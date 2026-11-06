@@ -115,9 +115,26 @@ Simulation execution and artifact transfer are removed. `/simulation`,
 `/artifacts/{fileId}` and `/artifact-status` return 404; the relay forwards
 Circuit, File and Project operations only.
 
+`AUTO_CANVAS_AGENT_IDLE_MS` sets the idle object cache lifetime in milliseconds
+(default `300000`, five minutes; a non-negative safe integer). An object is
+evicted only after events and input blockers finish, sockets and SSE streams
+close, and all writes persist. Empty storage is evicted immediately under the
+same conditions. Eviction preserves persisted session state; the next request
+loads it again. Alarms live in the host scheduler without retaining object
+caches and recreate an evicted object when they fire.
+
+SIGINT/SIGTERM stop the relay, close editor sockets and cancel SSE response
+bodies (clearing their keepalive intervals), then finish events and flush
+storage. The HTTP server can close with an SSE client connected, allowing the
+CLI to release its PostgreSQL pool. Shutdown does not revoke persisted sessions;
+clients can resume after restart under the existing authorization rules.
+
 [Host tests](../../apps/server/src/agent-relay/host.test.ts) use PostgreSQL and
 real WebSockets to cover persistence, alarms, output gates, pairing, restart
 and the concurrent HTTP/editor reply path.
+[Lifecycle tests](../../apps/server/src/agent-relay/host-lifecycle.test.ts)
+cover SSE shutdown, idle eviction, active-object retention and alarm delivery
+after eviction using real PostgreSQL, HTTP and WebSockets.
 
 ## Acceptance criteria
 

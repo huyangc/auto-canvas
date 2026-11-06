@@ -16,7 +16,10 @@ export class RelayStorage implements DurableStorageLike {
   constructor(
     private readonly db: Pool,
     private readonly name: string,
-    private readonly alarmChanged: (time: number | null) => void,
+    private readonly alarmChanged: (
+      time: number | null,
+      loaded?: boolean,
+    ) => void,
   ) {}
 
   async load(): Promise<void> {
@@ -32,7 +35,11 @@ export class RelayStorage implements DurableStorageLike {
     this.alarmTime = alarms.rows[0]
       ? Number(alarms.rows[0].scheduled_time)
       : null;
-    this.alarmChanged(this.alarmTime);
+    this.alarmChanged(this.alarmTime, true);
+  }
+
+  get isEmpty(): boolean {
+    return this.values.size === 0;
   }
 
   async get<T>(key: string): Promise<T | undefined> {

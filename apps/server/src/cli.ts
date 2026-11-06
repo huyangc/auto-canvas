@@ -27,17 +27,17 @@ if (process.argv.includes("--migrate")) {
       ),
   );
   agentRelay.attach(server);
+  let closing = false;
   const close = () => {
-    const relayClosed = agentRelay.close();
-    server.close(() => {
-      void relayClosed.then(
-        () => db.end(),
-        (error: unknown) => {
-          console.error("Agent relay shutdown failed", error);
-          return db.end();
-        },
-      );
+    if (closing) return;
+    closing = true;
+    const relayClosed = agentRelay.close().catch((error: unknown) => {
+      console.error("Agent relay shutdown failed", error);
     });
+    const serverClosed = new Promise<void>((resolve) =>
+      server.close(() => resolve()),
+    );
+    void Promise.all([relayClosed, serverClosed]).then(() => db.end());
   };
   process.once("SIGINT", close);
   process.once("SIGTERM", close);
