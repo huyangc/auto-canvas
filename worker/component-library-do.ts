@@ -1,14 +1,14 @@
 import { ComponentManagement } from "./component-management";
-import type { SharedComponent } from "../apps/editor/src/features/user-components/component-library-contract";
+import type { SharedComponent } from "@icm/component-library";
 import {
   publishedComponentPayload,
   parseSharedComponentPayload,
   summarizeSharedComponent,
-} from "../apps/editor/src/features/user-components/component-library-contract";
+} from "@icm/component-library";
 import {
   componentPublicationContent,
   componentContentDigest,
-} from "../apps/editor/src/features/user-components/component-publication-content";
+} from "@icm/component-library";
 import {
   ComponentPublicationIndex,
   type ComponentLibrarySql,

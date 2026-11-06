@@ -3,7 +3,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import UserComponentsLibrary from "./user-components-library";
-import type { ComponentLibrarySummaryPage } from "./component-library-contract";
+import type { ComponentLibrarySummaryPage } from "@icm/component-library";
 
 function page(
   names: string[],

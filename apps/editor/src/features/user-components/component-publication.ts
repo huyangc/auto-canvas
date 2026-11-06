@@ -1,7 +1,7 @@
 import {
   COMPONENT_LIBRARY_ID,
   type SharedComponent,
-} from "./component-library-contract";
+} from "@icm/component-library";
 import type { ComponentDefinition } from "@icm/model";
 
 /** A draft's destination is explicit; a later login must not turn a copy into an update. */

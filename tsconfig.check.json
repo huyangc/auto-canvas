@@ -4,6 +4,7 @@
     "jsx": "react-jsx",
     "noEmit": true,
     "paths": {
+      "@icm/component-library": ["./packages/component-library/src/index.ts"],
       "@icm/simulation-service": ["./packages/simulation-service/src/index.ts"],
       "@icm/simulation-service/*": ["./packages/simulation-service/src/*"],
       "@icm/agent-adapter": ["./packages/agent-adapter/src/index.ts"],

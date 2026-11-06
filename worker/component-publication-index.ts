@@ -2,8 +2,8 @@ import {
   COMPONENT_CONTENT_VERSION,
   componentPublicationContent,
   componentContentDigest,
-} from "../apps/editor/src/features/user-components/component-publication-content";
-import { parseSharedComponentPayload } from "../apps/editor/src/features/user-components/component-library-contract";
+} from "@icm/component-library";
+import { parseSharedComponentPayload } from "@icm/component-library";
 
 export type ComponentLibrarySql = {
   exec<T = Record<string, unknown>>(

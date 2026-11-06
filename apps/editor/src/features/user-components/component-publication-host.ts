@@ -4,7 +4,7 @@ import { executeComponentPublication } from "./component-publication-operation";
 import type {
   SharedComponent,
   SharedDefinitionPayload,
-} from "./component-library-contract";
+} from "@icm/component-library";
 
 /** Desktop stays offline; hosted publication retains its account-bound journal. */
 export async function saveLibraryComponent(request: {

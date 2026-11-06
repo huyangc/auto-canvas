@@ -23,7 +23,9 @@
     "@icm/model": "workspace:*",
     "@icm/project-protocol": "workspace:*",
     "@icm/render-svg": "workspace:*",
-    "@icm/symbols": "workspace:*"
+    "@icm/symbols": "workspace:*",
+    "@icm/component-library": "workspace:*",
+    "@icm/agent-adapter": "workspace:*"
   },
   "devDependencies": {
     "@types/pg": "8.23.1"

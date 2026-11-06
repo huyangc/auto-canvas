@@ -3,8 +3,8 @@ import {
   componentLibraryHarness,
   nativePackage,
 } from "./component-library.test-support";
-import { componentPublicationContent } from "../apps/editor/src/features/user-components/component-publication-content";
-import { publishedComponentPayload } from "../apps/editor/src/features/user-components/component-library-contract";
+import { componentPublicationContent } from "@icm/component-library";
+import { publishedComponentPayload } from "@icm/component-library";
 
 describe("publication identity across repackaging and recovery", () => {
   it("keeps zero-pin native packages, syntax and symbol-only definitions distinct", () => {

@@ -1,7 +1,7 @@
 import {
   parseSharedComponentPayload,
   type SharedDefinitionPayload,
-} from "./component-library-contract";
+} from "@icm/component-library";
 import {
   publishSharedComponent,
   readSharedComponent,
@@ -10,7 +10,7 @@ import {
   publicationAccount,
 } from "./component-library-client";
 export { publicationAccount } from "./component-library-client";
-import { componentPublicationContent } from "./component-publication-content";
+import { componentPublicationContent } from "@icm/component-library";
 
 import {
   publicationOperations,

@@ -4,7 +4,7 @@ import {
   ComponentLibraryError,
   type loadSharedComponentSummaries,
 } from "./component-library-client";
-import type { ComponentLibrarySummaryPage } from "./component-library-contract";
+import type { ComponentLibrarySummaryPage } from "@icm/component-library";
 
 const catalog = { version: 1, type: "all", order: "circuit-first" } as const;
 function page(

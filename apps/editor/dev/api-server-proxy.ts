@@ -7,10 +7,9 @@ export function apiServerProxy(): Plugin {
     config() {
       const target = process.env.AUTO_CANVAS_API_URL ?? "http://127.0.0.1:4310";
       const proxy = Object.fromEntries(
-        ["/api/auth", "/api/projects", "/api/health"].map((path) => [
-          path,
-          { target, changeOrigin: false },
-        ]),
+        ["/api/auth", "/api/projects", "/api/components", "/api/health"].map(
+          (path) => [path, { target, changeOrigin: false }],
+        ),
       );
       return { server: { proxy }, preview: { proxy } };
     },

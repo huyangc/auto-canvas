@@ -1,7 +1,7 @@
 import {
   parseSharedComponentPayload,
   type SharedDefinitionPayload,
-} from "./component-library-contract";
+} from "./component-library-contract.js";
 
 /** Versioned, exact package comparison. Only owned packaging identities disappear. */
 export const COMPONENT_CONTENT_VERSION = 1;

@@ -16,7 +16,7 @@ import {
 import {
   parseSharedDefinition,
   publishedDefinition,
-} from "./component-library-contract";
+} from "@icm/component-library";
 
 function fixture() {
   const project = createEmptyProject("test", "Test");

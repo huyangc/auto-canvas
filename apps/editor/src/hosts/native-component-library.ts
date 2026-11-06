@@ -1,10 +1,10 @@
 import type { ComponentDefinition } from "@icm/model";
-import { parseSharedComponentEntry } from "../features/user-components/component-library-entry";
+import { parseSharedComponentEntry } from "@icm/component-library";
 import { ComponentLibraryError } from "../features/user-components/component-library-error";
 import type {
   SharedComponent,
   SharedDefinitionPayload,
-} from "../features/user-components/component-library-contract";
+} from "@icm/component-library";
 
 async function request(action: string, body: unknown, signal?: AbortSignal) {
   const response = await fetch(`/desktop/components/${action}`, {

@@ -6,10 +6,10 @@ import {
   type CircuitComponentPackage,
   type ProjectStructureEdit,
 } from "@icm/edit-engine";
-import type { SharedComponent } from "./component-library-contract";
-import { parseSharedDefinition } from "./component-library-contract";
+import type { SharedComponent } from "@icm/component-library";
+import { parseSharedDefinition } from "@icm/component-library";
 import type { CircuitComponentAuthoring } from "./native-component-editor";
-import { definitionError } from "./component-definition-error";
+import { definitionError } from "@icm/component-library";
 import { componentDraftCheckpoint } from "./component-draft-checkpoint";
 import {
   ComponentDefinitionSchema,
@@ -17,7 +17,7 @@ import {
   type ComponentAuthoringDraft,
 } from "@icm/model";
 import { parseProject, serializeProject } from "@icm/project-protocol";
-import { parseSharedComponentEntry } from "./component-library-entry";
+import { parseSharedComponentEntry } from "@icm/component-library";
 import { readComponentPublication } from "./component-publication";
 
 /** An explicit reload replaces the saved baseline as well as the visible editor. */

@@ -7,12 +7,12 @@ import {
 import type {
   SharedComponent,
   SharedDefinitionPayload,
-} from "./component-library-contract";
+} from "@icm/component-library";
 import {
   COMPONENT_CONTENT_VERSION,
   componentPublicationContent,
   componentContentDigest,
-} from "./component-publication-content";
+} from "@icm/component-library";
 
 /** Both insertion paths capture the same provenance on the local class. */
 export async function componentLibraryCapture(
