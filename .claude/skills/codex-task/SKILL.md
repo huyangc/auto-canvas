@@ -1,6 +1,6 @@
 ---
 name: codex-task
-description: Dispatch an approved auto-canvas task to Codex, review the result independently, then commit and merge it or write a review round and redispatch. Use after plan-task, on the task's branch.
+description: Dispatch an approved auto-canvas task to Codex, review the result independently, then commit it and open a PR or write a review round and redispatch. Use after plan-task, on the task's branch.
 ---
 
 # codex-task
@@ -30,9 +30,8 @@ yourself:
 
 - **Accepted:** append the round to `review.md` (verdict accepted), commit on
   the task branch with a message that states what changed, why, validation
-  and known limits, ending with the attribution line. Merge into `main`
-  (`git switch main && git merge --no-ff task/<id>-<slug>`). Report to the
-  user with the evidence.
+  and known limits, a Test-Impact trailer and the attribution line. Then
+  deliver it as a PR (below).
 - **Changes requested:** append a round to `review.md` from
   `tasks/_template/review.md` with concrete must-fix findings (path, what is
   wrong, what done looks like), then dispatch again. Do not commit Codex's
@@ -40,6 +39,23 @@ yourself:
 - **After round 3**, or when a finding needs a product decision or a change of
   plan, stop and ask the user. A plan change edits plan.md (note it in
   review.md) before the next round.
+
+## Deliver
+
+Follow [PR review and merge](../../../docs/workflow.md#pr-评审与合入):
+
+1. `git push -u origin task/<id>-<slug>`, then `gh pr create --base main` using
+   `.github/pull_request_template.md`. Put the acceptance commands you reran
+   and their results under Evidence: CI on a PR does not run the build or tests.
+2. Read the review the codex hook posts to the PR. Verify each finding. Fix P0/P1
+   findings that hold, push, and read the re-review. No comment on the current
+   head means no review: run it by hand.
+3. Merge only if this delivery authorizes it, every `gh pr checks` entry is
+   `pass` and `~/.claude/hooks/codex-pr-review.sh verify <PR>` succeeds:
+   `gh pr merge <PR> --rebase`. Confirm `state` is `MERGED`. Otherwise hand back
+   the PR link and its status.
+
+## Small fixes
 
 Fix a few lines yourself only when explaining the fix would take longer than
 making it; note it in review.md.
