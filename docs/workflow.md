@@ -75,7 +75,9 @@ scripts/codex-task.sh tasks/T001-<slug>
 `codex exec --approve-for-me`（workspace-write 沙箱，审批请求交给自动审查）在仓库根目录运行。环境变量
 `CODEX_MODEL` 可覆盖模型。日志在 `tasks/<id>/logs/round-<n>.jsonl`。
 
-沙箱里没有网络，依赖要事先装好（`pnpm install --frozen-lockfile`）。
+沙箱里没有网络，依赖要事先装好（`pnpm install --frozen-lockfile`）。脚本设置
+`npm_config_verify_deps_before_run=false`，防止 pnpm 在运行脚本前尝试重装依赖、
+在离线沙箱里清空 `node_modules`。
 
 ## 查看 Codex 的过程
 
