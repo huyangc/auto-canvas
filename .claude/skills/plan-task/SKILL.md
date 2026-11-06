@@ -17,7 +17,11 @@ capable engineer who has never seen this conversation.
    paths. Give paths with line numbers.
 3. **Size it.** One task's diff must be reviewable in one pass. Split large
    work (for removals: cut entry points first, then delete code that became
-   unreachable, then remove now-unused tests, scripts and docs).
+   unreachable, then remove now-unused tests, scripts and docs). A removal's
+   owned paths must cover every importer of what it deletes, across the whole
+   repository (`worker/`, `scripts/`, build/census/dev code, other packages'
+   tests), or the plan must say which code stays and why. Otherwise Codex
+   correctly stops at the boundary and the deletion is left half done (T001).
 4. **Write steps and acceptance.** Steps are ordered and name files and
    functions. Unknowns become "Investigate:" steps with what to report.
    Acceptance lists exact commands with expected results, plus behavioral
