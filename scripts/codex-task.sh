@@ -60,7 +60,7 @@ model_args=()
 
 set +e
 codex exec -C "$root" -s workspace-write --approve-for-me --json \
-  "${model_args[@]}" \
+  ${model_args[@]+"${model_args[@]}"} \
   -o "$logs/round-$round-last.md" - <"$prompt" \
   >"$logs/round-$round.jsonl" 2>"$logs/round-$round.stderr"
 status=$?
