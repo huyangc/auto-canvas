@@ -14,6 +14,7 @@ on. Each topic has one owner spec; others link to it.
 | [`connectivity-and-routing.md`](connectivity-and-routing.md) | Physical/Logical Nets, contacts, cuts (sole owner)                    |
 | [`visual-language.md`](visual-language.md)                   | Formal scene, text/formulas, overlays, diagnostics (sole owner)       |
 | [`razavi-visual-contract.md`](razavi-visual-contract.md)     | Razavi authority, construction, exposure, pixel fidelity (sole owner) |
+| [`auto-layout.md`](auto-layout.md)                           | Structure recognition and template placement (proposed)               |
 | [`names-and-labels.md`](names-and-labels.md)                 | Electrical names vs label display, standard looks, renames            |
 | [`agent-api.md`](agent-api.md)                               | Agent API 3.0 Circuit operations and sibling resources                |
 | [`web-agent-session.md`](web-agent-session.md)               | Agent relay: pairing, credentials, transport, scopes                  |

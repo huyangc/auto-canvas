@@ -19,6 +19,7 @@
       "@icm/agent-client": ["./packages/agent-client/src/index.ts"],
       "@icm/mcp-server": ["./apps/mcp-server/src/index.ts"],
       "@icm/agent-routing": ["./packages/agent-routing/src/index.ts"],
+      "@icm/auto-layout": ["./packages/auto-layout/src/index.ts"],
       "@icm/derived": ["./packages/derived/src/index.ts"],
       "@icm/devices": ["./packages/devices/src/index.ts"],
       "@icm/edit-engine": ["./packages/edit-engine/src/index.ts"],

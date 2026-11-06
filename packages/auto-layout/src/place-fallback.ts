@@ -1,0 +1,210 @@
+import { transformPoint, type Instance } from "@icm/model";
+import type { SymbolResolver } from "@icm/symbols";
+import type { NetRoles } from "./net-roles.js";
+import { COLUMN_PITCH, placement, ROW_PITCH } from "./geometry.js";
+import {
+  deviceNets,
+  devicePins,
+  isSignalBlock,
+  isSource,
+  signalDistances,
+} from "./placement-connectivity.js";
+import { compareIds } from "./recognize.js";
+import type { Placement } from "./types.js";
+
+type Distances = ReturnType<typeof signalDistances>;
+type Pin = ReturnType<typeof devicePins>[number];
+
+function placeSources(
+  sources: Instance[],
+  targets: Map<string, Placement>,
+  netColumns: Map<string, number>,
+  mainY: number,
+  roles: NetRoles,
+  resolver: SymbolResolver,
+) {
+  sources.forEach((i, index) => {
+    const x = (index - sources.length) * COLUMN_PITCH;
+    const positive = devicePins(i, resolver).find((p) => p.name === "+")!;
+    targets.set(i.id, placement(x, mainY - positive.at.y));
+    const net = roles.pinNet(i.id, "+");
+    if (net) netColumns.set(net, x);
+  });
+}
+
+function seriesRotation(
+  pins: Pin[],
+  instance: Instance,
+  roles: NetRoles,
+  distances: Distances,
+): Placement["rotation"] {
+  const left = [...pins].sort(
+    (a, b) =>
+      (distances.nets.get(roles.pinNet(instance.id, a.name) ?? "") ??
+        Infinity) -
+        (distances.nets.get(roles.pinNet(instance.id, b.name) ?? "") ??
+          Infinity) || compareIds(a.name, b.name),
+  )[0]!;
+  if (pins[0]!.at.y !== pins[1]!.at.y)
+    return left.at.y < pins.find((p) => p !== left)!.at.y ? 270 : 90;
+  return left.at.x < pins.find((p) => p !== left)!.at.x ? 0 : 180;
+}
+
+function placeSeries(
+  i: Instance,
+  x: number,
+  y: number,
+  resolver: SymbolResolver,
+  roles: NetRoles,
+  distances: Distances,
+): Placement {
+  return placement(
+    x,
+    y,
+    "none",
+    seriesRotation(devicePins(i, resolver), i, roles, distances),
+  );
+}
+
+function placeShunts(
+  shunts: Instance[],
+  targets: Map<string, Placement>,
+  netColumns: Map<string, number>,
+  mainY: number,
+  resolver: SymbolResolver,
+  roles: NetRoles,
+  distances: Distances,
+) {
+  for (const i of shunts) {
+    const pins = devicePins(i, resolver);
+    const power = pins.find((p) =>
+      distances.isPower(roles.pinNet(i.id, p.name) ?? ""),
+    )!;
+    const signal = pins.find((p) => p !== power)!;
+    const ground =
+      roles.byNet.get(roles.pinNet(i.id, power.name) ?? "") === "ground";
+    const rotation = signal.at.y < power.at.y === ground ? 0 : 180;
+    const offset = transformPoint(
+      signal.at,
+      { x: 0, y: 0 },
+      { rotation, mirror: "none" },
+    );
+    let x =
+      (netColumns.get(roles.pinNet(i.id, signal.name) ?? "") ?? 0) +
+      COLUMN_PITCH;
+    const y = mainY - offset.y;
+    while (
+      [...targets.values()].some(
+        (p) =>
+          Math.abs(p.position.x - x) < COLUMN_PITCH &&
+          Math.abs(p.position.y - y) < ROW_PITCH,
+      )
+    )
+      x += COLUMN_PITCH;
+    targets.set(i.id, placement(x - offset.x, y, "none", rotation));
+  }
+}
+
+function placeBridges(
+  bridges: Instance[],
+  targets: Map<string, Placement>,
+  netColumns: Map<string, number>,
+  mainY: number,
+  grid: number,
+  resolver: SymbolResolver,
+  roles: NetRoles,
+  distances: Distances,
+) {
+  for (const i of bridges) {
+    const columns = deviceNets(i, resolver, roles).map((n) =>
+      netColumns.get(n)!,
+    );
+    const x =
+      Math.round((Math.min(...columns) + Math.max(...columns)) / 2 / grid) *
+      grid;
+    targets.set(
+      i.id,
+      placeSeries(i, x, mainY - ROW_PITCH, resolver, roles, distances),
+    );
+  }
+}
+
+/** R9 roles are placed separately so passive shunts cannot shortcut block flow. */
+export function placeFallback(
+  devices: Instance[],
+  targets: Map<string, Placement>,
+  distances: Distances,
+  mainY: number,
+  grid: number,
+  resolver: SymbolResolver,
+  roles: NetRoles,
+): void {
+  const remaining = devices.filter((i) => !targets.has(i.id));
+  const sources = remaining.filter(
+    (i) =>
+      isSource(i) &&
+      roles.byNet.get(roles.pinNet(i.id, "-") ?? "") === "ground",
+  );
+  const netColumns = new Map<string, number>();
+  for (const i of devices.filter((i) => targets.has(i.id)))
+    for (const n of deviceNets(i, resolver, roles).filter(
+      (n) => !distances.isPower(n),
+    ))
+      netColumns.set(n, targets.get(i.id)!.position.x);
+  placeSources(sources, targets, netColumns, mainY, roles, resolver);
+  const shunts: Instance[] = [];
+  const bridges: Instance[] = [];
+  let x = Math.max(
+    0,
+    ...[...targets.values()].map((p) => p.position.x + COLUMN_PITCH),
+  );
+  const ordered = remaining
+    .filter((i) => !targets.has(i.id))
+    .sort(
+      (a, b) =>
+        (distances.devices.get(a.id) ?? Infinity) -
+          (distances.devices.get(b.id) ?? Infinity) ||
+        Number(isSignalBlock(b, resolver)) -
+          Number(isSignalBlock(a, resolver)) ||
+        compareIds(a.id, b.id),
+    );
+  for (const i of ordered) {
+    const pins = devicePins(i, resolver);
+    const twoPin = pins.length === 2 && !isSignalBlock(i, resolver);
+    if (
+      twoPin &&
+      pins.some((p) => distances.isPower(roles.pinNet(i.id, p.name) ?? ""))
+    ) {
+      shunts.push(i);
+      continue;
+    }
+    const nets = deviceNets(i, resolver, roles);
+    if (twoPin && nets.length === 2 && nets.every((n) => netColumns.has(n))) {
+      bridges.push(i);
+      continue;
+    }
+    targets.set(
+      i.id,
+      twoPin
+        ? placeSeries(i, x, mainY, resolver, roles, distances)
+        : placement(x, mainY),
+    );
+    for (const pin of pins) {
+      const n = roles.pinNet(i.id, pin.name);
+      if (n && (!netColumns.has(n) || pin.role.includes("output")))
+        netColumns.set(n, x);
+    }
+    x += COLUMN_PITCH;
+  }
+  placeShunts(shunts, targets, netColumns, mainY, resolver, roles, distances);
+  placeBridges(
+    bridges,
+    targets,
+    netColumns,
+    mainY,
+    grid,
+    resolver,
+    roles,
+    distances,
+  );
+}
