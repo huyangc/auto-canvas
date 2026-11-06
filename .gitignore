@@ -47,3 +47,9 @@ apps/editor/dist-e2e/
 # auto-canvas workflow: baseline check logs and Codex round logs.
 .baseline/
 tasks/*/logs/
+
+# Local launcher logs.
+.local/
+
+# Local launcher configuration; keep .env.example tracked.
+.env

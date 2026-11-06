@@ -66,27 +66,38 @@ createdb auto_canvas_test
 
 ```bash
 pnpm install --frozen-lockfile
-pnpm build
-pnpm server:dev
+pnpm start
 ```
 
-In a second terminal:
+Open the printed URL (default <http://127.0.0.1:4310>). This builds the app,
+starts the server in the background, and serves the editor, API and Agent relay
+on one URL. Stop it with `pnpm stop`. Logs append to `.local/logs/server.log`.
+The launcher creates a missing `auto_canvas` database when PostgreSQL CLI tools
+are available; create `auto_canvas_test` separately before running tests.
 
-```bash
-pnpm dev
-```
+For development, run `pnpm dev`: the API starts in the background and Vite
+serves the editor with hot reload on <http://localhost:5173>. Ctrl+C stops both.
+API logs append to `.local/logs/server-dev.log`. Use `pnpm dev:editor` to run
+only Vite against an already-running server.
 
-Open <http://127.0.0.1:5173>. The editor's dev server forwards `/api/auth`,
-`/api/projects` and `/api/components` to the server on `127.0.0.1:4310`. The
-server applies database migrations at startup. Configuration (database URL,
-port, project limit, serving a built editor) is in
+`npm run start`, `npm run stop` and `npm run dev` work the same; installing
+must use pnpm. The server applies database migrations at startup. Configuration
+(database URL, host, port, project limit and launcher timeouts) is in
 [apps/server/README.md](apps/server/README.md).
+
+Optionally copy [.env.example](.env.example) to `.env` at the repository root
+and uncomment the settings you need. `start`, `stop` and `dev` load this Bash
+configuration before applying defaults; exported shell variables take precedence.
+A missing `.env` uses defaults. `.env` is ignored by Git.
 
 ## Commands
 
 | Command                   | What it does                                                              |
 | ------------------------- | ------------------------------------------------------------------------- |
-| `pnpm dev`                | Editor dev server (Vite)                                                  |
+| `pnpm start`              | Build and start the whole app in the background                           |
+| `pnpm stop`               | Stop the server on the configured port                                    |
+| `pnpm dev`                | Server plus Vite hot reload; Ctrl+C stops both                            |
+| `pnpm dev:editor`         | Editor dev server (Vite)                                                  |
 | `pnpm server:dev`         | Build and start the server against `auto_canvas`                          |
 | `pnpm server:migrate`     | Apply database migrations and exit                                        |
 | `pnpm build`              | Build every package and app                                               |
