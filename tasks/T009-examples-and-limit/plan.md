@@ -51,8 +51,10 @@ Two small regressions from earlier tasks:
 
 Owned paths: `apps/editor/src/app/use-project-entry.ts`,
 `apps/editor/src/document/project-workspace.ts` (only `OPEN_REQUESTS`),
-`apps/editor/src/app/App.tsx` and `app/use-agent-hosts.ts` (only the boot
-request check), `apps/editor/src/examples/**`, a new small module for opening
+`apps/editor/src/app/App.tsx` (the boot request check and the `useBootLink(...)`
+call site, widened in round 2) and `app/use-agent-hosts.ts` (only the boot
+request check), `worker/gallery-cloud-projects.test.ts` (only the assertion
+that pins the editor's limit, widened in round 2), `apps/editor/src/examples/**`, a new small module for opening
 an example if needed, `apps/editor/src/features/editor-shell/cloud-projects.ts`,
 `apps/editor/src/services/web-editor-services.ts`,
 `apps/editor/src/components/shelf-wall.tsx`, their unit tests,

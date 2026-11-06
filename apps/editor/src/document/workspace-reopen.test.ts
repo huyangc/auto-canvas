@@ -202,7 +202,7 @@ describe("tabs with unsaved work survive Reopen tabs and a fresh page (#1599)", 
     );
     // The address this page opened at found no tabs of its own.
     expect(
-      await workspaces.read("window", "/editor?example=bandgap"),
+      await workspaces.read("window", "/editor?workspace=other"),
     ).toBeNull();
     // Older copies: the edited tab's own, and the one this page resumes.
     const earlier = [

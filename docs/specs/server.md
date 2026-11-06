@@ -46,7 +46,7 @@ Timestamps are ISO strings from PostgreSQL `timestamptz`.
 | `GET /api/auth/providers`                         | `{github:false, google:false, email:false}`                                       |
 | `POST /api/auth/profile`                          | `{displayName}` trimmed to 1–40 characters → `{user}`; 400 `invalid-display-name` |
 | `POST /api/auth/logout`                           | `{ok:true}`; identity stays local                                                 |
-| `GET /api/projects`                               | `{projects}`, newest `updated_at` then id first; all Projects; `no-store`         |
+| `GET /api/projects`                               | `{projects, limit}`, newest `updated_at` then id first; all Projects; `no-store`  |
 | `POST /api/projects`                              | `{name, projectText, galleryEntryId?}` → 201 `{project}` summary                  |
 | `GET /api/projects/:id`                           | `{project}` open payload; 404 `not-found`; `no-store`                             |
 | `PUT /api/projects/:id`                           | Same body as POST, revision gate → `{project}` summary                            |
@@ -62,7 +62,9 @@ Names are trimmed, at most 120 characters; null/missing names become `""`.
 `galleryEntryId`, if present, must be a non-empty string and is ignored.
 Invalid fields yield 400 `invalid-fields`; Project text over 2 MiB UTF-8 yields
 413 `too-large`; a parse failure yields 400 `invalid-project`.
-The default limit is 200 Projects; exceeding it yields 409
+`GET /api/projects` returns the configured `AUTO_CANVAS_PROJECT_LIMIT` as
+`limit` (default 200 Projects). Clients receiving an older response without
+`limit` fall back to 200. Exceeding the limit yields 409
 `{error:"project-limit", projects}` without evicting a Project.
 
 Version entries are `{versionId, versionNo, name, createdAt, author:"", tags:[]}`;

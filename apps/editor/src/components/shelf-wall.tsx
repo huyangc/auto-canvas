@@ -34,14 +34,22 @@ export type ShelfState =
   | { status: "loading" }
   | { status: "signed-out" }
   | { status: "unreachable"; message: string }
-  | { status: "ready"; projects: readonly CloudProjectSummary[] };
+  | {
+      status: "ready";
+      projects: readonly CloudProjectSummary[];
+      limit: number;
+    };
 
 export async function loadShelf(
   fetchLike: typeof fetch = fetch,
 ): Promise<ShelfState> {
   const outcome = await listCloudProjects(fetchLike);
   if (outcome.status === "listed") {
-    return { status: "ready", projects: outcome.projects };
+    return {
+      status: "ready",
+      projects: outcome.projects,
+      limit: outcome.limit ?? CLOUD_PROJECT_LIMIT,
+    };
   }
   if (outcome.status === "signed-out") return { status: "signed-out" };
   return { status: "unreachable", message: outcome.message };
@@ -111,7 +119,7 @@ export function ShelfWall() {
     setState((current) =>
       current.status === "ready"
         ? {
-            status: "ready",
+            ...current,
             projects: [
               project,
               ...current.projects.filter((item) => item.id !== project.id),
@@ -227,7 +235,7 @@ export function ShelfWall() {
             result.status === "conflict"
               ? "This Project changed in another tab. Refresh your shelf and try again; no changes were overwritten."
               : result.status === "limit"
-                ? `Your shelf has reached its ${CLOUD_PROJECT_LIMIT}-Project limit. Export or remove a Project before duplicating.`
+                ? `Your shelf has reached its ${state.status === "ready" ? state.limit : CLOUD_PROJECT_LIMIT}-Project limit. Export or remove a Project before duplicating.`
                 : result.status === "rejected" ||
                     result.status === "unreachable"
                   ? result.message
@@ -266,7 +274,11 @@ export function ShelfWall() {
       // An editor tab of it, when this browser tab returns to the editor,
       // becomes an unsaved draft instead of a saved Project that is gone.
       noteCloudProjectDeleted(project.id);
-      setState({ status: "ready", projects: outcome.projects });
+      setState((current) =>
+        current.status === "ready"
+          ? { ...current, projects: outcome.projects }
+          : current,
+      );
     } else {
       setError(outcome.message);
       throw new Error(outcome.message);
@@ -315,8 +327,7 @@ export function ShelfWall() {
         </p>
       ) : null}
       <p className="shelf-count" data-testid="shelf-count">
-        {state.projects.length} of {CLOUD_PROJECT_LIMIT} saved · only you can
-        see these
+        {state.projects.length} of {state.limit} saved · only you can see these
       </p>
       <Masonry
         aria-label="Circuits on your shelf"

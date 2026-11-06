@@ -220,6 +220,10 @@ describe("Cloud Projects", () => {
   });
   it("enforces the configured limit atomically and allows creation after deletion", async () => {
     app = createApp({ db, limits: { projectLimit: 2 } });
+    expect(await (await request("/api/projects")).json()).toEqual({
+      projects: [],
+      limit: 2,
+    });
     const replies = await Promise.all(
       [1, 2, 3].map((n) =>
         request("/api/projects", "POST", {
@@ -241,9 +245,9 @@ describe("Cloud Projects", () => {
   });
   it("defaults to more than the upstream 20 projects without truncating the list", async () => {
     for (let i = 0; i < 21; i++) await create(`Circuit ${i}`);
-    expect(
-      (await (await request("/api/projects")).json()).projects,
-    ).toHaveLength(21);
+    const listed = await (await request("/api/projects")).json();
+    expect(listed.projects).toHaveLength(21);
+    expect(listed.limit).toBe(200);
   });
   it("validates fields, UTF-8 byte limits, parse errors and revision headers", async () => {
     for (const body of [
@@ -513,6 +517,7 @@ it("drives create, open, update, conflict and delete through the real editor cli
   expect(await listCloudProjects(fetchLike)).toEqual({
     status: "listed",
     projects: [],
+    limit: 200,
   });
 });
 

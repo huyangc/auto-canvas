@@ -2,6 +2,9 @@ import { useEffect, useRef, type Dispatch, type SetStateAction } from "react";
 import type { CircuitProject } from "@icm/model";
 import type { ProjectWorkspace } from "../document/project-workspace";
 import type { useProjectFileLifecycle } from "../document/use-project-file-lifecycle";
+import { libraryProjectExamples } from "../examples/library-examples";
+import type { NetlistExportProfile } from "../features/netlist-export/netlist-process-presets";
+import { prepareNetlistExample } from "../features/netlist-export/netlist-process";
 import type { useProjectTabSessions } from "./use-project-tab-sessions";
 import { DEFAULT_VIEWBOX } from "./default-view-box";
 type ProjectFileLifecycle = ReturnType<typeof useProjectFileLifecycle>;
@@ -32,6 +35,8 @@ export function useBootLink({
   restoreAfterRefresh,
   replaceActiveProject,
   openCloudProjectById,
+  guardDirtyReplacement,
+  netlistProfile,
 }: {
   restoredWorkspace: ProjectWorkspace | null;
   bootRequestsNewProject: boolean;
@@ -40,6 +45,8 @@ export function useBootLink({
   restoreAfterRefresh: ProjectFileLifecycle["restoreAfterRefresh"];
   replaceActiveProject: ProjectFileLifecycle["replaceActiveProject"];
   openCloudProjectById: ProjectFileLifecycle["openCloudProjectById"];
+  guardDirtyReplacement: ProjectFileLifecycle["guardDirtyReplacement"];
+  netlistProfile: NetlistExportProfile;
 }) {
   const restoredCloudLink = useRef(
     restoredWorkspace && !restoreAfterRefresh
@@ -79,6 +86,33 @@ export function useBootLink({
       setStatus("Opening your Cloud Project…");
       void openCloudProjectById(shelfProjectId, true);
       return;
+    }
+    const exampleId = new URLSearchParams(window.location.search).get(
+      "example",
+    );
+    if (exampleId !== null) {
+      const example = libraryProjectExamples.find(
+        (candidate) => candidate.id === exampleId,
+      );
+      if (!example) {
+        setStatus(`Example not found: ${exampleId}`);
+        return;
+      }
+      const exampleProject = prepareNetlistExample(
+        structuredClone(example.project),
+        netlistProfile,
+      );
+      void guardDirtyReplacement(`Open ${example.name} example`, () => {
+        replaceActiveProject(exampleProject);
+        setStatus(`Opened example: ${example.name}`);
+        const url = new URL(window.location.href);
+        url.searchParams.delete("example");
+        window.history.replaceState(
+          window.history.state,
+          "",
+          url.pathname + url.search + url.hash,
+        );
+      });
     }
   }, [restoreAfterRefresh]);
   return { restoredCloudLink, restoredNewLink };

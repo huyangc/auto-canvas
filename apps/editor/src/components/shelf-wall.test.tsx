@@ -15,6 +15,7 @@ describe("loadShelf", () => {
   it("lists the signed-in member's own Projects", async () => {
     const state = await loadShelf(
       fetchReturning({
+        limit: 37,
         projects: [
           {
             id: "p1",
@@ -28,7 +29,16 @@ describe("loadShelf", () => {
     );
     expect(state.status).toBe("ready");
     if (state.status !== "ready") return;
+    expect(state.limit).toBe(37);
     expect(state.projects.map((project) => project.name)).toEqual(["Bandgap"]);
+  });
+
+  it("falls back to 200 when an older server omits the limit", async () => {
+    expect(await loadShelf(fetchReturning({ projects: [] }))).toEqual({
+      status: "ready",
+      projects: [],
+      limit: 200,
+    });
   });
 
   it("reads a signed-out visitor as signed-out rather than empty", async () => {

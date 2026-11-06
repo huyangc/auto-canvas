@@ -74,7 +74,7 @@ export async function openWorkspaceWindows(
 
 /** Requests an editor address carries only until the editor has opened them:
  * resume a window, open a Cloud Project, start a New Circuit. */
-const OPEN_REQUESTS = ["resume", "project", "new"];
+const OPEN_REQUESTS = ["resume", "project", "new", "example"];
 
 /**
  * The editor address a window's tabs are kept under: the address without

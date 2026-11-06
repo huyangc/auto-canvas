@@ -35,9 +35,9 @@ describe("browser project workspace", () => {
     expect(await reopened.read("second", "/editor")).toEqual(
       workspace("second", 2),
     );
-    expect(await reopened.read("first", "/editor?example=other")).toBeNull();
+    expect(await reopened.read("first", "/editor?workspace=other")).toBeNull();
     expect(
-      await reopened.read("first", "/editor?example=other", {
+      await reopened.read("first", "/editor?workspace=other", {
         allowRouteChange: true,
       }),
     ).toEqual(workspace());
@@ -51,6 +51,7 @@ describe("browser project workspace", () => {
       "/editor?project=cloud-1",
       "/editor?resume=1",
       "/editor?new=1",
+      "/editor?example=common-source-amplifier",
       "/g/entry-1",
       "/editor/",
     ]) {
@@ -65,9 +66,13 @@ describe("browser project workspace", () => {
     // What the editor saves under is that plain address.
     expect(workspaceRoute("/editor?project=cloud-1&resume=1")).toBe("/editor");
     expect(workspaceRoute("/g/entry-1")).toBe("/editor");
-    // A link that starts the window afresh is still another address.
+    // Example requests share the workspace, so restored tabs win on boot.
     expect(workspaceRoute("/editor?project=cloud-1&example=bandgap")).toBe(
-      "/editor?example=bandgap",
+      "/editor",
+    );
+    // Unrelated query parameters still distinguish addresses.
+    expect(workspaceRoute("/editor?project=cloud-1&workspace=other")).toBe(
+      "/editor?workspace=other",
     );
   });
   it("finds the newest workspace another window left and forgets it once taken over (#1250)", async () => {

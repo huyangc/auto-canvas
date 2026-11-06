@@ -162,12 +162,31 @@ describe("Cloud Project client", () => {
     });
   });
 
+  it("uses the server's configured limit", async () => {
+    expect(
+      await listCloudProjects(
+        respondWith(200, { projects: [summary], limit: 37 }).fetchLike,
+      ),
+    ).toEqual({ status: "listed", projects: [summary], limit: 37 });
+  });
+
+  it.each([undefined, null, "20", 0, -1, 1.5])(
+    "falls back to 200 for a missing or invalid limit (%s)",
+    async (limit) => {
+      expect(
+        await listCloudProjects(
+          respondWith(200, { projects: [], limit }).fetchLike,
+        ),
+      ).toEqual({ status: "listed", projects: [], limit: 200 });
+    },
+  );
+
   it("lists summaries and opens one private Project", async () => {
     expect(
       await listCloudProjects(
         respondWith(200, { projects: [summary] }).fetchLike,
       ),
-    ).toEqual({ status: "listed", projects: [summary] });
+    ).toEqual({ status: "listed", projects: [summary], limit: 200 });
     expect(await listCloudProjects(respondWith(401, {}).fetchLike)).toEqual({
       status: "signed-out",
     });
@@ -323,5 +342,9 @@ it("shares concurrent Cloud lists but refreshes after settled reads and mutation
   const refreshed = listCloudProjects(fetchLike);
   expect(pending).toHaveLength(3);
   pending[2]!(Response.json({ projects: [] }));
-  expect(await refreshed).toEqual({ status: "listed", projects: [] });
+  expect(await refreshed).toEqual({
+    status: "listed",
+    projects: [],
+    limit: 200,
+  });
 });
