@@ -63,6 +63,8 @@ model_args=()
 # pnpm 11 verifies dependencies before every script and, if it decides the
 # lockfile changed, reinstalls; in Codex's offline sandbox that wipes
 # node_modules. Codex never installs dependencies (AGENTS.md), so skip it.
+# pnpm 11 reads the pnpm_config_ form; older releases read npm_config_.
+export pnpm_config_verify_deps_before_run=false
 export npm_config_verify_deps_before_run=false
 
 set +e
