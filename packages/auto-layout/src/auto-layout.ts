@@ -36,11 +36,16 @@ export function planAutoLayout(
   const lockedLabel = document.annotations.find(
     (a) => a.locked && a.anchor.kind === "route",
   );
+  const lockedRoute = document.routes.find((r) =>
+    r.legs.some((leg) => leg.mode === "locked"),
+  );
   const conflict = idConflict
     ? `R5: layout group id ${idConflict.id} already exists`
     : lockedLabel
       ? `R2: annotation ${lockedLabel.id} is locked to a Route`
-      : undefined;
+      : lockedRoute
+        ? `R2: Route ${lockedRoute.id} has a locked leg`
+        : undefined;
   const result = conflict
     ? { placements: new Map<string, Placement>(), problem: conflict }
     : placeDocument(document, resolver, roles, groups, options);

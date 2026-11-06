@@ -195,3 +195,39 @@ it("diagnoses a locked Route-anchored annotation instead of a rejected plan", ()
     ),
   ).toMatchObject({ edits: [], diagnostics: [{ rule: "R2" }] });
 });
+it("diagnoses a Route with a locked leg instead of a rejected plan", () => {
+  const project = parseProject(
+    readFileSync("apps/editor/src/examples/simulation-rlc.icproj.json", "utf8"),
+  );
+  const document = structuredClone(project.documents[0]!);
+  document.routes[0]!.legs[0]!.mode = "locked";
+  expect(
+    planAutoLayout(
+      document,
+      createProjectSymbolResolver(project, builtInSymbols),
+    ),
+  ).toMatchObject({ edits: [], diagnostics: [{ rule: "R2" }] });
+});
+it("stands a grounded shunt with horizontal pins vertically", () => {
+  const document = circuit(
+    {
+      v: "voltage-source",
+      r: "resistor",
+      d: "diode",
+      g1: "ground",
+      g2: "ground",
+    },
+    { a: ["v.+", "r.1"], k: ["r.2", "d.A"], z: ["v.-", "d.K", "g1.0", "g2.0"] },
+  );
+  const plan = planAutoLayout(document, resolver);
+  expect(plan.diagnostics).toEqual([]);
+  const result = commit(document, plan.edits);
+  if (!result.ok) throw new Error(JSON.stringify(result.diagnostics));
+  const pins = pinPoints(result.document, resolver).filter(
+    (p) => p.instanceId === "d",
+  );
+  const anode = pins.find((p) => p.pinName === "A")!.point;
+  const cathode = pins.find((p) => p.pinName === "K")!.point;
+  expect(anode.x).toBe(cathode.x);
+  expect(anode.y).toBeLessThan(cathode.y);
+});

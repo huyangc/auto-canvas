@@ -83,7 +83,22 @@ function placeShunts(
     const signal = pins.find((p) => p !== power)!;
     const ground =
       roles.byNet.get(roles.pinNet(i.id, power.name) ?? "") === "ground";
-    const rotation = signal.at.y < power.at.y === ground ? 0 : 180;
+    // Stand the part vertically whatever its symbol's pin axis: the signal
+    // pin faces the row, above the power pin for ground and below for supply.
+    const rotation =
+      ([0, 90, 180, 270] as const).find((r) => {
+        const s = transformPoint(
+          signal.at,
+          { x: 0, y: 0 },
+          { rotation: r, mirror: "none" },
+        );
+        const p = transformPoint(
+          power.at,
+          { x: 0, y: 0 },
+          { rotation: r, mirror: "none" },
+        );
+        return s.x === p.x && s.y < p.y === ground;
+      }) ?? 0;
     const offset = transformPoint(
       signal.at,
       { x: 0, y: 0 },
