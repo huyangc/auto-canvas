@@ -115,3 +115,17 @@ task's three Codex rounds were used.
 Each of the four new tests fails with its fix reverted and passes with it.
 Rerun: format, docs, typecheck, lint, build → 0; `pnpm test:local` → 7315
 passed; `pnpm deadcode | grep auto-layout` → no output.
+
+## PR review round 2 — P2 findings fixed by Opus
+
+Round 2 on `b8409b1` raised no P0/P1. Opus verified both P2 findings and fixed
+them, since each is a few lines.
+
+| Finding                                                                                                                                | Fix                                                                                                                              |
+| -------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| A Route with a `locked` leg makes the Edit Engine reject `remove_route_geometry`, while the planner returned edits without diagnostics | R2 diagnostic, no edits                                                                                                          |
+| A grounded shunt whose symbol pins are horizontal (diode) stayed horizontal                                                            | The shunt rotation is chosen from 0/90/180/270 so the signal pin sits directly above the power pin for ground (below for supply) |
+
+Both new tests fail with their fix reverted and pass with it. Rerun: format,
+docs, typecheck, lint, build → 0; `pnpm test:local` → 7317 passed;
+`pnpm deadcode | grep auto-layout` → no output; review script → 0.

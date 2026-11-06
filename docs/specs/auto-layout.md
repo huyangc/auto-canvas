@@ -81,8 +81,8 @@ AutoLayoutDiagnostic[] }`. Fixed instances retain their exact placements;
   input exists; column pitch is 160 units. Grounded-negative sources stand
   vertically in the leftmost columns, positive up. Series two-pin elements
   with neither pin on power lie horizontally, lower-distance pin left.
-  Shunts with one power pin stand in the column just right of their node's
-  driver, below the row for ground or above for supply, signal pin toward
+  Shunts with one power pin stand vertically, rotated as their symbol's pin
+  axis requires, in the column just right of their node's driver, below the row for ground or above for supply, signal pin toward
   the row. Multi-pin blocks sit on the row in distance order. A series
   element bridging two nets already reached by earlier columns lies
   horizontally 120 units above the row, centered between its net columns.
@@ -101,7 +101,7 @@ AutoLayoutDiagnostic[] }`. Fixed instances retain their exact placements;
 - **Existing locks and conflicts.** Members of a locked layout group or
   constraint are treated as fixed instances under R1, because the Edit Engine
   refuses to transform them. A recognized group whose generated id already
-  names an existing group, or a locked annotation anchored to a Route, makes
+  names an existing group, a locked annotation anchored to a Route, or a Route with a `locked` leg, makes
   the planner return no edits and an R5 or R2 diagnostic instead of a plan the
   Edit Engine would reject or that would overwrite user intent. A placed pin
   that lands on a retained Junction of another Net would merge the Nets, so
