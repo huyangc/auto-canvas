@@ -82,7 +82,7 @@ export function EditorComponentEditor(props: EditorComponentEditorProps) {
       preloadComponentDefinitionEditor();
     }
   }, [userComponentsOpen]);
-  if (!capabilities.community && !capabilities.localComponents) return null;
+  if (!capabilities.userComponents) return null;
   const cancelSession = () => {
     setComponentEditor(null);
     if (returnToLibrary.current) setUserComponentsOpen(true);

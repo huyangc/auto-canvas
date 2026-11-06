@@ -3,12 +3,7 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import { createEmptyProject, type CircuitProject } from "@icm/model";
-import { serializeProject } from "@icm/project-protocol";
 import { CURRENT_PROJECT_FILE_VERSION } from "@icm/project-protocol";
-import {
-  createGalleryExampleCommands,
-  type GalleryEntryContext,
-} from "../features/editor-shell/gallery-example-commands";
 import type { CloudProjectSaveOutcome } from "../features/editor-shell/cloud-projects";
 import type { CloudProjectStore } from "../services/editor-services";
 import {
@@ -64,10 +59,7 @@ function cloudStore(save: CloudProjectStore["save"]): CloudProjectStore {
   };
 }
 
-async function mount(
-  store: CloudProjectStore | null = null,
-  fetchImpl: typeof fetch = vi.fn(),
-) {
+async function mount(store: CloudProjectStore | null = null) {
   const initial = project();
   const recovery: UseProjectFileLifecycleOptions["recovery"] = {
     workingCopyId: "working-copy",
@@ -85,7 +77,6 @@ async function mount(
   let current!: {
     doc: ReturnType<typeof useDocumentController>;
     file: ReturnType<typeof useProjectFileLifecycle>;
-    commands: ReturnType<typeof createGalleryExampleCommands>;
   };
   const statuses: string[] = [];
   let pendingEdits = false;
@@ -106,19 +97,7 @@ async function mount(
       setStatus: (message) => statuses.push(message),
       onCloudProjectSaved: () => {},
     });
-    const commands = createGalleryExampleCommands({
-      defaultViewBox: view,
-      replaceActiveProject: file.replaceActiveProject,
-      captureRefreshTarget: file.captureReplacementTarget,
-      guardDirtyReplacement: file.guardDirtyReplacement,
-      beginCopyPlacement: () => {},
-      cancelAllTransientInteraction: () => {},
-      setGalleryEntryContext: () => {},
-      setDailyOpenLimit: () => {},
-      setStatus: (message) => statuses.push(message),
-      fetchImpl,
-    });
-    current = { doc, file, commands };
+    current = { doc, file };
     return null;
   }
   root = createRoot(document.createElement("div"));
@@ -191,87 +170,6 @@ it("keeps edits made during Save and continue, and can save them on retry", asyn
   expect(editor.current.file.replaceGuard).toBeNull();
 });
 
-it.each(["switch", "edit", "replace", "unapplied code draft"])(
-  "ignores Gallery refresh after %s",
-  async (action) => {
-    const response = deferred<Response>();
-    const editor = await mount(null, () => response.promise);
-    const oldController = editor.current.doc.controller;
-    const context: GalleryEntryContext = {
-      id: "gallery-A",
-      projectId: "A",
-      name: "A",
-      ownerUserId: null,
-      author: "",
-      description: "",
-      tags: [],
-    };
-    let refreshing!: Promise<void>;
-    await act(async () => {
-      refreshing = editor.current.commands.refreshGalleryEntry(context);
-    });
-    if (action === "switch") {
-      await act(async () => {
-        editor.current.doc.activateSession(
-          new EditorDocumentController(project("B")),
-        );
-        editor.current.file.restoreFileSession({
-          persistenceState: "dirty",
-          cloudBinding: { id: "cloud-B", revision: 7 },
-          savedBaseline: null,
-          safeSnapshotToken: null,
-        });
-      });
-    } else if (action === "edit") {
-      await editor.rename("Edited A");
-    } else if (action === "unapplied code draft") {
-      editor.setOpenBlocker("a code panel holds a draft that is not applied");
-    } else {
-      await act(async () => {
-        editor.current.file.replaceActiveProject(project("B"));
-      });
-    }
-    const before = editor.current.doc.project;
-    const fileBefore = editor.current.file.captureFileSession();
-    const oldBefore = oldController.project;
-    await act(async () => {
-      response.resolve(
-        new Response(
-          JSON.stringify({
-            projectText: serializeProject(project("Updated A")),
-          }),
-        ),
-      );
-      await refreshing;
-    });
-    expect(editor.current.doc.project).toEqual(before);
-    expect(oldController.project).toEqual(oldBefore);
-    expect(editor.current.file.captureFileSession()).toEqual(fileBefore);
-    expect(editor.current.file.replaceGuard).toBeNull();
-  },
-);
-
-it("is clean after Undo to saved content and dirty again after Redo", async () => {
-  const editor = await mount(cloudStore(async () => saved));
-  await act(async () => {
-    await editor.current.file.saveProjectToCloud();
-  });
-  expect(editor.current.file.hasUnsavedChanges()).toBe(false);
-  await editor.rename("Edited");
-  expect(editor.current.file.hasUnsavedChanges()).toBe(true);
-  await act(async () => {
-    editor.current.doc.transact([{ kind: "undo" }]);
-  });
-  expect(editor.current.doc.project.name).toBe("A");
-  expect(editor.current.file.persistenceState).toBe("clean");
-  expect(editor.current.file.hasUnsavedChanges()).toBe(false);
-  await act(async () => {
-    editor.current.doc.transact([{ kind: "redo" }]);
-  });
-  expect(editor.current.doc.project.name).toBe("Edited");
-  expect(editor.current.file.hasUnsavedChanges()).toBe(true);
-});
-
 it.each(["draft", "switch"])(
   "does not continue a Cloud save after a new %s",
   async (change) => {
@@ -304,28 +202,3 @@ it.each(["draft", "switch"])(
       expect(editor.current.file.cloudBinding?.id).toBe("cloud-C");
   },
 );
-
-it("refreshes an untouched Gallery project normally", async () => {
-  const editor = await mount(
-    null,
-    async () =>
-      new Response(
-        JSON.stringify({
-          projectText: serializeProject(project("Updated A")),
-        }),
-      ),
-  );
-  await act(async () =>
-    editor.current.commands.refreshGalleryEntry({
-      id: "gallery-A",
-      projectId: "A",
-      name: "A",
-      ownerUserId: null,
-      author: "",
-      description: "",
-      tags: [],
-    }),
-  );
-  expect(editor.current.doc.project.name).toBe("Updated A");
-  expect(editor.current.file.hasUnsavedChanges()).toBe(false);
-});

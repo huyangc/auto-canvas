@@ -1,5 +1,3 @@
-/* The sign-in choices, alike in the Gallery and the editor: each route
-   places the panel itself; what is inside it looks the same everywhere. */
 .account-provider {
   display: flex;
   align-items: center;
@@ -124,18 +122,6 @@
 }
 
 /* A quiet way to what the site keeps, under the ways in. */
-.account-signin-privacy {
-  justify-self: center;
-  align-self: center;
-  color: var(--icm-text-muted);
-  font-size: 12px;
-  text-decoration: none;
-}
-
-.account-signin-privacy:hover {
-  color: var(--icm-accent);
-  text-decoration: underline;
-}
 
 /* The name in the header is the account's one button. Its round mark carries
    the first letter, so a phone-width header can show the mark alone. */
@@ -299,10 +285,6 @@
   border-bottom: 1px solid var(--icm-border);
   font-size: 20px;
   font-weight: 650;
-}
-
-.account-dashboard .moderation-collection-heading h2 {
-  font-size: 16px;
 }
 
 .account-settings {
@@ -595,8 +577,6 @@
   background: var(--icm-accent);
   font-weight: 600;
 }
-
-/* The Owner's Data tab (#1446): plain tables of the Gallery's numbers. */
 .owner-data {
   display: grid;
   gap: 16px;

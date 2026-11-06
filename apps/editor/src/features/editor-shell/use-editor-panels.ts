@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 export const LIBRARY_WIDTH_MIN = 180;
-// Leave room for an expanded Gallery: one tag column and at least three cards.
+// Allow the Library to expand across the workspace.
 export const LIBRARY_WIDTH_MAX = 960;
 const LIBRARY_WIDTH_DEFAULT = 248;
 
@@ -47,9 +47,6 @@ export function useEditorPanels(options: UseEditorPanelsOptions) {
   });
   const [compactLayout, setCompactLayout] = useState(options.initialCompact);
   const [compactLibraryPanelOpen, setCompactLibraryPanelOpen] = useState(false);
-  const [leftPanelMode, setLeftPanelMode] = useState<"library" | "examples">(
-    "library",
-  );
   const [selectionOpen, setSelectionOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -93,42 +90,7 @@ export function useEditorPanels(options: UseEditorPanelsOptions) {
     }
   };
 
-  const showLeftPanel = (mode: "library" | "examples"): void => {
-    setLeftPanelMode(mode);
-    if (compactLayout) {
-      setCompactLibraryPanelOpen(true);
-      setSelectionOpen(false);
-      return;
-    }
-    setLibraryPanelOpen(true);
-    persistLibraryOpen(true);
-  };
-
   const toggleLibraryPanel = (): void => {
-    if (leftPanelMode === "examples") {
-      showLeftPanel("library");
-      return;
-    }
-    if (compactLayout) {
-      setCompactLibraryPanelOpen((current) => {
-        const next = !current;
-        if (next) setSelectionOpen(false);
-        return next;
-      });
-      return;
-    }
-    setLibraryPanelOpen((current) => {
-      const next = !current;
-      persistLibraryOpen(next);
-      return next;
-    });
-  };
-
-  const toggleExamplesPanel = (): void => {
-    if (leftPanelMode !== "examples") {
-      showLeftPanel("examples");
-      return;
-    }
     if (compactLayout) {
       setCompactLibraryPanelOpen((current) => {
         const next = !current;
@@ -156,7 +118,6 @@ export function useEditorPanels(options: UseEditorPanelsOptions) {
     closeSearch,
     compactLayout,
     compactLibraryPanelOpen,
-    leftPanelMode,
     libraryPanelOpen,
     libraryWidth,
     searchOpen,
@@ -167,14 +128,11 @@ export function useEditorPanels(options: UseEditorPanelsOptions) {
     setAgentStatusDismissed,
     setCompactLayout,
     setCompactLibraryPanelOpen,
-    setLeftPanelMode,
     setLibraryPanelOpen,
     setLibraryWidth,
     setSearchOpen,
     setSearchQuery,
     setSelectionOpen,
-    showLeftPanel,
-    toggleExamplesPanel,
     toggleLibraryPanel,
   };
 }

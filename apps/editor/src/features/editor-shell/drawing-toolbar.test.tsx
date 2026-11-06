@@ -7,7 +7,6 @@ describe("DrawingToolbar", () => {
   it("projects active panels and tools without owning editor state", () => {
     const markup = renderToStaticMarkup(
       <DrawingToolbar
-        leftPanelMode="examples"
         libraryPanelOpen
         projectPanel="project-code"
         tool="wire"
@@ -16,7 +15,6 @@ describe("DrawingToolbar", () => {
         documentSettingsOpen
         undo={{ enabled: true, execute: vi.fn() }}
         redo={{ enabled: true, execute: vi.fn() }}
-        onToggleExamples={vi.fn()}
         onToggleLibrary={vi.fn()}
         onToggleNetlist={vi.fn()}
         onToggleProjectCode={vi.fn()}
@@ -27,8 +25,7 @@ describe("DrawingToolbar", () => {
     );
 
     expect(markup).toContain('data-testid="draw-toolbar"');
-    expect(markup).toContain('data-testid="examples-toggle"');
-    expect(markup).toContain('aria-keyshortcuts="G"');
+    expect(markup).not.toContain('aria-keyshortcuts="G"');
     expect(markup).toContain('aria-keyshortcuts="B"');
     expect(markup).toContain('aria-keyshortcuts="N"');
     expect(markup).toContain('data-testid="netlist-panel-toggle"');

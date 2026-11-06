@@ -2,16 +2,15 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { accountInitial, type AccountMenuViewProps } from "./account";
 import { GitHubMark, GoogleMark } from "./provider-marks";
 import { OPEN_SIGN_IN_EVENT, takeSignInRequest } from "./sign-in-request";
-import { SITE_PRIVACY_PATH } from "./site-resource-links";
 
 /** Presentational account area; all effects live in `AccountMenu`. */
 export default function AccountMenuView({
   state,
   notice,
-  inEditor = false,
   onEmailStart,
   onEmailVerify,
   onReturnToOwner,
+  onSignOut,
 }: AccountMenuViewProps) {
   const [email, setEmail] = useState("");
   // Signing in by email is two steps: the address, then the emailed code,
@@ -71,21 +70,26 @@ export default function AccountMenuView({
   };
 
   if (user) {
-    // The name is the one way into the account: its own page, where the
-    // account is managed. Keep the same browser window so returning can
-    // resume its complete workspace, including unsaved tabs.
     return (
       <div className="account-menu" data-testid="account-menu">
-        <a
-          className="account-name"
-          href="/account"
-          data-testid="account-name"
-          data-initial={accountInitial(user.displayName)}
-          title="Your account"
-          {...(inEditor ? { rel: "noreferrer" } : {})}
-        >
-          {user.displayName}
-        </a>
+        <details className="account-signin">
+          <summary
+            className="account-name"
+            data-testid="account-name"
+            data-initial={accountInitial(user.displayName)}
+          >
+            {user.displayName}
+          </summary>
+          <div className="account-popover">
+            <button
+              type="button"
+              className="account-signout"
+              onClick={onSignOut}
+            >
+              Sign out
+            </button>
+          </div>
+        </details>
         {user.switchedFrom ? (
           <button
             type="button"
@@ -215,13 +219,6 @@ export default function AccountMenuView({
             {notes}
           </p>
         ) : null}
-        <a
-          className="account-signin-privacy"
-          href={SITE_PRIVACY_PATH}
-          data-testid="signin-privacy"
-        >
-          Privacy
-        </a>
       </div>
     </details>
   );

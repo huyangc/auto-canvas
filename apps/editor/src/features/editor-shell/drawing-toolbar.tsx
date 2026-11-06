@@ -11,8 +11,6 @@ interface ToolbarCommand {
 }
 
 export interface DrawingToolbarProps {
-  communityEnabled?: boolean;
-  leftPanelMode: "examples" | "library";
   libraryPanelOpen: boolean;
   projectPanel: "netlist" | "project-code" | null;
   leftPanelsDisabled?: boolean;
@@ -22,7 +20,6 @@ export interface DrawingToolbarProps {
   documentSettingsOpen: boolean;
   undo: ToolbarCommand;
   redo: ToolbarCommand;
-  onToggleExamples: () => void;
   onToggleLibrary: () => void;
   onToggleNetlist: () => void;
   onToggleProjectCode: () => void;
@@ -129,8 +126,6 @@ function ImmediatePanelButton({
 }
 
 export function DrawingToolbar({
-  communityEnabled = true,
-  leftPanelMode,
   libraryPanelOpen,
   projectPanel,
   leftPanelsDisabled = false,
@@ -140,7 +135,6 @@ export function DrawingToolbar({
   documentSettingsOpen,
   undo,
   redo,
-  onToggleExamples,
   onToggleLibrary,
   onToggleNetlist,
   onToggleProjectCode,
@@ -149,8 +143,7 @@ export function DrawingToolbar({
   onOpenDocumentSettings,
   resetLabels,
 }: DrawingToolbarProps) {
-  const examplesOpen = leftPanelMode === "examples" && libraryPanelOpen;
-  const libraryOpen = leftPanelMode === "library" && libraryPanelOpen;
+  const libraryOpen = libraryPanelOpen;
 
   return (
     <div
@@ -159,25 +152,6 @@ export function DrawingToolbar({
       data-testid="draw-toolbar"
     >
       <div className="draw-toolbar-panels" role="group" aria-label="Panels">
-        {communityEnabled ? (
-          <ImmediatePanelButton
-            testId="examples-toggle"
-            label="Insert from Gallery"
-            shortcut="G"
-            tooltip={
-              examplesOpen
-                ? "Hide Insert from Gallery"
-                : "Insert a circuit from the Gallery"
-            }
-            pressed={examplesOpen}
-            controls="examples-panel"
-            disabled={leftPanelsDisabled}
-            onClick={onToggleExamples}
-          >
-            <ToolIcon name="examples" />
-            <span>Insert</span>
-          </ImmediatePanelButton>
-        ) : null}
         <ImmediatePanelButton
           testId="library-toggle"
           label="Component library"

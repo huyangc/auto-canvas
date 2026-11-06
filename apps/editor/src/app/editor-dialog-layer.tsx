@@ -16,10 +16,8 @@ import {
   LazyNetlistPreflightDialog,
   LazyProjectInfoDialog,
   LazyProjectSearchDialog,
-  LazyPublishGalleryDialog,
   LazyRecentRecoveryDialog,
   LazyReplaceGuardDialog,
-  LazyVersionHistoryDialog,
 } from "./lazy-editor-dialogs";
 
 export interface EditorDialogLayerProps {
@@ -34,8 +32,6 @@ export interface EditorDialogLayerProps {
   insertComponent: ComponentProps<typeof LazyInsertComponentDialog> | null;
   cellManager: ComponentProps<typeof LazyCellManagerDialog> | null;
   netlistPreflight: ComponentProps<typeof LazyNetlistPreflightDialog> | null;
-  publishGallery: ComponentProps<typeof LazyPublishGalleryDialog> | null;
-  versionHistory: ComponentProps<typeof LazyVersionHistoryDialog> | null;
   agentConnection: ComponentProps<typeof LazyConnectAgentPanel> | null;
   agentFileApproval: {
     candidate: AgentFileCandidateSummary;
@@ -57,8 +53,6 @@ export function EditorDialogLayer({
   insertComponent,
   cellManager,
   netlistPreflight,
-  publishGallery,
-  versionHistory,
   agentConnection,
   agentFileApproval,
 }: EditorDialogLayerProps) {
@@ -87,12 +81,6 @@ export function EditorDialogLayer({
         {cellManager ? <LazyCellManagerDialog {...cellManager} /> : null}
         {netlistPreflight ? (
           <LazyNetlistPreflightDialog {...netlistPreflight} />
-        ) : null}
-        {publishGallery ? (
-          <LazyPublishGalleryDialog {...publishGallery} />
-        ) : null}
-        {versionHistory ? (
-          <LazyVersionHistoryDialog {...versionHistory} />
         ) : null}
         {agentConnection ? (
           <LazyConnectAgentPanel {...agentConnection} />

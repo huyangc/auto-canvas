@@ -22,7 +22,6 @@
   --icm-accent-soft: rgb(35 131 226 / 10%);
   --icm-accent-selection: rgb(35 131 226 / 14%);
   --icm-accent-tint: #e7f3fc;
-  /* The Gallery's AI mark: its card tag and the publish checkbox. */
   --icm-ai: #6a3cbf;
   --icm-ai-soft: #efe7fb;
   --icm-error: #eb5757;
@@ -240,11 +239,7 @@ body {
   background: #fff url("/icon.svg?v=nmos-4") center / cover no-repeat;
   box-shadow: none;
 }
-
-/* The wordmark is the shared two-way gallery/editor switch. Keep this beside
-   the shared brand primitives: both route bundles render it, and an inline
-   anchor would collapse the otherwise empty brand mark. */
-.gallery-home-link {
+.editor-brand {
   display: inline-flex;
   align-items: center;
   gap: var(--icm-space-2);
@@ -253,7 +248,7 @@ body {
   text-decoration: none;
 }
 
-.gallery-home-link:hover h1 {
+.editor-brand:hover h1 {
   color: var(--icm-accent);
 }
 
@@ -262,7 +257,7 @@ body {
   overflow: hidden;
 }
 
-.gallery-home-link h1,
+.editor-brand h1,
 .app-brand-copy p {
   margin: 0;
   overflow: hidden;
@@ -270,7 +265,7 @@ body {
   white-space: nowrap;
 }
 
-.gallery-home-link h1 {
+.editor-brand h1 {
   font-size: var(--icm-font-lg);
   font-weight: 600;
   letter-spacing: -0.01em;
@@ -342,8 +337,6 @@ body {
   width: 18px;
   height: 18px;
 }
-
-/* One public support path across Gallery, Editor, Analytics, and crash UI. */
 .bug-report-link {
   box-sizing: border-box;
   display: inline-flex;
@@ -382,8 +375,6 @@ body {
   font-weight: 750;
   line-height: 1;
 }
-
-/* Owner credit: paired with analytics at gallery center and kept in editor chrome. */
 .tokenzhang-credit {
   display: inline-flex;
   align-items: center;
@@ -391,34 +382,7 @@ body {
   white-space: nowrap;
 }
 
-/* The gallery header's middle takes the room left between the brand and the
-   actions and centres in it. Floating over the header's centre instead, it
-   ran under a signed-in account chip at every width from half screen to
-   about 1300px. In the row it cannot; whatever does not fit wraps onto a
-   second line the band clips, so the count, then the credit, drops out whole
-   instead of being covered or cut mid-number. */
-.gallery-credit-group {
-  flex: 1 1 0;
-  min-width: 0;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  align-content: flex-start;
-  justify-content: center;
-  height: var(--icm-control-h);
-  overflow: hidden;
-  white-space: nowrap;
-}
-
 /* A first line that is never empty, so the credit, too, can wrap away. */
-.gallery-credit-group::before {
-  content: "";
-  height: var(--icm-control-h);
-}
-
-.gallery-credit-group > * + * {
-  margin-left: var(--icm-space-3);
-}
 
 /* One line, even if long: "Presented by [Z] TokenZhang" never wraps. */
 .app-chrome-actions .tokenzhang-credit {
@@ -465,14 +429,6 @@ body {
 }
 
 @media (max-width: 900px) {
-  .gallery-chrome .gallery-home-link h1 {
-    display: none;
-  }
-
-  .gallery-chrome .app-brand {
-    min-width: 0;
-  }
-
   .tokenzhang-link-label {
     display: none;
   }
@@ -492,86 +448,6 @@ body {
   }
 }
 
-/* The gallery header centers credit plus analytics as one unit. A signed-in
-   account chip makes the right side wide, so text yields progressively before
-   the whole centered group does. */
-@media (max-width: 1400px) {
-  .gallery-chrome .tokenzhang-credit-kicker {
-    display: none;
-  }
-}
-
-@media (max-width: 1180px) {
-  .gallery-chrome .tokenzhang-link-label {
-    display: none;
-  }
-}
-
-@media (max-width: 860px) {
-  .gallery-credit-group {
-    display: none;
-  }
-}
-
 /* Below the credit group's exit the actions still crowd the brand: the
    subtitle yields (the tab bar right underneath names the page), the bug
    link goes icon-only, and the account chip tightens. */
-@media (max-width: 900px) {
-  .gallery-chrome .app-brand-copy {
-    display: none;
-  }
-
-  .gallery-actions .bug-report-label {
-    display: none;
-  }
-
-  .gallery-actions .bug-report-link {
-    width: var(--icm-control-h);
-    padding: 0;
-  }
-
-  .gallery-actions .account-name {
-    /* Wide enough for an ordinary two-part display name beside its round
-       mark; the header still holds one row at this width. Anything longer
-       ellipsizes, which only works because the chip stays out of the row's
-       shared flex rule. */
-    max-width: 11.75rem;
-  }
-}
-
-/* Narrower still the header keeps one row by dropping what it repeats; that
-   rule sits in gallery.css, after the base it overrides. */
-
-/* Visitor analytics entry (compact, does not crowd menubar commands). */
-.analytics-link {
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 0.3rem;
-  color: var(--icm-text-muted);
-  font-size: var(--icm-font-xs);
-  font-variant-numeric: tabular-nums;
-  line-height: var(--icm-line-tight);
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.analytics-link:hover {
-  color: var(--icm-accent);
-  text-decoration: underline;
-  text-underline-offset: 0.15rem;
-}
-
-.analytics-loading {
-  display: grid;
-  min-height: 100vh;
-  place-items: center;
-  color: #aeb8ca;
-  background: #10161f;
-  font-size: 0.85rem;
-}
-
-html.light .analytics-loading {
-  color: #68738a;
-  background: #ffffff;
-}

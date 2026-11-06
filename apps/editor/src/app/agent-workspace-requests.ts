@@ -484,13 +484,7 @@ export function createAgentWorkspaceTargets({
         transport: simulationTransport,
       });
     const projectHost = new runtime.BrowserAgentProjectHost({
-      projectTransactionOptions: EDITOR_PROJECT_TRANSACTION_OPTIONS,
       workspace: (request) => agentWorkspaceRef.current(request, workspaceId),
-      // A tab in the background has nothing on show to publish.
-      publishToGallery: runtime.createAgentGalleryPublisher({
-        current: () => null,
-        published: () => {},
-      }),
       getProjectSessionId: () =>
         available() ? controller.projectSessionId : "closed",
       getProject: () => controller.project,

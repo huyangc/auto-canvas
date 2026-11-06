@@ -1,8 +1,8 @@
+import type { useCloudProjects } from "./use-cloud-projects";
 // The editor's dialogs and banners: recovery, replace guard, Project Info,
-// search, insert, Cell Manager, netlist preflight, Gallery publishing and
-// version history, and the Agent connection and file approval.
+// search, insert, Cell Manager, netlist preflight, and the Agent connection
+// and file approval.
 import type { Dispatch, RefObject, SetStateAction } from "react";
-import { flushSync } from "react-dom";
 import { claimNow } from "../agent/claim-clock";
 import { planProjectCellImport } from "@icm/edit-engine";
 import type {
@@ -14,10 +14,7 @@ import type {
 import type { CircuitProject, SchematicDocument } from "@icm/model";
 import type { SimulationSourceLocation } from "@icm/simulation-service/contract";
 import type { createEditorCommandRouter } from "../commands/editor-command";
-import type {
-  EditorDocumentController,
-  useDocumentController,
-} from "../document/document-controller";
+import type { useDocumentController } from "../document/document-controller";
 import type { UseRecoveryCoordinatorResult } from "../document/recovery-coordinator";
 import type { useProjectFileLifecycle } from "../document/use-project-file-lifecycle";
 import type {
@@ -26,22 +23,12 @@ import type {
 } from "../features/component-insert/insert-component-dialog";
 import type { useComponentPlacement } from "../features/component-insert/use-component-placement";
 import type { createEditorFileCommands } from "../features/editor-shell/editor-file-commands";
-import type { createGalleryExampleCommands } from "../features/editor-shell/gallery-example-commands";
-import {
-  canUpdateGalleryPublication,
-  publishProjectToGallery,
-  updateGalleryEntry,
-} from "../features/editor-shell/gallery-publish";
-import type { projectWithTopologyRoot } from "../features/editor-shell/gallery-topology-project";
-import type { PublishGalleryDraft } from "../features/editor-shell/publish-gallery-dialog";
 import type { useEditorPanels } from "../features/editor-shell/use-editor-panels";
 import { loadCloudProjectForCellImport } from "../features/hierarchy/cloud-cell-import";
 import type { createEditorNavigationController } from "../features/hierarchy/editor-navigation-controller";
 import type { createProjectStructureCommands } from "../features/hierarchy/project-structure-commands";
 import type { useNetlistExportPreferences } from "../features/netlist-export/netlist-export-preferences";
-import { primeGalleryPreview } from "../gallery-client";
 import type { EditorServices } from "../services/editor-services";
-import { DEFAULT_VIEWBOX } from "./default-view-box";
 import { EditorDialogLayer } from "./editor-dialog-layer";
 import type { createEditorTransactionCommands } from "./editor-transaction-commands";
 import type {
@@ -49,29 +36,18 @@ import type {
   useEditorAgentConnection,
 } from "./use-agent-hosts";
 import type { useEditorDerivedModel } from "./use-editor-derived-model";
-import type {
-  useGalleryPublicationLink,
-  useGalleryPublicationRecord,
-  useGalleryPublishing,
-  useGalleryRefresh,
-} from "./use-gallery-publishing";
 import type { useProjectTabSessions } from "./use-project-tab-sessions";
 
 type DocumentControllerState = ReturnType<typeof useDocumentController>;
 type ProjectFileLifecycle = ReturnType<typeof useProjectFileLifecycle>;
 type EditorPanels = ReturnType<typeof useEditorPanels>;
-type GalleryRefresh = ReturnType<typeof useGalleryRefresh>;
-type GalleryPublishing = ReturnType<typeof useGalleryPublishing>;
+type CloudProjects = ReturnType<typeof useCloudProjects>;
 type AgentProjectResources = ReturnType<typeof useAgentProjectResources>;
-type AgentProjectResourcesOptions = Parameters<
-  typeof useAgentProjectResources
->[0];
 type AgentConnection = ReturnType<typeof useEditorAgentConnection>;
 type TransactionCommands = ReturnType<typeof createEditorTransactionCommands>;
 type ProjectStructureCommands = ReturnType<
   typeof createProjectStructureCommands
 >;
-type GalleryExampleCommands = ReturnType<typeof createGalleryExampleCommands>;
 type EditorDerivedModel = ReturnType<typeof useEditorDerivedModel>;
 type ComponentPlacement = ReturnType<typeof useComponentPlacement>;
 type NavigationController = ReturnType<typeof createEditorNavigationController>;
@@ -90,8 +66,6 @@ export function EditorDialogs({
   agentPanelOpen,
   setAgentPanelOpen,
   closeSearch,
-  galleryLoadGenerationRef,
-  setGalleryRefreshSignal,
   recoveryFailureDismissed,
   setRecoveryFailureDismissed,
   chunkLoadFailure,
@@ -101,9 +75,6 @@ export function EditorDialogs({
   project,
   document,
   dispatchProjectTransaction,
-  editorDocumentController,
-  projectSessionId,
-  galleryTopologyProject,
   projectConnectivityIndex,
   setDocumentStack,
   cellManagerOpen,
@@ -118,21 +89,7 @@ export function EditorDialogs({
   netlistRootDocumentId,
   projectInfoOpen,
   setProjectInfoOpen,
-  publishGalleryOpen,
-  setPublishGalleryOpen,
-  openedFromCheckNotice,
-  versionHistoryOpen,
-  setVersionHistoryOpen,
-  publishSession,
   cloudProjects,
-  galleryEntryContext,
-  publicationLinkLoading,
-  publicationLinkError,
-  publicationLinkNotice,
-  setPublicationLinkRetry,
-  publishGates,
-  publishQuota,
-  openProjectInTabRef,
   agentFileCandidate,
   cloudBinding,
   replaceGuard,
@@ -149,7 +106,6 @@ export function EditorDialogs({
   restoreRecoverySession,
   downloadRecoveryBackup,
   deleteRecoverySessionFromDialog,
-  linkExistingPublication,
   startupCloudRestoreAttemptedRef,
   agentSession,
   approveAgentFileCandidate,
@@ -164,9 +120,6 @@ export function EditorDialogs({
   editCellParameter,
   setExternalSubcircuitDefinition,
   removeExternalSubcircuitDefinition,
-  openGalleryEntryById,
-  publishDraft,
-  setPublishDraft,
   searchResults,
   requestElectricalDiagnostics,
   cellInsertCandidates,
@@ -189,7 +142,6 @@ export function EditorDialogs({
   workspaceReopen,
   setWorkspaceReopen,
   reopenClosedWindowTabs,
-  recordGalleryPublication,
 }: {
   projectStore: EditorServices["projectStore"];
   nativeProjectStore: EditorServices["nativeProjectStore"];
@@ -202,8 +154,6 @@ export function EditorDialogs({
   agentPanelOpen: EditorPanels["agentPanelOpen"];
   setAgentPanelOpen: EditorPanels["setAgentPanelOpen"];
   closeSearch: EditorPanels["closeSearch"];
-  galleryLoadGenerationRef: GalleryRefresh["galleryLoadGenerationRef"];
-  setGalleryRefreshSignal: GalleryRefresh["setGalleryRefreshSignal"];
   recoveryFailureDismissed: boolean;
   setRecoveryFailureDismissed: Dispatch<SetStateAction<boolean>>;
   chunkLoadFailure: string | null;
@@ -213,9 +163,6 @@ export function EditorDialogs({
   project: CircuitProject;
   document: SchematicDocument;
   dispatchProjectTransaction: DocumentControllerState["dispatchProjectTransaction"];
-  editorDocumentController: EditorDocumentController;
-  projectSessionId: string;
-  galleryTopologyProject: ReturnType<typeof projectWithTopologyRoot>;
   projectConnectivityIndex: ProjectConnectivityIndex;
   setDocumentStack: Dispatch<SetStateAction<HierarchyFrame[]>>;
   cellManagerOpen: boolean;
@@ -232,21 +179,7 @@ export function EditorDialogs({
   netlistRootDocumentId: string | undefined;
   projectInfoOpen: boolean;
   setProjectInfoOpen: Dispatch<SetStateAction<boolean>>;
-  publishGalleryOpen: GalleryPublishing["publishGalleryOpen"];
-  setPublishGalleryOpen: GalleryPublishing["setPublishGalleryOpen"];
-  openedFromCheckNotice: GalleryPublishing["openedFromCheckNotice"];
-  versionHistoryOpen: GalleryPublishing["versionHistoryOpen"];
-  setVersionHistoryOpen: GalleryPublishing["setVersionHistoryOpen"];
-  publishSession: GalleryPublishing["publishSession"];
-  cloudProjects: GalleryPublishing["cloudProjects"];
-  galleryEntryContext: GalleryPublishing["galleryEntryContext"];
-  publicationLinkLoading: GalleryPublishing["publicationLinkLoading"];
-  publicationLinkError: GalleryPublishing["publicationLinkError"];
-  publicationLinkNotice: GalleryPublishing["publicationLinkNotice"];
-  setPublicationLinkRetry: GalleryPublishing["setPublicationLinkRetry"];
-  publishGates: GalleryPublishing["publishGates"];
-  publishQuota: GalleryPublishing["publishQuota"];
-  openProjectInTabRef: AgentProjectResourcesOptions["openProjectInTabRef"];
+  cloudProjects: CloudProjects["cloudProjects"];
   agentFileCandidate: AgentProjectResources["agentFileCandidate"];
   cloudBinding: ProjectFileLifecycle["cloudBinding"];
   replaceGuard: ProjectFileLifecycle["replaceGuard"];
@@ -263,7 +196,6 @@ export function EditorDialogs({
   restoreRecoverySession: ProjectFileLifecycle["restoreRecoverySession"];
   downloadRecoveryBackup: ProjectFileLifecycle["downloadRecoveryBackup"];
   deleteRecoverySessionFromDialog: ProjectFileLifecycle["deleteRecoverySessionFromDialog"];
-  linkExistingPublication: ReturnType<typeof useGalleryPublicationLink>;
   startupCloudRestoreAttemptedRef: RefObject<boolean>;
   agentSession: AgentConnection["agentSession"];
   approveAgentFileCandidate: AgentConnection["approveAgentFileCandidate"];
@@ -278,9 +210,6 @@ export function EditorDialogs({
   editCellParameter: ProjectStructureCommands["editCellParameter"];
   setExternalSubcircuitDefinition: ProjectStructureCommands["setExternalSubcircuitDefinition"];
   removeExternalSubcircuitDefinition: ProjectStructureCommands["removeExternalSubcircuitDefinition"];
-  openGalleryEntryById: GalleryExampleCommands["openGalleryEntryById"];
-  publishDraft: PublishGalleryDraft | null;
-  setPublishDraft: Dispatch<SetStateAction<PublishGalleryDraft | null>>;
   searchResults: EditorDerivedModel["searchResults"];
   requestElectricalDiagnostics: () => ReturnType<typeof runErcChecks>;
   cellInsertCandidates: readonly CellInsertCandidate[];
@@ -305,7 +234,6 @@ export function EditorDialogs({
   workspaceReopen: ProjectTabSessions["workspaceReopen"];
   setWorkspaceReopen: ProjectTabSessions["setWorkspaceReopen"];
   reopenClosedWindowTabs: ProjectTabSessions["reopenClosedWindowTabs"];
-  recordGalleryPublication: ReturnType<typeof useGalleryPublicationRecord>;
 }) {
   return (
     <EditorDialogLayer
@@ -386,7 +314,6 @@ export function EditorDialogs({
           ? {
               name: project.name,
               documentName: document.name,
-              publication: galleryEntryContext,
               onSave: editProjectInfo,
               onClose: () => setProjectInfoOpen(false),
             }
@@ -626,107 +553,6 @@ export function EditorDialogs({
                   netlistPreferences.format,
                   namingProfile,
                 ),
-            }
-          : null
-      }
-      publishGallery={
-        !import.meta.env?.ICM_DESKTOP && publishGalleryOpen
-          ? {
-              draft: publishDraft,
-              onDraftChange: setPublishDraft,
-              defaultName: galleryEntryContext?.name ?? project.name,
-              session: publishSession,
-              gateReport: publishGates,
-              topologyProject: galleryTopologyProject,
-              openedFromCheckNotice,
-              publicationLinkLoading,
-              publicationLinkError,
-              publicationLinkNotice,
-              onRetryPublicationLink: () =>
-                setPublicationLinkRetry((value) => value + 1),
-              ...(cloudBinding
-                ? { onLinkExisting: linkExistingPublication }
-                : {}),
-              updateTarget: canUpdateGalleryPublication(
-                galleryEntryContext,
-                publishSession,
-              )
-                ? {
-                    id: galleryEntryContext!.id,
-                    name: galleryEntryContext!.name,
-                  }
-                : null,
-              updateDefaults: galleryEntryContext
-                ? {
-                    description: galleryEntryContext.description,
-                    tags: galleryEntryContext.tags,
-                    aiGenerated: galleryEntryContext.aiGenerated === true,
-                  }
-                : null,
-              agentEdited: editorDocumentController.agentEdited,
-              quota: publishQuota,
-              publish: (fields) =>
-                publishProjectToGallery(project, fields, fetch, cloudBinding),
-              ...(galleryEntryContext
-                ? {
-                    publishUpdate: (fields) =>
-                      updateGalleryEntry(
-                        galleryEntryContext.id,
-                        project,
-                        fields,
-                        fetch,
-                        cloudBinding,
-                      ),
-                  }
-                : {}),
-              onPublished: (outcome) => {
-                if (
-                  recordGalleryPublication(outcome, projectSessionId, "person")
-                ) {
-                  setPublishGalleryOpen(false);
-                  setPublishDraft(null);
-                }
-              },
-              ...(galleryEntryContext
-                ? {
-                    onShowHistory: () => {
-                      setPublishGalleryOpen(false);
-                      setVersionHistoryOpen(true);
-                    },
-                  }
-                : {}),
-              onClose: () => setPublishGalleryOpen(false),
-            }
-          : null
-      }
-      versionHistory={
-        !import.meta.env?.ICM_DESKTOP &&
-        versionHistoryOpen &&
-        galleryEntryContext
-          ? {
-              entryId: galleryEntryContext.id,
-              entryName: galleryEntryContext.name,
-              onBranch: async (snapshot) => {
-                // The tab guard reads the committed dialog state. Waiting a
-                // frame can still race a concurrent React render here.
-                flushSync(() => setVersionHistoryOpen(false));
-                return openProjectInTabRef.current(snapshot, DEFAULT_VIEWBOX, {
-                  source: "opened-file",
-                  persistenceState: "dirty",
-                });
-              },
-              onRestored: ({ previewRevision }) => {
-                void primeGalleryPreview(
-                  galleryEntryContext.id,
-                  previewRevision,
-                );
-                galleryLoadGenerationRef.current += 1;
-                setGalleryRefreshSignal((previous) => previous + 1);
-                setVersionHistoryOpen(false);
-                setStatus("Version restored — reloading the entry");
-                void openGalleryEntryById(galleryEntryContext.id);
-              },
-              onClose: () => setVersionHistoryOpen(false),
             }
           : null
       }

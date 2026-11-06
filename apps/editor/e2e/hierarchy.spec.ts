@@ -5,7 +5,7 @@ import {
   ngspiceCapabilities,
   profile,
 } from "./simulation-e2e-fixtures.js";
-import { sessionUser, signIn } from "./gallery-fixtures.js";
+import { sessionUser, signIn } from "./account-fixtures.js";
 import {
   createEmptyDocument,
   createEmptyProject,

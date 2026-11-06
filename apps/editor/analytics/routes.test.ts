@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 
-import { ANALYTICS_OPT_OUT_PATH, ANALYTICS_PAGE_LOAD_PATH } from "./client";
 import {
   OPT_OUT_ROUTE,
   PAGE_LOAD_ROUTE,
@@ -148,7 +147,7 @@ describe("the visitor cookie", () => {
   });
 
   it("answers at the path the privacy notice calls", () => {
-    expect(OPT_OUT_ROUTE).toBe(ANALYTICS_OPT_OUT_PATH);
+    expect(OPT_OUT_ROUTE).toBe("/api/track/opt-out");
   });
 
   it("opts out, and back in, from the privacy notice", async () => {
@@ -186,7 +185,7 @@ describe("the visitor cookie", () => {
 
 describe("page-load reports (#1581)", () => {
   function report(body: unknown, headers: Record<string, string> = {}) {
-    const request = new Request(`${SITE}${ANALYTICS_PAGE_LOAD_PATH}`, {
+    const request = new Request(`${SITE}${"/api/track/load"}`, {
       method: "POST",
       headers: {
         origin: SITE,
@@ -200,7 +199,7 @@ describe("page-load reports (#1581)", () => {
   }
 
   it("records the times with the country only: no cookie, no visitor", async () => {
-    expect(PAGE_LOAD_ROUTE).toBe(ANALYTICS_PAGE_LOAD_PATH);
+    expect(PAGE_LOAD_ROUTE).toBe("/api/track/load");
     const recorded: unknown[] = [];
     const env = analyticsEnv({}, (input, init) => {
       expect(input).toBe("https://analytics.internal/load");

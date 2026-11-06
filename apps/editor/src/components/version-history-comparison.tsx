@@ -4,9 +4,9 @@ import { buildSvgScene } from "@icm/render-svg";
 import { resolveDocumentStyleProfile } from "@icm/derived";
 import { builtInSymbols, createProjectSymbolResolver } from "@icm/symbols";
 import {
-  compareGalleryVersions,
+  compareProjectVersions,
   type VersionComponentChange,
-} from "./gallery-version-diff";
+} from "./version-diff";
 
 const colors = { added: "#19833c", removed: "#c33838", modified: "#a56800" };
 function VersionCanvas({
@@ -159,7 +159,7 @@ export function VersionHistoryComparison({
 }) {
   const result = useMemo(() => {
     try {
-      return { changes: compareGalleryVersions(before, after) };
+      return { changes: compareProjectVersions(before, after) };
     } catch (error) {
       return { error: error instanceof Error ? error.message : String(error) };
     }

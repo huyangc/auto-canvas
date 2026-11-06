@@ -4,8 +4,6 @@ export interface ProjectInfoDialogProps {
   name: string;
   /** The Cell on screen. */
   documentName: string;
-  /** Who published this drawing to the Gallery, when it has an entry. */
-  publication: { author: string; description: string } | null;
   /**
    * Saves the circuit's and the Cell's names as one undoable edit; false
    * keeps the dialog open.
@@ -16,13 +14,11 @@ export interface ProjectInfoDialogProps {
 
 /**
  * The circuit's name and the Cell on screen, edited here as in the project
- * tabs. A Gallery contributor and notes belong to the Gallery entry and are
- * only shown.
+ * tabs.
  */
 export function ProjectInfoDialog({
   name,
   documentName,
-  publication,
   onSave,
   onClose,
 }: ProjectInfoDialogProps) {
@@ -41,8 +37,6 @@ export function ProjectInfoDialog({
   const valid = draft.name.trim() !== "" && draft.cellName.trim() !== "";
   const changed =
     draft.name.trim() !== name || draft.cellName.trim() !== documentName;
-  const author = publication?.author.trim() ?? "";
-  const notes = publication?.description.trim() ?? "";
   return (
     <div
       className="help-backdrop"
@@ -112,20 +106,6 @@ export function ProjectInfoDialog({
                 }}
               />
             </label>
-            {publication ? (
-              <dl>
-                <div>
-                  <dt>Contributor</dt>
-                  <dd>{author || "Unknown contributor"}</dd>
-                </div>
-                {notes ? (
-                  <div>
-                    <dt>Notes</dt>
-                    <dd>{notes}</dd>
-                  </div>
-                ) : null}
-              </dl>
-            ) : null}
           </div>
           <div className="project-info-actions">
             <button type="button" onClick={onClose}>

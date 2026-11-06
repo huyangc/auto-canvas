@@ -191,8 +191,8 @@ export function NetlistPreflightDialog({
                   <h3>Electrical readiness ({electricalDiagnostics.length})</h3>
                   <p>
                     These findings use the same current-revision connectivity
-                    assessment as ERC and the Gallery gate. Saving remains a
-                    separate action and is allowed for unfinished work.
+                    assessment as ERC. Saving remains a separate action and is
+                    allowed for unfinished work.
                   </p>
                   <ul className="preflight-findings">
                     {electricalDiagnostics.map((diagnostic) => (

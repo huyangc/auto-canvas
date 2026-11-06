@@ -23,7 +23,6 @@ import {
   EditorDocumentController,
   type useDocumentController,
 } from "../document/document-controller";
-import { projectChangeToken } from "../document/project-session-lifecycle";
 import type { createProjectSnapshotSerializer } from "../document/project-snapshot-serializer";
 import {
   browserWorkspaceStore,
@@ -50,8 +49,6 @@ import {
   projectHoldReason,
 } from "../features/editor-shell/edit-blockers";
 import type { SpiceImportReport } from "../features/editor-shell/editor-file-commands";
-import type { GalleryEntryContext } from "../features/editor-shell/gallery-example-commands";
-import type { PublishGalleryDraft } from "../features/editor-shell/publish-gallery-dialog";
 import type { useEditorPanels } from "../features/editor-shell/use-editor-panels";
 import type { usePropertiesEditor } from "../features/properties/use-properties-editor";
 import type { useSelectionController } from "../features/selection/selection-controller";
@@ -131,10 +128,6 @@ interface ProjectTabSessionsOptions {
   projectInfoOpen: boolean;
   setProjectInfoOpen: Dispatch<SetStateAction<boolean>>;
   projectNameEditing: RefObject<boolean>;
-  publishGalleryOpen: boolean;
-  versionHistoryOpen: boolean;
-  galleryEntryContext: GalleryEntryContext | null;
-  setGalleryEntryContext: Dispatch<SetStateAction<GalleryEntryContext | null>>;
   projectSwitchBlockerRef: RefObject<() => string | null>;
   openProjectInTabRef: AgentProjectResourcesOptions["openProjectInTabRef"];
   setAgentFileCandidate: AgentProjectResources["setAgentFileCandidate"];
@@ -154,8 +147,6 @@ interface ProjectTabSessionsOptions {
   restoreSavedProjectBaseline: ProjectFileLifecycle["restoreSavedProjectBaseline"];
   hasExplicitBootTarget: boolean;
   getCurrentInteractionState: InteractionState["getCurrentState"];
-  publishDraft: PublishGalleryDraft | null;
-  setPublishDraft: Dispatch<SetStateAction<PublishGalleryDraft | null>>;
   setHighlightedNetOrigin: Dispatch<
     SetStateAction<HighlightedNetOrigin | null>
   >;
@@ -222,10 +213,6 @@ export function useProjectTabSessions({
   projectInfoOpen,
   setProjectInfoOpen,
   projectNameEditing,
-  publishGalleryOpen,
-  versionHistoryOpen,
-  galleryEntryContext,
-  setGalleryEntryContext,
   projectSwitchBlockerRef,
   openProjectInTabRef,
   setAgentFileCandidate,
@@ -243,8 +230,6 @@ export function useProjectTabSessions({
   restoreSavedProjectBaseline,
   hasExplicitBootTarget,
   getCurrentInteractionState,
-  publishDraft,
-  setPublishDraft,
   setHighlightedNetOrigin,
   setCodeNetPreview,
   carriedCopyRef,
@@ -270,8 +255,6 @@ export function useProjectTabSessions({
       selection: visualSelection,
       panel: projectPanel,
       properties: selectionOpen,
-      publication: galleryEntryContext,
-      publishDraft,
       netlistEntry,
       dirty: isDirtyWork(),
       unsafe: hasUnsafeWork() || codeDraftDirty,
@@ -304,8 +287,6 @@ export function useProjectTabSessions({
     replaceSelection(session.selection);
     setSelectionOpen(session.properties);
     setProjectPanel(session.panel);
-    setGalleryEntryContext(session.publication);
-    setPublishDraft(session.publishDraft);
     setNetlistEntry(session.netlistEntry);
     setStatus(`Switched to ${session.controller.project.name}`);
     setRestoringWorkspace(false);
@@ -357,8 +338,6 @@ export function useProjectTabSessions({
       },
       panel: "netlist",
       properties: false,
-      publication: null,
-      publishDraft: null,
       netlistEntry: null,
       dirty: options.persistenceState === "dirty",
       unsafe: options.persistenceState === "dirty",
@@ -395,9 +374,6 @@ export function useProjectTabSessions({
       );
     const session: TabSession = {
       ...saved,
-      // Cloud publication metadata may change while the page is closed.
-      // Keep the local draft, but resolve its current link before publishing.
-      publication: saved.file.cloudBinding ? null : saved.publication,
       controller,
       cellViews: new Map(saved.cellViews),
       fit: false,
@@ -624,8 +600,6 @@ export function useProjectTabSessions({
         cloudMutation.current,
       replaceGuard: !!replaceGuard,
       recoveryDialogOpen,
-      publishGalleryOpen,
-      versionHistoryOpen,
     });
   projectSwitchBlockerRef.current = projectSwitchBlocker;
   const projectTabs = useProjectTabs<TabSession>({
@@ -635,15 +609,9 @@ export function useProjectTabSessions({
     restore: restoreTabSession,
     describe: (session) => ({
       name: session.controller.project.name,
-      // A tab whose exact bytes the Gallery holds loses nothing on close.
-      dirty:
-        (session.dirty &&
-          session.file.publishedSnapshotToken !==
-            projectChangeToken(session.controller.project)) ||
-        session.unsafe,
+      dirty: session.dirty || session.unsafe,
       unsafe: session.unsafe,
       cloudId: session.file.cloudBinding?.id ?? null,
-      galleryId: session.publication?.id ?? null,
     }),
     prepare: async () => {
       const blocker = projectSwitchBlocker();

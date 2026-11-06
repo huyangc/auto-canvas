@@ -5,10 +5,8 @@ import { createHash } from "node:crypto";
 import { createEmptyProject } from "@icm/model";
 import { serializeProject } from "@icm/project-protocol";
 
-import { AgentHttpClient, AgentSessionClient } from "@icm/agent-client";
-import { openGalleryEntry } from "../../mcp-server/src/file-operations.js";
+import { AgentHttpClient } from "@icm/agent-client";
 import { placedInstance } from "./canvas-fixtures.js";
-import { sessionUser, signIn } from "./gallery-fixtures.js";
 import {
   revealPropertiesShelf,
   awaitEditorReady,
@@ -78,7 +76,6 @@ function boundTo(
       status().then(() => workspaceRequest(requestId, request)),
   };
 }
-type Agent = ReturnType<typeof boundTo>;
 
 /** A Circuit transaction that places one resistor. */
 function placeResistor(
@@ -128,129 +125,6 @@ const stagedFile = (name: string, mediaType: string, bytes: Buffer) => ({
   data: bytes.toString("base64"),
   byteLength: bytes.byteLength,
   sha256: createHash("sha256").update(bytes).digest("hex"),
-});
-
-/** A structural SPICE file staged for the Agent to open or have approved. */
-async function stageSpice(agent: Agent, requestId: string) {
-  const bytes = Buffer.from(
-    ".subckt stage vin vout\nR1 vin vout 1k\n.ends stage\n",
-  );
-  const staged = await agent.files({
-    apiVersion: "3.0",
-    requestId,
-    operation: "stage",
-    kind: "structural-spice",
-    entryPath: "stage.spi",
-    files: [stagedFile("stage.spi", "text/plain", bytes)],
-  });
-  if (!staged.ok || staged.operation !== "stage")
-    throw new Error(JSON.stringify(staged));
-  return staged.candidate.candidateId;
-}
-
-// The unchanged-context case is the same journey without the refusals.
-test("Agent Gallery open returns each new working copy after the relay context changes", async ({
-  page,
-  baseURL,
-}) => {
-  await openEditor(page);
-  await page.getByTestId("open-agent").click();
-  const panel = page.getByTestId("connect-agent-panel");
-  const { claimCode } = await readAgentClaim(panel);
-  let openedFile = false;
-  const staleStatuses: number[] = [];
-  const client = new AgentSessionClient({
-    http: new AgentHttpClient({
-      baseUrl: baseURL!,
-      fetch: async (input, init) => {
-        const request = new Request(input, init);
-        const path = new URL(request.url).pathname;
-        const body =
-          request.method === "POST" ? await request.clone().json() : null;
-        // Deliver one out-of-date context to the real relay after each open.
-        // Its HTTP refusal exercises the transport, session refresh and helper.
-        const stale =
-          openedFile &&
-          path.endsWith("/projects") &&
-          body?.operation === "workspace" &&
-          body.request.action === "list";
-        if (stale) {
-          openedFile = false;
-          request.headers.set("x-agent-context", "previous-gallery-context");
-        }
-        const response = await fetch(request);
-        if (stale) staleStatuses.push(response.status);
-        if (
-          path.endsWith("/files") &&
-          body?.operation === "open" &&
-          response.ok
-        ) {
-          openedFile = true;
-          await expect
-            .poll(async () => {
-              const status = await fetch(
-                request.url.replace(/\/files$/u, "/status"),
-                { headers: request.headers },
-              );
-              return (await status.json()).contextRevision;
-            })
-            .not.toBe(request.headers.get("x-agent-context"));
-        }
-        return response;
-      },
-    }),
-  });
-  await client.connect(claimCode);
-  try {
-    await panel.getByRole("button", { name: "Close Agent dialog" }).click();
-    const project = createEmptyProject(
-      "gallery-background",
-      "Background Gallery",
-    );
-    await page.route("**/api/gallery/issue-1546", (route) =>
-      route.fulfill({ json: { projectText: serializeProject(project) } }),
-    );
-    // Hidden browser panels may stop rendering frames while servicing Agent calls.
-    await page.evaluate(() => {
-      Object.defineProperty(document, "visibilityState", {
-        configurable: true,
-        get: () => "hidden",
-      });
-      window.requestAnimationFrame = () => 0;
-    });
-    for (let index = 0; index < 3; index++) {
-      let timeout: ReturnType<typeof setTimeout> | undefined;
-      try {
-        const opened = await Promise.race([
-          openGalleryEntry(client, "issue-1546", false),
-          new Promise<never>((_, reject) => {
-            timeout = setTimeout(
-              () =>
-                reject(
-                  new Error(
-                    `Gallery open ${index + 1} waited for a hidden view`,
-                  ),
-                ),
-              5_000,
-            );
-          }),
-        ]);
-        expect(opened).toMatchObject({
-          ok: true,
-          workspaceId: expect.any(String),
-          activeWorkspaceId: opened.workspaceId,
-        });
-      } finally {
-        clearTimeout(timeout);
-      }
-    }
-    expect((await client.refreshSnapshot()).snapshot.project.name).toBe(
-      "Background Gallery",
-    );
-    expect(staleStatuses).toEqual([409, 409, 409]);
-  } finally {
-    await client.disconnect();
-  }
 });
 
 /** The relay's answer to a created session. */
@@ -794,7 +668,7 @@ test("grants a browser Agent, edits through the live host, and shares undo", asy
   expect(sessionCreates).toBe(3);
 });
 
-test("keeps one paired working copy through Cell switches, a render crash, refresh and Gallery without resuming a pause", async ({
+test("keeps one paired working copy through Cell switches, a render crash, refresh without resuming a pause", async ({
   page,
   baseURL,
 }) => {
@@ -869,14 +743,6 @@ test("keeps one paired working copy through Cell switches, a render crash, refre
   });
   expect(sessionCreates).toBe(1);
 
-  // The Gallery and back return to the same working copy, still paused.
-  await page.goto("/");
-  await expect(page.getByTestId("gallery-agent-return")).toHaveCount(0);
-  await attached();
-  await page.getByTestId("gallery-editor-link").click();
-  await expect(page.getByTestId("active-instance-count")).toHaveText("1");
-  await page.getByTestId("open-agent").click();
-  await expect(panel.getByTestId("agent-status")).toHaveText("Paused");
   await panel.getByTestId("agent-resume").click();
   expect(await agent.snapshot("restored-snapshot", documentId)).toMatchObject({
     ok: true,
@@ -886,118 +752,6 @@ test("keeps one paired working copy through Cell switches, a render crash, refre
   await expect(page.getByTestId("active-instance-count")).toHaveText("0");
   await attached();
   expect(sessionCreates).toBe(1);
-});
-
-test("publishing by hand notes what an Agent drew, opened or had approved, leaving the AI mark to the person", async ({
-  page,
-  baseURL,
-}) => {
-  test.setTimeout(90_000);
-  await signIn(
-    page,
-    sessionUser({ displayName: "Publisher", email: "publisher@example.com" }),
-  );
-  await page.goto("/editor");
-  const { panel, session, agent } = await pairAgent(page, baseURL!);
-  await panel.getByRole("button", { name: "Close Agent dialog" }).click();
-  const dialog = page.getByTestId("publish-gallery-dialog");
-  const expectAgentNote = async (noted: boolean) => {
-    await page.getByTestId("publish-gallery-button").click();
-    await expect(dialog.getByLabel("AI-generated")).not.toBeChecked();
-    await expect(dialog.locator("#publish-gallery-ai-note")).toHaveText(
-      noted ? "An Agent worked on this Project" : "Shows an AI tag on the card",
-    );
-    await dialog.getByRole("button", { name: "Cancel" }).click();
-  };
-  // Pairing alone is not the Agent's work.
-  await expectAgentNote(false);
-
-  await agent.circuit(
-    placeResistor(session.documentIds[0]!, "agent-drawing", "agent-R"),
-  );
-  await expect(page.getByTestId("active-instance-count")).toHaveText("1");
-  await expectAgentNote(true);
-
-  // A file the Agent opens arrives in a tab of its own, already marked,
-  // without asking the person.
-  const tabs = page.getByRole("tab");
-  expect(
-    await agent.files({
-      apiVersion: "3.0",
-      requestId: "open-staged",
-      operation: "open",
-      candidateId: await stageSpice(agent, "stage-to-open"),
-      background: false,
-    }),
-  ).toMatchObject({ ok: true, operation: "open" });
-  await expect(tabs).toHaveCount(2);
-  await expect(tabs.last()).toHaveAttribute("aria-selected", "true");
-  await expect(page.getByTestId("agent-file-approval")).toHaveCount(0);
-  await expectAgentNote(true);
-  // The Agent follows the selected tab and reads its context first.
-  await expect
-    .poll(async () => (await agent.status()).projectId)
-    .not.toBe(session.projectId);
-
-  // So does a file the person approves in place of the open Project.
-  expect(
-    await agent.files({
-      apiVersion: "3.0",
-      requestId: "approve-staged",
-      operation: "request-approval",
-      candidateId: await stageSpice(agent, "stage-to-approve"),
-    }),
-  ).toMatchObject({ ok: true, approval: "pending-human" });
-  await page.getByTestId("agent-file-approve").click();
-  await expect(page.getByTestId("status")).toContainText("Accepted Agent");
-  await expectAgentNote(true);
-  // A file the person rejects changes nothing.
-  await agent.status();
-  await agent.files({
-    apiVersion: "3.0",
-    requestId: "reject-staged",
-    operation: "request-approval",
-    candidateId: await stageSpice(agent, "stage-to-reject"),
-  });
-  const approval = page.getByTestId("agent-file-approval");
-  await expect(approval).toBeVisible();
-  const revision = await page.getByTestId("revision").innerText();
-  await page.getByTestId("agent-file-reject").click();
-  await expect(approval).toHaveCount(0);
-  await expect(tabs).toHaveCount(2);
-  await expect(page.getByTestId("revision")).toHaveText(revision);
-
-  // A blank Project the Agent opens is not its work yet; renaming it is.
-  const blank = await agent.workspace("new-blank", {
-    action: "new",
-    name: "Blank",
-    background: true,
-  });
-  if (
-    !blank.ok ||
-    blank.operation !== "workspace" ||
-    blank.result.action !== "new"
-  )
-    throw new Error(JSON.stringify(blank));
-  expect(
-    await agent.workspace("show-blank", {
-      action: "activate",
-      workspaceId: blank.result.workspaceId!,
-    }),
-  ).toMatchObject({ ok: true });
-  await expect(tabs).toHaveCount(3);
-  await expect(tabs.last()).toHaveAttribute("aria-selected", "true");
-  await expectAgentNote(false);
-  expect(
-    await agent.workspace("rename-blank", { action: "rename", name: "Named" }),
-  ).toMatchObject({ ok: true, result: { action: "rename", applied: true } });
-  await expectAgentNote(true);
-
-  // The tab remembers it with the Project.
-  page.on("dialog", (prompt) => void prompt.accept());
-  await page.reload();
-  await expect(tabs).toHaveCount(3);
-  await expectAgentNote(true);
 });
 
 test("keeps pairing across Project tabs, rejects old writes and copies through the workspace transaction", async ({

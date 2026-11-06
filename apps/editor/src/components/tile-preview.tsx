@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 /**
- * A gallery/shelf thumbnail that degrades gracefully: when the preview
+ * A Cloud Project thumbnail that degrades gracefully: when the preview
  * request fails (a shelf saved before previews existed and not yet
  * backfilled, or a drawing the renderer cannot handle), the tile shows a
  * quiet schematic placeholder instead of the browser's broken-image glyph.
@@ -29,13 +29,13 @@ export function TilePreview({
     <span
       className={
         failed
-          ? "gallery-tile-preview gallery-tile-preview-missing"
-          : "gallery-tile-preview"
+          ? "shelf-tile-preview shelf-tile-preview-missing"
+          : "shelf-tile-preview"
       }
     >
       {failed ? (
         <svg
-          className="gallery-tile-placeholder"
+          className="shelf-tile-placeholder"
           viewBox="0 0 96 64"
           role="img"
           aria-label={alt}

@@ -1,3 +1,5 @@
+import { useCloudProjects } from "./use-cloud-projects";
+import { useBootLink, useRestoredTabLinks } from "./use-project-entry";
 import { useSignalMemberInspection } from "../features/selection/use-signal-member-inspection";
 import { editorSnapshotDerived } from "./editor-snapshot-derived-cache";
 import {
@@ -16,7 +18,6 @@ import {
   processPlacementTarget,
   processReviewedLibrary,
   planNetlistProcess,
-  prepareNetlistExample,
 } from "../features/netlist-export/netlist-process";
 import {
   DEFAULT_ARROW_PRESET,
@@ -199,7 +200,6 @@ import {
 } from "./editor-project-dock";
 import { EditorPropertiesDock } from "./editor-properties-dock";
 import { LazyProjectCodePanel as ProjectCodePanel } from "./lazy-editor-dialogs";
-import { LazyExamplesPanel as ExamplesPanel } from "./lazy-editor-dialogs";
 import { recoverSourceDrafts } from "../features/simulation/source-draft-cache";
 import { useProjectCheck } from "./use-project-check";
 import { summarizeVisualDiagnostics } from "../features/selection/selection-inspector-details";
@@ -209,21 +209,11 @@ import {
 } from "./use-editor-derived-model";
 import type { RoutingGuidanceView } from "../interaction/interaction-state";
 import { ShapesPanel } from "../features/editor-shell/shapes-panel";
-import {
-  type GalleryEntryContext,
-  createGalleryExampleCommands,
-} from "../features/editor-shell/gallery-example-commands";
 import { createEditorNavigationController } from "../features/hierarchy/editor-navigation-controller";
 import {
   createProjectStructureCommands,
   cellPlacementIssue,
 } from "../features/hierarchy/project-structure-commands";
-import type { PublishGalleryDraft } from "../features/editor-shell/publish-gallery-dialog";
-import { canUpdateGalleryPublication } from "../features/editor-shell/gallery-publication-permission";
-import { GalleryDailyLimitCard } from "../features/editor-shell/gallery-daily-limit-card";
-import { projectWithTopologyRoot } from "../features/editor-shell/gallery-topology-project";
-import { LazyGalleryTopologyTaskNotice as GalleryTopologyTaskNotice } from "./lazy-editor-dialogs";
-import { LazyGalleryPublishedNotice as GalleryPublishedNotice } from "./lazy-editor-dialogs";
 import {
   EDITOR_PROJECT_TRANSACTION_OPTIONS,
   useDocumentController,
@@ -253,18 +243,6 @@ import {
   createAgentWorkspaceHandler,
   createAgentWorkspaceTargets,
 } from "./agent-workspace-requests";
-import {
-  useGalleryPublicationLink,
-  useGalleryPublicationRecord,
-  useGalleryPublishing,
-  useGalleryRefresh,
-} from "./use-gallery-publishing";
-import {
-  createLeaveEditor,
-  useBootLink,
-  useGalleryTabEntry,
-  useRestoredTabLinks,
-} from "./use-gallery-entry";
 import {
   useActiveSimulationFolder,
   useSimulationPickCommands,
@@ -475,13 +453,10 @@ const NET_LABEL_SNAP_CAPTURE_RADIUS_PX = 12;
 export interface AppProps {
   services: EditorServices;
   project?: CircuitProject;
-  visitStats?: { pv: number; uv: number } | null;
   /** Override the deployment's Agent UI capability in tests. */
   publicAgentUiEnabled?: boolean;
   /** Override the deployment's analog Simulation UI capability in tests. */
   publicSimulationUiEnabled?: boolean;
-  /** `/g/<id>` deep link: load this gallery entry after boot. */
-  initialGalleryEntryId?: string | null;
 }
 
 export function App(props: AppProps) {
@@ -506,11 +481,10 @@ export function App(props: AppProps) {
           windowId,
           window.location.pathname + window.location.search,
           // An open request brings this window's tabs back and opens its
-          // target beside them: a Gallery entry, a Cloud Project, or a new
+          // target beside them: a Cloud Project or a new
           // circuit. Returning from the account resumes this window's
           // workspace without selecting its former deep-link target.
-          Boolean(entryProps.initialGalleryEntryId) ||
-            new URLSearchParams(window.location.search).has("project") ||
+          new URLSearchParams(window.location.search).has("project") ||
             new URLSearchParams(window.location.search).get("new") === "1" ||
             new URLSearchParams(window.location.search).get("resume") === "1",
         );
@@ -576,12 +550,10 @@ function propertiesMosBulkDefaultNetId(
 
 function WorkspaceEditor({
   project: initialProject,
-  visitStats,
   publicAgentUiEnabled: requestedAgentUi = !import.meta.env?.ICM_DESKTOP &&
     PUBLIC_AGENT_UI_ENABLED,
   publicSimulationUiEnabled: requestedSimulationUi = !import.meta.env
     .ICM_DESKTOP && PUBLIC_SIMULATION_UI_ENABLED,
-  initialGalleryEntryId = null,
   restoredWorkspace,
   workspaceError,
   workspaceNotice,
@@ -698,7 +670,6 @@ function WorkspaceEditor({
     compactLayout,
     compactLibraryPanelOpen,
     setCompactLibraryPanelOpen,
-    leftPanelMode,
     selectionOpen,
     setSelectionOpen,
     searchOpen,
@@ -712,7 +683,6 @@ function WorkspaceEditor({
     agentStatusDismissed,
     setAgentStatusDismissed,
     closeSearch,
-    toggleExamplesPanel: toggleExamplesPanelFromShell,
     toggleLibraryPanel,
   } = useEditorPanels({
     initialCompact: compactLayoutMatches(COMPACT_LAYOUT_MEDIA_QUERY),
@@ -726,11 +696,6 @@ function WorkspaceEditor({
   const visibleLibraryPanelOpen = compactLayout
     ? compactLibraryPanelOpen
     : libraryPanelOpen;
-  const { setGalleryRefreshSignal, galleryLoadGenerationRef } =
-    useGalleryRefresh({
-      capabilities,
-      visibleLibraryPanelOpen,
-    });
 
   const [recoveryFailureDismissed, setRecoveryFailureDismissed] =
     useState(false);
@@ -768,7 +733,6 @@ function WorkspaceEditor({
   const agentStartupRecovery = useAgentStartupRecovery({
     capabilities,
     restoredWorkspace,
-    initialGalleryEntryId,
     recoveryWorkingCopyId,
   });
   const {
@@ -797,10 +761,6 @@ function WorkspaceEditor({
   });
   // The tab names the open Project; the desktop names its window itself.
   usePageTitle(project.name, !import.meta.env?.ICM_DESKTOP);
-  const galleryTopologyProject = useMemo(
-    () => projectWithTopologyRoot(project, document.id),
-    [document.id, project],
-  );
   const definitionProjectRef = useRef({ project, projectSessionId });
   definitionProjectRef.current = { project, projectSessionId };
   const projectConnectivityIndex = useMemo(
@@ -984,17 +944,7 @@ function WorkspaceEditor({
   const [projectInfoOpen, setProjectInfoOpen] = useState(false);
   const projectNameEditing = useRef(false);
   const {
-    publishGalleryOpen,
-    setPublishGalleryOpen,
-    openedFromCheckNotice,
-    setOpenedFromCheckNotice,
-    publishedNotice,
-    setPublishedNotice,
-    versionHistoryOpen,
-    setVersionHistoryOpen,
-    galleryDailyLimit,
-    setGalleryDailyLimit,
-    publishSession,
+    sessionUser,
     cloudProjects,
     setCloudProjects,
     cloudProjectsReady,
@@ -1002,24 +952,7 @@ function WorkspaceEditor({
     noteCloudProjectSaved,
     noteCloudProjectsDeleted,
     reloadCloudProjects,
-    galleryEntryContext,
-    setGalleryEntryContext,
-    publicationLinkLoading,
-    setPublicationLinkLoading,
-    publicationLinkError,
-    setPublicationLinkError,
-    publicationLinkNotice,
-    setPublicationLinkNotice,
-    publicationLinkRetry,
-    setPublicationLinkRetry,
-    publishGates,
-    publishQuota,
-  } = useGalleryPublishing({
-    identity,
-    projectStore,
-    project,
-    resolver,
-  });
+  } = useCloudProjects({ identity, projectStore });
   /** The tab guard's blocker, for Agent hosts built before it (#1462). */
   const projectSwitchBlockerRef = useRef<() => string | null>(() => null);
   const openProjectInTabRef = useRef<
@@ -1038,8 +971,6 @@ function WorkspaceEditor({
     projectRunHistory,
     browserAgentSimulationHost,
     agentWorkspaceRef,
-    agentGalleryPublicationRef,
-    recordGalleryPublicationRef,
   } = useAgentProjectResources({
     runtime: agentRuntime,
     editorDocumentController,
@@ -1055,7 +986,6 @@ function WorkspaceEditor({
     () =>
       !import.meta.env?.ICM_DESKTOP && agentRuntime && browserAgentHost
         ? new agentRuntime.BrowserAgentProjectHost({
-            projectTransactionOptions: EDITOR_PROJECT_TRANSACTION_OPTIONS,
             isProjectAvailable: () =>
               agentProjectTabsRef
                 .current()
@@ -1064,21 +994,6 @@ function WorkspaceEditor({
                   (entry) =>
                     entry.session.controller === editorDocumentController,
                 ),
-            publishToGallery: agentRuntime.createAgentGalleryPublisher({
-              // Only while this working copy is the one its tab shows.
-              current: () => {
-                const state = agentGalleryPublicationRef.current();
-                return state.controller === editorDocumentController
-                  ? state
-                  : null;
-              },
-              published: (outcome, state) =>
-                recordGalleryPublicationRef.current(
-                  outcome,
-                  state.sessionId,
-                  "agent",
-                ),
-            }),
             workspace: (request) => agentWorkspaceRef.current(request),
             getProjectSessionId: () =>
               editorDocumentController.projectSessionId,
@@ -1100,8 +1015,6 @@ function WorkspaceEditor({
       editorDocumentController,
       projectSessionId,
       agentWorkspaceRef,
-      agentGalleryPublicationRef,
-      recordGalleryPublicationRef,
     ],
   );
   const {
@@ -1131,13 +1044,6 @@ function WorkspaceEditor({
   const noteCodeDraftDirty = useCallback((dirty: boolean) => {
     setCodeDraftDirty(dirty);
   }, []);
-  const openGalleryProjectInTabRef = useRef<
-    (
-      project: CircuitProject,
-      view: GridRect,
-      context: GalleryEntryContext,
-    ) => Promise<boolean>
-  >(async () => false);
   const captureAuthoredProject = async () => {
     if (
       simulationSourceBuffer.current &&
@@ -1155,7 +1061,7 @@ function WorkspaceEditor({
     restoreFileSession,
     cloudBinding,
     nativeBinding,
-    noteGalleryPublication,
+
     savedProjectBaseline,
     replaceGuard,
     replaceGuardSaving,
@@ -1169,9 +1075,8 @@ function WorkspaceEditor({
     isDirtyWork,
     hasUnsavedChanges,
     hasUnsafeWork,
-    noteProjectPublished,
+
     replaceActiveProject,
-    captureReplacementTarget,
     saveProjectToCloud,
     saveProjectToCloudByHand,
     saveByHand,
@@ -1213,12 +1118,6 @@ function WorkspaceEditor({
     },
     restoreWorkingSession: agentStartupRecovery !== null,
     externalWorkspaceRestored: restoredWorkspace !== null,
-    galleryEntryId: canUpdateGalleryPublication(
-      galleryEntryContext,
-      publishSession,
-    )
-      ? galleryEntryContext!.id
-      : undefined,
     hasPendingEdits: () => simulationSourceBuffer.current?.dirty === true,
     beforeSnapshot: captureAuthoredProject,
     onRecoverBuffers: recoverSourceDrafts,
@@ -1234,9 +1133,6 @@ function WorkspaceEditor({
     setStatus,
     onCloudProjectSaved: (saved) => {
       noteCloudProjectSaved(saved);
-      setGalleryEntryContext((current) =>
-        current && saved.galleryEntryId !== current.id ? null : current,
-      );
     },
     recovery: {
       ready: recoveryReady,
@@ -1256,7 +1152,6 @@ function WorkspaceEditor({
       setAgentFileCandidate(null);
       setImportReport(null);
       setImportReviewOpen(false);
-      setGalleryEntryContext(null);
       // Project Info belongs to the outgoing Project.
       setProjectInfoOpen(false);
       const nextDocument = replaceProject(nextProject);
@@ -1274,42 +1169,20 @@ function WorkspaceEditor({
       return nextDocument;
     },
   });
-  const linkExistingPublication = useGalleryPublicationLink({
-    publishGalleryOpen,
-    projectStore,
-    capabilities,
-    project,
-    editorDocumentController,
-    projectSessionId,
-    publishSession,
-    setGalleryEntryContext,
-    setPublicationLinkLoading,
-    setPublicationLinkError,
-    setPublicationLinkNotice,
-    publicationLinkRetry,
-    cloudBinding,
-    noteGalleryPublication,
-  });
-
   const startupCloudRestoreAttemptedRef = useRef(false);
   const hasExplicitBootTarget =
     restoredWorkspace !== null ||
-    initialGalleryEntryId !== null ||
     bootRequestsNewProject ||
     (typeof window !== "undefined" &&
       (() => {
         const search = new URLSearchParams(window.location.search);
-        return (
-          search.has("example") ||
-          search.has("project") ||
-          search.has("history")
-        );
+        return search.has("project");
       })());
   useEffect(() => {
     if (
       startupCloudRestoreAttemptedRef.current ||
       !cloudProjectsReady ||
-      !publishSession ||
+      !sessionUser ||
       !canRestoreStartupCloudProject ||
       hasExplicitBootTarget ||
       !startupCloudProjectId
@@ -1324,7 +1197,7 @@ function WorkspaceEditor({
     cloudProjectsReady,
     hasExplicitBootTarget,
     openCloudProjectById,
-    publishSession,
+    sessionUser,
     startupCloudProjectId,
   ]);
   const {
@@ -1535,32 +1408,6 @@ function WorkspaceEditor({
       return uniqueSuffixCounter.current;
     },
   });
-  const {
-    openGalleryEntryById,
-    refreshGalleryEntry,
-    openLibraryExample,
-    insertGalleryEntryById,
-  } = createGalleryExampleCommands({
-    defaultViewBox: DEFAULT_VIEWBOX,
-    captureRefreshTarget: captureReplacementTarget,
-    prepareLibraryExample: (example) =>
-      prepareNetlistExample(
-        example,
-        netlistPreferences.preferences.profiles[netlistPreferences.selected],
-      ),
-    replaceActiveProject,
-    openProjectInTab: (next, view, context) =>
-      openGalleryProjectInTabRef.current(next, view, context),
-    guardDirtyReplacement,
-    beginCopyPlacement: (clipboard, anchor) => {
-      prepareProjectCopy(project, document, clipboard);
-      beginCopyPlacementInteraction(clipboard, anchor);
-    },
-    cancelAllTransientInteraction,
-    setGalleryEntryContext,
-    setStatus,
-    setDailyOpenLimit: setGalleryDailyLimit,
-  });
   const [draftingInspectorSegment, setDraftingInspectorSegment] = useState<{
     objectId: string;
     index: number;
@@ -1568,10 +1415,6 @@ function WorkspaceEditor({
   const [selectedRouteSegmentIndex, setSelectedRouteSegmentIndex] = useState<
     number | null
   >(null);
-  /** Survives the dialog closing, so a mistaken dismissal loses nothing. */
-  const [publishDraft, setPublishDraft] = useState<PublishGalleryDraft | null>(
-    null,
-  );
   /**
    * A verb key pressed with nothing selected arms that verb: the next
    * object pointed at is the one acted on (Cadence-style verb-first).
@@ -3704,7 +3547,7 @@ function WorkspaceEditor({
     },
   });
 
-  // Every opened schematic lands fitted — shelf, gallery, examples,
+  // Every opened schematic lands fitted — shelf, file import,
   // imports, and recoveries alike — exactly as if F were pressed once the
   // new document's content bounds exist. An empty project keeps the
   // default camera.
@@ -3878,11 +3721,7 @@ function WorkspaceEditor({
     project,
     document,
     selection: visualSelection,
-    enabled:
-      !componentEditor &&
-      !userComponentsOpen &&
-      !interfaceConfirmation &&
-      !versionHistoryOpen,
+    enabled: !componentEditor && !userComponentsOpen && !interfaceConfirmation,
     setStatus,
     beginPaste: (clipboard) => beginClipboardPlacement(clipboard),
   });
@@ -3945,26 +3784,15 @@ function WorkspaceEditor({
     setStatus(`Properties for ${instanceId}`);
   }
 
-  function toggleExamplesPanel(): void {
-    if (!capabilities.community) return;
-    toggleExamplesPanelFromShell();
-  }
-
-  const { restoredGalleryLink, restoredCloudLink, restoredNewLink } =
-    useBootLink({
-      initialGalleryEntryId,
-      restoredWorkspace,
-      capabilities,
-      bootRequestsNewProject,
-      preparedInitialProject,
-      setStatus,
-      netlistPreferences,
-      openProjectInTabRef,
-      restoreAfterRefresh,
-      replaceActiveProject,
-      openCloudProjectById,
-      openGalleryEntryById,
-    });
+  const { restoredCloudLink, restoredNewLink } = useBootLink({
+    restoredWorkspace,
+    bootRequestsNewProject,
+    preparedInitialProject,
+    setStatus,
+    restoreAfterRefresh,
+    replaceActiveProject,
+    openCloudProjectById,
+  });
 
   function resetInteractionState(): void {
     exitCellSymbolLayout();
@@ -4117,7 +3945,7 @@ function WorkspaceEditor({
   );
 
   function openSelectedComponentDefinition(): void {
-    if (!capabilities.community && !capabilities.localComponents) {
+    if (!capabilities.userComponents) {
       setStatus("Component definition editing is unavailable in this host");
       return;
     }
@@ -4638,7 +4466,7 @@ function WorkspaceEditor({
       setDocumentSettingsOpen,
       projectInfoOpen,
       setProjectInfoOpen,
-      versionHistoryOpen,
+
       recoveryDialogOpen,
       setRecoveryDialogOpen,
       hasUnsafeWork,
@@ -4694,7 +4522,7 @@ function WorkspaceEditor({
       toggleHighlightedNet,
       toggleProjectPanel,
       circuitClipboard,
-      toggleExamplesPanel,
+
       openSelectedComponentDefinition,
       hasDefinitionSelection,
       activateTool,
@@ -4897,7 +4725,6 @@ function WorkspaceEditor({
     currentEditBlocker,
     projectSwitchBlocker,
     projectTabs,
-    dropDiscardedWork,
     workspaceReopen,
     setWorkspaceReopen,
     reopenClosedWindowTabs,
@@ -4947,10 +4774,7 @@ function WorkspaceEditor({
     projectInfoOpen,
     setProjectInfoOpen,
     projectNameEditing,
-    publishGalleryOpen,
-    versionHistoryOpen,
-    galleryEntryContext,
-    setGalleryEntryContext,
+
     projectSwitchBlockerRef,
     openProjectInTabRef,
     setAgentFileCandidate,
@@ -4968,8 +4792,7 @@ function WorkspaceEditor({
     restoreSavedProjectBaseline,
     hasExplicitBootTarget,
     getCurrentInteractionState,
-    publishDraft,
-    setPublishDraft,
+
     setHighlightedNetOrigin,
     setCodeNetPreview,
     carriedCopyRef,
@@ -4984,35 +4807,15 @@ function WorkspaceEditor({
     cancelAllTransientInteraction,
     nativeWorkspaceSaving,
   });
-  useGalleryTabEntry({
-    initialGalleryEntryId,
-    restoredWorkspace,
-    preparedInitialProject,
-    project,
-    projectSessionId,
-    setGalleryDailyLimit,
-    setGalleryEntryContext,
-    codeDraftDirty,
-    openGalleryProjectInTabRef,
-    isDirtyWork,
-    hasUnsafeWork,
-    replaceActiveProject,
-    createTabSession,
-    projectTabs,
-  });
   useRestoredTabLinks({
     restoringWorkspace,
     bootRequestsNewProject,
     setStatus,
-    codeDraftDirty,
     openCloudProjectById,
-    openGalleryEntryById,
-    refreshGalleryEntry,
-    restoredGalleryLink,
+
     restoredCloudLink,
     restoredNewLink,
     restoredTabs,
-    projectTabs,
   });
   const {
     recentNativeFiles,
@@ -5084,58 +4887,10 @@ function WorkspaceEditor({
       backgroundAgentHosts,
       projectTabs,
     });
-  const allowNextBrowserUnload = useUnsavedWorkGuard(projectTabs.hasUnsafeTabs);
-
-  const recordGalleryPublication = useGalleryPublicationRecord({
-    setStatus,
-    setGalleryRefreshSignal,
-    galleryLoadGenerationRef,
-    editorDocumentController,
-    setPublishedNotice,
-    publishSession,
-    galleryEntryContext,
-    setGalleryEntryContext,
-    agentGalleryPublicationRef,
-    recordGalleryPublicationRef,
-    cloudBinding,
-    noteGalleryPublication,
-    noteProjectPublished,
-  });
-
-  const { toGallery: leaveForGallery, toArena: leaveForArena } =
-    createLeaveEditor({
-      project,
-      stageRecovery,
-      flushRecovery,
-      captureAuthoredProject,
-      cloudBinding,
-      isDirtyWork,
-      guardDirtyReplacement,
-      dropDiscardedWork,
-      allowNextBrowserUnload,
-    });
+  useUnsavedWorkGuard(projectTabs.hasUnsafeTabs);
 
   return (
     <main className="app-shell">
-      {publishedNotice ? (
-        <Suspense fallback={null}>
-          <GalleryPublishedNotice
-            notice={publishedNotice}
-            onDismiss={() => setPublishedNotice(null)}
-          />
-        </Suspense>
-      ) : null}
-      {capabilities.community ? (
-        <Suspense fallback={null}>
-          <GalleryTopologyTaskNotice
-            hidden={publishGalleryOpen}
-            onOpen={() => {
-              setOpenedFromCheckNotice(true);
-              setPublishGalleryOpen(true);
-            }}
-          />
-        </Suspense>
-      ) : null}
       {interfaceConfirmation ? (
         <Suspense fallback={null}>
           <CellInterfaceConfirmationDialog
@@ -5178,7 +4933,6 @@ function WorkspaceEditor({
         setStatus={setStatus}
         userComponentsOpen={userComponentsOpen}
         setUserComponentsOpen={setUserComponentsOpen}
-        leftPanelMode={leftPanelMode}
         setSelectionOpen={setSelectionOpen}
         searchOpen={searchOpen}
         toggleLibraryPanel={toggleLibraryPanel}
@@ -5201,9 +4955,7 @@ function WorkspaceEditor({
         setDocumentSettingsOpen={setDocumentSettingsOpen}
         setProjectInfoOpen={setProjectInfoOpen}
         projectNameEditing={projectNameEditing}
-        publishGalleryOpen={publishGalleryOpen}
-        setPublishGalleryOpen={setPublishGalleryOpen}
-        setOpenedFromCheckNotice={setOpenedFromCheckNotice}
+
         cloudProjects={cloudProjects}
         reloadCloudProjects={reloadCloudProjects}
         cloudManagementBusy={cloudManagementBusy}
@@ -5247,7 +4999,7 @@ function WorkspaceEditor({
         enterSelectedHierarchy={enterSelectedHierarchy}
         returnToTopDocument={returnToTopDocument}
         toggleProjectPanel={toggleProjectPanel}
-        toggleExamplesPanel={toggleExamplesPanel}
+
         cancelAllTransientInteraction={cancelAllTransientInteraction}
         placeCellInstance={placeCellInstance}
         editorCommands={editorCommands}
@@ -5268,8 +5020,6 @@ function WorkspaceEditor({
         closeNativeTab={closeNativeTab}
         closeNativeTabs={closeNativeTabs}
         saveNativeTab={saveNativeTab}
-        leaveForGallery={leaveForGallery}
-        leaveForArena={leaveForArena}
       />
       <EditorDialogs
         projectStore={projectStore}
@@ -5283,8 +5033,7 @@ function WorkspaceEditor({
         agentPanelOpen={agentPanelOpen}
         setAgentPanelOpen={setAgentPanelOpen}
         closeSearch={closeSearch}
-        galleryLoadGenerationRef={galleryLoadGenerationRef}
-        setGalleryRefreshSignal={setGalleryRefreshSignal}
+
         recoveryFailureDismissed={recoveryFailureDismissed}
         setRecoveryFailureDismissed={setRecoveryFailureDismissed}
         chunkLoadFailure={chunkLoadFailure}
@@ -5294,9 +5043,7 @@ function WorkspaceEditor({
         project={project}
         document={document}
         dispatchProjectTransaction={dispatchProjectTransaction}
-        editorDocumentController={editorDocumentController}
-        projectSessionId={projectSessionId}
-        galleryTopologyProject={galleryTopologyProject}
+
         projectConnectivityIndex={projectConnectivityIndex}
         setDocumentStack={setDocumentStack}
         cellManagerOpen={cellManagerOpen}
@@ -5311,21 +5058,9 @@ function WorkspaceEditor({
         netlistRootDocumentId={netlistRootDocumentId}
         projectInfoOpen={projectInfoOpen}
         setProjectInfoOpen={setProjectInfoOpen}
-        publishGalleryOpen={publishGalleryOpen}
-        setPublishGalleryOpen={setPublishGalleryOpen}
-        openedFromCheckNotice={openedFromCheckNotice}
-        versionHistoryOpen={versionHistoryOpen}
-        setVersionHistoryOpen={setVersionHistoryOpen}
-        publishSession={publishSession}
+
         cloudProjects={cloudProjects}
-        galleryEntryContext={galleryEntryContext}
-        publicationLinkLoading={publicationLinkLoading}
-        publicationLinkError={publicationLinkError}
-        publicationLinkNotice={publicationLinkNotice}
-        setPublicationLinkRetry={setPublicationLinkRetry}
-        publishGates={publishGates}
-        publishQuota={publishQuota}
-        openProjectInTabRef={openProjectInTabRef}
+
         agentFileCandidate={agentFileCandidate}
         cloudBinding={cloudBinding}
         replaceGuard={replaceGuard}
@@ -5342,7 +5077,7 @@ function WorkspaceEditor({
         restoreRecoverySession={restoreRecoverySession}
         downloadRecoveryBackup={downloadRecoveryBackup}
         deleteRecoverySessionFromDialog={deleteRecoverySessionFromDialog}
-        linkExistingPublication={linkExistingPublication}
+
         startupCloudRestoreAttemptedRef={startupCloudRestoreAttemptedRef}
         agentSession={agentSession}
         approveAgentFileCandidate={approveAgentFileCandidate}
@@ -5357,9 +5092,7 @@ function WorkspaceEditor({
         editCellParameter={editCellParameter}
         setExternalSubcircuitDefinition={setExternalSubcircuitDefinition}
         removeExternalSubcircuitDefinition={removeExternalSubcircuitDefinition}
-        openGalleryEntryById={openGalleryEntryById}
-        publishDraft={publishDraft}
-        setPublishDraft={setPublishDraft}
+
         searchResults={searchResults}
         requestElectricalDiagnostics={requestElectricalDiagnostics}
         cellInsertCandidates={cellInsertCandidates}
@@ -5382,7 +5115,6 @@ function WorkspaceEditor({
         workspaceReopen={workspaceReopen}
         setWorkspaceReopen={setWorkspaceReopen}
         reopenClosedWindowTabs={reopenClosedWindowTabs}
-        recordGalleryPublication={recordGalleryPublication}
       />
       <div
         className={
@@ -5485,30 +5217,13 @@ function WorkspaceEditor({
             }}
           />
         ) : null}
-        {!capabilities.community || leftPanelMode === "library" ? (
-          <ShapesPanel
-            styleProfileId={document.presentation.styleProfileId}
-            open={visibleLibraryPanelOpen}
-            onStartInsert={(launch) =>
-              editorCommands.execute({ id: "insert.start", launch })
-            }
-          />
-        ) : (
-          <Suspense
-            fallback={
-              <aside
-                className="shapes-panel"
-                aria-label="Insert from Gallery"
-              />
-            }
-          >
-            <ExamplesPanel
-              open={visibleLibraryPanelOpen}
-              onOpenGalleryExample={(id) => void insertGalleryEntryById(id)}
-              onOpenExample={openLibraryExample}
-            />
-          </Suspense>
-        )}
+        <ShapesPanel
+          styleProfileId={document.presentation.styleProfileId}
+          open={visibleLibraryPanelOpen}
+          onStartInsert={(launch) =>
+            editorCommands.execute({ id: "insert.start", launch })
+          }
+        />
         {visibleLibraryPanelOpen ? (
           <div
             className="library-resize-handle"
@@ -7560,15 +7275,6 @@ function WorkspaceEditor({
               setStatus("Text cancelled");
             },
           }}
-          notice={
-            !import.meta.env?.ICM_DESKTOP && galleryDailyLimit ? (
-              <GalleryDailyLimitCard
-                limit={galleryDailyLimit}
-                onBackToGallery={leaveForGallery}
-                onClose={() => setGalleryDailyLimit(null)}
-              />
-            ) : null
-          }
         />
         {canvasContextMenu ? (
           <EditorCanvasContextMenu
@@ -7630,7 +7336,6 @@ function WorkspaceEditor({
       />
       <EditorStatusbar
         externalLinksEnabled={capabilities.externalLinks}
-        visitStats={visitStats}
         status={status}
         tool={tool}
         vddRailMode={vddRailMode}
@@ -7674,13 +7379,6 @@ function WorkspaceEditor({
         onWireCornerOrderChange={(cornerOrder) =>
           chooseWireShape({ cornerOrder })
         }
-        onOpenAnalytics={() => {
-          void guardDirtyReplacement("Open Analytics", async (discarded) => {
-            if (discarded) await dropDiscardedWork();
-            allowNextBrowserUnload();
-            window.location.assign("/analytics");
-          });
-        }}
         onZoomOut={() => zoomViewAtCenter(1.2)}
         onZoomIn={() => zoomViewAtCenter(0.84)}
         onFitView={() => editorCommands.execute({ id: "view.fit" })}

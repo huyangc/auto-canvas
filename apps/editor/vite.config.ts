@@ -9,9 +9,6 @@ import { localNetlistConversion } from "./dev/netlist-conversion";
 import { localAgentRelay } from "./dev/agent-relay";
 import { localSimulation } from "./dev/local-simulation.js";
 import { localReplica } from "./dev/local-replica";
-import { editorPreload } from "./build/editor-preload";
-import { usagePolicyShell } from "./build/usage-policy-shell";
-import { galleryEarlyFetch } from "./build/gallery-early-fetch";
 import { lockedCanvasPackage } from "./build/rnl-canvas-package";
 
 function isolateDevDependencyCache(): Plugin {
@@ -76,9 +73,6 @@ export default defineConfig({
     localNetlistConversion(),
     // After the Agent relay, whose narrower /api/agent/ proxy must win.
     localReplica(),
-    editorPreload(),
-    usagePolicyShell(),
-    galleryEarlyFetch(),
     versionStaticServiceWorker(),
   ],
 });

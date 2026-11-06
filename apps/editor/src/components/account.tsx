@@ -304,6 +304,7 @@ export interface AccountMenuViewProps {
   onEmailVerify: (email: string, code: string) => Promise<EmailCodeResult>;
   /** Switches a browser the Owner switched to an AI account back. */
   onReturnToOwner: () => void;
+  onSignOut?: () => void;
 }
 
 /** Self-loading account area shared by Gallery and Editor chrome. */
@@ -357,6 +358,9 @@ export function AccountMenu({
         state={state}
         notice={notice}
         inEditor={inEditor}
+        onSignOut={() => {
+          void signOut().then(() => window.location.reload());
+        }}
         onEmailStart={(email) => requestEmailCode(email)}
         onEmailVerify={async (email, code) => {
           const result = await verifyEmailCode(email, code);

@@ -39,7 +39,7 @@ export function createWebEditorServices(
     },
     exportDelivery: browserExportDelivery,
     capabilities: {
-      community: true,
+      userComponents: true,
       agent: true,
       simulation: true,
       externalLinks: true,

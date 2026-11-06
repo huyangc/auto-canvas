@@ -280,8 +280,7 @@ export default function EditorComponentSessionBody(
 
   return (
     <>
-      {(capabilities.community || capabilities.localComponents) &&
-      componentEditor ? (
+      {capabilities.userComponents && componentEditor ? (
         <ComponentDefinitionEditor
           key={componentEditor.key}
           authoringIdentity={{

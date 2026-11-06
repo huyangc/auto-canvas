@@ -19,8 +19,7 @@ export function createPreviewEditorServices(): EditorServices {
     NativeHeaderActions: NativeAboutButton,
     openExternalLink: openNativeExternalLink,
     capabilities: {
-      community: false,
-      localComponents: true,
+      userComponents: true,
       agent: false,
       simulation: false,
       externalLinks: false,

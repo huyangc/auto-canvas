@@ -1,8 +1,5 @@
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { GalleryOrderMenu } from "./components/gallery-order-menu";
 import {
   GALLERY_ORDER_KEY,
   GALLERY_SEED_GLOBAL,
@@ -51,35 +48,5 @@ describe("the Gallery's order (#1615)", () => {
     const own = galleryShuffleSeed();
     expect(own).toMatch(/^[a-z0-9]{1,16}$/u);
     expect(galleryShuffleSeed()).toBe(own);
-  });
-
-  it("names the order on its button and checks it in the menu", () => {
-    const html = renderToStaticMarkup(
-      createElement(GalleryOrderMenu, { order: "random", onChoose: () => {} }),
-    );
-    expect(html).toContain('aria-label="Order: Random"');
-    expect(html).toContain("Shuffle again");
-    expect(html).toMatch(
-      /aria-checked="true" data-testid="gallery-order-random"/u,
-    );
-    const parts = renderToStaticMarkup(
-      createElement(GalleryOrderMenu, { order: "parts", onChoose: () => {} }),
-    );
-    expect(parts).toContain('aria-label="Order: Most parts"');
-    expect(parts).toMatch(
-      /aria-checked="true" data-testid="gallery-order-parts"/u,
-    );
-    // By name, either way.
-    const byName = renderToStaticMarkup(
-      createElement(GalleryOrderMenu, {
-        order: "name-desc",
-        onChoose: () => {},
-      }),
-    );
-    expect(byName).toContain('aria-label="Order: Name Z–A"');
-    expect(byName).toContain('data-testid="gallery-order-name"');
-    expect(byName).toMatch(
-      /aria-checked="true" data-testid="gallery-order-name-desc"/u,
-    );
   });
 });

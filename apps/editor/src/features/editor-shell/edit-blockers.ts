@@ -15,8 +15,6 @@ export interface ProjectHeld extends EditInProgress {
   saving: boolean;
   replaceGuard: boolean;
   recoveryDialogOpen: boolean;
-  publishGalleryOpen: boolean;
-  versionHistoryOpen: boolean;
 }
 
 const first = (reasons: readonly (readonly [boolean, string])[]) =>
@@ -52,8 +50,6 @@ export function projectHoldReason(state: ProjectHeld): string | null {
         "a dialog asks whether to save before replacing the Project",
       ],
       [state.recoveryDialogOpen, "the recovery dialog is open"],
-      [state.publishGalleryOpen, "the Publish to Gallery dialog is open"],
-      [state.versionHistoryOpen, "Version history is open"],
     ]) ?? editInProgressReason(state)
   );
 }
