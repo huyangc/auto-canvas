@@ -1,3 +1,4 @@
+import { apiUrl } from "../../lib/app-url";
 import { ACCOUNT_CHANGED_EVENT } from "../../components/account";
 import type { CircuitProject } from "@icm/model";
 import {
@@ -58,7 +59,7 @@ export type CloudProjectListOutcome =
   | { status: "signed-out" }
   | { status: "unreachable"; message: string };
 
-const ENDPOINT = "/api/projects";
+const ENDPOINT = apiUrl("projects");
 
 /**
  * The shelf thumbnail for one Cloud Project. The revision names the bytes, so

@@ -1,3 +1,4 @@
+import { apiUrl } from "../../lib/app-url";
 import {
   parseSharedComponentEntry,
   parseSharedComponentMetadata,
@@ -112,7 +113,7 @@ async function libraryJson(
 export async function publicationAccount(
   fetchLike: typeof fetch = fetch,
 ): Promise<{ id: string; isAdmin: boolean } | null> {
-  const payload = await libraryJson("/api/auth/me", {}, fetchLike);
+  const payload = await libraryJson(apiUrl("auth/me"), {}, fetchLike);
   const user = payload.user;
   return isRecord(user) && typeof user.id === "string"
     ? { id: user.id, isAdmin: user.isAdmin === true }
@@ -144,7 +145,7 @@ export async function loadSharedComponentSummaries(
       params.set("since", String(ifCatalogRevision));
   }
   const payload = await libraryJson(
-    `/api/components?${params}`,
+    apiUrl(`components?${params}`),
     {},
     fetchLibrary,
     signal,
@@ -196,7 +197,9 @@ export async function readSharedComponentPreview(
   signal?: AbortSignal,
 ) {
   const payload = await libraryJson(
-    `/api/components/${encodeURIComponent(entry.id)}?view=preview&revision=${entry.revision}${entry.status === "deleted" ? "&status=deleted" : ""}`,
+    apiUrl(
+      `components/${encodeURIComponent(entry.id)}?view=preview&revision=${entry.revision}${entry.status === "deleted" ? "&status=deleted" : ""}`,
+    ),
     {},
     fetch,
     signal,
@@ -224,7 +227,9 @@ export async function readSharedComponentRecord(
   fetchLibrary: typeof fetch = fetch,
 ) {
   const payload = await libraryJson(
-    `/api/components/${encodeURIComponent(entry.id)}${entry.status === "deleted" ? "?status=deleted" : ""}`,
+    apiUrl(
+      `components/${encodeURIComponent(entry.id)}${entry.status === "deleted" ? "?status=deleted" : ""}`,
+    ),
     {},
     fetchLibrary,
     signal,
@@ -243,7 +248,9 @@ export async function checkSharedComponentRevision(
   signal?: AbortSignal,
 ) {
   await libraryJson(
-    `/api/components/${encodeURIComponent(entry.id)}?view=identity&revision=${entry.revision}${entry.status === "deleted" ? "&status=deleted" : ""}`,
+    apiUrl(
+      `components/${encodeURIComponent(entry.id)}?view=identity&revision=${entry.revision}${entry.status === "deleted" ? "&status=deleted" : ""}`,
+    ),
     {},
     fetch,
     signal,
@@ -286,7 +293,7 @@ export async function loadSharedComponents(
   }, 10_000);
   try {
     const payload = await responseJson(
-      await fetchLibrary(`/api/components?${params}`, {
+      await fetchLibrary(apiUrl(`components?${params}`), {
         credentials: "same-origin",
         cache: "no-store",
         signal: controller.signal,
@@ -342,7 +349,7 @@ export async function readSharedComponent(
   allowDeleted = false,
 ): Promise<SharedComponent> {
   const payload = await libraryJson(
-    `/api/components/${encodeURIComponent(id)}`,
+    apiUrl(`components/${encodeURIComponent(id)}`),
     {},
     fetchLibrary,
   );
@@ -361,7 +368,7 @@ export async function changeComponentLifecycle(
   fetchLibrary: typeof fetch = fetch,
 ) {
   const payload = await libraryJson(
-    `/api/components/${encodeURIComponent(entry.id)}`,
+    apiUrl(`components/${encodeURIComponent(entry.id)}`),
     {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -389,7 +396,7 @@ export async function publishSharedComponent(
   options: { idempotencyKey?: string; fetch?: typeof fetch } = {},
 ): Promise<ComponentPublicationReceipt> {
   const payload = await libraryJson(
-    `/api/components/${encodeURIComponent(id)}`,
+    apiUrl(`components/${encodeURIComponent(id)}`),
     {
       method: "PUT",
       credentials: "same-origin",
@@ -420,7 +427,7 @@ export async function manageSharedComponent(
   status: ComponentLibraryStatus,
 ): Promise<SharedComponent> {
   const payload = await libraryJson(
-    `/api/components/${encodeURIComponent(entry.id)}`,
+    apiUrl(`components/${encodeURIComponent(entry.id)}`),
     {
       method: "PATCH",
       credentials: "same-origin",

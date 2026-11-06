@@ -1,3 +1,4 @@
+import { normalizeBasePath } from "../../server/src/base-path.js";
 import type { ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import type { Connect, Plugin } from "vite";
@@ -8,14 +9,16 @@ import { handleNetlistConversionRequest } from "../../../packages/spice/src/conv
  * `vite preview`, which serves the built editor to browser tests.
  */
 export function localNetlistConversion(): Plugin {
+  const basePath = normalizeBasePath(process.env.AUTO_CANVAS_BASE_PATH);
   const convert = async (
     request: Connect.IncomingMessage,
     response: ServerResponse,
     next: Connect.NextFunction,
   ): Promise<void> => {
-    if (request.url?.split("?")[0] !== "/api/netlist/convert") return next();
+    if (request.url?.split("?")[0] !== `${basePath}/api/netlist/convert`)
+      return next();
     const result = await handleNetlistConversionRequest(
-      new Request(`http://localhost${request.url}`, {
+      new Request(`http://localhost${request.url.slice(basePath.length)}`, {
         method: request.method,
         headers: new Headers(
           Object.entries(request.headers).flatMap(([key, value]) =>

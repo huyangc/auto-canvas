@@ -1,6 +1,7 @@
 import { readFile, realpath, stat } from "node:fs/promises";
 import { extname, isAbsolute, relative, resolve } from "node:path";
 import type { Hono } from "hono";
+import { normalizeBasePath } from "./base-path.js";
 
 const TYPES: Readonly<Record<string, string>> = {
   ".css": "text/css; charset=utf-8",
@@ -24,15 +25,20 @@ function inside(root: string, target: string): string {
 export async function serveEditor(
   app: Hono,
   editorRoot: string,
+  basePath = normalizeBasePath(process.env.AUTO_CANVAS_BASE_PATH),
 ): Promise<void> {
+  basePath = normalizeBasePath(basePath);
   const root = await realpath(resolve(editorRoot));
   if (!(await stat(root)).isDirectory())
     throw new Error("Editor root is not a directory");
   app.on(["GET", "HEAD"], "*", async (c) => {
-    if (c.req.path === "/api" || c.req.path.startsWith("/api/"))
+    if (!c.req.path.startsWith(`${basePath}/`))
+      return c.json({ error: "Not found" }, 404);
+    const localPath = c.req.path.slice(basePath.length);
+    if (localPath === "/api" || localPath.startsWith("/api/"))
       return c.json({ error: "Not found" }, 404);
     try {
-      const path = decodeURIComponent(c.req.path).slice(1) || "index.html";
+      const path = decodeURIComponent(localPath).slice(1) || "index.html";
       let target = inside(root, resolve(root, path));
       try {
         target = inside(root, await realpath(target));

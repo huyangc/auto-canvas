@@ -17,9 +17,11 @@ export function registerComponents(
   app: Hono,
   db: Pool,
   sessionUser: () => Promise<LocalUser>,
+  basePath = "",
 ) {
   const route = async (request: Request): Promise<Response> => {
     const url = new URL(request.url);
+    url.pathname = url.pathname.slice(basePath.length);
     const id = url.pathname.slice("/api/components/".length);
     const isList = url.pathname === "/api/components";
     if (!isList && !COMPONENT_LIBRARY_ID.test(id))

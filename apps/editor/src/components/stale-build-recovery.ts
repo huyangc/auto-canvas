@@ -1,3 +1,4 @@
+import { appUrl } from "../lib/app-url";
 /**
  * Get a page out of a build it can no longer load.
  *
@@ -13,7 +14,10 @@
  * reloads. Nothing here touches a Project: recovery copies live in
  * IndexedDB, which is deliberately not cleared.
  */
-const SHELL_CACHE_PREFIX = "icm-static-shell-";
+const SHELL_CACHE_PREFIX =
+  import.meta.env.BASE_URL === "/"
+    ? "icm-static-shell-"
+    : `icm-static-shell-${import.meta.env.BASE_URL}:`;
 
 export type ModuleLoadDiagnosis =
   | {
@@ -60,7 +64,7 @@ export class TemporaryModuleLoadError extends Error {
 
 export interface StaleBuildRecoverySurfaces {
   readonly caches?: CacheStorage;
-  readonly serviceWorker?: ServiceWorkerContainer;
+  readonly serviceWorker?: Pick<ServiceWorkerContainer, "getRegistrations">;
   reload(): void;
 }
 
@@ -78,7 +82,7 @@ function moduleAssetUrl(error: unknown, currentUrl: string): string | null {
     const asset = new URL(match[0], current);
     if (
       asset.origin !== current.origin ||
-      !asset.pathname.startsWith("/assets/") ||
+      !asset.pathname.startsWith(appUrl("assets/")) ||
       !asset.pathname.endsWith(".js")
     ) {
       return null;
@@ -160,7 +164,16 @@ export function browserStaleBuildRecovery(): StaleBuildRecoverySurfaces {
   return {
     ...(typeof caches !== "undefined" ? { caches } : {}),
     ...(typeof navigator !== "undefined" && "serviceWorker" in navigator
-      ? { serviceWorker: navigator.serviceWorker }
+      ? {
+          serviceWorker: {
+            getRegistrations: async () =>
+              (await navigator.serviceWorker.getRegistrations()).filter(
+                (registration) =>
+                  registration.scope ===
+                  new URL(appUrl(""), window.location.href).href,
+              ),
+          },
+        }
       : {}),
     reload: () => window.location.reload(),
   };

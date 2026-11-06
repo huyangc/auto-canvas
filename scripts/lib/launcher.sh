@@ -62,7 +62,20 @@ launcher_config() {
     ::) url_host='[::1]' ;;
     *:*) url_host="[$HOST]" ;;
   esac
-  launcher_url="http://$url_host:$PORT"
+  launcher_origin="http://$url_host:$PORT"
+  launcher_url=$launcher_origin
+}
+
+# Only start/dev need a deployment path; stop continues to operate by port.
+launcher_base_path() {
+  if [[ -n "${AUTO_CANVAS_BASE_PATH:-}" ]]; then
+    AUTO_CANVAS_BASE_PATH=$(node --input-type=module -e '
+      import { normalizeBasePath } from "./apps/server/src/base-path.ts";
+      console.log(normalizeBasePath(process.env.AUTO_CANVAS_BASE_PATH));
+    ') || return 1
+    export AUTO_CANVAS_BASE_PATH
+  fi
+  launcher_url="$launcher_origin${AUTO_CANVAS_BASE_PATH:-}"
 }
 
 launcher_require() {

@@ -253,7 +253,7 @@ export async function compile(registry, repoRoot = root) {
     throw Error("Invalid connection placeholders");
   await ts(
     "apps/editor/src/agent/connection-guidance.generated.ts",
-    `const template=${JSON.stringify(template)};\nexport function renderAgentConnectionInstructions(origin:string,claimCode:string):string {const values:Record<string,string>={origin,claim:JSON.stringify({claimCode}),kitUrl:origin+"/api/agent/kit",manifestUrl:origin+"/api/agent/mcp-manifest.json"}; return template.replace(/\\{\\{(origin|claim|kitUrl|manifestUrl)\\}\\}/g,(_,key:string)=>values[key]!);}`,
+    `import { appUrl, apiUrl } from "../lib/app-url";\nconst template=${JSON.stringify(template)};\nexport function renderAgentConnectionInstructions(origin:string,claimCode:string):string {const values:Record<string,string>={origin:origin+appUrl("").replace(/\\/$/u,""),claim:JSON.stringify({claimCode}),kitUrl:origin+apiUrl("agent/kit"),manifestUrl:origin+apiUrl("agent/mcp-manifest.json")}; return template.replace(/\\{\\{(origin|claim|kitUrl|manifestUrl)\\}\\}/g,(_,key:string)=>values[key]!);}`,
   );
   const inputs = {
     "packages/agent-adapter/src/agent-api-help.generated.ts": [

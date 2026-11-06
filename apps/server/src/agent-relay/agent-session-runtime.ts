@@ -58,6 +58,7 @@ export type AgentSessionNamespaceLike = {
 
 export interface AgentSessionRouterEnv {
   AGENT_SESSION: AgentSessionNamespaceLike;
+  AUTO_CANVAS_BASE_PATH?: string;
   AGENT_ALLOWED_ORIGIN?: string;
 }
 
@@ -161,7 +162,10 @@ export async function routeAgentSessionRequest(
   env: AgentSessionRouterEnv,
 ): Promise<Response | null> {
   const url = new URL(request.url);
-  if (!url.pathname.startsWith("/api/agent/")) return null;
+  const basePath = env.AUTO_CANVAS_BASE_PATH ?? "";
+  if (!url.pathname.startsWith(`${basePath}/api/agent/`)) return null;
+  url.pathname = url.pathname.slice(basePath.length);
+  const publicUrl = url.origin + basePath;
   const allowedOrigin = env.AGENT_ALLOWED_ORIGIN ?? url.origin;
   if (!requestOriginAllowed(request, allowedOrigin)) {
     return jsonResponse(
@@ -183,7 +187,14 @@ export async function routeAgentSessionRequest(
     return new Response(null, { status: 204, headers });
   }
   if (request.method === "GET" && url.pathname === "/api/agent/openapi.json") {
-    return jsonResponse(agentCircuitOpenApi, 200, allowedOrigin);
+    return jsonResponse(
+      {
+        ...agentCircuitOpenApi,
+        ...(basePath ? { servers: [{ url: publicUrl }] } : {}),
+      },
+      200,
+      allowedOrigin,
+    );
   }
   if (request.method === "GET" && url.pathname === "/api/agent/kit") {
     return jsonResponse(agentOperatingKit, 200, allowedOrigin);
@@ -193,7 +204,7 @@ export async function routeAgentSessionRequest(
     url.pathname === "/api/agent/mcp-manifest.json"
   ) {
     const response = jsonResponse(
-      agentMcpBootstrapManifest(url.origin),
+      agentMcpBootstrapManifest(publicUrl),
       200,
       allowedOrigin,
     );

@@ -79,6 +79,8 @@ pnpm start
 `start`、`stop` 和 `dev` 会在应用默认值前加载这份 Bash 配置；Shell 中已导出的
 环境变量优先。没有 `.env` 时使用默认值。Git 会忽略 `.env`。
 
+设置 `AUTO_CANVAS_BASE_PATH=/canvas` 可将编辑器与 API 部署在 `/canvas/`，与其他应用共用域名；默认仍使用根路径。参见[前缀部署](apps/server/README.md#deploying-beside-silicon-notebook)。
+
 ## 常用命令
 
 | 命令                      | 作用                                                                    |

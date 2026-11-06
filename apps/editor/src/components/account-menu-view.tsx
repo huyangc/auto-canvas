@@ -1,3 +1,4 @@
+import { apiUrl } from "../lib/app-url";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { accountInitial, type AccountMenuViewProps } from "./account";
 import { GitHubMark, GoogleMark } from "./provider-marks";
@@ -122,7 +123,7 @@ export default function AccountMenuView({
         {providers.github ? (
           <a
             className="account-provider"
-            href="/api/auth/github/start"
+            href={apiUrl("auth/github/start")}
             data-testid="signin-github"
           >
             <GitHubMark />
@@ -132,7 +133,7 @@ export default function AccountMenuView({
         {providers.google ? (
           <a
             className="account-provider"
-            href="/api/auth/google/start"
+            href={apiUrl("auth/google/start")}
             data-testid="signin-google"
           >
             <GoogleMark />

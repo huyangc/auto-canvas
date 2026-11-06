@@ -90,6 +90,8 @@ and uncomment the settings you need. `start`, `stop` and `dev` load this Bash
 configuration before applying defaults; exported shell variables take precedence.
 A missing `.env` uses defaults. `.env` is ignored by Git.
 
+Set `AUTO_CANVAS_BASE_PATH=/canvas` to build and serve every editor/API URL under `/canvas/` beside another app; the default is the domain root. See [prefix deployment](apps/server/README.md#deploying-beside-silicon-notebook).
+
 ## Commands
 
 | Command                   | What it does                                                              |
