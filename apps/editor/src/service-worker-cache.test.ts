@@ -29,6 +29,8 @@ function loadWorker(
     "icm-static-shell-/canvas/:old",
     "icm-static-shell-/:notebook",
     "icm-static-shell-/other/:old",
+    // A shell named before caches were scoped by path.
+    "icm-static-shell-legacy-build",
   ];
   const listeners = new Map<string, Listener>();
   const stored = new Map<string, Response>();
@@ -157,6 +159,30 @@ describe("static shell cache policy", () => {
     });
     await Promise.all(pending);
     expect(deleted).toEqual(["icm-static-shell-/canvas/:old"]);
+  });
+
+  it("removes the legacy unscoped shell only when the root worker activates", async () => {
+    const pending: Promise<unknown>[] = [];
+    const { listeners, deleted } = loadWorker(
+      () => Promise.resolve(new Response("ok")),
+      Promise.resolve(),
+      false,
+      "/",
+    );
+    listeners.get("activate")!({
+      request: new Request("https://analog-canvas.test/"),
+      respondWith: () => undefined,
+      waitUntil: (value) => {
+        pending.push(value);
+      },
+    });
+    await Promise.all(pending);
+    // The root worker drops its own old shell and the legacy name, never a
+    // prefixed deployment's caches.
+    expect(deleted.sort()).toEqual([
+      "icm-static-shell-/:notebook",
+      "icm-static-shell-legacy-build",
+    ]);
   });
 
   it("refreshes a rejected Canvas package on reload and keeps a verified offline fallback", async () => {

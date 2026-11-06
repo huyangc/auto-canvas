@@ -5,6 +5,17 @@
 // activate() to remove the prior shell instead of retaining it indefinitely.
 const CACHE_PREFIX = `icm-static-shell-${new URL(self.registration.scope).pathname}:`;
 const CACHE = `${CACHE_PREFIX}__ICM_BUILD_ID__`;
+const ROOT_SCOPE = new URL(self.registration.scope).pathname === "/";
+
+function isLegacyShellCache(key) {
+  return key.startsWith("icm-static-shell-") && key[17] !== "/";
+}
+
+// Offline lookups read only this worker's own cache, never another
+// deployment's or a legacy shell that shares the origin.
+function matchOwn(request) {
+  return caches.open(CACHE).then((cache) => cache.match(request));
+}
 
 function scopeUrl() {
   return new URL(self.registration.scope);
@@ -31,15 +42,19 @@ self.addEventListener("install", (event) => {
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches
-      .keys()
-      .then((keys) =>
-        Promise.all(
-          keys
-            .filter((key) => key.startsWith(CACHE_PREFIX) && key !== CACHE)
-            .map((key) => caches.delete(key)),
-        ),
+    caches.keys().then((keys) =>
+      Promise.all(
+        keys
+          .filter(
+            (key) =>
+              (key.startsWith(CACHE_PREFIX) && key !== CACHE) ||
+              // Before scoped names, a root deployment named its shell
+              // icm-static-shell-<buildId>; only the root worker owns those.
+              (ROOT_SCOPE && isLegacyShellCache(key)),
+          )
+          .map((key) => caches.delete(key)),
       ),
+    ),
   );
 });
 
@@ -141,7 +156,7 @@ self.addEventListener("fetch", (event) => {
           }
           return response;
         })
-        .catch(() => caches.match(scopeUrl())),
+        .catch(() => matchOwn(scopeUrl())),
     );
     return;
   }
@@ -156,7 +171,7 @@ self.addEventListener("fetch", (event) => {
       // A rejected package must be refreshable instead of pinned in this cache.
       event.respondWith(
         fetchStaticAsset(event).catch(async (error) => {
-          const cached = await caches.match(event.request);
+          const cached = await matchOwn(event.request);
           if (cached) return cached;
           throw error;
         }),
