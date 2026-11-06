@@ -33,6 +33,8 @@ auto-canvas 基于 cascode-ai 的 [Analog Canvas](https://github.com/cascode-ai/
   - 自定义器件库：目录、发布、删除和恢复。
 - **Agent 编辑接口**（MCP 和 HTTP）：和界面操作使用同一套带类型的编辑模型；另有
   无界面工作区，可用脚本画图。
+- **服务端上的 Agent 中转**：实时 Agent 会话使用 Node 和 PostgreSQL；Vite 将
+  HTTP 和 WebSocket 请求转发至 `apps/server`。
 - **离线 EDA 导出**：[eda/](eda/) 里有导入 Aether 和 Virtuoso 的脚本。
 - **桌面预览版**（`apps/desktop`，Electron）：不需要服务端。
 
@@ -40,8 +42,6 @@ auto-canvas 基于 cascode-ai 的 [Analog Canvas](https://github.com/cascode-ai/
 
 - **自动摆放和绕线**：目前导入网表时器件按网格排开，不画导线。
 - **与 silicon-notebook 集成。**
-- **服务端上的 Agent 中转**：实时 Agent 会话目前需要 Vite 开发服务器自带的本地
-  中转。
 - **仿真**：从 analog-canvas 继承而来，正在删除。
 
 ## 环境要求

@@ -14,7 +14,7 @@ import {
 } from "./gallery-requests";
 import { type GalleryEnv } from "./gallery-store";
 import { type BoardActor } from "./gallery-store-boards";
-import { sameOrigin } from "./same-origin";
+import { sameOrigin } from "../apps/server/src/agent-relay/same-origin.js";
 
 /**
  * A board draws each entry plain, as a benchmark Task holds it: no colour on parts,

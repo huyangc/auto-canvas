@@ -1,109 +1,16 @@
-import { fileURLToPath } from "node:url";
+import type { Plugin } from "vite";
 
-import type { Plugin, ProxyOptions } from "vite";
-import type { Unstable_DevWorker } from "wrangler";
-
-/**
- * Start a real local relay when an Agent API or WebSocket is first requested,
- * or with the browser tests' preview server (`ICM_E2E_RELAY_AT_START=1`).
- */
+/** Forward Agent HTTP and editor WebSocket traffic to the plain Node server. */
 export function localAgentRelay(): Plugin {
-  let worker: Promise<Unstable_DevWorker> | undefined;
-  let proxyOptions: ProxyOptions;
-  let closing = false;
-
-  function start(): Promise<Unstable_DevWorker> {
-    if (closing)
-      return Promise.reject(new Error("Local Agent relay is closing"));
-    worker ??= import("wrangler")
-      .then(({ unstable_dev }) =>
-        unstable_dev(
-          fileURLToPath(new URL("./agent-worker.ts", import.meta.url)),
-          {
-            config: fileURLToPath(new URL("./wrangler.json", import.meta.url)),
-            envFiles: [],
-            local: true,
-            ip: "127.0.0.1",
-            port: 0,
-            inspectorPort: 0,
-            persist: false,
-            logLevel: "error",
-            experimental: {
-              disableExperimentalWarning: true,
-              disableDevRegistry: true,
-              showInteractiveDevSession: false,
-              watch: true,
-            },
-          },
-        ),
-      )
-      .catch((error: unknown) => {
-        worker = undefined;
-        throw error;
-      });
-    return worker;
-  }
-
-  async function stop(): Promise<void> {
-    closing = true;
-    await worker?.then(
-      (runtime) => runtime.stop(),
-      () => undefined,
-    );
-  }
-
-  const agentProxy: ProxyOptions = {
-    ws: true,
-    // Keep the editor's Host and Origin so the real router's same-origin
-    // validation and generated hand-off URLs work through the Vite proxy.
-    changeOrigin: false,
-    configure(_server, options) {
-      proxyOptions = options;
-    },
-    async bypass(req, res) {
-      try {
-        const runtime = await start();
-        proxyOptions.target = `http://${runtime.address}:${runtime.port}`;
-      } catch (error) {
-        console.error("Local Agent relay could not start:", error);
-        const body = JSON.stringify({
-          ok: false,
-          error: {
-            message:
-              "Local Agent relay could not start. Check the pnpm dev terminal, then retry.",
-          },
-        });
-        if (res) {
-          res.writeHead(503, { "content-type": "application/json" });
-          res.end(body);
-        } else {
-          req.socket.end(
-            "HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n",
-          );
-        }
-        return req.url ?? "/api/agent/";
-      }
-    },
-  };
-
   return {
     name: "local-agent-relay",
-    // Also under `vite preview`, which browser tests use to serve the built
-    // editor.
-    apply: "serve",
     config() {
-      const proxy = { "/api/agent/": agentProxy };
+      const target = process.env.AUTO_CANVAS_API_URL ?? "http://127.0.0.1:4310";
+      // Preserve the editor's Host and Origin for pairing URLs and origin checks.
+      const proxy = {
+        "/api/agent/": { target, ws: true, changeOrigin: false },
+      };
       return { server: { proxy }, preview: { proxy } };
     },
-    configurePreviewServer(server) {
-      // workerd would keep a closed preview server's process alive.
-      server.httpServer.once("close", () => void stop());
-      // A cold start (bundling the Worker, booting workerd) takes seconds on
-      // a loaded runner: pay it while the first tests load, not inside the
-      // first Agent test. The first request reports, and retries, a failure.
-      if (process.env.ICM_E2E_RELAY_AT_START === "1")
-        void start().catch(() => undefined);
-    },
-    closeBundle: stop,
   };
 }

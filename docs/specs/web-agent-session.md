@@ -142,7 +142,7 @@ GET  /api/agent/openapi.json
 A request ID binds its exact payload hash: an exact retry returns the cached
 result or joins the pending one; a different payload is `REQUEST_ID_REUSED`.
 Reads leave no ledger entry. A completed mutation's identity (ID, hash,
-timestamps, never its result) is stored once under its own Durable Object key
+timestamps, never its result) is stored once under its own PostgreSQL relay key
 for the session; after the result cache is gone it answers
 `REQUEST_RESULT_UNAVAILABLE` instead of re-executing. Session state keeps only
 pending mutations; session end deletes both. On `STALE_REVISION`, uncertain
@@ -165,7 +165,7 @@ reconciles, never blindly replays.
   and rate before forwarding. File Resource payloads ≤ 10 MB decoded
   (`fileResource.maxBytes`, advertised and enforced by the editor; clients
   build in no ceiling). Relay body/message ceiling 16 MB (base64 headroom,
-  under the 32 MiB Durable Object WebSocket message).
+  enforced by the Node relay before forwarding).
 - Secrets use constant-time comparison and redacted telemetry. Responses are
   `no-store`; payloads and secrets stay out of analytics and recovery.
   Offline, revoked, expired, replaced, connector-invalid, permission-denied,

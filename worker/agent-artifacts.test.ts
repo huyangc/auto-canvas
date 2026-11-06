@@ -5,12 +5,12 @@ import {
   AgentArtifacts,
   MAX_AGENT_ARTIFACT_BYTES,
   type AgentArtifactBucket,
-} from "./agent-artifacts";
-import { AgentSessionDO } from "./agent-session-do";
+} from "../apps/server/src/agent-relay/agent-artifacts.js";
+import { AgentSessionDO } from "../apps/server/src/agent-relay/agent-session-do.js";
 import {
   routeAgentSessionRequest,
   SESSION_STATE_KEY,
-} from "./agent-session-runtime";
+} from "../apps/server/src/agent-relay/agent-session-runtime.js";
 
 function fixture(limits?: { bytes: number; files: number }) {
   const values = new Map<string, unknown>();

@@ -3,7 +3,7 @@ import {
   MAX_ARTIFACT_BYTES,
   type ArtifactRef,
 } from "@icm/simulation-service";
-import type { DurableStorageLike } from "./agent-session-runtime";
+import type { DurableStorageLike } from "./agent-session-runtime.js";
 
 // Byte transfer limits, independent of JSON/RPC preview budgets.
 export const MAX_AGENT_ARTIFACT_BYTES = MAX_ARTIFACT_BYTES;

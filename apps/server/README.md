@@ -11,20 +11,21 @@ pnpm dev
 ```
 
 Startup also applies ordered SQL migrations transactionally. The migration
-ledger is `schema_migrations`; the local profile, Projects and Component Library survive restarts.
+ledger is `schema_migrations`; the local profile, Projects, Component Library and Agent session state survive restarts.
 Use `pnpm build` to build all apps, or `pnpm --filter @icm/server... build` to
 build the server and its workspace dependencies.
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `DATABASE_URL` | `postgresql:///auto_canvas` | PostgreSQL connection URL |
-| `HOST` | `127.0.0.1` | Bind address |
-| `PORT` | `4310` | HTTP port |
-| `AUTO_CANVAS_USER_NAME` | `Local user` | Initial display name; persisted profile takes precedence |
-| `AUTO_CANVAS_PROJECT_LIMIT` | `200` | Positive integer, maximum Projects for the local user |
-| `EDITOR_ROOT` | unset | Built editor directory; enables static assets and SPA fallback |
-| `AUTO_CANVAS_API_URL` | `http://127.0.0.1:4310` | Vite dev/preview proxy target; configured in the editor process |
-| `AUTO_CANVAS_TEST_DATABASE_URL` | `postgresql:///auto_canvas_test` | Contract and browser test database |
+| Variable                        | Default                          | Purpose                                                           |
+| ------------------------------- | -------------------------------- | ----------------------------------------------------------------- |
+| `DATABASE_URL`                  | `postgresql:///auto_canvas`      | PostgreSQL connection URL                                         |
+| `HOST`                          | `127.0.0.1`                      | Bind address                                                      |
+| `PORT`                          | `4310`                           | HTTP port                                                         |
+| `AUTO_CANVAS_USER_NAME`         | `Local user`                     | Initial display name; persisted profile takes precedence          |
+| `AUTO_CANVAS_PROJECT_LIMIT`     | `200`                            | Positive integer, maximum Projects for the local user             |
+| `AGENT_ALLOWED_ORIGIN`          | request origin                   | Optional allowed browser origin for Agent HTTP/WebSocket requests |
+| `EDITOR_ROOT`                   | unset                            | Built editor directory; enables static assets and SPA fallback    |
+| `AUTO_CANVAS_API_URL`           | `http://127.0.0.1:4310`          | Vite dev/preview proxy target; configured in the editor process   |
+| `AUTO_CANVAS_TEST_DATABASE_URL` | `postgresql:///auto_canvas_test` | Contract and browser test database                                |
 
 For a built editor, run `EDITOR_ROOT=apps/editor/dist node apps/server/dist/cli.js`.
 Unknown `/api/*` requests never fall back to HTML. The server is intended for a
@@ -54,3 +55,20 @@ published name and place it on the canvas. The real-server browser test checks
 the author/publish/reload/find/place path without API mocks and soft-deletes its
 published record afterward. The existing mocked browser suite still exercises
 the multi-account Worker contract.
+
+The Agent relay also runs here in plain Node. Vite dev and preview forward
+`/api/agent/` HTTP and WebSocket traffic to `AUTO_CANVAS_API_URL`; they do not
+start a Worker. `ICM_E2E_RELAY_AT_START` has no effect. Pair an MCP client with
+the editor's Agent connection panel, then use its Circuit resource to place a
+part. Restart the server: the editor reconnects with its existing proof or asks
+to pair again after expiry.
+
+Migration `003-agent-relay.sql` stores V8-serialized per-session values and
+alarm times in PostgreSQL. The host loads an object's cache before delivering
+events, persists writes in order, and gates HTTP/WebSocket output on those
+writes. HTTP and editor messages can interleave while awaiting replies. Run a
+single relay process per database; live sockets are held only by that process.
+No simulation artifact storage is configured: artifact transfer returns 503
+`ARTIFACT_STORAGE_UNAVAILABLE`, while simulation requests retain the editor's
+typed replies. Legacy `dev/agent-worker.ts` and `dev/wrangler.json` remain for
+T006 cleanup; neither dev nor Playwright loads them.

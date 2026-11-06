@@ -97,10 +97,18 @@ code; dependencies beyond what is prepared.
      with `node:v8` `serialize`/`deserialize` (structured-clone semantics,
      like Durable Object storage), plus a persisted alarm time per object.
      `get`/`put`/`deleteAll`/`setAlarm` with the semantics the class uses.
-   - Concurrency: each object name has one instance and one serial queue;
-     `fetch`, `alarm`, `webSocketMessage`, `webSocketClose` and
-     `blockConcurrencyWhile` run one at a time per object, as in a Durable
-     Object.
+   - Concurrency (corrected in round 2, see `review.md`): follow Durable
+     Object semantics, not a completion queue. Events (`fetch`, `alarm`,
+     `webSocketMessage`, `webSocketClose`) are delivered concurrently and
+     interleave at `await` points, exactly as `agent-session-do.ts` expects
+     (`forwardToEditor` awaits a reply that `webSocketMessage` resolves).
+     Storage is a per-object in-memory cache, loaded completely when the
+     object is created (inside `blockConcurrencyWhile`), so `get`/`put`/
+     `deleteAll` resolve from memory without yielding to other events; writes
+     persist to PostgreSQL in order behind the cache. Output gate: before a
+     `fetch` response is returned or a WebSocket message is sent, wait until
+     the writes made so far are persisted. `blockConcurrencyWhile` holds
+     delivery of new events until its callback settles.
    - Alarms: scheduled with timers, persisted, re-armed for every stored
      alarm when the server starts.
    - WebSockets: replace the `WebSocketPair` + `101` path with a host

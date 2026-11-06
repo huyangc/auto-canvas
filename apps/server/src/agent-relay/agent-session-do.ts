@@ -59,8 +59,8 @@ import {
   type DurableStateLike,
   type PendingForward,
   type WebSocketPairConstructor,
-} from "./agent-session-runtime";
-import { AgentArtifacts } from "./agent-artifacts";
+} from "./agent-session-runtime.js";
+import { AgentArtifacts } from "./agent-artifacts.js";
 
 // requestId is session-wide; identical payloads in different Project bindings
 // must never replay an earlier Project's cached result.
@@ -107,7 +107,7 @@ interface RequestTrace {
   result?: { ok?: unknown; revision?: unknown } | undefined;
 }
 
-/** Cloudflare Durable Object owning one temporary Agent session. */
+/** One temporary Agent session; the host supplies storage and sockets. */
 export class AgentSessionDO {
   private readonly artifacts: AgentArtifacts;
   /** Reason-only tombstone: no bearer, connector, editor proof or Project data. */
@@ -883,15 +883,29 @@ export class AgentSessionDO {
         WebSocketPair?: WebSocketPairConstructor;
       }
     ).WebSocketPair;
-    if (!Pair || !this.state.acceptWebSocket) {
+    if ((!Pair && !this.state.openWebSocket) || !this.state.acceptWebSocket) {
       return jsonResponse({ error: "WebSocket runtime unavailable" }, 501);
     }
     const version = await this.state.storage.get<string | null>(
       ADAPTER_VERSION_KEY,
     );
-    const pair = new Pair();
+    const opened = this.state.openWebSocket
+      ? await this.state.openWebSocket()
+      : (() => {
+          const pair = new Pair!();
+          return {
+            socket: pair[1],
+            response: new Response(null, {
+              status: 101,
+              headers: { "sec-websocket-protocol": EDITOR_PROTOCOL },
+              webSocket: pair[0],
+            } as ResponseInit & { webSocket: WebSocket }),
+          };
+        })();
+    if (!opened)
+      return jsonResponse({ error: "WebSocket upgrade required" }, 426);
     const previousSockets = this.state.getWebSockets?.(EDITOR_SOCKET_TAG) ?? [];
-    this.state.acceptWebSocket(pair[1], [EDITOR_SOCKET_TAG]);
+    this.state.acceptWebSocket(opened.socket, [EDITOR_SOCKET_TAG]);
     this.emit({ type: "editor.online", sessionId: machine.sessionId });
     for (const socket of previousSockets) {
       if (socket.readyState === WebSocket.OPEN) {
@@ -904,14 +918,14 @@ export class AgentSessionDO {
       expiresAt: new Date(machine.expiresAt).toISOString(),
     });
     if (status === "paused") {
-      pair[1].send(
+      opened.socket.send(
         editorEventMessage({
           type: "session.paused",
           sessionId: machine.sessionId,
         }),
       );
     } else if (machine.claimed) {
-      pair[1].send(
+      opened.socket.send(
         editorEventMessage({
           type: "session.ready",
           sessionId: machine.sessionId,
@@ -921,18 +935,14 @@ export class AgentSessionDO {
     }
     // A reloaded tab learns which adapter release is paired.
     if (machine.claimed && version)
-      pair[1].send(
+      opened.socket.send(
         editorEventMessage({
           type: "agent.adapter",
           sessionId: machine.sessionId,
           version,
         }),
       );
-    return new Response(null, {
-      status: 101,
-      headers: { "sec-websocket-protocol": EDITOR_PROTOCOL },
-      webSocket: pair[0],
-    } as ResponseInit & { webSocket: WebSocket });
+    return opened.response;
   }
 
   private async circuit(

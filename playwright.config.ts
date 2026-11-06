@@ -79,9 +79,7 @@ export default defineConfig({
           },
           {
             command: editorServer,
-            // Start the local Agent relay with the server, not in the first
-            // Agent test (apps/editor/dev/agent-relay.ts).
-            env: { ICM_E2E_RELAY_AT_START: "1", AUTO_CANVAS_API_URL: apiUrl },
+            env: { AUTO_CANVAS_API_URL: apiUrl },
             url: e2eBaseUrl,
             reuseExistingServer:
               !process.env.CI && process.env.ICM_E2E_ISOLATED !== "1",

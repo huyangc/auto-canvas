@@ -12,7 +12,7 @@ import {
 } from "@icm/symbols";
 import { type CircuitProject } from "@icm/model";
 import { sessionUserOf, type SessionUser } from "./auth";
-import { bearerMatches } from "./bearer";
+import { bearerMatches } from "../apps/server/src/agent-relay/bearer.js";
 import { aiSeatOf, isAiSeatEntry, type GalleryEnv } from "./gallery-store";
 
 function galleryStub(env: GalleryEnv) {

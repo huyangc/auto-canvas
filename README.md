@@ -39,6 +39,8 @@ Works today:
   User Components library with catalog, publishing, deletion and restore.
 - **Agent editing API** (MCP and HTTP) over the same typed edit model the GUI
   uses, and a headless workspace for scripted drawing.
+- **Agent relay on the server.** Live Agent sessions use Node and PostgreSQL;
+  Vite forwards HTTP and WebSocket traffic to `apps/server`.
 - **Offline EDA export** scripts for Aether and Virtuoso in [eda/](eda/).
 - **Desktop preview** (`apps/desktop`, Electron) that works without a server.
 
@@ -47,8 +49,6 @@ Not done yet:
 - **Automatic placement and routing.** Netlist import places devices on a
   grid and draws no wires.
 - **silicon-notebook integration.**
-- **Agent relay on the server.** Live Agent sessions currently need the Vite
-  dev server's local relay.
 - **Simulation** is inherited from analog-canvas and is being removed.
 
 ## Requirements

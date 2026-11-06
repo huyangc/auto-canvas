@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import mcpDistribution from "../config/agent-mcp-distribution.json";
+import mcpDistribution from "../../../../config/agent-mcp-distribution.json";
 import {
   REQUEST_LEDGER_KEY_PREFIX,
   SESSION_STATE_KEY,
@@ -7,7 +7,7 @@ import {
   projectOperationScopes,
   requestLedgerKey,
   simulationOperationScopes,
-} from "./agent-session-runtime";
+} from "./agent-session-runtime.js";
 
 import {
   AGENT_SSE_KEEPALIVE_INTERVAL_MS,
@@ -23,11 +23,11 @@ import {
 import {
   emptyAgentProject,
   liveAgentEditor,
-} from "../apps/editor/src/agent/live-agent-editor.test-support";
+} from "../../../editor/src/agent/live-agent-editor.test-support";
 import {
   HostedSimulationService,
   dividerFolder,
-} from "../apps/editor/src/agent/live-simulation.test-support";
+} from "../../../editor/src/agent/live-simulation.test-support";
 import {
   AGENT_OPERATING_KIT_FORMAT,
   AGENT_OPERATING_KIT_VERSION,
@@ -41,7 +41,7 @@ import {
   relayHeaders,
   routeAgentSessionRequest,
   type AgentSessionNamespaceLike,
-} from "./agent-session";
+} from "./agent-session.js";
 
 const limits: Partial<AgentSessionLimits> = {
   claimTtlMs: 60_000,

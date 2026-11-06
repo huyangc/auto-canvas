@@ -8,7 +8,7 @@ import { AgentFileResourceCapabilitySchema } from "./schema.js";
 import {
   simulationOperationScopes,
   fileOperationScopes,
-} from "../../../worker/agent-session-runtime.js";
+} from "../../../apps/server/src/agent-relay/agent-session-runtime.js";
 
 describe("Simulation sibling contract", () => {
   it("limits human approval to Project replacement rather than raw workspace operations", () => {

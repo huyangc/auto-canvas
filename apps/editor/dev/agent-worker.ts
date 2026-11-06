@@ -1,9 +1,9 @@
 import {
   routeAgentSessionRequest,
   type AgentSessionRouterEnv,
-} from "../../../worker/agent-session";
+} from "../../server/src/agent-relay/agent-session";
 
-export { AgentSessionDO } from "../../../worker/agent-session";
+export { AgentSessionDO } from "../../server/src/agent-relay/agent-session";
 
 // Local development uses the production Agent router and Durable Object, with
 // no cloud account, production bindings, or built editor assets required.

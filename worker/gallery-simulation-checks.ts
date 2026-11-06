@@ -10,7 +10,7 @@ import {
   simulationCheckPasses,
   type SimulationCheck,
 } from "./gallery-store-simulation-checks";
-import { sameOrigin } from "./same-origin";
+import { sameOrigin } from "../apps/server/src/agent-relay/same-origin.js";
 
 /** Entries one request may name for a check. */
 const MAX_CHECK_IDS = 500;

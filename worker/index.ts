@@ -11,7 +11,7 @@ import {
 import {
   routeAgentSessionRequest,
   type AgentSessionNamespaceLike,
-} from "./agent-session";
+} from "../apps/server/src/agent-relay/agent-session.js";
 import { refuseApiFlood, type ApiRateLimitEnv } from "./api-rate-limit";
 import { serveAsset } from "./static-assets";
 import { forgetEarlierOpens, routeGalleryRequest } from "./gallery";
@@ -66,7 +66,7 @@ export const ComponentLibraryDO = withPointInTimeRecovery(
 export const AnalyticsDO = withPointInTimeRecovery(AnalyticsStore);
 export const GalleryDO = withPointInTimeRecovery(GalleryStore);
 export const AuthDO = withPointInTimeRecovery(AuthStore);
-export { AgentSessionDO } from "./agent-session";
+export { AgentSessionDO } from "../apps/server/src/agent-relay/agent-session.js";
 export { SimulationControlDO } from "./simulation-control-do";
 
 type Env = TopologyTaskEnv &

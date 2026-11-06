@@ -3,11 +3,11 @@ import {
   AgentSessionMachine,
   AgentSessionStatusResponseSchema,
 } from "@icm/agent-adapter";
-import { AgentSessionDO } from "./agent-session-do";
+import { AgentSessionDO } from "./agent-session-do.js";
 import {
   SESSION_STATE_KEY,
   routeAgentSessionRequest,
-} from "./agent-session-runtime";
+} from "./agent-session-runtime.js";
 
 describe("Session observation", () => {
   it("routes status through the existing session service", async () => {

@@ -15,7 +15,7 @@ import {
   type CircuitProject,
 } from "@icm/model";
 import { AI_ACCOUNT_PROVIDER, sessionUserOf } from "./auth";
-import { sameOrigin } from "./same-origin";
+import { sameOrigin } from "../apps/server/src/agent-relay/same-origin.js";
 import {
   aiSeatOf,
   dailySubmissionLimit,
