@@ -286,10 +286,16 @@ importers:
       pg:
         specifier: 8.23.1
         version: 8.23.1
+      ws:
+        specifier: 8.21.0
+        version: 8.21.0
     devDependencies:
       "@types/pg":
         specifier: 8.23.1
         version: 8.23.1
+      "@types/ws":
+        specifier: 8.18.2
+        version: 8.18.2
 
   packages/agent-adapter:
     dependencies:
@@ -2356,6 +2362,12 @@ packages:
     resolution:
       {
         integrity: sha512-ScaPdn1dQczgbl0QFTeTOmVHFULt394XJgOQNoyVhZ6r2vLnMLJfBPd53SB52T/3G36VI1/g2MZaX0cwDuXsfw==,
+      }
+
+  "@types/ws@8.18.2":
+    resolution:
+      {
+        integrity: sha512-67MQl+fpWKVTT1NYdnmo3U4sc/xPo/zQBncVnI74qmQa0z/b+1g6iYqNmGCPbxO+zz2aklb08a0oHfegiVd0/w==,
       }
 
   "@typescript/typescript-aix-ppc64@7.0.2":
@@ -4848,6 +4860,10 @@ snapshots:
 
   "@types/trusted-types@2.0.7":
     optional: true
+
+  "@types/ws@8.18.2":
+    dependencies:
+      "@types/node": 24.13.3
 
   "@typescript/typescript-aix-ppc64@7.0.2":
     optional: true
