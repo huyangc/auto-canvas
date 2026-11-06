@@ -54,6 +54,8 @@ STATUS: done | STATUS: partial | STATUS: blocked
 followed by at most five lines of summary.
 EOF
 
+# A round that left an empty log is reused; its old marker would end a watcher.
+rm -f "$logs/round-$round.exit"
 echo "Codex round $round on $branch → $logs/round-$round.jsonl"
 model_args=()
 [[ -n "${CODEX_MODEL:-}" ]] && model_args=(-m "$CODEX_MODEL")
@@ -66,6 +68,8 @@ codex exec -C "$root" --approve-for-me --json \
 status=$?
 set -e
 
+# Tells scripts/codex-log.mjs --follow the round is over, however it ended.
+echo "$status" >"$logs/round-$round.exit"
 echo "codex exit $status"
 [[ -f "$logs/round-$round-last.md" ]] && cat "$logs/round-$round-last.md"
 exit "$status"
