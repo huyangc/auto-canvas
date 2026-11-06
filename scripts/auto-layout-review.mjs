@@ -1,0 +1,118 @@
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { performance } from "node:perf_hooks";
+import { planAutoLayout } from "../packages/auto-layout/dist/index.js";
+import {
+  deriveElectricalTopologyProjection,
+  endpointKey,
+} from "../packages/derived/dist/index.js";
+import { executeTransaction } from "../packages/edit-engine/dist/index.js";
+import { parseProject } from "../packages/project-protocol/dist/index.js";
+import {
+  buildSvgScene,
+  renderDocumentSvg,
+} from "../packages/render-svg/dist/index.js";
+import {
+  builtInSymbols,
+  createProjectSymbolResolver,
+} from "../packages/symbols/dist/index.js";
+
+const cases = JSON.parse(
+  readFileSync("packages/auto-layout/test/corpus-cases.json", "utf8"),
+);
+const output = "tmp/auto-layout-review";
+mkdirSync(output, { recursive: true });
+const escape = (value) =>
+  String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+const sections = [];
+let failures = 0;
+for (const fixture of cases) {
+  const project = parseProject(readFileSync(fixture.file, "utf8"));
+  const document = project.documents.find(
+    (d) => d.id === (fixture.documentId ?? project.topDocumentId),
+  );
+  if (!document) throw new Error(`Missing Document for ${fixture.id}`);
+  const resolver = createProjectSymbolResolver(project, builtInSymbols);
+  const start = performance.now();
+  const plan = planAutoLayout(document, resolver);
+  const milliseconds = performance.now() - start;
+  const result = plan.diagnostics.length
+    ? undefined
+    : executeTransaction(
+        document,
+        {
+          transactionId: `review-${fixture.id}`,
+          documentId: document.id,
+          expectedRevision: document.revision,
+          actor: { kind: "agent", id: "auto-layout-review" },
+          edits: plan.edits,
+        },
+        { symbolResolver: resolver },
+      );
+  const committed = result?.ok && result.applied;
+  const diagnostics = [...plan.diagnostics, ...(result?.diagnostics ?? [])];
+  if (!committed) failures++;
+  const after = committed ? result.document : document;
+  const preservedContacts = [];
+  const beforeNets = deriveElectricalTopologyProjection(
+    document,
+    resolver,
+  ).endpointToBaseNet;
+  if (committed)
+    for (const route of after.routes) {
+      const end = route.legs.at(-1)?.to;
+      const startNet = beforeNets.get(endpointKey(route.start));
+      const valid =
+        !document.routes.some((r) => r.id === route.id) &&
+        end?.kind === "endpoint" &&
+        startNet !== undefined &&
+        beforeNets.get(endpointKey(end.endpoint)) === startNet;
+      if (valid) preservedContacts.push(route.id);
+      else {
+        failures++;
+        diagnostics.push({
+          code: "AUTO_LAYOUT_REVIEW_INVALID_ROUTE",
+          rule: "R10",
+          message: `Route ${route.id} survived removal or joins endpoints outside one original Base Net`,
+        });
+      }
+    }
+  const boxes = [document, after].map(
+    (d) => buildSvgScene(d, resolver).viewBox,
+  );
+  const grid = document.presentation.grid;
+  const x = Math.floor(Math.min(...boxes.map((b) => b.x)) / grid) * grid;
+  const y = Math.floor(Math.min(...boxes.map((b) => b.y)) / grid) * grid;
+  const bounds = {
+    x,
+    y,
+    width:
+      Math.ceil(Math.max(...boxes.map((b) => b.x + b.width)) / grid) * grid - x,
+    height:
+      Math.ceil(Math.max(...boxes.map((b) => b.y + b.height)) / grid) * grid -
+      y,
+  };
+  const originalSvg = renderDocumentSvg(document, resolver, { bounds });
+  const resultSvg = renderDocumentSvg(after, resolver, { bounds });
+  writeFileSync(`${output}/${fixture.id}.svg`, resultSvg);
+  const status = committed
+    ? diagnostics.length
+      ? "Committed — contract violation"
+      : "Committed"
+    : "Blocked — original retained";
+  console.log(
+    `${fixture.id}: ${milliseconds.toFixed(3)} ms; ${status}; ${preservedContacts.length} direct-contact Routes; ${diagnostics.map((d) => d.message).join("; ")}`,
+  );
+  sections.push(
+    `<section><h2>${escape(fixture.id)}</h2><p>${escape(status)} · ${milliseconds.toFixed(3)} ms</p><pre>${escape(JSON.stringify({ groups: plan.groups, diagnostics, preservedContacts }, null, 2))}</pre><div class="pair"><figure><figcaption>Original</figcaption>${originalSvg}</figure><figure><figcaption>${escape(status)}</figcaption>${resultSvg}</figure></div></section>`,
+  );
+}
+writeFileSync(
+  `${output}/index.html`,
+  `<!doctype html><html lang="en"><meta charset="utf-8"><title>Auto-layout review</title><style>body{font:15px system-ui;margin:24px;color:#18212b;background:#f1f4f7}section{background:white;padding:20px;margin:20px 0;border:1px solid #cbd5df}pre{white-space:pre-wrap;font-size:12px}.pair{display:grid;grid-template-columns:1fr 1fr;gap:20px}figure{margin:0;min-width:0}figcaption{font-weight:bold;margin:8px 0}svg{width:100%;height:auto;max-height:720px;border:1px solid #ddd}</style><h1>Auto-layout corpus review</h1><p>Blocked cases retain their original drawing. Diagnostics explain why no result was committed.</p>${sections.join("\n")}</html>`,
+);
+console.log(`Wrote ${cases.length} SVGs and ${output}/index.html`);
+if (failures) process.exitCode = 1;

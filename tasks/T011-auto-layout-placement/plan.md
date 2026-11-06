@@ -69,7 +69,7 @@ Verified on `main@074541c`.
 - Transactions (`packages/edit-engine/src/transaction.ts:111`
   `executeTransaction(document, { transactionId, documentId,
 expectedRevision, actor: { kind: "human" | "agent", id }, dryRun?, edits },
-{ resolver })`): atomic, every Point validated against the Document grid
+{ symbolResolver: resolver })`): atomic, every Point validated against the Document grid
   (off-grid rejects, nothing is snapped), at most
   `MAX_SCHEMATIC_EDITS_PER_TRANSACTION = 1024` edits (`edit-schema.ts:532`).
 - Contacts by coincidence: when placement makes a pin newly coincide with a
@@ -175,19 +175,25 @@ Out of scope (do not change):
 
    - **R1 Input and output.** Input: one `SchematicDocument`, its
      `SymbolResolver`, and options `{ fixedInstanceIds?: ReadonlySet<string> }`
-     (empty in v1 callers; a fixed instance keeps its placement and is an
-     obstacle). Output: `{ edits: SchematicEdit[], groups: RecognizedGroup[],
+     (empty in v1 callers; a fixed instance keeps its exact placement, and if the
+     template collides with it the planner returns no edits and an R10
+     diagnostic; treating it as an obstacle to place around belongs to T013). Output: `{ edits: SchematicEdit[], groups: RecognizedGroup[],
 diagnostics: AutoLayoutDiagnostic[] }`. Pure and deterministic: the same
      input yields byte-identical `JSON.stringify(edits)`; ties break by
      instance `id` in code-unit order. No randomness, no clock.
-   - **R2 Edit order.** (a) one `remove_route_geometry` per Route, in
-     `document.routes` order; (b) `set_layout_group` for each new group;
-     (c) per instance in `id` order: `place_instance` if unplaced, otherwise
+   - **R2 Edit order.** (a) one `upsert_schematic_annotation` per annotation
+     with a `route` anchor, in `document.annotations` order, identical except
+     `anchor: { kind: "free", position: <its anchor.fallbackPosition> }`
+     (the Edit Engine refuses to delete a Route that anchors an annotation,
+     and removing the label would drop its name claim); (b) one
+     `remove_route_geometry` per Route, in `document.routes` order; (c)
+     `set_layout_group` for each new group; (d) per instance in `id` order: `place_instance` if unplaced, otherwise
      `rotate_instance`, `mirror_instance`, `move_instance`, each emitted only
      when the value changes. Never `clear_cell_drawing`,
      `reset_cell_placement`, `remove_instance` or any connectivity edit.
-     Drafting objects, annotations' content, Nets and existing layout groups
-     are never edited directly.
+     Drafting objects, annotation content and bindings, Nets and existing
+     layout groups are never edited; step (a) changes only the anchor. These
+     labels stay at their old page position until T012 re-anchors them.
    - **R3 Supported content.** Devices: `nmos`, `pmos`, `resistor`,
      `capacitor`, `inductor`/`inductor-compact`, `voltage-source`,
      `current-source`, and any other single- or two-pin symbol handled as a
@@ -230,9 +236,17 @@ diagnostics: AutoLayoutDiagnostic[] }`. Pure and deterministic: the same
      supply net; each next row holds devices whose upper channel terminal
      shares a net with a lower terminal of the row above; ground-connected
      devices take the lowest row of their stack. PMOS are always above every
-     NMOS they share a drain net with. Rows are 120 units apart; a ground
-     instance sits 40 units below its lowest connected pin; a `vdd-port`
-     40 units above its highest connected pin.
+     NMOS they share a drain net with. Rows are 120 units apart. R6a
+     places the power markers.
+   - **R6a Power markers.** Each `ground` or `vdd-port` instance gets its own
+     host: a channel-terminal or two-pin-device pin on its net (never a MOS B
+     pin). Sort the marker instances by `id`, sort that net's candidate hosts
+     by device (one host per device, its lowest pin for ground, its highest
+     for `vdd-port`), then by `x`, and pair them in order. Extra markers share
+     the last host and are nudged by grid steps. A ground sits 40 units below
+     its host pin at the same `x`; a `vdd-port` 40 units above. So `rlc` has
+     one ground under V1 and one under C1, and `common-source` has one under
+     each of VIN, VDD, XM1 and CL.
    - **R7 Templates.** Members of one group share one row (same `y`) and are
      mirror images about the group's vertical axis.
      - `differential-pair`: left member `mirror: "none"` (gate faces left,
@@ -250,21 +264,48 @@ diagnostics: AutoLayoutDiagnostic[] }`. Pure and deterministic: the same
    - **R8 Horizontal order and Cell Pins.** Within a row, order ungrouped
      devices left to right by signal flow: distance in nets from an `input`
      net. Cell Pins: `input` nets on the left edge, `output` on the right,
-     `supply` on top, `ground` at the bottom, each facing the circuit with the
-     shelf's rotations, 80 units outside the device bounding box, at the
-     height (or `x`) of the pin it connects to, nudged by grid steps to avoid
-     collisions.
+     `supply` on top, `ground` at the bottom, each facing the circuit, 80 units outside the device bounding box, at the
+     height (or `x`) of the pin it connects to. Orientation: left `rotation:
+0, mirror: "none"`; right `rotation: 0, mirror: "horizontal"`, as the
+     hand-drawn corpus does, so its label stays upright; top `90`; bottom
+     `270`. Cell Pins on one side are ordered by the coordinate of the pin
+     they connect to and are at least 40 units apart along that side; shift
+     later ones by grid steps to reach that, so their labels do not overlap.
+     In a Document with a MOS, a two-pin device whose lower pin shares a net
+     with the drain of a device one row below takes that device's drain `x`
+     when free (`common-source`: RD directly above XM1.D).
    - **R9 Generic fallback.** Devices R6–R7 cannot rank (no channel path, or
-     generic blocks) are layered left to right by distance from `input` nets,
-     one column per layer, 160 units apart, vertically centered on the main
-     block; two-pin sources whose − pin is on ground stand vertically with
-     their ground below them, left of the circuit they drive.
+     generic blocks), and every device of a Document with no MOS, are laid out
+     around one horizontal signal row. Distance is measured from `input` nets,
+     or from a grounded source's + net when there is no `input` net. Columns
+     are 160 units apart, in increasing distance:
+     - A two-pin source whose − pin is on ground stands vertically, + up, in
+       the leftmost columns, with its ground below it.
+     - A series element (two-pin, neither pin on supply or ground) lies
+       horizontally on the signal row, rotated so its lower-distance pin
+       faces left.
+     - A shunt element (two-pin, one pin on supply or ground) stands
+       vertically in the column just right of the element driving its node,
+       with its other pin toward the signal row, below the row for ground and
+       above it for supply.
+     - A multi-pin block sits on the signal row in the column of its distance.
+     - A bridging element (series, but both its nets are already reached by
+       earlier columns, as a compensation capacitor) lies horizontally one
+       row (120 units) above the signal row, centered between the columns of
+       its two nets.
    - **R10 Validity.** Every position is a multiple of
      `document.presentation.grid`; no two pins of the result coincide; no two
      instance bounds (`visibleInstanceBounds`) overlap except a ground or
-     `vdd-port` with the device it hangs from; the whole layout's bounding box
-     has its top-left corner at the old bounding box's top-left corner
-     (snapped to the grid), so the drawing does not jump on the page. If a
+     `vdd-port` with the device it hangs from. So the drawing does not jump on the page, the
+     whole layout is translated by `(snap(oldBox.x - newBox.x),
+snap(oldBox.y - newBox.y))`, where the boxes are `visibleInstanceBounds`
+     envelopes and `snap` rounds to the grid. Envelopes have fractional edges,
+     so the resulting corner is within half a grid step of the old corner,
+     not equal to it. This corner rule applies only with no fixed instances.
+     The Edit Engine keeps a direct pin contact that placement separates by
+     adding a short Route in the same transaction
+     (`reconcileTransformDirectContacts`); that Route is expected, and T012
+     replaces it. If a
      rule cannot be met, return no edits and a diagnostic naming the rule.
 
 2. **Package skeleton.** Create `packages/auto-layout` modeled on
@@ -308,8 +349,13 @@ options)` composing steps 3–5 and emitting edits per R1–R2. Export it and
       `deriveElectricalTopologyProjection` for the changed Document instead
       (every terminal endpoint keeps its Base Net);
    3. R10: grid, no coincident pins, no overlapping bounds;
-   4. every Route is gone, every drafting object and annotation id is still
-      present, and every pre-existing layout group is unchanged;
+   4. no Route id of the input remains; every Route in the result was added
+      by the transaction and joins two endpoints that were on one Base Net
+      before it (the direct-contact Routes of R10, not a removed wire
+      surviving); every drafting object and annotation id is still
+      present, every pre-existing layout group is unchanged, and every
+      annotation that had a `route` anchor now has a `free` anchor at its old
+      `fallbackPosition` with every other field unchanged;
    5. the expected structures in the table are recognized (exact kinds and
       member sets);
    6. template geometry: group members share `y`, are symmetric about the
@@ -318,7 +364,17 @@ options)` composing steps 3–5 and emitting edits per R1–R2. Export it and
       `two-inverters` each PMOS above its NMOS; in `common-source` RD above
       XM1;
    8. Cell Pin sides per R8 for `five-t-ota` (P1,P2 left of all devices or on
-      the left edge; P3 right) and `two-inverters`;
+      the left edge; P3 right) and `two-inverters`; generally, in every case,
+      Cell Pins on one side are at least 40 units apart, and each right-side
+      Cell Pin has `rotation: 0, mirror: "horizontal"`;
+      8a. power markers per R6a: in `rlc` and `common-source`, each ground's pin
+      has the same `x` as its host pin and no two grounds share a host;
+      8b. fallback per R9: in `rlc`, V1, R1, L1, C1 strictly increase in `x`, R1
+      and L1 share `y` with their pins horizontal, C1 and V1 are vertical; in
+      `rc-lowpass` and `rc-highpass`, source `x` < series element `x` < shunt
+      element `x`; in `two-stage-symbolic`, X7 `x` < X8 `x`, the `Vin` Cell Pin
+      is left of X7, the `Vout` Cell Pin is right of X8, and C9 and C10 do not
+      overlap X7 or X8; in `common-source`, RD's lower pin has XM1.D's `x`;
    9. determinism: running `planAutoLayout` twice on the input gives equal
       `JSON.stringify(edits)`;
    10. stability: running it again on the committed result emits no

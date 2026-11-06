@@ -341,6 +341,28 @@ importers:
         specifier: workspace:*
         version: link:../symbols
 
+  packages/auto-layout:
+    dependencies:
+      "@icm/derived":
+        specifier: workspace:*
+        version: link:../derived
+      "@icm/edit-engine":
+        specifier: workspace:*
+        version: link:../edit-engine
+      "@icm/model":
+        specifier: workspace:*
+        version: link:../model
+      "@icm/symbols":
+        specifier: workspace:*
+        version: link:../symbols
+    devDependencies:
+      "@icm/netlist":
+        specifier: workspace:*
+        version: link:../netlist
+      "@icm/project-protocol":
+        specifier: workspace:*
+        version: link:../project-protocol
+
   packages/component-library:
     dependencies:
       "@icm/agent-adapter":

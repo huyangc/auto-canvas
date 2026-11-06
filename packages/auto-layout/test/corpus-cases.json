@@ -1,0 +1,58 @@
+[
+  {
+    "id": "five-t-ota",
+    "file": "apps/editor/src/examples/current-mirror-loaded-differential-pair.icproj.json",
+    "documentId": "document-main",
+    "groups": [
+      ["differential-pair", "M3", "M4"],
+      ["current-mirror", "M1", "M2"]
+    ]
+  },
+  {
+    "id": "fig-17-19b",
+    "file": "fixtures/gallery-redline/7sxpwb4am7.icproj.json",
+    "groups": [
+      ["differential-pair", "M2", "M4"],
+      ["matched-pair", "M1", "M3"]
+    ]
+  },
+  {
+    "id": "two-inverters",
+    "file": "fixtures/gallery-redline/2rmm2vb45f.icproj.json",
+    "documentId": "document-82822626bf0850db",
+    "groups": []
+  },
+  {
+    "id": "differential-stage",
+    "file": "fixtures/projects/differential-stage/project.icproj.json",
+    "groups": []
+  },
+  {
+    "id": "common-source",
+    "file": "apps/editor/src/examples/simulation-common-source.icproj.json",
+    "groups": []
+  },
+  {
+    "id": "rc-lowpass",
+    "file": "apps/editor/src/examples/simulation-rc.icproj.json",
+    "documentId": "cell-rc-lowpass",
+    "groups": []
+  },
+  {
+    "id": "rc-highpass",
+    "file": "apps/editor/src/examples/simulation-rc.icproj.json",
+    "documentId": "cell-rc-highpass",
+    "groups": []
+  },
+  {
+    "id": "rlc",
+    "file": "apps/editor/src/examples/simulation-rlc.icproj.json",
+    "groups": []
+  },
+  {
+    "id": "two-stage-symbolic",
+    "file": "apps/editor/src/examples/two-stage-op-amp.icproj.json",
+    "documentId": "document-main",
+    "groups": []
+  }
+]
