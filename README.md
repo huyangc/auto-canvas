@@ -6,13 +6,20 @@ auto-canvas 是面向模拟电路自动布局布线（APR）的 Web 原理图画
 
 ## 安装与运行
 
-需要 Node.js 24+ 和 pnpm 11.16。
+需要 Node.js 24+、pnpm 11.16 和 PostgreSQL 16。先创建由当前系统用户拥有的
+`auto_canvas`（开发）和 `auto_canvas_test`（测试）数据库。
 
 ```bash
 pnpm install --frozen-lockfile
 pnpm build
+pnpm server:dev
+# 另一个终端运行编辑器：
 pnpm dev
 ```
+
+服务默认监听 `127.0.0.1:4310`，启动时自动迁移数据库；编辑器通过 Vite
+代理访问本地身份和 Cloud Projects。配置与独立迁移命令见
+[服务说明](apps/server/README.md)，协议见 [server spec](docs/specs/server.md)。
 
 运行本地检查：
 

@@ -8,6 +8,8 @@ process.env.NO_PROXY = [process.env.NO_PROXY, "127.0.0.1", "localhost"]
 
 const e2ePort = Number(process.env.ICM_E2E_PORT ?? "4173");
 const e2eBaseUrl = `http://127.0.0.1:${e2ePort}`;
+const apiPort = 4311;
+const apiUrl = `http://127.0.0.1:${apiPort}`;
 const chromiumExecutablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
 // A running editor to test instead of starting one: a live check of the
 // deployed site (editor-only cases: anything a case does reaches that
@@ -59,17 +61,32 @@ export default defineConfig({
   ...(externalBaseUrl
     ? {}
     : {
-        webServer: {
-          command: editorServer,
-          // Start the local Agent relay with the server, not in the first
-          // Agent test (apps/editor/dev/agent-relay.ts).
-          env: { ICM_E2E_RELAY_AT_START: "1" },
-          url: e2eBaseUrl,
-          reuseExistingServer:
-            !process.env.CI && process.env.ICM_E2E_ISOLATED !== "1",
-          // The test build runs first: about a second here, longer on a
-          // cold CI runner.
-          timeout: 120_000,
-        },
+        webServer: [
+          {
+            command:
+              "pnpm --filter @icm/server... build && node apps/server/dist/cli.js",
+            env: {
+              DATABASE_URL:
+                process.env.AUTO_CANVAS_TEST_DATABASE_URL ??
+                "postgresql:///auto_canvas_test",
+              PORT: String(apiPort),
+            },
+            url: `${apiUrl}/api/health`,
+            reuseExistingServer: false,
+            timeout: 120_000,
+          },
+          {
+            command: editorServer,
+            // Start the local Agent relay with the server, not in the first
+            // Agent test (apps/editor/dev/agent-relay.ts).
+            env: { ICM_E2E_RELAY_AT_START: "1", AUTO_CANVAS_API_URL: apiUrl },
+            url: e2eBaseUrl,
+            reuseExistingServer:
+              !process.env.CI && process.env.ICM_E2E_ISOLATED !== "1",
+            // The test build runs first: about a second here, longer on a
+            // cold CI runner.
+            timeout: 120_000,
+          },
+        ],
       }),
 });
