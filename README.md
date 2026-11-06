@@ -10,6 +10,7 @@ auto-canvas 是面向模拟电路自动布局布线（APR）的 Web 原理图画
 
 ```bash
 pnpm install --frozen-lockfile
+pnpm build
 pnpm dev
 ```
 
