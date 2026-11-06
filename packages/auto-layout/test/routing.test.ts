@@ -1,5 +1,9 @@
 import { expect, it } from "vitest";
-import { deriveElectricalTopologyProjection, endpointKey } from "@icm/derived";
+import {
+  deriveElectricalTopologyProjection,
+  endpointKey,
+  resolveRouteGeometry,
+} from "@icm/derived";
 import {
   DocumentHistory,
   executeTransaction,
@@ -574,4 +578,97 @@ it("never draws a fallback stub through the obstacle that blocked the net", () =
   if (!result.ok) throw new Error(JSON.stringify(result.diagnostics));
   expect(auditRouting(result.document, resolver).problems).toEqual([]);
   expect(result.document.routes.some((r) => r.netId === "good")).toBe(true);
+});
+
+it("wires each of two markers on one host to that host, not to each other", () => {
+  const document = circuit(
+    { r: "resistor", g1: "ground", g2: "ground" },
+    { n: ["r.1"], z: ["r.2", "g1.0", "g2.0"] },
+  );
+  const plan = planAutoLayout(document, resolver);
+  expect(plan.diagnostics).toEqual([]);
+  const result = executeTransaction(
+    document,
+    {
+      transactionId: "stubs",
+      documentId: document.id,
+      expectedRevision: document.revision,
+      actor: { kind: "agent", id: "test" },
+      edits: plan.edits,
+    },
+    { symbolResolver: resolver },
+  );
+  if (!result.ok) throw new Error(JSON.stringify(result.diagnostics));
+  const ends = result.document.routes.map((route) => {
+    const end = route.legs.at(-1)!.to;
+    return [route.start, end.kind === "endpoint" ? end.endpoint : null];
+  });
+  expect(ends).toHaveLength(2);
+  for (const pair of ends)
+    expect(
+      pair.filter((e) => e?.kind === "terminal" && e.instanceId === "r"),
+    ).toHaveLength(1);
+});
+
+it("warns when a route crosses a drafting object it could not avoid", () => {
+  const document = circuit(
+    { a: "resistor", b: "resistor" },
+    { n: ["a.1", "b.1"], x: ["a.2"], y: ["b.2"] },
+  );
+  document.instances[0]!.placement = {
+    position: { x: 0, y: 0 },
+    rotation: 90,
+    mirror: "none",
+  };
+  document.instances[1]!.placement = {
+    position: { x: 400, y: 0 },
+    rotation: 90,
+    mirror: "none",
+  };
+  const plain = planAutoLayout(document, resolver, {
+    fixedInstanceIds: new Set(["a", "b"]),
+  });
+  const routed = executeTransaction(
+    document,
+    {
+      transactionId: "plain",
+      documentId: document.id,
+      expectedRevision: document.revision,
+      actor: { kind: "agent", id: "test" },
+      edits: plain.edits,
+    },
+    { symbolResolver: resolver },
+  );
+  if (!routed.ok) throw new Error(JSON.stringify(routed.diagnostics));
+  const segment = resolveRouteGeometry(
+    routed.document,
+    resolver,
+    routed.document.routes[0]!,
+  )!.segments.reduce((a, b) =>
+    Math.abs(b.to.x - b.from.x) > Math.abs(a.to.x - a.from.x) ? b : a,
+  );
+  const x = Math.round((segment.from.x + segment.to.x) / 20) * 10;
+  const center = { x, y: segment.from.y };
+  document.drafting = {
+    objects: [
+      {
+        id: "note",
+        kind: "rectangle",
+        locked: false,
+        zIndex: 0,
+        anchor: { kind: "free", position: center },
+        center,
+        width: 20,
+        height: 20,
+        rotation: 0,
+        lineStyle: "solid",
+      },
+    ],
+  };
+  const plan = planAutoLayout(document, resolver, {
+    fixedInstanceIds: new Set(["a", "b"]),
+  });
+  expect(plan.diagnostics, JSON.stringify(plan.diagnostics)).toEqual([
+    expect.objectContaining({ code: "AUTO_LAYOUT_DRAFTING_OVERLAP" }),
+  ]);
 });

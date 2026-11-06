@@ -27,6 +27,8 @@ interface TerminalRef {
 }
 interface RoutingTarget {
   pins: TerminalRef[];
+  /** A marker stub: one wire between exactly these two pins. */
+  stub?: true;
   trunk?: { start: { x: number; y: number }; end: { x: number; y: number } };
 }
 
@@ -100,6 +102,7 @@ function powerTargets(
                 marker,
                 { instanceId: host.instanceId, pinName: host.pinName },
               ],
+              stub: true as const,
             },
           ]
         : [];
@@ -328,15 +331,40 @@ export function routeDocument(
       if (target.pins.length < 2) continue;
       let planned: SchematicEdit[];
       try {
-        planned = planRouteNet(
-          working,
-          resolver,
-          {
-            target: { kind: "pins", pins: target.pins },
-            ...(target.trunk ? { trunk: target.trunk } : {}),
-          },
-          MAX_SCHEMATIC_EDITS_PER_TRANSACTION,
-        ).edits;
+        if (target.stub) {
+          // Net-level routing may join a marker to another marker already on
+          // the host's component; R12 wants exactly marker to host.
+          const [marker, host] = target.pins as [TerminalRef, TerminalRef];
+          const stub = planWireBatch(
+            working,
+            resolver,
+            {
+              id: deriveStableId(
+                "auto-layout-stub",
+                working.id,
+                `${marker.instanceId}.${marker.pinName}`,
+              ),
+              from: {
+                kind: "endpoint",
+                endpoint: { kind: "terminal", ...marker },
+              },
+              to: { kind: "endpoint", endpoint: { kind: "terminal", ...host } },
+            },
+            MAX_SCHEMATIC_EDITS_PER_TRANSACTION,
+            { keepClear: true },
+          );
+          if (typeof stub === "string") throw new Error(stub);
+          planned = stub.edits;
+        } else
+          planned = planRouteNet(
+            working,
+            resolver,
+            {
+              target: { kind: "pins", pins: target.pins },
+              ...(target.trunk ? { trunk: target.trunk } : {}),
+            },
+            MAX_SCHEMATIC_EDITS_PER_TRANSACTION,
+          ).edits;
       } catch (error) {
         failure = error instanceof Error ? error.message : String(error);
         continue;

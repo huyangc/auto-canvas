@@ -16,6 +16,7 @@ import {
   restorePinGroups,
   terminalPartition,
 } from "./transaction.js";
+import { auditRouting } from "./routing-audit.js";
 import { classifyNets } from "./net-roles.js";
 import { placeDocument } from "./place.js";
 import { compareIds, recognizeStructures } from "./recognize.js";
@@ -245,5 +246,21 @@ export function planAutoLayout(
     );
   const lost = lostNameClaim(document, final.document);
   if (lost) return refuse(`R10: name claim ${lost} would be lost`);
-  return { edits, groups, diagnostics: routed.diagnostics };
+  // The router does not know drafting objects; say so rather than hide it.
+  const drafting = auditRouting(final.document, resolver).problems.filter((p) =>
+    p.includes("drafting"),
+  );
+  return {
+    edits,
+    groups,
+    diagnostics: [
+      ...routed.diagnostics,
+      ...drafting.map((message) => ({
+        severity: "warning" as const,
+        code: "AUTO_LAYOUT_DRAFTING_OVERLAP",
+        rule: "R10",
+        message,
+      })),
+    ],
+  };
 }

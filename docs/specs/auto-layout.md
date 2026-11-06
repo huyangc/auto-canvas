@@ -141,6 +141,11 @@ pins }` lists, never Net ids.
   leg it stays free at the nearest pin of its Net. Preserve id, content and
   binding. If whole-list replay invalidates a preview Route/leg id, keep that
   label free instead of emitting a broken anchor.
+- **Marker stubs and drafting.** A marker stub is one wire between exactly
+  the marker pin and its R6a host pin, planned with clearance checks, so
+  markers sharing a host are never wired to each other. The router does not
+  know drafting objects: a Route that crosses one is reported as an
+  `AUTO_LAYOUT_DRAFTING_OVERLAP` warning.
 - **Name claims.** Every input `name-claim` must survive with its name, scope
   and power domain; the partition check cannot see a lost name. A claim that
   cannot move to a new Route of its Net makes the planner return no edits and

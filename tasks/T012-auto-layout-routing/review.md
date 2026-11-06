@@ -90,3 +90,15 @@ and fixed them directly; each is a few lines.
 | P2: fallback stubs skip clearance and can cross the obstacle                                                                                     | `planWireBatch` with `keepClear`; a pin with no clear stub stays an unrouted member, already reported, and the other nets keep their routes |
 
 Both new tests fail with their fix reverted and pass with it.
+
+## PR review round 2 — P2 findings fixed by Opus
+
+Round 2 on `3360bdf` raised no P0/P1. Opus verified both P2 findings and
+fixed them.
+
+| Finding                                                                                          | Fix                                                                                                                 |
+| ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| Two markers sharing one host: net-level routing joins the second marker to the first             | Marker stubs are one clearance-checked wire between exactly the marker pin and its host pin                         |
+| A drafting object between two devices clears the device bounds but sits on the wire joining them | The router cannot avoid drafting, so the planner reports each crossing as an `AUTO_LAYOUT_DRAFTING_OVERLAP` warning |
+
+Both new tests fail with their fix reverted and pass with it.
