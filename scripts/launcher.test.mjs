@@ -58,7 +58,13 @@ beforeEach(async () => {
   root = mkdtempSync(join(tmpdir(), "auto-canvas-launcher-"));
   children = [];
   mkdirSync(join(root, "scripts", "lib"), { recursive: true });
-  for (const script of ["start.sh", "stop.sh", "dev.sh", "lib/launcher.sh"]) {
+  for (const script of [
+    "start.sh",
+    "stop.sh",
+    "dev.sh",
+    "lib/launcher.sh",
+    "lib/editor-supervisor.mjs",
+  ]) {
     cpSync(join(scripts, script), join(root, "scripts", script));
   }
   mkdirSync(join(root, "node_modules"));
@@ -435,3 +441,34 @@ test("repeated package-manager signals cannot interrupt development cleanup", as
     false,
   );
 });
+
+test("editor supervisor kills a process group that ignores SIGTERM after STOP_TIMEOUT", async () => {
+  // `sh` leads the group and prints its PID; `sleep` inherits the ignored
+  // SIGTERM, standing in for a Vite worker that does not shut down.
+  const supervisor = spawn(
+    process.execPath,
+    [
+      join(scripts, "lib/editor-supervisor.mjs"),
+      "sh",
+      "-c",
+      'trap "" TERM; echo $$; sleep 30',
+    ],
+    {
+      env: { ...process.env, STOP_TIMEOUT: "1" },
+      stdio: ["ignore", "pipe", "inherit"],
+    },
+  );
+  const [line] = await once(supervisor.stdout, "data");
+  const group = Number(String(line).trim());
+  expect(Number.isInteger(group) && group > 0).toBe(true);
+  const started = Date.now();
+  supervisor.kill("SIGTERM");
+  await once(supervisor, "exit");
+  // The group survived SIGTERM, so it is gone only because of the escalation.
+  expect(Date.now() - started).toBeGreaterThanOrEqual(400);
+  await expect
+    .poll(() => spawnSync("pgrep", ["-g", String(group)]).status, {
+      timeout: 3000,
+    })
+    .toBe(1);
+}, 15_000);
