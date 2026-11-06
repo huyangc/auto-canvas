@@ -27,7 +27,15 @@ interface VersionRow {
   preview_svg: string;
 }
 
-function summary(row: ProjectRow) {
+/** Columns a summary reads: listing never loads project text or previews. */
+const SUMMARY_COLUMNS =
+  "id, name, updated_at, revision, schema_version, favorite";
+type SummaryRow = Pick<
+  ProjectRow,
+  "id" | "name" | "updated_at" | "revision" | "schema_version" | "favorite"
+>;
+
+function summary(row: SummaryRow) {
   return {
     id: row.id,
     name: row.name,
@@ -42,8 +50,8 @@ function opened(row: ProjectRow) {
   return { ...summary(row), projectText: row.project_text };
 }
 async function list(db: Pool | PoolClient, userId: string) {
-  const result = await db.query<ProjectRow>(
-    "SELECT * FROM cloud_projects WHERE user_id = $1 ORDER BY updated_at DESC, id DESC",
+  const result = await db.query<SummaryRow>(
+    `SELECT ${SUMMARY_COLUMNS} FROM cloud_projects WHERE user_id = $1 ORDER BY updated_at DESC, id DESC`,
     [userId],
   );
   return result.rows.map(summary);
@@ -258,13 +266,15 @@ export function registerProjects(
   });
   app.get("/api/projects/:id/versions", async (c) => {
     c.header("cache-control", "private, no-store");
-    const current = await db.query<ProjectRow>(
-      "SELECT * FROM cloud_projects WHERE id = $1 AND user_id = $2",
+    const current = await db.query<Pick<ProjectRow, "revision">>(
+      "SELECT revision FROM cloud_projects WHERE id = $1 AND user_id = $2",
       [c.req.param("id"), userId],
     );
     if (!current.rows[0]) return notFound();
-    const result = await db.query<VersionRow>(
-      `SELECT v.* FROM cloud_project_versions v JOIN cloud_projects p ON p.id = v.project_id
+    const result = await db.query<
+      Pick<VersionRow, "id" | "revision" | "name" | "saved_at">
+    >(
+      `SELECT v.id, v.revision, v.name, v.saved_at FROM cloud_project_versions v JOIN cloud_projects p ON p.id = v.project_id
       WHERE p.id = $1 AND p.user_id = $2 ORDER BY v.revision DESC`,
       [c.req.param("id"), userId],
     );
