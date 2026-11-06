@@ -6,7 +6,7 @@ import type { AgentRuntime } from "../agent/agent-runtime-loader";
 import type { BrowserAgentFileHost } from "../agent/browser-agent-file-host";
 import type { BrowserAgentHost } from "../agent/browser-agent-host";
 import type { BrowserAgentProjectHost } from "../agent/browser-agent-project-host";
-import type { BrowserAgentSimulationHost } from "../agent/browser-agent-simulation-host";
+
 import {
   EDITOR_PROJECT_TRANSACTION_OPTIONS,
   type EditorDocumentController,
@@ -360,7 +360,6 @@ export function createAgentWorkspaceTargets({
   setAgentFileCandidate,
   agentProjectResources,
   browserAgentFileHost,
-  browserAgentSimulationHost,
   agentWorkspaceRef,
   browserAgentProjectHost,
   backgroundAgentHosts,
@@ -377,7 +376,6 @@ export function createAgentWorkspaceTargets({
   setAgentFileCandidate: AgentProjectResources["setAgentFileCandidate"];
   agentProjectResources: AgentProjectResources["agentProjectResources"];
   browserAgentFileHost: BrowserAgentFileHost;
-  browserAgentSimulationHost: BrowserAgentSimulationHost;
   agentWorkspaceRef: AgentProjectResources["agentWorkspaceRef"];
   browserAgentProjectHost: BrowserAgentProjectHost;
   backgroundAgentHosts: AgentConnection["backgroundAgentHosts"];
@@ -390,7 +388,6 @@ export function createAgentWorkspaceTargets({
       return {
         host: browserAgentHost,
         fileHost: browserAgentFileHost,
-        simulationHost: browserAgentSimulationHost,
         projectHost: browserAgentProjectHost,
       };
     const controller = entry.session.controller;
@@ -458,8 +455,7 @@ export function createAgentWorkspaceTargets({
         dispatchProjectTransaction: (request) =>
           host.dispatchProjectTransaction(request),
       });
-    const simulationHost =
-      existing?.simulation ?? new runtime.BrowserAgentSimulationHost();
+
     const projectHost = new runtime.BrowserAgentProjectHost({
       workspace: (request) => agentWorkspaceRef.current(request, workspaceId),
       getProjectSessionId: () =>
@@ -475,11 +471,10 @@ export function createAgentWorkspaceTargets({
       sessionId: controller.projectSessionId,
       host,
       fileHost,
-      simulationHost,
       projectHost,
     };
     backgroundAgentHosts.current.set(controller, target);
-    if (!existing?.files || !existing.simulation) {
+    if (!existing?.files) {
       let group = agentProjectResources.current.get(controller);
       if (!group) {
         group = new Map();
@@ -487,7 +482,6 @@ export function createAgentWorkspaceTargets({
       }
       group.set(`${controller.projectSessionId}`, {
         files: fileHost,
-        simulation: simulationHost,
       });
     }
     return target;

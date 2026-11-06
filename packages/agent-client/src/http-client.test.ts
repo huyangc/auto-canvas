@@ -42,41 +42,7 @@ describe("agent http client", () => {
       );
     },
   );
-  it("keeps streamed artifact authorization on this session and refuses redirects", async () => {
-    let calls = 0;
-    const http = new AgentHttpClient({
-      baseUrl: BASE,
-      fetch: async (url, init) => {
-        calls++;
-        expect(String(url)).toBe(
-          `${BASE}/api/agent/sessions/session/artifacts/file`,
-        );
-        expect(init?.redirect).toBe("error");
-        expect(new Headers(init?.headers).get("authorization")).toBe(
-          "Bearer private-token",
-        );
-        expect(new Headers(init?.headers).get("range")).toBe("bytes=5-");
-        return new Response("bytes");
-      },
-    });
-    const response = await http.downloadArtifact(
-      "session",
-      "private-token",
-      "/api/agent/sessions/session/artifacts/file",
-      5,
-    );
-    expect(await response.text()).toBe("bytes");
-    for (const path of [
-      "https://elsewhere.test/file",
-      "/api/agent/sessions/other/artifacts/file",
-      "/api/agent/sessions/session/artifacts/../status",
-    ]) {
-      await expect(
-        http.downloadArtifact("session", "private-token", path),
-      ).rejects.toThrow();
-    }
-    expect(calls).toBe(1);
-  });
+
   it("reads the canonical Session status using bearer authentication and a short deadline", async () => {
     const observation = {
       ok: true,
@@ -110,63 +76,7 @@ describe("agent http client", () => {
       code: "INVALID_RESPONSE",
     });
   });
-  it("reads captured Specs without legacy waveform projections and still rejects unknown fields", async () => {
-    const outputData = {
-      schemaVersion: 1,
-      analyses: [],
-      diagnostics: [],
-      specs: {
-        schemaVersion: 1,
-        runId: "run",
-        preparedId: "prepared",
-        inputDigest: "a".repeat(64),
-        results: [],
-      },
-    };
-    const body = {
-      apiVersion: "3.0",
-      requestId: "spec-read",
-      operation: "read",
-      ok: true,
-      run: {
-        id: "run",
-        preparedId: "prepared",
-        inputRevision: "input",
-        state: "finished",
-        artifacts: [],
-        outputData,
-      },
-    };
-    const http = new AgentHttpClient({
-      baseUrl: BASE,
-      fetch: async () => jsonResponse(200, body),
-    });
-    const request = {
-      apiVersion: "3.0" as const,
-      requestId: "spec-read",
-      operation: "read" as const,
-      runId: "run",
-    };
-    expect(await http.simulation("session", "token", request)).toEqual(body);
-    Object.assign(outputData.specs, { unknown: true });
-    await expect(http.simulation("session", "token", request)).rejects.toThrow(
-      "schema validation",
-    );
-    const rejected = await http
-      .simulation("session", "token", request)
-      .catch((error: unknown) => error);
-    expect(rejected).toMatchObject({
-      code: "INVALID_RESPONSE",
-      category: "request-rejected",
-    });
-    expect(String(rejected)).toContain(
-      "run.outputData.specs (unrecognized_keys)",
-    );
-    expect(String(rejected)).toContain("MCP manifest");
-    expect(String(rejected)).not.toContain("unknown");
-    delete (outputData.specs as Record<string, unknown>).unknown;
-    expect(await http.simulation("session", "token", request)).toEqual(body);
-  });
+
   it("backs off on 429 with byte-identical mutation retries and a finite budget", async () => {
     const bodies: string[] = [];
     const waits: number[] = [];

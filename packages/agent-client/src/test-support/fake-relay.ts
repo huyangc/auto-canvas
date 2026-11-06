@@ -5,8 +5,6 @@ import type {
   AgentFileResourceResponse,
   AgentProjectResourceRequest,
   AgentProjectResourceResponse,
-  AgentSimulationResourceRequest,
-  AgentSimulationResourceResponse,
 } from "@icm/agent-adapter";
 import { agentMcpBootstrapManifest } from "@icm/agent-adapter";
 import { AgentHttpClient, type ClaimSuccess } from "../http-client.js";
@@ -14,8 +12,7 @@ import { AgentHttpClient, type ClaimSuccess } from "../http-client.js";
 /**
  * In-process stand-in for the public relay. It pairs a client and carries
  * its requests to the editor; it never answers for the editor. Attach the
- * real editor's services with `circuit`, `files`, `projects` and
- * `simulation` (apps/editor's liveAgentEditor does). A request no editor
+ * real editor's services with `circuit`, `files` and `projects` (apps/editor's liveAgentEditor does). A request no editor
  * service is attached for fails.
  */
 
@@ -39,10 +36,6 @@ export interface FakeRelayOptions {
   projects?: (
     request: AgentProjectResourceRequest,
   ) => Promise<AgentProjectResourceResponse> | AgentProjectResourceResponse;
-  simulation?: (
-    request: AgentSimulationResourceRequest,
-  ) =>
-    Promise<AgentSimulationResourceResponse> | AgentSimulationResourceResponse;
   /**
    * The origin's MCP manifest, by default the one the Worker serves; a
    * handler that throws is an unreachable manifest.
@@ -66,7 +59,7 @@ export class FakeAgentHttp extends AgentHttpClient {
   readonly resumes: Array<{ sessionId: string; connectorToken: string }> = [];
   readonly fileCalls: AgentFileResourceRequest[] = [];
   readonly projectCalls: AgentProjectResourceRequest[] = [];
-  readonly simulationCalls: AgentSimulationResourceRequest[] = [];
+
   readonly disconnects: string[] = [];
   /** Replaceable per-test dispatch over recorded circuit calls. */
   circuitHandler: (call: RecordedCircuitCall) => Promise<AgentCircuitResponse>;
@@ -74,7 +67,7 @@ export class FakeAgentHttp extends AgentHttpClient {
   private readonly resumeHandler: NonNullable<FakeRelayOptions["resume"]>;
   private readonly fileHandler: NonNullable<FakeRelayOptions["files"]>;
   private readonly projectHandler: NonNullable<FakeRelayOptions["projects"]>;
-  private readonly simulationHandler: FakeRelayOptions["simulation"];
+
   private readonly manifestHandler: () => unknown;
   manifestReads = 0;
 
@@ -93,7 +86,6 @@ export class FakeAgentHttp extends AgentHttpClient {
         documentIds: ["main"],
       }));
     this.resumeHandler = options.resume ?? (() => this.claimHandler("resume"));
-    this.simulationHandler = options.simulation;
     this.manifestHandler =
       options.manifest ?? (() => agentMcpBootstrapManifest(this.baseUrl));
     this.fileHandler = options.files ?? noEditor("File");
@@ -145,15 +137,6 @@ export class FakeAgentHttp extends AgentHttpClient {
   ): Promise<AgentProjectResourceResponse> {
     this.projectCalls.push(request);
     return this.projectHandler(request);
-  }
-
-  override async simulation(
-    _sessionId: string,
-    _agentToken: string,
-    request: AgentSimulationResourceRequest,
-  ): Promise<AgentSimulationResourceResponse> {
-    this.simulationCalls.push(request);
-    return (this.simulationHandler ?? noEditor("Simulation"))(request);
   }
 
   override async mcpManifest(): Promise<unknown> {

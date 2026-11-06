@@ -25,13 +25,12 @@ limits.
 Send `Authorization: Bearer <agentToken>`, `Content-Type: application/json`,
 and `apiVersion` (currently `3.0`) and `requestId` where required.
 
-| Route under `/api/agent/sessions/{sessionId}` | Purpose |
-| --- | --- |
-| `POST /circuit` | capabilities, snapshot, transact, render |
-| `POST /files` | Project exports/import candidates, simulation source and artifacts |
-| `POST /simulation` | Capabilities, authoring help, run/prepare/start/read/cancel/export, batches |
-| `POST /projects` | Gallery, active Project Code/Netlist, Cloud Cells, workspaces |
-| `GET /status` | Session observations; attached is not execution readiness |
+| Route under `/api/agent/sessions/{sessionId}` | Purpose                                                       |
+| --------------------------------------------- | ------------------------------------------------------------- |
+| `POST /circuit`                               | capabilities, snapshot, transact, render                      |
+| `POST /files`                                 | Project exports and import candidates                         |
+| `POST /projects`                              | Gallery, active Project Code/Netlist, Cloud Cells, workspaces |
+| `GET /status`                                 | Session observations; attached is not execution readiness     |
 
 The four-operation limit applies to Circuit only. No route grants host files
 or shell access.
@@ -68,24 +67,6 @@ schema rejection, fix the payload with new IDs. After a stale revision, read
 fresh state and replan; changing only the revision is not recovery.
 `REQUEST_RESULT_UNAVAILABLE` means the request ran but its cached response is
 gone: reconcile, do not replay.
-
-## Simulation
-
-Follow the [shared simulation rules](shared/simulation.md): Simulation
-`capabilities` for a Profile and its engine, `authoring-help` for syntax. File
-`operation:"simulation-input"` reads/updates source with
-`owner:{kind:"project-folder",folderId}` (a Project structure object, updated
-at the structure revision) or `{kind:"session-workspace",workspaceId}` (File
-`create` makes an expiring workspace, not a folder). Simulation
-`operation:"run"` takes `source:{kind:"project-folder",folderId,expectedStructureRevision}`
-or `{kind:"workspace",workspaceId,expectedRevision}` at the body root (not
-MCP's `request`); keep the whole request and retry an uncertain submission
-unchanged; `prepare` + `start` (`preparedId`/`digest`) is optional; each `read`
-poll gets a new request ID. Select files with `catalog`, get a descriptor from
-File `input:{action:"download",artifactId}`, download whole files through its
-authenticated path and verify length and digest ([handoff](simulation-result-handoff.md)).
-An accepted request or start is not a successful simulation: check the outer
-response and the resource result.
 
 ## Resume, failure and authorization
 

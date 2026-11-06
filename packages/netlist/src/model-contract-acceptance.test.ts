@@ -16,7 +16,7 @@ import {
   generateCircuitSource,
   planCircuitSourceEdit,
 } from "./simulation-circuit-source.js";
-import { parseVacaskRawfile } from "../../spice-run/src/vacask-rawfile.js";
+import { parseVacaskRawfile } from "./test-support/vacask-rawfile.js";
 import { analyzeDesignNetlist, SIMULATION_DECK_GROUND } from "./extract.js";
 import { printVacaskWithLocations } from "./vacask-printer.js";
 

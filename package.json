@@ -16,8 +16,6 @@
     "@icm/netlist": "workspace:*",
     "@icm/project-protocol": "workspace:*",
     "@icm/render-svg": "workspace:*",
-    "@icm/simulation-service": "workspace:*",
-    "@icm/spice-run": "workspace:*",
     "@icm/symbols": "workspace:*",
     "@icm/component-library": "workspace:*"
   },
@@ -37,8 +35,6 @@
     "headless:package": "node scripts/package-headless.mjs",
     "mcp:package": "pnpm build && node scripts/package-mcp.mjs",
     "dev": "pnpm --filter @icm/editor dev",
-    "dev:replica": "ICM_LOCAL_REPLICA=1 pnpm --filter @icm/editor dev",
-    "replica:import": "node apps/editor/dev/replica-import.ts",
     "lint": "node scripts/lint.mjs",
     "draw:batch": "node scripts/draw-batch.mjs",
     "setup:e2e": "playwright install --with-deps chromium",

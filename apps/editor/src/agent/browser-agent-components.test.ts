@@ -14,7 +14,7 @@ import { BrowserAgentProjectHost } from "./browser-agent-project-host";
 import {
   componentLibraryHarness,
   nativePackage,
-} from "../../../../worker/component-library.test-support";
+} from "../../../server/src/component-library.test-support";
 
 describe("Agent User Components", () => {
   it("discovers that no authoring workspace is open without reading the public library", async () => {
@@ -47,14 +47,9 @@ describe("Agent User Components", () => {
     });
   });
   it("captures a public symbol and connects coincident pins in the same insertion transaction", async () => {
-    const library = componentLibraryHarness();
+    const library = await componentLibraryHarness();
     const definition = newComponentDefinition();
-    await library(
-      "PUT",
-      "/contact-block",
-      { definition, revision: 0 },
-      "alice",
-    );
+    await library("PUT", "/contact-block", { definition, revision: 0 });
     let project = createEmptyProject("contacts", "Contacts");
     const host = new BrowserAgentProjectHost({
       getProject: () => project,
@@ -143,7 +138,7 @@ describe("Agent User Components", () => {
             {
               id: "legacy-device",
               revision: 1,
-              authorId: "alice",
+              authorId: "local",
               author: "Alice",
               status: "shared",
               createdAt: "2026-01-01",
@@ -202,7 +197,7 @@ describe("Agent User Components", () => {
     expect(project).toEqual(before);
   });
   it("recovers an unknown public write with the same identity and rejects a Project changed during an insertion read", async () => {
-    const library = componentLibraryHarness();
+    const library = await componentLibraryHarness();
     const packaged = nativePackage();
     let project = createCircuitComponentPackageProject(packaged, "authoring");
     let loseReply = true;
@@ -223,7 +218,6 @@ describe("Agent User Components", () => {
           init?.method ?? "GET",
           url.pathname.slice("/api/components".length) + url.search,
           init?.body ? JSON.parse(String(init.body)) : undefined,
-          "alice",
         );
         if (init?.method === "PUT" && loseReply) {
           loseReply = false;
@@ -293,9 +287,9 @@ describe("Agent User Components", () => {
     expect(project.modelSources ?? []).toEqual([]);
     expect(project.documents[0]!.instances).toEqual([]);
   });
-  it("publishes, recovers, forks and captures a fixed public revision through the ordinary Project transaction", async () => {
-    const library = componentLibraryHarness();
-    let user = "alice";
+  it("publishes, recovers and captures a fixed public revision through the ordinary Project transaction", async () => {
+    const library = await componentLibraryHarness();
+    const user = "local";
     const fetchLibrary: typeof fetch = async (input, init) => {
       const url = new URL(
         typeof input === "string"
@@ -311,7 +305,6 @@ describe("Agent User Components", () => {
         init?.method ?? "GET",
         url.pathname.slice("/api/components".length) + url.search,
         init?.body ? JSON.parse(String(init.body)) : undefined,
-        user,
       );
     };
     const packaged = nativePackage();
@@ -362,7 +355,7 @@ describe("Agent User Components", () => {
       ok: true,
       result: {
         action: "publish",
-        entry: { id: "agent-resistor", revision: 1, authorId: "alice" },
+        entry: { id: "agent-resistor", revision: 1, authorId: "local" },
         digest: expect.stringMatching(/^[a-f0-9]{64}$/),
       },
     });
@@ -384,31 +377,6 @@ describe("Agent User Components", () => {
     expect(await call({ action: "list", query: "Packaged" })).toMatchObject({
       ok: true,
       result: { entries: [expect.objectContaining({ id: "agent-resistor" })] },
-    });
-    user = "bob";
-    expect(
-      await call({
-        ...publish,
-        action: "update",
-        expectedLibraryRevision: 1,
-        idempotencyKey: "bob-update",
-        expectedStructureRevision: project.structureRevision,
-      }),
-    ).toMatchObject({
-      ok: false,
-      error: { code: "COMPONENT_PERMISSION_DENIED" },
-    });
-    expect(
-      await call({
-        action: "fork",
-        componentId: "agent-resistor",
-        expectedLibraryRevision: 1,
-        newComponentId: "bob-resistor",
-        idempotencyKey: "bob-fork",
-      }),
-    ).toMatchObject({
-      ok: true,
-      result: { entry: { authorId: "bob", revision: 1 } },
     });
     project = createEmptyProject("destination", "Destination");
     const insert = {

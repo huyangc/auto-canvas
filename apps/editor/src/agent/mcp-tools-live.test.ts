@@ -1,10 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
-import {
-  createSimulationFolder,
-  readSimulationExperimentConfig,
-  type CircuitProject,
-} from "@icm/model";
+import { createSimulationFolder } from "@icm/model";
 import { callTool, type ToolSessionState } from "../../../mcp-server/src/tools";
 import { compareExpectedNetlist } from "../../../mcp-server/src/netlist-comparison";
 import { createDefaultNetlistExportPreferences } from "../features/netlist-export/netlist-export-preferences";
@@ -295,9 +291,8 @@ describe("MCP tools on the live editor", () => {
       counts: { total: diagnostics.items.length },
     });
     expect(diagnostics.counts.warnings).toBeGreaterThan(0);
-    const folders = await tool("simulation_folder", { action: "list" });
+    const folders = await editor.client.simulationFolderDirectory();
     expect(folders).toMatchObject({
-      ok: true,
       folders: [{ id: "small-op", name: "OP" }],
     });
     expect(JSON.stringify(folders)).not.toContain("private-source-body");
@@ -849,153 +844,6 @@ describe("MCP tools on the live editor", () => {
       byteLength: bytes.byteLength,
       sha256: createHash("sha256").update(bytes).digest("hex"),
       diagnostics: expect.any(Number),
-    });
-  });
-
-  it("keeps legacy JSON helpers off a native experiment and edits a v1 one in place", async () => {
-    const project = emptyAgentProject();
-    const native = createSimulationFolder({
-      id: "s",
-      name: "Program",
-      profileId: "test",
-      documentId: "main",
-    });
-    // The retained v1 compatibility lane.
-    const legacy = createSimulationFolder({
-      id: "legacy",
-      name: "Legacy",
-      profileId: "test",
-      documentId: "main",
-    });
-    legacy.input.files.find((file) => file.path === "experiment.json")!.text =
-      JSON.stringify({ version: 1, environment: { profileId: "test" } });
-    project.simulationFolders = structuredClone([native, legacy]);
-    const editor = await connected({ project });
-    await apply(editor, [place("nmos", "M1", 100)]);
-    const { tool, controller } = editor;
-    const folder = (id: string) =>
-      controller.project.simulationFolders.find((item) => item.id === id)!;
-    for (const name of [
-      "simulation_output",
-      "simulation_measurement",
-      "simulation_device_operating_point",
-    ])
-      expect(await tool(name, { action: "list", folderId: "s" })).toMatchObject(
-        {
-          ok: false,
-          error: { code: "SIMULATION_NATIVE_CODE_REQUIRED" },
-        },
-      );
-    expect(
-      await tool("simulation_output", {
-        action: "upsert",
-        folderId: "s",
-        label: "Vout",
-        expression: { kind: "vector", vector: "v(out)" },
-      }),
-    ).toMatchObject({
-      ok: false,
-      error: { code: "SIMULATION_NATIVE_CODE_REQUIRED" },
-    });
-    expect(folder("s")).toEqual(native);
-    expect(
-      await tool("simulation_output", {
-        action: "upsert",
-        folderId: "legacy",
-        outputId: "gain",
-        label: "Gain",
-        expression: {
-          kind: "db20",
-          operand: { kind: "vector", vector: "v(out)" },
-        },
-      }),
-    ).toMatchObject({ ok: true });
-    expect(
-      await tool("simulation_measurement", {
-        action: "upsert",
-        folderId: "legacy",
-        measurementId: "gain-at-1k",
-        label: "Gain at 1 kHz",
-        analysis: "ac",
-        outputId: "gain",
-        method: { kind: "sample-at", coordinate: 1000 },
-      }),
-    ).toMatchObject({ ok: true });
-    expect(
-      await tool("simulation_device_operating_point", {
-        action: "upsert",
-        folderId: "legacy",
-        deviceOperatingPointId: "m1",
-        targetDocumentId: "main",
-        instanceId: controller.document.instances[0]!.id,
-        occurrence: [],
-        circuit: { bindingId: "circuit", callPath: [] },
-      }),
-    ).toMatchObject({ ok: true });
-    const config = readSimulationExperimentConfig(folder("legacy"));
-    if (!config.ok) throw new Error(config.message);
-    expect(config.config).toMatchObject({
-      outputs: [{ id: "gain" }],
-      measurements: [{ id: "gain-at-1k" }],
-      deviceOperatingPoints: [
-        { id: "m1", circuit: { bindingId: "circuit", callPath: [] } },
-      ],
-    });
-    const runFile = (item: CircuitProject["simulationFolders"][number]) =>
-      item.input.files.find((file) => file.path === "run.cir")!.text;
-    expect(runFile(folder("legacy"))).toBe(runFile(legacy));
-    expect(folder("legacy").input).not.toHaveProperty("analyses");
-    expect(folder("s")).toEqual(native);
-  });
-
-  it("returns recoverable errors for a broken configuration and lets the same session repair it", async () => {
-    const project = emptyAgentProject();
-    const broken = createSimulationFolder({
-      id: "s",
-      name: "Draft",
-      profileId: "test",
-    });
-    broken.input.files.find(
-      (file) => file.path === broken.input.configPath,
-    )!.text = "{";
-    project.simulationFolders = [broken];
-    const { tool, controller } = await connected({ project });
-    expect(
-      await tool("simulation_output", { action: "list", folderId: "s" }),
-    ).toMatchObject({
-      ok: false,
-      error: { code: "SIMULATION_CONFIG_INVALID", recovery: "fix-input" },
-    });
-    expect(
-      await tool("simulation_folder", { action: "get", folderId: "s" }),
-    ).toMatchObject({
-      ok: true,
-      folder: {
-        input: {
-          files: expect.arrayContaining([
-            { path: "experiment.json", text: "{" },
-          ]),
-        },
-      },
-    });
-    const repaired = createSimulationFolder({
-      id: "s",
-      name: "Repaired",
-      profileId: "test",
-    }).input;
-    expect(
-      await tool("simulation_folder", {
-        action: "update",
-        folderId: "s",
-        input: repaired,
-      }),
-    ).toMatchObject({ ok: true });
-    expect(controller.project.simulationFolders[0]!.input).toEqual(repaired);
-    expect(
-      await tool("simulation_output", { action: "list", folderId: "s" }),
-    ).toMatchObject({
-      ok: false,
-      error: { code: "SIMULATION_NATIVE_CODE_REQUIRED" },
     });
   });
 });

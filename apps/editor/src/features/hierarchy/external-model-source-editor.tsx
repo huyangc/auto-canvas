@@ -61,7 +61,7 @@ import { CircuitInterfaceEditor } from "../user-components/circuit-interface-edi
 import { newComponentDefinition } from "../user-components/component-definition-edit";
 import type { ExternalDefinitionResult } from "./project-structure-commands";
 import { CellSymbolLayoutProperties } from "../properties/component-structure-properties";
-import type { SimulationSourceLocation } from "@icm/simulation-service/contract";
+import type { SimulationSourceLocation } from "@icm/netlist";
 
 export type ApplyModelSourceEdit = Extract<
   ProjectStructureEdit,

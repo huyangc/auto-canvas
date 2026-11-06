@@ -96,6 +96,15 @@ files below, `apps/editor/e2e/**` except the three T009 specs,
 `apps/editor/package.json` and `pnpm-lock.yaml` (only to remove `wrangler`
 and the deleted packages).
 
+Widened in round 2 (see `review.md`): `apps/editor/vite.config.ts` (replica
+and Worker plugin lines), all of `packages/netlist/**`, `apps/local-host/**`,
+`apps/server/README.md`, `pnpm-workspace.yaml` (Worker/simulation build
+entries). T009 has merged, so its files are no longer reserved; keep edits to
+them minimal. `wrangler` is already removed by Opus. Do not run
+`pnpm remove`/`pnpm add`; for deleted workspace packages, delete their
+directories and every `workspace:*` reference in `package.json` files, then
+stop: Opus refreshes `pnpm-lock.yaml` and `node_modules` during review.
+
 Out of scope (T009 runs in parallel): `apps/editor/src/app/use-project-entry.ts`,
 `apps/editor/src/document/project-workspace.ts`, `apps/editor/src/examples/**`,
 `apps/editor/src/features/editor-shell/cloud-projects.ts`,

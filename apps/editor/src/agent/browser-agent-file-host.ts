@@ -77,12 +77,6 @@ export class BrowserAgentFileHost {
     }
     this.removeExpired();
     switch (request.operation) {
-      case "simulation-input":
-        return this.error(
-          request,
-          "SIMULATION_UNAVAILABLE",
-          "Simulation files are unavailable in auto-canvas. Project source folders are preserved when saved.",
-        );
       case "download":
         return this.download(request);
       case "stage":
@@ -312,13 +306,6 @@ export class BrowserAgentFileHost {
     request: Extract<AgentFileResourceRequest, { operation: "download" }>,
   ): Promise<AgentFileResourceResponse> {
     try {
-      if (request.artifact === "simulation-plot") {
-        return this.error(
-          request,
-          "SIMULATION_UNAVAILABLE",
-          "Simulation is unavailable in auto-canvas. Export a netlist to simulate externally.",
-        );
-      }
       if (request.artifact === "project") {
         const bytes = new TextEncoder().encode(
           serializeProject(this.options.getProject()),

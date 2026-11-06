@@ -6,7 +6,6 @@ import {
   fileOperationScopes,
   projectOperationScopes,
   requestLedgerKey,
-  simulationOperationScopes,
 } from "./agent-session-runtime.js";
 
 import {
@@ -15,7 +14,6 @@ import {
   AgentFileResourceRequestSchema,
   AgentProjectResourceRequestSchema,
   AgentSessionMachine,
-  AgentSimulationResourceRequestSchema,
   type AgentMcpBootstrapManifest,
   type AgentSessionLimits,
   type PersistedAgentSessionState,
@@ -24,10 +22,7 @@ import {
   emptyAgentProject,
   liveAgentEditor,
 } from "../../../editor/src/agent/live-agent-editor.test-support";
-import {
-  HostedSimulationService,
-  dividerFolder,
-} from "../../../editor/src/agent/live-simulation.test-support";
+
 import {
   AGENT_OPERATING_KIT_FORMAT,
   AGENT_OPERATING_KIT_VERSION,
@@ -70,62 +65,6 @@ it("requires import and all existing edit scopes for staged Cell body writes", (
     "circuit.edit.connectivity",
     "circuit.edit.presentation",
   ]);
-});
-
-it("requires no spending grant for static authoring help without relaxing run access", () => {
-  const scopes = (op: object) =>
-    simulationOperationScopes(
-      AgentSimulationResourceRequestSchema.parse({
-        apiVersion: "3.0",
-        requestId: "scope",
-        ...op,
-      }),
-    );
-  expect(scopes({ operation: "authoring-help", name: "embed" })).toEqual([]);
-  expect(scopes({ operation: "capabilities" })).toEqual([]);
-  expect(
-    scopes({ operation: "start", preparedId: "p", digest: "a".repeat(64) }),
-  ).toEqual(["simulation.run"]);
-  expect(scopes({ operation: "read", runId: "r" })).toEqual(["simulation.run"]);
-  expect(scopes({ operation: "catalog", runId: "r" })).toEqual([
-    "simulation.run",
-  ]);
-  expect(scopes({ operation: "history-usage" })).toEqual(["simulation.run"]);
-  expect(scopes({ operation: "history-delete", runId: "r" })).toEqual([
-    "simulation.run",
-  ]);
-});
-
-it("uses existing Project write authorization for Project-owned simulation source only", () => {
-  const scopes = (input: unknown) =>
-    fileOperationScopes(
-      AgentFileResourceRequestSchema.parse({
-        apiVersion: "3.0",
-        requestId: "files",
-        operation: "simulation-input",
-        input,
-      }),
-    );
-  expect(
-    scopes({
-      action: "list",
-      owner: { kind: "project-folder", folderId: "s" },
-    }),
-  ).toEqual(["simulation.run"]);
-  expect(
-    scopes({
-      action: "update",
-      owner: { kind: "session-workspace", workspaceId: "w" },
-      expectedRevision: 0,
-    }),
-  ).toEqual(["simulation.run"]);
-  expect(
-    scopes({
-      action: "update",
-      owner: { kind: "project-folder", folderId: "s" },
-      expectedRevision: 0,
-    }),
-  ).toEqual(["simulation.run", "project.import"]);
 });
 
 it("opens a staged import under the Project import scope", () => {
@@ -399,7 +338,6 @@ function editorFor(
   project.id = projectId;
   project.documents[0]!.id = documentId;
   project.topDocumentId = documentId;
-  project.simulationFolders = [dividerFolder("divider", "Divider")];
   return liveAgentEditor({ ...options, project });
 }
 
@@ -455,76 +393,11 @@ async function editorAnswer(
       return editor.projectHost.handle(
         AgentProjectResourceRequestSchema.parse(payload),
       );
-    case "simulation":
-      return editor.simulationHost!.handle(
-        AgentSimulationResourceRequestSchema.parse(payload),
-      );
   }
   throw new Error(`The editor answers no ${family} request`);
 }
 
 describe("public Agent session routes", () => {
-  it("relays the editor's simulation refusal without revoking the session", async () => {
-    const { env, objects, sockets } = routedFixture();
-    const post = (path: string, body: unknown, token?: string) =>
-      routeAgentSessionRequest(
-        new Request(`https://editor.example${path}`, {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            ...(token ? { authorization: `Bearer ${token}` } : {}),
-          },
-          body: JSON.stringify(body),
-        }),
-        env,
-      );
-    const created = (await (await post("/api/agent/sessions", {
-      projectSessionId: "p:sim",
-      projectId: "p",
-      documentIds: ["doc"],
-      scopes: ["simulation.run"],
-    }))!.json()) as { session: { sessionId: string; claimCode: string } };
-    const claim = (await (await post("/api/agent/claims", {
-      claimCode: created.session.claimCode,
-    }))!.json()) as { agentToken: string };
-    const id = created.session.sessionId;
-    const service = new HostedSimulationService();
-    const browser = editorEnd(
-      editorFor("p", "doc", {
-        scopes: ["simulation.run"],
-        simulationService: service.fetch,
-      }),
-      () => objects.get(id)!,
-    );
-    sockets.set(id, [browser.socket]);
-    const path = `/api/agent/sessions/${id}/simulation`,
-      base = { apiVersion: "3.0" };
-    // The editor no longer simulates (T006): its typed refusal passes through.
-    const request = (requestId: string) => ({
-      ...base,
-      requestId,
-      operation: "prepare",
-      source: {
-        kind: "project-folder",
-        folderId: "divider",
-        expectedStructureRevision: 0,
-      },
-    });
-    const refused = await post(path, request("first"), claim.agentToken);
-    expect(refused!.status).toBe(200);
-    expect(await refused!.json()).toMatchObject({
-      ok: false,
-      error: { code: "SIMULATION_UNAVAILABLE" },
-    });
-    // The session survives the refusal and still answers its own bearer.
-    expect(
-      await (await post(path, request("second"), claim.agentToken))!.json(),
-    ).toMatchObject({ ok: false, error: { code: "SIMULATION_UNAVAILABLE" } });
-    expect((await post(path, request("other"), "wrong-token"))!.status).toBe(
-      401,
-    );
-    expect(browser.families).toEqual(["simulation", "simulation"]);
-  });
   it("publishes the exact Agent API contract", async () => {
     const { env } = routedFixture();
     const response = await routeAgentSessionRequest(
@@ -542,12 +415,9 @@ describe("public Agent session routes", () => {
     expect(Object.keys(contract.paths).sort()).toEqual([
       "/api/agent/claims",
       "/api/agent/connectors/resume",
-      "/api/agent/sessions/{sessionId}/artifact-status",
-      "/api/agent/sessions/{sessionId}/artifacts/{fileId}",
       "/api/agent/sessions/{sessionId}/circuit",
       "/api/agent/sessions/{sessionId}/files",
       "/api/agent/sessions/{sessionId}/projects",
-      "/api/agent/sessions/{sessionId}/simulation",
       "/api/agent/sessions/{sessionId}/status",
     ]);
   });
@@ -1598,12 +1468,7 @@ describe("Agent idle expiry", () => {
       projectSessionId: "project:1",
       projectId: "project",
       documentIds: ["doc"],
-      scopes: [
-        "circuit.snapshot",
-        "project.download",
-        "project.import",
-        "simulation.run",
-      ],
+      scopes: ["circuit.snapshot", "project.download", "project.import"],
       now: Date.now(),
       random: () => crypto.randomUUID(),
     });
@@ -1620,13 +1485,7 @@ describe("Agent idle expiry", () => {
     let object: AgentSessionDO;
     const browser = editorEnd(
       editorFor("project", "doc", {
-        scopes: [
-          "circuit.snapshot",
-          "project.download",
-          "project.import",
-          "simulation.run",
-        ],
-        simulationService: new HostedSimulationService().fetch,
+        scopes: ["circuit.snapshot", "project.download", "project.import"],
       }),
       () => object,
       (envelope) => messages.push(envelope),
@@ -1699,17 +1558,6 @@ describe("Agent idle expiry", () => {
   it.each([
     ["circuit", { operation: "snapshot", documentId: "doc" }],
     ["files", { operation: "download", artifact: "project" }],
-    [
-      "simulation",
-      {
-        operation: "prepare",
-        source: {
-          kind: "project-folder",
-          folderId: "folder",
-          expectedStructureRevision: 0,
-        },
-      },
-    ],
     ["projects", { operation: "read-project-code" }],
   ])(
     "renews admitted %s operations, persists and reschedules the deadline",

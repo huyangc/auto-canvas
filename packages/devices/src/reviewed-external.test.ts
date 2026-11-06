@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { delimiter } from "node:path";
 import { describe, expect, it } from "vitest";
-import sg13 from "../../../containers/ngspice/sg13g2/profile.json";
+import sg13 from "../../../fixtures/pdk/sg13g2/profile.json";
 
 import {
   resolveReviewedLibraryInterface,
@@ -683,7 +683,7 @@ describe("standard cells behind Library gates (#1450)", () => {
   it("agrees with the vendored SKY130 HD netlist the hosted simulator runs", () => {
     const text = readFileSync(
       new URL(
-        "../../../containers/ngspice/cells/sky130_fd_sc_hd.spice",
+        "../../../fixtures/pdk/sky130/sky130_fd_sc_hd.spice",
         import.meta.url,
       ),
       "utf8",

@@ -2,13 +2,10 @@ import {
   AgentConnectionCredentialResponseSchema,
   AgentCircuitResponseSchema,
   AgentFileResourceResponseSchema,
-  AgentSimulationResourceResponseSchema,
   type AgentCircuitRequest,
   type AgentCircuitResponse,
   type AgentFileResourceRequest,
   type AgentFileResourceResponse,
-  type AgentSimulationResourceRequest,
-  type AgentSimulationResourceResponse,
   type AgentProjectResourceRequest,
   type AgentProjectResourceResponse,
   AgentProjectResourceResponseSchema,
@@ -20,10 +17,6 @@ import {
   networkFailure,
   transportFailure,
 } from "./errors.js";
-import {
-  EvidenceResourceUsageSchema,
-  type EvidenceResourceUsage,
-} from "@icm/simulation-service/contract";
 
 interface ResponseIssue {
   code: string;
@@ -67,7 +60,7 @@ function responseIssueSummary(issues: readonly ResponseIssue[]): string {
 }
 
 /**
- * Every relayed call (circuit, files, simulation) is forwarded to the editor
+ * Every relayed call (circuit, files, projects) is forwarded to the editor
  * under the Worker's FORWARD_TIMEOUT_MS of 30 s. The client must outlive
  * that so the relay's own 504 reaches the caller; a 30 s client timeout
  * races the relay and masks the cause as a bare abort.
@@ -146,104 +139,8 @@ export class AgentHttpClient {
   }
 
   /** Authorized byte stream; never send a bearer to a returned external URL. */
-  async downloadArtifact(
-    sessionId: string,
-    agentToken: string,
-    path: string,
-    offset = 0,
-    digest?: string,
-    leaseId?: string,
-  ): Promise<Response> {
-    const prefix = `/api/agent/sessions/${encodeURIComponent(sessionId)}/artifacts/`;
-    if (
-      !path.startsWith(prefix) ||
-      !/^[a-zA-Z0-9_-]{1,128}$/u.test(path.slice(prefix.length))
-    )
-      throw invalidResponseFailure(
-        "Artifact download is outside the authorized session",
-      );
-    const response = await this.send(
-      path,
-      {
-        method: "GET",
-        redirect: "error",
-        headers: {
-          authorization: `Bearer ${agentToken}`,
-          ...(leaseId ? { "x-artifact-lease": leaseId } : {}),
-          ...(offset
-            ? {
-                range: `bytes=${offset}-`,
-                ...(digest ? { "if-range": `"${digest}"` } : {}),
-              }
-            : {}),
-        },
-      },
-      120_000,
-    );
-    if (!response.ok)
-      throw this.transportError(
-        response.status,
-        await this.consume(response, (body) => body),
-      );
-    return response;
-  }
+
   /** Release only this unguessable download lease after verified local commit. */
-  async releaseArtifactDownload(
-    sessionId: string,
-    agentToken: string,
-    path: string,
-    leaseId: string,
-  ): Promise<void> {
-    const prefix = `/api/agent/sessions/${encodeURIComponent(sessionId)}/artifacts/`;
-    if (
-      !path.startsWith(prefix) ||
-      !/^[a-zA-Z0-9_-]{1,128}$/u.test(path.slice(prefix.length)) ||
-      !/^[0-9a-f-]{36}$/u.test(leaseId)
-    )
-      throw invalidResponseFailure(
-        "Artifact lease is outside the authorized session",
-      );
-    const response = await this.send(
-      path,
-      {
-        method: "DELETE",
-        redirect: "error",
-        headers: {
-          authorization: `Bearer ${agentToken}`,
-          "x-artifact-lease": leaseId,
-        },
-      },
-      30_000,
-    );
-    if (!response.ok && response.status !== 404)
-      throw this.transportError(
-        response.status,
-        await this.consume(response, (body) => body),
-      );
-    await response.body?.cancel();
-  }
-  async artifactUsage(
-    sessionId: string,
-    agentToken: string,
-  ): Promise<EvidenceResourceUsage> {
-    const response = await this.send(
-      `/api/agent/sessions/${encodeURIComponent(sessionId)}/artifact-status`,
-      {
-        method: "GET",
-        redirect: "error",
-        headers: { authorization: `Bearer ${agentToken}` },
-      },
-      30_000,
-    );
-    const body = (await this.consume(response, (value) => value)) as {
-      usage?: unknown;
-    };
-    if (!response.ok) throw this.transportError(response.status, body);
-    const parsed = EvidenceResourceUsageSchema.safeParse(body.usage);
-    if (!parsed.success || parsed.data.scope !== "agent-session-transfer")
-      throw invalidResponseFailure("Artifact transfer usage failed validation");
-    return parsed.data;
-  }
 
   /**
    * Redeem a `<sessionId>.<code>` claim code. The session ID travels in the
@@ -385,37 +282,6 @@ export class AgentHttpClient {
    * transport; each simulation HTTP step still answers within the shared
    * client timeout, above the relay's own forward timeout.
    */
-  async simulation(
-    sessionId: string,
-    agentToken: string,
-    request: AgentSimulationResourceRequest,
-    attempts?: AgentHttpAttempts,
-  ): Promise<AgentSimulationResourceResponse> {
-    const response = await this.send(
-      `/api/agent/sessions/${encodeURIComponent(sessionId)}/simulation`,
-      {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${agentToken}`,
-        },
-        body: JSON.stringify(request),
-      },
-      this.timeoutMs,
-      request,
-      attempts,
-    );
-    return this.consume(response, (body) => {
-      if (!response.ok) throw this.transportError(response.status, body);
-      const parsed = AgentSimulationResourceResponseSchema.safeParse(body);
-      if (!parsed.success) {
-        throw invalidResponseFailure(
-          `Simulation response failed schema validation: ${responseIssueSummary(parsed.error.issues)}. Check the server MCP manifest and reload a compatible adapter; use the published HTTP Agent Kit if unavailable. The connector remains valid unless the server revokes it.`,
-        );
-      }
-      return parsed.data;
-    });
-  }
 
   async projects(
     sessionId: string,
@@ -520,18 +386,12 @@ export class AgentHttpClient {
     identity?: { requestId: string; operation: string },
     attempts: AgentHttpAttempts = { count: 0 },
   ): Promise<Response> {
-    if (
-      this.contextRevision &&
-      /\/(circuit|files|simulation|projects)$/.test(path)
-    ) {
+    if (this.contextRevision && /\/(circuit|files|projects)$/.test(path)) {
       const headers = new Headers(init.headers);
       headers.set("x-agent-context", this.contextRevision);
       init = { ...init, headers };
     }
-    if (
-      this.workspaceId &&
-      /\/(circuit|files|simulation|projects)$/.test(path)
-    ) {
+    if (this.workspaceId && /\/(circuit|files|projects)$/.test(path)) {
       const headers = new Headers(init.headers);
       headers.set("x-agent-workspace", this.workspaceId);
       init = { ...init, headers };
@@ -711,7 +571,7 @@ export class AgentHttpClient {
     this.timingCount += 1;
     const resource =
       path.match(
-        /\/sessions\/[^/]+\/(circuit|files|simulation|projects|status|activity|artifacts)(?:\/|$)/,
+        /\/sessions\/[^/]+\/(circuit|files|projects|status|activity)(?:\/|$)/,
       )?.[1] ??
       path.split("/").filter(Boolean).at(-1) ??
       "request";

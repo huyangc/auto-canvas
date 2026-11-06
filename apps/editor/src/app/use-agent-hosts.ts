@@ -23,7 +23,7 @@ import type { BrowserAgentPlanningContext } from "../agent/browser-agent-command
 import type { BrowserAgentFileHost } from "../agent/browser-agent-file-host";
 import type { BrowserAgentHost } from "../agent/browser-agent-host";
 import type { BrowserAgentProjectHost } from "../agent/browser-agent-project-host";
-import type { BrowserAgentSimulationHost } from "../agent/browser-agent-simulation-host";
+
 import { peekAgentSessionRecovery } from "../agent/session-recovery";
 import { claimNow } from "../agent/claim-clock";
 import type { UseAgentSessionOptions } from "../agent/use-agent-session";
@@ -210,7 +210,6 @@ export function useAgentProjectResources({
         string,
         {
           files?: BrowserAgentFileHost;
-          simulation?: BrowserAgentSimulationHost;
         }
       >
     >(),
@@ -263,14 +262,10 @@ export function useAgentProjectResources({
       projectSwitchBlockerRef,
     ],
   );
-  const browserAgentSimulationHost = useMemo(
-    () => (runtime ? new runtime.BrowserAgentSimulationHost() : null),
-    [runtime],
-  );
-  if (browserAgentFileHost && browserAgentSimulationHost)
+
+  if (browserAgentFileHost)
     resources.set(resourceKey, {
       files: browserAgentFileHost,
-      simulation: browserAgentSimulationHost,
     });
   const agentWorkspaceRef = useRef<
     (
@@ -285,7 +280,6 @@ export function useAgentProjectResources({
     setAgentFileCandidate,
     agentProjectResources,
     browserAgentFileHost,
-    browserAgentSimulationHost,
     agentWorkspaceRef,
   };
 }
@@ -306,7 +300,6 @@ export function useEditorAgentConnection({
   agentFileCandidate,
   setAgentFileCandidate,
   browserAgentFileHost,
-  browserAgentSimulationHost,
   browserAgentProjectHost,
   captureAuthoredProject,
   cloudBinding,
@@ -331,7 +324,6 @@ export function useEditorAgentConnection({
     SetStateAction<AgentFileCandidateSummary | null>
   >;
   browserAgentFileHost: BrowserAgentFileHost | null;
-  browserAgentSimulationHost: BrowserAgentSimulationHost | null;
   browserAgentProjectHost: BrowserAgentProjectHost | null;
   captureAuthoredProject: () => Promise<CircuitProject | null>;
   cloudBinding: ProjectFileLifecycle["cloudBinding"];
@@ -350,7 +342,6 @@ export function useEditorAgentConnection({
         sessionId: string;
         host: BrowserAgentHost;
         fileHost: BrowserAgentFileHost;
-        simulationHost: BrowserAgentSimulationHost;
         projectHost: BrowserAgentProjectHost;
       }
     >(),
@@ -359,7 +350,6 @@ export function useEditorAgentConnection({
     !import.meta.env?.ICM_DESKTOP &&
       browserAgentHost &&
       browserAgentFileHost &&
-      browserAgentSimulationHost &&
       browserAgentProjectHost
       ? {
           // A restored workspace is already the requested circuit. Resume its
@@ -384,7 +374,6 @@ export function useEditorAgentConnection({
           projectSessionId: recoveryWorkingCopyId,
           host: browserAgentHost,
           fileHost: browserAgentFileHost,
-          simulationHost: browserAgentSimulationHost,
           projectHost: browserAgentProjectHost,
           resolveWorkspace: (workspaceId) =>
             agentTargetRef.current(workspaceId),

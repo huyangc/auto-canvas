@@ -201,7 +201,7 @@ describe("verified offline MCP installation", () => {
         `import readline from 'node:readline';
 for await (const line of readline.createInterface({input:process.stdin})) {
 const m=JSON.parse(line); if(!m.id)continue;
-const result=m.method==='initialize'?{serverInfo:{name:'analog-canvas',version:'1.2.3'}}:{tools:['connect','connection_status','get_context','simulation'].map(name=>({name}))};
+const result=m.method==='initialize'?{serverInfo:{name:'analog-canvas',version:'1.2.3'}}:{tools:['connect','connection_status','get_context','apply_actions'].map(name=>({name}))};
 process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');
 }`,
       );
@@ -497,7 +497,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');
         `import readline from 'node:readline';
 for await (const line of readline.createInterface({input:process.stdin})) {
  const m=JSON.parse(line); if(!m.id) continue;
- const result=m.method==='initialize'?{serverInfo:{name:'analog-canvas',version:'1.2.3'}}:{tools:['connect','connection_status','get_context','simulation'].map(name=>({name}))};
+ const result=m.method==='initialize'?{serverInfo:{name:'analog-canvas',version:'1.2.3'}}:{tools:['connect','connection_status','get_context','apply_actions'].map(name=>({name}))};
  process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');
 }`,
       );

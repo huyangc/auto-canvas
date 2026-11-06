@@ -1,7 +1,4 @@
-// The usage policy in one line, wherever a reader or a program meets it: the
-// page shell (build/usage-policy-head.ts), the Gallery's footnote, and the
-// Worker's flood and block refusals. robots.txt and llms.txt state it at
-// length in worker/usage-policy.ts.
+// Legacy hosted policy wording still used by Project request refusals.
 import { SITE_PRIVACY_CONTACT } from "./components/site-resource-links";
 
 /** Who grants bulk access to the Gallery's circuits: the site's operator. */

@@ -255,7 +255,6 @@ export function useEditorAgentSession(
     options?.project,
     options?.host,
     options?.fileHost,
-    options?.simulationHost,
     options?.projectHost,
     options?.recover,
   ]);

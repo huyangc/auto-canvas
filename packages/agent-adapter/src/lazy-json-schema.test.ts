@@ -26,7 +26,7 @@ describe("published JSON Schemas", () => {
     expect(conversions.count).toBe(0);
 
     const schemas = adapter.agentCircuitOpenApi.components.schemas;
-    expect(Object.keys(schemas)).toHaveLength(13);
+    expect(Object.keys(schemas)).toHaveLength(11);
     const converted = conversions.count;
     expect(converted).toBeGreaterThan(0);
     // Built once, then kept.

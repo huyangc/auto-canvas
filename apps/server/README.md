@@ -53,8 +53,8 @@ For the manual persistence check, start both processes above, author and publish
 a User Component, restart both processes, then open User Components, find the
 published name and place it on the canvas. The real-server browser test checks
 the author/publish/reload/find/place path without API mocks and soft-deletes its
-published record afterward. The existing mocked browser suite still exercises
-the multi-account Worker contract.
+published record afterward. The component browser suite also uses isolated PostgreSQL schemas for
+publication recovery, catalog and lifecycle checks.
 
 The Agent relay also runs here in plain Node. Vite dev and preview forward
 `/api/agent/` HTTP and WebSocket traffic to `AUTO_CANVAS_API_URL`; they do not
@@ -68,7 +68,5 @@ alarm times in PostgreSQL. The host loads an object's cache before delivering
 events, persists writes in order, and gates HTTP/WebSocket output on those
 writes. HTTP and editor messages can interleave while awaiting replies. Run a
 single relay process per database; live sockets are held only by that process.
-No simulation artifact storage is configured: artifact transfer returns 503
-`ARTIFACT_STORAGE_UNAVAILABLE`, while simulation requests retain the editor's
-typed replies. Legacy `dev/agent-worker.ts` and `dev/wrangler.json` remain for
-T006 cleanup; neither dev nor Playwright loads them.
+Simulation and artifact transfer routes are retired and return 404. The relay
+serves the retained Agent operations through the editor connection.

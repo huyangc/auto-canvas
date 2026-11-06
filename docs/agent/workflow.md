@@ -27,14 +27,13 @@ is recovered with the original request identity. Interpret results with
 
 ## Completion evidence
 
-| Task | Evidence |
-| --- | --- |
-| Read/explain | Returned facts and remaining uncertainty |
-| Local parameter change | Accepted change and current value; simulation only if requested |
-| Placement, labels or routing | Changed geometry/connectivity and a formal render of the area |
-| Whole schematic or hierarchy | Changed Documents and affected parent contexts reviewed |
+| Task                                              | Evidence                                                                                                        |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Read/explain                                      | Returned facts and remaining uncertainty                                                                        |
+| Local parameter change                            | Accepted change and current value                                                                               |
+| Placement, labels or routing                      | Changed geometry/connectivity and a formal render of the area                                                   |
+| Whole schematic or hierarchy                      | Changed Documents and affected parent contexts reviewed                                                         |
 | Drawing from a reference (figure, paper, netlist) | Done as [Drawing a schematic](circuit-style-knowledge.md) defines it: connected, compact, reads like the source |
-| Simulation | Completed run, captured input identity and retrieved requested results |
 
 For other visual changes use [Drawing a schematic](circuit-style-knowledge.md)
 and [diagnostic policy](shared/diagnostics.md); do not clear observations

@@ -22,7 +22,6 @@ import {
   emptyAgentProject,
   liveAgentEditor,
 } from "../../../editor/src/agent/live-agent-editor.test-support.js";
-import { AgentSimulationResourceRequestSchema } from "@icm/agent-adapter";
 
 const url =
   process.env.AUTO_CANVAS_TEST_DATABASE_URL ?? "postgresql:///auto_canvas_test";
@@ -259,7 +258,7 @@ async function paired(relay: AgentRelayHost) {
     projectSessionId: "p:tab",
     projectId: "p",
     documentIds: ["doc"],
-    scopes: ["circuit.snapshot", "simulation.run"],
+    scopes: ["circuit.snapshot"],
   });
   expect(created.status).toBe(200);
   const { session } = await created.json();
@@ -355,9 +354,9 @@ it("restores a paired session after restart, reports offline and accepts a recon
   expect(client.readyState).toBe(ClientSocket.OPEN);
 });
 
-it("keeps origin and bearer checks and fails artifact transfer clearly without a bucket", async () => {
+it("keeps origin and bearer checks and rejects retired simulation routes", async () => {
   const relay = host();
-  const { origin, post, session, claim, client } = await paired(relay);
+  const { origin, post, session, claim } = await paired(relay);
   const denied = await fetch(origin + "/api/agent/sessions", {
     method: "POST",
     headers: { origin: "http://other" },
@@ -368,65 +367,19 @@ it("keeps origin and bearer checks and fails artifact transfer clearly without a
     error: { code: "UNAUTHORIZED_ORIGIN" },
   });
   const path = `/api/agent/sessions/${session.sessionId}`;
-  expect((await fetch(origin + path + "/artifacts/file")).status).toBe(401);
-  const artifact = await fetch(origin + path + "/artifacts/file", {
-    headers: { authorization: `Bearer ${claim.agentToken}` },
-  });
-  expect(artifact.status).toBe(503);
-  expect(await artifact.json()).toMatchObject({
-    error: { code: "ARTIFACT_STORAGE_UNAVAILABLE" },
-  });
-  const upload = await fetch(origin + path + "/artifacts/file", {
-    method: "PUT",
-    headers: { "x-editor-secret": session.editorSecret },
-    body: "bytes",
-  });
-  expect(upload.status).toBe(503);
-  expect(await upload.json()).toMatchObject({
-    error: { code: "ARTIFACT_STORAGE_UNAVAILABLE" },
-  });
-  const project = emptyAgentProject();
-  project.id = "p";
-  project.documents[0]!.id = "doc";
-  project.topDocumentId = "doc";
-  const editor = liveAgentEditor({
-    project,
-    simulationService: async () =>
-      new Response("Simulator unavailable", { status: 503 }),
-  });
-  client.on("message", (data) => {
-    const envelope = JSON.parse(String(data));
-    if (envelope.kind !== "simulation-request") return;
-    void editor
-      .simulationHost!.handle(
-        AgentSimulationResourceRequestSchema.parse(envelope.payload),
-      )
-      .then((payload) =>
-        client.send(
-          JSON.stringify({ ...envelope, kind: "simulation-response", payload }),
-        ),
-      );
-  });
-  const simulation = await post(
-    path + "/simulation",
-    {
-      apiVersion: "3.0",
-      requestId: "no-simulator",
-      operation: "prepare",
-      source: {
-        kind: "project-folder",
-        folderId: "missing",
-        expectedStructureRevision: 0,
-      },
-    },
-    claim.agentToken,
-  );
-  expect(simulation.status).toBe(200);
-  // The editor no longer simulates (T006); its typed refusal passes through.
-  expect(await simulation.json()).toMatchObject({
-    ok: false,
-    error: { code: "SIMULATION_UNAVAILABLE" },
-  });
+  expect((await fetch(origin + path + "/status")).status).toBe(401);
+  for (const resource of ["simulation", "artifact-status", "artifacts/file"]) {
+    expect(
+      (
+        await fetch(origin + path + "/" + resource, {
+          headers: { authorization: `Bearer ${claim.agentToken}` },
+        })
+      ).status,
+    ).toBe(404);
+    expect(
+      (await post(path + "/" + resource, {}, claim.agentToken)).status,
+    ).toBe(404);
+  }
 });
 
 it("does not release a successful HTTP response when persistence fails", async () => {

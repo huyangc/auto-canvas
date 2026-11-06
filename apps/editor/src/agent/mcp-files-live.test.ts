@@ -142,7 +142,7 @@ describe("MCP file tools on the live editor", () => {
       }),
     ).toMatchObject({
       ok: false,
-      error: { code: "SIMULATION_UNAVAILABLE" },
+      error: { code: "INVALID_TOOL_INPUT" },
     });
     await expect(access(plotPath)).rejects.toThrow();
   });

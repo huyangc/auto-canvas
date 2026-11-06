@@ -47,7 +47,6 @@ import type {
   AgentPermissions,
   AgentRenderRequest,
   AgentSessionSnapshot,
-  AgentSimulationResourceCapability,
   AgentProjectResourceCapability,
   AgentTransactRequest,
 } from "./schema.js";
@@ -118,8 +117,6 @@ export interface AgentCircuitHostServiceOptions {
   limits?: Partial<AgentLimits>;
   /** Advertised independently from the four Circuit operations. */
   fileResource?: AgentFileResourceCapability;
-  /** The Simulation Resource sibling, advertised the same way. */
-  simulationResource?: AgentSimulationResourceCapability;
   /** Cloud Project Cell discovery/import sibling. */
   projectResource?: AgentProjectResourceCapability;
   /** The IDs an action list makes; random unless a test fixes them. */
@@ -415,9 +412,7 @@ export function createAgentCircuitService(
   const fileResource = useHost
     ? (options as AgentCircuitHostServiceOptions).fileResource
     : undefined;
-  const simulationResource = useHost
-    ? (options as AgentCircuitHostServiceOptions).simulationResource
-    : undefined;
+
   const projectResource = useHost
     ? (options as AgentCircuitHostServiceOptions).projectResource
     : undefined;
@@ -639,9 +634,6 @@ export function createAgentCircuitService(
               ? {
                   resources: {
                     file: fileResource,
-                    ...(simulationResource
-                      ? { simulation: simulationResource }
-                      : {}),
                     ...(projectResource ? { project: projectResource } : {}),
                   },
                 }

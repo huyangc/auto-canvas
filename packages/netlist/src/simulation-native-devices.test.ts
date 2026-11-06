@@ -13,18 +13,12 @@ import {
 } from "./simulation-native-devices.js";
 import { nativeAcquisitionEdit } from "./simulation-native-save-edit.js";
 import { compileSourceSimulation } from "./simulation-source-compile.js";
-import { parseVacaskRawfile } from "../../spice-run/src/vacask-rawfile.js";
-import { readVacaskSimulationData } from "@icm/spice-run";
-import { evaluateSimulationOutputs } from "../../simulation-service/src/output-evaluation.js";
-import { SimulationOutputDataSchema } from "../../simulation-service/src/contract.js";
-import { CapabilitiesSchema } from "../../simulation-service/src/contract.js";
-import { prepareSourceExecutionInput } from "../../simulation-service/src/prepare-source.js";
+import { parseVacaskRawfile } from "./test-support/vacask-rawfile.js";
 import {
   inspectNativeModelLibrarySymbols,
   type NativeModelLibrarySymbols,
 } from "./vacask-model-symbols.js";
 import { sha256Hex } from "@icm/derived";
-import { sourceProbeChoices } from "../../../apps/editor/src/features/simulation/source-probe-choices.js";
 
 // Illustrative default BSIM4, not a substitute for any foundry model.
 function fixture(pmos = false) {
@@ -105,7 +99,7 @@ endc
 }
 
 describe("native Canvas device acquisitions", () => {
-  it("shares digest/section-bound symbols with the picker, respecting conditional loads and authored shadows", () => {
+  it("respects digest/section-bound symbols, conditional loads and authored shadows", () => {
     const { project, folder, source } = fixture();
     const library: NativeModelLibrarySymbols = {
       dependencyId: "models",
@@ -125,11 +119,6 @@ describe("native Canvas device acquisitions", () => {
     const devices = () =>
       nativeSimulationDevices(project, folder.input, [library]);
     expect(devices().flatMap(nativeDeviceOpAcquisitions)).toHaveLength(18);
-    expect(
-      sourceProbeChoices(project, folder.input, [library]).filter(
-        (p) => p.kind === "device-op",
-      ),
-    ).toHaveLength(18);
     for (const replacement of [
       'include "library.inc" section=ff',
       '@if enabled\ninclude "library.inc" section=tt\n@end',
@@ -145,26 +134,6 @@ describe("native Canvas device acquisitions", () => {
     }
     folder.input.dependencies[0]!.sha256 = "b".repeat(64);
     expect(devices().flatMap(nativeDeviceOpAcquisitions)).toEqual([]);
-    const caps = {
-      configured: true,
-      inputs: ["source"],
-      analyses: ["op"],
-      parsedAnalyses: ["op"],
-      maxTimeoutMs: 10000,
-      maxInputBytes: 100000,
-      cancel: true,
-      profiles: [
-        {
-          id: "candidate",
-          corners: ["tt"],
-          dependencies: [{ id: "models", sha256: library.sha256 }],
-          modelSymbols: [library],
-        },
-      ],
-    };
-    expect(CapabilitiesSchema.safeParse(caps).success).toBe(true);
-    caps.profiles[0]!.dependencies[0]!.sha256 = "b".repeat(64);
-    expect(CapabilitiesSchema.safeParse(caps).success).toBe(false);
   });
   it("uses exact occurrence paths and returns separate model-native save selectors and raw keys", () => {
     const { project, folder } = fixture();
@@ -398,48 +367,25 @@ it.skipIf(!process.env.VACASK_BIN || !process.env.VACASK_MODULES)(
         "analysis proof op",
         "analysis proof op\nanalysis repeated op\nclear saves\nanalysis uncaptured op",
       );
-      const prepared = await prepareSourceExecutionInput(
-        project,
-        folder,
-        CapabilitiesSchema.parse({
-          configured: true,
-          rawfileCollection: "native-multi-ascii",
-          inputs: ["source"],
-          analyses: ["op"],
-          parsedAnalyses: ["op"],
-          profiles: [
-            {
-              id: "candidate",
-              corners: [],
-              dependencies: [{ id: dependency.id, sha256: dependency.sha256 }],
-              modelSymbols: [library],
-            },
-          ],
-          maxTimeoutMs: 10000,
-          maxInputBytes: 1000000,
-          cancel: true,
-        }),
-      );
-      if (!prepared.ok) throw Error(JSON.stringify(prepared.error));
+      // The standalone compiler resolves the same model bytes as a Project file.
+      folder.input.dependencies = [];
+      folder.input.files.push({
+        path: dependency.mountPath,
+        text: libraryText,
+      });
+      const prepared = compileSourceSimulation(project, folder);
+      if (!prepared.ok) throw Error(JSON.stringify(prepared.diagnostics));
       expect(prepared.deviceOperatingPoints).toHaveLength(2);
       expect(prepared.vectors).toHaveLength(acquisitions.length);
       const cwd = mkdtempSync(join(tmpdir(), "icm-native-device-helper-"));
-      for (const file of prepared.input.files!)
+      for (const file of prepared.files)
         writeFileSync(join(cwd, file.path), file.text);
       writeFileSync(join(cwd, dependency.mountPath), libraryText);
       const startup = join(cwd, "startup.toml");
       writeFileSync(startup, "# controlled native helper proof\n");
       const run = spawnSync(
         process.env.VACASK_BIN!,
-        [
-          "--tomlfile",
-          startup,
-          "-n",
-          "1",
-          "-b",
-          "1",
-          prepared.input.entryPath!,
-        ],
+        ["--tomlfile", startup, "-n", "1", "-b", "1", prepared.entry],
         {
           cwd,
           encoding: "utf8",
@@ -492,50 +438,17 @@ it.skipIf(!process.env.VACASK_BIN || !process.env.VACASK_MODULES)(
           ).toBeDefined();
         }
       }
-      const artifacts = ["proof", "repeated", "uncaptured"].map((name) => ({
-        path: `${name}.raw`,
-        text: readFileSync(join(cwd, `${name}.raw`), "utf8"),
-      }));
-      const numeric = readVacaskSimulationData(
-        artifacts,
-        artifacts.map((a) => ({
-          artifactPath: a.path,
-          plotOrdinal: 0,
-          analysis: "op" as const,
-        })),
+      // Repeated and uncaptured runs preserve compiler-selected raw keys.
+      const repeated = parseVacaskRawfile(
+        readFileSync(join(cwd, "repeated.raw"), "utf8"),
       );
-      if (numeric.status !== "read") throw Error(JSON.stringify(numeric));
-      const outputs = evaluateSimulationOutputs(
-        numeric.data,
-        prepared.vectors,
-        prepared.outputs,
-        [],
-        prepared.deviceOperatingPoints,
-        true,
-      );
-      expect(SimulationOutputDataSchema.safeParse(outputs).success).toBe(true);
-      expect(outputs.diagnostics).toEqual([]);
-      expect(outputs.deviceOperatingPoints).toHaveLength(4);
-      expect(
-        outputs.deviceOperatingPoints?.map((d) => d.analysisIndex),
-      ).toEqual([0, 0, 1, 1]);
-      for (const device of outputs.deviceOperatingPoints!) {
-        expect(device.values).toHaveLength(9);
-        for (const value of device.values) {
-          const expected = reference.plots[0]!.vectors.find(
-            (v) =>
-              v.variable.name === `${pmos ? "P" : "N"}1.${value.parameter}`,
-          )?.real[0];
-          expect(value.status).toBe("available");
-          if (value.status !== "available") throw Error(value.reason);
-          expect(value.value).toBeCloseTo(expected!, 11);
-        }
-      }
-      // No phantom OP rows after clear saves, and no reclassification of
-      // the untouched native artifact bytes to make a missing value appear.
-      expect(
-        outputs.deviceOperatingPoints?.some((d) => d.analysisIndex === 2),
-      ).toBe(false);
+      if (!repeated.ok) throw Error(repeated.error.message);
+      for (const vector of prepared.vectors)
+        expect(
+          repeated.plots[0]!.vectors.some(
+            (v) => v.variable.name === vector.vector,
+          ),
+        ).toBe(true);
     }
   },
 );

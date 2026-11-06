@@ -492,7 +492,6 @@ test("grants a browser Agent, edits through the live host, and shares undo", asy
           "project.download",
           "project.import",
           "visual.download",
-          "simulation.run",
         ].sort(),
       );
       await route.fulfill({
@@ -545,7 +544,7 @@ test("grants a browser Agent, edits through the live host, and shares undo", asy
   await expect(page.getByTestId("agent-status")).toContainText("Connected");
 
   const send = async (
-    kind: "circuit" | "file" | "project" | "simulation",
+    kind: "circuit" | "file" | "project",
     requestId: string,
     payload: Record<string, unknown>,
   ): Promise<SessionMessage> => {
@@ -591,17 +590,6 @@ test("grants a browser Agent, edits through the live host, and shares undo", asy
       })
     ).payload,
   ).toMatchObject({ ok: false, error: { code: "FILE_REQUEST_INVALID" } });
-  expect(
-    (
-      await send("simulation", "invalid-simulation", {
-        operation: "start",
-        preparedId: "missing-digest",
-      })
-    ).payload,
-  ).toMatchObject({
-    ok: false,
-    error: { code: "SIMULATION_REQUEST_INVALID", recovery: "fix-input" },
-  });
 
   const edit = {
     operation: "transact",

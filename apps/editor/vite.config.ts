@@ -8,7 +8,6 @@ import { defineConfig, type Plugin } from "vite";
 import { localNetlistConversion } from "./dev/netlist-conversion";
 import { apiServerProxy } from "./dev/api-server-proxy.js";
 import { localAgentRelay } from "./dev/agent-relay";
-import { localReplica } from "./dev/local-replica";
 import { lockedCanvasPackage } from "./build/rnl-canvas-package";
 
 function isolateDevDependencyCache(): Plugin {
@@ -56,7 +55,7 @@ function versionStaticServiceWorker(): Plugin {
 }
 
 export default defineConfig({
-  // The Worker serves the editor from a domain root, so assets are absolute.
+  // The server serves the editor from a domain root, so assets are absolute.
   base: "/",
   // The rnl runtime's Worker awaits at its top level, so Workers bundle as
   // ES modules; every Worker here is a module Worker already.
@@ -71,8 +70,6 @@ export default defineConfig({
     localAgentRelay(),
     apiServerProxy(),
     localNetlistConversion(),
-    // After the Agent relay, whose narrower /api/agent/ proxy must win.
-    localReplica(),
     versionStaticServiceWorker(),
   ],
 });

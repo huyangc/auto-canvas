@@ -11,7 +11,7 @@ import {
   nativeControlContext,
   nativeVoltageSelectorNode,
 } from "./vacask-language.js";
-import { parseVacaskRawfile } from "../../spice-run/src/vacask-rawfile.js";
+import { parseVacaskRawfile } from "./test-support/vacask-rawfile.js";
 
 describe("native language helpers", () => {
   it("shares inspectable postprocess helpers without evaluating or inventing measurements", () => {

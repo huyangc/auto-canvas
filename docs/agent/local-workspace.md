@@ -33,7 +33,7 @@ jq -n --rawfile text ws/reference.sp '{expectedNetlist:{text:$text}}' \
 
 `render` returns the formal SVG, `netlist_code` `{"action":"read"}` the
 netlist, `export_file` `{"artifact":"project"}` a Project copy. Refused:
-simulation (`SIMULATION_UNAVAILABLE`), Gallery, Cloud and tabs
+Gallery, Cloud and tabs
 (`gallery_circuits`, `project_cells`) and figure exports, which need a page
 (`WEBSITE_REQUIRED`).
 

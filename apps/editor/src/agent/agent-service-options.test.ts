@@ -17,7 +17,7 @@ describe("live editor capability announcement", () => {
     const editor = liveAgentEditor();
     await editor.client.connect("session-1.code");
     expect(
-      (await editor.client.capabilities()).capabilities.resources?.simulation,
-    ).toBeUndefined();
+      (await editor.client.capabilities()).capabilities.resources,
+    ).not.toHaveProperty("simulation");
   });
 });

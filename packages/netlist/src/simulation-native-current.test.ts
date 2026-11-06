@@ -17,7 +17,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { parseVacaskRawfile } from "../../spice-run/src/vacask-rawfile.js";
+import { parseVacaskRawfile } from "./test-support/vacask-rawfile.js";
 
 function fixture(m = "1") {
   const project = createEmptyProject("p", "Terminal sensing", "dut");

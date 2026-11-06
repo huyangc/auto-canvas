@@ -3,17 +3,8 @@ import { z } from "zod";
 import { inputContract } from "./input-contract.js";
 import { FOCUSED_TOOLS } from "./focused-tools.js";
 import { inlineSchema } from "./inline-schema.js";
-import {
-  callTool,
-  describeToolContract,
-  listToolDefinitions,
-  toolInputSchema,
-} from "./tools.js";
-import {
-  contractOperations,
-  properties,
-  selectToolSchema,
-} from "./tool-contracts.js";
+import { callTool, listToolDefinitions, toolInputSchema } from "./tools.js";
+import { contractOperations, properties } from "./tool-contracts.js";
 
 // The first tool listing builds every tool's contract: about a second
 // alone, and past the 5 s a test gets beside the full suite on a CI runner.
@@ -38,63 +29,6 @@ describe("caller input contracts", () => {
     });
   });
 
-  it("keeps update defaults optional in discovery and precise queries", () => {
-    const tool = listToolDefinitions().find(
-      (t) => t.name === "simulation_edit",
-    )!;
-    const selected = selectToolSchema(tool.inputSchema, ["update"]) as any;
-    expect(selected.properties.request.required).not.toContain("patches");
-    const field = describeToolContract({
-      tool: "simulation_edit",
-      operations: ["update"],
-      field: "/request/patches",
-    }) as any;
-    expect(field.variants[0].required).toBe(false);
-  });
-
-  it("rejects wrong tuple lengths at the selected nested field without network access", async () => {
-    const args = {
-      request: {
-        action: "prepare-plot",
-        runId: "run",
-        name: "plot",
-        panels: [
-          {
-            analysisIndex: 0,
-            signals: [{ signal: "v(out)" }],
-            xRange: [0, 1, 2],
-          },
-        ],
-      },
-    };
-    for (const tool of ["simulation_files", "simulation_plot"]) {
-      const result = await callTool(tool, args, {} as never);
-      expect(result.isError).toBe(true);
-      const failure = JSON.parse(result.content[0]!.text!);
-      expect(failure.error.issues).toContainEqual(
-        expect.objectContaining({
-          path: ["request", "panels", 0, "xRange"],
-          code: "too_big",
-          message: "Expected exactly two numbers: [minimum, maximum].",
-        }),
-      );
-      expect(failure.error.details).toBeDefined();
-      // Details must not re-expand unrelated file/workspace union branches.
-      if (failure.error.details[0].code === "invalid_union")
-        expect(failure.error.details[0].errors).toHaveLength(1);
-      else expect(failure.error.details[0].code).toBe("too_big");
-    }
-    const field = describeToolContract({
-      tool: "simulation_plot",
-      field: "/request/panels/*/xRange",
-    }) as any;
-    expect(field.variants[0].schema).toMatchObject({
-      minItems: 2,
-      maxItems: 2,
-      description: "Exactly two numbers: [minimum, maximum].",
-    });
-  });
-
   it("says what would pass: the known keys, values, limits and type (#1464)", async () => {
     const issue = async (tool: string, args: unknown) => {
       const result = await callTool(tool, args, {} as never);
@@ -113,12 +47,12 @@ describe("caller input contracts", () => {
     });
     // An object in a union lists the keys of the branch its action selects.
     expect(
-      await issue("simulation_files", { request: { action: "list", page: 2 } }),
+      await issue("project_cells", { action: "list-projects", page: 2 }),
     ).toMatchObject({
-      path: ["request"],
+      path: [],
       code: "unrecognized_keys",
       keys: ["page"],
-      allowed: ["action", "owner"],
+      allowed: ["action"],
     });
     expect(await issue("render", { mode: "raw" })).toMatchObject({
       path: ["mode"],
@@ -211,12 +145,12 @@ describe("caller input contracts", () => {
           values: issue.values,
         });
     }
-    expect(checked).toBeGreaterThan(20);
+    expect(checked).toBe(15);
   });
 
   it("does not guess a union branch for an unknown operation or expose submitted values", async () => {
     const result = await callTool(
-      "simulation_files",
+      "user_components",
       {
         request: { action: "private-unknown-action", secret: "private-value" },
       },
@@ -226,7 +160,7 @@ describe("caller input contracts", () => {
     expect(JSON.stringify(result)).not.toContain("private-");
     expect(JSON.parse(result.content[0]!.text!).error.issues[0]).toMatchObject({
       path: ["request", "action"],
-      values: contractOperations(toolInputSchema("simulation_files")!),
+      values: contractOperations(toolInputSchema("user_components")!),
     });
     expect(result.content[0]!.text!.length).toBeLessThan(1500);
     expect(

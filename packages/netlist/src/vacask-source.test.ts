@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { parseVacaskRawfile } from "../../spice-run/src/vacask-rawfile.js";
+import { parseVacaskRawfile } from "./test-support/vacask-rawfile.js";
 import { SimulationSourceInputSchema, SourceSpanSchema } from "@icm/model";
 import {
   inspectVacaskSource,

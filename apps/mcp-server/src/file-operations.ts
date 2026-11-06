@@ -98,7 +98,6 @@ export async function exportFile(
     operation: "download",
     artifact: options.artifact,
     ...(options.documentId ? { documentId: options.documentId } : {}),
-    ...(options.simulation ? { simulation: options.simulation } : {}),
   });
   if (!response.ok || response.operation !== "download") {
     throw requestFailure(

@@ -25,8 +25,7 @@ terminal session recovery requires it.
 Circuit operations are exactly `capabilities`, `snapshot`, `transact` and
 `render`. A transact carries exactly one of edits, structureEdits, wireIntent,
 semanticIntent, a browser-planned command, or high-level actions; commands and
-actions reuse the GUI planners and Edit Engine. Simulation
-(capabilities/run/prepare/start/read/cancel/export) and File are sibling
+actions reuse the GUI planners and Edit Engine. File and Project are sibling
 resources. The static authoring catalog is not Project state.
 
 Reuse a request ID only for an exact-payload retry. The current OpenAPI and

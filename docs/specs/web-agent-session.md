@@ -2,8 +2,9 @@
 
 Status: `accepted`
 
-Primary owners: `worker/agent-session.ts`, `worker/agent-session-runtime.ts`,
-`worker/agent-session-do.ts`, and `apps/editor/src/agent`
+Primary owners: `apps/server/src/agent-relay/agent-session.ts`,
+`apps/server/src/agent-relay/agent-session-runtime.ts`,
+`apps/server/src/agent-relay/agent-session-do.ts`, and `apps/editor/src/agent`
 
 The browser Project is authoritative; the relay only forwards. Circuit
 operations are in the [Agent API](agent-api.md).
@@ -15,7 +16,6 @@ POST /api/agent/connectors/resume
 GET  /api/agent/sessions/{sessionId}/status
 POST /api/agent/sessions/{sessionId}/circuit
 POST /api/agent/sessions/{sessionId}/files
-POST /api/agent/sessions/{sessionId}/simulation
 POST /api/agent/sessions/{sessionId}/projects
 GET  /api/agent/openapi.json
 ```
@@ -53,7 +53,7 @@ GET  /api/agent/openapi.json
 - Claim redeemable 30 minutes; bearer ≤ 8 hours, never persisted; session and
   connector expire after 30 minutes idle (no absolute limit); idempotent
   results cached 5 minutes within entry/byte ceilings.
-- Idle is reset by redemption, admitted Circuit/File/Simulation/Project
+- Idle is reset by redemption, admitted Circuit/File/Project
   operations and responses, manual Document edits (Cell roster included) and
   pause/resume; not by capabilities probes, connector refresh, heartbeat
   acks, SSE keepalives or reconnects.
@@ -93,9 +93,8 @@ GET  /api/agent/openapi.json
   empty and circuit operations return `NO_ACTIVE_PROJECT`. Manual pause stays
   authoritative across completion, recovery and renewal; transport failure
   never revokes.
-- The editor does not advertise a Simulation resource or simulation file
-  operations. Inherited requests receive `SIMULATION_UNAVAILABLE`; the legacy
-  relay/API definitions remain until their separate removal.
+- Simulation and artifact-transfer routes are removed; see the
+  [removed operations](agent-api.md#sibling-resources).
 - Project resource `workspace` lists live tabs and Cell revisions, activates,
   opens, saves and copies into a live target via the GUI planner (one Undo);
   Cloud discovery and `import-cell` read saved versions only.
@@ -155,10 +154,7 @@ reconciles, never blindly replays.
 - Circuit scopes: Snapshot, render, source spans, geometry, connectivity,
   presentation, semantic editor control. File scopes: Project download, visual
   download, staging (`project.import`, which also gates the Project resource).
-  `simulation.run` covers Simulation operations and simulation workspaces
-  (capability/help requests need none); saving a Project-folder source needs
-  `simulation.run` + `project.import` (+ connectivity edit if it edits the
-  circuit). `gallery.publish` is independent of edit scopes; older sessions
+  `gallery.publish` is independent of edit scopes; older sessions
   need a new connection for it.
 - Semantic control selects a locator, highlights a Net, activates/fits a Cell
   or clears focus; never advances revision or history.

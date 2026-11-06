@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ComponentLibrarySummarySchema } from "@icm/agent-adapter";
-import { nativePackage } from "../../../worker/component-library.test-support";
+import { nativePackage } from "./component-library.test-support";
 import { summarizeSharedComponent } from "@icm/component-library";
 
 describe("component discovery diagnostics", () => {
@@ -13,7 +13,7 @@ describe("component discovery diagnostics", () => {
         ...payload,
         id: "bad-source",
         revision: 1,
-        authorId: "alice",
+        authorId: "local",
         author: "Alice",
         status: "shared",
         createdAt: "2026-01-01",

@@ -26,11 +26,3 @@ export async function signIn(
 }
 
 /** Offer these sign-in methods. */
-export async function mockProviders(
-  target: Page | BrowserContext,
-  providers: { github: boolean; google: boolean; email: boolean },
-): Promise<void> {
-  await target.route("**/api/auth/providers", (route) =>
-    route.fulfill({ json: providers }),
-  );
-}

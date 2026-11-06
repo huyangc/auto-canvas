@@ -34,24 +34,20 @@ user's restart or a new conversation, never an automatic restart.
   after a known human change.
 
 Plan with the current revision; accepted receipts need no reread. Replan after
-a stale revision and keep `verify` for milestones. Simulation `prepare`
-freezes its input, so start/read/download need no circuit reread.
+a stale revision and keep `verify` for milestones.
 
 ## Task guidance
 
 - Circuit editing: [authoring](shared/authoring.md), then the built-in catalog
   for unfamiliar symbols (`analog-canvas://catalog/builtins?symbols=nmos,pmos,port`
   selects IDs); [tool details](mcp/tools.md) for less common calls.
-- Simulation: [simulation calls](mcp/simulation.md); any authored or imported
-  circuit is a valid input.
-- Failures: [recovery](response-semantics.md). Keep uncertain write/start
-  identities and reconcile before repeating; never restart a run to fetch
-  results.
+- Failures: [recovery](response-semantics.md). Keep uncertain write
+  identities and reconcile before repeating.
 - Gallery reuse: `gallery_circuits` `action:"insert"` (entry ID,
   `targetDocumentId`, `position`; one undo, no tab), with the Editor's login.
 
 Use displayed parameters directly; `describe_tool` (`tool`, `operations`,
-`field`, e.g. `{"tool":"simulation_plot","field":"/request/formats"}`) is for
+`field`, e.g. `{"tool":"circuit_place","field":"/actions"}`) is for
 unfamiliar fields, never a prerequisite.
 
 Sessions renew on Agent operations and manual edits with a 30-minute idle

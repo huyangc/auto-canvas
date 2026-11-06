@@ -123,11 +123,11 @@ their IDs, never resolved to the first.
   - for a logic gate, a standard cell of its function and input count: SKY130
     HD (`sky130_fd_sc_hd__nand2_1`), IHP SG13G2 (`sg13g2_nand2_1`) or TSMC 28
     HPC+ 12-track (`ND2D1BWP12T30P140`, `…LVT`), any drive or variant, called
-    in library pin order and defined by the library's `.include`. Hosted
-    ngspice simulates SKY130 HD; a Profile without the library refuses
-    (`STANDARD_CELL_LIBRARY_UNAVAILABLE`); another pin order or no matching
-    gate is `STANDARD_CELL_UNSUPPORTED`; another function is refused with the
-    cells that fit. A SPICE-imported cell stays an external block.
+    in library pin order and defined by the library's `.include`. Supply the
+    matching model and cell sources when using an external simulator. Another
+    pin order or no matching gate is `STANDARD_CELL_UNSUPPORTED`; another
+    function is refused with the cells that fit. A SPICE-imported cell stays
+    an external block.
   - an external subcircuit of the Project (SPICE-imported or model-source), by
     name or ID.
 
@@ -527,7 +527,7 @@ overwriting. Keep inactive Custom artwork and unfinished text intact.
 invalid text; it never changes executable facts. `authoring-save` saves the
 non-executable draft. `authoring-apply` with `dryRun:true` validates through the
 GUI planner without writing; actual Apply advances the same applied facts
-used by placement, netlist copy/export and simulation. Validation may be
+used by placement and netlist copy/export. Validation may be
 pending just after an update; wait for the Editor and reread. Library editing
 is isolated from drawing captures. Applying and saving do not publish.
 
@@ -599,9 +599,9 @@ publish. Dry-run and revision guards apply as for other authoring commands.
 
 Only reviewed core SKY130 1.8 V and IHP SG13G2 low-voltage MOS conversions
 exist; others refuse without partial change; converted spans cannot be reverse
-edited. Only the SPICE projection runs (on qualified ngspice), whatever the
-source language. Invalid raw text belongs in `save_model_source_draft`;
-export, clipboard and simulation use the applied revision and owned helpers.
+edited. Export the SPICE projection with its model sources for external
+simulation. Invalid raw text belongs in `save_model_source_draft`;
+export and clipboard use the applied revision and owned helpers.
 Raw upsert may add an imported owner, never replace an applied one; fork by
 applying a new owner and definition ID with nonconflicting names. Never
 duplicate a Project model in an experiment. Apply neither runs SPICE nor

@@ -2,7 +2,7 @@
 
 Status: `accepted`
 
-Primary owner: Worker Cloud Project storage, `packages/project-protocol`, and
+Primary owner: Node server Project storage, `packages/project-protocol`, and
 the editor document lifecycle
 
 Web: a private Cloud Project is the saved resource; `.icproj.json` is
@@ -129,8 +129,8 @@ Branch (independent Project without that binding). Routes:
 `GET /api/projects/:id/versions`, version `project`/`preview.svg` reads,
 `POST .../versions/:versionId/restore`; private, not cached. Full-store
 backups include snapshots; Gallery-only backups do
-not. Storage: [Cloud Project storage](../../worker/gallery-store-cloud-projects.ts);
-authorization: [HTTP handler](../../worker/gallery-cloud-projects.ts).
+not. Storage and HTTP boundaries: [Project handler](../../apps/server/src/projects.ts)
+and the [server contract](server.md).
 
 ### Working-copy transitions
 

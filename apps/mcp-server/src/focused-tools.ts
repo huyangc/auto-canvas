@@ -5,83 +5,8 @@ import {
   type ContractTool,
 } from "./tool-contracts.js";
 
-export function canonicalSimulationSchema(schema: Record<string, unknown>) {
-  const copy = structuredClone(schema) as Record<string, any>;
-  const request = copy.properties?.request;
-  const key = request?.oneOf ? "oneOf" : request?.anyOf ? "anyOf" : undefined;
-  if (!key) return copy;
-  request[key] = request[key].map((branch: Record<string, any>) => {
-    if (!branch.properties?.action) return branch;
-    const { action, ...properties } = branch.properties;
-    return {
-      ...branch,
-      properties: { ...properties, operation: action },
-      required: (branch.required ?? []).map((name: string) =>
-        name === "action" ? "operation" : name,
-      ),
-    };
-  });
-  return copy;
-}
-
 /** A routing map, not a second parameter contract or an execution engine. */
 export const FOCUSED_TOOLS = [
-  {
-    name: "simulation_source",
-    source: "simulation_files",
-    operations: ["list", "create", "read", "discard"],
-  },
-  {
-    name: "simulation_edit",
-    source: "simulation_files",
-    operations: ["update"],
-  },
-  {
-    name: "simulation_data",
-    source: "simulation_files",
-    operations: ["workspace", "sync", "download", "artifact"],
-  },
-  {
-    name: "simulation_plot",
-    source: "simulation_files",
-    operations: ["prepare-plot"],
-  },
-  {
-    name: "simulation_results",
-    source: "simulation",
-    operations: [
-      "catalog",
-      "history",
-      "history-usage",
-      "resource-usage",
-      "history-delete",
-      "export",
-    ],
-  },
-  {
-    name: "simulation_run",
-    source: "simulation",
-    operations: [
-      "capabilities",
-      "authoring-help",
-      "run",
-      "prepare",
-      "start",
-      "read",
-      "cancel",
-    ],
-  },
-  {
-    name: "simulation_batch",
-    source: "simulation",
-    operations: [
-      "prepare-batch",
-      "prepare-sweep",
-      "start-batch",
-      "read-batch",
-      "cancel-batch",
-    ],
-  },
   {
     name: "circuit_place",
     source: "apply_actions",
@@ -182,10 +107,7 @@ export function focusedTools<S>(
           original.definition.inputSchema,
           operations,
         );
-        derived =
-          source === "simulation_files"
-            ? canonicalSimulationSchema(selectedSchema)
-            : selectedSchema;
+        derived = selectedSchema;
       }
       return derived;
     };

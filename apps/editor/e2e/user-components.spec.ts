@@ -11,7 +11,6 @@ import {
 } from "./editor-fixtures";
 import { openSelectionShelf, placeComponent } from "./manual-editor-fixtures";
 import { placedInstance, onScreen, drawWire } from "./canvas-fixtures";
-import { mockProviders, sessionUser, signIn } from "./account-fixtures";
 import { analyzeDesignNetlist, createDesignNetlistExport } from "@icm/netlist";
 import { builtInSymbols, createProjectSymbolResolver } from "@icm/symbols";
 import { deviceDescriptor } from "@icm/devices";
@@ -26,7 +25,7 @@ import {
   type Page,
   type Locator,
 } from "@playwright/test";
-import { DatabaseSync } from "node:sqlite";
+import { componentLibraryStorage } from "../../server/src/component-library-browser.test-support";
 import { createEmptyProject, routeEnd, type CircuitProject } from "@icm/model";
 import { parseProject, serializeProject } from "@icm/project-protocol";
 import {
@@ -35,57 +34,37 @@ import {
 } from "@icm/edit-engine";
 import { newComponentDefinition } from "../src/features/user-components/component-definition-edit";
 import { publishedDefinition } from "@icm/component-library";
-import {
-  ComponentLibraryDO,
-  routeComponentLibraryRequest,
-} from "../../../worker/component-library";
-
-/** Browser journeys use the real HTTP policy and SQLite storage, with isolated test sessions. */
-function library() {
+/** Browser journeys exercise the server's HTTP policy and isolated PostgreSQL storage. */
+async function library() {
   let dropPublicationResponse = false;
   let catalogPageSize: number | undefined;
-  const db = new DatabaseSync(":memory:");
-  const durable = new ComponentLibraryDO({
-    storage: {
-      sql: {
-        exec<T>(sql: string, ...bindings: (string | number | null)[]) {
-          const statement = db.prepare(sql);
-          if (sql.trim().startsWith("SELECT"))
-            return { toArray: () => statement.all(...bindings) as T[] };
-          statement.run(...bindings);
-          return { toArray: () => [] as T[] };
-        },
-      },
-      transactionSync<T>(fn: () => T): T {
-        return fn();
-      },
-    },
-  });
+  const contexts = new Set<BrowserContext>();
+  const { app, db, close } = await componentLibraryStorage();
   return {
-    // Fault journeys need several pages even when the client requests a
-    // larger batch. The real server still owns rows, cursors and revisions.
     limitCatalogPages(size: number) {
       catalogPageSize = size;
     },
-    seedHistoricalDefinition(id: string, definition: unknown) {
-      db.prepare(
+    async seedHistoricalDefinition(id: string, definition: unknown) {
+      await db.query(
         `INSERT INTO components
         (id, revision, author_id, author, status, created_at, updated_at, name, definition)
-        VALUES (?, 1, 'alice', 'Alice', 'shared', '2026-01-01', '2026-01-01', ?, ?)`,
-      ).run(
-        id,
-        (definition as { symbol: { name: string } }).symbol.name,
-        JSON.stringify(definition),
+        VALUES ($1, 1, 'local', 'Alice', 'shared', '2026-01-01', '2026-01-01', $2, $3)`,
+        [
+          id,
+          (definition as { symbol: { name: string } }).symbol.name,
+          JSON.stringify(definition),
+        ],
       );
     },
-    /** Seeds revision 1 of a new component definition named `name`. */
-    seedPublished(id: string, name: string) {
+    async seedPublished(id: string, name: string) {
       const definition = newComponentDefinition();
       definition.symbol.name = name;
-      this.seedHistoricalDefinition(id, publishedDefinition(definition, id, 1));
+      await this.seedHistoricalDefinition(
+        id,
+        publishedDefinition(definition, id, 1),
+      );
       return definition;
     },
-    /** Signs the page's browser in as `identity` (null: signed out), then opens a new editor. */
     async openEditorAs(page: Page, identity: string | null) {
       await this.connect(page.context(), identity);
       await openBlankEditor(page);
@@ -93,75 +72,72 @@ function library() {
     dropNextPublicationResponse: () => {
       dropPublicationResponse = true;
     },
-    close: () => db.close(),
-    async connect(context: BrowserContext, identity: string | null) {
-      const user = identity
-        ? sessionUser({
-            id: identity,
-            displayName: identity,
-            email: `${identity}@example.com`,
-            isAdmin: identity === "admin",
-          })
-        : null;
+    async close() {
+      for (const context of contexts)
+        await context.unrouteAll({ behavior: "wait" });
+      await close();
+    },
+    async connect(context: BrowserContext, displayName: string | null) {
+      if (!contexts.has(context)) {
+        contexts.add(context);
+        context.once("close", () => contexts.delete(context));
+      }
       await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-      await signIn(context, user);
-      await mockProviders(context, {
-        github: true,
-        google: false,
-        email: false,
+      await app.request("/api/auth/me");
+      if (displayName)
+        await db.query("UPDATE users SET display_name=$1 WHERE id='local'", [
+          displayName,
+        ]);
+      await context.route("**/api/auth/**", async (route) => {
+        const response = await app.request(
+          new URL(route.request().url()).pathname,
+        );
+        await route.fulfill({
+          status: response.status,
+          contentType: "application/json",
+          body: await response.text(),
+        });
       });
       await context.route("**/api/components**", async (route) => {
-        const headers = {
-          ...route.request().headers(),
-          ...(identity ? { cookie: `icm_session=${identity}` } : {}),
-        };
         const address = new URL(route.request().url());
         if (catalogPageSize && address.searchParams.has("catalog"))
           address.searchParams.set("limit", String(catalogPageSize));
-        const response = await routeComponentLibraryRequest(
+        const response = await app.request(
           new Request(address, {
             method: route.request().method(),
-            headers,
+            headers: route.request().headers(),
             ...(route.request().postData()
               ? { body: route.request().postData()! }
               : {}),
           }),
-          {
-            COMPONENT_LIBRARY: {
-              getByName: () => ({
-                fetch: (input, init) => durable.fetch(new Request(input, init)),
-              }),
-            },
-            AUTH: {
-              getByName: () => ({ fetch: async () => Response.json({ user }) }),
-            },
-          },
         );
         if (
           dropPublicationResponse &&
           route.request().method() === "PUT" &&
-          response!.ok
+          response.ok
         ) {
           dropPublicationResponse = false;
           await route.abort("failed");
           return;
         }
         await route.fulfill({
-          status: response!.status,
+          status: response.status,
           contentType: "application/json",
-          body: await response!.text(),
+          body: await response.text(),
         });
       });
     },
   };
 }
 
-/** Each test owns a fresh library, closed when the test ends. */
-const test = base.extend<{ service: ReturnType<typeof library> }>({
+const test = base.extend<{ service: Awaited<ReturnType<typeof library>> }>({
   service: async ({}, provideService) => {
-    const service = library();
-    await provideService(service);
-    service.close();
+    const service = await library();
+    try {
+      await provideService(service);
+    } finally {
+      await service.close();
+    }
   },
 });
 
@@ -210,9 +186,6 @@ const requestComponent = (
 /** Writes a public record through the real library API, returning its status. */
 const putComponent = (page: Page, id: string, body: unknown) =>
   requestComponent(page, id, "PUT", body);
-/** An administrator's soft deletion of revision 1, returning its status. */
-const deleteComponent = (page: Page, id: string) =>
-  requestComponent(page, id, "PATCH", { revision: 1, status: "deleted" });
 async function copyText(page: Page, field: Locator) {
   await field.focus();
   await page.keyboard.press("ControlOrMeta+a");
@@ -395,37 +368,14 @@ async function authoringView(
   }
 }
 
-test("account changes clear cached details and deleted cards while offline focus retains the catalog", async ({
+test("offline focus retains the component catalog and offers retry", async ({
   page,
   context,
   service,
 }) => {
-  service.seedPublished("retained-detail", "Retained detail");
-  await service.openEditorAs(page, "admin");
+  await service.seedPublished("offline-public", "Offline public");
+  await service.openEditorAs(page, "local");
   const dialog = await openUserComponents(page);
-  await clickLibraryAction(dialog, "Details for Retained detail");
-  await expect(
-    dialog.getByRole("heading", { name: "Retained detail", exact: true }),
-  ).toBeVisible();
-  await button(dialog, "Close").click();
-  expect(await deleteComponent(page, "retained-detail")).toBe(200);
-  // Changing accounts clears retained private detail before any new selection.
-  await context.unroute("**/api/auth/me");
-  await context.unroute("**/api/components**");
-  await service.connect(context, null);
-  await openUserComponents(page);
-  await expect(
-    dialog.getByRole("heading", { name: "Retained detail", exact: true }),
-  ).toHaveCount(0);
-  await expect(button(dialog, "Place Retained detail")).toHaveCount(0);
-  await expect(dialog.locator(".user-component-detail")).toHaveCount(0);
-
-  await context.unroute("**/api/auth/me");
-  await context.unroute("**/api/components**");
-  await service.connect(context, "admin");
-  service.seedPublished("offline-public", "Offline public");
-  await button(dialog, "Close").click();
-  await openUserComponents(page);
   await expect(button(dialog, "Place Offline public")).toBeVisible();
   const offline = (route: import("@playwright/test").Route) =>
     route.abort("failed");
@@ -435,21 +385,6 @@ test("account changes clear cached details and deleted cards while offline focus
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await expect(button(dialog, "Try Again")).toBeVisible();
   await expect(button(dialog, "Place Offline public")).toBeVisible();
-  await context.unroute("**/api/auth/me");
-  await context.unroute("**/api/components?**", offline);
-  await context.unroute("**/api/components**");
-  await service.connect(context, "admin");
-  await openShelf(page, "Deleted (all)");
-  await expect(button(dialog, "Place Retained detail")).toBeVisible();
-  await context.unroute("**/api/auth/me");
-  await context.unroute("**/api/components**");
-  await service.connect(context, null);
-  await button(dialog, "Close").click();
-  await openUserComponents(page);
-  await expect(dialog.locator(".user-component-tile")).toHaveCount(1);
-  await expect(button(dialog, "Place Offline public")).toBeVisible();
-  await expect(button(dialog, "Place Retained detail")).toHaveCount(0);
-  await expect(button(dialog, "Show available components")).toHaveCount(0);
 });
 
 test("public symbol placement connects contacts atomically and keeps the clicked orientation during a revision check", async ({
@@ -457,7 +392,7 @@ test("public symbol placement connects contacts atomically and keeps the clicked
   context,
   service,
 }) => {
-  service.seedPublished("contact-block", "Contact block");
+  await service.seedPublished("contact-block", "Contact block");
   await service.openEditorAs(page, "alice");
   await placeFromLibrary(page, "Contact block");
   const before = await readProject(page);
@@ -518,7 +453,10 @@ test("library selection refuses a revision changed during preview and editing re
   page,
   service,
 }) => {
-  const definition = service.seedPublished("revision-guard", "Revision guard");
+  const definition = await service.seedPublished(
+    "revision-guard",
+    "Revision guard",
+  );
   await service.openEditorAs(page, "alice");
   const dialog = await openUserComponents(page);
   await clickLibraryAction(dialog, "Details for Revision guard");
@@ -584,6 +522,7 @@ async function editDefinition(page: Page, name: string) {
   await code.fill(JSON.stringify(value, null, 2));
 }
 async function clickLibraryAction(scope: Page | Locator, name: string) {
+  name = name.replace(/^Edit (.*) definition$/, "Manage $1");
   const componentName = name
     .replace(
       /^(Details for |Copy raw record for |Create from |Manage |Review |Edit )/,
@@ -631,7 +570,7 @@ test("historical invalid pin mappings remain inspectable without blocking valid 
   healthy.symbol.name = "Healthy device";
   await publishComponent(page, "healthy-device", healthy);
   const legacy = legacyDefinition("legacy-interface", "Legacy device");
-  service.seedHistoricalDefinition("legacy-device", legacy);
+  await service.seedHistoricalDefinition("legacy-device", legacy);
   const dialog = await openUserComponents(page);
   await expect(button(dialog, "Place Healthy device")).toBeVisible();
   const rejected = dialog.getByTestId("rejected-user-component");
@@ -690,7 +629,7 @@ test("automatically loads all components and retries an interrupted page without
     "legacy-paged-interface",
     "Legacy paged device",
   );
-  service.seedHistoricalDefinition("paged-device-43", legacy);
+  await service.seedHistoricalDefinition("paged-device-43", legacy);
   let failNextPage = true;
   let failFirstPage = true;
   const cursors: (string | null)[] = [];
@@ -764,7 +703,7 @@ test("library preview fits actual off-viewBox artwork without changing the store
     },
   ];
   definition.symbol.primitives = [boxOutline(500, 200, 600, 280)];
-  service.seedHistoricalDefinition("offset-symbol", definition);
+  await service.seedHistoricalDefinition("offset-symbol", definition);
   await service.openEditorAs(page, null);
   await openUserComponents(page);
   const tile = button(page, "Place Offset symbol");
@@ -861,16 +800,13 @@ test("library cards separate artwork, long titles and authors at narrow and zoom
       exact: true,
     });
     await menuToggle.click();
-    const editBounds = (await button(
-      dialog,
-      `Edit ${name} definition`,
-    ).boundingBox())!;
+    const editBounds = (await button(dialog, `Manage ${name}`).boundingBox())!;
     expect(artBounds.y + artBounds.height).toBeLessThanOrEqual(titleBounds.y);
     expect(titleBounds.y + titleBounds.height).toBeLessThanOrEqual(
       authorBounds.y,
     );
     expect(editBounds.x).toBeGreaterThanOrEqual(0);
-    await expect(button(dialog, `Edit ${name} definition`)).toBeInViewport();
+    await expect(button(dialog, `Manage ${name}`)).toBeInViewport();
     await page.keyboard.press("Escape");
     // Read enough of a long title to distinguish entries; its full name stays accessible.
     expect(titleBounds.height).toBeGreaterThan(
@@ -910,7 +846,7 @@ test("Create from keeps a new publication destination through draft reopening ev
   expect(draft.appliedDefinition.libraryOrigin).toMatchObject({
     componentId: "original-device",
     revision: 1,
-    authorId: "alice",
+    authorId: "local",
   });
   await openProjectFile(page, saved);
   await awaitEditorReady(page);
@@ -926,14 +862,14 @@ test("Create from keeps a new publication destination through draft reopening ev
     entries.find((entry: { id: string }) => entry.id === "original-device"),
   ).toMatchObject({
     revision: 1,
-    authorId: "alice",
+    authorId: "local",
     definition: { symbol: { name: "Original device" } },
   });
   expect(
     entries.find((entry: { id: string }) => entry.id !== "original-device"),
   ).toMatchObject({
     revision: 1,
-    authorId: "alice",
+    authorId: "local",
     definition: { symbol: { name: "Derivative device" } },
   });
 });
@@ -943,7 +879,7 @@ test("captured origin lookup failure preserves its target and refuses implicit n
   context,
   service,
 }) => {
-  service.seedHistoricalDefinition(
+  await service.seedHistoricalDefinition(
     "origin-lookup-device",
     publishedDefinition(
       symbolDefinition("Origin lookup device"),
@@ -975,7 +911,7 @@ test("captured origin lookup failure preserves its target and refuses implicit n
     name: "Publication recovery",
   });
   await expect(recovery).toBeVisible();
-  await expect(button(editor, "Update my component")).toBeDisabled();
+  await expect(button(editor, "Update component (admin)")).toBeDisabled();
   await recovery
     .getByRole("button", { name: "Reload published version" })
     .click();
@@ -986,13 +922,12 @@ test("captured origin lookup failure preserves its target and refuses implicit n
     .getByLabel("Component definition code")
     .fill(JSON.stringify(variant));
   await button(editor, "Apply").click();
-  await expect(button(editor, "Update my component")).toBeDisabled();
+  await expect(button(editor, "Update component (admin)")).toBeDisabled();
   expect(newWrites).toBe(0);
 });
 
-test("publication conflicts retain update intent until explicit reload or create-copy after an account change", async ({
+test("publication conflicts retain update intent until an explicit reload", async ({
   page,
-  context,
   service,
 }) => {
   await service.openEditorAs(page, "alice");
@@ -1027,22 +962,6 @@ test("publication conflicts retain update intent until explicit reload or create
   await expect(editor.getByLabel("Component definition code")).toContainText(
     "Concurrent revision",
   );
-  await service.connect(context, "bob");
-  await button(editor, "Update my component").click();
-  await expect(recovery).toBeVisible();
-  await recovery.getByRole("button", { name: "Create separate copy" }).click();
-  await button(editor, "Publish as new component").click();
-  await expect(editor.getByRole("status")).toContainText(
-    "Published to the public library",
-  );
-  const entries = await libraryEntries(page);
-  expect(entries).toHaveLength(2);
-  expect(
-    entries.find((entry: { id: string }) => entry.id === "owned-device"),
-  ).toMatchObject({ revision: 2, authorId: "alice" });
-  expect(
-    entries.find((entry: { id: string }) => entry.id !== "owned-device"),
-  ).toMatchObject({ revision: 1, authorId: "bob" });
 });
 
 test("new native publication survives a lost response, Project reopen and another edit without duplicating its public identity", async ({
@@ -1078,7 +997,7 @@ test("new native publication survives a lost response, Project reopen and anothe
   await expect(button(editor, "Update my component")).toBeEnabled();
   const entries = await libraryEntries(page);
   expect(entries).toHaveLength(1);
-  expect(entries[0]).toMatchObject({ revision: 1, authorId: "alice" });
+  expect(entries[0]).toMatchObject({ revision: 1, authorId: "local" });
   await netlist(editor).fill(
     ".subckt retry_source IN OUT\nR1 IN OUT 2k\n.ends retry_source\n",
   );
@@ -1092,7 +1011,7 @@ test("new native publication survives a lost response, Project reopen and anothe
   expect(updated[0]).toMatchObject({
     id: entries[0].id,
     revision: 2,
-    authorId: "alice",
+    authorId: "local",
   });
 });
 
@@ -1196,10 +1115,10 @@ test("filters and reopens the catalog, retaining cards and scroll through a fail
   context,
 }) => {
   const resistor = builtInSymbols.find((s) => s.id === "resistor")!;
-  service.seedHistoricalDefinition("aaa-artwork", {
+  await service.seedHistoricalDefinition("aaa-artwork", {
     symbol: { ...resistor, name: "Artwork only" },
   });
-  service.seedHistoricalDefinition("zzz-circuit", {
+  await service.seedHistoricalDefinition("zzz-circuit", {
     symbol: { ...resistor, name: "Electrical resistor" },
     electrical: deviceDescriptor("resistor"),
   });
@@ -1227,7 +1146,7 @@ test("filters and reopens the catalog, retaining cards and scroll through a fail
     "Artwork only",
   );
   await button(dialog, "Close").click();
-  service.seedPublished("new-arrival", "Automatic arrival");
+  await service.seedPublished("new-arrival", "Automatic arrival");
   await openUserComponents(page);
   await expect(dialog.getByLabel("Component order")).toHaveValue("oldest");
   await expect(button(dialog, "Place Automatic arrival")).toBeVisible();
@@ -1235,7 +1154,7 @@ test("filters and reopens the catalog, retaining cards and scroll through a fail
   await expect(button(dialog, "Load More")).toHaveCount(0);
   service.limitCatalogPages(20);
   for (let index = 0; index < 35; index++)
-    service.seedHistoricalDefinition(
+    await service.seedHistoricalDefinition(
       `managed-${String(index).padStart(2, "0")}`,
       symbolDefinition(`Managed ${index}`),
     );
@@ -1245,7 +1164,7 @@ test("filters and reopens the catalog, retaining cards and scroll through a fail
   await clickLibraryAction(dialog, "Manage Managed 20");
   await button(page, "Promote to official").click();
   await expect(text(page, "Promoted to an official component.")).toBeVisible();
-  service.seedHistoricalDefinition(
+  await service.seedHistoricalDefinition(
     "aaa-managed-new",
     symbolDefinition("Managed arrival"),
   );
@@ -1492,7 +1411,7 @@ test("Agent collaborates on a library JSON draft without publishing or changing 
   service,
   baseURL,
 }) => {
-  service.seedHistoricalDefinition(
+  await service.seedHistoricalDefinition(
     "library-authoring",
     publishedDefinition(
       symbolDefinition("Library source"),
@@ -2091,7 +2010,7 @@ test("automatic layout only enables explicit offsets and distinguishes pending s
   ).toEqual([expect.objectContaining({ side: "west", offset: 40 })]);
 });
 
-test("publishes an applied native component and captures another user's complete revision on insertion", async ({
+test("publishes an applied native component and captures a complete revision in another editor on insertion", async ({
   page,
   browser,
   baseURL,
@@ -2109,7 +2028,7 @@ test("publishes an applied native component and captures another user's complete
     const [published] = await libraryEntries(page);
     expect(published).toMatchObject({
       revision: 1,
-      authorId: "alice",
+      authorId: "local",
       status: "shared",
       circuit: { version: 1, source: { language: "spice", revision: 1 } },
     });
@@ -2865,7 +2784,7 @@ test("live preview and the administrator lifecycle keep captured Projects", asyn
   page,
   service,
 }) => {
-  service.seedPublished("shared-amplifier", "Shared amplifier");
+  await service.seedPublished("shared-amplifier", "Shared amplifier");
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await service.openEditorAs(page, "admin");
@@ -2900,27 +2819,7 @@ test("live preview and the administrator lifecycle keep captured Projects", asyn
   expect(errors).toEqual([]);
 });
 
-test("a later component editor offers sign-in after the page's initial account signs out", async ({
-  page,
-  service,
-}) => {
-  await service.openEditorAs(page, "alice");
-  await expect(page.getByTestId("account-name")).toHaveText("alice");
-  await page.clock.install();
-  // The server session changes as it would after signing out in another tab.
-  await service.connect(page.context(), null);
-  await page.clock.fastForward(31_000);
-
-  await openUserComponents(page);
-  await button(page, "Create Component…").click();
-  const editor = componentEditor(page);
-  await expect(editor.getByTestId("account-signin")).toBeVisible();
-  await expect(editor.getByTestId("account-name")).toHaveCount(0);
-  await editor.getByTestId("account-signin").locator("summary").click();
-  await expect(editor.getByTestId("signin-github")).toBeVisible();
-});
-
-test("anonymous creation keeps public publication disabled and invalid code leaves the circuit untouched", async ({
+test("invalid component code leaves the circuit untouched", async ({
   page,
   service,
 }) => {
@@ -2928,7 +2827,6 @@ test("anonymous creation keeps public publication disabled and invalid code leav
   await openUserComponents(page);
   await button(page, "Create Component…").click();
   await choose(page, "Definition type", "json");
-  await expect(button(page, PUBLISH)).toBeDisabled();
   await expect(button(page, "Apply")).toBeEnabled();
   const code = page.getByRole("textbox", {
     name: "Component definition code",
@@ -3762,7 +3660,7 @@ test("owners manage library records in compact menus without changing placed cop
   page,
   service,
 }) => {
-  service.seedPublished("managed-library", "Managed reusable module");
+  await service.seedPublished("managed-library", "Managed reusable module");
   await service.openEditorAs(page, "alice");
   await placeFromLibrary(page, "Managed reusable module");
   const before = await readProject(page);
@@ -3788,9 +3686,6 @@ test("owners manage library records in compact menus without changing placed cop
   const after = await readProject(page);
   expect(after.documents).toEqual(before.documents);
   expect(after.componentDefinitions).toEqual(before.componentDefinitions);
-  await service.connect(page.context(), "bob");
-  await openUserComponents(page);
-  await expect(button(dialog, "Delete Managed reusable module")).toHaveCount(0);
 });
 
 test("project drafts can be deleted, undone, redone and saved without touching applied facts", async ({
@@ -3914,7 +3809,7 @@ test("Library keeps management in My shelf without persistent repair banners", a
   page,
   service,
 }) => {
-  service.seedPublished("community", "Community module");
+  await service.seedPublished("community", "Community module");
   await service.openEditorAs(page, "bob");
   await publishComponent(
     page,
@@ -3932,7 +3827,7 @@ test("Library keeps management in My shelf without persistent repair banners", a
   await expect(button(dialog, "Review deleted components")).toHaveCount(0);
   await dialog.getByRole("tab", { name: "My shelf", exact: true }).click();
   await expect(button(dialog, "Place My shelf module")).toBeVisible();
-  await expect(button(dialog, "Place Community module")).toHaveCount(0);
+  await expect(button(dialog, "Place Community module")).toHaveCount(1);
   await dialog
     .getByRole("tab", { name: "Project drafts", exact: true })
     .click();
@@ -3948,7 +3843,7 @@ test("Library keeps management in My shelf without persistent repair banners", a
   );
   await page.clock.fastForward(6100);
   await expect(dialog.locator(".component-library-feedback")).toHaveCount(0);
-  await dialog.getByRole("tab", { name: "Deleted", exact: true }).click();
+  await dialog.getByRole("tab", { name: "Deleted (all)", exact: true }).click();
   await button(dialog, "Actions for My shelf module").click();
   await dialog
     .getByRole("group", { name: "Component actions" })
@@ -4081,11 +3976,11 @@ test("Library and My shelf stay compact at narrow widths without global repair n
   page,
   service,
 }, testInfo) => {
-  service.seedPublished(
+  await service.seedPublished(
     "compact-module",
     "Reusable module with a long display name",
   );
-  service.seedHistoricalDefinition("invalid-module", {
+  await service.seedHistoricalDefinition("invalid-module", {
     symbol: { name: "Legacy definition", id: "broken" },
   });
   await service.openEditorAs(page, "alice");
@@ -4126,7 +4021,7 @@ test("reselecting a Library tab cancels pending detail reads without leaving car
   page,
   service,
 }) => {
-  service.seedPublished("slow-detail", "Slow detail");
+  await service.seedPublished("slow-detail", "Slow detail");
   await service.openEditorAs(page, null);
   const dialog = await openUserComponents(page);
   let release!: () => void;

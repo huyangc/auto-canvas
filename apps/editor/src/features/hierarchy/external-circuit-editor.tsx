@@ -8,7 +8,7 @@ import {
   type ApplyModelSourceEdit,
 } from "./external-model-source-editor";
 import type { ProjectStructureEdit } from "@icm/edit-engine";
-import type { SimulationSourceLocation } from "@icm/simulation-service/contract";
+import type { SimulationSourceLocation } from "@icm/netlist";
 
 /**
  * Project-level external declaration; there is no local schematic body. The

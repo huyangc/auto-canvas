@@ -13,7 +13,6 @@ import {
 
 export { BrowserAgentHost } from "./browser-agent-host";
 export { BrowserAgentFileHost } from "./browser-agent-file-host";
-export { BrowserAgentSimulationHost } from "./browser-agent-simulation-host";
 export { BrowserAgentProjectHost } from "./browser-agent-project-host";
 export { createAgentSemanticIntentHandler } from "./agent-semantic-intent-handler";
 

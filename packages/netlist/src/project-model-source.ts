@@ -818,3 +818,16 @@ export function planMappedProjectModelEdit(
     return fail("Edit model interfaces and dependencies at their owner");
   return { matched: true, ok: true, modelUpdates: [update] };
 }
+
+/** A digest-checked location in authored or derived Project source text. */
+export interface SimulationSourceLocation {
+  scope: "authored" | "generated" | "prepared" | "model-source";
+  sourceId?: string;
+  revision?: number;
+  path: string;
+  textDigest: string;
+  startOffset: number;
+  endOffset: number;
+  line: number;
+  column: number;
+}

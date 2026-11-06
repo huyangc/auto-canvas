@@ -42,8 +42,8 @@ auto-canvas 基于 cascode-ai 的 [Analog Canvas](https://github.com/cascode-ai/
 
 - **自动摆放和绕线**：目前导入网表时器件按网格排开，不画导线。
 - **与 silicon-notebook 集成。**
-- **仿真**：编辑器已移除仿真界面和执行入口；可导出 SPICE、Spectre 或 RNL
-  在外部工具中使用，已有 Project 的仿真源文件夹保存时保持不变。
+- **仿真**：auto-canvas 不提供仿真。可导出 SPICE、Spectre 或 RNL 交给外部工具，
+  已有工程里的仿真文件夹保存时保持不变。
 
 ## 环境要求
 
@@ -103,11 +103,9 @@ packages/
   spice, netlist, rnl, project-protocol                        导入导出与工程文件格式
   render-svg, exporters, math-typesetting                      渲染与图片导出
   agent-adapter, agent-client, agent-routing                   Agent 接口
-  simulation-service, spice-run                                继承的仿真代码（正在删除）
 eda/            离线导入 Aether / Virtuoso 的工具
 docs/           接口约定、使用说明和开发流程
 tasks/          每个开发任务一个目录：方案、报告、审查记录
-worker/         继承的 Cloudflare Worker，正在由 apps/server 替换
 ```
 
 ## 开发方式

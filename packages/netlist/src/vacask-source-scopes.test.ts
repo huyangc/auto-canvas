@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { SimulationSourceInputSchema } from "@icm/model";
 import { inspectVacaskSourceGraph } from "./vacask-source.js";
 import { vacaskCircuitScopes } from "./vacask-source-scopes.js";
-import { parseVacaskRawfile } from "../../spice-run/src/vacask-rawfile.js";
+import { parseVacaskRawfile } from "./test-support/vacask-rawfile.js";
 import type { DesignNetlistIR } from "./ir.js";
 
 const binding = {

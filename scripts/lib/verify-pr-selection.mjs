@@ -3,7 +3,7 @@
 /** What `pnpm format:check` covers: code, JSON and YAML, not Markdown. */
 /**
  * The files `format:check` reads, by the same globs as package.json, so the
- * merge queue and this check agree. docs/, fixtures/ and worker/ are not
+ * merge queue and this check agree. docs/ and fixtures/ are not
  * among them: generated files there, such as the Agent API artifacts and the
  * Agent distribution manifest, keep their generator's layout.
  */
@@ -25,7 +25,7 @@ export function formattedPaths(paths) {
 export function unitSourcePaths(paths) {
   return paths.filter(
     (path) =>
-      /^(?:apps|packages|worker|scripts|containers)\//u.test(path) &&
+      /^(?:apps|packages|scripts)\//u.test(path) &&
       /\.(?:[cm]?[jt]sx?)$/u.test(path) &&
       !/(?:^|\/)e2e\//u.test(path) &&
       !/\.generated\.[cm]?[jt]s$/u.test(path),
@@ -163,13 +163,13 @@ export function censusChecks(paths) {
 export const PRODUCT_FILE_LINE_LIMIT = 1000;
 
 /**
- * Product code: what the apps, packages, Worker and simulation containers
- * ship. Tests, browser specs, test support and fixtures, the Gallery census,
- * generated files and declarations are not.
+ * Product code: what the apps and packages ship. Tests, browser specs,
+ * test support and fixtures, the Gallery census, generated files and
+ * declarations are not.
  */
 function isProductSource(path) {
   return (
-    /^(?:apps|packages|worker|containers)\//u.test(path) &&
+    /^(?:apps|packages)\//u.test(path) &&
     /\.[cm]?[jt]sx?$/u.test(path) &&
     !/\.d\.[cm]?ts$/u.test(path) &&
     !/\.(?:test|spec|test-support|test-fixture)\.[cm]?[jt]sx?$/u.test(path) &&

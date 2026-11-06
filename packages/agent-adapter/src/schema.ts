@@ -43,7 +43,6 @@ import {
   SchematicEditSchema,
 } from "@icm/edit-engine";
 import { z } from "zod";
-import { SimulationOperationSchema } from "@icm/simulation-service/contract";
 
 import { lazyJsonSchema } from "./lazy-json-schema.js";
 import { AgentAuthoringCommandSchema } from "./authoring-command.js";
@@ -92,7 +91,6 @@ export const AgentFileResourceCapabilitySchema = z.strictObject({
       "discard",
       "request-approval",
       "open",
-      "simulation-input",
       "import-cell",
     ]),
   ),
@@ -100,19 +98,7 @@ export const AgentFileResourceCapabilitySchema = z.strictObject({
   humanApprovalOperations: z.array(z.literal("request-approval")),
 });
 /** Separate, short-request Simulation Resource over the shared run registry. */
-export const AgentSimulationResourceCapabilitySchema = z.strictObject({
-  path: z.literal("/api/agent/sessions/{sessionId}/simulation"),
-  operations: z.array(
-    z.enum(
-      SimulationOperationSchema.options.map(
-        (schema) => schema.shape.operation.value,
-      ),
-    ),
-  ),
-  analyses: z.array(z.enum(["op", "dc", "ac", "tran", "noise"])),
-  maxTimeoutMs: z.number().int().positive(),
-  synchronous: z.literal(false),
-});
+
 /** Gallery discovery plus active and Cloud Project code operations. */
 export const AgentProjectResourceCapabilitySchema = z.strictObject({
   path: z.literal("/api/agent/sessions/{sessionId}/projects"),
@@ -793,7 +779,6 @@ export const AgentCapabilitiesResponseSchema = ResponseBaseSchema.extend({
     resources: z
       .strictObject({
         file: AgentFileResourceCapabilitySchema,
-        simulation: AgentSimulationResourceCapabilitySchema.optional(),
         project: AgentProjectResourceCapabilitySchema.optional(),
       })
       .optional(),
@@ -1113,9 +1098,7 @@ export type AgentSnapshotInstanceLabel = z.infer<
 export type AgentFileResourceCapability = z.infer<
   typeof AgentFileResourceCapabilitySchema
 >;
-export type AgentSimulationResourceCapability = z.infer<
-  typeof AgentSimulationResourceCapabilitySchema
->;
+
 export type AgentProjectResourceCapability = z.infer<
   typeof AgentProjectResourceCapabilitySchema
 >;

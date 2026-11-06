@@ -6,15 +6,14 @@ and destinations; the generated [report](distribution.generated.json) records
 source and output hashes as evidence, not a second registry. Edit and release
 rules: [maintenance](maintenance.md).
 
-| Consumer | Task | Entry | Task-selected guidance | Delivery |
-| --- | --- | --- | --- | --- |
-| Setup Agent | Install and verify callable MCP | [Connection message](entrypoints/connect.md) | [Installation](mcp-install.md), host manifest | Browser copied message |
-| MCP circuit Agent | Inspect, author, render | [Quickstart](mcp-quickstart.md) | [Authoring](shared/authoring.md); [MCP tools](mcp/tools.md); workflow, recovery, knowledge | MCP resources and tool descriptions |
-| MCP simulation Agent | Save, run, measure, hand off | [Quickstart](mcp-quickstart.md) | [Simulation calls](mcp/simulation.md); [details](mcp/simulation-reference.md), [Specs](simulation-specs.md), [handoff](simulation-result-handoff.md) | MCP resources |
-| Raw HTTP Agent / integrator | Claim, resume, request, retry | [Kit README](http-kit/README.md) | [Boundary](http-kit/AGENTS.md), [API usage](api-usage.md), OpenAPI, [examples](examples.md) | `GET /api/agent/kit` |
-| Shared-client CLI Agent / script | Call tools without an MCP host | [CLI](http-cli.md) | Authoring, `--http list-tools`, `--http resource` | Same package and registry as MCP |
-| Internal batch Agent / script | Draw without a browser | [Local workspace](local-workspace.md), [batch drawing](batch-drawing.md) | MCP or CLI guidance, no pairing or simulation | Repository only (`--local`) |
-| Product maintainer | Change, verify, release guidance | [Maintenance](maintenance.md) | Root rules, code contracts, release docs | Repository only |
+| Consumer                         | Task                             | Entry                                                                    | Task-selected guidance                                                                      | Delivery                            |
+| -------------------------------- | -------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- | ----------------------------------- |
+| Setup Agent                      | Install and verify callable MCP  | [Connection message](entrypoints/connect.md)                             | [Installation](mcp-install.md), host manifest                                               | Browser copied message              |
+| MCP circuit Agent                | Inspect, author, render          | [Quickstart](mcp-quickstart.md)                                          | [Authoring](shared/authoring.md); [MCP tools](mcp/tools.md); workflow, recovery, knowledge  | MCP resources and tool descriptions |
+| Raw HTTP Agent / integrator      | Claim, resume, request, retry    | [Kit README](http-kit/README.md)                                         | [Boundary](http-kit/AGENTS.md), [API usage](api-usage.md), OpenAPI, [examples](examples.md) | `GET /api/agent/kit`                |
+| Shared-client CLI Agent / script | Call tools without an MCP host   | [CLI](http-cli.md)                                                       | Authoring, `--http list-tools`, `--http resource`                                           | Same package and registry as MCP    |
+| Internal batch Agent / script    | Draw without a browser           | [Local workspace](local-workspace.md), [batch drawing](batch-drawing.md) | MCP or CLI guidance, no pairing or simulation                                               | Repository only (`--local`)         |
+| Product maintainer               | Change, verify, release guidance | [Maintenance](maintenance.md)                                            | Root rules, code contracts, release docs                                                    | Repository only                     |
 
 An entry is a starting point; `load` (`entry`, `required`, `on-demand`) is a
 distribution role, never a permission gate.

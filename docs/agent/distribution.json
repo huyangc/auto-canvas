@@ -2,41 +2,15 @@
   "format": "analog-canvas-agent-distribution-v1",
   "version": 1,
   "kitVersion": "6",
-  "consumers": [
-    "bootstrap",
-    "mcp",
-    "http-kit",
-    "http-cli",
-    "maintainer"
-  ],
+  "consumers": ["bootstrap", "mcp", "http-kit", "http-cli", "maintainer"],
   "documents": [
-    {
-      "id": "reference/simulation-specs",
-      "source": "docs/agent/simulation-specs.md",
-      "name": "Simulation Spec rules and raw handoff",
-      "description": "Native measurements, captured acceptance rules, verdicts and canonical result files.",
-      "mimeType": "text/markdown",
-      "consumers": [
-        "mcp",
-        "http-cli",
-        "http-kit"
-      ],
-      "task": "Simulation Spec rules and raw handoff",
-      "load": "on-demand",
-      "requires": [],
-      "uri": "analog-canvas://reference/simulation-specs",
-      "kitPath": "references/simulation-specs.md"
-    },
     {
       "id": "reference/quickstart",
       "source": "docs/agent/mcp-quickstart.md",
       "name": "MCP live-session quickstart",
       "description": "MCP-native connect, inspect, atomic edit, verify, and recovery loop.",
       "mimeType": "text/markdown",
-      "consumers": [
-        "mcp",
-        "http-cli"
-      ],
+      "consumers": ["mcp", "http-cli"],
       "task": "MCP live-session quickstart",
       "load": "entry",
       "requires": [],
@@ -48,9 +22,7 @@
       "name": "Raw HTTP live-session workflow",
       "description": "Claim, OpenAPI, Snapshot, and transact workflow for hosts without MCP.",
       "mimeType": "text/markdown",
-      "consumers": [
-        "http-kit"
-      ],
+      "consumers": ["http-kit"],
       "task": "Raw HTTP live-session workflow",
       "load": "required",
       "requires": [
@@ -66,11 +38,7 @@
       "name": "Session contract",
       "description": "The four operations, idempotency, scopes, and limits of one session.",
       "mimeType": "text/markdown",
-      "consumers": [
-        "mcp",
-        "http-cli",
-        "http-kit"
-      ],
+      "consumers": ["mcp", "http-cli", "http-kit"],
       "task": "Session contract",
       "load": "on-demand",
       "requires": [],
@@ -83,11 +51,7 @@
       "name": "Built-in authoring contract",
       "description": "Authority split between the catalog, the snapshot, and capabilities; product primitives.",
       "mimeType": "text/markdown",
-      "consumers": [
-        "mcp",
-        "http-cli",
-        "http-kit"
-      ],
+      "consumers": ["mcp", "http-cli", "http-kit"],
       "task": "Built-in authoring contract",
       "load": "on-demand",
       "requires": [],
@@ -100,11 +64,7 @@
       "name": "Schematic workflow",
       "description": "Task-scoped evidence, safe editing and completion criteria.",
       "mimeType": "text/markdown",
-      "consumers": [
-        "mcp",
-        "http-cli",
-        "http-kit"
-      ],
+      "consumers": ["mcp", "http-cli", "http-kit"],
       "task": "Schematic workflow",
       "load": "on-demand",
       "requires": [],
@@ -117,11 +77,7 @@
       "name": "Tool behavior",
       "description": "Runtime behavior of typed transactions, route geometry, movement, and rendering.",
       "mimeType": "text/markdown",
-      "consumers": [
-        "mcp",
-        "http-cli",
-        "http-kit"
-      ],
+      "consumers": ["mcp", "http-cli", "http-kit"],
       "task": "Tool behavior",
       "load": "on-demand",
       "requires": [],
@@ -134,11 +90,7 @@
       "name": "Response semantics and recovery",
       "description": "Interpreting results by layer, failures, conflicts, and completion decisions.",
       "mimeType": "text/markdown",
-      "consumers": [
-        "mcp",
-        "http-cli",
-        "http-kit"
-      ],
+      "consumers": ["mcp", "http-cli", "http-kit"],
       "task": "Response semantics and recovery",
       "load": "on-demand",
       "requires": [],
@@ -151,11 +103,7 @@
       "name": "Drawing a schematic",
       "description": "What a finished drawing is: connected, compact and like its source; pitch targets, structure and wiring tables, names and render review. Read once before drawing or restyling.",
       "mimeType": "text/markdown",
-      "consumers": [
-        "mcp",
-        "http-cli",
-        "http-kit"
-      ],
+      "consumers": ["mcp", "http-cli", "http-kit"],
       "task": "Draw or redraw a schematic from a figure, paper or netlist",
       "load": "on-demand",
       "requires": [],
@@ -168,11 +116,7 @@
       "name": "Folded-cascode placement: recommended",
       "description": "Connected PMOS-input example: input pair beside adjacent stacks, separate folding nodes and mid-stack outputs. Body ties omitted.",
       "mimeType": "image/svg+xml",
-      "consumers": [
-        "mcp",
-        "http-cli",
-        "http-kit"
-      ],
+      "consumers": ["mcp", "http-cli", "http-kit"],
       "task": "Inspect the folded-cascode placement example",
       "load": "on-demand",
       "requires": [],
@@ -185,11 +129,7 @@
       "name": "Folded-cascode placement: not recommended",
       "description": "The same circuit with the input pair splitting the main stacks. A readability contrast, not an electrical failure.",
       "mimeType": "image/svg+xml",
-      "consumers": [
-        "mcp",
-        "http-cli",
-        "http-kit"
-      ],
+      "consumers": ["mcp", "http-cli", "http-kit"],
       "task": "Compare folded-cascode placement examples",
       "load": "on-demand",
       "requires": [],
@@ -202,11 +142,7 @@
       "name": "Routing and diagnostics",
       "description": "Reading routing facts and visual diagnostics before editing.",
       "mimeType": "text/markdown",
-      "consumers": [
-        "mcp",
-        "http-cli",
-        "http-kit"
-      ],
+      "consumers": ["mcp", "http-cli", "http-kit"],
       "task": "Routing and diagnostics",
       "load": "on-demand",
       "requires": [],
@@ -219,11 +155,7 @@
       "name": "Wiring rules (drawing guide alias)",
       "description": "Same content as reference/razavi-style; no additional reading needed.",
       "mimeType": "text/markdown",
-      "consumers": [
-        "mcp",
-        "http-cli",
-        "http-kit"
-      ],
+      "consumers": ["mcp", "http-cli", "http-kit"],
       "task": "Drawing guide alias; do not reread",
       "load": "on-demand",
       "requires": [],
@@ -236,11 +168,7 @@
       "name": "Advanced transaction contract",
       "description": "Full HTTP request schema for offline tooling. For interactive use, prefer the compact analog-canvas://contract/edits/{kind} resource template. Reading is advisory, never a permission gate.",
       "mimeType": "application/schema+json",
-      "consumers": [
-        "mcp",
-        "http-cli",
-        "http-kit"
-      ],
+      "consumers": ["mcp", "http-cli", "http-kit"],
       "task": "Advanced transaction contract",
       "load": "on-demand",
       "requires": [],
@@ -250,23 +178,16 @@
     {
       "id": "http-kit/README.md",
       "source": "docs/agent/http-kit/README.md",
-      "consumers": [
-        "http-kit"
-      ],
+      "consumers": ["http-kit"],
       "task": "Bootstrap raw HTTP",
       "load": "entry",
-      "requires": [
-        "http-kit/AGENTS.md",
-        "fallback/http-session-workflow"
-      ],
+      "requires": ["http-kit/AGENTS.md", "fallback/http-session-workflow"],
       "kitPath": "README.md"
     },
     {
       "id": "http-kit/AGENTS.md",
       "source": "docs/agent/http-kit/AGENTS.md",
-      "consumers": [
-        "http-kit"
-      ],
+      "consumers": ["http-kit"],
       "task": "Bootstrap raw HTTP",
       "load": "entry",
       "requires": [],
@@ -275,14 +196,10 @@
     {
       "id": "reference/http-cli",
       "source": "docs/agent/http-cli.md",
-      "consumers": [
-        "http-cli"
-      ],
+      "consumers": ["http-cli"],
       "task": "Operate shared-client CLI",
       "load": "entry",
-      "requires": [
-        "reference/authoring"
-      ],
+      "requires": ["reference/authoring"],
       "uri": "analog-canvas://reference/http-cli",
       "name": "Shared-client CLI",
       "description": "CLI lifecycle and exact retry responsibilities.",
@@ -292,11 +209,7 @@
       "id": "catalog/builtins",
       "source": "packages/agent-adapter/src/agent-authoring-catalog.generated.ts",
       "kind": "catalog",
-      "consumers": [
-        "mcp",
-        "http-cli",
-        "http-kit"
-      ],
+      "consumers": ["mcp", "http-cli", "http-kit"],
       "task": "Discover built-in symbols",
       "load": "on-demand",
       "requires": [],
@@ -309,11 +222,7 @@
     {
       "id": "reference/knowledge/circuit-reading",
       "source": "docs/agent/knowledge/circuit-reading.md",
-      "consumers": [
-        "mcp",
-        "http-cli",
-        "http-kit"
-      ],
+      "consumers": ["mcp", "http-cli", "http-kit"],
       "task": "Evidence-first circuit reading",
       "load": "on-demand",
       "requires": [],
@@ -326,11 +235,7 @@
     {
       "id": "reference/knowledge/hierarchy-and-large-circuits",
       "source": "docs/agent/knowledge/hierarchy-and-large-circuits.md",
-      "consumers": [
-        "mcp",
-        "http-cli",
-        "http-kit"
-      ],
+      "consumers": ["mcp", "http-cli", "http-kit"],
       "task": "Hierarchy and large circuits",
       "load": "on-demand",
       "requires": [],
@@ -343,11 +248,7 @@
     {
       "id": "reference/knowledge/pdk-and-symbols",
       "source": "docs/agent/knowledge/pdk-and-symbols.md",
-      "consumers": [
-        "mcp",
-        "http-cli",
-        "http-kit"
-      ],
+      "consumers": ["mcp", "http-cli", "http-kit"],
       "task": "PDK models and symbols",
       "load": "on-demand",
       "requires": [],
@@ -360,10 +261,7 @@
     {
       "id": "reference/mcp-install",
       "source": "docs/agent/mcp-install.md",
-      "consumers": [
-        "mcp",
-        "http-cli"
-      ],
+      "consumers": ["mcp", "http-cli"],
       "task": "Install the Analog Canvas MCP adapter",
       "load": "on-demand",
       "requires": [],
@@ -375,9 +273,7 @@
     {
       "id": "reference/api-usage",
       "source": "docs/agent/api-usage.md",
-      "consumers": [
-        "http-kit"
-      ],
+      "consumers": ["http-kit"],
       "task": "Agent API Usage",
       "load": "on-demand",
       "requires": [],
@@ -389,9 +285,7 @@
     {
       "id": "reference/examples",
       "source": "docs/agent/examples.md",
-      "consumers": [
-        "http-kit"
-      ],
+      "consumers": ["http-kit"],
       "task": "Reproducible Agent Workflows",
       "load": "on-demand",
       "requires": [],
@@ -401,46 +295,9 @@
       "mimeType": "text/markdown"
     },
     {
-      "id": "reference/simulation-evidence-storage",
-      "source": "docs/agent/simulation-evidence-storage.md",
-      "consumers": [
-        "mcp",
-        "http-cli",
-        "http-kit"
-      ],
-      "task": "Simulation evidence usage and recovery",
-      "load": "on-demand",
-      "requires": [],
-      "uri": "analog-canvas://reference/simulation-evidence-storage",
-      "kitPath": "references/simulation-evidence-storage.md",
-      "name": "simulation-evidence-storage.md",
-      "description": "Storage budgets, leased downloads and evidence-only recovery.",
-      "mimeType": "text/markdown"
-    },
-    {
-      "id": "reference/simulation-result-handoff",
-      "source": "docs/agent/simulation-result-handoff.md",
-      "consumers": [
-        "mcp",
-        "http-cli",
-        "http-kit"
-      ],
-      "task": "Agent simulation result handoff",
-      "load": "on-demand",
-      "requires": [],
-      "uri": "analog-canvas://reference/simulation-result-handoff",
-      "kitPath": "references/simulation-result-handoff.md",
-      "name": "simulation-result-handoff.md",
-      "description": "On-demand task guidance.",
-      "mimeType": "text/markdown"
-    },
-    {
       "id": "reference/mcp-tools",
       "source": "docs/agent/mcp/tools.md",
-      "consumers": [
-        "mcp",
-        "http-cli"
-      ],
+      "consumers": ["mcp", "http-cli"],
       "task": "MCP editing tools and local inspection",
       "load": "on-demand",
       "requires": [],
@@ -450,66 +307,12 @@
       "mimeType": "text/markdown"
     },
     {
-      "id": "reference/mcp-simulation",
-      "source": "docs/agent/mcp/simulation.md",
-      "consumers": [
-        "mcp",
-        "http-cli"
-      ],
-      "task": "MCP simulation calls and file ownership",
-      "load": "on-demand",
-      "requires": [],
-      "uri": "analog-canvas://reference/mcp-simulation",
-      "name": "MCP simulation calls and file ownership",
-      "description": "MCP simulation calls and file ownership",
-      "mimeType": "text/markdown"
-    },
-    {
-      "id": "reference/mcp-simulation-details",
-      "source": "docs/agent/mcp/simulation-reference.md",
-      "consumers": [
-        "mcp",
-        "http-cli"
-      ],
-      "task": "Detailed MCP simulation contracts",
-      "load": "on-demand",
-      "requires": [],
-      "uri": "analog-canvas://reference/mcp-simulation-details",
-      "name": "MCP simulation detailed contracts",
-      "description": "Device mapping, file ownership, Batch and recovery on demand.",
-      "mimeType": "text/markdown"
-    },
-    {
-      "id": "reference/simulation-workflow",
-      "source": "docs/agent/shared/simulation.md",
-      "consumers": [
-        "mcp",
-        "http-cli",
-        "http-kit"
-      ],
-      "task": "Shared simulation lifecycle",
-      "load": "on-demand",
-      "requires": [
-        "reference/simulation-specs",
-        "reference/simulation-result-handoff"
-      ],
-      "uri": "analog-canvas://reference/simulation-workflow",
-      "kitPath": "references/simulation-workflow.md",
-      "name": "Shared simulation lifecycle",
-      "description": "Shared simulation lifecycle",
-      "mimeType": "text/markdown"
-    },
-    {
       "id": "reference/knowledge/patterns",
       "source": "docs/agent/circuit-style-knowledge.md",
       "name": "Circuit patterns (drawing guide alias)",
       "description": "Same content as reference/razavi-style; no additional reading needed.",
       "mimeType": "text/markdown",
-      "consumers": [
-        "mcp",
-        "http-cli",
-        "http-kit"
-      ],
+      "consumers": ["mcp", "http-cli", "http-kit"],
       "task": "Drawing guide alias; do not reread",
       "load": "on-demand",
       "requires": [],
@@ -519,9 +322,7 @@
     {
       "id": "repo/routegraph",
       "source": "docs/agent/routegraph.md",
-      "consumers": [
-        "maintainer"
-      ],
+      "consumers": ["maintainer"],
       "task": "Use optional repository RouteGraph helper",
       "load": "on-demand",
       "requires": []
@@ -529,9 +330,7 @@
     {
       "id": "repo/local-workspace",
       "source": "docs/agent/local-workspace.md",
-      "consumers": [
-        "maintainer"
-      ],
+      "consumers": ["maintainer"],
       "task": "Draw in a local workspace without a browser",
       "load": "on-demand",
       "requires": []
@@ -545,29 +344,19 @@
   },
   "templateConsumers": {
     "apiHelp": {
-      "consumers": [
-        "http-kit",
-        "maintainer"
-      ],
+      "consumers": ["http-kit", "maintainer"],
       "task": "Describe published HTTP operations"
     },
     "connect": {
-      "consumers": [
-        "bootstrap"
-      ],
+      "consumers": ["bootstrap"],
       "task": "Install, verify loading, then connect"
     },
     "instructions": {
-      "consumers": [
-        "mcp"
-      ],
+      "consumers": ["mcp"],
       "task": "Initialize MCP reading route"
     },
     "toolHelp": {
-      "consumers": [
-        "mcp",
-        "http-cli"
-      ],
+      "consumers": ["mcp", "http-cli"],
       "task": "Discover tool operation and limitations"
     }
   }

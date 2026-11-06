@@ -15,7 +15,5 @@
   "scripts": {
     "build": "tsc -p tsconfig.json"
   },
-  "dependencies": {
-    "@icm/spice-run": "workspace:*"
-  }
+  "dependencies": {}
 }

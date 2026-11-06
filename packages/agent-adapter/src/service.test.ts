@@ -501,12 +501,9 @@ describe("current Agent Circuit API service", () => {
     expect(Object.keys(agentCircuitOpenApi.paths).sort()).toEqual([
       "/api/agent/claims",
       "/api/agent/connectors/resume",
-      "/api/agent/sessions/{sessionId}/artifact-status",
-      "/api/agent/sessions/{sessionId}/artifacts/{fileId}",
       "/api/agent/sessions/{sessionId}/circuit",
       "/api/agent/sessions/{sessionId}/files",
       "/api/agent/sessions/{sessionId}/projects",
-      "/api/agent/sessions/{sessionId}/simulation",
       "/api/agent/sessions/{sessionId}/status",
     ]);
   });

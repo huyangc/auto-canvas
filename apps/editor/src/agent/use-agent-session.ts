@@ -12,7 +12,6 @@ import {
   isReadOnlyFileRequest,
   isReadOnlyProjectRequest,
   parseAgentFileResourceRequest,
-  parseAgentSimulationResourceRequest,
   parseAgentProjectResourceRequest,
   createAgentCircuitService,
   parseAgentCircuitRequest,
@@ -20,8 +19,6 @@ import {
   type AgentFileResourceRequest,
   type AgentFileResourceResponse,
   type AgentSessionScope,
-  type AgentSimulationResourceRequest,
-  type AgentSimulationResourceResponse,
   type AgentProjectResourceRequest,
   type AgentProjectResourceResponse,
 } from "@icm/agent-adapter";
@@ -189,10 +186,7 @@ export interface UseAgentSessionOptions {
   /** Resolve an open working copy without selecting its browser tab. */
   resolveWorkspace?: (
     workspaceId: string,
-  ) => Pick<
-    UseAgentSessionOptions,
-    "host" | "fileHost" | "simulationHost" | "projectHost"
-  > | null;
+  ) => Pick<UseAgentSessionOptions, "host" | "fileHost" | "projectHost"> | null;
   fileHost?: {
     handle: (
       request: AgentFileResourceRequest,
@@ -200,11 +194,7 @@ export interface UseAgentSessionOptions {
     clear?: () => void;
   };
   /** Session-owned prepared inputs and run receipts; revoked with the session. */
-  simulationHost?: {
-    handle: (
-      request: AgentSimulationResourceRequest,
-    ) => Promise<AgentSimulationResourceResponse>;
-  };
+
   projectHost?: {
     handle: (
       request: AgentProjectResourceRequest,
@@ -362,7 +352,7 @@ export function useAgentSession(
     clearAgentSessionRecovery(window.sessionStorage);
     options.fileHost?.clear?.();
     return live;
-  }, [options.fileHost, options.simulationHost]);
+  }, [options.fileHost]);
 
   const retire = useCallback(
     async (live: LiveSession | null, operation: ConnectionOperation) => {
@@ -611,7 +601,6 @@ export function useAgentSession(
               : {
                   host: options.host,
                   fileHost: options.fileHost,
-                  simulationHost: options.simulationHost,
                   projectHost: options.projectHost,
                 };
             if (parsed.data.kind === "event") {
@@ -686,7 +675,6 @@ export function useAgentSession(
                 !options.enabled)
             ) {
               const candidate = parsed.data.payload as { operation?: string };
-              const simulation = parsed.data.kind === "simulation-request";
               const circuit = parsed.data.kind === "circuit-request";
               const project = parsed.data.kind === "project-request";
               socket.send(
@@ -710,9 +698,6 @@ export function useAgentSession(
                           ? "The requested working copy is no longer open"
                           : "Read the current browser context before operating on a Project",
                       ...(project ? { recovery: "refresh" } : {}),
-                      ...(simulation
-                        ? { stage: "input", recovery: "fix-input" }
-                        : {}),
                     },
                     ...(circuit ? { diagnostics: [] } : {}),
                   },
@@ -807,92 +792,7 @@ export function useAgentSession(
                 });
               return;
             }
-            if (parsed.data.kind === "simulation-request") {
-              const simulationRequest = parseAgentSimulationResourceRequest(
-                parsed.data.payload,
-              );
-              const payloadHash = sha256Hex(
-                JSON.stringify([
-                  parsed.data.workspaceId ?? parsed.data.contextRevision,
-                  parsed.data.payload,
-                ]),
-              );
-              const knownHash = live.requestHashes.get(parsed.data.requestId);
-              const sendSimulationResponse = (payload: unknown) => {
-                if (socket.readyState !== WebSocket.OPEN) return;
-                socket.send(
-                  JSON.stringify({
-                    protocolVersion: AGENT_SESSION_PROTOCOL_VERSION,
-                    sessionId: live.sessionId,
-                    messageId: crypto.randomUUID(),
-                    requestId: parsed.data.requestId,
-                    sentAt: new Date().toISOString(),
-                    timing: responseTiming(),
-                    kind: "simulation-response",
-                    payload,
-                  }),
-                );
-              };
-              if (!simulationRequest.success || !target?.simulationHost) {
-                sendSimulationResponse({
-                  apiVersion: AGENT_API_VERSION,
-                  requestId: parsed.data.requestId,
-                  operation: "error",
-                  ok: false,
-                  error: {
-                    code: simulationRequest.success
-                      ? "SIMULATION_UNAVAILABLE"
-                      : "SIMULATION_REQUEST_INVALID",
-                    message: simulationRequest.success
-                      ? "Simulation is unavailable in auto-canvas. Export a netlist to simulate externally."
-                      : "The simulation request does not match the current contract; read capabilities and correct the request",
-                    stage: "input",
-                    recovery: "fix-input",
-                  },
-                });
-                return;
-              }
-              if (knownHash && knownHash !== payloadHash) {
-                sendSimulationResponse({
-                  apiVersion: AGENT_API_VERSION,
-                  requestId: parsed.data.requestId,
-                  operation: simulationRequest.data.operation,
-                  ok: false,
-                  error: {
-                    code: "REQUEST_ID_REUSED",
-                    message: "Use the same payload for a retry",
-                    stage: "input",
-                    recovery: "fix-input",
-                  },
-                });
-                return;
-              }
-              live.requestHashes.set(parsed.data.requestId, payloadHash);
-              startWork();
-              void target.simulationHost
-                .handle(simulationRequest.data)
-                .then(sendSimulationResponse)
-                .catch((error: unknown) => {
-                  console.error("Agent Simulation request failed", error);
-                  sendSimulationResponse({
-                    apiVersion: AGENT_API_VERSION,
-                    requestId: parsed.data.requestId,
-                    operation: simulationRequest.data.operation,
-                    ok: false,
-                    error: {
-                      code: "SIMULATION_HOST_ERROR",
-                      message: `The operation failed without revoking the session (${hostFailureReason(error)})`,
-                      stage: "read",
-                      recovery: "retry-after",
-                    },
-                  });
-                })
-                .finally(() => {
-                  live.requestHashes.delete(parsed.data.requestId);
-                  finishWork();
-                });
-              return;
-            }
+
             if (parsed.data.kind === "project-request") {
               const projectRequest = parseAgentProjectResourceRequest(
                 parsed.data.payload,
@@ -1255,7 +1155,6 @@ export function useAgentSession(
     },
     [
       options.fileHost,
-      options.simulationHost,
       options.enabled,
       options.host,
       options.project,

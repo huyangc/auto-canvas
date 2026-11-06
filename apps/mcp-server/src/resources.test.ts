@@ -142,25 +142,18 @@ describe("mcp resources single-source projection", () => {
       visit(tool.inputSchema);
     }
     const complete = readResourceContent(
-      "analog-canvas://contract/tools/simulation_output",
+      "analog-canvas://contract/tools/user_components",
     );
-    expect(complete.text).toContain('"expression"');
-    expect(complete.text).toContain('"operand"');
+    expect(complete.text).toContain('"expectedLibraryRevision"');
+    expect(complete.text).toContain('"idempotencyKey"');
     // The advertised compact entry does not loosen dispatch validation.
     const response = await callTool(
-      "simulation_output",
-      {
-        action: "upsert",
-        folderId: "test",
-        label: "bad",
-        expression: { kind: "invented" },
-      },
+      "user_components",
+      { request: { action: "invented" } },
       {} as never,
     );
     expect(response.isError).toBe(true);
-    expect(response.content[0]?.text).toContain(
-      "SIMULATION_HELPER_INPUT_INVALID",
-    );
+    expect(response.content[0]?.text).toContain("INVALID_TOOL_INPUT");
     // It walks every tool's complete contract: under a loaded CI runner that
     // took longer than the default five seconds, though under one here.
   }, 30_000);

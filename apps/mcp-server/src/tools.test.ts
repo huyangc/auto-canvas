@@ -39,10 +39,10 @@ describe("mcp tool surface", () => {
   it("classifies invalid arguments without dispatching or echoing submitted values", async () => {
     const { session, http } = await toolSession();
     const result = await callTool(
-      "simulation",
+      "user_components",
       {
-        request: { operation: "capabilities" },
-        waitMs: "private-invalid-value",
+        request: { action: "list" },
+        requestId: 123,
       },
       session,
     );
@@ -52,7 +52,7 @@ describe("mcp tool surface", () => {
       error: {
         code: "INVALID_TOOL_INPUT",
         recovery: "fix-input",
-        issues: [{ path: ["waitMs"], code: "invalid_type" }],
+        issues: [{ path: ["requestId"], code: "invalid_type" }],
       },
     });
     expect(JSON.stringify(result)).not.toContain("private-invalid-value");
@@ -62,7 +62,7 @@ describe("mcp tool surface", () => {
     "classifies HTTP %s without changing the retry identity",
     async (httpStatus) => {
       const { session } = await toolSession();
-      vi.spyOn(session.client, "simulationResource").mockRejectedValue(
+      vi.spyOn(session.client, "projectResource").mockRejectedValue(
         new AgentSessionError(
           "HTTP_ERROR",
           `HTTP ${httpStatus}`,
@@ -71,27 +71,27 @@ describe("mcp tool surface", () => {
         ),
       );
       const result = await callTool(
-        "simulation",
+        "user_components",
         {
           requestId: "same-start",
           request: {
-            operation: "start",
-            preparedId: "prepared",
-            digest: "a".repeat(64),
+            action: "list",
           },
         },
         session,
       );
       expect(parseText(result)).toMatchObject({
         ok: false,
-        requestId: "same-start",
         error: {
-          httpStatus,
-          stage: "start",
-          recovery: httpStatus === 400 ? "fix-input" : "retry-same-request",
+          code: "HTTP_ERROR",
+          message: `HTTP ${httpStatus}`,
+          category: "request-rejected",
         },
       });
-      expect(session.client.simulationResource).toHaveBeenCalledTimes(1);
+      expect(session.client.projectResource).toHaveBeenCalledTimes(1);
+      expect(session.client.projectResource).toHaveBeenCalledWith(
+        expect.objectContaining({ requestId: "same-start" }),
+      );
     },
   );
   it("reports the actual runtime origin without remote pairing for local readiness", async () => {
@@ -179,16 +179,7 @@ describe("mcp tool surface", () => {
     ).toMatchObject({ runtime: { latestVersion: AGENT_MCP_VERSION } });
     expect(unreachable.http.manifestReads).toBe(2);
   });
-  it("advertises raw and captured Specs rather than a retired result renderer", () => {
-    const tools = listToolDefinitions();
-    expect(tools.find((t) => t.name === "simulation")?.description).toContain(
-      "run.details",
-    );
-    const download = tools.find((t) => t.name === "export_file")!;
-    expect(download.description).toContain("simulation_files");
-    expect(download.description).toContain("SIMULATION_PLOT_RETIRED");
-    expect(download.description).not.toContain("same plot renderer");
-  });
+
   it("gives every tool a description and a JSON-schema input", () => {
     const tools = listToolDefinitions();
     for (const tool of tools) {

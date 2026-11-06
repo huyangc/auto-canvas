@@ -1,6 +1,6 @@
 import type { AgentCircuitRequest } from "./schema.js";
 import type { AgentFileResourceRequest } from "./file-resource.js";
-import type { AgentSimulationResourceRequest } from "./simulation-resource.js";
+
 import type { AgentProjectResourceRequest } from "./project-resource.js";
 
 // Only provably read-only operations may be re-executed after their short
@@ -14,28 +14,7 @@ export function isReadOnlyCircuitRequest(
 export function isReadOnlyFileRequest(
   request: AgentFileResourceRequest,
 ): boolean {
-  return (
-    request.operation === "inspect" ||
-    (request.operation === "simulation-input" &&
-      ["list", "read", "artifact", "transfer-capabilities"].includes(
-        request.input.action,
-      ))
-  );
-}
-
-export function isReadOnlySimulationRequest(
-  request: AgentSimulationResourceRequest,
-): boolean {
-  return [
-    "authoring-help",
-    "capabilities",
-    "read",
-    "catalog",
-    "history",
-    "history-usage",
-    "resource-usage",
-    "read-batch",
-  ].includes(request.operation);
+  return request.operation === "inspect";
 }
 
 export function isReadOnlyProjectRequest(
