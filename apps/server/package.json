@@ -17,17 +17,19 @@
   },
   "dependencies": {
     "@hono/node-server": "2.1.6",
-    "hono": "4.13.16",
-    "pg": "8.23.1",
+    "@icm/agent-adapter": "workspace:*",
+    "@icm/component-library": "workspace:*",
     "@icm/derived": "workspace:*",
     "@icm/model": "workspace:*",
     "@icm/project-protocol": "workspace:*",
     "@icm/render-svg": "workspace:*",
     "@icm/symbols": "workspace:*",
-    "@icm/component-library": "workspace:*",
-    "@icm/agent-adapter": "workspace:*"
+    "hono": "4.13.16",
+    "pg": "8.23.1",
+    "ws": "8.21.0"
   },
   "devDependencies": {
-    "@types/pg": "8.23.1"
+    "@types/pg": "8.23.1",
+    "@types/ws": "8.18.2"
   }
 }
