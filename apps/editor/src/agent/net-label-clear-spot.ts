@@ -1,0 +1,200 @@
+import {
+  createLabelClearanceContext,
+  netLabelBaselineAboveWire,
+  netLabelCapHeight,
+  netLabelLook,
+  netLabelStandardOffset,
+  resolveDocumentStyleProfile,
+  resolveRouteAttachment,
+  resolveRouteGeometry,
+  type ResolvedRouteGeometry,
+} from "@icm/derived";
+import {
+  routeEndpoints,
+  type Annotation,
+  type RichTextDocument,
+  type SchematicDocument,
+} from "@icm/model";
+import type { SymbolResolver } from "@icm/symbols";
+
+/**
+ * Where an Agent's new upright Net Label stands when the spot its point gave
+ * is not clear of parts, wires and other labels. Centred on a stub two grid
+ * steps out of a block's pin, a label reached back into the block, and one
+ * with a subscript reached the stub of the pin above: all 12 labels of a
+ * two-block DAC array were drawn over something. When the label's segment
+ * ends open, the label stands at that end, if it is clear there: reading
+ * away from a horizontal wire, and beside a vertical one as before. A
+ * transmission gate's S̄ beside the stub below its NMOS gate had reached up
+ * into the NMOS.
+ *
+ * Otherwise the label slides along its segment, a grid step at a time, to
+ * the clear spot nearest the one it was given. In a beta-multiplier
+ * reference, the vbn label given by M1's drain stood at the middle of the
+ * vbn wire, where the startup's wire crosses it, and read struck through.
+ * Failing that, it takes the clear spot nearest the one it was given
+ * elsewhere on its Net's wires, within eight grid steps: left of a vertical
+ * run as well as right of it, and on the Net's other runs. A gate stub's
+ * name beside another Net's wire running down next to it had stood struck
+ * through (#1836). Where nothing is clear it keeps its spot, and
+ * VISUAL_LABEL_CLEARANCE says so. The Net Label tool is unchanged: a person
+ * sees the preview where the label commits.
+ *
+ * `text` is what the label will read. Its name claim lands in the same
+ * transaction, so the document cannot tell yet.
+ */
+export function netLabelAtClearSpot(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  label: Annotation,
+  text: RichTextDocument,
+  geometry: ResolvedRouteGeometry,
+): Annotation {
+  const anchor = label.anchor;
+  if (anchor.kind !== "route" || label.rotation !== 0) return label;
+  const route = document.routes.find(({ id }) => id === anchor.routeId);
+  const index = geometry.segments.findIndex(
+    ({ address }) => address.legId === anchor.legId,
+  );
+  const segment = geometry.segments[index];
+  if (!route || !segment) return label;
+  const vertical = segment.from.x === segment.to.x;
+  if (!vertical && segment.from.y !== segment.to.y) return label;
+  const context = createLabelClearanceContext(document, resolver);
+  // Clear of what the label diagnostics report, and of crowding as well: a
+  // word's space from other labels and a line's from junction dots.
+  const clear = (candidate: Annotation) => {
+    const shown = { ...candidate, formatOverride: text };
+    const ink = context.measure(shown).inkBounds;
+    return (
+      context.clearAt(shown, ink) &&
+      !context.conflictsAt(ink, candidate.id).length &&
+      !context.dotsAt(ink).length
+    );
+  };
+  if (clear(label)) return label;
+  /** The label at `attachment` on `wire`, reading by `alignment`, or null. */
+  const placedAt = (
+    wire: ResolvedRouteGeometry,
+    attachment: typeof anchor,
+    alignment: Annotation["alignment"],
+  ): Annotation | null => {
+    const placed = resolveRouteAttachment(wire, attachment);
+    return placed
+      ? {
+          ...label,
+          alignment,
+          anchor: {
+            ...attachment,
+            fallbackPosition: {
+              x: Math.round(placed.labelPoint.x),
+              y: Math.round(placed.labelPoint.y),
+            },
+          },
+        }
+      : null;
+  };
+  const at = (t: number, alignment: Annotation["alignment"]) =>
+    placedAt(geometry, { ...anchor, t }, alignment);
+
+  const [start, end] = routeEndpoints(route);
+  const open = (endpoint: typeof start) =>
+    endpoint.kind === "junction" &&
+    document.routes
+      .flatMap((candidate) => routeEndpoints(candidate))
+      .filter(
+        (other) =>
+          other.kind === "junction" && other.junctionId === endpoint.junctionId,
+      ).length === 1;
+  const ends = [
+    ...(index === 0 && open(start) ? [0] : []),
+    ...(index === geometry.segments.length - 1 && open(end) ? [1] : []),
+  ].sort((a, b) => Math.abs(a - anchor.t) - Math.abs(b - anchor.t));
+  for (const t of ends) {
+    const [from, other] = t
+      ? [segment.to, segment.from]
+      : [segment.from, segment.to];
+    const candidate = at(
+      t,
+      vertical ? label.alignment : from.x < other.x ? "end" : "start",
+    );
+    if (candidate && clear(candidate)) return candidate;
+  }
+
+  const length = Math.hypot(
+    segment.to.x - segment.from.x,
+    segment.to.y - segment.from.y,
+  );
+  const step = document.presentation.grid / length;
+  for (let distance = step; distance < 1; distance += step)
+    for (const t of [anchor.t - distance, anchor.t + distance]) {
+      if (t <= 0 || t >= 1) continue;
+      const candidate = at(t, label.alignment);
+      if (candidate && clear(candidate)) return candidate;
+    }
+
+  /** The clear spot on the Net's wires nearest the given one, or null. */
+  const elsewhereOnNet = (): Annotation | null => {
+    const given = resolveRouteAttachment(geometry, anchor)?.conductorPoint;
+    if (!given) return null;
+    const grid = document.presentation.grid;
+    const profile = resolveDocumentStyleProfile(document.presentation);
+    const sizeScale = label.sizeScale ?? 1;
+    const baseline = netLabelBaselineAboveWire(text, profile, sizeScale);
+    const capHeight = netLabelCapHeight(profile, sizeScale);
+    const candidates: { distance: number; annotation: Annotation }[] = [];
+    for (const wire of document.routes) {
+      if (wire.netId !== route.netId) continue;
+      const wireGeometry =
+        wire.id === route.id
+          ? geometry
+          : resolveRouteGeometry(document, resolver, wire);
+      if (!wireGeometry) continue;
+      for (const { from, to, address } of wireGeometry.segments) {
+        const upright = from.x === to.x;
+        if (!upright && from.y !== to.y) continue;
+        // Right of a vertical run and left of it, or centred over a
+        // horizontal one, as a new label there stands.
+        const looks = upright
+          ? (["right", "left"] as const).map((direction) =>
+              netLabelLook(direction, from, to, capHeight, baseline),
+            )
+          : [
+              {
+                normalOffset: netLabelStandardOffset(from, to, baseline),
+                alignment: "middle" as const,
+              },
+            ];
+        const length = Math.hypot(to.x - from.x, to.y - from.y);
+        for (let along = grid; along < length; along += grid) {
+          const t = along / length;
+          const distance = Math.hypot(
+            from.x + (to.x - from.x) * t - given.x,
+            from.y + (to.y - from.y) * t - given.y,
+          );
+          if (distance > grid * 8) continue;
+          for (const look of looks) {
+            const annotation = placedAt(
+              wireGeometry,
+              {
+                ...anchor,
+                routeId: wire.id,
+                legId: address.legId,
+                t,
+                normalOffset: look.normalOffset,
+              },
+              look.alignment,
+            );
+            if (annotation) candidates.push({ distance, annotation });
+          }
+        }
+      }
+    }
+    return (
+      candidates
+        .sort((a, b) => a.distance - b.distance)
+        .find(({ annotation }) => clear(annotation))?.annotation ?? null
+    );
+  };
+  return elsewhereOnNet() ?? label;
+}

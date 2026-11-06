@@ -1,0 +1,354 @@
+/**
+ * The Gallery's "show me only…" state, in one shape.
+ *
+ * It lives in three places at once and this module owns the translation
+ * between them: React state while the reader is on the wall, the URL so a
+ * link and the Back button carry the same slice, and browser storage so
+ * opening a circuit and coming back does not silently widen the wall again.
+ * Narrowing by author, by tag and by the marks are all one kind of thing to a
+ * reader, so they persist as one thing. The text search is the exception: a
+ * link carries it, but storage never keeps it and a reload drops it (#1675),
+ * so a returning reader is not left on a wall a forgotten search narrowed.
+ */
+
+import { gallerySourceByKey, gallerySourceOfEntryId } from "./gallery-sources";
+import { galleryFocusEntryId } from "./gallery-focus";
+
+export type GalleryView = "gallery" | "shelf";
+
+/**
+ * A reason as the link or storage spells it. The taxonomy stays out of this
+ * shared module; the Worker ignores a reason it does not know.
+ */
+function readReason(value: unknown): string | null {
+  return typeof value === "string" && /^[a-z][a-z-]{0,39}$/u.test(value)
+    ? value
+    : null;
+}
+
+export interface GalleryFilterState {
+  /** Which wall: the community gallery, or the reader's own shelf. */
+  view: GalleryView;
+  attention: boolean;
+  /** One reason Needs attention narrows to; null for every reason. */
+  attentionKind: string | null;
+  author: string | null;
+  /** Stable identity for the selected author; null for legacy links/entries. */
+  ownerUserId: string | null;
+  tags: string[];
+  /** Free text over name, author, description and tags. */
+  search: string;
+  /** Only circuits whose drawing extracts to a netlist. */
+  netlistable: boolean;
+  /** Only circuits whose drawing does not; never with `netlistable`. */
+  withoutNetlist: boolean;
+  /**
+   * How the circuits were made: AI-generated, by hand (community circuits
+   * without the AI mark) or redrawn from a reference dataset; null for all.
+   */
+  ai: "ai" | "human" | "dataset" | null;
+  /** Only circuits this viewer has liked. */
+  liked: boolean;
+  /**
+   * Sizes by part count, as the taxonomy's range keys (`0-5`, `26-`); any of
+   * them matches, and none means every size.
+   */
+  parts: string[];
+  /**
+   * The reference dataset the wall shows instead of the community's, by its
+   * key (#1510); null for the community wall.
+   */
+  source: string | null;
+  /**
+   * Whether the community wall leaves out the reference datasets' circuits
+   * it otherwise holds (#1697): `source=community` in a link.
+   */
+  hideDatasets: boolean;
+}
+
+export const GALLERY_FILTERS_KEY = "icm.gallery-filters.v1";
+
+/** Bounds on restored text, so a hand-edited store cannot grow a query. */
+const MAX_FILTER_LENGTH = 200;
+const MAX_FILTER_TAGS = 256;
+
+/**
+ * The narrowing parameters, as distinct from `view`. A link that names one of
+ * them is a request for exactly that slice, so it replaces the stored
+ * preference outright instead of intersecting with it.
+ */
+const NARROWING_PARAMS = [
+  "author",
+  "owner",
+  "tags",
+  "q",
+  "netlist",
+  "ai",
+  "liked",
+  "attention",
+  "reason",
+  "parts",
+  "source",
+] as const;
+
+export function createDefaultGalleryFilters(): GalleryFilterState {
+  return {
+    view: "gallery",
+    attention: false,
+    attentionKind: null,
+    author: null,
+    ownerUserId: null,
+    tags: [],
+    search: "",
+    netlistable: false,
+    withoutNetlist: false,
+    ai: null,
+    liked: false,
+    parts: [],
+    source: null,
+    hideDatasets: false,
+  };
+}
+
+/**
+ * Whether the server does the narrowing. The text query is answered in the
+ * browser over what has loaded, so it never speaks for the wall's total.
+ */
+export function galleryFiltersNarrowQuery(
+  filters: GalleryFilterState,
+): boolean {
+  return (
+    filters.author !== null ||
+    filters.ownerUserId !== null ||
+    filters.tags.length > 0 ||
+    filters.netlistable ||
+    filters.withoutNetlist ||
+    filters.ai !== null ||
+    filters.liked ||
+    filters.attention ||
+    filters.parts.length > 0
+  );
+}
+
+/** "1", "0" or "dataset" in a link, the side's name in storage. */
+function readAi(value: unknown): "ai" | "human" | "dataset" | null {
+  return value === "1" || value === "ai"
+    ? "ai"
+    : value === "0" || value === "human"
+      ? "human"
+      : value === "dataset"
+        ? "dataset"
+        : null;
+}
+
+/** Size keys as a link or storage spells them; the Worker ignores unknown ones. */
+function boundedParts(values: readonly unknown[]): string[] {
+  const parts: string[] = [];
+  for (const value of values) {
+    if (typeof value !== "string" || !/^\d{1,4}-\d{0,4}$/u.test(value))
+      continue;
+    if (!parts.includes(value)) parts.push(value);
+    if (parts.length === 16) break;
+  }
+  return parts;
+}
+
+function boundedTags(values: readonly unknown[]): string[] {
+  const tags: string[] = [];
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    const tag = value.trim().slice(0, MAX_FILTER_LENGTH);
+    if (tag.length === 0 || tags.includes(tag)) continue;
+    tags.push(tag);
+    if (tags.length === MAX_FILTER_TAGS) break;
+  }
+  return tags;
+}
+
+export function parseGalleryFilterQuery(search: string): {
+  filters: GalleryFilterState;
+  /** The URL names at least one narrowing parameter. */
+  narrowed: boolean;
+  /** The URL names the wall, so the stored wall must not override it. */
+  namesView: boolean;
+} {
+  const params = new URLSearchParams(search);
+  const author = params.get("author")?.trim() ?? "";
+  const ownerUserId = params.get("owner")?.trim() ?? "";
+  return {
+    filters: {
+      view: params.get("view") === "shelf" ? "shelf" : "gallery",
+      author: author.length > 0 ? author.slice(0, MAX_FILTER_LENGTH) : null,
+      ownerUserId:
+        ownerUserId.length > 0 ? ownerUserId.slice(0, MAX_FILTER_LENGTH) : null,
+      tags: boundedTags((params.get("tags") ?? "").split(",")),
+      search: (params.get("q") ?? "").slice(0, MAX_FILTER_LENGTH),
+      netlistable: params.get("netlist") === "1",
+      withoutNetlist: params.get("netlist") === "0",
+      ai: readAi(params.get("ai")),
+      liked: params.get("liked") === "1",
+      attention: params.get("attention") === "1",
+      attentionKind:
+        params.get("attention") === "1"
+          ? readReason(params.get("reason"))
+          : null,
+      parts: boundedParts((params.get("parts") ?? "").split(",")),
+      source: gallerySourceByKey(params.get("source"))?.key ?? null,
+      hideDatasets: params.get("source") === "community",
+    },
+    narrowed: NARROWING_PARAMS.some((name) => (params.get(name) ?? "") !== ""),
+    namesView: params.has("view"),
+  };
+}
+
+/**
+ * The filters written back over a location's own query, leaving every
+ * unrelated parameter (a preview seed, a campaign tag) where it was.
+ */
+export function galleryFilterSearch(
+  currentSearch: string,
+  filters: GalleryFilterState,
+): string {
+  const params = new URLSearchParams(currentSearch);
+  const set = (name: string, value: string | null): void => {
+    if (value) params.set(name, value);
+    else params.delete(name);
+  };
+  set("view", filters.view === "shelf" ? "shelf" : null);
+  set("author", filters.author);
+  set("owner", filters.ownerUserId);
+  set("tags", filters.tags.length > 0 ? filters.tags.join(",") : null);
+  set("q", filters.search.trim().length > 0 ? filters.search : null);
+  set(
+    "netlist",
+    filters.netlistable ? "1" : filters.withoutNetlist ? "0" : null,
+  );
+  set(
+    "ai",
+    filters.ai === "ai"
+      ? "1"
+      : filters.ai === "human"
+        ? "0"
+        : filters.ai === "dataset"
+          ? "dataset"
+          : null,
+  );
+  set("liked", filters.liked ? "1" : null);
+  // Category filtering was retired in favor of one tag vocabulary. Remove
+  // old links instead of preserving a parameter the Gallery no longer reads.
+  params.delete("category");
+  set("attention", filters.attention ? "1" : null);
+  set("reason", filters.attention ? filters.attentionKind : null);
+  set("parts", filters.parts.length > 0 ? filters.parts.join(",") : null);
+  set("source", filters.source ?? (filters.hideDatasets ? "community" : null));
+  const query = params.toString();
+  return query.length > 0 ? `?${query}` : "";
+}
+
+/** The preference as browser storage keeps it: every filter but the search. */
+export function storedGalleryFilters(filters: GalleryFilterState): string {
+  const { search: _search, ...kept } = filters;
+  return JSON.stringify(kept);
+}
+
+/** A location's query without the text search, every other parameter kept. */
+function withoutSearch(search: string): string {
+  const params = new URLSearchParams(search);
+  params.delete("q");
+  return params.toString();
+}
+
+/** A stored preference, or null when there is nothing legible to restore. */
+export function parseStoredGalleryFilters(
+  raw: string | null,
+): GalleryFilterState | null {
+  if (!raw) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return null;
+  }
+  const record = parsed as Record<string, unknown>;
+  const author = typeof record.author === "string" ? record.author.trim() : "";
+  const ownerUserId =
+    typeof record.ownerUserId === "string" ? record.ownerUserId.trim() : "";
+  return {
+    view: record.view === "shelf" ? "shelf" : "gallery",
+    author: author.length > 0 ? author.slice(0, MAX_FILTER_LENGTH) : null,
+    ownerUserId:
+      ownerUserId.length > 0 ? ownerUserId.slice(0, MAX_FILTER_LENGTH) : null,
+    tags: boundedTags(Array.isArray(record.tags) ? record.tags : []),
+    // An older store kept the search; it is no longer restored (#1675).
+    search: "",
+    netlistable: record.netlistable === true,
+    withoutNetlist:
+      record.netlistable !== true && record.withoutNetlist === true,
+    ai: readAi(record.ai),
+    liked: record.liked === true,
+    attention: record.attention === true,
+    attentionKind:
+      record.attention === true ? readReason(record.attentionKind) : null,
+    parts: boundedParts(Array.isArray(record.parts) ? record.parts : []),
+    source:
+      typeof record.source === "string"
+        ? (gallerySourceByKey(record.source)?.key ?? null)
+        : null,
+    hideDatasets: record.hideDatasets === true,
+  };
+}
+
+/** Where a page learns how it was loaded: `performance`, in a browser. */
+interface NavigationTimingSource {
+  getEntriesByType(type: "navigation"): readonly unknown[];
+}
+
+/**
+ * Whether this page load is the reader reloading it, as Navigation Timing
+ * tells; a browser that cannot say is taken as a fresh visit. It stays true
+ * for the document's life, which is safe because the wall (GalleryFeed)
+ * mounts once per document: the path picks the page once, with no client
+ * routing back to the wall.
+ */
+export function isPageReload(
+  timing: NavigationTimingSource | undefined = globalThis.performance as
+    Performance | undefined,
+): boolean {
+  try {
+    const [entry] = timing?.getEntriesByType("navigation") ?? [];
+    return (entry as { type?: unknown } | undefined)?.type === "reload";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The filters the wall opens with. A link that narrows the wall wins outright
+ * — it is somebody's request for that slice — and otherwise the reader's own
+ * last choice is restored, including the empty one they cleared on purpose.
+ * A link to one circuit (`?entry=`) asks for the whole wall, where that
+ * circuit is sure to be. A reload opens unsearched (#1675): the address's
+ * `q` is read as absent, and every other choice it names stands.
+ */
+export function resolveGalleryFilters(
+  search: string,
+  storedRaw: string | null,
+  { reload = false }: { reload?: boolean } = {},
+): GalleryFilterState {
+  const { filters, narrowed, namesView } = parseGalleryFilterQuery(
+    reload ? withoutSearch(search) : search,
+  );
+  const stored = parseStoredGalleryFilters(storedRaw);
+  const focused = galleryFocusEntryId(search);
+  // A linked circuit of a reference dataset opens that dataset's wall.
+  if (focused)
+    return {
+      ...filters,
+      source: gallerySourceOfEntryId(focused)?.key ?? null,
+    };
+  if (narrowed || !stored) return filters;
+  return { ...stored, view: namesView ? filters.view : stored.view };
+}

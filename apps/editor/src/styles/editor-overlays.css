@@ -1,0 +1,569 @@
+/* Editor overlay owner: recovery and guarded-action surfaces that must not resize the workspace. */
+
+.help-backdrop {
+  position: fixed;
+  z-index: 30;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 1.25rem;
+  background: rgb(55 53 47 / 28%);
+  backdrop-filter: blur(4px);
+}
+
+.help-dialog {
+  width: min(42rem, 100%);
+  max-height: min(44rem, calc(100vh - 2.5rem));
+  overflow: auto;
+  border: 1px solid rgb(255 255 255 / 55%);
+  border-radius: var(--icm-radius-lg);
+  background: var(--icm-surface);
+  box-shadow: var(--icm-shadow-lg);
+}
+
+.help-dialog-header {
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.1rem 1.25rem 0.9rem;
+  border-bottom: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-lg) var(--icm-radius-lg) 0 0;
+  background: rgb(255 255 255 / 94%);
+  backdrop-filter: blur(12px);
+}
+
+.help-dialog-header h2,
+.help-dialog-header p,
+.help-dialog-content h3,
+.help-dialog-content p {
+  margin: 0;
+}
+
+.help-kicker {
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-sm);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.help-dialog-header h2 {
+  margin-top: 0.2rem;
+  font-size: 18px;
+}
+
+.help-dialog-content {
+  display: grid;
+  gap: 0.85rem;
+  padding: 1.25rem;
+  line-height: 1.55;
+}
+
+.help-dialog-content > section {
+  scroll-margin-top: 5.5rem;
+}
+
+/* The unsaved-changes guard: a compact decision card, not a document.
+   Hierarchy does the work — amber glyph names the stakes, the accent
+   button is the recommended way out, and the destructive path sits
+   apart on the left in quiet red. */
+.replace-guard-dialog {
+  width: min(37rem, 100%);
+  padding: 1.15rem 1.25rem 1rem;
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-lg);
+  background: var(--icm-surface);
+  box-shadow: var(--icm-shadow-lg);
+}
+
+.replace-guard-lede {
+  display: flex;
+  gap: 0.85rem;
+  align-items: flex-start;
+}
+
+.replace-guard-glyph {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 2.35rem;
+  height: 2.35rem;
+  margin-top: 0.1rem;
+  border-radius: 999px;
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.replace-guard-copy {
+  display: grid;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.replace-guard-copy h2 {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.3;
+}
+
+.replace-guard-copy p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--icm-text);
+}
+
+.replace-guard-hint {
+  color: var(--icm-text-muted, #787066);
+  font-size: 12px;
+}
+
+.replace-guard-hint code {
+  font-size: 11px;
+  padding: 0 0.25em;
+}
+
+.replace-guard-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 1.1rem;
+}
+
+.replace-guard-actions button {
+  height: var(--icm-control-h);
+  padding: 0 0.85rem;
+  border-radius: var(--icm-radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.replace-guard-actions button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.replace-guard-discard {
+  margin-right: auto;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #b3261e;
+}
+
+.replace-guard-discard:hover:not(:disabled) {
+  background: rgb(179 38 30 / 8%);
+}
+
+.replace-guard-stay {
+  border: 1px solid var(--icm-border);
+  background: var(--icm-surface);
+  color: var(--icm-text);
+}
+
+.replace-guard-stay:hover:not(:disabled) {
+  background: var(--icm-surface-hover);
+}
+
+.replace-guard-save {
+  border: 1px solid var(--icm-accent);
+  background: var(--icm-accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.replace-guard-save:hover:not(:disabled) {
+  filter: brightness(1.05);
+}
+
+@media (max-width: 560px) {
+  .replace-guard-discard {
+    margin-right: 0;
+    order: 3;
+  }
+
+  .replace-guard-actions {
+    justify-content: flex-end;
+  }
+}
+
+/* File → Project Info: the circuit's and the Cell's names to edit and a few
+   facts, in the same quiet card as the unsaved-changes guard, about two
+   thirds of the window wide and never narrower than the form needs. */
+.project-info-dialog {
+  width: min(calc(100vw - 2rem), max(66.667vw, 28rem));
+  padding: 1.15rem 1.25rem 1rem;
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-lg);
+  background: var(--icm-surface);
+  box-shadow: var(--icm-shadow-lg);
+}
+
+.project-info-dialog h2 {
+  margin: 0 0 0.9rem;
+  font-size: 15px;
+  line-height: 1.3;
+}
+
+.project-info-details dt,
+.project-info-details label > span {
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-xs);
+  font-weight: 500;
+}
+
+.project-info-details,
+.project-info-details dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.project-info-details label,
+.project-info-details dl > div {
+  display: grid;
+  grid-template-columns: 6rem minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+}
+
+.project-info-details input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: var(--icm-control-h);
+  padding: 0 0.5rem;
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-sm);
+  background: var(--icm-surface);
+  color: var(--icm-text);
+  font: inherit;
+  font-size: var(--icm-font-sm);
+}
+
+.project-info-details dd {
+  margin: 0;
+  font-size: var(--icm-font-sm);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.project-info-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.9rem;
+}
+
+.project-info-actions button {
+  height: var(--icm-control-h);
+  padding: 0 0.95rem;
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-sm);
+  background: var(--icm-surface);
+  color: var(--icm-text);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.project-info-actions button:hover:not(:disabled) {
+  background: var(--icm-surface-hover);
+}
+
+.project-info-actions .primary {
+  border-color: var(--icm-accent);
+  color: #fff;
+  background: var(--icm-accent);
+}
+
+.project-info-actions .primary:hover:not(:disabled) {
+  background: var(--icm-accent);
+  filter: brightness(1.08);
+}
+
+.project-info-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.replace-guard-warning {
+  padding: var(--icm-space-2) var(--icm-space-3);
+  border-left: 3px solid #b45309;
+  background: #fef3c7;
+}
+
+/* Recovery banners float over the canvas so they never resize it. */
+.recovery-banner {
+  position: fixed;
+  z-index: 19;
+  top: 4.6rem;
+  left: 50%;
+  translate: -50% 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  max-width: min(38rem, calc(100vw - 2.5rem));
+  padding: 0.7rem 1rem;
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-lg);
+  background: var(--icm-surface);
+  box-shadow: var(--icm-shadow-lg);
+}
+
+.recovery-banner p {
+  margin: 0;
+  font-size: var(--icm-font-sm);
+}
+
+.recovery-banner-warning {
+  border-color: #b45309;
+  background: #fef3c7;
+}
+
+.recovery-banner-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.recovery-session-list {
+  display: grid;
+  gap: 0.85rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.recovery-session-card {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.85rem 0.95rem;
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-lg);
+}
+
+.recovery-session-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.recovery-session-meta {
+  font-size: var(--icm-font-sm);
+  color: #5f6b7a;
+}
+
+.recovery-generation-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+  margin: 0;
+}
+
+.recovery-generation-list div {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.recovery-generation-list dt {
+  font-size: var(--icm-font-sm);
+  color: #5f6b7a;
+}
+
+.recovery-generation-list dd {
+  margin: 0;
+  font-weight: 600;
+}
+
+.recovery-session-note {
+  margin: 0;
+  font-size: var(--icm-font-sm);
+  color: #8a4b08;
+}
+
+.recovery-session-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.statusbar-recovery {
+  font-size: var(--icm-font-sm);
+  color: #5f6b7a;
+}
+
+.help-dialog-content h3 {
+  margin-bottom: 0.25rem;
+  font-size: var(--icm-font-lg);
+}
+
+.help-dialog-content p {
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-lg);
+}
+
+.help-dialog-content strong {
+  color: var(--icm-text);
+}
+
+.selection-filter-popover {
+  position: fixed;
+  z-index: 12;
+  top: 7.25rem;
+  right: var(--icm-space-4);
+  display: grid;
+  width: min(300px, calc(100vw - var(--icm-space-6)));
+  max-height: calc(100vh - 9rem);
+  gap: var(--icm-space-3);
+  padding: var(--icm-space-4);
+  overflow: auto;
+  border: 1px solid var(--icm-border-strong);
+  border-radius: var(--icm-radius-md);
+  background: rgb(255 255 255 / 97%);
+  box-shadow: var(--icm-shadow-md);
+  color: var(--icm-text);
+  backdrop-filter: blur(10px);
+}
+
+.selection-filter-popover > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--icm-space-3);
+}
+
+.selection-filter-popover h2,
+.selection-filter-popover p {
+  margin: 0;
+}
+
+.selection-filter-popover h2 {
+  font-size: var(--icm-font-lg);
+}
+
+.selection-filter-kicker,
+.selection-filter-popover legend,
+.selection-filter-popover small {
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-xs);
+}
+
+.selection-filter-popover button {
+  min-height: 28px;
+  padding: 3px 8px;
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-sm);
+  background: var(--icm-surface);
+  color: inherit;
+}
+
+.selection-filter-popover button:hover {
+  background: var(--icm-surface-hover);
+}
+
+.selection-filter-presets {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--icm-space-2);
+}
+
+.selection-filter-popover fieldset {
+  display: grid;
+  gap: var(--icm-space-2);
+  margin: 0;
+  padding: var(--icm-space-2) 0 0;
+  border: 0;
+  border-top: 1px solid var(--icm-border);
+}
+
+.selection-filter-popover legend {
+  padding: 0 var(--icm-space-2) 0 0;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.selection-filter-popover fieldset label {
+  display: flex;
+  align-items: center;
+  gap: var(--icm-space-2);
+  font-size: var(--icm-font-sm);
+}
+
+.selection-filter-popover input {
+  margin: 0;
+}
+
+/* The day's Gallery opens are spent: a card in the middle of the canvas, so
+   an empty canvas is not mistaken for a broken link. */
+.gallery-daily-limit-card {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 3;
+  transform: translate(-50%, -50%);
+  box-sizing: border-box;
+  width: min(340px, calc(100% - 32px));
+  padding: var(--icm-space-4);
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-lg);
+  background: var(--icm-surface);
+  box-shadow: var(--icm-shadow-lg);
+  text-align: center;
+}
+
+.gallery-daily-limit-card h2 {
+  margin: 0 0 var(--icm-space-2);
+  font-size: var(--icm-font-md);
+  font-weight: 650;
+}
+
+.gallery-daily-limit-card p {
+  margin: 0 0 var(--icm-space-3);
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-sm);
+  line-height: 1.45;
+}
+
+.gallery-daily-limit-actions {
+  display: flex;
+  justify-content: center;
+  gap: var(--icm-space-2);
+}
+
+.gallery-daily-limit-actions a,
+.gallery-daily-limit-actions button {
+  display: inline-flex;
+  align-items: center;
+  height: var(--icm-control-h);
+  padding: 0 var(--icm-space-4);
+  border: 1px solid var(--icm-border);
+  border-radius: 999px;
+  background: var(--icm-surface);
+  color: inherit;
+  font: inherit;
+  font-size: var(--icm-font-sm);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.gallery-daily-limit-actions .gallery-daily-limit-primary {
+  border-color: var(--icm-accent);
+  background: var(--icm-accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.gallery-daily-limit-actions a:focus-visible,
+.gallery-daily-limit-actions button:focus-visible {
+  outline: 2px solid var(--icm-accent-soft);
+  outline-offset: 2px;
+}

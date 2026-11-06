@@ -1,0 +1,375 @@
+import { createEmptyProject } from "@icm/model";
+import { InMemorySymbolResolver } from "@icm/symbols";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { hierarchyParameterFixture } from "../../../../../netlists/hierarchy-parameters/fixture";
+import { ChunkLoadError } from "../../components/chunk-import";
+import type { EditorExportDelivery } from "../../hosts/export-delivery";
+import { loadRnlRuntime } from "../netlist-export/rnl-runtime";
+import {
+  createEditorFileCommands,
+  type EditorFileCommandDependencies,
+} from "./editor-file-commands";
+import {
+  createSvgExportArtifact,
+  createVisualExportArtifact,
+  planDesignNetlistExport,
+  type EditorExportArtifact,
+} from "./editor-export-commands";
+
+vi.mock("./editor-export-commands", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./editor-export-commands")>()),
+  createSvgExportArtifact: vi.fn(),
+  createVisualExportArtifact: vi.fn(),
+}));
+vi.mock("../netlist-export/rnl-runtime", () => ({ loadRnlRuntime: vi.fn() }));
+
+function commands(overrides: Partial<EditorFileCommandDependencies> = {}) {
+  const project =
+    overrides.project ?? createEmptyProject("project", "My Circuit / 1");
+  const deliverFile = vi
+    .fn<EditorExportDelivery["deliverFile"]>()
+    .mockResolvedValue({ status: "saved" });
+  const copyText = vi
+    .fn<EditorExportDelivery["copyText"]>()
+    .mockResolvedValue();
+  const dependencies = {
+    project,
+    document: project.documents[0]!,
+    resolver: new InMemorySymbolResolver([]),
+    defaultViewBox: { x: 0, y: 0, width: 960, height: 640 },
+    exportDelivery: { deliverFile, copyText },
+    electricalWarningsPresent: () => false,
+    guardDirtyReplacement: vi.fn(),
+    replaceActiveProject: vi.fn(),
+    showNetlist: vi.fn(),
+    setImportReport: vi.fn(),
+    setImportReviewOpen: vi.fn(),
+    setSelectionOpen: vi.fn(),
+    setStatus: vi.fn(),
+    onChunkLoadFailure: vi.fn(),
+    ...overrides,
+  } satisfies EditorFileCommandDependencies;
+  return {
+    ...createEditorFileCommands(dependencies),
+    dependencies,
+    deliverFile,
+    copyText,
+  };
+}
+
+function prepareVisual(format: "svg" | "png" | "pdf") {
+  const artifact: EditorExportArtifact = {
+    bytes: format === "svg" ? "<svg/>" : new Uint8Array([1, 2, 3]),
+    mediaType:
+      format === "svg"
+        ? "image/svg+xml"
+        : format === "png"
+          ? "image/png"
+          : "application/pdf",
+    extension: format,
+    report: "Exported revision 7; preserve the fidelity warning",
+  };
+  vi.mocked(createSvgExportArtifact).mockResolvedValue(artifact);
+  vi.mocked(createVisualExportArtifact).mockResolvedValue(artifact);
+  return artifact;
+}
+
+beforeEach(() => {
+  vi.resetAllMocks();
+  // Commands must be usable through an injected host without browser I/O.
+  vi.stubGlobal("window", undefined);
+  vi.stubGlobal("navigator", undefined);
+});
+afterEach(() => vi.unstubAllGlobals());
+
+describe.each(["svg", "png"] as const)("%s file delivery", (format) => {
+  const run = (target: ReturnType<typeof commands>) =>
+    format === "svg" ? target.exportSvg() : target.exportRaster(format);
+
+  it("waits for the host, preserving bytes, filename and fidelity report without changing the Project", async () => {
+    const artifact = prepareVisual(format);
+    const target = commands();
+    const before = structuredClone(target.dependencies.project);
+    const pending = Promise.withResolvers<{ status: "saved" }>();
+    target.deliverFile.mockReturnValue(pending.promise);
+    const completed = run(target);
+    await vi.waitFor(() => expect(target.deliverFile).toHaveBeenCalledOnce());
+    expect(target.dependencies.setStatus).toHaveBeenLastCalledWith(
+      `Preparing ${format.toUpperCase()} export`,
+    );
+    expect(target.deliverFile).toHaveBeenCalledWith({
+      bytes: artifact.bytes,
+      mediaType: artifact.mediaType,
+      suggestedName: `my-circuit-1.${format}`,
+    });
+    pending.resolve({ status: "saved" });
+    await completed;
+    expect(target.dependencies.setStatus).toHaveBeenLastCalledWith(
+      artifact.report,
+    );
+    expect(target.dependencies.project).toEqual(before);
+    expect(target.dependencies.replaceActiveProject).not.toHaveBeenCalled();
+  });
+
+  it("does not report success after a cancelled save dialog", async () => {
+    const artifact = prepareVisual(format);
+    const target = commands();
+    target.deliverFile.mockResolvedValue({ status: "cancelled" });
+    await run(target);
+    expect(target.dependencies.setStatus).toHaveBeenLastCalledWith(
+      "Export cancelled",
+    );
+    expect(target.dependencies.setStatus).not.toHaveBeenCalledWith(
+      artifact.report,
+    );
+  });
+
+  it("reports a failed delivery instead of claiming success", async () => {
+    const artifact = prepareVisual(format);
+    const target = commands();
+    target.deliverFile.mockRejectedValue(new Error("Disk is full"));
+    await run(target);
+    expect(target.dependencies.setStatus).toHaveBeenLastCalledWith(
+      "Disk is full",
+    );
+    expect(target.dependencies.setStatus).not.toHaveBeenCalledWith(
+      artifact.report,
+    );
+  });
+});
+
+it("keeps the existing Web report after requesting a download", async () => {
+  const artifact = prepareVisual("svg");
+  const target = commands();
+  target.deliverFile.mockResolvedValue({ status: "download-requested" });
+  await target.exportSvg();
+  expect(target.dependencies.setStatus).toHaveBeenLastCalledWith(
+    artifact.report,
+  );
+});
+
+it("does not deliver a failed visual build and keeps the chunk refresh remedy", async () => {
+  const target = commands();
+  vi.mocked(createVisualExportArtifact).mockRejectedValue(
+    new ChunkLoadError("PDF export", new Error("missing chunk")),
+  );
+  await target.exportRaster("pdf");
+  expect(target.deliverFile).not.toHaveBeenCalled();
+  expect(target.dependencies.onChunkLoadFailure).toHaveBeenCalledWith(
+    "PDF export",
+  );
+  expect(target.dependencies.setStatus).toHaveBeenLastCalledWith(
+    expect.stringContaining("Refresh"),
+  );
+});
+
+describe("netlist delivery", () => {
+  it("saves the selected netlist to a file with the same refusal rules while ordinary Copy stays on the clipboard", async () => {
+    const target = commands({
+      project: hierarchyParameterFixture(),
+      netlistRootDocumentId: "resistors",
+    });
+    await target.exportDesignNetlist("spice", "native", "file");
+    expect(target.copyText).not.toHaveBeenCalled();
+    expect(target.deliverFile).toHaveBeenCalledOnce();
+    expect(String(target.deliverFile.mock.calls[0]![0].bytes)).toContain(
+      ".subckt",
+    );
+    expect(target.dependencies.setStatus).toHaveBeenLastCalledWith(
+      expect.stringContaining("saved"),
+    );
+    const refused = commands({
+      netlistConfigurationError: "Choose a root Cell",
+    });
+    await refused.exportDesignNetlist("spice", "native", "file");
+    expect(refused.deliverFile).not.toHaveBeenCalled();
+  });
+  it.each(["spice", "spectre"] as const)(
+    "saves exactly the %s text that Copy puts on the clipboard, named by the format",
+    async (format) => {
+      const project = hierarchyParameterFixture();
+      const copying = commands({
+        project,
+        netlistRootDocumentId: "resistors",
+      });
+      await copying.exportDesignNetlist(format, "native");
+      const saving = commands({
+        project,
+        netlistRootDocumentId: "resistors",
+      });
+      await saving.exportDesignNetlist(format, "native", "file");
+      const saved = saving.deliverFile.mock.calls[0]![0];
+      expect(saved.bytes).toBe(String(copying.copyText.mock.calls[0]![0]));
+      expect(saved.suggestedName).toMatch(
+        format === "spice" ? /\.spi$/u : /\.scs$/u,
+      );
+    },
+  );
+  it.each(["spice", "spectre"] as const)(
+    "copies the current %s plan with the chosen root and warnings through the host",
+    async (format) => {
+      const project = hierarchyParameterFixture();
+      project.documents[0]!.netlist = undefined;
+      const before = structuredClone(project);
+      const target = commands({
+        project,
+        netlistRootDocumentId: "resistors",
+        electricalWarningsPresent: () => true,
+      });
+      const pending = Promise.withResolvers<void>();
+      target.copyText.mockReturnValue(pending.promise);
+      const completed = target.exportDesignNetlist(format, "cadence-bang");
+      const plan = planDesignNetlistExport({
+        project,
+        format,
+        namingProfile: "cadence-bang",
+        rootDocumentId: "resistors",
+        electricalWarningsPresent: true,
+      });
+      expect(plan.status).toBe("ready");
+      if (plan.status !== "ready") throw new Error("Expected a ready fixture");
+      expect(target.copyText).toHaveBeenCalledWith(plan.artifact.bytes);
+      expect(target.dependencies.showNetlist).toHaveBeenCalledWith(
+        format,
+        "cadence-bang",
+      );
+      expect(target.dependencies.setStatus).not.toHaveBeenCalledWith(
+        plan.artifact.report,
+      );
+      pending.resolve();
+      await completed;
+      expect(target.dependencies.setStatus).toHaveBeenLastCalledWith(
+        plan.artifact.report,
+      );
+      expect(target.deliverFile).not.toHaveBeenCalled();
+      expect(project).toEqual(before);
+    },
+  );
+
+  it("refuses invalid configuration before calling either delivery", async () => {
+    const target = commands({
+      netlistConfigurationError: "Choose a root Cell",
+    });
+    await target.exportDesignNetlist("spice");
+    expect(target.dependencies.setStatus).toHaveBeenLastCalledWith(
+      "Fix Netlist configuration: Choose a root Cell",
+    );
+    expect(target.copyText).not.toHaveBeenCalled();
+    expect(target.deliverFile).not.toHaveBeenCalled();
+  });
+
+  it("does not deliver a structurally blocked netlist", async () => {
+    const project = createEmptyProject("project", "Circuit");
+    project.documents[0]!.netlist = undefined;
+    const target = commands({ project });
+    await target.exportDesignNetlist("spice");
+    expect(target.dependencies.setStatus).toHaveBeenLastCalledWith(
+      "Resolve the Check Report findings before export",
+    );
+    expect(target.copyText).not.toHaveBeenCalled();
+    expect(target.deliverFile).not.toHaveBeenCalled();
+  });
+
+  it("preserves the sidebar-copy fallback without silently downloading on clipboard failure", async () => {
+    const target = commands();
+    target.copyText.mockRejectedValue(new Error("Clipboard unavailable"));
+    await target.exportDesignNetlist("spice");
+    expect(target.dependencies.setStatus).toHaveBeenLastCalledWith(
+      "Clipboard unavailable; select the netlist in the sidebar and copy it",
+    );
+    expect(target.deliverFile).not.toHaveBeenCalled();
+  });
+});
+
+describe("RNL netlist copy", () => {
+  const written = (text: string) => ({
+    write: vi.fn(async () => ({ text, document: { diagnostics: [] } })),
+    snapshot: vi.fn(),
+  });
+
+  it("starts the copy inside the click and fills it in once the runtime has written", async () => {
+    const runtime = Promise.withResolvers<ReturnType<typeof written>>();
+    vi.mocked(loadRnlRuntime).mockReturnValue(runtime.promise);
+    const target = commands();
+    const completed = target.exportDesignNetlist("spice+rnl");
+    expect(target.copyText).toHaveBeenCalledOnce();
+    const text = target.copyText.mock.calls[0]![0];
+    expect(text).toBeInstanceOf(Promise);
+    runtime.resolve(written("* written"));
+    await completed;
+    await expect(text).resolves.toBe("* written");
+    expect(target.dependencies.setStatus).toHaveBeenLastCalledWith(
+      expect.stringMatching(/^SPICE\+RNL netlist copied/u),
+    );
+  });
+
+  it("says why a blocked RNL netlist was not copied", async () => {
+    vi.mocked(loadRnlRuntime).mockResolvedValue(null);
+    const target = commands();
+    await target.exportDesignNetlist("spectre+rnl");
+    await expect(target.copyText.mock.calls[0]![0]).rejects.toThrow(
+      "rnl runtime",
+    );
+    expect(target.dependencies.setStatus).toHaveBeenLastCalledWith(
+      "RNL formats need the rnl runtime, which this build lacks",
+    );
+  });
+
+  it("names the runtime's failure and keeps the clipboard fallback for a refused copy", async () => {
+    vi.mocked(loadRnlRuntime).mockRejectedValue(new Error("no Worker"));
+    const failed = commands();
+    await failed.exportDesignNetlist("spice+rnl");
+    expect(failed.dependencies.setStatus).toHaveBeenLastCalledWith(
+      "RNL: no Worker",
+    );
+    vi.mocked(loadRnlRuntime).mockResolvedValue(written("* written"));
+    const refused = commands();
+    refused.copyText.mockRejectedValue(new Error("Not allowed"));
+    await refused.exportDesignNetlist("spice+rnl");
+    expect(refused.dependencies.setStatus).toHaveBeenLastCalledWith(
+      "Clipboard unavailable; select the netlist in the sidebar and copy it",
+    );
+  });
+});
+
+describe("RNL chunk failures", () => {
+  afterEach(() => {
+    vi.doUnmock("@icm/rnl");
+    vi.doUnmock("../netlist-export/rnl-import");
+  });
+
+  it("keeps the chunk refresh remedy when the RNL writer cannot load", async () => {
+    vi.doMock("@icm/rnl", () => {
+      throw new Error("missing chunk");
+    });
+    vi.mocked(loadRnlRuntime).mockResolvedValue(null);
+    for (const destination of ["clipboard", "file"] as const) {
+      const target = commands();
+      await target.exportDesignNetlist("spice+rnl", "native", destination);
+      expect(target.deliverFile).not.toHaveBeenCalled();
+      expect(target.dependencies.onChunkLoadFailure).toHaveBeenCalledWith(
+        "RNL formats",
+      );
+      expect(target.dependencies.setStatus).toHaveBeenLastCalledWith(
+        expect.stringContaining("Refresh"),
+      );
+    }
+  });
+
+  it("keeps the chunk refresh remedy when the RNL importer cannot load", async () => {
+    vi.doMock("../netlist-export/rnl-import", () => {
+      throw new Error("missing chunk");
+    });
+    const target = commands();
+    await target.importRnlFiles([
+      new File(["* rnl\n"], "circuit.sp"),
+    ] as unknown as FileList);
+    expect(target.dependencies.replaceActiveProject).not.toHaveBeenCalled();
+    expect(target.dependencies.onChunkLoadFailure).toHaveBeenCalledWith(
+      "RNL import",
+    );
+    expect(target.dependencies.setStatus).toHaveBeenLastCalledWith(
+      expect.stringContaining("Refresh"),
+    );
+  });
+});

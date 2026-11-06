@@ -1,0 +1,47 @@
+# No trailing slash: a bare `node_modules/` matches a directory but not a
+# symlink of the same name, which is how one reached the index once.
+node_modules
+.pnpm-store/
+.worktrees/
+dist/
+coverage/
+playwright-report/
+test-results/
+output/
+tmp/
+.reference-src/
+# Local Claude registration points at the checked-in original skills.
+.claude/skills
+*.tsbuildinfo
+.vite/
+.wrangler/
+.DS_Store
+
+# Razavi fidelity diff generated output
+fixtures/visual-reference/razavi-reference-v1/diff/
+fixtures/visual-reference/razavi-reference-v1/text-diff/
+fixtures/visual-reference/razavi-reference-v1/diff-common/
+
+# Python PDF extractor bytecode
+**/__pycache__/
+
+# Local Agent-tooling scratch and generated layout exports
+.zcode/
+netlists/*/agent-*-layout.icproj.json
+netlists/*/agent-*-layout.mjs
+netlists/*/agent-*-layout.pdf
+netlists/*/agent-*-layout.png
+netlists/*/agent-*-layout.svg
+
+# Target plans are a local working area, not a published artifact.
+plan/
+containers/ngspice/runtime/
+
+# Sky130 model files staged by the preview deploy for the container image.
+pdk/
+
+# Separate desktop preview renderer output.
+apps/editor/dist-desktop/
+
+# Editor bundle browser tests serve under ICM_E2E_SERVER=preview.
+apps/editor/dist-e2e/

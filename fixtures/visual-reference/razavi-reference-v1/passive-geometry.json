@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "referenceId": "razavi-reference-v1",
+  "referenceSha256": "08c89f54345c835324528a63c7519dc3aeda17169febc20134e33056bc85790b",
+  "coordinateSystem": "reference-raster-pixels",
+  "pixelsPerLogical": 1.72,
+  "symbols": {
+    "resistor": {
+      "evidencePanel": "d-R1",
+      "originPx": { "x": 125, "y": 590 },
+      "rotation": 90,
+      "cropWindowPx": { "width": 31, "height": 35 },
+      "bodyPointsPx": [
+        { "x": 140, "y": 590 },
+        { "x": 136, "y": 604 },
+        { "x": 132, "y": 578 },
+        { "x": 127, "y": 604 },
+        { "x": 122, "y": 577 },
+        { "x": 117, "y": 604 },
+        { "x": 112, "y": 578 },
+        { "x": 110, "y": 590 }
+      ],
+      "bodyStyle": { "strokeRole": "normal", "lineCap": "butt", "lineJoin": "miter" }
+    }
+  },
+  "unrecordedSymbols": {
+    "capacitor": {
+      "reason": "The sole Razavi six-panel reference contains no capacitor.",
+      "requiredEvidence": "A capacitor-containing crop from the accepted Razavi reference."
+    }
+  }
+}

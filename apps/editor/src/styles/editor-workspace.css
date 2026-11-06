@@ -1,0 +1,800 @@
+/* Editor workspace owner: layout shell, library rail, shapes browser, and workspace resizing. */
+
+.app-workspace {
+  display: grid;
+  grid-template-columns: var(--icm-shapes-width) minmax(0, 1fr) auto auto;
+  grid-template-areas: "shapes canvas props simulation";
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  transition: grid-template-columns 160ms ease;
+}
+
+.app-workspace.library-collapsed {
+  grid-template-columns: 0 minmax(0, 1fr) auto auto;
+}
+
+.app-workspace.simulation-mode {
+  transition: none;
+}
+
+.app-shell:has(> .app-workspace.simulation-maximized) {
+  grid-template-rows: minmax(0, 1fr) auto auto;
+}
+
+.app-workspace.simulation-mode.simulation-maximized {
+  /* Reserve the flexible first row; footer auto-placement follows it. */
+  grid-row: 1;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "simulation";
+}
+
+.app-workspace.simulation-maximized .canvas-panel,
+.app-workspace.simulation-maximized .shapes-panel,
+.app-workspace.simulation-maximized .properties-resize-handle,
+.app-workspace.simulation-maximized .library-resize-handle,
+.app-workspace.simulation-maximized .simulation-resize-handle {
+  display: none;
+}
+
+/* Sits on the Library's right edge, overlapping the canvas by a few pixels so
+   the grab target is comfortable without stealing layout width. */
+.library-resize-handle {
+  grid-area: canvas;
+  z-index: 2;
+  width: 9px;
+  margin-left: -5px;
+  cursor: col-resize;
+  touch-action: none;
+  background: transparent;
+}
+
+.library-resize-handle:hover,
+.library-resize-handle:focus-visible {
+  background: linear-gradient(
+    to right,
+    transparent 3px,
+    var(--icm-accent) 3px,
+    var(--icm-accent) 5px,
+    transparent 5px
+  );
+  outline: none;
+}
+
+.simulation-resize-handle {
+  grid-area: simulation;
+  z-index: 13;
+  width: 9px;
+  margin-left: -5px;
+  cursor: col-resize;
+  touch-action: none;
+  background: transparent;
+}
+
+.properties-resize-handle {
+  grid-area: props;
+  z-index: 14;
+  width: 9px;
+  margin-left: -5px;
+  cursor: col-resize;
+  touch-action: none;
+  background: transparent;
+}
+
+.editor-right-dock {
+  grid-area: props;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  z-index: 12;
+  background: var(--icm-surface);
+}
+.editor-simulation-dock {
+  grid-area: simulation;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  border-left: 1px solid var(--icm-border);
+  background: var(--icm-surface);
+}
+.editor-simulation-dock.open {
+  width: min(var(--icm-simulation-width), 70vw);
+  border-left: 1px solid var(--icm-border);
+}
+.editor-simulation-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+.editor-right-dock[hidden],
+.editor-simulation-dock[hidden],
+.editor-simulation-content[hidden] {
+  display: none;
+}
+.editor-right-dock .selection-dock {
+  height: 100%;
+}
+.simulation-restore-rail {
+  writing-mode: vertical-rl;
+  align-self: flex-start;
+  padding: 12px 6px;
+  border: 0;
+  background: transparent;
+}
+.app-workspace.simulation-maximized .editor-simulation-dock {
+  width: 100%;
+}
+
+.simulation-resize-handle:hover,
+.simulation-resize-handle:focus-visible,
+.properties-resize-handle:hover,
+.properties-resize-handle:focus-visible {
+  background: linear-gradient(
+    to right,
+    transparent 3px,
+    var(--icm-accent) 3px,
+    var(--icm-accent) 5px,
+    transparent 5px
+  );
+  outline: none;
+}
+
+.tool-rail {
+  grid-area: tools;
+  display: flex;
+  flex-direction: column;
+  gap: var(--icm-space-1);
+  min-height: 0;
+  padding: var(--icm-space-2) var(--icm-space-1);
+  border-right: 1px solid var(--icm-border);
+  background: var(--icm-surface);
+  overflow: auto;
+}
+
+.tool-rail-button {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 3px;
+  width: 100%;
+  min-height: 44px;
+  padding: var(--icm-space-1) 2px;
+  border: 1px solid transparent;
+  border-radius: var(--icm-radius-sm);
+  color: var(--icm-text);
+  background: transparent;
+  box-shadow: none;
+  font-size: var(--icm-font-xs);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.tool-rail-button:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--icm-surface-hover);
+}
+
+.tool-rail-button[aria-pressed="true"] {
+  border-color: transparent;
+  color: var(--icm-accent);
+  background: var(--icm-accent-tint);
+  box-shadow: none;
+}
+
+.tool-rail-button span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-rail-button.examples-toggle {
+  font-size: 9px;
+  letter-spacing: 0;
+}
+
+.tool-rail-divider {
+  height: 1px;
+  margin: var(--icm-space-1) var(--icm-space-2);
+  background: var(--icm-border);
+}
+
+.shapes-panel {
+  grid-area: shapes;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border-right: 1px solid var(--icm-border);
+  background: var(--icm-surface);
+  overflow: hidden;
+  transition:
+    opacity 160ms ease,
+    border-color 160ms ease;
+}
+
+.shapes-panel.collapsed {
+  opacity: 0;
+  border-right-color: transparent;
+  pointer-events: none;
+}
+
+.shapes-panel-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--icm-space-3);
+  min-height: 0;
+  padding: var(--icm-space-3);
+  overflow: auto;
+  scrollbar-color: var(--icm-border-strong) transparent;
+  scrollbar-width: thin;
+}
+
+.shapes-section {
+  display: grid;
+  gap: var(--icm-space-2);
+}
+
+/* Stacking fold sections must stay in normal flow — no absolute/overlap. */
+.shapes-fold {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-md);
+  background: var(--icm-surface);
+  overflow: clip;
+}
+
+.shapes-fold-summary {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 8px;
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 0 10px;
+  cursor: pointer;
+  list-style: none;
+  color: var(--icm-text);
+  font-size: var(--icm-font-xs);
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  user-select: none;
+  background: var(--icm-surface-muted);
+}
+
+.shapes-fold-summary::-webkit-details-marker {
+  display: none;
+}
+
+.shapes-fold-summary::before {
+  content: "";
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 5px solid currentColor;
+  opacity: 0.45;
+  transition: transform 120ms ease;
+}
+
+.shapes-fold[open] > .shapes-fold-summary::before {
+  transform: rotate(90deg);
+}
+
+.shapes-fold-summary:hover {
+  background: var(--icm-surface-hover);
+}
+
+.shapes-fold-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shapes-fold-label-compact {
+  display: none;
+}
+
+.shapes-fold-count {
+  min-width: 1.25rem;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgb(15 15 15 / 6%);
+  color: var(--icm-text-muted);
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1.2;
+  text-align: center;
+}
+
+.shapes-fold-body {
+  position: relative;
+  display: block;
+  flex: 0 0 auto;
+  min-width: 0;
+  padding: var(--icm-space-2);
+  border-top: 1px solid var(--icm-border);
+  background: var(--icm-surface);
+}
+
+.shapes-fold:not([open]) > .shapes-fold-body {
+  display: none;
+}
+
+.shapes-section h3 {
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: var(--icm-line-tight);
+}
+
+.shapes-category-list {
+  display: grid;
+  gap: var(--icm-space-3);
+}
+
+.shapes-category {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.shapes-category-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  min-height: 18px;
+  padding: 0 2px;
+  color: var(--icm-text-muted);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.shapes-category-header::-webkit-details-marker {
+  display: none;
+}
+
+.shapes-category-header::before {
+  content: "";
+  width: 0;
+  height: 0;
+  border-top: 3px solid transparent;
+  border-bottom: 3px solid transparent;
+  border-left: 4px solid currentColor;
+  opacity: 0.5;
+  transition: transform 120ms ease;
+}
+
+.shapes-category[open] > .shapes-category-header::before {
+  transform: rotate(90deg);
+}
+
+.shapes-category-header:hover {
+  color: var(--icm-text);
+}
+
+.shapes-category-label {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  line-height: var(--icm-line-tight);
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.shapes-category:not([open]) > .shapes-grid {
+  display: none;
+}
+
+.shapes-category-count {
+  flex: 0 0 auto;
+  color: var(--icm-text-muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+/* Fixed-size tiles rather than fractional columns: dragging the panel wider
+   fits more squares per row instead of stretching each one. */
+.shapes-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, var(--icm-shapes-tile));
+  gap: 4px;
+}
+
+.shapes-example-card {
+  display: block;
+  width: 100%;
+  min-height: 76px;
+  padding: var(--icm-space-3);
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-sm);
+  background: var(--icm-surface-muted);
+  box-shadow: none;
+  color: var(--icm-text);
+  text-align: left;
+}
+
+/* User-saved examples: the card is a row of one open surface plus small
+   export/delete actions, sharing the bundled-example card chrome. */
+.user-example-card {
+  display: flex;
+  align-items: stretch;
+  gap: var(--icm-space-2);
+  padding: var(--icm-space-2);
+}
+
+.user-example-card .user-example-open {
+  flex: 1;
+  min-width: 0;
+  padding: var(--icm-space-1);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.user-example-actions {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--icm-space-1);
+}
+
+.user-example-actions button {
+  padding: 2px var(--icm-space-2);
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-sm);
+  background: var(--icm-surface);
+  color: var(--icm-text-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.user-example-actions button:hover {
+  border-color: var(--icm-border-hover);
+  color: var(--icm-text);
+}
+
+.user-example-list .shapes-category-header {
+  display: block;
+  margin-top: var(--icm-space-2);
+}
+
+.shapes-example-card:hover:not(:disabled) {
+  border-color: var(--icm-border-hover);
+  background: #fff;
+  box-shadow: var(--icm-shadow-sm);
+}
+
+.shapes-example-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.shapes-example-kicker {
+  color: var(--icm-text-muted);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+
+.shapes-example-name {
+  overflow: hidden;
+  font-size: var(--icm-font-sm);
+  font-weight: 650;
+  line-height: var(--icm-line-tight);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shapes-example-description {
+  overflow: hidden;
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-xs);
+  line-height: var(--icm-line-tight);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shapes-chip {
+  display: grid;
+  grid-template-rows: 32px 1.15em;
+  justify-items: center;
+  align-content: center;
+  gap: 2px;
+  width: var(--icm-shapes-tile);
+  height: var(--icm-shapes-tile);
+  padding: 0;
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-sm);
+  background: var(--icm-surface-muted);
+  box-shadow: none;
+  color: var(--icm-text);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.15;
+  text-align: center;
+}
+
+.shapes-chip:hover:not(:disabled) {
+  border-color: var(--icm-border-hover);
+  background: #fff;
+  box-shadow: var(--icm-shadow-sm);
+}
+
+.shapes-chip-art {
+  width: 40px;
+  height: 32px;
+  overflow: visible;
+  color: var(--icm-text);
+}
+
+.shapes-chip span {
+  display: block;
+  max-width: calc(100% - 2px);
+  min-height: 1.15em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shapes-hint {
+  margin: 0;
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-sm);
+  line-height: var(--icm-line);
+}
+
+.shapes-hint kbd,
+.inspect-empty kbd {
+  padding: 1px 5px;
+  border: 1px solid var(--icm-border-strong);
+  border-radius: 4px;
+  background: var(--icm-surface-muted);
+  font: inherit;
+  font-size: var(--icm-font-xs);
+}
+
+.statusbar-left {
+  display: flex;
+  align-items: center;
+  gap: var(--icm-space-2);
+  min-width: 0;
+}
+
+/* When the bar is short of room the message gives way first, down to
+   nothing, before any chip goes. */
+.statusbar-left > .editor-status {
+  flex-shrink: 1000;
+}
+
+/* Chips that do not fit drop whole onto a hidden second row instead of
+   running under the view controls; the bar keeps its one row. */
+.statusbar-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  align-content: flex-start;
+  gap: 0 var(--icm-space-2);
+  min-width: 0;
+  height: 28px;
+  overflow: hidden;
+}
+
+/* A zero-width strut makes the visible row the full height, so the chips
+   sit centred in it; it gives its share of the gap back. */
+.statusbar-chips::before {
+  width: 0;
+  height: 28px;
+  margin-right: calc(-1 * var(--icm-space-2));
+  content: "";
+}
+
+.statusbar-tool {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: var(--icm-text-muted);
+  background: var(--icm-surface-muted);
+  font-size: var(--icm-font-xs);
+  font-weight: 600;
+  line-height: var(--icm-line-tight);
+}
+
+/* The Agent session's final minute: the one action that keeps it, in view. */
+.statusbar-agent-expiring {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px 2px 8px;
+  border-radius: 999px;
+  color: var(--icm-text);
+  background: var(--icm-surface-muted);
+  font-size: var(--icm-font-xs);
+  font-weight: 600;
+  line-height: var(--icm-line-tight);
+}
+
+.statusbar-agent-expiring button {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font: inherit;
+}
+
+/* Persistent findings entry point. Same chip language as the tool label; the
+   severity recolors it, and the zero state stays quiet but clickable. */
+.statusbar-issues {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: 999px;
+  color: var(--icm-text-muted);
+  background: var(--icm-surface-muted);
+  font-size: var(--icm-font-xs);
+  font-weight: 600;
+  line-height: var(--icm-line-tight);
+  cursor: pointer;
+}
+
+.statusbar-issues[data-severity="warning"] {
+  color: var(--icm-warning);
+  background: color-mix(in srgb, var(--icm-warning) 14%, transparent);
+}
+
+.statusbar-issues[data-severity="error"] {
+  color: var(--icm-danger, #b42318);
+  background: color-mix(in srgb, var(--icm-danger, #b42318) 12%, transparent);
+}
+
+/* The gallery panel shows circuits, not just their names, and the reader
+   chooses how many fit per row. */
+.shapes-example-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--icm-space-2);
+  padding: var(--icm-space-2);
+}
+
+.shapes-example-preview {
+  display: block;
+  overflow: hidden;
+  aspect-ratio: 1;
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-sm);
+  background: var(--icm-surface);
+}
+
+.shapes-example-preview svg,
+.shapes-example-preview img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+@media (max-width: 1100px) {
+  .app-workspace {
+    grid-template-columns:
+      min(220px, var(--icm-shapes-width)) minmax(0, 1fr)
+      auto auto;
+  }
+
+  .app-workspace.simulation-mode.simulation-maximized {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "simulation";
+  }
+}
+
+@media (max-width: 860px) {
+  /* The project dock floats over the canvas on compact screens. An active
+     text editor must keep all formatting controls clickable; restore the
+     same dock immediately after text editing ends. */
+  .app-workspace:has(.canvas-text-editor-overlay) .project-tool-dock,
+  .app-workspace:has(.canvas-text-editor-overlay) .properties-resize-handle {
+    visibility: hidden;
+  }
+  .editor-right-dock {
+    display: contents;
+  }
+  .app-workspace.simulation-mode .selection-dock {
+    right: min(var(--icm-simulation-width), 70vw);
+  }
+  .app-workspace.simulation-mode .selection-dock.open {
+    width: min(var(--icm-properties-width), 30vw);
+  }
+  .app-workspace,
+  .app-workspace.library-collapsed {
+    position: relative;
+    grid-template-rows: minmax(0, 1fr);
+    /* The dragged width stays authoritative here too; only the ceiling
+       narrows, so the Library can still be pulled open on a half-screen
+       window. */
+    grid-template-columns:
+      min(var(--icm-shapes-width), 60vw) minmax(0, 1fr)
+      auto;
+    grid-template-areas: "shapes canvas simulation";
+  }
+
+  .app-workspace.library-collapsed {
+    grid-template-columns: 0 minmax(0, 1fr) auto;
+  }
+
+  .app-workspace.simulation-mode {
+    grid-template-columns: 0 minmax(0, 1fr) auto;
+    grid-template-areas: "shapes canvas simulation";
+  }
+
+  .app-workspace.simulation-mode.simulation-maximized {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "simulation";
+  }
+
+  .app-workspace.library-collapsed .shapes-panel {
+    display: none;
+  }
+
+  .properties-resize-handle {
+    grid-area: auto;
+    position: absolute;
+    top: 0;
+    right: calc(
+      min(
+          var(--icm-properties-width, var(--icm-props-open)),
+          calc(100% - var(--icm-rail-width))
+        ) -
+        5px
+    );
+    bottom: 0;
+    margin-left: 0;
+  }
+
+  .shapes-panel {
+    border-top: 0;
+  }
+
+  .shapes-fold-label-full {
+    display: none;
+  }
+
+  .shapes-fold-label-compact {
+    display: inline;
+  }
+
+  .shapes-chip {
+    grid-template-rows: 36px 1.15em;
+    gap: 3px;
+    padding: 0;
+    font-size: 10px;
+  }
+
+  .shapes-chip-art {
+    width: 46px;
+    height: 36px;
+  }
+}

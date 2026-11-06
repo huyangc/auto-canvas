@@ -1,0 +1,389 @@
+import {
+  ProjectSimulationFolderSchema,
+  type ProjectSimulationFolder,
+  type CircuitProject,
+  type ProjectModelSource,
+} from "@icm/model";
+import {
+  generateCircuitSource,
+  planCircuitSourceEdit,
+  type CircuitParameterChange,
+} from "@icm/netlist";
+import { problem, type Problem } from "./contract.js";
+import {
+  planSimulationSourceChanges,
+  sourceUpdateReceipt,
+} from "./source-files.js";
+import type {
+  SimulationFileOperation,
+  SimulationFileResult,
+} from "./file-contract.js";
+import { sha256 } from "./content-digest.js";
+
+export interface ProjectSourceSnapshot {
+  /** The host's Project replacement identity, distinct from the revision. */
+  projectSessionId: string;
+  structureRevision: number;
+  folder: ProjectSimulationFolder;
+  /** Omitted only by text-only hosts; generated Circuit access requires the authoritative Project. */
+  project?: CircuitProject;
+}
+
+/** Adapter to existing Project history/transactions; it does not own a store. */
+export interface ProjectSimulationFileHost {
+  read(folderId: string): ProjectSourceSnapshot | undefined;
+  /** Must atomically check the session and expected revision before upsert. */
+  commit(
+    expected: Pick<
+      ProjectSourceSnapshot,
+      "projectSessionId" | "structureRevision"
+    >,
+    folder: ProjectSimulationFolder,
+    parameters?: CircuitParameterChange[],
+    modelUpdates?: ProjectModelSource[],
+  ):
+    | { ok: true; snapshot: ProjectSourceSnapshot }
+    | { ok: false; error: Problem };
+}
+
+type FileReply = SimulationFileResult | { ok: false; error: Problem };
+type OwnedOperation = Extract<
+  SimulationFileOperation,
+  { action: "list" | "read" | "update" }
+>;
+
+function listProjectSource(
+  snapshot: ProjectSourceSnapshot,
+): SimulationFileResult {
+  const { folder, structureRevision } = snapshot;
+  const input = folder.input;
+  return {
+    ok: true,
+    source: {
+      owner: { kind: "project-folder", folderId: folder.id },
+      revision: structureRevision,
+      entry: input.entry,
+      configPath: input.configPath,
+      ...(input.drafts?.length ? { drafts: input.drafts } : {}),
+      files: [
+        ...input.files.map((file) => ({
+          path: file.path,
+          kind: "authored" as const,
+          editing: "text" as const,
+          byteLength: new TextEncoder().encode(file.text).byteLength,
+        })),
+        ...input.circuitBindings.map((b) => ({
+          path: b.path,
+          kind: "generated" as const,
+          editing: "mapped-parameters" as const,
+        })),
+        ...input.dependencies.map((d) => ({
+          path: d.mountPath,
+          kind: "dependency" as const,
+          editing: "read-only" as const,
+        })),
+      ],
+    },
+  };
+}
+
+export async function handleProjectSourceFiles(
+  host: ProjectSimulationFileHost,
+  op: OwnedOperation,
+  active: () => boolean,
+  selectEngine?: (
+    folder: ProjectSimulationFolder,
+  ) => Promise<"ngspice" | "vacask">,
+): Promise<FileReply> {
+  if (!op.owner || op.owner.kind !== "project-folder")
+    return problem(
+      "SIMULATION_FILE_INVALID",
+      "Expected a Project folder owner",
+      "input",
+    );
+  const folderId = op.owner.folderId;
+  const before = host.read(folderId);
+  if (!before || !active())
+    return problem(
+      "SIMULATION_FOLDER_UNAVAILABLE",
+      "Read the current Project and select an existing folder",
+      "input",
+    );
+  const current = () => host.read(folderId);
+  const conflict = () => {
+    const result = problem(
+      "PROJECT_REVISION_CONFLICT",
+      "Reread the Project files; no changes were applied",
+      "input",
+    );
+    return {
+      ...result,
+      error: {
+        ...result.error,
+        currentRevision: current()?.structureRevision,
+        ...(op.action === "update"
+          ? {
+              fileEdit: {
+                applied: false as const,
+                expectedRevision: op.expectedRevision,
+              },
+            }
+          : {}),
+      },
+    };
+  };
+  const unchanged = () => {
+    const now = current();
+    return (
+      active() &&
+      now?.projectSessionId === before.projectSessionId &&
+      now.structureRevision === before.structureRevision &&
+      (!before.project || now.project === before.project)
+    );
+  };
+  if (op.action === "list") return listProjectSource(before);
+  let engine: "ngspice" | "vacask" = "vacask";
+  const needsGenerated =
+    op.action === "read"
+      ? before.folder.input.circuitBindings.some((b) => b.path === op.path)
+      : op.circuitEdits.length > 0;
+  if (selectEngine && needsGenerated) {
+    try {
+      engine = await selectEngine(before.folder);
+    } catch (error) {
+      return problem(
+        "SIMULATION_ENGINE_UNAVAILABLE",
+        error instanceof Error ? error.message : String(error),
+        "input",
+        "retry-after",
+      );
+    }
+    if (!unchanged()) return conflict();
+  }
+  if (op.action === "read") {
+    let file = before.folder.input.files.find((f) => f.path === op.path);
+    let editableParameters;
+    let instances;
+    let modelSources;
+    const binding = before.folder.input.circuitBindings.find(
+      (b) => b.path === op.path,
+    );
+    if (!file && binding && before.project) {
+      const result = generateCircuitSource(
+        before.project,
+        binding,
+        before.folder.input,
+        engine,
+      );
+      if (!result.ok) {
+        const failure = problem(
+          "SIMULATION_CIRCUIT_UNAVAILABLE",
+          result.diagnostics.find((d) => d.severity === "error")?.message ??
+            "Resolve the Circuit diagnostics before generating its source",
+          "input",
+        );
+        return {
+          ...failure,
+          error: { ...failure.error, diagnostics: result.sourceDiagnostics },
+        };
+      }
+      file = { path: binding.path, text: result.source.text };
+      if (op.detail !== "text") {
+        instances = result.source.instances;
+        modelSources = result.source.modelLocations;
+        editableParameters = result.source.parameters.map((p) => ({
+          from: p.startOffset,
+          to: p.endOffset,
+          label: p.descriptor.label,
+          documentId: p.documentId,
+          instanceId: p.instanceId,
+          parameter: p.parameter,
+        }));
+      }
+    }
+    if (!file)
+      return problem(
+        "SIMULATION_FILE_NOT_FOUND",
+        "No available authored or generated Circuit file at this path",
+        "input",
+      );
+    if (op.offset > file.text.length)
+      return problem(
+        "SIMULATION_TEXT_RANGE_INVALID",
+        "Offset exceeds file length",
+        "input",
+      );
+    const textDigest = await sha256(file.text);
+    if (!unchanged()) return conflict();
+    const end = Math.min(file.text.length, op.offset + op.maxChars);
+    return {
+      ok: true,
+      owner: op.owner,
+      revision: before.structureRevision,
+      path: file.path,
+      textDigest,
+      text: file.text.slice(op.offset, end),
+      offset: op.offset,
+      nextOffset: end < file.text.length ? end : null,
+      ...(editableParameters ? { editableParameters } : {}),
+      ...(instances ? { instances } : {}),
+      ...(modelSources ? { modelSources } : {}),
+    };
+  }
+  if (op.expectedRevision !== before.structureRevision) return conflict();
+  const input = before.folder.input;
+  const dependencyPath = [
+    ...op.writes.map((file) => file.path),
+    ...op.removes,
+    ...op.patches.map((edit) => edit.path),
+    ...(op.replacements ?? []).map((edit) => edit.path),
+  ].find((path) =>
+    input.dependencies.some((dependency) => dependency.mountPath === path),
+  );
+  if (dependencyPath)
+    return {
+      ok: false,
+      error: {
+        ...problem(
+          "SIMULATION_DEPENDENCY_READ_ONLY",
+          "Dependencies are environment-owned; edit authored source or its dependency declaration",
+          "input",
+        ).error,
+        fileEdit: { applied: false, path: dependencyPath },
+      },
+    };
+  const planned = await planSimulationSourceChanges(
+    input.files,
+    {
+      writes: op.writes,
+      removes: op.removes,
+      patches: op.patches,
+      replacements: op.replacements,
+    },
+    [
+      ...input.circuitBindings.map((b) => b.path),
+      ...input.dependencies.map((d) => d.mountPath),
+    ],
+  );
+  if (!planned.ok) return planned;
+  const parameters = new Map<string, CircuitParameterChange>();
+  const modelUpdates = new Map<string, ProjectModelSource>();
+  const editedPaths = new Set<string>();
+  for (const edit of op.circuitEdits) {
+    if (editedPaths.has(edit.path))
+      return problem(
+        "SIMULATION_PARAMETER_CONFLICT",
+        "Supply each generated Circuit path only once",
+        "input",
+      );
+    editedPaths.add(edit.path);
+    const binding = input.circuitBindings.find((b) => b.path === edit.path);
+    if (!binding || !before.project)
+      return problem(
+        "SIMULATION_CIRCUIT_UNAVAILABLE",
+        "This host cannot resolve the requested Circuit binding",
+        "input",
+      );
+    const generated = generateCircuitSource(
+      before.project,
+      binding,
+      input,
+      engine,
+    );
+    if (!generated.ok) {
+      const failure = problem(
+        "SIMULATION_CIRCUIT_UNAVAILABLE",
+        generated.diagnostics.find((d) => d.severity === "error")?.message ??
+          "Circuit source is unavailable",
+        "input",
+      );
+      return {
+        ...failure,
+        error: { ...failure.error, diagnostics: generated.sourceDiagnostics },
+      };
+    }
+    if ((await sha256(generated.source.text)) !== edit.textDigest)
+      return conflict();
+    const mapped = planCircuitSourceEdit(generated.source, edit.text);
+    if (!mapped.ok) return problem(mapped.code, mapped.message, "input");
+    for (const model of mapped.modelUpdates ?? []) {
+      const prior = modelUpdates.get(model.id);
+      if (prior && JSON.stringify(prior) !== JSON.stringify(model))
+        return problem(
+          "MODEL_SOURCE_EDIT_CONFLICT",
+          "Repeated views must assign the same shared model body",
+          "input",
+        );
+      modelUpdates.set(model.id, model);
+    }
+    for (const change of mapped.changes) {
+      const key = JSON.stringify([
+        change.documentId,
+        change.instanceId,
+        change.parameter,
+      ]);
+      const existing = parameters.get(key);
+      if (
+        existing &&
+        (existing.value !== change.value || existing.unset !== change.unset)
+      )
+        return problem(
+          "SIMULATION_PARAMETER_CONFLICT",
+          "Repeated Circuit appearances must assign the same parameter value",
+          "input",
+        );
+      parameters.set(key, change);
+    }
+  }
+  if (!unchanged()) return conflict();
+  const committedPaths = new Set([
+    ...op.writes.map((file) => file.path),
+    ...op.removes,
+    ...op.patches.map((patch) => patch.path),
+    ...(op.replacements ?? []).map((edit) => edit.path),
+    ...editedPaths,
+  ]);
+  const remainingDrafts =
+    op.drafts ??
+    input.drafts?.filter((draft) => !committedPaths.has(draft.path));
+  const next = ProjectSimulationFolderSchema.safeParse({
+    ...before.folder,
+    input: {
+      ...input,
+      files: planned.files,
+      entry: op.entry ?? input.entry,
+      configPath: op.configPath ?? input.configPath,
+      ...(remainingDrafts ? { drafts: remainingDrafts } : {}),
+    },
+  });
+  if (!next.success)
+    return problem(
+      "SIMULATION_FILE_INVALID",
+      next.error.issues[0]?.message ?? "Invalid file ownership",
+      "input",
+    );
+  const update = await sourceUpdateReceipt(input.files, next.data.input.files);
+  // Sorting by the planner is not an authored change on an untouched folder.
+  if (!update.files.length) next.data.input.files = input.files;
+  if (parameters.size || modelUpdates.size)
+    update.mappedCircuitPaths = [...editedPaths];
+  update.changed =
+    parameters.size > 0 ||
+    modelUpdates.size > 0 ||
+    JSON.stringify(next.data) !==
+      JSON.stringify(ProjectSimulationFolderSchema.parse(before.folder));
+  if (!unchanged()) return conflict();
+  // Do not parse SPICE/JSON here: broken text and missing references are saveable.
+  if (!update.changed) return { ...listProjectSource(before), update };
+  const committed = modelUpdates.size
+    ? host.commit(
+        before,
+        next.data,
+        [...parameters.values()],
+        [...modelUpdates.values()],
+      )
+    : host.commit(before, next.data, [...parameters.values()]);
+  return committed.ok
+    ? { ...listProjectSource(committed.snapshot), update }
+    : committed;
+}

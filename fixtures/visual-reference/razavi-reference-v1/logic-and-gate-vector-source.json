@@ -1,0 +1,269 @@
+{
+  "schemaVersion": 1,
+  "id": "razavi-textbook-logic-and-gate",
+  "kind": "pdf-vector-extract",
+  "source": {
+    "title": "Design of Analog CMOS Integrated Circuits, Second Edition",
+    "sha256": "a6031d1149c2c6191a1f0e541065165b72dafc4bc4ab4b0ea37af41b7cb0f739",
+    "pdfPage": 687,
+    "printedPage": 668,
+    "figure": "16.24(a)"
+  },
+  "selection": {
+    "method": "direct-logic-gate-vector-normalization",
+    "nativeObjectCount": 5,
+    "nativeObjectSha256": "fa7eccf1151c5c90f740a15b70119b233b44b07caac57018af5cb22ca4eeb018",
+    "nativeObjects": [
+      {
+        "objectType": "line",
+        "x0": 192.47,
+        "top": 519.1462,
+        "x1": 201.162,
+        "bottom": 519.1462,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 2,
+        "pathSha256": "d745e73a7c1af2f7e42d5a90acb398664b4ea5b01df6810f0d263a66a6f8c300"
+      },
+      {
+        "objectType": "line",
+        "x0": 192.47,
+        "top": 530.6142,
+        "x1": 201.251,
+        "bottom": 530.6142,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 2,
+        "pathSha256": "3a02b45e2025585a946a81243fa2e70288f2c8779e6436e7734c1f3676448bc3"
+      },
+      {
+        "objectType": "line",
+        "x0": 161.647,
+        "top": 524.8802,
+        "x1": 172.399,
+        "bottom": 524.8802,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 2,
+        "pathSha256": "217939a23a47872222a00ed33d3eb2877e5179b93724088faa0e92cf5be67d2b"
+      },
+      {
+        "objectType": "curve",
+        "x0": 172.758,
+        "top": 516.1442,
+        "x1": 182.077,
+        "bottom": 533.4372,
+        "linewidth": 1.434,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 20,
+        "pathSha256": "0b7f561401fb0e4db80a8700ffb75d6f6a524df187c6d6075819604f09fa696a"
+      },
+      {
+        "objectType": "curve",
+        "x0": 181.36,
+        "top": 516.2342,
+        "x1": 192.291,
+        "bottom": 533.4372,
+        "linewidth": 1.434,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 4,
+        "pathSha256": "8823db6f9794462aaddb990eee3264d2393583028a61050146560f25745a220f"
+      }
+    ]
+  },
+  "normalization": {
+    "sourceInputPitchPdf": 11.469,
+    "logicalInputPitch": 20.0,
+    "logicalUnitsPerPdfPoint": 1.743831,
+    "sourceOriginPdf": {
+      "x": 181.449,
+      "y": 524.8802
+    },
+    "pinAnchorsLogical": [
+      {
+        "name": "A",
+        "x": -40,
+        "y": -10
+      },
+      {
+        "name": "B",
+        "x": -40,
+        "y": 10
+      },
+      {
+        "name": "Y",
+        "x": 40,
+        "y": 0
+      }
+    ],
+    "strokeMapping": {
+      "normal": {
+        "sourcePdfPt": 0.717,
+        "targetRole": "normal"
+      },
+      "body": {
+        "sourcePdfPt": 1.434,
+        "targetRole": "emphasis"
+      }
+    },
+    "symbolDefinition": {
+      "schemaVersion": 1,
+      "id": "and-gate",
+      "name": "AND Gate",
+      "viewBox": {
+        "x": -44,
+        "y": -24,
+        "width": 88,
+        "height": 48
+      },
+      "pins": [
+        {
+          "name": "A",
+          "role": "input",
+          "at": {
+            "x": -40,
+            "y": -10
+          },
+          "direction": "west",
+          "presentation": {
+            "visibility": "visible",
+            "leadLength": 20
+          }
+        },
+        {
+          "name": "B",
+          "role": "input",
+          "at": {
+            "x": -40,
+            "y": 10
+          },
+          "direction": "west",
+          "presentation": {
+            "visibility": "visible",
+            "leadLength": 20
+          }
+        },
+        {
+          "name": "Y",
+          "role": "output",
+          "at": {
+            "x": 40,
+            "y": 0
+          },
+          "direction": "east",
+          "presentation": {
+            "visibility": "visible",
+            "leadLength": 20
+          }
+        }
+      ],
+      "primitives": [
+        {
+          "kind": "line",
+          "from": {
+            "x": -40.0,
+            "y": -10.0
+          },
+          "to": {
+            "x": -19.218764,
+            "y": -9.999128
+          },
+          "style": {
+            "strokeRole": "normal",
+            "lineCap": "butt",
+            "lineJoin": "miter"
+          }
+        },
+        {
+          "kind": "line",
+          "from": {
+            "x": -40.0,
+            "y": 10.0
+          },
+          "to": {
+            "x": -19.218764,
+            "y": 9.999128
+          },
+          "style": {
+            "strokeRole": "normal",
+            "lineCap": "butt",
+            "lineJoin": "miter"
+          }
+        },
+        {
+          "kind": "path",
+          "data": "M 0.155201 -15.077165 L -18.906618 -15.077165 L -18.906618 14.921964 L -1.016654 14.921964",
+          "style": {
+            "strokeRole": "emphasis",
+            "lineCap": "butt",
+            "lineJoin": "miter",
+            "miterLimit": 4
+          }
+        },
+        {
+          "kind": "path",
+          "data": "M 0.155201 -15.234109 C 0.155201 -15.234109 0.155201 -15.234109 0.312146 -15.194001 C 0.467347 -15.155637 0.781236 -15.077165 0.936437 -15.0388 C 1.093382 -14.998692 1.093382 -14.998692 1.769989 -14.895806 C 2.446595 -14.791176 3.801552 -14.58366 5.011771 -14.231406 C 6.223734 -13.879152 7.290958 -13.385648 8.450606 -12.590461 C 9.60851 -11.797018 10.858837 -10.701892 11.821432 -9.556195 C 12.78577 -8.410498 13.462377 -7.21423 13.983782 -5.988316 C 14.505188 -4.764147 14.869649 -3.515564 15.064958 -2.212922 C 15.260267 -0.912024 15.286424 0.442933 15.155637 1.707211 C 15.02485 2.969745 14.738861 4.141599 14.205249 5.43029 C 13.671637 6.718982 12.8904 8.126253 11.992327 9.284157 C 11.094254 10.443805 10.0776 11.354085 9.244049 12.030691 C 8.410498 12.709042 7.760049 13.153719 7.069492 13.502485 C 6.378935 13.854739 5.650013 14.116314 4.999564 14.323829 C 4.347371 14.533089 3.775395 14.690034 3.26794 14.777226 C 2.758741 14.869649 2.317552 14.89755 1.860668 14.909757 C 1.405528 14.921964 0.936437 14.921964 0.442933 14.921964 C -0.052315 14.921964 -0.57372 14.921964 -0.833551 14.921964 C -1.095126 14.921964 -1.095126 14.921964 -1.095126 14.921964",
+          "style": {
+            "strokeRole": "emphasis",
+            "lineCap": "butt",
+            "lineJoin": "miter",
+            "miterLimit": 4
+          }
+        },
+        {
+          "kind": "line",
+          "from": {
+            "x": 15.781672,
+            "y": -0.0
+          },
+          "to": {
+            "x": 40.0,
+            "y": 0.0
+          },
+          "style": {
+            "strokeRole": "normal",
+            "lineCap": "butt",
+            "lineJoin": "miter"
+          }
+        }
+      ],
+      "variants": []
+    }
+  },
+  "derivation": {
+    "pinExtension": "native leads extend collinearly to the existing x=+/-40 electrical anchors",
+    "orientation": "native source orientation is recorded as 180 degrees relative to the product default"
+  },
+  "rasterWitness": {
+    "kind": "source-pdf-crop",
+    "sourcePdfPage": 687,
+    "dpi": 301.334031,
+    "pixels": {
+      "width": 154,
+      "height": 74
+    },
+    "pixelsPerLogical": 2.4,
+    "originPx": {
+      "x": 71.036673,
+      "y": 38.088674
+    },
+    "window": {
+      "width": 154,
+      "height": 74,
+      "minX": -29.5,
+      "minY": -15.5
+    },
+    "rotation": 180,
+    "sourceCropPx": {
+      "x": 546,
+      "y": 2301
+    },
+    "assetPath": "logic-and-gate-reference.png",
+    "threshold": 160
+  }
+}

@@ -1,0 +1,465 @@
+import { resolveAnnotationName } from "@icm/derived";
+import { subcircuitDescriptor } from "@icm/devices";
+import type { SchematicEdit } from "@icm/edit-engine";
+import {
+  LINEAR_CONTROLLED_SOURCE_KINDS,
+  controlledSourceExpressionDocument,
+  controlledSourceExpressionSource,
+  semanticTextDocument,
+  SUPPLY_PINS_VARIANT_ID,
+  type SchematicDocument,
+} from "@icm/model";
+
+import { snapCoordinate } from "../../snap/engine";
+import type { ComponentPropertyCodeValue } from "./component-property-code";
+import { planInductorCouplingEdits } from "./inductor-coupling-properties";
+import { instanceLabelAnnotationFor } from "../instance-display/default-instance-display";
+import {
+  logicGateInputInfo,
+  logicGateSymbolId,
+} from "./logic-gate-input-count";
+import {
+  componentSourceShape,
+  DIAMOND_SOURCE_VARIANT,
+  NO_INTERNAL_MARK,
+  supplyPinsEdit,
+  symbolForInputPolarity,
+  symbolForInputsSwapped,
+  symbolForInternalMark,
+  symbolForOutputsSwapped,
+} from "./component-visual-variants";
+
+type Instance = SchematicDocument["instances"][number];
+
+/** A cut wire can leave a lone, anonymous Net membership on its former pin. */
+function removableOrphanInput(
+  document: SchematicDocument,
+  instance: Instance,
+  pinName: string,
+): boolean {
+  const net = document.nets.find((candidate) =>
+    candidate.terminals.some(
+      (terminal) =>
+        terminal.instanceId === instance.id && terminal.pinName === pinName,
+    ),
+  );
+  if (
+    !net ||
+    net.terminals.length !== 1 ||
+    instance.importProvenance?.terminalMapping?.some(
+      (terminal) => terminal.pinName === pinName,
+    ) ||
+    document.noConnects.some(
+      (item) =>
+        item.endpoint.instanceId === instance.id &&
+        item.endpoint.pinName === pinName,
+    )
+  )
+    return false;
+  const netId = net.id;
+  return !(
+    document.routes.some((route) => route.netId === netId) ||
+    document.junctions.some((junction) => junction.netId === netId) ||
+    document.netlist?.terminals.some((terminal) => terminal.netId === netId) ||
+    document.annotations.some(
+      (annotation) =>
+        annotation.netId === netId ||
+        (annotation.binding?.kind === "net-name" &&
+          annotation.binding.netId === netId),
+    ) ||
+    document.connectivityEvidence.some(
+      (evidence) => evidence.netId === netId,
+    ) ||
+    document.layoutGroups.some((group) => group.objectIds.includes(netId)) ||
+    document.constraints.some((constraint) =>
+      constraint.objectIds.includes(netId),
+    ) ||
+    document.instances.some(
+      (candidate) => candidate.mosBulkBinding?.netId === netId,
+    ) ||
+    document.mosBulkDefaults?.nmosNetId === netId ||
+    document.mosBulkDefaults?.pmosNetId === netId
+  );
+}
+
+function sameStyle(
+  left: Instance["styleOverride"] | null,
+  right: Instance["styleOverride"] | null,
+): boolean {
+  return (
+    (left?.foreground ?? null) === (right?.foreground ?? null) &&
+    (left?.background ?? null) === (right?.background ?? null)
+  );
+}
+
+/**
+ * Translate presentation code into the existing typed edit contract. Display
+ * annotations are appended by the caller because they need the live Symbol
+ * resolver and annotation policy.
+ */
+/** Parameters compare by value, whatever order their keys were written in. */
+function sameParameters(
+  left: Record<string, unknown>,
+  right: Record<string, unknown>,
+): boolean {
+  const keys = Object.keys(left);
+  return (
+    keys.length === Object.keys(right).length &&
+    keys.every(
+      (key) => JSON.stringify(left[key]) === JSON.stringify(right[key]),
+    )
+  );
+}
+
+export function planComponentPropertyCodeEdits(
+  document: SchematicDocument,
+  instance: Instance,
+  value: ComponentPropertyCodeValue,
+): SchematicEdit[] {
+  const edits: SchematicEdit[] = [];
+  for (const [pinName, selectedNetId] of Object.entries({
+    ...value.supplies,
+    ...value.terminals,
+  })) {
+    const currentNetId =
+      document.nets.find((net) =>
+        net.terminals.some(
+          (terminal) =>
+            terminal.instanceId === instance.id && terminal.pinName === pinName,
+        ),
+      )?.id ?? null;
+    const netId = selectedNetId || null;
+    if (currentNetId !== netId)
+      edits.push({
+        kind: "set_property_terminal_net",
+        instanceId: instance.id,
+        pinName,
+        netId,
+      });
+  }
+  if (value.displayName !== undefined) {
+    const label = instanceLabelAnnotationFor(document, instance.id);
+    const controlled = LINEAR_CONTROLLED_SOURCE_KINDS.has(instance.symbolId);
+    const currentName =
+      controlled && label?.content
+        ? controlledSourceExpressionSource(label.content)
+        : label
+          ? resolveAnnotationName(document, label).trim()
+          : null;
+    if (label?.kind === "instance-label" && currentName !== value.displayName) {
+      if (label.binding?.kind === "instance-reference") {
+        if (
+          value.netlistName !== undefined &&
+          value.netlistName !== instance.reference &&
+          value.netlistName !== value.displayName
+        )
+          throw new Error(
+            "name and netlistName must agree while the label follows its netlist name",
+          );
+        edits.push({
+          kind: "set_instance_reference",
+          instanceId: instance.id,
+          reference: value.displayName,
+        });
+      } else {
+        const {
+          binding: _binding,
+          content: _content,
+          formatOverride: _formatOverride,
+          ...presentation
+        } = label;
+        edits.push({
+          kind: "upsert_schematic_annotation",
+          annotation: {
+            ...presentation,
+            content: controlled
+              ? controlledSourceExpressionDocument(value.displayName)
+              : semanticTextDocument(value.displayName, "instance-label"),
+          },
+        });
+      }
+    }
+  }
+  if (
+    value.netlistName !== undefined &&
+    value.netlistName !== instance.reference &&
+    !edits.some((edit) => edit.kind === "set_instance_reference")
+  )
+    edits.push({
+      kind: "set_instance_reference",
+      instanceId: instance.id,
+      reference: value.netlistName,
+    });
+  if (value.parameters && instance.netlist) {
+    const set = Object.fromEntries(
+      Object.entries(value.parameters).filter(
+        ([key, raw]) =>
+          raw.trim() !== "" && raw !== instance.netlist!.parameters[key],
+      ),
+    );
+    const unset = Object.keys(instance.netlist.parameters).filter(
+      (key) => !(value.parameters![key] ?? "").trim(),
+    );
+    if ((Object.keys(set).length || unset.length) && !value.control)
+      edits.push({
+        kind: "patch_instance_netlist_parameters",
+        instanceId: instance.id,
+        ...(Object.keys(set).length ? { set } : {}),
+        ...(unset.length ? { unset } : {}),
+      });
+  }
+  if (value.control) {
+    const control =
+      "instanceId" in value.control
+        ? {
+            kind: "terminal-current" as const,
+            direction: value.control.direction,
+            ...(value.control.instanceId
+              ? { instanceId: value.control.instanceId }
+              : {}),
+            ...(value.control.pinName
+              ? { pinName: value.control.pinName }
+              : {}),
+          }
+        : {
+            kind: "voltage" as const,
+            ...(value.control.positiveNetId
+              ? { positiveNetId: value.control.positiveNetId }
+              : {}),
+            ...(value.control.negativeNetId
+              ? { negativeNetId: value.control.negativeNetId }
+              : {}),
+          };
+    const parameters = value.parameters
+      ? Object.fromEntries(
+          Object.entries(value.parameters).filter(
+            ([, raw]) => raw.trim() !== "",
+          ),
+        )
+      : (instance.netlist?.parameters ?? {});
+    if (
+      JSON.stringify(control) !== JSON.stringify(instance.netlist?.control) ||
+      !sameParameters(parameters, instance.netlist?.parameters ?? {})
+    )
+      edits.push({
+        kind: "set_instance_netlist",
+        instanceId: instance.id,
+        netlist: {
+          ...(instance.netlist?.binding
+            ? { binding: instance.netlist.binding }
+            : {}),
+          parameters,
+          control,
+        },
+      });
+  }
+  let nextSymbolId = value.symbol ?? instance.symbolId;
+  if (value.appearance.internalMark !== undefined)
+    nextSymbolId =
+      symbolForInternalMark(nextSymbolId, value.appearance.internalMark) ??
+      nextSymbolId;
+  if (value.appearance.inputPolarity !== undefined)
+    nextSymbolId =
+      symbolForInputPolarity(nextSymbolId, value.appearance.inputPolarity) ??
+      nextSymbolId;
+  if (value.appearance.inputsSwapped !== undefined)
+    nextSymbolId =
+      symbolForInputsSwapped(nextSymbolId, value.appearance.inputsSwapped) ??
+      nextSymbolId;
+  if (value.appearance.outputsSwapped !== undefined)
+    nextSymbolId =
+      symbolForOutputsSwapped(nextSymbolId, value.appearance.outputsSwapped) ??
+      nextSymbolId;
+  if (value.inputs !== undefined) {
+    const gate = logicGateInputInfo(instance.symbolId);
+    if (!gate)
+      throw new Error("inputs is available only for configurable logic gates");
+    nextSymbolId = logicGateSymbolId(gate.family, value.inputs);
+  }
+  const oldGate = logicGateInputInfo(instance.symbolId);
+  if (
+    value.inputs !== undefined &&
+    oldGate !== null &&
+    value.inputs < oldGate.count
+  ) {
+    for (const pinName of ["A", "B", "C", "D"].slice(
+      value.inputs,
+      oldGate.count,
+    )) {
+      if (!removableOrphanInput(document, instance, pinName)) {
+        // A dropped input never takes what it carries along: what holds it
+        // is named, before any edit (#1457).
+        const pin = `${instance.reference ?? instance.id}.${pinName}`;
+        const choice = `before choosing ${value.inputs} inputs`;
+        if (
+          document.noConnects.some(
+            (item) =>
+              item.endpoint.instanceId === instance.id &&
+              item.endpoint.pinName === pinName,
+          )
+        )
+          throw new Error(
+            `${pin} is marked No Connect; remove the mark ${choice}`,
+          );
+        if (
+          instance.importProvenance?.terminalMapping?.some(
+            (terminal) => terminal.pinName === pinName,
+          )
+        )
+          throw new Error(`${pin} maps an imported terminal; it stays`);
+        if (
+          document.nets.some((net) =>
+            net.terminals.some(
+              (terminal) =>
+                terminal.instanceId === instance.id &&
+                terminal.pinName === pinName,
+            ),
+          )
+        )
+          throw new Error(`${pin} is connected; disconnect it ${choice}`);
+        continue;
+      }
+      edits.push({
+        kind: "disconnect_endpoint",
+        endpoint: { kind: "terminal", instanceId: instance.id, pinName },
+      });
+    }
+  }
+  // An op-amp's supply pins stay as chosen across its forms (#1833); the
+  // choice alone changes only its variant, as a source's shape does.
+  const supplyPins = value.appearance.supplyPins;
+  if (nextSymbolId !== instance.symbolId)
+    edits.push({
+      kind: "set_instance_symbol",
+      instanceId: instance.id,
+      symbolId: nextSymbolId,
+      ...(supplyPins ? { symbolVariantId: SUPPLY_PINS_VARIANT_ID } : {}),
+    });
+  else if (supplyPins !== undefined) {
+    const edit = supplyPinsEdit(instance, supplyPins);
+    if (edit) edits.push(edit);
+  }
+  // A controlled source's outline is its variant; the part stays the same.
+  if (value.appearance.shape !== undefined) {
+    const currentShape = componentSourceShape(instance);
+    if (currentShape === undefined)
+      throw new Error(`${instance.symbolId} has no shape choice`);
+    if (value.appearance.shape !== currentShape)
+      edits.push({
+        kind: "set_instance_symbol",
+        instanceId: instance.id,
+        symbolId: instance.symbolId,
+        symbolVariantId:
+          value.appearance.shape === "diamond" ? DIAMOND_SOURCE_VARIANT : null,
+      });
+  }
+  if (nextSymbolId !== instance.symbolId && value.inputs !== undefined) {
+    const oldTarget = subcircuitDescriptor(instance.symbolId)?.target;
+    const nextTarget = subcircuitDescriptor(nextSymbolId)?.target;
+    if (!oldTarget || !nextTarget)
+      throw new Error("Logic gate subcircuit interface is missing");
+    const binding = instance.netlist?.binding;
+    if (
+      binding &&
+      (binding.kind !== "unresolved-subcircuit" || binding.name !== oldTarget)
+    )
+      throw new Error(
+        "Restore the default logic gate target before changing input count",
+      );
+    const nextBinding = {
+      kind: "unresolved-subcircuit" as const,
+      name: nextTarget,
+    };
+    if (instance.netlist)
+      edits.push({
+        kind: "set_instance_binding",
+        instanceId: instance.id,
+        binding: nextBinding,
+      });
+    else
+      edits.push({
+        kind: "set_instance_netlist",
+        instanceId: instance.id,
+        netlist: { binding: nextBinding, parameters: {} },
+      });
+  }
+
+  let nextSignalFlow = value.signalFlow;
+  if (value.appearance.internalMark !== undefined) {
+    nextSignalFlow = { ...(instance.signalFlowParameters ?? {}) };
+    if (
+      value.appearance.internalMark === NO_INTERNAL_MARK ||
+      value.appearance.internalMark === "A"
+    )
+      delete nextSignalFlow.formula;
+    else nextSignalFlow.formula = value.appearance.internalMark;
+  }
+  // The body text keeps its look while its characters stay the same; new
+  // characters start from the Symbol's own look again.
+  const format = instance.signalFlowParameters?.formulaFormat;
+  if (nextSignalFlow) {
+    const plain = { ...nextSignalFlow };
+    delete plain.formulaFormat;
+    nextSignalFlow =
+      format && plain.formula === instance.signalFlowParameters?.formula
+        ? { ...plain, formulaFormat: format }
+        : plain;
+  }
+  if (
+    nextSignalFlow &&
+    !sameParameters(nextSignalFlow, instance.signalFlowParameters ?? {})
+  )
+    edits.push({
+      kind: "set_instance_signal_flow_parameters",
+      instanceId: instance.id,
+      parameters: Object.keys(nextSignalFlow).length ? nextSignalFlow : null,
+    });
+  if (instance.placement && value.placement) {
+    const position = {
+      x: snapCoordinate(
+        value.placement.coordinate[0],
+        document.presentation.grid,
+      ),
+      y: snapCoordinate(
+        value.placement.coordinate[1],
+        document.presentation.grid,
+      ),
+    };
+    if (
+      position.x !== instance.placement.position.x ||
+      position.y !== instance.placement.position.y
+    ) {
+      edits.push({ kind: "move_instance", instanceId: instance.id, position });
+    }
+    if (value.placement.rotation !== instance.placement.rotation) {
+      edits.push({
+        kind: "rotate_instance",
+        instanceId: instance.id,
+        rotation: value.placement.rotation,
+      });
+    }
+    if (value.placement.mirror !== instance.placement.mirror) {
+      edits.push({
+        kind: "mirror_instance",
+        instanceId: instance.id,
+        mirror: value.placement.mirror,
+      });
+    }
+  }
+
+  edits.push(...planInductorCouplingEdits(document, instance, value));
+  const styleOverride = {
+    ...(value.appearance.color === "auto"
+      ? {}
+      : { foreground: value.appearance.color }),
+  };
+  const nextStyle = Object.keys(styleOverride).length ? styleOverride : null;
+  if (!sameStyle(instance.styleOverride ?? null, nextStyle)) {
+    edits.push({
+      kind: "set_instance_style_override",
+      instanceId: instance.id,
+      styleOverride: nextStyle,
+    });
+  }
+  return edits;
+}

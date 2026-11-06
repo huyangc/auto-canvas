@@ -1,0 +1,577 @@
+@import "@fontsource-variable/google-sans-code/index.css";
+
+:root {
+  --font-mono:
+    "Google Sans Code Variable", "Google Sans Code", ui-monospace, "SF Mono",
+    monospace;
+  /* Editor chrome design tokens only. Formal schematic SVG/export is not
+     tokenized so export appearance stays independent of chrome restyling.
+     Scale: 4px grid, three type sizes, one icon size. */
+  --icm-chrome-bg: #f7f6f3;
+  --icm-surface: #ffffff;
+  --icm-surface-muted: #f1f1ef;
+  --icm-surface-hover: #ebebea;
+  --icm-border: #e9e9e7;
+  --icm-border-strong: #dfdfde;
+  --icm-border-hover: #cfcfcd;
+  --icm-text: #37352f;
+  --icm-text-muted: #787774;
+  --icm-text-disabled: #b4b4b0;
+  --icm-accent: #2383e2;
+  --icm-accent-rgb: 35 131 226;
+  --icm-accent-soft: rgb(35 131 226 / 10%);
+  --icm-accent-selection: rgb(35 131 226 / 14%);
+  --icm-accent-tint: #e7f3fc;
+  /* The Gallery's AI mark: its card tag and the publish checkbox. */
+  --icm-ai: #6a3cbf;
+  --icm-ai-soft: #efe7fb;
+  --icm-error: #eb5757;
+  --icm-warning: #9a6700;
+  --icm-warning-rgb: 234 179 8;
+  --icm-marquee-crossing: #3fa34d;
+  --icm-marquee-crossing-soft: rgb(63 163 77 / 10%);
+  --icm-grid-dot: #c4c7c9;
+
+  /* Spacing: 4px base */
+  --icm-space-1: 4px;
+  --icm-space-2: 8px;
+  --icm-space-3: 12px;
+  --icm-space-4: 16px;
+  --icm-space-5: 20px;
+  --icm-space-6: 24px;
+
+  /* Type: three steps only */
+  --icm-font-xs: 11px; /* kickers, meta, rail captions */
+  --icm-font-sm: 12px; /* secondary UI, chips, status */
+  --icm-font-md: 13px; /* menus, buttons, body chrome */
+  --icm-font-lg: 14px; /* panel titles, brand */
+  --icm-line: 1.35;
+  --icm-line-tight: 1.2;
+
+  /* Controls */
+  --icm-icon: 16px;
+  --icm-control-h: 28px;
+  --icm-control-h-lg: 32px;
+  --icm-radius-sm: 6px;
+  --icm-radius-md: 8px;
+  --icm-radius-lg: 12px;
+  --icm-shadow-sm: 0 1px 2px rgb(15 15 15 / 4%);
+  --icm-shadow-md: 0 8px 24px rgb(15 15 15 / 8%);
+  --icm-shadow-lg: 0 18px 48px rgb(15 15 15 / 12%);
+
+  /* Layout columns */
+  --icm-rail-width: 56px;
+  --icm-shapes-width: 248px;
+  --icm-shapes-tile: 56px;
+  --icm-props-collapsed: 40px;
+  --icm-props-open: 280px;
+  --icm-menubar-h: 44px;
+  --icm-statusbar-h: 36px;
+
+  color: var(--icm-text);
+  background: var(--icm-chrome-bg);
+  font-family:
+    ui-sans-serif,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Helvetica,
+    Arial,
+    sans-serif;
+  font-size: var(--icm-font-md);
+  line-height: var(--icm-line);
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+button {
+  border: 1px solid var(--icm-border-strong);
+  border-radius: var(--icm-radius-sm);
+  color: var(--icm-text);
+  background: var(--icm-surface);
+  box-shadow: none;
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--icm-font-md);
+  line-height: var(--icm-line-tight);
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease,
+    box-shadow 120ms ease,
+    color 120ms ease;
+}
+
+.tool-icon {
+  width: var(--icm-icon);
+  height: var(--icm-icon);
+  flex: 0 0 auto;
+  display: block;
+}
+
+.file-import {
+  padding: 0.35rem 0.55rem;
+  border: 1px solid var(--icm-border-strong);
+  border-radius: var(--icm-radius-sm);
+  background: var(--icm-surface);
+  box-shadow: var(--icm-shadow-sm);
+  cursor: pointer;
+  font-size: var(--icm-font-md);
+}
+
+.file-import:hover {
+  border-color: var(--icm-border-hover);
+  background: var(--icm-surface-hover);
+}
+
+.file-import:focus-within {
+  outline: 2px solid var(--icm-accent);
+  outline-offset: 2px;
+}
+
+.file-import input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--icm-border-hover);
+  background: var(--icm-surface-hover);
+}
+
+button:focus-visible,
+summary:focus-visible,
+input:focus-visible,
+select:focus-visible,
+a:focus-visible {
+  outline: 2px solid rgb(var(--icm-accent-rgb) / 70%);
+  outline-offset: 2px;
+}
+
+button:disabled {
+  color: var(--icm-text-disabled);
+  cursor: not-allowed;
+}
+
+button[aria-pressed="true"] {
+  border-color: var(--icm-accent);
+  background: var(--icm-accent-tint);
+  box-shadow: 0 0 0 1px rgb(var(--icm-accent-rgb) / 12%);
+}
+
+body {
+  margin: 0;
+  min-width: 0;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--icm-chrome-bg);
+}
+
+#root {
+  height: 100%;
+  overflow: hidden;
+}
+
+.app-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  width: 100%;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--icm-chrome-bg);
+}
+
+.app-chrome {
+  position: relative;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  min-width: 0;
+  min-height: var(--icm-menubar-h);
+  padding: 0;
+  border-bottom: 1px solid var(--icm-border);
+  background: var(--icm-surface);
+  overflow: visible;
+}
+
+.app-chrome-main {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--icm-space-3);
+  height: var(--icm-menubar-h);
+  min-width: 0;
+  min-height: var(--icm-menubar-h);
+  padding: 0 var(--icm-space-3);
+}
+
+.app-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--icm-space-2);
+  flex: 0 1 auto;
+  min-width: 0;
+  padding: 0;
+}
+
+/* The wordmark is the product's name in both views and always shows in full;
+   only the variable-length project/document line yields to a narrow editor
+   chrome. */
+.app-chrome-main .app-brand-copy {
+  max-width: min(12rem, 24vw);
+}
+
+.app-brand-mark {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  border-radius: 6px;
+  background: #fff url("/icon.svg?v=nmos-4") center / cover no-repeat;
+  box-shadow: none;
+}
+
+/* The wordmark is the shared two-way gallery/editor switch. Keep this beside
+   the shared brand primitives: both route bundles render it, and an inline
+   anchor would collapse the otherwise empty brand mark. */
+.gallery-home-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--icm-space-2);
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.gallery-home-link:hover h1 {
+  color: var(--icm-accent);
+}
+
+.app-brand-copy {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.gallery-home-link h1,
+.app-brand-copy p {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gallery-home-link h1 {
+  font-size: var(--icm-font-lg);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: var(--icm-line-tight);
+}
+
+.app-brand-copy p {
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-xs);
+  line-height: var(--icm-line-tight);
+}
+
+/* The menubar yields before the right-hand chrome does: at narrow widths it
+   scrolls its own row rather than pushing compact support links off-screen. */
+.app-command-surface {
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0;
+  min-width: 0;
+  margin-right: auto;
+  overflow: visible;
+}
+
+@media (max-width: 900px) {
+  .app-command-surface {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  /* Scrolling the menubar clips its own dropdowns, which left File and Edit
+     unopenable on a half-screen window. Stop clipping while a menu is open,
+     the same way a toolbar row does. */
+  .app-command-surface:has(.command-menu[open]) {
+    overflow: visible;
+  }
+
+  .app-command-surface::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.app-chrome-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--icm-space-2);
+  margin-left: auto;
+}
+
+.app-repository-link {
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: var(--icm-control-h);
+  height: var(--icm-control-h);
+  place-items: center;
+  border-radius: var(--icm-radius-sm);
+  color: var(--icm-text-muted);
+}
+
+.app-repository-link:hover {
+  color: var(--icm-text);
+  background: var(--icm-surface-hover);
+}
+
+.app-repository-link svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* One public support path across Gallery, Editor, Analytics, and crash UI. */
+.bug-report-link {
+  box-sizing: border-box;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: var(--icm-space-1);
+  height: var(--icm-control-h);
+  padding: 0 10px;
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-sm);
+  color: var(--icm-text-muted);
+  background: transparent;
+  font-size: var(--icm-font-md);
+  font-weight: 500;
+  line-height: var(--icm-line-tight);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.bug-report-link:hover {
+  border-color: var(--icm-border-hover);
+  color: var(--icm-text);
+  background: var(--icm-surface-hover);
+}
+
+.bug-report-mark {
+  display: inline-grid;
+  width: 1rem;
+  height: 1rem;
+  place-items: center;
+  border: 1px solid currentcolor;
+  border-radius: 999px;
+  color: var(--icm-error);
+  font-size: 0.7rem;
+  font-weight: 750;
+  line-height: 1;
+}
+
+/* Owner credit: paired with analytics at gallery center and kept in editor chrome. */
+.tokenzhang-credit {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--icm-space-1);
+  white-space: nowrap;
+}
+
+/* The gallery header's middle takes the room left between the brand and the
+   actions and centres in it. Floating over the header's centre instead, it
+   ran under a signed-in account chip at every width from half screen to
+   about 1300px. In the row it cannot; whatever does not fit wraps onto a
+   second line the band clips, so the count, then the credit, drops out whole
+   instead of being covered or cut mid-number. */
+.gallery-credit-group {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  align-content: flex-start;
+  justify-content: center;
+  height: var(--icm-control-h);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* A first line that is never empty, so the credit, too, can wrap away. */
+.gallery-credit-group::before {
+  content: "";
+  height: var(--icm-control-h);
+}
+
+.gallery-credit-group > * + * {
+  margin-left: var(--icm-space-3);
+}
+
+/* One line, even if long: "Presented by [Z] TokenZhang" never wraps. */
+.app-chrome-actions .tokenzhang-credit {
+  align-items: center;
+  gap: var(--icm-space-1);
+  max-height: var(--icm-menubar-h);
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.tokenzhang-credit-kicker {
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-xs);
+  font-weight: 500;
+  line-height: 1.1;
+}
+
+.tokenzhang-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--icm-space-1);
+  color: var(--icm-text);
+  font-size: var(--icm-font-xs);
+  font-weight: 500;
+  line-height: 1.1;
+  text-decoration: none;
+}
+
+.tokenzhang-link:hover {
+  color: var(--icm-accent);
+  text-decoration: underline;
+  text-underline-offset: 0.15rem;
+}
+
+.tokenzhang-link-icon {
+  width: var(--icm-icon);
+  height: var(--icm-icon);
+  border-radius: 3px;
+}
+
+.app-chrome-actions .tokenzhang-link-icon {
+  width: 12px;
+  height: 12px;
+}
+
+@media (max-width: 900px) {
+  .gallery-chrome .gallery-home-link h1 {
+    display: none;
+  }
+
+  .gallery-chrome .app-brand {
+    min-width: 0;
+  }
+
+  .tokenzhang-link-label {
+    display: none;
+  }
+
+  /* Narrow windows keep the verb; the tooltip still says where. */
+  .publish-label-long {
+    display: none;
+  }
+
+  .app-chrome-actions .bug-report-label {
+    display: none;
+  }
+
+  .app-chrome-actions .bug-report-link {
+    width: var(--icm-control-h);
+    padding: 0;
+  }
+}
+
+/* The gallery header centers credit plus analytics as one unit. A signed-in
+   account chip makes the right side wide, so text yields progressively before
+   the whole centered group does. */
+@media (max-width: 1400px) {
+  .gallery-chrome .tokenzhang-credit-kicker {
+    display: none;
+  }
+}
+
+@media (max-width: 1180px) {
+  .gallery-chrome .tokenzhang-link-label {
+    display: none;
+  }
+}
+
+@media (max-width: 860px) {
+  .gallery-credit-group {
+    display: none;
+  }
+}
+
+/* Below the credit group's exit the actions still crowd the brand: the
+   subtitle yields (the tab bar right underneath names the page), the bug
+   link goes icon-only, and the account chip tightens. */
+@media (max-width: 900px) {
+  .gallery-chrome .app-brand-copy {
+    display: none;
+  }
+
+  .gallery-actions .bug-report-label {
+    display: none;
+  }
+
+  .gallery-actions .bug-report-link {
+    width: var(--icm-control-h);
+    padding: 0;
+  }
+
+  .gallery-actions .account-name {
+    /* Wide enough for an ordinary two-part display name beside its round
+       mark; the header still holds one row at this width. Anything longer
+       ellipsizes, which only works because the chip stays out of the row's
+       shared flex rule. */
+    max-width: 11.75rem;
+  }
+}
+
+/* Narrower still the header keeps one row by dropping what it repeats; that
+   rule sits in gallery.css, after the base it overrides. */
+
+/* Visitor analytics entry (compact, does not crowd menubar commands). */
+.analytics-link {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-xs);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--icm-line-tight);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.analytics-link:hover {
+  color: var(--icm-accent);
+  text-decoration: underline;
+  text-underline-offset: 0.15rem;
+}
+
+.analytics-loading {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  color: #aeb8ca;
+  background: #10161f;
+  font-size: 0.85rem;
+}
+
+html.light .analytics-loading {
+  color: #68738a;
+  background: #ffffff;
+}

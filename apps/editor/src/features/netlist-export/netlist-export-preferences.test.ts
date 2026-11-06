@@ -1,0 +1,152 @@
+import { describe, expect, it } from "vitest";
+import {
+  createDefaultNetlistExportPreferences,
+  parseNetlistExportPreferences,
+  readNetlistExportPreferences,
+  selectNetlistExportMode,
+  selectNetlistExportProfile,
+  setNetlistExportDeviceTarget,
+} from "./netlist-export-preferences.js";
+
+describe("netlist authoring preferences", () => {
+  it("moves the old SG13 ideal defaults once and preserves subsequent explicit Ideal choices", () => {
+    const old = createDefaultNetlistExportPreferences();
+    delete old.sg13Defaults;
+    old.profiles.sg13g2.devices.resistor.target = "";
+    old.profiles.sg13g2.devices.capacitor.target = "";
+    old.profiles.sg13g2.devices.resistor.substrate = "VNEG";
+    const updated = readNetlistExportPreferences(JSON.stringify(old));
+    expect(updated.profiles.sg13g2.devices.resistor.target).toBe("rppd");
+    expect(updated.profiles.sg13g2.devices.capacitor.target).toBe("cap_cmim");
+    expect(updated.profiles.sg13g2.devices.resistor.substrate).toBe("VNEG");
+    const ideal = setNetlistExportDeviceTarget(
+      selectNetlistExportProfile(updated, "sg13g2"),
+      "resistor",
+      "",
+    );
+    expect(
+      readNetlistExportPreferences(JSON.stringify(ideal)).profiles.sg13g2
+        .devices.resistor.target,
+    ).toBe("");
+  });
+  it("remembers an RNL mode as its dialect and a flag, and drops the flag again", () => {
+    const rnl = selectNetlistExportMode(
+      createDefaultNetlistExportPreferences(),
+      "spectre+rnl",
+    );
+    expect(rnl.format).toBe("spectre");
+    expect(rnl.rnl).toBe(true);
+    expect(readNetlistExportPreferences(JSON.stringify(rnl))).toEqual(rnl);
+    const plain = selectNetlistExportMode(rnl, "spice");
+    expect(plain.format).toBe("spice");
+    expect(plain).not.toHaveProperty("rnl");
+    expect(() =>
+      parseNetlistExportPreferences(JSON.stringify({ ...rnl, rnl: "yes" })),
+    ).toThrow("rnl must be true or false.");
+  });
+
+  it("remembers format, process and device choices independently", () => {
+    const preferences = setNetlistExportDeviceTarget(
+      selectNetlistExportProfile(
+        selectNetlistExportMode(
+          createDefaultNetlistExportPreferences(),
+          "spectre",
+        ),
+        "sky130",
+      ),
+      "nmos",
+      "sky130_fd_pr__nfet_01v8_lvt",
+    );
+    expect(readNetlistExportPreferences(JSON.stringify(preferences))).toEqual(
+      preferences,
+    );
+    expect(preferences.format).toBe("spectre");
+    expect(preferences).not.toHaveProperty("portCase");
+    expect(preferences.profiles.sky130.devices.nmos.target).toBe(
+      "sky130_fd_pr__nfet_01v8_lvt",
+    );
+    expect(selectNetlistExportMode(preferences, "spice").selected).toBe(
+      "sky130",
+    );
+  });
+
+  it("retains process choices but drops legacy case conversion preferences", () => {
+    const restored = readNetlistExportPreferences(
+      JSON.stringify({ format: "spectre", portCase: "lower" }),
+    );
+    // The regression's storage says nothing about a process, so the restored
+    // preference is the default one a fresh editor starts in.
+    expect(restored).toMatchObject({
+      selected: "sky130",
+      format: "spectre",
+    });
+    expect(restored).not.toHaveProperty("portCase");
+    expect(restored.profiles.tsmc28.devices.nmos.target).toBe("nch_ulvt_mac");
+    expect(restored.profiles.tsmc180.devices.pmos.target).toBe("pch");
+  });
+
+  it("adds the IHP SG13G2 template to preferences saved before it existed", () => {
+    const saved = createDefaultNetlistExportPreferences();
+    const { sg13g2: _added, ...older } = saved.profiles;
+    const restored = readNetlistExportPreferences(
+      JSON.stringify({ ...saved, selected: "sky130", profiles: older }),
+    );
+    expect(restored.selected).toBe("sky130");
+    expect(restored.profiles.sg13g2.devices.nmos.target).toBe("sg13_lv_nmos");
+    expect(restored.profiles.sg13g2.devices.npn.target).toBe("npn13G2");
+    expect(restored.profiles.sg13g2.devices.nmos.parameters).toMatchObject({
+      l: "130n",
+    });
+    expect(restored.profiles.sg13g2.devices.nmos.parameters).not.toHaveProperty(
+      "nf",
+    );
+  });
+
+  it("does not accept a case override in new configuration code", () => {
+    expect(() =>
+      parseNetlistExportPreferences(
+        JSON.stringify({
+          ...createDefaultNetlistExportPreferences(),
+          portCase: "upper",
+        }),
+      ),
+    ).toThrow("Port names keep their authored case");
+  });
+
+  it("moves a stored Abstract default to SKY130 exactly once", () => {
+    const stored = createDefaultNetlistExportPreferences();
+    const legacy = JSON.stringify({
+      ...stored,
+      selected: "abstract",
+      defaultProcess: undefined,
+    });
+    const moved = readNetlistExportPreferences(legacy);
+    expect(moved.selected).toBe("sky130");
+
+    // Abstract chosen after the move is a choice, and it stays.
+    const chosen = readNetlistExportPreferences(
+      JSON.stringify({ ...moved, selected: "abstract" }),
+    );
+    expect(chosen.selected).toBe("abstract");
+  });
+
+  it("retains complete legacy customized process templates", () => {
+    const preferences = createDefaultNetlistExportPreferences();
+    preferences.selected = "custom";
+    preferences.profiles.custom.devices.nmos.target = "my_nmos";
+    preferences.profiles.custom.devices.nmos.parameters.w = "5u";
+    const restored = readNetlistExportPreferences(
+      JSON.stringify({ ...preferences, portCase: "lower" }),
+    );
+    expect(restored).toEqual(preferences);
+  });
+
+  it.each(["{", "null", "[]", '{"format":"custom"}'])(
+    "recovers malformed preferences: %s",
+    (raw) => {
+      expect(readNetlistExportPreferences(raw)).toEqual(
+        createDefaultNetlistExportPreferences(),
+      );
+    },
+  );
+});

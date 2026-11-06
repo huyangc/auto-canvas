@@ -1,0 +1,751 @@
+import type { PointerEvent as ReactPointerEvent } from "react";
+
+import type {
+  DocumentDerivedContext,
+  SchematicStyleProfile,
+} from "@icm/derived";
+import type {
+  DerivedPoint,
+  GridRect,
+  Point,
+  SchematicDocument,
+} from "@icm/model";
+import type { SymbolResolver } from "@icm/symbols";
+
+import { constrainedPowerRailEndpoint } from "../features/component-insert/vdd-rail";
+import {
+  marqueeMode,
+  marqueeSelection,
+} from "../features/selection/marquee-selection";
+import {
+  type SelectableCanvasHit,
+  type SelectionPolicy,
+} from "../features/selection/selection-filter";
+import {
+  EMPTY_VISUAL_SELECTION,
+  unionSelections,
+  type VisualSelection,
+} from "../features/selection/visual-selection";
+import type { RouteGeometryRecord } from "../features/wiring/route-interaction-geometry";
+import type { WireCanvasSnapResult } from "../features/wiring/wire-canvas-snap";
+import { wireDraftTargetFromSnap } from "../features/wiring/wire-draft-preview";
+import type {
+  EditorTool,
+  WireDraftTarget,
+} from "../interaction/interaction-state";
+import { snapCoordinate, type SnapGuideLine } from "../snap/engine";
+import {
+  classifyCanvasGestureStart,
+  type BoxPreview,
+  type PanPreview,
+  updateCanvasPan,
+} from "./canvas-gesture-model";
+import { normalizedRect } from "./canvas-geometry";
+import type { BoxPreviewRuntime } from "./box-preview-runtime";
+import {
+  cameraAnchorFromScreen,
+  cameraDeltaFromScreen,
+  fitCameraToBounds,
+  fitViewCamera,
+  panCameraByScreenPixels,
+  zoomCameraAtAnchor,
+  type CameraPanDirection,
+  type CameraRectInput,
+  type CanvasInsets,
+} from "./fit-view";
+
+// A stiff middle button drifts under the hand; keep a larger slop than an
+// ordinary drag so a click can still cycle the active wire corner.
+const PAN_START_DISTANCE_PX = 10;
+const KEYBOARD_PAN_STEP_PX = 48;
+const DRAFTING_SNAP_CAPTURE_RADIUS_PX = 4;
+
+type SetViewBox = (
+  next: GridRect | CameraRectInput | ((current: GridRect) => CameraRectInput),
+  grid?: number,
+) => void;
+
+export interface CanvasGestureControllerDependencies {
+  model: {
+    document: SchematicDocument;
+    resolver: SymbolResolver;
+    routeGeometryRecords: readonly RouteGeometryRecord[];
+    styleProfile: SchematicStyleProfile;
+    selectionPolicy: SelectionPolicy;
+    selectionRead?:
+      | Pick<DocumentDerivedContext, "routingGeometry" | "logicalNetResolution">
+      | undefined;
+  };
+  viewport: {
+    defaultViewBox: GridRect;
+    contentBounds: GridRect | null | undefined;
+    getViewBox: () => GridRect;
+    setViewBox: SetViewBox;
+    scheduleViewBox: SetViewBox;
+    flushViewBox: () => void;
+    measureSurface: (element: SVGSVGElement, refresh?: boolean) => DOMRect;
+    pointFromClient: (
+      clientX: number,
+      clientY: number,
+      svg: SVGSVGElement,
+    ) => Point;
+    rawPointFromClient: (
+      clientX: number,
+      clientY: number,
+      svg: SVGSVGElement,
+    ) => DerivedPoint;
+    logicalRadiusForPixels: (svg: SVGSVGElement, pixels: number) => number;
+    /** Live read: the person can change it between two wheel events. */
+    wheelBehavior: () => WheelBehavior;
+  };
+  gestureSession: {
+    boxPreview: BoxPreview | null;
+    boxPreviewRuntime?: BoxPreviewRuntime;
+    setBoxPreview: (preview: BoxPreview | null) => void;
+    panPreview: PanPreview | null;
+    setPanPreview: (preview: PanPreview | null) => void;
+    getInteractionKind: () => string;
+    paintSnapGuides: (guides: readonly SnapGuideLine[]) => void;
+    noteCanvasPoint: (
+      point: Point,
+      rawPoint: Point,
+      svg: SVGSVGElement,
+    ) => void;
+    setStatus: (status: string) => void;
+    /** A completed right-button frame consumes that gesture's context menu. */
+    setContextMenuSuppressed: (suppressed: boolean) => void;
+    /** Canvas size and how far floating docks reach over it; see fitView. */
+    measureCanvasView?: () => {
+      viewport: { width: number; height: number };
+      insets: CanvasInsets;
+    } | null;
+  };
+  selection: {
+    updateCommandMovePreview: (
+      point: Point,
+      clientPoint: Point,
+      svg: SVGSVGElement,
+      suppressSnap: boolean,
+    ) => void;
+    replaceSelection: (selection: VisualSelection) => void;
+    /** The selection a Shift or Ctrl/Cmd box adds to. */
+    currentSelection: () => VisualSelection;
+    clearSelectedEndpoint: () => void;
+  };
+  placement: {
+    componentPlacementPending: boolean;
+    componentSymbolPending: boolean;
+    snapPlacementPoint: (
+      point: Point,
+      svg: SVGSVGElement,
+    ) => { point: Point; guides: readonly SnapGuideLine[] };
+    setComponentPreviewPoint: (point: Point) => void;
+    vddRailMode: boolean;
+    vddRailStart: Point | null;
+    setVddRailPreviewPoint: (point: Point) => void;
+    copyPlacementPending: boolean;
+    setCopyPreviewPoint: (point: Point) => void;
+  };
+  drafting: {
+    tool: EditorTool;
+    outlineArrow?: boolean;
+    draftingSource: Point | null;
+    snapDraftingPoint: (
+      point: DerivedPoint,
+      altKey: boolean,
+      shiftKey: boolean,
+      origin: Point | undefined,
+      tolerance: number,
+    ) => { point: Point; snap: Point | null; guides: SnapGuideLine[] };
+    setDraftingHover: (point: Point | null) => void;
+    setDraftingSnapPoint: (point: Point | null) => void;
+  };
+  wiring: {
+    wireActive: boolean;
+    resolveWireCanvasSnap: (
+      point: Point,
+      svg: SVGSVGElement,
+      suppressSnap: boolean,
+    ) => WireCanvasSnapResult;
+    setWirePreview: (target: WireDraftTarget | null) => void;
+    cycleWireCornerShape: () => void;
+  };
+  cellSymbolLayout: {
+    activeDragPointerId: number | null;
+    cancelDrag: () => void;
+    completeDrag: (event: ReactPointerEvent<SVGSVGElement>) => boolean;
+  };
+}
+
+/**
+ * Wheel-source inference. Trackpads scroll in pixel mode with a horizontal
+ * component, fractional deltas, or gentle sub-detent steps; a discrete
+ * mouse wheel reports line/page mode or large integer vertical detents.
+ * Heuristic by necessity — the DOM never names the device.
+ */
+interface WheelSourceShape {
+  deltaMode: number;
+  deltaX: number;
+  deltaY: number;
+  /** Non-standard, Chromium/WebKit only; absent on Firefox. */
+  wheelDeltaY?: number;
+}
+
+/**
+ * What a wheel event proves about the device that produced it.
+ *
+ * The DOM never names the device, so this reports evidence rather than a
+ * guess: "unknown" is a real answer, and the caller decides what a
+ * device-less event should do. Nothing here infers a source from how large
+ * a delta happens to be — a high-resolution or slowly turned wheel emits
+ * exactly the small values a trackpad does.
+ */
+export type WheelSource = "mouse" | "trackpad" | "unknown";
+
+/**
+ * How the wheel should be read. "auto" trusts the evidence above; the two
+ * explicit values exist because no evidence is available in every browser,
+ * and a person who knows their own device should never be at the mercy of
+ * a guess.
+ */
+export type WheelBehavior = "auto" | "zoom" | "pan";
+
+export function classifyWheelSource(event: WheelSourceShape): WheelSource {
+  // Firefox and older engines report a wheel in lines or pages; a precise
+  // surface always reports pixels.
+  if (event.deltaMode !== 0) return "mouse";
+  // Chromium and WebKit carry the raw platform value alongside the
+  // normalized one. A precise surface keeps the fixed 3:1 pixel ratio,
+  // while a physical detent is quantized to multiples of 120 and breaks
+  // that ratio however much pointer acceleration shrinks its deltaY.
+  const wheelDeltaY = event.wheelDeltaY;
+  if (typeof wheelDeltaY === "number" && wheelDeltaY !== 0) {
+    if (Math.abs(wheelDeltaY) === 3 * Math.abs(event.deltaY)) return "trackpad";
+    if (wheelDeltaY % 120 === 0) return "mouse";
+  }
+  // Two axes at once is a surface, not a wheel.
+  if (event.deltaX !== 0) return "trackpad";
+  // Sub-pixel precision comes from momentum, which a detent cannot produce.
+  if (!Number.isInteger(event.deltaY)) return "trackpad";
+  return "unknown";
+}
+
+const TRACKPAD_EVIDENCE_WINDOW_MS = 1500;
+let lastTrackpadWheelAt = Number.NEGATIVE_INFINITY;
+
+/**
+ * Said the first time "auto" reads a wheel as a trackpad and pans, once per
+ * page: a mouse it misreads (#1898) learns how to zoom anyway.
+ */
+export const WHEEL_PAN_HINT =
+  "The wheel pans here, as on a trackpad. Ctrl+wheel zooms; to make the wheel always zoom, open Properties (O) and set Scroll behavior to Always zoom.";
+let wheelPanHinted = false;
+
+/** The hint the first time "auto" pans with the wheel, then nothing. */
+export function wheelPanHint(): string | null {
+  if (wheelPanHinted) return null;
+  wheelPanHinted = true;
+  return WHEEL_PAN_HINT;
+}
+
+/** Own viewport gestures and canvas-background pointer progression. */
+export function createCanvasGestureController({
+  model: {
+    document,
+    resolver,
+    routeGeometryRecords,
+    styleProfile,
+    selectionPolicy,
+    selectionRead,
+  },
+  viewport: {
+    defaultViewBox,
+    contentBounds,
+    getViewBox,
+    setViewBox,
+    scheduleViewBox,
+    flushViewBox,
+    measureSurface,
+    pointFromClient,
+    rawPointFromClient,
+    logicalRadiusForPixels,
+    wheelBehavior,
+  },
+  gestureSession: {
+    boxPreview,
+    boxPreviewRuntime,
+    setBoxPreview,
+    panPreview,
+    setPanPreview,
+    getInteractionKind,
+    paintSnapGuides,
+    noteCanvasPoint,
+    setStatus,
+    setContextMenuSuppressed,
+    measureCanvasView,
+  },
+  selection: {
+    updateCommandMovePreview,
+    replaceSelection,
+    currentSelection,
+    clearSelectedEndpoint,
+  },
+  placement: {
+    componentPlacementPending,
+    componentSymbolPending,
+    snapPlacementPoint,
+    setComponentPreviewPoint,
+    vddRailMode,
+    vddRailStart,
+    setVddRailPreviewPoint,
+    copyPlacementPending,
+    setCopyPreviewPoint,
+  },
+  drafting: {
+    tool,
+    draftingSource,
+    outlineArrow = false,
+    snapDraftingPoint,
+    setDraftingHover,
+    setDraftingSnapPoint,
+  },
+  wiring: {
+    wireActive,
+    resolveWireCanvasSnap,
+    setWirePreview,
+    cycleWireCornerShape,
+  },
+  cellSymbolLayout: {
+    activeDragPointerId: cellSymbolLayoutDragPointerId,
+    cancelDrag: cancelCellSymbolLayoutDrag,
+    completeDrag: completeCellSymbolLayoutDrag,
+  },
+}: CanvasGestureControllerDependencies) {
+  const fitView = (options: { announce?: boolean } = {}): void => {
+    const bounds = contentBounds ?? defaultViewBox;
+    const grid = document.presentation.grid;
+    // Below the layout's narrow breakpoint the Properties dock stops being a
+    // column and floats over the canvas, so fitting to the element put part
+    // of the drawing underneath it.
+    setViewBox(fitViewCamera(bounds, grid, measureCanvasView?.() ?? null));
+    if (options.announce !== false) setStatus("Fit Document");
+  };
+
+  const zoomViewAtCenter = (factor: number): void => {
+    const viewport = measureCanvasView?.()?.viewport ?? {
+      width: defaultViewBox.width,
+      height: defaultViewBox.height,
+    };
+    setViewBox((current) =>
+      zoomCameraAtAnchor(current, factor, { x: 0.5, y: 0.5 }, viewport),
+    );
+  };
+
+  const panView = (direction: CameraPanDirection): void => {
+    const viewport = measureCanvasView?.()?.viewport ?? {
+      width: defaultViewBox.width,
+      height: defaultViewBox.height,
+    };
+    setViewBox((current) =>
+      panCameraByScreenPixels(
+        current,
+        direction,
+        KEYBOARD_PAN_STEP_PX,
+        viewport,
+      ),
+    );
+  };
+
+  /** Cursor-anchored zoom shared by wheel, pinch, and Safari gestures. */
+  const zoomAtClientPoint = (
+    factor: number,
+    clientX: number,
+    clientY: number,
+    element: SVGSVGElement,
+  ): void => {
+    const bounds = measureSurface(element);
+    if (bounds.width <= 0 || bounds.height <= 0) return;
+    const viewport = { width: bounds.width, height: bounds.height };
+    const point = { x: clientX - bounds.left, y: clientY - bounds.top };
+    scheduleViewBox((current) => {
+      const anchor = cameraAnchorFromScreen(current, point, viewport);
+      return anchor
+        ? zoomCameraAtAnchor(current, factor, anchor, viewport)
+        : current;
+    });
+  };
+
+  // Wheel map by device. A trackpad two-finger scroll pans in every
+  // direction; a mouse wheel zooms at the cursor (its only axis earns the
+  // richer gesture). Pinch — delivered as ctrl+wheel — and Cmd+scroll zoom
+  // on both. Shift+wheel pans horizontally. Attached as a non-passive
+  // native listener so preventDefault actually stops browser page zoom
+  // and history-swipe navigation.
+  const handleWheel = (event: WheelEvent, element: SVGSVGElement): void => {
+    event.preventDefault();
+    const bounds = measureSurface(element);
+    if (bounds.width <= 0 || bounds.height <= 0) return;
+    const unit =
+      event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? bounds.height : 1;
+    const deltaX = event.deltaX * unit;
+    const deltaY = event.deltaY * unit;
+    if (event.ctrlKey || event.metaKey) {
+      zoomAtClientPoint(
+        Math.exp(deltaY * 0.01),
+        event.clientX,
+        event.clientY,
+        element,
+      );
+      return;
+    }
+    const source = classifyWheelSource(event);
+    if (source === "trackpad") lastTrackpadWheelAt = event.timeStamp;
+    if (source === "mouse") lastTrackpadWheelAt = Number.NEGATIVE_INFINITY;
+    // An explicit preference is the whole answer; "auto" reads the evidence
+    // and, where a browser offers none, keeps the momentum tail of a recent
+    // trackpad gesture panning before falling back to the wheel's zoom.
+    const trackpad =
+      wheelBehavior() === "pan" ||
+      (wheelBehavior() === "auto" &&
+        (source === "trackpad" ||
+          (source === "unknown" &&
+            event.timeStamp - lastTrackpadWheelAt <
+              TRACKPAD_EVIDENCE_WINDOW_MS)));
+    if (trackpad && wheelBehavior() === "auto") {
+      const hint = wheelPanHint();
+      if (hint) setStatus(hint);
+    }
+    if (!trackpad) {
+      if (event.shiftKey) {
+        if (deltaY === 0) return;
+        scheduleViewBox((current) => {
+          const delta = cameraDeltaFromScreen(
+            current,
+            { x: deltaY, y: 0 },
+            { width: bounds.width, height: bounds.height },
+          );
+          return delta ? { ...current, x: current.x + delta.x } : current;
+        });
+        return;
+      }
+      if (deltaY === 0) return;
+      zoomAtClientPoint(
+        Math.exp(deltaY * 0.0012),
+        event.clientX,
+        event.clientY,
+        element,
+      );
+      return;
+    }
+    const panX = event.shiftKey && deltaX === 0 ? deltaY : deltaX;
+    const panY = event.shiftKey && deltaX === 0 ? 0 : deltaY;
+    if (panX === 0 && panY === 0) return;
+    scheduleViewBox((current) => {
+      const delta = cameraDeltaFromScreen(
+        current,
+        { x: panX, y: panY },
+        { width: bounds.width, height: bounds.height },
+      );
+      return delta
+        ? { ...current, x: current.x + delta.x, y: current.y + delta.y }
+        : current;
+    });
+  };
+
+  const begin = (event: ReactPointerEvent<SVGSVGElement>): void => {
+    setContextMenuSuppressed(false);
+    // Visual objects own their context menu. Starting the background framing
+    // gesture on any of these hit layers would capture the pointer and swallow
+    // the later contextmenu event. Route strokes and endpoint circles are
+    // already excluded by the background-target classifier below.
+    const contextMenuHitKind = (event.target as Element)
+      .closest?.("[data-canvas-hit-kind]")
+      ?.getAttribute("data-canvas-hit-kind");
+    if (
+      event.button === 2 &&
+      (contextMenuHitKind === "instance" ||
+        contextMenuHitKind === "annotation" ||
+        contextMenuHitKind === "drafting")
+    ) {
+      return;
+    }
+    const directHitElement = (event.target as Element).closest?.(
+      "[data-canvas-hit-kind][data-canvas-hit-id]",
+    );
+    const directHitKind = directHitElement?.getAttribute(
+      "data-canvas-hit-kind",
+    ) as SelectableCanvasHit["kind"] | null;
+    const directHitId = directHitElement?.getAttribute("data-canvas-hit-id");
+    const directEndpointKind = (event.target as Element)
+      .closest?.("[data-endpoint-kind]")
+      ?.getAttribute("data-endpoint-kind") as "junction" | "terminal" | null;
+    const filteredTargetActsAsCanvas = Boolean(
+      (directHitKind &&
+        directHitId &&
+        !selectionPolicy.allowsCanvasHit(
+          { kind: directHitKind, id: directHitId },
+          "select",
+        )) ||
+      (directEndpointKind &&
+        !selectionPolicy.allowsEndpoint(directEndpointKind, "select")),
+    );
+    const gesture = classifyCanvasGestureStart({
+      button: event.button,
+      altKey: event.altKey,
+      interactionKind: getInteractionKind(),
+      targetIsCanvas:
+        event.target === event.currentTarget ||
+        (event.target as Element).tagName === "rect" ||
+        filteredTargetActsAsCanvas,
+      placementPending: componentPlacementPending,
+      vddRailMode,
+      copyPlacementPending,
+      tool,
+    });
+    if (gesture === "pan") {
+      event.preventDefault();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      measureSurface(event.currentTarget, true);
+      setPanPreview({
+        clientStart: { x: event.clientX, y: event.clientY },
+        viewBoxStart: getViewBox(),
+        pointerId: event.pointerId,
+        dragged: false,
+      });
+      return;
+    }
+    if (gesture === "zoom") {
+      // Raw pointer: the framing rectangle tracks the cursor exactly
+      // instead of jumping in Document-grid steps.
+      const zoomStart = rawPointFromClient(
+        event.clientX,
+        event.clientY,
+        event.currentTarget,
+      );
+      event.currentTarget.setPointerCapture(event.pointerId);
+      setBoxPreview({
+        start: zoomStart,
+        end: zoomStart,
+        pointerId: event.pointerId,
+        intent: "zoom",
+      });
+      return;
+    }
+    if (gesture !== "select") return;
+    // Raw pointer: the marquee must not snap to the grid.
+    const point = rawPointFromClient(
+      event.clientX,
+      event.clientY,
+      event.currentTarget,
+    );
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setBoxPreview({
+      start: point,
+      end: point,
+      pointerId: event.pointerId,
+      intent: "select",
+      // Shift or Ctrl/Cmd adds the box to the selection, as those keys add a
+      // clicked object (2026-10-18).
+      ...(event.shiftKey || event.ctrlKey || event.metaKey
+        ? { additive: true }
+        : {}),
+    });
+  };
+
+  const continueGesture = (event: ReactPointerEvent<SVGSVGElement>): void => {
+    const activeBox = boxPreviewRuntime
+      ? boxPreviewRuntime.current()
+      : boxPreview;
+    const interactionKind = getInteractionKind();
+    if (interactionKind === "moving-selection") {
+      updateCommandMovePreview(
+        rawPointFromClient(event.clientX, event.clientY, event.currentTarget),
+        { x: event.clientX, y: event.clientY },
+        event.currentTarget,
+        event.altKey,
+      );
+      return;
+    }
+    if (panPreview?.pointerId === event.pointerId) {
+      const update = updateCanvasPan(
+        panPreview,
+        { x: event.clientX, y: event.clientY },
+        measureSurface(event.currentTarget),
+        PAN_START_DISTANCE_PX,
+      );
+      if (!update) return;
+      if (update.preview !== panPreview) setPanPreview(update.preview);
+      scheduleViewBox(update.viewBox);
+      return;
+    }
+    const point = pointFromClient(
+      event.clientX,
+      event.clientY,
+      event.currentTarget,
+    );
+    noteCanvasPoint(
+      point,
+      rawPointFromClient(event.clientX, event.clientY, event.currentTarget),
+      event.currentTarget,
+    );
+    if (vddRailMode) {
+      const snapped = {
+        x: snapCoordinate(point.x, document.presentation.grid),
+        y: snapCoordinate(point.y, document.presentation.grid),
+      };
+      setVddRailPreviewPoint(
+        vddRailStart
+          ? constrainedPowerRailEndpoint(vddRailStart, snapped)
+          : snapped,
+      );
+      return;
+    }
+    if (componentSymbolPending) {
+      const raw = rawPointFromClient(
+        event.clientX,
+        event.clientY,
+        event.currentTarget,
+      );
+      const snapped = snapPlacementPoint(raw, event.currentTarget);
+      setComponentPreviewPoint(snapped.point);
+      paintSnapGuides(snapped.guides);
+      return;
+    }
+    if (interactionKind === "copy-placement") {
+      const snapped = snapPlacementPoint(
+        rawPointFromClient(event.clientX, event.clientY, event.currentTarget),
+        event.currentTarget,
+      );
+      setCopyPreviewPoint(snapped.point);
+      paintSnapGuides(snapped.guides);
+      return;
+    }
+    if (activeBox?.pointerId === event.pointerId) {
+      const next = {
+        ...activeBox,
+        end: rawPointFromClient(
+          event.clientX,
+          event.clientY,
+          event.currentTarget,
+        ),
+      };
+      if (boxPreviewRuntime && activeBox.intent === "select")
+        boxPreviewRuntime.preview(next);
+      else setBoxPreview(next);
+    }
+    if (
+      tool === "arrow" ||
+      tool === "polyline" ||
+      tool === "construction-line" ||
+      tool === "rectangle" ||
+      tool === "circle"
+    ) {
+      // Raw pointer: the drafting snapper rounds by the annotation grid,
+      // which can be finer than the Document grid this handler's point uses.
+      const snapped = snapDraftingPoint(
+        rawPointFromClient(event.clientX, event.clientY, event.currentTarget),
+        event.altKey || (tool === "arrow" && outlineArrow),
+        tool === "arrow" && outlineArrow ? false : event.shiftKey,
+        tool === "arrow" && outlineArrow
+          ? undefined
+          : (draftingSource ?? undefined),
+        logicalRadiusForPixels(
+          event.currentTarget,
+          DRAFTING_SNAP_CAPTURE_RADIUS_PX,
+        ),
+      );
+      setDraftingHover(snapped.point);
+      setDraftingSnapPoint(snapped.snap);
+      paintSnapGuides(snapped.guides);
+    }
+    if (tool === "wire" && wireActive) {
+      const resolved = resolveWireCanvasSnap(
+        rawPointFromClient(event.clientX, event.clientY, event.currentTarget),
+        event.currentTarget,
+        event.altKey,
+      );
+      // Keep what the pointer resolved TO, not merely where it landed: the
+      // draft preview builds its far end from the same target the press will
+      // commit, so the two cannot describe different wires.
+      setWirePreview(wireDraftTargetFromSnap(resolved));
+      paintSnapGuides(resolved.guides);
+    }
+  };
+
+  const finish = (event: ReactPointerEvent<SVGSVGElement>): void => {
+    const activeBox = boxPreviewRuntime
+      ? boxPreviewRuntime.current()
+      : boxPreview;
+    if (
+      event.type === "pointercancel" &&
+      cellSymbolLayoutDragPointerId === event.pointerId
+    ) {
+      cancelCellSymbolLayoutDrag();
+      return;
+    }
+    if (completeCellSymbolLayoutDrag(event)) return;
+    if (panPreview?.pointerId === event.pointerId) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+      flushViewBox();
+      if (!panPreview.dragged && getInteractionKind() === "wire") {
+        cycleWireCornerShape();
+      }
+      setPanPreview(null);
+      return;
+    }
+    if (activeBox?.pointerId !== event.pointerId) return;
+    boxPreviewRuntime?.flush();
+    event.currentTarget.releasePointerCapture(event.pointerId);
+    if (activeBox.intent === "zoom") {
+      const rect = normalizedRect(activeBox.start, activeBox.end);
+      setBoxPreview(null);
+      if (
+        rect.width > document.presentation.grid &&
+        rect.height > document.presentation.grid
+      ) {
+        if (event.button === 2) setContextMenuSuppressed(true);
+        setViewBox(fitCameraToBounds(rect, document.presentation.grid));
+        setStatus("Zoomed to framed region");
+      }
+      return;
+    }
+    const rect = normalizedRect(activeBox.start, activeBox.end);
+    const clicked =
+      rect.width <= document.presentation.grid &&
+      rect.height <= document.presentation.grid;
+    const boxed = clicked
+      ? EMPTY_VISUAL_SELECTION
+      : marqueeSelection(
+          document,
+          resolver,
+          routeGeometryRecords,
+          styleProfile,
+          rect,
+          marqueeMode(activeBox.start, activeBox.end),
+          selectionPolicy,
+          selectionRead,
+        );
+    const selection = activeBox.additive
+      ? unionSelections(currentSelection(), boxed)
+      : boxed;
+    replaceSelection(selection);
+    clearSelectedEndpoint();
+    setBoxPreview(null);
+    const count = Object.values(selection).reduce(
+      (total, ids) => total + ids.length,
+      0,
+    );
+    setStatus(count > 0 ? `Selected ${count} objects` : "Selection cleared");
+  };
+
+  return {
+    fitView,
+    panView,
+    zoomViewAtCenter,
+    handleWheel,
+    zoomAtClientPoint,
+    beginCanvasGesture: begin,
+    continueCanvasGesture: continueGesture,
+    finishCanvasGesture: finish,
+  };
+}

@@ -1,0 +1,1785 @@
+/* Editor chrome owner: application bars, menus, commands, project identity, and root failure surface. */
+
+/* Full-window simulation reclaims chrome space without unmounting its state. */
+.app-shell:has(> .app-workspace.simulation-maximized) > .app-chrome {
+  display: none;
+}
+
+.menubar-row {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.menubar-row {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.toolbar-row {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--icm-space-1);
+  width: 100%;
+  min-width: 0;
+  padding: var(--icm-space-1) var(--icm-space-3);
+  border-top: 1px solid var(--icm-border);
+  background: var(--icm-surface-muted);
+  white-space: nowrap;
+  overflow-x: auto;
+}
+
+.toolbar-row:has(.command-menu[open]) {
+  overflow: visible;
+}
+
+.draw-toolbar {
+  gap: 2px;
+  background: var(--icm-surface);
+}
+
+.draw-toolbar-panels {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+}
+
+.draw-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--icm-space-1);
+  height: var(--icm-control-h);
+  padding: 0 var(--icm-space-2);
+  border: 1px solid transparent;
+  border-radius: var(--icm-radius-sm);
+  background: transparent;
+  font: inherit;
+  font-size: var(--icm-font-sm);
+  white-space: nowrap;
+}
+
+.draw-tool:hover {
+  border-color: var(--icm-border);
+  background: var(--icm-surface-muted);
+}
+
+.draw-tool[aria-pressed="true"] {
+  border-color: var(--icm-accent);
+  background: var(--icm-accent-soft);
+  color: var(--icm-accent);
+  font-weight: 600;
+}
+
+.instant-toolbar-tooltip {
+  position: fixed;
+  z-index: 1000;
+  transform: translateX(-50%);
+  max-width: min(22rem, calc(100vw - 16px));
+  padding: 6px 9px;
+  border: 1px solid var(--icm-border-strong);
+  border-radius: var(--icm-radius-sm);
+  background: var(--icm-surface);
+  color: var(--icm-text);
+  box-shadow: var(--icm-shadow-md);
+  font-size: var(--icm-font-sm);
+  line-height: var(--icm-line-tight);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.toolbar-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+}
+
+.toolbar-divider {
+  width: 1px;
+  height: 18px;
+  margin: 0 var(--icm-space-2);
+  background: var(--icm-border-strong);
+}
+
+.toolbar-button,
+.command-menu summary {
+  min-height: var(--icm-control-h);
+  border: 1px solid transparent;
+  border-radius: var(--icm-radius-sm);
+  background: transparent;
+  box-shadow: none;
+  color: var(--icm-text);
+  font-size: var(--icm-font-md);
+  font-weight: 500;
+  line-height: var(--icm-line-tight);
+  white-space: nowrap;
+}
+
+.toolbar-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--icm-space-1);
+  padding: 0 var(--icm-space-2);
+}
+
+.toolbar-button:hover:not(:disabled),
+.command-menu summary:hover {
+  border-color: transparent;
+  background: var(--icm-surface-hover);
+}
+
+.toolbar-button[aria-pressed="true"],
+.command-menu[open] summary {
+  border-color: transparent;
+  color: var(--icm-accent);
+  background: var(--icm-accent-tint);
+  box-shadow: none;
+}
+
+/* The check report had no styles at all, so each finding rendered its code
+   and its sentence as one unbroken run: "GROUND_NAME_MISMATCHGround marker
+   must connect to…". The code is a label for the sentence, so it sits above
+   it. */
+.preflight-findings {
+  display: grid;
+  gap: var(--icm-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.preflight-findings button {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: var(--icm-space-1) var(--icm-space-2);
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-sm);
+  background: var(--icm-surface);
+  color: var(--icm-text);
+  text-align: left;
+}
+
+.preflight-findings strong {
+  font-size: var(--icm-font-sm);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--icm-text-muted);
+}
+
+.preflight-findings button[data-severity="error"] strong {
+  color: var(--icm-danger, #b4232a);
+}
+
+/* Netlist review is a report workbench, not a component picker. Its summary
+   spans the dialog while preview and diagnostics each own one complete pane;
+   structural and electrical findings share the diagnostics rail instead of
+   becoming a third item in a two-column insertion grid. */
+.netlist-preflight-dialog {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  gap: var(--icm-space-3);
+  width: min(72rem, calc(100vw - 2.5rem));
+  height: min(44rem, calc(100dvh - 2.5rem));
+  padding: 1rem;
+  overflow: hidden;
+  border: 1px solid var(--icm-border-strong);
+  border-radius: var(--icm-radius-lg);
+  color: var(--icm-text);
+  background: var(--icm-surface);
+  box-shadow: var(--icm-shadow-lg);
+}
+
+.netlist-preflight-header,
+.netlist-preflight-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--icm-space-3);
+}
+
+.netlist-profile-code {
+  display: grid;
+  gap: 8px;
+}
+/* However many selects the row carries — Entry appears only for a Project with
+   more than one Cell — they share the width the panel has and wrap when it runs
+   out. Their shared prompt width keeps both select edges aligned after a wrap.
+   Actions stay together on the right and stack alongside the selects when
+   the panel is narrow. */
+.netlist-live-code {
+  container: netlist-panel / inline-size;
+}
+.netlist-code-controls {
+  --netlist-control-height: 30px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.netlist-code-selects {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+}
+.netlist-code-selects label,
+.netlist-device-mapping label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  flex: 1 1 150px;
+  gap: 6px;
+  min-width: 0;
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-xs);
+  font-weight: 600;
+}
+.netlist-code-selects select,
+.netlist-device-mapping select {
+  min-width: 0;
+  width: 100%;
+  padding: 4px 24px 4px 8px;
+  border: 1px solid var(--icm-border);
+  border-radius: 6px;
+  background: var(--icm-surface);
+  color: var(--icm-text);
+  font: inherit;
+}
+.netlist-code-selects select {
+  box-sizing: border-box;
+  height: var(--netlist-control-height);
+  padding-right: 14px;
+  padding-left: 5px;
+}
+.netlist-code-selects label {
+  grid-template-columns: 4rem minmax(0, 1fr);
+  gap: 3px;
+}
+.netlist-code-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+.netlist-code-actions button {
+  box-sizing: border-box;
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: var(--netlist-control-height);
+  height: var(--netlist-control-height);
+  min-height: var(--netlist-control-height);
+  padding: 5px;
+  place-items: center;
+}
+@container netlist-panel (max-width: 390px) {
+  .netlist-code-selects {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .netlist-code-selects label {
+    flex: 0 0 auto;
+  }
+  .netlist-code-actions {
+    flex-direction: column;
+  }
+}
+.netlist-mapping-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.netlist-code-actions svg {
+  width: 18px;
+  height: 18px;
+}
+.netlist-default-action,
+.netlist-fill-defaults {
+  min-height: 30px;
+  min-width: 76px;
+}
+.netlist-profile-code p {
+  font-size: 12px;
+  color: var(--icm-text-dim);
+}
+/* Every finding that keeps the netlist from being taken away, each one a
+   button to its object on the canvas. */
+.netlist-issues {
+  display: grid;
+  gap: 4px;
+}
+.netlist-profile-code .netlist-issues-heading {
+  margin: 0;
+  color: var(--icm-error);
+}
+/* Six findings show at once and the rest scroll, so a drawing with dozens
+   of unfinished nets still leaves the code its room. */
+.netlist-issues ul {
+  display: grid;
+  gap: 2px;
+  max-height: 168px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+.netlist-issue {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-sm);
+  background: var(--icm-surface);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.netlist-issue:hover,
+.netlist-issue:focus-visible {
+  border-color: var(--icm-error);
+  background: var(--icm-surface-hover);
+}
+.netlist-issue-message {
+  flex: 1;
+  color: var(--icm-error);
+}
+.netlist-issue-target {
+  color: var(--icm-text-muted);
+  white-space: nowrap;
+}
+.project-source-editor,
+.project-code-panel > textarea,
+.netlist-profile-code > textarea {
+  width: 100%;
+  height: 60dvh;
+  min-height: 24rem;
+  box-sizing: border-box;
+  overflow: hidden;
+  border: 1px solid var(--icm-border);
+  border-radius: 6px;
+  background: var(--icm-surface);
+  color: var(--icm-text);
+  font: 12px/1.6 var(--font-mono);
+  tab-size: 2;
+  /* Above the first line and below the last, in the code and its gutter. */
+  --code-block-padding: 10px;
+}
+.project-code-panel > textarea,
+.netlist-profile-code > textarea {
+  padding: 10px;
+  resize: vertical;
+}
+.project-source-editor[data-invalid="true"],
+.project-code-panel > textarea[aria-invalid="true"],
+.netlist-profile-code > textarea[aria-invalid="true"] {
+  border-color: var(--icm-error);
+}
+.project-source-editor:focus-within {
+  border-color: var(--icm-accent);
+  outline: 2px solid var(--icm-accent-soft);
+  outline-offset: 0;
+}
+.project-source-editor[data-invalid="true"]:focus-within {
+  border-color: var(--icm-error);
+}
+.project-source-editor .cm-editor {
+  height: 100%;
+  border-radius: inherit;
+  background: transparent;
+}
+.project-source-editor .cm-editor.cm-focused {
+  outline: none;
+}
+/* The code of each part selected on the canvas. */
+.project-source-editor .cm-code-highlight {
+  background: rgb(var(--icm-accent-rgb) / 12%);
+  box-shadow: inset 3px 0 0 rgb(var(--icm-accent-rgb) / 70%);
+}
+/* A line a finding names, such as a draft card with a ?. Selected too, it
+   keeps the yellow and gains the selection's bar. */
+.project-source-editor .cm-code-warning {
+  background: rgb(var(--icm-warning-rgb) / 24%);
+}
+.project-source-editor .cm-scroller,
+.static-code-scroller {
+  overflow: auto;
+  font-family: inherit;
+  line-height: 1.6;
+}
+.project-source-editor .cm-gutters,
+.static-code-gutter {
+  border-right: 1px solid var(--icm-border);
+  background: var(--icm-surface-muted);
+  color: var(--icm-text-muted);
+}
+.project-source-editor .cm-lineNumbers .cm-gutterElement,
+.static-code-gutter > div {
+  min-width: 2.25rem;
+  padding: 0 9px 0 6px;
+}
+.project-source-editor .cm-content,
+.static-code-content {
+  padding: var(--code-block-padding) 0;
+  caret-color: var(--icm-text);
+}
+.project-source-editor .cm-line,
+.static-code-content > div {
+  padding: 0 12px 0 10px;
+}
+.project-source-editor .cm-activeLine,
+.project-source-editor .cm-activeLineGutter,
+.static-code-view .static-code-active {
+  background: color-mix(in srgb, var(--icm-accent) 7%, transparent);
+}
+/* The code editor's own layout, which its stylesheet gives it once loaded. */
+.static-code-scroller {
+  display: flex;
+  align-items: flex-start;
+  height: 100%;
+  white-space: pre;
+}
+.static-code-gutter {
+  position: sticky;
+  left: 0;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  min-height: 100%;
+  padding-top: var(--code-block-padding);
+  text-align: right;
+}
+.static-code-gutter > div {
+  box-sizing: border-box;
+}
+.static-code-content {
+  flex: 2 0 auto;
+  box-sizing: border-box;
+  min-height: 100%;
+}
+/* The live netlist takes the room the dock has. Its code area grows with the
+   netlist as far as the dock allows. The controls and findings under it may
+   take the rest, but never squeeze it below the netlist's first thirty lines
+   (ten at least): the dock scrolls instead. */
+.netlist-live-code {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+.netlist-code-viewport {
+  flex: 0 1 var(--netlist-editor-height);
+  /* Ten lines are 214px and thirty 598px, at the editor's 19.2px line. */
+  min-height: clamp(214px, var(--netlist-editor-height), 598px);
+}
+.netlist-code-viewport > .project-source-editor {
+  height: 100%;
+  min-height: 0;
+}
+.netlist-device-mapping {
+  display: grid;
+  /* Two model columns while they fit; one once the panel is dragged narrow,
+     so the model selects and Default stay whole instead of being clipped. */
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  align-items: center;
+  gap: 8px;
+  padding-top: 2px;
+}
+.netlist-device-mapping select {
+  font-family: var(--font-mono);
+}
+
+.netlist-preflight-header p,
+.netlist-preflight-header h2,
+.netlist-preflight-summary h3,
+.netlist-preflight-summary p,
+.netlist-preflight-diagnostics h3,
+.netlist-preflight-diagnostics p {
+  margin: 0;
+}
+
+.netlist-preflight-header p {
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.netlist-preflight-header h2 {
+  margin-top: 0.15rem;
+  font-size: 16px;
+}
+
+.netlist-preflight-summary {
+  display: grid;
+  gap: var(--icm-space-1);
+  padding: var(--icm-space-3);
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-md);
+  background: var(--icm-surface-muted);
+}
+
+.netlist-preflight-summary h3,
+.netlist-preflight-diagnostics h3 {
+  font-size: var(--icm-font-md);
+}
+
+.netlist-preflight-summary p,
+.netlist-preflight-diagnostics p {
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-sm);
+  line-height: 1.45;
+}
+
+.netlist-preflight-body {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(20rem, 2fr);
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-md);
+  background: var(--icm-surface-muted);
+}
+
+.netlist-preflight-body[data-has-preview="false"],
+.netlist-preflight-body[data-has-diagnostics="false"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.netlist-preflight-export {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: var(--icm-space-3);
+  min-width: 0;
+  min-height: 0;
+  padding: var(--icm-space-3);
+  background: var(--icm-surface);
+}
+
+.netlist-preflight-export-controls {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: var(--icm-space-3);
+}
+
+.netlist-preflight-export-controls label {
+  display: grid;
+  gap: var(--icm-space-1);
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-sm);
+  font-weight: 650;
+}
+
+.netlist-preflight-export-controls select,
+.netlist-preflight-export-controls button,
+.netlist-preflight-actions button {
+  min-height: var(--icm-control-h-lg);
+}
+
+.netlist-preflight-export-controls select {
+  min-width: 9rem;
+}
+
+.netlist-preflight-export .netlist-preview {
+  min-height: 0;
+}
+
+.netlist-preflight-diagnostics {
+  display: grid;
+  align-content: start;
+  gap: var(--icm-space-4);
+  min-width: 0;
+  min-height: 0;
+  padding: var(--icm-space-3);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-left: 1px solid var(--icm-border);
+  background: var(--icm-surface-muted);
+  scrollbar-width: thin;
+}
+
+.netlist-preflight-body[data-has-preview="false"]
+  .netlist-preflight-diagnostics {
+  border-left: 0;
+}
+
+.netlist-preflight-diagnostics > section {
+  display: grid;
+  gap: var(--icm-space-2);
+}
+
+@media (max-width: 52rem) {
+  .netlist-preflight-dialog {
+    width: calc(100vw - 1rem);
+    height: calc(100dvh - 1rem);
+  }
+
+  .netlist-preflight-body {
+    grid-template-columns: minmax(0, 1fr);
+    overflow-y: auto;
+  }
+
+  .netlist-preflight-export {
+    min-height: 24rem;
+  }
+
+  .netlist-preflight-diagnostics {
+    overflow: visible;
+    border-top: 1px solid var(--icm-border);
+    border-left: 0;
+  }
+}
+
+/* The explicit Check and Save action reuses the existing run glyph. */
+.toolbar-check-glyph {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  margin-right: var(--icm-space-1);
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 8px solid #1a8f4c;
+}
+
+.document-nav {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: var(--icm-space-1);
+  min-width: 0;
+}
+
+.document-nav button {
+  height: var(--icm-control-h);
+  padding: 0 var(--icm-space-2);
+  white-space: nowrap;
+}
+
+/* One-click return to the gallery landing page from the editor. */
+.toolbar-gallery-link {
+  display: inline-flex;
+  align-items: center;
+  height: var(--icm-control-h);
+  padding: 0 var(--icm-space-2);
+  border: 1px solid var(--icm-border-strong);
+  border-radius: var(--icm-radius-sm);
+  background: var(--icm-surface);
+  color: var(--icm-text);
+  font-size: var(--icm-font-sm);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.toolbar-gallery-link:hover {
+  border-color: var(--icm-border-hover);
+  background: var(--icm-surface-hover);
+}
+
+.document-nav select {
+  flex: 1 1 12rem;
+  min-width: 5rem;
+  max-width: 12rem;
+  height: var(--icm-control-h);
+  padding: 0 var(--icm-space-2);
+  border: 1px solid var(--icm-border-strong);
+  border-radius: var(--icm-radius-sm);
+  background: var(--icm-surface);
+  font: inherit;
+  font-size: var(--icm-font-sm);
+}
+
+.command-menu {
+  position: relative;
+}
+
+.netlist-format,
+.netlist-extension {
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-xs);
+}
+
+.netlist-extension {
+  margin-left: auto;
+}
+
+.command-menu summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: var(--icm-control-h);
+  padding: 0 8px;
+  cursor: pointer;
+  list-style: none;
+  white-space: nowrap;
+}
+
+.command-menu summary::after {
+  content: "";
+  width: 0;
+  height: 0;
+  border-left: 3.5px solid transparent;
+  border-right: 3.5px solid transparent;
+  border-top: 4px solid currentColor;
+  opacity: 0.45;
+  translate: 0 1px;
+}
+
+.command-menu[open] summary::after {
+  opacity: 0.75;
+  rotate: 180deg;
+}
+
+.command-menu summary::-webkit-details-marker {
+  display: none;
+}
+
+.command-popover {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 6px);
+  left: 0;
+  display: grid;
+  min-width: 15rem;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid var(--icm-border);
+  border-radius: 10px;
+  background: var(--icm-surface);
+  box-shadow:
+    0 0 0 1px rgb(15 15 15 / 3%),
+    0 12px 32px rgb(15 15 15 / 12%);
+}
+
+/* Only the variable Cloud Project list scrolls; File commands and flyouts stay reachable. */
+.file-command-popover {
+  display: flex;
+  flex-direction: column;
+  width: min(22rem, calc(100vw - var(--icm-space-6)));
+  max-height: calc(100dvh - 4rem);
+}
+
+.file-command-popover > :not(.cloud-project-list) {
+  flex-shrink: 0;
+}
+
+.cloud-project-list {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: min(21rem, 42dvh);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: var(--icm-text-disabled) transparent;
+  scrollbar-width: thin;
+}
+
+.cloud-project-list .cloud-project-command {
+  width: 100%;
+}
+
+.command-popover button,
+.command-popover .file-import {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  box-shadow: none;
+  font-size: var(--icm-font-md);
+  font-weight: 500;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.annotation-menu {
+  flex: 0 0 auto;
+}
+
+.annotation-menu > summary {
+  font-size: var(--icm-font-sm);
+}
+
+.annotation-palette {
+  grid-template-columns: repeat(4, 40px);
+  min-width: 0;
+  left: auto;
+  right: 0;
+  gap: 4px;
+}
+
+.annotation-palette button {
+  justify-content: center;
+  height: 40px;
+  padding: 5px;
+}
+
+.annotation-palette-art {
+  display: block;
+  width: 28px;
+  height: 28px;
+}
+
+.command-popover .export-submenu {
+  position: relative;
+}
+
+.command-popover .export-submenu > button {
+  justify-content: space-between;
+}
+
+.command-popover .export-submenu-options {
+  position: absolute;
+  z-index: 1;
+  left: 100%;
+  top: -6px;
+  display: grid;
+  min-width: 9rem;
+  padding: 6px;
+  border: 1px solid var(--icm-border);
+  border-radius: 10px;
+  background: var(--icm-surface);
+  box-shadow: 0 8px 24px rgb(15 15 15 / 12%);
+}
+
+.command-popover .export-submenu-options[hidden] {
+  display: none;
+}
+
+/* In the header's one menu, which scrolls, Import and Export open in place
+   beneath their own row: a flyout would be clipped by that scroll. */
+.project-menu-popover .export-submenu-options {
+  position: static;
+  min-width: 0;
+  margin: 2px 0 4px 12px;
+  padding: 0 0 0 6px;
+  border: 0;
+  border-left: 1px solid var(--icm-border);
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.project-menu-popover .export-submenu > button[aria-expanded="true"] > span {
+  rotate: 90deg;
+}
+
+@media (min-width: 481px) and (max-width: 780px) {
+  .file-command-popover .export-submenu-options {
+    right: 100%;
+    left: auto;
+  }
+}
+
+@media (max-width: 480px) {
+  .command-popover .export-submenu-options {
+    position: static;
+    margin-left: 12px;
+    box-shadow: none;
+  }
+}
+
+/* An unusually short viewport cannot hold even the fixed actions. */
+@media (max-height: 380px) {
+  .file-command-popover {
+    overflow-y: auto;
+  }
+
+  .file-command-popover .cloud-project-list {
+    flex-shrink: 0;
+  }
+
+  .file-command-popover .export-submenu-options {
+    position: static;
+    margin-left: 12px;
+    box-shadow: none;
+  }
+}
+
+.cloud-project-command {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px;
+  width: min(22rem, calc(100vw - var(--icm-space-6)));
+  min-width: 0;
+  max-width: 100%;
+}
+
+.command-popover .cloud-project-open {
+  display: grid;
+  min-width: 0;
+  height: auto;
+  padding-block: 6px;
+  gap: 1px;
+  white-space: normal;
+}
+
+.cloud-project-name {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-popover .cloud-project-command > button:last-child {
+  width: auto;
+  color: var(--icm-text-muted);
+}
+
+.document-nav .command-popover button {
+  height: auto;
+}
+
+.document-nav .command-menu {
+  flex: 0 0 auto;
+}
+
+.document-nav .command-popover {
+  right: 0;
+  left: auto;
+  width: max-content;
+  min-width: min(15rem, calc(100vw - var(--icm-space-6)));
+  max-width: calc(100vw - var(--icm-space-6));
+}
+
+.search-backdrop {
+  position: fixed;
+  z-index: 31;
+  inset: 0;
+  display: grid;
+  place-items: start center;
+  padding: min(14vh, 7rem) 1.25rem 1.25rem;
+  background: rgb(15 23 42 / 32%);
+  backdrop-filter: blur(2px);
+}
+
+.project-search-dialog {
+  display: grid;
+  gap: 0.8rem;
+  width: min(38rem, 100%);
+  max-height: min(32rem, calc(100vh - 4rem));
+  padding: 1rem;
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 55%);
+  border-radius: var(--icm-radius-lg);
+  background: var(--icm-surface);
+  box-shadow: var(--icm-shadow-lg);
+}
+
+.project-search-dialog > header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.project-search-dialog h2,
+.project-search-dialog p {
+  margin: 0;
+}
+
+.project-search-dialog h2 {
+  margin-top: 0.15rem;
+  font-size: 1.1rem;
+}
+
+.project-search-dialog > input {
+  width: 100%;
+  min-height: 2.5rem;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid var(--icm-border-strong);
+  border-radius: var(--icm-radius-sm);
+  color: var(--icm-text);
+  background: #fff;
+  font: inherit;
+}
+
+.project-search-results {
+  display: grid;
+  gap: 0.35rem;
+  overflow: auto;
+  padding-right: 0.2rem;
+}
+
+.project-search-results > p {
+  padding: 0.75rem 0.25rem;
+  color: var(--icm-text-muted);
+  font-size: 0.88rem;
+}
+
+.project-search-results > button {
+  display: grid;
+  gap: 0.15rem;
+  width: 100%;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-sm);
+  color: var(--icm-text);
+  background: var(--icm-surface-muted);
+  text-align: left;
+}
+
+.project-search-results > button:hover,
+.project-search-results > button:focus-visible {
+  border-color: var(--icm-accent);
+  background: #fff;
+}
+
+.project-search-results small {
+  color: var(--icm-text-muted);
+}
+
+.command-popover button:disabled {
+  opacity: 0.45;
+}
+
+.command-popover .tool-icon {
+  opacity: 0.85;
+}
+
+.command-popover small {
+  display: block;
+  margin: 4px 6px 2px;
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-xs);
+  line-height: var(--icm-line);
+  white-space: normal;
+}
+
+.file-import {
+  padding: 0 var(--icm-space-2);
+  border: 1px solid transparent;
+  border-radius: var(--icm-radius-sm);
+  background: transparent;
+  box-shadow: none;
+  cursor: pointer;
+  font-size: var(--icm-font-md);
+}
+
+.editor-status {
+  box-sizing: border-box;
+  min-width: 0;
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-sm);
+  font-weight: 500;
+  line-height: var(--icm-line-tight);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-statusbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--icm-space-3);
+  min-height: var(--icm-statusbar-h);
+  padding: 0 var(--icm-space-3);
+  border-top: 1px solid var(--icm-border);
+  background: var(--icm-surface);
+}
+
+/* On-demand canvas hints and the grid toggle sit with the view controls. */
+.statusbar-view-controls {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--icm-space-2);
+}
+
+/* On-canvas references and background-grid visibility are one-click chips;
+   the pressed treatment means their corresponding layer is currently shown. */
+.statusbar-hints-toggle,
+.statusbar-grid-toggle {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--icm-space-1);
+  min-height: 28px;
+  padding: 0 10px 0 8px;
+  border: 1px solid var(--icm-border);
+  border-radius: 999px;
+  color: var(--icm-text-muted);
+  background: var(--icm-surface-muted);
+  box-shadow: none;
+  font-size: var(--icm-font-xs);
+  font-weight: 600;
+  line-height: var(--icm-line-tight);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.statusbar-hints-toggle:hover,
+.statusbar-grid-toggle:hover {
+  background: var(--icm-surface-hover);
+}
+
+.statusbar-hints-toggle[aria-pressed="true"],
+.statusbar-grid-toggle[aria-pressed="true"] {
+  border-color: transparent;
+  color: var(--icm-accent);
+  background: var(--icm-accent-tint);
+  box-shadow: none;
+}
+
+.statusbar-analytics {
+  margin-left: auto;
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.statusbar-analytics:hover {
+  color: var(--icm-accent);
+  text-decoration: underline;
+  text-underline-offset: 0.15rem;
+}
+
+.statusbar-change-log {
+  flex: 0 0 auto;
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-xs);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.statusbar-change-log:hover {
+  color: var(--icm-accent);
+  text-decoration: underline;
+  text-underline-offset: 0.15rem;
+}
+
+/* A narrower window hides the bar's least needed links whole; the zoom
+   controls always stay. */
+@media (max-width: 760px) {
+  .statusbar-analytics,
+  .statusbar-change-log:not(.statusbar-privacy) {
+    display: none;
+  }
+}
+
+@media (max-width: 560px) {
+  .statusbar-privacy {
+    display: none;
+  }
+}
+
+@media (max-width: 420px) {
+  .statusbar-hints-toggle {
+    display: none;
+  }
+}
+
+/* Root crash screen shown by the editor error boundary. */
+.editor-crash-screen {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: 1.5rem;
+  background: var(--icm-surface);
+}
+
+.editor-crash-panel {
+  display: grid;
+  gap: 0.75rem;
+  width: min(34rem, 100%);
+  padding: 1.5rem;
+  border: 1px solid #b91c1c;
+  border-radius: var(--icm-radius-lg);
+  background: #fef2f2;
+  box-shadow: var(--icm-shadow-lg);
+}
+
+.editor-crash-panel[data-kind="load"] {
+  border-color: var(--icm-border-strong);
+  background: var(--icm-surface);
+}
+
+.editor-crash-panel h1 {
+  margin: 0;
+  font-size: var(--icm-font-lg);
+}
+
+.editor-crash-panel p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.editor-crash-panel code {
+  font-size: var(--icm-font-sm);
+  overflow-wrap: anywhere;
+}
+
+.editor-crash-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--icm-space-2);
+}
+
+.editor-crash-actions > * {
+  min-height: var(--icm-control-h-lg);
+}
+
+.editor-crash-note {
+  color: #5f6b7a;
+  font-size: var(--icm-font-sm);
+}
+
+/* The panel toggles lead the drawing toolbar; a hairline separates them from
+   the drawing tools so the row still reads as two groups. */
+.draw-toolbar-divider {
+  width: 1px;
+  height: 1.1rem;
+  margin: 0 var(--icm-space-1);
+  background: var(--icm-border);
+}
+
+/* The way to the Community Gallery, beside the wordmark and in its blue, so
+   it is found before the toolbar's Insert panel is mistaken for it. */
+.header-gallery-link {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  height: var(--icm-control-h);
+  padding: 0 11px 0 9px;
+  border-radius: 999px;
+  color: var(--icm-accent);
+  background: var(--icm-accent-soft);
+  font-size: var(--icm-font-sm);
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.header-gallery-link:hover {
+  color: #fff;
+  background: var(--icm-accent);
+}
+
+.header-gallery-link:focus-visible {
+  outline: 2px solid var(--icm-accent);
+  outline-offset: 2px;
+}
+
+.header-gallery-link svg {
+  width: 15px;
+  height: 15px;
+  fill: currentColor;
+}
+
+/* The Arena button's swords are a cartoon with its own colours, a size up. */
+.header-arena-link svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* Project titles are variable-length content, never menubar layout inputs. */
+.app-chrome-main .app-brand,
+.app-chrome-main .gallery-home-link,
+.project-menu,
+.hierarchy-entry {
+  flex: 0 0 auto;
+}
+
+.project-menu .project-menu-popover {
+  position: fixed;
+  top: calc(var(--icm-menubar-h) + 4px);
+  left: 12px;
+  box-sizing: border-box;
+  width: min(22rem, calc(100vw - 24px));
+  min-width: 0;
+  max-height: calc(100dvh - var(--icm-menubar-h) - 16px);
+  overflow: auto;
+}
+
+.project-unsaved-indicator {
+  color: var(--icm-accent);
+  font-size: 0.62rem;
+  vertical-align: middle;
+}
+
+/* Three menus: File, Edit and Circuit. */
+.project-menu > summary {
+  max-width: min(18rem, 34vw);
+}
+
+.header-menu-popover {
+  display: grid;
+  gap: 10px;
+  min-width: 15rem;
+}
+
+.project-menu-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.command-section {
+  display: grid;
+  gap: 2px;
+}
+
+.command-section-title {
+  padding: 0 10px 2px;
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-xs);
+  font-weight: 600;
+}
+
+/* The left menu group stays beside the brand while the action group occupies
+   the right edge at every width. */
+.app-chrome-main .app-chrome-actions {
+  margin-left: auto;
+}
+
+.app-actions {
+  gap: 8px;
+}
+
+.app-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--icm-control-h);
+  padding: 0 12px;
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-sm);
+  color: var(--icm-text);
+  background: var(--icm-surface);
+  font: inherit;
+  font-size: var(--icm-font-md);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.app-action-label {
+  white-space: nowrap;
+}
+
+.app-action:hover {
+  border-color: var(--icm-border-hover);
+  background: var(--icm-surface-hover);
+}
+
+.app-action[aria-pressed="true"] {
+  border-color: var(--icm-accent);
+  color: var(--icm-accent);
+  background: var(--icm-accent-tint);
+}
+
+.app-action-icon {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+}
+
+/* Publish to Gallery rests in the header links' soft blue and turns solid
+   under the pointer, or while its dialog is open. */
+.app-action-primary {
+  border-color: transparent;
+  color: var(--icm-accent);
+  background: var(--icm-accent-soft);
+  font-weight: 600;
+}
+
+/* Outranks the app-wide button:hover:not(:disabled), which would turn the
+   button grey. */
+.app-action-primary:hover:not(:disabled),
+.app-action-primary[aria-expanded="true"] {
+  border-color: var(--icm-accent);
+  color: #fff;
+  background: var(--icm-accent);
+}
+
+/* The site links stay in view, compact: Report bug is its icon. */
+.app-chrome-actions .bug-report-label {
+  display: none;
+}
+
+.app-chrome-actions .bug-report-link {
+  width: var(--icm-control-h);
+  padding: 0;
+  justify-content: center;
+}
+
+@media (max-width: 1100px) {
+  /* Collapsed chrome keeps just the Z mark; the wording returns with
+     room. */
+  .app-chrome-actions .tokenzhang-credit-kicker,
+  .app-chrome-actions .tokenzhang-link-label {
+    display: none;
+  }
+
+  .app-chrome-actions .tokenzhang-link-icon {
+    width: 16px;
+    height: 16px;
+  }
+
+  .app-brand-copy h1 {
+    font-size: var(--icm-font-md);
+  }
+
+  .toolbar-button span {
+    display: none;
+  }
+
+  .toolbar-button {
+    min-width: 2rem;
+    justify-content: center;
+    padding-inline: 0.4rem;
+  }
+
+  /* Half-width windows: the drawing toolbar collapses to icons so Style
+     never runs off the edge; every button keeps its tooltip. */
+  .draw-tool > span:not(.tool-icon):not([class]) {
+    display: none;
+  }
+
+  .draw-tool {
+    min-width: 2rem;
+    justify-content: center;
+    padding-inline: 0.4rem;
+  }
+
+  .app-brand {
+    min-width: 0;
+  }
+
+  /* Half-width windows keep the grid toggle as a round icon button; its
+     tooltip and accessible name stay. */
+  .statusbar-grid-label {
+    display: none;
+  }
+
+  .statusbar-grid-toggle {
+    justify-content: center;
+    width: 28px;
+    padding: 0;
+  }
+}
+
+/* Half-screen editor chrome keeps the product mark and Gallery switch, then
+   lets the left menu group remain anchored while the actions stay on the
+   right. Support links are secondary at this width; the account name stays
+   visible while its role and full identity live behind the ellipsis menu. */
+@media (max-width: 900px) {
+  .app-chrome-main {
+    gap: var(--icm-space-2);
+    padding-inline: var(--icm-space-2);
+  }
+
+  .app-chrome-main .app-brand {
+    gap: var(--icm-space-1);
+  }
+
+  .app-chrome-main .gallery-home-link h1 {
+    display: none;
+  }
+
+  .app-chrome-main .app-chrome-actions .app-repository-link,
+  .app-chrome-main .app-chrome-actions .bug-report-link {
+    display: none;
+  }
+}
+
+@media (max-width: 860px) {
+  .app-chrome-main {
+    column-gap: var(--icm-space-2);
+    padding: 0 var(--icm-space-2);
+  }
+}
+
+/* Half-screen windows: tighten every menubar pill so the left menus and
+   right-side actions share one uncut row. */
+@media (max-width: 940px) {
+  .command-menu summary,
+  .toolbar-button {
+    padding-inline: 0.35rem;
+  }
+}
+
+/* The editor reuses the account contract from Gallery without importing the
+   Gallery page stylesheet. Only its compact header treatment lives here. */
+.app-chrome-actions .account-menu {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--icm-space-1);
+}
+
+.app-chrome-actions .account-name,
+.app-chrome-actions .account-signin > summary {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--icm-control-h);
+  padding: 0 var(--icm-space-2);
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-sm);
+  color: var(--icm-text);
+  background: var(--icm-surface);
+  font: inherit;
+  font-size: var(--icm-font-sm);
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* Beside an AI account's name: as tall as the name, and as short. */
+.app-chrome-actions .account-switch-back {
+  margin-left: 0;
+  min-height: var(--icm-control-h);
+  max-width: 8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.app-chrome-actions .account-name:hover,
+.app-chrome-actions .account-signin > summary:hover {
+  background: var(--icm-surface-hover);
+}
+
+.app-chrome-actions .account-name {
+  max-width: 10rem;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+}
+
+/* On phone widths the two secondary actions keep their affordance through
+   their icons. The primary Publish label remains explicit. */
+@media (max-width: 760px) {
+  .app-chrome-actions {
+    gap: var(--icm-space-1);
+  }
+
+  .app-chrome-actions .app-action:not(.app-action-primary) {
+    width: 2.25rem;
+    padding-inline: 0;
+    justify-content: center;
+  }
+
+  .app-chrome-actions .app-action-label {
+    display: none;
+  }
+
+  /* A name is shown whole or not at all: here the round mark alone keeps
+     the account one tap away. */
+  .app-chrome-actions .account-name {
+    max-width: none;
+    padding-inline: 4px;
+    font-size: 0;
+  }
+
+  .app-chrome-actions .account-name::before {
+    margin-right: 0;
+    font-size: 11px;
+  }
+}
+
+/* Keep the complete header usable on a phone. A narrower window hides
+   things whole, least needed first; it never shrinks the menus' type, never
+   cuts a name short, and keeps the row's margins. */
+@media (max-width: 560px) {
+  .app-chrome-main {
+    flex-wrap: nowrap;
+    gap: 4px;
+    padding-inline: var(--icm-space-2);
+  }
+
+  .app-chrome-main .app-brand {
+    flex: 1 1 auto;
+    width: auto;
+    gap: 0;
+    overflow: visible;
+  }
+
+  .app-chrome-main .app-chrome-actions {
+    flex: 0 0 auto;
+    width: auto;
+    min-width: 0;
+    justify-content: flex-end;
+    margin-left: 0;
+  }
+
+  .app-chrome-main .header-gallery-link {
+    gap: 0;
+    padding-inline: 8px;
+  }
+
+  .app-chrome-main .header-gallery-link > span {
+    display: none;
+  }
+
+  .app-chrome-main .command-menu summary,
+  .app-chrome-main .project-menu > summary {
+    padding-inline: 2px;
+  }
+
+  .app-chrome-main .app-action-primary {
+    padding-inline: 8px;
+  }
+}
+
+/* The logo opens the Gallery too, so its own button goes first, and Arena's
+   with it: the Gallery header keeps the way to Arena. */
+@media (max-width: 420px) {
+  .app-chrome-main .header-gallery-link {
+    display: none;
+  }
+}
+
+/* The menus keep their names; only the arrows after them go. */
+@media (max-width: 380px) {
+  .app-chrome-main .command-menu summary::after,
+  .app-chrome-main .project-menu > summary::after {
+    display: none;
+  }
+}
+
+@media (max-width: 360px) {
+  .app-chrome-main {
+    gap: 2px;
+  }
+
+  .app-chrome-main .app-brand-mark {
+    width: 18px;
+    height: 18px;
+  }
+
+  .app-chrome-main .app-action-primary {
+    padding-inline: 4px;
+  }
+
+  .app-chrome-actions .app-action:not(.app-action-primary) {
+    width: 2rem;
+  }
+
+  .app-chrome-actions .tokenzhang-link-icon {
+    width: 14px;
+    height: 14px;
+  }
+}
+
+/* Narrower than any phone, the Z mark and then the Agent button give way. */
+@media (max-width: 315px) {
+  .app-chrome-actions .tokenzhang-credit {
+    display: none;
+  }
+}
+
+@media (max-width: 296px) {
+  .app-chrome-actions .app-action-agent {
+    display: none;
+  }
+}
+
+/* The account (or Sign in) widens the right side, so the long publish
+   label yields to it; the actions never run under the account. */
+@media (max-width: 1020px) {
+  .app-chrome:has(.app-chrome-actions :is(.account-menu, .account-signin))
+    .publish-label-long {
+    display: none;
+  }
+}
+
+.app-chrome-actions .account-signin {
+  position: relative;
+}
+
+.app-chrome-actions .account-signin > summary {
+  list-style: none;
+}
+
+.app-chrome-actions .account-signin > summary::-webkit-details-marker {
+  display: none;
+}
+
+.app-chrome-actions .account-signin-panel,
+.app-chrome-actions .account-popover {
+  position: absolute;
+  z-index: 60;
+  top: calc(100% + 6px);
+  right: 0;
+  display: grid;
+  min-width: 11rem;
+  gap: var(--icm-space-1);
+  padding: var(--icm-space-2);
+  border: 1px solid var(--icm-border);
+  border-radius: 10px;
+  background: var(--icm-surface);
+  box-shadow: 0 12px 32px rgb(15 15 15 / 12%);
+}
+
+/* Its contents are styled once for every route, in components/account.css. */
+.app-chrome-actions .account-signin-panel {
+  width: 18rem;
+  gap: 10px;
+  padding: 16px;
+  border-radius: 12px;
+}
+
+.app-chrome-actions .account-menu-identity {
+  display: grid;
+  gap: 4px;
+  padding: 6px 8px 8px;
+  border-bottom: 1px solid var(--icm-border);
+}
+
+.app-chrome-actions .account-menu-identity strong {
+  overflow-wrap: anywhere;
+  font-size: var(--icm-font-sm);
+  font-weight: 650;
+}
+
+/* After a publish or an update: what reached the Gallery, and a way to it. */
+.gallery-published-notice {
+  position: fixed;
+  top: 96px;
+  left: 50%;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: calc(100vw - 32px);
+  padding: 10px 14px;
+  border: 1px solid var(--icm-border);
+  border-radius: 8px;
+  background: var(--icm-surface);
+  color: var(--icm-text);
+  box-shadow: 0 4px 20px rgb(0 0 0 / 12%);
+  font-size: 13px;
+  transform: translateX(-50%);
+}
+
+.gallery-published-notice-mark {
+  color: #16a34a;
+  font-weight: 700;
+}
+
+.gallery-published-notice a,
+.gallery-published-notice button {
+  border: 0;
+  background: none;
+  color: var(--icm-accent);
+  cursor: pointer;
+  font: inherit;
+  white-space: nowrap;
+}

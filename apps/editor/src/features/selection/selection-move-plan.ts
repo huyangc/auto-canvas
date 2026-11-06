@@ -1,0 +1,231 @@
+import {
+  deriveRoutingAffectedClosure,
+  type RoutingAffectedClosure,
+} from "@icm/derived";
+import { routeEndpoints } from "@icm/model";
+import type { SchematicDocument, VisualAnchor } from "@icm/model";
+
+import { looseRouteAnchorIds } from "../wiring/route-interaction-geometry";
+import type { VisualSelection } from "./visual-selection";
+import { canMoveDraftingIndependently } from "../drafting/drafting-move";
+
+/**
+ * A transient, editor-only description of what moves in one direct-manipulation
+ * gesture. It intentionally contains no geometry or persisted state: Route
+ * geometry remains planned by the Edit Engine and the Document remains the
+ * sole source of electrical truth.
+ */
+export interface SelectionMovePlan {
+  intent: "move-selection";
+  instanceIds: string[];
+  translatedRouteIds: string[];
+  translatedJunctionIds: string[];
+  looseRouteIds: string[];
+  previewObjectIds: string[];
+  /** Explicitly selected labels whose anchor target is not moving with them. */
+  independentAnnotationIds: string[];
+  /** Selected drawings that own an independent placement edit, not followers. */
+  draftingIds: string[];
+  fixedObjectIds: string[];
+}
+
+/**
+ * The step a selection moves by. Parts and wires keep the drawing's grid, so
+ * every connection stays on it. Labels and drawing objects alone move on the
+ * finer label grid, the step one of them takes when dragged by itself.
+ */
+export function selectionMovePitch(
+  plan: SelectionMovePlan,
+  grid: number,
+  annotationGrid: number,
+): number {
+  return plan.instanceIds.length === 0 &&
+    plan.translatedRouteIds.length === 0 &&
+    plan.translatedJunctionIds.length === 0 &&
+    plan.looseRouteIds.length === 0
+    ? annotationGrid
+    : grid;
+}
+
+function stable(ids: Iterable<string>): string[] {
+  return [...new Set(ids)].sort((left, right) =>
+    left.localeCompare(right, "en"),
+  );
+}
+
+function firstById<T extends { id: string }>(
+  items: readonly T[],
+): Map<string, T> {
+  const index = new Map<string, T>();
+  for (const item of items) if (!index.has(item.id)) index.set(item.id, item);
+  return index;
+}
+
+function followsTranslatedAnchor(
+  anchor: VisualAnchor,
+  objectIds: ReadonlySet<string>,
+  routeIds: ReadonlySet<string>,
+): boolean {
+  return (
+    (anchor.kind === "object" && objectIds.has(anchor.objectId)) ||
+    (anchor.kind === "route" && routeIds.has(anchor.routeId))
+  );
+}
+
+/**
+ * Derive one movement closure from one visual selection. Instances determine
+ * electrical closure: internal Routes/Junctions translate intact and boundary
+ * Routes remain the Edit Engine's stretch responsibility. A separately
+ * selected loose Route may translate only with both of its loose Junction
+ * anchors. Other explicitly selected Routes remain fixed rather than silently
+ * detaching or changing connectivity.
+ */
+export function planSelectionMove(
+  document: SchematicDocument,
+  selection: VisualSelection,
+  preparedClosure?: RoutingAffectedClosure,
+): SelectionMovePlan {
+  const placedIds = new Set(
+    document.instances.filter((i) => i.placement).map((i) => i.id),
+  );
+  const instanceIds = stable(
+    selection.instanceIds.filter((id) => placedIds.has(id)),
+  );
+  // The caller owns a current same-source closure. A visual selection can
+  // include an unplaced Instance; its movement seed deliberately cannot.
+  const closure =
+    preparedClosure &&
+    preparedClosure.instances.length === instanceIds.length &&
+    preparedClosure.instances.every((id, index) => id === instanceIds[index])
+      ? preparedClosure
+      : deriveRoutingAffectedClosure(document, {
+          instanceIds,
+          routeIds: selection.routeIds,
+          junctionIds: selection.junctionIds,
+          annotationIds: selection.annotationIds,
+        });
+  const routesById = firstById(document.routes);
+  const annotationsById = firstById(document.annotations);
+  const draftingById = firstById(document.drafting?.objects ?? []);
+  const junctionsById = firstById(document.junctions);
+  const routeDegreeByJunctionId = new Map<string, number>();
+  for (const route of document.routes) {
+    // One Route counts once even if an invalid/legacy path repeats an anchor.
+    const ids = new Set(
+      routeEndpoints(route).flatMap((e) =>
+        e.kind === "junction" ? [e.junctionId] : [],
+      ),
+    );
+    for (const id of ids)
+      routeDegreeByJunctionId.set(
+        id,
+        (routeDegreeByJunctionId.get(id) ?? 0) + 1,
+      );
+  }
+  const translatedRouteIds = new Set(closure.internalRoutes);
+  // The engine closure decides which anchors travel and which arms stretch.
+  // A second GUI filter would disagree with both preview and commit.
+  const translatedJunctionIds = new Set(closure.internalJunctions);
+  const looseRouteIds = new Set<string>();
+  const fixedObjectIds = new Set<string>();
+
+  for (const routeId of selection.routeIds) {
+    const route = routesById.get(routeId);
+    if (!route) continue;
+    const anchors = looseRouteAnchorIds(document, route, {
+      junctionsById,
+      routeDegreeByJunctionId,
+    });
+    if (anchors && translatedRouteIds.has(routeId)) {
+      looseRouteIds.add(routeId);
+      continue;
+    }
+    if (!translatedRouteIds.has(routeId)) {
+      fixedObjectIds.add(routeId);
+    }
+  }
+
+  for (const junctionId of selection.junctionIds) {
+    if (!translatedJunctionIds.has(junctionId)) fixedObjectIds.add(junctionId);
+  }
+
+  const selectedDraftingIds = new Set(selection.draftingIds);
+  const selectedDrafting = (document.drafting?.objects ?? []).filter((object) =>
+    selectedDraftingIds.has(object.id),
+  );
+  const movingObjectIds = new Set([
+    ...instanceIds,
+    ...translatedJunctionIds,
+    ...selectedDrafting
+      .filter(
+        (object) =>
+          !object.locked &&
+          (object.kind === "rectangle" || object.kind === "circle"),
+      )
+      .map((object) => object.id),
+  ]);
+  const followingDraftingIds = (document.drafting?.objects ?? [])
+    .filter(
+      (object) =>
+        object.kind === "text" &&
+        followsTranslatedAnchor(
+          object.anchor,
+          movingObjectIds,
+          translatedRouteIds,
+        ),
+    )
+    .map((object) => object.id);
+  const followingDraftingIdSet = new Set(followingDraftingIds);
+  const followingAnnotationIds = document.annotations
+    .filter((annotation) =>
+      followsTranslatedAnchor(
+        annotation.anchor,
+        movingObjectIds,
+        translatedRouteIds,
+      ),
+    )
+    .map((annotation) => annotation.id);
+  const followingAnnotationIdSet = new Set(followingAnnotationIds);
+  const independentAnnotationIds = selection.annotationIds.filter((id) => {
+    const annotation = annotationsById.get(id);
+    if (!annotation) return false;
+    if (annotation.locked && !followingAnnotationIdSet.has(id)) {
+      fixedObjectIds.add(id);
+      return false;
+    }
+    // A selected label whose host is already in the routing transform is a
+    // follower. Updating its anchor as a second operation would apply the
+    // same gesture twice. Every other explicitly selected label owns one
+    // independent anchor update, regardless of free/object/route anchoring.
+    return !followingAnnotationIdSet.has(id);
+  });
+  const draftingIds = selection.draftingIds.filter((id) => {
+    const object = draftingById.get(id);
+    if (!object || followingDraftingIdSet.has(id)) return false;
+    if (object.locked || !canMoveDraftingIndependently(object)) {
+      fixedObjectIds.add(id);
+      return false;
+    }
+    return true;
+  });
+
+  return {
+    intent: "move-selection",
+    instanceIds,
+    translatedRouteIds: stable(translatedRouteIds),
+    translatedJunctionIds: stable(translatedJunctionIds),
+    looseRouteIds: stable(looseRouteIds),
+    previewObjectIds: stable([
+      ...instanceIds,
+      ...translatedRouteIds,
+      ...translatedJunctionIds,
+      ...followingAnnotationIds,
+      ...independentAnnotationIds,
+      ...followingDraftingIds,
+      ...draftingIds,
+    ]),
+    independentAnnotationIds: stable(independentAnnotationIds),
+    draftingIds: stable(draftingIds),
+    fixedObjectIds: stable(fixedObjectIds),
+  };
+}

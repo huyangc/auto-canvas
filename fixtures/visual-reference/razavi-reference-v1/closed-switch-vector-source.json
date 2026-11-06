@@ -1,0 +1,253 @@
+{
+  "schemaVersion": 1,
+  "id": "razavi-textbook-closed-switch",
+  "kind": "pdf-vector-extract",
+  "source": {
+    "title": "Design of Analog CMOS Integrated Circuits, Second Edition",
+    "sha256": "a6031d1149c2c6191a1f0e541065165b72dafc4bc4ab4b0ea37af41b7cb0f739",
+    "pdfPage": 561,
+    "printedPage": 542,
+    "figure": "13.5 (S2)"
+  },
+  "selection": {
+    "method": "direct-device-vector-normalization",
+    "boundsPdf": {
+      "left": 272.5,
+      "top": 52.0,
+      "right": 299.0,
+      "bottom": 56.3
+    },
+    "nativeObjectCount": 5,
+    "nativeObjectSha256": "6ac49991c489eab53ff55b7f906c0280f20ccc2bb0f05dc6f039d410bf1facdd",
+    "nativeObjectSample": [
+      {
+        "objectType": "line",
+        "linewidth": 0.717,
+        "x0": 292.215,
+        "top": 54.6482,
+        "x1": 298.666,
+        "bottom": 54.6482,
+        "pathCommandCount": 2,
+        "pathSha256": "6396fc362eac63b7378357a21261744e484b6d0e7879cc60501404c2fa6d83ef"
+      },
+      {
+        "objectType": "line",
+        "linewidth": 0.717,
+        "x0": 272.861,
+        "top": 54.6482,
+        "x1": 280.029,
+        "bottom": 54.6482,
+        "pathCommandCount": 2,
+        "pathSha256": "61737fb2667779173d44277d464c341fdbbcc8b3347a9b161da6b2c109dc114e"
+      },
+      {
+        "objectType": "line",
+        "linewidth": 0.717,
+        "x0": 282.896,
+        "top": 52.4982,
+        "x1": 292.215,
+        "bottom": 53.9312,
+        "pathCommandCount": 2,
+        "pathSha256": "2f55a5cd24669875b7ddd14918092c3afbbbad01a213de784b8ccfe71537d287"
+      },
+      {
+        "objectType": "curve",
+        "linewidth": 0.717,
+        "x0": 289.327,
+        "top": 53.1682,
+        "x1": 292.194,
+        "bottom": 56.0352,
+        "pathCommandCount": 5,
+        "pathSha256": "9362e10f71eeefd1ba2fe121fd52cbd03b12ac71d7a3d295c511812b4f3907e2"
+      },
+      {
+        "objectType": "curve",
+        "linewidth": 0.717,
+        "x0": 280.039,
+        "top": 53.1682,
+        "x1": 282.906,
+        "bottom": 56.0352,
+        "pathCommandCount": 5,
+        "pathSha256": "6615e8e13a53eb54636db2ade914942af4628fe47b9c89ab648fab92e4adc0af"
+      }
+    ]
+  },
+  "normalization": {
+    "pinAnchorsLogical": [
+      {
+        "name": "1",
+        "x": -30,
+        "y": 0
+      },
+      {
+        "name": "2",
+        "x": 30,
+        "y": 0
+      }
+    ],
+    "strokeMapping": {
+      "normal": {
+        "targetRole": "normal"
+      },
+      "emphasis": {
+        "targetRole": "emphasis"
+      }
+    },
+    "symbolDefinition": {
+      "schemaVersion": 1,
+      "id": "closed-switch",
+      "name": "Closed Switch",
+      "viewBox": {
+        "x": -34,
+        "y": -12,
+        "width": 68,
+        "height": 24
+      },
+      "pins": [
+        {
+          "name": "1",
+          "role": "passive",
+          "at": {
+            "x": -30,
+            "y": 0
+          },
+          "direction": "west",
+          "presentation": {
+            "visibility": "visible",
+            "leadLength": 10
+          }
+        },
+        {
+          "name": "2",
+          "role": "passive",
+          "at": {
+            "x": 30,
+            "y": 0
+          },
+          "direction": "east",
+          "presentation": {
+            "visibility": "visible",
+            "leadLength": 10
+          }
+        }
+      ],
+      "primitives": [
+        {
+          "kind": "line",
+          "from": {
+            "x": -30,
+            "y": 0
+          },
+          "to": {
+            "x": -13.562064,
+            "y": 0
+          },
+          "style": {
+            "strokeRole": "normal",
+            "lineCap": "butt",
+            "lineJoin": "miter"
+          }
+        },
+        {
+          "kind": "circle",
+          "center": {
+            "x": -10.36318,
+            "y": 0.0
+          },
+          "radius": 3.198884,
+          "fill": "none",
+          "stroke": "foreground",
+          "style": {
+            "strokeRole": "normal",
+            "lineCap": "butt",
+            "lineJoin": "miter"
+          }
+        },
+        {
+          "kind": "line",
+          "from": {
+            "x": -7.186611,
+            "y": -1.496234
+          },
+          "to": {
+            "x": 13.608926,
+            "y": -4.694003
+          },
+          "style": {
+            "strokeRole": "normal",
+            "lineCap": "butt",
+            "lineJoin": "miter"
+          }
+        },
+        {
+          "kind": "circle",
+          "center": {
+            "x": 10.36318,
+            "y": 0.0
+          },
+          "radius": 3.198884,
+          "fill": "none",
+          "stroke": "foreground",
+          "style": {
+            "strokeRole": "normal",
+            "lineCap": "butt",
+            "lineJoin": "miter"
+          }
+        },
+        {
+          "kind": "line",
+          "from": {
+            "x": 13.562064,
+            "y": 0
+          },
+          "to": {
+            "x": 30,
+            "y": 0
+          },
+          "style": {
+            "strokeRole": "normal",
+            "lineCap": "butt",
+            "lineJoin": "miter"
+          }
+        }
+      ],
+      "variants": [],
+      "aliases": [
+        "switch-closed",
+        "two-terminal-closed-switch"
+      ]
+    }
+  },
+  "rasterWitness": {
+    "kind": "source-pdf-crop",
+    "sourcePdfPage": 561,
+    "dpi": 385.606695,
+    "pixels": {
+      "width": 96,
+      "height": 48
+    },
+    "pixelsPerLogical": 2.4,
+    "originPx": {
+      "x": 48.162745,
+      "y": 19.604184
+    },
+    "window": {
+      "width": 96,
+      "height": 48,
+      "minX": -20,
+      "minY": -8
+    },
+    "sourceCropPx": {
+      "x": 1302,
+      "y": 455
+    },
+    "assetPath": "closed-switch-reference.png",
+    "threshold": 160
+  },
+  "derivation": {
+    "geometry": "uniformly normalized from Figure 13.5 S2 native lead segments, hollow contacts, and angled blade",
+    "scale": "native 0.717 pt stroke mapped to the Razavi normal 1.6 logical-unit stroke",
+    "pinExtension": "native circuit wiring is excluded; isolated horizontal leads extend to symmetric 10-unit anchors at x=-30 and x=30",
+    "rasterWitness": "direct source-PDF crop registered around the measured contact midpoint; it is not candidate-generated artwork"
+  }
+}

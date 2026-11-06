@@ -1,0 +1,281 @@
+{
+  "schemaVersion": 1,
+  "id": "razavi-textbook-voltage-amplifier",
+  "kind": "pdf-vector-extract",
+  "source": {
+    "title": "Design of Analog CMOS Integrated Circuits, Second Edition",
+    "sha256": "a6031d1149c2c6191a1f0e541065165b72dafc4bc4ab4b0ea37af41b7cb0f739",
+    "pdfPage": 307,
+    "printedPage": 288,
+    "figure": "8.24"
+  },
+  "selection": {
+    "method": "direct-family-observation",
+    "boundsPdf": {
+      "left": 220.0,
+      "top": 25.0,
+      "right": 390.0,
+      "bottom": 95.0
+    },
+    "nativeObjectCount": 25,
+    "nativeObjectSha256": "ad962d25538dee885307c2163ea3c57af41f088a636a3fc8f912445db4ea4468",
+    "nativeObjectSample": [
+      {
+        "objectType": "line",
+        "linewidth": 0.717,
+        "x0": 258.907,
+        "top": 60.9472,
+        "x1": 266.518,
+        "bottom": 60.9472,
+        "pathCommandCount": 2,
+        "pathSha256": "5d7f96d1dc4a19eeeb4cea3fb280bef999a48462b5a664aeef766e3badee6c5c"
+      },
+      {
+        "objectType": "line",
+        "linewidth": 0.717,
+        "x0": 224.225,
+        "top": 60.9472,
+        "x1": 237.65,
+        "bottom": 60.9472,
+        "pathCommandCount": 2,
+        "pathSha256": "fe79d9e221c021a1fa41ea269719f0be355106f815d0b3653903270303e24f23"
+      },
+      {
+        "objectType": "line",
+        "linewidth": 0.717,
+        "x0": 260.244,
+        "top": 60.9472,
+        "x1": 271.714,
+        "bottom": 60.9472,
+        "pathCommandCount": 2,
+        "pathSha256": "d024bed2a41db534d64ec5ba41ab0d956cbb41045886a8fe5fc7949a9fa319e1"
+      },
+      {
+        "objectType": "line",
+        "linewidth": 0.717,
+        "x0": 317.591,
+        "top": 66.6362,
+        "x1": 317.591,
+        "bottom": 73.0872,
+        "pathCommandCount": 2,
+        "pathSha256": "a94e476e9d2476c938bc396550696a9cdaf1510b25e912686b8bd0cba398e4be"
+      },
+      {
+        "objectType": "line",
+        "linewidth": 0.717,
+        "x0": 317.591,
+        "top": 84.5572,
+        "x1": 317.591,
+        "bottom": 91.0082,
+        "pathCommandCount": 2,
+        "pathSha256": "528411c722f16eb1a28a3d2dbb5d3b4dd96aea24481760f7f74ae00ac233f2ce"
+      },
+      {
+        "objectType": "line",
+        "linewidth": 0.717,
+        "x0": 218.176,
+        "top": 60.9472,
+        "x1": 231.438,
+        "bottom": 60.9472,
+        "pathCommandCount": 2,
+        "pathSha256": "95f42410fa303df65e63a3305505a486bbf5a02f61f3dba236675b15b57af7a7"
+      },
+      {
+        "objectType": "line",
+        "linewidth": 1.434,
+        "x0": 315.403,
+        "top": 94.4132,
+        "x1": 319.69,
+        "bottom": 94.4132,
+        "pathCommandCount": 2,
+        "pathSha256": "c5b8c0091b72426fcc6255284e1830e7e67a7503d9d7ac7e967e97a0494ac706"
+      },
+      {
+        "objectType": "line",
+        "linewidth": 1.434,
+        "x0": 314.037,
+        "top": 91.5462,
+        "x1": 321.043,
+        "bottom": 91.5462,
+        "pathCommandCount": 2,
+        "pathSha256": "a699bcd586a13c8627c280d664ca70448d0ee8b733ed42c2d98bbeaa22298927"
+      },
+      {
+        "objectType": "line",
+        "linewidth": 0.717,
+        "x0": 317.591,
+        "top": 87.2452,
+        "x1": 317.591,
+        "bottom": 91.5462,
+        "pathCommandCount": 2,
+        "pathSha256": "586c9c118c6cc5959de9a444f4d42c86909246db55e55aa1d3aaa3ee63fe0943"
+      },
+      {
+        "objectType": "line",
+        "linewidth": 0.717,
+        "x0": 309.251,
+        "top": 69.3692,
+        "x1": 309.251,
+        "bottom": 73.6702,
+        "pathCommandCount": 2,
+        "pathSha256": "e396800225888535818c81c856c104f20c254563cf84a555ec7e4d8a4332ba94"
+      },
+      {
+        "objectType": "line",
+        "linewidth": 0.717,
+        "x0": 307.099,
+        "top": 71.5202,
+        "x1": 311.4,
+        "bottom": 71.5202,
+        "pathCommandCount": 2,
+        "pathSha256": "ca092e6f6ea88c1be047d874ee72fcb17e9d7edcf8074cb7fb191f0de4389847"
+      },
+      {
+        "objectType": "line",
+        "linewidth": 0.717,
+        "x0": 307.099,
+        "top": 85.8562,
+        "x1": 311.4,
+        "bottom": 85.8562,
+        "pathCommandCount": 2,
+        "pathSha256": "e5e6750163699cab1074085a945b84fce6aa879ac647db5afe1a7ce0c565ef9e"
+      }
+    ]
+  },
+  "normalization": {
+    "pinAnchorsLogical": [
+      {
+        "name": "IN",
+        "x": -40,
+        "y": 0
+      },
+      {
+        "name": "OUT",
+        "x": 40,
+        "y": 0
+      }
+    ],
+    "strokeMapping": {
+      "normal": {
+        "targetRole": "normal"
+      },
+      "emphasis": {
+        "targetRole": "emphasis"
+      }
+    },
+    "symbolDefinition": {
+      "schemaVersion": 1,
+      "id": "voltage-amplifier",
+      "name": "Voltage Amplifier",
+      "viewBox": {
+        "x": -44,
+        "y": -28,
+        "width": 88,
+        "height": 56
+      },
+      "pins": [
+        {
+          "name": "IN",
+          "role": "input",
+          "at": {
+            "x": -40,
+            "y": 0
+          },
+          "direction": "west",
+          "presentation": {
+            "visibility": "visible",
+            "leadLength": 20
+          }
+        },
+        {
+          "name": "OUT",
+          "role": "output",
+          "at": {
+            "x": 40,
+            "y": 0
+          },
+          "direction": "east",
+          "presentation": {
+            "visibility": "visible",
+            "leadLength": 20
+          }
+        }
+      ],
+      "primitives": [
+        {
+          "kind": "line",
+          "from": {
+            "x": -40,
+            "y": 0
+          },
+          "to": {
+            "x": -23.63,
+            "y": 0
+          },
+          "style": {
+            "strokeRole": "normal",
+            "lineCap": "butt",
+            "lineJoin": "miter"
+          }
+        },
+        {
+          "kind": "path",
+          "data": "M -23.63 -28.62 L -23.63 28.62 L 23.63 0 Z",
+          "style": {
+            "strokeRole": "emphasis",
+            "lineCap": "butt",
+            "lineJoin": "miter"
+          }
+        },
+        {
+          "kind": "line",
+          "from": {
+            "x": 23.63,
+            "y": 0
+          },
+          "to": {
+            "x": 40,
+            "y": 0
+          },
+          "style": {
+            "strokeRole": "normal",
+            "lineCap": "butt",
+            "lineJoin": "miter"
+          }
+        }
+      ],
+      "variants": [],
+      "aliases": [
+        "gain-block",
+        "voltage-gain",
+        "a0"
+      ]
+    }
+  },
+  "rasterWitness": {
+    "kind": "source-pdf-crop",
+    "sourcePdfPage": 307,
+    "dpi": 385.606695,
+    "pixels": {
+      "width": 125,
+      "height": 135
+    },
+    "pixelsPerLogical": 2.4,
+    "originPx": {
+      "x": 63.298812,
+      "y": 67.588452
+    },
+    "window": {
+      "width": 125,
+      "height": 135,
+      "minX": -26,
+      "minY": -28
+    },
+    "sourceCropPx": {
+      "x": 1084,
+      "y": 441
+    },
+    "assetPath": "voltage-amplifier-reference.png",
+    "threshold": 160
+  }
+}

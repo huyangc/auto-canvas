@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "referenceId": "razavi-reference-v1",
+  "assetPath": "differential-opamp-reference.png",
+  "assetSha256": "9fa682862a9f779e57be2d48b5dbe8d55ec9d71fffc3509ecfa08cc493f460b5",
+  "vectorEvidencePath": "differential-opamp-vector-source.json",
+  "vectorEvidenceSha256": "e735c93cbcb3962d51e2217bb225619dd45196ceed4be6a9703513205ccfe360",
+  "coordinateSystem": "isolated-pdf-object-raster-pixels",
+  "pixels": {
+    "width": 107,
+    "height": 150
+  },
+  "pixelsPerLogical": 4.780299,
+  "symbols": {
+    "opamp-differential-inputs-swapped": {
+      "evidenceId": "razavi-textbook-figure-13-48-differential-opamp",
+      "assetPath": "differential-opamp-reference.png",
+      "pixelsPerLogical": 4.780299,
+      "threshold": 160,
+      "originPx": {
+        "x": 98.726664,
+        "y": 74.835333
+      },
+      "rotation": 0,
+      "window": {
+        "width": 107,
+        "height": 150,
+        "minX": -20.652731,
+        "minY": -15.655049
+      }
+    }
+  }
+}

@@ -1,0 +1,18 @@
+* Minimized library-section fixture.
+.lib TT
+.model DMOD D
+.model QMOD NPN
+.model JMOD NJF
+.model ZMOD NMF
+.model MMOD NMOS
+.model SMOD SW
+.model WMOD CSW
+.model OMOD LTRA
+.model PMOD CPL
+.model UMOD URC
+.model YMOD TXL
+.endl TT
+
+.lib SS
+.model DMOD D IS=2e-15
+.endl SS

@@ -1,0 +1,1539 @@
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
+import { createPortal } from "react-dom";
+
+import { labelFormulaProblem } from "@icm/derived";
+import { flattenRichText, soleRichTextMathRun } from "@icm/model";
+import {
+  ANALOG_CANVAS_MATH_PROFILE_ID,
+  prepareFormula,
+} from "@icm/math-typesetting/cache";
+import type { RichTextDocument, RichTextRun } from "@icm/model";
+
+import { boundFormulaPresentation } from "./bound-formula";
+import {
+  GREEK_LOWERCASE,
+  GREEK_UPPERCASE,
+  greekCommandBefore,
+} from "./greek-letters";
+import {
+  editableDocument,
+  isElement,
+  normalizeEditableMarkup,
+  readChildren,
+  toEditableHtml,
+} from "./editable-dom";
+import { fractionFromSelection } from "./fraction-selection";
+
+export interface RichTextEditorProps {
+  targetKey: string;
+  content: RichTextDocument;
+  disabled?: boolean;
+  sizeScale: number;
+  alignment: "start" | "middle" | "end";
+  defaultBold?: boolean;
+  defaultItalic?: boolean;
+  /**
+   * A plain-only display (for example Symbol body text) edits its source
+   * field. It is deliberately a plain editing surface rather than a fake
+   * RichText document with disabled formatting controls. Long source values
+   * wrap visually, but Enter still commits instead of adding stored lines.
+   */
+  sourceOnly?: boolean;
+  multiline?: boolean;
+  compact?: boolean;
+  deleteLabel?: string;
+  showDelete?: boolean;
+  onChange(content: RichTextDocument): void;
+  onSizeChange(sizeScale: number): void;
+  onAlignmentChange(alignment: "start" | "middle" | "end"): void;
+  onCommit(): void;
+  onCancel(): void;
+  onEscape?(): void;
+  onDelete(): void;
+  /** Electrical name represented by this editor, when Formula is constrained. */
+  formulaSemanticText?: string;
+  displayAlias?: boolean;
+  onDisplayAliasChange?(enabled: boolean): RichTextDocument | undefined;
+  onLayoutHeightChange?(height: number): void;
+}
+
+function enclosingOverbar(node: Node): HTMLElement | null {
+  const element = isElement(node) ? node : node.parentElement;
+  const overbar = element?.closest<HTMLElement>(
+    '[data-rich-text-style="overbar"]',
+  );
+  return overbar ?? null;
+}
+
+function selectionBold(range: Range): boolean {
+  const node = range.commonAncestorContainer;
+  const element = isElement(node) ? node : node.parentElement;
+  return !!element && Number(getComputedStyle(element).fontWeight) >= 600;
+}
+
+function selectionItalic(range: Range): boolean {
+  const node = range.commonAncestorContainer;
+  const element = isElement(node) ? node : node.parentElement;
+  return !!element && getComputedStyle(element).fontStyle !== "normal";
+}
+
+function allTextBold(runs: RichTextRun[], bold = false): boolean {
+  return runs.every((run) => {
+    if (run.kind === "text") return !run.value.trim() || bold;
+    if (run.kind === "span")
+      return allTextBold(run.children, bold || run.style === "bold");
+    if (run.kind === "fraction")
+      return (
+        allTextBold(run.numerator.runs, bold) &&
+        allTextBold(run.denominator.runs, bold)
+      );
+    return true;
+  });
+}
+
+function withoutItalic(runs: RichTextRun[]): RichTextRun[] {
+  return runs.flatMap((run): RichTextRun[] => {
+    if (run.kind === "span") {
+      const children = withoutItalic(run.children);
+      return run.style === "italic" ? children : [{ ...run, children }];
+    }
+    if (run.kind === "fraction")
+      return [
+        {
+          ...run,
+          numerator: { runs: withoutItalic(run.numerator.runs) },
+          denominator: { runs: withoutItalic(run.denominator.runs) },
+        },
+      ];
+    return [run];
+  });
+}
+
+/**
+ * Every character italic, a script's own included. A script is upright only
+ * by default, so the slant is set inside it, where it counts as the author's.
+ */
+function withItalic(runs: RichTextRun[]): RichTextRun[] {
+  const italicize = (run: RichTextRun): RichTextRun => {
+    if (run.kind === "text")
+      return { kind: "span", style: "italic", children: [run] };
+    if (run.kind === "span")
+      return { ...run, children: run.children.map(italicize) };
+    if (run.kind === "fraction")
+      return {
+        ...run,
+        numerator: { runs: run.numerator.runs.map(italicize) },
+        denominator: { runs: run.denominator.runs.map(italicize) },
+      };
+    return run;
+  };
+  return withoutItalic(runs).map(italicize);
+}
+
+/** The subscript or superscript a node sits in, if any. */
+function enclosingScript(node: Node): HTMLElement | null {
+  const element = isElement(node) ? node : node.parentElement;
+  return element?.closest<HTMLElement>("sub, sup") ?? null;
+}
+
+const STYLE_BUTTONS = [
+  "bold",
+  "italic",
+  "subscript",
+  "superscript",
+  "overbar",
+] as const;
+type ActiveStyles = Readonly<Record<(typeof STYLE_BUTTONS)[number], boolean>>;
+const NO_ACTIVE_STYLES: ActiveStyles = {
+  bold: false,
+  italic: false,
+  subscript: false,
+  superscript: false,
+  overbar: false,
+};
+
+/**
+ * The elements whose look a selection reports. A range reports every
+ * character it covers. A caret reports the character before it, which is what
+ * typing there continues, or the first character when it sits at the start.
+ */
+function selectedTextElements(range: Range, root: HTMLElement): HTMLElement[] {
+  const texts: Text[] = [];
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode())
+    if ((node as Text).data.length) texts.push(node as Text);
+  const elements = (nodes: Text[]) =>
+    nodes.flatMap((text) => (text.parentElement ? [text.parentElement] : []));
+  if (!range.collapsed)
+    return elements(
+      texts.filter(
+        (text) =>
+          range.intersectsNode(text) &&
+          !(text === range.endContainer && range.endOffset === 0) &&
+          !(
+            text === range.startContainer &&
+            range.startOffset >= text.data.length
+          ),
+      ),
+    );
+  const before = texts.filter((text) => range.comparePoint(text, 0) < 0);
+  const text = before[before.length - 1] ?? texts[0];
+  return text ? elements([text]) : [root];
+}
+
+/** Which formatting buttons show pressed for a selection inside `root`. */
+function activeStylesAt(range: Range, root: HTMLElement): ActiveStyles {
+  const elements = selectedTextElements(range, root);
+  if (!elements.length) return NO_ACTIVE_STYLES;
+  const every = (test: (element: HTMLElement) => boolean) =>
+    elements.every(test);
+  const inside = (element: HTMLElement, selector: string) => {
+    const found = element.closest(selector);
+    return !!found && root.contains(found);
+  };
+  return {
+    bold: every(
+      (element) => Number(getComputedStyle(element).fontWeight) >= 600,
+    ),
+    italic: every(
+      (element) => getComputedStyle(element).fontStyle !== "normal",
+    ),
+    subscript: every((element) => inside(element, "sub")),
+    superscript: every((element) => inside(element, "sup")),
+    overbar: every((element) =>
+      inside(element, '[data-rich-text-style="overbar"]'),
+    ),
+  };
+}
+
+function withoutBold(runs: RichTextRun[]): RichTextRun[] {
+  return runs.flatMap((run): RichTextRun[] => {
+    if (run.kind === "span") {
+      const children = withoutBold(run.children);
+      return run.style === "bold" ? children : [{ ...run, children }];
+    }
+    if (run.kind === "fraction")
+      return [
+        {
+          ...run,
+          numerator: { runs: withoutBold(run.numerator.runs) },
+          denominator: { runs: withoutBold(run.denominator.runs) },
+        },
+      ];
+    return [run];
+  });
+}
+
+interface FormulaMathfieldHandle {
+  insert(latex: string): void;
+}
+
+const FormulaMathfield = forwardRef<
+  FormulaMathfieldHandle,
+  {
+    value: string;
+    onChange(value: string): void;
+  }
+>(function FormulaMathfield({ value, onChange }, ref) {
+  const hostRef = useRef<HTMLDivElement>(null);
+  const fieldRef = useRef<import("mathlive").MathfieldElement | null>(null);
+  const changeRef = useRef(onChange);
+  const valueRef = useRef(value);
+  changeRef.current = onChange;
+  valueRef.current = value;
+
+  useImperativeHandle(ref, () => ({
+    insert(latex: string): void {
+      const field = fieldRef.current;
+      if (!field) return;
+      field.insert(latex, {
+        format: "latex",
+        selectionMode: "placeholder",
+        focus: true,
+        feedback: false,
+      });
+      changeRef.current(field.value);
+    },
+  }));
+
+  useEffect(() => {
+    let disposed = false;
+    let field: import("mathlive").MathfieldElement | undefined;
+    let keyboard: Window["mathVirtualKeyboard"] | undefined;
+    const suppressVirtualKeyboard = (event: Event): void => {
+      event.preventDefault();
+    };
+    const mount = async () => {
+      const [{ MathfieldElement }] = await Promise.all([
+        import("mathlive"),
+        import("mathlive/fonts.css"),
+      ]);
+      if (disposed || !hostRef.current) return;
+      // Vite owns the font URLs emitted by the CSS import above. Disable
+      // MathLive's fallback loader, whose module-relative `/fonts` guess does
+      // not exist in a bundled application.
+      MathfieldElement.fontsDirectory = null;
+      MathfieldElement.soundsDirectory = null;
+      field = new MathfieldElement();
+      field.value = valueRef.current;
+      field.setAttribute("aria-label", "Formula editor");
+      // The stock virtual keyboard is appended to the page, outside this SVG
+      // foreignObject. Keep physical-keyboard input and provide a local,
+      // product-styled formula structure palette instead.
+      field.setAttribute("math-virtual-keyboard-policy", "manual");
+      field.popoverPolicy = "off";
+      field.environmentPopoverPolicy = "off";
+      field.addEventListener("input", () => changeRef.current(field!.value));
+      hostRef.current.replaceChildren(field);
+      fieldRef.current = field;
+      keyboard = window.mathVirtualKeyboard;
+      if (keyboard.visible) keyboard.hide({ animate: false });
+      keyboard.addEventListener(
+        "before-virtual-keyboard-toggle",
+        suppressVirtualKeyboard,
+      );
+    };
+    void mount();
+    return () => {
+      disposed = true;
+      fieldRef.current = null;
+      field?.remove();
+      keyboard?.removeEventListener(
+        "before-virtual-keyboard-toggle",
+        suppressVirtualKeyboard,
+      );
+      if (keyboard?.visible) keyboard.hide({ animate: false });
+    };
+  }, []);
+
+  useEffect(() => {
+    if (fieldRef.current && fieldRef.current.value !== value) {
+      fieldRef.current.value = value;
+    }
+  }, [value]);
+
+  return <div className="rich-text-formula-mathfield" ref={hostRef} />;
+});
+
+const FORMULA_KEYCAPS = [
+  { label: "xₙ", title: "Subscript", latex: "_{#0}" },
+  { label: "xⁿ", title: "Superscript", latex: "^{#0}" },
+  { label: "a⁄b", title: "Fraction", latex: "\\frac{#0}{#0}" },
+  { label: "√x", title: "Square root", latex: "\\sqrt{#0}" },
+  { label: "ⁿ√x", title: "Nth root", latex: "\\sqrt[#0]{#0}" },
+  { label: "x̅", title: "Overbar", latex: "\\overline{#0}" },
+  { label: "x̂", title: "Hat", latex: "\\hat{#0}" },
+  { label: "x⃗", title: "Vector", latex: "\\vec{#0}" },
+  { label: "|x|", title: "Absolute value", latex: "\\left|#0\\right|" },
+  { label: "{x}", title: "Braces", latex: "\\left\\{#0\\right\\}" },
+  {
+    label: "dy⁄dx",
+    title: "Derivative",
+    latex: "\\frac{\\mathrm{d}#0}{\\mathrm{d}#0}",
+  },
+  {
+    label: "∂y⁄∂x",
+    title: "Partial derivative",
+    latex: "\\frac{\\partial #0}{\\partial #0}",
+  },
+  { label: "Σ", title: "Summation", latex: "\\sum_{#0}^{#0}" },
+  { label: "Π", title: "Product", latex: "\\prod_{#0}^{#0}" },
+  { label: "∫", title: "Integral", latex: "\\int_{#0}^{#0}" },
+  { label: "∬", title: "Double integral", latex: "\\iint_{#0}" },
+  { label: "lim", title: "Limit", latex: "\\lim_{#0 \\to #0}" },
+  {
+    label: "[ ]₂×₂",
+    title: "Two by two matrix",
+    latex: "\\begin{bmatrix}#0&#0\\\\#0&#0\\end{bmatrix}",
+  },
+  {
+    label: "{⋯",
+    title: "Cases",
+    latex: "\\begin{cases}#0&#0\\\\#0&#0\\end{cases}",
+  },
+  { label: "∞", title: "Infinity", latex: "\\infty" },
+] as const;
+
+/** "Phi" for Φ and "Phi lowercase" for φ, as screen readers announce them. */
+function greekLetterTitle(name: string, glyph: string): string {
+  const title = name[0]!.toUpperCase() + name.slice(1);
+  return glyph === glyph.toLowerCase() &&
+    GREEK_UPPERCASE.some(([capital]) => capital === title)
+    ? `${title} lowercase`
+    : title;
+}
+
+/** Circuit symbols offered beside the Greek letters. */
+const CIRCUIT_SYMBOLS = ["±", "≠", "≈", "≤", "≥", "∞", "°", "·", "→"] as const;
+
+const FORMULA_MORE_GROUPS: readonly {
+  title: string;
+  items: readonly (readonly [label: string, title: string, latex: string])[];
+}[] = [
+  {
+    title: "Greek",
+    items: [...GREEK_LOWERCASE, ...GREEK_UPPERCASE].map(
+      ([name, glyph]) =>
+        [glyph, greekLetterTitle(name, glyph), `\\${name}`] as const,
+    ),
+  },
+  {
+    title: "Relations & operators",
+    items: [
+      ["±", "Plus or minus", "\\pm"],
+      ["∓", "Minus or plus", "\\mp"],
+      ["×", "Multiply", "\\times"],
+      ["÷", "Divide", "\\div"],
+      ["·", "Centered dot", "\\cdot"],
+      ["≠", "Not equal", "\\neq"],
+      ["≈", "Approximately equal", "\\approx"],
+      ["≤", "Less than or equal", "\\leq"],
+      ["≥", "Greater than or equal", "\\geq"],
+      ["∝", "Proportional to", "\\propto"],
+      ["∠", "Angle", "\\angle"],
+      ["∥", "Parallel", "\\parallel"],
+      ["⊥", "Perpendicular", "\\perp"],
+      ["→", "Right arrow", "\\rightarrow"],
+      ["↔", "Left right arrow", "\\leftrightarrow"],
+      ["⇒", "Implies", "\\Rightarrow"],
+    ],
+  },
+  {
+    title: "Functions & accents",
+    items: [
+      ["sin", "Sine", "\\sin(#0)"],
+      ["cos", "Cosine", "\\cos(#0)"],
+      ["tan", "Tangent", "\\tan(#0)"],
+      ["ln", "Natural logarithm", "\\ln(#0)"],
+      ["log", "Logarithm", "\\log_{#0}(#0)"],
+      ["exp", "Exponential", "\\exp(#0)"],
+      ["Re", "Real part", "\\operatorname{Re}(#0)"],
+      ["Im", "Imaginary part", "\\operatorname{Im}(#0)"],
+      ["ẋ", "Dot accent", "\\dot{#0}"],
+      ["ẍ", "Double dot accent", "\\ddot{#0}"],
+      ["x̃", "Tilde accent", "\\tilde{#0}"],
+      ["⟨x⟩", "Angle brackets", "\\left\\langle#0\\right\\rangle"],
+    ],
+  },
+];
+
+export function RichTextEditor({
+  targetKey,
+  content,
+  disabled = false,
+  sizeScale,
+  alignment,
+  defaultBold = false,
+  defaultItalic = false,
+  sourceOnly = false,
+  multiline = true,
+  compact = false,
+  deleteLabel = "Delete",
+  showDelete = true,
+  onChange,
+  onSizeChange,
+  onAlignmentChange,
+  onCommit,
+  onCancel,
+  onEscape,
+  onDelete,
+  formulaSemanticText,
+  displayAlias,
+  onDisplayAliasChange,
+  onLayoutHeightChange,
+}: RichTextEditorProps) {
+  const shellRef = useRef<HTMLDivElement>(null);
+  const editableRef = useRef<HTMLDivElement>(null);
+  const sourceInputRef = useRef<HTMLTextAreaElement>(null);
+  const formulaSourceRef = useRef<HTMLTextAreaElement>(null);
+  const formulaMathfieldRef = useRef<FormulaMathfieldHandle>(null);
+  const selectionRangeRef = useRef<Range | null>(null);
+  const editableInsertionSequenceRef = useRef(0);
+  const placeholderInsertionRef = useRef(false);
+  const existingFormula = soleRichTextMathRun(content);
+  const [formulaOpen, setFormulaOpen] = useState(false);
+  const [formulaDraft, setFormulaDraft] = useState(
+    existingFormula?.latex ?? flattenRichText(content),
+  );
+  const [formulaDisplay, setFormulaDisplay] = useState<"inline" | "block">(
+    existingFormula?.display ?? "inline",
+  );
+  const [formulaError, setFormulaError] = useState<string | null>(null);
+  const [activeStyles, setActiveStyles] =
+    useState<ActiveStyles>(NO_ACTIVE_STYLES);
+
+  // The formatting buttons show what the selection already has, so italic
+  // text lights Italic and a subscript lights Subscript. Clicking a button
+  // keeps the text's selection; a selection elsewhere keeps the last report.
+  const refreshActiveStyles = useCallback((): void => {
+    const editable = editableRef.current;
+    const selection = window.getSelection();
+    const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+    if (
+      !editable ||
+      !range ||
+      !editable.contains(range.commonAncestorContainer)
+    )
+      return;
+    const next = activeStylesAt(range, editable);
+    setActiveStyles((current) =>
+      STYLE_BUTTONS.every((name) => current[name] === next[name])
+        ? current
+        : next,
+    );
+  }, []);
+
+  useEffect(() => {
+    document.addEventListener("selectionchange", refreshActiveStyles);
+    return () =>
+      document.removeEventListener("selectionchange", refreshActiveStyles);
+  }, [refreshActiveStyles]);
+
+  useEffect(() => {
+    if (!formulaOpen) return;
+    const frame = requestAnimationFrame(() => {
+      formulaSourceRef.current?.focus();
+      formulaSourceRef.current?.select();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [formulaOpen]);
+
+  useLayoutEffect(() => {
+    const shell = shellRef.current;
+    if (!shell || !onLayoutHeightChange) return;
+    const report = (): void => {
+      onLayoutHeightChange(Math.ceil(shell.offsetHeight));
+    };
+    report();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(report);
+    observer.observe(shell);
+    return () => observer.disconnect();
+  }, [onLayoutHeightChange, targetKey]);
+
+  useEffect(() => {
+    if (sourceOnly && sourceInputRef.current) {
+      sourceInputRef.current.focus();
+      sourceInputRef.current.select();
+      return;
+    }
+    if (editableRef.current) {
+      editableRef.current.innerHTML = toEditableHtml(content, disabled);
+      editableRef.current.focus();
+      refreshActiveStyles();
+    }
+  }, [sourceOnly, targetKey, disabled, refreshActiveStyles]);
+
+  const sync = (): void => {
+    // The placeholder an insertion lands first is not the text. Reported, it
+    // reads a restyle as retyping, and Apply would then redraw a label's
+    // standard look over the author's italic. The inserting caller reports
+    // the finished content itself.
+    if (placeholderInsertionRef.current) return;
+    if (editableRef.current)
+      onChange(
+        editableDocument(editableRef.current, defaultBold, defaultItalic),
+      );
+  };
+
+  const rememberSelection = (): void => {
+    const editable = editableRef.current;
+    const selection = window.getSelection();
+    if (
+      !editable ||
+      !selection ||
+      selection.rangeCount === 0 ||
+      !editable.contains(selection.anchorNode) ||
+      !editable.contains(selection.focusNode)
+    ) {
+      return;
+    }
+    selectionRangeRef.current = selection.getRangeAt(0).cloneRange();
+  };
+
+  const restoreSelection = (): void => {
+    const range = selectionRangeRef.current;
+    const selection = window.getSelection();
+    if (!range || !selection) return;
+    selection.removeAllRanges();
+    selection.addRange(range);
+  };
+
+  const insertEditableContent = (
+    content: RichTextDocument,
+  ): HTMLElement | null => {
+    const editable = editableRef.current;
+    if (!editable) return null;
+    const marker = String(++editableInsertionSequenceRef.current);
+    // Insert one atomic node into native undo, then populate it ourselves.
+    // Chromium otherwise repairs nested editable parts while inheriting nearby
+    // bold/italic markup and can move a denominator outside its fraction.
+    placeholderInsertionRef.current = true;
+    try {
+      document.execCommand(
+        "insertHTML",
+        false,
+        `<span data-rich-text-insertion="${marker}" contenteditable="false">&#xfffc;</span>`,
+      );
+    } finally {
+      placeholderInsertionRef.current = false;
+    }
+    const inserted = editable.querySelector<HTMLElement>(
+      `[data-rich-text-insertion="${marker}"]`,
+    );
+    if (!inserted) return null;
+    inserted.innerHTML = toEditableHtml(content);
+    inserted.removeAttribute("data-rich-text-insertion");
+    inserted.removeAttribute("contenteditable");
+    return inserted;
+  };
+
+  const command = (name: (typeof STYLE_BUTTONS)[number]): void => {
+    applyCommand(name);
+    // A style change that keeps the same selection fires no selectionchange.
+    refreshActiveStyles();
+  };
+
+  const applyCommand = (name: (typeof STYLE_BUTTONS)[number]): void => {
+    if (disabled || !editableRef.current) return;
+    editableRef.current.focus();
+    restoreSelection();
+    const selection = window.getSelection();
+    const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+    const fragment = range?.cloneContents();
+    const fractions = fragment
+      ? [...fragment.querySelectorAll("[data-rich-text-fraction]")]
+      : [];
+    if (
+      range &&
+      !range.collapsed &&
+      fractions.length &&
+      fractions.every(
+        (fraction) =>
+          fraction.querySelector(':scope > [data-fraction-part="numerator"]') &&
+          fraction.querySelector(':scope > [data-fraction-part="denominator"]'),
+      )
+    ) {
+      // Native formatting skips contenteditable islands. Format their canonical
+      // structure together with the selected companions, retaining local undo.
+      const selected = document.createElement("div");
+      selected.append(fragment!);
+      const current = editableDocument(
+        selected,
+        selectionBold(range),
+        selectionItalic(range),
+      );
+      const sole = current.runs.length === 1 ? current.runs[0] : undefined;
+      const unbold = name === "bold" && allTextBold(current.runs);
+      const next: RichTextDocument = unbold
+        ? { runs: withoutBold(current.runs) }
+        : sole?.kind === "span" && sole.style === name
+          ? { runs: sole.children }
+          : { runs: [{ kind: "span", style: name, children: current.runs }] };
+      const inserted = insertEditableContent(next);
+      if (inserted) {
+        if (unbold) inserted.style.fontWeight = "normal";
+        const nextRange = document.createRange();
+        nextRange.selectNodeContents(inserted);
+        selection?.removeAllRanges();
+        selection?.addRange(nextRange);
+      }
+      rememberSelection();
+      sync();
+      return;
+    }
+    if (name === "overbar") {
+      const selection = window.getSelection();
+      const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+      if (!range || range.collapsed) return;
+      const startOverbar = enclosingOverbar(range.startContainer);
+      const endOverbar = enclosingOverbar(range.endContainer);
+      if (
+        startOverbar &&
+        startOverbar === endOverbar &&
+        editableRef.current.contains(startOverbar)
+      ) {
+        // The canonical editor writes an overbar as one span. A second action
+        // on any selected part of that span removes the same decoration from
+        // the whole selected formatting run, including a multi-character name.
+        const parent = startOverbar.parentNode;
+        if (!parent) return;
+        const contents = globalThis.document.createDocumentFragment();
+        while (startOverbar.firstChild)
+          contents.append(startOverbar.firstChild);
+        parent.replaceChild(contents, startOverbar);
+        normalizeEditableMarkup(editableRef.current);
+        rememberSelection();
+        sync();
+        return;
+      }
+      const wrapper = globalThis.document.createElement("span");
+      wrapper.dataset.richTextStyle = "overbar";
+      try {
+        range.surroundContents(wrapper);
+      } catch {
+        wrapper.append(range.extractContents());
+        range.insertNode(wrapper);
+      }
+      const next = globalThis.document.createRange();
+      next.selectNodeContents(wrapper);
+      selection?.removeAllRanges();
+      selection?.addRange(next);
+    } else if (
+      name === "italic" &&
+      range &&
+      !range.collapsed &&
+      !enclosingScript(range.commonAncestorContainer)
+    ) {
+      // Italic toggles the way its button shows it: a selection italic
+      // throughout loses it, and anything else becomes italic throughout,
+      // scripts included. Scripts are upright only by default, and a
+      // selection over them asks for them too; native editing would leave
+      // them upright, and toggles by the selection's start on macOS but by
+      // all of it elsewhere. Every run carries its own weight and slant, so
+      // the insertion, which may land outside the selection's own wrapper,
+      // cancels whatever it would inherit.
+      const italicThroughout = activeStylesAt(
+        range,
+        editableRef.current,
+      ).italic;
+      const selected = document.createElement("div");
+      selected.append(range.cloneContents());
+      const current = editableDocument(
+        selected,
+        selectionBold(range),
+        selectionItalic(range),
+      );
+      const inserted = insertEditableContent({
+        runs: italicThroughout
+          ? withoutItalic(current.runs)
+          : withItalic(current.runs),
+      });
+      if (inserted) {
+        inserted.style.fontStyle = "normal";
+        inserted.style.fontWeight = "normal";
+        const nextRange = document.createRange();
+        nextRange.selectNodeContents(inserted);
+        selection?.removeAllRanges();
+        selection?.addRange(nextRange);
+      }
+      rememberSelection();
+      sync();
+      return;
+    } else {
+      document.execCommand(name);
+    }
+    normalizeEditableMarkup(editableRef.current);
+    rememberSelection();
+    sync();
+  };
+
+  const insertLineBreak = (): void => {
+    if (disabled || !editableRef.current) return;
+    editableRef.current.focus();
+    restoreSelection();
+    const selection = window.getSelection();
+    const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+    if (!range || !editableRef.current.contains(range.commonAncestorContainer))
+      return;
+    // Let the browser break the line. Placing the <br> by hand leaves the
+    // caret on the empty text node after it, which Chromium treats as having
+    // no visual position of its own: the next character is then typed back
+    // onto the previous line and the break slides to the end of the text.
+    // The browser also keeps its own trailing placeholder and native undo.
+    if (globalThis.document.execCommand("insertLineBreak")) {
+      rememberSelection();
+      sync();
+      return;
+    }
+    range.deleteContents();
+    const lineBreak = globalThis.document.createElement("br");
+    range.insertNode(lineBreak);
+    const next = globalThis.document.createRange();
+    next.setStartAfter(lineBreak);
+    next.collapse(true);
+    selection?.removeAllRanges();
+    selection?.addRange(next);
+    rememberSelection();
+    sync();
+  };
+
+  const selectFractionPart = (part: Element): void => {
+    (part as HTMLElement).focus();
+    const range = document.createRange();
+    range.selectNodeContents(part);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    rememberSelection();
+  };
+
+  const insertFraction = (): void => {
+    const editable = editableRef.current;
+    if (disabled || !editable || existingFormula) return;
+    editable.focus();
+    restoreSelection();
+    const selection = window.getSelection();
+    const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+    if (!range || !editable.contains(range.commonAncestorContainer)) return;
+    const selected = document.createElement("div");
+    selected.append(range.cloneContents());
+    let selectedContent: RichTextDocument = {
+      runs: readChildren(selected, selectionBold(range)),
+    };
+    // cloneContents omits styles on the common ancestor itself. Carry those
+    // styles into both parts when converting a selection inside a styled label.
+    let ancestor = isElement(range.commonAncestorContainer)
+      ? range.commonAncestorContainer
+      : range.commonAncestorContainer.parentElement;
+    while (ancestor && ancestor !== editable) {
+      const tag = ancestor.tagName.toLowerCase();
+      const style =
+        tag === "strong" || tag === "b"
+          ? "bold"
+          : tag === "em" || tag === "i"
+            ? "italic"
+            : tag === "sub"
+              ? "subscript"
+              : tag === "sup"
+                ? "superscript"
+                : ancestor.dataset.richTextStyle === "overbar"
+                  ? "overbar"
+                  : null;
+      if (style && selectedContent.runs.length)
+        selectedContent = {
+          runs: [{ kind: "span", style, children: selectedContent.runs }],
+        };
+      ancestor = ancestor.parentElement;
+    }
+    const fraction = fractionFromSelection(selectedContent);
+    const inserted = insertEditableContent({ runs: [fraction] });
+    const numerator = inserted?.querySelector(
+      '[data-fraction-part="numerator"]',
+    );
+    if (numerator) selectFractionPart(numerator);
+    sync();
+  };
+
+  const moveThroughFraction = (backward: boolean): boolean => {
+    const selection = window.getSelection();
+    const anchor = selection?.anchorNode;
+    const element =
+      anchor && (isElement(anchor) ? anchor : anchor.parentElement);
+    const part = element?.closest<HTMLElement>("[data-fraction-part]");
+    const fraction = part?.parentElement;
+    if (
+      !part ||
+      !fraction?.hasAttribute("data-rich-text-fraction") ||
+      !editableRef.current?.contains(fraction)
+    )
+      return false;
+    const sibling = backward
+      ? part.previousElementSibling
+      : part.nextElementSibling;
+    if (sibling) selectFractionPart(sibling);
+    else {
+      editableRef.current.focus();
+      const range = document.createRange();
+      if (backward) range.setStartBefore(fraction);
+      else range.setStartAfter(fraction);
+      range.collapse(true);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      rememberSelection();
+    }
+    return true;
+  };
+
+  // The symbol menu floats over the page rather than inside the canvas
+  // editor: the editor's foreignObject is sized to its own controls, so a
+  // menu hanging below them would be clipped.
+  const [symbolMenuOpen, setSymbolMenuOpen] = useState(false);
+  const symbolButtonRef = useRef<HTMLButtonElement | null>(null);
+  const symbolMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useLayoutEffect(() => {
+    const menu = symbolMenuRef.current;
+    const button = symbolButtonRef.current;
+    const shell = shellRef.current;
+    if (!symbolMenuOpen || !menu || !button || !shell) return;
+    // Right-aligned with the Ω button within the editor's own width, and
+    // below the whole editor so the text being typed stays in view; above it
+    // when the window has no room below.
+    const anchor = button.getBoundingClientRect();
+    const frame = shell.getBoundingClientRect();
+    const size = menu.getBoundingClientRect();
+    const right = Math.min(anchor.right, frame.right);
+    menu.style.left = `${Math.max(frame.left, right - size.width)}px`;
+    const below = frame.bottom + 4;
+    const above = frame.top - size.height - 4;
+    menu.style.top = `${
+      below + size.height <= window.innerHeight - 8 || above < 8 ? below : above
+    }px`;
+  }, [symbolMenuOpen]);
+
+  useEffect(() => {
+    if (!symbolMenuOpen) return;
+    const close = (): void => setSymbolMenuOpen(false);
+    const closeOutside = (event: PointerEvent): void => {
+      const target = event.target as Node | null;
+      if (
+        target &&
+        (symbolMenuRef.current?.contains(target) ||
+          symbolButtonRef.current?.contains(target))
+      )
+        return;
+      close();
+    };
+    document.addEventListener("pointerdown", closeOutside, true);
+    // Zooming or panning moves the editor away from a fixed menu.
+    window.addEventListener("wheel", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside, true);
+      window.removeEventListener("wheel", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [symbolMenuOpen]);
+
+  // `\phi` then Space spells φ, the way LaTeX names it. Anything else before
+  // the caret leaves Space to type an ordinary space.
+  const replaceGreekCommand = (): boolean => {
+    const selection = window.getSelection();
+    if (disabled || !selection?.isCollapsed || selection.rangeCount === 0)
+      return false;
+    const caret = selection.getRangeAt(0);
+    const node = caret.startContainer;
+    if (
+      node.nodeType !== Node.TEXT_NODE ||
+      !editableRef.current?.contains(node)
+    )
+      return false;
+    const command = greekCommandBefore(
+      (node.textContent ?? "").slice(0, caret.startOffset),
+    );
+    if (!command) return false;
+    const spelled = document.createRange();
+    spelled.setStart(node, caret.startOffset - command.length);
+    spelled.setEnd(node, caret.startOffset);
+    selection.removeAllRanges();
+    selection.addRange(spelled);
+    document.execCommand("insertText", false, command.glyph);
+    rememberSelection();
+    sync();
+    return true;
+  };
+
+  const insertSymbol = (symbol: string): void => {
+    const editable = editableRef.current;
+    if (disabled || !editable) return;
+    editable.focus();
+    restoreSelection();
+    // A caret the person never placed, or one left in text the editor has
+    // since redrawn, is no place to insert: the symbol goes at the end.
+    const selection = window.getSelection();
+    if (!selection) return;
+    if (
+      !selectionRangeRef.current ||
+      selection.rangeCount === 0 ||
+      !editable.contains(selection.anchorNode) ||
+      !editable.contains(selection.focusNode)
+    ) {
+      const end = document.createRange();
+      end.selectNodeContents(editable);
+      end.collapse(false);
+      selection.removeAllRanges();
+      selection.addRange(end);
+    }
+    // An engine that refuses the edit command inside the canvas's embedded
+    // editor still gets the symbol, placed directly with the caret after it.
+    if (
+      !document.execCommand("insertText", false, symbol) &&
+      selection.rangeCount > 0
+    ) {
+      const range = selection.getRangeAt(0);
+      range.deleteContents();
+      const text = document.createTextNode(symbol);
+      range.insertNode(text);
+      range.setStartAfter(text);
+      range.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+    rememberSelection();
+    sync();
+  };
+
+  const openFormulaEditor = (): void => {
+    if (disabled) return;
+    const selection = window.getSelection()?.toString().trim();
+    const formula = soleRichTextMathRun(content);
+    setFormulaDraft(formula?.latex ?? (selection || flattenRichText(content)));
+    setFormulaDisplay(formula?.display ?? "inline");
+    setFormulaError(null);
+    setFormulaOpen(true);
+  };
+
+  const closeFormulaEditor = (): void => {
+    setFormulaOpen(false);
+    setFormulaError(null);
+  };
+
+  const updateFormulaDraft = (value: string): void => {
+    setFormulaDraft(value);
+    setFormulaError(null);
+  };
+
+  const applyFormula = async (): Promise<void> => {
+    const latex = formulaDraft.trim();
+    if (!latex) return;
+    const validation = await prepareFormula({
+      latex,
+      display: formulaDisplay,
+      profileId: ANALOG_CANVAS_MATH_PROFILE_ID,
+    });
+    if (!validation.ok) {
+      setFormulaError(validation.diagnostic.message);
+      return;
+    }
+    // Every formula is set in label type; LaTeX it cannot set is refused
+    // here, by name, rather than drawn another way.
+    const problem = labelFormulaProblem(latex);
+    if (problem) {
+      setFormulaError(problem);
+      return;
+    }
+    const next: RichTextDocument = {
+      runs: [{ kind: "math", latex, display: formulaDisplay }],
+    };
+    const boundPresentation =
+      formulaSemanticText === undefined
+        ? null
+        : boundFormulaPresentation(latex, formulaSemanticText);
+    if (formulaSemanticText !== undefined && !boundPresentation) {
+      setFormulaError(
+        `A bound electrical name formula must preserve “${formulaSemanticText}”`,
+      );
+      return;
+    }
+    const inserted = boundPresentation ?? next;
+    onChange(inserted);
+    if (editableRef.current) {
+      editableRef.current.innerHTML = toEditableHtml(inserted);
+    }
+    closeFormulaEditor();
+  };
+
+  return (
+    <div
+      ref={shellRef}
+      className={`rich-text-editor-shell${compact ? " compact" : ""}`}
+      onPointerDown={(event) => event.stopPropagation()}
+    >
+      <div
+        className="rich-text-floating-toolbar"
+        role="toolbar"
+        aria-label="Text formatting"
+      >
+        {!sourceOnly ? (
+          <>
+            <button
+              type="button"
+              aria-label="Bold"
+              aria-pressed={activeStyles.bold}
+              disabled={disabled}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => command("bold")}
+            >
+              <strong>B</strong>
+            </button>
+            <button
+              type="button"
+              aria-label="Italic"
+              aria-pressed={activeStyles.italic}
+              disabled={disabled}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => command("italic")}
+            >
+              <em>I</em>
+            </button>
+            <button
+              type="button"
+              aria-label="Subscript"
+              aria-pressed={activeStyles.subscript}
+              disabled={disabled}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => command("subscript")}
+            >
+              x<sub>2</sub>
+            </button>
+            <button
+              type="button"
+              aria-label="Superscript"
+              aria-pressed={activeStyles.superscript}
+              disabled={disabled}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => command("superscript")}
+            >
+              x<sup>2</sup>
+            </button>
+            <button
+              type="button"
+              aria-label="Overbar"
+              aria-pressed={activeStyles.overbar}
+              disabled={disabled}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => command("overbar")}
+            >
+              <span className="rich-text-overbar-button">x</span>
+            </button>
+            <button
+              type="button"
+              aria-label="Insert fraction"
+              title="Insert fraction · Tab moves through numerator, denominator, and back to text"
+              disabled={
+                disabled ||
+                Boolean(existingFormula) ||
+                formulaSemanticText !== undefined
+              }
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={insertFraction}
+            >
+              <span className="rich-text-fraction-button" aria-hidden="true">
+                <span>a</span>
+                <span>b</span>
+              </span>
+            </button>
+            <span className="rich-text-toolbar-separator" />
+          </>
+        ) : null}
+        {!sourceOnly && !compact ? (
+          <>
+            <button
+              ref={symbolButtonRef}
+              className="rich-text-symbol-button"
+              type="button"
+              aria-label="Insert circuit symbol"
+              aria-haspopup="menu"
+              aria-expanded={symbolMenuOpen}
+              title="Greek letters and symbols · or type \phi then Space"
+              disabled={disabled}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => setSymbolMenuOpen((open) => !open)}
+            >
+              Ω
+            </button>
+            {symbolMenuOpen
+              ? createPortal(
+                  <div
+                    ref={symbolMenuRef}
+                    className="rich-text-symbol-menu"
+                    // Part of the canvas text editor: clicking it is not
+                    // leaving the text, which would commit and close it.
+                    data-canvas-text-editor-part=""
+                    role="menu"
+                    aria-label="Circuit symbols"
+                    onMouseDown={(event) => event.preventDefault()}
+                  >
+                    {(
+                      [
+                        ["Lowercase Greek letters", GREEK_LOWERCASE],
+                        ["Capital Greek letters", GREEK_UPPERCASE],
+                        [
+                          "Symbols",
+                          CIRCUIT_SYMBOLS.map(
+                            (symbol) => [null, symbol] as const,
+                          ),
+                        ],
+                      ] as const
+                    ).map(([group, symbols]) => (
+                      <div
+                        key={group}
+                        role="group"
+                        aria-label={group}
+                        className="rich-text-symbol-grid"
+                      >
+                        {symbols.map(([name, symbol]) => (
+                          <button
+                            key={symbol}
+                            type="button"
+                            role="menuitem"
+                            aria-label={`Insert ${symbol}`}
+                            title={name ? `${symbol}  \\${name}` : symbol}
+                            disabled={disabled}
+                            onClick={() => insertSymbol(symbol)}
+                          >
+                            {symbol}
+                          </button>
+                        ))}
+                      </div>
+                    ))}
+                    <p className="rich-text-symbol-hint">
+                      Type <kbd>\phi</kbd> then Space for φ, <kbd>\Phi</kbd> for
+                      Φ
+                    </p>
+                  </div>,
+                  document.body,
+                )
+              : null}
+            <button
+              className="rich-text-latex-button"
+              type="button"
+              aria-label="Insert formula"
+              title="Edit the complete label as LaTeX"
+              aria-pressed={formulaOpen}
+              disabled={disabled}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={openFormulaEditor}
+            >
+              LaTeX
+            </button>
+            <span className="rich-text-toolbar-separator" />
+          </>
+        ) : null}
+        {!compact ? (
+          <span className="rich-text-toolbar-size-controls">
+            <button
+              type="button"
+              aria-label="Decrease text size"
+              disabled={disabled || sizeScale <= 0.5}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() =>
+                onSizeChange(
+                  Math.max(0.5, Math.round((sizeScale - 0.1) * 10) / 10),
+                )
+              }
+            >
+              A-
+            </button>
+            <button
+              type="button"
+              aria-label="Increase text size"
+              disabled={disabled || sizeScale >= 3}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() =>
+                onSizeChange(
+                  Math.min(3, Math.round((sizeScale + 0.1) * 10) / 10),
+                )
+              }
+            >
+              A+
+            </button>
+          </span>
+        ) : null}
+        {!compact ? (
+          <span className="rich-text-toolbar-action-break" aria-hidden="true" />
+        ) : null}
+        <button
+          type="button"
+          aria-label="Apply text changes"
+          disabled={disabled}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={onCommit}
+        >
+          Apply
+        </button>
+        <button
+          type="button"
+          aria-label="Cancel text changes"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={onCancel}
+        >
+          Cancel
+        </button>
+        {showDelete ? (
+          <button
+            type="button"
+            aria-label={`${deleteLabel} text`}
+            disabled={disabled}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={onDelete}
+          >
+            {deleteLabel}
+          </button>
+        ) : null}
+        {!compact ? (
+          <span className="rich-text-toolbar-separator" aria-hidden="true" />
+        ) : null}
+        {!compact
+          ? (
+              [
+                ["start", "Align left"],
+                ["middle", "Align center"],
+                ["end", "Align right"],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                aria-label={label}
+                aria-pressed={alignment === value}
+                disabled={disabled}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => onAlignmentChange(value)}
+              >
+                <svg
+                  className="rich-text-align-icon"
+                  viewBox="0 0 16 16"
+                  aria-hidden="true"
+                >
+                  <path
+                    d={
+                      value === "start"
+                        ? "M1 3h14M1 6h9M1 9h14M1 12h7"
+                        : value === "middle"
+                          ? "M1 3h14M3.5 6h9M1 9h14M4.5 12h7"
+                          : "M1 3h14M6 6h9M1 9h14M8 12h7"
+                    }
+                  />
+                </svg>
+              </button>
+            ))
+          : null}
+        {onDisplayAliasChange ? (
+          <label className="rich-text-display-alias">
+            <input
+              type="checkbox"
+              checked={displayAlias ?? false}
+              disabled={disabled}
+              onChange={(event) => {
+                const restored = onDisplayAliasChange(
+                  event.currentTarget.checked,
+                );
+                if (restored && editableRef.current) {
+                  editableRef.current.innerHTML = toEditableHtml(restored);
+                  selectionRangeRef.current = null;
+                }
+                closeFormulaEditor();
+              }}
+            />
+            Use display alias
+          </label>
+        ) : null}
+      </div>
+      {formulaOpen && !sourceOnly ? (
+        <div
+          className="rich-text-formula-popover"
+          role="dialog"
+          aria-label="Formula"
+        >
+          <div className="rich-text-formula-header">
+            <div>
+              <strong>LaTeX</strong>
+              <span>Type the source directly; preview updates below</span>
+            </div>
+            <button
+              type="button"
+              aria-label="Close formula editor"
+              onClick={closeFormulaEditor}
+            >
+              ×
+            </button>
+          </div>
+          <div
+            className="rich-text-formula-scroll-region"
+            data-testid="formula-scroll-region"
+          >
+            <label className="rich-text-formula-source">
+              <span>LaTeX source</span>
+              <textarea
+                ref={formulaSourceRef}
+                autoFocus
+                value={formulaDraft}
+                aria-label="Formula LaTeX source"
+                spellCheck={false}
+                rows={3}
+                onChange={(event) => updateFormulaDraft(event.target.value)}
+              />
+            </label>
+            <section className="rich-text-formula-preview">
+              <span>Preview</span>
+              <FormulaMathfield
+                ref={formulaMathfieldRef}
+                value={formulaDraft}
+                onChange={updateFormulaDraft}
+              />
+            </section>
+            <div
+              className="rich-text-formula-keyboard"
+              role="toolbar"
+              aria-label="Formula keyboard"
+            >
+              {FORMULA_KEYCAPS.map((item) => (
+                <button
+                  key={item.title}
+                  type="button"
+                  aria-label={`Insert ${item.title}`}
+                  title={item.title}
+                  onPointerDown={(event) => event.preventDefault()}
+                  onClick={() =>
+                    formulaMathfieldRef.current?.insert(item.latex)
+                  }
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+            <details className="rich-text-formula-more">
+              <summary>More symbols</summary>
+              <div className="rich-text-formula-more-groups">
+                {FORMULA_MORE_GROUPS.map((group) => (
+                  <section key={group.title}>
+                    <h4>{group.title}</h4>
+                    <div
+                      className="rich-text-formula-more-grid"
+                      role="toolbar"
+                      aria-label={group.title}
+                    >
+                      {group.items.map(([label, title, latex]) => (
+                        <button
+                          key={title}
+                          type="button"
+                          aria-label={`Insert ${title}`}
+                          title={title}
+                          onPointerDown={(event) => event.preventDefault()}
+                          onClick={() =>
+                            formulaMathfieldRef.current?.insert(latex)
+                          }
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                ))}
+              </div>
+            </details>
+            {formulaError ? (
+              <div className="rich-text-formula-error" role="alert">
+                {formulaError}
+              </div>
+            ) : null}
+          </div>
+          <div className="rich-text-formula-actions">
+            <div className="rich-text-formula-display-toggle">
+              <button
+                type="button"
+                aria-pressed={formulaDisplay === "inline"}
+                onClick={() => {
+                  setFormulaDisplay("inline");
+                }}
+              >
+                Inline
+              </button>
+              <button
+                type="button"
+                aria-pressed={formulaDisplay === "block"}
+                onClick={() => {
+                  setFormulaDisplay("block");
+                }}
+              >
+                Display
+              </button>
+            </div>
+            <button
+              className="rich-text-formula-primary-action"
+              type="button"
+              onClick={() => void applyFormula()}
+            >
+              Insert
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {sourceOnly ? (
+        <textarea
+          ref={sourceInputRef}
+          className="rich-text-editable rich-text-source-input"
+          dir="auto"
+          value={flattenRichText(content)}
+          disabled={disabled}
+          rows={2}
+          wrap="soft"
+          aria-label="Canvas text editor"
+          aria-description="Edit the bound schematic label"
+          style={{ fontSize: `${15.116 * sizeScale}px` }}
+          onChange={(event) =>
+            onChange({ runs: [{ kind: "text", value: event.target.value }] })
+          }
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === "Escape") {
+              event.preventDefault();
+              event.stopPropagation();
+              if (event.key === "Escape") (onEscape ?? onCommit)();
+              else onCommit();
+            }
+          }}
+        />
+      ) : (
+        <div
+          ref={editableRef}
+          className="rich-text-editable"
+          contentEditable={!disabled}
+          suppressContentEditableWarning
+          role="textbox"
+          // Follow the content's script: RTL text edits right-to-left.
+          dir="auto"
+          aria-label="Canvas text editor"
+          aria-multiline={multiline}
+          style={{
+            fontSize: `${15.116 * sizeScale}px`,
+            fontWeight: defaultBold ? 700 : 400,
+            fontStyle: defaultItalic ? "italic" : "normal",
+            // Mirror the committed alignment so centered labels edit centered.
+            textAlign:
+              alignment === "middle"
+                ? "center"
+                : alignment === "end"
+                  ? "right"
+                  : "left",
+          }}
+          onInput={sync}
+          onSelect={rememberSelection}
+          onKeyUp={rememberSelection}
+          onPointerUp={rememberSelection}
+          onKeyDown={(event) => {
+            if (
+              event.key === " " &&
+              !event.nativeEvent.isComposing &&
+              replaceGreekCommand()
+            ) {
+              event.preventDefault();
+            } else if (
+              event.key === "Tab" &&
+              moveThroughFraction(event.shiftKey)
+            ) {
+              event.preventDefault();
+            } else if (event.key === "Escape") {
+              event.preventDefault();
+              event.stopPropagation();
+              (onEscape ?? onCommit)();
+            } else if (event.key === "Enter" && event.shiftKey && multiline) {
+              // Enter finishes the text everywhere; a deliberate modifier is
+              // what asks for another line.
+              event.preventDefault();
+              insertLineBreak();
+            } else if (event.key === "Enter") {
+              event.preventDefault();
+              onCommit();
+            } else if (event.ctrlKey && event.key.toLowerCase() === "b") {
+              event.preventDefault();
+              command("bold");
+            } else if (event.ctrlKey && event.key.toLowerCase() === "i") {
+              event.preventDefault();
+              command("italic");
+            }
+          }}
+        />
+      )}
+    </div>
+  );
+}

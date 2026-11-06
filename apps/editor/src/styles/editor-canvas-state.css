@@ -1,0 +1,194 @@
+.component-input-plane {
+  fill: transparent;
+  cursor: copy;
+  pointer-events: all;
+}
+
+.component-placement-preview {
+  color: var(--icm-accent);
+  opacity: 0.78;
+  pointer-events: none;
+  vector-effect: non-scaling-stroke;
+}
+
+.copy-placement-preview {
+  opacity: 0.48;
+  pointer-events: none;
+}
+
+.schematic-canvas.component-mode .hit-target,
+.schematic-canvas.component-mode .analog-block-hit-area,
+.schematic-canvas.component-mode .route-hit,
+.schematic-canvas.component-mode .annotation-hit,
+.schematic-canvas.component-mode .route-handle,
+.schematic-canvas.component-mode [data-testid^="terminal-"],
+.schematic-canvas.component-mode [data-testid^="junction-"] {
+  pointer-events: none;
+}
+
+/* A label stays pressable while a part is placed: a click on it still places
+   the part, and a drag ends placement and carries the label. */
+.schematic-canvas.component-mode .hit-target.annotation-text-hit {
+  pointer-events: auto;
+}
+
+.schematic-canvas.drawing-mode,
+.schematic-canvas.drawing-mode *,
+.schematic-canvas.no-connect-mode,
+.schematic-canvas.no-connect-mode * {
+  cursor: crosshair;
+}
+
+.schematic-canvas.drawing-mode [data-testid="canvas-text-editor"],
+.schematic-canvas.drawing-mode [data-testid="canvas-text-editor"] * {
+  cursor: auto;
+}
+
+.schematic-canvas.pan-mode,
+.schematic-canvas.pan-mode * {
+  cursor: grabbing;
+}
+
+.hit-target:hover:not(.selected) {
+  stroke: rgb(var(--icm-accent-rgb) / 22%);
+  stroke-dasharray: 3 5;
+}
+
+.canvas-shortcut-menu {
+  position: absolute;
+  z-index: 3;
+  top: var(--icm-space-3);
+  right: var(--icm-space-3);
+  display: grid;
+  gap: var(--icm-space-2);
+  width: min(780px, calc(100% - var(--icm-space-6)));
+  max-width: calc(100% - var(--icm-space-6));
+  padding: 10px var(--icm-space-3);
+  border: 1px solid var(--icm-border);
+  color: var(--icm-text-muted);
+  background: rgb(255 255 255 / 92%);
+  border-radius: var(--icm-radius-md);
+  box-shadow: var(--icm-shadow-sm);
+  pointer-events: none;
+  text-align: left;
+  backdrop-filter: blur(8px);
+}
+
+.canvas-shortcut-menu-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--icm-space-3);
+}
+
+.canvas-shortcut-menu-heading > span {
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-xs);
+  line-height: var(--icm-line-tight);
+  opacity: 0.78;
+}
+
+.canvas-shortcut-menu-title {
+  margin: 0;
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  line-height: var(--icm-line-tight);
+}
+
+.canvas-shortcut-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  column-gap: var(--icm-space-4);
+  row-gap: var(--icm-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.canvas-shortcut-list li {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  gap: var(--icm-space-2);
+  font-size: var(--icm-font-sm);
+  line-height: var(--icm-line-tight);
+}
+
+.canvas-shortcut-list li > span:last-child {
+  min-width: 0;
+}
+
+.canvas-shortcut-chord {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.canvas-shortcut-menu kbd {
+  display: inline-grid;
+  min-width: 24px;
+  height: 22px;
+  place-items: center;
+  padding: 0 5px;
+  border: 1px solid var(--icm-border-strong);
+  border-radius: 5px;
+  color: var(--icm-text);
+  background: var(--icm-surface-muted);
+  box-shadow: 0 1px 0 var(--icm-border-strong);
+  font: inherit;
+  font-size: var(--icm-font-xs);
+  font-weight: 650;
+}
+
+@media (max-width: 860px) {
+  .canvas-shortcut-menu {
+    right: calc(var(--icm-props-collapsed) + var(--icm-space-3));
+    max-width: calc(100% - var(--icm-props-collapsed) - var(--icm-space-6));
+  }
+}
+
+.canvas-controls {
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid var(--icm-border);
+  border-radius: 999px;
+  background: var(--icm-surface-muted);
+}
+
+.canvas-controls button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+
+.canvas-controls button:hover:not(:disabled) {
+  background: var(--icm-surface-hover);
+}
+
+.canvas-controls output {
+  min-width: 3rem;
+  padding: 0 var(--icm-space-1);
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-xs);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--icm-line-tight);
+  text-align: center;
+}
+.draft-rotation-stem {
+  stroke: #246bfd;
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+.drafting-outline-arrow-hit {
+  pointer-events: stroke;
+}

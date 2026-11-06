@@ -1,0 +1,1516 @@
+import { labelTextDocument, richTextIdentifier } from "@icm/model";
+import { resolveAnnotationName, resolveAnnotationText } from "@icm/derived";
+import type { NetLabelDirection } from "@icm/derived";
+import { referenceDeviceLetter } from "@icm/devices";
+import { useEffect, useRef, useState } from "react";
+
+import {
+  createRoutingOperationPlan,
+  planExpandedNetLabels,
+  gateRoutingOperationPlan,
+  type SchematicEdit,
+} from "@icm/edit-engine";
+import {
+  flattenRichText,
+  roleLabelFormat,
+  semanticTextDocument,
+} from "@icm/model";
+import type {
+  Annotation,
+  DraftingObject,
+  Point,
+  RichTextDocument,
+  RouteAnnotationAttachment,
+  Rotation,
+  SchematicDocument,
+} from "@icm/model";
+import type { SymbolFormulaPresentation, SymbolResolver } from "@icm/symbols";
+
+import {
+  componentParameters,
+  effectiveComponentParameterValue,
+} from "../component-insert/component-parameters";
+import type { ComponentParameter } from "../component-insert/component-parameters";
+import {
+  additionalParameterDrafts,
+  planAdditionalParameterPatch,
+} from "./additional-parameters";
+import type { AdditionalParameterDraft } from "./additional-parameters";
+import {
+  createTextEditingSession,
+  editedBoundAnnotationName,
+  editedBoundAnnotationPresentation,
+  proposeTextEditingCommit,
+  resolveTextEditingTarget,
+  textDeletionEdit,
+  updateTextEditingSession,
+} from "../text-editing/text-editing";
+import type { TextEditingSession } from "../text-editing/text-editing";
+import { prepareNetLabelDraft } from "../text-editing/net-label-draft";
+import { planElectricalMarkerName } from "./electrical-marker-name";
+import { planNetLabelAlias } from "./group-naming";
+import type { NetLabelPlacementTarget } from "../wiring/route-interaction-geometry";
+import {
+  railPowerLabel,
+  routePropertyCodeValue,
+  type RoutePropertyCodeValue,
+} from "./route-property-code";
+
+export interface InstancePropertyDraft {
+  instanceId: string | null;
+  parameters: Record<string, string>;
+  x: string;
+  y: string;
+  rotation: `${Rotation}`;
+}
+
+const EMPTY_INSTANCE_PROPERTY_DRAFT: InstancePropertyDraft = {
+  instanceId: null,
+  parameters: {},
+  x: "",
+  y: "",
+  rotation: "0",
+};
+
+function sameInstancePropertyDraft(
+  left: InstancePropertyDraft,
+  right: InstancePropertyDraft,
+): boolean {
+  if (
+    left.instanceId !== right.instanceId ||
+    left.x !== right.x ||
+    left.y !== right.y ||
+    left.rotation !== right.rotation
+  ) {
+    return false;
+  }
+  const keys = new Set([
+    ...Object.keys(left.parameters),
+    ...Object.keys(right.parameters),
+  ]);
+  return [...keys].every(
+    (key) => left.parameters[key] === right.parameters[key],
+  );
+}
+
+function sameAdditionalParameterDrafts(
+  left: readonly AdditionalParameterDraft[],
+  right: readonly AdditionalParameterDraft[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every(
+      (entry, index) =>
+        entry.originalName === right[index]?.originalName &&
+        entry.name === right[index]?.name &&
+        entry.value === right[index]?.value,
+    )
+  );
+}
+
+type TransactionResult = { ok: boolean; revision: number };
+type Route = SchematicDocument["routes"][number];
+type Instance = SchematicDocument["instances"][number];
+
+/** The edit that gives a wire these look settings, if it lacks any of them. */
+function routeStyleEdits(
+  route: Route,
+  appearance: Partial<RoutePropertyCodeValue["appearance"]>,
+): SchematicEdit[] {
+  const styleOverride = { ...(route.styleOverride ?? {}) };
+  if (appearance.color === "auto") delete styleOverride.color;
+  else if (appearance.color !== undefined)
+    styleOverride.color = appearance.color;
+  if (appearance.lineStyle === "solid") delete styleOverride.lineStyle;
+  else if (appearance.lineStyle !== undefined)
+    styleOverride.lineStyle = appearance.lineStyle;
+  if (appearance.directionArrow === "none") delete styleOverride.arrow;
+  else if (appearance.directionArrow !== undefined)
+    styleOverride.arrow = appearance.directionArrow;
+  const nextStyle =
+    Object.keys(styleOverride).length > 0 ? styleOverride : null;
+  return JSON.stringify(route.styleOverride ?? null) ===
+    JSON.stringify(nextStyle)
+    ? []
+    : [
+        {
+          kind: "set_route_style_override",
+          routeId: route.id,
+          styleOverride: nextStyle,
+        },
+      ];
+}
+
+export interface UsePropertiesEditorOptions {
+  document: SchematicDocument;
+  resolver: SymbolResolver;
+  selectedRoute: Route | undefined;
+  /** Every selected wire; a look set on `selectedRoute` carries to them. */
+  selectedRouteIds?: readonly string[];
+  selectedRouteNetLabel: Annotation | null;
+  selectedRouteNetLabels: readonly Annotation[];
+  selectedInstance: Instance | undefined;
+  componentParametersForInstance?: (
+    instance: Instance,
+  ) => readonly ComponentParameter[];
+  transact: (edits: SchematicEdit[]) => TransactionResult;
+  setStatus: (status: string) => void;
+  replaceSelectionKind: (kind: "annotation", ids: readonly string[]) => void;
+  selectOnly: (kind: "annotation", ids: readonly string[]) => void;
+  selectDraftingObject: (id: string) => void;
+  clearSelectionKinds: (kinds: readonly ("annotation" | "drafting")[]) => void;
+  netLabelForRoute: (route: Route) => Annotation | null | undefined;
+  netLabelEditsForRoute: (
+    route: Route,
+    draft: string,
+    presentation?: {
+      alignment: "start" | "middle" | "end";
+      /** A label R turned upright reads bottom to top (270). */
+      rotation?: 0 | 270;
+      sizeScale: number;
+      formatOverride?: RichTextDocument;
+      position?: Point;
+      routeAttachment?: RouteAnnotationAttachment;
+    },
+  ) => SchematicEdit[] | null;
+  netLabelScopeEdit: (
+    annotation: Annotation,
+    scope: "local" | "global",
+  ) => SchematicEdit[] | null;
+  netNameEditsForAnnotation?: (
+    annotation: Annotation,
+    name: string,
+    presentationAnnotation?: Annotation,
+  ) => SchematicEdit[] | null | undefined;
+  instancePropertyEdits: (draft: InstancePropertyDraft) => {
+    edits: SchematicEdit[];
+    invalidPosition: boolean;
+  };
+  referenceLabelVisibilityEdits: (
+    instanceIds: readonly string[],
+    visible: boolean,
+  ) => SchematicEdit[];
+  valueVisibilityEdits: (
+    source: SchematicDocument,
+    instanceIds: readonly string[],
+    visible: boolean,
+  ) => SchematicEdit[];
+  isCellPinAnnotation?: (annotation: Annotation) => boolean;
+  commitCellPinAnnotation?: (annotation: Annotation, name: string) => boolean;
+  commitRailConnectionMode?: (
+    routeId: string,
+    mode: "cell-pin" | "global",
+    edits: SchematicEdit[],
+  ) => boolean;
+  nextId: (prefix: string) => string;
+}
+
+/** Flat owner for property drafts, Net Labels, and canvas text sessions. */
+export function usePropertiesEditor(options: UsePropertiesEditorOptions) {
+  const [netLabelDraft, setNetLabelDraft] = useState("");
+  const [netLabelPlacement, setNetLabelPlacement] = useState<{
+    phase: "naming" | "placing";
+    content: RichTextDocument;
+    sizeScale: number;
+    alignment: "start" | "middle" | "end";
+    position: Point;
+    target: NetLabelPlacementTarget | null;
+    commitAfterNaming: boolean;
+    /** Set once R turns the label; until then it takes its wire's look. */
+    direction?: NetLabelDirection;
+  } | null>(null);
+  const [instancePropertyDraft, setInstancePropertyDraft] =
+    useState<InstancePropertyDraft>(EMPTY_INSTANCE_PROPERTY_DRAFT);
+  const [additionalParameterDraft, setAdditionalParameterDraft] = useState<
+    readonly AdditionalParameterDraft[]
+  >([]);
+  const [textEditing, setTextEditing] = useState<TextEditingSession | null>(
+    null,
+  );
+  useEffect(() => {
+    if (
+      textEditing &&
+      !resolveTextEditingTarget(options.document, textEditing, options.resolver)
+    )
+      setTextEditing(null);
+  }, [options.document, options.resolver, textEditing]);
+  const netLabelDraftRouteRef = useRef<string | null>(null);
+  const netLabelDraftDirtyRef = useRef(false);
+  const lastSelectedInstanceKeyRef = useRef<string | null>(null);
+  const instancePropertyDraftRef = useRef<InstancePropertyDraft>(
+    EMPTY_INSTANCE_PROPERTY_DRAFT,
+  );
+  const instancePropertyBaselineRef = useRef<InstancePropertyDraft>(
+    EMPTY_INSTANCE_PROPERTY_DRAFT,
+  );
+  const additionalParameterBaselineRef = useRef<
+    readonly AdditionalParameterDraft[]
+  >([]);
+  const additionalParameterSerialRef = useRef(0);
+
+  const transactNamedNet = (edits: readonly SchematicEdit[]): boolean => {
+    const gate = gateRoutingOperationPlan(
+      options.document,
+      createRoutingOperationPlan(options.document, {
+        intent: "rename-marker",
+        diagnostics: [],
+        edits,
+      }),
+      { symbolResolver: options.resolver },
+    );
+    if (!gate.ok) {
+      options.setStatus(gate.message);
+      return false;
+    }
+    return options.transact([...gate.edits]).ok;
+  };
+
+  const parametersForInstance = (instance: Instance) =>
+    options.componentParametersForInstance?.(instance) ??
+    componentParameters(instance.symbolId, instance);
+
+  const commitElectricalMarkerName = (
+    instanceId: string,
+    name: string,
+  ): void => {
+    const plan = planElectricalMarkerName(options.document, instanceId, name);
+    if (plan.status === "noop") return;
+    if (plan.status === "rejected") {
+      options.setStatus(plan.message);
+      return;
+    }
+    const gate = gateRoutingOperationPlan(
+      options.document,
+      plan.operationPlan,
+      { symbolResolver: options.resolver },
+    );
+    if (!gate.ok) {
+      options.setStatus(gate.message);
+      return;
+    }
+    if (options.transact([...gate.edits]).ok) options.setStatus(plan.message);
+  };
+
+  const draftForInstance = (instance: Instance): InstancePropertyDraft => ({
+    instanceId: instance.id,
+    parameters: Object.fromEntries(
+      parametersForInstance(instance).map((parameter) => [
+        parameter.key,
+        effectiveComponentParameterValue(instance, parameter),
+      ]),
+    ),
+    x: instance.placement ? String(instance.placement.position.x) : "",
+    y: instance.placement ? String(instance.placement.position.y) : "",
+    rotation: String(instance.placement?.rotation ?? 0) as `${Rotation}`,
+  });
+
+  const commitPendingNetLabelDraft = (): void => {
+    const routeId = netLabelDraftRouteRef.current;
+    netLabelDraftRouteRef.current = null;
+    const dirty = netLabelDraftDirtyRef.current;
+    netLabelDraftDirtyRef.current = false;
+    if (!routeId || !dirty) return;
+    const route = options.document.routes.find(
+      (candidate) => candidate.id === routeId,
+    );
+    if (!route) return;
+    const existing = options.netLabelForRoute(route);
+    const draftName = netLabelDraft.trim();
+    const currentName = existing
+      ? resolveAnnotationName(options.document, existing).trim()
+      : "";
+    if (existing ? draftName === currentName : draftName === "") return;
+    const edits = options.netLabelEditsForRoute(route, netLabelDraft);
+    if (!edits) return;
+    if (transactNamedNet(edits)) {
+      options.setStatus(
+        draftName ? `Saved Net Label ${draftName}` : "Removed Net Label",
+      );
+    }
+  };
+
+  useEffect(() => {
+    commitPendingNetLabelDraft();
+    if (!options.selectedRoute) {
+      setNetLabelDraft("");
+      return;
+    }
+    setNetLabelDraft(
+      options.selectedRouteNetLabel
+        ? resolveAnnotationName(options.document, options.selectedRouteNetLabel)
+        : "",
+    );
+    netLabelDraftDirtyRef.current = false;
+    netLabelDraftRouteRef.current = options.selectedRoute.id;
+  }, [options.selectedRoute, options.selectedRouteNetLabel]);
+
+  useEffect(() => {
+    const instanceKey = options.selectedInstance
+      ? `${options.selectedInstance.id}:${options.selectedInstance.symbolId}`
+      : null;
+    if (instanceKey === lastSelectedInstanceKeyRef.current) return;
+    lastSelectedInstanceKeyRef.current = instanceKey;
+    const nextDraft = options.selectedInstance
+      ? draftForInstance(options.selectedInstance)
+      : EMPTY_INSTANCE_PROPERTY_DRAFT;
+    instancePropertyDraftRef.current = nextDraft;
+    instancePropertyBaselineRef.current = nextDraft;
+    setInstancePropertyDraft(nextDraft);
+    const nextAdditionalDraft = options.selectedInstance
+      ? additionalParameterDrafts(
+          options.selectedInstance,
+          parametersForInstance(options.selectedInstance).map(
+            (parameter) => parameter.key,
+          ),
+        )
+      : [];
+    additionalParameterBaselineRef.current = nextAdditionalDraft;
+    setAdditionalParameterDraft(nextAdditionalDraft);
+  }, [options.selectedInstance]);
+
+  const updateInstancePropertyDraft = (
+    update: (current: InstancePropertyDraft) => InstancePropertyDraft,
+  ): void => {
+    const nextDraft = update(instancePropertyDraftRef.current);
+    instancePropertyDraftRef.current = nextDraft;
+    setInstancePropertyDraft(nextDraft);
+    if (
+      !options.selectedInstance ||
+      nextDraft.instanceId !== options.selectedInstance.id
+    ) {
+      return;
+    }
+    const { edits, invalidPosition } = options.instancePropertyEdits(nextDraft);
+    if (!invalidPosition && edits.length > 0) options.transact(edits);
+  };
+
+  const addAdditionalParameter = (): void => {
+    const instance = options.selectedInstance;
+    if (!instance?.netlist) {
+      options.setStatus("This component has no netlist parameters to edit");
+      return;
+    }
+    additionalParameterSerialRef.current += 1;
+    setAdditionalParameterDraft((current) => [
+      ...current,
+      {
+        id: `${instance.id}:additional:new:${additionalParameterSerialRef.current}`,
+        originalName: null,
+        name: "",
+        value: "",
+      },
+    ]);
+  };
+
+  const updateAdditionalParameter = (
+    id: string,
+    change: Partial<Pick<AdditionalParameterDraft, "name" | "value">>,
+  ): void => {
+    setAdditionalParameterDraft((current) =>
+      current.map((entry) =>
+        entry.id === id ? { ...entry, ...change } : entry,
+      ),
+    );
+  };
+
+  const removeAdditionalParameter = (id: string): void => {
+    setAdditionalParameterDraft((current) =>
+      current.filter((entry) => entry.id !== id),
+    );
+  };
+
+  const applyAdditionalParameters = (): void => {
+    const instance = options.selectedInstance;
+    if (!instance) return;
+    const plan = planAdditionalParameterPatch(
+      instance,
+      additionalParameterDraft,
+      parametersForInstance(instance).map((parameter) => parameter.key),
+    );
+    if (plan.kind === "invalid") {
+      options.setStatus(plan.message);
+      return;
+    }
+    if (plan.kind === "unchanged") {
+      // The draft can differ from the baseline (whitespace, a new row with a
+      // blank value) while producing no persisted change; without a message
+      // the still-visible Apply button reads as broken.
+      options.setStatus("No additional-parameter changes to apply");
+      return;
+    }
+    if (!options.transact([plan.edit]).ok) return;
+    const baseline = additionalParameterDraft
+      .filter((entry) => entry.name.trim() && entry.value.trim())
+      .map((entry) => ({
+        ...entry,
+        originalName: entry.name.trim(),
+        name: entry.name.trim(),
+        value: entry.value.trim(),
+      }));
+    additionalParameterBaselineRef.current = baseline;
+    setAdditionalParameterDraft(baseline);
+    options.setStatus(`Updated additional parameters for ${instance.id}`);
+  };
+
+  const cancelAdditionalParameters = (): void => {
+    setAdditionalParameterDraft(additionalParameterBaselineRef.current);
+  };
+
+  const applyNetLabel = (): void => {
+    const route = options.selectedRoute;
+    if (!route) return;
+    const existingLabel = options.netLabelForRoute(route);
+    const name = netLabelDraft.trim();
+    if (!name && !existingLabel) {
+      options.setStatus("Selected Route has no Net Label");
+      return;
+    }
+    const edits = options.netLabelEditsForRoute(route, netLabelDraft);
+    if (!edits || !transactNamedNet(edits)) return;
+    netLabelDraftRouteRef.current = null;
+    netLabelDraftDirtyRef.current = false;
+    if (!name) {
+      options.replaceSelectionKind("annotation", []);
+      options.setStatus(
+        `Deleted Net Label ${resolveAnnotationName(options.document, existingLabel!)}`,
+      );
+      return;
+    }
+    options.replaceSelectionKind("annotation", [
+      existingLabel?.id ?? `net-label-${route.id}`,
+    ]);
+    options.setStatus(
+      edits.some((edit) => edit.kind === "merge_nets")
+        ? `Connected Nets through label ${name}`
+        : `Named Net ${name}`,
+    );
+  };
+
+  const updateNetLabelDraft = (draft: string): void => {
+    setNetLabelDraft(draft);
+    const route = options.selectedRoute;
+    if (!route) return;
+    const existing = options.netLabelForRoute(route);
+    const nextName = draft.trim();
+    const currentName = existing
+      ? resolveAnnotationName(options.document, existing).trim()
+      : "";
+    if (nextName === currentName || (!nextName && !existing)) {
+      netLabelDraftDirtyRef.current = false;
+      return;
+    }
+    netLabelDraftDirtyRef.current = true;
+    const edits = options.netLabelEditsForRoute(route, draft);
+    if (!edits || !transactNamedNet(edits)) return;
+    netLabelDraftDirtyRef.current = false;
+    options.setStatus(
+      nextName ? `Saved Net Label ${nextName}` : "Removed Net Label",
+    );
+  };
+
+  const deleteSelectedRouteNetLabel = (): void => {
+    const label = options.selectedRouteNetLabel;
+    if (!options.selectedRoute || !label) {
+      options.setStatus(
+        options.selectedRouteNetLabels.length > 1
+          ? "This Net has multiple labels; select the label to delete"
+          : "Selected Route has no Net Label",
+      );
+      return;
+    }
+    if (
+      transactNamedNet([
+        { kind: "remove_schematic_annotation", annotationId: label.id },
+      ])
+    ) {
+      options.replaceSelectionKind("annotation", []);
+      setNetLabelDraft("");
+      netLabelDraftDirtyRef.current = false;
+      options.setStatus(
+        `Deleted Net Label ${resolveAnnotationName(options.document, label)}`,
+      );
+    }
+  };
+
+  const commitNetLabelScope = (
+    annotation: Annotation,
+    scope: "local" | "global",
+  ): void => {
+    const edits = options.netLabelScopeEdit(annotation, scope);
+    if (!edits || edits.length === 0) return;
+    if (transactNamedNet(edits)) {
+      options.setStatus(
+        `Net Label ${resolveAnnotationName(options.document, annotation)} is now ${scope}`,
+      );
+    }
+  };
+
+  const applyRouteProperties = (
+    value: RoutePropertyCodeValue,
+  ): { ok: boolean; message?: string } => {
+    const route = options.selectedRoute;
+    if (!route) return { ok: false, message: "Selected Route is unavailable" };
+    const existingLabel = options.netLabelForRoute(route) ?? null;
+    const current = routePropertyCodeValue(
+      options.document,
+      route,
+      existingLabel,
+    );
+    const railLabel = railPowerLabel(options.document, route);
+    if (
+      railLabel ||
+      (route.presentation === "power-rail" &&
+        value.net.scope !== current.net.scope)
+    )
+      return applyRailProperties(route, railLabel, current, value);
+    const name = value.net.name.trim();
+    const scope = name ? value.net.scope : "local";
+
+    const edits: SchematicEdit[] = [];
+    const nameChanged = name !== current.net.name;
+    if (nameChanged) {
+      const nameEdits = options.netLabelEditsForRoute(route, name);
+      if (!nameEdits) {
+        return {
+          ok: false,
+          message: "The Net name could not be applied",
+        };
+      }
+      const labelId = existingLabel?.id ?? `net-label-${route.id}`;
+      // The name planner authors a local claim by default. Route JSON owns
+      // name and scope together, so rewrite that new claim before the one
+      // atomic transaction when the pasted code requests global scope.
+      edits.push(
+        ...nameEdits.map((edit): SchematicEdit => {
+          if (
+            edit.kind === "upsert_connectivity_evidence" &&
+            edit.evidence.kind === "name-claim" &&
+            edit.evidence.owner.kind === "net-label" &&
+            edit.evidence.owner.annotationId === labelId
+          ) {
+            return {
+              ...edit,
+              evidence: { ...edit.evidence, scope },
+            };
+          }
+          return edit;
+        }),
+      );
+    } else if (existingLabel && scope !== current.net.scope) {
+      const scopeEdits = options.netLabelScopeEdit(existingLabel, scope);
+      if (!scopeEdits) {
+        return {
+          ok: false,
+          message: "The Net scope could not be applied",
+        };
+      }
+      edits.push(...scopeEdits);
+    }
+
+    edits.push(...routeStyleEdits(route, value.appearance));
+    const others = otherSelectedRouteStyleEdits(
+      route,
+      current.appearance,
+      value.appearance,
+    );
+    edits.push(...others);
+
+    if (edits.length === 0) return { ok: true };
+    const committed =
+      nameChanged || scope !== current.net.scope
+        ? transactNamedNet(edits)
+        : options.transact(edits).ok;
+    if (!committed) {
+      return {
+        ok: false,
+        message: "The Route properties could not be applied",
+      };
+    }
+    if (!name && existingLabel) options.replaceSelectionKind("annotation", []);
+    options.setStatus(
+      others.length > 0
+        ? `Updated Route ${route.id} and ${others.length} more selected wire${others.length === 1 ? "" : "s"}`
+        : `Updated Route ${route.id}`,
+    );
+    return { ok: true };
+  };
+
+  /**
+   * The look settings changed on the wire Properties shows carry to every
+   * other selected wire, as they do for labels and drawings. Each wire keeps
+   * whatever else is its own, and its Net name is never touched.
+   */
+  const otherSelectedRouteStyleEdits = (
+    shown: Route,
+    before: RoutePropertyCodeValue["appearance"],
+    after: RoutePropertyCodeValue["appearance"],
+  ): SchematicEdit[] => {
+    const changed = {
+      ...(after.color !== before.color ? { color: after.color } : {}),
+      ...(after.lineStyle !== before.lineStyle
+        ? { lineStyle: after.lineStyle }
+        : {}),
+      ...(after.directionArrow !== before.directionArrow
+        ? { directionArrow: after.directionArrow }
+        : {}),
+    };
+    if (Object.keys(changed).length === 0) return [];
+    return (options.selectedRouteIds ?? []).flatMap((id) => {
+      if (id === shown.id) return [];
+      const route = options.document.routes.find(
+        (candidate) => candidate.id === id,
+      );
+      return route ? routeStyleEdits(route, changed) : [];
+    });
+  };
+
+  /**
+   * A power rail is named by its power label. Its name is renamed the way
+   * the label's own text edit renames it, the label is shown or hidden, and
+   * the wire's look is set as for any wire.
+   */
+  const applyRailProperties = (
+    route: Route,
+    label: Annotation | null,
+    current: RoutePropertyCodeValue,
+    value: RoutePropertyCodeValue,
+  ): { ok: boolean; message?: string } => {
+    const name = value.net.name.trim();
+    if (!name)
+      return { ok: false, message: "A power rail's name cannot be empty" };
+    const modeChanged = value.net.scope !== current.net.scope;
+    if (modeChanged && name !== current.net.name)
+      return {
+        ok: false,
+        message: "Apply the supply name and connection mode separately",
+      };
+    const edits: SchematicEdit[] = [];
+    const visible = value.display?.visualAnnotation ?? true;
+    if (label && visible !== (current.display?.visualAnnotation ?? true)) {
+      const { visible: _visible, ...shown } = label;
+      edits.push({
+        kind: "upsert_schematic_annotation",
+        annotation: visible ? shown : { ...label, visible: false },
+      });
+    }
+    edits.push(
+      ...routeStyleEdits(route, value.appearance),
+      ...otherSelectedRouteStyleEdits(
+        route,
+        current.appearance,
+        value.appearance,
+      ),
+    );
+    if (modeChanged) {
+      return options.commitRailConnectionMode?.(
+        route.id,
+        value.net.scope === "global" ? "global" : "cell-pin",
+        edits,
+      )
+        ? { ok: true }
+        : {
+            ok: false,
+            message: "The rail connection mode could not be applied",
+          };
+    }
+    if (edits.length > 0 && !options.transact(edits).ok)
+      return { ok: false, message: "The rail properties could not be applied" };
+    if (label && name !== current.net.name) {
+      const renamed =
+        label.binding?.kind === "cell-terminal-name"
+          ? (options.commitCellPinAnnotation?.(label, name) ?? false)
+          : (() => {
+              const netEdits = options.netNameEditsForAnnotation?.(label, name);
+              return netEdits ? transactNamedNet(netEdits) : false;
+            })();
+      if (!renamed)
+        return { ok: false, message: "The rail's name could not be applied" };
+    }
+    options.setStatus(`Updated power rail ${name}`);
+    return { ok: true };
+  };
+
+  const commitInstancePropertyDraft = (): boolean => {
+    const { edits, invalidPosition } = options.instancePropertyEdits(
+      instancePropertyDraftRef.current,
+    );
+    return !invalidPosition && edits.length > 0 && options.transact(edits).ok;
+  };
+
+  const discardInstancePropertyDraft = (): void => {
+    const instance = options.selectedInstance;
+    const baseline = instancePropertyBaselineRef.current;
+    if (!instance || baseline.instanceId !== instance.id) return;
+    const { edits, invalidPosition } = options.instancePropertyEdits(baseline);
+    if (!invalidPosition && edits.length > 0) options.transact(edits);
+    instancePropertyDraftRef.current = baseline;
+    setInstancePropertyDraft(baseline);
+    options.setStatus(`Discarded property edits for ${instance.id}`);
+  };
+
+  const setReferenceLabelsVisible = (
+    instanceIds: readonly string[],
+    visible: boolean,
+  ): void => {
+    const edits = options.referenceLabelVisibilityEdits(instanceIds, visible);
+    if (edits.length === 0) {
+      options.setStatus(
+        visible
+          ? "No reference labels are available for this selection"
+          : "Selected components have no reference labels",
+      );
+      return;
+    }
+    if (options.transact(edits).ok) {
+      options.setStatus(
+        `${visible ? "Showing" : "Hiding"} reference labels on ${edits.length} component${edits.length === 1 ? "" : "s"}`,
+      );
+    }
+  };
+
+  const setValueLabelsVisible = (
+    instanceIds: readonly string[],
+    visible: boolean,
+  ): void => {
+    const edits = options.valueVisibilityEdits(
+      options.document,
+      instanceIds,
+      visible,
+    );
+    if (edits.length === 0) {
+      options.setStatus(
+        visible
+          ? "No component values are available for this selection"
+          : "Selected components have no value displays",
+      );
+      return;
+    }
+    if (options.transact(edits).ok) {
+      options.setStatus(
+        `${visible ? "Showing" : "Hiding"} component values on ${edits.length} component${edits.length === 1 ? "" : "s"}`,
+      );
+    }
+  };
+
+  const showSelectedInstanceValue = (): void => {
+    const instance = options.selectedInstance;
+    if (!instance) return;
+    const propertyEdits =
+      instancePropertyDraft.instanceId === instance.id
+        ? options
+            .instancePropertyEdits(instancePropertyDraft)
+            .edits.filter(
+              (edit) =>
+                edit.kind === "set_instance_netlist" ||
+                edit.kind === "patch_instance_netlist_parameters",
+            )
+        : [];
+    const projected = structuredClone(options.document);
+    for (const edit of propertyEdits) {
+      const target = projected.instances.find(
+        (item) => item.id === edit.instanceId,
+      );
+      if (!target) continue;
+      if (edit.kind === "set_instance_netlist") {
+        target.netlist = structuredClone(edit.netlist);
+      } else if (edit.kind === "patch_instance_netlist_parameters") {
+        if (!target.netlist) continue;
+        for (const [name, value] of Object.entries(edit.set ?? {})) {
+          target.netlist.parameters[name] = value;
+        }
+        for (const name of edit.unset ?? []) {
+          delete target.netlist.parameters[name];
+        }
+      }
+    }
+    const valueEdits = options.valueVisibilityEdits(
+      projected,
+      [instance.id],
+      true,
+    );
+    if (propertyEdits.length === 0 && valueEdits.length === 0) {
+      options.setStatus("No component value is available for this selection");
+      return;
+    }
+    if (options.transact([...propertyEdits, ...valueEdits]).ok) {
+      options.setStatus(`Showing component value for ${instance.id}`);
+    }
+  };
+
+  const beginNetLabelEditing = (
+    position: Point,
+    target: NetLabelPlacementTarget | null = null,
+  ): void => {
+    setNetLabelPlacement({
+      phase: "naming",
+      content: semanticTextDocument("", "net-label"),
+      sizeScale: 1,
+      alignment: "start",
+      position,
+      target,
+      commitAfterNaming: target !== null,
+    });
+    options.setStatus("Format the Net Label, then Apply to place it");
+  };
+
+  const commitNetLabelAtTarget = (
+    placement: NonNullable<typeof netLabelPlacement>,
+    target: NetLabelPlacementTarget,
+  ): boolean => {
+    const route = options.document.routes.find(
+      (candidate) => candidate.id === target.routeId,
+    );
+    if (!route) {
+      options.setStatus("The target wire is no longer available");
+      return false;
+    }
+    const prepared = prepareNetLabelDraft(
+      placement.content,
+      options.document.presentation,
+    );
+    const existingLabel = options.netLabelForRoute(route);
+    const edits = options.netLabelEditsForRoute(route, prepared.name, {
+      alignment: target.alignment ?? placement.alignment,
+      ...(target.rotation ? { rotation: target.rotation } : {}),
+      sizeScale: placement.sizeScale,
+      ...(prepared.formatOverride
+        ? { formatOverride: prepared.formatOverride }
+        : {}),
+      position: target.labelPosition,
+      routeAttachment: target.routeAttachment,
+    });
+    if (!edits || !transactNamedNet(edits)) return false;
+    const labelId = existingLabel?.id ?? `net-label-${route.id}`;
+    options.selectOnly("annotation", [labelId]);
+    setNetLabelPlacement(null);
+    options.setStatus(`Placed Net Label ${prepared.name}`);
+    return true;
+  };
+
+  const commitNetLabelEditing = (): void => {
+    if (!netLabelPlacement) return;
+    const prepared = prepareNetLabelDraft(
+      netLabelPlacement.content,
+      options.document.presentation,
+    );
+    if (!prepared.name) {
+      options.setStatus("Net Label name cannot be empty");
+      return;
+    }
+    const ready = {
+      ...netLabelPlacement,
+      content: prepared.content,
+      phase: "placing" as const,
+    };
+    if (ready.commitAfterNaming && ready.target) {
+      commitNetLabelAtTarget(ready, ready.target);
+      return;
+    }
+    options.setStatus(
+      `Place Net Label ${prepared.name} near a wire · Esc cancels`,
+    );
+    setNetLabelPlacement(ready);
+  };
+
+  const expandNetLabelSelection = (): void => {
+    if (!netLabelPlacement) return;
+    try {
+      const expression = flattenRichText(netLabelPlacement.content);
+      const edits = planExpandedNetLabels(
+        options.document,
+        options.resolver,
+        expression,
+        options.selectedRouteIds ?? [],
+      );
+      if (transactNamedNet(edits)) {
+        setNetLabelPlacement(null);
+        options.setStatus(
+          `Expanded ${expression} onto selected branches in selection order`,
+        );
+      }
+    } catch (error) {
+      options.setStatus(
+        error instanceof Error ? error.message : "Cannot expand Labels",
+      );
+    }
+  };
+  const updateNetLabelPlacementText = (
+    change: Partial<
+      Pick<
+        NonNullable<typeof netLabelPlacement>,
+        "content" | "sizeScale" | "alignment"
+      >
+    >,
+  ): void => {
+    setNetLabelPlacement((current) =>
+      current?.phase === "naming" ? { ...current, ...change } : current,
+    );
+  };
+
+  const updateNetLabelPlacementPosition = (
+    position: Point,
+    target: NetLabelPlacementTarget | null,
+  ): void => {
+    setNetLabelPlacement((current) =>
+      current?.phase === "placing" ? { ...current, position, target } : current,
+    );
+  };
+
+  /** R while placing: the label turns a quarter, retargeted on its wire. */
+  const turnNetLabelPlacement = (
+    direction: NetLabelDirection,
+    target: NetLabelPlacementTarget | null,
+  ): void => {
+    setNetLabelPlacement((current) =>
+      current?.phase === "placing"
+        ? {
+            ...current,
+            direction,
+            target,
+            position: target?.labelPosition ?? current.position,
+          }
+        : current,
+    );
+    options.setStatus(`Net Label runs ${direction} · R turns it again`);
+  };
+
+  const placeNetLabel = (target: NetLabelPlacementTarget | null): void => {
+    if (!netLabelPlacement || netLabelPlacement.phase !== "placing") return;
+    if (!target) {
+      options.setStatus("Move closer to a wire before placing the Net Label");
+      return;
+    }
+    commitNetLabelAtTarget(netLabelPlacement, target);
+  };
+
+  const cancelNetLabelEditing = (): void => {
+    if (!netLabelPlacement) return;
+    setNetLabelPlacement(null);
+    options.setStatus("Net Label placement cancelled");
+  };
+
+  const beginAnnotationTextEditing = (annotation: Annotation): void => {
+    options.selectOnly("annotation", [annotation.id]);
+    setTextEditing(
+      createTextEditingSession(
+        { owner: "annotation", object: annotation },
+        options.document,
+        options.resolver,
+      ),
+    );
+  };
+
+  const beginDraftingTextEditing = (
+    object: Extract<DraftingObject, { kind: "text" }>,
+  ): void => {
+    options.selectDraftingObject(object.id);
+    if (object.polarity === "positive" || object.polarity === "negative") {
+      options.setStatus("A standalone polarity mark has no editable text");
+      return;
+    }
+    setTextEditing(createTextEditingSession({ owner: "drafting", object }));
+  };
+
+  /**
+   * The text a Symbol draws inside its own body. It edits on the canvas where
+   * it is drawn, through the same session and overlay every other editable
+   * text uses, and commits to the same field the Properties panel writes.
+   */
+  const beginInstanceFormulaEditing = (
+    instance: Instance,
+    presentation: SymbolFormulaPresentation,
+  ): void => {
+    setTextEditing(
+      createTextEditingSession(
+        { owner: "instance-formula", object: instance, presentation },
+        options.document,
+      ),
+    );
+  };
+
+  const updateTextEditing = (
+    change: Partial<
+      Pick<TextEditingSession, "content" | "sizeScale" | "alignment">
+    >,
+  ): void => {
+    setTextEditing((current) =>
+      current ? updateTextEditingSession(current, change) : null,
+    );
+  };
+
+  const deleteTextEditing = (): void => {
+    if (!textEditing) return;
+    const editedAnnotation =
+      textEditing.owner === "annotation"
+        ? options.document.annotations.find(
+            (annotation) => annotation.id === textEditing.id,
+          )
+        : undefined;
+    if (editedAnnotation && options.isCellPinAnnotation?.(editedAnnotation)) {
+      options.setStatus(
+        "Cell Pin name cannot be empty or deleted independently",
+      );
+      return;
+    }
+    if (options.transact([textDeletionEdit(textEditing)]).ok) {
+      options.clearSelectionKinds(["annotation", "drafting"]);
+      setTextEditing(null);
+      options.setStatus(`Deleted text ${textEditing.id}`);
+    }
+  };
+
+  const commitTextEditing = (): void => {
+    if (!textEditing) return;
+    if (
+      !resolveTextEditingTarget(options.document, textEditing, options.resolver)
+    ) {
+      setTextEditing(null);
+      return;
+    }
+    const boundAnnotation =
+      textEditing.owner === "annotation"
+        ? options.document.annotations.find(
+            (annotation) => annotation.id === textEditing.id,
+          )
+        : undefined;
+    if (
+      boundAnnotation?.binding &&
+      boundAnnotation.binding.kind !== "instance-reference" &&
+      boundAnnotation.binding.kind !== "instance-value"
+    ) {
+      const currentName = (
+        boundAnnotation.binding.kind === "net-name" &&
+        (boundAnnotation.binding.memberEndpoint ||
+          boundAnnotation.binding.memberEndpoints)
+          ? richTextIdentifier(
+              resolveAnnotationText(
+                options.document,
+                boundAnnotation,
+                undefined,
+                options.resolver,
+              ),
+            )
+          : resolveAnnotationName(options.document, boundAnnotation)
+      ).trim();
+      const name = editedBoundAnnotationName(
+        options.document,
+        boundAnnotation,
+        textEditing,
+        currentName,
+        options.resolver,
+      );
+      const presentationChanged =
+        (boundAnnotation.sizeScale ?? 1) !== textEditing.sizeScale ||
+        boundAnnotation.alignment !== textEditing.alignment;
+      const formatOverrideAllowed =
+        boundAnnotation.binding.kind === "net-name" ||
+        boundAnnotation.binding.kind === "cell-terminal-name";
+      const { formatOverride: _currentOverride, ...annotationWithoutOverride } =
+        boundAnnotation;
+      const semanticContent = labelTextDocument(
+        name,
+        options.document.presentation,
+      );
+      const presentedFormat = editedBoundAnnotationPresentation(
+        options.document,
+        boundAnnotation,
+        textEditing,
+        name,
+        semanticContent,
+      );
+      const nextFormatOverride = formatOverrideAllowed
+        ? JSON.stringify(semanticContent) === JSON.stringify(presentedFormat)
+          ? undefined
+          : presentedFormat
+        : boundAnnotation.formatOverride;
+      const presentationEdit: SchematicEdit = {
+        kind: "upsert_schematic_annotation",
+        annotation: {
+          ...annotationWithoutOverride,
+          ...(nextFormatOverride ? { formatOverride: nextFormatOverride } : {}),
+          sizeScale: textEditing.sizeScale,
+          alignment: textEditing.alignment,
+        },
+      };
+      const formatOverrideChanged =
+        JSON.stringify(boundAnnotation.formatOverride ?? null) !==
+        JSON.stringify(nextFormatOverride ?? null);
+      if (!name) {
+        options.setStatus("Bound electrical names cannot be empty");
+        return;
+      }
+      if (
+        name === currentName &&
+        (!formatOverrideChanged ||
+          (boundAnnotation.binding.kind === "net-name" &&
+            (boundAnnotation.binding.memberEndpoint ||
+              boundAnnotation.binding.memberEndpoints)))
+      ) {
+        if (
+          (presentationChanged || formatOverrideChanged) &&
+          !options.transact([presentationEdit]).ok
+        ) {
+          return;
+        }
+        setTextEditing(null);
+        return;
+      }
+      switch (boundAnnotation.binding.kind) {
+        case "net-name":
+          const routeAnchor = boundAnnotation.anchor;
+          const boundRoute =
+            routeAnchor.kind === "route"
+              ? options.document.routes.find(
+                  (route) => route.id === routeAnchor.routeId,
+                )
+              : undefined;
+          const annotationNetEdits = boundRoute
+            ? undefined
+            : options.netNameEditsForAnnotation?.(
+                boundAnnotation,
+                name,
+                presentationChanged || formatOverrideChanged
+                  ? presentationEdit.annotation
+                  : undefined,
+              );
+          const netLabelEdits = boundRoute
+            ? options.netLabelEditsForRoute(
+                boundRoute,
+                name,
+                presentationChanged || formatOverrideChanged
+                  ? {
+                      alignment: textEditing.alignment,
+                      sizeScale: textEditing.sizeScale,
+                      ...(nextFormatOverride
+                        ? { formatOverride: nextFormatOverride }
+                        : {}),
+                    }
+                  : undefined,
+              )
+            : annotationNetEdits !== undefined
+              ? annotationNetEdits
+              : name !== currentName
+                ? null
+                : presentationChanged || formatOverrideChanged
+                  ? [presentationEdit]
+                  : [];
+          if (
+            netLabelEdits === null &&
+            !boundRoute &&
+            annotationNetEdits === undefined
+          ) {
+            // No planner owns this label (not route-anchored, not a
+            // power-label): say so instead of leaving Apply visibly inert.
+            options.setStatus(
+              "This label cannot rename its Net — edit the name from a wire on that Net",
+            );
+            return;
+          }
+          if (netLabelEdits && transactNamedNet(netLabelEdits)) {
+            setTextEditing(null);
+          }
+          return;
+        case "cell-terminal-name":
+          if (name !== currentName) {
+            if (
+              !options.commitCellPinAnnotation?.(
+                presentationEdit.annotation,
+                name,
+              )
+            )
+              return;
+          } else if (
+            (presentationChanged || formatOverrideChanged) &&
+            !options.transact([presentationEdit]).ok
+          ) {
+            return;
+          }
+          {
+            setTextEditing(null);
+          }
+          return;
+      }
+    }
+    const proposal = proposeTextEditingCommit(
+      options.document,
+      textEditing,
+      options.resolver,
+    );
+    if (proposal.kind === "blocked") {
+      options.setStatus(
+        proposal.message ??
+          (textEditing.visualInstanceId && !textEditing.displayAlias
+            ? "Type a name for this part, or hide its label from Properties"
+            : "This text can no longer be edited"),
+      );
+      return;
+    }
+    if (proposal.kind === "delete" && textEditing.owner === "annotation") {
+      const annotation = options.document.annotations.find(
+        (candidate) => candidate.id === textEditing.id,
+      );
+      if (annotation && options.isCellPinAnnotation?.(annotation)) {
+        options.setStatus("Cell Pin name cannot be empty");
+        return;
+      }
+    }
+    if (proposal.kind === "unchanged") {
+      setTextEditing(null);
+      return;
+    }
+    // A Pin's display alias is its label's own text: the Pin keeps its name.
+    const pinAlias = Boolean(
+      textEditing.cellPinTerminalId && textEditing.displayAlias,
+    );
+    if (
+      proposal.kind === "update" &&
+      proposal.edit.kind === "upsert_schematic_annotation" &&
+      options.commitCellPinAnnotation &&
+      !pinAlias &&
+      options.isCellPinAnnotation?.(proposal.edit.annotation) &&
+      proposal.edit.annotation.kind === "instance-label" &&
+      proposal.edit.annotation.anchor.kind === "object"
+    ) {
+      const content = proposal.edit.annotation.content ?? { runs: [] };
+      const name = flattenRichText(content).trim();
+      if (!name) {
+        options.setStatus("Cell Pin name cannot be empty");
+        return;
+      }
+      if (!options.commitCellPinAnnotation(proposal.edit.annotation, name))
+        return;
+      setTextEditing(null);
+      return;
+    }
+    if (
+      !options.transact([
+        ...(proposal.kind === "update" ? (proposal.beforeEdits ?? []) : []),
+        proposal.edit,
+      ]).ok
+    )
+      return;
+    if (proposal.kind === "delete") {
+      options.clearSelectionKinds(["annotation", "drafting"]);
+      options.setStatus(`Deleted text ${proposal.id}`);
+    } else if (proposal.kind === "update" && proposal.aliasFor) {
+      options.setStatus(
+        `Showing ${flattenRichText(textEditing.content).trim()} as a display alias; the netlist name stays ${proposal.aliasFor}`,
+      );
+    } else if (proposal.kind === "update" && pinAlias) {
+      const pin = options.document.netlist?.terminals.find(
+        (terminal) => terminal.id === textEditing.cellPinTerminalId,
+      );
+      options.setStatus(
+        `Showing ${flattenRichText(textEditing.content).trim()} as a display alias; the Pin stays ${pin?.name ?? "as it is"}`,
+      );
+    } else if (
+      proposal.kind === "update" &&
+      textEditing.netLabelName !== undefined &&
+      textEditing.displayAlias
+    ) {
+      options.setStatus(
+        `Showing ${flattenRichText(textEditing.content).trim()} as a display alias; the Net stays ${textEditing.netLabelName}`,
+      );
+    } else {
+      options.setStatus(`Updated text ${proposal.id}`);
+    }
+    setTextEditing(null);
+  };
+
+  const setTextDisplayAlias = (
+    enabled: boolean,
+  ): RichTextDocument | undefined => {
+    if (textEditing?.netLabelName !== undefined) {
+      // On, the label keeps what it shows as text of its own while the Net
+      // keeps its name; off, it names the Net again in its standard look.
+      const plan = planNetLabelAlias({
+        document: options.document,
+        annotationId: textEditing.id,
+        alias: enabled ? textEditing.content : null,
+      });
+      if (!plan.ok) {
+        options.setStatus(plan.message);
+        return;
+      }
+      if (!plan.label) return;
+      const annotation: Annotation = {
+        ...plan.label,
+        sizeScale: textEditing.sizeScale,
+        alignment: textEditing.alignment,
+      };
+      if (
+        !options.transact([{ kind: "upsert_schematic_annotation", annotation }])
+          .ok
+      )
+        return;
+      const session = createTextEditingSession(
+        { owner: "annotation", object: annotation },
+        options.document,
+        options.resolver,
+      );
+      setTextEditing(session);
+      return session.content;
+    }
+    if (textEditing?.cellPinTerminalId) {
+      const annotation = options.document.annotations.find(
+        (candidate) => candidate.id === textEditing.id,
+      );
+      const pin = options.document.netlist?.terminals.find(
+        (terminal) => terminal.id === textEditing.cellPinTerminalId,
+      );
+      if (!annotation || !pin) return;
+      const {
+        binding: _binding,
+        content: _content,
+        formatOverride: _format,
+        ...rest
+      } = annotation;
+      // On, the label keeps what it shows as text of its own; off, it names
+      // the Pin again in the look a new Pin label takes.
+      const standard = roleLabelFormat("voltage-node", pin.name);
+      const content = enabled
+        ? textEditing.content
+        : (standard ??
+          labelTextDocument(pin.name, options.document.presentation));
+      const next: Annotation = {
+        ...rest,
+        sizeScale: textEditing.sizeScale,
+        alignment: textEditing.alignment,
+        ...(enabled
+          ? { content }
+          : {
+              binding: {
+                kind: "cell-terminal-name" as const,
+                terminalId: pin.id,
+              },
+              ...(standard ? { formatOverride: standard } : {}),
+            }),
+      };
+      if (
+        !options.transact([
+          { kind: "upsert_schematic_annotation", annotation: next },
+        ]).ok
+      )
+        return;
+      const {
+        bindingKind: _bindingKind,
+        contentEdited: _contentEdited,
+        formatEdited: _formatEdited,
+        ...session
+      } = textEditing;
+      setTextEditing({
+        ...session,
+        content,
+        displayAlias: enabled,
+        bound: !enabled,
+        ...(enabled ? {} : { bindingKind: "cell-terminal-name" as const }),
+      });
+      return content;
+    }
+    if (!textEditing?.visualInstanceId) return;
+    const labelled = options.document.instances.find(
+      (instance) => instance.id === textEditing.visualInstanceId,
+    );
+    const reference = labelled?.reference;
+    if (!labelled || !reference) return;
+    const deviceLetter = referenceDeviceLetter(labelled.symbolId);
+    const content = enabled
+      ? textEditing.content
+      : (roleLabelFormat(
+          "device-reference",
+          reference,
+          deviceLetter ? { deviceLetter } : {},
+        ) ?? semanticTextDocument(reference, "instance-label"));
+    const next = { ...textEditing, content, displayAlias: enabled };
+    const proposal = proposeTextEditingCommit(
+      options.document,
+      next,
+      options.resolver,
+    );
+    if (proposal.kind === "blocked" || proposal.kind === "delete") return;
+    if (
+      proposal.kind === "update" &&
+      !options.transact([...(proposal.beforeEdits ?? []), proposal.edit]).ok
+    )
+      return;
+    setTextEditing(next);
+    return content;
+  };
+
+  return {
+    setTextDisplayAlias,
+    additionalParameterDraft,
+    additionalParameterDraftChanges: !sameAdditionalParameterDrafts(
+      additionalParameterDraft,
+      additionalParameterBaselineRef.current,
+    ),
+    addAdditionalParameter,
+    applyRouteProperties,
+    applyNetLabel,
+    applyAdditionalParameters,
+    beginAnnotationTextEditing,
+    beginDraftingTextEditing,
+    beginInstanceFormulaEditing,
+    beginNetLabelEditing,
+    cancelNetLabelEditing,
+    commitInstancePropertyDraft,
+    commitElectricalMarkerName,
+    commitNetLabelScope,
+    commitNetLabelEditing,
+    expandNetLabelSelection,
+    commitPendingNetLabelDraft,
+    commitTextEditing,
+    escapeTextEditing: () => {
+      const annotation =
+        textEditing?.owner === "annotation"
+          ? options.document.annotations.find(
+              (item) => item.id === textEditing.id,
+            )
+          : undefined;
+      if (
+        annotation &&
+        textEditing?.signalExpression &&
+        !textEditing.displayAlias &&
+        editedBoundAnnotationName(
+          options.document,
+          annotation,
+          textEditing,
+          textEditing.signalExpression,
+          options.resolver,
+        ) !== textEditing.signalExpression
+      ) {
+        setTextEditing(null);
+        options.setStatus("Cancelled signal name changes");
+        return;
+      }
+      // Presentation edits keep their existing Escape commit behavior.
+      commitTextEditing();
+      setTextEditing(null);
+    },
+    cancelAdditionalParameters,
+    clearTextEditing: () => setTextEditing(null),
+    deleteSelectedRouteNetLabel,
+    deleteTextEditing,
+    discardInstancePropertyDraft,
+    instancePropertyDraft,
+    hasInstancePropertyDraftChanges: !sameInstancePropertyDraft(
+      instancePropertyDraft,
+      instancePropertyBaselineRef.current,
+    ),
+    netLabelDraft,
+    netLabelPlacement,
+    placeNetLabel,
+    removeAdditionalParameter,
+    updateInstancePropertyDraft,
+    updateAdditionalParameter,
+    updateNetLabelDraft,
+    updateNetLabelPlacementText,
+    updateNetLabelPlacementPosition,
+    turnNetLabelPlacement,
+    setReferenceLabelsVisible,
+    setValueLabelsVisible,
+    showSelectedInstanceValue,
+    textEditing,
+    updateTextEditing,
+  };
+}

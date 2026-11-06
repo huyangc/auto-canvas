@@ -1,0 +1,48 @@
+{
+  "name": "@icm/exporters",
+  "version": "0.9.2",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "development": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./browser-fonts": {
+      "development": "./src/browser-fonts.ts",
+      "types": "./dist/browser-fonts.d.ts",
+      "default": "./dist/browser-fonts.js"
+    },
+    "./browser-raster": {
+      "development": "./src/browser-raster.ts",
+      "types": "./dist/browser-raster.d.ts",
+      "default": "./dist/browser-raster.js"
+    },
+    "./browser-pdf": {
+      "development": "./src/browser-pdf.ts",
+      "types": "./dist/browser-pdf.d.ts",
+      "default": "./dist/browser-pdf.js"
+    },
+    "./node": {
+      "types": "./dist/node.d.ts",
+      "default": "./dist/node.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@icm/derived": "workspace:*",
+    "@icm/model": "workspace:*",
+    "@icm/project-protocol": "workspace:*",
+    "@icm/render-svg": "workspace:*",
+    "@icm/symbols": "workspace:*",
+    "@resvg/resvg-js": "2.6.2",
+    "@xmldom/xmldom": "0.9.12",
+    "dejavu-fonts-ttf": "2.37.3",
+    "jspdf": "4.2.1",
+    "pdf-lib": "1.17.1",
+    "svg2pdf.js": "2.8.0"
+  }
+}

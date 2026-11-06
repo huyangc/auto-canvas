@@ -1,0 +1,263 @@
+import {
+  resolveDocumentRoutingGeometry,
+  resolveVisualAnchor,
+} from "@icm/derived";
+import type { SchematicDocument } from "@icm/model";
+import type { SymbolResolver } from "@icm/symbols";
+
+import type { EditTransaction } from "./edit-schema.js";
+import { orphanedCellResetJunctionIds } from "./cell-reset-junctions.js";
+import { removeConnectivityEvidenceOwnedBy } from "./transaction-connectivity.js";
+import type { AppliedEditMutation } from "./transaction-domain.js";
+
+type CellResetEdit = Extract<
+  EditTransaction["edits"][number],
+  {
+    kind: "clear_cell_drawing" | "reset_cell_placement" | "reset_cell_body";
+  }
+>;
+
+export interface CellResetEditContext {
+  draft: SchematicDocument;
+  changedObjectIds: Set<string>;
+  deferNetPrune(netId: string): void;
+  resolver?: SymbolResolver;
+}
+
+export type CellResetEditOutcome = AppliedEditMutation & {
+  readonly geometryChanged: true;
+};
+
+/**
+ * Both resets that remove every Route keep the circuit's names. A Net or
+ * supply label drawn on a wire stays where it was drawn, now free, so its
+ * name claim survives. A current or voltage marker drawn on a wire goes with
+ * the wire.
+ */
+function releaseRouteAnchoredAnnotations(
+  draft: SchematicDocument,
+  changedObjectIds: Set<string>,
+  resolver: SymbolResolver | undefined,
+): void {
+  if (
+    !draft.annotations.some((annotation) => annotation.anchor.kind === "route")
+  )
+    return;
+  const geometry = resolver
+    ? resolveDocumentRoutingGeometry(draft, resolver)
+    : undefined;
+  draft.annotations = draft.annotations.flatMap((annotation) => {
+    const anchor = annotation.anchor;
+    if (anchor.kind !== "route") return [annotation];
+    changedObjectIds.add(annotation.id);
+    if (annotation.kind === "route-marker") return [];
+    const position =
+      resolver && geometry
+        ? resolveVisualAnchor(draft, resolver, anchor, geometry).position
+        : anchor.fallbackPosition;
+    return [
+      {
+        ...annotation,
+        anchor: {
+          kind: "free" as const,
+          position: { x: Math.round(position.x), y: Math.round(position.y) },
+        },
+      },
+    ];
+  });
+}
+
+/** The labels and markers a reset that removes every Route re-anchors or removes. */
+export function routeAnchoredAnnotationIds(
+  document: SchematicDocument,
+): readonly string[] {
+  return document.annotations.flatMap((annotation) =>
+    annotation.anchor.kind === "route" ? [annotation.id] : [],
+  );
+}
+
+export function applyCellResetEdit(
+  edit: CellResetEdit,
+  context: CellResetEditContext,
+): CellResetEditOutcome {
+  const { draft, changedObjectIds, deferNetPrune, resolver } = context;
+
+  switch (edit.kind) {
+    case "clear_cell_drawing": {
+      releaseRouteAnchoredAnnotations(draft, changedObjectIds, resolver);
+      const orphanedJunctions = orphanedCellResetJunctionIds(
+        draft,
+        "clear-drawing",
+      );
+      const routeIds = new Set(draft.routes.map((route) => route.id));
+      const ownerNetIds = removeConnectivityEvidenceOwnedBy(
+        draft,
+        routeIds,
+        changedObjectIds,
+      );
+      for (const object of [
+        ...draft.routes,
+        ...(draft.drafting?.objects ?? []),
+      ]) {
+        changedObjectIds.add(object.id);
+      }
+      draft.routes = [];
+      draft.junctions = draft.junctions.filter(
+        (junction) => !orphanedJunctions.has(junction.id),
+      );
+      for (const id of orphanedJunctions) changedObjectIds.add(id);
+      draft.drafting = { objects: [] };
+      for (const netId of ownerNetIds) deferNetPrune(netId);
+      return {
+        ok: true,
+        connectivityChanged: ownerNetIds.length > 0,
+        geometryChanged: true,
+      };
+    }
+    case "reset_cell_placement": {
+      releaseRouteAnchoredAnnotations(draft, changedObjectIds, resolver);
+      const orphanedJunctions = orphanedCellResetJunctionIds(
+        draft,
+        "reset-placement",
+      );
+      const routeIds = new Set(draft.routes.map((route) => route.id));
+      const ownerNetIds = removeConnectivityEvidenceOwnedBy(
+        draft,
+        routeIds,
+        changedObjectIds,
+      );
+      for (const object of [
+        ...draft.instances.filter((instance) => instance.placement !== null),
+        ...draft.routes,
+        ...draft.layoutGroups,
+        ...draft.constraints,
+      ]) {
+        changedObjectIds.add(object.id);
+      }
+      for (const instance of draft.instances) instance.placement = null;
+      draft.routes = [];
+      draft.junctions = draft.junctions.filter(
+        (junction) => !orphanedJunctions.has(junction.id),
+      );
+      for (const id of orphanedJunctions) changedObjectIds.add(id);
+      draft.layoutGroups = [];
+      draft.constraints = [];
+      for (const netId of ownerNetIds) deferNetPrune(netId);
+      return {
+        ok: true,
+        connectivityChanged: ownerNetIds.length > 0,
+        geometryChanged: true,
+      };
+    }
+    case "reset_cell_body": {
+      const cellPinInstanceIds = new Set(
+        draft.netlist?.terminals.flatMap(
+          (terminal) => terminal.interfaceInstanceIds,
+        ) ?? [],
+      );
+      const interfaceNetIds = new Set(
+        draft.netlist?.terminals.map((terminal) => terminal.netId) ?? [],
+      );
+      const retainedInstances = draft.instances.filter((instance) =>
+        cellPinInstanceIds.has(instance.id),
+      );
+      const retainedNets = draft.nets
+        .filter((net) => interfaceNetIds.has(net.id))
+        .map((net) => ({
+          ...net,
+          terminals: net.terminals.filter((terminal) =>
+            cellPinInstanceIds.has(terminal.instanceId),
+          ),
+        }));
+      const retainedAnnotations = draft.annotations.filter(
+        (annotation) =>
+          (annotation.anchor.kind === "object" &&
+            cellPinInstanceIds.has(annotation.anchor.objectId)) ||
+          draft.netlist?.terminals.some(
+            (terminal) => terminal.interfaceAnnotationId === annotation.id,
+          ),
+      );
+      const retainedAnnotationIds = new Set(
+        retainedAnnotations.map((annotation) => annotation.id),
+      );
+      const retainedEvidence = draft.connectivityEvidence.filter((evidence) => {
+        if (!interfaceNetIds.has(evidence.netId)) return false;
+        if (evidence.kind !== "name-claim") return true;
+        switch (evidence.owner.kind) {
+          case "global-declaration":
+            return true;
+          case "net-label":
+            return retainedAnnotationIds.has(evidence.owner.annotationId);
+          case "power-marker":
+            return (
+              cellPinInstanceIds.has(evidence.owner.objectId) ||
+              retainedAnnotationIds.has(evidence.owner.objectId)
+            );
+        }
+      });
+      const retainedJunctions = draft.junctions.filter((junction) =>
+        retainedAnnotations.some(
+          (annotation) =>
+            annotation.anchor.kind === "object" &&
+            annotation.anchor.objectId === junction.id,
+        ),
+      );
+      const retainedIds = new Set([
+        ...retainedInstances.map((instance) => instance.id),
+        ...retainedNets.map((net) => net.id),
+        ...retainedAnnotations.map((annotation) => annotation.id),
+        ...retainedJunctions.map((junction) => junction.id),
+        ...retainedEvidence.map((evidence) => evidence.id),
+      ]);
+      for (const object of [
+        ...draft.instances,
+        ...draft.nets,
+        ...draft.routes,
+        ...draft.junctions,
+        ...draft.noConnects,
+        ...draft.annotations,
+        ...draft.connectivityEvidence,
+        ...draft.layoutGroups,
+        ...draft.constraints,
+        ...(draft.inductorCouplings ?? []),
+        ...(draft.drafting?.objects ?? []),
+      ]) {
+        if (!retainedIds.has(object.id)) changedObjectIds.add(object.id);
+      }
+      // A coupling stays only while both its inductors do.
+      const retainedCouplings = (draft.inductorCouplings ?? []).filter(
+        (coupling) =>
+          coupling.members.every((member) =>
+            retainedIds.has(member.instanceId),
+          ),
+      );
+      for (const coupling of retainedCouplings)
+        changedObjectIds.delete(coupling.id);
+      if (retainedCouplings.length) draft.inductorCouplings = retainedCouplings;
+      else delete draft.inductorCouplings;
+      for (const retainedNet of retainedNets) {
+        const sourceNet = draft.nets.find((net) => net.id === retainedNet.id);
+        if (sourceNet?.terminals.length !== retainedNet.terminals.length) {
+          changedObjectIds.add(retainedNet.id);
+        }
+      }
+      draft.instances = retainedInstances;
+      draft.nets = retainedNets;
+      draft.routes = [];
+      draft.junctions = retainedJunctions;
+      draft.noConnects = [];
+      draft.annotations = retainedAnnotations;
+      draft.connectivityEvidence = retainedEvidence;
+      draft.layoutGroups = [];
+      draft.constraints = [];
+      draft.drafting = { objects: [] };
+      if (draft.mosBulkDefaults) changedObjectIds.add(draft.id);
+      delete draft.mosBulkDefaults;
+      return {
+        ok: true,
+        connectivityChanged: true,
+        geometryChanged: true,
+      };
+    }
+  }
+}

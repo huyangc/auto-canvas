@@ -1,0 +1,228 @@
+{
+  "schemaVersion": 1,
+  "id": "razavi-textbook-logic-inverter",
+  "kind": "pdf-vector-extract",
+  "source": {
+    "title": "Design of Analog CMOS Integrated Circuits, Second Edition",
+    "sha256": "a6031d1149c2c6191a1f0e541065165b72dafc4bc4ab4b0ea37af41b7cb0f739",
+    "pdfPage": 688,
+    "printedPage": 669,
+    "figure": "16.25(a)"
+  },
+  "selection": {
+    "method": "direct-logic-gate-vector-normalization",
+    "nativeObjectCount": 4,
+    "nativeObjectSha256": "6af71d6524e3b3b81512862674ee813671ccd1738a5536f8081710a588898e25",
+    "nativeObjects": [
+      {
+        "objectType": "line",
+        "x0": 242.062,
+        "top": 316.7712,
+        "x1": 242.062,
+        "bottom": 324.9692,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 2,
+        "pathSha256": "5819c07922914c5b76d11c4f78178330475bfa0ee6e6fae4ec1da7e6b96930f4"
+      },
+      {
+        "objectType": "line",
+        "x0": 242.062,
+        "top": 342.8912,
+        "x1": 242.062,
+        "bottom": 350.0582,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 2,
+        "pathSha256": "aa52ec19a2036e41acbef439d2e27c218109f4f36746e860f8d12b26f5975d1b"
+      },
+      {
+        "objectType": "curve",
+        "x0": 233.46,
+        "top": 324.9692,
+        "x1": 249.946,
+        "bottom": 338.5892,
+        "linewidth": 1.434,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 4,
+        "pathSha256": "a6d18f356d8b6862d3f4f44eceb2116e73b5556de82c26c95c7044bb571cc795"
+      },
+      {
+        "objectType": "curve",
+        "x0": 239.917,
+        "top": 338.6012,
+        "x1": 244.218,
+        "bottom": 342.9022,
+        "linewidth": 1.434,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 5,
+        "pathSha256": "36c94e006b6adf69e7b65a75a497e5669aeb5b2a761d22574beaae2a3ea16b43"
+      }
+    ]
+  },
+  "normalization": {
+    "sourceInputPitchPdf": 11.469,
+    "logicalInputPitch": 20.0,
+    "logicalUnitsPerPdfPoint": 1.743831,
+    "sourceOriginPdf": {
+      "x": 242.062,
+      "y": 333.4147
+    },
+    "pinAnchorsLogical": [
+      {
+        "name": "A",
+        "x": -40,
+        "y": 0
+      },
+      {
+        "name": "Y",
+        "x": 40,
+        "y": 0
+      }
+    ],
+    "strokeMapping": {
+      "normal": {
+        "sourcePdfPt": 0.717,
+        "targetRole": "normal"
+      },
+      "body": {
+        "sourcePdfPt": 1.434,
+        "targetRole": "emphasis"
+      }
+    },
+    "symbolDefinition": {
+      "schemaVersion": 1,
+      "id": "inverter",
+      "name": "Inverter",
+      "viewBox": {
+        "x": -44,
+        "y": -24,
+        "width": 88,
+        "height": 48
+      },
+      "pins": [
+        {
+          "name": "A",
+          "role": "input",
+          "at": {
+            "x": -40,
+            "y": 0
+          },
+          "direction": "west",
+          "presentation": {
+            "visibility": "visible",
+            "leadLength": 20
+          }
+        },
+        {
+          "name": "Y",
+          "role": "output",
+          "at": {
+            "x": 40,
+            "y": 0
+          },
+          "direction": "east",
+          "presentation": {
+            "visibility": "visible",
+            "leadLength": 20
+          }
+        }
+      ],
+      "primitives": [
+        {
+          "kind": "line",
+          "from": {
+            "x": -40.0,
+            "y": 0.0
+          },
+          "to": {
+            "x": -14.727526,
+            "y": 0.0
+          },
+          "style": {
+            "strokeRole": "normal",
+            "lineCap": "butt",
+            "lineJoin": "miter"
+          }
+        },
+        {
+          "kind": "path",
+          "data": "M 9.023455 0.0 L -14.727526 -15.000436 L -14.727526 13.748365 L 9.023455 0.0",
+          "style": {
+            "strokeRole": "emphasis",
+            "lineCap": "butt",
+            "lineJoin": "miter",
+            "miterLimit": 4
+          }
+        },
+        {
+          "kind": "circle",
+          "center": {
+            "x": 12.794489,
+            "y": 0.009591
+          },
+          "radius": 3.750109,
+          "part": "negation-bubble",
+          "style": {
+            "strokeRole": "emphasis",
+            "lineCap": "butt",
+            "lineJoin": "miter",
+            "miterLimit": 4
+          }
+        },
+        {
+          "kind": "line",
+          "from": {
+            "x": 16.525416,
+            "y": 0.0
+          },
+          "to": {
+            "x": 40.0,
+            "y": 0.0
+          },
+          "style": {
+            "strokeRole": "normal",
+            "lineCap": "butt",
+            "lineJoin": "miter"
+          }
+        }
+      ],
+      "variants": []
+    }
+  },
+  "derivation": {
+    "pinExtension": "native leads extend collinearly to the existing x=+/-40 electrical anchors",
+    "orientation": "native source orientation is recorded as 90 degrees relative to the product default"
+  },
+  "rasterWitness": {
+    "kind": "source-pdf-crop",
+    "sourcePdfPage": 688,
+    "dpi": 301.334031,
+    "pixels": {
+      "width": 72,
+      "height": 138
+    },
+    "pixelsPerLogical": 2.4,
+    "originPx": {
+      "x": 37.71389,
+      "y": 67.768245
+    },
+    "window": {
+      "width": 72,
+      "height": 138,
+      "minX": -15.5,
+      "minY": -28.2
+    },
+    "rotation": 90,
+    "sourceCropPx": {
+      "x": 833,
+      "y": 1470
+    },
+    "assetPath": "logic-inverter-reference.png",
+    "threshold": 160
+  }
+}

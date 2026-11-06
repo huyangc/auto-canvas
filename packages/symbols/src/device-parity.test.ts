@@ -1,0 +1,66 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  builtInDeviceDescriptors,
+  deviceDescriptor,
+  deviceRegistry,
+  validateDeviceRegistry,
+} from "@icm/devices";
+
+import { builtInSymbols } from "./builtins.js";
+
+describe("built-in device/Symbol parity", () => {
+  it("matches every registered definition to canonical Symbol pin order", () => {
+    expect(validateDeviceRegistry(deviceRegistry, builtInSymbols)).toEqual([]);
+  });
+
+  // Drawn, designated, and read, but not simulable: SPICE's S card takes four
+  // nodes and a model, and these have two terminals and no control, which is
+  // why the catalog records them as manual-only. They still share the `S`
+  // sequence, because a reader counts the switches on a sheet as one series.
+  it("designates the manual-only switches without a netlist form", () => {
+    for (const symbolId of ["ideal-switch", "closed-switch", "simple-switch"]) {
+      expect(deviceDescriptor(symbolId)).toMatchObject({
+        deviceClass: "switch",
+        referencePrefix: "S",
+        pinOrder: ["1", "2"],
+        targetPolicy: "none",
+      });
+    }
+    // SPICE has no three-terminal switch primitive at all: the usual netlist
+    // form is a pair of controlled switches sharing a node, a different
+    // circuit than this one Symbol.
+    expect(deviceDescriptor("spdt-switch")).toMatchObject({
+      deviceClass: "switch",
+      referencePrefix: "S",
+      pinOrder: ["COM", "A", "B"],
+      targetPolicy: "none",
+    });
+    expect(deviceDescriptor("externally-controlled-switch")).toMatchObject({
+      deviceClass: "switch",
+      referencePrefix: "S",
+      pinOrder: ["P", "N", "CTRL"],
+      targetPolicy: "none",
+    });
+  });
+
+  it("leaves unsupported catalog blocks explicit instead of guessing", () => {
+    for (const symbolId of [
+      "opamp",
+      "voltage-amplifier",
+      "port",
+      "port-filled",
+      "adder",
+      "multiplier",
+      "transconductance",
+      "differential-transconductance",
+      "integrator",
+      "unit-delay",
+      "discrete-time-integrator",
+      "quantizer",
+    ]) {
+      expect(deviceDescriptor(symbolId)).toBeUndefined();
+    }
+    expect(builtInDeviceDescriptors.length).toBeGreaterThan(0);
+  });
+});

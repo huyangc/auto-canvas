@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "referenceId": "razavi-reference-v1",
+  "family": {
+    "kind": "direct-pdf-vector",
+    "semanticBoundary": "electrical pins are reconstructed; visual geometry is source-owned"
+  },
+  "symbols": {
+    "buffer": {
+      "assetPath": "buffer-reference.png",
+      "pixelsPerLogical": 2.4,
+      "originPx": {
+        "x": 43.209347,
+        "y": 44.152682
+      },
+      "window": {
+        "width": 74,
+        "height": 86,
+        "minX": -18,
+        "minY": -18
+      },
+      "rotation": 0
+    },
+    "d-flip-flop": {
+      "assetPath": "d-flip-flop-reference.png",
+      "pixelsPerLogical": 1.92,
+      "originPx": {
+        "x": 94.339643,
+        "y": 58.470765
+      },
+      "window": {
+        "width": 187,
+        "height": 115,
+        "minX": -48.75,
+        "minY": -30
+      },
+      "rotation": 0
+    }
+  }
+}

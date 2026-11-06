@@ -1,0 +1,200 @@
+{
+  "schemaVersion": 1,
+  "id": "razavi-textbook-buffer",
+  "kind": "pdf-vector-extract",
+  "source": {
+    "title": "Design of Analog CMOS Integrated Circuits, Second Edition",
+    "sha256": "a6031d1149c2c6191a1f0e541065165b72dafc4bc4ab4b0ea37af41b7cb0f739",
+    "pdfPage": 703,
+    "printedPage": 684,
+    "figure": "16.53(a)"
+  },
+  "selection": {
+    "method": "direct-buffer-dff-vector-normalization",
+    "scope": "direct buffer triangle and lead/body seams",
+    "nativeObjectCount": 3,
+    "nativeObjectSha256": "b7f69d2b6c524d4d97cfd92b6faf932eeba44f4dbac26e6ab2d6522aaf1c3fdb",
+    "nativeObjects": [
+      {
+        "objectType": "line",
+        "x0": 150.978,
+        "top": 336.1832,
+        "x1": 164.403,
+        "bottom": 336.1832,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 2,
+        "pathSha256": "0dafd71f3bbc2327ea8c37004964e8397c1795a8c8ba097a8b72d9aacbe9c036"
+      },
+      {
+        "objectType": "line",
+        "x0": 185.66,
+        "top": 336.1832,
+        "x1": 193.27,
+        "bottom": 336.1832,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 2,
+        "pathSha256": "7df1f23d444005cc0a5af8b91f63cf964134d5347810de4244ec43ac7b181ef6"
+      },
+      {
+        "objectType": "curve",
+        "x0": 164.4,
+        "top": 323.9012,
+        "x1": 185.582,
+        "bottom": 349.5412,
+        "linewidth": 1.434,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 4,
+        "pathSha256": "a98be2e631a44b8478267c97a84b92856a05ad4910f95324bbf71b1132d03b14"
+      }
+    ]
+  },
+  "normalization": {
+    "logicalUnitsPerPdfPoint": 1.121248,
+    "sourceOriginPdf": {
+      "x": 177.53494,
+      "y": 336.1642
+    },
+    "pinAnchorsLogical": [
+      {
+        "name": "A",
+        "x": -40,
+        "y": 0
+      },
+      {
+        "name": "Y",
+        "x": 40,
+        "y": 0
+      }
+    ],
+    "strokeMapping": {
+      "normal": {
+        "sourcePdfPt": 0.717,
+        "targetRole": "normal"
+      },
+      "body": {
+        "sourcePdfPt": 1.434,
+        "targetRole": "emphasis"
+      }
+    },
+    "symbolDefinition": {
+      "schemaVersion": 1,
+      "id": "buffer",
+      "name": "Buffer",
+      "viewBox": {
+        "x": -44,
+        "y": -24,
+        "width": 88,
+        "height": 48
+      },
+      "pins": [
+        {
+          "name": "A",
+          "role": "input",
+          "at": {
+            "x": -40,
+            "y": 0
+          },
+          "direction": "west",
+          "presentation": {
+            "visibility": "visible",
+            "leadLength": 20
+          }
+        },
+        {
+          "name": "Y",
+          "role": "output",
+          "at": {
+            "x": 40,
+            "y": 0
+          },
+          "direction": "east",
+          "presentation": {
+            "visibility": "visible",
+            "leadLength": 20
+          }
+        }
+      ],
+      "primitives": [
+        {
+          "kind": "line",
+          "from": {
+            "x": -40.0,
+            "y": 0.0
+          },
+          "to": {
+            "x": -14.727526,
+            "y": 0.0
+          },
+          "style": {
+            "strokeRole": "normal",
+            "lineCap": "butt",
+            "lineJoin": "miter"
+          }
+        },
+        {
+          "kind": "path",
+          "data": "M 9.022751 -0.0 L -14.727526 14.998936 L -14.727526 -13.749865 L 9.022751 -0.0",
+          "style": {
+            "strokeRole": "emphasis",
+            "lineCap": "butt",
+            "lineJoin": "miter",
+            "miterLimit": 4
+          }
+        },
+        {
+          "kind": "line",
+          "from": {
+            "x": 9.022751,
+            "y": 0.0
+          },
+          "to": {
+            "x": 40.0,
+            "y": 0.0
+          },
+          "style": {
+            "strokeRole": "normal",
+            "lineCap": "butt",
+            "lineJoin": "miter"
+          }
+        }
+      ],
+      "variants": []
+    }
+  },
+  "derivation": {
+    "pinExtension": "native leads extend collinearly to the existing x=+/-40 electrical anchors",
+    "semantics": "pin identity is reconstructed explicitly; only visual geometry comes from PDF vectors"
+  },
+  "rasterWitness": {
+    "kind": "source-pdf-crop",
+    "sourcePdfPage": 703,
+    "dpi": 193.75167,
+    "pixels": {
+      "width": 74,
+      "height": 86
+    },
+    "pixelsPerLogical": 2.4,
+    "originPx": {
+      "x": 43.209347,
+      "y": 44.152682
+    },
+    "window": {
+      "width": 74,
+      "height": 86,
+      "minX": -18,
+      "minY": -18
+    },
+    "rotation": 0,
+    "sourceCropPx": {
+      "x": 343,
+      "y": 952
+    },
+    "assetPath": "buffer-reference.png",
+    "threshold": 160
+  }
+}

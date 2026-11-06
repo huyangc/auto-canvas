@@ -1,0 +1,141 @@
+import {
+  diagnoseProject,
+  diagnoseVisualQuality,
+  diagnoseLabelClearance,
+} from "@icm/derived";
+import { createDesignNetlistExport } from "@icm/netlist";
+import type { Diagnostic, ObjectLocator } from "@icm/derived";
+import type { CircuitProject, SchematicDocument } from "@icm/model";
+import type { SymbolResolver } from "@icm/symbols";
+
+import type { AgentDiagnostic } from "./schema.js";
+
+function locatorWithoutSource({
+  sourceRef: _sourceRef,
+  ...locator
+}: ObjectLocator) {
+  return {
+    ...locator,
+    hierarchyPath: locator.hierarchyPath.map((frame) => ({ ...frame })),
+  };
+}
+
+function diagnosticObjectIds(diagnostic: Diagnostic): string[] {
+  return [diagnostic.primary, ...diagnostic.related]
+    .map((locator) => locator.objectId)
+    .filter((id, index, ids) => ids.indexOf(id) === index);
+}
+
+export function agentVisualDiagnostics(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+): AgentDiagnostic[] {
+  return [
+    ...diagnoseVisualQuality(document, resolver),
+    ...diagnoseLabelClearance(document, resolver),
+  ].map((item) => ({
+    code: item.code,
+    severity: item.severity,
+    category: item.category,
+    confidence: item.confidence,
+    gateEligible: item.gateEligible,
+    message: item.message,
+    objectIds: [...item.objectIds],
+    revision: document.revision,
+    ...(item.bounds ? { bounds: item.bounds } : {}),
+    ...(item.point ? { point: item.point } : {}),
+    ...(item.parameters ? { parameters: { ...item.parameters } } : {}),
+  }));
+}
+
+export function agentProjectDiagnostics(
+  project: CircuitProject,
+  resolver: SymbolResolver,
+  documentId: string,
+  revision: number,
+): AgentDiagnostic[] {
+  const diagnostics: AgentDiagnostic[] = diagnoseProject(project, resolver)
+    .filter((diagnostic) => diagnostic.primary.documentId === documentId)
+    .map((diagnostic) => ({
+      code: diagnostic.code,
+      domain: diagnostic.domain,
+      severity: diagnostic.severity,
+      confidence: diagnostic.confidence,
+      gateEligible: diagnostic.gateEligible,
+      message: diagnostic.message,
+      objectIds: diagnosticObjectIds(diagnostic),
+      primary: locatorWithoutSource(diagnostic.primary),
+      related: diagnostic.related.map(locatorWithoutSource),
+      revision,
+      parameters: { ...diagnostic.parameters },
+    }));
+  const document = project.documents.find((d) => d.id === documentId);
+  if (document)
+    diagnostics.push(
+      ...diagnoseLabelClearance(document, resolver).map((item) => ({
+        ...item,
+        objectIds: [...item.objectIds],
+        revision,
+      })),
+    );
+  if (document) {
+    const exportResult = createDesignNetlistExport(project, {
+      format: "spice",
+      rootDocumentId: documentId,
+    });
+    diagnostics.push(
+      ...exportResult.diagnostics.map((item) => {
+        const { sourceRef: _sourceRef, ...primary } = item.primary;
+        return {
+          code: item.code,
+          domain: "spice" as const,
+          severity: item.severity,
+          category: "structural" as const,
+          confidence: "high" as const,
+          gateEligible: true,
+          message: item.message,
+          objectIds: [...item.objectIds],
+          primary: {
+            ...primary,
+            hierarchyPath: primary.hierarchyPath.map((frame) => ({ ...frame })),
+          },
+          revision,
+          parameters: {
+            documentId: item.documentId,
+            ...(item.parameter ? { parameter: item.parameter } : {}),
+          },
+        };
+      }),
+    );
+  }
+  return diagnostics;
+}
+
+/**
+ * The ambiguous Junctions a change adds (#1257): VISUAL_AMBIGUOUS_JUNCTION
+ * findings at points where none sat before. Compared by point, so a Route
+ * renamed by a split does not make an existing finding look new.
+ */
+export function addedAmbiguousJunctions(
+  before: SchematicDocument,
+  after: SchematicDocument,
+  resolver: SymbolResolver,
+): AgentDiagnostic[] {
+  const ambiguous = (document: SchematicDocument) =>
+    agentVisualDiagnostics(document, resolver).filter(
+      (item) => item.code === "VISUAL_AMBIGUOUS_JUNCTION",
+    );
+  const at = (item: AgentDiagnostic) =>
+    item.point ? `${item.point.x},${item.point.y}` : "";
+  const existing = new Set(ambiguous(before).map(at));
+  return ambiguous(after).filter((item) => !existing.has(at(item)));
+}
+
+export function agentDiagnosticIdentity(diagnostic: AgentDiagnostic): string {
+  return JSON.stringify({
+    domain: diagnostic.domain ?? null,
+    code: diagnostic.code,
+    objectIds: diagnostic.objectIds ?? [],
+    parameters: diagnostic.parameters ?? {},
+  });
+}

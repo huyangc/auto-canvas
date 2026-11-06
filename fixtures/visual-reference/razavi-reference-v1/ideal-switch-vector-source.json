@@ -1,0 +1,252 @@
+{
+  "schemaVersion": 1,
+  "id": "razavi-textbook-ideal-switch",
+  "kind": "pdf-vector-extract",
+  "source": {
+    "title": "Design of Analog CMOS Integrated Circuits, Second Edition",
+    "sha256": "a6031d1149c2c6191a1f0e541065165b72dafc4bc4ab4b0ea37af41b7cb0f739",
+    "pdfPage": 560,
+    "printedPage": 541,
+    "figure": "13.4"
+  },
+  "selection": {
+    "method": "direct-device-vector-normalization",
+    "boundsPdf": {
+      "left": 235.0,
+      "top": 446.5,
+      "right": 262.0,
+      "bottom": 454.8
+    },
+    "nativeObjectCount": 5,
+    "nativeObjectSha256": "64ace81bb14acbebea4e37988d5d5013c18109365acf7779ddbe1077ee9364a7",
+    "nativeObjectSample": [
+      {
+        "objectType": "line",
+        "linewidth": 0.717,
+        "x0": 244.958,
+        "top": 447.2852,
+        "x1": 251.416,
+        "bottom": 452.3072,
+        "pathCommandCount": 2,
+        "pathSha256": "484b92ad118cb31da6415e191f7f99e6bdacbc24e4a323cf535dc87aeecddf4d"
+      },
+      {
+        "objectType": "line",
+        "linewidth": 0.717,
+        "x0": 255.003,
+        "top": 453.0242,
+        "x1": 261.46,
+        "bottom": 453.0242,
+        "pathCommandCount": 2,
+        "pathSha256": "95494300646d1db1da8a2da92f05225324d404434ff97bb9291bb284b64a3f5b"
+      },
+      {
+        "objectType": "line",
+        "linewidth": 0.717,
+        "x0": 235.631,
+        "top": 453.0242,
+        "x1": 242.805,
+        "bottom": 453.0242,
+        "pathCommandCount": 2,
+        "pathSha256": "799783c17555139243fbbd122a46b6625c5f821d708cfbe925f826d3f7b9506b"
+      },
+      {
+        "objectType": "curve",
+        "linewidth": 0.717,
+        "x0": 252.13,
+        "top": 451.5802,
+        "x1": 255.0,
+        "bottom": 454.4502,
+        "pathCommandCount": 5,
+        "pathSha256": "24d8f20fd96e4af94c66adc14420a185cba329daf7eced3fe2370ba24ee6b7d1"
+      },
+      {
+        "objectType": "curve",
+        "linewidth": 0.717,
+        "x0": 242.842,
+        "top": 451.5802,
+        "x1": 245.713,
+        "bottom": 454.4502,
+        "pathCommandCount": 5,
+        "pathSha256": "ffb4784e28d435bc512c2e811fb1fcf7c1591ccc9623646f7937f18db4dcac12"
+      }
+    ]
+  },
+  "normalization": {
+    "pinAnchorsLogical": [
+      {
+        "name": "1",
+        "x": -30,
+        "y": 0
+      },
+      {
+        "name": "2",
+        "x": 30,
+        "y": 0
+      }
+    ],
+    "strokeMapping": {
+      "normal": {
+        "targetRole": "normal"
+      },
+      "emphasis": {
+        "targetRole": "emphasis"
+      }
+    },
+    "symbolDefinition": {
+      "schemaVersion": 1,
+      "id": "ideal-switch",
+      "name": "Open Switch",
+      "viewBox": {
+        "x": -34,
+        "y": -18,
+        "width": 68,
+        "height": 30
+      },
+      "pins": [
+        {
+          "name": "1",
+          "role": "passive",
+          "at": {
+            "x": -30,
+            "y": 0
+          },
+          "direction": "west",
+          "presentation": {
+            "visibility": "visible",
+            "leadLength": 10
+          }
+        },
+        {
+          "name": "2",
+          "role": "passive",
+          "at": {
+            "x": 30,
+            "y": 0
+          },
+          "direction": "east",
+          "presentation": {
+            "visibility": "visible",
+            "leadLength": 10
+          }
+        }
+      ],
+      "primitives": [
+        {
+          "kind": "line",
+          "from": {
+            "x": -30,
+            "y": 0
+          },
+          "to": {
+            "x": -12.726917,
+            "y": 0
+          },
+          "style": {
+            "strokeRole": "normal",
+            "lineCap": "butt",
+            "lineJoin": "miter"
+          }
+        },
+        {
+          "kind": "circle",
+          "center": {
+            "x": -9.524128,
+            "y": -0.020084
+          },
+          "radius": 3.202789,
+          "fill": "none",
+          "stroke": "foreground",
+          "style": {
+            "strokeRole": "normal",
+            "lineCap": "butt",
+            "lineJoin": "miter"
+          }
+        },
+        {
+          "kind": "line",
+          "from": {
+            "x": -6.953731,
+            "y": -2.417959
+          },
+          "to": {
+            "x": 6.405579,
+            "y": -12.806695
+          },
+          "style": {
+            "strokeRole": "normal",
+            "lineCap": "butt",
+            "lineJoin": "miter"
+          }
+        },
+        {
+          "kind": "circle",
+          "center": {
+            "x": 11.201116,
+            "y": -0.020084
+          },
+          "radius": 3.202232,
+          "fill": "none",
+          "stroke": "foreground",
+          "style": {
+            "strokeRole": "normal",
+            "lineCap": "butt",
+            "lineJoin": "miter"
+          }
+        },
+        {
+          "kind": "line",
+          "from": {
+            "x": 14.403348,
+            "y": 0
+          },
+          "to": {
+            "x": 30,
+            "y": 0
+          },
+          "style": {
+            "strokeRole": "normal",
+            "lineCap": "butt",
+            "lineJoin": "miter"
+          }
+        }
+      ],
+      "variants": [],
+      "aliases": [
+        "switch-open",
+        "two-terminal-switch"
+      ]
+    }
+  },
+  "rasterWitness": {
+    "kind": "source-pdf-crop",
+    "sourcePdfPage": 560,
+    "dpi": 385.606695,
+    "pixels": {
+      "width": 164,
+      "height": 72
+    },
+    "pixelsPerLogical": 2.4,
+    "originPx": {
+      "x": 81.958059,
+      "y": 43.366862
+    },
+    "window": {
+      "width": 164,
+      "height": 72,
+      "minX": -34,
+      "minY": -18
+    },
+    "sourceCropPx": {
+      "x": 1069,
+      "y": 2565
+    },
+    "assetPath": "ideal-switch-reference.png",
+    "threshold": 160
+  },
+  "derivation": {
+    "geometry": "uniformly normalized from the five native Figure 13.4 switch objects",
+    "scale": "native 0.717 pt stroke mapped to the Razavi normal 1.6 logical-unit stroke",
+    "pinExtension": "native horizontal leads extended only to the nearest symmetric 10-unit anchors at x=-30 and x=30"
+  }
+}

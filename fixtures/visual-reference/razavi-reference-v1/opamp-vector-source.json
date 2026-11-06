@@ -1,0 +1,238 @@
+{
+  "schemaVersion": 1,
+  "id": "razavi-textbook-figure-8-26-opamp",
+  "kind": "pdf-vector-extract",
+  "source": {
+    "title": "Design of Analog CMOS Integrated Circuits, Second Edition",
+    "sha256": "a6031d1149c2c6191a1f0e541065165b72dafc4bc4ab4b0ea37af41b7cb0f739",
+    "pdfPage": 308,
+    "printedPage": 289,
+    "figure": "8.26"
+  },
+  "selection": {
+    "triangleDuplicateCount": 2,
+    "trianglePathPdf": [
+      [
+        "m",
+        [
+          398.36199999999997,
+          350.21619999999996
+        ]
+      ],
+      [
+        "l",
+        [
+          398.36199999999997,
+          378.91519999999997
+        ]
+      ],
+      [
+        "l",
+        [
+          427.06199999999995,
+          364.56519999999995
+        ]
+      ],
+      [
+        "l",
+        [
+          398.36199999999997,
+          350.21619999999996
+        ]
+      ]
+    ],
+    "triangleLineWidthPdfPt": 1.435,
+    "normalLineWidthPdfPt": 0.717,
+    "lineFingerprintsPdf": {
+      "input-minus": [
+        {
+          "x": 384.641,
+          "y": 358.8252
+        },
+        {
+          "x": 398.273,
+          "y": 358.8252
+        }
+      ],
+      "input-plus": [
+        {
+          "x": 384.731,
+          "y": 370.3052
+        },
+        {
+          "x": 398.362,
+          "y": 370.3052
+        }
+      ],
+      "output": [
+        {
+          "x": 427.062,
+          "y": 364.5652
+        },
+        {
+          "x": 437.107,
+          "y": 364.5652
+        }
+      ],
+      "plus-vertical": [
+        {
+          "x": 403.385,
+          "y": 369.5872
+        },
+        {
+          "x": 403.385,
+          "y": 373.8922
+        }
+      ],
+      "plus-horizontal": [
+        {
+          "x": 401.233,
+          "y": 371.7402
+        },
+        {
+          "x": 405.538,
+          "y": 371.7402
+        }
+      ],
+      "minus-horizontal": [
+        {
+          "x": 401.233,
+          "y": 357.3902
+        },
+        {
+          "x": 405.538,
+          "y": 357.3902
+        }
+      ]
+    }
+  },
+  "normalization": {
+    "originPdf": {
+      "x": 413.744,
+      "y": 364.5652
+    },
+    "logicalUnitsPerPdfPoint": 1.74216,
+    "pinAnchorsLogical": [
+      {
+        "name": "IN+",
+        "x": -50.0,
+        "y": 10
+      },
+      {
+        "name": "IN-",
+        "x": -50.0,
+        "y": -10
+      },
+      {
+        "name": "OUT",
+        "x": 40.0,
+        "y": 0
+      }
+    ],
+    "strokeMapping": {
+      "normal": {
+        "sourcePdfPt": 0.717,
+        "targetRole": "normal"
+      },
+      "triangle": {
+        "sourcePdfPt": 1.435,
+        "targetRole": "emphasis"
+      }
+    },
+    "symbolGeometry": {
+      "trianglePathData": "M -26.7979 -24.9983 L -26.7979 25 L 23.2021 0 Z",
+      "inputMinus": {
+        "from": {
+          "x": -50.0,
+          "y": -10
+        },
+        "to": {
+          "x": -26.952962,
+          "y": -10.0
+        }
+      },
+      "inputPlus": {
+        "from": {
+          "x": -50.0,
+          "y": 10
+        },
+        "to": {
+          "x": -26.797909,
+          "y": 10.0
+        }
+      },
+      "output": {
+        "from": {
+          "x": 23.202091,
+          "y": 0.0
+        },
+        "to": {
+          "x": 40.0,
+          "y": 0
+        }
+      },
+      "plusVertical": {
+        "from": {
+          "x": -18.047038,
+          "y": 8.749129
+        },
+        "to": {
+          "x": -18.047038,
+          "y": 16.249129
+        }
+      },
+      "plusHorizontal": {
+        "from": {
+          "x": -21.796167,
+          "y": 12.5
+        },
+        "to": {
+          "x": -14.296167,
+          "y": 12.5
+        }
+      },
+      "minusHorizontal": {
+        "from": {
+          "x": -21.796167,
+          "y": -12.5
+        },
+        "to": {
+          "x": -14.296167,
+          "y": -12.5
+        }
+      }
+    }
+  },
+  "rasterWitness": {
+    "kind": "source-pdf-crop",
+    "sourcePdfPage": 308,
+    "dpi": 300.0,
+    "selectionBoundsPdf": {
+      "left": 383.891,
+      "top": 347.7162,
+      "right": 437.857,
+      "bottom": 381.4152
+    },
+    "pixels": {
+      "width": 226,
+      "height": 141
+    },
+    "pixelsPerPdfPoint": {
+      "x": 4.167616341344726,
+      "y": 4.168054397762668
+    },
+    "cropBoxPx": {
+      "left": 1458,
+      "top": 1591,
+      "right": 1684,
+      "bottom": 1732
+    },
+    "assetPath": "opamp-reference.png",
+    "originPx": {
+      "x": 124.415851,
+      "y": 70.227549
+    },
+    "pixelsPerLogical": 2.392338,
+    "threshold": 160
+  }
+}

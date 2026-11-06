@@ -1,0 +1,22 @@
+{
+  "name": "@icm/derived",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "development": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@icm/devices": "workspace:*",
+    "@icm/math-typesetting": "workspace:*",
+    "@icm/model": "workspace:*",
+    "@icm/symbols": "workspace:*"
+  }
+}

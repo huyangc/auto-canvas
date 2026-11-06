@@ -1,0 +1,133 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  createEmptyDocument,
+  createEmptyProject,
+  CURRENT_MODEL_SCHEMA_VERSION,
+} from "@icm/model";
+import type { LegacySimulationSetup as SimulationSetup } from "@icm/model";
+import { migrateSimulationSetupToSource } from "@icm/netlist";
+
+import {
+  parseProjectWithMetadata,
+  tryParseProjectWithMetadata,
+} from "./load.js";
+import { serializeProject } from "./save.js";
+import {
+  upgradeSchema36To37,
+  upgradeSchema36To37WithReport,
+} from "./transforms/simulation-setup.js";
+
+describe("schema 36 to 37 migration (persisted SimulationSetup)", () => {
+  const schema36Project = (): Record<string, unknown> => {
+    const project = createEmptyProject("divider", "Divider");
+    const raw = JSON.parse(JSON.stringify(project)) as Record<string, unknown>;
+    const document = (raw.documents as Record<string, unknown>[])[0]!;
+    (document.instances as unknown[]).push({
+      id: "V1",
+      symbolId: "voltage-source",
+      placement: { position: { x: 100, y: 100 }, rotation: 0, mirror: "none" },
+      reference: "V1",
+      netlist: { parameters: { dc: "1" } },
+    });
+    raw.schemaVersion = 36;
+    return raw;
+  };
+
+  const setup = (): SimulationSetup => ({
+    version: 3,
+    input: {
+      kind: "structured",
+      rootDocumentId: "testbench",
+      analyses: [
+        { kind: "op" },
+        { kind: "ac", sweep: "dec", points: 10, startHz: 1, stopHz: 1e6 },
+      ],
+      outputs: [
+        {
+          id: "probe-out",
+          label: "out",
+          expression: {
+            kind: "voltage",
+            documentId: "testbench",
+            anchor: {
+              kind: "terminal",
+              instanceId: "load",
+              pinName: "1",
+            },
+            occurrence: [],
+          },
+        },
+      ],
+      designVariables: [],
+      runPlan: { mode: "nominal" },
+      environment: { profileId: "sky130-core-continuous-ngspice46-v1" },
+    },
+  });
+
+  it("changes only the version stamp", () => {
+    const previous = schema36Project();
+
+    expect(upgradeSchema36To37(previous)).toEqual({
+      ...previous,
+      schemaVersion: 37,
+    });
+    expect(upgradeSchema36To37WithReport(previous).report).toEqual({
+      changed: false,
+    });
+  });
+
+  it("loads schema 36 with no simulation setup invented", () => {
+    const result = parseProjectWithMetadata(JSON.stringify(schema36Project()));
+
+    expect(result.sourceSchemaVersion).toBe(36);
+    expect(result.migrated).toBe(true);
+    expect(result.project.schemaVersion).toBe(CURRENT_MODEL_SCHEMA_VERSION);
+    expect(result.project.simulationFolders).toEqual([]);
+    expect(result.project.documents[0]!.instances[0]!.netlist).toEqual({
+      parameters: { dc: "1" },
+    });
+    expect(serializeProject(result.project)).toContain('"simulationFolders"');
+  });
+
+  it("round-trips an authored setup byte-stably beside the circuit", () => {
+    const project = createEmptyProject("ota-bench", "OTA bench", "testbench");
+    project.documents.push(createEmptyDocument("ota", "OTA"));
+    project.simulationFolders.push(
+      migrateSimulationSetupToSource(project, {
+        id: "setup-1",
+        name: "Setup 1",
+        ...setup(),
+      }).folder,
+    );
+
+    const serialized = serializeProject(project);
+    const reloaded = parseProjectWithMetadata(serialized);
+
+    expect(reloaded.migrated).toBe(false);
+    expect(reloaded.project.simulationFolders).toEqual(
+      project.simulationFolders,
+    );
+    expect(serializeProject(reloaded.project)).toBe(serialized);
+  });
+
+  it("preserves a setup whose root was removed for prepare-time diagnostics", () => {
+    const project = createEmptyProject("orphan", "Orphan");
+    const candidate = {
+      ...JSON.parse(JSON.stringify(project)),
+      schemaVersion: 48,
+      simulationSetups: [{ id: "setup-1", name: "Setup 1", ...setup() }],
+    };
+
+    const result = tryParseProjectWithMetadata(JSON.stringify(candidate));
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.project.simulationFolders[0]).toMatchObject({
+      id: "setup-1",
+      name: "Setup 1",
+      version: 4,
+      input: { kind: "source", circuitBindings: [{ documentId: "testbench" }] },
+    });
+  });
+});

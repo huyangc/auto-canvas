@@ -1,0 +1,56 @@
+/**
+ * User-facing index of every editor command chord owned by
+ * `resolveEditorShortcut` or the native circuit clipboard handler. Browser-safety interceptions such as blocking F5
+ * while work is unsaved are deliberately absent: they protect the document,
+ * but they are not commands a user can invoke.
+ *
+ * Keep this beside the resolver so adding a keyboard command and documenting
+ * it are one change. Canvas Hints renders the complete list rather than a
+ * separately curated subset.
+ */
+export const EDITOR_SHORTCUT_REFERENCE = [
+  { keys: ["Ctrl/Cmd", "F"], action: "Find in circuit" },
+  { keys: ["Ctrl/Cmd", "Shift", "F"], action: "Choose selectable objects" },
+  { keys: ["F"], action: "Fit view" },
+  { keys: ["Home"], action: "Fit view" },
+  { keys: ["Arrow keys"], action: "Pan view" },
+  { keys: ["G"], action: "Toggle Gallery" },
+  { keys: ["B"], action: "Toggle Component Library" },
+  { keys: ["N"], action: "Toggle Netlist" },
+  { keys: ["I"], action: "Insert component" },
+  { keys: ["P"], action: "Place Cell Pin" },
+  { keys: ["W"], action: "Draw wire" },
+  { keys: ["F3"], action: "Wire options" },
+  { keys: ["/"], action: "Cycle wire corner shape" },
+  { keys: ["T"], action: "Add text" },
+  { keys: ["O"], action: "Display settings" },
+  { keys: ["C"], action: "Copy circuit selection" },
+  { keys: ["V"], action: "Paste circuit selection" },
+  { keys: ["Ctrl/Cmd", "C"], action: "Copy circuit selection across tabs" },
+  { keys: ["Ctrl/Cmd", "V"], action: "Paste circuit selection" },
+  { keys: ["M"], action: "Move selection" },
+  { keys: ["Shift", "M"], action: "Move without wires" },
+  { keys: ["R"], action: "Rotate selection / next object" },
+  { keys: ["Shift", "R"], action: "Mirror left / right" },
+  { keys: ["Ctrl/Cmd", "R"], action: "Mirror top / bottom" },
+  { keys: ["Q"], action: "Toggle Properties" },
+  { keys: ["L"], action: "Create and place Net Label" },
+  { keys: ["H"], action: "Toggle Net highlight" },
+  { keys: ["E"], action: "Edit Component Definition / enter selected Cell" },
+  { keys: ["Shift", "E"], action: "Return to parent Cell" },
+  { keys: ["["], action: "Decrease selected line width" },
+  { keys: ["]"], action: "Increase selected line width" },
+  { keys: ["Enter"], action: "Finish wire or drawing" },
+  { keys: ["Delete"], action: "Delete / remove last wire bend" },
+  { keys: ["Backspace"], action: "Delete / remove last wire bend" },
+  { keys: ["Esc"], action: "Cancel active tool" },
+  { keys: ["Ctrl/Cmd", "A"], action: "Select all" },
+  { keys: ["Ctrl/Cmd", "D"], action: "Clear selection" },
+  { keys: ["U"], action: "Undo" },
+  { keys: ["Ctrl/Cmd", "Z"], action: "Undo" },
+  { keys: ["Shift", "U"], action: "Redo" },
+  { keys: ["Ctrl/Cmd", "Shift", "Z"], action: "Redo" },
+  { keys: ["Ctrl/Cmd", "Y"], action: "Redo" },
+  { keys: ["Ctrl/Cmd", "S"], action: "Save project" },
+  { keys: ["Ctrl/Cmd", "O"], action: "Open project" },
+] as const;

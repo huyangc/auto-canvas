@@ -1,0 +1,609 @@
+# Circuit authoring
+
+The built-in catalog owns asset IDs, canonical pins and variants; the live
+Snapshot owns existing IDs, placement, Net membership, revision and bulk. Use
+live resolved facts for imported/custom/PDK assets; ask the human only when a
+needed fact is unavailable. Never infer connectivity from artwork.
+
+## Pin geometry and the normal path
+
+A catalog pin's `at` is its offset from the origin at rotation 0, y down;
+`landing`, where given, is where a wire attaches. Variants may hide pins
+(`hiddenPinNames`), add `auxiliaryPins` and have their own `bounds`, the ink a
+wire must not cross (`null` for a formula block that grows with its text).
+
+Orientation rotates the offset clockwise, then mirrors it, about the origin:
+(x, y) → (-y, x) at 90, (-x, -y) at 180, (y, -x) at 270, so at `rotation:90`
+nmos D at (10, -20) lands at origin + (20, 10). A resistor lies horizontal
+with pin 1 left at 270; a diode points down at 90. `mirror:"horizontal"` then
+negates x, `"vertical"` y, `"both"` both.
+
+Normal path: **place → read selected pins → wire → review the render → fit the
+view**. Accepted receipts carry current revisions and diagnostics; refresh only
+after a human change or stale-revision rejection, and read the full Snapshot
+only for broad context. New endpoints come from MCP `inspect` target `pins`
+with `instanceIds` (up to 64) or HTTP Snapshot projection `pins`: pin
+geometry, Net IDs and bulk without full topology. A Cell Pin marker (`port`,
+`port-filled`, `vdd-port`) has `reference: null` and its name in
+`cellTerminal: {id, name, direction}`. A crossing is not a connection. It
+draws plain unless the Cell's `crossingStyle` is `"hop"`
+(`set_presentation_style`), which arcs every crossing on its own; set it only
+when asked. Drafting never fakes or hides circuit geometry: no hops, masks or
+lines over wires or parts. A white (sheet-colored) drafting stroke or
+fill is refused (`EDIT_PRECONDITION`), and the Gallery refuses a Project
+holding one (`drafting-cover`).
+
+`place-component` takes an optional `id` of your choosing (refused if taken).
+Give one to a ground, each VDD marker and any part you will wire: later actions
+of the list may name it by that ID or its Reference. A bare string
+(`instance:"M4"`) matches a Reference or Cell Pin name first and an ID only
+when none matches; `instance:{kind:"instance",id}` names the ID alone and, in
+MCP wiring, avoids full-Snapshot name resolution (use it for imported Cell
+Pins). A name several parts share (every VDD marker's `VDD`) is refused with
+their IDs, never resolved to the first.
+
+## Place and name
+
+- Place with native `place-components` (MCP `circuit_place`
+  `place-component`), which creates attached Reference/Value displays; never a
+  bare `add_instance`. Without `parameters` a part gets catalog defaults and a
+  transistor the Netlist panel Process's model (a SKY130 BJT the reviewed
+  wrapper, keeping `m`). The receipt's `placed` lists `{id, reference, symbol}`
+  per part in order, so wiring needs no read.
+- References follow the GUI: a device's starts with its prefix (R, C, M, …), a
+  `place-cell` instance's with X; omitted, the next free name is taken (`R1`,
+  `X2`; a block that emits nothing gets none). A wrong prefix or a used name is
+  rejected with a free name and nothing is placed. To draw another name (op-amp
+  `X1` as A1) use `set-display-alias {target, text}` (`text:null` restores);
+  it survives Project Code and Copy. A Port takes one the same way; a Net
+  label takes one by `annotationId` (Net `VEA_OUT` drawn `VEA,OUT`), and its
+  Net keeps its name in the netlist and joins by it. A Reference outside letters, digits and
+  `_` (a prime, `C3'`) blocks the netlist (`INVALID_INSTANCE_REFERENCE`).
+- A device shows its name alone. `showValue:true` on `place-component` shows
+  its value; `showReference:false` hides the name (native `displays` keyed by
+  new Instance ID); Cell markers and ground take neither. Later,
+  `set-instance-display` (`instanceIds`, `showReference`, `showValue`,
+  `showParameters`) toggles the same attached labels, keeping placement and
+  style; never imitate them with free text. `showSupplyPins` draws an op-amp's
+  `VDD`/`VSS` as pins to wire (a wired one must be disconnected before
+  `false`, one set by `set-terminal-net` returned to `net: null` before
+  `true`); hidden, each takes `set-terminal-net`. Parameter keys come from the actual
+  model contract (magnetics keep `k/lp/ls/l1/l2/cb`, MOS/BJT keep `m`; bound
+  geometry offers its `w/l/mult/mf/vm`, and custom definitions their declared
+  parameters). Omitted keys stay; an unsupported key rejects the whole action.
+  Show Value uses authored values: scalar parts keep their value, MOS keeps
+  its W/L fraction, and geometry R/C shows `W=… L=…` with its non-unit multiplier.
+  A separate multiplier label shows only while that summary is hidden.
+- A placed Cell shows its Cell name and hides `X1`; `set-instance-display`
+  `showReference:true` shows `X1` above it (to tell which block is `x1` in
+  `v(xdut.x1.net0)`).
+- Several `place-cell` actions share one call and Undo; each may omit
+  `instanceId`, `rotation` and `mirror` (the helper makes the ID and turns the
+  Cell upright) and creates its owned Port, Net and terminal-name display.
+  Place a tray Instance with `place-existing` (`instanceId`, `placement`) or
+  `move` it from the tray.
+- `pinAnchor:{pinName,position}` replaces the origin on `place-component`
+  (native `pinAnchors` by Instance ID), `place-cell`, `place-existing` (then
+  `placement` may be omitted) and `move` (keeping rotation/mirror). It uses the
+  routing landing, not artwork contact; an unreachable target is refused with
+  the nearest reachable landing.
+- `mirrorOf:{instance, x}` (or `y`) places the exact mirror image of a placed
+  part about that line (origin reflected, mirror toggled, rotation kept, Ports
+  and names included; off-grid images are refused). `mirror` with `axis`
+  reflects a part in place (`y` left-right, `x` top-bottom); `set-orientation`
+  sets absolute rotation and mirror. No mirror copies connectivity or adds a
+  symmetry constraint.
+- A Port's lead leaves its circle eastward. Place a right-edge output with
+  `mirror:"horizontal"`, or the wire hooks round the circle
+  (`VISUAL_TERMINAL_DEPARTURE`).
+- A person may be watching: after each placement batch, after wiring or moves
+  that reach new ground, and when done, fit the view with `circuit_view`
+  `{kind:"focus",intent:{kind:"fit-document"}}` (the F key). It may end an
+  `apply_actions` list without splitting it and changes only the view (no
+  revision or undo entry; selection and dialogs kept).
+
+## Values and models
+
+- Set values before showing them. Values are strings; MOS sizes are quantities
+  (`w:"10u", l:"1u"`, not `10/1`). `place-component` and `set-property` refuse
+  an unknown parameter (naming the likely one), a value outside a choice list,
+  and a quantity that is not a SPICE number (`1k`, `9kΩ`), a braced expression
+  (`{vdd/2}`) or an accepted word (`vhigh:"VDD"`). Write micro `u` and mega
+  `Meg`: `1MΩ` (milli to SPICE) is refused naming both readings; stored values
+  get the same checks and the `MILLI_SCALE_VALUE` netlist warning.
+- `set-model` (with `target`; native `instanceId` still accepted) uses the
+  GUI's Process-aware planner; an empty model clears the binding. Reviewed
+  targets use the full library name (`sky130_fd_pr__nfet_01v8`; the Netlist
+  panel's `nfet_01v8` is the same device in a SKY130 Project), keep terminal
+  mapping and export the `X` call. Any other name is a raw binding for custom
+  definitions and leaves the Process Custom.
+- Every Library part with a generated body keeps its symbol, pins and VDD/VSS
+  Nets (Auto as unbound) when `set-model` binds it to the first of:
+  - a Project Cell drawn at transistor level (name, any case, or ID);
+  - for a logic gate, a standard cell of its function and input count: SKY130
+    HD (`sky130_fd_sc_hd__nand2_1`), IHP SG13G2 (`sg13g2_nand2_1`) or TSMC 28
+    HPC+ 12-track (`ND2D1BWP12T30P140`, `…LVT`), any drive or variant, called
+    in library pin order and defined by the library's `.include`. Hosted
+    ngspice simulates SKY130 HD; a Profile without the library refuses
+    (`STANDARD_CELL_LIBRARY_UNAVAILABLE`); another pin order or no matching
+    gate is `STANDARD_CELL_UNSUPPORTED`; another function is refused with the
+    cells that fit. A SPICE-imported cell stays an external block.
+  - an external subcircuit of the Project (SPICE-imported or model-source), by
+    name or ID.
+
+  A Cell's Pins or a subcircuit's ports are the part's own pins, never an ideal
+  body's `VIP`/`VIN`/`VOUT`, in any order and letter case, plus `VDD`/`VSS`
+  unless its supplies are global:
+
+  | Parts                                                  | Pins                                                                                |
+  | ------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+  | 2/3/4-input gates, adder, multiplier                   | `A`, `B`(, `C`, `D`), `Y`                                                           |
+  | `inverter`, `buffer`, `delay-cell`, `transconductance` | `A`, `Y`                                                                            |
+  | `opamp`, `comparator`, `differential-transconductance` | `IN+`, `IN-`, `OUT`                                                                 |
+  | `opamp-differential`, `comparator-differential`        | `IN+`, `IN-`, `OUT+`, `OUT-`                                                        |
+  | `voltage-amplifier`, `adc`, `dac`                      | `IN`, `OUT`                                                                         |
+  | `d-flip-flop`, `-q`, `-reset`                          | `D`, `CK`, `Q`, `QBAR` where drawn, `RST` for reset                                 |
+  | `crystal`                                              | `1`, `2`                                                                            |
+  | `tcoil`, `center-tap-inductor`                         | `1`, `2`, `3`                                                                       |
+  | `xfmr`                                                 | `P+`, `P-`, `S+`, `S-`                                                              |
+  | `chopper`                                              | `INP`, `INN`, `OUTP`, `OUTN`, plus `CK` for the clock its label names unless global |
+
+  Others are refused by name, as is a subcircuit that names its ports only by
+  position. The call goes to the definition by Pin name, its parameters win, a
+  VDD/VSS Net it lacks a Pin for is cleared, the part's own Cell is refused,
+  and a Cell's used Pins cannot be renamed or removed. An empty model returns
+  the generated body; the part's own parameters keep their values, or take
+  their defaults where unset (a Delay Cell's all reset). A part with no model
+  calls its ideal body; where a Cell or subcircuit of the Project has the
+  body's name, the netlist writes the body as `icm_<name>`
+  (`LIBRARY_PART_NAME_COLLISION` when that name is taken too, or for a Spectre
+  call-only part). Only `set-model` reaches the Project's own.
+
+- A fully differential amplifier is `opamp-differential-crossed` (compact) or
+  `opamp-differential-wide-crossed` by default: each row pairs + with − (IN−
+  with OUT+ above, IN+ with OUT− below), so feedback from an output to the
+  input on its row runs straight. `opamp-differential` / `-wide` put OUT+ in
+  line with IN+; use them where that keeps wires from crossing. A placed one
+  switches with `set_instance_symbol` (same pin names, Nets kept).
+- AND/NAND/OR/NOR/XOR/XNOR have 2–4 inputs: place `nor-gate-3`, `xor-gate-4`,
+  or `set-property {target, set:{inputs:"3"}}` (symbol and default target
+  change; shared inputs keep wires). Removing a wired input is refused, as is a
+  gate bound to a cell or Cell until its model is cleared.
+- Generic models, reported as netlist information: diodes in Abstract, SKY130,
+  IHP SG13G2 or Custom bind `DIODE`, one `.model DIODE D(IS=1e-14 N=1)` per Cell
+  (`GENERIC_DIODE_MODEL`); BJTs in Abstract or Custom, or `set-model`
+  `NPN`/`PNP`, get `.model NPN NPN(IS=1e-16 BF=100 VAF=100)` /
+  `.model PNP PNP(IS=1e-16 BF=50 VAF=50)` (`GENERIC_BJT_MODEL`); generic
+  `NMOS`/`PMOS` get BSIM4 stand-ins in a netlist handed out,
+  `.model NMOS nmos level=54` / `.model PMOS pmos level=54` in SPICE and
+  `model NMOS bsim4 type=n` / `model PMOS bsim4 type=p` in Spectre
+  (`GENERIC_MOS_MODEL`), and none in a run's deck; there, and for the
+  switch's `SW`, the netlist reports
+  `GENERIC_MODEL_UNDEFINED`. A
+  same-name `.model` in a simulation folder's files replaces or supplies it for
+  that folder. For a real device, `set-model` it.
+- Adder: `signA`/`signB` `"-"` (default `"+"`; `−` stored as `-`) subtracts that
+  input, drawn ±, netlisted `adder_minus_b` (`_a`, `_ab`). V_hold − V_DAC is one
+  adder with `signB:"-"`, never an undrawn −1 gain block.
+- `set-terminal-net {target, pin, net}` sets a terminal no pin of the part's
+  symbol draws, as its Properties row does: a block's or Circuit Component's
+  `VDD`/`VSS` (fixes `MISSING_BLOCK_SUPPLY`), a SKY130 substrate (`B`, `SUB`,
+  `S`), an inductor's `CT`. `net:null` returns a supply to Auto and leaves
+  another unconnected; a drawn pin is refused (wire it). `apply_actions` also
+  takes `set-block-supply {target, supply, net}`. No limit below takes braces.
+- Comparator: V(OUT) = `vlow` + (high − `vlow`)·½(1 + tanh(V(IN+,IN−)/`vtransition`)),
+  `vhigh` `"VDD"` (default: its bound VDD, else the one drawn positive supply,
+  else a default VDD Cell Pin) or volts, `vlow` (`"0"`), `vtransition` (`"1m"`).
+  Keep `"VDD"` when driving logic: a fixed `"1"` never switches it at VDD ≥ 2 V.
+- Op-amp: `gain`·V(IN+,IN−) (`"1e6"`) clipped at `vlow`/`vhigh`, volts or
+  `"VSS"`/`"VDD"` (defaults) read from its own supply once a VDD powers it, else
+  ±5 V; several candidates warn `IDEAL_OPAMP_SUPPLY_AMBIGUOUS` (bind VDD or
+  VSS). Set a figure's stated swing (`vhigh:"12"`, `vlow:"-12"`) so oscillators
+  and Schmitt triggers saturate as drawn. The fully differential op-amp is
+  unlimited.
+- Formula blocks (catalog `formula: true`: integrator, unit delay,
+  discrete-time integrator, transconductance) take
+  `signalFlow:{formula?, coefficient?, bodyWidth?, bodyHeight?}`;
+  `set-signal-flow` changes them (`null` clears; a new formula drops the old
+  look). Compact text, not TeX: `^`/`_` raise/lower the next term, `()` or `{}`
+  group (`g_(m1)`, `z^-1`), one top-level `/` is a fraction. It is drawing text;
+  `set-property` on such a part names `set-signal-flow`.
+- `tcoil` is a bridged T-coil (k plus bridge capacitor CB). A plain
+  centre-tapped inductor (an LC tank fed at its tap) is `center-tap-inductor`:
+  two series halves meeting at pin 3, uncoupled unless k is given.
+
+### Controlled sources
+
+`vcvs`, `vccs`, `cccs`, `ccvs` take `control` on `place-component`;
+`set-source-control` (Instance `target`, `null` clears) changes it, keeping
+parameters and binding (the drawn formula is only an Annotation):
+VCVS/VCCS `{kind:"voltage",positiveNetId,negativeNetId}` with stable Net IDs;
+CCCS/CCVS `{kind:"terminal-current",instanceId,pinName,direction:"into"}`
+(current entering that pin; `out` reverses; export reuses a voltage-source
+sensor or inserts a zero-volt probe); or `{kind:"current",sensorInstanceId}`.
+Snapshots return `instance.netlist.control`; an incomplete one is not
+simulation-ready. A voltage control follows merged Nets; a deleted sensed Net
+is `INVALID_CONTROL_NET`. Parameters are `gain`, `gm` (S), `rm` (ohms). Raw
+HTTP uses `instances[].netlist.control` or `set_instance_netlist`, which
+replaces all netlist facts.
+
+### Switch clock phases
+
+An Open or Closed switch (`ideal-switch`, `closed-switch`) is clocked by the
+phase its name label shows (a new `S1` by `S1`). Share a clock with
+`set-display-alias {target, text:"Φ_1"}` on each switch (netlist
+`S1 a b PHI1 VSS ideal_switch`), driven by a Net named `Φ1` or a Cell Pin
+`Φ1`; an undriven phase becomes a Cell input (`.subckt … PHI1`) passed up
+through callers. `text:"EN_bar"` (drawn E̅N̅) is its own signal: draw the
+inverter if the circuit makes it, else the testbench drives both. Free text
+clocks nothing. `externally-controlled-switch` uses its CTRL pin.
+
+### Coupled inductors
+
+`circuit_selection` `couple-inductors` couples two inductors of one Cell:
+`{kind:"couple-inductors",inductors:[{kind:"instance",reference:"L1"},{kind:"instance",reference:"L2"}],k:"0.9"}`.
+A new pair gets the next `TFn`, `k:"1"`, dots where other couplings put them
+(else the first pin) and the arrow; `name`, `k` (SPICE text, -1 to 1), `dots`
+(per inductor, `null` keeps) and `arrow` override, and a coupled pair changes
+only given fields. Netlist `KTF1 L1 L2 0.9` (Spectre `mutual_inductor`), cards
+starting at the dotted pin. Snapshot `document.inductorCouplings` lists `id`,
+`name`, `members` (`instanceId`, `reference`, `dotPin`), `k`, `arrow:false`
+when hidden. Uncouple with `apply_actions` `delete`
+`target:{kind:"inductor-coupling",name:"TF1"}`; deleting an inductor removes
+its couplings. SPICE `K` cards import as couplings.
+
+## MOS bodies
+
+Three-terminal MOS artwork still has an electrical B pin; read `mosBulk` and
+`mosBulkDefaults`. An unresolved body takes the conventional VDD or ground; a
+Cell that draws none gains it as a Cell Pin (`MOS_BODY_DEFAULT_SUPPLY`,
+information). Hidden bulk needs no decorative wire.
+
+- One device: `connect` its B pin (dashed, as the GUI's Draw bulk connection)
+  with an explicit `via`, never automatic routing. B lands inside the channel
+  and leaves along `outward` (both in selected pins). For an upright part with
+  B at (X,Y), `via:[{x:X+20,y:Y}]` with `to:{kind:"net",net:"VB"}` meets VB at
+  its nearest point; add corners if refused, or target a `wire-at` point or
+  Junction. Body to own source:
+  `{kind:"connect",from:{kind:"pin",instance:"MP",pin:"B"},to:{kind:"pin",instance:"MP",pin:"S"},via:[{x:X+20,y:Y},{x:X+20,y:SY}]}`
+  (SY the source landing's y).
+- Cell default: `{kind:"set-mos-bulk-default",mos:"pmos"|"nmos",net:"VB"}`
+  (`circuit_place`; Net name or ID; `null` clears), as Cell Properties: bodies
+  on the old default move, wired bodies stay (raw `set_mos_bulk_defaults` /
+  `reconcile_mos_bulk` leave them). The NMOS default also places PDK substrate
+  pins ([PDK models and symbols](../knowledge/pdk-and-symbols.md)).
+- `MOS_BODY_OTHER_SUPPLY` (information) names a body on another supply than its
+  source's (following the default, or unwired with none). MCP `verify` lists
+  both body findings in `information`.
+
+## Cell Pins and supplies
+
+- `port`/`port-filled`/`vdd-port` placement also creates the Cell terminal and
+  Net. `reference` names a Port (required); `vdd-port` defaults to `VDD`;
+  `ground` takes none. Optional `direction` (default passive) applies to these
+  markers only (native `terminalDirections` keys must be new markers). The
+  first explicit supply in a batch initializes an absent bulk default, so a
+  signal input (`VIN`) is a `port`, not a `vdd-port`. A `vdd-port`'s name
+  stands beside its bar; `arrange-labels` `side:"top"` centres it (house
+  style).
+- `set-port-direction` sets one terminal or a whole Port; `set-vdd-mode`
+  switches VDD between Cell Pin and Global. Remove a Pin with
+  `remove-cell-terminal` or selection deletion, never by disconnecting `P`.
+- `add-power-rail` draws a `vdd-rail` (a primitive, not a symbol) with optional
+  `name`/`scope` (existing scope kept, else local; `global` only explicitly).
+  It initializes the PMOS bulk default; geometry alone joins no pin. Markers
+  are not named devices. A rail along a same-supply rail, overlapping or
+  touching, extends it. `extend-power-rail {routeId,start,end}` moves a
+  straight rail's ends along its line: taps and the other end stay, the label
+  follows its end, no pin is joined; dropping a tap or moving a tapped end is
+  refused with the tap's ID.
+- `set-cell-symbol-pins` (`circuit_transform`, the Cell's `documentId`)
+  arranges a block's Pins by name:
+  `{kind:"set-cell-symbol-pins",pins:[{name:"bl",side:"east"},{name:"blb",side:"west",offset:0}]}`.
+  Sides `north|east|south|west`; `offset` along the side from the Symbol origin in multiples
+  of 10. Unnamed Pins stay (on an unplaced Cell, where the first placement puts
+  them); a named Pin without `offset` stays on an unchanged side, else takes
+  the first free slot inside the body (0, -20, 20, …). Unknown names and shared slots are
+  refused with the names or free slots. Callers keep their Nets; stretched
+  wiring is redrawn and labels it crosses move clear;
+  `projectStructure.changedDocumentIds` and `changedObjectIds` name what moved.
+- `set-cell-symbol-size` (`circuit_transform`, the Cell's `documentId`) sizes
+  its block body: `{kind:"set-cell-symbol-size",width:80,height:60}`. A
+  centred body takes multiples of 20, explicit edges multiples of 10 (top-left
+  corner kept). A size short of room for the Pins and their names (inside
+  explicit edges, the Pins) is refused with the smallest that fits; an earlier
+  stored size does not count, so a body left large can be made smaller. On an
+  unplaced Cell its Pins stay where its first placement puts them. Callers
+  keep their Nets and redraw.
+- Other interface/symbol edits use `structureEdits` with a nested
+  `transact_document` (not top-level `edits`), e.g. `set_cell_symbol_presentation`
+  with all `pinPlacements` by terminal ID. HTTP callers use their published
+  transact schema; its `actions` form takes `apply_actions`' actions.
+
+## Ordered bus members
+
+Explicit Cell Pin and Net Label names accept `NAME<index>`, inclusive
+`NAME<first:last>`, ordered lists such as `DATA<7,3,0>`, and comma-separated
+bundles such as `CLK,RESET,DATA<3:0>` (at most 256 members). Older bracketed
+scalar names keep their meaning. A parent Label may name its bus independently
+of the child's formal pin.
+
+Inspect before wiring: an aggregate pin reports `netId:null` and ordered
+`members:[{id,name,netId}]`; Route and Junction member records expose their
+scalar logical Net IDs. Semantic pin, Junction and route-segment targets accept
+one of `memberId`, ordered `memberIds`, or `selectionExpression`. For
+`wireIntent`, `memberIds` and `selectionExpression` belong to the endpoint or
+route-segment target; a single `memberId` remains on its endpoint. A shorthand
+such as `<7:4>` requires one explicit indexed source context; mixed bundles
+require full member names. Selections resolve to stable IDs, preserve order,
+and may tap a slice again. Omitting a selection
+continues the whole bus; connecting to a fixed scalar requires an explicit
+member or a unique authoritative name match in the current Document. Geometry
+and child formal spelling never guess a member. Whole-bus connections map
+equal-width ordered lists positionally. The shared planner rejects wrong
+widths, unknown members and ambiguous selections without mutation.
+
+A branch and its bound selector are one transaction. Its `net-name` binding's
+`memberEndpoint` or ordered `memberEndpoints` are display references: unnamed
+parent members display the current formal name without creating a parent name
+claim. `rename-cell-terminal` and an owner `set-net-label` accept `memberMap`,
+mapping existing stable member IDs to requested expanded names or `null` to
+disconnect. Matching names retain identity without a map. Unmatched existing
+members require an explicit choice; reordering never remaps by position. Set
+`convertLegacy:true` to deliberately convert a legacy scalar owner, mapping its
+terminal or naming-claim ID to one member or `null`. Inspect the result before
+continuing; the mutation includes every affected caller in one transaction.
+Bus group copy uses the same selection and dependency rules as scalar copy,
+preserving ordered members, mappings, selector bindings, member No Connects
+and captured artwork.
+
+`expand-net-labels` pairs an expression with explicit `routeIds` in order;
+choose distinct existing scalar branches, one per expanded name. It applies
+through the same Label authority in one undo unit.
+
+`set-no-connect` marks or clears an explicit endpoint set atomically. A bus
+endpoint requires `memberId`; connected members require `disconnect-pin` with
+that member first. Inspect the current members before choosing the set.
+
+Read-only `snapshot.traceNet` takes a scalar logical Net ID and optional
+concrete hierarchy path. Its frames include parent/child member IDs and names
+for bus boundaries; tracing does not change Project revisions or exports.
+
+## Wiring
+
+Wires are drawn as a person draws them: never over another Net's pin, through
+a part (its own included) or along its leads, or onto another Net's wire; a
+Junction on another Net's wire is refused. A first or last leg that would run
+along its own Net's wire ends on it with a dot (a body tied to its source taps
+the source wire). Plain crossings stay legal.
+
+`route-net` (`apply_actions`, native `command`) fills missing visible
+connections for a current Net ID/name, one member pin, a pin list, or a frozen
+import `sourceNetId` (not a current Net ID), skipping connected components.
+`trunk:{start,end}` gives one straight trunk; otherwise it draws a trunk
+between two aligned pins with nothing between, then joins each component
+where cheapest (a joined pin, Junction, or straight onto a wire) in T
+junctions, each wire the cheapest clear path (L, short lead, or detour along a
+free row/column). When none is clear the whole operation is refused naming the
+obstacle and the two points between which it meets it: move parts or give a
+trunk. A given trunk is checked the same way, never bent. It is not an
+autorouter: it moves no device, infers no bulk wiring, and does not override
+import-reference shorts/scope conflicts. Several `route-net` actions share a
+batch, each planned on the previous result. Contract:
+`describe_tool({tool:"apply_actions",operations:["route-net"]})`.
+
+Where a Net cannot cross the drawing (a cascode bias to both halves), name it
+at each end: `connect` the pin to an open `{kind:"point"}` a grid step or two
+out, then `add-label` with the Net's name and target
+`{kind:"pin",instance:"M4",pin:"G"}`; same-name Nets in a Cell are one Net. A
+label not clear on the stub stands at its open end or slides along a longer
+run to the nearest clear spot, then tries the Net's other wires within eight
+grid steps (either side of a vertical run); else it stays and
+`VISUAL_LABEL_CLEARANCE` says so.
+
+A pin unused on purpose (QBAR) needs No Connect or the netlist blocks with
+`MISSING_PIN_NET`:
+`{kind:"disconnect",target:{kind:"pin",instance:"X1",pin:"QBAR"},noConnect:true}`
+(disconnect a wired pin first; exports as `NC0001`, information;
+`noConnect:false` removes it).
+
+## Batches and limits
+
+Placements, wires, labels, models and annotation moves batch atomically:
+failure commits nothing, success is one undo. A transaction takes at most 64
+expanded edits (a part about two, three with `showValue:true`; a Cell Pin about
+five). A `circuit_place` batch (up to 64 parts) over the limit is placed in
+successive transactions with one receipt and one undo; a refusal leaves none.
+A dry run checks one transaction, so over the limit it fails `LIMIT_EXCEEDED`
+(as native `place-components` does) with `expandedEdits`, `maxTransactionEdits`
+and `fittingPlacements`. An over-limit `delete-selection` adds per-class
+`selected…` counts and the fitting leading part (`fittingInstances`, …):
+delete it, refresh, delete the rest. Other commands name themselves and their
+`expandedEdits`.
+
+Display flags, Port directions, VDD mode, terminal removal and power rails
+share a command batch (a VDD and a VSS rail: one call). Pure presentation
+batches keep the structure revision. A list needing several transactions
+commits nothing: `ACTION_BATCH_NOT_ATOMIC`'s `calls` gives action indexes per
+call, in order (placements apart from their wires; a `focus` with the last).
+
+## Move, delete and reset
+
+Clean up with move/mirror/group transforms and route edits. Geometry moves do
+not perform GUI drag-to-connect snapping; a moved part joins only a pin it
+lands on. An unturned, unmirrored `move` carries grounds, supply markers
+and Cell Pins standing unwired on the part's pins (`MARKERS_MOVED_ALONG`);
+wired, shared or locked ones stay, joined by a wire. A selection `transform`
+mirror without a center reflects the whole selection about its own axis as the
+editor's Mirror does, connections unchanged (a wire held by an unselected part
+stays); with an explicit center, labels and drafting are rejected. Translation
+keeps text offsets and formatting; attached drafting follows its owner. Locked
+targets reject the request. Receipt `terminalConnectivityChanged` compares
+document-local terminal equivalence only (omitted means unknown).
+
+`delete` uses the GUI deletion planner, including owned displays and interface
+declarations. `delete-selection` nests explicit IDs by type, omitted lists
+empty: `{"kind":"delete-selection","selection":{"instanceIds":["M1"],"routeIds":["route-3"]}}`
+(`instanceIds`, `routeIds`, `junctionIds`, `annotationIds`, `draftingIds`,
+`noConnectIds`; `annotate` text is drafting). Unknown or misclassified IDs
+reject it all. Deleting a part deletes wires that only tapped it; a wire
+running on to another pin, or carrying a label, stays open there so a
+replacement reconnects (`ERC_DANGLING_WIRE` names open ends).
+
+`reset-placement` (intentional redraw) and `clear-drawing` remove every wire:
+labels on wires stay free with their names, markers on wires go, a rail's
+label stays; the receipt lists moved labels. `reset-cell` `reset-body` removes
+all but the formal interface (Pins, markers, a local rail's label). A rail
+redrawn for a kept label takes it and its Pin over; a VDD Pin marker placed
+instead takes the Net and the kept label, Pin and Junction go. A reset never
+means deleting the Cell.
+
+## Labels and text
+
+- Name Nets with `add-label` / Net Label `edit-text` (native `set-net-label`),
+  which create the name claim and bound text together (free text does not).
+  Give `position` for a new label; its target is a Net or a pin (that pin's
+  Net, on its wire). Plain text is a name drawn in its standard look (`VB1` as
+  V over B1); RichText (runs use `value`) sets its own look. A math run in a
+  Port or Net label renames the Net to its LaTeX (`\phi_1`), which the netlist
+  export refuses: write Greek as the Unicode letter (`φ1`). Deleting a label
+  removes its claim, not wires. Name nodes that scripts reference.
+- `annotate` is for independent notes, with GUI Text defaults. `annotate` and
+  `edit-text` take plain text (keeps existing spans) or RichText (replaces
+  formatting; needed for fractions/formulas). `edit-text` is the GUI text commit:
+  on a bound label new text renames the part or Net or sets the value.
+- A name label's own look: `edit-text` on a Reference, alias, Cell Pin, Port,
+  Net or supply label with RichText that spells the name (the same characters; the `_`
+  before a subscript may be left out) only restyles it, e.g.
+  `{runs:[{kind:"text",value:"AMP1"}]}` draws AMP1 as written instead of AMP₁,
+  or V, an `in` subscript and a `+` superscript draw `Vin+` with its sign
+  raised. A later rename keeps that styling around the new text; a Cell Pin
+  display that does not spell its name is refused.
+- `arrange-labels {instanceIds}` compacts default label slots and moves crowded
+  labels to nearby clear spots in one undo, so no label reads as another
+  part's. `side` (`left|right|top|bottom`) tries that side first; `"outside"`
+  faces labels away from the centre line so differential halves mirror.
+  `place-component` arranges labels that would land crowded. Where parts sit
+  too close the value is left touching a wire: hide values or move parts. A
+  requested Port name now covered moves to its first clear side.
+  `compact:false` / `avoidCollisions:false` disable either part;
+  `referenceStyle:"first-letter-subscript"` draws `RBIAS` as R_BIAS (and an
+  unstyled Port name in its placed look, `vrfp` as V_rfp) without renaming.
+  Manual, locked, hidden and restyled labels stay and are named
+  (`LABELS_LEFT_IN_PLACE`); `includeManual:true` re-places hand-moved ones.
+  Clearance observations never gate editing.
+- `{kind:"apply-label-preset",preset:"textbook"}` (`circuit_text`) for the Cell
+  or `targets` (`[{kind:"instance",reference:"M1"}]` or `id`; native
+  `instanceIds`), one undo: hides every MOS W/L, shows ×m where `m` ≠ 1, leaves
+  other values as they are, then arranges with `first-letter-subscript` (R_L,
+  I_SS, M_1), counting the W/L space as free. Labels arrange-labels leaves alone
+  keep place and look. Over the limit nothing changes (`LIMIT_EXCEEDED`,
+  `fittingParts`).
+- A full or `pins` Snapshot with `instanceLabels:true` (MCP object `inspect`)
+  lists each instance's `annotations` (ids, text, `position`).
+  `move-annotation` sets that position, `alignment` (`start|middle|end`)
+  choosing which end stands there; geometry `inspect` `textBounds:true` reads a
+  label's box. Legacy `move` has the same semantics without `alignment`;
+  `transform` translates; both keep ownership and binding. A Net label moved
+  within 20 units of its own wire segment stays attached; further away it is
+  free but still names its Net. Rotation/anchor changes need annotation edits.
+
+## External model sources
+
+When a User Component editor is open, collaborate on its current candidate
+through `user_components` authoring actions. `authoring-read` discovers the
+workspace and returns its raw candidate, diagnostics, protected owner context
+and `candidateRevision`, saved/applied checkpoint matches and publication
+destination; no open editor returns `workspace:null`. Confirm the returned
+`capabilities.version:1`; older Editors need an update. If the MCP tool lacks
+authoring actions, update the adapter before editing. `open:false` requires a
+person to open the intended GUI editor. Use that
+exact Project session, draft and open-session target for every write. A GUI
+edit, Undo/Redo or reopened editor invalidates older handles/revisions;
+composition refuses concurrent input. Reread and reconcile rather than
+overwriting. Keep inactive Custom artwork and unfinished text intact.
+
+`authoring-update` replaces the raw candidate visible in the GUI, including
+invalid text; it never changes executable facts. `authoring-save` saves the
+non-executable draft. `authoring-apply` with `dryRun:true` validates through the
+GUI planner without writing; actual Apply advances the same applied facts
+used by placement, netlist copy/export and simulation. Validation may be
+pending just after an update; wait for the Editor and reread. Library editing
+is isolated from drawing captures. Applying and saving do not publish.
+
+For example, call `user_components` with
+`{"request":{"action":"authoring-read"}}`, copy its candidate and change an
+owned source file's `text`. Send `authoring-update` with that complete
+`candidate`, the returned `target` and `expectedCandidateRevision`. Reread until
+validation is ready, then send `authoring-apply` with the new revision and
+`dryRun:true`; commit with `dryRun:false` only for the intended change. Let the
+user inspect it in the same editor. Place captures the applied definition;
+public publishing remains a separate action.
+
+Use `read` to inspect an accessible valid definition, including an owned or
+administrator-managed deleted record. `record` reads the raw record at
+`componentId` and `expectedLibraryRevision`; set `deleted:true` for a deleted
+selection. It remains available for malformed definitions without validating or
+applying their circuit. Both reads use the same server permissions as GUI Details.
+
+Manage Project checkpoints with `user_components` `drafts` and the current
+`projectId`/`projectSessionId`. It returns typed targets, capacity limits and
+`structureRevision`. `delete-drafts` takes those exact `targets`, the same session
+and `expectedStructureRevision`; `dryRun:true` returns reclaimable bytes without
+writing. Committed deletion is one Project Undo step; it keeps applied circuit
+facts and current unsaved input. Shared source bodies are retained until explicitly
+selected as a source draft. Read the open candidate again after deletion.
+`discard_model_source_draft` with `definitionIds` removes only those authoring
+candidates after checking `expectedDraft`; it preserves the source text and
+original `baseRevision`. Omit `definitionIds` only to discard the whole draft.
+
+Library `delete`/`restore` take `componentId` and `expectedLibraryRevision`;
+`browse` with `deleted:true` lists manageable removals. They require
+`components.publish`, use authenticated ownership, and return metadata even for
+malformed definitions. Authors may restore their own withdrawals; administrator
+removals require an administrator. Library lifecycle never changes placed copies.
+Draft reads and dry runs require `circuit.snapshot`; committed draft deletion uses
+the same Project edit scopes as authoring-save.
+
+`advanced_transact` `structureEdits` `apply_model_source` defines a
+Project-owned SPICE or Spectre source (files, entry, pinned dependencies) and
+`definitions:[{definitionId,entry,portMap?}]`; optional
+`transform:{language:"spectre",process:"sg13g2"}` runs the GUI's
+Format/Process converter first. The native header derives target, port order
+and defaults (zero ports valid); bound definitions update atomically.
+`portMap` maps connected removed/renamed ports to new names, or `null` to
+disconnect keeping wires; reorder keeps identity.
+
+For a User Component each definition target takes a transient `authoring`:
+`{symbolMode:"automatic"}` or
+`{symbolMode:"custom",artworkText:"<ComponentDefinition JSON>"}` (required to
+create Custom; omitted on edit keeps the capture), optional `terminalDirections`
+by formal port name (input/output/inout/passive), and an optional complete
+`pinMap` from formal names to `{pinName}` or `{supply:"VSS"|"VDD"}` (identical
+names map automatically when artwork has no binding). Never combine it with
+compiled `symbol` or ID-keyed directions on one target; the edit schema covers
+`artworkOrigin` and caller migrations. Validate with `dryRun:true`, then commit
+at the same revisions.
+
+For project definition editing use `apply_actions` command
+`apply-component-definition` with `edit: {kind:"apply_model_source", ...}`.
+It resolves all callers of the exact native owner, matching GUI Edit definition.
+`apply-component-artwork` takes `instanceId` and a complete `definition` for
+captured primitive or Symbol-only definitions. `create-component-variant` takes
+`instanceId` and a fresh `identity`; it clones owned resources and rebinds only
+that instance in one transaction. Inspect the resulting source/owner IDs before
+editing the variant. Declarations and references are namespaced using parsed
+source spans; global parameters or ambiguous opaque references require manual
+source isolation. Display names may remain identical. These operations do not
+publish. Dry-run and revision guards apply as for other authoring commands.
+
+Only reviewed core SKY130 1.8 V and IHP SG13G2 low-voltage MOS conversions
+exist; others refuse without partial change; converted spans cannot be reverse
+edited. Only the SPICE projection runs (on qualified ngspice), whatever the
+source language. Invalid raw text belongs in `save_model_source_draft`;
+export, clipboard and simulation use the applied revision and owned helpers.
+Raw upsert may add an imported owner, never replace an applied one; fork by
+applying a new owner and definition ID with nonconflicting names. Never
+duplicate a Project model in an experiment. Apply neither runs SPICE nor
+certifies behaviour. `user_components` `browse`/`read` discover public
+components; publishing is a separate guarded operation.

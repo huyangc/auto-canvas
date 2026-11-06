@@ -1,0 +1,391 @@
+import {
+  expandedDeviceCatalogEntry,
+  expandedDeviceSymbols,
+  EXTENDED_DEVICE_CATEGORY,
+  normalizeSignalFlowFormula,
+  razaviProductSymbols,
+} from "@icm/symbols";
+import type { SymbolDefinition } from "@icm/symbols";
+
+import {
+  ANNOTATION_CATEGORY,
+  annotationPreviewSymbols,
+  isAnnotationPaletteSymbol,
+} from "./annotation-preview-symbols";
+import { vddRailPreviewSymbol } from "./vdd-rail-preview-symbol";
+import { noConnectPreviewSymbol } from "./no-connect-preview-symbol";
+
+/**
+ * Reach order rather than taxonomy order: the devices placed most often in a
+ * Razavi-style schematic come first, and the composite blocks and logic gates
+ * that are reached for least often sit at the end.
+ */
+interface CatalogSection {
+  readonly category: string;
+}
+
+const CATALOG_SECTIONS: readonly CatalogSection[] = [
+  { category: "Transistors" },
+  { category: "Passives" },
+  { category: "Power and Ports" },
+  { category: "Sources" },
+  { category: "Switches" },
+  { category: "Analog Blocks" },
+  { category: "Logic Gates" },
+  { category: "Signal Flow" },
+  { category: ANNOTATION_CATEGORY },
+  { category: EXTENDED_DEVICE_CATEGORY },
+];
+
+export interface ComponentCatalogGroup {
+  category: string;
+  symbols: SymbolDefinition[];
+}
+
+export function symbolCategory(symbolId: string): string {
+  if (isAnnotationPaletteSymbol(symbolId)) return ANNOTATION_CATEGORY;
+  // Keep diode and adjustable-passive tiles in Extended Devices,
+  // leaving the everyday transistor and passive groups compact.
+  if (
+    [
+      "variable-resistor",
+      "variable-capacitor",
+      "variable-inductor",
+      "diode",
+      "zener-diode",
+      "tcoil",
+      "center-tap-inductor",
+      "xfmr",
+      "crystal",
+    ].includes(symbolId)
+  ) {
+    return EXTENDED_DEVICE_CATEGORY;
+  }
+  const expanded = expandedDeviceCatalogEntry(symbolId);
+  if (expanded) return expanded.category;
+  if (["nmos", "pmos", "npn", "pnp"].includes(symbolId)) {
+    return "Transistors";
+  }
+  if (
+    ["resistor", "capacitor", "inductor-compact", "inductor"].includes(symbolId)
+  ) {
+    return "Passives";
+  }
+  if (
+    [
+      "adc",
+      "dac",
+      "opamp",
+      "opamp-wide",
+      "opamp-lettered",
+      "voltage-amplifier-lettered",
+      "transconductance",
+      "differential-transconductance",
+      "opamp-differential",
+      "opamp-differential-wide",
+      "opamp-differential-lettered",
+      "opamp-differential-crossed",
+      "opamp-differential-wide-crossed",
+      "opamp-differential-crossed-lettered",
+      "voltage-amplifier",
+      "comparator",
+      "comparator-unmarked",
+      "comparator-differential",
+      "comparator-differential-unmarked",
+    ].includes(symbolId)
+  ) {
+    return "Analog Blocks";
+  }
+  if (
+    [
+      "inverter",
+      "buffer",
+      "delay-cell",
+      "d-flip-flop",
+      "d-flip-flop-reset",
+      "d-flip-flop-q",
+      "and-gate",
+      "or-gate",
+      "nand-gate",
+      "nor-gate",
+      "xor-gate",
+      "xnor-gate",
+    ].includes(symbolId)
+  ) {
+    return "Logic Gates";
+  }
+  if (
+    [
+      "adder",
+      "multiplier",
+      "integrator",
+      "unit-delay",
+      "discrete-time-integrator",
+      "quantizer",
+    ].includes(symbolId)
+  ) {
+    return "Signal Flow";
+  }
+  if (
+    [
+      "voltage-source",
+      "pulse-voltage-source",
+      "current-source",
+      "vcvs",
+      "vccs",
+      "cccs",
+      "ccvs",
+    ].includes(symbolId)
+  ) {
+    return "Sources";
+  }
+  if (
+    [
+      "ideal-switch",
+      "closed-switch",
+      "externally-controlled-switch",
+      "simple-switch",
+      "spdt-switch",
+      "voltage-controlled-switch",
+      "chopper",
+    ].includes(symbolId)
+  ) {
+    return "Switches";
+  }
+  return "Power and Ports";
+}
+
+/**
+ * Library display names, where the catalog's own name does not say what the
+ * entry is *for*.
+ *
+ * The hollow Port is a Cell Pin. The filled marker is a Bias Voltage Port.
+ * Both remain independently authored interface objects in the current model.
+ */
+const LIBRARY_DISPLAY_NAMES: Readonly<Record<string, string>> = {
+  "no-connect": "NoConn",
+  opamp: "Op Amp S",
+  "opamp-wide": "Op Amp",
+  "opamp-differential-crossed": "FD Amp S",
+  "opamp-differential-wide-crossed": "FD Amp",
+  "comparator-differential": "FD Comp",
+  "depletion-nmos": "D-NMOS",
+  "depletion-pmos": "D-PMOS",
+  "externally-controlled-switch": "Ctrl SW",
+  vcvs: "VCVS",
+  vccs: "VCCS",
+  cccs: "CCCS",
+  ccvs: "CCVS",
+  port: "Cell Pin",
+  "zener-diode": "Zener",
+  "center-tap-inductor": "CT Coil",
+};
+
+/** One line saying what an entry does, where the name alone leaves a doubt. */
+const LIBRARY_DESCRIPTIONS: Readonly<Record<string, string>> = {
+  "no-connect":
+    "No Connect: mark intentionally unused pins; activates a tool, not a device",
+  "comparator-differential":
+    "Fully differential comparator — complementary OUT+ / OUT−; input/output pin spacing: 20",
+  tcoil:
+    "Bridged T-coil: two coupled windings with a bridge capacitor across the ends",
+  "center-tap-inductor":
+    "Center-tapped inductor: two series halves meeting at the tap, no bridge capacitor",
+  opamp: "Compact Op Amp — input pin spacing: 20",
+  "opamp-wide": "Op Amp — input pin spacing: 40",
+  "opamp-differential-crossed":
+    "Compact FD Amp — input/output pin spacing: 20; each row pairs + with −",
+  "opamp-differential-wide-crossed":
+    "FD Amp — input/output pin spacing: 40; each row pairs + with −",
+  "d-flip-flop-reset":
+    "Rising-edge D flip-flop with an active-high asynchronous reset",
+  "voltage-controlled-switch":
+    "Four-terminal switch: P/N carry the switched path; CP/CN sense the control voltage",
+  "externally-controlled-switch":
+    "Three-terminal switch: P/N carry the path; CTRL is one external logic-control pin",
+  vcvs: "Voltage-controlled voltage source",
+  vccs: "Voltage-controlled current source",
+  cccs: "Current-controlled current source",
+  ccvs: "Current-controlled voltage source",
+  port: "A terminal on this Cell interface — the parent circuit connects to it",
+  "port-filled":
+    "A solid bias-voltage port, typically used for VB-style bias nodes",
+};
+
+export function libraryDisplayName(symbolId: string, fallback: string): string {
+  return LIBRARY_DISPLAY_NAMES[symbolId] ?? fallback;
+}
+
+export function libraryDescription(symbolId: string): string | undefined {
+  return LIBRARY_DESCRIPTIONS[symbolId];
+}
+
+/**
+ * Catalog parts the Library leaves out. The FD amps it offers are the
+ * crossed ones, each row pairing + with −; the straight ones stay in the
+ * catalog for the Agent and for drawings, and Swap outputs reaches them.
+ */
+const LIBRARY_LEAVES_OUT = new Set([
+  "pulse-voltage-source",
+  "opamp-differential",
+  "opamp-differential-wide",
+]);
+
+export function paletteSymbols(_styleProfileId: string): SymbolDefinition[] {
+  const symbols = [
+    vddRailPreviewSymbol,
+    noConnectPreviewSymbol,
+    ...razaviProductSymbols,
+    ...annotationPreviewSymbols,
+    ...expandedDeviceSymbols,
+  ];
+  return symbols.filter((symbol) => !LIBRARY_LEAVES_OUT.has(symbol.id));
+}
+
+/**
+ * Reach order inside a category. Alphabetical order separated devices that are
+ * used together — NMOS from PMOS, the supply Port from its Rail — so the
+ * frequently placed pair leads and the rest keep alphabetical order after it.
+ */
+const SYMBOL_ORDER: readonly string[] = [
+  "nmos",
+  "pmos",
+  "npn",
+  "pnp",
+  // Passives in the order they are taught and reached for, not alphabetical.
+  "resistor",
+  "capacitor",
+  "inductor-compact",
+  "inductor",
+  // Independent sources lead; controlled sources follow in electrical order.
+  "voltage-source",
+  "current-source",
+  "vcvs",
+  "vccs",
+  "cccs",
+  "ccvs",
+  // Switches: textbook two-terminal forms, then explicit-control forms.
+  "ideal-switch",
+  "closed-switch",
+  "externally-controlled-switch",
+  "voltage-controlled-switch",
+  // Logic gates likewise: the two single-input gates, then the combinational
+  // family, then the sequential blocks that are reached for least often.
+  "inverter",
+  "buffer",
+  "and-gate",
+  "or-gate",
+  "nand-gate",
+  "nor-gate",
+  "xor-gate",
+  "xnor-gate",
+  "d-flip-flop",
+  "d-flip-flop-reset",
+  "d-flip-flop-q",
+  "delay-cell",
+  "variable-resistor",
+  "variable-capacitor",
+  "variable-inductor",
+  "diode",
+  "zener-diode",
+  "tcoil",
+  "center-tap-inductor",
+  "xfmr",
+  "crystal",
+  "depletion-nmos",
+  "depletion-pmos",
+  "ndmos",
+  "pdmos",
+  "vdd-port",
+  "vdd",
+  "ground",
+  "no-connect",
+  // Signal-flow blocks in signal-chain order, not alphabetical.
+  "adder",
+  "multiplier",
+  "integrator",
+  "unit-delay",
+  "discrete-time-integrator",
+  "quantizer",
+  // Annotations: drawing tools first (toolbar order), then the polarity
+  // label, standalone signs, and fixed decorative marks last.
+  // Analog Blocks. Alphabetical order split the two converters apart, putting
+  // ADC at the head of the group and DAC four tiles later with comparators and
+  // a differential amplifier between them. A reader looking for one converter
+  // is looking for the pair, so they sit together, after the amplifiers and
+  // comparators an analog schematic reaches for far more often.
+  "opamp-wide",
+  "opamp",
+  "opamp-differential-wide-crossed",
+  "opamp-differential-crossed",
+  "voltage-amplifier",
+  "transconductance",
+  "differential-transconductance",
+  "comparator",
+  "comparator-differential",
+  "adc",
+  "dac",
+  "annotation-arrow",
+  "annotation-line",
+  "annotation-polyline",
+  "annotation-rectangle",
+  "annotation-circle",
+  "annotation-polarity-both",
+  "annotation-text-plus",
+  "annotation-text-minus",
+  "annotation-ellipsis",
+];
+
+function symbolRank(symbolId: string): number {
+  const index = SYMBOL_ORDER.indexOf(symbolId);
+  return index < 0 ? Number.POSITIVE_INFINITY : index;
+}
+
+function searchableText(symbol: SymbolDefinition): string {
+  const formula = symbol.formulaPresentation?.defaultFormula ?? "";
+  return normalizeSignalFlowFormula(
+    `${libraryDisplayName(symbol.id, symbol.name)} ${symbol.name} ${symbol.id} ${formula} ${symbol.id === "no-connect" ? "nc noconn" : ""}`,
+  ).toLowerCase();
+}
+
+export function componentCatalog(
+  styleProfileId: string,
+  query: string,
+  recentSymbolIds: readonly string[] = [],
+): ComponentCatalogGroup[] {
+  const normalizedQuery = normalizeSignalFlowFormula(
+    query.trim(),
+  ).toLowerCase();
+  const recentRank = new Map(
+    recentSymbolIds.map((symbolId, index) => [symbolId, index]),
+  );
+  const symbols = paletteSymbols(styleProfileId)
+    .filter(
+      (symbol) =>
+        normalizedQuery.length === 0 ||
+        searchableText(symbol).includes(normalizedQuery),
+    )
+    .sort((left, right) => {
+      const leftRank = recentRank.get(left.id) ?? Number.POSITIVE_INFINITY;
+      const rightRank = recentRank.get(right.id) ?? Number.POSITIVE_INFINITY;
+      if (leftRank !== rightRank) return leftRank - rightRank;
+      const leftOrder = symbolRank(left.id);
+      const rightOrder = symbolRank(right.id);
+      if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+      return left.name.localeCompare(right.name);
+    });
+
+  return CATALOG_SECTIONS.map(({ category }) => ({
+    category,
+    symbols: symbols.filter((symbol) => symbolCategory(symbol.id) === category),
+  })).filter((group) => group.symbols.length > 0);
+}
+
+export function findPaletteSymbol(
+  styleProfileId: string,
+  symbolId: string,
+): SymbolDefinition | undefined {
+  return paletteSymbols(styleProfileId).find(
+    (symbol) => symbol.id === symbolId,
+  );
+}

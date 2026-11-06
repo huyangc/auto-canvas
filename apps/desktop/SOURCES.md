@@ -1,0 +1,57 @@
+# Desktop preview source map
+
+## Desktop completion (2026-10-11)
+
+The interface follow-up adds a private persistent User Components library and
+adapts upstream definition/native-source authoring and revision checks to that
+host. It simplifies the native Project manager and adds fixed product URLs
+opened in the system browser, independently of blocked renderer navigation.
+These additions reuse upstream component implementations; no additional fork
+implementation is copied. Historical handoff descriptions below remain as the
+record of the earlier migrations.
+
+The sections below record earlier migrations; omitted capabilities describe
+those historical changes. This completion extends the already-adapted shell
+and file bridge, preserving their original notices and LXY-freshman credit.
+No additional fork implementation is copied here.
+
+Upstream integration adds the project library, three-version history,
+independent-copy codec, workspace grant recovery, checked preview migration,
+`.icproj` Windows registration, About, compact paths, website icon packaging,
+online module exclusion and native-ota acceptance. Registration follows
+[Windows per-user file type guidance](https://learn.microsoft.com/en-us/windows/win32/shell/fa-file-types)
+and does not adopt the fork schema or `.schdraft` association. Shared-model
+direction and capability isolation retain Arcadia-1's discussion credit below.
+
+## Native file management (2026-09-26)
+
+This bounded migration adopts the file dialog/result flow and close decision
+ports from LXY-freshman. The original implementation author is recorded as
+`Co-authored-by: LXY-freshman <57762866+LXY-freshman@users.noreply.github.com>`
+in the adopting commits; verify that trailer on the final squash as well.
+
+| Destination                                   | Fixed original                                                                                                                                                                                                                                                                                                                                                                                                      | Reuse and adaptation                                                                                                                                                                                                                                                                                  |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/project-files.ts`                        | [Project file API](https://github.com/LXY-freshman/schematic-draft/blob/5231840f31b551f231441976efc0d18e6f9e5f80/apps/desktop/src/project-files.ts), originating in [desktop c15d9f2d](https://github.com/LXY-freshman/schematic-draft/commit/c15d9f2db22cfbf19bdbc84d743460f5a384b7f6)                                                                                                                             | Retain native Open/Save/Save-As routing, cancelled/failed/saved outcomes and bounded Project size. Replace renderer-selected paths with main-process grants, optimistic byte comparisons and atomic replacement. Add recent-file index. No `.schdraft`, file associations or arbitrary path read API. |
+| `../editor/src/hosts/native-project-store.ts` | [Renderer file bridge](https://github.com/LXY-freshman/schematic-draft/blob/5231840f31b551f231441976efc0d18e6f9e5f80/apps/editor/src/features/editor-shell/project-files.ts)                                                                                                                                                                                                                                        | Adapt POST transport, canonical serialization and defensive outcome decoding to injected services and opaque revisioned bindings. Paths in receipts are display metadata, never write authority.                                                                                                      |
+| `src/close-guard.ts` and its test             | [Close guard](https://github.com/LXY-freshman/schematic-draft/blob/5231840f31b551f231441976efc0d18e6f9e5f80/apps/desktop/src/close-guard.ts), [original close change](https://github.com/LXY-freshman/schematic-draft/commit/54179d29be1c04f17d20fd22deaf98418fc9ff5e), [tests](https://github.com/LXY-freshman/schematic-draft/blob/5231840f31b551f231441976efc0d18e6f9e5f80/apps/desktop/src/close-guard.test.ts) | Retain pure decision ports and save/cancel/failure branches. Aggregate all tabs, recheck after Save, default to Keep open, and require explicit discard if the renderer is unavailable. Current-workspace assertions replace the original single-Project fixtures.                                    |
+
+The recent index, tab integration, current Project protocol adaptation and new
+storage regression cases are upstream integration work. Original source commits
+retain their historical AI-tool trailers; this adapted implementation's credit
+does not claim that those tools participated in the new adaptation.
+
+## First preview
+
+This first migration uses the frozen [Schematic Draft source](https://github.com/LXY-freshman/schematic-draft/tree/5231840f31b551f231441976efc0d18e6f9e5f80), by **LXY-freshman** (`57762866+LXY-freshman@users.noreply.github.com`). The source and upstream are AGPL-3.0-only. This inventory was prepared before adopting the shell implementation.
+
+| Destination                | Original implementation and history                                                                                                                                                                                                                                         | Adaptation / omissions                                                                                                                                                                                                                                                                                                                                                                        |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/app-protocol.ts`      | [Final app-protocol.ts](https://github.com/LXY-freshman/schematic-draft/blob/5231840f31b551f231441976efc0d18e6f9e5f80/apps/desktop/src/app-protocol.ts), [initial desktop](https://github.com/LXY-freshman/schematic-draft/commit/c15d9f2db22cfbf19bdbc84d743460f5a384b7f6) | Reuse private scheme, MIME table, root confinement, script CSP hashes, static responses. Change product origin. Replace native project/shell APIs with export-only delivery. Upstream uses inline style attributes and dynamic styles without nonces, so retain inline styles in style-src, never script-src. No copied nonce helper or false claim of strict style CSP.                      |
+| `src/main.ts`              | [Final main.ts](https://github.com/LXY-freshman/schematic-draft/blob/5231840f31b551f231441976efc0d18e6f9e5f80/apps/desktop/src/main.ts), initial desktop above                                                                                                              | Adapt scheme registration, network/permission restrictions, BrowserWindow isolation, navigation restrictions and download dialogs. Disable external-browser handoff. Use separate preview user data; no registry, associations, native project binding, installer, original close/save algorithm or portable-install path policy. Preview close is a conservative all-tabs reminder, not D-A. |
+| `scripts/build.mjs`        | [Original build script](https://github.com/LXY-freshman/schematic-draft/blob/5231840f31b551f231441976efc0d18e6f9e5f80/apps/desktop/scripts/build.mjs)                                                                                                                       | Retain esbuild ESM main bundle, Electron external and inline legal comments. No recursive cleanup needed.                                                                                                                                                                                                                                                                                     |
+| `src/app-protocol.test.ts` | [Original shell tests](https://github.com/LXY-freshman/schematic-draft/blob/5231840f31b551f231441976efc0d18e6f9e5f80/apps/desktop/src/local-shell.test.ts)                                                                                                                  | Adapt static-serving/CSP/wrong-host test assertions. Add upstream preview export cancellation/failure/path tests. Omit native storage/association/nonce tests because those implementations are not migrated.                                                                                                                                                                                 |
+
+`src/export-file.ts`, preview capability composition, package assembly and packaged acceptance are new integration work. They do not implement the fork schema or claim the original author wrote the new adaptations. The original [NOTICE](./upstream-NOTICE.md) is retained verbatim as a historical source notice; its statements about Schematic Draft's native Save, deleted hosted code, icon and distribution layout describe that fork, not this preview.
+
+The first adopting commit carries the source URLs, reuse scope and `Co-authored-by: LXY-freshman <57762866+LXY-freshman@users.noreply.github.com>`. The preview delivery also credits **Token Zhang / Arcadia-1** for the shared-core desktop direction and service-composition discussion in [Issue #1003](https://github.com/cascode-ai/analog-canvas/issues/1003) and [#1121](https://github.com/cascode-ai/analog-canvas/issues/1121). This discussion credit does not attribute the fork implementation to Arcadia-1. Preserve both contributions in the final squash commit; inspect its trailers after merging.

@@ -1,0 +1,182 @@
+import {
+  lazy,
+  Suspense,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import type { CircuitProject } from "@icm/model";
+
+import { formatProjectCode, planProjectCodeCommit } from "./project-code";
+import { projectCodeInstanceRanges } from "./project-code-ranges";
+import { createProjectCodeReader } from "./project-code-reader";
+
+const ProjectTextEditor = lazy(() => import("./project-text-editor"));
+
+export interface ProjectCodeApplyOutcome {
+  ok: boolean;
+  message?: string;
+}
+
+/** Complete Project JSON, kept separate from per-object Properties. */
+export function ProjectCodePanel({
+  project,
+  selection,
+  serializeProject = formatProjectCode,
+  onDirtyChange,
+  onApply,
+}: {
+  onDirtyChange?(dirty: boolean): void;
+  project: CircuitProject;
+  /** The session's canonical serializer; validation still belongs to the reader. */
+  serializeProject?: typeof formatProjectCode;
+  /** Parts selected on the canvas, whose whole JSON the code lights. */
+  selection?: { documentId: string; instanceIds: readonly string[] };
+  onApply(
+    source: string,
+    baseline: string,
+    planners: {
+      formatProjectCode: typeof formatProjectCode;
+      planProjectCodeCommit: typeof planProjectCodeCommit;
+    },
+  ): ProjectCodeApplyOutcome;
+}) {
+  const reader = useMemo(
+    () => createProjectCodeReader(project, serializeProject),
+    [project, serializeProject],
+  );
+  const baseline = reader.baseline;
+  const [draft, setDraft] = useState(baseline);
+  const [editBaseline, setEditBaseline] = useState(baseline);
+  const [dirty, setDirty] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const ownApply = useRef(false);
+
+  useLayoutEffect(() => {
+    if (!dirty || ownApply.current) {
+      ownApply.current = false;
+      setDraft(baseline);
+      setEditBaseline(baseline);
+      setDirty(false);
+      setError(null);
+    }
+  }, [baseline, dirty]);
+
+  useLayoutEffect(() => {
+    onDirtyChange?.(dirty);
+    return () => onDirtyChange?.(false);
+  }, [dirty, onDirtyChange]);
+
+  const selectionKey = selection
+    ? `${selection.documentId}\u0000${selection.instanceIds.join("\u0000")}`
+    : "";
+  const highlightedRanges = useMemo(
+    () =>
+      selection
+        ? projectCodeInstanceRanges(
+            draft,
+            selection.documentId,
+            selection.instanceIds,
+          )
+        : [],
+    // The selection is read through its key; a new array of the same ids
+    // is the same selection.
+    [draft, selectionKey],
+  );
+
+  const changedOutsideDraft = dirty && editBaseline !== baseline;
+  const parsed = reader.validate(draft);
+
+  function change(source: string): void {
+    if (!dirty) setEditBaseline(baseline);
+    setDraft(source);
+    setDirty(source !== baseline);
+    const next = reader.validate(source);
+    setError(next.ok ? null : next.message);
+  }
+
+  function apply(): void {
+    const current = reader.validate(draft);
+    if (!current.ok) {
+      setError(current.message);
+      return;
+    }
+    if (changedOutsideDraft) {
+      setError(
+        "The canvas or Agent changed this Project while you were editing. Reload the live code before applying.",
+      );
+      return;
+    }
+    const outcome = onApply(draft, editBaseline, {
+      formatProjectCode: serializeProject,
+      planProjectCodeCommit,
+    });
+    if (!outcome.ok) {
+      setError(outcome.message ?? "The Project edit was rejected");
+      return;
+    }
+    ownApply.current = true;
+    setDraft(baseline);
+    setEditBaseline(baseline);
+    setDirty(false);
+    setError(null);
+  }
+
+  function reload(): void {
+    setDraft(baseline);
+    setEditBaseline(baseline);
+    setDirty(false);
+    setError(null);
+  }
+
+  return (
+    <section className="project-code-panel" aria-label="Project Code">
+      <div className="project-code-actions">
+        <button type="button" onClick={reload} disabled={!dirty}>
+          Reload
+        </button>
+        <button
+          type="button"
+          className="primary"
+          onClick={apply}
+          disabled={!dirty || !parsed.ok || changedOutsideDraft}
+        >
+          Apply
+        </button>
+      </div>
+      <Suspense
+        fallback={
+          <textarea
+            aria-label="Loading Project code editor"
+            value={draft}
+            readOnly
+          />
+        }
+      >
+        <ProjectTextEditor
+          ariaLabel="Project code"
+          language="json"
+          value={draft}
+          invalid={!!error || changedOutsideDraft}
+          onChange={change}
+          onModEnter={apply}
+          highlightedRanges={highlightedRanges}
+          revealHighlight={selectionKey}
+        />
+      </Suspense>
+      {changedOutsideDraft ? (
+        <p role="alert">
+          The live Project changed. Reload before applying so an Agent or canvas
+          edit is not overwritten.
+        </p>
+      ) : error ? (
+        <p role="alert">{error}</p>
+      ) : dirty ? (
+        <p role="status">Valid Project JSON · Apply or press Ctrl/⌘ + Enter.</p>
+      ) : (
+        <p role="status">Showing the current complete Project.</p>
+      )}
+    </section>
+  );
+}

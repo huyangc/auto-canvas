@@ -1,0 +1,707 @@
+{
+  "format": "analog-canvas-agent-distribution-v1",
+  "version": 1,
+  "registrySha256": "b4d84d5d4c58dc1f856d0e541b3ea80e8c1a0e45e9f831481533f2067cf3ff10",
+  "sources": [
+    {
+      "source": "docs/agent/simulation-specs.md",
+      "sha256": "b3112ef75f2da39bc9e9b30dd950df2733b766bb12fa36f0ac56047d33464332"
+    },
+    {
+      "source": "docs/agent/mcp-quickstart.md",
+      "sha256": "a6ca3f6db92b2c0f1464bec3b9010b63c9ec6113dca78d1cc4bb9bdb703437fb"
+    },
+    {
+      "source": "docs/agent/http-kit/skills/icm-circuit-session/SKILL.md",
+      "sha256": "030861cf994d95a7f2fdcece6566e88d8daaa4ed85d7c89702822c4a221496da"
+    },
+    {
+      "source": "docs/agent/shared/session.md",
+      "sha256": "486a1e6d0aea2957a16d2640a179c4a79c0ef156b47eb2ba3e44a567165cf2b8"
+    },
+    {
+      "source": "docs/agent/shared/authoring.md",
+      "sha256": "983b3aa63d608ccceead1d0bf8a51237e7411b668633ed57b728e5a0ce2a7bd9"
+    },
+    {
+      "source": "docs/agent/workflow.md",
+      "sha256": "b63788b375b95396c7500a0631a4b2a1ca9eea1c9799914333285d1d2ba658a8"
+    },
+    {
+      "source": "docs/agent/tool-behavior.md",
+      "sha256": "d6755e913583f37ba971b32feb79b2012ebfa4b8dee42e21129cbf9bf1294660"
+    },
+    {
+      "source": "docs/agent/response-semantics.md",
+      "sha256": "4462776ca6e477272429ad2756b9eb4663e8684da96a7d6bdfa5d658fef2cb84"
+    },
+    {
+      "source": "docs/agent/circuit-style-knowledge.md",
+      "sha256": "82224a41c84e840f07ae63354ab21ad6ec5d239fe2e3adc3cfcdc968f4ff7ed8"
+    },
+    {
+      "source": "docs/agent/assets/folded-cascode-recommended.svg",
+      "sha256": "f368149e7e5b246b490eab980ba947dc73ead4302890a347b7abc55347ae73ca"
+    },
+    {
+      "source": "docs/agent/assets/folded-cascode-not-recommended.svg",
+      "sha256": "1f39c5d60856a4ee2f33a68bd08a5bf50666042897df0e450a6f04980224dd2f"
+    },
+    {
+      "source": "docs/agent/shared/diagnostics.md",
+      "sha256": "b9bd8d5859eb70ea8ab2459d44b1e3775373485bb2db838ba7101507c23a10e6"
+    },
+    {
+      "source": "fixtures/agent-api/agent-circuit-request.schema.json",
+      "sha256": "efdc57969829c18a86bc488465858ece85935c46f69364e5843272daf8c63397"
+    },
+    {
+      "source": "docs/agent/http-kit/README.md",
+      "sha256": "6ba880c4b66bdc4e5a1b303e5291f6b34e7444d9c717cea3f04ec39acbb1b3cd"
+    },
+    {
+      "source": "docs/agent/http-kit/AGENTS.md",
+      "sha256": "01b547b8bf1832344f41c5d3abe73f0de20196c405f90a323532da5b233c92ed"
+    },
+    {
+      "source": "docs/agent/http-cli.md",
+      "sha256": "86a7bb066e8934882890466e468b5ebaaa3277f6083dc527398b70e00235a43a"
+    },
+    {
+      "source": "packages/agent-adapter/src/agent-authoring-catalog.generated.ts",
+      "sha256": "63d3431389f339e5242c2ed2fcc2102fe1fffe02490ecd7b49a38e9e1ed60a70"
+    },
+    {
+      "source": "docs/agent/knowledge/circuit-reading.md",
+      "sha256": "574b49ea9ef22e8bf2d95ace480e4fe8b8a06ea47aaa0760900cdd933799925e"
+    },
+    {
+      "source": "docs/agent/knowledge/hierarchy-and-large-circuits.md",
+      "sha256": "3d42ae311955c1922d711212a12d05e5414c9d1a5bb565035abc78be31b15bbc"
+    },
+    {
+      "source": "docs/agent/knowledge/pdk-and-symbols.md",
+      "sha256": "48e6079e4a7fcc7d5cc347ab4507c4df20ceeda3fc56c101186cd06ea9f0e856"
+    },
+    {
+      "source": "docs/agent/mcp-install.md",
+      "sha256": "abccbd0432acd1d02063868a03871d59ddfc470f22f8c607f2faac122327ba16"
+    },
+    {
+      "source": "docs/agent/api-usage.md",
+      "sha256": "a4001a52cb1a17133dc8cbcbc26e000fafc74fb5e3fd04bb59bbc7ac1015eab6"
+    },
+    {
+      "source": "docs/agent/examples.md",
+      "sha256": "ec2d228fe4b3f86e1795ce7ea0f555d348a21ff660181a37924ffb6cc4b2f0ae"
+    },
+    {
+      "source": "docs/agent/simulation-evidence-storage.md",
+      "sha256": "c2a029d887351b005012d0ee6496c10ad42f6daf44bd142b6b0305fbf967824d"
+    },
+    {
+      "source": "docs/agent/simulation-result-handoff.md",
+      "sha256": "025575578e71edbaf74cbe568167b3286605d6587bf1106c3bc3238ab997cfcf"
+    },
+    {
+      "source": "docs/agent/mcp/tools.md",
+      "sha256": "bf5a427f874d284dc574d80d21ef1b25828677f214b97c96468025beb23e18de"
+    },
+    {
+      "source": "docs/agent/mcp/simulation.md",
+      "sha256": "327afd32daf7e0270f7e78d2e69779c319dc78d4407dd5c77fd1fb1cc12c64c2"
+    },
+    {
+      "source": "docs/agent/mcp/simulation-reference.md",
+      "sha256": "0e0756b451a093bac477cdd896c4d95bd27c4ddb10491f7d4d3f4229d8681960"
+    },
+    {
+      "source": "docs/agent/shared/simulation.md",
+      "sha256": "cd861fb392f8765a6730279b55ea4475ed03a3182df050d91bffbe60d5b55685"
+    },
+    {
+      "source": "docs/agent/routegraph.md",
+      "sha256": "c71fbee08fa2947d2f1a00d7b20cc2e2aa1322b39463f085811ee0af4326beb5"
+    },
+    {
+      "source": "docs/agent/local-workspace.md",
+      "sha256": "66da36a8ace81e9baee565afe8b0c7e0209dd2cd1f586b9f3117d56194dfc999"
+    },
+    {
+      "source": "docs/agent/mcp/tool-help.json",
+      "sha256": "4fbe205d99efaaeb5c18bc8190328d32bdf7319dceda7678e21cb42cf7dbb463"
+    },
+    {
+      "source": "docs/agent/http-kit/api-help.json",
+      "sha256": "c26a542c286aadebe5a39f15a63ba61903635a062ce51b6f3af0f6176a7e1b6f"
+    },
+    {
+      "source": "docs/agent/mcp/instructions.md",
+      "sha256": "6b7f2482a576fa50cca54ad273bd0dde337ecf6557ee7edae494314e4ab65b60"
+    },
+    {
+      "source": "docs/agent/entrypoints/connect.md",
+      "sha256": "1f70d966658ff5b1326b67191dff313323f533a9facd841b836b3dcf89b59c7b"
+    }
+  ],
+  "documents": [
+    {
+      "id": "reference/simulation-specs",
+      "source": "docs/agent/simulation-specs.md",
+      "consumers": [
+        "mcp",
+        "http-cli",
+        "http-kit"
+      ],
+      "task": "Simulation Spec rules and raw handoff",
+      "load": "on-demand",
+      "requires": [],
+      "uri": "analog-canvas://reference/simulation-specs",
+      "kitPath": "references/simulation-specs.md"
+    },
+    {
+      "id": "reference/quickstart",
+      "source": "docs/agent/mcp-quickstart.md",
+      "consumers": [
+        "mcp",
+        "http-cli"
+      ],
+      "task": "MCP live-session quickstart",
+      "load": "entry",
+      "requires": [],
+      "uri": "analog-canvas://reference/quickstart"
+    },
+    {
+      "id": "fallback/http-session-workflow",
+      "source": "docs/agent/http-kit/skills/icm-circuit-session/SKILL.md",
+      "consumers": [
+        "http-kit"
+      ],
+      "task": "Raw HTTP live-session workflow",
+      "load": "required",
+      "requires": [
+        "reference/api-usage",
+        "reference/session",
+        "reference/authoring"
+      ],
+      "kitPath": "skills/icm-circuit-session/SKILL.md"
+    },
+    {
+      "id": "reference/session",
+      "source": "docs/agent/shared/session.md",
+      "consumers": [
+        "mcp",
+        "http-cli",
+        "http-kit"
+      ],
+      "task": "Session contract",
+      "load": "on-demand",
+      "requires": [],
+      "uri": "analog-canvas://reference/session",
+      "kitPath": "references/session-contract.md"
+    },
+    {
+      "id": "reference/authoring",
+      "source": "docs/agent/shared/authoring.md",
+      "consumers": [
+        "mcp",
+        "http-cli",
+        "http-kit"
+      ],
+      "task": "Built-in authoring contract",
+      "load": "on-demand",
+      "requires": [],
+      "uri": "analog-canvas://reference/authoring",
+      "kitPath": "references/authoring-contract.md"
+    },
+    {
+      "id": "reference/workflow",
+      "source": "docs/agent/workflow.md",
+      "consumers": [
+        "mcp",
+        "http-cli",
+        "http-kit"
+      ],
+      "task": "Schematic workflow",
+      "load": "on-demand",
+      "requires": [],
+      "uri": "analog-canvas://reference/workflow",
+      "kitPath": "references/workflow.md"
+    },
+    {
+      "id": "reference/tool-behavior",
+      "source": "docs/agent/tool-behavior.md",
+      "consumers": [
+        "mcp",
+        "http-cli",
+        "http-kit"
+      ],
+      "task": "Tool behavior",
+      "load": "on-demand",
+      "requires": [],
+      "uri": "analog-canvas://reference/tool-behavior",
+      "kitPath": "references/tool-behavior.md"
+    },
+    {
+      "id": "reference/recovery",
+      "source": "docs/agent/response-semantics.md",
+      "consumers": [
+        "mcp",
+        "http-cli",
+        "http-kit"
+      ],
+      "task": "Response semantics and recovery",
+      "load": "on-demand",
+      "requires": [],
+      "uri": "analog-canvas://reference/recovery",
+      "kitPath": "references/response-semantics.md"
+    },
+    {
+      "id": "reference/razavi-style",
+      "source": "docs/agent/circuit-style-knowledge.md",
+      "consumers": [
+        "mcp",
+        "http-cli",
+        "http-kit"
+      ],
+      "task": "Draw or redraw a schematic from a figure, paper or netlist",
+      "load": "on-demand",
+      "requires": [],
+      "uri": "analog-canvas://reference/razavi-style",
+      "kitPath": "references/circuit-style-knowledge.md"
+    },
+    {
+      "id": "reference/folded-cascode-recommended",
+      "source": "docs/agent/assets/folded-cascode-recommended.svg",
+      "consumers": [
+        "mcp",
+        "http-cli",
+        "http-kit"
+      ],
+      "task": "Inspect the folded-cascode placement example",
+      "load": "on-demand",
+      "requires": [],
+      "uri": "analog-canvas://reference/folded-cascode-recommended",
+      "kitPath": "references/assets/folded-cascode-recommended.svg"
+    },
+    {
+      "id": "reference/folded-cascode-not-recommended",
+      "source": "docs/agent/assets/folded-cascode-not-recommended.svg",
+      "consumers": [
+        "mcp",
+        "http-cli",
+        "http-kit"
+      ],
+      "task": "Compare folded-cascode placement examples",
+      "load": "on-demand",
+      "requires": [],
+      "uri": "analog-canvas://reference/folded-cascode-not-recommended",
+      "kitPath": "references/assets/folded-cascode-not-recommended.svg"
+    },
+    {
+      "id": "reference/diagnostics",
+      "source": "docs/agent/shared/diagnostics.md",
+      "consumers": [
+        "mcp",
+        "http-cli",
+        "http-kit"
+      ],
+      "task": "Routing and diagnostics",
+      "load": "on-demand",
+      "requires": [],
+      "uri": "analog-canvas://reference/diagnostics",
+      "kitPath": "references/diagnostics.md"
+    },
+    {
+      "id": "reference/routing",
+      "source": "docs/agent/circuit-style-knowledge.md",
+      "consumers": [
+        "mcp",
+        "http-cli",
+        "http-kit"
+      ],
+      "task": "Drawing guide alias; do not reread",
+      "load": "on-demand",
+      "requires": [],
+      "uri": "analog-canvas://reference/routing",
+      "kitPath": "references/route-tree-shapes.md"
+    },
+    {
+      "id": "contract/advanced-edits",
+      "source": "fixtures/agent-api/agent-circuit-request.schema.json",
+      "consumers": [
+        "mcp",
+        "http-cli",
+        "http-kit"
+      ],
+      "task": "Advanced transaction contract",
+      "load": "on-demand",
+      "requires": [],
+      "uri": "analog-canvas://contract/advanced-edits",
+      "kitPath": "references/agent-circuit-request.schema.json"
+    },
+    {
+      "id": "http-kit/README.md",
+      "source": "docs/agent/http-kit/README.md",
+      "consumers": [
+        "http-kit"
+      ],
+      "task": "Bootstrap raw HTTP",
+      "load": "entry",
+      "requires": [
+        "http-kit/AGENTS.md",
+        "fallback/http-session-workflow"
+      ],
+      "kitPath": "README.md"
+    },
+    {
+      "id": "http-kit/AGENTS.md",
+      "source": "docs/agent/http-kit/AGENTS.md",
+      "consumers": [
+        "http-kit"
+      ],
+      "task": "Bootstrap raw HTTP",
+      "load": "entry",
+      "requires": [],
+      "kitPath": "AGENTS.md"
+    },
+    {
+      "id": "reference/http-cli",
+      "source": "docs/agent/http-cli.md",
+      "consumers": [
+        "http-cli"
+      ],
+      "task": "Operate shared-client CLI",
+      "load": "entry",
+      "requires": [
+        "reference/authoring"
+      ],
+      "uri": "analog-canvas://reference/http-cli"
+    },
+    {
+      "id": "catalog/builtins",
+      "source": "packages/agent-adapter/src/agent-authoring-catalog.generated.ts",
+      "consumers": [
+        "mcp",
+        "http-cli",
+        "http-kit"
+      ],
+      "task": "Discover built-in symbols",
+      "load": "on-demand",
+      "requires": [],
+      "uri": "analog-canvas://catalog/builtins",
+      "kitPath": "references/razavi-authoring-catalog.json"
+    },
+    {
+      "id": "reference/knowledge/circuit-reading",
+      "source": "docs/agent/knowledge/circuit-reading.md",
+      "consumers": [
+        "mcp",
+        "http-cli",
+        "http-kit"
+      ],
+      "task": "Evidence-first circuit reading",
+      "load": "on-demand",
+      "requires": [],
+      "uri": "analog-canvas://reference/knowledge/circuit-reading",
+      "kitPath": "references/knowledge/circuit-reading.md"
+    },
+    {
+      "id": "reference/knowledge/hierarchy-and-large-circuits",
+      "source": "docs/agent/knowledge/hierarchy-and-large-circuits.md",
+      "consumers": [
+        "mcp",
+        "http-cli",
+        "http-kit"
+      ],
+      "task": "Hierarchy and large circuits",
+      "load": "on-demand",
+      "requires": [],
+      "uri": "analog-canvas://reference/knowledge/hierarchy-and-large-circuits",
+      "kitPath": "references/knowledge/hierarchy-and-large-circuits.md"
+    },
+    {
+      "id": "reference/knowledge/pdk-and-symbols",
+      "source": "docs/agent/knowledge/pdk-and-symbols.md",
+      "consumers": [
+        "mcp",
+        "http-cli",
+        "http-kit"
+      ],
+      "task": "PDK models and symbols",
+      "load": "on-demand",
+      "requires": [],
+      "uri": "analog-canvas://reference/knowledge/pdk-and-symbols",
+      "kitPath": "references/knowledge/pdk-and-symbols.md"
+    },
+    {
+      "id": "reference/mcp-install",
+      "source": "docs/agent/mcp-install.md",
+      "consumers": [
+        "mcp",
+        "http-cli"
+      ],
+      "task": "Install the Analog Canvas MCP adapter",
+      "load": "on-demand",
+      "requires": [],
+      "uri": "analog-canvas://reference/mcp-install"
+    },
+    {
+      "id": "reference/api-usage",
+      "source": "docs/agent/api-usage.md",
+      "consumers": [
+        "http-kit"
+      ],
+      "task": "Agent API Usage",
+      "load": "on-demand",
+      "requires": [],
+      "kitPath": "references/api-usage.md"
+    },
+    {
+      "id": "reference/examples",
+      "source": "docs/agent/examples.md",
+      "consumers": [
+        "http-kit"
+      ],
+      "task": "Reproducible Agent Workflows",
+      "load": "on-demand",
+      "requires": [],
+      "kitPath": "references/examples.md"
+    },
+    {
+      "id": "reference/simulation-evidence-storage",
+      "source": "docs/agent/simulation-evidence-storage.md",
+      "consumers": [
+        "mcp",
+        "http-cli",
+        "http-kit"
+      ],
+      "task": "Simulation evidence usage and recovery",
+      "load": "on-demand",
+      "requires": [],
+      "uri": "analog-canvas://reference/simulation-evidence-storage",
+      "kitPath": "references/simulation-evidence-storage.md"
+    },
+    {
+      "id": "reference/simulation-result-handoff",
+      "source": "docs/agent/simulation-result-handoff.md",
+      "consumers": [
+        "mcp",
+        "http-cli",
+        "http-kit"
+      ],
+      "task": "Agent simulation result handoff",
+      "load": "on-demand",
+      "requires": [],
+      "uri": "analog-canvas://reference/simulation-result-handoff",
+      "kitPath": "references/simulation-result-handoff.md"
+    },
+    {
+      "id": "reference/mcp-tools",
+      "source": "docs/agent/mcp/tools.md",
+      "consumers": [
+        "mcp",
+        "http-cli"
+      ],
+      "task": "MCP editing tools and local inspection",
+      "load": "on-demand",
+      "requires": [],
+      "uri": "analog-canvas://reference/mcp-tools"
+    },
+    {
+      "id": "reference/mcp-simulation",
+      "source": "docs/agent/mcp/simulation.md",
+      "consumers": [
+        "mcp",
+        "http-cli"
+      ],
+      "task": "MCP simulation calls and file ownership",
+      "load": "on-demand",
+      "requires": [],
+      "uri": "analog-canvas://reference/mcp-simulation"
+    },
+    {
+      "id": "reference/mcp-simulation-details",
+      "source": "docs/agent/mcp/simulation-reference.md",
+      "consumers": [
+        "mcp",
+        "http-cli"
+      ],
+      "task": "Detailed MCP simulation contracts",
+      "load": "on-demand",
+      "requires": [],
+      "uri": "analog-canvas://reference/mcp-simulation-details"
+    },
+    {
+      "id": "reference/simulation-workflow",
+      "source": "docs/agent/shared/simulation.md",
+      "consumers": [
+        "mcp",
+        "http-cli",
+        "http-kit"
+      ],
+      "task": "Shared simulation lifecycle",
+      "load": "on-demand",
+      "requires": [
+        "reference/simulation-specs",
+        "reference/simulation-result-handoff"
+      ],
+      "uri": "analog-canvas://reference/simulation-workflow",
+      "kitPath": "references/simulation-workflow.md"
+    },
+    {
+      "id": "reference/knowledge/patterns",
+      "source": "docs/agent/circuit-style-knowledge.md",
+      "consumers": [
+        "mcp",
+        "http-cli",
+        "http-kit"
+      ],
+      "task": "Drawing guide alias; do not reread",
+      "load": "on-demand",
+      "requires": [],
+      "uri": "analog-canvas://reference/knowledge/patterns",
+      "kitPath": "references/knowledge/patterns.md"
+    },
+    {
+      "id": "repo/routegraph",
+      "source": "docs/agent/routegraph.md",
+      "consumers": [
+        "maintainer"
+      ],
+      "task": "Use optional repository RouteGraph helper",
+      "load": "on-demand",
+      "requires": []
+    },
+    {
+      "id": "repo/local-workspace",
+      "source": "docs/agent/local-workspace.md",
+      "consumers": [
+        "maintainer"
+      ],
+      "task": "Draw in a local workspace without a browser",
+      "load": "on-demand",
+      "requires": []
+    }
+  ],
+  "templates": {
+    "apiHelp": {
+      "consumers": [
+        "http-kit",
+        "maintainer"
+      ],
+      "task": "Describe published HTTP operations"
+    },
+    "connect": {
+      "consumers": [
+        "bootstrap"
+      ],
+      "task": "Install, verify loading, then connect"
+    },
+    "instructions": {
+      "consumers": [
+        "mcp"
+      ],
+      "task": "Initialize MCP reading route"
+    },
+    "toolHelp": {
+      "consumers": [
+        "mcp",
+        "http-cli"
+      ],
+      "task": "Discover tool operation and limitations"
+    }
+  },
+  "outputs": [
+    {
+      "file": "apps/mcp-server/src/resources.generated.ts",
+      "sources": [
+        "docs/agent/distribution.json",
+        "docs/agent/simulation-specs.md",
+        "docs/agent/mcp-quickstart.md",
+        "docs/agent/shared/session.md",
+        "docs/agent/shared/authoring.md",
+        "docs/agent/workflow.md",
+        "docs/agent/tool-behavior.md",
+        "docs/agent/response-semantics.md",
+        "docs/agent/circuit-style-knowledge.md",
+        "docs/agent/assets/folded-cascode-recommended.svg",
+        "docs/agent/assets/folded-cascode-not-recommended.svg",
+        "docs/agent/shared/diagnostics.md",
+        "docs/agent/circuit-style-knowledge.md",
+        "fixtures/agent-api/agent-circuit-request.schema.json",
+        "docs/agent/http-cli.md",
+        "packages/agent-adapter/src/agent-authoring-catalog.generated.ts",
+        "docs/agent/knowledge/circuit-reading.md",
+        "docs/agent/knowledge/hierarchy-and-large-circuits.md",
+        "docs/agent/knowledge/pdk-and-symbols.md",
+        "docs/agent/mcp-install.md",
+        "docs/agent/simulation-evidence-storage.md",
+        "docs/agent/simulation-result-handoff.md",
+        "docs/agent/mcp/tools.md",
+        "docs/agent/mcp/simulation.md",
+        "docs/agent/mcp/simulation-reference.md",
+        "docs/agent/shared/simulation.md",
+        "docs/agent/circuit-style-knowledge.md"
+      ],
+      "sha256": "a8c8b2549443fef2e6762fae0af34f284ad38757f313e2d5018b5f83da6b066e"
+    },
+    {
+      "file": "packages/agent-adapter/src/agent-docs.generated.ts",
+      "sources": [
+        "docs/agent/distribution.json",
+        "docs/agent/simulation-specs.md",
+        "docs/agent/http-kit/skills/icm-circuit-session/SKILL.md",
+        "docs/agent/shared/session.md",
+        "docs/agent/shared/authoring.md",
+        "docs/agent/workflow.md",
+        "docs/agent/tool-behavior.md",
+        "docs/agent/response-semantics.md",
+        "docs/agent/circuit-style-knowledge.md",
+        "docs/agent/assets/folded-cascode-recommended.svg",
+        "docs/agent/assets/folded-cascode-not-recommended.svg",
+        "docs/agent/shared/diagnostics.md",
+        "docs/agent/circuit-style-knowledge.md",
+        "fixtures/agent-api/agent-circuit-request.schema.json",
+        "docs/agent/http-kit/README.md",
+        "docs/agent/http-kit/AGENTS.md",
+        "packages/agent-adapter/src/agent-authoring-catalog.generated.ts",
+        "docs/agent/knowledge/circuit-reading.md",
+        "docs/agent/knowledge/hierarchy-and-large-circuits.md",
+        "docs/agent/knowledge/pdk-and-symbols.md",
+        "docs/agent/api-usage.md",
+        "docs/agent/examples.md",
+        "docs/agent/simulation-evidence-storage.md",
+        "docs/agent/simulation-result-handoff.md",
+        "docs/agent/shared/simulation.md",
+        "docs/agent/circuit-style-knowledge.md"
+      ],
+      "sha256": "90b29813eddeb4db7ac125e5a5bcf22a14df73a1b1eba87398c698e5f4219906"
+    },
+    {
+      "file": "packages/agent-adapter/src/agent-api-help.generated.ts",
+      "sources": [
+        "docs/agent/distribution.json",
+        "docs/agent/http-kit/api-help.json"
+      ],
+      "sha256": "f2c6e686584ae50dc775fd5853960febf5abe25147dd1930aa2c1795f5bf52fb"
+    },
+    {
+      "file": "apps/mcp-server/src/guidance.generated.ts",
+      "sources": [
+        "docs/agent/distribution.json",
+        "docs/agent/mcp/instructions.md",
+        "docs/agent/mcp/tool-help.json"
+      ],
+      "sha256": "2b6ccb8aee248562cf63dcf7cf989b944845131e24dbbf10d52e83213d0fd665"
+    },
+    {
+      "file": "apps/editor/src/agent/connection-guidance.generated.ts",
+      "sources": [
+        "docs/agent/distribution.json",
+        "docs/agent/entrypoints/connect.md"
+      ],
+      "sha256": "42f7bdb526d56ef234538b735ba8bee1383ed59c364785fd7e583c52d7657280"
+    }
+  ]
+}

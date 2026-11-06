@@ -1,0 +1,56 @@
+Ngspice 46 structural baseline
+* Original minimized conformance fixture; no manual text is copied.
+.param SELECT=1 BASE=1k
+.func twice(x) {2*x}
+.global VDD VSS
+.lib models.lib TT
+
+.subckt child A B
+RCHILD A B {BASE}
+.ends child
+
+.subckt core IN OUT VDD VSS
+R1 IN N1 {BASE}
+C1 N1 VSS 2p
+L1 N1 N2 3n
+L2 N2 OUT 4n
+K12 L1 L2 0.98
+VBIAS VDD VSS dc 1.8
+I1 OUT VSS 2u
+E1 EOUT VSS IN VSS 2
+G1 GOUT VSS IN VSS 1m
+F1 FOUT VSS VBIAS 3
+H1 HOUT VSS VBIAS 4
+B1 BOUT VSS V={v(IN)*2}
+D1 N2 VSS DMOD
+Q1 QOUT IN VSS QMOD
+J1 JOUT IN VSS JMOD
+Z1 ZOUT IN VSS ZMOD
+M1 MOUT IN VSS VSS MMOD L=1u W=2u
+S1 SOUT VSS IN VSS SMOD
+W1 WOUT VSS VBIAS WMOD
+T1 TIN VSS TOUT VSS Z0=50 TD=1n
+O1 OIN VSS OOUT VSS OMOD
+P1 P1A VSS P1B VSS PMOD
+U1 UIN UOUT VSS UMOD L=1m
+Y1 YIN VSS YOUT VSS YMOD
+X1 IN OUT child
+.if (SELECT == 1)
+RSELECT OUT VSS {twice(BASE)}
+.else
+RSELECT_OFF OUT VSS 9k
+.endif
+.ends core
+
+XTOP IN OUT VDD VSS core
+.options reltol=1e-3
+.op
+.ac dec 10 1 1Meg
+.dc VBIAS 0 1.8 0.1
+.tran 1n 10n
+.save v(OUT)
+.control
+run
+print v(OUT)
+.endc
+.end

@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "referenceId": "razavi-reference-v1",
+  "family": {
+    "kind": "direct-pdf-vector",
+    "semanticBoundary": "electrical pins are reconstructed; visual geometry and the Delta-T mark are source-owned"
+  },
+  "symbols": {
+    "delay-cell": {
+      "evidenceId": "razavi-textbook-delay-cell",
+      "assetPath": "delay-cell-reference.png",
+      "pixelsPerLogical": 1.8,
+      "originPx": {
+        "x": 82.136598,
+        "y": 38.735838
+      },
+      "window": {
+        "width": 93,
+        "height": 49,
+        "minX": -25.6,
+        "minY": -13.6
+      },
+      "rotation": 0,
+      "threshold": 160
+    }
+  }
+}

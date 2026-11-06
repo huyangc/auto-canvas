@@ -1,0 +1,858 @@
+import { createRoutePath } from "@icm/model";
+import { describe, expect, it, vi } from "vitest";
+
+import {
+  createEmptyDocument,
+  createEmptyProject,
+  semanticTextDocument,
+} from "@icm/model";
+import type { SchematicDocument } from "@icm/model";
+import {
+  diagnoseProjectSnapshot,
+  deriveDocumentContactEvidence,
+} from "@icm/derived";
+import { hierarchicalSymbolId } from "@icm/symbols";
+import {
+  planSetCellSymbolPresentation,
+  proposeBlockSymbolLayout,
+} from "@icm/edit-engine";
+import { serializeProject, parseProject } from "@icm/project-protocol";
+
+import { EditorDocumentController } from "./document-controller";
+
+function instance(id: string) {
+  return {
+    id,
+    symbolId: "resistor",
+    placement: null,
+  };
+}
+
+function hierarchicalProject() {
+  const project = createEmptyProject("controller", "Controller");
+  const top = project.documents[0]!;
+  const child: SchematicDocument = {
+    ...structuredClone(top),
+    id: "document-child",
+    name: "child",
+    netlist: { name: "child", terminals: [], formalParameters: [] },
+  };
+  project.documents.push(child);
+  return project;
+}
+
+describe("EditorDocumentController", () => {
+  it("restores every rotated and mirrored caller of an asymmetric layout in one Undo, with atomic stale/no-op/refused edits", () => {
+    const project = hierarchicalProject();
+    const root = project.documents[0]!,
+      child = project.documents[1]!;
+    for (const name of ["A", "B", "C"]) {
+      child.instances.push({
+        id: `P${name}`,
+        symbolId: "port",
+        placement: null,
+      });
+      child.nets.push({
+        id: name,
+        terminals: [{ instanceId: `P${name}`, pinName: "P" }],
+      });
+      child.netlist!.terminals.push({
+        id: name,
+        name,
+        netId: name,
+        direction: "input",
+        interfaceInstanceIds: [`P${name}`],
+      });
+    }
+    child.presentation.cellSymbol = {
+      minimumBodySize: { width: 120, height: 100 },
+    };
+    for (const rotation of [0, 45, 90, 135, 180, 225, 270, 315] as const)
+      for (const mirror of ["none", "horizontal", "vertical", "both"] as const)
+        root.instances.push({
+          id: `X${rotation}-${mirror}`,
+          reference: `X${rotation}-${mirror}`,
+          symbolId: hierarchicalSymbolId("child"),
+          placement: {
+            position: { x: rotation * 10, y: mirror.length * 100 },
+            rotation,
+            mirror,
+          },
+          netlist: {
+            parameters: {},
+            binding: { kind: "subcircuit", childDocumentId: child.id },
+          },
+        });
+    const controller = new EditorDocumentController(project);
+    const placements = controller.document.instances.map(
+      (instance) => instance.placement,
+    );
+    const proposal = proposeBlockSymbolLayout(
+      {
+        id: "layout",
+        name: "child",
+        terminals: child.netlist!.terminals,
+        presentation: child.presentation.cellSymbol,
+      },
+      { kind: "resize", grip: "west", point: { x: -100, y: 0 } },
+    );
+    expect(proposal.ok).toBe(true);
+    if (!proposal.ok) return;
+    const request = {
+      transactionId: "layout",
+      projectId: project.id,
+      expectedStructureRevision: controller.project.structureRevision,
+      actor: { kind: "human" as const, id: "test" },
+      edits: planSetCellSymbolPresentation(
+        controller.project,
+        child.id,
+        proposal.presentation,
+      ),
+    };
+    expect(controller.dispatchProjectTransaction(request)).toMatchObject({
+      ok: true,
+      applied: true,
+    });
+    const edited = parseProject(serializeProject(controller.project));
+    expect(edited.documents[1]!.presentation.cellSymbol?.bodyBounds).toEqual({
+      left: -100,
+      right: 60,
+      top: -50,
+      bottom: 50,
+    });
+    expect(
+      controller.document.instances.map((instance) => instance.placement),
+    ).toEqual(placements);
+    const same = {
+      ...request,
+      expectedStructureRevision: controller.project.structureRevision,
+      edits: planSetCellSymbolPresentation(
+        controller.project,
+        child.id,
+        proposal.presentation,
+      ),
+    };
+    expect(controller.dispatchProjectTransaction(same)).toMatchObject({
+      ok: true,
+      applied: false,
+    });
+    expect(controller.dispatchProjectTransaction(request)).toMatchObject({
+      ok: false,
+    });
+    expect(
+      controller.dispatchProjectTransaction({
+        ...same,
+        edits: planSetCellSymbolPresentation(controller.project, child.id, {
+          bodyBounds: { left: 0, right: 10, top: 0, bottom: 10 },
+        }),
+      }),
+    ).toMatchObject({ ok: false });
+    expect(controller.transact([{ kind: "undo" }])).toMatchObject({
+      ok: true,
+      applied: true,
+    });
+    expect(controller.project.documents[1]!.presentation.cellSymbol).toEqual(
+      child.presentation.cellSymbol,
+    );
+    expect(
+      controller.document.instances.map((instance) => instance.placement),
+    ).toEqual(placements);
+    expect(controller.canUndo).toBe(false);
+    expect(controller.transact([{ kind: "redo" }])).toMatchObject({
+      ok: true,
+      applied: true,
+    });
+    expect(controller.project.documents[1]!.presentation.cellSymbol).toEqual(
+      edited.documents[1]!.presentation.cellSymbol,
+    );
+  });
+  it("reuses current contact evidence without changing transforms, refusals or history", () => {
+    const project = createEmptyProject("contact", "Contact");
+    const document = project.documents[0]!;
+    document.instances = ["A", "B"].map((id) => ({
+      id,
+      reference: id,
+      symbolId: "resistor",
+      placement: { position: { x: 0, y: 0 }, rotation: 0, mirror: "none" },
+    }));
+    document.nets = ["1", "2"].map((pinName) => ({
+      id: `n${pinName}`,
+      terminals: ["A", "B"].map((instanceId) => ({ instanceId, pinName })),
+    }));
+    const plain = new EditorDocumentController(project);
+    const hinted = new EditorDocumentController(project);
+    let reads = 0;
+    const evidence = deriveDocumentContactEvidence(
+      hinted.document,
+      hinted.resolver,
+    );
+    const hint = {
+      document: hinted.document,
+      resolver: hinted.resolver,
+      get evidence() {
+        reads++;
+        return evidence;
+      },
+    };
+    for (const edits of [
+      [{ kind: "move_instance", instanceId: "A", position: { x: 40, y: 0 } }],
+      [{ kind: "move_instance", instanceId: "A", position: { x: 80, y: 0 } }],
+      [{ kind: "undo" }],
+      [{ kind: "redo" }],
+      [
+        {
+          kind: "move_instance",
+          instanceId: "absent",
+          position: { x: 0, y: 0 },
+        },
+      ],
+    ] as const) {
+      expect(hinted.transact(edits, hint)).toEqual(plain.transact(edits));
+      expect(hinted.project).toEqual(plain.project);
+      expect([hinted.canUndo, hinted.canRedo]).toEqual([
+        plain.canUndo,
+        plain.canRedo,
+      ]);
+    }
+    expect(reads).toBeGreaterThan(0);
+    const foreign = {
+      document: hinted.document,
+      resolver: plain.resolver,
+      get evidence(): never {
+        throw new Error("foreign resolver evidence");
+      },
+    };
+    expect(
+      hinted.transact(
+        [
+          {
+            kind: "move_instance",
+            instanceId: "A",
+            position: { x: 120, y: 0 },
+          },
+        ],
+        foreign,
+      ),
+    ).toEqual(
+      plain.transact([
+        { kind: "move_instance", instanceId: "A", position: { x: 120, y: 0 } },
+      ]),
+    );
+  });
+  it("compares shared history without serializing whole Documents", () => {
+    const controller = new EditorDocumentController(hierarchicalProject());
+    controller.transact([{ kind: "add_instance", instance: instance("Rtop") }]);
+    const stringify = JSON.stringify;
+    let documentsSerialized = 0;
+    const spy = vi
+      .spyOn(JSON, "stringify")
+      .mockImplementation((value, replacer, space) => {
+        if (
+          value &&
+          Array.isArray(value.instances) &&
+          Array.isArray(value.routes)
+        )
+          documentsSerialized++;
+        return stringify(value, replacer as never, space);
+      });
+    try {
+      const undone = controller.transact([{ kind: "undo" }]);
+      expect(undone).toMatchObject({ ok: true, applied: true, revision: 2 });
+      expect(undone.ok && undone.diff.changedObjectIds).toEqual([
+        controller.document.id,
+        "Rtop",
+      ]);
+      expect(controller.document.instances).toEqual([]);
+      expect(controller.canRedo).toBe(true);
+      expect(documentsSerialized).toBe(0);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+  it("keeps returned transaction documents mutable and detached from committed history", () => {
+    const controller = new EditorDocumentController(hierarchicalProject());
+    const result = controller.transact([
+      { kind: "add_instance", instance: instance("Rtop") },
+    ]);
+    expect(result.ok).toBe(true);
+    result.document.instances.length = 0;
+    expect(controller.document.instances.map((item) => item.id)).toContain(
+      "Rtop",
+    );
+    const rejected = controller.dispatchTransaction({
+      transactionId: "stale",
+      documentId: controller.document.id,
+      expectedRevision: 0,
+      actor: { kind: "human", id: "editor" },
+      edits: [{ kind: "noop" }],
+    });
+    expect(rejected.ok).toBe(false);
+    rejected.document.instances.length = 0;
+    expect(controller.document.instances.map((item) => item.id)).toContain(
+      "Rtop",
+    );
+    const undone = controller.transact([{ kind: "undo" }]);
+    expect(undone.ok).toBe(true);
+    undone.document.name = "Caller edit";
+    expect(controller.document.name).not.toBe("Caller edit");
+  });
+
+  it("owns a validated clone rather than mutating the caller's Project", () => {
+    const source = hierarchicalProject();
+    const controller = new EditorDocumentController(source);
+
+    expect(controller.project).not.toBe(source);
+    expect(controller.document.id).toBe(source.topDocumentId);
+    expect(controller.activeDocumentId).toBe(source.topDocumentId);
+  });
+
+  it("commits through the Edit Engine and replaces exactly the active document", () => {
+    const controller = new EditorDocumentController(hierarchicalProject());
+    const childBefore = controller.project.documents.find(
+      (document) => document.id === "document-child",
+    );
+    const result = controller.transact([
+      { kind: "add_instance", instance: instance("Rtop") },
+    ]);
+
+    expect(result.ok && result.applied).toBe(true);
+    expect(controller.document.instances).toContainEqual(instance("Rtop"));
+    expect(
+      controller.project.documents.find(
+        (document) => document.id === "document-child",
+      ),
+    ).toEqual(childBefore);
+    expect(controller.transactionsIssued).toBe(1);
+    expect(controller.canUndo).toBe(true);
+  });
+
+  it("fits a 16 V part the GUI resizes to a size SKY130 models (#1485)", () => {
+    const project = createEmptyProject("controller", "Controller");
+    project.externalSubcircuitDefinitions.push({
+      id: "definition-16v",
+      name: "sky130_fd_pr__nfet_g5v0d16v0",
+      interfaceStatus: "declared",
+      terminals: ["D", "G", "S", "B"].map((name) => ({
+        id: `terminal-${name}`,
+        name,
+        direction: "passive" as const,
+      })),
+      formalParameters: [],
+    });
+    project.documents[0]!.instances.push({
+      id: "M1",
+      reference: "M1",
+      symbolId: "ndmos",
+      placement: null,
+      netlist: {
+        binding: {
+          kind: "external-subcircuit",
+          definitionId: "definition-16v",
+        },
+        parameters: { w: "5u", l: "2.2u", nf: "1", m: "1" },
+      },
+    });
+    const controller = new EditorDocumentController(project);
+    // W 55 µm is modelled only at L 0.7 µm: the typed W stays, L follows.
+    const result = controller.transact([
+      {
+        kind: "bulk_patch_instance_netlist",
+        assignments: [{ instanceId: "M1", set: { w: "55u" } }],
+      },
+    ]);
+    expect(result.ok && result.applied).toBe(true);
+    expect(controller.document.instances[0]!.netlist?.parameters).toEqual({
+      w: "55u",
+      l: "700n",
+      nf: "1",
+      m: "1",
+    });
+  });
+
+  it("undoes chronologically across Cells without changing the viewed Cell", () => {
+    const controller = new EditorDocumentController(hierarchicalProject());
+    controller.transact([{ kind: "add_instance", instance: instance("Rtop") }]);
+    expect(controller.openDocument("document-child")?.name).toBe("child");
+    controller.transact([
+      { kind: "add_instance", instance: instance("Rchild") },
+    ]);
+
+    controller.openDocument(controller.project.topDocumentId);
+    expect(controller.canUndo).toBe(true);
+    controller.transact([{ kind: "undo" }]);
+    expect(controller.document.instances).toContainEqual(instance("Rtop"));
+
+    controller.openDocument("document-child");
+    expect(controller.document.instances).toEqual([]);
+    expect(controller.canUndo).toBe(true);
+    controller.transact([{ kind: "undo" }]);
+    expect(controller.activeDocumentId).toBe("document-child");
+    expect(controller.project.documents[0]!.instances).toEqual([]);
+  });
+
+  it("re-derives resolved diagnostics across undo and redo revisions", () => {
+    const controller = new EditorDocumentController(hierarchicalProject());
+    controller.transact([{ kind: "add_instance", instance: instance("R1") }]);
+    const codes = () =>
+      diagnoseProjectSnapshot(controller.project, controller.resolver)
+        .diagnostics.filter(
+          (diagnostic) =>
+            diagnostic.primary.documentId === controller.document.id,
+        )
+        .map((diagnostic) => diagnostic.code);
+
+    expect(codes()).toContain("ERC_UNCONNECTED_PIN");
+
+    controller.transact([
+      {
+        kind: "connect_endpoints",
+        from: { kind: "terminal", instanceId: "R1", pinName: "1" },
+        to: { kind: "terminal", instanceId: "R1", pinName: "2" },
+        newNetId: "net-r1-loop",
+      },
+    ]);
+    expect(codes()).not.toContain("ERC_UNCONNECTED_PIN");
+
+    controller.transact([{ kind: "undo" }]);
+    expect(codes()).toContain("ERC_UNCONNECTED_PIN");
+
+    controller.transact([{ kind: "redo" }]);
+    expect(codes()).not.toContain("ERC_UNCONNECTED_PIN");
+  });
+
+  it("re-derives endpoint readiness when Wire Delete is undone and redone", () => {
+    const project = hierarchicalProject();
+    const document = project.documents[0]!;
+    document.instances.push(
+      {
+        id: "M1",
+        symbolId: "nmos",
+        placement: {
+          position: { x: 0, y: 0 },
+          rotation: 0,
+          mirror: "none",
+        },
+      },
+      {
+        id: "M2",
+        symbolId: "nmos",
+        placement: {
+          position: { x: 100, y: 0 },
+          rotation: 0,
+          mirror: "none",
+        },
+      },
+    );
+    document.nets.push({
+      id: "net-ports",
+      terminals: ["M1", "M2"].map((instanceId) => ({
+        instanceId,
+        pinName: "D",
+      })),
+    });
+    document.noConnects.push(
+      ...["M1", "M2"].flatMap((instanceId) =>
+        ["G", "S", "B"].map((pinName) => ({
+          id: `nc-${instanceId.toLowerCase()}-${pinName.toLowerCase()}`,
+          endpoint: { kind: "terminal" as const, instanceId, pinName },
+        })),
+      ),
+    );
+    document.routes.push(
+      createRoutePath({
+        id: "wire-ports",
+        netId: "net-ports",
+        start: { kind: "terminal", instanceId: "M1", pinName: "D" },
+        end: { kind: "terminal", instanceId: "M2", pinName: "D" },
+        bends: [],
+        modes: ["manual"],
+      }),
+    );
+    const controller = new EditorDocumentController(project);
+    const unconnectedCount = () =>
+      diagnoseProjectSnapshot(
+        controller.project,
+        controller.resolver,
+      ).diagnostics.filter(
+        (diagnostic) => diagnostic.code === "ERC_UNCONNECTED_PIN",
+      ).length;
+
+    expect(unconnectedCount()).toBe(0);
+    const cut = controller.transact([
+      { kind: "cut_connection", routeId: "wire-ports" },
+    ]);
+    if (!cut.ok) throw new Error(JSON.stringify(cut, null, 2));
+    expect(unconnectedCount()).toBe(2);
+
+    controller.transact([{ kind: "undo" }]);
+    expect(unconnectedCount()).toBe(0);
+
+    controller.transact([{ kind: "redo" }]);
+    expect(unconnectedCount()).toBe(2);
+  });
+
+  it("rejects missing documents without changing the active history", () => {
+    const controller = new EditorDocumentController(hierarchicalProject());
+    const activeId = controller.activeDocumentId;
+
+    expect(controller.openDocument("missing")).toBeNull();
+    expect(controller.activeDocumentId).toBe(activeId);
+  });
+
+  it("resets active document and all histories on Project replacement", () => {
+    const controller = new EditorDocumentController(hierarchicalProject());
+    const originalSessionId = controller.projectSessionId;
+    controller.transact([{ kind: "add_instance", instance: instance("Rold") }]);
+    const replacement = createEmptyProject("replacement", "Replacement");
+    replacement.topDocumentId = replacement.documents[0]!.id;
+
+    const document = controller.replaceProject(replacement);
+
+    expect(document.id).toBe(replacement.topDocumentId);
+    expect(controller.project.id).toBe("replacement");
+    expect(controller.projectSessionId).toMatch(/^replacement:\d+$/u);
+    expect(controller.projectSessionId).not.toBe(originalSessionId);
+    expect(controller.canUndo).toBe(false);
+    expect(controller.canRedo).toBe(false);
+  });
+
+  it("commits a new child Cell without replacing the Project session", () => {
+    const controller = new EditorDocumentController(hierarchicalProject());
+    const sessionId = controller.projectSessionId;
+    const resolverBefore = controller.resolver;
+    controller.transact([{ kind: "add_instance", instance: instance("Rold") }]);
+    const project = structuredClone(controller.project);
+    const child = createEmptyDocument("document-cell-1", "Cell1");
+    project.documents.push(child);
+    project.documents[0]!.instances.push({
+      id: "X1",
+      symbolId: hierarchicalSymbolId("Cell1"),
+      placement: {
+        position: { x: 0, y: 0 },
+        rotation: 0,
+        mirror: "none",
+      },
+      reference: "X1",
+      netlist: {
+        parameters: {},
+        binding: {
+          kind: "subcircuit",
+          childDocumentId: child.id,
+        },
+      },
+    });
+    project.structureRevision += 1;
+
+    const active = controller.commitProjectStructure(project);
+
+    expect(active.id).toBe(controller.project.topDocumentId);
+    expect(controller.projectSessionId).toBe(sessionId);
+    expect(controller.resolver).not.toBe(resolverBefore);
+    expect(
+      controller.resolver.resolve(hierarchicalSymbolId("Cell1")),
+    ).toBeDefined();
+    expect(controller.canUndo).toBe(true);
+    expect(controller.openDocument(child.id)?.id).toBe(child.id);
+    const undo = controller.transact([{ kind: "undo" }]);
+    expect(undo.ok && undo.applied).toBe(true);
+    expect(controller.project.documents).toHaveLength(2);
+    expect(
+      controller.project.documents.some(
+        (document) => document.id === "document-cell-1",
+      ),
+    ).toBe(false);
+    expect(controller.document.id).toBe(controller.project.topDocumentId);
+    expect(controller.canRedo).toBe(true);
+
+    const redo = controller.transact([{ kind: "redo" }]);
+    expect(redo.ok && redo.applied).toBe(true);
+    expect(
+      controller.project.documents.some(
+        (document) => document.id === "document-cell-1",
+      ),
+    ).toBe(true);
+  });
+
+  it("dispatches an Agent transaction as one undo item without rebuilding symbols", () => {
+    const controller = new EditorDocumentController(hierarchicalProject());
+    const resolverBefore = controller.resolver;
+    const revisionBefore = controller.document.revision;
+
+    const result = controller.dispatchTransaction({
+      transactionId: "agent-1",
+      documentId: controller.activeDocumentId,
+      expectedRevision: revisionBefore,
+      actor: { kind: "agent", id: "codex" },
+      edits: [{ kind: "add_instance", instance: instance("Ragent") }],
+    });
+
+    expect(result.ok && result.applied).toBe(true);
+    expect(controller.document.instances).toContainEqual(instance("Ragent"));
+    expect(controller.document.revision).toBe(revisionBefore + 1);
+    expect(controller.canUndo).toBe(true);
+    expect(controller.resolver).toBe(resolverBefore);
+
+    // One Agent transaction is one undo item: a single undo restores the
+    // pre-Agent state through the shared history.
+    controller.transact([{ kind: "undo" }]);
+    expect(controller.document.instances).not.toContainEqual(
+      instance("Ragent"),
+    );
+    expect(controller.resolver).toBe(resolverBefore);
+  });
+
+  it("keeps the transactions of one step as one undo item, or none of them (#1516)", () => {
+    const controller = new EditorDocumentController(hierarchicalProject());
+    controller.transact([{ kind: "add_instance", instance: instance("R0") }]);
+    controller.transact([{ kind: "undo" }]);
+    const before = structuredClone(controller.document);
+    const add = (id: string) =>
+      controller.dispatchTransaction({
+        transactionId: id,
+        documentId: controller.activeDocumentId,
+        expectedRevision: controller.document.revision,
+        actor: { kind: "agent", id: "codex" },
+        edits: [{ kind: "add_instance", instance: instance(id) }],
+      }).ok;
+
+    // Refused after its first commit: that one is taken back, the redo stays.
+    expect(controller.commitAsOneStep(() => add("R1") && false)).toBe(false);
+    expect(controller.document.instances).toEqual(before.instances);
+    expect(controller.document.revision).toBeGreaterThan(before.revision);
+    expect(controller.canUndo).toBe(false);
+    expect(controller.canRedo).toBe(true);
+
+    expect(controller.commitAsOneStep(() => add("R1") && add("R2"))).toBe(true);
+    expect(controller.document.instances.map((item) => item.id)).toEqual([
+      "R1",
+      "R2",
+    ]);
+    controller.transact([{ kind: "undo" }]);
+    expect(controller.document.instances).toEqual(before.instances);
+    expect(controller.canUndo).toBe(false);
+    controller.transact([{ kind: "redo" }]);
+    expect(controller.document.instances.map((item) => item.id)).toEqual([
+      "R1",
+      "R2",
+    ]);
+  });
+
+  it("rebuilds symbols for a definition-level Document edit", () => {
+    const controller = new EditorDocumentController(hierarchicalProject());
+    controller.openDocument("document-child");
+    const resolverBefore = controller.resolver;
+
+    const result = controller.dispatchTransaction({
+      transactionId: "cell-symbol-presentation",
+      documentId: "document-child",
+      expectedRevision: controller.document.revision,
+      actor: { kind: "human", id: "human-local" },
+      edits: [
+        {
+          kind: "set_cell_symbol_presentation",
+          presentation: { minimumBodySize: { width: 120, height: 80 } },
+        },
+      ],
+    });
+
+    expect(result.ok && result.applied).toBe(true);
+    expect(controller.resolver).not.toBe(resolverBefore);
+  });
+
+  it("refreshes inherited Port formatting but not annotation positioning, including Undo", () => {
+    const project = hierarchicalProject();
+    const child = project.documents[1]!;
+    child.instances.push({ id: "P1", symbolId: "port", placement: null });
+    child.nets.push({
+      id: "net",
+      terminals: [{ instanceId: "P1", pinName: "P" }],
+    });
+    child.netlist!.terminals.push({
+      id: "out",
+      name: "Vout",
+      netId: "net",
+      direction: "output",
+      interfaceInstanceIds: ["P1"],
+    });
+    const controller = new EditorDocumentController(project);
+    controller.openDocument(child.id);
+    const before = controller.resolver;
+    const annotation: SchematicDocument["annotations"][number] = {
+      id: "label",
+      kind: "instance-label",
+      binding: { kind: "cell-terminal-name", terminalId: "out" },
+      formatOverride: {
+        runs: [
+          { kind: "text", value: "V" },
+          {
+            kind: "span",
+            style: "subscript",
+            children: [{ kind: "text", value: "out" }],
+          },
+        ],
+      },
+      anchor: {
+        kind: "object",
+        objectId: "P1",
+        localOffset: { x: 0, y: 0 },
+        fallbackPosition: { x: 0, y: 0 },
+      },
+      alignment: "start",
+      rotation: 0,
+      locked: false,
+    };
+    expect(
+      controller.transact([{ kind: "upsert_schematic_annotation", annotation }])
+        .ok,
+    ).toBe(true);
+    const formatted = controller.resolver;
+    expect(formatted).not.toBe(before);
+    expect(
+      formatted.resolve(hierarchicalSymbolId("child"))!.definition.pins[0]!
+        .presentation.nameContent,
+    ).toEqual(annotation.formatOverride);
+    const moved = structuredClone(annotation);
+    if (moved.anchor.kind === "object") moved.anchor.localOffset.x = 20;
+    expect(
+      controller.transact([
+        { kind: "upsert_schematic_annotation", annotation: moved },
+      ]).ok,
+    ).toBe(true);
+    expect(controller.resolver).toBe(formatted);
+    controller.transact([{ kind: "undo" }]);
+    expect(controller.resolver).toBe(formatted);
+    controller.transact([{ kind: "undo" }]);
+    expect(controller.resolver).not.toBe(formatted);
+    expect(
+      controller.resolver.resolve(hierarchicalSymbolId("child"))!.definition
+        .pins[0]!.presentation.nameContent,
+    ).toEqual(semanticTextDocument("Vout", "formal-port"));
+  });
+
+  it("leaves history, Project, and resolver unchanged on a dry-run dispatch", () => {
+    const controller = new EditorDocumentController(hierarchicalProject());
+    const revisionBefore = controller.document.revision;
+    const resolverBefore = controller.resolver;
+
+    const result = controller.dispatchTransaction({
+      transactionId: "agent-dry",
+      documentId: controller.activeDocumentId,
+      expectedRevision: revisionBefore,
+      actor: { kind: "agent", id: "codex" },
+      dryRun: true,
+      edits: [{ kind: "add_instance", instance: instance("Rdry") }],
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.applied).toBe(false);
+    expect(controller.document.revision).toBe(revisionBefore);
+    expect(controller.document.instances).not.toContainEqual(instance("Rdry"));
+    expect(controller.canUndo).toBe(false);
+    expect(controller.resolver).toBe(resolverBefore);
+  });
+
+  it.each(["add_instance", "undo", "redo"] as const)(
+    "rejects a stale %s revision and preserves history",
+    (kind) => {
+      const controller = new EditorDocumentController(hierarchicalProject());
+      controller.transact([{ kind: "add_instance", instance: instance("R1") }]);
+      const current = controller.document.revision;
+
+      const result = controller.dispatchTransaction({
+        transactionId: "agent-stale",
+        documentId: controller.activeDocumentId,
+        expectedRevision: current - 1,
+        actor: { kind: "agent", id: "codex" },
+        edits:
+          kind === "add_instance"
+            ? [{ kind, instance: instance("Rstale") }]
+            : [{ kind }],
+      });
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.code).toBe("STALE_REVISION");
+        expect(result.revision).toBe(current);
+      }
+      expect(controller.canUndo).toBe(true);
+      expect(controller.canRedo).toBe(false);
+    },
+  );
+
+  it("dispatches to a non-active Document without retargeting the active one", () => {
+    const controller = new EditorDocumentController(hierarchicalProject());
+    const activeId = controller.activeDocumentId;
+
+    const result = controller.dispatchTransaction({
+      transactionId: "agent-child",
+      documentId: "document-child",
+      expectedRevision: controller.project.documents.find(
+        (d) => d.id === "document-child",
+      )!.revision,
+      actor: { kind: "agent", id: "codex" },
+      edits: [{ kind: "add_instance", instance: instance("Rchild") }],
+    });
+
+    expect(result.ok && result.applied).toBe(true);
+    expect(controller.activeDocumentId).toBe(activeId);
+    // The active Document is untouched; only the child Document changed.
+    expect(controller.document.instances).toEqual([]);
+    expect(
+      controller.project.documents.find((d) => d.id === "document-child")!
+        .instances,
+    ).toContainEqual(instance("Rchild"));
+  });
+
+  it("returns a typed rejection when the dispatched Document is absent", () => {
+    const controller = new EditorDocumentController(hierarchicalProject());
+    const revisionBefore = controller.document.revision;
+
+    const result = controller.dispatchTransaction({
+      transactionId: "agent-missing",
+      documentId: "does-not-exist",
+      expectedRevision: revisionBefore,
+      actor: { kind: "agent", id: "codex" },
+      edits: [{ kind: "add_instance", instance: instance("Rmissing") }],
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("OBJECT_NOT_FOUND");
+    }
+    expect(controller.document.revision).toBe(revisionBefore);
+  });
+});
+
+it("removes unused classes, restores custom geometry on undo, and inserts fresh library geometry", () => {
+  const project = createEmptyProject("class-history", "Class history");
+  project.documents[0]!.instances.push(instance("R1"));
+  const initial = new EditorDocumentController(project);
+  const saved = structuredClone(initial.project);
+  const definition = saved.componentDefinitions![0]!;
+  definition.symbol.primitives = [
+    { kind: "circle", center: { x: 0, y: 0 }, radius: 9 },
+  ];
+  const controller = new EditorDocumentController(saved);
+  expect(
+    controller.transact([{ kind: "remove_instance", instanceId: "R1" }]).ok,
+  ).toBe(true);
+  expect(controller.project.componentDefinitions).toBeUndefined();
+  expect(controller.transact([{ kind: "undo" }]).ok).toBe(true);
+  expect(
+    controller.resolver.resolve("resistor")!.definition.primitives,
+  ).toEqual(definition.symbol.primitives);
+  expect(controller.transact([{ kind: "redo" }]).ok).toBe(true);
+  expect(controller.project.componentDefinitions).toBeUndefined();
+  expect(
+    controller.transact([{ kind: "add_instance", instance: instance("R2") }])
+      .ok,
+  ).toBe(true);
+  expect(
+    controller.resolver.resolve("resistor")!.definition.primitives,
+  ).not.toEqual(definition.symbol.primitives);
+  expect(controller.transact([{ kind: "undo" }]).ok).toBe(true);
+  expect(controller.transact([{ kind: "undo" }]).ok).toBe(true);
+  expect(
+    controller.resolver.resolve("resistor")!.definition.primitives,
+  ).toEqual(definition.symbol.primitives);
+});

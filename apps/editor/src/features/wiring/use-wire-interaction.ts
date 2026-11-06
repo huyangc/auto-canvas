@@ -1,0 +1,1396 @@
+import type {
+  MouseEvent as ReactMouseEvent,
+  MutableRefObject,
+  PointerEvent as ReactPointerEvent,
+} from "react";
+import { useEffect, useMemo, useState } from "react";
+
+import { segmentDragPreviewPolyline } from "./segment-drag-preview";
+import { resolveWireDraftShape } from "./wire-draft-shape";
+import { prepareNetLabelDraft } from "../text-editing/net-label-draft";
+import {
+  wireDraftTargetIdsForSuffix,
+  wirePassThroughContacts,
+  wireSourceForTarget,
+} from "./wire-draft-preview";
+
+import {
+  evaluateWireMembers,
+  signalEndpointMembers,
+  prepareNamedWireSource,
+  planNamedWireEdits,
+  selectWireMember,
+  selectWireExpression,
+  wireMemberChoice,
+  type WireMemberChoice,
+  type WireDraftStep,
+  createRoutingOperationPlan,
+  gateRoutingOperationPlan,
+  proposeLooseRouteTranslation,
+  proposePowerRailEndpointResize,
+  proposePowerRailTranslation,
+  proposeRouteEndpointMove,
+  prepareWireSegmentMove,
+  proposeWireCommitThroughContacts,
+  type SchematicEdit,
+  type ExpectedElectricalEffect,
+  type RoutingOperationIntent,
+  type RoutingOperationPlan,
+  type WireSource,
+  type WireCornerOrder,
+  type WireRoutingMode,
+} from "@icm/edit-engine";
+import {
+  derivePowerRailComponent,
+  endpointKey,
+  isMosBulkTerminal,
+  resolveEndpointConnection,
+  resolveElectricalContactTargets,
+  resolveRouteTap,
+} from "@icm/derived";
+import { snapCoordinate } from "../../snap/engine";
+import type { Flightline } from "@icm/derived";
+import {
+  routeEnd,
+  semanticTextDocument,
+  type Point,
+  type RouteEndpoint,
+  type SchematicDocument,
+  type CircuitProject,
+} from "@icm/model";
+import type { SymbolResolver } from "@icm/symbols";
+
+import {
+  freeWireDraftTarget,
+  type WireDraftTarget,
+  type WireLabelDraft,
+  type WireRepeat,
+} from "../../interaction/interaction-state";
+import {
+  startCanvasDragSession,
+  type CanvasDragSession,
+} from "../../canvas/canvas-drag-session";
+import { startCanvasDragVisual } from "../../canvas/canvas-drag-visual";
+import {
+  endpointNetId,
+  looseRouteAnchorIds,
+  routeTapPoint,
+  type RouteGeometryRecord,
+} from "./route-interaction-geometry";
+
+export interface RouteStretchPreview {
+  routeId: string;
+  segmentIndex: number;
+  intent:
+    | "stretch-segment"
+    | "move-loose-route"
+    | "move-power-rail"
+    | "resize-power-rail-start"
+    | "resize-power-rail-end"
+    | "resize-route-start"
+    | "resize-route-end";
+  start: Point;
+  point: Point;
+  /** The drag origin the last successful segment plan used with `point`. */
+  origin?: Point;
+  /**
+   * Ids for whatever this drag has to author — the Junction a pin-anchored
+   * end becomes, and the Route halves a landing splits. Allocated once when
+   * the drag starts so the preview and the commit plan the same gesture, and
+   * shaped `ui-<n>` so that `maxRoutingCounter` can see the ids it produces:
+   * the Junction is named by the suffix alone, so a counter blind to it would
+   * hand the same number out again after a reload and the next re-point would
+   * be refused with "Junction already exists".
+   */
+  suffix?: string;
+}
+
+export interface CurrentWireSession {
+  source: WireSource | null;
+  sourceRevision: number | null;
+  steps: readonly WireDraftStep[];
+  routingMode: WireRoutingMode;
+  cornerOrder: WireCornerOrder;
+  repeat?: WireRepeat;
+  label?: WireLabelDraft;
+  labelEditing?: WireLabelDraft;
+}
+
+type TransactionResult = {
+  ok: boolean;
+  revision: number;
+};
+
+export interface UseWireInteractionOptions {
+  model: {
+    document: SchematicDocument;
+    resolver: SymbolResolver;
+    externalSubcircuitDefinitions: CircuitProject["externalSubcircuitDefinitions"];
+    visibleEndpoints: readonly WireSource[];
+    routeGeometryRecords: readonly RouteGeometryRecord[];
+    contactComponents: Parameters<typeof resolveElectricalContactTargets>[3];
+    /** The name the netlist writes a Net under, which a clicked wire is
+     * called by. */
+    netNameOf: (netId: string) => string | null;
+  };
+  selection: {
+    selectedInstance: SchematicDocument["instances"][number] | undefined;
+    selectedRouteId: string | null;
+    selectedRouteSegmentIndex: number | null;
+    selectOnly: (kind: "route", ids: readonly string[]) => void;
+    setSelectedRouteSegmentIndex: (segmentIndex: number | null) => void;
+    setSelectedEndpoint: (endpoint: WireSource | null) => void;
+  };
+  session: {
+    wireActive: boolean;
+    readCurrentWireSession: () => CurrentWireSession;
+    setTool: (tool: "wire") => void;
+    setWireSource: (source: WireSource | null, revision: number | null) => void;
+    setWirePreview: (target: WireDraftTarget | null) => void;
+    setWireDraftSteps: (steps: WireDraftStep[]) => void;
+    completeWire: (revision?: number) => void;
+    setWireRepeat: (repeat: WireRepeat | null) => void;
+    editWireLabel: (draft: WireLabelDraft | null) => void;
+    acceptWireLabel: (draft: WireLabelDraft, source: WireSource) => void;
+    clearTransientCanvasState: () => void;
+    cancelInteraction: () => void;
+    setBulkDrawInstanceId: (instanceId: string | null) => void;
+  };
+  transaction: {
+    nextRoutingSuffix: () => number;
+    transact: (
+      edits: SchematicEdit[],
+      options?: { completesWireSession?: boolean },
+    ) => TransactionResult;
+    setStatus: (status: string) => void;
+  };
+  drag: {
+    canvasDragSessionRef: MutableRefObject<CanvasDragSession | null>;
+    setRouteStretchPreview: (preview: RouteStretchPreview | null) => void;
+    pointFromClient: (
+      clientX: number,
+      clientY: number,
+      svg: SVGSVGElement,
+      snapToGrid: false,
+    ) => Point;
+    logicalRadiusForPixels: (svg: SVGSVGElement, pixels: number) => number;
+  };
+}
+
+/**
+ * The snapped grab point a segment drag plans from. A 45-degree segment moves
+ * along the dominant axis of `snapped - origin`, so the axis the pointer
+ * actually travelled along is decided here, before snapping, by giving the
+ * origin the target's coordinate on the other axis. Snapping both ends
+ * separately could otherwise turn a mostly vertical drag into a tie.
+ */
+function segmentDragOrigin(
+  start: Point,
+  pointer: Point,
+  snapped: Point,
+  grid: number,
+): Point {
+  return Math.abs(pointer.x - start.x) >= Math.abs(pointer.y - start.y)
+    ? { x: snapCoordinate(start.x, grid), y: snapped.y }
+    : { x: snapped.x, y: snapCoordinate(start.y, grid) };
+}
+
+/**
+ * Owns wire sessions and route-specific drag lifecycles. The App remains the
+ * cross-domain canvas pointer arbiter.
+ */
+export function useWireInteraction(capabilities: UseWireInteractionOptions) {
+  const [pendingChoice, setPendingChoice] = useState<{
+    choice: WireMemberChoice;
+    document: SchematicDocument;
+    revision: number;
+    accept: (source: WireSource) => void;
+  } | null>(null);
+  const hasWireSource =
+    capabilities.session.readCurrentWireSession().source !== null;
+  useEffect(() => {
+    if (
+      !capabilities.session.wireActive ||
+      pendingChoice?.document !== capabilities.model.document ||
+      (pendingChoice?.choice.allowWhole && !hasWireSource)
+    )
+      setPendingChoice(null);
+  }, [
+    capabilities.session.wireActive,
+    capabilities.model.document,
+    pendingChoice?.document,
+    pendingChoice?.choice.allowWhole,
+    hasWireSource,
+  ]);
+  useEffect(() => {
+    if (!pendingChoice || pendingChoice.choice.allowWhole) return;
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      setPendingChoice(null);
+      capabilities.transaction.setStatus(
+        "Bus choice cancelled · Wire remains active",
+      );
+    };
+    window.addEventListener("keydown", escape, true);
+    return () => window.removeEventListener("keydown", escape, true);
+  }, [pendingChoice, capabilities.transaction.setStatus]);
+  const segmentPlanner = useMemo(
+    () =>
+      prepareWireSegmentMove(
+        capabilities.model.document,
+        capabilities.model.resolver,
+      ),
+    [capabilities.model.document, capabilities.model.resolver],
+  );
+  const options = {
+    ...capabilities.model,
+    ...capabilities.selection,
+    ...capabilities.session,
+    ...capabilities.transaction,
+    ...capabilities.drag,
+  };
+  const repeat = options.readCurrentWireSession().repeat;
+  useEffect(() => {
+    const wire = options.readCurrentWireSession();
+    const current = wire.repeat;
+    if (!current || wire.source || current.index >= current.members.length)
+      return;
+    if (current.revision !== options.document.revision) {
+      options.cancelInteraction();
+      options.setStatus("Continuous taps cancelled because the source changed");
+      return;
+    }
+    const endpoint = current.source.endpoint;
+    const connection = resolveEndpointConnection(
+      options.document,
+      options.resolver,
+      endpoint,
+    );
+    const members = signalEndpointMembers(
+      options.document,
+      options.resolver,
+      endpoint,
+    );
+    if (!connection || !members) {
+      options.cancelInteraction();
+      options.setStatus("Continuous tap source is no longer available");
+      return;
+    }
+    const source: WireSource = {
+      endpoint,
+      connection,
+      members,
+      netId: members[0]!.netId,
+      preludeEdits: [],
+    };
+    options.setWireSource(
+      selectWireMember(source, current.members[current.index]!.id),
+      options.document.revision,
+    );
+    options.setWirePreview(freeWireDraftTarget(connection.contactPoint));
+  }, [repeat, options.document]);
+  const beginContinuousTaps = (
+    order: "ascending" | "descending" | "fanout",
+    memberId?: string,
+  ) => {
+    if (
+      !pendingChoice?.choice.allowWhole ||
+      pendingChoice.document !== options.document
+    )
+      return;
+    const source = pendingChoice.choice.source;
+    const members = pendingChoice.choice.options.filter(
+      (member) => !memberId || member.id === memberId,
+    );
+    if (!members.length) return;
+    if (order !== "fanout")
+      members.sort(
+        (a, b) =>
+          a.label.localeCompare(b.label, undefined, { numeric: true }) *
+          (order === "descending" ? -1 : 1),
+      );
+    options.setWireRepeat({
+      source,
+      members,
+      index: 0,
+      fanout: order === "fanout",
+      revision: options.document.revision,
+    });
+    pendingChoice.accept(selectWireMember(source, members[0]!.id));
+    setPendingChoice(null);
+  };
+  const transactProposal = (
+    proposal: RoutingOperationPlan,
+    transactionOptions?: { completesWireSession?: boolean },
+  ): TransactionResult => {
+    const gate = gateRoutingOperationPlan(options.document, proposal, {
+      symbolResolver: options.resolver,
+      externalSubcircuitDefinitions: options.externalSubcircuitDefinitions,
+    });
+    if (!gate.ok) {
+      options.setStatus(gate.message);
+      return { ok: false, revision: options.document.revision };
+    }
+    return options.transact([...gate.edits], transactionOptions);
+  };
+  const proposalFor = (
+    intent: RoutingOperationIntent,
+    edits: readonly SchematicEdit[],
+    expectedElectricalEffect?: ExpectedElectricalEffect,
+  ): RoutingOperationPlan =>
+    createRoutingOperationPlan(options.document, {
+      intent,
+      diagnostics: [],
+      edits,
+      ...(expectedElectricalEffect ? { expectedElectricalEffect } : {}),
+    });
+
+  /**
+   * The far end a gesture commits to, whatever the pointer resolved to.
+   *
+   * The one place a committed `WireSource` is built. The draft preview asks
+   * the same function with preview identity, so the wire drawn during the
+   * gesture and the wire the release lands cannot describe different geometry.
+   */
+  const sourceForTarget = (target: WireDraftTarget): WireSource | null =>
+    wireSourceForTarget(
+      options.document,
+      target,
+      options.readCurrentWireSession().source?.netId ?? null,
+      () => wireDraftTargetIdsForSuffix(target, options.nextRoutingSuffix()),
+      options.resolver,
+    );
+
+  const beginWireLabelEditing = (position: Point): boolean => {
+    const wire = options.readCurrentWireSession();
+    if (!wire.source) return false;
+    options.editWireLabel(
+      wire.label ?? {
+        content: semanticTextDocument("", "net-label"),
+        sizeScale: 1,
+        alignment: "start",
+        position,
+      },
+    );
+    options.setStatus(
+      "Name the Wire · Enter resumes routing · Esc discards this name edit",
+    );
+    return true;
+  };
+  const commitWireLabelEditing = (): void => {
+    const wire = options.readCurrentWireSession();
+    if (!wire.source || !wire.labelEditing) return;
+    if (wire.sourceRevision !== options.document.revision) {
+      options.cancelInteraction();
+      options.setStatus("Wire cancelled because its source revision is stale");
+      return;
+    }
+    try {
+      const prepared = prepareNetLabelDraft(
+        wire.labelEditing.content,
+        options.document.presentation,
+      );
+      const source = prepareNamedWireSource(wire.source, prepared.name);
+      options.acceptWireLabel(
+        { ...wire.labelEditing, content: prepared.content },
+        source,
+      );
+      options.setStatus("Wire name accepted · Continue routing");
+    } catch (error) {
+      options.setStatus(
+        error instanceof Error ? error.message : "Invalid Wire name",
+      );
+    }
+  };
+  const cancelWireLabelEditing = (): void => {
+    options.editWireLabel(null);
+    options.setStatus("Name edit cancelled · Continue routing");
+  };
+
+  const commitResolvedWire = (
+    source: WireSource,
+    candidate: WireSource,
+  ): void => {
+    const wire = { ...options.readCurrentWireSession(), source };
+    if (!wire.source) return;
+    if (wire.sourceRevision !== options.document.revision) {
+      options.clearTransientCanvasState();
+      options.cancelInteraction();
+      options.setBulkDrawInstanceId(null);
+      options.setStatus("Wire cancelled because its source revision is stale");
+      return;
+    }
+    try {
+      const shape = resolveWireDraftShape(
+        options.document,
+        options.resolver,
+        wire.source,
+        candidate,
+        wire.steps,
+        wire.routingMode,
+        wire.cornerOrder,
+        options.visibleEndpoints,
+      );
+      const proposal = proposeWireCommitThroughContacts(
+        wire.source,
+        candidate,
+        shape.steps.map((item) => item.point),
+        wirePassThroughContacts(options.visibleEndpoints, {
+          from: wire.source,
+          to: candidate,
+          steps: shape.steps,
+        }),
+        options.nextRoutingSuffix(),
+        {
+          steps: shape.steps,
+          routingMode: wire.routingMode,
+          cornerOrder: shape.cornerOrder,
+        },
+      );
+      const bulkEndpoint = [wire.source.endpoint, candidate.endpoint].find(
+        (endpoint) => endpoint.kind === "terminal" && endpoint.pinName === "B",
+      );
+      const defaultBoundInstance =
+        bulkEndpoint?.kind === "terminal"
+          ? options.document.instances.find(
+              (instance) => instance.id === bulkEndpoint.instanceId,
+            )
+          : undefined;
+      const edits = defaultBoundInstance?.mosBulkBinding
+        ? [
+            {
+              kind: "clear_mos_bulk_default" as const,
+              instanceId: defaultBoundInstance.id,
+            },
+            ...proposal.edits.map((edit) => {
+              if (edit.kind !== "connect_endpoints") return edit;
+              const target =
+                edit.from.kind === "terminal" && edit.from.pinName === "B"
+                  ? edit.to
+                  : edit.from;
+              return {
+                ...edit,
+                from: target,
+                to: {
+                  kind: "terminal" as const,
+                  instanceId: defaultBoundInstance.id,
+                  pinName: "B",
+                },
+              };
+            }),
+          ]
+        : proposal.edits;
+      const namedEdits = wire.label
+        ? planNamedWireEdits(
+            options.document,
+            edits,
+            proposal.routeId,
+            {
+              ...wire.label,
+              ...prepareNetLabelDraft(
+                wire.label.content,
+                options.document.presentation,
+              ),
+            },
+            {
+              symbolResolver: options.resolver,
+              externalSubcircuitDefinitions:
+                options.externalSubcircuitDefinitions,
+            },
+          )
+        : edits;
+      const result = transactProposal(proposalFor("connect", namedEdits), {
+        completesWireSession: true,
+      });
+      if (result.ok) {
+        options.completeWire(result.revision);
+        options.setBulkDrawInstanceId(null);
+        options.setStatus(
+          `Committed route at revision ${result.revision} · Wire remains active · Esc exits`,
+        );
+      }
+    } catch (error) {
+      options.setStatus(
+        error instanceof Error ? error.message : "Cannot connect here",
+      );
+    }
+  };
+
+  const askMember = (
+    choice: WireMemberChoice,
+    accept: (source: WireSource) => void,
+  ): void => {
+    setPendingChoice({
+      choice,
+      document: options.document,
+      revision: options.document.revision,
+      accept,
+    });
+    if (!choice.allowWhole)
+      options.setStatus(`Choose ${choice.expectedWidth ?? 1} bus member(s)`);
+  };
+  const startWire = (candidate: WireSource, description?: string): void => {
+    options.setWireRepeat(null);
+    const selectSource = (source: WireSource) => {
+      options.setWireSource(source, options.document.revision);
+      const endpoint = source.endpoint;
+      options.setStatus(
+        `Wire source: ${description ?? (endpoint.kind === "terminal" ? `${endpoint.instanceId}.${endpoint.pinName}` : endpointKey(endpoint))}`,
+      );
+    };
+    selectSource(candidate);
+    options.setWirePreview(
+      freeWireDraftTarget(candidate.connection.contactPoint),
+    );
+    options.setWireDraftSteps([]);
+    if (candidate.members)
+      askMember(
+        wireMemberChoice(options.document, candidate, true),
+        selectSource,
+      );
+  };
+  const commitWire = (candidate: WireSource): void => {
+    if (options.readCurrentWireSession().labelEditing) return;
+    const source = options.readCurrentWireSession().source;
+    if (!source) return;
+    const evaluation = evaluateWireMembers(options.document, source, candidate);
+    if (evaluation.kind === "invalid") {
+      options.setStatus(evaluation.message);
+      return;
+    }
+    if (evaluation.kind === "choose") {
+      askMember(evaluation.choice, (selected) =>
+        commitResolvedWire(
+          evaluation.side === "from" ? selected : source,
+          evaluation.side === "to" ? selected : candidate,
+        ),
+      );
+      return;
+    }
+    setPendingChoice(null);
+    commitResolvedWire(evaluation.from, evaluation.to);
+  };
+  const chooseWireMember = (memberId: string | null): void => {
+    if (
+      !pendingChoice ||
+      pendingChoice.document !== options.document ||
+      pendingChoice.revision !== options.document.revision
+    )
+      return;
+    if (memberId === null && !pendingChoice.choice.allowWhole) return;
+    const source =
+      memberId === null
+        ? pendingChoice.choice.source
+        : selectWireMember(pendingChoice.choice.source, memberId);
+    if (
+      pendingChoice.choice.expectedWidth &&
+      (source.members?.length ?? 1) !== pendingChoice.choice.expectedWidth
+    ) {
+      options.setStatus(
+        `Choose ${pendingChoice.choice.expectedWidth} members to match the other endpoint`,
+      );
+      return;
+    }
+    setPendingChoice(null);
+    pendingChoice.accept(source);
+  };
+  const wireExpressionSelection = (expression: string): WireSource => {
+    if (
+      !pendingChoice ||
+      pendingChoice.document !== options.document ||
+      pendingChoice.revision !== options.document.revision
+    )
+      throw new Error("That member choice is stale; restart the Wire");
+    const source = selectWireExpression(
+      options.document,
+      pendingChoice.choice.source,
+      expression,
+    );
+    const width = source.members?.length ?? 1;
+    if (
+      pendingChoice.choice.expectedWidth &&
+      width !== pendingChoice.choice.expectedWidth
+    )
+      throw new Error(
+        `Select ${pendingChoice.choice.expectedWidth} members; this expression selects ${width}`,
+      );
+    return source;
+  };
+  const previewWireExpression = (
+    expression: string,
+  ): { text: string; valid: boolean } => {
+    try {
+      const source = wireExpressionSelection(expression);
+      const ids = source.members?.map((member) => member.id) ?? [
+        source.endpoint.memberId,
+      ];
+      const names = ids.map(
+        (id) =>
+          pendingChoice!.choice.options.find((option) => option.id === id)!
+            .label,
+      );
+      return {
+        text: `${names.length} member${names.length === 1 ? "" : "s"} · ${names.join(" → ")}`,
+        valid: true,
+      };
+    } catch (error) {
+      return {
+        text: error instanceof Error ? error.message : "Invalid selection",
+        valid: false,
+      };
+    }
+  };
+  const chooseWireExpression = (expression: string): void => {
+    try {
+      const source = wireExpressionSelection(expression);
+      const accept = pendingChoice!.accept;
+      setPendingChoice(null);
+      accept(source);
+    } catch (error) {
+      options.setStatus(
+        error instanceof Error ? error.message : "Invalid selection",
+      );
+    }
+  };
+
+  const handleWireEndpoint = (
+    event: ReactPointerEvent<SVGCircleElement>,
+    candidate: WireSource,
+  ): void => {
+    // Only the primary button starts or commits on an endpoint. A middle
+    // press bubbles to the canvas gesture (corner cycling) unless the caller
+    // intercepted it; right-click keeps cancelling via the context menu.
+    if (event.button !== 0) return;
+    event.stopPropagation();
+    if (event.altKey) {
+      options.setStatus("Snap suppressed while Alt is held");
+      return;
+    }
+    options.setTool("wire");
+    const wire = options.readCurrentWireSession();
+    if (!wire.source) {
+      startWire(candidate);
+      return;
+    }
+    if (endpointKey(wire.source.endpoint) === endpointKey(candidate.endpoint)) {
+      options.setStatus("Choose a different endpoint");
+      return;
+    }
+    commitWire(candidate);
+  };
+
+  const handleFlightline = (
+    event: ReactMouseEvent<SVGLineElement>,
+    flightline: Flightline,
+  ): void => {
+    event.stopPropagation();
+    const fromConnection = resolveEndpointConnection(
+      options.document,
+      options.resolver,
+      flightline.from,
+    );
+    const toConnection = resolveEndpointConnection(
+      options.document,
+      options.resolver,
+      flightline.to,
+    );
+    if (!fromConnection || !toConnection) {
+      options.setStatus("Flightline endpoint has no routable grid landing");
+      return;
+    }
+    const from: WireSource = {
+      endpoint: flightline.from,
+      netId: endpointNetId(options.document, flightline.from),
+      connection: fromConnection,
+      preludeEdits: [],
+      ...(isMosBulkTerminal(options.document, flightline.from)
+        ? { routePresentation: "bulk-dashed" as const }
+        : {}),
+    };
+    const to: WireSource = {
+      endpoint: flightline.to,
+      netId: endpointNetId(options.document, flightline.to),
+      connection: toConnection,
+      preludeEdits: [],
+      ...(isMosBulkTerminal(options.document, flightline.to)
+        ? { routePresentation: "bulk-dashed" as const }
+        : {}),
+    };
+    options.setTool("wire");
+    const wire = options.readCurrentWireSession();
+    if (wire.source) {
+      const candidate =
+        endpointKey(wire.source.endpoint) === endpointKey(from.endpoint)
+          ? to
+          : from;
+      if (
+        endpointKey(wire.source.endpoint) !== endpointKey(candidate.endpoint)
+      ) {
+        commitWire(candidate);
+      }
+      return;
+    }
+    options.setWireSource(from, options.document.revision);
+    options.setWirePreview(freeWireDraftTarget(to.connection.contactPoint));
+    options.setWireDraftSteps([]);
+    options.setStatus(`Wire source: flightline on ${flightline.netId}`);
+  };
+
+  const drawSelectedMosBulk = (): void => {
+    const instance = options.selectedInstance;
+    if (!instance?.placement) return;
+    const endpoint: RouteEndpoint = {
+      kind: "terminal",
+      instanceId: instance.id,
+      pinName: "B",
+    };
+    const connection = resolveEndpointConnection(
+      options.document,
+      options.resolver,
+      endpoint,
+    );
+    if (!connection) {
+      options.setStatus("Selected instance has no routable Razavi bulk anchor");
+      return;
+    }
+    const source: WireSource = {
+      endpoint,
+      netId: instance.mosBulkBinding
+        ? null
+        : endpointNetId(options.document, endpoint),
+      connection,
+      preludeEdits: options.document.noConnects.flatMap((noConnect) =>
+        noConnect.endpoint.kind === "terminal" &&
+        noConnect.endpoint.instanceId === instance.id &&
+        noConnect.endpoint.pinName === "B"
+          ? [{ kind: "remove_no_connect" as const, noConnectId: noConnect.id }]
+          : [],
+      ),
+      routePresentation: "bulk-dashed",
+    };
+    options.setBulkDrawInstanceId(instance.id);
+    options.setTool("wire");
+    options.setWireSource(source, options.document.revision);
+    options.setWirePreview(freeWireDraftTarget(source.connection.contactPoint));
+    options.setWireDraftSteps([]);
+    options.setStatus(`Drawing ${instance.id}.B bulk connection`);
+  };
+
+  const selectRoute = (routeId: string, segmentIndex = 0): void => {
+    options.selectOnly("route", [routeId]);
+    options.setSelectedRouteSegmentIndex(segmentIndex);
+    options.setSelectedEndpoint(null);
+    const netId = options.document.routes.find(
+      (route) => route.id === routeId,
+    )?.netId;
+    const netName = netId ? options.netNameOf(netId) : null;
+    options.setStatus(
+      netName ? `Selected wire on ${netName}` : "Selected wire",
+    );
+  };
+
+  const completeRouteStretch = (
+    preview: RouteStretchPreview,
+    point: Point,
+  ): void => {
+    const record = options.routeGeometryRecords.find(
+      (candidate) => candidate.route.id === preview.routeId,
+    );
+    if (!record) return;
+    try {
+      if (preview.intent === "move-loose-route") {
+        const anchorIds = looseRouteAnchorIds(options.document, record.route);
+        if (!anchorIds)
+          throw new Error(
+            "Only a route with two loose ends can move as a whole",
+          );
+        const delta = {
+          x: snapCoordinate(
+            point.x - preview.start.x,
+            options.document.presentation.grid,
+          ),
+          y: snapCoordinate(
+            point.y - preview.start.y,
+            options.document.presentation.grid,
+          ),
+        };
+        if (delta.x !== 0 || delta.y !== 0) {
+          const proposal = proposeLooseRouteTranslation(
+            options.document,
+            record.route.id,
+            delta,
+            {
+              resolver: options.resolver,
+              suffix: `land-${options.nextRoutingSuffix()}`,
+            },
+          );
+          // An attach among the edits means an end came to rest on another
+          // conductor; the gate derives the join from that primitive itself.
+          const landed = proposal.edits.some(
+            (edit) => edit.kind === "attach_endpoint_to_route",
+          );
+          const result = transactProposal(
+            proposalFor("route-geometry", proposal.edits),
+          );
+          if (result.ok) {
+            options.setStatus(
+              landed
+                ? `Moved ${record.route.id} onto the wire it now shares a net with`
+                : `Moved loose route ${record.route.id}`,
+            );
+          }
+        }
+      } else if (preview.intent === "move-power-rail") {
+        const delta = {
+          x: snapCoordinate(
+            point.x - preview.start.x,
+            options.document.presentation.grid,
+          ),
+          y: snapCoordinate(
+            point.y - preview.start.y,
+            options.document.presentation.grid,
+          ),
+        };
+        if (delta.x !== 0 || delta.y !== 0) {
+          const proposal = proposePowerRailTranslation(
+            options.document,
+            options.resolver,
+            record.route.id,
+            delta,
+          );
+          const result = transactProposal(
+            proposalFor(
+              "route-geometry",
+              proposal.edits,
+              proposal.expectedElectricalEffect,
+            ),
+          );
+          if (result.ok)
+            options.setStatus(`Moved Power Rail ${record.route.id}`);
+        }
+      } else if (
+        preview.intent === "resize-power-rail-start" ||
+        preview.intent === "resize-power-rail-end"
+      ) {
+        const proposal = proposePowerRailEndpointResize(
+          options.document,
+          options.resolver,
+          record.route.id,
+          preview.intent === "resize-power-rail-start" ? "start" : "end",
+          {
+            x: snapCoordinate(point.x, options.document.presentation.grid),
+            y: snapCoordinate(point.y, options.document.presentation.grid),
+          },
+        );
+        const result = transactProposal(
+          proposalFor(
+            "route-geometry",
+            proposal.edits,
+            proposal.expectedElectricalEffect,
+          ),
+        );
+        if (result.ok)
+          options.setStatus(`Resized Power Rail ${record.route.id}`);
+      } else if (
+        preview.intent === "resize-route-start" ||
+        preview.intent === "resize-route-end"
+      ) {
+        const proposal = proposeRouteEndpointMove(
+          options.document,
+          options.resolver,
+          record.route.id,
+          preview.intent === "resize-route-start" ? "start" : "end",
+          {
+            x: snapCoordinate(point.x, options.document.presentation.grid),
+            y: snapCoordinate(point.y, options.document.presentation.grid),
+          },
+          preview.suffix ?? `ui-${options.nextRoutingSuffix()}`,
+        );
+        // A contact or an attach among the edits means the end came to rest
+        // on something; the gate derives the join from those primitives.
+        const landed = proposal.edits.some(
+          (edit) =>
+            edit.kind === "attach_endpoint_to_route" ||
+            edit.kind === "connect_endpoints",
+        );
+        const result = transactProposal(
+          proposalFor("route-geometry", proposal.edits),
+        );
+        if (result.ok) {
+          options.setStatus(
+            landed
+              ? `Resized wire ${record.route.id} and connected it where it landed`
+              : `Resized wire ${record.route.id}`,
+          );
+        }
+      } else {
+        const grid = options.document.presentation.grid;
+        const planAt = (target: Point, origin: Point | undefined) =>
+          segmentPlanner(record.route.id, preview.segmentIndex, target, origin);
+        let refusal: string | null = null;
+        const proposal = (() => {
+          try {
+            const snapped = {
+              x: snapCoordinate(point.x, grid),
+              y: snapCoordinate(point.y, grid),
+            };
+            return planAt(
+              snapped,
+              segmentDragOrigin(preview.start, point, snapped, grid),
+            );
+          } catch (error) {
+            // Land on the furthest position the drag actually planned, which
+            // is the geometry the preview was showing when the pointer went
+            // past what the wire could do.
+            if (preview.point === preview.start) throw error;
+            refusal = error instanceof Error ? error.message : null;
+            return planAt(preview.point, preview.origin);
+          }
+        })();
+        // Nothing moved: say why, and add no empty undo step.
+        if (proposal.unchanged) {
+          options.setStatus(
+            refusal ?? `Route segment ${record.route.id} unchanged`,
+          );
+          return;
+        }
+        const result = transactProposal(
+          proposalFor(
+            "route-geometry",
+            proposal.edits,
+            proposal.expectedElectricalEffect,
+          ),
+        );
+        if (result.ok) {
+          options.setStatus(
+            proposal.expectedElectricalEffect?.kind === "merge"
+              ? `Moved route segment ${record.route.id} and connected it where it landed`
+              : `Moved route segment ${record.route.id}`,
+          );
+        }
+      }
+    } catch (error) {
+      options.setStatus(
+        error instanceof Error ? error.message : "Route move failed",
+      );
+    }
+  };
+
+  const beginRouteStretch = (
+    event: ReactPointerEvent<SVGElement>,
+    routeId: string,
+    segmentIndex: number,
+    intent: RouteStretchPreview["intent"] = "stretch-segment",
+    hitTarget: SVGElement = event.currentTarget,
+  ): void => {
+    if (event.button !== 0) return;
+    event.stopPropagation();
+    options.canvasDragSessionRef.current?.cancel();
+    const svg = hitTarget.ownerSVGElement!;
+    const start = options.pointFromClient(
+      event.clientX,
+      event.clientY,
+      svg,
+      false,
+    );
+    const record = options.routeGeometryRecords.find(
+      (candidate) => candidate.route.id === routeId,
+    );
+    if (!record) return;
+    const powerRail =
+      intent === "move-power-rail" ||
+      intent === "resize-power-rail-start" ||
+      intent === "resize-power-rail-end"
+        ? derivePowerRailComponent(options.document, routeId)
+        : null;
+    const routeEndpoint =
+      intent === "resize-route-start"
+        ? record.route.start
+        : intent === "resize-route-end"
+          ? routeEnd(record.route)
+          : null;
+    const routeEndpointJunctionId =
+      routeEndpoint?.kind === "junction" ? routeEndpoint.junctionId : null;
+    const routeEndpointRouteIds = routeEndpointJunctionId
+      ? options.document.routes
+          .filter((candidate) => {
+            const end = routeEnd(candidate);
+            return (
+              (candidate.start.kind === "junction" &&
+                candidate.start.junctionId === routeEndpointJunctionId) ||
+              (end.kind === "junction" &&
+                end.junctionId === routeEndpointJunctionId)
+            );
+          })
+          .map((candidate) => candidate.id)
+      : [];
+    const anchorIds =
+      intent === "move-loose-route"
+        ? (looseRouteAnchorIds(options.document, record.route) ?? [])
+        : routeEndpointJunctionId
+          ? [routeEndpointJunctionId]
+          : (powerRail?.junctionIds ?? []);
+    const translatedRouteIds =
+      intent === "move-power-rail" ||
+      intent === "resize-power-rail-start" ||
+      intent === "resize-power-rail-end"
+        ? (powerRail?.routeIds ?? [routeId])
+        : routeEndpointRouteIds.length > 0
+          ? routeEndpointRouteIds
+          : [routeId];
+    let visual: ReturnType<typeof startCanvasDragVisual> | null = null;
+    const segmentJunctionIds = new Set(
+      [record.route.start, routeEnd(record.route)].flatMap((endpoint) =>
+        endpoint.kind === "junction" ? [endpoint.junctionId] : [],
+      ),
+    );
+    const segmentRouteIds = options.document.routes
+      .filter((route) =>
+        [route.start, routeEnd(route)].some(
+          (endpoint) =>
+            endpoint.kind === "junction" &&
+            segmentJunctionIds.has(endpoint.junctionId),
+        ),
+      )
+      .map((route) => route.id);
+    const dragVisual = () =>
+      (visual ??= startCanvasDragVisual(svg, [
+        ...translatedRouteIds,
+        ...anchorIds,
+        ...(intent === "stretch-segment"
+          ? [...segmentRouteIds, ...segmentJunctionIds]
+          : []),
+      ]));
+    const previewJunctions = (
+      moves: readonly { junctionId: string; position: Point }[],
+    ) => {
+      for (const move of moves) {
+        const original = options.document.junctions.find(
+          (j) => j.id === move.junctionId,
+        );
+        if (!original) continue;
+        dragVisual().translateObject(move.junctionId, {
+          x: move.position.x - original.position.x,
+          y: move.position.y - original.position.y,
+        });
+      }
+    };
+    const resizesRouteEnd =
+      intent === "resize-route-start" || intent === "resize-route-end";
+    const preview: RouteStretchPreview = {
+      routeId,
+      segmentIndex,
+      intent,
+      start,
+      point: start,
+      ...(resizesRouteEnd
+        ? { suffix: `ui-${options.nextRoutingSuffix()}` }
+        : {}),
+    };
+    options.setRouteStretchPreview(preview);
+    options.canvasDragSessionRef.current = startCanvasDragSession({
+      target: hitTarget,
+      pointerId: event.pointerId,
+      startClient: { x: event.clientX, y: event.clientY },
+      thresholdPx: 4,
+      onPreview: (client) => {
+        const point = options.pointFromClient(client.x, client.y, svg, false);
+        if (intent === "move-loose-route" || intent === "move-power-rail") {
+          dragVisual().translate({
+            x: point.x - start.x,
+            y: point.y - start.y,
+          });
+          return;
+        }
+        if (
+          intent === "resize-power-rail-start" ||
+          intent === "resize-power-rail-end" ||
+          intent === "resize-route-start" ||
+          intent === "resize-route-end"
+        ) {
+          try {
+            const snapped = {
+              x: snapCoordinate(point.x, options.document.presentation.grid),
+              y: snapCoordinate(point.y, options.document.presentation.grid),
+            };
+            const draggedSide = resizesRouteEnd
+              ? intent === "resize-route-start"
+                ? ("start" as const)
+                : ("end" as const)
+              : null;
+            const plan = draggedSide
+              ? proposeRouteEndpointMove(
+                  options.document,
+                  options.resolver,
+                  routeId,
+                  draggedSide,
+                  snapped,
+                  preview.suffix,
+                )
+              : proposePowerRailEndpointResize(
+                  options.document,
+                  options.resolver,
+                  routeId,
+                  intent === "resize-power-rail-start" ? "start" : "end",
+                  snapped,
+                );
+            const movedJunctions = new Map(
+              plan.preview?.junctions.map((junction) => [
+                junction.junctionId,
+                junction.position,
+              ]),
+            );
+            for (const routeProposal of plan.preview?.routes ?? []) {
+              const routeRecord = options.routeGeometryRecords.find(
+                (candidate) => candidate.route.id === routeProposal.routeId,
+              );
+              if (!routeRecord) continue;
+              const routeEndPoint = routeEnd(routeRecord.route);
+              // The dragged end follows the pointer whatever it is anchored
+              // to. A pin-anchored end has no Junction to look up — the one
+              // it becomes is authored by this same plan — so pinning it to
+              // the persisted endpoint left it stuck on the pin while the
+              // rest of the wire moved.
+              const dragged =
+                routeProposal.routeId === routeId ? draggedSide : null;
+              const from =
+                dragged === "start"
+                  ? snapped
+                  : routeRecord.route.start.kind === "junction"
+                    ? (movedJunctions.get(routeRecord.route.start.junctionId) ??
+                      routeRecord.geometry.centerline[0]!)
+                    : routeRecord.geometry.centerline[0]!;
+              const to =
+                dragged === "end"
+                  ? snapped
+                  : routeEndPoint.kind === "junction"
+                    ? (movedJunctions.get(routeEndPoint.junctionId) ??
+                      routeRecord.geometry.centerline.at(-1)!)
+                    : routeRecord.geometry.centerline.at(-1)!;
+              dragVisual().setObjectPolyline(routeProposal.routeId, [
+                from,
+                ...routeProposal.waypoints,
+                to,
+              ]);
+            }
+            previewJunctions(plan.preview?.junctions ?? []);
+          } catch {
+            // Keep the last valid endpoint preview; commit reports the error.
+          }
+          return;
+        }
+        try {
+          const grid = options.document.presentation.grid;
+          const snapped = {
+            x: snapCoordinate(point.x, grid),
+            y: snapCoordinate(point.y, grid),
+          };
+          const origin = segmentDragOrigin(start, point, snapped, grid);
+          const plan = segmentPlanner(routeId, segmentIndex, snapped, origin);
+          const proposal = plan.preview?.routes.find(
+            (candidate) => candidate.routeId === routeId,
+          );
+          if (!proposal) return;
+          // Remember how far the drag actually planned. Releasing past that
+          // point used to plan once more, fail, and snap the wire back to
+          // where it started, discarding everything the preview had shown.
+          preview.point = snapped;
+          preview.origin = origin;
+          // Draw what the plan will commit. Pinning the Route's original
+          // endpoints here left a moved free end behind, so the closing leg
+          // cut across at an angle and the drag read as a triangle.
+          // Restore arms no longer affected by this plan (for example after
+          // returning from a carried Junction to a fixed-end dogleg).
+          dragVisual().restore();
+          for (const item of plan.preview?.routes ?? []) {
+            const affected = options.routeGeometryRecords.find(
+              (r) => r.route.id === item.routeId,
+            );
+            if (!affected) continue;
+            dragVisual().setObjectPolyline(
+              item.routeId,
+              segmentDragPreviewPolyline(
+                affected.route,
+                affected.geometry.centerline,
+                item.waypoints,
+                plan.preview?.junctions ?? [],
+              ),
+            );
+          }
+          previewJunctions(plan.preview?.junctions ?? []);
+        } catch {
+          // Keep the last valid preview; commit lands on it instead.
+        }
+      },
+      onFinish: ({ client, dragged }) => {
+        options.canvasDragSessionRef.current = null;
+        visual?.restore();
+        if (dragged) {
+          completeRouteStretch(
+            preview,
+            options.pointFromClient(client.x, client.y, svg, false),
+          );
+        }
+        options.setRouteStretchPreview(null);
+      },
+      onCancel: () => {
+        options.canvasDragSessionRef.current = null;
+        visual?.restore();
+        options.setRouteStretchPreview(null);
+      },
+    });
+  };
+
+  const handleWireRoutePointerDown = (
+    event: ReactPointerEvent<SVGElement>,
+    routeId: string,
+    hitTarget: SVGElement = event.currentTarget,
+  ): void => {
+    if (event.button !== 0) return;
+    event.stopPropagation();
+    if (event.altKey) {
+      options.setStatus("Snap suppressed while Alt is held");
+      return;
+    }
+    const record = options.routeGeometryRecords.find(
+      (candidate) => candidate.route.id === routeId,
+    );
+    if (!record) return;
+    const svg = (hitTarget.ownerSVGElement ?? hitTarget) as SVGSVGElement;
+    const pointer = options.pointFromClient(
+      event.clientX,
+      event.clientY,
+      svg,
+      false,
+    );
+    const tap = resolveRouteTap(
+      record.geometry,
+      pointer,
+      options.logicalRadiusForPixels(svg, 7),
+    );
+    if (!tap) {
+      options.setStatus("Wire must start or end inside a route segment");
+      return;
+    }
+    const segment = record.geometry.segments[tap.address.segmentIndex];
+    if (!segment) return;
+    const currentWire = options.readCurrentWireSession();
+    const tapPoint = routeTapPoint(
+      tap.point,
+      segment.from,
+      segment.to,
+      options.document.presentation.grid,
+      currentWire.source
+        ? (currentWire.steps.at(-1)?.point ??
+            currentWire.source.connection.gridLanding)
+        : null,
+    );
+    const overlappingTargets = options.routeGeometryRecords.flatMap(
+      (candidate) => {
+        const candidateTap = resolveRouteTap(
+          candidate.geometry,
+          pointer,
+          options.logicalRadiusForPixels(svg, 7),
+        );
+        return candidateTap
+          ? [
+              {
+                kind: "route" as const,
+                id: `route:${candidate.route.id}:${candidateTap.address.segmentIndex}`,
+                point: candidateTap.point,
+                netId: candidate.route.netId,
+                routeId: candidate.route.id,
+                segmentIndex: candidateTap.address.segmentIndex,
+              },
+            ]
+          : [];
+      },
+    );
+    if (
+      resolveElectricalContactTargets(
+        options.document,
+        options.resolver,
+        overlappingTargets,
+        options.contactComponents,
+      ).length > 1
+    ) {
+      options.setStatus(
+        "Ambiguous intersection: choose one conductor away from the crossing",
+      );
+      return;
+    }
+    const anchor = sourceForTarget({
+      kind: "route",
+      point: tapPoint,
+      routeId,
+      segmentIndex: tap.address.segmentIndex,
+    });
+    if (!anchor) {
+      options.setStatus("That conductor segment is no longer on the sheet");
+      return;
+    }
+    if (!currentWire.source) {
+      startWire(anchor, `route ${routeId}`);
+      return;
+    }
+    commitWire(anchor);
+  };
+
+  const fixWirePoint = (point: Point): void => {
+    const wire = options.readCurrentWireSession();
+    if (wire.labelEditing) return;
+    if (!wire.source) {
+      const source = sourceForTarget(freeWireDraftTarget(point))!;
+      options.setWireSource(source, options.document.revision);
+      options.setWirePreview(freeWireDraftTarget(point));
+      options.setWireDraftSteps([]);
+      options.setStatus("Wire source: free grid point");
+      return;
+    }
+    options.setWireDraftSteps([
+      ...wire.steps,
+      {
+        point,
+        routingMode: wire.routingMode,
+        cornerOrder: wire.cornerOrder,
+      },
+    ]);
+    options.setWirePreview(freeWireDraftTarget(point));
+    options.setStatus("Wire step fixed; double-click or Enter to finish");
+  };
+
+  const finishWireAtPoint = (point: Point): void => {
+    if (!options.readCurrentWireSession().source) {
+      fixWirePoint(point);
+      return;
+    }
+    commitWire(sourceForTarget(freeWireDraftTarget(point))!);
+  };
+
+  return {
+    beginWireLabelEditing,
+    commitWireLabelEditing,
+    cancelWireLabelEditing,
+    memberChoice: pendingChoice?.choice ?? null,
+    beginContinuousTaps,
+    wireRepeat: repeat,
+    chooseWireMember,
+    previewWireExpression,
+    chooseWireExpression,
+    cancelMemberChoice: () => setPendingChoice(null),
+    sourceForTarget,
+    startWire,
+    beginRouteStretch,
+    commitWire,
+    completeRouteStretch,
+    drawSelectedMosBulk,
+    fixWirePoint,
+    finishWireAtPoint,
+    handleFlightline,
+    handleWireRoutePointerDown,
+    handleWireEndpoint,
+    selectRoute,
+  };
+}

@@ -1,0 +1,728 @@
+import type { SymbolResolver } from "@icm/symbols";
+import { instanceDisplayParameters } from "@icm/derived";
+import type { Rotation, SchematicDocument } from "@icm/model";
+import { LINEAR_CONTROLLED_SOURCE_KINDS } from "@icm/model";
+import {
+  componentPropertyDetailsValue,
+  parseComponentPropertyDetails,
+  type ComponentPropertyDetailsContext,
+  type ComponentPropertyDetailsValue,
+} from "./component-property-details";
+import {
+  CANVAS_PROPERTY_FIELDS,
+  ROTATION_OPTIONS,
+  MIRROR_OPTIONS,
+  colorToRgb,
+  parseCanvasColor,
+} from "./component-property-fields";
+import {
+  inductorCouplingPropertyValue,
+  parseInductorCouplingProperties,
+  type InductorCouplingPropertyContext,
+  type InductorCouplingPropertyValue,
+} from "./inductor-coupling-properties";
+import {
+  componentInputPolarity,
+  componentInputsSwapped,
+  componentInternalMark,
+  componentOutputsSwapped,
+  componentSourceShape,
+  componentSupplyPins,
+  NO_INTERNAL_MARK,
+  type SourceShape,
+} from "./component-visual-variants";
+
+type Instance = SchematicDocument["instances"][number];
+
+export type ComponentPropertyColor = "auto" | `#${string}`;
+
+export interface ComponentPropertyPlacementCode {
+  coordinate: [number, number];
+  rotation: Rotation;
+  mirror: "none" | "horizontal" | "vertical" | "both";
+}
+
+export interface ComponentPropertyDisplayCode {
+  visualAnnotation?: boolean;
+  value?: boolean;
+  parameters?: Record<string, boolean>;
+}
+
+export interface ComponentPropertyCodeValue
+  extends ComponentPropertyDetailsValue, InductorCouplingPropertyValue {
+  /** Empty Net ID selects the existing unique authored-supply fallback. */
+  supplies?: Record<string, string>;
+  /**
+   * A device's own terminal no pin draws, such as a substrate or a centre tap
+   * (#1833); an empty Net ID leaves it unconnected. Properties sets it from
+   * its own row, the Agent through set-terminal-net.
+   */
+  terminals?: Record<string, string>;
+  control?:
+    | { positiveNetId: string; negativeNetId: string }
+    | { instanceId: string; pinName: string; direction: "into" | "out" };
+  /** Electrical role of VDD Power; absent for every other component. */
+  connection?: "cell-pin" | "global";
+  /** Global Net name owned by a supply marker. */
+  netName?: string;
+  /** Visual instance annotation, independent from the exported netlist name. */
+  displayName?: string;
+  placement: ComponentPropertyPlacementCode | null;
+  display?: ComponentPropertyDisplayCode;
+  appearance: {
+    color: ComponentPropertyColor;
+    internalMark?: string;
+    inputPolarity?: boolean;
+    inputsSwapped?: boolean;
+    outputsSwapped?: boolean;
+    /** A controlled source drawn as a circle or a diamond. */
+    shape?: SourceShape;
+    /** An op-amp's VDD and VSS drawn as pins to wire (#1833). */
+    supplyPins?: boolean;
+  };
+}
+
+export interface ComponentPropertyCodeContext {
+  resolver?: SymbolResolver;
+  supplyTerminals?: readonly {
+    pinName: string;
+    netId: string;
+    options: readonly {
+      value: string;
+      label: string;
+      baseNetIds?: readonly string[];
+      previewNetId?: string | null;
+    }[];
+  }[];
+  instance: Instance;
+  /** Null when this component has no independently editable instance label. */
+  displayName?: string | null;
+  referenceVisible: boolean | null;
+  valueVisible: boolean | null;
+  parameterVisibility?: Record<string, boolean>;
+  /** Null when this component is not VDD Power. */
+  connection?: "cell-pin" | "global" | null;
+  /** Null when this component does not own an editable electrical marker name. */
+  netName?: string | null;
+  details?: ComponentPropertyDetailsContext;
+  controlNetOptions?: readonly {
+    value: string;
+    label: string;
+    baseNetIds?: readonly string[];
+  }[];
+  controlDeviceOptions?: readonly { value: string; label: string }[];
+  controlTerminalOptions?: readonly { value: string; label: string }[];
+  /** Present for an inductor that can be coupled to another. */
+  inductorCoupling?: InductorCouplingPropertyContext;
+}
+
+export type ComponentPropertyCodeParseResult =
+  | { ok: true; value: ComponentPropertyCodeValue }
+  | { ok: false; message: string };
+
+const ROOT_KEYS = new Set([
+  "supplies",
+  "inputs",
+  "placement",
+  "display",
+  "displayName",
+  "appearance",
+  "connection",
+  "netName",
+  "netlistName",
+  "parameters",
+  "netlistTarget",
+  "symbol",
+  "signalFlow",
+  "control",
+  "dot",
+  "coupling",
+]);
+const fieldKeys = (group: string) =>
+  new Set(
+    CANVAS_PROPERTY_FIELDS.filter((field) =>
+      field.path.startsWith(`${group}.`),
+    ).map((field) => field.path.split(".")[1]!),
+  );
+const PLACEMENT_KEYS = fieldKeys("placement");
+const APPEARANCE_KEYS = fieldKeys("appearance");
+
+function formattedColor(value: string | undefined): ComponentPropertyColor {
+  return (value ?? "auto") as ComponentPropertyColor;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function unexpectedKey(
+  value: Record<string, unknown>,
+  allowed: ReadonlySet<string>,
+  path: string,
+): string | null {
+  const key = Object.keys(value).find((candidate) => !allowed.has(candidate));
+  return key ? `${path}.${key} is not a supported property` : null;
+}
+
+function parsePlacement(
+  value: unknown,
+  currentlyPlaced: boolean,
+): ComponentPropertyPlacementCode | null {
+  if (value === null) {
+    // A drawn device never leaves the sheet: the schematic is what it shows.
+    // An Instance that is already off-sheet keeps reading back as null, so
+    // editing its other properties stays possible.
+    if (currentlyPlaced) {
+      throw new Error(
+        "placement cannot be changed to null; a Cell never holds a device its drawing does not show",
+      );
+    }
+    return null;
+  }
+  if (!isRecord(value)) throw new Error("placement must be an object");
+  const unknown = unexpectedKey(value, PLACEMENT_KEYS, "placement");
+  if (unknown) throw new Error(unknown);
+  const coordinate = value.coordinate;
+  if (
+    !Array.isArray(coordinate) ||
+    coordinate.length !== 2 ||
+    coordinate.some((entry) =>
+      typeof entry === "number" ? !Number.isFinite(entry) : true,
+    )
+  ) {
+    throw new Error("placement.coordinate must be a finite [x, y] coordinate");
+  }
+  const rotation = value.rotation;
+  if (!ROTATION_OPTIONS.some((option) => option.value === rotation)) {
+    throw new Error(
+      `placement.rotation must be ${ROTATION_OPTIONS.map((option) => option.value).join(", ")}`,
+    );
+  }
+  const mirror = value.mirror;
+  if (!MIRROR_OPTIONS.some((option) => option.value === mirror)) {
+    throw new Error(
+      `placement.mirror must be ${MIRROR_OPTIONS.map((option) => JSON.stringify(option.value)).join(" or ")}`,
+    );
+  }
+  return {
+    coordinate: [coordinate[0] as number, coordinate[1] as number],
+    rotation: rotation as Rotation,
+    mirror: mirror as ComponentPropertyPlacementCode["mirror"],
+  };
+}
+
+function parseDisplay(
+  value: unknown,
+  context: ComponentPropertyCodeContext,
+): ComponentPropertyDisplayCode | undefined {
+  const supported = new Set<string>();
+  if (context.referenceVisible !== null) supported.add("visualAnnotation");
+  if (context.valueVisible !== null) supported.add("value");
+  const parameters = instanceDisplayParameters(
+    context.instance,
+    context.resolver,
+  );
+  if (parameters.length) supported.add("parameters");
+  if (supported.size === 0) {
+    if (value !== undefined) {
+      throw new Error("display is not available for this component");
+    }
+    return undefined;
+  }
+  if (!isRecord(value)) throw new Error("display must be an object");
+  const unknown = unexpectedKey(value, supported, "display");
+  if (unknown) throw new Error(unknown);
+  const display: ComponentPropertyDisplayCode = {};
+  for (const key of supported) {
+    if (key === "parameters") {
+      if (!isRecord(value.parameters))
+        throw new Error("display.parameters must be an object");
+      const unknownParameter = unexpectedKey(
+        value.parameters,
+        new Set(parameters.map((parameter) => parameter.name)),
+        "display.parameters",
+      );
+      if (unknownParameter) throw new Error(unknownParameter);
+      display.parameters = {};
+      for (const parameter of parameters) {
+        const visible = value.parameters[parameter.name];
+        if (typeof visible !== "boolean")
+          throw new Error(
+            `display.parameters.${parameter.name} must be true or false`,
+          );
+        display.parameters[parameter.name] = visible;
+      }
+      continue;
+    }
+    if (typeof value[key] !== "boolean") {
+      throw new Error(`display.${key} must be true or false`);
+    }
+    display[key as "visualAnnotation" | "value"] = value[key] as boolean;
+  }
+  return display;
+}
+
+function parseAppearance(
+  value: Record<string, unknown>,
+  context: ComponentPropertyCodeContext,
+): ComponentPropertyCodeValue["appearance"] {
+  const internalMark = componentInternalMark(context.instance);
+  const inputPolarity = componentInputPolarity(context.instance.symbolId);
+  const booleanStates = {
+    inputPolarity,
+    inputsSwapped: componentInputsSwapped(context.instance.symbolId),
+    outputsSwapped: componentOutputsSwapped(context.instance.symbolId),
+    supplyPins: componentSupplyPins(context.instance, context.resolver),
+  };
+  const shape = componentSourceShape(context.instance);
+  const supported = new Set<string>(["color"]);
+  if (internalMark !== undefined) supported.add("internalMark");
+  if (shape !== undefined) supported.add("shape");
+  for (const [key, state] of Object.entries(booleanStates))
+    if (state !== undefined) supported.add(key);
+  const unknown = unexpectedKey(value, supported, "appearance");
+  if (unknown) throw new Error(unknown);
+  if (!("color" in value)) throw new Error("appearance.color is required");
+  const appearance: ComponentPropertyCodeValue["appearance"] = {
+    color: parseCanvasColor(value.color, "appearance.color"),
+  };
+  if (internalMark !== undefined) {
+    if (!("internalMark" in value))
+      throw new Error("appearance.internalMark is required");
+    if (
+      typeof value.internalMark !== "string" ||
+      !value.internalMark.trim() ||
+      value.internalMark.length > 64
+    )
+      throw new Error(
+        'appearance.internalMark must be "none" or nonempty custom text of at most 64 characters',
+      );
+    appearance.internalMark = value.internalMark.trim();
+  }
+  for (const key of Object.keys(
+    booleanStates,
+  ) as (keyof typeof booleanStates)[]) {
+    if (booleanStates[key] === undefined) continue;
+    if (!(key in value)) throw new Error(`appearance.${key} is required`);
+    if (typeof value[key] !== "boolean")
+      throw new Error(`appearance.${key} must be true or false`);
+    appearance[key] = value[key];
+  }
+  if (shape !== undefined) {
+    if (!("shape" in value)) throw new Error("appearance.shape is required");
+    if (value.shape !== "circle" && value.shape !== "diamond")
+      throw new Error('appearance.shape must be "circle" or "diamond"');
+    appearance.shape = value.shape;
+  }
+  return appearance;
+}
+
+export function componentPropertyCodeValue(
+  context: ComponentPropertyCodeContext,
+): ComponentPropertyCodeValue {
+  const { instance } = context;
+  const internalMark = componentInternalMark(instance);
+  const inputPolarity = componentInputPolarity(instance.symbolId);
+  const inputsSwapped = componentInputsSwapped(instance.symbolId);
+  const outputsSwapped = componentOutputsSwapped(instance.symbolId);
+  const shape = componentSourceShape(instance);
+  const supplyPins = componentSupplyPins(instance, context.resolver);
+  const display: ComponentPropertyDisplayCode = {};
+  if (context.referenceVisible !== null) {
+    display.visualAnnotation = context.referenceVisible;
+  }
+  if (context.valueVisible !== null) display.value = context.valueVisible;
+  const parameters = instanceDisplayParameters(instance, context.resolver);
+  const controlled = LINEAR_CONTROLLED_SOURCE_KINDS.has(instance.symbolId);
+  const voltageControl =
+    instance.symbolId === "vcvs" || instance.symbolId === "vccs";
+  if (parameters.length)
+    display.parameters = Object.fromEntries(
+      parameters.map((parameter) => [
+        parameter.name,
+        context.parameterVisibility?.[parameter.name] ?? false,
+      ]),
+    );
+  return {
+    ...(context.supplyTerminals?.length
+      ? {
+          supplies: Object.fromEntries(
+            context.supplyTerminals.map((terminal) => [
+              terminal.pinName,
+              terminal.netId,
+            ]),
+          ),
+        }
+      : {}),
+    ...(context.connection !== undefined && context.connection !== null
+      ? { connection: context.connection }
+      : {}),
+    ...(context.netName !== undefined && context.netName !== null
+      ? { netName: context.netName }
+      : {}),
+    ...componentPropertyDetailsValue(instance, context.details),
+    ...(controlled
+      ? {
+          control: voltageControl
+            ? {
+                positiveNetId:
+                  instance.netlist?.control?.kind === "voltage"
+                    ? (instance.netlist.control.positiveNetId ?? "")
+                    : "",
+                negativeNetId:
+                  instance.netlist?.control?.kind === "voltage"
+                    ? (instance.netlist.control.negativeNetId ?? "")
+                    : "",
+              }
+            : {
+                instanceId:
+                  instance.netlist?.control?.kind === "terminal-current"
+                    ? (instance.netlist.control.instanceId ?? "")
+                    : instance.netlist?.control?.kind === "current"
+                      ? (instance.netlist.control.sensorInstanceId ?? "")
+                      : "",
+                pinName:
+                  instance.netlist?.control?.kind === "terminal-current"
+                    ? (instance.netlist.control.pinName ?? "")
+                    : instance.netlist?.control?.kind === "current" &&
+                        instance.netlist.control.sensorInstanceId
+                      ? "+"
+                      : "",
+                direction:
+                  instance.netlist?.control?.kind === "terminal-current"
+                    ? instance.netlist.control.direction
+                    : "into",
+              },
+        }
+      : {}),
+    ...(context.displayName !== undefined && context.displayName !== null
+      ? { displayName: context.displayName }
+      : {}),
+    ...inductorCouplingPropertyValue(context.inductorCoupling),
+    placement: instance.placement
+      ? {
+          coordinate: [
+            instance.placement.position.x,
+            instance.placement.position.y,
+          ],
+          rotation: instance.placement.rotation,
+          mirror: instance.placement.mirror,
+        }
+      : null,
+    ...(Object.keys(display).length > 0 ? { display } : {}),
+    appearance: {
+      color: formattedColor(instance.styleOverride?.foreground),
+      ...(internalMark !== undefined ? { internalMark } : {}),
+      ...(inputPolarity !== undefined ? { inputPolarity } : {}),
+      ...(inputsSwapped !== undefined ? { inputsSwapped } : {}),
+      ...(outputsSwapped !== undefined ? { outputsSwapped } : {}),
+      ...(shape !== undefined ? { shape } : {}),
+      ...(supplyPins !== undefined ? { supplyPins } : {}),
+    },
+  };
+}
+
+export function serializeComponentPropertyCode(
+  value: ComponentPropertyCodeValue,
+): string {
+  const {
+    placement,
+    appearance,
+    display,
+    displayName,
+    connection,
+    netName,
+    netlistName,
+    netlistTarget,
+    control,
+    dot,
+    coupling,
+    ...details
+  } = value;
+  const source = JSON.stringify(
+    {
+      placement,
+      ...(connection !== undefined ? { connection } : {}),
+      ...(netName !== undefined ? { netName } : {}),
+      appearance: {
+        color:
+          appearance.color === "auto" ? "auto" : colorToRgb(appearance.color),
+        ...(appearance.internalMark !== undefined
+          ? { internalMark: appearance.internalMark }
+          : {}),
+        ...(appearance.inputPolarity !== undefined
+          ? { inputPolarity: appearance.inputPolarity }
+          : {}),
+        ...(appearance.inputsSwapped !== undefined
+          ? { inputsSwapped: appearance.inputsSwapped }
+          : {}),
+        ...(appearance.outputsSwapped !== undefined
+          ? { outputsSwapped: appearance.outputsSwapped }
+          : {}),
+        ...(appearance.shape !== undefined ? { shape: appearance.shape } : {}),
+        ...(appearance.supplyPins !== undefined
+          ? { supplyPins: appearance.supplyPins }
+          : {}),
+      },
+      ...(display ? { display } : {}),
+      ...(displayName !== undefined ? { displayName } : {}),
+      ...(control !== undefined ? { control } : {}),
+      ...(dot !== undefined ? { dot } : {}),
+      ...(coupling !== undefined ? { coupling } : {}),
+      ...details,
+      netlistName,
+      netlistTarget,
+    },
+    null,
+    2,
+  );
+  // Keep coordinate and RGB tuples readable on one line; this remains strict JSON.
+  return source.replace(
+    /"(?:\\.|[^"\\])*"|\[\s*(-?\d+(?:\.\d+)?(?:e[+-]?\d+)?)\s*,\s*(-?\d+(?:\.\d+)?(?:e[+-]?\d+)?)(?:\s*,\s*(\d+))?\s*\]/giu,
+    (match, first?: string, second?: string, third?: string) =>
+      first === undefined
+        ? match
+        : `[${first}, ${second}${third === undefined ? "" : `, ${third}`}]`,
+  );
+}
+
+export function formatComponentPropertyCode(
+  context: ComponentPropertyCodeContext,
+): string {
+  return serializeComponentPropertyCode(componentPropertyCodeValue(context));
+}
+
+/** Parse the strict component-local JSON surface; physical connectivity stays outside it. */
+export function parseComponentPropertyCode(
+  source: string,
+  context: ComponentPropertyCodeContext,
+): ComponentPropertyCodeParseResult {
+  try {
+    const decoded: unknown = JSON.parse(source);
+    if (!isRecord(decoded))
+      throw new Error("Property code must be a JSON object");
+    const unknown = unexpectedKey(decoded, ROOT_KEYS, "component");
+    if (unknown) throw new Error(unknown);
+    if (!("placement" in decoded)) {
+      throw new Error("placement is required");
+    }
+    if (!isRecord(decoded.appearance)) {
+      throw new Error("appearance must be an object");
+    }
+    // Keep the shared field registry honest, while the component-specific
+    // parser below decides which of those appearance controls is available.
+    const appearanceUnknown = unexpectedKey(
+      decoded.appearance,
+      APPEARANCE_KEYS,
+      "appearance",
+    );
+    if (appearanceUnknown) throw new Error(appearanceUnknown);
+    const display = parseDisplay(decoded.display, context);
+    const displayNameAvailable =
+      context.displayName !== undefined && context.displayName !== null;
+    if (!displayNameAvailable && "displayName" in decoded) {
+      throw new Error("displayName is not available for this component");
+    }
+    if (displayNameAvailable) {
+      if (!("displayName" in decoded)) {
+        throw new Error("displayName is required for this component");
+      }
+      if (
+        typeof decoded.displayName !== "string" ||
+        !decoded.displayName.trim() ||
+        decoded.displayName.length > 256
+      ) {
+        throw new Error(
+          "displayName must be a nonempty string of at most 256 characters",
+        );
+      }
+    }
+    const connectionAvailable =
+      context.connection !== undefined && context.connection !== null;
+    if (!connectionAvailable && "connection" in decoded) {
+      throw new Error("connection is not available for this component");
+    }
+    if (connectionAvailable) {
+      if (!("connection" in decoded)) {
+        throw new Error("connection is required for this component");
+      }
+      if (
+        decoded.connection !== "cell-pin" &&
+        decoded.connection !== "global"
+      ) {
+        throw new Error('connection must be "cell-pin" or "global"');
+      }
+    }
+    const netNameAvailable =
+      context.netName !== undefined && context.netName !== null;
+    if (!netNameAvailable && "netName" in decoded) {
+      throw new Error("netName is not available for this component");
+    }
+    if (netNameAvailable) {
+      if (!("netName" in decoded)) {
+        throw new Error("netName is required for this component");
+      }
+      if (
+        typeof decoded.netName !== "string" ||
+        !decoded.netName.trim() ||
+        decoded.netName.length > 128
+      ) {
+        throw new Error(
+          "netName must be a nonempty string of at most 128 characters",
+        );
+      }
+    }
+    const controlled = LINEAR_CONTROLLED_SOURCE_KINDS.has(
+      context.instance.symbolId,
+    );
+    let supplies: ComponentPropertyCodeValue["supplies"];
+    if (context.supplyTerminals?.length) {
+      if (!isRecord(decoded.supplies))
+        throw new Error("supplies must be an object");
+      const unknownSupply = unexpectedKey(
+        decoded.supplies,
+        new Set(context.supplyTerminals.map((terminal) => terminal.pinName)),
+        "supplies",
+      );
+      if (unknownSupply) throw new Error(unknownSupply);
+      supplies = {};
+      for (const terminal of context.supplyTerminals) {
+        const netId = decoded.supplies[terminal.pinName];
+        if (
+          typeof netId !== "string" ||
+          !terminal.options.some(
+            (option) =>
+              option.value === netId || option.baseNetIds?.includes(netId),
+          )
+        )
+          throw new Error(
+            `supplies.${terminal.pinName} must select an available Net or Auto`,
+          );
+        supplies[terminal.pinName] = netId;
+      }
+    } else if ("supplies" in decoded) {
+      throw new Error("supplies is not available for this component");
+    }
+    if (!controlled && "control" in decoded)
+      throw new Error(
+        "Controlled-source properties are not available for this component",
+      );
+    let control: ComponentPropertyCodeValue["control"];
+    if (controlled) {
+      if (!isRecord(decoded.control))
+        throw new Error("control must be an object");
+      const voltage =
+        context.instance.symbolId === "vcvs" ||
+        context.instance.symbolId === "vccs";
+      const keys = voltage
+        ? ["positiveNetId", "negativeNetId"]
+        : ["instanceId", "pinName", "direction"];
+      const unknownControl = unexpectedKey(
+        decoded.control,
+        new Set(keys),
+        "control",
+      );
+      if (unknownControl) throw new Error(unknownControl);
+      for (const key of keys)
+        if (typeof decoded.control[key] !== "string")
+          throw new Error(`control.${key} must be a string`);
+      if (
+        !voltage &&
+        decoded.control.direction !== "into" &&
+        decoded.control.direction !== "out"
+      )
+        throw new Error("control.direction must be into or out");
+      control = voltage
+        ? {
+            positiveNetId: decoded.control.positiveNetId as string,
+            negativeNetId: decoded.control.negativeNetId as string,
+          }
+        : {
+            instanceId: decoded.control.instanceId as string,
+            pinName: decoded.control.pinName as string,
+            direction: decoded.control.direction as "into" | "out",
+          };
+    }
+    return {
+      ok: true,
+      value: {
+        ...(supplies ? { supplies } : {}),
+        ...(controlled && control
+          ? {
+              control,
+            }
+          : {}),
+        ...parseInductorCouplingProperties(
+          decoded,
+          context.instance.id,
+          context.inductorCoupling,
+        ),
+        ...(connectionAvailable
+          ? {
+              connection: decoded.connection as "cell-pin" | "global",
+            }
+          : {}),
+        ...(displayNameAvailable
+          ? { displayName: (decoded.displayName as string).trim() }
+          : {}),
+        ...(netNameAvailable
+          ? { netName: (decoded.netName as string).trim() }
+          : {}),
+        ...parseComponentPropertyDetails(
+          decoded,
+          context.instance,
+          context.details,
+        ),
+        placement: parsePlacement(
+          decoded.placement,
+          context.instance.placement !== null,
+        ),
+        ...(display ? { display } : {}),
+        appearance: parseAppearance(decoded.appearance, context),
+      },
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message:
+        error instanceof Error ? error.message : "Property code is invalid",
+    };
+  }
+}
+
+/** Reset authored defaults in the draft without moving, renaming, or rebinding the device. */
+export function defaultComponentPropertyCode(
+  context: ComponentPropertyCodeContext,
+  { parametersOnly = false }: { parametersOnly?: boolean } = {},
+): string {
+  const value = componentPropertyCodeValue(context);
+  if (!parametersOnly && value.placement)
+    value.placement = { ...value.placement, rotation: 0, mirror: "none" };
+  if (!parametersOnly)
+    value.appearance = {
+      color: "auto",
+      ...(value.appearance.internalMark !== undefined
+        ? { internalMark: NO_INTERNAL_MARK }
+        : {}),
+      ...(value.appearance.inputPolarity !== undefined
+        ? { inputPolarity: true }
+        : {}),
+      ...(value.appearance.inputsSwapped !== undefined
+        ? { inputsSwapped: false }
+        : {}),
+      ...(value.appearance.outputsSwapped !== undefined
+        ? { outputsSwapped: false }
+        : {}),
+      ...(value.appearance.shape !== undefined ? { shape: "circle" } : {}),
+      ...(value.appearance.supplyPins !== undefined
+        ? { supplyPins: false }
+        : {}),
+    };
+  if (value.parameters && context.details) {
+    // Preserve unknown model overrides; only descriptor-owned defaults are known.
+    for (const parameter of context.details.parameters)
+      value.parameters[parameter.key] = parameter.defaultValue ?? "";
+  }
+  if (!parametersOnly && value.signalFlow) value.signalFlow = {};
+  return serializeComponentPropertyCode(value);
+}

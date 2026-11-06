@@ -1,0 +1,716 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+import { createEmptyDocument } from "@icm/model";
+import { parseProject } from "@icm/project-protocol";
+import { executeTransaction } from "@icm/edit-engine";
+import type { CircuitProject } from "@icm/model";
+import { resolveDocumentRoutingGeometry } from "@icm/derived";
+import { InMemorySymbolResolver, builtInSymbols } from "@icm/symbols";
+import { describe, expect, it } from "vitest";
+
+import {
+  AgentProductionCircuitRequestSchema,
+  AgentBootstrapSnapshotSchema,
+  AgentSessionSnapshotSchema,
+  AgentSchematicEditSchema,
+} from "./schema.js";
+import {
+  buildAgentBootstrapSnapshot,
+  buildAgentSessionSnapshot,
+  canonicalSnapshotContent,
+  selectAgentInstances,
+} from "./snapshot.js";
+
+const resolver = new InMemorySymbolResolver(builtInSymbols);
+
+function fixtureProject(): CircuitProject {
+  return parseProject(
+    readFileSync(
+      resolve(
+        process.cwd(),
+        "fixtures/projects/differential-stage/project.icproj.json",
+      ),
+      "utf8",
+    ),
+  );
+}
+
+describe("Agent Document Snapshot", () => {
+  it("reads and edits an independent Junction color through the native contract", () => {
+    const project = fixtureProject();
+    const document = project.documents[0]!;
+    document.junctions.push({
+      id: "colored-J",
+      netId: document.nets[0]!.id,
+      position: { x: 400, y: 200 },
+    });
+    const before = buildAgentSessionSnapshot({ project, document, resolver });
+    const edit = AgentSchematicEditSchema.parse({
+      kind: "set_junction_style_override",
+      target: { kind: "junction", junctionId: "colored-J" },
+      styleOverride: { color: "#CC2244" },
+    });
+    const result = executeTransaction(document, {
+      transactionId: "agent-dot-color",
+      documentId: document.id,
+      expectedRevision: document.revision,
+      actor: { kind: "agent", id: "test" },
+      edits: [edit],
+    });
+    expect(result).toMatchObject({ ok: true });
+    if (!result.ok) return;
+    const after = buildAgentSessionSnapshot({
+      project,
+      document: result.document,
+      resolver,
+    });
+    expect(AgentSessionSnapshotSchema.parse(after)).toEqual(after);
+    expect(
+      after.document.junctions.find((j) => j.id === "colored-J"),
+    ).toMatchObject({ styleOverride: { color: "#CC2244" } });
+    expect(after.electricalTopologyHash).toBe(before.electricalTopologyHash);
+  });
+  it("leaves out the Document style a copied object keeps", () => {
+    const project = fixtureProject();
+    const document = project.documents[0]!;
+    const kept = { fontScale: 2 };
+    document.instances[0]!.documentStyle = kept;
+    document.routes[0]!.documentStyle = kept;
+    for (const annotation of document.annotations)
+      annotation.documentStyle = kept;
+    const snapshot = buildAgentSessionSnapshot({ project, document, resolver });
+    expect(AgentSessionSnapshotSchema.parse(snapshot)).toEqual(snapshot);
+    expect(JSON.stringify(snapshot)).not.toContain("documentStyle");
+    expect(document.annotations[0]!.documentStyle).toEqual(kept);
+  });
+
+  it("resolves selected pins identically without resolving unrelated symbols", () => {
+    const project = fixtureProject();
+    const document = project.documents[0]!;
+    const full = buildAgentSessionSnapshot({ project, document, resolver });
+    const selected = full.document.instances[0]!;
+    const calls: string[] = [];
+    const boundedResolver = {
+      resolve(id: string, variant?: string | null) {
+        calls.push(id);
+        return resolver.resolve(id, variant ?? undefined);
+      },
+    };
+    const pins = selectAgentInstances(
+      { project, document, resolver: boundedResolver },
+      [selected.id, "absent"],
+    );
+    expect(pins).toEqual([selected]);
+    expect(new Set(calls)).toEqual(new Set([selected.symbolId]));
+    expect(JSON.stringify(pins).length).toBeLessThan(
+      JSON.stringify(full).length / 2,
+    );
+  });
+  it("lists coupled inductors with their References only when there are some (#1648)", () => {
+    const project = fixtureProject();
+    const document = project.documents[0]!;
+    const plain = buildAgentSessionSnapshot({ project, document, resolver });
+    expect(plain.document).not.toHaveProperty("inductorCouplings");
+    // An empty list is no couplings: the Snapshot stays as it was.
+    document.inductorCouplings = [];
+    expect(
+      JSON.stringify(
+        buildAgentSessionSnapshot({ project, document, resolver }),
+      ),
+    ).toBe(JSON.stringify(plain));
+
+    for (const id of ["L1", "L2"])
+      document.instances.push({
+        id: `inductor-${id}`,
+        symbolId: "inductor",
+        reference: id,
+        placement: null,
+        netlist: { parameters: { value: "1u" } },
+      });
+    document.inductorCouplings = [
+      {
+        id: "coupling-1",
+        name: "TF1",
+        members: [
+          { instanceId: "inductor-L1", dotPin: "2" },
+          { instanceId: "inductor-L2", dotPin: "1" },
+        ],
+        k: "0.9",
+        arrow: false,
+      },
+    ];
+    const coupled = buildAgentSessionSnapshot({ project, document, resolver });
+    expect(AgentSessionSnapshotSchema.parse(coupled)).toEqual(coupled);
+    expect(coupled.document.inductorCouplings).toEqual([
+      {
+        id: "coupling-1",
+        name: "TF1",
+        members: [
+          { instanceId: "inductor-L1", reference: "L1", dotPin: "2" },
+          { instanceId: "inductor-L2", reference: "L2", dotPin: "1" },
+        ],
+        k: "0.9",
+        arrow: false,
+      },
+    ]);
+  });
+
+  it("bounds an adder round the sign marks it draws (#1324)", () => {
+    const bounds = (signB: "+" | "-") => {
+      const document = createEmptyDocument("doc", "Adder");
+      document.instances.push({
+        id: "S1",
+        symbolId: "adder",
+        reference: "S1",
+        placement: {
+          position: { x: 100, y: 100 },
+          rotation: 0,
+          mirror: "none",
+        },
+        netlist: {
+          binding: { kind: "unresolved-subcircuit", name: "adder" },
+          parameters: { signA: "+", signB },
+        },
+      });
+      const box = selectAgentInstances({ document, resolver }, ["S1"])[0]!
+        .bounds!;
+      return [box.x, box.y, box.x + box.width, box.y + box.height].map(
+        (value) => Number(value.toFixed(6)),
+      );
+    };
+    // Adding, an adder is its Symbol's box.
+    expect(bounds("+")).toEqual([76, 84, 124, 124]);
+    // Once B subtracts, the plus over A and the minus by B reach past it.
+    expect(bounds("-")).toEqual([72.7, 83.7, 124, 124.3]);
+  });
+
+  it("builds a bounded bootstrap projection without full topology or diagnostics", () => {
+    const project = fixtureProject();
+    const document = project.documents[0]!;
+    const bootstrap = buildAgentBootstrapSnapshot({ project, document });
+    const full = buildAgentSessionSnapshot({ project, document, resolver });
+
+    expect(AgentBootstrapSnapshotSchema.parse(bootstrap)).toEqual(bootstrap);
+    expect(bootstrap).toMatchObject({
+      project: {
+        id: project.id,
+        structureRevision: project.structureRevision,
+        topDocumentId: project.topDocumentId,
+      },
+      document: {
+        id: document.id,
+        revision: document.revision,
+        instanceCount: document.instances.length,
+        netCount: document.nets.length,
+      },
+    });
+    expect(bootstrap.byteLength).toBeLessThan(full.byteLength);
+    expect(bootstrap).not.toHaveProperty("electricalTopologyHash");
+    expect(bootstrap.document).not.toHaveProperty("instances");
+    expect(bootstrap.document).not.toHaveProperty("diagnostics");
+
+    const newerDocument = {
+      ...document,
+      revision: document.revision + 1,
+      instances: [
+        ...document.instances,
+        structuredClone(document.instances[0]!),
+      ],
+    };
+    const newer = buildAgentBootstrapSnapshot({
+      project,
+      document: newerDocument,
+    });
+    expect(
+      newer.project.documents.find((item) => item.id === document.id),
+    ).toMatchObject({
+      revision: newerDocument.revision,
+      instanceCount: newerDocument.instances.length,
+    });
+  });
+
+  it("reads and edits Route styling without losing color, arrow, or connectivity", () => {
+    const project = fixtureProject();
+    const document = project.documents[0]!;
+    const route = document.routes[0]!;
+    route.styleOverride = { color: "#123456", arrow: "end" };
+    const before = buildAgentSessionSnapshot({ project, document, resolver });
+    const visibleRoute = before.document.routes.find(
+      (item) => item.id === route.id,
+    )!;
+    expect(visibleRoute.styleOverride).toEqual(route.styleOverride);
+    const edit = AgentSchematicEditSchema.parse({
+      kind: "set_route_style_override",
+      routeId: route.id,
+      styleOverride: { ...visibleRoute.styleOverride, lineStyle: "dashed" },
+    });
+    const result = executeTransaction(document, {
+      transactionId: "agent-wire-style",
+      documentId: document.id,
+      expectedRevision: document.revision,
+      actor: { kind: "agent", id: "test" },
+      edits: [edit],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const after = buildAgentSessionSnapshot({
+      project,
+      document: result.document,
+      resolver,
+    });
+    expect(AgentSessionSnapshotSchema.parse(after)).toEqual(after);
+    expect(
+      after.document.routes.find((item) => item.id === route.id)?.styleOverride,
+    ).toEqual({
+      color: "#123456",
+      arrow: "end",
+      lineStyle: "dashed",
+    });
+    expect(after.document.nets).toEqual(before.document.nets);
+    expect(after.electricalTopologyHash).toBe(before.electricalTopologyHash);
+    expect(route.styleOverride).toEqual({ color: "#123456", arrow: "end" });
+  });
+
+  it("lists the labels that name or value each part, where they stand (#1518)", () => {
+    const project = fixtureProject();
+    const document = project.documents[0]!;
+    const label = {
+      alignment: "start" as const,
+      rotation: 0 as const,
+      locked: false,
+    };
+    document.annotations.push(
+      {
+        ...label,
+        id: "m1-name",
+        kind: "instance-label",
+        binding: { kind: "instance-reference", instanceId: "M1" },
+        anchor: {
+          kind: "object",
+          objectId: "M1",
+          localOffset: { x: 20, y: -10 },
+          fallbackPosition: { x: 0, y: 0 },
+        },
+      },
+      {
+        ...label,
+        id: "m1-w",
+        kind: "instance-value",
+        binding: { kind: "instance-value", instanceId: "M1", parameter: "w" },
+        anchor: { kind: "free", position: { x: 210, y: 230 } },
+        visible: false,
+      },
+      {
+        ...label,
+        id: "vout-name",
+        kind: "instance-label",
+        binding: {
+          kind: "cell-terminal-name",
+          terminalId: "cell-terminal-vout",
+        },
+        anchor: {
+          kind: "object",
+          objectId: "VOUT",
+          localOffset: { x: 10, y: 20 },
+          fallbackPosition: { x: 0, y: 0 },
+        },
+      },
+      {
+        ...label,
+        id: "vinp-net",
+        kind: "net-label",
+        netId: "net-vinp",
+        binding: { kind: "net-name", netId: "net-vinp" },
+        anchor: { kind: "free", position: { x: 0, y: 0 } },
+      },
+    );
+    // Without asking, the records keep the shape released clients parse.
+    expect(
+      JSON.stringify(
+        buildAgentSessionSnapshot({ project, document, resolver }).document
+          .instances,
+      ),
+    ).not.toContain('"annotations"');
+    const snapshot = buildAgentSessionSnapshot({
+      project,
+      document,
+      resolver,
+      instanceLabels: true,
+    });
+    const labelsOf = (id: string) =>
+      snapshot.document.instances.find((instance) => instance.id === id)!
+        .annotations;
+    expect(labelsOf("M1")).toEqual([
+      {
+        id: "m1-name",
+        kind: "instance-label",
+        visible: true,
+        resolvedText: "M1",
+        // M1 stands at (180, 200).
+        position: { x: 200, y: 190 },
+      },
+      {
+        id: "m1-w",
+        kind: "instance-value",
+        parameter: "w",
+        visible: false,
+        resolvedText: snapshot.document.annotations.find(
+          (annotation) => annotation.id === "m1-w",
+        )!.resolvedText,
+        position: { x: 210, y: 230 },
+      },
+    ]);
+    // A Cell Pin's name label, and an older drawing's literal one on its marker.
+    expect(labelsOf("VOUT")).toEqual([
+      {
+        id: "label-vout",
+        kind: "instance-label",
+        visible: true,
+        resolvedText: "Vout",
+        position: { x: 390, y: 150 },
+      },
+      {
+        id: "vout-name",
+        kind: "instance-label",
+        visible: true,
+        resolvedText: "VOUT",
+        position: { x: 390, y: 180 },
+      },
+    ]);
+    expect(labelsOf("M2")).toBeUndefined();
+    expect(JSON.stringify(snapshot.document.instances)).not.toContain(
+      "vinp-net",
+    );
+    // A pins read lists the same.
+    expect(
+      selectAgentInstances(
+        { project, document, resolver, instanceLabels: true },
+        ["M1"],
+      )[0]!.annotations,
+    ).toEqual(labelsOf("M1"));
+  });
+
+  it("provides complete bidirectional topology and presentation facts", () => {
+    const project = fixtureProject();
+    const document = project.documents[0]!;
+    const snapshot = buildAgentSessionSnapshot({
+      project,
+      document,
+      resolver,
+    });
+
+    expect(AgentSessionSnapshotSchema.parse(snapshot)).toEqual(snapshot);
+    expect(snapshot.document.revision).toBe(document.revision);
+    expect(snapshot.document.presentation).toEqual(document.presentation);
+    expect(snapshot.document.routes[0]).toMatchObject({
+      start: expect.any(Object),
+      legs: expect.any(Array),
+      polyline: expect.any(Array),
+    });
+    const snapshotRoute = snapshot.document.routes[0]!;
+    expect(snapshotRoute.polyline).toEqual(
+      resolveDocumentRoutingGeometry(document, resolver).routes.get(
+        snapshotRoute.id,
+      )?.centerline ?? null,
+    );
+    expect(snapshot.document.layoutGroups[0]?.objectIds.length).toBeGreaterThan(
+      0,
+    );
+
+    const m1 = snapshot.document.instances.find((item) => item.id === "M1")!;
+    expect(m1.pins.find((pin) => pin.name === "G")).toMatchObject({
+      netId: "net-vinp",
+      connection: expect.objectContaining({
+        contactPoint: expect.any(Object),
+        gridLanding: expect.any(Object),
+      }),
+    });
+    const vinp = snapshot.document.nets.find((item) => item.id === "net-vinp")!;
+    expect(vinp.terminals).toContainEqual({ instanceId: "M1", pinName: "G" });
+    const modelM1 = document.instances.find((item) => item.id === "M1")!;
+    if (!modelM1.netlist) {
+      expect(m1.netlist).toBeUndefined();
+    } else {
+      expect(m1.netlist).toMatchObject({
+        reference: modelM1.reference,
+        parameters: modelM1.netlist.parameters,
+      });
+      expect(m1.netlist?.binding).toEqual(modelM1.netlist.binding);
+      expect(m1.netlist?.terminalMapping).toEqual(
+        modelM1.importProvenance?.terminalMapping,
+      );
+    }
+
+    for (const instance of snapshot.document.instances) {
+      for (const pin of instance.pins) {
+        if (!pin.netId) continue;
+        const net = snapshot.document.nets.find(
+          (candidate) => candidate.id === pin.netId,
+        );
+        expect(net?.terminals).toContainEqual({
+          instanceId: instance.id,
+          pinName: pin.name,
+        });
+      }
+    }
+    for (const net of snapshot.document.nets) {
+      for (const terminal of net.terminals) {
+        const instance = snapshot.document.instances.find(
+          (candidate) => candidate.id === terminal.instanceId,
+        );
+        expect(instance).toBeDefined();
+        expect(
+          instance?.pins.find((pin) => pin.name === terminal.pinName)?.netId,
+        ).toBe(net.id);
+      }
+    }
+
+    const canonical = canonicalSnapshotContent({
+      project: snapshot.project,
+      document: snapshot.document,
+    });
+    expect(snapshot.byteLength).toBe(Buffer.byteLength(canonical, "utf8"));
+    expect(snapshot.electricalTopologyHash).toMatch(/^[a-f0-9]{64}$/u);
+  });
+
+  it("exposes the resolved marker-owned power-domain fact", () => {
+    const document = createEmptyDocument("power-snapshot", "Power Snapshot");
+    document.nets.push({
+      id: "net-vdd",
+
+      terminals: [],
+    });
+    document.connectivityEvidence.push({
+      id: "claim-vdd",
+      kind: "name-claim",
+      netId: "net-vdd",
+      name: "VDD",
+      scope: "global",
+      powerDomain: "vdd",
+      owner: { kind: "net-label", annotationId: "test-net-label-1" },
+    });
+    const snapshot = buildAgentSessionSnapshot({ document, resolver });
+    expect(snapshot.document.nets).toContainEqual(
+      expect.objectContaining({ id: "net-vdd", powerDomain: "vdd" }),
+    );
+  });
+
+  it("reports a materialized MOS supply default distinctly from an explicit B route", () => {
+    const document = createEmptyDocument("bulk-snapshot", "Bulk Snapshot");
+    document.instances.push({
+      id: "M1",
+      symbolId: "nmos",
+      symbolVariantId: "textbook-3terminal",
+      mosBulkBinding: {
+        origin: "supply-default",
+        netId: "net-global-0",
+      },
+      placement: null,
+    });
+    document.nets.push({
+      id: "net-global-0",
+
+      terminals: [{ instanceId: "M1", pinName: "B" }],
+    });
+
+    const snapshot = buildAgentSessionSnapshot({ document, resolver });
+
+    expect(snapshot.document.instances[0]?.mosBulk).toEqual({
+      status: "supply-default",
+      netId: "net-global-0",
+    });
+    expect(AgentSessionSnapshotSchema.parse(snapshot)).toEqual(snapshot);
+  });
+
+  it("uses canonical Project ERC evidence in the Snapshot", () => {
+    const project = fixtureProject();
+    const document = createEmptyDocument("snapshot-erc", "Snapshot ERC");
+    document.instances.push({
+      id: "R-open",
+      symbolId: "resistor",
+      placement: {
+        position: { x: 0, y: 0 },
+        rotation: 0,
+        mirror: "none",
+      },
+    });
+    project.documents = [document];
+    project.topDocumentId = document.id;
+
+    const snapshot = buildAgentSessionSnapshot({ project, document, resolver });
+    expect(snapshot.document.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          domain: "erc",
+          code: "ERC_UNCONNECTED_PIN",
+          objectIds: ["R-open:1"],
+          parameters: { instanceId: "R-open", pinName: "1" },
+        }),
+      ]),
+    );
+  });
+
+  it("cannot be submitted as a mutation request", () => {
+    const project = fixtureProject();
+    const snapshot = buildAgentSessionSnapshot({
+      project,
+      document: project.documents[0]!,
+      resolver,
+    });
+    expect(
+      AgentProductionCircuitRequestSchema.safeParse({
+        apiVersion: "3.0",
+        requestId: "replace-document",
+        operation: "transact",
+        documentId: snapshot.document.id,
+        expectedRevision: snapshot.document.revision,
+        transactionId: "replace-document",
+        snapshot,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("keeps electricalTopologyHash stable across non-electrical edits", () => {
+    const project = fixtureProject();
+    const base = buildAgentSessionSnapshot({
+      project,
+      document: project.documents[0]!,
+      resolver,
+    });
+
+    // Move an instance, change an annotation, and add drafting: none of
+    // these are electrical facts, so the hash must not change (ADR 0010).
+    const edited = structuredClone(project);
+    const document = edited.documents[0]!;
+    document.instances[0]!.placement = {
+      position: { x: 1000, y: 1000 },
+      rotation: 90,
+      mirror: "horizontal",
+    };
+    document.annotations[0]!.content = {
+      runs: [{ kind: "text", value: "changed" }],
+    };
+    document.drafting = {
+      objects: [
+        {
+          id: "d1",
+          kind: "text",
+          locked: false,
+          zIndex: 0,
+          anchor: { kind: "free", position: { x: 10, y: 10 } },
+          content: { runs: [{ kind: "text", value: "note" }] },
+          alignment: "start",
+          rotation: 0,
+        },
+      ],
+    };
+    const after = buildAgentSessionSnapshot({
+      project: edited,
+      document,
+      resolver,
+    });
+    expect(after.electricalTopologyHash).toBe(base.electricalTopologyHash);
+  });
+
+  it("changes electricalTopologyHash when Net membership changes", () => {
+    const project = fixtureProject();
+    const base = buildAgentSessionSnapshot({
+      project,
+      document: project.documents[0]!,
+      resolver,
+    });
+    const edited = structuredClone(project);
+    const document = edited.documents[0]!;
+    // Remove a terminal from a Net: an electrical fact.
+    document.nets[0]!.terminals.pop();
+    const after = buildAgentSessionSnapshot({
+      project: edited,
+      document,
+      resolver,
+    });
+    expect(after.electricalTopologyHash).not.toBe(base.electricalTopologyHash);
+  });
+
+  it("includes NoConnect declarations but excludes Route and Junction geometry from electricalTopologyHash", () => {
+    const project = fixtureProject();
+    const document = project.documents[0]!;
+    const base = buildAgentSessionSnapshot({ project, document, resolver });
+
+    const withNoConnect = structuredClone(project);
+    const noConnectDocument = withNoConnect.documents[0]!;
+    noConnectDocument.noConnects.push({
+      id: "nc-hash-contract",
+      endpoint: { kind: "terminal", instanceId: "M1", pinName: "B" },
+    });
+    const declared = buildAgentSessionSnapshot({
+      project: withNoConnect,
+      document: noConnectDocument,
+      resolver,
+    });
+    expect(declared.electricalTopologyHash).not.toBe(
+      base.electricalTopologyHash,
+    );
+
+    const geometryOnly = structuredClone(withNoConnect);
+    const geometryDocument = geometryOnly.documents[0]!;
+    geometryDocument.routes[0]!.legs[0]!.mode = "locked";
+    geometryDocument.junctions.push({
+      id: "junction-hash-contract",
+      netId: geometryDocument.nets[0]!.id,
+      position: { x: 10, y: 10 },
+      role: "route-anchor",
+    });
+    const afterGeometry = buildAgentSessionSnapshot({
+      project: geometryOnly,
+      document: geometryDocument,
+      resolver,
+    });
+    expect(afterGeometry.electricalTopologyHash).toBe(
+      declared.electricalTopologyHash,
+    );
+  });
+
+  it("exposes resolved drafting geometry matching the persisted anchor", () => {
+    const project = fixtureProject();
+    const document = project.documents[0]!;
+    document.drafting = {
+      objects: [
+        {
+          id: "d1",
+          kind: "text",
+          locked: false,
+          zIndex: 0,
+          anchor: {
+            kind: "object",
+            objectId: document.instances[0]!.id,
+            localOffset: { x: 10, y: 10 },
+            fallbackPosition: { x: 0, y: 0 },
+          },
+          content: { runs: [{ kind: "text", value: "note" }] },
+          alignment: "start",
+          rotation: 0,
+        },
+      ],
+    };
+    const snapshot = buildAgentSessionSnapshot({ project, document, resolver });
+    const entry = snapshot.document.drafting.objects[0]!;
+    expect(entry.object.id).toBe("d1");
+    const geometry = entry.resolvedGeometry as {
+      kind: string;
+      position?: { x: number; y: number };
+    };
+    expect(geometry.kind).toBe("text");
+    // The resolved position = instance placement + localOffset.
+    const instance = document.instances[0]!.placement!.position;
+    expect(geometry.position).toEqual({
+      x: instance.x + 10,
+      y: instance.y + 10,
+    });
+    // The persisted anchor is unchanged (still references the instance).
+    expect(entry.object.anchor).toMatchObject({
+      kind: "object",
+      objectId: document.instances[0]!.id,
+    });
+  });
+});

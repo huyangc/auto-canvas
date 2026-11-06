@@ -1,0 +1,349 @@
+import { describe, expect, it } from "vitest";
+
+import { createEmptyDocument, flattenRichText } from "@icm/model";
+
+import {
+  parseSignalFlowInline,
+  resolveAdaptiveSignalFlowBlockLayout,
+  resolveSignalFlowFormulaLayout,
+  resolveSignalFlowPinAt,
+  signalFlowBodyTextDocument,
+  signalFlowBodyWordDocument,
+  signalFlowFormulaSource,
+} from "./signal-flow-layout.js";
+
+const definition = {
+  formulaPresentation: {
+    defaultFormula: "z^-1/(1-z^-1)",
+    supportsCoefficient: true,
+    center: { x: 0, y: 0 },
+    fontSize: 12,
+    adaptiveFrame: {
+      minBodyWidth: 120,
+      minBodyHeight: 60,
+      horizontalPadding: 16,
+      verticalPadding: 12,
+      leadLength: 20,
+    },
+  },
+} as const;
+
+const baseParameters = { formula: "1/s", coefficient: "K" } as const;
+
+describe("signal-flow layout", () => {
+  it("keeps 1/s, z^-1, and z^-1/(1-z^-1) at fontSize 12 and grows fractions vertically", () => {
+    const inline = resolveSignalFlowFormulaLayout(
+      definition.formulaPresentation,
+      {
+        formula: "1/s",
+      },
+    );
+    const unitDelay = resolveSignalFlowFormulaLayout(
+      definition.formulaPresentation,
+      { formula: "z^-1" },
+    );
+    const fraction = resolveSignalFlowFormulaLayout(
+      definition.formulaPresentation,
+      { formula: "z^-1/(1-z^-1)" },
+    );
+
+    expect(inline?.fontSize).toBe(12);
+    expect(unitDelay?.fontSize).toBe(12);
+    expect(fraction?.fontSize).toBe(12);
+    expect(fraction?.bounds.height).toBeGreaterThanOrEqual(
+      inline!.bounds.height,
+    );
+    expect(fraction?.contentHeight).toBeGreaterThanOrEqual(
+      inline!.contentHeight,
+    );
+    expect(fraction?.formulaWidth).toBeGreaterThanOrEqual(43.2);
+    expect(
+      fraction!.denominatorBaseline - fraction!.fractionBarY,
+    ).toBeGreaterThanOrEqual(fraction!.fontSize * 1.25);
+    expect(
+      fraction!.fractionBarY - fraction!.numeratorBaseline,
+    ).toBeGreaterThanOrEqual(fraction!.fontSize * 0.4);
+  });
+
+  it("snaps adaptive geometry to the 10-grid without exceeding its lead limit", () => {
+    const layout = resolveAdaptiveSignalFlowBlockLayout(definition, {
+      ...baseParameters,
+      bodyWidth: 121,
+      bodyHeight: 61,
+    });
+    expect(layout?.body.width).toBe(130);
+    expect(layout?.body.height).toBe(70);
+    expect(layout?.pinSpan).toBe(80);
+    expect(layout?.bounds.width).toBe(160);
+    expect(layout?.bounds.height).toBe(70);
+    expect(layout!.pinSpan - layout!.body.width / 2).toBeLessThanOrEqual(
+      definition.formulaPresentation.adaptiveFrame.leadLength,
+    );
+
+    const larger = resolveAdaptiveSignalFlowBlockLayout(definition, {
+      formula: "very_long_custom_transfer_function",
+      bodyWidth: 160,
+      bodyHeight: 90,
+    });
+    expect(larger).toBeDefined();
+    expect(larger!.body.width).toBeGreaterThanOrEqual(160);
+    expect(larger!.body.height).toBeGreaterThanOrEqual(90);
+    expect(larger!.body.width % 10).toBe(0);
+    expect(larger!.body.height % 10).toBe(0);
+    expect(larger!.body.width).toBeGreaterThanOrEqual(layout!.body.width);
+    expect(larger!.pinSpan % 10).toBe(0);
+    expect(larger!.pinSpan - larger!.body.width / 2).toBeLessThanOrEqual(
+      definition.formulaPresentation.adaptiveFrame.leadLength,
+    );
+  });
+
+  it("lands one-cell Signal Flow leads on the first eligible grid point", () => {
+    const oneCellDefinition = {
+      formulaPresentation: {
+        ...definition.formulaPresentation,
+        adaptiveFrame: {
+          ...definition.formulaPresentation.adaptiveFrame,
+          minBodyWidth: 40,
+          leadLength: 10,
+        },
+      },
+    };
+    const halfGridBody = resolveAdaptiveSignalFlowBlockLayout(
+      oneCellDefinition,
+      { formula: "x", bodyWidth: 40 },
+    );
+    const alignedBody = resolveAdaptiveSignalFlowBlockLayout(
+      oneCellDefinition,
+      { formula: "x", bodyWidth: 60 },
+    );
+
+    expect(halfGridBody).toMatchObject({
+      body: { width: 50 },
+      pinSpan: 30,
+    });
+    expect(alignedBody).toMatchObject({
+      body: { width: 60 },
+      pinSpan: 40,
+    });
+    for (const layout of [alignedBody, halfGridBody]) {
+      expect(layout).toBeDefined();
+      expect(layout!.pinSpan % 10).toBe(0);
+      expect(layout!.pinSpan - layout!.body.width / 2).toBeLessThanOrEqual(10);
+    }
+  });
+
+  it("preserves a right-tapered transconductance frame while expanding long formulas", () => {
+    const trapezoid = {
+      formulaPresentation: {
+        ...definition.formulaPresentation,
+        defaultFormula: "g_m",
+        adaptiveFrame: {
+          ...definition.formulaPresentation.adaptiveFrame,
+          shape: "right-tapered-trapezoid" as const,
+          minBodyWidth: 40,
+          horizontalPadding: 4,
+          minBodyHeight: 70,
+        },
+      },
+    };
+    const preset = resolveAdaptiveSignalFlowBlockLayout(trapezoid, {
+      formula: "gₘ₁",
+    });
+    const expanded = resolveAdaptiveSignalFlowBlockLayout(trapezoid, {
+      formula: "-g_mL_with_a_long_suffix",
+    });
+
+    expect(preset).toMatchObject({
+      shape: "right-tapered-trapezoid",
+      body: { width: 40, height: 70 },
+      pinSpan: 40,
+    });
+    expect(expanded!.shape).toBe("right-tapered-trapezoid");
+    expect(expanded!.body.width).toBeGreaterThan(preset!.body.width);
+    expect(expanded!.body.height).toBe(70);
+    expect(expanded!.pinSpan).toBeGreaterThan(preset!.pinSpan);
+  });
+
+  it("keeps adaptive body, pinSpan, and pin coordinates aligned around the same center", () => {
+    const layout = resolveAdaptiveSignalFlowBlockLayout(definition, {
+      formula: "z^-1/(1-z^-1)",
+      coefficient: "A",
+    });
+    const west = resolveSignalFlowPinAt(
+      definition,
+      { at: { x: -40, y: 0 }, direction: "west" },
+      { formula: "z^-1/(1-z^-1)" },
+    );
+    const east = resolveSignalFlowPinAt(
+      definition,
+      { at: { x: 40, y: 0 }, direction: "east" },
+      { formula: "z^-1/(1-z^-1)" },
+    );
+
+    expect(layout?.body.x).toBe(-layout!.body.width / 2);
+    expect(layout?.body.y).toBe(-layout!.body.height / 2);
+    expect(west.x).toBe(-layout!.pinSpan);
+    expect(east.x).toBe(layout!.pinSpan);
+    expect(west.y).toBe(0);
+    expect(east.y).toBe(0);
+  });
+});
+
+describe("Symbol body text as RichText", () => {
+  const presentation = definition.formulaPresentation;
+  const drawing = createEmptyDocument("main", "Main").presentation;
+
+  it("reads compact syntax into literal text and scripts", () => {
+    expect(parseSignalFlowInline("z^-1+g_m")).toEqual([
+      { kind: "text", value: "z" },
+      { kind: "superscript", value: "-1" },
+      { kind: "text", value: "+g" },
+      { kind: "subscript", value: "m" },
+    ]);
+    // More than one underscore stays literal, as it always drew.
+    expect(parseSignalFlowInline("a_b_c")).toEqual([
+      { kind: "text", value: "a_b_c" },
+    ]);
+    // A script groups in parentheses, or in braces as TeX writes it.
+    for (const formula of ["g_(m1)", "g_{m1}"])
+      expect(parseSignalFlowInline(formula)).toEqual([
+        { kind: "text", value: "g" },
+        { kind: "subscript", value: "m1" },
+      ]);
+    expect(parseSignalFlowInline("z^{-1}")).toEqual([
+      { kind: "text", value: "z" },
+      { kind: "superscript", value: "-1" },
+    ]);
+  });
+
+  // Typed body text is stored as compact source, so the scripts and fraction
+  // an editor shows must spell back to the same drawing.
+  it("spells RichText back into compact source when it can", () => {
+    for (const formula of ["z^-1", "g_m", "1/s", "z^-1/(1-z^-1)", "K(s+1)"]) {
+      const look = signalFlowBodyTextDocument(
+        presentation,
+        { formula },
+        drawing,
+      )!;
+      const source = signalFlowFormulaSource(look)!;
+      expect(source).toBe(formula);
+      expect(
+        signalFlowBodyTextDocument(presentation, { formula: source }, drawing),
+      ).toEqual(look);
+    }
+    const text = (value: string) => ({ kind: "text" as const, value });
+    expect(
+      signalFlowFormulaSource({
+        runs: [{ kind: "span", style: "overbar", children: [text("Q")] }],
+      }),
+    ).toBeNull();
+    expect(
+      signalFlowFormulaSource({
+        runs: [
+          text("K + "),
+          {
+            kind: "fraction",
+            numerator: { runs: [text("1")] },
+            denominator: { runs: [text("s")] },
+          },
+        ],
+      }),
+    ).toBeNull();
+  });
+
+  // Textbook notation: a quantity such as an amplifier's A slants; a word or
+  // an abbreviation such as ADC or DAC stands upright.
+  it("slants a single-letter quantity and stands a word upright", () => {
+    const slants = (formula: string) =>
+      JSON.stringify(signalFlowBodyWordDocument(formula, drawing)).includes(
+        '"italic"',
+      );
+    for (const quantity of ["A", "A1", "A_v", "G_m"])
+      expect(slants(quantity)).toBe(true);
+    for (const word of ["ADC", "DAC", "LPF", "ADCaa", "Zz"])
+      expect(slants(word)).toBe(false);
+    expect(flattenRichText(signalFlowBodyWordDocument("ADC", drawing)!)).toBe(
+      "ADC",
+    );
+  });
+
+  it("gives a transfer function the look it draws in, fraction and all", () => {
+    expect(
+      signalFlowBodyTextDocument(presentation, { formula: "1/s" }, drawing),
+    ).toEqual({
+      runs: [
+        {
+          kind: "span",
+          style: "bold",
+          children: [
+            {
+              kind: "fraction",
+              numerator: { runs: [{ kind: "text", value: "1" }] },
+              denominator: { runs: [{ kind: "text", value: "s" }] },
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("returns the author's look as it is stored", () => {
+    const formulaFormat = {
+      runs: [{ kind: "text" as const, value: "H(s)" }],
+    };
+    expect(
+      signalFlowBodyTextDocument(
+        presentation,
+        { formula: "H(s)", formulaFormat },
+        drawing,
+      ),
+    ).toBe(formulaFormat);
+  });
+
+  // The frame and pins size an authored look by the same conservative metric
+  // as the compact text, so restyling never jumps the pins by more than the
+  // text itself changed.
+  it("sizes an authored look like the same characters in compact text", () => {
+    const plain = resolveSignalFlowFormulaLayout(presentation, {
+      formula: "Hm",
+    })!;
+    const formatted = resolveSignalFlowFormulaLayout(presentation, {
+      formula: "Hm",
+      formulaFormat: {
+        runs: [
+          { kind: "text", value: "H" },
+          {
+            kind: "span",
+            style: "subscript",
+            children: [{ kind: "text", value: "m" }],
+          },
+        ],
+      },
+    })!;
+    expect(formatted.format).toBeDefined();
+    expect(formatted.formulaWidth).toBe(plain.formulaWidth);
+    expect(formatted.contentHeight).toBe(plain.contentHeight);
+
+    const stacked = resolveSignalFlowFormulaLayout(presentation, {
+      formula: "1/s",
+      formulaFormat: {
+        runs: [
+          {
+            kind: "fraction",
+            numerator: { runs: [{ kind: "text", value: "1" }] },
+            denominator: { runs: [{ kind: "text", value: "s" }] },
+          },
+        ],
+      },
+    })!;
+    expect(stacked.contentHeight).toBe(presentation.fontSize * 3);
+  });
+
+  it("ignores a look left without authored text", () => {
+    const layout = resolveSignalFlowFormulaLayout(presentation, {
+      formulaFormat: { runs: [{ kind: "text", value: "stray" }] },
+    })!;
+    expect(layout.format).toBeUndefined();
+    expect(layout.formula).toBe(presentation.defaultFormula);
+  });
+});

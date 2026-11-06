@@ -1,0 +1,768 @@
+import {
+  isEligibleSeriesInsertionPinPair,
+  planSeriesInstanceSplice,
+  planSeriesInstanceSpliceAtRouteEnd,
+  type SeriesSplicePlan,
+} from "./series-splice-planner.js";
+import { createContactPlanningDraft } from "./contact-planning-draft.js";
+import { planEnsurePowerNet } from "./power-net-planner.js";
+import { endpointOwnerNetId } from "./transaction-routing.js";
+import {
+  proposeEndpointRouteAttachment,
+  proposeEndpointsRouteAttachment,
+  type WireSource,
+} from "./wire-commit-planner.js";
+import type { ExpectedElectricalEffect } from "./routing-operation-plan.js";
+import type { SchematicEdit } from "./edit-schema.js";
+import { deviceDescriptor } from "@icm/devices";
+import {
+  buildDocumentSpatialIndex,
+  createElectricalContactResolver,
+  endpointKey,
+  isVisibleEndpoint,
+  isMosBulkTerminal,
+  findRouteSegmentsAtPoint,
+  resolveDocumentLogicalNets,
+  resolveEndpointConnection,
+  resolveDocumentRoutingGeometry,
+  supplyMarkerForSymbol,
+} from "@icm/derived";
+import type {
+  ElectricalContactCandidate,
+  ElectricalContactTarget,
+  EndpointObjectLookup,
+  ResolvedDocumentLogicalNets,
+  ResolvedDocumentRoutingGeometry,
+  DocumentSpatialIndex,
+} from "@icm/derived";
+import { deriveStableId, routeEndpoints } from "@icm/model";
+import type { Instance, RouteEndpoint, SchematicDocument } from "@icm/model";
+import type { SymbolResolver } from "@icm/symbols";
+
+export const powerConnectionForSymbol = supplyMarkerForSymbol;
+
+export interface PlacementContactProposal {
+  edits: readonly SchematicEdit[];
+  matched: boolean;
+  ambiguous: boolean;
+  rejected?: string;
+  powerNetId?: string;
+  powerEndpoint?: RouteEndpoint;
+  netId?: string;
+  expectedElectricalEffect?: ExpectedElectricalEffect;
+}
+
+/** Local read context only; discard after ANY edit or resolver change. */
+export function createPlacementContactContext(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+) {
+  const revision = document.revision;
+  let logicalNets: ResolvedDocumentLogicalNets | undefined;
+  let geometry: ResolvedDocumentRoutingGeometry | undefined;
+  let index: DocumentSpatialIndex | undefined;
+  const lookup: EndpointObjectLookup = {
+    instancesById: new Map(document.instances.map((item) => [item.id, item])),
+    junctionsById: new Map(document.junctions.map((item) => [item.id, item])),
+    get logicalNets() {
+      return (logicalNets ??= resolveDocumentLogicalNets(document));
+    },
+  };
+  // Match the previous field-by-field search exactly: a display-style endpoint
+  // key can alias ("R:1", "2") with ("R", "1:2").
+  const netsByInstance = new Map<string, Map<string, string>>();
+  for (const net of document.nets)
+    for (const terminal of net.terminals) {
+      let pins = netsByInstance.get(terminal.instanceId);
+      if (!pins) {
+        pins = new Map();
+        netsByInstance.set(terminal.instanceId, pins);
+      }
+      if (!pins.has(terminal.pinName)) pins.set(terminal.pinName, net.id);
+    }
+  const routingGeometry = () =>
+    (geometry ??= resolveDocumentRoutingGeometry(document, resolver));
+  return {
+    document,
+    resolver,
+    assertSnapshot(
+      current: SchematicDocument,
+      currentResolver: SymbolResolver,
+    ) {
+      if (
+        current !== document ||
+        currentResolver !== resolver ||
+        current.revision !== revision
+      )
+        throw new Error(
+          "Placement contact context belongs to a different snapshot",
+        );
+    },
+    lookup,
+    netForTerminal(endpoint: Extract<RouteEndpoint, { kind: "terminal" }>) {
+      return netsByInstance.get(endpoint.instanceId)?.get(endpoint.pinName);
+    },
+    routesById: new Map(document.routes.map((route) => [route.id, route])),
+    get logicalNets() {
+      return lookup.logicalNets!;
+    },
+    get routingGeometry() {
+      return routingGeometry();
+    },
+    get spatialIndex() {
+      return (index ??= buildDocumentSpatialIndex(document, routingGeometry()));
+    },
+    resolveContacts: createElectricalContactResolver(
+      document,
+      resolver,
+      undefined,
+      routingGeometry,
+    ),
+  };
+}
+
+export type PlacementContactContext = ReturnType<
+  typeof createPlacementContactContext
+>;
+
+function standalonePowerNetId(
+  document: SchematicDocument,
+  instanceId: string,
+): string {
+  const preferred = `net-power-${instanceId.toLowerCase()}`;
+  const occupied = new Set([
+    ...document.instances.map((instance) => instance.id),
+    ...document.nets.map((net) => net.id),
+    ...document.routes.map((route) => route.id),
+    ...document.junctions.map((junction) => junction.id),
+    ...document.noConnects.map((noConnect) => noConnect.id),
+    ...document.annotations.map((annotation) => annotation.id),
+    ...document.connectivityEvidence.map((evidence) => evidence.id),
+    ...document.layoutGroups.map((group) => group.id),
+    ...document.constraints.map((constraint) => constraint.id),
+    ...(document.drafting?.objects.map((object) => object.id) ?? []),
+    ...(document.netlist?.terminals.map((terminal) => terminal.id) ?? []),
+  ]);
+  if (!occupied.has(preferred)) return preferred;
+
+  let suffix = 2;
+  while (occupied.has(`${preferred}-${suffix}`)) suffix += 1;
+  return `${preferred}-${suffix}`;
+}
+
+/** Visible electrical anchors for an Instance that is about to be placed. */
+export function placementWireSources(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  instance: Instance,
+  context?: PlacementContactContext,
+): readonly WireSource[] {
+  context?.assertSnapshot(document, resolver);
+  if (!instance.placement) return [];
+  const resolved = resolver.resolve(
+    instance.symbolId,
+    instance.symbolVariantId,
+  );
+  if (!resolved) return [];
+  const alreadyPlaced = context
+    ? context.lookup.instancesById.get(instance.id) === instance
+    : document.instances.includes(instance);
+  const placedDocument = alreadyPlaced
+    ? document
+    : {
+        ...document,
+        instances: [
+          ...document.instances.filter(
+            (candidate) => candidate.id !== instance.id,
+          ),
+          instance,
+        ],
+      };
+  // A moved/replaced instance must not use a lookup of its old placement.
+  const lookup = alreadyPlaced ? context?.lookup : undefined;
+  return resolved.definition.pins.flatMap((pin): WireSource[] => {
+    const endpoint = {
+      kind: "terminal" as const,
+      instanceId: instance.id,
+      pinName: pin.name,
+    };
+    const connection = resolveEndpointConnection(
+      placedDocument,
+      resolver,
+      endpoint,
+      lookup,
+    );
+    return connection &&
+      isVisibleEndpoint(placedDocument, resolver, endpoint, lookup)
+      ? [
+          {
+            endpoint,
+            netId:
+              (context
+                ? context.netForTerminal(endpoint)
+                : document.nets.find((n) =>
+                    n.terminals.some(
+                      (t) =>
+                        t.instanceId === instance.id && t.pinName === pin.name,
+                    ),
+                  )?.id) ?? null,
+            connection,
+            preludeEdits: [],
+            ...(isMosBulkTerminal(placedDocument, endpoint)
+              ? { routePresentation: "bulk-dashed" as const }
+              : {}),
+          },
+        ]
+      : [];
+  });
+}
+
+function samePoint(
+  left: { x: number; y: number },
+  right: { x: number; y: number },
+): boolean {
+  return left.x === right.x && left.y === right.y;
+}
+
+function isEligibleSeriesInsertionPair(
+  instance: Instance,
+  visibleSources: readonly WireSource[],
+  contactedSources: readonly WireSource[],
+): boolean {
+  return isEligibleSeriesInsertionPinPair(
+    contactedSources.map(({ endpoint }) =>
+      endpoint.kind === "terminal" ? endpoint.pinName : "",
+    ),
+    visibleSources.length,
+    deviceDescriptor(instance.symbolId)?.seriesInsertionPinPair,
+  );
+}
+
+interface PlacementContact {
+  source: WireSource;
+  target: ElectricalContactTarget;
+}
+
+/**
+ * The two pins of `instance` when one lands inside a Wire and the other on
+ * the Junction or pin that ends that same Wire.
+ */
+function routeEndSpliceContacts(
+  document: SchematicDocument,
+  instance: Instance,
+  contacts: readonly PlacementContact[],
+):
+  | {
+      inner: {
+        source: WireSource;
+        route: NonNullable<ElectricalContactTarget["route"]>;
+      };
+      outer: { source: WireSource; routeEnd: RouteEndpoint };
+    }
+  | undefined {
+  if (
+    !contacts.every(
+      ({ source }) =>
+        source.endpoint.kind === "terminal" &&
+        source.endpoint.instanceId === instance.id,
+    )
+  )
+    return undefined;
+  const inner = contacts.find(({ target }) => target.route && !target.endpoint);
+  const outer = contacts.find(
+    (contact) => contact !== inner && contact.target.endpoint,
+  );
+  if (!inner || !outer) return undefined;
+  const route = document.routes.find(
+    (candidate) => candidate.id === inner.target.route!.routeId,
+  );
+  const end = outer.target.endpoint!.endpoint;
+  if (
+    !route ||
+    !routeEndpoints(route).some(
+      (endpoint) => endpointKey(endpoint) === endpointKey(end),
+    )
+  )
+    return undefined;
+  return {
+    inner: { source: inner.source, route: inner.target.route! },
+    outer: { source: outer.source, routeEnd: end },
+  };
+}
+
+/**
+ * Why a contact must be refused: it would leave both pins of a two-pin part
+ * on one Logical Net, which shorts the part. `connected` holds every pin's
+ * membership once all contacts are made. A part with more pins may tie them
+ * together on purpose (a dummy transistor), so only two-pin parts are held.
+ */
+function shortedTwoPinPart(
+  connected: SchematicDocument,
+  instances: readonly Instance[],
+  sources: readonly WireSource[],
+): string | undefined {
+  let logical: ReturnType<typeof resolveDocumentLogicalNets> | undefined;
+  for (const item of instances) {
+    const pins = sources.filter(
+      ({ endpoint }) =>
+        endpoint.kind === "terminal" && endpoint.instanceId === item.id,
+    );
+    if (pins.length !== 2) continue;
+    logical ??= resolveDocumentLogicalNets(connected);
+    const [first, second] = pins.map((pin) => {
+      const netId = endpointOwnerNetId(connected, pin.endpoint);
+      return netId ? (logical!.byBaseNetId.get(netId)?.id ?? netId) : null;
+    });
+    if (!first || first !== second) continue;
+    const name = logical.byId.get(first)?.name;
+    const label = item.reference ?? item.id;
+    return `Both pins of ${label} would join ${name ? `Net ${name}` : "one Net"}, which shorts it`;
+  }
+  return undefined;
+}
+
+/**
+ * A component may acquire electrical connectivity only from an exact visible
+ * pin-to-pin, pin-to-Junction, or pin-to-Route contact. Grid coincidence alone
+ * is deliberately insufficient. Multiple independent contacts commit
+ * together; multiple disconnected conductors at one point remain ambiguous.
+ * Several pins landing on one conductor at distinct points are the
+ * series-insertion drop and attach together, cutting the Route at each pin;
+ * so is one pin inside a Wire with the other on that Wire's own end. A drop
+ * that would still put both pins of a two-pin part on one Net is refused.
+ */
+export function proposePlacementContact(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  instance: Instance,
+  targets: readonly WireSource[],
+  options: {
+    mode?: "placement" | "move";
+    instances?: readonly Instance[];
+    /** False when VDD artwork is being authored as a formal Cell Pin. */
+    powerMarker?: boolean;
+    /** The only Wires a pin may land on; every Wire when omitted. */
+    routeIds?: ReadonlySet<string>;
+    /** Only for the immutable Document passed to this call, never a draft. */
+    context?: PlacementContactContext;
+  } = {},
+): PlacementContactProposal {
+  const contacts: PlacementContact[] = [];
+  let ambiguous = false;
+  const context =
+    options.context ?? createPlacementContactContext(document, resolver);
+  context.assertSnapshot(document, resolver);
+  const routingGeometry = context.routingGeometry;
+  const spatialIndex = context.spatialIndex;
+  const sources = (options.instances ?? [instance]).flatMap((item) =>
+    placementWireSources(document, resolver, item, context),
+  );
+  for (const source of sources) {
+    const sourceKey = endpointKey(source.endpoint);
+    const candidates: ElectricalContactCandidate[] = targets
+      .filter(
+        (target) =>
+          endpointKey(target.endpoint) !== sourceKey &&
+          samePoint(
+            source.connection.contactPoint,
+            target.connection.contactPoint,
+          ),
+      )
+      .map((target) => ({
+        kind: "endpoint" as const,
+        id: `endpoint:${JSON.stringify(target.endpoint)}`,
+        point: target.connection.contactPoint,
+        netId: target.netId,
+        endpoint: target.endpoint,
+      }));
+    for (const address of findRouteSegmentsAtPoint(
+      routingGeometry,
+      source.connection.contactPoint,
+      spatialIndex,
+    )) {
+      const route = context.routesById.get(address.routeId);
+      if (
+        !route ||
+        (options.routeIds && !options.routeIds.has(route.id)) ||
+        routeEndpoints(route).some((e) => endpointKey(e) === sourceKey)
+      )
+        continue;
+      candidates.push({
+        kind: "route" as const,
+        id: `route:${route.id}:${address.segmentIndex}`,
+        point: source.connection.contactPoint,
+        netId: route.netId,
+        routeId: route.id,
+        segmentIndex: address.segmentIndex,
+      });
+    }
+    const groups = context.resolveContacts(candidates);
+    if (groups.length === 1) {
+      const target = groups[0]!;
+      // Returning to an existing endpoint bond is a preserve transform, not
+      // a fresh attach/merge. Keep both authored membership and its identity.
+      if (
+        options.mode === "move" &&
+        target.endpoint &&
+        source.netId !== null &&
+        source.netId === target.endpoint.netId
+      )
+        continue;
+      contacts.push({ source, target });
+    } else if (groups.length > 1) ambiguous = true;
+  }
+  if (ambiguous) {
+    return { edits: [], matched: false, ambiguous: true };
+  }
+  if (contacts.length === 0) {
+    return { edits: [], matched: false, ambiguous: false };
+  }
+  // Several pins of one device may land on the SAME conductor. Exactly two
+  // contacts form a series-insertion gesture only when the whole visible
+  // device is two-terminal or its Device descriptor names that pair. This is
+  // based on exact resolved pin contacts, never on symbol bounds. Any other
+  // same-conductor multi-contact remains an ordinary attachment; two pins
+  // claiming the exact same point remain ambiguous.
+  const routeContactGroups = new Map<
+    string,
+    Array<{
+      source: WireSource;
+      route: NonNullable<ElectricalContactTarget["route"]>;
+    }>
+  >();
+  for (const contact of contacts) {
+    const route = contact.target.route;
+    if (!route || contact.target.endpoint) continue;
+    routeContactGroups.set(route.routeId, [
+      ...(routeContactGroups.get(route.routeId) ?? []),
+      { source: contact.source, route },
+    ]);
+  }
+  for (const group of routeContactGroups.values()) {
+    const pointKeys = group.map(
+      (member) =>
+        `${member.source.connection.contactPoint.x},${member.source.connection.contactPoint.y}`,
+    );
+    if (new Set(pointKeys).size !== pointKeys.length) {
+      return { edits: [], matched: false, ambiguous: true };
+    }
+  }
+  const onlyRouteContactGroup =
+    routeContactGroups.size === 1
+      ? [...routeContactGroups.values()][0]
+      : undefined;
+  const spliceGroup =
+    contacts.length === 2 &&
+    contacts.every(
+      (c) =>
+        c.source.endpoint.kind === "terminal" &&
+        c.source.endpoint.instanceId === instance.id,
+    ) &&
+    onlyRouteContactGroup?.length === 2 &&
+    isEligibleSeriesInsertionPair(
+      instance,
+      sources,
+      onlyRouteContactGroup.map((member) => member.source),
+    )
+      ? onlyRouteContactGroup
+      : undefined;
+  const alreadyRouted = sources.some((source) =>
+    document.routes.some((route) =>
+      routeEndpoints(route).some(
+        (endpoint) => endpointKey(endpoint) === endpointKey(source.endpoint),
+      ),
+    ),
+  );
+  // One pin inside a Wire and the other on the Junction or pin that ends
+  // that same Wire is the same gesture. Joined as two ordinary contacts, both
+  // pins would land on one Net with the Wire still running between them.
+  const endSplice =
+    !spliceGroup && contacts.length === 2
+      ? routeEndSpliceContacts(document, instance, contacts)
+      : undefined;
+  const spliceAtEnd =
+    endSplice &&
+    isEligibleSeriesInsertionPair(instance, sources, [
+      endSplice.inner.source,
+      endSplice.outer.source,
+    ])
+      ? endSplice
+      : undefined;
+  if (
+    ((spliceGroup && spliceGroup.length === 2) || spliceAtEnd) &&
+    !(options.mode === "move" && alreadyRouted)
+  ) {
+    const projected = structuredClone(document);
+    projected.instances = [
+      ...projected.instances.filter(
+        (candidate) => candidate.id !== instance.id,
+      ),
+      structuredClone(instance),
+    ];
+    const suffix = `splice-${instance.id.toLowerCase()}`;
+    const splice: SeriesSplicePlan = spliceAtEnd
+      ? planSeriesInstanceSpliceAtRouteEnd(
+          projected,
+          resolver,
+          spliceAtEnd.inner.route.routeId,
+          {
+            endpoint: spliceAtEnd.inner.source.endpoint,
+            point: spliceAtEnd.inner.source.connection.contactPoint,
+            segmentIndex: spliceAtEnd.inner.route.segmentIndex,
+          },
+          {
+            endpoint: spliceAtEnd.outer.source.endpoint,
+            routeEnd: spliceAtEnd.outer.routeEnd,
+          },
+          suffix,
+        )
+      : planSeriesInstanceSplice(
+          projected,
+          resolver,
+          spliceGroup![0]!.route.routeId,
+          [
+            {
+              endpoint: spliceGroup![0]!.source.endpoint,
+              point: spliceGroup![0]!.source.connection.contactPoint,
+              segmentIndex: spliceGroup![0]!.route.segmentIndex,
+            },
+            {
+              endpoint: spliceGroup![1]!.source.endpoint,
+              point: spliceGroup![1]!.source.connection.contactPoint,
+              segmentIndex: spliceGroup![1]!.route.segmentIndex,
+            },
+          ],
+          suffix,
+        );
+    return splice.ok
+      ? {
+          edits: splice.edits,
+          matched: true,
+          ambiguous: false,
+          expectedElectricalEffect: splice.expectedElectricalEffect,
+        }
+      : {
+          edits: [],
+          matched: false,
+          ambiguous: false,
+          rejected: splice.message,
+        };
+  }
+  const power =
+    options.mode === "move" || options.powerMarker === false
+      ? undefined
+      : supplyMarkerForSymbol(instance.symbolId);
+  const edits: SchematicEdit[] = [];
+  // Fold all contact membership edits through the transaction's own mutations
+  // before compiling any split. Later contacts must see prior Net merges, but
+  // Route leg identities must remain unchanged until every split is planned.
+  const contactDraft = createContactPlanningDraft(document, resolver);
+  const connected = contactDraft.document;
+  for (const item of options.instances ?? [instance]) {
+    connected.instances = connected.instances.filter((i) => i.id !== item.id);
+    connected.instances.push(structuredClone(item));
+  }
+  const connections = new Map<
+    WireSource,
+    { netId: string; newNetId: string }
+  >();
+  try {
+    for (const { source, target } of contacts) {
+      const newNetId =
+        contacts.length === 1
+          ? `net-contact-${instance.id.toLowerCase()}`
+          : `net-contact-${source.endpoint.kind === "terminal" ? source.endpoint.instanceId.toLowerCase() + "-" + source.endpoint.pinName.toLowerCase() : instance.id.toLowerCase()}`;
+      const to =
+        target.endpoint?.endpoint ??
+        connected.routes.find((r) => r.id === target.route!.routeId)!.start;
+      const connection = contactDraft.connect(source.endpoint, to, newNetId);
+      if (!connection.ok)
+        return {
+          edits: [],
+          matched: false,
+          ambiguous: false,
+          rejected: connection.message,
+        };
+      connections.set(source, { netId: connection.netId, newNetId });
+    }
+  } catch (error) {
+    return {
+      edits: [],
+      matched: false,
+      ambiguous: false,
+      rejected: error instanceof Error ? error.message : String(error),
+    };
+  }
+  const shorted = shortedTwoPinPart(
+    connected,
+    options.instances ?? [instance],
+    sources,
+  );
+  if (shorted) {
+    return { edits: [], matched: false, ambiguous: false, rejected: shorted };
+  }
+  edits.push(...contactDraft.edits);
+  // A contact may merge the target's Net away (the survivor can be the pin's
+  // own Net), so every later edit names the Net the pin ended up in.
+  const joinedNetId = (source: WireSource) =>
+    endpointOwnerNetId(connected, source.endpoint) ??
+    connections.get(source)!.netId;
+  let powerNetId: string | undefined;
+  let powerTarget:
+    { netId: string; state: "existing" | "pending-connection" } | undefined;
+  let powerEndpoint: RouteEndpoint | undefined;
+  let netId: string | undefined;
+  for (const contact of contacts) {
+    const { source, target } = contact;
+    if (target.endpoint) {
+      if (power)
+        powerTarget = target.endpoint.netId
+          ? { netId: target.endpoint.netId, state: "existing" }
+          : {
+              netId: connections.get(source)!.newNetId,
+              state: "pending-connection",
+            };
+      netId = joinedNetId(source);
+      if (power) powerNetId = netId;
+    } else if (target.route) {
+      const group = routeContactGroups.get(target.route.routeId) ?? [];
+      if (group[0]?.source === source) {
+        const connectedNetId = connected.routes.find(
+          (r) => r.id === target.route!.routeId,
+        )!.netId;
+        edits.push(
+          ...(group.length === 1
+            ? proposeEndpointRouteAttachment(
+                connected,
+                source.endpoint,
+                connectedNetId,
+                target.route.routeId,
+                source.connection.contactPoint,
+                target.route.segmentIndex,
+                `contact-${instance.id.toLowerCase()}-${source.endpoint.kind === "terminal" ? source.endpoint.pinName.toLowerCase() : "pin"}`,
+              )
+            : proposeEndpointsRouteAttachment(
+                connected,
+                resolver,
+                target.route.routeId,
+                group.map((member) => ({
+                  endpoint: member.source.endpoint,
+                  endpointNetId: connectedNetId,
+                  point: member.source.connection.contactPoint,
+                  segmentIndex: member.route.segmentIndex,
+                })),
+                `contact-${instance.id.toLowerCase()}`,
+              )
+          ).edits,
+        );
+      }
+      if (power) powerTarget = { netId: target.route.netId, state: "existing" };
+      netId = joinedNetId(source);
+      if (power) powerNetId = netId;
+    }
+    if (power) powerEndpoint = source.endpoint;
+  }
+  if (power && powerNetId && powerTarget) {
+    const request = (
+      candidateNetId: string,
+      candidateState: "existing" | "pending-connection",
+    ) => ({
+      candidateNetId,
+      candidateState,
+      domain: power.domain,
+      name: power.name,
+      scope: power.scope,
+      evidenceId: deriveStableId(
+        "connectivity-evidence",
+        document.id,
+        "power-marker",
+        instance.id,
+        candidateNetId,
+      ),
+      owner: { kind: "power-marker" as const, objectId: instance.id },
+    });
+    // The Net the marker was dropped on decides whether its name may attach…
+    const check = planEnsurePowerNet(
+      document,
+      request(powerTarget.netId, powerTarget.state),
+    );
+    // …but the claim itself must name the Net that survives the merges.
+    const plan = check.ok
+      ? planEnsurePowerNet(connected, request(powerNetId, "existing"))
+      : check;
+    if (!plan.ok) {
+      return {
+        edits: [],
+        matched: false,
+        ambiguous: false,
+        rejected: plan.message,
+      };
+    }
+    edits.push(...plan.edits);
+    powerNetId = plan.netId;
+  }
+  return {
+    edits,
+    matched: true,
+    ambiguous: false,
+    ...(powerNetId ? { powerNetId } : {}),
+    ...(powerEndpoint ? { powerEndpoint } : {}),
+    ...(netId ? { netId } : {}),
+  };
+}
+
+export function proposedStandalonePowerConnection(
+  document: SchematicDocument,
+  instance: Instance,
+): PlacementContactProposal {
+  const power = supplyMarkerForSymbol(instance.symbolId);
+  if (!power) return { edits: [], matched: false, ambiguous: false };
+  const endpoint: RouteEndpoint = {
+    kind: "terminal",
+    instanceId: instance.id,
+    pinName: power.pinName,
+  };
+  // Instance designators are deliberately reusable after deletion, while a
+  // Base Net may remain alive because its wire/Junction topology remains.
+  // Keep those lifetimes independent instead of assuming that VDD2 becoming
+  // available also makes net-power-vdd2 available.
+  const netId = standalonePowerNetId(document, instance.id);
+  const plan = planEnsurePowerNet(document, {
+    candidateNetId: netId,
+    candidateState: "pending-connection",
+    domain: power.domain,
+    name: power.name,
+    scope: power.scope,
+    evidenceId: deriveStableId(
+      "connectivity-evidence",
+      document.id,
+      "power-marker",
+      instance.id,
+      netId,
+    ),
+    owner: { kind: "power-marker", objectId: instance.id },
+  });
+  if (!plan.ok) {
+    return {
+      edits: [],
+      matched: false,
+      ambiguous: false,
+      rejected: plan.message,
+    };
+  }
+  return {
+    edits: [
+      {
+        kind: "connect_endpoints",
+        from: endpoint,
+        to: endpoint,
+        newNetId: netId,
+      },
+      ...plan.edits,
+    ],
+    matched: false,
+    ambiguous: false,
+    powerNetId: plan.netId,
+    powerEndpoint: endpoint,
+  };
+}

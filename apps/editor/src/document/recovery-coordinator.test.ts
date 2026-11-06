@@ -1,0 +1,593 @@
+import { describe, expect, it, vi, afterEach } from "vitest";
+import { IDBFactory } from "fake-indexeddb";
+
+import { createEmptyProject, freezeSnapshot } from "@icm/model";
+import { serializeProject } from "@icm/project-protocol";
+
+import { createBrowserRecoveryStore } from "./browser-recovery-store";
+import { createProjectSnapshotSerializer } from "./project-snapshot-serializer";
+import {
+  WORKING_COPY_STORAGE_KEY,
+  createRecoveryCoordinator,
+  type RecoveryCoordinator,
+  type RecoverySessionSummary,
+  type RecoveryState,
+} from "./recovery-coordinator";
+
+function memorySessionStorage(initial: Record<string, string> = {}) {
+  const data = new Map(Object.entries(initial));
+  return {
+    getItem: (key: string) => data.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      data.set(key, value);
+    },
+    has: (key: string) => data.has(key),
+  };
+}
+
+function fakes() {
+  const handles: ReturnType<typeof vi.fn>[] = [];
+  const timers: Map<unknown, () => void> = new Map();
+  const setTimeout = vi.fn((handler: () => void, _ms: number) => {
+    const handle = { handler };
+    timers.set(handle, handler);
+    handles.push(setTimeout);
+    return handle;
+  });
+  const clearTimeout = vi.fn((handle: unknown) => {
+    timers.delete(handle);
+  });
+  const fire = () => {
+    const pending = [...timers.values()];
+    timers.clear();
+    for (const handler of pending) handler();
+  };
+  return { setTimeout, clearTimeout, fire };
+}
+
+interface Harness {
+  coordinator: RecoveryCoordinator;
+  states: RecoveryState[];
+  notices: string[];
+  sessions: RecoverySessionSummary[];
+  storage: ReturnType<typeof memorySessionStorage>;
+  fire: () => void;
+  settle: () => Promise<void>;
+}
+
+function createHarness(
+  options: {
+    initialStorage?: Record<string, string>;
+    serializeProject?: typeof serializeProject;
+  } = {},
+): Harness {
+  const factory = new IDBFactory() as unknown as IDBFactory;
+  const store = createBrowserRecoveryStore({ idbFactory: factory });
+  const storage = memorySessionStorage(options.initialStorage ?? {});
+  const timers = fakes();
+  const states: RecoveryState[] = [];
+  const notices: string[] = [];
+  const sessions: RecoverySessionSummary[] = [];
+  let idCounter = 0;
+  let tick = 0;
+  const coordinator = createRecoveryCoordinator({
+    ...(options.serializeProject
+      ? { serializeProject: options.serializeProject }
+      : {}),
+    store,
+    events: {
+      onStateChange: (state) => states.push(state),
+      onNotice: (message) => notices.push(message),
+      onSessionsChange: (next) => {
+        sessions.length = 0;
+        sessions.push(...next);
+      },
+    },
+    setTimeout: timers.setTimeout as never,
+    clearTimeout: timers.clearTimeout as never,
+    getSessionStorage: () => storage,
+    createId: () => `id-${(idCounter += 1)}`,
+    now: () => new Date(2026, 7, 14, 10, 0, 0 + (tick += 1)).toISOString(),
+  });
+  return {
+    coordinator,
+    states,
+    notices,
+    sessions,
+    storage,
+    fire: timers.fire,
+    settle: async () => {
+      // Await the serial write chain (and with it the fake-indexeddb
+      // transaction) through the coordinator's own settling point instead of
+      // racing a wall-clock wait. Every settle site runs after `fire()` or a
+      // cancel, so the scheduler holds no candidate and the flush half of
+      // `flushNow()` is a no-op — were a supposedly dropped candidate still
+      // pending, it would be written and fail the test's readAll assertions.
+      await coordinator.flushNow();
+    },
+  };
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+const projectA = createEmptyProject("project-alpha", "Alpha");
+const projectB = createEmptyProject("project-alpha", "Beta");
+const projectC = createEmptyProject("project-gamma", "Gamma");
+
+describe("createRecoveryCoordinator", () => {
+  it("shares computed text with workspace saving without sharing persistence state", async () => {
+    const projectA = freezeSnapshot(
+      createEmptyProject("project-alpha", "Alpha"),
+    );
+    const projectB = freezeSnapshot(
+      createEmptyProject("project-alpha", "Beta"),
+    );
+    const serialize = vi.fn(serializeProject);
+    const cache = createProjectSnapshotSerializer(serialize);
+    const harness = createHarness({ serializeProject: cache.serialize });
+    const workspaceText = cache.serialize(projectA);
+    harness.coordinator.stage(projectA);
+    expect(harness.states).toEqual([]);
+    harness.fire();
+    expect(harness.states).toEqual(["pending"]);
+    await harness.settle();
+    expect(harness.states).toEqual(["pending", "stored"]);
+    expect(serialize).toHaveBeenCalledTimes(1);
+    expect(
+      (await harness.coordinator.store.readAll()).sessions[0]?.latest
+        ?.projectText,
+    ).toBe(workspaceText);
+    // Unchanged text still carries changed dirty metadata into the actual store.
+    harness.coordinator.stage(projectA, { unsavedAtSnapshot: false });
+    await harness.coordinator.flushNow();
+    expect(
+      (await harness.coordinator.store.readAll()).sessions[0]?.latest
+        ?.unsavedAtSnapshot,
+    ).toBe(false);
+    expect(serialize).toHaveBeenCalledTimes(1);
+    harness.coordinator.stage(projectB);
+    await harness.coordinator.flushNow();
+    expect(cache.serialize(projectB)).toBe(serializeProject(projectB));
+    expect(serialize).toHaveBeenCalledTimes(2);
+  });
+  it("creates and persists a working-copy identity", () => {
+    const harness = createHarness();
+    expect(harness.coordinator.workingCopyId).toBe("id-1");
+    expect(harness.storage.getItem(WORKING_COPY_STORAGE_KEY)).toBe("id-1");
+  });
+
+  it("reuses the persisted identity so a reload continues the same session", () => {
+    const harness = createHarness({
+      initialStorage: { [WORKING_COPY_STORAGE_KEY]: "id-existing" },
+    });
+    expect(harness.coordinator.workingCopyId).toBe("id-existing");
+  });
+
+  it("stages a debounced write and publishes pending then stored", async () => {
+    const harness = createHarness();
+    harness.coordinator.stage(projectA);
+    expect(harness.coordinator.state).toBe("idle");
+    harness.fire();
+    expect(harness.coordinator.state).toBe("pending");
+    await harness.settle();
+    expect(harness.coordinator.state).toBe("stored");
+    const read = await harness.coordinator.store.readAll();
+    expect(read.sessions).toHaveLength(1);
+    expect(read.sessions[0]?.latest?.projectText).toBe(
+      serializeProject(projectA),
+    );
+    expect(read.sessions[0]?.latest?.source).toBe("new");
+    expect(read.sessions[0]?.latest?.unsavedAtSnapshot).toBe(true);
+  });
+
+  it("coalesces a burst of commits into the newest Project", async () => {
+    const harness = createHarness();
+    harness.coordinator.stage(projectA);
+    harness.coordinator.stage(projectB);
+    harness.fire();
+    await harness.settle();
+    const read = await harness.coordinator.store.readAll();
+    expect(read.sessions).toHaveLength(1);
+    expect(read.sessions[0]?.latest?.projectText).toBe(
+      serializeProject(projectB),
+    );
+    expect(read.sessions[0]?.previous).toBeNull();
+  });
+
+  it("does not consume a generation for an unchanged Project", async () => {
+    const harness = createHarness();
+    harness.coordinator.stage(projectA);
+    harness.fire();
+    await harness.settle();
+    harness.coordinator.stage(projectA);
+    harness.fire();
+    await harness.settle();
+    const read = await harness.coordinator.store.readAll();
+    expect(read.sessions[0]?.previous).toBeNull();
+    expect(read.sessions[0]?.latest?.projectText).toBe(
+      serializeProject(projectA),
+    );
+  });
+
+  it("marks identical content clean without consuming the previous generation", async () => {
+    const harness = createHarness();
+    harness.coordinator.stage(projectA);
+    await harness.coordinator.flushNow();
+    harness.coordinator.stage(projectA, { unsavedAtSnapshot: false });
+    await harness.coordinator.flushNow();
+    const read = await harness.coordinator.store.readAll();
+    expect(read.sessions[0]?.previous).toBeNull();
+    expect(read.sessions[0]?.latest?.unsavedAtSnapshot).toBe(false);
+  });
+
+  it("flushNow writes a pending Project without waiting for the timer", async () => {
+    const harness = createHarness();
+    harness.coordinator.stage(projectA);
+    const state = await harness.coordinator.flushNow();
+    expect(state).toBe("stored");
+    const read = await harness.coordinator.store.readAll();
+    expect(read.sessions[0]?.latest?.projectText).toBe(
+      serializeProject(projectA),
+    );
+  });
+
+  it("cancelPending drops a scheduled write", async () => {
+    const harness = createHarness();
+    harness.coordinator.stage(projectA);
+    harness.coordinator.cancelPending();
+    harness.fire();
+    await harness.settle();
+    const read = await harness.coordinator.store.readAll();
+    expect(read.sessions).toHaveLength(0);
+  });
+
+  it("never loses the newest revision while a write is in flight", async () => {
+    const factory = new IDBFactory() as unknown as IDBFactory;
+    const realStore = createBrowserRecoveryStore({ idbFactory: factory });
+    let releaseFirst: (() => void) | null = null;
+    const gate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const release = (): void => {
+      releaseFirst?.();
+    };
+    let first = true;
+    const blockingStore: typeof realStore = {
+      ...realStore,
+      writeRecord: async (record) => {
+        if (first) {
+          first = false;
+          await gate;
+        }
+        return realStore.writeRecord(record);
+      },
+    };
+    const storage = memorySessionStorage();
+    const timers = fakes();
+    const coordinator = createRecoveryCoordinator({
+      store: blockingStore,
+      setTimeout: timers.setTimeout as never,
+      clearTimeout: timers.clearTimeout as never,
+      getSessionStorage: () => storage,
+      createId: () => "id-wc",
+      now: () => new Date(2026, 7, 14, 10, 0, 0).toISOString(),
+    });
+    coordinator.stage(projectA);
+    timers.fire();
+    await Promise.resolve();
+    await Promise.resolve();
+    // Project B is committed while A's IndexedDB transaction is still in
+    // flight; the serial chain must write B after A completes.
+    coordinator.stage(projectB);
+    timers.fire();
+    release();
+    const state = await coordinator.flushNow();
+    expect(state).toBe("stored");
+    const read = await realStore.readAll();
+    expect(read.sessions[0]?.latest?.projectText).toBe(
+      serializeProject(projectB),
+    );
+    expect(read.sessions[0]?.previous?.projectText).toBe(
+      serializeProject(projectA),
+    );
+  });
+
+  it("beginWorkingCopy forks the identity, keeps outgoing records, and re-sources", async () => {
+    const harness = createHarness();
+    harness.coordinator.stage(projectA);
+    harness.fire();
+    await harness.settle();
+    const next = harness.coordinator.beginWorkingCopy("opened-file");
+    expect(next).not.toBe("id-1");
+    expect(harness.storage.getItem(WORKING_COPY_STORAGE_KEY)).toBe(next);
+    harness.coordinator.stage(projectC);
+    await harness.coordinator.flushNow();
+    const read = await harness.coordinator.store.readAll();
+    const ids = read.sessions.map((session) => session.workingCopyId).sort();
+    expect(ids).toEqual(["id-1", next].sort());
+    const incoming = read.sessions.find(
+      (session) => session.workingCopyId === next,
+    );
+    expect(incoming?.latest?.source).toBe("opened-file");
+    expect(incoming?.latest?.projectText).toBe(serializeProject(projectC));
+  });
+
+  it("beginWorkingCopy drops a pending write for the outgoing Project", async () => {
+    const harness = createHarness();
+    harness.coordinator.stage(projectA);
+    harness.coordinator.beginWorkingCopy("opened-file");
+    harness.fire();
+    await harness.settle();
+    const read = await harness.coordinator.store.readAll();
+    expect(read.sessions).toHaveLength(0);
+  });
+
+  it("maps quota-exceeded to its state and keeps prior records", async () => {
+    const harness = createHarness();
+    harness.coordinator.stage(projectA);
+    harness.fire();
+    await harness.settle();
+    vi.spyOn(harness.coordinator.store, "writeRecord").mockResolvedValue({
+      status: "failed",
+      failure: "quota-exceeded",
+      message: "simulated quota",
+    });
+    harness.coordinator.stage(projectB);
+    const state = await harness.coordinator.flushNow();
+    expect(state).toBe("quota-exceeded");
+    const read = await harness.coordinator.store.readAll();
+    expect(read.sessions[0]?.latest?.projectText).toBe(
+      serializeProject(projectA),
+    );
+  });
+
+  it("notices and fails when the store rejects an oversized snapshot", async () => {
+    const harness = createHarness();
+    vi.spyOn(harness.coordinator.store, "writeRecord").mockResolvedValue({
+      status: "rejected-too-large",
+      byteLength: 5 * 1024 * 1024,
+    });
+    harness.coordinator.stage(projectA);
+    const state = await harness.coordinator.flushNow();
+    expect(state).toBe("failed");
+    expect(harness.notices.join(" ")).toContain("4 MB");
+  });
+
+  it("discover summarizes and orders sessions with typed reviews", async () => {
+    const harness = createHarness();
+    harness.coordinator.stage(projectA);
+    harness.fire();
+    await harness.settle();
+    harness.coordinator.beginWorkingCopy("opened-file");
+    // Another Project: retention keeps one closed copy per Project.
+    harness.coordinator.stage(createEmptyProject("project-beta", "Beta"));
+    await harness.coordinator.flushNow();
+    await harness.coordinator.discover();
+    expect(harness.sessions).toHaveLength(2);
+    const byName = harness.sessions.map((s) => s.projectName).sort();
+    expect(byName).toEqual(["Alpha", "Beta"]);
+    expect(harness.sessions[0]?.latest?.review).toBe("valid");
+    expect(harness.sessions[0]?.latest?.revision).not.toBeNull();
+    expect(harness.sessions[0]?.latest?.unsavedAtSnapshot).toBe(true);
+  });
+
+  it("classifies corrupt and unsupported-schema generations in summaries", async () => {
+    const harness = createHarness();
+    // Seed one valid and one schema-99 record through the store directly.
+    const store = harness.coordinator.store;
+    const futureText = JSON.stringify({
+      ...JSON.parse(serializeProject(projectA)),
+      schemaVersion: 99,
+    });
+    await store.writeRecord({
+      format: "analog-canvas-browser-recovery-v2",
+      recordId: "record-future",
+      workingCopyId: "copy-future",
+      generation: "latest",
+      projectId: projectA.id,
+      projectName: projectA.name,
+      projectSchemaVersion: 99,
+      topDocumentId: projectA.topDocumentId,
+      documentRevisions: { [projectA.topDocumentId]: 0 },
+      source: "new",
+      updatedAt: new Date(2026, 7, 14, 9, 0, 0).toISOString(),
+      byteLength: futureText.length,
+      projectText: futureText,
+    });
+    const corruptText = "not a project";
+    await store.writeRecord({
+      format: "analog-canvas-browser-recovery-v2",
+      recordId: "record-corrupt",
+      workingCopyId: "copy-corrupt",
+      generation: "latest",
+      projectId: projectA.id,
+      projectName: projectA.name,
+      projectSchemaVersion: projectA.schemaVersion,
+      topDocumentId: projectA.topDocumentId,
+      documentRevisions: { [projectA.topDocumentId]: 0 },
+      source: "new",
+      updatedAt: new Date(2026, 7, 14, 8, 0, 0).toISOString(),
+      byteLength: corruptText.length,
+      projectText: corruptText,
+    });
+    await harness.coordinator.discover();
+    const future = harness.sessions.find(
+      (session) => session.workingCopyId === "copy-future",
+    );
+    const corrupt = harness.sessions.find(
+      (session) => session.workingCopyId === "copy-corrupt",
+    );
+    expect(future?.latest?.review).toBe("unsupported-schema");
+    expect(corrupt?.latest?.review).toBe("corrupt");
+  });
+
+  it("readSessionProject returns typed results per generation", async () => {
+    const harness = createHarness();
+    harness.coordinator.stage(projectA);
+    harness.fire();
+    await harness.settle();
+    harness.coordinator.stage(projectB);
+    await harness.coordinator.flushNow();
+    const id = harness.coordinator.workingCopyId;
+    const latest = await harness.coordinator.readSessionProject(id, "latest");
+    expect(latest).toMatchObject({ status: "valid" });
+    if (latest.status === "valid") {
+      expect(latest.project.name).toBe("Beta");
+    }
+    const previous = await harness.coordinator.readSessionProject(
+      id,
+      "previous",
+    );
+    expect(previous).toMatchObject({ status: "valid" });
+    if (previous.status === "valid") {
+      expect(previous.project.name).toBe("Alpha");
+    }
+    const missing = await harness.coordinator.readSessionProject(
+      "unknown-copy",
+      "latest",
+    );
+    expect(missing).toMatchObject({ status: "missing" });
+  });
+
+  it("deleteSession removes exactly one session", async () => {
+    const harness = createHarness();
+    harness.coordinator.stage(projectA);
+    harness.fire();
+    await harness.settle();
+    harness.coordinator.beginWorkingCopy("opened-file");
+    harness.coordinator.stage(projectC);
+    await harness.coordinator.flushNow();
+    const removed = await harness.coordinator.deleteSession("id-1");
+    expect(removed).toBe(true);
+    const read = await harness.coordinator.store.readAll();
+    expect(read.sessions).toHaveLength(1);
+    expect(read.sessions[0]?.workingCopyId).not.toBe("id-1");
+  });
+});
+
+it("resumes separate project-tab recovery identities without overwriting another drawing", async () => {
+  const { coordinator, settle, storage } = createHarness();
+  await settle();
+  const first = createEmptyProject("tab-a", "First");
+  coordinator.noteFormalFileHint({ name: "first.icproj.json" });
+  coordinator.stage(first);
+  await coordinator.flushNow();
+  const a = coordinator.captureWorkingSession();
+  coordinator.beginWorkingCopy("new");
+  const second = createEmptyProject("tab-b", "Second");
+  coordinator.stage(second);
+  await coordinator.flushNow();
+  const b = coordinator.captureWorkingSession();
+  expect(a.workingCopyId).not.toBe(b.workingCopyId);
+  coordinator.resumeWorkingSession(a);
+  expect(storage.getItem(WORKING_COPY_STORAGE_KEY)).toBe(a.workingCopyId);
+  coordinator.stage({ ...first, name: "First revised" });
+  await coordinator.flushNow();
+  const restoredA = await coordinator.readSessionProject(
+    a.workingCopyId,
+    "latest",
+  );
+  const restoredB = await coordinator.readSessionProject(
+    b.workingCopyId,
+    "latest",
+  );
+  expect(restoredA.status).toBe("valid");
+  expect(restoredB.status).toBe("valid");
+  if (restoredA.status === "valid")
+    expect(restoredA.project.name).toBe("First revised");
+  if (restoredB.status === "valid")
+    expect(restoredB.project.name).toBe("Second");
+  expect(coordinator.captureWorkingSession().formalFileHint).toEqual({
+    name: "first.icproj.json",
+  });
+  coordinator.resumeWorkingSession(b);
+  expect(coordinator.captureWorkingSession().formalFileHint).toBeUndefined();
+  coordinator.dispose();
+});
+
+// A tab may activate while its outgoing write remains queued behind IndexedDB.
+it("captures outgoing recovery identity before a nonblocking tab activation", async () => {
+  const { coordinator, settle } = createHarness();
+  await settle();
+  const first = createEmptyProject("queued-a", "Queued first");
+  coordinator.noteFormalFileHint({ name: "first.icproj.json" });
+  const a = coordinator.captureWorkingSession();
+  coordinator.stage(first);
+  const outgoing = coordinator.flushNow();
+  coordinator.beginWorkingCopy("opened-file");
+  const b = coordinator.captureWorkingSession();
+  coordinator.stage(createEmptyProject("queued-b", "Queued second"));
+  await coordinator.flushNow();
+  await outgoing;
+  const readA = await coordinator.readSessionProject(a.workingCopyId, "latest");
+  const readB = await coordinator.readSessionProject(b.workingCopyId, "latest");
+  expect(readA.status).toBe("valid");
+  expect(readB.status).toBe("valid");
+  if (readA.status === "valid") {
+    expect(readA.project.name).toBe("Queued first");
+    expect(readA.record.source).toBe(a.source);
+    expect(readA.record.formalFileHint).toEqual(a.formalFileHint);
+  }
+  if (readB.status === "valid") {
+    expect(readB.project.name).toBe("Queued second");
+    expect(readB.record.source).toBe("opened-file");
+    expect(readB.record.formalFileHint).toBeUndefined();
+  }
+  coordinator.dispose();
+});
+
+it("updates an inactive tab's unbound recovery copy without changing active identity", async () => {
+  const { coordinator, settle } = createHarness();
+  await settle();
+  const active = coordinator.captureWorkingSession();
+  coordinator.stage(createEmptyProject("active-copy", "Active drawing"));
+  await coordinator.flushNow();
+  coordinator.beginWorkingCopy("cloud-project");
+  const inactive = coordinator.captureWorkingSession();
+  const drawing = createEmptyProject("deleted-cloud", "Cloud drawing");
+  coordinator.stage(drawing, {
+    unsavedAtSnapshot: false,
+    cloudBinding: { id: "deleted-resource", revision: 2 },
+  });
+  await coordinator.flushNow();
+  coordinator.resumeWorkingSession(active);
+  const state = coordinator.state;
+  coordinator.writeSessionSnapshot(inactive, drawing, {
+    unsavedAtSnapshot: true,
+    cloudBinding: null,
+  });
+  await coordinator.flushNow();
+  expect(coordinator.workingCopyId).toBe(active.workingCopyId);
+  expect(coordinator.state).toBe(state);
+  const read = await coordinator.readSessionProject(
+    inactive.workingCopyId,
+    "latest",
+  );
+  expect(read.status).toBe("valid");
+  if (read.status === "valid") {
+    expect(read.record.unsavedAtSnapshot).toBe(true);
+    expect(read.record.cloudBinding).toBeUndefined();
+    expect(read.project.name).toBe("Cloud drawing");
+  }
+  coordinator.dispose();
+});
+
+it("reports an outgoing recovery failure after another tab activates", async () => {
+  const notices: string[] = [];
+  const coordinator = createRecoveryCoordinator({
+    store: createBrowserRecoveryStore(),
+    getSessionStorage: () => null,
+    events: { onNotice: (message) => notices.push(message) },
+  });
+  coordinator.stage(createEmptyProject("outgoing-failed", "Outgoing drawing"));
+  const outgoing = coordinator.flushNow();
+  coordinator.beginWorkingCopy("new");
+  coordinator.resumeWorkingSession(coordinator.captureWorkingSession());
+  await outgoing;
+  expect(coordinator.state).toBe("idle");
+  expect(notices.join(" ")).toContain("Outgoing drawing");
+  expect(notices.join(" ")).toContain("recovery");
+  coordinator.dispose();
+});

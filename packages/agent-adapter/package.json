@@ -1,0 +1,53 @@
+{
+  "name": "@icm/agent-adapter",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "development": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./loopback": {
+      "development": "./src/loopback.ts",
+      "types": "./dist/loopback.d.ts",
+      "default": "./dist/loopback.js"
+    },
+    "./kit": {
+      "development": "./src/agent-kit.ts",
+      "types": "./dist/agent-kit.d.ts",
+      "default": "./dist/agent-kit.js"
+    },
+    "./authoring": {
+      "development": "./src/authoring.ts",
+      "types": "./dist/authoring.d.ts",
+      "default": "./dist/authoring.js"
+    },
+    "./component-resource": {
+      "development": "./src/component-resource.ts",
+      "types": "./dist/component-resource.d.ts",
+      "default": "./dist/component-resource.js"
+    },
+    "./session-scope": {
+      "development": "./src/session-scope.ts",
+      "types": "./dist/session-scope.d.ts",
+      "default": "./dist/session-scope.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@icm/simulation-service": "workspace:*",
+    "@icm/derived": "workspace:*",
+    "@icm/devices": "workspace:*",
+    "@icm/edit-engine": "workspace:*",
+    "@icm/model": "workspace:*",
+    "@icm/netlist": "workspace:*",
+    "@icm/project-protocol": "workspace:*",
+    "@icm/render-svg": "workspace:*",
+    "@icm/symbols": "workspace:*",
+    "zod": "4.4.3"
+  }
+}

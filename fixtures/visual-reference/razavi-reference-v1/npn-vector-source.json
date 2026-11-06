@@ -1,0 +1,369 @@
+{
+  "schemaVersion": 1,
+  "id": "razavi-textbook-npn",
+  "kind": "pdf-vector-extract",
+  "source": {
+    "title": "Design of Analog CMOS Integrated Circuits, Second Edition",
+    "sha256": "a6031d1149c2c6191a1f0e541065165b72dafc4bc4ab4b0ea37af41b7cb0f739",
+    "pdfPage": 533,
+    "printedPage": 514,
+    "figure": "12.6"
+  },
+  "selection": {
+    "method": "direct-device-vector-normalization",
+    "boundsPdf": {
+      "left": 198.5,
+      "top": 221.0,
+      "right": 216.7,
+      "bottom": 246.8
+    },
+    "nativeObjectCount": 10,
+    "nativeObjectSha256": "a9eec2e6012972aef28099bdd237aff2c8da4426d088f2d81b80c59f90b92091",
+    "nativeObjectSample": [
+      {
+        "objectType": "line",
+        "linewidth": 1.434,
+        "x0": 207.594,
+        "top": 227.2912,
+        "x1": 207.594,
+        "bottom": 240.5732,
+        "pathCommandCount": 2,
+        "pathSha256": "3008d6d4c0ecbd5698b37094148068bf2c609f75cb1509478a4550176b98d2be"
+      },
+      {
+        "objectType": "line",
+        "linewidth": 0.717,
+        "x0": 207.594,
+        "top": 236.9192,
+        "x1": 216.54,
+        "bottom": 240.6452,
+        "pathCommandCount": 2,
+        "pathSha256": "8da57a2a19c19683cf668a0c6b5287659cfb8b7b070d84c5b1c07720d00e5469"
+      },
+      {
+        "objectType": "line",
+        "linewidth": 0.717,
+        "x0": 207.594,
+        "top": 236.9192,
+        "x1": 216.54,
+        "bottom": 240.6452,
+        "pathCommandCount": 2,
+        "pathSha256": "8da57a2a19c19683cf668a0c6b5287659cfb8b7b070d84c5b1c07720d00e5469"
+      },
+      {
+        "objectType": "line",
+        "linewidth": 0.717,
+        "x0": 207.594,
+        "top": 227.2262,
+        "x1": 216.54,
+        "bottom": 230.9542,
+        "pathCommandCount": 2,
+        "pathSha256": "9ff13de7e890376e72b359805606a2c9655c37a102e42dd8fed2e3ffde81fb9d"
+      },
+      {
+        "objectType": "line",
+        "linewidth": 0.717,
+        "x0": 207.594,
+        "top": 227.2262,
+        "x1": 216.54,
+        "bottom": 230.9542,
+        "pathCommandCount": 2,
+        "pathSha256": "9ff13de7e890376e72b359805606a2c9655c37a102e42dd8fed2e3ffde81fb9d"
+      },
+      {
+        "objectType": "line",
+        "linewidth": 0.717,
+        "x0": 198.648,
+        "top": 233.9362,
+        "x1": 207.594,
+        "bottom": 233.9362,
+        "pathCommandCount": 2,
+        "pathSha256": "82142bc13531bcee3d493fe62ef16f5873787cffe5a4dc8b9cb7ed67d1a9fea0"
+      },
+      {
+        "objectType": "line",
+        "linewidth": 0.717,
+        "x0": 216.54,
+        "top": 221.2622,
+        "x1": 216.54,
+        "bottom": 227.2262,
+        "pathCommandCount": 2,
+        "pathSha256": "79e9d8c72ce5de72f7c073b486238b68d05591e56df8566fe3d2704a7e028b05"
+      },
+      {
+        "objectType": "line",
+        "linewidth": 0.717,
+        "x0": 216.54,
+        "top": 240.6452,
+        "x1": 216.54,
+        "bottom": 246.6092,
+        "pathCommandCount": 2,
+        "pathSha256": "d820093f2800360d98176f4c9f74c4c7eee560329609afecc7067674c80ceddc"
+      },
+      {
+        "objectType": "curve",
+        "linewidth": 1.434,
+        "x0": 212.067,
+        "top": 237.6642,
+        "x1": 216.54,
+        "bottom": 240.6452,
+        "pathCommandCount": 3,
+        "pathSha256": "be7b0dc754a0ff246fe1250d4ae2bbafdd6ad46070a2f32df511f1db03bfc8ea"
+      },
+      {
+        "objectType": "curve",
+        "linewidth": 0.717,
+        "x0": 212.067,
+        "top": 237.6642,
+        "x1": 216.54,
+        "bottom": 240.6452,
+        "pathCommandCount": 3,
+        "pathSha256": "be7b0dc754a0ff246fe1250d4ae2bbafdd6ad46070a2f32df511f1db03bfc8ea"
+      }
+    ]
+  },
+  "normalization": {
+    "pinAnchorsLogical": [
+      {
+        "name": "C",
+        "x": 0,
+        "y": -30
+      },
+      {
+        "name": "B",
+        "x": -40,
+        "y": 0
+      },
+      {
+        "name": "E",
+        "x": 0,
+        "y": 30
+      }
+    ],
+    "strokeMapping": {
+      "normal": {
+        "targetRole": "normal"
+      },
+      "emphasis": {
+        "targetRole": "emphasis"
+      }
+    },
+    "relativeProportionCalibration": {
+      "basis": "user-reviewed textbook BJT/MOS coordinate comparison",
+      "referencePixels": {
+        "mosGateBars": [44, 33],
+        "bjtBaseBar": 46,
+        "bjtBranch": { "horizontal": 29, "vertical": 12 }
+      },
+      "visualOnly": true,
+      "pinAnchorsPreserved": true,
+      "scales": {
+        "bodyX": 0.845,
+        "baseBarY": 0.9,
+        "branchY": 0.839
+      }
+    },
+    "symbolDefinition": {
+      "schemaVersion": 1,
+      "id": "npn",
+      "name": "NPN Bipolar Transistor",
+      "viewBox": {
+        "x": -44,
+        "y": -34,
+        "width": 52,
+        "height": 68
+      },
+      "pins": [
+        {
+          "name": "C",
+          "role": "collector",
+          "at": {
+            "x": 0,
+            "y": -30
+          },
+          "direction": "north",
+          "presentation": {
+            "visibility": "visible",
+            "leadLength": 10
+          }
+        },
+        {
+          "name": "B",
+          "role": "base",
+          "at": {
+            "x": -40,
+            "y": 0
+          },
+          "direction": "west",
+          "presentation": {
+            "visibility": "visible",
+            "leadLength": 10
+          }
+        },
+        {
+          "name": "E",
+          "role": "emitter",
+          "at": {
+            "x": 0,
+            "y": 30
+          },
+          "direction": "south",
+          "presentation": {
+            "visibility": "visible",
+            "leadLength": 10
+          }
+        }
+      ],
+      "primitives": [
+        {
+          "kind": "line",
+          "from": {
+            "x": -40,
+            "y": 0
+          },
+          "to": {
+            "x": -16.868887,
+            "y": 0
+          },
+          "style": {
+            "strokeRole": "normal",
+            "lineCap": "butt",
+            "lineJoin": "miter"
+          }
+        },
+        {
+          "kind": "line",
+          "from": {
+            "x": -16.868887,
+            "y": -13.345607
+          },
+          "to": {
+            "x": -16.868887,
+            "y": 13.32954
+          },
+          "style": {
+            "strokeRole": "emphasis",
+            "lineCap": "butt",
+            "lineJoin": "miter"
+          }
+        },
+        {
+          "kind": "polyline",
+          "points": [
+            {
+              "x": -16.868887,
+              "y": -6.401526
+            },
+            {
+              "x": 0.0,
+              "y": -13.379732
+            },
+            {
+              "x": 0,
+              "y": -30
+            }
+          ],
+          "style": {
+            "strokeRole": "normal",
+            "lineCap": "butt",
+            "lineJoin": "miter"
+          }
+        },
+        {
+          "kind": "line",
+          "from": {
+            "x": -16.868887,
+            "y": 6.403673
+          },
+          "to": {
+            "x": -7.30071,
+            "y": 10.358712
+          },
+          "style": {
+            "strokeRole": "normal",
+            "lineCap": "butt",
+            "lineJoin": "miter"
+          }
+        },
+        {
+          "kind": "polyline",
+          "points": [
+            {
+              "x": -0.936056,
+              "y": 12.990761
+            },
+            {
+              "x": 0.0,
+              "y": 13.377859
+            },
+            {
+              "x": 0,
+              "y": 30
+            }
+          ],
+          "style": {
+            "strokeRole": "normal",
+            "lineCap": "butt",
+            "lineJoin": "miter"
+          }
+        },
+        {
+          "kind": "polygon",
+          "points": [
+            {
+              "x": -6.635095,
+              "y": 6.792086
+            },
+            {
+              "x": -9.952643,
+              "y": 13.377859
+            },
+            {
+              "x": 0.0,
+              "y": 13.377859
+            }
+          ],
+          "fill": "foreground",
+          "stroke": "none"
+        }
+      ],
+      "variants": [],
+      "aliases": [
+        "bjt-npn",
+        "bipolar-npn"
+      ]
+    }
+  },
+  "rasterWitness": {
+    "kind": "source-pdf-crop",
+    "sourcePdfPage": 533,
+    "dpi": 385.606695,
+    "pixels": {
+      "width": 125,
+      "height": 164
+    },
+    "pixelsPerLogical": 2.4,
+    "originPx": {
+      "x": 106.535464,
+      "y": 82.056736
+    },
+    "window": {
+      "width": 125,
+      "height": 164,
+      "minX": -44,
+      "minY": -34
+    },
+    "sourceCropPx": {
+      "x": 871,
+      "y": 1353
+    },
+    "assetPath": "npn-reference.png",
+    "threshold": 160
+  },
+  "derivation": {
+    "geometry": "Figure 12.6 Q1 native vectors with a visual-only BJT/MOS relative-proportion calibration; C/B/E anchors remain unchanged",
+    "junctionCleanup": "collector/emitter diagonal and vertical leads are emitted as joined polylines",
+    "arrowCleanup": "the emitter centerline is clipped at the native arrow polygon, overlapped 1.2 logical units inside its fill to suppress raster seams, and the arrow is rendered last",
+    "arrowCalibration": "shared Figure 12.6 triangle template enlarged 1.18x from direct-PDF arrow ink measurement"
+  }
+}

@@ -1,0 +1,296 @@
+{
+  "schemaVersion": 1,
+  "id": "razavi-textbook-logic-nand-gate",
+  "kind": "pdf-vector-extract",
+  "source": {
+    "title": "Design of Analog CMOS Integrated Circuits, Second Edition",
+    "sha256": "a6031d1149c2c6191a1f0e541065165b72dafc4bc4ab4b0ea37af41b7cb0f739",
+    "pdfPage": 688,
+    "printedPage": 669,
+    "figure": "16.25(a)"
+  },
+  "selection": {
+    "method": "direct-logic-gate-vector-normalization",
+    "nativeObjectCount": 6,
+    "nativeObjectSha256": "0d1783a5720cb8afc0dc4ea28f29a9b8a5ec80ec73eb0eccc230ed703701c436",
+    "nativeObjects": [
+      {
+        "objectType": "line",
+        "x0": 236.327,
+        "top": 286.2172,
+        "x1": 236.327,
+        "bottom": 292.1302,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 2,
+        "pathSha256": "96727b4d2b2da066563c49285a0dac1302c18420d1afdf6701070ad7bd5b4898"
+      },
+      {
+        "objectType": "line",
+        "x0": 247.796,
+        "top": 286.1722,
+        "x1": 247.796,
+        "bottom": 292.1302,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 2,
+        "pathSha256": "f3cab6cdb04231695245466d492ee1564ede1a57830c6449eeaa918ed217290e"
+      },
+      {
+        "objectType": "line",
+        "x0": 242.062,
+        "top": 316.7712,
+        "x1": 242.062,
+        "bottom": 324.9692,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 2,
+        "pathSha256": "5819c07922914c5b76d11c4f78178330475bfa0ee6e6fae4ec1da7e6b96930f4"
+      },
+      {
+        "objectType": "curve",
+        "x0": 233.505,
+        "top": 292.3092,
+        "x1": 250.709,
+        "bottom": 302.9722,
+        "linewidth": 1.434,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 4,
+        "pathSha256": "b27bc3666d715385321c20755f663b8ca9f9ad4a45af3d4dd6d266a8119e2234"
+      },
+      {
+        "objectType": "curve",
+        "x0": 233.505,
+        "top": 302.5242,
+        "x1": 250.709,
+        "bottom": 311.8422,
+        "linewidth": 1.434,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 20,
+        "pathSha256": "d3a2d6e73375fda05dc3253fbca4aea0267a4d384026fb1fcd5898a9d57b1769"
+      },
+      {
+        "objectType": "curve",
+        "x0": 240.132,
+        "top": 313.1132,
+        "x1": 244.003,
+        "bottom": 316.9832,
+        "linewidth": 1.434,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 5,
+        "pathSha256": "4ce88851172979985d05dd82946d7046a681ab19f0e5642455bb3f2d97bfc866"
+      }
+    ]
+  },
+  "normalization": {
+    "sourceInputPitchPdf": 11.469,
+    "logicalInputPitch": 20.0,
+    "logicalUnitsPerPdfPoint": 1.743831,
+    "sourceOriginPdf": {
+      "x": 242.0615,
+      "y": 305.5707
+    },
+    "pinAnchorsLogical": [
+      {
+        "name": "A",
+        "x": -40,
+        "y": -10
+      },
+      {
+        "name": "B",
+        "x": -40,
+        "y": 10
+      },
+      {
+        "name": "Y",
+        "x": 40,
+        "y": 0
+      }
+    ],
+    "strokeMapping": {
+      "normal": {
+        "sourcePdfPt": 0.717,
+        "targetRole": "normal"
+      },
+      "body": {
+        "sourcePdfPt": 1.434,
+        "targetRole": "emphasis"
+      }
+    },
+    "symbolDefinition": {
+      "schemaVersion": 1,
+      "id": "nand-gate",
+      "name": "NAND Gate",
+      "viewBox": {
+        "x": -44,
+        "y": -24,
+        "width": 88,
+        "height": 48
+      },
+      "pins": [
+        {
+          "name": "A",
+          "role": "input",
+          "at": {
+            "x": -40,
+            "y": -10
+          },
+          "direction": "west",
+          "presentation": {
+            "visibility": "visible",
+            "leadLength": 20
+          }
+        },
+        {
+          "name": "B",
+          "role": "input",
+          "at": {
+            "x": -40,
+            "y": 10
+          },
+          "direction": "west",
+          "presentation": {
+            "visibility": "visible",
+            "leadLength": 20
+          }
+        },
+        {
+          "name": "Y",
+          "role": "output",
+          "at": {
+            "x": 40,
+            "y": 0
+          },
+          "direction": "east",
+          "presentation": {
+            "visibility": "visible",
+            "leadLength": 20
+          }
+        }
+      ],
+      "primitives": [
+        {
+          "kind": "line",
+          "from": {
+            "x": -40.0,
+            "y": -10.0
+          },
+          "to": {
+            "x": -23.437963,
+            "y": -10.0
+          },
+          "style": {
+            "strokeRole": "normal",
+            "lineCap": "butt",
+            "lineJoin": "miter"
+          }
+        },
+        {
+          "kind": "line",
+          "from": {
+            "x": -40.0,
+            "y": 10.0
+          },
+          "to": {
+            "x": -23.437963,
+            "y": 10.0
+          },
+          "style": {
+            "strokeRole": "normal",
+            "lineCap": "butt",
+            "lineJoin": "miter"
+          }
+        },
+        {
+          "kind": "path",
+          "data": "M -4.531345 15.07978 L -23.125817 15.07978 L -23.125817 -14.921092 L -5.234109 -14.921092",
+          "style": {
+            "strokeRole": "emphasis",
+            "lineCap": "butt",
+            "lineJoin": "miter",
+            "miterLimit": 4
+          }
+        },
+        {
+          "kind": "path",
+          "data": "M -4.609818 15.07978 C -4.609818 15.07978 -4.609818 15.07978 -4.362194 15.06583 C -4.11457 15.051879 -3.619322 15.025722 -3.371698 15.013515 C -3.124074 15.001308 -3.124074 15.001308 -2.447467 14.894934 C -1.770861 14.792048 -0.417648 14.582788 0.792571 14.234022 C 2.004534 13.880024 3.073502 13.38652 4.23315 12.591333 C 5.391054 11.79789 6.641381 10.704508 7.603976 9.558811 C 8.566571 8.413114 9.244921 7.213358 9.766327 5.990932 C 10.285988 4.766763 10.652193 3.516436 10.847502 2.213794 C 11.041067 0.911152 11.068969 -0.442061 10.936437 -1.706339 C 10.807394 -2.968873 10.523149 -4.140727 9.986049 -5.429418 C 9.452437 -6.71811 8.671201 -8.125381 7.773128 -9.283285 C 6.875054 -10.442933 5.860145 -11.354957 5.026593 -12.031563 C 4.193042 -12.70817 3.542593 -13.151103 2.85378 -13.503357 C 2.159735 -13.853867 1.434301 -14.115442 0.780364 -14.322958 C 0.131659 -14.530473 -0.442061 -14.687418 -0.949516 -14.778097 C -1.458715 -14.870521 -1.901648 -14.894934 -2.356788 -14.908885 C -2.811928 -14.921092 -3.281018 -14.921092 -3.776266 -14.921092 C -4.269771 -14.921092 -4.791176 -14.921092 -5.052751 -14.921092 C -5.312582 -14.921092 -5.312582 -14.921092 -5.312582 -14.921092",
+          "style": {
+            "strokeRole": "emphasis",
+            "lineCap": "butt",
+            "lineJoin": "miter",
+            "miterLimit": 4
+          }
+        },
+        {
+          "kind": "circle",
+          "center": {
+            "x": 16.52716,
+            "y": 0.010463
+          },
+          "radius": 3.375185,
+          "part": "negation-bubble",
+          "style": {
+            "strokeRole": "emphasis",
+            "lineCap": "butt",
+            "lineJoin": "miter",
+            "miterLimit": 4
+          }
+        },
+        {
+          "kind": "line",
+          "from": {
+            "x": 19.531781,
+            "y": 0.000872
+          },
+          "to": {
+            "x": 40.0,
+            "y": 0.0
+          },
+          "style": {
+            "strokeRole": "normal",
+            "lineCap": "butt",
+            "lineJoin": "miter"
+          }
+        }
+      ],
+      "variants": []
+    }
+  },
+  "derivation": {
+    "pinExtension": "native leads extend collinearly to the existing x=+/-40 electrical anchors",
+    "orientation": "native source orientation is recorded as 90 degrees relative to the product default"
+  },
+  "rasterWitness": {
+    "kind": "source-pdf-crop",
+    "sourcePdfPage": 688,
+    "dpi": 301.334031,
+    "pixels": {
+      "width": 74,
+      "height": 161
+    },
+    "pixelsPerLogical": 2.4,
+    "originPx": {
+      "x": 37.711797,
+      "y": 82.235679
+    },
+    "window": {
+      "width": 74,
+      "height": 161,
+      "minX": -15.5,
+      "minY": -34.2
+    },
+    "rotation": 90,
+    "sourceCropPx": {
+      "x": 833,
+      "y": 1339
+    },
+    "assetPath": "logic-nand-gate-reference.png",
+    "threshold": 160
+  }
+}

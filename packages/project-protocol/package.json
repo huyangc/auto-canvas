@@ -1,0 +1,23 @@
+{
+  "name": "@icm/project-protocol",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "development": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@icm/devices": "workspace:*",
+    "@icm/model": "workspace:*",
+    "@icm/netlist": "workspace:*",
+    "@icm/symbols": "workspace:*",
+    "@icm/derived": "workspace:*"
+  }
+}

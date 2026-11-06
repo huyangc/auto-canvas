@@ -1,0 +1,170 @@
+import {
+  razaviCatalogSymbols,
+  razaviSemanticPrimitives,
+  razaviSymbolCatalogEntries,
+  razaviSymbolCatalogIdentity,
+} from "./razavi-catalog.generated.js";
+import type { SymbolDefinition } from "./schema.js";
+
+export interface RazaviSymbolCatalogEntry {
+  symbolId: string;
+  name: string;
+  category: string;
+  reviewStatus: "reviewed" | "provisional";
+  /**
+   * Where the artwork comes from. `razavi-reference-v1` answers to the
+   * reviewed textbook authority and pins its evidence; `house` is drawn here
+   * for a primitive the textbook never contained, and says so rather than
+   * borrowing an authority it does not have. Absent means Razavi, which is
+   * what every reviewed entry is.
+   */
+  provenance?: "razavi-reference-v1" | "house";
+  /** Required on a house entry: why the reference does not cover it. */
+  houseReason?: string;
+  /** Present exactly when the provenance is `razavi-reference-v1`. */
+  visualAuthority?: {
+    kind: "razavi-reference-v1";
+    referenceManifestPath: string;
+    referencePaths: string[];
+    calibrationPath?: string;
+  };
+  pinOrder: string[];
+  palette: boolean;
+  automaticMappings: string[];
+  manualOnlyReason?: string;
+  assetPath: string;
+  assetHash: string;
+  generation?:
+    | {
+        kind: "razavi-raster-reference" | "razavi-pdf-vector-reference";
+        referenceManifestPath: string;
+        referencePath: string;
+        converterPath: string;
+        converterVersion: number;
+        /**
+         * Uniform factor applied to the reference geometry so this Symbol
+         * shares the pin span of its sibling family. Absent means
+         * evidence-exact.
+         */
+        pinSpanScale?: number;
+        /** Product shape normalization; original PDF evidence remains unchanged. */
+        bodyNormalization?: "equilateral-triangle" | "left-grid-anchor";
+      }
+    | {
+        /**
+         * Derived from another reviewed Symbol rather than from the reference
+         * itself, so its visual authority is that Symbol's. The converter
+         * states the one transformation it applies and its `:check` gate
+         * keeps the pair from drifting apart. `derived-input-swap` exchanges
+         * a marked differential pair; `derived-output-drop` leaves an output
+         * unbrought-out, for a part that exists in both widths;
+         * `derived-lettered-body` adds the body letter an amplifier is named
+         * by, whose text each Instance then owns; `derived-reset-pin` adds an
+         * active-high reset terminal to an otherwise shared sequential body.
+         */
+        kind:
+          | "derived-input-swap"
+          | "derived-output-drop"
+          | "derived-lettered-body"
+          | "derived-wide-amplifier"
+          | "derived-reset-pin"
+          | "derived-differential-comparator";
+        sourceSymbolId: string;
+        converterPath: string;
+        converterVersion: number;
+      }
+    | {
+        kind: "derived-multi-input-and-gate";
+        sourceSymbolId: "and-gate";
+        inputCount: 3 | 4;
+        converterPath: string;
+        converterVersion: number;
+      }
+    | {
+        kind: "derived-multi-input-logic-gate";
+        sourceSymbolId:
+          "nand-gate" | "or-gate" | "nor-gate" | "xor-gate" | "xnor-gate";
+        inputCount: 3 | 4;
+        converterPath: string;
+        converterVersion: number;
+      };
+}
+
+export interface RazaviSemanticPrimitiveEntry {
+  id: string;
+  disposition: "semantic-primitive";
+  geometry: {
+    kind: "circle";
+    sourceDiameterIU: number;
+    fill: "foreground";
+    stroke: "none";
+  };
+  runtimeOwner: string;
+}
+
+const symbolsById = new Map(
+  razaviCatalogSymbols.map((symbol) => [symbol.id, symbol]),
+);
+const entriesById = new Map(
+  razaviSymbolCatalogEntries.map((entry) => [entry.symbolId, entry]),
+);
+
+/**
+ * Resolvable: a reviewed, Reference-calibrated Symbol the runtime may draw.
+ *
+ * `palette` is browsability, not existence. A Symbol reached by an action
+ * rather than by picking it — the crossed-output and swapped-input siblings —
+ * has to resolve everywhere the Project can name it while staying out of a
+ * Library where it would read as a near-duplicate of its source.
+ */
+function isRazaviLibraryCatalogEntry(entry: RazaviSymbolCatalogEntry): boolean {
+  if (entry.reviewStatus !== "reviewed") return false;
+  // A house primitive resolves and draws like any other reviewed entry; what
+  // it does not do is claim the reference's authority for its geometry.
+  if (entry.provenance === "house") return entry.visualAuthority === undefined;
+  return entry.visualAuthority?.kind === "razavi-reference-v1";
+}
+
+/** Browsable: the subset a person picks from. */
+function isRazaviProductCatalogEntry(entry: RazaviSymbolCatalogEntry): boolean {
+  return entry.palette && isRazaviLibraryCatalogEntry(entry);
+}
+
+const symbolsFor = (
+  predicate: (entry: RazaviSymbolCatalogEntry) => boolean,
+): readonly SymbolDefinition[] =>
+  razaviSymbolCatalogEntries
+    .filter(predicate)
+    .map((entry) => symbolsById.get(entry.symbolId)!)
+    .filter((symbol): symbol is SymbolDefinition => symbol !== undefined);
+
+export const razaviLibrarySymbols = symbolsFor(isRazaviLibraryCatalogEntry);
+export const razaviProductSymbols = symbolsFor(isRazaviProductCatalogEntry);
+
+export { razaviCatalogSymbols, razaviSymbolCatalogEntries };
+/** @internal Catalog tests pin the generated identity and primitives. */
+export { razaviSemanticPrimitives, razaviSymbolCatalogIdentity };
+
+export function getRazaviCatalogSymbol(
+  symbolId: string,
+): SymbolDefinition | undefined {
+  return symbolsById.get(symbolId);
+}
+
+/** @internal Tests across packages fetch catalog Symbols by id with it. */
+export function requireRazaviCatalogSymbol(symbolId: string): SymbolDefinition {
+  const symbol = getRazaviCatalogSymbol(symbolId);
+  if (!symbol) throw new Error(`Unknown Razavi catalog symbol: ${symbolId}`);
+  return symbol;
+}
+
+export function getRazaviCatalogEntry(
+  symbolId: string,
+): RazaviSymbolCatalogEntry | undefined {
+  return entriesById.get(symbolId);
+}
+
+export function isRazaviProductSymbolId(symbolId: string): boolean {
+  const entry = entriesById.get(symbolId);
+  return entry !== undefined && isRazaviProductCatalogEntry(entry);
+}

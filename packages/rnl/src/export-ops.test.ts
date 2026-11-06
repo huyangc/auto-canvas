@@ -1,0 +1,1033 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { describe, expect, it } from "vitest";
+
+import { subcircuitDescriptor } from "@icm/devices";
+import {
+  contactRequiresJunctionDot,
+  deriveDocumentContactEvidence,
+} from "@icm/derived";
+import {
+  createEmptyDocument,
+  createEmptyProject,
+  createRoutePath,
+  type CircuitProject,
+  type SchematicDocument,
+} from "@icm/model";
+import { createDesignNetlistExport } from "@icm/netlist";
+import { parseProject } from "@icm/project-protocol";
+import {
+  builtInSymbols,
+  createProjectSymbolResolver,
+  externalSubcircuitSymbolId,
+} from "@icm/symbols";
+
+import { delayCellFixture } from "../../netlist/src/delay-cell-fixture.test-support.js";
+import { rnlExportOps, type RnlOp, type RnlVertex } from "./export-ops.js";
+import { rnlBodyPortOrder } from "./symbol-map.js";
+
+const example = (name: string): CircuitProject =>
+  parseProject(
+    readFileSync(
+      resolve(process.cwd(), `apps/editor/src/examples/${name}.icproj.json`),
+      "utf8",
+    ),
+  );
+
+function exported(project: CircuitProject) {
+  const result = createDesignNetlistExport(project, {
+    bodyPortOrder: rnlBodyPortOrder(project),
+    includeIr: true,
+  });
+  if (result.status !== "ready")
+    throw new Error(JSON.stringify(result.diagnostics));
+  // The netlist holds the root Cell and what it calls; so does the RNL.
+  const printed = new Set(result.ir!.cells.map((cell) => cell.id));
+  return {
+    text: result.file.text,
+    documents: project.documents.filter((document) => printed.has(document.id)),
+    ...rnlExportOps(project, result.ir!),
+  };
+}
+
+type Op<K extends RnlOp["op"]> = Extract<RnlOp, { op: K }>;
+const of = <K extends RnlOp["op"]>(ops: readonly RnlOp[], kind: K) =>
+  ops.filter((op): op is Op<K> => op.op === kind);
+
+const EXAMPLES = [
+  "simulation-common-source",
+  "simulation-rc",
+  "simulation-rlc",
+  "simulation-ota",
+  "five-transistor-ota-sky130",
+];
+
+describe("RNL export of the simulation examples", () => {
+  it.each(EXAMPLES)(
+    "draws every part, glyph and wire of %s, naming only what it declares",
+    (name) => {
+      const project = example(name);
+      const { ops, diagnostics, text, documents } = exported(project);
+      expect(diagnostics.filter((item) => item.severity === "error")).toEqual(
+        [],
+      );
+      // Their symbols all come with rnl-std: the file pins it, clears the
+      // symbols' own labels and names only the package that says how each
+      // Cell sets names.
+      expect(
+        of(ops, "use-package").map(({ name, version }) => `${name} ${version}`),
+      ).toEqual([
+        "rnl-std 0.3",
+        "rnl-std-no-labels 0.3",
+        "analog-canvas-extensions 0.5",
+      ]);
+      expect(
+        of(ops, "add-usage").filter(
+          (op) => op.definition === "$CANVAS_TYPESETTING",
+        ),
+      ).toHaveLength(documents.length);
+      const wires = of(ops, "add-wire");
+      const routes = documents.flatMap((document) => document.routes);
+      expect(wires.length).toBeGreaterThanOrEqual(routes.length);
+      const levelOf = new Map<string, Set<string>>();
+      const declare = (level: string, name: string) => {
+        if (!levelOf.has(level)) levelOf.set(level, new Set());
+        levelOf.get(level)!.add(name);
+      };
+      for (const op of of(ops, "set")) declare(op.level, op.object);
+      for (const op of of(ops, "add-usage"))
+        if (op.name) declare(op.level, op.name);
+      for (const op of of(ops, "add-point")) declare(op.level, op.name);
+      for (const op of of(ops, "add-wire"))
+        if (op.name) declare(op.level, op.name);
+      const wireNames = new Set(
+        of(ops, "add-wire").flatMap((op) => (op.name ? [op.name] : [])),
+      );
+      const known = (level: string, vertex: RnlVertex) =>
+        "terminal" in vertex
+          ? levelOf.get(level)!.has(vertex.terminal.split(":")[0]!)
+          : "point" in vertex
+            ? levelOf.get(level)!.has(vertex.point)
+            : "usage" in vertex
+              ? levelOf.get(level)!.has(vertex.usage)
+              : true;
+      for (const wire of wires) {
+        expect(wire.via.length).toBeGreaterThanOrEqual(2);
+        for (const vertex of wire.via)
+          expect(known(wire.level, vertex), JSON.stringify(vertex)).toBe(true);
+        for (const net of wire.nets)
+          expect(text).toMatch(new RegExp(`[ (]${net.slice(1)}[ )\n]`));
+      }
+      const grounds = documents.flatMap((document) =>
+        document.instances.filter((instance) => instance.symbolId === "ground"),
+      );
+      expect(
+        of(ops, "add-usage").filter((op) => op.definition === "$GROUND"),
+      ).toHaveLength(grounds.length);
+      // Without ORIENT the solver may turn what is drawn (RNL 11.2), so every
+      // placed part and every mark but a round dot says how it is turned.
+      for (const op of of(ops, "set"))
+        if (op.at) expect(op.orient, op.object).toBeDefined();
+      // A round dot and the usages of meaning only draw nothing to turn.
+      for (const op of of(ops, "add-usage"))
+        if (
+          ![
+            "$JUNCTION",
+            "$CANVAS_NAME",
+            "$CANVAS_TYPESETTING",
+            "$CANVAS_LABEL",
+            "$CANVAS_PARAMETER",
+          ].includes(op.definition)
+        )
+          expect(op.orient, op.name).toBeDefined();
+      for (const label of of(ops, "add-text")) {
+        // A part's or glyph's label hangs on something declared, by key and
+        // offset; a net's stands at an absolute place, on its net or on the
+        // wire it hangs on, which has no point to offset from; a free text
+        // on its point.
+        if (label.attach?.startsWith("&") || wireNames.has(label.attach!)) {
+          expect(label.at).toBeDefined();
+          expect(label.key).toBeUndefined();
+          expect(label.offset).toBeUndefined();
+        } else if (label.attach) {
+          expect(levelOf.get(label.level)!.has(label.attach)).toBe(true);
+          expect(label.offset).toBeDefined();
+        } else expect(label.at).toBeDefined();
+        expect(label.lines.flat().length).toBeGreaterThan(0);
+      }
+    },
+  );
+
+  it("hangs a part's labels on it by key, where Analog Canvas shows them", () => {
+    const { ops, diagnostics } = exported(example("simulation-common-source"));
+    const place = of(ops, "set").find((op) => op.object === "#XM1")!.at!;
+    const name = of(ops, "add-text").find(
+      (op) => op.attach === "#XM1" && op.key === "name",
+    )!;
+    const value = of(ops, "add-text").find(
+      (op) => op.attach === "#XM1" && op.key === "value",
+    )!;
+    expect(name.size).toBeGreaterThan(1);
+    expect(
+      name.lines.flat().map((run) => run.kind === "text" && run.text),
+    ).toEqual(["XM1"]);
+    // W over L, as the value label draws it.
+    expect(value.lines[0]![0]!.kind).toBe("frac");
+    expect(place).toEqual([35, -40]);
+    expect(name.offset).toEqual([-4, -3]);
+    expect(diagnostics).toContainEqual(
+      expect.objectContaining({
+        severity: "warning",
+        code: "RNL_TEXT_FIXED",
+      }),
+    );
+  });
+
+  it("hangs a net's label on the wire it hangs on at its place, and leaves hidden labels out", () => {
+    const { ops, diagnostics } = exported(example("simulation-rlc"));
+    // The label of out hangs on a wire of out: that wire is named, and the
+    // label attached to it, placed where it stands (13.3).
+    const wire = of(ops, "add-wire").find(
+      (op) => op.name && op.nets.includes("&out"),
+    )!;
+    expect(wire.name).toMatch(/^%wire\d+$/u);
+    expect(of(ops, "add-text")).toContainEqual(
+      expect.objectContaining({ attach: wire.name, at: expect.any(Array) }),
+    );
+    expect(diagnostics.map((item) => item.code)).toEqual(
+      expect.arrayContaining(["RNL_TEXT_HIDDEN", "RNL_TEXT_ALONG_WIRE"]),
+    );
+    // One warning per kind and drawing, naming every object it covers.
+    const hidden = diagnostics.find((item) => item.code === "RNL_TEXT_HIDDEN")!;
+    expect(hidden.objectIds).toHaveLength(2);
+    expect(hidden.message).toMatch(/^2 /);
+  });
+
+  it("joins a wire that runs through a junction there, and dots it", () => {
+    const project = example("simulation-common-source");
+    const { ops } = exported(project);
+    const source = of(ops, "add-wire").find(
+      (wire) => "terminal" in wire.via[0]! && wire.via[0].terminal === "#XM1:3",
+    )!;
+    expect(source.via).toEqual([
+      { terminal: "#XM1:3" },
+      { point: expect.stringMatching(/^%j/) },
+      { usage: expect.stringMatching(/^%gnd/), role: "p" },
+    ]);
+    const through = (source.via[1] as { point: string }).point;
+    expect(of(ops, "add-point").find((op) => op.name === through)).toEqual(
+      expect.objectContaining({ junction: true }),
+    );
+  });
+
+  it("dots exactly the contacts Analog Canvas dots", () => {
+    for (const name of EXAMPLES) {
+      const project = example(name);
+      const { ops, documents } = exported(project);
+      const resolver = createProjectSymbolResolver(project, builtInSymbols);
+      const dots = documents.flatMap((document) =>
+        deriveDocumentContactEvidence(document, resolver).contacts.filter(
+          contactRequiresJunctionDot,
+        ),
+      );
+      const written =
+        of(ops, "add-point").filter((op) => op.junction).length +
+        of(ops, "add-usage").filter((op) => op.definition === "$JUNCTION")
+          .length;
+      expect(written, name).toBe(dots.length);
+    }
+  });
+
+  it("joins parts that touch with a wire of no length", () => {
+    const { ops } = exported(example("simulation-common-source"));
+    expect(of(ops, "add-wire")).toContainEqual(
+      expect.objectContaining({
+        nets: ["&VSS"],
+        via: [
+          { terminal: "#CL:2" },
+          { usage: expect.stringMatching(/^%gnd/), role: "p" },
+        ],
+      }),
+    );
+  });
+
+  it("draws ground on the Cell's ground pin and keeps a port tag off it", () => {
+    const { ops } = exported(example("simulation-common-source"));
+    for (const op of of(ops, "add-usage").filter(
+      (item) => item.definition === "$GROUND",
+    ))
+      expect(op.attach).toEqual({ p: "&VSS" });
+    expect(of(ops, "remove-from")).toEqual([
+      expect.objectContaining({
+        items: ["&VSS"],
+        set: "$PORT_FILL_SET",
+      }),
+    ]);
+  });
+
+  it("marks a pin left open with the standard no-connect on its terminal", () => {
+    const project = example("simulation-rc");
+    const document = project.documents[0]!;
+    document.instances.push({
+      id: "R9",
+      reference: "R9",
+      symbolId: "resistor",
+      placement: { position: { x: 400, y: 400 }, rotation: 0, mirror: "none" },
+      netlist: {
+        binding: { kind: "primitive", deviceClass: "resistor" },
+        parameters: { value: "1k" },
+      },
+    });
+    document.noConnects.push(
+      {
+        id: "open-2",
+        endpoint: { kind: "terminal", instanceId: "R9", pinName: "2" },
+      },
+      {
+        id: "open-bus",
+        endpoint: {
+          kind: "terminal",
+          instanceId: "R9",
+          pinName: "1",
+          memberId: "b0",
+        },
+      },
+    );
+    const { ops, diagnostics, text } = exported(project);
+    expect(text).toMatch(/^R9 NC\d+ NC\d+ 1k$/mu);
+    expect(
+      of(ops, "add-usage").filter((op) => op.definition === "$NO_CONNECT"),
+    ).toEqual([
+      {
+        level: expect.stringMatching(/^subckt:/u),
+        op: "add-usage",
+        definition: "$NO_CONNECT",
+        attach: { t: "#R9:2" },
+      },
+    ]);
+    // A bus member has no terminal of its own in RNL.
+    expect(diagnostics).toContainEqual(
+      expect.objectContaining({
+        severity: "warning",
+        code: "RNL_NO_CONNECT_UNNAMED",
+        objectIds: ["open-bus"],
+      }),
+    );
+  });
+
+  it("wires a drawn Cell's block by its printed port positions", () => {
+    const { ops, diagnostics } = exported(example("simulation-ota"));
+    expect(diagnostics.filter((item) => item.severity === "error")).toEqual([]);
+    const block = of(ops, "set").find((op) => op.object === "#XDUT")!;
+    expect(block.symbol).toBeUndefined();
+    const reached = of(ops, "add-wire").flatMap((wire) =>
+      wire.via.flatMap((vertex) =>
+        "terminal" in vertex && vertex.terminal.startsWith("#XDUT:")
+          ? [Number(vertex.terminal.split(":")[1])]
+          : [],
+      ),
+    );
+    expect(new Set(reached)).toEqual(new Set([1, 2, 3, 4, 5, 6]));
+  });
+});
+
+describe("what RNL cannot write", () => {
+  it("refuses a part turned by 45°", () => {
+    const project = example("simulation-rc");
+    const part = project.documents[0]!.instances.find(
+      (instance) => instance.placement && instance.symbolId === "resistor",
+    )!;
+    part.placement!.rotation = 45;
+    const { ops, diagnostics } = exported(project);
+    expect(diagnostics).toContainEqual(
+      expect.objectContaining({
+        severity: "error",
+        code: "RNL_ROTATION_NOT_QUARTER",
+        objectIds: [part.id],
+      }),
+    );
+    expect(
+      of(ops, "set").find((op) => op.object === `#${part.reference}`),
+    ).toBeUndefined();
+  });
+
+  it("warns of a part off the drawing and places nothing for it", () => {
+    const project = example("simulation-rc");
+    const part = project.documents[0]!.instances.find(
+      (instance) => instance.placement && instance.symbolId === "resistor",
+    )!;
+    part.placement = null;
+    const { ops, diagnostics } = exported(project);
+    expect(diagnostics).toContainEqual(
+      expect.objectContaining({ severity: "warning", code: "RNL_NOT_PLACED" }),
+    );
+    expect(
+      of(ops, "set").find((op) => op.object === `#${part.reference}`),
+    ).toEqual(expect.not.objectContaining({ at: expect.anything() }));
+  });
+
+  it("draws a three-terminal MOS whole when a wire reaches its hidden bulk", () => {
+    const project = example("simulation-common-source");
+    const mos = project.documents[0]!.instances.find(
+      (instance) => instance.id === "XM1",
+    )!;
+    mos.symbolVariantId = "textbook-3terminal";
+    const { ops, diagnostics } = exported(project);
+    expect(diagnostics.map((item) => item.code)).toContain(
+      "RNL_HIDDEN_PIN_WIRED",
+    );
+    expect(of(ops, "set").find((op) => op.object === "#XM1")?.symbol).toBe(
+      "$NMOS_4TERM",
+    );
+  });
+
+  it.each([
+    ["opamp", "$OPAMP_5TERM", "rnl-std-functional 0.3", false],
+    [
+      "opamp-lettered",
+      "$CANVAS_OPAMP_LETTERED",
+      "analog-canvas-extensions 0.5",
+      true,
+    ],
+  ] as const)(
+    "declares the package of %s's symbol %s, %s, and warns only of a non-standard one",
+    (symbolId, symbol, pinned, nonStandard) => {
+      const project = createEmptyProject("block", "Block", "dut");
+      const document = project.documents[0]!;
+      document.netlist!.name = "dut";
+      const descriptor = subcircuitDescriptor(symbolId)!;
+      document.instances.push({
+        id: "block",
+        symbolId,
+        reference: "X1",
+        placement: {
+          position: { x: 100, y: 0 },
+          rotation: 0,
+          mirror: "none",
+        },
+        netlist: {
+          binding: { kind: "unresolved-subcircuit", name: descriptor.target },
+          parameters: {},
+        },
+      });
+      for (const port of descriptor.ports.filter((item) => !item.supply)) {
+        const id = `pin-${port.name}`;
+        document.instances.push({ id, symbolId: "port", placement: null });
+        document.nets.push({
+          id: port.name,
+          terminals: [
+            { instanceId: id, pinName: "P" },
+            { instanceId: "block", pinName: port.pinName ?? port.name },
+          ],
+        });
+        document.netlist!.terminals.push({
+          id: `terminal-${port.name}`,
+          name: port.name,
+          netId: port.name,
+          direction: "inout",
+          interfaceInstanceIds: [id],
+        });
+      }
+      const { ops, diagnostics } = exported(project);
+      expect(
+        diagnostics.filter((item) => item.code === "RNL_NOT_STANDARD_SYMBOL"),
+      ).toEqual(
+        nonStandard
+          ? [
+              expect.objectContaining({
+                severity: "warning",
+                objectIds: ["block"],
+              }),
+            ]
+          : [],
+      );
+      expect(of(ops, "set")).toContainEqual(
+        // Both draw − on top: the + on top symbol, flipped.
+        expect.objectContaining({
+          object: "#X1",
+          symbol,
+          at: [10, 0],
+          orient: "MX",
+        }),
+      );
+      expect(
+        of(ops, "use-package").map(({ name, version }) => `${name} ${version}`),
+      ).toEqual([
+        ...new Set([
+          "rnl-std 0.3",
+          "rnl-std-no-labels 0.3",
+          // Every Cell says how it sets names ($CANVAS_TYPESETTING).
+          "analog-canvas-extensions 0.5",
+          pinned,
+        ]),
+      ]);
+    },
+  );
+});
+
+describe("an op-amp's shown supply pins (#1833)", () => {
+  it("leaves out a wire on VDD, which RNL's symbol draws no pin for, and says so", () => {
+    const project = createEmptyProject("supplies", "Supplies", "dut");
+    const document = project.documents[0]!;
+    document.netlist!.name = "dut";
+    const at = (x: number, y: number) => ({
+      position: { x, y },
+      rotation: 0 as const,
+      mirror: "none" as const,
+    });
+    // The op-amp's VDD pin at (100, 70); the marker's P straight above it.
+    document.instances.push(
+      {
+        id: "block",
+        symbolId: "opamp",
+        symbolVariantId: "supply-pins",
+        reference: "X1",
+        placement: at(100, 100),
+        netlist: {
+          binding: { kind: "unresolved-subcircuit", name: "opamp" },
+          parameters: {},
+        },
+      },
+      { id: "rail", symbolId: "vdd-port", placement: at(100, 30) },
+    );
+    for (const pinName of ["IN+", "IN-", "OUT"]) {
+      const id = `pin-${pinName}`;
+      document.instances.push({ id, symbolId: "port", placement: null });
+      document.nets.push({
+        id: `net-${pinName}`,
+        terminals: [
+          { instanceId: id, pinName: "P" },
+          { instanceId: "block", pinName },
+        ],
+      });
+      document.netlist!.terminals.push({
+        id: `terminal-${pinName}`,
+        name: pinName === "OUT" ? "VOUT" : pinName === "IN+" ? "VIP" : "VIN",
+        netId: `net-${pinName}`,
+        direction: "inout",
+        interfaceInstanceIds: [id],
+      });
+    }
+    const start = {
+      kind: "terminal" as const,
+      instanceId: "block",
+      pinName: "VDD",
+    };
+    const end = { kind: "terminal" as const, instanceId: "rail", pinName: "P" };
+    document.nets.push({
+      id: "net-vdd",
+      terminals: [
+        { instanceId: "block", pinName: "VDD" },
+        { instanceId: "rail", pinName: "P" },
+      ],
+    });
+    document.routes.push(
+      createRoutePath({
+        id: "wire",
+        netId: "net-vdd",
+        start,
+        end,
+        bends: [],
+        modes: ["manual"],
+      }),
+    );
+    const { text, ops, diagnostics } = exported(project);
+    // RNL fails a wire to a terminal its symbol draws no pin for (9.2.4).
+    expect(diagnostics).toContainEqual(
+      expect.objectContaining({
+        severity: "warning",
+        code: "RNL_PIN_NOT_DRAWN",
+        message:
+          "X1 (opamp) has a wire on VDD, which RNL's $OPAMP_5TERM draws no pin for; the wire is left out, and the netlist still joins it",
+      }),
+    );
+    expect(
+      of(ops, "add-wire").some((wire) =>
+        wire.via.some(
+          (vertex) => "terminal" in vertex && vertex.terminal.startsWith("#X1"),
+        ),
+      ),
+    ).toBe(false);
+    // The netlist still joins VDD to the rail.
+    expect(text).toMatch(/^X1 VIP VIN VDD 0 VOUT /mu);
+  });
+});
+
+describe("blocks' symbols", () => {
+  it("defines a drawn Cell's block in its own level, its pins on the printed ports", () => {
+    const { ops, diagnostics } = exported(example("simulation-ota"));
+    expect(diagnostics.map((item) => item.code)).not.toContain(
+      "RNL_BLOCK_STAND_IN",
+    );
+    const symbol = of(ops, "define-symbol").find(
+      (op) => op.level === "subckt:ota_5t",
+    )!;
+    expect(symbol.name).toBe("%ota_5t_SYMBOL");
+    expect(symbol.box).toEqual([-8, -7, 8, 7]);
+    expect(
+      symbol.pins.map((pin) => [pin.terminals, pin.at, pin.direction]),
+    ).toContainEqual([["vout"], [8, 0], "right"]);
+    expect(symbol.pins[0]!.label?.lines[0]![0]).toMatchObject({ text: "vss" });
+    expect(symbol.prims[0]).toEqual({
+      shape: "rectangle",
+      points: [[0, 0]],
+      params: { width: 14, height: 12 },
+    });
+    expect(of(ops, "set")).toContainEqual({
+      level: "subckt:ota_5t",
+      op: "set",
+      object: "#",
+      symbol: "%ota_5t_SYMBOL",
+    });
+    // Each call takes the Cell's own look.
+    expect(
+      of(ops, "set").find((op) => op.object === "#XDUT")?.symbol,
+    ).toBeUndefined();
+  });
+
+  it("defines an external block once in the file level and sets it on each call, by port number", () => {
+    const project = example("simulation-ota");
+    const cell = project.documents.find((item) => item.name === "ota_5t")!;
+    for (const id of ["M1", "M2"]) {
+      const mos = cell.instances.find((instance) => instance.id === id)!;
+      const binding = mos.netlist!.binding;
+      if (binding?.kind !== "external-subcircuit") throw new Error(id);
+      mos.symbolId = externalSubcircuitSymbolId(binding.definitionId);
+    }
+    const { ops } = exported(project);
+    const files = of(ops, "define-symbol").filter((op) => op.level === "file");
+    expect(files.map((op) => op.name)).toEqual([
+      "$sky130_fd_pr__nfet_01v8_SYMBOL",
+    ]);
+    expect(files[0]!.pins.map((pin) => pin.terminals)).toEqual([
+      [1],
+      [2],
+      [3],
+      [4],
+    ]);
+    for (const id of ["#XM1", "#XM2"])
+      expect(of(ops, "set").find((op) => op.object === id)?.symbol).toBe(
+        "$sky130_fd_pr__nfet_01v8_SYMBOL",
+      );
+  });
+
+  it("draws a Delay Cell on a supplies-first Cell with its artwork defined for that call only", () => {
+    const { ops, diagnostics } = exported(delayCellFixture(true));
+    expect(diagnostics.filter((item) => item.severity === "error")).toEqual([]);
+    const files = of(ops, "define-symbol").filter((op) => op.level === "file");
+    expect(files.map((op) => op.name)).toEqual([
+      "$CANVAS_CALL_DELAY_CELL__0_0_1_2",
+    ]);
+    expect(files[0]!.pins.map((pin) => pin.terminals)).toEqual([[3], [4]]);
+    expect(of(ops, "set").find((op) => op.object === "#X1")?.symbol).toBe(
+      "$CANVAS_CALL_DELAY_CELL__0_0_1_2",
+    );
+  });
+
+  it("draws a Delay Cell bound to a supplies-first external definition as it draws one on such a Cell (#1928)", () => {
+    const project = delayCellFixture(true);
+    project.documents = project.documents.filter(
+      (document) => document.id !== "delay_cmos",
+    );
+    project.modelSources = [
+      {
+        id: "delay-source",
+        language: "spice",
+        revision: 1,
+        entry: "delay.spice",
+        dependencies: [],
+        files: [
+          {
+            path: "delay.spice",
+            text: ".subckt delay_ext VDD VSS A Y\nR1 A Y 1k\n.ends delay_ext\n",
+          },
+        ],
+      },
+    ];
+    project.externalSubcircuitDefinitions.push({
+      id: "delay-ext",
+      name: "delay_ext",
+      interfaceStatus: "declared",
+      formalParameters: [],
+      terminals: ["VDD", "VSS", "A", "Y"].map((name) => ({
+        id: `delay-ext-${name}`,
+        name,
+        direction: "inout" as const,
+      })),
+      implementation: {
+        kind: "source",
+        sourceId: "delay-source",
+        entry: "delay_ext",
+      },
+    });
+    project.documents[0]!.instances[0]!.netlist!.binding = {
+      kind: "external-subcircuit",
+      definitionId: "delay-ext",
+    };
+    const { ops, diagnostics } = exported(project);
+    expect(diagnostics.filter((item) => item.severity === "error")).toEqual([]);
+    expect(of(ops, "set").find((op) => op.object === "#X1")?.symbol).toBe(
+      "$CANVAS_CALL_DELAY_CELL__0_0_1_2",
+    );
+  });
+
+  it.each([
+    // The chopper's clock reaches the Cell's ck, a terminal it does not draw.
+    [
+      "chopper",
+      "CH1",
+      "#XCH1",
+      ["INP", "INN", "OUTP", "OUTN"],
+      ["ck", "OUTN", "OUTP", "INN", "INP"],
+      "$CANVAS_CALL_CHOPPER__0_4_3_2_1",
+    ],
+    ["tcoil", "X1", "#X1", ["1", "2", "3"], ["3", "2", "1"], /_3_2_1$/u],
+  ] as const)(
+    "draws a %s bound to a Cell as itself, each pin where the call prints it (#1928)",
+    (symbolId, reference, object, pins, cellPins, order) => {
+      const project = createEmptyProject("bound", "Bound", "top");
+      const top = project.documents[0]!;
+      top.netlist!.name = "top";
+      top.instances.push({
+        id: "part",
+        symbolId,
+        reference,
+        placement: {
+          position: { x: 100, y: 100 },
+          rotation: 0,
+          mirror: "none",
+        },
+        netlist: {
+          binding: { kind: "subcircuit", childDocumentId: "own" },
+          parameters: {},
+        },
+      });
+      for (const pin of pins)
+        top.nets.push({
+          id: `net-${pin}`,
+          terminals: [{ instanceId: "part", pinName: pin }],
+        });
+      const own = createEmptyDocument("own", "own");
+      own.netlist!.name = "own";
+      for (const pin of cellPins) {
+        own.instances.push({
+          id: `port-${pin}`,
+          symbolId: "port",
+          placement: null,
+        });
+        own.nets.push({
+          id: `own-${pin}`,
+          terminals: [{ instanceId: `port-${pin}`, pinName: "P" }],
+        });
+        own.netlist!.terminals.push({
+          id: `own-terminal-${pin}`,
+          name: pin,
+          netId: `own-${pin}`,
+          direction: "inout",
+          interfaceInstanceIds: [`port-${pin}`],
+        });
+      }
+      project.documents.push(own);
+      const { ops, diagnostics } = exported(project);
+      expect(diagnostics.filter((item) => item.severity === "error")).toEqual(
+        [],
+      );
+      expect(of(ops, "set").find((op) => op.object === object)?.symbol).toMatch(
+        order,
+      );
+    },
+  );
+
+  it("draws Delay Cells whose body yields its name to a Cell as on the body itself (#1928)", () => {
+    const symbols = (project: CircuitProject) =>
+      of(exported(project).ops, "set")
+        .filter((op) => /^#X[123]$/u.test(op.object))
+        .map((op) => op.symbol);
+    const renamed = delayCellFixture(false);
+    const own = createEmptyDocument("own-delay", "delay_cell");
+    own.netlist!.name = "delay_cell";
+    renamed.documents.push(own);
+    const { text, diagnostics } = exported(renamed);
+    expect(diagnostics.filter((item) => item.severity === "error")).toEqual([]);
+    expect(text).toMatch(/^X1 .* icm_delay_cell( |$)/mu);
+    expect(symbols(renamed)).toEqual(symbols(delayCellFixture(false)));
+  });
+});
+
+/** The RC example with one drawing object of each kind, and marks on its wires. */
+function drawings(): CircuitProject {
+  const project = example("simulation-rc");
+  const document = project.documents.find(
+    (item) => item.id === project.topDocumentId,
+  )!;
+  const free = (x: number, y: number) =>
+    ({ kind: "free", position: { x, y } }) as const;
+  const base = (id: string, zIndex: number, x = 0, y = 0) => ({
+    id,
+    locked: false,
+    zIndex,
+    anchor: free(x, y),
+  });
+  const text = (value: string) => ({
+    runs: [{ kind: "text" as const, value }],
+  });
+  const objects: NonNullable<SchematicDocument["drafting"]>["objects"] = [
+    {
+      ...base("back", 0),
+      kind: "rectangle",
+      center: { x: 500, y: -150 },
+      width: 160,
+      height: 80,
+      rotation: 0,
+      lineStyle: "solid",
+      layer: "background",
+      styleOverride: { fillColor: "#eef4ff" },
+    },
+    {
+      ...base("turned", 1),
+      kind: "rectangle",
+      center: { x: 700, y: -150 },
+      width: 80,
+      height: 40,
+      rotation: 90,
+      lineStyle: "dashed",
+    },
+    {
+      ...base("slanted", 2),
+      kind: "rectangle",
+      center: { x: 860, y: -150 },
+      width: 80,
+      height: 40,
+      rotation: 30,
+      lineStyle: "solid",
+    },
+    {
+      ...base("circle", 3),
+      kind: "circle",
+      center: { x: 1000, y: -150 },
+      radius: 30,
+      lineStyle: "dotted",
+      styleOverride: { color: "#cc0000" },
+    },
+    {
+      ...base("curve", 4),
+      kind: "construction-line",
+      points: [
+        { x: 400, y: -300 },
+        { x: 500, y: -300 },
+        { x: 600, y: -250 },
+      ],
+      curveControls: [null, { x: 580, y: -310 }],
+      lineStyle: "dashed",
+    },
+    {
+      ...base("arrow", 5),
+      kind: "arrow",
+      from: free(400, -400),
+      to: free(560, -400),
+      styleOverride: { arrowEnd: "medium-arrow" },
+    },
+    {
+      ...base("ends", 6),
+      kind: "arrow",
+      from: free(400, -460),
+      to: free(560, -460),
+      styleOverride: { arrowStart: "dot", arrowEnd: "open-arrow" },
+    },
+    {
+      ...base("hollow", 7),
+      kind: "arrow",
+      from: free(820, -430),
+      to: free(960, -430),
+      outline: { width: 20 },
+    },
+    {
+      ...base("leader", 8, 400, -520),
+      kind: "leader",
+      target: free(480, -560),
+    },
+    {
+      ...base("callout", 9, 600, -540),
+      kind: "callout",
+      content: text("Load"),
+      alignment: "start",
+      rotation: 0,
+      target: free(700, -580),
+    },
+    {
+      ...base("both", 10, 860, -540),
+      kind: "text",
+      content: text("Vx"),
+      alignment: "middle",
+      rotation: 0,
+      polarity: "both",
+    },
+    {
+      ...base("plus", 11, 940, -540),
+      kind: "text",
+      content: text("unseen"),
+      alignment: "middle",
+      rotation: 0,
+      polarity: "positive",
+    },
+    {
+      ...base("figure", 12, 1100, -300),
+      kind: "floating-symbol",
+      symbolId: "resistor",
+      transform: { rotation: 90, mirror: "none" },
+    },
+  ];
+  document.drafting = { objects };
+  const [first, second] = document.routes;
+  first!.styleOverride = { arrow: "middle" };
+  second!.styleOverride = { arrow: "end" };
+  const marker = (id: string, markerKind: "current" | "voltage") => ({
+    id,
+    kind: "route-marker" as const,
+    content: text(markerKind === "current" ? "I1" : "V1"),
+    anchor: {
+      kind: "route" as const,
+      routeId: first!.id,
+      legId: first!.legs[0]!.id,
+      t: 0.5,
+      normalOffset: -14,
+      direction: "forward" as const,
+      orientation: "follow" as const,
+      fallbackPosition: { x: 0, y: 0 },
+    },
+    alignment: "middle" as const,
+    rotation: 0 as const,
+    locked: false,
+    markerKind,
+  });
+  document.annotations.push(
+    marker("current", "current"),
+    marker("voltage", "voltage"),
+  );
+  return project;
+}
+
+const firstText = (op: Op<"add-text">) => {
+  const run = op.lines[0]?.[0];
+  return run?.kind === "text" ? run.text : undefined;
+};
+
+describe("drawing objects", () => {
+  it("draws each object as its RNL shapes, stacked as Analog Canvas stacks them", () => {
+    const { ops, diagnostics } = exported(drawings());
+    expect(diagnostics.map((item) => item.code)).not.toContain(
+      "RNL_DRAWING_NOT_EXPORTED",
+    );
+    const shapes = of(ops, "add-shape");
+    expect(shapes[0]).toMatchObject({
+      shape: "rectangle",
+      layer: "bottom",
+      points: [[50, 15]],
+      params: { width: 16, height: 8, fill: "fillcolor" },
+      style: { fillcolor: "#eef4ff" },
+    });
+    expect(shapes[1]).toMatchObject({
+      shape: "rectangle",
+      layer: "top",
+      params: { width: 4, height: 8 },
+      style: { linestyle: "dashed" },
+    });
+    expect(shapes[2]).toMatchObject({ shape: "line" });
+    expect(shapes[2]!.points).toHaveLength(5);
+    expect(shapes[3]).toMatchObject({
+      shape: "circle",
+      params: { radius: 3 },
+      style: { linestyle: "dotted", linecolor: "#cc0000" },
+    });
+    expect(shapes[4]).toMatchObject({ shape: "bezier" });
+    expect(shapes[5]).toMatchObject({
+      shape: "line",
+      points: [
+        [40, 40],
+        [56, 40],
+      ],
+      params: { arrow: "end" },
+    });
+    // A dot is a filled circle; an open head is its outline, the shaft ending at its base.
+    const ends = shapes.slice(6, 9);
+    expect(ends.map((shape) => shape.shape)).toEqual([
+      "line",
+      "line",
+      "circle",
+    ]);
+    expect(ends[0]!.params).toBeUndefined();
+    expect(ends[2]).toMatchObject({
+      points: [[40, 46]],
+      params: { fill: "linecolor" },
+    });
+    expect(shapes[9]).toMatchObject({ shape: "line" });
+    expect(shapes[9]!.points.at(-1)).toEqual(shapes[9]!.points[0]);
+    expect(
+      shapes
+        .slice(10, 12)
+        .map((shape) => shape.points.map((point) => point.join(","))),
+    ).toEqual([
+      ["40,52", "48,56"],
+      ["60,54", "70,58"],
+    ]);
+    // + is two strokes and − one, around the words; a one-sided + has its own two.
+    expect(shapes.slice(12)).toHaveLength(5);
+    const texts = of(ops, "add-text");
+    expect(texts).toContainEqual(
+      expect.objectContaining({ at: [60, 54], style: { bold: true } }),
+    );
+    expect(texts.find((op) => firstText(op) === "Load")?.at).toEqual([60, 54]);
+    expect(texts.find((op) => firstText(op) === "Vx")).toMatchObject({
+      at: [86, 54],
+      valign: "middle",
+    });
+    expect(texts.find((op) => firstText(op) === "unseen")).toBeUndefined();
+    expect(of(ops, "add-usage")).toContainEqual(
+      expect.objectContaining({
+        definition: "$FIGURE",
+        attach: { p: [110, 30] },
+        symbol: "$RESISTOR",
+        orient: "R270",
+      }),
+    );
+  });
+
+  it("puts current and voltage marks and wire arrows on the wires", () => {
+    const { ops, diagnostics } = exported(drawings());
+    expect(diagnostics.map((item) => item.code)).not.toContain(
+      "RNL_WIRE_ARROW",
+    );
+    const usages = of(ops, "add-usage");
+    const arrows = usages.filter((op) => op.definition === "$ARROW");
+    expect(arrows.map((op) => op.orient)).toEqual(["R0", "R270"]);
+    const current = usages.find((op) => op.definition === "$CURRENT_ARROW")!;
+    expect(current.orient).toBe("R90");
+    const label = of(ops, "add-text").find((op) => firstText(op) === "I1");
+    expect(label).toMatchObject({ attach: current.name, halign: "middle" });
+    const signs = of(ops, "add-text").filter((op) =>
+      ["+", "−"].includes(firstText(op) ?? ""),
+    );
+    expect(signs).toHaveLength(2);
+  });
+
+  it("leaves out a floating symbol with no RNL symbol, and says so", () => {
+    const project = drawings();
+    const document = project.documents.find(
+      (item) => item.id === project.topDocumentId,
+    )!;
+    const figure = document.drafting!.objects.find(
+      (object) => object.kind === "floating-symbol",
+    )!;
+    if (figure.kind === "floating-symbol") figure.symbolId = "no-such-symbol";
+    const { ops, diagnostics } = exported(project);
+    expect(
+      of(ops, "add-usage").filter((op) => op.definition === "$FIGURE"),
+    ).toEqual([]);
+    expect(diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: "RNL_DRAWING_NOT_EXPORTED",
+        objectIds: ["figure"],
+      }),
+    );
+  });
+});

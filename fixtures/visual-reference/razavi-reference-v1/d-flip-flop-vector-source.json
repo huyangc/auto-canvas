@@ -1,0 +1,334 @@
+{
+  "schemaVersion": 1,
+  "id": "razavi-textbook-d-flip-flop",
+  "kind": "pdf-vector-extract",
+  "source": {
+    "title": "Design of Analog CMOS Integrated Circuits, Second Edition",
+    "sha256": "a6031d1149c2c6191a1f0e541065165b72dafc4bc4ab4b0ea37af41b7cb0f739",
+    "pdfPage": 687,
+    "printedPage": 668,
+    "figure": "16.23(a)"
+  },
+  "selection": {
+    "method": "direct-buffer-dff-vector-normalization",
+    "scope": "generic D/CK/Q/Q-bar flip-flop block without external circuit ports",
+    "nativeObjectCount": 6,
+    "nativeObjectSha256": "264c37b26615e62ce77b9567585769b1119766ddb84bf84b5a6b7edcffcd595e",
+    "nativeObjects": [
+      {
+        "objectType": "rect",
+        "x0": 284.233,
+        "top": 40.4612,
+        "x1": 313.48,
+        "bottom": 69.7072,
+        "linewidth": 1.434,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 5,
+        "pathSha256": "a9de5a549b29a27a1dce3533c6fcb70beff49a72138bad775c4a4869561bff8b"
+      },
+      {
+        "objectType": "line",
+        "x0": 269.61,
+        "top": 47.7722,
+        "x1": 284.233,
+        "bottom": 47.7722,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 2,
+        "pathSha256": "da12ada4ed669b22f9baaca350f0ca7c4bbb07e5a425b0674021118ce0c4e13a"
+      },
+      {
+        "objectType": "line",
+        "x0": 269.61,
+        "top": 62.3962,
+        "x1": 284.233,
+        "bottom": 62.3962,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 2,
+        "pathSha256": "66cf9c506474cf1a1a8499493baaab987a141628d3b47fccd6f4f72534f063f4"
+      },
+      {
+        "objectType": "line",
+        "x0": 313.404,
+        "top": 47.7722,
+        "x1": 328.027,
+        "bottom": 47.7722,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 2,
+        "pathSha256": "3bd9c144c86fa70924cf0918584468ef2ac920488d09080177805f7ea679dc8b"
+      },
+      {
+        "objectType": "line",
+        "x0": 313.404,
+        "top": 62.3962,
+        "x1": 328.027,
+        "bottom": 62.3962,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 2,
+        "pathSha256": "d93ecb5208e3bf7e08afd827a0835f7ddca06d6d1cd0e36696e46e92abae60f1"
+      },
+      {
+        "objectType": "line",
+        "x0": 305.208,
+        "top": 58.1912,
+        "x1": 311.545,
+        "bottom": 58.1912,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 2,
+        "pathSha256": "844cae63bfa705ef3af6a96ef98d119824f22ba00af34a00be134aaaee449b38"
+      }
+    ]
+  },
+  "normalization": {
+    "logicalUnitsPerPdfPoint": 1.709635,
+    "sourceOriginPdf": {
+      "x": 298.8565,
+      "y": 55.0842
+    },
+    "pinAnchorsLogical": [
+      {
+        "name": "D",
+        "x": -50,
+        "y": -10
+      },
+      {
+        "name": "CK",
+        "x": -50,
+        "y": 10
+      },
+      {
+        "name": "Q",
+        "x": 50,
+        "y": -10
+      },
+      {
+        "name": "QBAR",
+        "x": 50,
+        "y": 10
+      }
+    ],
+    "strokeMapping": {
+      "normal": {
+        "sourcePdfPt": 0.717,
+        "targetRole": "normal"
+      },
+      "body": {
+        "sourcePdfPt": 1.434,
+        "targetRole": "emphasis"
+      }
+    },
+    "symbolDefinition": {
+      "schemaVersion": 1,
+      "id": "d-flip-flop",
+      "name": "D Flip-Flop",
+      "viewBox": {
+        "x": -55,
+        "y": -30,
+        "width": 110,
+        "height": 60
+      },
+      "pins": [
+        {
+          "name": "D",
+          "role": "input",
+          "at": {
+            "x": -50,
+            "y": -10
+          },
+          "direction": "west",
+          "presentation": {
+            "visibility": "visible",
+            "leadLength": 25,
+            "showName": true,
+            "textStyle": "math-symbol",
+            "textSizeScale": 0.68
+          }
+        },
+        {
+          "name": "CK",
+          "role": "clock",
+          "at": {
+            "x": -50,
+            "y": 10
+          },
+          "direction": "west",
+          "presentation": {
+            "visibility": "visible",
+            "leadLength": 25,
+            "showName": true,
+            "textStyle": "math-symbol",
+            "textSizeScale": 0.68
+          }
+        },
+        {
+          "name": "Q",
+          "role": "output",
+          "at": {
+            "x": 50,
+            "y": -10
+          },
+          "direction": "east",
+          "presentation": {
+            "visibility": "visible",
+            "leadLength": 25,
+            "showName": true,
+            "textStyle": "math-symbol",
+            "textSizeScale": 0.68
+          }
+        },
+        {
+          "name": "QBAR",
+          "role": "output-complement",
+          "at": {
+            "x": 50,
+            "y": 10
+          },
+          "direction": "east",
+          "presentation": {
+            "visibility": "visible",
+            "leadLength": 25,
+            "showName": true,
+            "displayName": "Q",
+            "textStyle": "math-symbol",
+            "textSizeScale": 0.68
+          }
+        }
+      ],
+      "primitives": [
+        {
+          "kind": "line",
+          "from": {
+            "x": -50.0,
+            "y": -10.0
+          },
+          "to": {
+            "x": -25.000855,
+            "y": -10.0
+          },
+          "style": {
+            "strokeRole": "normal",
+            "lineCap": "butt",
+            "lineJoin": "miter"
+          }
+        },
+        {
+          "kind": "line",
+          "from": {
+            "x": -50.0,
+            "y": 10.0
+          },
+          "to": {
+            "x": -25.000855,
+            "y": 10.0
+          },
+          "style": {
+            "strokeRole": "normal",
+            "lineCap": "butt",
+            "lineJoin": "miter"
+          }
+        },
+        {
+          "kind": "path",
+          "data": "M -25.000855 -25.0 L 25.000855 -25.0 L 25.000855 25.0 L -25.000855 25.0 Z",
+          "style": {
+            "strokeRole": "emphasis",
+            "lineCap": "butt",
+            "lineJoin": "miter",
+            "miterLimit": 4
+          }
+        },
+        {
+          "kind": "line",
+          "from": {
+            "x": 25.000855,
+            "y": -10.0
+          },
+          "to": {
+            "x": 50.0,
+            "y": -10.0
+          },
+          "style": {
+            "strokeRole": "normal",
+            "lineCap": "butt",
+            "lineJoin": "miter"
+          }
+        },
+        {
+          "kind": "line",
+          "from": {
+            "x": 25.000855,
+            "y": 10.0
+          },
+          "to": {
+            "x": 50.0,
+            "y": 10.0
+          },
+          "style": {
+            "strokeRole": "normal",
+            "lineCap": "butt",
+            "lineJoin": "miter"
+          }
+        },
+        {
+          "kind": "line",
+          "part": "pin-name-overbar",
+          "from": {
+            "x": 13.687,
+            "y": 4.24947
+          },
+          "to": {
+            "x": 22.354168,
+            "y": 4.24947
+          },
+          "style": {
+            "strokeRole": "normal",
+            "lineCap": "butt",
+            "lineJoin": "miter"
+          }
+        }
+      ],
+      "variants": []
+    }
+  },
+  "derivation": {
+    "pinExtension": "native leads extend collinearly to the existing x=+/-40 electrical anchors",
+    "semantics": "pin identity is reconstructed explicitly; the extracted Q-bar stroke is renderer-owned so it stays attached to the upright complementary-output label through rotation; only visual geometry comes from PDF vectors"
+  },
+  "rasterWitness": {
+    "kind": "source-pdf-crop",
+    "sourcePdfPage": 687,
+    "dpi": 236.340012,
+    "pixels": {
+      "width": 187,
+      "height": 115
+    },
+    "pixelsPerLogical": 2.4,
+    "originPx": {
+      "x": 94.339643,
+      "y": 58.470765
+    },
+    "window": {
+      "width": 187,
+      "height": 115,
+      "minX": -39,
+      "minY": -24
+    },
+    "rotation": 0,
+    "sourceCropPx": {
+      "x": 775,
+      "y": 234
+    },
+    "assetPath": "d-flip-flop-reference.png",
+    "threshold": 160
+  }
+}

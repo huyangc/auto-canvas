@@ -1,0 +1,72 @@
+* Moderate mixed-device acceptance circuit for netlist-to-schematic closure.
+* It exercises every SPICE primitive symbol family currently supported by
+* Net-painting Converter while keeping each schematic page reviewable.
+
+.include "models.inc"
+.param RBASE=4.7k CCOMP=2p LISO=8n
+
+* Native R/C/L and parameter-expression coverage.
+.subckt mixed_passive_cell IN OUT VSS
+RIN IN N_FILTER {RBASE}
+LISO N_FILTER OUT {LISO}
+CCOMP OUT VSS {CCOMP}
+.ends mixed_passive_cell
+
+* Semiconductor families remain separate reviewable cells so a failure points
+* to one symbol/pin contract instead of an unrelated dense routing interaction.
+.subckt mixed_diode_cell IN OUT
+DCLAMP IN OUT DACC
+.ends mixed_diode_cell
+
+.subckt mixed_mos_cell BIT NBIT BOT VSS VDD
+XDP NBIT BIT VDD VDD sky130_fd_pr__pfet_01v8
++ l=0.18 w=4 nf=2
+XDN NBIT BIT VSS VSS sky130_fd_pr__nfet_01v8
++ l=0.18 w=2 nf=1
+XSP BOT NBIT VDD VDD sky130_fd_pr__pfet_01v8 l=0.18 w=8 nf=2
+XSN BOT NBIT VSS VSS sky130_fd_pr__nfet_01v8 l=0.18 w=4 nf=1
+.ends mixed_mos_cell
+
+.subckt mixed_pdk_resistor_cell IN OUT VSS
+XRPOLY IN OUT VSS sky130_fd_pr__res_high_po w=1 l=5.5 mult=1
+.ends mixed_pdk_resistor_cell
+
+* Bipolar polarities stay in small independently reviewable cells. This is a
+* symbol-and-connectivity fixture, not a simulator-quality push-pull bias stage.
+.subckt mixed_npn_cell IN OUT VSS
+QN OUT IN VSS QNACC
+.ends mixed_npn_cell
+
+.subckt mixed_pnp_cell IN OUT VDD
+QP OUT IN VDD QPACC
+.ends mixed_pnp_cell
+
+* Independent and controlled sources plus a voltage-controlled switch.
+.subckt mixed_control_cell IN CTRL OUT VDD VSS
+VREF N_REF VSS 0.9
+IBIAS VDD N_BIAS 50u
+VSENSE N_SENSE VSS 0
+EGAIN N_E VSS IN VSS 2
+GTRAN N_G VSS IN VSS 1m
+FFB N_F VSS VSENSE 1.5
+HMON N_H VSS VSENSE 25
+SROUTE N_E OUT CTRL VSS SWACC
+RE N_E N_SENSE 1k
+RG N_G N_SENSE 2k
+RF N_F N_SENSE 3k
+RH N_H N_SENSE 4k
+RREF N_REF N_BIAS 100k
+COUT OUT VSS 10p
+.ends mixed_control_cell
+
+* The family blocks keep every page moderate while exercising page-per-subckt
+* and explicit local expansion. XFILTER is the intended inline target.
+.subckt mixed_device_acceptance IN CTRL VDD VSS OUT
+XFILTER IN N_FILTER VSS mixed_passive_cell
+XDIODE N_FILTER N_DIODE mixed_diode_cell
+XMOS CTRL N_NBIT N_DIODE VSS VDD mixed_mos_cell
+XPDKR N_DIODE N_FET VSS mixed_pdk_resistor_cell
+XNPN N_FET N_BJT_N VSS mixed_npn_cell
+XPNP N_BJT_N N_CORE VDD mixed_pnp_cell
+XCONTROL N_CORE CTRL OUT VDD VSS mixed_control_cell
+.ends mixed_device_acceptance

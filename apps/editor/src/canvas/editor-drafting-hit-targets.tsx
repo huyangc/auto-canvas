@@ -1,0 +1,586 @@
+import { useMemo } from "react";
+import type {
+  MouseEvent as ReactMouseEvent,
+  PointerEvent as ReactPointerEvent,
+} from "react";
+
+import {
+  arrowArtwork,
+  resolveDocumentRoutingGeometry,
+  objectStyleProfile,
+  resolveDocumentStyleProfile,
+  resolveDraftingObjectGeometry,
+} from "@icm/derived";
+import type { DraftingObject, SchematicDocument } from "@icm/model";
+import type { SymbolResolver } from "@icm/symbols";
+
+import { type DraftingHandle } from "../features/drafting/drafting-manipulation";
+import {
+  isClosedPolyline,
+  polylineCorners,
+  POLYLINE_RESIZE_PADDING,
+  POLYLINE_CORNER_DIRECTIONS,
+} from "../features/drafting/drafting-polyline";
+import {
+  draftingPathData,
+  quadraticMidpoint,
+} from "../features/drafting/drafting-path";
+import type { EditorTool } from "../interaction/interaction-state";
+import type { SelectionPolicy } from "../features/selection/selection-filter";
+import { serializePolylinePoints } from "./canvas-geometry";
+
+export function EditorDraftingHitTargets({
+  document,
+  resolver,
+  tool,
+  selectedDraftingId,
+  supplementalDraftingIds,
+  selectionPolicy,
+  onConstructionLineEdit,
+  onArrowEdit,
+  onTextEdit,
+  onTextContextMenu,
+}: {
+  document: SchematicDocument;
+  resolver: SymbolResolver;
+  tool: EditorTool;
+  selectedDraftingId: string | null;
+  supplementalDraftingIds: readonly string[];
+  selectionPolicy: SelectionPolicy;
+  onConstructionLineEdit: (
+    event: ReactMouseEvent<SVGElement>,
+    object: Extract<DraftingObject, { kind: "construction-line" }>,
+  ) => void;
+  onArrowEdit: (
+    event: ReactMouseEvent<SVGElement>,
+    object: Extract<DraftingObject, { kind: "arrow" }>,
+  ) => void;
+  onTextEdit: (object: Extract<DraftingObject, { kind: "text" }>) => void;
+  onTextContextMenu: (
+    object: Extract<DraftingObject, { kind: "text" }>,
+    clientX: number,
+    clientY: number,
+  ) => void;
+}) {
+  const draftingObjects = [...(document.drafting?.objects ?? [])].sort(
+    (left, right) => {
+      const plane = (object: DraftingObject) =>
+        (object.kind === "rectangle" || object.kind === "circle") &&
+        object.layer === "background"
+          ? 0
+          : 1;
+      return plane(left) - plane(right) || left.zIndex - right.zIndex;
+    },
+  );
+  // `resolveDraftingObjectGeometry` re-derived the whole Document's route
+  // geometry on every call, so a Project with hundreds of drafting objects
+  // paid to resolve all of its Routes hundreds of times per render. Derive it
+  // once here and hand it to each call.
+  const routingGeometry = useMemo(
+    () => resolveDocumentRoutingGeometry(document, resolver),
+    [document, resolver],
+  );
+  return draftingObjects.map((object) => {
+    const drawingThroughScene =
+      tool === "wire" ||
+      tool === "arrow" ||
+      tool === "polyline" ||
+      tool === "construction-line" ||
+      tool === "rectangle" ||
+      tool === "circle";
+    const geometry = resolveDraftingObjectGeometry(
+      document,
+      resolver,
+      object,
+      routingGeometry,
+    );
+    const selected =
+      selectedDraftingId === object.id ||
+      supplementalDraftingIds.includes(object.id);
+    const selectedClass = selected
+      ? "annotation-hit selected"
+      : "annotation-hit";
+    const textClass = selected
+      ? "hit-target annotation-text-hit selected"
+      : "hit-target annotation-text-hit";
+    const common = {
+      "data-testid": `drafting-hit-${object.id}`,
+      "data-canvas-hit-kind": "drafting",
+      "data-canvas-hit-id": object.id,
+      "data-drag-object-id": object.id,
+      ...(object.kind === "text"
+        ? {
+            onContextMenu: (event: ReactMouseEvent<SVGElement>) => {
+              if (!selectionPolicy.allowsDrafting(object, "context-menu"))
+                return;
+              event.preventDefault();
+              event.stopPropagation();
+              onTextContextMenu(object, event.clientX, event.clientY);
+            },
+          }
+        : {}),
+      // Active drawing tools see the underlying scene as snap geometry, not
+      // as interactive hit targets. Nothing new is painted for this behavior.
+      pointerEvents: drawingThroughScene ? ("none" as const) : undefined,
+    };
+    if (
+      object.kind === "construction-line" &&
+      geometry.kind === "construction-line"
+    ) {
+      const doubleClick = (event: ReactMouseEvent<SVGElement>) =>
+        selectionPolicy.allowsDrafting(object, "edit")
+          ? onConstructionLineEdit(event, object)
+          : undefined;
+      return geometry.curveControls.some(Boolean) ? (
+        <path
+          key={object.id}
+          {...common}
+          className={`${selectedClass} drafting-path-hit`}
+          fill="none"
+          d={draftingPathData(geometry.points, geometry.curveControls)}
+          onDoubleClick={doubleClick}
+        />
+      ) : (
+        <polyline
+          key={object.id}
+          {...common}
+          className={`${selectedClass} drafting-path-hit`}
+          fill="none"
+          points={object.points
+            .map((point) => `${point.x},${point.y}`)
+            .join(" ")}
+          onDoubleClick={doubleClick}
+        />
+      );
+    }
+    if (object.kind === "arrow" && geometry.kind === "arrow") {
+      const art = arrowArtwork(
+        object,
+        geometry.points,
+        geometry.curveControls,
+        objectStyleProfile(
+          resolveDocumentStyleProfile(document.presentation),
+          object,
+        ),
+      );
+      const { "data-testid": _testId, ...headCommon } = common;
+      const doubleClick = (event: ReactMouseEvent<SVGElement>) =>
+        !object.outline && selectionPolicy.allowsDrafting(object, "edit")
+          ? onArrowEdit(event, object)
+          : undefined;
+      const dotHits = art.dots.map(({ center, radius }, index) => (
+        <circle
+          key={`dot-${index}`}
+          {...headCommon}
+          className={selectedClass}
+          cx={center.x}
+          cy={center.y}
+          r={radius}
+          fill="transparent"
+          pointerEvents={drawingThroughScene ? "none" : "all"}
+          onDoubleClick={doubleClick}
+        />
+      ));
+      if (art.outline)
+        return (
+          <g key={object.id}>
+            <polygon
+              key={object.id}
+              {...common}
+              className={`${selectedClass} drafting-outline-arrow-hit`}
+              points={serializePolylinePoints(art.outline)}
+              fill="none"
+            />
+            {dotHits}
+          </g>
+        );
+      return (
+        <g key={object.id}>
+          {geometry.curveControls.some(Boolean) ? (
+            <path
+              key={object.id}
+              {...common}
+              className={`${selectedClass} drafting-path-hit`}
+              fill="none"
+              d={draftingPathData(geometry.points, geometry.curveControls)}
+              onDoubleClick={doubleClick}
+            />
+          ) : (
+            <polyline
+              key={object.id}
+              {...common}
+              className={`${selectedClass} drafting-path-hit`}
+              fill="none"
+              points={geometry.points
+                .map((point) => `${point.x},${point.y}`)
+                .join(" ")}
+              onDoubleClick={doubleClick}
+            />
+          )}
+          {art.heads.map((head, index) => (
+            <polygon
+              key={`head-${index}`}
+              {...headCommon}
+              className={selectedClass}
+              points={serializePolylinePoints(head.points)}
+              fill="transparent"
+              pointerEvents={drawingThroughScene ? "none" : "all"}
+              onDoubleClick={doubleClick}
+            />
+          ))}
+          {dotHits}
+        </g>
+      );
+    }
+    if (object.kind === "rectangle" && geometry.kind === "rectangle") {
+      const fillClass = object.styleOverride?.fillColor
+        ? object.layer === "background"
+          ? " drafting-shape-background-hit"
+          : " drafting-shape-filled-hit"
+        : "";
+      return (
+        <polygon
+          key={object.id}
+          {...common}
+          className={`${selectedClass} drafting-rectangle-hit${fillClass}`}
+          points={serializePolylinePoints(geometry.corners)}
+          fill="none"
+        />
+      );
+    }
+    if (object.kind === "circle" && geometry.kind === "circle") {
+      const fillClass = object.styleOverride?.fillColor
+        ? object.layer === "background"
+          ? " drafting-shape-background-hit"
+          : " drafting-shape-filled-hit"
+        : "";
+      return (
+        <circle
+          key={object.id}
+          {...common}
+          className={`${selectedClass} drafting-circle-hit${fillClass}`}
+          cx={geometry.center.x}
+          cy={geometry.center.y}
+          r={geometry.radius}
+          fill="none"
+        />
+      );
+    }
+    if (object.kind === "leader" && geometry.kind === "leader") {
+      return (
+        <line
+          key={object.id}
+          {...common}
+          className={selectedClass}
+          x1={geometry.anchor.x}
+          y1={geometry.anchor.y}
+          x2={geometry.target.x}
+          y2={geometry.target.y}
+        />
+      );
+    }
+    if (object.kind === "callout" && geometry.kind === "callout") {
+      return (
+        <g key={object.id} {...common}>
+          <line
+            className={selectedClass}
+            x1={geometry.textPosition.x}
+            y1={geometry.textPosition.y}
+            x2={geometry.target.x}
+            y2={geometry.target.y}
+          />
+          <rect className={selectedClass} {...geometry.textBounds} />
+        </g>
+      );
+    }
+    return (
+      <rect
+        key={object.id}
+        {...common}
+        className={object.kind === "text" ? textClass : selectedClass}
+        {...geometry.bounds}
+        onDoubleClick={(event) => {
+          if (object.kind !== "text") return;
+          if (object.polarity === "positive" || object.polarity === "negative")
+            return;
+          if (!selectionPolicy.allowsDrafting(object, "edit")) return;
+          event.stopPropagation();
+          onTextEdit(object);
+        }}
+      />
+    );
+  });
+}
+
+export function EditorDraftingHandles({
+  document,
+  resolver,
+  selectedDraftingId,
+  onHandlePointerDown,
+  onDeleteVertex,
+}: {
+  document: SchematicDocument;
+  resolver: SymbolResolver;
+  selectedDraftingId: string | null;
+  onHandlePointerDown: (
+    event: ReactPointerEvent<SVGElement>,
+    object: DraftingObject,
+    handle: DraftingHandle,
+  ) => void;
+  onDeleteVertex: (
+    object: Extract<DraftingObject, { kind: "construction-line" }>,
+    index: number,
+  ) => void;
+}) {
+  const object = document.drafting?.objects.find(
+    (candidate) => candidate.id === selectedDraftingId,
+  );
+  if (!object || object.locked) return null;
+  const geometry = resolveDraftingObjectGeometry(document, resolver, object);
+  const circle = (
+    point: { x: number; y: number },
+    testId: string,
+    handle: DraftingHandle,
+  ) => (
+    <circle
+      key={testId}
+      className="draft-handle"
+      data-testid={testId}
+      cx={point.x}
+      cy={point.y}
+      r="5"
+      onPointerDown={(event) => onHandlePointerDown(event, object, handle)}
+    />
+  );
+  const curve = (
+    from: { x: number; y: number },
+    control: { x: number; y: number } | null,
+    to: { x: number; y: number },
+    index: number,
+  ) => {
+    const point = quadraticMidpoint(from, control, to);
+    return (
+      <rect
+        key={`curve-${index}`}
+        className="draft-handle draft-midpoint-handle"
+        data-testid={`draft-handle-segment-${index}-${object.id}`}
+        x={point.x - 3}
+        y={point.y - 3}
+        width="6"
+        height="6"
+        transform={`rotate(45 ${point.x} ${point.y})`}
+        onPointerDown={(event) =>
+          onHandlePointerDown(event, object, { kind: "curve", index })
+        }
+      />
+    );
+  };
+  if (object.kind === "arrow" && geometry.kind === "arrow") {
+    const closed = isClosedPolyline(object);
+    // Rotation edits the bearing of the first leg, not the endpoint chord.
+    const directionEnd = geometry.points[1]!;
+    const dx = directionEnd.x - geometry.from.x,
+      dy = directionEnd.y - geometry.from.y;
+    const corners = polylineCorners(object)?.map((point, index) => ({
+      x:
+        point.x +
+        POLYLINE_CORNER_DIRECTIONS[index]!.x * POLYLINE_RESIZE_PADDING,
+      y:
+        point.y +
+        POLYLINE_CORNER_DIRECTIONS[index]!.y * POLYLINE_RESIZE_PADDING,
+    }));
+    const length = Math.hypot(dx, dy) || 1;
+    const offset = object.outline ? object.outline.width / 2 + 18 : 25;
+    const rotationHandle = {
+      x: geometry.center.x + (dy / length) * offset,
+      y: geometry.center.y - (dx / length) * offset,
+    };
+    const widthHandle = {
+      x: geometry.center.x - ((dy / length) * (object.outline?.width ?? 0)) / 2,
+      y: geometry.center.y + ((dx / length) * (object.outline?.width ?? 0)) / 2,
+    };
+    return (
+      <g data-testid={`drafting-handles-${object.id}`}>
+        {corners && (
+          <>
+            <rect
+              className="draft-group-bounds"
+              x={corners[0]!.x}
+              y={corners[0]!.y}
+              width={corners[2]!.x - corners[0]!.x}
+              height={corners[2]!.y - corners[0]!.y}
+              pointerEvents="none"
+            />
+            {corners.map((point, index) => (
+              <rect
+                key={`path-corner-${index}`}
+                className="draft-handle"
+                data-testid={`draft-handle-path-corner-${index}-${object.id}`}
+                aria-label={`Resize path corner ${index + 1}`}
+                x={point.x - 4}
+                y={point.y - 4}
+                width="8"
+                height="8"
+                onPointerDown={(event) =>
+                  onHandlePointerDown(event, object, {
+                    kind: "path-corner",
+                    index,
+                  })
+                }
+              />
+            ))}
+          </>
+        )}
+        {object.from.kind === "free" && object.to.kind === "free" ? (
+          <>
+            <line
+              className="draft-rotation-stem"
+              x1={geometry.center.x}
+              y1={geometry.center.y}
+              x2={rotationHandle.x}
+              y2={rotationHandle.y}
+              pointerEvents="none"
+            />
+            {circle(rotationHandle, `draft-handle-rotate-${object.id}`, {
+              kind: "rotate",
+            })}
+          </>
+        ) : null}
+        {object.outline
+          ? circle(widthHandle, `draft-handle-width-${object.id}`, {
+              kind: "outline-width",
+            })
+          : null}
+        {circle(geometry.from, `draft-handle-from-${object.id}`, {
+          kind: "from",
+        })}
+        {geometry.points.slice(1, -1).map((point, index) =>
+          circle(point, `draft-handle-waypoint-${index}-${object.id}`, {
+            kind: "waypoint",
+            index,
+          }),
+        )}
+        {!object.outline &&
+          geometry.points
+            .slice(0, -1)
+            .map((point, index) =>
+              curve(
+                point,
+                geometry.curveControls[index] ?? null,
+                geometry.points[index + 1]!,
+                index,
+              ),
+            )}
+        {!closed &&
+          circle(geometry.to, `draft-handle-to-${object.id}`, { kind: "to" })}
+      </g>
+    );
+  }
+  if (
+    object.kind === "construction-line" &&
+    geometry.kind === "construction-line"
+  ) {
+    return (
+      <g data-testid={`drafting-handles-${object.id}`}>
+        {geometry.vertices.map((vertex, index) => (
+          <circle
+            key={`vertex-${index}`}
+            className="draft-handle"
+            data-testid={`draft-handle-vx-${index}-${object.id}`}
+            cx={vertex.x}
+            cy={vertex.y}
+            r="5"
+            onPointerDown={(event) =>
+              onHandlePointerDown(event, object, { kind: "vertex", index })
+            }
+            onDoubleClick={(event) => {
+              event.stopPropagation();
+              onDeleteVertex(object, index);
+            }}
+          />
+        ))}
+        {geometry.vertices
+          .slice(0, -1)
+          .map((vertex, index) =>
+            curve(
+              vertex,
+              geometry.curveControls[index] ?? null,
+              geometry.vertices[index + 1]!,
+              index,
+            ),
+          )}
+      </g>
+    );
+  }
+  if (object.kind === "rectangle" && geometry.kind === "rectangle") {
+    // A corner resizes both ways; the middle of a side moves that side only.
+    // Corners draw last, so on a small rectangle they stay on top.
+    const sides = geometry.corners.map((corner, index) => {
+      const next = geometry.corners[(index + 1) % 4]!;
+      return { x: (corner.x + next.x) / 2, y: (corner.y + next.y) / 2 };
+    });
+    return (
+      <g data-testid={`drafting-handles-${object.id}`}>
+        {sides.map((middle, index) => (
+          <rect
+            key={`side-${index}`}
+            className="draft-handle"
+            data-testid={`draft-handle-side-${index}-${object.id}`}
+            aria-label={`Resize side ${index + 1}`}
+            x={middle.x - 4}
+            y={middle.y - 4}
+            width="8"
+            height="8"
+            onPointerDown={(event) =>
+              onHandlePointerDown(event, object, {
+                kind: "rectangle-edge",
+                index,
+              })
+            }
+          />
+        ))}
+        {geometry.corners.map((corner, index) => (
+          <rect
+            key={`corner-${index}`}
+            className="draft-handle"
+            data-testid={`draft-handle-corner-${index}-${object.id}`}
+            x={corner.x - 4}
+            y={corner.y - 4}
+            width="8"
+            height="8"
+            onPointerDown={(event) =>
+              onHandlePointerDown(event, object, {
+                kind: "rectangle-corner",
+                index,
+              })
+            }
+          />
+        ))}
+      </g>
+    );
+  }
+  if (object.kind === "circle" && geometry.kind === "circle") {
+    const point = {
+      x: geometry.center.x + geometry.radius,
+      y: geometry.center.y,
+    };
+    return (
+      <g data-testid={`drafting-handles-${object.id}`}>
+        <circle
+          className="draft-handle"
+          data-testid={`draft-handle-radius-${object.id}`}
+          cx={point.x}
+          cy={point.y}
+          r="5"
+          onPointerDown={(event) =>
+            onHandlePointerDown(event, object, {
+              kind: "circle-radius",
+              index: 0,
+            })
+          }
+        />
+      </g>
+    );
+  }
+  return null;
+}

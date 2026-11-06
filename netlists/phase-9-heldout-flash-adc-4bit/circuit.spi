@@ -1,0 +1,50 @@
+* Phase 9 held-out topology-only 4-bit flash ADC.
+* Created after the circuit-layout knowledge set was frozen.
+* This fixture is for hierarchy/layout evaluation, not simulated performance.
+
+.subckt flash_cmp vin vref vbias out vdd vss
+XM1 nleft vin tail vss sky130_fd_pr__nfet_01v8 l=0.5 w=24 nf=4
+XM2 nright vref tail vss sky130_fd_pr__nfet_01v8 l=0.5 w=24 nf=4
+XM3 nleft nleft vdd vdd sky130_fd_pr__pfet_01v8 l=0.5 w=12 nf=2
+XM4 nright nleft vdd vdd sky130_fd_pr__pfet_01v8 l=0.5 w=12 nf=2
+XM5 tail vbias vss vss sky130_fd_pr__nfet_01v8 l=1.0 w=18 nf=3
+XM6 preout nright vdd vdd sky130_fd_pr__pfet_01v8 l=0.3 w=8 nf=2
+XM7 preout nright vss vss sky130_fd_pr__nfet_01v8 l=0.3 w=4 nf=1
+XM8 out preout vdd vdd sky130_fd_pr__pfet_01v8 l=0.3 w=16 nf=2
+XM9 out preout vss vss sky130_fd_pr__nfet_01v8 l=0.3 w=8 nf=1
+.ends flash_cmp
+
+.subckt flash_adc_4bit vin vrefp vrefn vbias vdd vss
++ d0 d1 d2 d3 d4 d5 d6 d7 d8 d9 d10 d11 d12 d13 d14
+R0 vrefp tap14 1k
+R1 tap14 tap13 1k
+R2 tap13 tap12 1k
+R3 tap12 tap11 1k
+R4 tap11 tap10 1k
+R5 tap10 tap9 1k
+R6 tap9 tap8 1k
+R7 tap8 tap7 1k
+R8 tap7 tap6 1k
+R9 tap6 tap5 1k
+R10 tap5 tap4 1k
+R11 tap4 tap3 1k
+R12 tap3 tap2 1k
+R13 tap2 tap1 1k
+R14 tap1 tap0 1k
+R15 tap0 vrefn 1k
+XC0 vin tap0 vbias d0 vdd vss flash_cmp
+XC1 vin tap1 vbias d1 vdd vss flash_cmp
+XC2 vin tap2 vbias d2 vdd vss flash_cmp
+XC3 vin tap3 vbias d3 vdd vss flash_cmp
+XC4 vin tap4 vbias d4 vdd vss flash_cmp
+XC5 vin tap5 vbias d5 vdd vss flash_cmp
+XC6 vin tap6 vbias d6 vdd vss flash_cmp
+XC7 vin tap7 vbias d7 vdd vss flash_cmp
+XC8 vin tap8 vbias d8 vdd vss flash_cmp
+XC9 vin tap9 vbias d9 vdd vss flash_cmp
+XC10 vin tap10 vbias d10 vdd vss flash_cmp
+XC11 vin tap11 vbias d11 vdd vss flash_cmp
+XC12 vin tap12 vbias d12 vdd vss flash_cmp
+XC13 vin tap13 vbias d13 vdd vss flash_cmp
+XC14 vin tap14 vbias d14 vdd vss flash_cmp
+.ends flash_adc_4bit

@@ -1,0 +1,166 @@
+// This worker owns only the static application shell. User Projects and
+// browser recovery records are deliberately outside Cache Storage.
+// Replaced by the Vite build with a digest of the emitted index.html. This
+// changes when its content-hashed application asset graph changes, allowing
+// activate() to remove the prior shell instead of retaining it indefinitely.
+const CACHE = "icm-static-shell-__ICM_BUILD_ID__";
+
+function scopeUrl() {
+  return new URL(self.registration.scope);
+}
+
+function shellUrls() {
+  const scope = scopeUrl();
+  return [
+    new URL("./", scope).toString(),
+    new URL("manifest.webmanifest", scope).toString(),
+    new URL("icon.svg?v=nmos-4", scope).toString(),
+    new URL("icon-192.png?v=nmos-4", scope).toString(),
+    new URL("icon-512.png?v=nmos-4", scope).toString(),
+  ];
+}
+
+self.addEventListener("install", (event) => {
+  event.waitUntil(
+    caches.open(CACHE).then((cache) => cache.addAll(shellUrls())),
+  );
+  // Do not skipWaiting: a new shell must never take over an editor with
+  // unsaved in-memory work. The browser activates it after the old client ends.
+});
+
+self.addEventListener("activate", (event) => {
+  event.waitUntil(
+    caches
+      .keys()
+      .then((keys) =>
+        Promise.all(
+          keys
+            .filter(
+              (key) => key.startsWith("icm-static-shell-") && key !== CACHE,
+            )
+            .map((key) => caches.delete(key)),
+        ),
+      ),
+  );
+});
+
+function isStaticAsset(request) {
+  return (
+    ["script", "worker", "style", "image", "font", "manifest"].includes(
+      request.destination,
+    ) ||
+    // Fonts and the RNL Worker read these built assets with fetch(), which
+    // has no destination. Imported/user package files stay outside this cache.
+    /\.(?:ttf|woff2?)$/u.test(new URL(request.url).pathname) ||
+    /^\/assets\/(?:analog-canvas-extensions-[^/]+\.rnl|rnl_runtime_wasm-[^/]+\.wasm)$/u.test(
+      new URL(request.url).pathname,
+    )
+  );
+}
+
+function isSameOriginApi(request) {
+  const requestUrl = new URL(request.url);
+  const scope = scopeUrl();
+  return (
+    requestUrl.origin === scope.origin &&
+    (requestUrl.pathname === "/api" || requestUrl.pathname.startsWith("/api/"))
+  );
+}
+
+/**
+ * Whether a response is the kind of thing the request asked for.
+ *
+ * Asset names carry a content hash, so this cache is keyed on names that
+ * promise never to change meaning — which makes a wrong answer permanent.
+ * A single-page-application fallback answers a missing asset with the app
+ * shell under `200 text/html`; caching that as a script would leave the name
+ * broken for as long as the cache lives, long after the deploy that caused
+ * it. Store only what matches.
+ */
+function servesWhatWasAsked(request, response) {
+  if (
+    (response.headers.get("cache-control") ?? "")
+      .toLowerCase()
+      .includes("no-store")
+  ) {
+    return false;
+  }
+  const type = (response.headers.get("content-type") ?? "").toLowerCase();
+  if (!type) return true;
+  if (["script", "worker"].includes(request.destination))
+    return type.includes("javascript");
+  if (request.destination === "style") return type.includes("css");
+  return !type.includes("text/html");
+}
+
+function storeResponse(event, key, response) {
+  // Clone before respondWith hands the original body to the browser.
+  const copy = response.clone();
+  event.waitUntil(
+    caches
+      .open(CACHE)
+      .then((cache) => cache.put(key, copy))
+      .catch(() => {
+        // Quota or storage failure must not break an otherwise valid response.
+      }),
+  );
+}
+
+function fetchStaticAsset(event) {
+  return fetch(event.request).then((response) => {
+    if (response.ok && servesWhatWasAsked(event.request, response)) {
+      storeResponse(event, event.request, response);
+    }
+    return response;
+  });
+}
+
+self.addEventListener("fetch", (event) => {
+  if (event.request.method !== "GET") return;
+
+  // APIs own their own HTTP caching policy. In particular, Gallery previews
+  // use revisioned URLs; putting them in the build-scoped shell cache would
+  // ignore that policy and keep an old or access-controlled image alive.
+  if (isSameOriginApi(event.request)) return;
+
+  // Navigation is network-first so a deployed build can replace index.html and
+  // point at its fresh, content-hashed Vite assets. Offline falls back only to
+  // the known shell, never to a Project or arbitrary cached request.
+  if (event.request.mode === "navigate") {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          if (response.ok) {
+            storeResponse(event, scopeUrl(), response);
+          }
+          return response;
+        })
+        .catch(() => caches.match(scopeUrl())),
+    );
+    return;
+  }
+
+  // Only same-origin static assets are cached. This intentionally excludes
+  // arbitrary GETs, imported files, Project downloads, and future APIs.
+  if (
+    isStaticAsset(event.request) &&
+    new URL(event.request.url).origin === scopeUrl().origin
+  ) {
+    if (event.request.cache === "reload") {
+      // A rejected package must be refreshable instead of pinned in this cache.
+      event.respondWith(
+        fetchStaticAsset(event).catch(async (error) => {
+          const cached = await caches.match(event.request);
+          if (cached) return cached;
+          throw error;
+        }),
+      );
+    } else {
+      event.respondWith(
+        caches
+          .match(event.request)
+          .then((cached) => cached ?? fetchStaticAsset(event)),
+      );
+    }
+  }
+});

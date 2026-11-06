@@ -1,0 +1,691 @@
+import type { ResolvedRouteGeometry } from "@icm/derived";
+import {
+  isNearVerticalSegment,
+  NET_LABEL_WIRE_GAP,
+  netLabelAttachmentForText,
+  netLabelBaselineForName,
+  netLabelAliasClaim,
+  netLabelStandardOffset,
+  resolveAnnotationName,
+  resolveNetLabelBinding,
+} from "@icm/derived";
+import { instanceParameterContract } from "@icm/devices";
+import {
+  planEnsureNamedNet,
+  planEnsureNamedRoute,
+  resolveNetLabelOwnerRoute,
+  previewLabelSignalMigration,
+  type SchematicEdit,
+} from "@icm/edit-engine";
+import {
+  deriveStableId,
+  renamedLabelFormat,
+  roleLabelFormat,
+  snapGridPoint,
+  type Annotation,
+  type CircuitProject,
+  type ConnectivityEvidence,
+  type RichTextDocument,
+  type RouteAnnotationAttachment,
+  type Rotation,
+  type RouteBranch,
+  type SchematicDocument,
+} from "@icm/model";
+import type { SymbolResolver } from "@icm/symbols";
+import type { CellInterfaceConfirmation } from "../hierarchy/cell-interface-confirmation-types";
+
+import { snapCoordinate } from "../../snap/engine";
+import { componentParameters } from "../component-insert/component-parameters";
+import { initialInstanceNetlist } from "../netlist-export/netlist-authoring";
+
+export interface PropertyEditPlannerDependencies {
+  project: CircuitProject;
+  document: SchematicDocument;
+  resolver: SymbolResolver;
+  routeGeometryRecords: readonly {
+    route: RouteBranch;
+    geometry: ResolvedRouteGeometry;
+  }[];
+  setStatus: (status: string) => void;
+  requestConfirmation?: (request: CellInterfaceConfirmation) => void;
+  commitMigration?: (edits: SchematicEdit[]) => boolean;
+}
+
+export interface InstancePropertyDraft {
+  instanceId: string | null;
+  parameters: Record<string, string>;
+  x: string;
+  y: string;
+  rotation: `${Rotation}`;
+}
+
+/** Pure edit planning plus user-facing planner diagnostics for Properties. */
+export function createPropertyEditPlanner({
+  project,
+  document,
+  resolver,
+  routeGeometryRecords,
+  setStatus,
+  requestConfirmation,
+  commitMigration,
+}: PropertyEditPlannerDependencies) {
+  const requestLabelMigration = (
+    annotationId: string,
+    routeId: string,
+    name: string,
+    convertLegacy = false,
+    presentationAnnotation?: Annotation,
+  ): boolean => {
+    const claim = document.connectivityEvidence.find(
+      (item) =>
+        item.kind === "name-claim" &&
+        item.owner.kind === "net-label" &&
+        item.owner.annotationId === annotationId,
+    );
+    if (
+      claim?.kind !== "name-claim" ||
+      (!convertLegacy && (!claim.signal || claim.name === name)) ||
+      !requestConfirmation ||
+      !commitMigration
+    )
+      return false;
+    try {
+      const preview = (expression: string) =>
+        previewLabelSignalMigration(document, annotationId, expression);
+      requestConfirmation({
+        title: convertLegacy ? "Convert Label to bus" : "Update bus Label",
+        message: "Review member connections before applying this change.",
+        confirmLabel: convertLegacy ? "Convert" : "Apply",
+        ...(convertLegacy
+          ? { conversion: { expression: name, preview } }
+          : { migration: preview(name) }),
+        apply: (memberMap, expression) => {
+          const nextName = convertLegacy ? (expression ?? name) : name;
+          const plan = planEnsureNamedRoute(
+            document,
+            routeId,
+            {
+              candidateNetId: claim.netId,
+              name: nextName,
+              evidenceId: claim.id,
+              owner: claim.owner,
+            },
+            {
+              ...(memberMap ? { memberMap } : {}),
+              ...(convertLegacy ? { convertLegacy: true } : {}),
+            },
+            resolver,
+          );
+          if (!plan.ok) {
+            setStatus(plan.message);
+            return false;
+          }
+          return commitMigration([
+            ...plan.edits,
+            ...(presentationAnnotation
+              ? [
+                  {
+                    kind: "upsert_schematic_annotation" as const,
+                    annotation: {
+                      ...presentationAnnotation,
+                      ...(presentationAnnotation.formatOverride
+                        ? {
+                            formatOverride: renamedLabelFormat(
+                              presentationAnnotation,
+                              claim.name,
+                              nextName,
+                              document.presentation,
+                            ),
+                          }
+                        : {}),
+                      netId: plan.netId,
+                      binding: { kind: "net-name" as const, netId: plan.netId },
+                    },
+                  },
+                ]
+              : []),
+          ]);
+        },
+      });
+      return true;
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+      return true;
+    }
+  };
+  const convertLabelSignal = (annotation: Annotation): boolean => {
+    const claim = document.connectivityEvidence.find(
+      (item) =>
+        item.kind === "name-claim" &&
+        item.owner.kind === "net-label" &&
+        item.owner.annotationId === annotation.id,
+    );
+    if (claim?.kind !== "name-claim" || claim.signal) return false;
+    const route = resolveNetLabelOwnerRoute(document, annotation);
+    return (
+      !!route &&
+      requestLabelMigration(annotation.id, route.id, claim.name, true)
+    );
+  };
+  const netLabelForRoute = (
+    route: SchematicDocument["routes"][number],
+  ): Annotation | undefined => {
+    const candidates = document.annotations.filter(
+      (annotation) =>
+        annotation.kind === "net-label" && annotation.netId === route.netId,
+    );
+    return (
+      candidates.find(
+        (annotation) => annotation.id === `net-label-${route.id}`,
+      ) ??
+      candidates.find(
+        (annotation) =>
+          resolveNetLabelBinding(document, resolver, annotation)?.routeId ===
+          route.id,
+      )
+    );
+  };
+
+  const netLabelEditsForRoute = (
+    route: SchematicDocument["routes"][number],
+    rawName: string,
+    presentation?: {
+      alignment: "start" | "middle" | "end";
+      /** A label R turned upright reads bottom to top (270). */
+      rotation?: 0 | 270;
+      sizeScale: number;
+      formatOverride?: RichTextDocument;
+      /** Explicit canvas placement from the Cadence-style L workflow. */
+      position?: { x: number; y: number };
+      /** Projection shared by the Label preview and its committed anchor. */
+      routeAttachment?: RouteAnnotationAttachment;
+    },
+  ): SchematicEdit[] | null => {
+    const net = document.nets.find((candidate) => candidate.id === route.netId);
+    if (!net) {
+      setStatus(`Wire references missing Net ${route.netId}`);
+      return null;
+    }
+    const existingLabel = netLabelForRoute(route);
+    const name = rawName.trim();
+    if (!name) {
+      return existingLabel
+        ? [
+            {
+              kind: "remove_schematic_annotation",
+              annotationId: existingLabel.id,
+            },
+          ]
+        : null;
+    }
+    const labelId = existingLabel?.id ?? `net-label-${route.id}`;
+    if (
+      requestLabelMigration(
+        labelId,
+        route.id,
+        name,
+        false,
+        existingLabel && presentation
+          ? {
+              ...existingLabel,
+              alignment: presentation.alignment,
+              rotation: presentation.rotation ?? existingLabel.rotation,
+              sizeScale: presentation.sizeScale,
+              ...(presentation.formatOverride
+                ? { formatOverride: presentation.formatOverride }
+                : {}),
+            }
+          : undefined,
+      )
+    )
+      return null;
+    const namedNetPlan = planEnsureNamedRoute(
+      document,
+      route.id,
+      {
+        candidateNetId: net.id,
+        name,
+        evidenceId:
+          document.connectivityEvidence.find(
+            (evidence) =>
+              evidence.kind === "name-claim" &&
+              evidence.owner.kind === "net-label" &&
+              evidence.owner.annotationId === labelId,
+          )?.id ??
+          deriveStableId(
+            "connectivity-evidence",
+            document.id,
+            "net-label",
+            net.id,
+            labelId,
+          ),
+        owner: { kind: "net-label", annotationId: labelId },
+      },
+      {},
+      resolver,
+    );
+    // A rejected plan (name collision, power-domain conflict) must reach the
+    // status bar: this planner also backs the text editor's Apply, where a
+    // silent null leaves the edit box open with no visible reaction.
+    if (!namedNetPlan.ok) {
+      setStatus(namedNetPlan.message);
+      return null;
+    }
+    const targetNetId = namedNetPlan.netId;
+    // A rename that brings no new look keeps the label's own format, which
+    // follows the new name; it is never silently dropped. A new label takes
+    // its voltage-node look (V_in, V_BP) when its name has one.
+    const carriedFormat =
+      presentation?.formatOverride ??
+      (presentation !== undefined
+        ? undefined
+        : existingLabel?.formatOverride
+          ? renamedLabelFormat(
+              existingLabel,
+              resolveAnnotationName(document, existingLabel),
+              name,
+              document.presentation,
+            )
+          : existingLabel
+            ? undefined
+            : roleLabelFormat("voltage-node", name));
+    const geometry = routeGeometryRecords.find(
+      ({ route: candidate }) => candidate.id === route.id,
+    )?.geometry;
+    if (!geometry) {
+      setStatus("Net Label position could not be resolved for this wire");
+      return null;
+    }
+    const segment = Math.max(
+      0,
+      Math.floor((geometry.centerline.length - 1) / 2),
+    );
+    const from = geometry.centerline[segment]!;
+    const to = geometry.centerline[segment + 1] ?? from;
+    // A new label takes the wire's standard side: above a horizontal wire,
+    // right of a vertical one, whichever way the wire was drawn. Upright
+    // over a horizontal wire it stands as close as what it reads allows: a
+    // subscript a grid step up, plain text just above the wire (#1300).
+    const vertical = isNearVerticalSegment(from, to);
+    const baseline = netLabelBaselineForName(
+      name,
+      carriedFormat,
+      document.presentation,
+      presentation?.sizeScale ?? existingLabel?.sizeScale ?? 1,
+    );
+    const requestedPosition = presentation?.position ??
+      (existingLabel
+        ? existingLabel.anchor.kind === "free"
+          ? existingLabel.anchor.position
+          : existingLabel.anchor.fallbackPosition
+        : undefined) ?? {
+        x: (from.x + to.x) / 2 + (vertical ? NET_LABEL_WIRE_GAP : 0),
+        y: (from.y + to.y) / 2 - (vertical ? 0 : baseline),
+      };
+    // The L workflow's preview stands at the full grid step until the name
+    // is known; once it is, an upright label on a horizontal wire takes its
+    // text's own height above it.
+    const placed = presentation?.routeAttachment
+      ? netLabelAttachmentForText(
+          presentation.routeAttachment,
+          requestedPosition,
+          presentation.rotation ?? 0,
+          baseline,
+          geometry,
+        )
+      : null;
+    const position = placed
+      ? placed.position
+      : snapGridPoint(requestedPosition, document.presentation.grid);
+    const previousAnchor =
+      existingLabel?.anchor.kind === "route" &&
+      existingLabel.anchor.routeId === route.id
+        ? existingLabel.anchor
+        : null;
+    // A rename keeps a display alias, the label's own text.
+    const keptAlias =
+      presentation === undefined &&
+      existingLabel &&
+      netLabelAliasClaim(document, existingLabel)
+        ? existingLabel.content
+        : undefined;
+    const edits: SchematicEdit[] = [...namedNetPlan.edits];
+    edits.push({
+      kind: "upsert_schematic_annotation",
+      annotation: {
+        id: labelId,
+        kind: "net-label",
+        ...(keptAlias
+          ? { content: keptAlias }
+          : {
+              binding:
+                existingLabel?.binding?.kind === "net-name" &&
+                (existingLabel.binding.memberEndpoint ||
+                  existingLabel.binding.memberEndpoints)
+                  ? existingLabel.binding
+                  : { kind: "net-name" as const, netId: targetNetId },
+            }),
+        netId: targetNetId,
+        anchor: placed
+          ? {
+              kind: "route",
+              ...placed.attachment,
+              orientation: "follow",
+              fallbackPosition: position,
+            }
+          : presentation?.position
+            ? { kind: "free", position }
+            : previousAnchor
+              ? { ...previousAnchor, fallbackPosition: position }
+              : {
+                  kind: "route",
+                  routeId: route.id,
+                  legId: route.legs[segment]!.id,
+                  t: 0.5,
+                  normalOffset: netLabelStandardOffset(from, to, baseline),
+                  direction: "forward",
+                  orientation: "follow",
+                  fallbackPosition: position,
+                },
+        alignment:
+          presentation?.alignment ??
+          existingLabel?.alignment ??
+          (vertical ? "start" : "middle"),
+        // A rename keeps the way the label was turned; a placement brings its
+        // own.
+        rotation:
+          presentation !== undefined
+            ? (presentation.rotation ?? 0)
+            : (existingLabel?.rotation ?? 0),
+        locked: false,
+        ...(presentation?.sizeScale !== undefined
+          ? { sizeScale: presentation.sizeScale }
+          : existingLabel?.sizeScale !== undefined
+            ? { sizeScale: existingLabel.sizeScale }
+            : {}),
+        ...(carriedFormat ? { formatOverride: carriedFormat } : {}),
+      },
+    });
+    return edits;
+  };
+
+  const netNameEditsForAnnotation = (
+    annotation: Annotation,
+    rawName: string,
+    presentationAnnotation?: Annotation,
+  ): SchematicEdit[] | null | undefined => {
+    const binding = annotation.binding;
+    if (binding?.kind !== "net-name") {
+      return undefined;
+    }
+    const net = document.nets.find(
+      (candidate) => candidate.id === binding.netId,
+    );
+    if (!net) {
+      setStatus(`Net Label references missing Net ${binding.netId}`);
+      return null;
+    }
+    const name = rawName.trim();
+
+    // L places a free visual annotation at the click point. It still owns one
+    // explicit Net name claim, so later double-click edits must rename that
+    // same Net without forcing the label back to a Route midpoint.
+    if (annotation.kind === "net-label") {
+      const labelClaim = document.connectivityEvidence.find(
+        (
+          evidence,
+        ): evidence is Extract<ConnectivityEvidence, { kind: "name-claim" }> =>
+          evidence.kind === "name-claim" &&
+          evidence.owner.kind === "net-label" &&
+          evidence.owner.annotationId === annotation.id,
+      );
+      const request = {
+        candidateNetId: net.id,
+        name,
+        evidenceId:
+          labelClaim?.id ??
+          deriveStableId(
+            "connectivity-evidence",
+            document.id,
+            "net-label",
+            net.id,
+            annotation.id,
+          ),
+        owner: { kind: "net-label" as const, annotationId: annotation.id },
+        ...(labelClaim ? { scope: labelClaim.scope } : {}),
+      };
+      const route = resolveNetLabelOwnerRoute(document, annotation);
+      const namedNetPlan = route
+        ? requestLabelMigration(
+            annotation.id,
+            route.id,
+            name,
+            false,
+            presentationAnnotation,
+          )
+          ? null
+          : planEnsureNamedRoute(document, route.id, request, {}, resolver)
+        : planEnsureNamedNet(document, request);
+      if (!namedNetPlan) return null;
+      if (!namedNetPlan.ok) {
+        setStatus(namedNetPlan.message);
+        return null;
+      }
+      return [
+        ...namedNetPlan.edits,
+        ...(presentationAnnotation
+          ? [
+              {
+                kind: "upsert_schematic_annotation" as const,
+                annotation: {
+                  ...presentationAnnotation,
+                  netId: namedNetPlan.netId,
+                  binding: { ...binding, netId: namedNetPlan.netId },
+                },
+              },
+            ]
+          : []),
+      ];
+    }
+    if (annotation.anchor.kind !== "object") return undefined;
+    const ownerObjectId = annotation.anchor.objectId;
+    const powerClaim = document.connectivityEvidence.find(
+      (
+        evidence,
+      ): evidence is Extract<ConnectivityEvidence, { kind: "name-claim" }> =>
+        evidence.kind === "name-claim" &&
+        evidence.owner.kind === "power-marker" &&
+        (evidence.owner.objectId === ownerObjectId ||
+          evidence.owner.objectId === annotation.id),
+    );
+    if (annotation.kind !== "power-label") return undefined;
+    const namedNetPlan = planEnsureNamedNet(document, {
+      candidateNetId: net.id,
+      name,
+      evidenceId:
+        powerClaim?.id ??
+        deriveStableId(
+          "connectivity-evidence",
+          document.id,
+          "power-marker",
+          net.id,
+          annotation.id,
+        ),
+      owner: {
+        kind: "power-marker",
+        objectId:
+          powerClaim?.owner.kind === "power-marker"
+            ? powerClaim.owner.objectId
+            : annotation.id,
+      },
+      ...(powerClaim
+        ? {
+            scope: powerClaim.scope,
+            ...(powerClaim.powerDomain
+              ? { powerDomain: powerClaim.powerDomain }
+              : {}),
+          }
+        : {}),
+    });
+    if (!namedNetPlan.ok) {
+      setStatus(namedNetPlan.message);
+      return null;
+    }
+    return [
+      ...namedNetPlan.edits,
+      ...(presentationAnnotation
+        ? [
+            {
+              kind: "upsert_schematic_annotation" as const,
+              annotation: presentationAnnotation,
+            },
+          ]
+        : []),
+    ];
+  };
+
+  const netLabelScopeEdit = (
+    annotation: Annotation,
+    scope: "local" | "global",
+  ): SchematicEdit[] | null => {
+    if (annotation.kind !== "net-label") {
+      setStatus(
+        "Use the VDD Power connection property to change a supply marker's scope",
+      );
+      return null;
+    }
+    const claim = document.connectivityEvidence.find(
+      (
+        evidence,
+      ): evidence is Extract<ConnectivityEvidence, { kind: "name-claim" }> =>
+        evidence.kind === "name-claim" &&
+        evidence.owner.kind === "net-label" &&
+        evidence.owner.annotationId === annotation.id,
+    );
+    if (!claim) {
+      setStatus("This Net Label has no editable scope claim");
+      return null;
+    }
+    if (claim.scope === scope) return [];
+    return [
+      {
+        kind: "upsert_connectivity_evidence",
+        evidence: { ...claim, scope },
+      },
+    ];
+  };
+
+  const propertyParametersForInstance = (
+    instance: SchematicDocument["instances"][number],
+  ) => {
+    const binding = instance.netlist?.binding;
+    const parameters = componentParameters(
+      instance.symbolId,
+      instance,
+      project,
+    );
+    if (
+      (binding?.kind === "subcircuit" ||
+        binding?.kind === "external-subcircuit") &&
+      instanceParameterContract(project, instance)?.open
+    ) {
+      return parameters.map((parameter) => ({
+        ...parameter,
+        definitionParameter: true,
+        key:
+          Object.keys(instance.netlist?.parameters ?? {}).find(
+            (key) => key.toLowerCase() === parameter.key.toLowerCase(),
+          ) ?? parameter.key,
+      }));
+    }
+    return parameters;
+  };
+
+  const instancePropertyEdits = (
+    draft: InstancePropertyDraft,
+  ): { edits: SchematicEdit[]; invalidPosition: boolean } => {
+    if (!draft.instanceId) return { edits: [], invalidPosition: false };
+    const instance = document.instances.find(
+      (item) => item.id === draft.instanceId,
+    );
+    if (!instance) return { edits: [], invalidPosition: false };
+    const edits: SchematicEdit[] = [];
+    const baseNetlist =
+      instance.netlist ?? initialInstanceNetlist(instance.symbolId, {});
+    if (baseNetlist) {
+      const netlistParameters = { ...baseNetlist.parameters };
+      const set: Record<string, string> = {};
+      const unset: string[] = [];
+      for (const parameter of propertyParametersForInstance(instance)) {
+        const value = (draft.parameters[parameter.key] ?? "").trim();
+        const current = netlistParameters[parameter.key];
+        if (value === "") {
+          delete netlistParameters[parameter.key];
+          if (current !== undefined) unset.push(parameter.key);
+        } else {
+          netlistParameters[parameter.key] = value;
+          if (current !== value) set[parameter.key] = value;
+        }
+      }
+
+      const nextNetlist = { ...baseNetlist, parameters: netlistParameters };
+      if (!instance.netlist) {
+        edits.push({
+          kind: "set_instance_netlist",
+          instanceId: instance.id,
+          netlist: nextNetlist,
+        });
+      } else if (Object.keys(set).length > 0 || unset.length > 0) {
+        edits.push({
+          kind: "patch_instance_netlist_parameters",
+          instanceId: instance.id,
+          ...(Object.keys(set).length > 0 ? { set } : {}),
+          ...(unset.length > 0 ? { unset } : {}),
+        });
+      }
+    }
+
+    let invalidPosition = false;
+    if (instance.placement) {
+      const x = Number(draft.x);
+      const y = Number(draft.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        invalidPosition = true;
+      } else {
+        const position = {
+          x: snapCoordinate(x, document.presentation.grid),
+          y: snapCoordinate(y, document.presentation.grid),
+        };
+        if (
+          position.x !== instance.placement.position.x ||
+          position.y !== instance.placement.position.y
+        ) {
+          edits.push({
+            kind: "move_instance",
+            instanceId: instance.id,
+            position,
+          });
+        }
+      }
+      const rotation = Number(draft.rotation) as Rotation;
+      if (rotation !== instance.placement.rotation) {
+        edits.push({
+          kind: "rotate_instance",
+          instanceId: instance.id,
+          rotation,
+        });
+      }
+    }
+    return { edits, invalidPosition };
+  };
+
+  return {
+    convertLabelSignal,
+    netLabelForRoute,
+    netLabelEditsForRoute,
+    netLabelScopeEdit,
+    netNameEditsForAnnotation,
+    propertyParametersForInstance,
+    instancePropertyEdits,
+  };
+}

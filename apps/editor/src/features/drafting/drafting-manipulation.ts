@@ -1,0 +1,964 @@
+import { draftTextTurn, type ResolvedDraftingGeometry } from "@icm/derived";
+import { reflectOrientation, snapGridPoint } from "@icm/model";
+import {
+  reflectedTextAlignment,
+  reflectedTextAnchor,
+  reflectPoint,
+  translateDraftingObject,
+} from "@icm/edit-engine";
+
+export { translateDraftingObject };
+import type {
+  DerivedPoint,
+  DraftingObject,
+  GridPoint,
+  Rotation,
+  ScreenFlip,
+  VisualAnchor,
+} from "@icm/model";
+
+import {
+  centerOfBounds,
+  closestPointOnSegment,
+  normalizedBearing,
+  rotatePointByDegrees,
+} from "../../canvas/canvas-geometry";
+import { rectangleGridGeometry } from "./rectangle-grid-geometry";
+import {
+  isClosedPolyline,
+  resizePolyline,
+  POLYLINE_CORNER_DIRECTIONS,
+  POLYLINE_RESIZE_PADDING,
+} from "./drafting-polyline";
+
+export type DraftingHandle =
+  | { kind: "from" | "to" | "outline-width" | "rotate" }
+  | {
+      kind:
+        | "waypoint"
+        | "vertex"
+        | "curve"
+        | "rectangle-corner"
+        | "rectangle-edge"
+        | "circle-radius"
+        | "path-corner";
+      index: number;
+    };
+
+export type DraftingStylePatch = Partial<{
+  lineStyle: "solid" | "dashed" | "dotted";
+  /** Free multiplier over the profile annotation stroke, 0.25–4. */
+  strokeScale: number;
+  /** Explicit stroke color; an explicit undefined restores the profile
+   * foreground (the patch application deletes the key). */
+  color: string | undefined;
+  /** Explicit closed-shape fill; undefined restores transparency. */
+  fillColor: string | undefined;
+  arrowHead: "none" | "filled" | "open";
+  /** Which ends carry the head; absent means the trailing end alone. */
+  arrowHeadAt: "end" | "start" | "both";
+  arrowHeadScale: 0.75 | 1 | 1.25 | 1.5;
+}>;
+
+export type DraftingGeometryPatch = Partial<{
+  radius: number;
+  width: number;
+  height: number;
+}>;
+
+export type DraftingStackingTarget = "front" | "back";
+
+function isBackgroundShape(object: DraftingObject): boolean {
+  return (
+    (object.kind === "rectangle" || object.kind === "circle") &&
+    object.layer === "background"
+  );
+}
+
+/**
+ * Plan one atomic stacking edit. Sending a shape behind the circuit also
+ * normalizes its background peers so repeated commands cannot accumulate
+ * unbounded z-index values and the selected shape is unambiguously last.
+ */
+export function planDraftingStacking(
+  objects: readonly DraftingObject[],
+  objectId: string,
+  target: DraftingStackingTarget,
+): DraftingObject[] | null {
+  const object = objects.find((candidate) => candidate.id === objectId);
+  if (
+    !object ||
+    object.locked ||
+    (object.kind !== "rectangle" && object.kind !== "circle")
+  ) {
+    return null;
+  }
+  if (target === "front") {
+    const frontZIndex =
+      Math.max(
+        0,
+        ...objects
+          .filter((candidate) => !isBackgroundShape(candidate))
+          .map((candidate) => candidate.zIndex),
+      ) + 1;
+    return [{ ...object, layer: "foreground", zIndex: frontZIndex }];
+  }
+  const stableOrder = new Map(
+    objects.map((candidate, index) => [candidate.id, index]),
+  );
+  const peers = objects
+    .filter(
+      (candidate) => candidate.id !== object.id && isBackgroundShape(candidate),
+    )
+    .sort(
+      (left, right) =>
+        left.zIndex - right.zIndex ||
+        stableOrder.get(left.id)! - stableOrder.get(right.id)!,
+    );
+  return [
+    { ...object, layer: "background", zIndex: 0 },
+    ...peers
+      .map((peer, index) => ({ ...peer, zIndex: index + 1 }))
+      .filter((peer, index) => peer.zIndex !== peers[index]!.zIndex),
+  ];
+}
+
+/**
+ * Precise geometry from the Properties dock: a circle takes a radius, a
+ * rectangle takes width/height. Values are rounded to integers and floored
+ * at 1 to stay inside the persisted schema; other kinds return null.
+ */
+export function applyDraftingGeometryPatch(
+  object: DraftingObject,
+  patch: DraftingGeometryPatch,
+): DraftingObject | null {
+  if (object.locked) return null;
+  const size = (value: number): number => Math.max(1, Math.round(value));
+  if (object.kind === "arrow" && object.outline && patch.width !== undefined) {
+    if (!Number.isFinite(patch.width) || patch.width < 1) return null;
+    return { ...object, outline: { width: size(patch.width) } };
+  }
+  if (object.kind === "circle" && patch.radius !== undefined) {
+    if (!Number.isFinite(patch.radius)) return null;
+    return { ...object, radius: size(patch.radius) };
+  }
+  if (
+    object.kind === "rectangle" &&
+    (patch.width !== undefined || patch.height !== undefined)
+  ) {
+    const width = patch.width ?? object.width;
+    const height = patch.height ?? object.height;
+    if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
+    return { ...object, width: size(width), height: size(height) };
+  }
+  return null;
+}
+
+export function draftingDragOrigin(object: DraftingObject): GridPoint | null {
+  if (object.kind === "construction-line") return object.points[0] ?? null;
+  if (object.kind === "rectangle") return object.center;
+  if (object.kind === "circle") return object.center;
+  if (object.kind === "arrow") {
+    return object.from.kind === "free" && object.to.kind === "free"
+      ? object.from.position
+      : null;
+  }
+  return object.anchor.kind === "free" ? object.anchor.position : null;
+}
+
+function controlForQuadraticMidpoint(
+  from: DerivedPoint,
+  midpoint: GridPoint,
+  to: DerivedPoint,
+  grid: number,
+): GridPoint {
+  return snapGridPoint(
+    {
+      x: 2 * midpoint.x - (from.x + to.x) / 2,
+      y: 2 * midpoint.y - (from.y + to.y) / 2,
+    },
+    grid,
+  );
+}
+
+export function applyDraftingHandle(
+  object: DraftingObject,
+  handle: DraftingHandle,
+  point: GridPoint,
+  originalGeometry: ResolvedDraftingGeometry,
+  grid: number,
+): DraftingObject {
+  if (handle.kind === "rotate") {
+    if (object.kind !== "arrow" || originalGeometry.kind !== "arrow")
+      return object;
+    const bearing = normalizedBearing(originalGeometry.center, point) + 90;
+    const result = setDraftingBearing(object, originalGeometry, bearing, grid);
+    return result.kind === "updated" ? result.object : object;
+  }
+  if (handle.kind === "outline-width") {
+    if (
+      object.kind !== "arrow" ||
+      !object.outline ||
+      originalGeometry.kind !== "arrow"
+    )
+      return object;
+    const dx = originalGeometry.to.x - originalGeometry.from.x;
+    const dy = originalGeometry.to.y - originalGeometry.from.y;
+    const length = Math.hypot(dx, dy) || 1;
+    const distance =
+      Math.abs(
+        (point.x - originalGeometry.center.x) * -dy +
+          (point.y - originalGeometry.center.y) * dx,
+      ) / length;
+    return {
+      ...object,
+      outline: { width: Math.max(1, Math.round(distance * 2)) },
+    };
+  }
+  if (object.kind === "arrow") {
+    if (handle.kind === "path-corner") {
+      const direction = POLYLINE_CORNER_DIRECTIONS[handle.index];
+      return direction
+        ? resizePolyline(
+            object,
+            handle.index,
+            {
+              x: point.x - direction.x * POLYLINE_RESIZE_PADDING,
+              y: point.y - direction.y * POLYLINE_RESIZE_PADDING,
+            },
+            grid,
+          )
+        : object;
+    }
+    if (
+      object.outline &&
+      (handle.kind === "curve" || handle.kind === "waypoint")
+    )
+      return object;
+    if (handle.kind === "waypoint") {
+      if (handle.index < 0 || handle.index >= (object.waypoints?.length ?? 0)) {
+        return object;
+      }
+      const waypoints = [...(object.waypoints ?? [])];
+      waypoints[handle.index] = point;
+      return { ...object, waypoints };
+    }
+    if (handle.kind === "curve" && originalGeometry.kind === "arrow") {
+      const from = originalGeometry.points[handle.index];
+      const to = originalGeometry.points[handle.index + 1];
+      if (!from || !to) return object;
+      const controls = Array.from(
+        { length: originalGeometry.points.length - 1 },
+        (_, index) => object.curveControls?.[index] ?? null,
+      );
+      controls[handle.index] = controlForQuadraticMidpoint(
+        from,
+        point,
+        to,
+        grid,
+      );
+      return { ...object, curveControls: controls };
+    }
+    if (
+      handle.kind === "vertex" ||
+      handle.kind === "rectangle-corner" ||
+      handle.kind === "rectangle-edge" ||
+      handle.kind === "circle-radius"
+    ) {
+      return object;
+    }
+    const anchor = handle.kind === "from" ? object.from : object.to;
+    if (anchor.kind !== "free") return object;
+    const nextAnchor = { ...anchor, position: point };
+    if (isClosedPolyline(object))
+      return {
+        ...object,
+        anchor: nextAnchor,
+        from: nextAnchor,
+        to: nextAnchor,
+      };
+    return handle.kind === "from"
+      ? { ...object, anchor: nextAnchor, from: nextAnchor }
+      : { ...object, to: nextAnchor };
+  }
+  if (object.kind === "construction-line" && handle.kind === "vertex") {
+    if (handle.index < 0 || handle.index >= object.points.length) return object;
+    const points = object.points.slice();
+    points[handle.index] = point;
+    return { ...object, points };
+  }
+  if (
+    object.kind === "construction-line" &&
+    handle.kind === "curve" &&
+    originalGeometry.kind === "construction-line"
+  ) {
+    const from = originalGeometry.points[handle.index];
+    const to = originalGeometry.points[handle.index + 1];
+    if (!from || !to) return object;
+    const controls = Array.from(
+      { length: originalGeometry.points.length - 1 },
+      (_, index) => object.curveControls?.[index] ?? null,
+    );
+    controls[handle.index] = controlForQuadraticMidpoint(from, point, to, grid);
+    return { ...object, curveControls: controls };
+  }
+  if (
+    object.kind === "rectangle" &&
+    handle.kind === "rectangle-corner" &&
+    originalGeometry.kind === "rectangle"
+  ) {
+    const opposite = originalGeometry.corners[(handle.index + 2) % 4];
+    if (!opposite) return object;
+    if (object.rotation % 90 === 0) {
+      const { center, width, height } = rectangleGridGeometry(
+        opposite,
+        point,
+        grid,
+      );
+      if (width === 0 || height === 0) return object;
+      const swapAxes = object.rotation % 180 !== 0;
+      return {
+        ...object,
+        center,
+        anchor: { kind: "free", position: center },
+        width: swapAxes ? height : width,
+        height: swapAxes ? width : height,
+      };
+    }
+    const radians = (object.rotation * Math.PI) / 180;
+    const ux = { x: Math.cos(radians), y: Math.sin(radians) };
+    const uy = { x: -Math.sin(radians), y: Math.cos(radians) };
+    const delta = { x: point.x - opposite.x, y: point.y - opposite.y };
+    const localWidth = delta.x * ux.x + delta.y * ux.y;
+    const localHeight = delta.x * uy.x + delta.y * uy.y;
+    const center = snapGridPoint(
+      {
+        x: opposite.x + (localWidth * ux.x + localHeight * uy.x) / 2,
+        y: opposite.y + (localWidth * ux.y + localHeight * uy.y) / 2,
+      },
+      grid,
+    );
+    return {
+      ...object,
+      center,
+      anchor: { kind: "free", position: center },
+      width: Math.max(grid, Math.round(Math.abs(localWidth) / grid) * grid),
+      height: Math.max(grid, Math.round(Math.abs(localHeight) / grid) * grid),
+    };
+  }
+  if (
+    object.kind === "rectangle" &&
+    handle.kind === "rectangle-edge" &&
+    originalGeometry.kind === "rectangle"
+  ) {
+    return resizeRectangleSide(
+      object,
+      originalGeometry,
+      handle.index,
+      point,
+      grid,
+    );
+  }
+  if (
+    object.kind === "circle" &&
+    handle.kind === "circle-radius" &&
+    originalGeometry.kind === "circle"
+  ) {
+    const radius = Math.max(
+      grid,
+      Math.round(
+        Math.hypot(point.x - object.center.x, point.y - object.center.y) / grid,
+      ) * grid,
+    );
+    return { ...object, radius };
+  }
+  return object;
+}
+
+/**
+ * Drag one side of a rectangle out or in. The opposite side stays where it
+ * is, and so does the other dimension; dragged past the opposite side, the
+ * rectangle turns over onto it. Side i runs from corner i to corner i + 1, so
+ * sides 0 and 2 set the height and sides 1 and 3 the width, whatever the
+ * rectangle's turn.
+ */
+function resizeRectangleSide(
+  object: Extract<DraftingObject, { kind: "rectangle" }>,
+  geometry: Extract<ResolvedDraftingGeometry, { kind: "rectangle" }>,
+  side: number,
+  point: GridPoint,
+  grid: number,
+): DraftingObject {
+  const first = geometry.corners[(side + 2) % 4];
+  const second = geometry.corners[(side + 3) % 4];
+  if (!first || !second) return object;
+  const fixed = { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 };
+  const setsHeight = side % 2 === 0;
+  const radians = (object.rotation * Math.PI) / 180;
+  const axis = setsHeight
+    ? { x: -Math.sin(radians), y: Math.cos(radians) }
+    : { x: Math.cos(radians), y: Math.sin(radians) };
+  const along = (target: DerivedPoint) =>
+    (target.x - fixed.x) * axis.x + (target.y - fixed.y) * axis.y;
+  const reach = along(point);
+  const start = geometry.corners[side];
+  const end = geometry.corners[(side + 1) % 4];
+  if (!start || !end) return object;
+  // Dropped right on the opposite side, it stays on its own side of it.
+  const direction =
+    Math.abs(reach) > 1e-9
+      ? Math.sign(reach)
+      : Math.sign(
+          along({ x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 }),
+        );
+  // An integer center needs an even span on an odd pitch, as a newly drawn
+  // rectangle's does.
+  const pitch = grid % 2 === 0 ? grid : grid * 2;
+  const span = Math.max(pitch, Math.round(Math.abs(reach) / pitch) * pitch);
+  const half = (direction * span) / 2;
+  const center = snapGridPoint(
+    { x: fixed.x + axis.x * half, y: fixed.y + axis.y * half },
+    1,
+  );
+  return {
+    ...object,
+    center,
+    anchor: { kind: "free", position: center },
+    ...(setsHeight ? { height: span } : { width: span }),
+  };
+}
+
+export function insertConstructionVertex(
+  object: Extract<DraftingObject, { kind: "construction-line" }>,
+  point: GridPoint,
+): {
+  object: Extract<DraftingObject, { kind: "construction-line" }>;
+  index: number;
+} | null {
+  if (object.locked) return null;
+  let bestIndex = object.points.length - 1;
+  let bestDistance = Infinity;
+  for (let index = 0; index < object.points.length - 1; index += 1) {
+    const on = closestPointOnSegment(
+      point,
+      object.points[index]!,
+      object.points[index + 1]!,
+    );
+    const distance = (on.x - point.x) ** 2 + (on.y - point.y) ** 2;
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestIndex = index + 1;
+    }
+  }
+  const points = object.points.slice();
+  points.splice(bestIndex, 0, { ...point });
+  const curveControls = object.curveControls
+    ? [...object.curveControls]
+    : undefined;
+  if (curveControls) curveControls.splice(bestIndex - 1, 1, null, null);
+  return { object: { ...object, points, curveControls }, index: bestIndex };
+}
+
+export function insertArrowWaypoint(
+  object: Extract<DraftingObject, { kind: "arrow" }>,
+  geometry: Extract<ResolvedDraftingGeometry, { kind: "arrow" }>,
+  point: GridPoint,
+): {
+  object: Extract<DraftingObject, { kind: "arrow" }>;
+  index: number;
+} | null {
+  if (object.locked || object.outline) return null;
+  let bestIndex = 0;
+  let bestDistance = Infinity;
+  for (let index = 0; index < geometry.points.length - 1; index += 1) {
+    const on = closestPointOnSegment(
+      point,
+      geometry.points[index]!,
+      geometry.points[index + 1]!,
+    );
+    const distance = (on.x - point.x) ** 2 + (on.y - point.y) ** 2;
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestIndex = index;
+    }
+  }
+  const waypoints = [...(object.waypoints ?? [])];
+  waypoints.splice(bestIndex, 0, { ...point });
+  const curveControls = object.curveControls
+    ? [...object.curveControls]
+    : undefined;
+  if (curveControls) curveControls.splice(bestIndex, 1, null, null);
+  return { object: { ...object, waypoints, curveControls }, index: bestIndex };
+}
+
+export type DeleteConstructionVertexResult =
+  | {
+      kind: "updated";
+      object: Extract<DraftingObject, { kind: "construction-line" }>;
+    }
+  | { kind: "locked" }
+  | { kind: "minimum" }
+  | { kind: "invalid-index" };
+
+export function deleteConstructionVertex(
+  object: Extract<DraftingObject, { kind: "construction-line" }>,
+  index: number,
+): DeleteConstructionVertexResult {
+  if (object.locked) return { kind: "locked" };
+  if (object.points.length <= 2) return { kind: "minimum" };
+  if (index < 0 || index >= object.points.length) {
+    return { kind: "invalid-index" };
+  }
+  const points = object.points.filter(
+    (_, vertexIndex) => vertexIndex !== index,
+  );
+  const { curveControls: _curveControls, ...straightObject } = object;
+  return { kind: "updated", object: { ...straightObject, points } };
+}
+
+export function applyDraftingStylePatch(
+  object: DraftingObject,
+  patch: DraftingStylePatch,
+): DraftingObject | null {
+  if (
+    object.locked ||
+    (object.kind !== "text" &&
+      object.kind !== "arrow" &&
+      object.kind !== "construction-line" &&
+      object.kind !== "rectangle" &&
+      object.kind !== "circle")
+  ) {
+    return null;
+  }
+  const nextOverride = { ...(object.styleOverride ?? {}) };
+  for (const [key, value] of Object.entries(patch)) {
+    if (
+      key === "fillColor" &&
+      object.kind !== "rectangle" &&
+      object.kind !== "circle"
+    ) {
+      continue;
+    }
+    if (value === undefined) {
+      delete (nextOverride as Record<string, unknown>)[key];
+    } else {
+      (nextOverride as Record<string, unknown>)[key] = value;
+    }
+  }
+  if (
+    JSON.stringify(nextOverride) === JSON.stringify(object.styleOverride ?? {})
+  ) {
+    return null;
+  }
+  return {
+    ...object,
+    styleOverride:
+      Object.keys(nextOverride).length > 0 ? nextOverride : undefined,
+  };
+}
+
+function rotateFreeAnchor(
+  anchor: Extract<VisualAnchor, { kind: "free" }>,
+  pivot: DerivedPoint,
+  deltaDegrees: number,
+  grid: number,
+): Extract<VisualAnchor, { kind: "free" }> {
+  return {
+    ...anchor,
+    position: snapGridPoint(
+      rotatePointByDegrees(anchor.position, pivot, deltaDegrees),
+      grid,
+    ),
+  };
+}
+
+/** A text placed at a quarter turn reads up the page; otherwise across. */
+export function uprightOrUp(rotation: number): 0 | 270 {
+  return rotation % 180 === 90 ? 270 : 0;
+}
+
+export function rotateDraftingObject(
+  object: DraftingObject,
+  geometry: ResolvedDraftingGeometry,
+  deltaDegrees: 45 | -45 | 90 | -90 | 135 | -135 | 180,
+  grid: number,
+): DraftingObject | null {
+  if (object.locked) return null;
+  if (object.kind === "arrow" && geometry.kind === "arrow") {
+    const pivot = geometry.center;
+    return {
+      ...object,
+      from:
+        object.from.kind === "free"
+          ? rotateFreeAnchor(object.from, pivot, deltaDegrees, grid)
+          : object.from,
+      to:
+        object.to.kind === "free"
+          ? rotateFreeAnchor(object.to, pivot, deltaDegrees, grid)
+          : object.to,
+      waypoints: object.waypoints?.map((point) =>
+        snapGridPoint(rotatePointByDegrees(point, pivot, deltaDegrees), grid),
+      ),
+      curveControls: object.curveControls?.map((point) =>
+        point
+          ? snapGridPoint(
+              rotatePointByDegrees(point, pivot, deltaDegrees),
+              grid,
+            )
+          : null,
+      ),
+    };
+  }
+  if (
+    object.kind === "construction-line" &&
+    geometry.kind === "construction-line"
+  ) {
+    const pivot = centerOfBounds(geometry.bounds);
+    return {
+      ...object,
+      points: object.points.map((point) =>
+        snapGridPoint(rotatePointByDegrees(point, pivot, deltaDegrees), grid),
+      ),
+      curveControls: object.curveControls?.map((point) =>
+        point
+          ? snapGridPoint(
+              rotatePointByDegrees(point, pivot, deltaDegrees),
+              grid,
+            )
+          : null,
+      ),
+    };
+  }
+  if (object.kind === "rectangle") {
+    return {
+      ...object,
+      rotation: (((object.rotation + deltaDegrees) % 360) + 360) % 360,
+    };
+  }
+  // A free text turns between reading across and reading up the page, about
+  // its anchor; a half turn would stand it on its head.
+  if (object.kind === "text" && !object.polarity) {
+    if (deltaDegrees === 180) return null;
+    return { ...object, rotation: draftTextTurn(object) ? 0 : 270 };
+  }
+  // Polarity text turns its + and − about the text: above and below it, or
+  // either side. Its glyphs stay upright.
+  if (object.kind === "text" && object.polarity === "both") {
+    return {
+      ...object,
+      rotation: ((((object.rotation + deltaDegrees) % 360) + 360) %
+        360) as Rotation,
+    };
+  }
+  return null;
+}
+
+/**
+ * One end of a drafting object under a mirror. Free ends reflect. An end
+ * attached to something the same mirror carries keeps its attachment and
+ * mirrors its offset from it; an end attached to anything else stays with
+ * that host, as it does when the selection moves.
+ */
+function mirrorAnchor<T extends VisualAnchor>(
+  anchor: T,
+  pivot: DerivedPoint,
+  direction: ScreenFlip,
+  mirroredHostIds: ReadonlySet<string>,
+): T {
+  const reflect = (point: GridPoint): GridPoint =>
+    snapGridPoint(reflectPoint(point, pivot, direction), 1);
+  if (anchor.kind === "free") {
+    return { ...anchor, position: reflect(anchor.position) };
+  }
+  if (anchor.kind === "object") {
+    if (!mirroredHostIds.has(anchor.objectId)) return anchor;
+    return {
+      ...anchor,
+      localOffset:
+        direction === "left-right"
+          ? { x: -anchor.localOffset.x, y: anchor.localOffset.y }
+          : { x: anchor.localOffset.x, y: -anchor.localOffset.y },
+      fallbackPosition: reflect(anchor.fallbackPosition),
+    };
+  }
+  if (!mirroredHostIds.has(anchor.routeId)) return anchor;
+  // The wire keeps its point order through the mirror, so its normal turns
+  // to the other side: the same offset would land on the wrong side.
+  return {
+    ...anchor,
+    normalOffset: -anchor.normalOffset,
+    fallbackPosition: reflect(anchor.fallbackPosition),
+  };
+}
+
+/**
+ * Mirror a drafting object about a pivot, as one member of a mirrored
+ * selection.
+ *
+ * Lines, arrows and shapes reflect outright; an arrow keeps which end is its
+ * head. Text keeps readable glyphs: its box reflects and its alignment
+ * follows the reversed reading direction. `geometryOf` resolves an object as
+ * it would draw, which the text needs to find its box.
+ */
+export function mirrorDraftingObject(
+  object: DraftingObject,
+  pivot: DerivedPoint,
+  direction: ScreenFlip,
+  mirroredHostIds: ReadonlySet<string>,
+  geometryOf: (object: DraftingObject) => ResolvedDraftingGeometry,
+): DraftingObject | null {
+  if (object.locked) return null;
+  const reflect = (point: GridPoint): GridPoint =>
+    snapGridPoint(reflectPoint(point, pivot, direction), 1);
+  const anchor = (value: VisualAnchor): VisualAnchor =>
+    mirrorAnchor(value, pivot, direction, mirroredHostIds);
+  switch (object.kind) {
+    case "text": {
+      const alignment = reflectedTextAlignment(
+        object.alignment,
+        object.rotation,
+        direction,
+      );
+      // Polarity marks reflect with the drawing: across the axis the + and −
+      // trade sides, while the glyphs stay readable.
+      const rotation =
+        object.polarity === "both"
+          ? ((((direction === "left-right" ? 360 : 540) - object.rotation) %
+              360) as Rotation)
+          : object.rotation;
+      if (object.anchor.kind !== "free") {
+        const next = anchor(object.anchor);
+        return next === object.anchor && rotation === object.rotation
+          ? null
+          : { ...object, anchor: next, alignment, rotation };
+      }
+      const geometry = geometryOf(object);
+      const realigned =
+        alignment === object.alignment && rotation === object.rotation
+          ? geometry
+          : geometryOf({ ...object, alignment, rotation });
+      if (geometry.kind !== "text" || realigned.kind !== "text") return null;
+      return {
+        ...object,
+        alignment,
+        rotation,
+        anchor: {
+          kind: "free",
+          position: reflectedTextAnchor(
+            geometry.position,
+            geometry.bounds,
+            realigned.bounds,
+            pivot,
+            direction,
+          ),
+        },
+      };
+    }
+    case "callout":
+      return {
+        ...object,
+        anchor: anchor(object.anchor),
+        target: anchor(object.target),
+        alignment: reflectedTextAlignment(
+          object.alignment,
+          object.rotation,
+          direction,
+        ),
+      };
+    case "leader":
+      return {
+        ...object,
+        anchor: anchor(object.anchor),
+        target: anchor(object.target),
+      };
+    case "arrow":
+      return {
+        ...object,
+        anchor: anchor(object.anchor),
+        from: anchor(object.from),
+        to: anchor(object.to),
+        waypoints: object.waypoints?.map(reflect),
+        curveControls: object.curveControls?.map((point) =>
+          point ? reflect(point) : null,
+        ),
+      };
+    case "construction-line":
+      return {
+        ...object,
+        anchor: anchor(object.anchor),
+        points: object.points.map(reflect),
+        curveControls: object.curveControls?.map((point) =>
+          point ? reflect(point) : null,
+        ),
+      };
+    case "rectangle": {
+      const center = reflect(object.center);
+      return {
+        ...object,
+        center,
+        anchor: { kind: "free", position: center },
+        // Either mirror of a rectangle turned by θ is the rectangle turned
+        // by −θ: a rectangle is its own half-turn.
+        rotation: (360 - object.rotation) % 360,
+      };
+    }
+    case "circle": {
+      const center = reflect(object.center);
+      return { ...object, center, anchor: { kind: "free", position: center } };
+    }
+    case "floating-symbol":
+      return {
+        ...object,
+        anchor: anchor(object.anchor),
+        transform: reflectOrientation(object.transform, direction),
+      };
+  }
+}
+
+function controlForTangentAngle(
+  from: DerivedPoint,
+  to: DerivedPoint,
+  angleDegrees: number,
+  existingControl: GridPoint | null,
+  grid: number,
+): GridPoint | null {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const chordLength = Math.hypot(dx, dy);
+  if (chordLength < 1e-6 || angleDegrees <= 0.01) return null;
+  const boundedAngle = Math.min(170, Math.max(0.01, angleDegrees));
+  const midpoint = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
+  const normal = { x: -dy / chordLength, y: dx / chordLength };
+  const existingSide = existingControl
+    ? Math.sign(
+        (existingControl.x - midpoint.x) * normal.x +
+          (existingControl.y - midpoint.y) * normal.y,
+      )
+    : 1;
+  const offset = (chordLength / 2) * Math.tan((boundedAngle * Math.PI) / 360);
+  return snapGridPoint(
+    {
+      x: midpoint.x + normal.x * offset * (existingSide || 1),
+      y: midpoint.y + normal.y * offset * (existingSide || 1),
+    },
+    grid,
+  );
+}
+
+export function setDraftingTangentAngle(
+  object: Extract<DraftingObject, { kind: "arrow" | "construction-line" }>,
+  geometry: Extract<
+    ResolvedDraftingGeometry,
+    { kind: "arrow" | "construction-line" }
+  >,
+  index: number,
+  angleDegrees: number,
+  grid: number,
+): DraftingObject | null {
+  if (
+    object.locked ||
+    !Number.isFinite(angleDegrees) ||
+    (object.kind === "arrow" && Boolean(object.outline)) ||
+    index < 0 ||
+    index >= geometry.points.length - 1
+  ) {
+    return null;
+  }
+  const curveControls = [...geometry.curveControls];
+  curveControls[index] = controlForTangentAngle(
+    geometry.points[index]!,
+    geometry.points[index + 1]!,
+    angleDegrees,
+    curveControls[index] ?? null,
+    grid,
+  );
+  return { ...object, curveControls };
+}
+
+export type SetDraftingBearingResult =
+  | { kind: "updated"; object: DraftingObject }
+  | { kind: "attached-arrow" }
+  | { kind: "unsupported" };
+
+export function setDraftingBearing(
+  object: DraftingObject,
+  geometry: ResolvedDraftingGeometry,
+  bearingDegrees: number,
+  grid: number,
+): SetDraftingBearingResult {
+  if (object.locked || !Number.isFinite(bearingDegrees)) {
+    return { kind: "unsupported" };
+  }
+  const targetBearing = ((bearingDegrees % 360) + 360) % 360;
+  if (object.kind === "rectangle") {
+    return { kind: "updated", object: { ...object, rotation: targetBearing } };
+  }
+  if (
+    (geometry.kind !== "arrow" && geometry.kind !== "construction-line") ||
+    geometry.points.length < 2 ||
+    (object.kind !== "arrow" && object.kind !== "construction-line")
+  ) {
+    return { kind: "unsupported" };
+  }
+  const currentBearing = normalizedBearing(
+    geometry.points[0]!,
+    geometry.points[1]!,
+  );
+  const delta = ((targetBearing - currentBearing + 540) % 360) - 180;
+  if (object.kind === "arrow") {
+    if (
+      geometry.kind !== "arrow" ||
+      object.from.kind !== "free" ||
+      object.to.kind !== "free"
+    ) {
+      return { kind: "attached-arrow" };
+    }
+    const pivot = geometry.center;
+    return {
+      kind: "updated",
+      object: {
+        ...object,
+        from: {
+          ...object.from,
+          position: snapGridPoint(
+            rotatePointByDegrees(object.from.position, pivot, delta),
+            grid,
+          ),
+        },
+        to: {
+          ...object.to,
+          position: snapGridPoint(
+            rotatePointByDegrees(object.to.position, pivot, delta),
+            grid,
+          ),
+        },
+        waypoints: object.waypoints?.map((point) =>
+          snapGridPoint(rotatePointByDegrees(point, pivot, delta), grid),
+        ),
+        curveControls: object.curveControls?.map((point) =>
+          point
+            ? snapGridPoint(rotatePointByDegrees(point, pivot, delta), grid)
+            : null,
+        ),
+      },
+    };
+  }
+  if (geometry.kind !== "construction-line") {
+    return { kind: "unsupported" };
+  }
+  const pivot = centerOfBounds(geometry.bounds);
+  return {
+    kind: "updated",
+    object: {
+      ...object,
+      points: object.points.map((point) =>
+        snapGridPoint(rotatePointByDegrees(point, pivot, delta), grid),
+      ),
+      curveControls: object.curveControls?.map((point) =>
+        point
+          ? snapGridPoint(rotatePointByDegrees(point, pivot, delta), grid)
+          : null,
+      ),
+    },
+  };
+}

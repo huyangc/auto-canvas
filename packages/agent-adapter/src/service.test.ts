@@ -1,0 +1,1476 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+import { executeTransaction, SchematicEditSchema } from "@icm/edit-engine";
+import {
+  createEmptyDocument,
+  createEmptyProject,
+  createRoutePath,
+  createSimulationFolder,
+} from "@icm/model";
+import { parseProject } from "@icm/project-protocol";
+import type { CircuitProject } from "@icm/model";
+import {
+  InMemorySymbolResolver,
+  builtInSymbols,
+  type SymbolResolver,
+} from "@icm/symbols";
+import { describe, expect, it } from "vitest";
+
+import { agentCircuitOpenApi } from "./openapi.js";
+import {
+  agentCircuitRequestJsonSchema,
+  AgentProductionCircuitRequestSchema,
+  agentCircuitResponseJsonSchema,
+  AgentCircuitResponseSchema,
+  AgentSnapshotInstanceSchema,
+} from "./schema.js";
+import type { AgentPermissions } from "./schema.js";
+import {
+  AGENT_EDIT_KINDS,
+  agentEditCategory,
+  createAgentCircuitService,
+} from "./service.js";
+import {
+  addedAmbiguousJunctions,
+  agentProjectDiagnostics,
+} from "./diagnostics.js";
+
+const resolver = new InMemorySymbolResolver(builtInSymbols);
+const allPermissions: AgentPermissions = {
+  snapshot: true,
+  render: true,
+  sourceSpans: false,
+  edit: { geometry: true, connectivity: true, presentation: true },
+};
+
+function resolveLocalJsonPointer(root: unknown, reference: string): unknown {
+  if (!reference.startsWith("#/")) return undefined;
+  return reference
+    .slice(2)
+    .split("/")
+    .map((part) => part.replaceAll("~1", "/").replaceAll("~0", "~"))
+    .reduce<unknown>((current, part) => {
+      if (typeof current !== "object" || current === null) return undefined;
+      return (current as Record<string, unknown>)[part];
+    }, root);
+}
+
+function localReferences(root: unknown): string[] {
+  const references: string[] = [];
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item);
+      return;
+    }
+    if (typeof value !== "object" || value === null) return;
+    for (const [key, item] of Object.entries(value)) {
+      if (key === "$ref" && typeof item === "string" && item.startsWith("#")) {
+        references.push(item);
+      }
+      visit(item);
+    }
+  };
+  visit(root);
+  return references;
+}
+
+function fixtureProject(): CircuitProject {
+  return parseProject(
+    readFileSync(
+      resolve(
+        process.cwd(),
+        "fixtures/projects/differential-stage/project.icproj.json",
+      ),
+      "utf8",
+    ),
+  );
+}
+
+function serviceFixture(
+  permissions: AgentPermissions = allPermissions,
+  limits: Parameters<typeof createAgentCircuitService>[0]["limits"] = {},
+  symbolResolver: SymbolResolver = resolver,
+) {
+  let project = fixtureProject();
+  let document = structuredClone(project.documents[0]!);
+  const service = createAgentCircuitService({
+    agentId: "agent-test",
+    resolver: symbolResolver,
+    permissions,
+    limits,
+    store: {
+      getDocument: () => document,
+      commitDocument: (next) => {
+        document = next;
+        project.documents = project.documents.map((candidate) =>
+          candidate.id === next.id ? next : candidate,
+        );
+      },
+      getProject: () => project,
+      commitProject: (next) => {
+        project = next;
+        document =
+          next.documents.find((candidate) => candidate.id === document.id) ??
+          next.documents.find(
+            (candidate) => candidate.id === next.topDocumentId,
+          )!;
+      },
+    },
+  });
+  return { service, getDocument: () => document, getProject: () => project };
+}
+
+describe("current Agent Circuit API service", () => {
+  it("includes Cell-scoped export blockers in diagnostics", () => {
+    const project = createEmptyProject("project", "Missing model", "dut");
+    const document = project.documents[0]!;
+    document.instances.push({
+      id: "Q1",
+      symbolId: "npn",
+      reference: "Q1",
+      placement: null,
+      netlist: { parameters: {} },
+    });
+    for (const pinName of ["C", "B", "E", "S"])
+      document.noConnects.push({
+        id: `nc-${pinName}`,
+        endpoint: { kind: "terminal", instanceId: "Q1", pinName },
+      });
+
+    const diagnostics = agentProjectDiagnostics(
+      project,
+      resolver,
+      document.id,
+      document.revision,
+    );
+    expect(diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "MISSING_MODEL_TARGET",
+          domain: "spice",
+          severity: "error",
+          primary: expect.objectContaining({ documentId: document.id }),
+        }),
+      ]),
+    );
+  });
+
+  it.each(["vcvs", "vccs", "cccs", "ccvs"])(
+    "roundtrips %s controls through transactions and both Snapshot projections",
+    (symbolId) => {
+      const fixture = serviceFixture();
+      const document = fixture.getDocument();
+      const voltage = symbolId === "vcvs" || symbolId === "vccs";
+      const controls = voltage
+        ? [
+            {
+              kind: "voltage",
+              positiveNetId: document.nets[0]!.id,
+              negativeNetId: document.nets[1]!.id,
+            },
+            { kind: "voltage" },
+          ]
+        : [
+            {
+              kind: "terminal-current",
+              instanceId: "M1",
+              pinName: "D",
+              direction: "into",
+            },
+            {
+              kind: "terminal-current",
+              instanceId: "M1",
+              pinName: "S",
+              direction: "out",
+            },
+            { kind: "current", sensorInstanceId: "sensor" },
+          ];
+      const placed = fixture.service.handle({
+        apiVersion: "3.0",
+        operation: "transact",
+        requestId: "place-source",
+        transactionId: "place-source",
+        documentId: document.id,
+        expectedRevision: document.revision,
+        edits: [
+          {
+            id: "source",
+            symbolId,
+            reference: { vcvs: "E1", vccs: "G1", cccs: "F1", ccvs: "H1" }[
+              symbolId
+            ],
+            placement: {
+              position: { x: 800, y: 600 },
+              rotation: 0,
+              mirror: "none",
+            },
+            netlist: { parameters: { gain: "2" }, control: controls[0] },
+          },
+          {
+            id: "sensor",
+            symbolId: "voltage-source",
+            reference: "V99",
+            placement: {
+              position: { x: 1000, y: 600 },
+              rotation: 0,
+              mirror: "none",
+            },
+            netlist: { parameters: { dc: "0" } },
+          },
+        ].map((instance) => ({ kind: "add_instance", instance })),
+      });
+      expect(placed, JSON.stringify(placed)).toMatchObject({ ok: true });
+      for (const [index, control] of [...controls, undefined].entries()) {
+        const reply = fixture.service.handle({
+          apiVersion: "3.0",
+          operation: "transact",
+          requestId: `control-${index}`,
+          transactionId: `control-${index}`,
+          documentId: document.id,
+          expectedRevision: fixture.getDocument().revision,
+          edits: [
+            {
+              kind: "set_instance_netlist",
+              instanceId: "source",
+              netlist: {
+                parameters: { gain: String(index + 3) },
+                ...(control ? { control } : {}),
+              },
+            },
+          ],
+        });
+        expect(reply).toMatchObject({ ok: true });
+        for (const projection of [undefined, "pins"] as const) {
+          const read = fixture.service.handle({
+            apiVersion: "3.0",
+            operation: "snapshot",
+            requestId: `read-${index}-${projection}`,
+            documentId: document.id,
+            ...(projection ? { projection, instanceIds: ["source"] } : {}),
+          });
+          expect(AgentCircuitResponseSchema.safeParse(read).success).toBe(true);
+          const instances =
+            read.ok && read.operation === "snapshot"
+              ? "projection" in read && read.projection === "pins"
+                ? read.instances
+                : "snapshot" in read
+                  ? read.snapshot.document.instances
+                  : []
+              : [];
+          expect(
+            instances.find((instance) => instance.id === "source")?.netlist,
+          ).toEqual({
+            parameters: { gain: String(index + 3) },
+            ...(control ? { control } : {}),
+          });
+        }
+      }
+    },
+  );
+  it("compacts removed diagnostic bodies without changing the preview or current diagnostics", () => {
+    const full = serviceFixture();
+    const compact = serviceFixture();
+    const placement = full
+      .getDocument()
+      .instances.find((i) => i.id === "M1")!.placement!;
+    full.getDocument().instances.find((i) => i.id === "M1")!.placement = null;
+    compact.getDocument().instances.find((i) => i.id === "M1")!.placement =
+      null;
+    full.getProject().documents[0] = full.getDocument();
+    compact.getProject().documents[0] = compact.getDocument();
+    const request = {
+      apiVersion: "3.0",
+      operation: "transact",
+      documentId: full.getDocument().id,
+      expectedRevision: 0,
+      dryRun: true,
+      edits: [{ kind: "place_instance", instanceId: "M1", placement }],
+    };
+    const a = full.service.handle({
+      ...request,
+      requestId: "full",
+      transactionId: "full",
+    });
+    const b = compact.service.handle({
+      ...request,
+      requestId: "compact",
+      transactionId: "compact",
+      diagnosticDeltaDetail: "compact",
+    });
+    expect(a).toMatchObject({ ok: true });
+    expect(b).toMatchObject({ ok: true });
+    if (
+      !a.ok ||
+      a.operation !== "transact" ||
+      !b.ok ||
+      b.operation !== "transact"
+    )
+      throw new Error("commit failed");
+    expect(a.diagnosticDelta!.removed.length).toBeGreaterThan(0);
+    expect(b.diagnosticDelta!.removed).toEqual([]);
+    expect(b.diagnosticDelta!.removedIds).toHaveLength(
+      a.diagnosticDelta!.removed.length,
+    );
+    expect(b.diagnostics).toEqual(a.diagnostics);
+    expect(b.diff).toEqual(a.diff);
+    expect(compact.getDocument()).toEqual(full.getDocument());
+  });
+  it("provides bounded real pin/bulk facts and rejects contradictory selectors", () => {
+    const fixture = serviceFixture();
+    const document = fixture.getDocument();
+    const request = {
+      apiVersion: "3.0",
+      requestId: "pins",
+      operation: "snapshot",
+      documentId: document.id,
+      projection: "pins",
+      instanceIds: [document.instances[0]!.id, "missing"],
+    };
+    const reply = fixture.service.handle(request);
+    expect(reply).toMatchObject({
+      ok: true,
+      projection: "pins",
+      revision: document.revision,
+      instances: [{ id: document.instances[0]!.id, pins: expect.any(Array) }],
+      missingInstanceIds: ["missing"],
+    });
+    expect(reply).not.toHaveProperty("snapshot");
+    expect(
+      fixture.service.handle({
+        ...request,
+        requestId: "pins-invalid",
+        projection: "full",
+      }),
+    ).toMatchObject({ ok: false, error: { code: "INVALID_REQUEST" } });
+    // A Cell Pin marker has no Reference; the projection names its terminal.
+    const pins = fixture.service.handle({
+      ...request,
+      requestId: "pins-port",
+      instanceIds: ["VINP", "M1"],
+    });
+    if (!pins.ok || pins.operation !== "snapshot" || !("instances" in pins))
+      throw new Error("pins snapshot failed");
+    const [m1, vinp] = pins.instances;
+    expect(vinp).toMatchObject({
+      id: "VINP",
+      reference: null,
+      cellTerminal: {
+        id: "cell-terminal-vinp",
+        name: "VINP",
+        direction: expect.any(String),
+      },
+    });
+    expect(m1).toMatchObject({ id: "M1", reference: "M1" });
+    expect(m1).not.toHaveProperty("cellTerminal");
+    expect(AgentSnapshotInstanceSchema.parse(vinp)).toEqual(vinp);
+  });
+
+  it("lists a part's labels on full and pins reads only when asked (#1518)", () => {
+    const fixture = serviceFixture();
+    const document = fixture.getDocument();
+    const base = {
+      apiVersion: "3.0",
+      operation: "snapshot",
+      documentId: document.id,
+    };
+    const labelsOfVinp = (reply: ReturnType<typeof fixture.service.handle>) => {
+      if (!reply.ok || reply.operation !== "snapshot")
+        throw new Error("snapshot failed");
+      const instances =
+        "instances" in reply
+          ? reply.instances
+          : "snapshot" in reply
+            ? reply.snapshot.document.instances
+            : [];
+      return instances.find((instance) => instance.id === "VINP")!.annotations;
+    };
+    const pins = { ...base, projection: "pins", instanceIds: ["VINP"] };
+    expect(
+      labelsOfVinp(fixture.service.handle({ ...pins, requestId: "pins" })),
+    ).toBeUndefined();
+    const listed = labelsOfVinp(
+      fixture.service.handle({
+        ...pins,
+        requestId: "pins-labels",
+        instanceLabels: true,
+      }),
+    );
+    expect(listed).toEqual([
+      expect.objectContaining({ id: "label-vinp", kind: "instance-label" }),
+    ]);
+    expect(
+      labelsOfVinp(
+        fixture.service.handle({
+          ...base,
+          requestId: "full-labels",
+          instanceLabels: true,
+        }),
+      ),
+    ).toEqual(listed);
+    // The labelled read is not served to a reader that did not ask.
+    expect(
+      labelsOfVinp(fixture.service.handle({ ...base, requestId: "full" })),
+    ).toBeUndefined();
+    expect(
+      fixture.service.handle({
+        ...base,
+        requestId: "geometry-labels",
+        projection: "geometry",
+        geometryIds: ["VINP"],
+        instanceLabels: true,
+      }),
+    ).toMatchObject({ ok: false, error: { code: "INVALID_REQUEST" } });
+  });
+  it("rejects a schema-invalid request without changing the revision", () => {
+    const fixture = serviceFixture();
+    const before = fixture.getDocument().revision;
+    const response = fixture.service.handle({
+      apiVersion: "3.0",
+      requestId: "invalid-variant",
+      operation: "transact",
+      documentId: fixture.getDocument().id,
+      transactionId: "invalid-variant",
+      expectedRevision: before,
+      edits: [
+        {
+          kind: "add_instance",
+          instance: {
+            id: "VIN",
+            symbolId: "port",
+            symbolVariantId: "",
+            placement: null,
+          },
+        },
+      ],
+    });
+    expect(response).toMatchObject({
+      operation: "error",
+      ok: false,
+      error: { code: "INVALID_REQUEST" },
+      diagnostics: [
+        {
+          path: ["edits", 0, "instance", "symbolVariantId"],
+        },
+      ],
+    });
+    expect(fixture.getDocument().revision).toBe(before);
+  });
+
+  it("publishes exactly four operations and validates checked request examples", () => {
+    const fixture = serviceFixture();
+    const response = fixture.service.handle({
+      apiVersion: "3.0",
+      requestId: "capabilities-test",
+      operation: "capabilities",
+    });
+    expect(response).toMatchObject({
+      ok: true,
+      operation: "capabilities",
+      capabilities: {
+        operations: ["capabilities", "snapshot", "transact", "render"],
+        editKinds: expect.arrayContaining([
+          "add_instance",
+          "patch_instance_netlist_parameters",
+          "connect_endpoints",
+          "cut_connection",
+          "merge_nets",
+          "move_junction",
+          "route_orthogonal",
+          "disconnect_endpoint",
+          "upsert_schematic_annotation",
+          "remove_schematic_annotation",
+        ]),
+      },
+    });
+    expect(AgentCircuitResponseSchema.parse(response)).toEqual(response);
+    for (const name of ["capabilities", "snapshot", "align", "render"]) {
+      const request = JSON.parse(
+        readFileSync(
+          resolve(process.cwd(), `fixtures/agent-api/${name}.request.json`),
+          "utf8",
+        ),
+      );
+      expect(AgentProductionCircuitRequestSchema.parse(request)).toEqual(
+        request,
+      );
+    }
+    expect(agentCircuitRequestJsonSchema()).toMatchObject({
+      $schema: "https://json-schema.org/draft/2020-12/schema",
+    });
+    expect(Object.keys(agentCircuitOpenApi.paths).sort()).toEqual([
+      "/api/agent/claims",
+      "/api/agent/connectors/resume",
+      "/api/agent/sessions/{sessionId}/artifact-status",
+      "/api/agent/sessions/{sessionId}/artifacts/{fileId}",
+      "/api/agent/sessions/{sessionId}/circuit",
+      "/api/agent/sessions/{sessionId}/files",
+      "/api/agent/sessions/{sessionId}/projects",
+      "/api/agent/sessions/{sessionId}/simulation",
+      "/api/agent/sessions/{sessionId}/status",
+    ]);
+  });
+
+  it("derives advertised typed edits from the Edit Engine schema", () => {
+    const typedKinds = SchematicEditSchema.options.map(
+      (option) => option.shape.kind.value,
+    );
+    const supportedKinds = typedKinds.filter(
+      (kind) => agentEditCategory(kind) !== "unsupported",
+    );
+
+    expect(AGENT_EDIT_KINDS).toEqual([...supportedKinds, "wire"]);
+    expect(AGENT_EDIT_KINDS).toEqual(
+      expect.arrayContaining([
+        "add_no_connect",
+        "remove_no_connect",
+        "set_presentation_style",
+        "upsert_schematic_annotation",
+        "remove_schematic_annotation",
+        "upsert_drafting_object",
+        "remove_drafting_object",
+      ]),
+    );
+    expect(AGENT_EDIT_KINDS).not.toEqual(
+      expect.arrayContaining([
+        "undo",
+        "redo",
+        "unplace_instance",
+        "normalize_power_nets",
+        "upsert_connectivity_evidence",
+        "remove_connectivity_evidence",
+      ]),
+    );
+  });
+
+  it("publishes one reusable request and response schema in OpenAPI", () => {
+    const schemas = agentCircuitOpenApi.components.schemas;
+    const paths = ["/api/agent/sessions/{sessionId}/circuit"] as const;
+    for (const path of paths) {
+      expect(
+        agentCircuitOpenApi.paths[path].post.requestBody.content[
+          "application/json"
+        ].schema,
+      ).toEqual({ $ref: "#/components/schemas/agentCircuitRequest" });
+      expect(
+        agentCircuitOpenApi.paths[path].post.responses["200"].content[
+          "application/json"
+        ].schema,
+      ).toEqual({ $ref: "#/components/schemas/agentCircuitResponse" });
+    }
+    expect(JSON.stringify(schemas.agentCircuitRequest)).toContain(
+      "#/components/schemas/agentCircuitRequest/$defs/",
+    );
+    expect(JSON.stringify(schemas.agentCircuitResponse)).toContain(
+      "#/components/schemas/agentCircuitResponse/$defs/",
+    );
+    expect(JSON.stringify(agentCircuitOpenApi)).not.toContain('"$schema"');
+  });
+
+  it("keeps every generated local reference resolvable and bounded", () => {
+    for (const artifact of [
+      agentCircuitRequestJsonSchema(),
+      agentCircuitResponseJsonSchema(),
+      agentCircuitOpenApi,
+    ]) {
+      const references = localReferences(artifact);
+      expect(references.length).toBeGreaterThan(0);
+      for (const reference of references) {
+        expect(
+          resolveLocalJsonPointer(artifact, reference),
+          `unresolved local schema reference: ${reference}`,
+        ).toBeDefined();
+      }
+    }
+
+    // Tripwires for a schema that unfolds by accident (RichText inlined into
+    // every part, a reference expanded in place), not a pin on today's size:
+    // each ceiling sits at about twice the measured length (request 175,783,
+    // response under 180,000, OpenAPI 537,392 characters), so ordinary
+    // contract growth never trips them. Focused MCP tools keep their own
+    // 5,000-byte limit, which a real host's compaction sets.
+    expect(JSON.stringify(agentCircuitRequestJsonSchema()).length).toBeLessThan(
+      350_000,
+    );
+    expect(
+      JSON.stringify(agentCircuitResponseJsonSchema()).length,
+    ).toBeLessThan(360_000);
+    expect(JSON.stringify(agentCircuitOpenApi).length).toBeLessThan(1_100_000);
+  });
+
+  it("keeps terminal-current runtime control strict and partial authoring explicit", () => {
+    const edit = {
+      kind: "set_instance_netlist",
+      instanceId: "F1",
+      netlist: {
+        parameters: { gain: "2" },
+        control: {
+          kind: "terminal-current",
+          instanceId: "R1",
+          pinName: "1",
+          direction: "into",
+        },
+      },
+    };
+    expect(SchematicEditSchema.parse(edit)).toEqual(edit);
+    expect(
+      SchematicEditSchema.safeParse({
+        ...edit,
+        netlist: {
+          ...edit.netlist,
+          control: { ...edit.netlist.control, direction: "sideways" },
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      SchematicEditSchema.safeParse({
+        ...edit,
+        netlist: {
+          ...edit.netlist,
+          control: { ...edit.netlist.control, sensorInstanceId: "V1" },
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      SchematicEditSchema.safeParse({
+        ...edit,
+        netlist: {
+          ...edit.netlist,
+          control: { kind: "terminal-current", direction: "into" },
+        },
+      }).success,
+    ).toBe(true);
+  });
+
+  it("publishes the flat Snapshot workflow and returns complete facts", () => {
+    const fixture = serviceFixture();
+    expect(
+      fixture.service.handle({
+        apiVersion: "3.0",
+        requestId: "capabilities-current",
+        operation: "capabilities",
+      }),
+    ).toMatchObject({
+      apiVersion: "3.0",
+      ok: true,
+      capabilities: {
+        operations: ["capabilities", "snapshot", "transact", "render"],
+        apiVersions: ["3.0"],
+        snapshotVersions: ["3.0"],
+        permissions: { snapshot: true },
+      },
+    });
+
+    const response = fixture.service.handle({
+      apiVersion: "3.0",
+      requestId: "snapshot-current",
+      operation: "snapshot",
+      documentId: "document-differential-stage",
+    });
+    expect(response).toMatchObject({
+      apiVersion: "3.0",
+      operation: "snapshot",
+      ok: true,
+      revision: 0,
+      snapshot: {
+        snapshotVersion: "3.0",
+        document: {
+          id: "document-differential-stage",
+          instances: expect.any(Array),
+          nets: expect.any(Array),
+          routes: expect.any(Array),
+          diagnostics: expect.any(Array),
+        },
+      },
+    });
+    if (
+      !response.ok ||
+      response.operation !== "snapshot" ||
+      !("snapshot" in response)
+    )
+      return;
+    expect(
+      response.snapshot.document.instances.find((item) => item.id === "M1")
+        ?.pins,
+    ).toContainEqual(expect.objectContaining({ name: "G", netId: "net-vinp" }));
+    expect(response.snapshot.document.nets).toContainEqual(
+      expect.objectContaining({
+        id: "net-vinp",
+        terminals: expect.arrayContaining([{ instanceId: "M1", pinName: "G" }]),
+      }),
+    );
+  });
+
+  it("returns bootstrap context without resolving full symbol geometry", () => {
+    let resolveCalls = 0;
+    const countingResolver: SymbolResolver = {
+      resolve(symbolId, variantId) {
+        resolveCalls += 1;
+        return resolver.resolve(symbolId, variantId);
+      },
+    };
+    const fixture = serviceFixture(allPermissions, {}, countingResolver);
+    const response = fixture.service.handle({
+      apiVersion: "3.0",
+      requestId: "snapshot-bootstrap",
+      operation: "snapshot",
+      documentId: fixture.getDocument().id,
+      projection: "bootstrap",
+    });
+
+    expect(response).toMatchObject({
+      ok: true,
+      operation: "snapshot",
+      projection: "bootstrap",
+      revision: 0,
+      context: {
+        project: { id: expect.any(String), documents: expect.any(Array) },
+        document: {
+          id: fixture.getDocument().id,
+          revision: fixture.getDocument().revision,
+          instanceCount: fixture.getDocument().instances.length,
+          netCount: fixture.getDocument().nets.length,
+        },
+      },
+    });
+    expect(response).not.toHaveProperty("snapshot");
+    expect(response).not.toHaveProperty("diagnostics");
+    expect(resolveCalls).toBe(0);
+
+    expect(
+      fixture.service.handle({
+        apiVersion: "3.0",
+        requestId: "bootstrap-move",
+        operation: "transact",
+        documentId: fixture.getDocument().id,
+        transactionId: "bootstrap-move",
+        expectedRevision: fixture.getDocument().revision,
+        edits: [
+          {
+            kind: "move_instance",
+            instanceId: "M1",
+            position: { x: 200, y: 220 },
+          },
+        ],
+      }),
+    ).toMatchObject({ ok: true, revision: 1 });
+    expect(
+      fixture.service.handle({
+        apiVersion: "3.0",
+        requestId: "snapshot-bootstrap-after-move",
+        operation: "snapshot",
+        documentId: fixture.getDocument().id,
+        projection: "bootstrap",
+      }),
+    ).toMatchObject({
+      ok: true,
+      revision: 1,
+      context: { document: { revision: 1 } },
+    });
+  });
+
+  it("rejects full-only Snapshot options on the bootstrap projection", () => {
+    const fixture = serviceFixture();
+    expect(
+      fixture.service.handle({
+        apiVersion: "3.0",
+        requestId: "snapshot-bootstrap-trace",
+        operation: "snapshot",
+        documentId: fixture.getDocument().id,
+        projection: "bootstrap",
+        traceNet: { netId: "net-vinp" },
+      }),
+    ).toMatchObject({
+      ok: false,
+      operation: "snapshot",
+      error: { code: "INVALID_REQUEST" },
+    });
+  });
+
+  it("reads only selected authored geometry without resolving the full circuit", () => {
+    let resolveCalls = 0;
+    const countingResolver: SymbolResolver = {
+      resolve(symbolId, variantId) {
+        resolveCalls += 1;
+        return resolver.resolve(symbolId, variantId);
+      },
+    };
+    const fixture = serviceFixture(allPermissions, {}, countingResolver);
+    const documentId = fixture.getDocument().id;
+    const read = (requestId: string) =>
+      fixture.service.handle({
+        apiVersion: "3.0",
+        requestId,
+        operation: "snapshot",
+        documentId,
+        projection: "geometry",
+        geometryIds: ["M1", "route-vinp", "absent"],
+      });
+    expect(read("geometry-before")).toMatchObject({
+      ok: true,
+      projection: "geometry",
+      revision: 0,
+      objects: [
+        { kind: "instance", id: "M1" },
+        { kind: "route", id: "route-vinp", legs: expect.any(Array) },
+      ],
+      missingObjectIds: ["absent"],
+    });
+    expect(resolveCalls).toBe(0);
+    expect(
+      fixture.service.handle({
+        apiVersion: "3.0",
+        requestId: "geometry-move",
+        operation: "transact",
+        documentId,
+        transactionId: "geometry-move",
+        expectedRevision: 0,
+        edits: [
+          {
+            kind: "move_instance",
+            instanceId: "M1",
+            position: { x: 200, y: 220 },
+          },
+        ],
+      }),
+    ).toMatchObject({ ok: true, revision: 1 });
+    expect(read("geometry-after")).toMatchObject({
+      ok: true,
+      revision: 1,
+      objects: [
+        {
+          kind: "instance",
+          id: "M1",
+          placement: { position: { x: 200, y: 220 } },
+        },
+        { kind: "route", id: "route-vinp", legs: expect.any(Array) },
+      ],
+    });
+    expect(
+      fixture.service.handle({
+        apiVersion: "3.0",
+        requestId: "geometry-invalid",
+        operation: "snapshot",
+        documentId,
+        projection: "geometry",
+        geometryIds: ["M1"],
+        traceNet: { netId: "net-vinp" },
+      }),
+    ).toMatchObject({ ok: false, error: { code: "INVALID_REQUEST" } });
+  });
+
+  it("reads current state and the saved folder directory without returning source bodies", () => {
+    const fixture = serviceFixture();
+    const documentId = fixture.getDocument().id;
+    const folder = createSimulationFolder({
+      id: "large-experiment",
+      name: "Large experiment",
+      profileId: "test-profile",
+      documentId,
+    });
+    folder.input.files[0]!.text = "source-sentinel-".repeat(12_000);
+    fixture.getProject().simulationFolders.push(folder);
+    const directory = fixture.service.handle({
+      apiVersion: "3.0",
+      requestId: "folder-directory",
+      operation: "snapshot",
+      documentId,
+      projection: "folder-directory",
+    });
+    expect(directory).toMatchObject({
+      ok: true,
+      projection: "folder-directory",
+      folders: [
+        {
+          id: folder.id,
+          name: folder.name,
+          entry: folder.input.entry,
+          circuitBindings: folder.input.circuitBindings,
+        },
+      ],
+    });
+    expect(JSON.stringify(directory)).not.toContain("source-sentinel-");
+    expect(JSON.stringify(directory)).not.toContain('"files"');
+
+    const state = fixture.service.handle({
+      apiVersion: "3.0",
+      requestId: "state-counts",
+      operation: "snapshot",
+      documentId,
+      projection: "state",
+    });
+    const detailed = fixture.service.handle({
+      apiVersion: "3.0",
+      requestId: "state-items",
+      operation: "snapshot",
+      documentId,
+      projection: "state",
+      diagnosticDetail: "items",
+    });
+    const full = fixture.service.handle({
+      apiVersion: "3.0",
+      requestId: "state-full-comparison",
+      operation: "snapshot",
+      documentId,
+    });
+    expect(state).toMatchObject({
+      ok: true,
+      projection: "state",
+      revision: fixture.getDocument().revision,
+      counts: { errors: expect.any(Number), warnings: expect.any(Number) },
+    });
+    expect(state).not.toHaveProperty("diagnostics");
+    if (
+      !detailed.ok ||
+      detailed.operation !== "snapshot" ||
+      !("projection" in detailed) ||
+      detailed.projection !== "state" ||
+      !full.ok ||
+      full.operation !== "snapshot" ||
+      !("snapshot" in full)
+    )
+      throw new Error("Expected state and full Snapshots");
+    expect(detailed.diagnostics).toEqual(full.diagnostics);
+    expect(detailed.netCount).toBe(full.snapshot.document.nets.length);
+    expect(JSON.stringify(detailed)).not.toContain("source-sentinel-");
+    expect(JSON.stringify(full).length).toBeGreaterThan(
+      JSON.stringify(detailed).length * 10,
+    );
+    expect(
+      fixture.service.handle({
+        apiVersion: "3.0",
+        requestId: "directory-trace-invalid",
+        operation: "snapshot",
+        documentId,
+        projection: "folder-directory",
+        traceNet: { netId: "net-vinp" },
+      }),
+    ).toMatchObject({ ok: false, error: { code: "INVALID_REQUEST" } });
+  });
+
+  it("rejects Snapshots above the server-owned byte limit", () => {
+    const fixture = serviceFixture(allPermissions, { maxSnapshotBytes: 10 });
+    expect(
+      fixture.service.handle({
+        apiVersion: "3.0",
+        requestId: "snapshot-too-large",
+        operation: "snapshot",
+        documentId: "document-differential-stage",
+      }),
+    ).toMatchObject({
+      apiVersion: "3.0",
+      ok: false,
+      operation: "snapshot",
+      error: { code: "SNAPSHOT_TOO_LARGE" },
+    });
+  });
+
+  it("reuses one unchanged Snapshot and invalidates it after a commit", () => {
+    let resolveCalls = 0;
+    const countingResolver: SymbolResolver = {
+      resolve(symbolId, variantId) {
+        resolveCalls += 1;
+        return resolver.resolve(symbolId, variantId);
+      },
+    };
+    const fixture = serviceFixture(allPermissions, {}, countingResolver);
+    const snapshotRequest = (requestId: string) => ({
+      apiVersion: "3.0" as const,
+      requestId,
+      operation: "snapshot" as const,
+      documentId: fixture.getDocument().id,
+    });
+
+    const first = fixture.service.handle(snapshotRequest("snapshot-first"));
+    const callsAfterFirst = resolveCalls;
+    const second = fixture.service.handle(snapshotRequest("snapshot-second"));
+
+    expect(callsAfterFirst).toBeGreaterThan(0);
+    expect(resolveCalls).toBe(callsAfterFirst);
+    expect(second).toMatchObject({ ok: true, revision: 0 });
+    if (
+      !first.ok ||
+      first.operation !== "snapshot" ||
+      !("snapshot" in first) ||
+      !second.ok ||
+      second.operation !== "snapshot" ||
+      !("snapshot" in second)
+    ) {
+      return;
+    }
+    expect(second.snapshot).toEqual(first.snapshot);
+
+    const committed = fixture.service.handle({
+      apiVersion: "3.0",
+      requestId: "move-before-snapshot",
+      operation: "transact",
+      documentId: fixture.getDocument().id,
+      transactionId: "move-before-snapshot",
+      expectedRevision: fixture.getDocument().revision,
+      edits: [
+        {
+          kind: "move_instance",
+          instanceId: "M1",
+          position: { x: 180, y: 220 },
+        },
+      ],
+    });
+    expect(committed).toMatchObject({
+      ok: true,
+      applied: true,
+      revision: 1,
+      terminalConnectivityChanged: false,
+    });
+    const callsAfterCommit = resolveCalls;
+
+    const after = fixture.service.handle(snapshotRequest("snapshot-after"));
+    expect(after).toMatchObject({ ok: true, revision: 1 });
+    expect(resolveCalls).toBeGreaterThan(callsAfterCommit);
+  });
+
+  it("keeps Agent instance authoring identical to direct Edit Engine execution", () => {
+    const fixture = serviceFixture();
+    const request = {
+      apiVersion: "3.0" as const,
+      requestId: "add-instance-request",
+      operation: "transact" as const,
+      documentId: "document-differential-stage",
+      transactionId: "add-R-new",
+      expectedRevision: 0,
+      edits: [
+        {
+          kind: "add_instance" as const,
+          instance: {
+            id: "R-new",
+            symbolId: "resistor",
+            placement: {
+              position: { x: 420, y: 300 },
+              rotation: 0 as const,
+              mirror: "none" as const,
+            },
+          },
+        },
+      ],
+    };
+    const direct = executeTransaction(
+      fixture.getDocument(),
+      {
+        transactionId: request.transactionId,
+        documentId: request.documentId,
+        expectedRevision: 0,
+        actor: { kind: "agent", id: "agent-test" },
+        edits: request.edits,
+      },
+      { symbolResolver: resolver },
+    );
+
+    expect(fixture.service.handle(request)).toMatchObject({
+      ok: true,
+      applied: true,
+      revision: 1,
+    });
+    expect(direct.ok).toBe(true);
+    expect(fixture.getDocument()).toEqual(direct.document);
+    expect(fixture.getDocument().sourceStatus).toBe("connectivity-modified");
+  });
+
+  it("places a Cell Pin through one coordinated Agent transaction", () => {
+    const fixture = serviceFixture();
+    const response = fixture.service.handle({
+      apiVersion: "3.0",
+      requestId: "place-port-symbol",
+      operation: "transact",
+      documentId: fixture.getDocument().id,
+      transactionId: "place-port-symbol",
+      expectedRevision: fixture.getDocument().revision,
+      expectedStructureRevision: fixture.getProject().structureRevision,
+      structureEdits: [
+        {
+          kind: "transact_document",
+          documentId: fixture.getDocument().id,
+          expectedRevision: fixture.getDocument().revision,
+          edits: [
+            {
+              kind: "add_instance",
+              instance: {
+                id: "PORT-OUT",
+                symbolId: "port",
+                placement: {
+                  position: { x: 620, y: 300 },
+                  rotation: 0,
+                  mirror: "none",
+                },
+              },
+            },
+            {
+              kind: "connect_endpoints",
+              from: { kind: "terminal", instanceId: "PORT-OUT", pinName: "P" },
+              to: { kind: "terminal", instanceId: "PORT-OUT", pinName: "P" },
+              newNetId: "net-port-out",
+            },
+            {
+              kind: "add_cell_terminal",
+              terminal: {
+                id: "terminal-port-out",
+                name: "OUT",
+                netId: "net-port-out",
+                direction: "output",
+                interfaceInstanceIds: ["PORT-OUT"],
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    if (!response.ok) throw new Error(JSON.stringify(response, null, 2));
+    expect(response).toMatchObject({ ok: true, applied: true, revision: 1 });
+    expect(fixture.getDocument().instances).toContainEqual(
+      expect.objectContaining({ id: "PORT-OUT", symbolId: "port" }),
+    );
+    expect(fixture.getDocument().netlist?.terminals).toContainEqual(
+      expect.objectContaining({
+        name: "OUT",
+        interfaceInstanceIds: ["PORT-OUT"],
+      }),
+    );
+    expect(resolver.resolve("port")?.definition.pins).toEqual([
+      expect.objectContaining({ name: "P" }),
+    ]);
+  });
+
+  it("adds a reusable Cell through the existing transact operation", () => {
+    const fixture = serviceFixture();
+    const child = createEmptyDocument("document-agent-child", "Agent Child");
+    const response = fixture.service.handle({
+      apiVersion: "3.0",
+      requestId: "add-agent-child",
+      operation: "transact",
+      documentId: fixture.getDocument().id,
+      transactionId: "add-agent-child",
+      expectedRevision: fixture.getDocument().revision,
+      expectedStructureRevision: fixture.getProject().structureRevision,
+      structureEdits: [{ kind: "add_document", document: child }],
+    });
+
+    expect(response).toMatchObject({
+      ok: true,
+      applied: true,
+      projectStructure: {
+        fromRevision: 0,
+        toRevision: 1,
+        changedDocumentIds: ["document-agent-child"],
+      },
+    });
+    expect(fixture.getProject().documents).toContainEqual(
+      expect.objectContaining({ id: "document-agent-child" }),
+    );
+  });
+
+  it("updates Cell symbol intent only through structureEdits", () => {
+    const fixture = serviceFixture();
+    const document = fixture.getDocument();
+    const response = fixture.service.handle({
+      apiVersion: "3.0",
+      requestId: "set-cell-symbol-presentation",
+      operation: "transact",
+      documentId: document.id,
+      transactionId: "set-cell-symbol-presentation",
+      expectedRevision: document.revision,
+      expectedStructureRevision: fixture.getProject().structureRevision,
+      structureEdits: [
+        {
+          kind: "transact_document",
+          documentId: document.id,
+          expectedRevision: document.revision,
+          edits: [
+            {
+              kind: "set_cell_symbol_presentation",
+              presentation: {
+                minimumBodySize: { width: 120, height: 80 },
+                bodyBounds: { left: -60, right: 100, top: -40, bottom: 60 },
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(response).toMatchObject({
+      ok: true,
+      applied: true,
+      projectStructure: { fromRevision: 0, toRevision: 1 },
+    });
+    expect(fixture.getDocument().presentation.cellSymbol).toEqual({
+      minimumBodySize: { width: 120, height: 80 },
+      bodyBounds: { left: -60, right: 100, top: -40, bottom: 60 },
+    });
+  });
+
+  it("applies an instance netlist-parameter patch through the same presentation boundary", () => {
+    const fixture = serviceFixture();
+    const instance = fixture
+      .getDocument()
+      .instances.find((item) => item.id === "M1")!;
+    instance.reference = "M1";
+    instance.netlist = {
+      binding: { kind: "primitive", deviceClass: "mos" },
+      parameters: {},
+    };
+    const response = fixture.service.handle({
+      apiVersion: "3.0",
+      requestId: "property-patch",
+      operation: "transact",
+      documentId: "document-differential-stage",
+      transactionId: "property-patch",
+      expectedRevision: 0,
+      edits: [
+        {
+          kind: "patch_instance_netlist_parameters",
+          instanceId: "M1",
+          set: { value: "12u" },
+        },
+      ],
+    });
+
+    expect(response).toMatchObject({
+      ok: true,
+      revision: 1,
+      diff: {
+        editKinds: ["patch_instance_netlist_parameters"],
+        changedObjectIds: ["M1"],
+      },
+    });
+    expect(
+      fixture.getDocument().instances.find((item) => item.id === "M1")?.netlist
+        ?.parameters,
+    ).toMatchObject({ value: "12u" });
+  });
+
+  it("accepts annotation textColor through upsert_schematic_annotation", () => {
+    const fixture = serviceFixture();
+    const response = fixture.service.handle({
+      apiVersion: "3.0",
+      requestId: "annotation-text-color",
+      operation: "transact",
+      documentId: "document-differential-stage",
+      transactionId: "annotation-text-color",
+      expectedRevision: 0,
+      edits: [
+        {
+          kind: "upsert_schematic_annotation",
+          annotation: {
+            id: "note-colored",
+            kind: "route-marker",
+            markerKind: "current",
+            content: { runs: [{ kind: "text", value: "I_tail" }] },
+            anchor: {
+              kind: "free",
+              position: { x: 120, y: 120 },
+            },
+            alignment: "middle",
+            rotation: 0,
+            locked: false,
+            textColor: "#123ABC",
+          },
+        },
+      ],
+    });
+
+    expect(response).toMatchObject({ ok: true, applied: true, revision: 1 });
+    expect(
+      fixture
+        .getDocument()
+        .annotations.find((item) => item.id === "note-colored")?.textColor,
+    ).toBe("#123ABC");
+  });
+
+  it("allows Snapshot permission to be denied independently", () => {
+    const fixture = serviceFixture({
+      ...allPermissions,
+      snapshot: false,
+    });
+    expect(
+      fixture.service.handle({
+        apiVersion: "3.0",
+        requestId: "snapshot-denied",
+        operation: "snapshot",
+        documentId: "document-differential-stage",
+      }),
+    ).toMatchObject({
+      ok: false,
+      operation: "snapshot",
+      error: { code: "PERMISSION_DENIED" },
+    });
+  });
+
+  it("localizes a transact rejection to the failing edit with a path and objectIds", () => {
+    const fixture = serviceFixture();
+    for (const item of [
+      ...fixture.getDocument().layoutGroups,
+      ...fixture.getDocument().constraints,
+    ]) {
+      item.locked = false;
+    }
+    // Two edits: the first is a valid annotation; the second targets an
+    // instance that does not exist, so it must reject at edits index 1.
+    const response = fixture.service.handle({
+      apiVersion: "3.0",
+      requestId: "reject-index",
+      operation: "transact",
+      documentId: "document-differential-stage",
+      transactionId: "reject-index",
+      expectedRevision: 0,
+      edits: [
+        {
+          kind: "upsert_schematic_annotation",
+          annotation: {
+            id: "note-test",
+            kind: "route-marker",
+            markerKind: "current",
+            content: { runs: [{ kind: "text", value: "I_x" }] },
+            anchor: {
+              kind: "free",
+              position: { x: 100, y: 100 },
+            },
+            alignment: "middle",
+            rotation: 0,
+            locked: false,
+          },
+        },
+        {
+          kind: "move_instance",
+          instanceId: "instance-does-not-exist",
+          position: { x: 200, y: 200 },
+        },
+      ],
+    });
+    expect(response).toMatchObject({
+      ok: false,
+      error: { code: "OBJECT_NOT_FOUND" },
+    });
+    if (response.ok) return;
+    const diagnostic = response.diagnostics[0];
+    expect(diagnostic).toBeDefined();
+    expect(diagnostic!.path).toEqual(["edits", 1]);
+    expect(diagnostic!.objectIds).toContain("instance-does-not-exist");
+  });
+
+  it("returns bounded formal and diagnostic image artifacts without overlay leakage", () => {
+    const fixture = serviceFixture();
+    const render = (mode: "formal" | "diagnostics") =>
+      fixture.service.handle({
+        apiVersion: "3.0",
+        requestId: `render-${mode}`,
+        operation: "render",
+        documentId: "document-differential-stage",
+        mode,
+      });
+    const formal = render("formal");
+    const diagnostics = render("diagnostics");
+    expect(formal).toMatchObject({ ok: true, operation: "render" });
+    expect(diagnostics).toMatchObject({ ok: true, operation: "render" });
+    if (
+      !formal.ok ||
+      formal.operation !== "render" ||
+      !diagnostics.ok ||
+      diagnostics.operation !== "render"
+    )
+      return;
+    const formalSvg = Buffer.from(formal.artifact.data, "base64").toString(
+      "utf8",
+    );
+    const diagnosticSvg = Buffer.from(
+      diagnostics.artifact.data,
+      "base64",
+    ).toString("utf8");
+    expect(formalSvg).toContain('data-layer="formal"');
+    expect(formalSvg).not.toMatch(/agent-diagnostics|editor-overlay/u);
+    expect(diagnosticSvg).toContain('data-layer="agent-diagnostics"');
+    expect(diagnostics.artifact.sha256).toMatch(/^[a-f0-9]{64}$/u);
+  });
+});
+
+describe("ambiguous Junctions are refused, not committed (#1257)", () => {
+  /** Net A's wire from (0,0) to (100,0); Net B owns nothing yet. */
+  function wireOfNetA() {
+    const document = createEmptyDocument("doc", "Ambiguity");
+    document.nets.push(
+      { id: "net-a", terminals: [] },
+      { id: "net-b", terminals: [] },
+    );
+    document.junctions.push(
+      { id: "a1", netId: "net-a", position: { x: 0, y: 0 } },
+      { id: "a2", netId: "net-a", position: { x: 100, y: 0 } },
+    );
+    document.routes.push(
+      createRoutePath({
+        id: "route-a",
+        netId: "net-a",
+        start: { kind: "junction", junctionId: "a1" },
+        end: { kind: "junction", junctionId: "a2" },
+        bends: [],
+        modes: ["manual"],
+      }),
+    );
+    return document;
+  }
+
+  it("finds a Junction a change puts on another Net's wire, and only a new one", () => {
+    const before = wireOfNetA();
+    const after = structuredClone(before);
+    after.junctions.push({
+      id: "b1",
+      netId: "net-b",
+      position: { x: 50, y: 0 },
+    });
+    expect(addedAmbiguousJunctions(before, after, resolver)).toEqual([
+      expect.objectContaining({
+        code: "VISUAL_AMBIGUOUS_JUNCTION",
+        point: { x: 50, y: 0 },
+      }),
+    ]);
+    // One that was already there is not the change's doing.
+    expect(addedAmbiguousJunctions(after, after, resolver)).toEqual([]);
+  });
+
+  it("still lets a wire end on another wire, which joins the two", () => {
+    let document = createEmptyDocument("doc", "Join");
+    const service = createAgentCircuitService({
+      agentId: "agent-test",
+      resolver,
+      permissions: allPermissions,
+      store: {
+        getDocument: () => document,
+        commitDocument: (next) => {
+          document = next;
+        },
+      },
+    });
+    const wire = (
+      id: string,
+      from: { x: number; y: number },
+      to: { x: number; y: number },
+    ) =>
+      service.handle({
+        apiVersion: "3.0",
+        operation: "transact",
+        requestId: id,
+        transactionId: id,
+        documentId: document.id,
+        expectedRevision: document.revision,
+        wireIntent: {
+          id,
+          from: { kind: "free", point: from },
+          to: { kind: "free", point: to },
+        },
+      });
+    expect(wire("w1", { x: 0, y: 0 }, { x: 100, y: 0 })).toMatchObject({
+      ok: true,
+    });
+    expect(wire("w2", { x: 50, y: -50 }, { x: 50, y: 0 })).toMatchObject({
+      ok: true,
+    });
+    expect(new Set(document.junctions.map((item) => item.netId)).size).toBe(1);
+  });
+});

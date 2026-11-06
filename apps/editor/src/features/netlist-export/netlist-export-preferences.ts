@@ -1,0 +1,262 @@
+import { useEffect, useState } from "react";
+import {
+  createNetlistExportProfile,
+  isNetlistExportProfile,
+  NETLIST_PROFILE_IDS,
+  setNetlistDefaultTarget,
+  type NetlistExportProfile,
+  type NetlistProfileId,
+  type NetlistQuickTargetFamily,
+} from "./netlist-process-presets";
+import type { NetlistFormat } from "@icm/netlist";
+import {
+  netlistMode,
+  netlistModeParts,
+  type NetlistMode,
+} from "./netlist-mode";
+
+const NETLIST_EXPORT_PREFERENCES_KEY = "icm.netlist-export.v1";
+
+/**
+ * Which default process a stored preference has already been told about.
+ *
+ * Abstract was the default nobody chose; the editor now works in SKY130. A
+ * stored preference still carrying the old default therefore moves once, so a
+ * reader who never picked a process gets the new one. Anyone who does mean
+ * Abstract picks it again and keeps it: the marker below is what stops the
+ * move from happening a second time.
+ */
+const DEFAULT_PROCESS_GENERATION = 2;
+const SG13_DEFAULTS_GENERATION = 1;
+export interface NetlistExportPreferences {
+  selected: NetlistProfileId;
+  /** The default-process generation this preference has been moved to. */
+  defaultProcess?: number;
+  /** Records the physical R/C preset update; later explicit Ideal choices stay. */
+  sg13Defaults?: number;
+  format: NetlistFormat;
+  /**
+   * Write the drawing into the netlist as RNL: the read-only SPICE+RNL and
+   * Spectre+RNL formats. Left out when false.
+   */
+  rnl?: boolean;
+  profiles: Record<NetlistProfileId, NetlistExportProfile>;
+}
+
+export function createDefaultNetlistExportPreferences(): NetlistExportPreferences {
+  return {
+    selected: "sky130",
+    defaultProcess: DEFAULT_PROCESS_GENERATION,
+    sg13Defaults: SG13_DEFAULTS_GENERATION,
+    format: "spice",
+    profiles: Object.fromEntries(
+      NETLIST_PROFILE_IDS.map((id) => [id, createNetlistExportProfile(id)]),
+    ) as NetlistExportPreferences["profiles"],
+  };
+}
+
+function migrateStoredNetlistExportPreferences(raw: string): string {
+  const parsed = JSON.parse(raw) as
+    (Partial<NetlistExportPreferences> & { portCase?: unknown }) | null;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+    return raw;
+  // Old browsers saved an implicit upper/lower export transformation. Retire
+  // that preference without losing the author's process and model choices.
+  delete parsed.portCase;
+  if (!parsed.profiles)
+    return JSON.stringify({
+      ...createDefaultNetlistExportPreferences(),
+      ...parsed,
+    });
+  const profiles = parsed.profiles as Partial<
+    Record<NetlistProfileId, NetlistExportProfile>
+  >;
+  // v1 shipped Abstract, SKY130, and Custom. Add new foundry templates
+  // without discarding any edited legacy profile or its selected preset.
+  for (const id of ["tsmc28", "tsmc180", "sg13g2"] as const) {
+    profiles[id] ??= createNetlistExportProfile(id);
+  }
+  if ((parsed.sg13Defaults ?? 0) < SG13_DEFAULTS_GENERATION) {
+    const defaults = createNetlistExportProfile("sg13g2");
+    const sg13 = profiles.sg13g2;
+    for (const family of ["resistor", "capacitor"] as const) {
+      if (sg13?.devices?.[family]?.target === "")
+        sg13.devices[family] = {
+          ...defaults.devices[family],
+          substrate: sg13.devices[family].substrate,
+        };
+    }
+  }
+  const moved =
+    (parsed.defaultProcess ?? 1) < DEFAULT_PROCESS_GENERATION &&
+    parsed.selected === "abstract";
+  return JSON.stringify({
+    format: "spice",
+    ...parsed,
+    ...(moved ? { selected: "sky130" as const } : {}),
+    defaultProcess: DEFAULT_PROCESS_GENERATION,
+    sg13Defaults: SG13_DEFAULTS_GENERATION,
+    profiles,
+  });
+}
+
+export function parseNetlistExportPreferences(
+  raw: string,
+): NetlistExportPreferences {
+  const parsed = JSON.parse(raw) as NetlistExportPreferences | null;
+  if (!parsed || !NETLIST_PROFILE_IDS.includes(parsed.selected))
+    throw new Error(
+      `selected must be one of: ${NETLIST_PROFILE_IDS.join(", ")}.`,
+    );
+  if (parsed.format !== "spice" && parsed.format !== "spectre")
+    throw new Error("format must be spice or spectre.");
+  if (parsed.rnl !== undefined && typeof parsed.rnl !== "boolean")
+    throw new Error("rnl must be true or false.");
+  if ("portCase" in parsed)
+    throw new Error("Port names keep their authored case; remove portCase.");
+  if (
+    !NETLIST_PROFILE_IDS.every(
+      (id) =>
+        isNetlistExportProfile(parsed.profiles?.[id]) &&
+        parsed.profiles[id].id === id,
+    )
+  )
+    throw new Error(
+      "Keep every preset with valid device targets and parameters.",
+    );
+  return parsed;
+}
+export function readNetlistExportPreferences(
+  raw: string | null,
+): NetlistExportPreferences {
+  try {
+    return parseNetlistExportPreferences(
+      migrateStoredNetlistExportPreferences(raw ?? "null"),
+    );
+  } catch {
+    return createDefaultNetlistExportPreferences();
+  }
+}
+
+export function selectNetlistExportProfile(
+  preferences: NetlistExportPreferences,
+  selected: NetlistProfileId,
+): NetlistExportPreferences {
+  return { ...preferences, selected };
+}
+
+export function selectNetlistExportMode(
+  preferences: NetlistExportPreferences,
+  mode: NetlistMode,
+): NetlistExportPreferences {
+  const { format, rnl } = netlistModeParts(mode);
+  const { rnl: _was, ...rest } = preferences;
+  return rnl ? { ...rest, format, rnl } : { ...rest, format };
+}
+
+export function setNetlistExportDeviceTarget(
+  preferences: NetlistExportPreferences,
+  family: NetlistQuickTargetFamily,
+  target: string,
+): NetlistExportPreferences {
+  const profile = setNetlistDefaultTarget(
+    preferences.profiles[preferences.selected],
+    family,
+    target,
+  );
+  return {
+    ...preferences,
+    profiles: { ...preferences.profiles, [preferences.selected]: profile },
+  };
+}
+
+/** Raw JSON is the complete configuration surface; valid edits apply immediately. */
+export function useNetlistExportPreferences() {
+  const [initial] = useState(() => {
+    try {
+      return readNetlistExportPreferences(
+        window.localStorage.getItem(NETLIST_EXPORT_PREFERENCES_KEY),
+      );
+    } catch {
+      return readNetlistExportPreferences(null);
+    }
+  });
+  const [preferences, setPreferences] = useState(initial);
+  const [text, setText] = useState(() => JSON.stringify(initial, null, 2));
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (error) return;
+    try {
+      window.localStorage.setItem(NETLIST_EXPORT_PREFERENCES_KEY, text);
+    } catch {
+      /* Editing and copying work without browser storage. */
+    }
+  }, [text, error]);
+  const changeText = (
+    source: string,
+    apply?: (next: NetlistExportPreferences) => void,
+  ) => {
+    setText(source);
+    try {
+      const next = parseNetlistExportPreferences(source);
+      apply?.(next);
+      setPreferences(next);
+      setError(null);
+      return next;
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Invalid JSON");
+      return null;
+    }
+  };
+  const selectProfile = (selected: NetlistProfileId) => {
+    const next = selectNetlistExportProfile(preferences, selected);
+    const source = JSON.stringify(next, null, 2);
+    setPreferences(next);
+    setText(source);
+    setError(null);
+  };
+  const selectMode = (mode: NetlistMode) => {
+    const next = selectNetlistExportMode(preferences, mode);
+    const source = JSON.stringify(next, null, 2);
+    setPreferences(next);
+    setText(source);
+    setError(null);
+  };
+  const setDeviceTarget = (
+    family: NetlistQuickTargetFamily,
+    target: string,
+    selected: NetlistProfileId = preferences.selected,
+  ) => {
+    if (target && !/^[A-Za-z_][A-Za-z0-9_]*$/u.test(target)) return;
+    const next = setNetlistExportDeviceTarget(
+      { ...preferences, selected },
+      family,
+      target,
+    );
+    const source = JSON.stringify(next, null, 2);
+    setPreferences(next);
+    setText(source);
+    setError(null);
+  };
+  const reset = () => {
+    const next = createDefaultNetlistExportPreferences();
+    setPreferences(next);
+    setText(JSON.stringify(next, null, 2));
+    setError(null);
+  };
+  return {
+    preferences,
+    selected: preferences.selected,
+    format: preferences.format,
+    rnl: preferences.rnl === true,
+    mode: netlistMode(preferences.format, preferences.rnl === true),
+    profile: preferences.profiles[preferences.selected],
+    text,
+    error,
+    changeText,
+    selectProfile,
+    selectMode,
+    setDeviceTarget,
+    reset,
+  };
+}

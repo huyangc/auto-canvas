@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "referenceId": "razavi-reference-v1",
+  "assetPath": "capacitor-reference.png",
+  "assetSha256": "e2b13a01eed7e7565080bc9d0d7c98bc8dc6714ceed3c7159096c8b5deb3dcbc",
+  "coordinateSystem": "reference-raster-pixels",
+  "pixels": { "width": 279, "height": 279 },
+  "pixelsPerLogical": 1.72,
+  "symbols": {
+    "capacitor-vertical": {
+      "evidenceId": "C1-vertical",
+      "originPx": { "x": 67, "y": 114 },
+      "rotation": 0,
+      "cropWindowPx": { "width": 29, "height": 39 }
+    },
+    "capacitor-horizontal": {
+      "evidenceId": "C2-horizontal",
+      "originPx": { "x": 182, "y": 158 },
+      "rotation": 90,
+      "cropWindowPx": { "width": 29, "height": 29 }
+    }
+  }
+}

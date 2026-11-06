@@ -1,0 +1,128 @@
+{
+  "schemaVersion": 1,
+  "referenceId": "razavi-reference-v1",
+  "referenceSha256": "08c89f54345c835324528a63c7519dc3aeda17169febc20134e33056bc85790b",
+  "coordinateSystem": "reference-raster-pixels",
+  "pixelThreshold": 160,
+  "symbols": {
+    "nmos": {
+      "evidencePanel": "a-lower-M2",
+      "pixelsPerLogical": 1.72,
+      "originPx": { "x": 161.8, "y": 217.5 },
+      "pinsPx": {
+        "D": { "x": 179, "y": 183.1 },
+        "G": { "x": 127.4, "y": 217.5 },
+        "S": { "x": 179, "y": 251.9 },
+        "B": { "x": 196.2, "y": 217.5 }
+      },
+      "gateBarsPx": [
+        { "left": 141.5, "top": 201, "right": 146.5, "bottom": 234 },
+        { "left": 150.5, "top": 196, "right": 155.5, "bottom": 239 }
+      ],
+      "channelsPx": {
+        "upper": {
+          "from": { "x": 155.5, "y": 205.5 },
+          "to": { "x": 180, "y": 205.5 }
+        },
+        "lower": {
+          "from": { "x": 155.5, "y": 229.5 },
+          "to": { "x": 180, "y": 229.5 }
+        }
+      },
+      "leadsPx": {
+        "D": {
+          "from": { "x": 179, "y": 205.5 },
+          "to": { "x": 179, "y": 183.1 }
+        },
+        "G": {
+          "from": { "x": 146.5, "y": 217.5 },
+          "to": { "x": 127.4, "y": 217.5 }
+        },
+        "S": {
+          "from": { "x": 179, "y": 229.5 },
+          "to": { "x": 179, "y": 251.9 }
+        }
+      },
+      "sourceArrowPx": {
+        "support": {
+          "from": { "x": 155.5, "y": 229.5 },
+          "to": { "x": 180, "y": 229.5 }
+        },
+        "tip": { "x": 180, "y": 229.5 },
+        "baseTop": { "x": 164, "y": 222.5 },
+        "baseBottom": { "x": 164, "y": 236.5 }
+      },
+      "bulkExtensionPx": {
+        "supports": [
+          {
+            "from": { "x": 155.5, "y": 217.5 },
+            "to": { "x": 179, "y": 217.5 }
+          },
+          {
+            "from": { "x": 190, "y": 217.5 },
+            "to": { "x": 196.2, "y": 217.5 }
+          }
+        ],
+        "tip": { "x": 179, "y": 217.5 },
+        "baseTop": { "x": 190, "y": 211.5 },
+        "baseBottom": { "x": 190, "y": 223.5 }
+      }
+    },
+    "pmos": {
+      "evidencePanel": "b-upper-M3",
+      "pixelsPerLogical": 1.72,
+      "originPx": { "x": 526.8, "y": 82.75 },
+      "pinsPx": {
+        "D": { "x": 544, "y": 48.35 },
+        "G": { "x": 492.4, "y": 82.75 },
+        "S": { "x": 544, "y": 117.15 },
+        "B": { "x": 561.2, "y": 82.75 }
+      },
+      "gateBarsPx": [
+        { "left": 506.5, "top": 66.75, "right": 510.5, "bottom": 98.75 },
+        { "left": 515.5, "top": 61.75, "right": 520.5, "bottom": 103.75 }
+      ],
+      "channelsPx": {
+        "upper": {
+          "from": { "x": 520.5, "y": 70.5 },
+          "to": { "x": 545, "y": 70.5 }
+        },
+        "lower": {
+          "from": { "x": 520.5, "y": 95 },
+          "to": { "x": 545, "y": 95 }
+        }
+      },
+      "leadsPx": {
+        "D": {
+          "from": { "x": 544, "y": 70.5 },
+          "to": { "x": 544, "y": 48.35 }
+        },
+        "G": {
+          "from": { "x": 510.5, "y": 82.75 },
+          "to": { "x": 492.4, "y": 82.75 }
+        },
+        "S": { "from": { "x": 544, "y": 95 }, "to": { "x": 544, "y": 117.15 } }
+      },
+      "sourceArrowPx": {
+        "support": {
+          "from": { "x": 536.5, "y": 70.5 },
+          "to": { "x": 545, "y": 70.5 }
+        },
+        "tip": { "x": 520.5, "y": 70.5 },
+        "baseTop": { "x": 536.5, "y": 63.5 },
+        "baseBottom": { "x": 536.5, "y": 77.5 }
+      },
+      "bulkExtensionPx": {
+        "supports": [
+          {
+            "from": { "x": 520.5, "y": 82.75 },
+            "to": { "x": 550.2, "y": 82.75 }
+          }
+        ],
+        "tip": { "x": 561.2, "y": 82.75 },
+        "baseTop": { "x": 550.2, "y": 76.25 },
+        "baseBottom": { "x": 550.2, "y": 89.25 }
+      }
+    }
+  }
+}

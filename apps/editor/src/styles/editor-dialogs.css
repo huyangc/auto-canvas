@@ -1,0 +1,1385 @@
+/* Editor dialog owner: modal editor workflows and their responsive layout contracts. */
+
+.insert-dialog-backdrop {
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 1.25rem;
+  background: rgb(55 53 47 / 28%);
+  backdrop-filter: blur(4px);
+}
+
+/* The Insert dialog is a one-glance speed picker: every candidate tiles into
+   one flat grid, and a click or Enter starts placement immediately. */
+.insert-component-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  /* The viewport is the available workspace: a half-screen editor fills its
+     half (minus the modal gutter), while a full-screen editor earns enough
+     width for substantially more component columns. The cap keeps ultrawide
+     displays from turning the picker into an unreadably long scan line. */
+  width: min(96rem, calc(100vw - 2.5rem));
+  max-height: calc(100dvh - 2.5rem);
+  padding: 1rem;
+  overflow: hidden;
+  border: 1px solid var(--icm-border-strong);
+  border-radius: var(--icm-radius-lg);
+  color: var(--icm-text);
+  background: var(--icm-surface);
+  box-shadow: var(--icm-shadow-lg);
+}
+
+/* Cell placement shares picker behavior, not the Library's wide layout. */
+.insert-cell-dialog {
+  width: min(57.6rem, calc(60vw - 1.5rem));
+  min-width: min(22rem, calc(100vw - 2.5rem));
+  height: min(36rem, calc(100dvh - 2.5rem));
+}
+
+.insert-cell-dialog .insert-tile-grid {
+  grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr));
+  grid-auto-rows: max-content;
+}
+
+.insert-cell-dialog .insert-tile {
+  gap: 0.375rem;
+  padding: 0.625rem 0.4375rem 0.5625rem;
+}
+
+.insert-cell-dialog .insert-tile .insert-symbol-artwork {
+  height: 4.25rem;
+}
+
+.insert-dialog-header,
+.insert-dialog-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.insert-dialog-header p,
+.insert-dialog-header h2 {
+  margin: 0;
+}
+
+.insert-dialog-header p {
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.insert-dialog-header h2 {
+  margin-top: 0.15rem;
+  font-size: 16px;
+}
+
+.insert-dialog-header kbd {
+  padding: 0.15rem 0.42rem;
+  border: 1px solid var(--icm-border-strong);
+  border-radius: 0.3rem;
+  background: var(--icm-surface-muted);
+  box-shadow: 0 1px 0 var(--icm-border-strong);
+  font: inherit;
+  font-size: var(--icm-font-sm);
+}
+
+.insert-quick-search {
+  width: 100%;
+  min-height: 2.35rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--icm-border-strong);
+  border-radius: var(--icm-radius-md);
+  color: var(--icm-text);
+  background: var(--icm-surface);
+  font: inherit;
+  font-size: var(--icm-font-lg);
+}
+
+.insert-quick-search:focus {
+  border-color: var(--icm-accent);
+  background: var(--icm-surface);
+  box-shadow: 0 0 0 3px var(--icm-accent-soft);
+}
+
+.insert-category-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.insert-category-chip {
+  min-height: 0;
+  padding: 0.22rem 0.6rem;
+  border: 1px solid var(--icm-border);
+  border-radius: 999px;
+  color: var(--icm-text-muted);
+  background: var(--icm-surface-muted);
+  box-shadow: none;
+  font-size: var(--icm-font-xs);
+  font-weight: 600;
+}
+
+.insert-category-chip[aria-pressed="true"] {
+  border-color: var(--icm-accent);
+  color: var(--icm-accent);
+  background: var(--icm-accent-soft);
+}
+
+.insert-tile-grid {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(6.4rem, 1fr));
+  align-content: start;
+  gap: 0.45rem;
+  min-height: 0;
+  padding: 0.55rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-md);
+  background: var(--icm-surface-muted);
+  scrollbar-width: thin;
+}
+
+.insert-tile {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.5rem 0.35rem 0.45rem;
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-md);
+  background: var(--icm-surface);
+  box-shadow: none;
+  text-align: center;
+}
+
+.insert-tile:hover,
+.insert-tile[aria-selected="true"] {
+  border-color: var(--icm-accent);
+  color: var(--icm-accent);
+  background: var(--icm-accent-soft);
+}
+
+.insert-tile[aria-selected="true"] {
+  box-shadow: 0 0 0 2px var(--icm-accent-soft);
+}
+
+.insert-tile .insert-symbol-artwork {
+  width: 100%;
+  height: 3.4rem;
+  color: #111827;
+}
+
+.insert-tile span {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: var(--icm-font-xs);
+  font-weight: 600;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.insert-no-results {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 1.25rem;
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-md);
+  text-align: center;
+}
+
+.insert-dialog-actions > small {
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-sm);
+}
+
+/* Cell Manager is a compact master-detail workbench. Interface facts remain
+   definition-owned, while the left column stays purely navigational. */
+.cell-manager-dialog {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: min(64rem, calc(100vw - 2.5rem));
+  height: min(42rem, calc(100dvh - 2.5rem));
+  overflow: hidden;
+  border: 1px solid var(--icm-border-strong);
+  border-radius: var(--icm-radius-lg);
+  color: var(--icm-text);
+  background: var(--icm-surface);
+  box-shadow: var(--icm-shadow-lg);
+}
+
+.cell-manager-header,
+.cell-manager-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--icm-space-3);
+}
+
+/* Title, definition scope and dismiss share one band; a second full-width
+   tab strip only ate detail height. */
+.cell-manager-header {
+  flex-wrap: wrap;
+  min-height: 52px;
+  padding: var(--icm-space-2) var(--icm-space-3) var(--icm-space-2)
+    var(--icm-space-4);
+  border-bottom: 1px solid var(--icm-border);
+}
+
+.cell-manager-header p,
+.cell-manager-header h2,
+.cell-manager-detail-header h3,
+.cell-interface-section h3,
+.cell-interface-section p {
+  margin: 0;
+}
+
+.cell-manager-header p {
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.cell-manager-header h2 {
+  margin-top: 2px;
+  font-size: var(--icm-font-lg);
+}
+
+.cell-manager-heading {
+  min-width: 0;
+}
+
+/* Same tab affordance as the Simulation workspace, so switching definition
+   scope reads as a tab and not as a pressed toggle. */
+.cell-manager-resource-tabs {
+  display: flex;
+  gap: var(--icm-space-1);
+  margin-left: auto;
+}
+
+.cell-manager-resource-tabs [role="tab"] {
+  min-height: 26px;
+  padding: 0 var(--icm-space-2);
+  border-color: transparent;
+  color: var(--icm-text-muted);
+  background: transparent;
+  box-shadow: none;
+  font-size: var(--icm-font-sm);
+  white-space: nowrap;
+}
+
+.cell-manager-resource-tabs [role="tab"][aria-selected="true"] {
+  border-color: var(--icm-border);
+  color: var(--icm-accent);
+  background: var(--icm-surface);
+  font-weight: 650;
+}
+
+.cell-manager-dismiss {
+  flex: 0 0 auto;
+  width: var(--icm-control-h);
+  min-width: var(--icm-control-h);
+  min-height: var(--icm-control-h);
+  padding: 0;
+  box-shadow: none;
+  font-size: var(--icm-font-lg);
+  line-height: 1;
+}
+
+.cell-manager-body {
+  display: grid;
+  grid-template-columns: 13rem minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+}
+
+.cell-manager-list {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--icm-border);
+  background: var(--icm-surface-muted);
+}
+
+.cell-manager-list > input[type="search"] {
+  min-width: 0;
+  margin: var(--icm-space-2);
+}
+
+.cell-manager-list-scroll {
+  flex: 1 1 0;
+  min-height: 0;
+  padding: var(--icm-space-2);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.cell-manager-list-item {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  min-height: 52px;
+  padding: var(--icm-space-2);
+  border: 0;
+  border-radius: var(--icm-radius-sm);
+  background: transparent;
+  box-shadow: none;
+  text-align: left;
+}
+
+.cell-manager-list-item:hover,
+.cell-manager-list-item[aria-selected="true"] {
+  background: var(--icm-surface);
+}
+
+.cell-manager-list-item[aria-selected="true"] {
+  color: var(--icm-accent);
+  box-shadow: inset 3px 0 0 var(--icm-accent);
+}
+
+.cell-manager-list-item > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--icm-space-2);
+}
+
+.cell-manager-list-item strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cell-manager-list-item em,
+.cell-manager-title-row span,
+.cell-count-badge {
+  padding: 2px 6px;
+  border-radius: 999px;
+  color: var(--icm-text-muted);
+  background: var(--icm-surface-hover);
+  font-size: var(--icm-font-xs);
+  font-style: normal;
+  font-weight: 600;
+}
+
+.cell-manager-list-item small {
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-xs);
+}
+
+.cell-manager-list-actions {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  flex: 0 0 auto;
+  gap: var(--icm-space-2);
+  padding: var(--icm-space-2);
+  border-top: 1px solid var(--icm-border);
+}
+
+.cell-manager-new {
+  min-height: var(--icm-control-h);
+  padding: 0 var(--icm-space-2);
+  overflow: hidden;
+  box-shadow: none;
+  font-size: var(--icm-font-sm);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.cell-manager-detail {
+  /* Single source for the pane inset: the sticky action bar below cancels it
+     to span the scrollport, so the two must never drift apart. */
+  --cell-manager-detail-pad: var(--icm-space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--icm-space-3);
+  min-width: 0;
+  min-height: 0;
+  padding: var(--cell-manager-detail-pad);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+/* Chrome insets a sticky rectangle by the scroll container's padding, so a
+   bottom inset would leave an uncovered strip that earlier siblings scroll
+   through. The action bar supplies its own breathing room instead. */
+.cell-manager-detail:has(> .external-model-workbench) {
+  padding-bottom: 0;
+}
+
+/*
+ * The netlist is the subject of this pane, so the workbench is a flex column
+ * and the editor is its only elastic child: it absorbs whatever height the
+ * dialog has left instead of sitting at a fixed clamp.
+ */
+.external-model-workbench {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+  gap: var(--icm-space-2);
+  min-width: 0;
+}
+
+.external-model-workbench > * {
+  flex: 0 0 auto;
+}
+
+.external-model-workbench .netlist-code-selects label {
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px;
+}
+
+.external-model-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--icm-space-1);
+}
+.external-model-files button[aria-pressed="true"] {
+  border-color: var(--icm-accent);
+  background: var(--icm-accent-tint);
+}
+.external-model-symbol {
+  width: 140px;
+  max-width: 100%;
+  height: 72px;
+}
+.external-model-workbench label {
+  display: grid;
+  gap: var(--icm-space-1);
+  min-width: 0;
+}
+.external-model-workbench label > span {
+  min-width: 0;
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-xs);
+  overflow-wrap: anywhere;
+}
+.external-model-workbench select,
+.external-model-workbench input {
+  min-width: 0;
+  width: 100%;
+}
+.external-model-dependency {
+  display: grid;
+  gap: var(--icm-space-2);
+}
+
+.external-model-source-view {
+  display: contents;
+}
+.external-model-source-view[hidden] {
+  display: none;
+}
+.external-model-source-view > .project-source-editor {
+  flex: 1 1 0;
+  height: auto;
+  /* Floor for short viewports; overrides `editor-chrome.css`'s 24rem. */
+  min-height: clamp(7rem, 18dvh, 12rem);
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-md);
+}
+
+/* Once a model is applied, the always-expanded Symbol Layout card below is
+ * taller than the collapsed `<details>` it replaced. Raise the floor only in
+ * that state so it can never shrink the editor past a comfortable size,
+ * without eating into the unrelated pre-apply layout's narrow-viewport
+ * margin. */
+.external-model-workbench:has(.external-model-layout-section)
+  > .external-model-source-view
+  > .project-source-editor {
+  min-height: clamp(8rem, 24dvh, 16rem);
+}
+
+.external-model-workbench .cm-editor,
+.external-model-workbench .cm-scroller {
+  height: 100%;
+}
+
+/* What the parser actually read, as one strip: the `.subckt` text is already
+ * visible in the editor directly above, so nothing here restates it. */
+.external-model-interface {
+  display: flex;
+  align-items: center;
+  gap: var(--icm-space-2);
+  min-width: 0;
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-xs);
+  overflow-wrap: anywhere;
+}
+.external-model-ports {
+  min-width: 0;
+  color: var(--icm-text);
+  font-family: var(--icm-font-mono, ui-monospace, "SFMono-Regular", monospace);
+  font-size: var(--icm-font-sm);
+}
+.external-model-interface .cell-count-badge {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.external-model-state {
+  margin: 0;
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-xs);
+  overflow-wrap: anywhere;
+}
+
+/* Collapsible blocks read as the dialog's own cards, not as the uppercase
+ * properties-panel language. */
+.external-model-section {
+  min-width: 0;
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-md);
+  background: var(--icm-surface);
+}
+.external-model-section > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--icm-space-2);
+  min-height: var(--icm-control-h-lg);
+  padding-inline: var(--icm-space-3);
+  cursor: pointer;
+  list-style: none;
+  font-size: var(--icm-font-sm);
+  font-weight: 600;
+}
+.external-model-section > summary::-webkit-details-marker {
+  display: none;
+}
+.external-model-section > summary::before {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid var(--icm-text-muted);
+  border-bottom: 1.5px solid var(--icm-text-muted);
+  transform: rotate(-45deg);
+  transition: transform 120ms ease;
+  content: "";
+}
+.external-model-section[open] > summary::before {
+  transform: rotate(45deg);
+}
+.external-model-section-body {
+  display: grid;
+  gap: var(--icm-space-2);
+  min-width: 0;
+  padding: var(--icm-space-3);
+  border-top: 1px solid var(--icm-border);
+}
+
+/* Always expanded, so it reads as the dialog's own unified card instead of
+ * borrowing the collapsible `.external-model-section` chrome above. */
+.external-model-layout-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--icm-space-2);
+  min-width: 0;
+  padding: var(--icm-space-3);
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-md);
+  background: var(--icm-surface);
+}
+.external-model-layout-section > header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.external-model-layout-section > header h3 {
+  margin: 0;
+  font-size: var(--icm-font-md);
+}
+.external-model-layout-section > header p {
+  margin: 0;
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-xs);
+  line-height: var(--icm-line);
+}
+
+.external-model-directions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--icm-space-2) var(--icm-space-3);
+}
+/* Two columns inside each row as well, and both sized to their content so the
+ * select sits beside its own label instead of across a column of dead space.
+ * The template is identical in every cell, so the rows stay baseline-aligned. */
+.external-model-directions label {
+  display: grid;
+  grid-template-columns: minmax(0, 8.5rem) minmax(0, 6rem);
+  align-items: center;
+  gap: var(--icm-space-2);
+}
+.external-model-directions label > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.external-model-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(9rem, 11rem);
+  align-items: start;
+  gap: var(--icm-space-3);
+}
+.external-model-layout-controls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--icm-space-2);
+  min-width: 0;
+}
+@media (max-width: 860px) {
+  .external-model-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .external-model-layout-preview {
+    justify-self: start;
+    width: min(100%, 14rem);
+  }
+}
+/* Already inside a card; drop the nested one it brings from the properties
+ * panel, heading included. */
+.external-model-layout .cell-symbol-layout-properties {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+.external-model-layout .property-section-heading {
+  display: none;
+}
+.external-model-layout .component-geometry-row {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.external-model-layout .cell-symbol-pin-layout-table th,
+.external-model-layout .cell-symbol-pin-layout-table td {
+  padding-inline: 2px;
+}
+.external-model-layout .cell-symbol-pin-layout-table tr > :nth-child(2) {
+  width: 4.5rem;
+}
+.external-model-layout .cell-symbol-pin-layout-table tr > :nth-child(3) {
+  width: 3.5rem;
+}
+.external-model-layout-preview {
+  display: grid;
+  gap: var(--icm-space-1);
+  min-width: 0;
+  margin: 0;
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-xs);
+}
+.external-model-preview-frame {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  min-width: 0;
+  padding: var(--icm-space-2);
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-sm);
+  background-color: var(--icm-surface);
+  background-image: radial-gradient(var(--icm-border) 1px, transparent 1px);
+  background-size: 10px 10px;
+}
+.external-model-layout-preview .external-model-symbol {
+  width: 100%;
+  height: 100%;
+  color: var(--icm-text);
+}
+
+/*
+ * Sticky footer. It is the workbench's last child, so no normal-flow content
+ * can scroll out from under it; the negative inline margins cancel the pane's
+ * own inset so its opaque background spans the whole scrollport, and the pane
+ * drops its bottom padding so nothing can slip under the stuck edge.
+ */
+.external-model-actionbar {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--icm-space-2);
+  margin-top: calc(-1 * var(--icm-space-2));
+  margin-inline: calc(-1 * var(--cell-manager-detail-pad, var(--icm-space-4)));
+  padding-block: var(--icm-space-2);
+  padding-inline: var(--cell-manager-detail-pad, var(--icm-space-4));
+  background: var(--icm-surface);
+  border-top: 1px solid var(--icm-border);
+}
+.external-model-more {
+  position: relative;
+  margin-left: auto;
+}
+.external-model-more summary,
+.cell-hierarchy-tree summary {
+  cursor: pointer;
+  padding: var(--icm-space-2);
+  font-size: var(--icm-font-sm);
+}
+.external-model-more > div {
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  display: grid;
+  gap: var(--icm-space-1);
+  width: max-content;
+  max-width: min(18rem, 80vw);
+  max-height: 45dvh;
+  overflow: auto;
+  padding: var(--icm-space-2);
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-md);
+  background: var(--icm-surface);
+  box-shadow: var(--icm-shadow-lg);
+}
+.cell-manager-back {
+  display: none;
+}
+.cell-manager-actions {
+  flex-wrap: wrap;
+}
+
+@media (max-width: 680px) {
+  .cell-manager-dialog {
+    width: calc(100vw - 1rem);
+    height: calc(100dvh - 1rem);
+  }
+  .cell-manager-body[data-pane] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .cell-manager-body[data-pane="detail"] > .cell-manager-list,
+  .cell-manager-body[data-pane="list"] > .cell-manager-detail {
+    display: none;
+  }
+  .cell-manager-back {
+    display: inline-block;
+    margin-bottom: var(--icm-space-2);
+  }
+  .cell-manager-list {
+    border-right: 0;
+  }
+}
+
+.cell-manager-detail-header {
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+}
+
+.cell-manager-title-row,
+.cell-manager-actions,
+.cell-interface-order-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--icm-space-1);
+}
+
+.cell-manager-detail-header .cell-manager-title-row {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.cell-manager-title-row h3 {
+  overflow: hidden;
+  font-size: var(--icm-font-lg);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cell-manager-actions button,
+.cell-interface-section button,
+.cell-manager-callers button {
+  min-height: var(--icm-control-h);
+  padding: 0 var(--icm-space-2);
+  box-shadow: none;
+}
+
+.cell-manager-confirm {
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-sm);
+}
+
+.cell-interface-editor {
+  display: grid;
+  flex: 0 0 auto;
+  gap: var(--icm-space-3);
+}
+
+.cell-interface-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(16rem, 0.85fr);
+  gap: var(--icm-space-3);
+}
+
+.cell-interface-grid:not(:has(.cell-parameter-list)) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.cell-interface-section,
+.cell-manager-callers {
+  flex: 0 0 auto;
+  min-width: 0;
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-md);
+  background: var(--icm-surface);
+}
+
+.cell-interface-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--icm-space-2);
+  padding: var(--icm-space-3);
+}
+
+.cell-interface-section > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--icm-space-2);
+}
+
+.cell-interface-section h3 {
+  font-size: var(--icm-font-md);
+}
+
+.cell-interface-section header p,
+.cell-interface-empty {
+  margin-top: 2px;
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-xs);
+  line-height: var(--icm-line);
+}
+
+.cell-interface-table,
+.cell-parameter-list {
+  display: grid;
+  gap: 4px;
+}
+
+.cell-interface-row {
+  display: grid;
+  grid-template-columns: 1.6rem minmax(5.5rem, 1fr) 6.2rem auto;
+  align-items: center;
+  gap: 4px;
+}
+
+.cell-interface-port-name {
+  display: grid;
+  min-width: 0;
+  line-height: var(--icm-line);
+}
+
+.cell-interface-port-name strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cell-interface-port-name small {
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-xs);
+}
+
+.cell-interface-order {
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-xs);
+  text-align: center;
+}
+
+.cell-interface-row input,
+.cell-interface-row select,
+.cell-parameter-row input,
+.cell-external-grid input,
+.cell-external-grid select {
+  min-width: 0;
+  width: 100%;
+  height: var(--icm-control-h-lg);
+  padding: 0 var(--icm-space-2);
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-sm);
+  color: var(--icm-text);
+  background: var(--icm-surface);
+  font: inherit;
+  font-size: var(--icm-font-sm);
+}
+
+.cell-interface-order-actions {
+  gap: 2px;
+}
+
+.cell-interface-order-actions button,
+.cell-parameter-row button {
+  width: 28px;
+  min-width: 28px;
+  padding: 0;
+}
+
+/* A second bounded navigator docked under the definition list: expanding an
+   occurrence scrolls inside the tree instead of pushing the list away. */
+.cell-hierarchy-tree {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  min-height: 0;
+  max-height: 45%;
+  border-top: 1px solid var(--icm-border);
+}
+
+.cell-hierarchy-tree[open] {
+  flex: 1 1 auto;
+}
+
+.cell-hierarchy-tree summary {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 0 var(--icm-space-3);
+  cursor: pointer;
+  list-style: none;
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-xs);
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.cell-hierarchy-tree summary::-webkit-details-marker {
+  display: none;
+}
+
+.cell-hierarchy-tree ul {
+  list-style: none;
+  padding-left: 12px;
+  margin: 4px 0;
+}
+
+.cell-hierarchy-tree > ul {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  padding: 0 var(--icm-space-2) var(--icm-space-2);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.cell-hierarchy-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* Tree rows carry the same quiet weight as the Cell list rows beside them. */
+.cell-hierarchy-row button {
+  min-height: 24px;
+  padding: 0 var(--icm-space-1);
+  overflow: hidden;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  font-size: var(--icm-font-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cell-hierarchy-row button:hover:not(:disabled) {
+  border-color: var(--icm-border);
+  background: var(--icm-surface);
+}
+
+.cell-hierarchy-row > button:first-child,
+.cell-hierarchy-row > span[aria-hidden] {
+  width: 18px;
+  min-width: 18px;
+  padding: 0;
+  color: var(--icm-text-muted);
+  text-align: center;
+}
+
+.cell-parameter-row {
+  display: grid;
+  grid-template-columns: minmax(4rem, 1fr) minmax(4rem, 1fr) 28px;
+  align-items: center;
+  gap: 4px;
+}
+
+/* A dashed rest state keeps the heading editable-looking; the old transparent
+   border gave rename no affordance at all. */
+.cell-manager-name {
+  width: 100%;
+  min-width: 0;
+  height: var(--icm-control-h);
+  padding: 0 var(--icm-space-2);
+  border: 1px dashed var(--icm-border-strong);
+  border-radius: var(--icm-radius-sm);
+  background: transparent;
+  font: inherit;
+  font-size: var(--icm-font-lg);
+  font-weight: 650;
+}
+
+.cell-manager-name:hover {
+  background: var(--icm-surface-muted);
+}
+
+.cell-manager-name:focus {
+  border-style: solid;
+  border-color: var(--icm-accent);
+  background: var(--icm-surface);
+}
+.cell-manager-entry {
+  position: relative;
+  display: flex;
+  align-items: center;
+  border-top: 2px solid transparent;
+}
+.cell-manager-entry .cell-manager-list-item {
+  flex: 1;
+  min-width: 0;
+}
+.cell-manager-entry[data-drop="active"] {
+  border-color: var(--icm-accent);
+  background: var(--icm-accent-soft);
+}
+.cell-drop-hint {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  background: var(--icm-surface);
+  color: var(--icm-accent);
+}
+.cell-manager-drop-end {
+  min-height: 1.6rem;
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-xs);
+  text-align: center;
+}
+
+.cell-manager-callers summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 38px;
+  padding: 0 var(--icm-space-3);
+  cursor: pointer;
+  list-style: none;
+  font-size: var(--icm-font-sm);
+  font-weight: 600;
+}
+
+.cell-manager-callers summary::-webkit-details-marker {
+  display: none;
+}
+
+/* The card owns the padding and the border now, so the field grid is plain
+   content and the submit button lives in a real footer. */
+.cell-external-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--icm-space-2) var(--icm-space-3);
+}
+
+.cell-external-grid label {
+  display: grid;
+  gap: 3px;
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-xs);
+}
+
+.cell-external-grid label:last-of-type {
+  grid-column: 1 / -1;
+}
+
+.cell-external-result {
+  margin: 0;
+  padding: var(--icm-space-2);
+  border: 1px solid var(--icm-border);
+  border-left: 3px solid var(--icm-accent);
+  border-radius: var(--icm-radius-sm);
+  background: var(--icm-surface-muted);
+  font-size: var(--icm-font-sm);
+  line-height: var(--icm-line);
+}
+
+.cell-external-result[role="alert"] {
+  border-left-color: var(--icm-error);
+  color: var(--icm-error);
+}
+
+.cell-external-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--icm-space-2);
+  margin-top: var(--icm-space-1);
+  padding-top: var(--icm-space-2);
+  border-top: 1px solid var(--icm-border);
+}
+
+/* Selection-scoped actions stay left of the commit button so the primary
+   action keeps the same slot whether or not a definition is selected. */
+.cell-external-actions-lead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--icm-space-2);
+  margin-right: auto;
+}
+
+.cell-external-actions .primary:not(:disabled) {
+  border-color: var(--icm-accent);
+  color: #fff;
+  background: var(--icm-accent);
+}
+
+/* Secondary reference material sinks to the bottom of the detail pane, so a
+   short definition no longer leaves a void under its card. */
+.cell-manager-callers {
+  margin-top: auto;
+}
+
+.cell-manager-callers ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0 var(--icm-space-3) var(--icm-space-3);
+  list-style: none;
+}
+
+.cell-manager-callers li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--icm-space-2);
+  font-size: var(--icm-font-sm);
+}
+
+.cell-manager-dialog-layer {
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: var(--icm-space-4);
+  border-radius: inherit;
+  background: rgb(55 53 47 / 24%);
+  backdrop-filter: blur(3px);
+}
+
+.editor-action-dialog {
+  display: grid;
+  gap: var(--icm-space-4);
+  width: min(25rem, calc(100vw - 2.5rem));
+  max-height: calc(100dvh - 3rem);
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  padding: var(--icm-space-4);
+  border: 1px solid var(--icm-border-strong);
+  border-radius: var(--icm-radius-lg);
+  color: var(--icm-text);
+  background: var(--icm-surface);
+  box-shadow: var(--icm-shadow-lg);
+}
+
+.editor-action-dialog-header p,
+.editor-action-dialog-header h2,
+.editor-action-dialog-body p {
+  margin: 0;
+}
+
+.editor-action-dialog-header p {
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.editor-action-dialog-header h2 {
+  margin-top: 2px;
+  font-size: var(--icm-font-lg);
+}
+
+.editor-action-dialog-body {
+  display: grid;
+  gap: var(--icm-space-3);
+  overflow: auto;
+  min-width: 0;
+}
+
+.editor-action-dialog-body > label {
+  display: grid;
+  gap: var(--icm-space-1);
+  min-width: 0;
+}
+.editor-action-dialog-body select {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--icm-control-h-lg);
+}
+
+.editor-action-dialog-body p {
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-sm);
+  line-height: 1.5;
+}
+
+.editor-action-dialog-field {
+  display: grid;
+  gap: var(--icm-space-1);
+}
+
+.cell-signal-migration {
+  display: grid;
+  gap: var(--icm-space-3);
+  min-width: 0;
+}
+
+.cell-signal-migration label {
+  display: grid;
+  gap: var(--icm-space-1);
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--icm-font-sm);
+}
+
+.editor-action-dialog-body > p,
+.editor-action-dialog-body li {
+  overflow-wrap: anywhere;
+}
+
+.editor-action-dialog-field span {
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-sm);
+  font-weight: 600;
+}
+
+.editor-action-dialog-field input {
+  width: 100%;
+  min-height: var(--icm-control-h-lg);
+  padding: 0 var(--icm-space-2);
+}
+
+.editor-action-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--icm-space-2);
+  padding-top: var(--icm-space-1);
+}
+
+.editor-action-dialog-actions button {
+  min-width: 5.5rem;
+  min-height: var(--icm-control-h-lg);
+}
+
+.editor-action-dialog-actions .primary {
+  border-color: var(--icm-accent);
+  color: #fff;
+  background: var(--icm-accent);
+}
+
+.editor-action-dialog-actions .danger {
+  border-color: var(--icm-danger, #b42318);
+  color: #fff;
+  background: var(--icm-danger, #b42318);
+}
+
+.netlist-preview {
+  min-height: 10rem;
+  margin: 0;
+  padding: 0.65rem;
+  overflow: auto;
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-md);
+  color: var(--icm-text);
+  background: var(--icm-surface);
+  font: 0.74rem/1.45 var(--icm-font-mono, ui-monospace, monospace);
+  white-space: pre;
+}
+
+/* One compact Reference/Value switch shared by the insert dialog, the
+   component properties panel, and group selection. */
+.display-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.display-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 0;
+  color: var(--icm-text);
+  font-size: var(--icm-font-sm);
+  cursor: pointer;
+}
+
+.display-toggle input {
+  min-height: 0;
+  width: auto;
+  padding: 0;
+  border: none;
+  background: none;
+  accent-color: var(--icm-accent);
+}
+
+.display-toggle.disabled {
+  color: var(--icm-text-muted);
+  cursor: help;
+}
+
+@media (max-width: 860px) {
+  .cell-manager-dialog {
+    width: calc(100vw - 1rem);
+    height: calc(100dvh - 1rem);
+  }
+
+  /* Narrow headers cannot fit title and tabs on one line; the tabs drop to
+     their own row instead of squeezing the title to nothing. */
+  .cell-manager-resource-tabs {
+    flex-basis: 100%;
+    margin-left: 0;
+  }
+
+  .cell-manager-body {
+    grid-template-columns: 11.5rem minmax(0, 1fr);
+  }
+
+  .cell-manager-detail {
+    --cell-manager-detail-pad: var(--icm-space-3);
+  }
+
+  .cell-manager-detail-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  /* Column direction would read the title row's flex-basis as a height, so the
+     stacked header keeps its intrinsic size and still clips a long name. */
+  .cell-manager-detail-header .cell-manager-title-row {
+    flex: 0 0 auto;
+    width: 100%;
+  }
+
+  .cell-interface-grid,
+  .cell-external-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

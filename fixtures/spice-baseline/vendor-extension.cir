@@ -1,0 +1,6 @@
+Vendor extension preservation
+R1 IN 0 1k
+Alogic [IN] [OUT] d_buffer
+Ncompact D G S B vendor_osdi_model
+.vendor_option preserve=this
+.end

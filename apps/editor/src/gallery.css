@@ -1,0 +1,2227 @@
+/* ---------- Community gallery landing feed ---------- */
+
+.gallery-shell {
+  /* The editor locks #root/body with overflow: hidden for the canvas;
+     the gallery pages therefore scroll INSIDE their own shell — without
+     this, anything below the first viewport is unreachable. */
+  height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  background: var(--icm-chrome-bg);
+  color: var(--icm-text);
+}
+
+/* Both views wear the same chrome band: one header height, one control
+   height, and a brand block that spans the same band as the buttons so the
+   two sides of the row read as equal. */
+.gallery-chrome {
+  display: flex;
+  /* A child of the Gallery's column: when it wraps into two rows it must not
+     be squeezed back to one row's height over the tabs below. */
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--icm-space-3);
+  height: var(--icm-menubar-h);
+  min-height: var(--icm-menubar-h);
+  padding: 0 var(--icm-space-3);
+  border-bottom: 1px solid var(--icm-border);
+  background: var(--icm-surface);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+/* Narrow, the header stays one row: what it repeats goes. Report bug and
+   GitHub leave, New Circuit too (Editor at the left opens a new circuit),
+   and the account shows its round mark alone. It follows the base rule
+   above; written in styles.css, which loads first, it would lose to it. */
+@media (max-width: 620px) {
+  .gallery-chrome {
+    gap: var(--icm-space-2);
+    padding-inline: var(--icm-space-2);
+  }
+
+  .gallery-actions {
+    gap: 6px;
+  }
+
+  .gallery-actions .bug-report-link,
+  .gallery-actions .app-repository-link {
+    display: none;
+  }
+
+  .gallery-actions .account-name {
+    max-width: none;
+    padding-inline: 4px;
+    font-size: 0;
+  }
+
+  .gallery-actions .account-name::before {
+    margin-right: 0;
+    font-size: 11px;
+  }
+}
+
+.gallery-chrome .app-brand,
+.app-chrome-main .app-brand,
+.gallery-actions,
+.account-menu {
+  min-height: var(--icm-control-h);
+}
+
+/* The Gallery's one way into the editor, so it wears the primary blue. */
+.gallery-editor-link {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  height: var(--icm-control-h);
+  padding: 0 11px 0 9px;
+  border-radius: 999px;
+  color: var(--icm-accent);
+  background: var(--icm-accent-soft);
+  font-size: var(--icm-font-sm);
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+/* At rest it wears the soft blue of the header's other links, and lights up
+   only under the pointer, as they do. */
+.gallery-editor-link:hover {
+  color: #fff;
+  background: var(--icm-accent);
+}
+
+.gallery-editor-link:focus-visible {
+  outline: 2px solid var(--icm-accent);
+  outline-offset: 2px;
+}
+
+.gallery-editor-link svg {
+  width: 15px;
+  height: 15px;
+}
+
+/* Chip Arena beside the Editor, in the same soft blue. */
+.gallery-arena-link {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  height: var(--icm-control-h);
+  padding: 0 11px 0 9px;
+  border-radius: 999px;
+  color: var(--icm-accent);
+  background: var(--icm-accent-soft);
+  font-size: var(--icm-font-sm);
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.gallery-arena-link:hover {
+  color: #fff;
+  background: var(--icm-accent);
+}
+
+.gallery-arena-link:focus-visible {
+  outline: 2px solid var(--icm-accent);
+  outline-offset: 2px;
+}
+
+.gallery-arena-link svg {
+  width: 18px;
+  height: 18px;
+}
+
+.gallery-actions .account-signin summary {
+  display: inline-flex;
+  align-items: center;
+  height: var(--icm-control-h);
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.gallery-actions {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.account-menu {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.account-name {
+  text-decoration: none;
+  padding: 6px 10px;
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-sm);
+  color: var(--icm-text);
+  background: var(--icm-surface);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.account-name:hover {
+  background: var(--icm-surface-hover);
+}
+
+.account-name {
+  font-weight: 600;
+  /* The chip is one line always: a long display name ellipsizes instead of
+     wrapping inside the fixed-height control. It stays inline-block on
+     purpose — text-overflow does nothing on a flex container, so the header
+     row's shared inline-flex rule deliberately skips this one control, and a
+     name that outgrows the chip would otherwise be cut mid-letter. */
+  display: inline-block;
+  box-sizing: border-box;
+  height: var(--icm-control-h);
+  /* A flex item will not shrink below its content without this, which is how
+     the chip ended up narrower than its own max-width and clipped anyway. */
+  min-width: 0;
+  max-width: 15.75rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* The line box is the whole content box, so the name sits on the row's
+     centre line. The shared control rule this one opts out of also zeroed
+     these; with the 6px back, a 26px line inside a 14px content box pushed
+     the name 6px below every other control in the header. */
+  padding-top: 0;
+  padding-bottom: 0;
+  line-height: calc(var(--icm-control-h) - 2px);
+}
+
+.account-signin summary {
+  padding: 8px 14px;
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-sm);
+  color: var(--icm-text);
+  background: var(--icm-surface);
+  font-size: 13px;
+  font-weight: 600;
+  list-style: none;
+  cursor: pointer;
+}
+
+.account-signin summary::-webkit-details-marker {
+  display: none;
+}
+
+.account-signin summary:hover {
+  background: var(--icm-surface-hover);
+}
+
+.account-signin-panel {
+  position: absolute;
+  z-index: 60;
+  top: calc(100% + 8px);
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 18rem;
+  padding: 16px;
+  border: 1px solid var(--icm-border);
+  border-radius: 12px;
+  background: var(--icm-surface);
+  box-shadow: 0 16px 36px rgb(15 15 15 / 16%);
+}
+
+.account-link {
+  padding: 6px 10px;
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-sm);
+  color: var(--icm-text);
+  background: var(--icm-surface);
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.account-link:hover {
+  background: var(--icm-surface-hover);
+}
+
+.account-popover {
+  position: absolute;
+  z-index: 60;
+  top: calc(100% + 6px);
+  right: 0;
+  display: grid;
+  min-width: 11rem;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid var(--icm-border);
+  border-radius: 10px;
+  background: var(--icm-surface);
+  box-shadow:
+    0 0 0 1px rgb(15 15 15 / 3%),
+    0 12px 32px rgb(15 15 15 / 12%);
+}
+
+.account-menu-identity {
+  display: grid;
+  gap: 4px;
+  padding: 6px 8px 8px;
+  border-bottom: 1px solid var(--icm-border);
+}
+
+.account-menu-identity strong {
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.review-shell {
+  /* Same scroll-inside-the-shell rule as .gallery-shell: the app root is
+     overflow: hidden, so these pages own their scrolling. */
+  height: 100%;
+  overflow-y: auto;
+  background: var(--icm-surface);
+}
+
+.page-body {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 6px 22px 40px;
+}
+
+.review-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 12px 0 0;
+}
+
+.mine-list {
+  padding: 12px 0 0;
+}
+
+/* A Gallery entry as a card wherever entries are managed — an account's
+   own circuits and moderation alike: the drawing as the Gallery tiles show
+   it, then the status badge, name, date, one row of actions and notes. */
+.entry-card {
+  border: 1px solid var(--icm-border);
+  border-radius: 12px;
+  background: var(--icm-surface);
+  transition:
+    border-color 120ms,
+    box-shadow 120ms;
+}
+
+.entry-card:hover {
+  border-color: var(--icm-border-hover);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 6%);
+}
+
+.entry-card-open {
+  display: block;
+  border-radius: 12px 12px 0 0;
+  color: var(--icm-text);
+  text-decoration: none;
+}
+
+.entry-card .gallery-tile-preview {
+  border-radius: 12px 12px 0 0;
+  padding: 16px;
+}
+
+.entry-card-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 12px 16px 14px;
+}
+
+.entry-card-copy h3 {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.entry-card-date {
+  color: var(--icm-text-muted);
+  font-size: 12px;
+}
+
+/* One row of alike pills, red marking the one that cannot be undone. */
+.entry-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.entry-card-note {
+  margin: 0;
+  color: var(--icm-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.entry-card-error {
+  color: var(--icm-danger, #b42318);
+}
+
+.entry-action {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--icm-border);
+  border-radius: 999px;
+  color: var(--icm-text);
+  background: var(--icm-surface);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.entry-action:hover:not(:disabled) {
+  background: var(--icm-surface-hover);
+}
+
+.entry-action:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.entry-action-danger {
+  color: var(--icm-danger, #b42318);
+}
+
+/* A state, not an action: a tinted badge over the circuit's name, filled
+   where the actions are outlined, its colour telling which state. */
+.entry-status {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  color: var(--icm-text-muted);
+  background: var(--icm-surface-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.entry-status-public {
+  color: var(--icm-accent);
+  background: var(--icm-accent-soft);
+}
+
+.entry-status-rejected {
+  color: var(--icm-danger, #b42318);
+  background: rgb(180 35 24 / 10%);
+}
+
+.gallery-filter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 22px 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.gallery-filter button {
+  padding: 4px 10px;
+  border: 1px solid var(--icm-border);
+  border-radius: 999px;
+  color: var(--icm-text-muted);
+  background: var(--icm-surface);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.gallery-filter button:hover {
+  background: var(--icm-surface-hover);
+}
+
+.gallery-tag-option {
+  padding: 5px 12px;
+  border: 1px solid var(--icm-border);
+  border-radius: 999px;
+  color: var(--icm-text);
+  background: var(--icm-surface);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.gallery-tag-option span {
+  color: var(--icm-text-muted);
+  font-size: 11px;
+}
+
+.gallery-tag-option:hover {
+  background: var(--icm-surface-hover);
+}
+
+.gallery-tag-selected {
+  border-color: var(--icm-accent);
+  color: var(--icm-accent);
+  background: var(--icm-accent-soft);
+  font-weight: 600;
+}
+
+.gallery-tag-clear {
+  color: var(--icm-text-muted);
+}
+
+.gallery-tile-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 6px;
+}
+
+.gallery-tile-tag {
+  padding: 2px 8px;
+  border: 1px solid var(--icm-border);
+  border-radius: 999px;
+  color: var(--icm-text-muted);
+  background: var(--icm-surface-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.gallery-tile-tag:hover {
+  border-color: var(--icm-accent);
+  color: var(--icm-accent);
+}
+
+.gallery-tile-author {
+  padding: 0;
+  border: none;
+  color: inherit;
+  background: none;
+  font: inherit;
+  text-decoration: underline dotted;
+  cursor: pointer;
+}
+
+.gallery-sentinel {
+  height: 1px;
+}
+
+.review-bin {
+  margin-top: 30px;
+  border-top: 1px solid var(--icm-border);
+  padding-top: 10px;
+}
+
+.review-bin h2 {
+  margin: 8px 0 0;
+  font-size: 17px;
+}
+
+.review-card {
+  display: flex;
+  gap: 16px;
+  padding: 14px;
+  border: 1px solid var(--icm-border);
+  border-radius: 12px;
+  background: var(--icm-surface);
+}
+
+.review-card-preview img {
+  display: block;
+  width: 220px;
+  height: 150px;
+  object-fit: contain;
+  border: 1px solid var(--icm-border);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.review-card-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.review-card-copy h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.review-card-meta {
+  margin: 0;
+  color: var(--icm-text-muted);
+  font-size: 12px;
+}
+
+.review-card-copy input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-sm);
+  font: inherit;
+  font-size: 13px;
+}
+
+.review-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.review-card-actions button {
+  padding: 6px 14px;
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-sm);
+  color: var(--icm-text);
+  background: var(--icm-surface);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.review-card-actions .review-approve {
+  border-color: var(--icm-accent);
+  color: #fff;
+  background: var(--icm-accent);
+}
+
+/* A search reads the wall page by page; this says how far it has read. */
+.gallery-search-progress {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin: 0 0 12px;
+  color: var(--icm-text-muted);
+  font-size: 13px;
+}
+
+.gallery-search-progress progress {
+  width: min(240px, 100%);
+  height: 6px;
+  accent-color: var(--icm-accent);
+}
+
+.gallery-status,
+.gallery-footnote {
+  padding: 18px 22px;
+  color: var(--icm-text-muted);
+  font-size: 13px;
+}
+
+.gallery-footnote {
+  margin-top: auto;
+  border-top: 1px solid var(--icm-border);
+  background: var(--icm-surface);
+}
+
+.gallery-footnote p {
+  margin: 0;
+}
+
+.gallery-footnote p + p {
+  margin-top: 4px;
+}
+
+/* Pinterest-style wall: CSS columns give a dependency-free masonry. */
+.gallery-wall {
+  padding: 18px 22px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* Signed out: after the circuits shown in full, the next row fades into
+   the page, and the invitation to sign in sits where it disappears. */
+/* Signed out, the Gallery shows no circuit. Grey stand-ins keep the shape of
+   its wall under a veil, and the invitation to sign in sits on top. */
+.gallery-sign-in {
+  position: relative;
+  flex: 1;
+  min-height: 520px;
+  padding: var(--icm-space-4);
+  overflow: hidden;
+}
+
+.gallery-sign-in-veil {
+  columns: 220px;
+  column-gap: 16px;
+  pointer-events: none;
+  user-select: none;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    rgb(0 0 0 / 100%),
+    rgb(0 0 0 / 25%) 95%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    rgb(0 0 0 / 100%),
+    rgb(0 0 0 / 25%) 95%
+  );
+}
+
+.gallery-sign-in-tile {
+  display: block;
+  break-inside: avoid;
+  margin-bottom: 16px;
+  border-radius: var(--icm-radius-md, 10px);
+  background: color-mix(in srgb, var(--icm-text-muted) 22%, transparent);
+}
+
+/* One of the wall's first circuits, as a signed-out visitor sees it: a
+   little grey, and out of reach under the veil, which takes no pointer. */
+.gallery-sign-in-circuit {
+  box-sizing: border-box;
+  padding: 10px 10px 8px;
+  border: 1px solid var(--icm-border);
+  background: var(--icm-surface);
+  opacity: 0.62;
+  filter: grayscale(0.7);
+}
+
+.gallery-sign-in-circuit img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.gallery-sign-in-circuit-name {
+  display: block;
+  margin-top: 6px;
+  overflow: hidden;
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-sm);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gallery-sign-in-card {
+  position: absolute;
+  top: 96px;
+  left: 50%;
+  transform: translateX(-50%);
+  box-sizing: border-box;
+  width: min(420px, calc(100% - 32px));
+  padding: 28px 28px 24px;
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-lg, 14px);
+  background: var(--icm-surface);
+  box-shadow: var(--icm-shadow-lg);
+  text-align: center;
+}
+
+.gallery-sign-in-card h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+  font-weight: 650;
+}
+
+.gallery-sign-in-card p {
+  margin: 0;
+  color: var(--icm-text-muted);
+  line-height: 1.5;
+}
+
+.gallery-sign-in-card .gallery-unlock {
+  margin-top: 18px;
+}
+
+.gallery-unlock {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 14px 30px;
+  border: 0;
+  border-radius: 999px;
+  --gallery-unlock-gradient: linear-gradient(
+    120deg,
+    #2563eb 0%,
+    #7c3aed 55%,
+    #db2777 100%
+  );
+  color: #fff;
+  background: var(--gallery-unlock-gradient) 0% 50% / 180% 100%;
+  box-shadow:
+    0 12px 28px -12px rgb(124 58 237 / 60%),
+    0 2px 6px rgb(15 23 42 / 12%);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition:
+    background-position 500ms ease,
+    box-shadow 200ms ease,
+    transform 200ms ease;
+}
+
+/* Outranks the app-wide button:hover:not(:disabled), whose background
+   shorthand would otherwise clear the gradient to a grey fill. */
+.gallery-unlock:hover:not(:disabled) {
+  background: var(--gallery-unlock-gradient) 100% 50% / 180% 100%;
+  box-shadow:
+    0 16px 34px -12px rgb(124 58 237 / 70%),
+    0 3px 8px rgb(15 23 42 / 14%);
+  transform: translateY(-1px);
+}
+
+.gallery-unlock:focus-visible {
+  outline: 3px solid rgb(124 58 237 / 45%);
+  outline-offset: 3px;
+}
+
+.gallery-unlock-icon {
+  width: 18px;
+  height: 18px;
+}
+
+/* True masonry: the component measures tiles and writes width/transform;
+   items are absolutely positioned inside a relative container whose
+   height is set to the tallest column. */
+.masonry {
+  position: relative;
+  width: 100%;
+}
+
+.masonry-item {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+.gallery-tile {
+  display: block;
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-md, 10px);
+  background: var(--icm-surface);
+  overflow: hidden;
+  text-decoration: none;
+  color: inherit;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.gallery-tile-wrap {
+  position: relative;
+}
+
+/* The circuit a "View in Gallery" link asked for, ringed once it is found. */
+.gallery-tile-wrap.is-linked > .gallery-tile {
+  border-color: var(--icm-accent);
+  box-shadow:
+    0 0 0 3px var(--icm-accent-soft),
+    0 4px 16px rgb(0 0 0 / 8%);
+}
+
+.gallery-owner-menu {
+  position: absolute;
+  z-index: 3;
+  top: 8px;
+  right: 8px;
+}
+
+.gallery-owner-reject-shortcut {
+  position: absolute;
+  z-index: 3;
+  top: 8px;
+  right: 46px;
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgb(180 35 24 / 30%);
+  border-radius: 999px;
+  color: var(--icm-danger, #b42318);
+  background: rgb(255 255 255 / 94%);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 12%);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.gallery-owner-reject-shortcut:hover {
+  color: #fff;
+  background: var(--icm-danger, #b42318);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 18%);
+}
+
+.gallery-owner-reject-shortcut:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.gallery-owner-menu > summary {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid rgb(0 0 0 / 12%);
+  border-radius: 999px;
+  color: #202124;
+  background: rgb(255 255 255 / 94%);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 12%);
+  font-size: 19px;
+  font-weight: 700;
+  line-height: 1;
+  list-style: none;
+  cursor: pointer;
+}
+
+.gallery-owner-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.gallery-owner-menu[open] > summary,
+.gallery-owner-menu > summary:hover {
+  background: #fff;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 18%);
+}
+
+.gallery-owner-popover {
+  position: absolute;
+  top: 36px;
+  right: 0;
+  display: grid;
+  min-width: 11.5rem;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid var(--icm-border);
+  border-radius: 10px;
+  background: var(--icm-surface);
+  box-shadow: 0 12px 32px rgb(15 15 15 / 18%);
+}
+
+.gallery-owner-popover a,
+.gallery-owner-popover button {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 7px;
+  color: var(--icm-text);
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.gallery-owner-popover a:hover,
+.gallery-owner-popover button:hover {
+  background: var(--icm-surface-hover);
+}
+
+.gallery-owner-popover button:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.gallery-owner-danger {
+  color: var(--icm-danger, #b42318) !important;
+}
+
+.gallery-owner-dialog-backdrop {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgb(15 23 42 / 42%);
+}
+
+.gallery-owner-dialog {
+  box-sizing: border-box;
+  width: min(30rem, 100%);
+  padding: 20px;
+  border: 1px solid var(--icm-border);
+  border-radius: 14px;
+  color: var(--icm-text);
+  background: var(--icm-surface);
+  box-shadow: 0 24px 64px rgb(0 0 0 / 24%);
+}
+
+.gallery-owner-dialog h2 {
+  margin: 0;
+  font-size: 19px;
+}
+
+.gallery-owner-dialog p {
+  margin: 8px 0 18px;
+  color: var(--icm-text-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.gallery-owner-dialog form {
+  display: grid;
+  gap: 8px;
+}
+
+.gallery-owner-dialog .gallery-owner-reject-email {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.gallery-owner-dialog .gallery-owner-reject-email span {
+  color: var(--icm-text);
+}
+
+.gallery-owner-reason-options {
+  min-width: 0;
+  margin: 0 0 4px;
+  padding: 0;
+  border: 0;
+}
+
+.gallery-owner-reason-options legend {
+  margin-bottom: 8px;
+  padding: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.gallery-owner-reason-options > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.gallery-owner-reason-options label {
+  position: relative;
+  cursor: pointer;
+}
+
+.gallery-owner-reason-options input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.gallery-owner-reason-options span {
+  display: block;
+  padding: 6px 10px;
+  border: 1px solid var(--icm-border);
+  border-radius: 999px;
+  color: var(--icm-text-muted);
+  background: var(--icm-surface);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.gallery-owner-reason-options label:hover span {
+  border-color: var(--icm-border-hover);
+  background: var(--icm-surface-hover);
+}
+
+.gallery-owner-reason-options input:focus-visible + span {
+  outline: 2px solid color-mix(in srgb, var(--icm-accent) 30%, transparent);
+  outline-offset: 2px;
+}
+
+.gallery-owner-reason-options input:checked + span {
+  border-color: var(--icm-danger, #b42318);
+  color: var(--icm-danger, #b42318);
+  background: color-mix(
+    in srgb,
+    var(--icm-danger, #b42318) 9%,
+    var(--icm-surface)
+  );
+}
+
+.gallery-owner-dialog label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.gallery-owner-dialog > form > label span {
+  color: var(--icm-text-muted);
+  font-weight: 400;
+}
+
+.gallery-owner-dialog textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 7rem;
+  resize: vertical;
+  padding: 10px 12px;
+  border: 1px solid var(--icm-border);
+  border-radius: 8px;
+  color: var(--icm-text);
+  background: var(--icm-surface);
+  font: inherit;
+  font-size: 13px;
+}
+
+.gallery-owner-dialog textarea:focus {
+  border-color: var(--icm-accent);
+  outline: 2px solid color-mix(in srgb, var(--icm-accent) 18%, transparent);
+}
+
+.gallery-owner-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.gallery-owner-dialog-actions button {
+  padding: 7px 12px;
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-sm);
+  color: var(--icm-text);
+  background: var(--icm-surface);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.gallery-owner-dialog-actions .gallery-owner-danger {
+  border-color: var(--icm-danger, #b42318);
+  color: #fff !important;
+  background: var(--icm-danger, #b42318);
+}
+
+.gallery-owner-dialog-actions button:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.gallery-tile:hover {
+  border-color: var(--icm-border-hover);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 8%);
+}
+
+.gallery-tile-preview {
+  display: block;
+  background: #fff;
+  border-bottom: 1px solid var(--icm-border);
+  padding: 10px;
+}
+
+/* Missing thumbnail: a quiet schematic squiggle on the muted surface,
+   never the browser's broken-image glyph. */
+.gallery-tile-preview-missing {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 3 / 2;
+  color: var(--icm-border);
+  background: var(--icm-chrome-bg);
+}
+
+.gallery-tile-placeholder {
+  width: 40%;
+  max-width: 9rem;
+}
+
+.gallery-tile-preview img,
+.gallery-tile-preview svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 380px;
+  object-fit: contain;
+}
+
+.gallery-tile-copy {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px 12px;
+}
+
+.gallery-tile-kicker {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--icm-text-muted);
+}
+
+.gallery-tile-name {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.gallery-tile-meta,
+/* A description can run to a full citation; the tile keeps three lines and
+   the title shows the rest, as does the entry's Notes in the editor. */
+.gallery-tile-description {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  font-size: 12px;
+  color: var(--icm-text-muted);
+}
+
+/* The wall the reader had, held while the next filters load: it dims only
+   after a moment, so a quick answer replaces it without a flicker. */
+.gallery-wall.is-refreshing {
+  opacity: 0.55;
+  transition: opacity 150ms ease 150ms;
+}
+
+/* A withdraw or reject's outcome, passing over the wall like the editor's
+   Publish notice, so no tile moves. It sits at the bottom, clear of the top
+   row's reject and menu buttons, for a reviewer rejecting one after another. */
+.gallery-owner-toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: calc(100vw - 32px);
+  padding: 10px 14px;
+  border: 1px solid var(--icm-border);
+  border-radius: 8px;
+  background: var(--icm-surface);
+  color: var(--icm-text);
+  box-shadow: 0 4px 20px rgb(0 0 0 / 12%);
+  font-size: 13px;
+  transform: translateX(-50%);
+}
+
+.gallery-owner-toast-mark {
+  color: #16a34a;
+  font-weight: 700;
+}
+
+.gallery-owner-toast[data-ok="false"] .gallery-owner-toast-mark {
+  color: #dc2626;
+}
+
+.gallery-owner-toast button {
+  border: 0;
+  background: none;
+  color: var(--icm-text-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.gallery-source-note {
+  margin: 0;
+  padding: 14px 22px 0;
+  color: var(--icm-text-muted);
+  font-size: 12px;
+}
+
+.gallery-source-note a {
+  color: var(--icm-accent);
+}
+
+.gallery-tag-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Word marks after the name: the circuit extracts to a netlist, its
+   publisher says an AI made it, and its testbench met its Specs when the
+   server ran it again. Each records something and gates nothing, so they
+   stay small beside the name and never compete with the like heart. */
+.gallery-tile-mark {
+  margin-left: 6px;
+  padding: 2px 5px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.gallery-tile-netlist {
+  color: #2f7d4f;
+  background: #e4f2e9;
+}
+
+.gallery-tile-ai {
+  color: var(--icm-ai);
+  background: var(--icm-ai-soft);
+}
+
+.gallery-tile-sim {
+  color: #24589e;
+  background: #e3ecf8;
+}
+
+.gallery-tile-like {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: var(--icm-radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.gallery-tile-like:hover {
+  background: var(--icm-surface-hover);
+}
+
+.gallery-tile-like[aria-pressed="true"] {
+  color: #e0245e;
+  font-weight: 600;
+}
+
+.gallery-tile-like svg {
+  display: block;
+  transition: transform 120ms ease;
+}
+
+.gallery-tile-like:active svg {
+  transform: scale(1.25);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gallery-tile-like svg {
+    transition: none;
+  }
+
+  .gallery-tile-like:active svg {
+    transform: none;
+  }
+}
+
+/* The two walls: everyone's circuits, and your own private shelf. */
+.gallery-view-tabs {
+  display: flex;
+  /* A row of the shell's column that keeps its height at any window size. */
+  flex-shrink: 0;
+  align-items: flex-end;
+  gap: 6px;
+  padding: 14px 22px 0;
+  border-bottom: 1px solid var(--icm-border);
+}
+
+.gallery-view-tablist {
+  display: flex;
+  gap: 6px;
+}
+
+/* The wall count is also the door to a compact contributor leaderboard. */
+/* The wall's order (#1615), left of the count; the count follows it. */
+.gallery-order-menu {
+  position: relative;
+  margin-left: auto;
+  align-self: center;
+  padding-bottom: 6px;
+}
+
+.gallery-order-menu + .gallery-contributor-menu {
+  margin-left: 8px;
+}
+
+.gallery-order-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--icm-border);
+  border-radius: 999px;
+  background: var(--icm-surface);
+  color: var(--icm-text-muted);
+  font-size: 0.85rem;
+  list-style: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.gallery-order-button::-webkit-details-marker {
+  display: none;
+}
+
+.gallery-order-menu[open] > .gallery-order-button,
+.gallery-order-button:hover {
+  border-color: var(--icm-accent);
+  color: var(--icm-text);
+}
+
+.gallery-order-button svg,
+.gallery-order-popover svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.gallery-order-popover {
+  position: absolute;
+  z-index: 70;
+  top: calc(100% + 1px);
+  right: 0;
+  display: grid;
+  gap: 2px;
+  box-sizing: border-box;
+  width: 12.5rem;
+  padding: 6px;
+  border: 1px solid var(--icm-border);
+  border-radius: 12px;
+  background: var(--icm-surface);
+  box-shadow: 0 16px 36px rgb(15 15 15 / 16%);
+}
+
+.gallery-order-popover button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--icm-text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.gallery-order-popover button:hover {
+  background: var(--icm-surface-hover);
+}
+
+.gallery-order-popover button[aria-checked="true"] {
+  color: var(--icm-accent);
+  font-weight: 600;
+}
+
+.gallery-order-group {
+  padding: 6px 8px 2px;
+  color: var(--icm-text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.gallery-contributor-menu {
+  position: relative;
+  margin-left: auto;
+  align-self: center;
+  padding-bottom: 6px;
+}
+
+.gallery-count-panel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border: 1px solid var(--icm-border);
+  border-radius: 999px;
+  background: var(--icm-surface);
+  color: var(--icm-text-muted);
+  font: inherit;
+  font-size: 0.85rem;
+  list-style: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.gallery-count-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gallery-count-panel::-webkit-details-marker {
+  display: none;
+}
+
+.gallery-count-panel::after {
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  content: "";
+  transform: translateY(-2px) rotate(45deg);
+  transition: transform 120ms ease;
+}
+
+.gallery-contributor-menu[open] > .gallery-count-panel,
+.gallery-count-panel:hover {
+  border-color: var(--icm-accent);
+  color: var(--icm-text);
+  background: var(--icm-surface-hover);
+}
+
+.gallery-contributor-menu[open] > .gallery-count-panel::after {
+  transform: translateY(2px) rotate(225deg);
+}
+
+.gallery-count-panel:focus-visible,
+.gallery-contributor-author:focus-visible {
+  outline: 2px solid var(--icm-accent);
+  outline-offset: 2px;
+}
+
+.gallery-contributor-popover {
+  position: absolute;
+  z-index: 70;
+  top: calc(100% + 1px);
+  right: 0;
+  box-sizing: border-box;
+  width: min(23rem, calc(100vw - 44px));
+  padding: 10px;
+  border: 1px solid var(--icm-border);
+  border-radius: 12px;
+  background: var(--icm-surface);
+  box-shadow: 0 16px 36px rgb(15 15 15 / 16%);
+}
+
+.gallery-contributor-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 6px 10px;
+}
+
+/* By circuits or by name: two choices, one of them pressed. */
+.gallery-contributor-order {
+  display: flex;
+  gap: 4px;
+  padding: 0 6px 8px;
+}
+
+.gallery-contributor-sort {
+  display: flex;
+  gap: 4px;
+}
+
+/* Shows or hides the reference datasets in the list (#1574): a checkbox,
+   unlike the sort buttons beside it, so on and off read at a glance. */
+.gallery-contributor-datasets {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 8px;
+  padding: 3px 10px 3px 8px;
+  border: 1px solid var(--icm-border);
+  border-radius: 999px;
+  color: var(--icm-text-muted);
+  background: var(--icm-surface);
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.gallery-contributor-datasets:has(input:checked) {
+  color: var(--icm-text);
+}
+
+.gallery-contributor-datasets input {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  accent-color: var(--icm-accent);
+  cursor: pointer;
+}
+
+.gallery-contributor-order button {
+  padding: 3px 10px;
+  border: 1px solid var(--icm-border);
+  border-radius: 999px;
+  color: var(--icm-text-muted);
+  background: var(--icm-surface);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.gallery-contributor-order button[aria-pressed="true"] {
+  border-color: var(--icm-accent);
+  color: var(--icm-accent);
+  background: var(--icm-accent-soft);
+  font-weight: 600;
+}
+
+.gallery-contributor-heading strong {
+  color: var(--icm-text);
+  font-size: 14px;
+}
+
+.gallery-contributor-heading span,
+.gallery-contributor-status {
+  color: var(--icm-text-muted);
+  font-size: 12px;
+}
+
+.gallery-contributor-status {
+  margin: 0;
+  padding: 10px 6px;
+}
+
+div.gallery-contributor-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.gallery-contributor-status p {
+  margin: 0;
+}
+
+.gallery-contributor-status button {
+  padding: 5px 9px;
+  border: 1px solid var(--icm-border);
+  border-radius: 999px;
+  color: var(--icm-text);
+  background: var(--icm-surface);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.gallery-contributor-status button:hover {
+  border-color: var(--icm-accent);
+  background: var(--icm-accent-soft);
+}
+
+.gallery-contributor-list {
+  max-height: min(32rem, 65vh);
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.gallery-contributor-list > li + li {
+  border-top: 1px solid var(--icm-border);
+}
+
+.gallery-contributor-row {
+  display: grid;
+  grid-template-columns: 1.7rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 6px;
+  border-radius: 7px;
+  color: var(--icm-text);
+}
+
+.gallery-contributor-row:hover {
+  background: var(--icm-surface-hover);
+}
+
+.gallery-contributor-rank,
+.gallery-contributor-count {
+  color: var(--icm-text-muted);
+  font-size: 12px;
+}
+
+.gallery-contributor-rank {
+  text-align: center;
+}
+
+.gallery-contributor-author {
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  color: var(--icm-text);
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* A reference dataset among the contributors (#1574). */
+.gallery-contributor-tag {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border: 1px solid var(--icm-border);
+  border-radius: 999px;
+  color: var(--icm-text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  vertical-align: 1px;
+}
+
+.gallery-contributor-row[aria-current="true"] .gallery-contributor-author {
+  color: var(--icm-accent);
+}
+
+.gallery-contributor-author:hover {
+  color: var(--icm-accent);
+  text-decoration: underline;
+  text-underline-offset: 0.15rem;
+}
+
+.gallery-view-tab {
+  appearance: none;
+  border: 1px solid transparent;
+  border-bottom: none;
+  background: none;
+  color: var(--icm-text-muted);
+  font: inherit;
+  font-weight: 600;
+  /* A tab label is one line at any width. */
+  white-space: nowrap;
+  padding: 8px 14px;
+  border-radius: 8px 8px 0 0;
+  cursor: pointer;
+  transform: translateY(1px);
+}
+
+.gallery-view-tab:hover {
+  color: var(--icm-text);
+}
+
+.gallery-view-tab[aria-selected="true"] {
+  color: var(--icm-text);
+  background: var(--icm-surface);
+  border-color: var(--icm-border);
+}
+
+.shelf-count {
+  margin: 0 0 12px;
+  color: var(--icm-text-muted);
+  font-size: 0.85rem;
+}
+
+.shelf-tile-revision {
+  color: var(--icm-text-muted);
+}
+
+.shelf-tile-delete {
+  appearance: none;
+  border: 1px solid var(--icm-border);
+  background: var(--icm-surface);
+  color: var(--icm-text-muted);
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 4px 10px;
+  border-radius: var(--icm-radius-sm);
+  margin-top: 6px;
+  cursor: pointer;
+}
+
+.shelf-tile-delete:hover:not(:disabled) {
+  color: var(--icm-text);
+  border-color: var(--icm-text);
+}
+
+.shelf-tile-delete:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.gallery-tile-wrap > .inline-confirm {
+  margin-top: 6px;
+}
+.shelf-rename-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-block: 8px;
+  min-width: 0;
+}
+.shelf-rename-form input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: 6px 8px;
+  color: var(--icm-text);
+  background: var(--icm-surface);
+  border: 1px solid var(--icm-border);
+  border-radius: 4px;
+  font: inherit;
+}
+.shelf-rename-form button {
+  padding: 4px 8px;
+  border: 1px solid var(--icm-border);
+  border-radius: 4px;
+  background: var(--icm-surface);
+  color: var(--icm-text);
+  cursor: pointer;
+}
+.gallery-owner-popover {
+  min-width: 0;
+  width: min(12rem, calc(100vw - 32px));
+}
+
+/* The Gallery has one search field for circuit names, authors and tags. */
+.gallery-search-input {
+  flex: 0 0 auto;
+  width: 9rem;
+  padding: 5px 12px;
+  border: 1px solid var(--icm-border);
+  border-radius: 999px;
+  background: var(--icm-surface);
+  color: var(--icm-text);
+  font: inherit;
+  font-size: 12px;
+}
+
+.gallery-search-input:focus-visible {
+  outline: 2px solid var(--icm-accent);
+  outline-offset: 1px;
+}
+
+/* Deleting is irreversible, so it reads as the weightier of the two author
+   actions without shouting from a closed menu. */
+.gallery-owner-danger-action {
+  color: var(--icm-error);
+}
+
+/* Administrator-only duplicate scan and cleanup results. */
+.gallery-duplicates {
+  display: contents;
+  font-size: 13px;
+}
+.gallery-duplicates-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-left: auto;
+  font-size: 13px;
+}
+.gallery-duplicates > p {
+  flex-basis: 100%;
+  margin: 4px 0 0;
+  font-size: 13px;
+}
+.gallery-duplicates-results {
+  flex-basis: 100%;
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid var(--color-border, #d5d9df);
+  border-radius: 10px;
+  max-height: 65vh;
+  overflow: auto;
+}
+.gallery-duplicates-results > p {
+  margin: 0 0 10px;
+}
+.gallery-duplicate-group {
+  margin: 8px 0;
+}
+.gallery-duplicate-group summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 6px 0;
+}
+.gallery-duplicate-circuits {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 12px;
+  margin: 8px 0 16px;
+}
+.gallery-duplicate-circuits a {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: inherit;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+.gallery-duplicate-circuit {
+  border: 1px solid var(--icm-border);
+  border-radius: 8px;
+  padding: 8px;
+}
+.gallery-duplicate-circuit[data-keep="true"] {
+  border-color: var(--icm-accent);
+}
+.gallery-duplicate-circuit label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  cursor: pointer;
+}
+.gallery-duplicate-circuits img {
+  width: 100%;
+  height: 120px;
+  object-fit: contain;
+  background: white;
+  border-radius: 6px;
+}
+.gallery-duplicate-badge {
+  font-size: 11px;
+  color: #8a530c;
+  background: #fff2cf;
+  border-radius: 4px;
+  padding: 2px 5px;
+  margin-left: 6px;
+}
+
+/* Gallery taxonomy: quiet navigation beside the circuit wall. */
+.gallery-browser {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  flex: 1;
+}
+
+/* Signed out there is no sidebar. The wall must take the whole row: left in
+   the sidebar's content-sized column, it measured one tile wide. */
+.gallery-main {
+  min-width: 0;
+}
+
+.gallery-sidebar-slot {
+  --gallery-ui-font:
+    "SF Pro Text", "Segoe UI Variable Text", ui-sans-serif, system-ui,
+    -apple-system, BlinkMacSystemFont, sans-serif;
+  position: relative;
+  box-sizing: border-box;
+  width: var(--gallery-sidebar-width, 262px);
+  min-width: 0;
+  border-right: 1px solid var(--icm-border);
+  background: var(--icm-surface);
+  font-family: var(--gallery-ui-font);
+  font-synthesis: none;
+}
+
+.gallery-sidebar-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -5px;
+  z-index: 1;
+  width: 9px;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+}
+
+.gallery-sidebar-resize-handle:hover,
+.gallery-sidebar-resize-handle:focus-visible,
+.gallery-sidebar-resize-handle[data-dragging="true"] {
+  background: linear-gradient(
+    to right,
+    transparent 3px,
+    var(--icm-accent) 3px,
+    var(--icm-accent) 5px,
+    transparent 5px
+  );
+  outline: none;
+}
+
+.gallery-tag-sidebar {
+  position: sticky;
+  top: var(--icm-menubar-h);
+  max-height: calc(100dvh - var(--icm-menubar-h));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  box-sizing: border-box;
+  padding: 20px 14px;
+}
+
+.gallery-tag-sidebar h2 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--icm-text-muted);
+}
+
+.gallery-sidebar-quick {
+  display: grid;
+  gap: 3px;
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--icm-border);
+}
+
+/* Every quick filter leads with a mark of one width, so the names line up:
+   the AI word mark takes the icons' size here, not a tile badge's. */
+.gallery-sidebar-quick .gallery-tag-mark > svg,
+.gallery-sidebar-quick .gallery-tag-mark > .gallery-tile-ai {
+  flex: 0 0 14px;
+}
+
+.gallery-sidebar-quick .gallery-tile-ai {
+  box-sizing: border-box;
+  width: 14px;
+  height: 12px;
+  margin-left: 0;
+  padding: 0;
+  border-radius: 3px;
+  font-size: 8.5px;
+  line-height: 12px;
+  text-align: center;
+}
+
+.gallery-sidebar-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 0 8px;
+  margin-bottom: 10px;
+}
+
+.gallery-sidebar-clear {
+  border: 0;
+  padding: 2px 0;
+  background: transparent;
+  color: var(--icm-accent);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.gallery-sidebar-search {
+  margin: 20px 14px 0;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--icm-border);
+}
+
+.gallery-search-field {
+  position: relative;
+  display: block;
+}
+
+.gallery-search-icon {
+  position: absolute;
+  top: 50%;
+  left: 10px;
+  width: 15px;
+  height: 15px;
+  color: var(--icm-text-muted);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.gallery-sidebar-search .gallery-search-input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 8px 10px 8px 32px;
+  border-radius: 6px;
+}
+
+.gallery-sidebar-admin {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--icm-border);
+}
+
+.gallery-sidebar-admin .gallery-duplicates {
+  display: block;
+}
+
+.gallery-sidebar-admin .gallery-duplicates + .gallery-simulation-checks {
+  margin-top: 10px;
+}
+
+.gallery-sidebar-admin .gallery-duplicates-actions {
+  display: grid;
+  gap: 6px;
+  margin-left: 0;
+}
+
+.gallery-sidebar-admin .gallery-duplicates-actions .gallery-tag-option {
+  width: 100%;
+  box-sizing: border-box;
+  text-align: left;
+}
+
+.gallery-sidebar-admin .gallery-duplicates-actions > span,
+.gallery-sidebar-admin .gallery-duplicates > p {
+  line-height: 1.4;
+}
+
+.gallery-sidebar-admin .gallery-duplicates-results {
+  max-height: none;
+  padding: 8px;
+  overflow: visible;
+}
+
+.gallery-sidebar-admin .gallery-duplicate-circuits {
+  grid-template-columns: 1fr;
+}
+
+.gallery-sidebar-admin .gallery-duplicate-circuits img {
+  height: 100px;
+}
+
+.gallery-sidebar-toggle {
+  display: none;
+}
+
+/* A narrower window narrows the sides only; nothing moves up or down. */
+@media (max-width: 900px) {
+  .gallery-sidebar-search {
+    margin-inline: 10px;
+  }
+  .gallery-tag-sidebar {
+    padding-inline: 10px;
+  }
+  .gallery-main .gallery-wall {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+}
+
+@media (max-width: 620px) {
+  .gallery-browser {
+    display: block;
+  }
+  .gallery-sidebar-slot {
+    /* Its own block context, as the grid cell was: the search's top margin
+       stays inside the white panel instead of opening a grey gap above it. */
+    display: flow-root;
+    width: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--icm-border);
+  }
+  .gallery-sidebar-resize-handle {
+    display: none;
+  }
+  .gallery-sidebar-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 12px 18px;
+    border: 0;
+    background: var(--icm-surface);
+    color: var(--icm-text);
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .gallery-tag-sidebar {
+    display: none;
+    position: static;
+    max-height: 55dvh;
+  }
+  .gallery-tag-sidebar[data-open="true"] {
+    display: block;
+  }
+  /* The tabs keep their one-line labels; in a row too narrow the count
+     beside them gives way, ending in an ellipsis. Only the sides narrow:
+     the row keeps its height at every width. */
+  .gallery-view-tabs {
+    padding-inline: 10px;
+  }
+  .gallery-view-tablist {
+    flex-shrink: 0;
+  }
+  .gallery-view-tab {
+    padding: 8px 10px;
+  }
+  .gallery-contributor-menu {
+    min-width: 0;
+  }
+  /* Only the icon: the count keeps its room. */
+  .gallery-order-label {
+    display: none;
+  }
+  .gallery-order-menu {
+    flex-shrink: 0;
+  }
+}
+
+/* A drawing's review, opened from its tile menu. */
+.gallery-review-dialog {
+  display: grid;
+  gap: 10px;
+}
+.gallery-review-dialog p,
+.gallery-review-dialog ul {
+  margin: 0;
+}
+.gallery-review-dialog .gallery-review-status {
+  color: var(--icm-text);
+  font-weight: 600;
+}
+.gallery-review-dialog ul {
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.gallery-review-dialog select {
+  padding: 7px 10px;
+  border: 1px solid var(--icm-border);
+  border-radius: 8px;
+  color: var(--icm-text);
+  background: var(--icm-surface);
+  font: inherit;
+  font-size: 13px;
+}
+.gallery-review-dialog textarea {
+  min-height: 5rem;
+}
+
+.shelf-tile-actions {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  padding: 4px 10px;
+  border: 1px solid var(--icm-border);
+  border-radius: 6px;
+  background: var(--icm-surface);
+  color: var(--icm-text);
+  cursor: pointer;
+}
+.shelf-context-menu {
+  position: fixed;
+  z-index: 800;
+  display: flex;
+  flex-direction: column;
+  min-width: 200px;
+  padding: 6px;
+  border: 1px solid var(--icm-border);
+  border-radius: 10px;
+  background: var(--icm-surface);
+  box-shadow: 0 8px 30px rgb(0 0 0 / 15%);
+}
+.shelf-context-menu > * {
+  padding: 9px 12px;
+  border: 0;
+  border-radius: 5px;
+  text-align: left;
+  font: inherit;
+  font-size: 13px;
+  color: var(--icm-text);
+  background: none;
+  text-decoration: none;
+  cursor: pointer;
+}
+.shelf-context-menu > *:hover,
+.shelf-context-menu > *:focus-visible {
+  background: var(--icm-accent-soft);
+}
+.shelf-action-error {
+  color: var(--icm-error);
+}

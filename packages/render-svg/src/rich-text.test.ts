@@ -1,0 +1,263 @@
+import { describe, expect, it } from "vitest";
+
+import { renderRichTextDocument } from "./rich-text.js";
+import {
+  razaviTextbookProfile,
+  richTextLinePitches,
+  richTextMetrics,
+  schematicTextAdvanceEm,
+} from "@icm/derived";
+
+describe("renderRichTextDocument", () => {
+  it("renders a plain text run escaped", () => {
+    const svg = renderRichTextDocument(
+      { runs: [{ kind: "text", value: "a<b>&c" }] },
+      razaviTextbookProfile,
+    );
+    expect(svg).toBe("a&lt;b&gt;&amp;c");
+  });
+
+  it("composes nested styles instead of letting an inner style erase its parent", () => {
+    const svg = renderRichTextDocument(
+      {
+        runs: [
+          {
+            kind: "span",
+            style: "italic",
+            children: [
+              {
+                kind: "span",
+                style: "bold",
+                children: [{ kind: "text", value: "gm" }],
+              },
+            ],
+          },
+        ],
+      },
+      razaviTextbookProfile,
+    );
+    expect(svg).toContain(
+      'style="font-style:italic;font-weight:700">gm</tspan>',
+    );
+    expect(svg).not.toContain('font-style:normal;font-weight:700">gm');
+  });
+
+  it("keeps a plain overbar on the general renderer without spacer text", () => {
+    const svg = renderRichTextDocument(
+      {
+        runs: [
+          {
+            kind: "span",
+            style: "overbar",
+            children: [{ kind: "text", value: "Vout" }],
+          },
+        ],
+      },
+      razaviTextbookProfile,
+    );
+
+    expect(svg).toContain('data-text-run="overbar"');
+    expect(svg).toContain("text-decoration:overline");
+    expect(svg).toContain(">Vout</tspan>");
+    expect(svg).not.toContain("&#160;");
+    expect(svg).not.toContain("letter-spacing");
+  });
+
+  it.each([
+    ["subscript", "superscript"],
+    ["superscript", "subscript"],
+  ] as const)(
+    "stacks a %s and a %s in one column after the base",
+    (first, second) => {
+      const script = (style: "subscript" | "superscript") => ({
+        kind: "span" as const,
+        style,
+        children: [
+          { kind: "text" as const, value: style === "subscript" ? "in" : "+" },
+        ],
+      });
+      const svg = renderRichTextDocument(
+        { runs: [{ kind: "text", value: "V" }, script(first), script(second)] },
+        razaviTextbookProfile,
+        { fontSize: 20 },
+      );
+      // V with `in` below and `+` above, not `+` and then `in` further on.
+      // The narrower `+` is drawn first, one gap after the base, and `in`
+      // starts back over it, so the line continues after the wider script.
+      const plus = 15.2 * schematicTextAdvanceEm("+", "plain");
+      expect(svg).toBe(
+        `V<tspan data-text-run="superscript" dx="0.6992" dy="-6.688" font-size="15.2px" style="font-style:normal;font-weight:400">+</tspan>` +
+          `<tspan data-text-run="subscript" dx="${Number((-plus).toFixed(6))}" dy="13.376" font-size="15.2px" style="font-style:normal;font-weight:400">in</tspan>`,
+      );
+    },
+  );
+
+  it("stacks scripts by their own styled advances even inside italic text", () => {
+    const svg = renderRichTextDocument(
+      {
+        runs: [
+          { kind: "text", value: "V" },
+          {
+            kind: "span",
+            style: "subscript",
+            children: [
+              {
+                kind: "span",
+                style: "italic",
+                children: [{ kind: "text", value: "R" }],
+              },
+            ],
+          },
+          {
+            kind: "span",
+            style: "superscript",
+            children: [{ kind: "text", value: "R" }],
+          },
+        ],
+      },
+      razaviTextbookProfile,
+      { fontSize: 20, defaultBold: true, defaultItalic: true },
+    );
+    // Metropolis Bold R is 0.682 em; Bold Italic R is 0.700 em. The
+    // upright superscript is drawn first, then backed over by exactly its
+    // advance (0.682 * 20 * 0.76), leaving the wider italic subscript last.
+    expect(svg).toContain(
+      'data-text-run="superscript" dx="0.6992" dy="-6.688" font-size="15.2px" style="font-style:normal;font-weight:700">R</tspan>',
+    );
+    expect(svg).toContain(
+      'data-text-run="subscript" dx="-10.3664" dy="13.376"',
+    );
+    expect(svg).toContain(
+      'style="font-style:italic;font-weight:700">R</tspan>',
+    );
+  });
+
+  it("keeps a script upright when it occurs inside bold italic text", () => {
+    const svg = renderRichTextDocument(
+      {
+        runs: [
+          {
+            kind: "span",
+            style: "italic",
+            children: [
+              {
+                kind: "span",
+                style: "bold",
+                children: [
+                  { kind: "text", value: "V" },
+                  {
+                    kind: "span",
+                    style: "subscript",
+                    children: [{ kind: "text", value: "out" }],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      razaviTextbookProfile,
+      { fontSize: 20 },
+    );
+    expect(svg).toContain(
+      'data-text-run="subscript" dx="0.6992" dy="6.688" font-size="15.2px" style="font-style:normal;font-weight:700">out</tspan>',
+    );
+  });
+
+  it("restores the parent baseline on the next visible run", () => {
+    const svg = renderRichTextDocument(
+      {
+        runs: [
+          { kind: "text", value: "V" },
+          {
+            kind: "span",
+            style: "subscript",
+            children: [{ kind: "text", value: "in" }],
+          },
+          { kind: "text", value: " + V" },
+        ],
+      },
+      razaviTextbookProfile,
+      { fontSize: 20 },
+    );
+
+    expect(svg).toContain(
+      '<tspan data-text-run="baseline-reset" dy="-6.688"> + V</tspan>',
+    );
+    expect(svg).not.toContain("baseline-shift");
+  });
+
+  it("renders a line break", () => {
+    const svg = renderRichTextDocument(
+      {
+        runs: [
+          { kind: "text", value: "line1" },
+          { kind: "line-break" },
+          { kind: "text", value: "line2" },
+        ],
+      },
+      razaviTextbookProfile,
+      { lineOriginX: 240, fontSize: 20 },
+    );
+    expect(svg).toContain('data-text-run="line-break"');
+    expect(svg).toContain('x="240"');
+    expect(svg).not.toContain('x="0"');
+    expect(svg).toContain('dy="20">line2</tspan>');
+  });
+});
+
+describe("fraction rendering", () => {
+  it("renders an inline fraction as centered stacked tspans", () => {
+    const svg = renderRichTextDocument(
+      {
+        runs: [
+          {
+            kind: "fraction",
+            numerator: { runs: [{ kind: "text", value: "10um" }] },
+            denominator: { runs: [{ kind: "text", value: "150nm" }] },
+          },
+        ],
+      },
+      razaviTextbookProfile,
+    );
+    expect(svg).toContain('data-text-run="fraction"');
+    expect(svg).toContain('data-text-run="numerator"');
+    expect(svg).toContain('data-text-run="denominator"');
+    expect(svg).toContain(">10um</tspan>");
+    expect(svg).toContain(">150nm</tspan>");
+  });
+});
+
+describe("line breaks under a subscript (2026-10-15)", () => {
+  it("move the next line down by the shared line pitch", () => {
+    const document = {
+      runs: [
+        { kind: "text", value: "V" },
+        {
+          kind: "span",
+          style: "subscript",
+          children: [{ kind: "text", value: "OC" }],
+        },
+        { kind: "text", value: "采样与" },
+        { kind: "line-break" },
+        { kind: "text", value: "窗口参考" },
+      ],
+    } as const;
+    const markup = renderRichTextDocument(
+      document as never,
+      razaviTextbookProfile,
+    );
+    const [pitch] = richTextLinePitches(
+      document as never,
+      richTextMetrics(razaviTextbookProfile),
+    );
+    const dy = /data-text-run="line-break" x="0" dy="([^"]+)"/u.exec(
+      markup,
+    )?.[1];
+    // The CJK text before the break is back on the line's baseline.
+    expect(Number(dy)).toBeCloseTo(pitch!, 2);
+    expect(pitch).toBeGreaterThan(
+      razaviTextbookProfile.typography.annotationFontSize,
+    );
+  });
+});

@@ -1,0 +1,644 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  createEmptyDocument,
+  createEmptyProject,
+  type RichTextDocument,
+} from "@icm/model";
+
+import { builtInSymbols } from "./builtins.js";
+import {
+  cellSymbolPinSlots,
+  createHierarchicalBlockSymbol,
+  createProjectHierarchicalSymbols,
+  externalSubcircuitSymbolId,
+  freeHierarchicalBlockOffsets,
+  hierarchicalSymbolId,
+} from "./hierarchical-block.js";
+
+describe("hierarchical block formal terminals", () => {
+  it("derives an unreferenced manual top before its first placement without persisting defaults", () => {
+    const project = createEmptyProject("p", "Top", "dut");
+    const before = JSON.stringify(project);
+    expect(createProjectHierarchicalSymbols(project)).toEqual([
+      expect.objectContaining({
+        name: project.documents[0]!.name,
+        hierarchicalBlock: true,
+        pins: [],
+      }),
+    ]);
+    expect(JSON.stringify(project)).toBe(before);
+  });
+  it("sizes an unplaced Cell's block for its top and bottom Pin names, and leaves a placed one's (#1327)", () => {
+    // Three inputs take rows 0, -20 and 20, VDD on top and VSS below: each
+    // supply name needs a row clear of the nearest side name.
+    const project = createEmptyProject("p", "Top", "top");
+    const cell = createEmptyDocument("bias", "Bias");
+    const terminal = (
+      name: string,
+      direction: "input" | "inout",
+    ): NonNullable<typeof cell.netlist>["terminals"][number] => ({
+      id: `terminal-${name}`,
+      name,
+      netId: `net-${name}`,
+      direction,
+      interfaceInstanceIds: [`P-${name}`],
+    });
+    cell.netlist = {
+      name: "bias",
+      formalParameters: [],
+      terminals: [
+        terminal("a", "input"),
+        terminal("b", "input"),
+        terminal("c", "input"),
+        terminal("VDD", "inout"),
+        terminal("VSS", "inout"),
+      ],
+    };
+    cell.presentation.cellSymbol = {
+      pinPlacements: [
+        { terminalId: "terminal-VDD", side: "north", offset: 0 },
+        { terminalId: "terminal-VSS", side: "south", offset: 0 },
+      ],
+    };
+    project.documents.push(cell);
+    const at = (source: typeof project, name: string) =>
+      createProjectHierarchicalSymbols(source)
+        .find((symbol) => symbol.id === hierarchicalSymbolId("bias"))!
+        .pins.find((pin) => pin.name === name)!.at;
+    // Body 120 high: VDD's name row clears b at -20, VSS's clears c at 20.
+    expect(at(project, "b")).toEqual({ x: -50, y: -20 });
+    expect(at(project, "VDD")).toEqual({ x: 0, y: -70 });
+    expect(at(project, "VSS")).toEqual({ x: 0, y: 70 });
+
+    // Placed somewhere, the block derives as before (80 high), so drawings
+    // made with it keep their wiring.
+    project.documents[0]!.instances.push({
+      id: "X1",
+      symbolId: hierarchicalSymbolId("bias"),
+      reference: "X1",
+      placement: null,
+      netlist: {
+        binding: { kind: "subcircuit", childDocumentId: cell.id },
+        parameters: {},
+      },
+    });
+    expect(at(project, "VDD")).toEqual({ x: 0, y: -50 });
+  });
+  it("puts an unplaced Cell's Pins on the side and in the order their Ports are drawn (#1319)", () => {
+    // blb comes first in the interface but is drawn right of bl; input a is
+    // drawn above input b. The automatic rule would put blb west and b
+    // above a, mirrored against the Cell's own schematic.
+    const project = createEmptyProject("p", "Top", "top");
+    const cell = createEmptyDocument("sram", "SRAM");
+    const port = (
+      name: string,
+      direction: "input" | "inout",
+      x: number,
+      y: number,
+    ) => {
+      cell.instances.push({
+        id: `P-${name}`,
+        symbolId: "port",
+        placement: { position: { x, y }, rotation: 0, mirror: "none" },
+      });
+      return {
+        id: `terminal-${name}`,
+        name,
+        netId: `net-${name}`,
+        direction,
+        interfaceInstanceIds: [`P-${name}`],
+      };
+    };
+    cell.netlist = {
+      name: "sram",
+      formalParameters: [],
+      terminals: [
+        port("blb", "inout", 200, 100),
+        port("bl", "inout", 0, 100),
+        port("b", "input", 0, 200),
+        port("a", "input", 0, 140),
+      ],
+    };
+    project.documents.push(cell);
+    const at = (name: string) =>
+      createProjectHierarchicalSymbols(project)
+        .find((symbol) => symbol.id === hierarchicalSymbolId("sram"))!
+        .pins.find((pin) => pin.name === name)!;
+    expect(at("bl").direction).toBe("west");
+    expect(at("blb").direction).toBe("east");
+    expect(at("a").at.y).toBeLessThan(at("b").at.y);
+    expect(at("bl").at.y).toBeLessThan(at("a").at.y);
+  });
+  it("sets an unplaced Cell's drawn rows a little below the middle under a top Pin (#1319)", () => {
+    // The body grows evenly from its middle, and VDD's name needs room above
+    // the first row only: rows from the middle up had made a DAC unit 160
+    // high where 120 holds it.
+    const project = createEmptyProject("p", "Top", "top");
+    const cell = createEmptyDocument("unit", "Unit");
+    const port = (name: string, x: number, y: number) => {
+      cell.instances.push({
+        id: `P-${name}`,
+        symbolId: "port",
+        placement: { position: { x, y }, rotation: 0, mirror: "none" },
+      });
+      return {
+        id: `terminal-${name}`,
+        name,
+        netId: `net-${name}`,
+        direction: "input" as const,
+        interfaceInstanceIds: [`P-${name}`],
+      };
+    };
+    cell.netlist = {
+      name: "unit",
+      formalParameters: [],
+      terminals: [
+        port("p", 0, 0),
+        port("q", 0, 40),
+        port("VDD", 100, -60),
+        port("r", 200, 20),
+      ],
+    };
+    cell.presentation.cellSymbol = {
+      pinPlacements: [{ terminalId: "terminal-VDD", side: "north", offset: 0 }],
+    };
+    project.documents.push(cell);
+    const at = (name: string) =>
+      createProjectHierarchicalSymbols(project)
+        .find((symbol) => symbol.id === hierarchicalSymbolId("unit"))!
+        .pins.find((pin) => pin.name === name)!.at.y;
+    expect([at("p"), at("q"), at("r")]).toEqual([0, 20, 10]);
+  });
+  it("puts a Port drawn on the middle line at the end of the block it is drawn at", () => {
+    // A differential pair's tail, drawn below the pair, had no side, and the
+    // automatic layout put it between outp and inp: three names in 20 units.
+    const project = createEmptyProject("p", "Top", "top");
+    const cell = createEmptyDocument("pair", "Pair");
+    const port = (name: string, x: number, y: number) => {
+      cell.instances.push({
+        id: `P-${name}`,
+        symbolId: "port",
+        placement: { position: { x, y }, rotation: 0, mirror: "none" },
+      });
+      return {
+        id: `terminal-${name}`,
+        name,
+        netId: `net-${name}`,
+        direction: "inout" as const,
+        interfaceInstanceIds: [`P-${name}`],
+      };
+    };
+    cell.netlist = {
+      name: "pair",
+      formalParameters: [],
+      terminals: [
+        port("inp", -60, 0),
+        port("inn", 160, 0),
+        port("outp", 10, -60),
+        port("outn", 90, -60),
+        port("tail", 50, 60),
+      ],
+    };
+    project.documents.push(cell);
+    const symbol = createProjectHierarchicalSymbols(project).find(
+      (item) => item.id === hierarchicalSymbolId("pair"),
+    )!;
+    const at = (name: string) =>
+      symbol.pins.find((pin) => pin.name === name)!.at;
+    // The tail below the block, in the middle of it.
+    expect(at("tail").x).toBe((at("inp").x + at("inn").x) / 2);
+    expect(at("tail").y).toBeGreaterThan(at("inp").y);
+    // Two rows down each side, a full row apart.
+    expect(at("inp").y - at("outp").y).toBe(20);
+    expect(at("inn").y - at("outn").y).toBe(20);
+  });
+  it("projects a Cell Pin's authored RichText to the parent without changing its electrical name", () => {
+    const authored: RichTextDocument = {
+      runs: [
+        {
+          kind: "span",
+          style: "italic",
+          children: [{ kind: "text", value: "V" }],
+        },
+        {
+          kind: "span",
+          style: "subscript",
+          children: [{ kind: "text", value: "out" }],
+        },
+      ],
+    };
+    const symbol = createHierarchicalBlockSymbol({
+      name: "Child",
+      netlist: {
+        name: "Child",
+        formalParameters: [],
+        terminals: [
+          {
+            id: "terminal-vout",
+            name: "Vout",
+            netId: "net-vout",
+            direction: "output",
+            interfaceInstanceIds: ["P1"],
+          },
+        ],
+      },
+      annotations: [
+        {
+          id: "pin-label",
+          kind: "instance-label",
+          binding: { kind: "cell-terminal-name", terminalId: "terminal-vout" },
+          formatOverride: authored,
+          anchor: { kind: "free", position: { x: 0, y: 0 } },
+          alignment: "start",
+          rotation: 0,
+          locked: false,
+        },
+      ],
+    });
+
+    expect(symbol?.pins[0]?.name).toBe("Vout");
+    expect(symbol?.pins[0]?.presentation?.nameContent).toEqual(authored);
+  });
+
+  it("shows a Pin's display alias on the parent and makes room for it", () => {
+    const cell = (content?: RichTextDocument) =>
+      createHierarchicalBlockSymbol({
+        name: "Child",
+        netlist: {
+          name: "Child",
+          formalParameters: [],
+          terminals: [
+            {
+              id: "terminal-in",
+              name: "IN",
+              netId: "net-in",
+              direction: "input",
+              interfaceInstanceIds: ["P1"],
+            },
+          ],
+        },
+        annotations: content
+          ? [
+              {
+                id: "pin-label",
+                kind: "instance-label",
+                content,
+                anchor: {
+                  kind: "object",
+                  objectId: "P1",
+                  localOffset: { x: 10, y: 0 },
+                  fallbackPosition: { x: 10, y: 0 },
+                },
+                alignment: "start",
+                rotation: 0,
+                locked: false,
+              },
+            ]
+          : [],
+      });
+    const alias: RichTextDocument = {
+      runs: [{ kind: "text", value: "Reference input" }],
+    };
+    const named = cell();
+    const aliased = cell(alias);
+    // The netlist keeps the Pin's name; the parent draws the alias.
+    expect(aliased?.pins[0]?.name).toBe("IN");
+    expect(aliased?.pins[0]?.presentation?.nameContent).toEqual(alias);
+    expect(aliased!.viewBox.width).toBeGreaterThan(named!.viewBox.width);
+  });
+
+  it("uses the current local Cell name after an imported Cell is renamed", () => {
+    const symbol = createHierarchicalBlockSymbol({
+      name: "Stage",
+      sourceBinding: {
+        cellName: "OriginalImportedName",
+        sourceRef: {
+          fileId: "source.sp",
+          start: { offset: 0, line: 1, column: 1 },
+          end: { offset: 1, line: 1, column: 2 },
+        },
+      },
+      netlist: { name: "Stage", terminals: [], formalParameters: [] },
+    });
+
+    expect(symbol?.id).toBe(hierarchicalSymbolId("Stage"));
+    expect(symbol?.name).toBe("Stage");
+  });
+
+  it("projects independently authored same-name Pins as one hierarchy pin", () => {
+    const symbol = createHierarchicalBlockSymbol({
+      name: "Child",
+      netlist: {
+        name: "Child",
+        formalParameters: [],
+        terminals: [
+          {
+            id: "terminal-bus-a",
+            name: "BUS",
+            netId: "net-bus-a",
+            direction: "input",
+            interfaceInstanceIds: ["P1"],
+          },
+          {
+            id: "terminal-out",
+            name: "OUT",
+            netId: "net-out",
+            direction: "output",
+            interfaceInstanceIds: ["P2"],
+          },
+          {
+            id: "terminal-bus-b",
+            name: "bus",
+            netId: "net-bus-b",
+            direction: "output",
+            interfaceInstanceIds: ["P3"],
+          },
+        ],
+      },
+    });
+
+    expect(symbol?.pins.map((pin) => pin.name)).toEqual(["BUS", "OUT"]);
+    expect(symbol?.pins.find((pin) => pin.name === "BUS")?.direction).toBe(
+      "west",
+    );
+  });
+
+  it("creates a formal zero-terminal block for a manual Cell", () => {
+    const symbol = createHierarchicalBlockSymbol({
+      name: "Cell1",
+      netlist: { name: "Cell1", terminals: [], formalParameters: [] },
+    });
+
+    expect(symbol).toMatchObject({
+      name: "Cell1",
+      hierarchicalBlock: true,
+      viewBox: { x: -50, y: -30, width: 100, height: 60 },
+      pins: [],
+    });
+    expect(symbol?.primitives[0]).toMatchObject({
+      kind: "polygon",
+      fill: "none",
+      stroke: "foreground",
+    });
+    expect(
+      symbol?.primitives[0]?.kind === "polygon"
+        ? symbol.primitives[0].points
+        : [],
+    ).toHaveLength(4);
+  });
+
+  it("uses direction-aware sides, adaptive body width, and stable explicit pin placement", () => {
+    const symbol = createHierarchicalBlockSymbol({
+      name: "GainStage",
+      netlist: {
+        name: "GainStage",
+        formalParameters: [],
+        terminals: [
+          {
+            id: "terminal-vin",
+            name: "VERY_LONG_INPUT",
+            netId: "net-in",
+            direction: "input",
+            interfaceInstanceIds: ["P1"],
+          },
+          {
+            id: "terminal-vout",
+            name: "OUT",
+            netId: "net-out",
+            direction: "output",
+            interfaceInstanceIds: ["P2"],
+          },
+          {
+            id: "terminal-vdd",
+            name: "VDD",
+            netId: "net-vdd",
+            direction: "passive",
+            interfaceInstanceIds: ["P3"],
+          },
+        ],
+      },
+      presentation: {
+        styleProfileId: "razavi-textbook-v1",
+        grid: 10,
+        compactness: "normal",
+        cellSymbol: {
+          pinPlacements: [
+            { terminalId: "terminal-vdd", side: "north", offset: 20 },
+          ],
+        },
+      },
+    });
+
+    expect(symbol?.pins).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "VERY_LONG_INPUT",
+          direction: "west",
+        }),
+        expect.objectContaining({ name: "OUT", direction: "east" }),
+        expect.objectContaining({
+          name: "VDD",
+          at: { x: 20, y: -30 },
+          direction: "north",
+        }),
+      ]),
+    );
+    expect(symbol?.viewBox.width).toBeGreaterThan(100);
+    expect(
+      symbol?.pins.every((pin) => pin.at.x % 10 === 0 && pin.at.y % 10 === 0),
+    ).toBe(true);
+  });
+
+  it("keeps dense long-name interfaces grid-aligned on every body edge", () => {
+    const terminals = Array.from({ length: 12 }, (_, index) => ({
+      id: `terminal-${index}`,
+      name: `VERY_LONG_SIGNAL_${index + 1}`,
+      netId: `net-${index}`,
+      direction: index % 2 === 0 ? ("input" as const) : ("output" as const),
+      interfaceInstanceIds: [`P${index + 1}`],
+    }));
+    const symbol = createHierarchicalBlockSymbol({
+      name: "DenseStage",
+      netlist: { name: "DenseStage", terminals, formalParameters: [] },
+      presentation: {
+        styleProfileId: "razavi-textbook-v1",
+        grid: 10,
+        compactness: "normal",
+        cellSymbol: {
+          pinPlacements: [
+            { terminalId: "terminal-0", side: "north", offset: -40 },
+            { terminalId: "terminal-1", side: "south", offset: 40 },
+          ],
+        },
+      },
+    });
+
+    expect(symbol?.pins).toHaveLength(12);
+    expect(symbol?.viewBox.width).toBeGreaterThanOrEqual(220);
+    expect(symbol?.viewBox.height).toBeGreaterThanOrEqual(100);
+    expect(
+      symbol?.pins.map((pin) => `${pin.direction}:${pin.at.x}:${pin.at.y}`),
+    ).toHaveLength(
+      new Set(
+        symbol?.pins.map((pin) => `${pin.direction}:${pin.at.x}:${pin.at.y}`),
+      ).size,
+    );
+    expect(
+      symbol?.pins.every((pin) => pin.at.x % 10 === 0 && pin.at.y % 10 === 0),
+    ).toBe(true);
+  });
+
+  it("reads where every Pin of a Cell's block stands, placed or not (#1320)", () => {
+    // bl drawn left, blb right; z, an output, is not drawn at all.
+    const project = createEmptyProject("p", "Top", "top");
+    const cell = createEmptyDocument("sram", "SRAM");
+    for (const [id, x] of [
+      ["P-bl", 0],
+      ["P-blb", 200],
+    ] as const)
+      cell.instances.push({
+        id,
+        symbolId: "port",
+        placement: { position: { x, y: 100 }, rotation: 0, mirror: "none" },
+      });
+    cell.instances.push({ id: "P-z", symbolId: "port", placement: null });
+    const terminal = (name: string, direction: "inout" | "output") => ({
+      id: `terminal-${name}`,
+      name,
+      netId: `net-${name}`,
+      direction,
+      interfaceInstanceIds: [`P-${name}`],
+    });
+    cell.netlist = {
+      name: "sram",
+      formalParameters: [],
+      terminals: [
+        terminal("blb", "inout"),
+        terminal("bl", "inout"),
+        terminal("z", "output"),
+      ],
+    };
+    project.documents.push(cell);
+    const shown = (source: typeof project) =>
+      createProjectHierarchicalSymbols(source)
+        .find((symbol) => symbol.id === hierarchicalSymbolId("sram"))!
+        .pins.map((pin) => ({
+          terminalId: `terminal-${pin.name}`,
+          side: pin.direction,
+          offset:
+            pin.direction === "west" || pin.direction === "east"
+              ? pin.at.y
+              : pin.at.x,
+        }));
+    // Unplaced: the drawn sides its first placement would store, and the
+    // automatic slot for the Pin with none.
+    expect(cellSymbolPinSlots(project, cell)).toEqual([
+      { terminalId: "terminal-blb", side: "east", offset: 0 },
+      { terminalId: "terminal-bl", side: "west", offset: 0 },
+      { terminalId: "terminal-z", side: "east", offset: -20 },
+    ]);
+    expect(cellSymbolPinSlots(project, cell)).toEqual(shown(project));
+    // Placed with nothing stored: the automatic layout callers were drawn
+    // with, blb west and bl east.
+    project.documents[0]!.instances.push({
+      id: "X1",
+      symbolId: hierarchicalSymbolId("sram"),
+      reference: "X1",
+      placement: null,
+      netlist: {
+        binding: { kind: "subcircuit", childDocumentId: cell.id },
+        parameters: {},
+      },
+    });
+    expect(cellSymbolPinSlots(project, cell)).toEqual([
+      { terminalId: "terminal-blb", side: "west", offset: 0 },
+      { terminalId: "terminal-bl", side: "east", offset: 0 },
+      { terminalId: "terminal-z", side: "east", offset: -20 },
+    ]);
+    expect(cellSymbolPinSlots(project, cell)).toEqual(shown(project));
+  });
+
+  it("lists free offsets in automatic order, a full row from every Pin", () => {
+    expect(freeHierarchicalBlockOffsets([0]).slice(0, 3)).toEqual([
+      -20, 20, -40,
+    ]);
+    // Beside Pins drawn half a row off the automatic rows.
+    expect(freeHierarchicalBlockOffsets([-10, 10]).slice(0, 2)).toEqual([
+      -40, 40,
+    ]);
+  });
+});
+
+describe("external PDK symbol presentation", () => {
+  function projectWithExternal(
+    name: string,
+    terminalNames: readonly string[] = ["D", "G", "S", "B"],
+    presentation?: { minimumBodySize: { width: number; height: number } },
+  ) {
+    const project = createEmptyProject("project", "Project");
+    project.externalSubcircuitDefinitions.push({
+      id: "external-device",
+      name,
+      terminals: terminalNames.map((terminalName, index) => ({
+        id: `external-terminal-${index}`,
+        name: terminalName,
+        direction: "passive",
+      })),
+      formalParameters: [],
+      interfaceStatus: "declared",
+      ...(presentation ? { presentation } : {}),
+    });
+    return project;
+  }
+
+  it.each([
+    ["sky130_fd_pr__nfet_01v8", "nmos"],
+    ["sky130_fd_pr__pfet_01v8", "pmos"],
+  ])(
+    "retains canonical %s MOS presentation for existing external identity",
+    (name, baseId) => {
+      const symbol = createProjectHierarchicalSymbols(
+        projectWithExternal(name),
+        builtInSymbols,
+      ).find(
+        (candidate) =>
+          candidate.id === externalSubcircuitSymbolId("external-device"),
+      );
+      const base = builtInSymbols.find((candidate) => candidate.id === baseId);
+
+      expect(symbol).toMatchObject({
+        id: externalSubcircuitSymbolId("external-device"),
+        name,
+        hierarchicalBlock: true,
+        pins: base?.pins,
+        primitives: base?.primitives,
+        defaultVariantId: "textbook-3terminal",
+        variants: base?.variants,
+      });
+      expect(symbol?.pins.map((pin) => pin.name)).toEqual(["D", "G", "S", "B"]);
+    },
+  );
+
+  it("keeps the generic block when terminal order is incompatible", () => {
+    const symbol = createProjectHierarchicalSymbols(
+      projectWithExternal("sky130_fd_pr__nfet_01v8", ["G", "D", "S", "B"]),
+      builtInSymbols,
+    ).at(-1);
+
+    expect(symbol?.pins.map((pin) => pin.name)).toEqual(["G", "D", "S", "B"]);
+    expect(symbol?.primitives[0]).toMatchObject({ kind: "polygon" });
+  });
+
+  it("keeps an explicit block presentation authoritative", () => {
+    const symbol = createProjectHierarchicalSymbols(
+      projectWithExternal("sky130_fd_pr__nfet_01v8", ["D", "G", "S", "B"], {
+        minimumBodySize: { width: 160, height: 100 },
+      }),
+      builtInSymbols,
+    ).at(-1);
+
+    expect(symbol?.viewBox.width).toBeGreaterThanOrEqual(160);
+    expect(symbol?.primitives[0]).toMatchObject({ kind: "polygon" });
+  });
+});

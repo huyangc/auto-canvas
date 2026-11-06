@@ -1,0 +1,509 @@
+{
+  "schemaVersion": 1,
+  "id": "razavi-data-converters-clock-pulse",
+  "kind": "pdf-vector-extract",
+  "source": {
+    "title": "Analysis and Design of Data Converters",
+    "sha256": "8a5c1bb42a5e32a84cd6af53e2f43db79ea8f511552c913ec65d2caa1d90a028",
+    "pdfPage": 352,
+    "printedPage": 334,
+    "figure": "16.8"
+  },
+  "selection": {
+    "method": "direct-source-region-vector-fingerprint",
+    "boundsPdf": {
+      "left": 55.0,
+      "top": 350.0,
+      "right": 505.0,
+      "bottom": 445.0
+    },
+    "nativeObjectCount": 29,
+    "textObjectCount": 15,
+    "nativeSelectionSha256": "683c85fabbc2687bcfc2789524cb2a370b0a141012c70d0d3c4fda3bebdfc154",
+    "nativeObjects": [
+      {
+        "objectType": "line",
+        "x0": 222.623,
+        "top": 373.853,
+        "x1": 233.379,
+        "bottom": 373.853,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 2,
+        "pathSha256": "777693a45f08b28e4de2825dec0aa8807f2a6e9e7ade0fff05ae12d73f27ca94"
+      },
+      {
+        "objectType": "line",
+        "x0": 222.624001,
+        "top": 385.324997,
+        "x1": 228.827001,
+        "bottom": 385.324997,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 2,
+        "pathSha256": "0e838f4f16a1c5ff61c348d0678a0423640407dc1479cc76fc7db4b3095c1049"
+      },
+      {
+        "objectType": "line",
+        "x0": 253.456008,
+        "top": 379.588986,
+        "x1": 264.212008,
+        "bottom": 379.588986,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 2,
+        "pathSha256": "88bbe80dfb1031b59c535f359096695b55444e1e3266dd0bbc1439ab93f6dd3a"
+      },
+      {
+        "objectType": "line",
+        "x0": 153.786011,
+        "top": 373.853,
+        "x1": 228.359011,
+        "bottom": 373.853,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 2,
+        "pathSha256": "a9d7645c004c55e38e85a1a825669f8eba30dac2335bfe6e2ea8c2885cd35fb8"
+      },
+      {
+        "objectType": "line",
+        "x0": 320.140988,
+        "top": 402.534006,
+        "x1": 452.077988,
+        "bottom": 402.534006,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 2,
+        "pathSha256": "4924be2dc7011249cdd03a467207ffc269a7c3875fa352f045d57f07ce20e9c0"
+      },
+      {
+        "objectType": "line",
+        "x0": 348.823,
+        "top": 385.325,
+        "x1": 348.823,
+        "bottom": 414.007,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 2,
+        "pathSha256": "a45658fc50f093125d865763163fac5e69f04341162f0c11bdfec733b08bf5e1"
+      },
+      {
+        "objectType": "line",
+        "x0": 324.623,
+        "top": 408.270996,
+        "x1": 336.096,
+        "bottom": 408.270996,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 2,
+        "pathSha256": "375843974dd7688d0d33e46f0013db1914d17c30ab98cc5ad6adadbe12b1c921"
+      },
+      {
+        "objectType": "line",
+        "x0": 349.991992,
+        "top": 408.270996,
+        "x1": 361.464992,
+        "bottom": 408.270996,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 2,
+        "pathSha256": "c8b027414ffbab1daef9e0b70503d9728a566319309a4285d19fef96a9be888a"
+      },
+      {
+        "objectType": "line",
+        "x0": 337.351003,
+        "top": 385.325,
+        "x1": 337.351003,
+        "bottom": 414.007,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 2,
+        "pathSha256": "bdba6c05b9e45071d12daeb0c6db41ba22813cb0c1a41874f5b4545c8acc684f"
+      },
+      {
+        "objectType": "curve",
+        "x0": 243.775995,
+        "top": 370.849997,
+        "x1": 253.097995,
+        "bottom": 388.148997,
+        "linewidth": 1.4341,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 20,
+        "pathSha256": "cd075bdb9caebbf9f99c55e52c29abbf3f3c0b66dd8cd4e0564e1bee465bbd26"
+      },
+      {
+        "objectType": "curve",
+        "x0": 233.557995,
+        "top": 370.939987,
+        "x1": 244.492995,
+        "bottom": 388.148987,
+        "linewidth": 1.4341,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 4,
+        "pathSha256": "4ed7c18961529735dd84530cd0385acf436eac6a789381a4fff41c98059f9dd3"
+      },
+      {
+        "objectType": "curve",
+        "x0": 228.754003,
+        "top": 383.388997,
+        "x1": 232.626003,
+        "bottom": 387.260997,
+        "linewidth": 1.4341,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 6,
+        "pathSha256": "95d980a6aea0a1b7eccde895ab2e8255d657ad00d3a55d7dacfdccc00858059f"
+      },
+      {
+        "objectType": "curve",
+        "x0": 211.150011,
+        "top": 385.324997,
+        "x1": 228.359011,
+        "bottom": 391.061997,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 4,
+        "pathSha256": "78a0da96848dd3adeb636c509d94ff0d21b34fe27b69703648ff344341c2d278"
+      },
+      {
+        "objectType": "curve",
+        "x0": 165.258997,
+        "top": 373.853009,
+        "x1": 176.731997,
+        "bottom": 391.062009,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 3,
+        "pathSha256": "ccd1e962e1869185babb7af1936bbae3addcdaf56d5f993431385850bb25a627"
+      },
+      {
+        "objectType": "curve",
+        "x0": 163.736006,
+        "top": 372.146002,
+        "x1": 166.604006,
+        "bottom": 375.014002,
+        "linewidth": 0.0,
+        "fill": true,
+        "stroke": false,
+        "pathCommandCount": 5,
+        "pathSha256": "9f0640484c5e91dc8a19d62d244a2ce12055c71f70f19ff0b3ca540a56cea2d0"
+      },
+      {
+        "objectType": "curve",
+        "x0": 163.736006,
+        "top": 372.146002,
+        "x1": 166.604006,
+        "bottom": 375.014002,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 6,
+        "pathSha256": "3a48f8806672633acc0d4482451d3766b6b15880d051b56cd8bbe433d215060d"
+      },
+      {
+        "objectType": "curve",
+        "x0": 152.263008,
+        "top": 372.150006,
+        "x1": 155.131008,
+        "bottom": 375.018006,
+        "linewidth": 0.0,
+        "fill": true,
+        "stroke": false,
+        "pathCommandCount": 5,
+        "pathSha256": "d3d68f7eeb02caaafbcf5ceefa830bf009e01079d16a3ebc111f77d5c10259dc"
+      },
+      {
+        "objectType": "curve",
+        "x0": 152.263008,
+        "top": 372.150006,
+        "x1": 155.131008,
+        "bottom": 375.018006,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 6,
+        "pathSha256": "4939b22bdc894ea6e5a619bfaa6ce44f5026babfb160d4a5f363437cc0cf65db"
+      },
+      {
+        "objectType": "curve",
+        "x0": 261.253999,
+        "top": 377.885992,
+        "x1": 264.121999,
+        "bottom": 380.753992,
+        "linewidth": 0.0,
+        "fill": true,
+        "stroke": false,
+        "pathCommandCount": 5,
+        "pathSha256": "24411a947067b13667f11c5f1259d766da132ee865c0d17ce096373d17639671"
+      },
+      {
+        "objectType": "curve",
+        "x0": 261.253999,
+        "top": 377.885992,
+        "x1": 264.121999,
+        "bottom": 380.753992,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 6,
+        "pathSha256": "d524877addff4c0597ff59ddc7d67e4e7a71befe4f7375d23076c1ca790be682"
+      },
+      {
+        "objectType": "curve",
+        "x0": 325.878,
+        "top": 362.38,
+        "x1": 446.341,
+        "bottom": 373.853,
+        "linewidth": 1.4341,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 10,
+        "pathSha256": "3fa4198067039280bb27752f2b0ff8b642572d255d5d94d2f30b67fcff6f91b2"
+      },
+      {
+        "objectType": "curve",
+        "x0": 325.878,
+        "top": 385.324995,
+        "x1": 446.341,
+        "bottom": 396.797995,
+        "linewidth": 1.4341,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 10,
+        "pathSha256": "4c03a931eaea3b7d6f577277d482ef3d9cd1768512dfc8ff96ad796805d98ade"
+      },
+      {
+        "objectType": "curve",
+        "x0": 443.831979,
+        "top": 399.913986,
+        "x1": 453.440979,
+        "bottom": 405.154986,
+        "linewidth": 0.0,
+        "fill": true,
+        "stroke": false,
+        "pathCommandCount": 3,
+        "pathSha256": "6bcf9cce7f69957ce0e6e1e6c8db847637d7fda9c47d2ea0e20d18a3807d1fb1"
+      },
+      {
+        "objectType": "curve",
+        "x0": 444.189987,
+        "top": 400.384006,
+        "x1": 452.077987,
+        "bottom": 404.686006,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 3,
+        "pathSha256": "8c6426e39ac031712324737d3257522c206b672ab872ce885653efb0deb8ec1f"
+      },
+      {
+        "objectType": "curve",
+        "x0": 327.850002,
+        "top": 405.65,
+        "x1": 337.459002,
+        "bottom": 410.891,
+        "linewidth": 0.0,
+        "fill": true,
+        "stroke": false,
+        "pathCommandCount": 3,
+        "pathSha256": "afb3025cb674e09ad14e77bb80e80ff8bb599f71b444560d021064c850936aef"
+      },
+      {
+        "objectType": "curve",
+        "x0": 328.20801,
+        "top": 406.119995,
+        "x1": 336.09601,
+        "bottom": 410.421995,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 3,
+        "pathSha256": "5eb6f68dd2cef172b184859791b9dd26d8ffc916ec4a47f0bd07cb6e15710257"
+      },
+      {
+        "objectType": "curve",
+        "x0": 348.62999,
+        "top": 405.649991,
+        "x1": 358.23799,
+        "bottom": 410.890991,
+        "linewidth": 0.0,
+        "fill": true,
+        "stroke": false,
+        "pathCommandCount": 3,
+        "pathSha256": "c775fdab761c91441fe986e48232f032072a27648379014bb3f6a25450e664b2"
+      },
+      {
+        "objectType": "curve",
+        "x0": 349.992007,
+        "top": 406.119997,
+        "x1": 357.880007,
+        "bottom": 410.421997,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 3,
+        "pathSha256": "6a9eb02d3abc36299295fb5c812bc2676382dd237c57a7802ad104c6d818f1ca"
+      },
+      {
+        "objectType": "rect",
+        "x0": 176.732002,
+        "top": 382.456997,
+        "x1": 211.150002,
+        "bottom": 399.665997,
+        "linewidth": 1.4341,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 5,
+        "pathSha256": "c7aac9e27fdeef6909b49d4712102f5e7fd3c428a9555e0b69e733a0bb73b973"
+      }
+    ],
+    "textObjects": [
+      {
+        "text": "CK",
+        "x0": 302.529,
+        "top": 360.94148,
+        "x1": 314.95462,
+        "bottom": 369.54648
+      },
+      {
+        "text": "in",
+        "x0": 315.829,
+        "top": 364.67828,
+        "x1": 321.967545,
+        "bottom": 371.58328
+      },
+      {
+        "text": "CK",
+        "x0": 130.438,
+        "top": 369.54548,
+        "x1": 142.86362,
+        "bottom": 378.15048
+      },
+      {
+        "text": "in",
+        "x0": 143.738,
+        "top": 373.28228,
+        "x1": 149.876545,
+        "bottom": 380.18728
+      },
+      {
+        "text": "CK",
+        "x0": 265.914,
+        "top": 375.99948,
+        "x1": 278.33962,
+        "bottom": 384.60448
+      },
+      {
+        "text": "out",
+        "x0": 280.962,
+        "top": 379.51428,
+        "x1": 291.699275,
+        "bottom": 386.41928
+      },
+      {
+        "text": "CK",
+        "x0": 302.529,
+        "top": 383.88648,
+        "x1": 314.95462,
+        "bottom": 392.49148
+      },
+      {
+        "text": "T",
+        "x0": 189.566,
+        "top": 386.98248,
+        "x1": 194.823655,
+        "bottom": 395.58748
+      },
+      {
+        "text": "out",
+        "x0": 315.829,
+        "top": 387.62328,
+        "x1": 326.566275,
+        "bottom": 394.52828
+      },
+      {
+        "text": "1",
+        "x0": 195.247,
+        "top": 390.72128,
+        "x1": 199.08618,
+        "bottom": 397.62628
+      },
+      {
+        "text": "t",
+        "x0": 444.906,
+        "top": 406.69648,
+        "x1": 447.771465,
+        "bottom": 415.30148
+      },
+      {
+        "text": "T",
+        "x0": 338.712,
+        "top": 409.92848,
+        "x1": 343.969655,
+        "bottom": 418.53348
+      },
+      {
+        "text": "1",
+        "x0": 344.393,
+        "top": 413.66728,
+        "x1": 348.23218,
+        "bottom": 420.57228
+      },
+      {
+        "text": "Figure16.8",
+        "x0": 75.961,
+        "top": 426.320996,
+        "x1": 119.082484,
+        "bottom": 435.286996
+      },
+      {
+        "text": "Useofapulsegeneratorforproducingaclock.",
+        "x0": 127.081,
+        "top": 426.428588,
+        "x1": 295.634932,
+        "bottom": 435.394588
+      }
+    ]
+  },
+  "derivation": {
+    "visualScope": [
+      "square clock-step proportions",
+      "narrow pulse and pulse-width marker treatment"
+    ],
+    "semanticBoundary": "The source figure contains a pulse-generator circuit and waveforms, not a standalone voltage-source Symbol. Product artwork may compose its square-step mark with the separately reviewed independent voltage-source body; electrical pins remain product semantics."
+  },
+  "rasterWitness": {
+    "kind": "source-pdf-crop",
+    "sourcePdfPage": 352,
+    "dpi": 200,
+    "pixels": {
+      "width": 1250,
+      "height": 264
+    },
+    "selectionBoundsPdf": {
+      "left": 55.0,
+      "top": 350.0,
+      "right": 505.0,
+      "bottom": 445.0
+    },
+    "sourceCropPx": {
+      "x": 152,
+      "y": 972
+    },
+    "assetPath": "data-converters-clock-pulse-reference.png",
+    "threshold": 160
+  }
+}

@@ -1,0 +1,404 @@
+import type { Point } from "@icm/model";
+
+export interface CanvasDragVisual {
+  translate(delta: Point): void;
+  translateObject(objectId: string, delta: Point): void;
+  setPolyline(points: readonly Point[]): void;
+  setObjectPolyline(objectId: string, points: readonly Point[]): void;
+  restore(): void;
+}
+
+interface SavedElement {
+  element: Element;
+  objectId: string;
+  transform: string | null;
+  points: string | null;
+}
+
+/** A label tether's line: each end moves with its own object's drag. */
+interface SavedTether {
+  element: Element;
+  labelId: string | null;
+  ownerId: string | null;
+  label: Point;
+  target: Point;
+}
+
+/**
+ * A coupling's arrow (#1648): each end follows its own inductor's drag, its
+ * curve's control point half of each, its heads their ends and its name
+ * the middle. The drop redraws it exactly.
+ */
+interface SavedCouplingArrow {
+  ends: [string, string];
+  shaft: Element | null;
+  d: string | null;
+  p0: Point;
+  control: Point;
+  p1: Point;
+  moved: { element: Element; end: 0 | 1 | null; transform: string | null }[];
+}
+
+function pairOf(value: string | null): Point {
+  const [x, y] = (value ?? "0 0").split(" ").map(Number);
+  return { x: x ?? 0, y: y ?? 0 };
+}
+
+function pointList(points: readonly Point[]): string {
+  return points.map((point) => `${point.x},${point.y}`).join(" ");
+}
+
+/** The paint a Route's own polyline borrows from its ink while it is dragged. */
+const INK_PAINT = [
+  "stroke",
+  "stroke-width",
+  "stroke-linecap",
+  "stroke-linejoin",
+  "stroke-dasharray",
+  "stroke-miterlimit",
+] as const;
+
+/** A polyline's points as the ink spells the same run: `M x y L x y …`. */
+function inkRun(points: string): string {
+  return `M ${points
+    .trim()
+    .split(/\s+/)
+    .map((point) => point.replace(",", " "))
+    .join(" L ")}`;
+}
+
+/** The vertices of one `M … L …` subpath, as `x y` pairs. */
+function inkVertices(subpath: string): string[] {
+  const numbers = subpath.replace(/[ML]/g, " ").trim().split(/\s+/);
+  const vertices: string[] = [];
+  for (let index = 0; index + 1 < numbers.length; index += 2)
+    vertices.push(`${numbers[index]} ${numbers[index + 1]}`);
+  return vertices;
+}
+
+/**
+ * Conductors of one paint are stroked as a single shape, and each Route keeps
+ * an unpainted polyline carrying its id and points (#926). A drag moves only
+ * that polyline, which left the visible wire behind until the drop. For the
+ * length of the drag, each dragged Route's run leaves the shared ink, with
+ * the small miters that join its two ends, and its own polyline is painted
+ * with the ink's paint instead. `restore` puts both back.
+ */
+function takeOverRouteInk(root: ParentNode, saved: readonly SavedElement[]) {
+  const routes = saved.filter(
+    (item) =>
+      item.points !== null &&
+      item.element.getAttribute("data-net-id") !== null &&
+      item.element.getAttribute("stroke") === "none",
+  );
+  const inks = routes.length
+    ? Array.from(root.querySelectorAll('[data-role="conductor-ink"]')).filter(
+        (element) => element.getAttribute("data-role") === "conductor-ink",
+      )
+    : [];
+  const originalInk = new Map<Element, string>();
+  const painted = new Map<Element, Map<string, string | null>>();
+  if (inks.length > 0) {
+    const runs = new Set(
+      Array.from(root.querySelectorAll("[data-net-id][points]")).flatMap(
+        (element) => {
+          const points = element.getAttribute("points");
+          return points ? [inkRun(points)] : [];
+        },
+      ),
+    );
+    // Parse each shared path once. The ordered owner lists preserve the old
+    // first-remaining-ink rule, including equal runs in different paint buckets.
+    const buckets = inks.map((element) => {
+      const d = element.getAttribute("d") ?? "";
+      const subpaths = d.split(/ (?=M )/);
+      const byRun = new Map<string, number[]>();
+      const byVertex = new Map<string, number[]>();
+      const remaining = new Map<string, number>();
+      subpaths.forEach((subpath, index) => {
+        const members = byRun.get(subpath) ?? [];
+        members.push(index);
+        byRun.set(subpath, members);
+        remaining.set(subpath, (remaining.get(subpath) ?? 0) + 1);
+        if (!runs.has(subpath))
+          for (const vertex of inkVertices(subpath)) {
+            const miters = byVertex.get(vertex) ?? [];
+            miters.push(index);
+            byVertex.set(vertex, miters);
+          }
+      });
+      return {
+        element,
+        d,
+        subpaths,
+        byRun,
+        byVertex,
+        remaining,
+        removed: new Set<number>(),
+      };
+    });
+    const owners = new Map<string, typeof buckets>();
+    for (const bucket of buckets)
+      for (const run of bucket.byRun.keys()) {
+        const list = owners.get(run) ?? [];
+        list.push(bucket);
+        owners.set(run, list);
+      }
+    for (const item of routes) {
+      const run = inkRun(item.points!);
+      const vertices = inkVertices(run);
+      const bucket = owners
+        .get(run)
+        ?.find((candidate) => candidate.remaining.has(run));
+      if (!bucket) continue;
+      const ink = bucket.element;
+      if (!originalInk.has(ink)) originalInk.set(ink, bucket.d);
+      const remove = (index: number) => {
+        if (bucket.removed.has(index)) return;
+        bucket.removed.add(index);
+        const subpath = bucket.subpaths[index]!;
+        const count = bucket.remaining.get(subpath)! - 1;
+        if (count) bucket.remaining.set(subpath, count);
+        else bucket.remaining.delete(subpath);
+      };
+      for (const index of bucket.byRun.get(run) ?? []) remove(index);
+      for (const end of [vertices[0], vertices.at(-1)])
+        if (end !== undefined)
+          for (const index of bucket.byVertex.get(end) ?? []) remove(index);
+      const before = new Map<string, string | null>();
+      for (const name of INK_PAINT) {
+        before.set(name, item.element.getAttribute(name));
+        const value = ink.getAttribute(name);
+        if (value === null) item.element.removeAttribute(name);
+        else item.element.setAttribute(name, value);
+      }
+      painted.set(item.element, before);
+    }
+    for (const bucket of buckets)
+      if (originalInk.has(bucket.element)) {
+        bucket.element.setAttribute(
+          "d",
+          bucket.subpaths
+            .filter((_, index) => !bucket.removed.has(index))
+            .join(" "),
+        );
+      }
+  }
+  return {
+    restore() {
+      for (const [ink, d] of originalInk) ink.setAttribute("d", d);
+      for (const [element, saved] of painted)
+        for (const [name, value] of saved) {
+          if (value === null) element.removeAttribute(name);
+          else element.setAttribute(name, value);
+        }
+    },
+  };
+}
+
+/**
+ * Lightweight live feedback for a drag. Formal and overlay objects expose the
+ * same drag id, so one imperative update moves the paint without rebuilding
+ * the formal scene or committing document state.
+ */
+export function startCanvasDragVisual(
+  root: ParentNode,
+  objectIds: readonly string[],
+): CanvasDragVisual {
+  const ids = new Set(objectIds);
+  const elements = Array.from(
+    root.querySelectorAll("[data-object-id], [data-drag-object-id]"),
+  ).filter((element) => {
+    const id =
+      element.getAttribute("data-drag-object-id") ??
+      element.getAttribute("data-object-id");
+    return id !== null && ids.has(id);
+  });
+  const saved: SavedElement[] = elements.map((element) => ({
+    element,
+    objectId:
+      element.getAttribute("data-drag-object-id") ??
+      element.getAttribute("data-object-id")!,
+    transform: element.getAttribute("transform"),
+    points: element.getAttribute("points"),
+  }));
+  const routeInk = takeOverRouteInk(root, saved);
+  // A tether joins a label to its owner. A drag moves one or both of them,
+  // so its line stretches end by end instead of moving whole. Pressing a
+  // label selects it, and its tether renders only after the drag begins, so
+  // each move also takes up tethers it has not seen yet.
+  const tethers = new Map<Element, SavedTether>();
+  const collectTethers = (): SavedTether[] => {
+    for (const element of Array.from(
+      root.querySelectorAll("[data-tether-label-id], [data-tether-owner-id]"),
+    )) {
+      if (tethers.has(element)) continue;
+      const labelId = element.getAttribute("data-tether-label-id");
+      const ownerId = element.getAttribute("data-tether-owner-id");
+      if (
+        !(labelId !== null && ids.has(labelId)) &&
+        !(ownerId !== null && ids.has(ownerId))
+      )
+        continue;
+      tethers.set(element, {
+        element,
+        labelId,
+        ownerId,
+        label: {
+          x: Number(element.getAttribute("x1")),
+          y: Number(element.getAttribute("y1")),
+        },
+        target: {
+          x: Number(element.getAttribute("x2")),
+          y: Number(element.getAttribute("y2")),
+        },
+      });
+    }
+    return [...tethers.values()];
+  };
+  const couplings = new Map<Element, SavedCouplingArrow>();
+  for (const group of Array.from(
+    root.querySelectorAll("[data-coupling-ends]"),
+  )) {
+    const ends = (group.getAttribute("data-coupling-ends") ?? "").split(
+      " ",
+    ) as [string, string];
+    if (!ids.has(ends[0]) && !ids.has(ends[1])) continue;
+    const shaft = group.querySelector('[data-role="coupling-arrow"]');
+    if (!shaft) continue;
+    couplings.set(group, {
+      ends,
+      shaft,
+      d: shaft.getAttribute("d"),
+      p0: pairOf(shaft.getAttribute("data-p0")),
+      control: pairOf(shaft.getAttribute("data-c")),
+      p1: pairOf(shaft.getAttribute("data-p1")),
+      moved: Array.from(
+        group.querySelectorAll(
+          '[data-coupling-head], [data-role="coupling-name"]',
+        ),
+      ).map((element) => {
+        const head = element.getAttribute("data-coupling-head");
+        return {
+          element,
+          end: head === "0" ? 0 : head === "1" ? 1 : null,
+          transform: element.getAttribute("transform"),
+        };
+      }),
+    });
+  }
+  const offsets = new Map<string, Point>();
+  const bend = (moved: (id: string) => Point | null): void => {
+    for (const arrow of couplings.values()) {
+      const a = moved(arrow.ends[0]) ?? { x: 0, y: 0 };
+      const b = moved(arrow.ends[1]) ?? { x: 0, y: 0 };
+      const middle = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      arrow.shaft?.setAttribute(
+        "d",
+        `M ${arrow.p0.x + a.x} ${arrow.p0.y + a.y} Q ${arrow.control.x + middle.x} ${arrow.control.y + middle.y} ${arrow.p1.x + b.x} ${arrow.p1.y + b.y}`,
+      );
+      for (const item of arrow.moved) {
+        const delta = item.end === 0 ? a : item.end === 1 ? b : middle;
+        const prefix = `translate(${delta.x} ${delta.y})`;
+        item.element.setAttribute(
+          "transform",
+          item.transform ? `${prefix} ${item.transform}` : prefix,
+        );
+      }
+    }
+  };
+  const stretch = (
+    moved: (id: string | null) => Point | null,
+    seen: readonly SavedTether[] = collectTethers(),
+  ): void => {
+    for (const tether of seen) {
+      const label = moved(tether.labelId);
+      const target = moved(tether.ownerId);
+      tether.element.setAttribute(
+        "x1",
+        String(tether.label.x + (label?.x ?? 0)),
+      );
+      tether.element.setAttribute(
+        "y1",
+        String(tether.label.y + (label?.y ?? 0)),
+      );
+      tether.element.setAttribute(
+        "x2",
+        String(tether.target.x + (target?.x ?? 0)),
+      );
+      tether.element.setAttribute(
+        "y2",
+        String(tether.target.y + (target?.y ?? 0)),
+      );
+    }
+  };
+
+  return {
+    translate(delta) {
+      for (const item of saved) {
+        const prefix = `translate(${delta.x} ${delta.y})`;
+        item.element.setAttribute(
+          "transform",
+          item.transform ? `${prefix} ${item.transform}` : prefix,
+        );
+      }
+      stretch((id) => (id !== null && ids.has(id) ? delta : null));
+      bend((id) => (ids.has(id) ? delta : null));
+    },
+    translateObject(objectId, delta) {
+      for (const item of saved) {
+        if (item.objectId !== objectId) continue;
+        const prefix = `translate(${delta.x} ${delta.y})`;
+        item.element.setAttribute(
+          "transform",
+          item.transform ? `${prefix} ${item.transform}` : prefix,
+        );
+      }
+      offsets.set(objectId, delta);
+      bend((id) => offsets.get(id) ?? null);
+      for (const tether of collectTethers()) {
+        if (tether.labelId === objectId) {
+          tether.element.setAttribute("x1", String(tether.label.x + delta.x));
+          tether.element.setAttribute("y1", String(tether.label.y + delta.y));
+        }
+        if (tether.ownerId === objectId) {
+          tether.element.setAttribute("x2", String(tether.target.x + delta.x));
+          tether.element.setAttribute("y2", String(tether.target.y + delta.y));
+        }
+      }
+    },
+    setPolyline(points) {
+      const value = pointList(points);
+      for (const item of saved) {
+        if (item.points !== null) item.element.setAttribute("points", value);
+      }
+    },
+    setObjectPolyline(objectId, points) {
+      const value = pointList(points);
+      for (const item of saved) {
+        if (item.objectId === objectId && item.points !== null) {
+          item.element.setAttribute("points", value);
+        }
+      }
+    },
+    restore() {
+      routeInk.restore();
+      stretch(() => null, [...tethers.values()]);
+      for (const arrow of couplings.values()) {
+        if (arrow.d === null) arrow.shaft?.removeAttribute("d");
+        else arrow.shaft?.setAttribute("d", arrow.d);
+        for (const item of arrow.moved) {
+          if (item.transform === null)
+            item.element.removeAttribute("transform");
+          else item.element.setAttribute("transform", item.transform);
+        }
+      }
+      for (const item of saved) {
+        if (item.transform === null) item.element.removeAttribute("transform");
+        else item.element.setAttribute("transform", item.transform);
+        if (item.points === null) item.element.removeAttribute("points");
+        else item.element.setAttribute("points", item.points);
+      }
+    },
+  };
+}

@@ -1,0 +1,216 @@
+import {
+  planSetDeviceModelTarget,
+  type ProjectStructureEdit,
+  type SchematicEdit,
+} from "@icm/edit-engine";
+import {
+  bindsProjectCell,
+  reviewedExternalBindingForMaster,
+  reviewedExternalModelSuggestions,
+} from "@icm/devices";
+import {
+  type Annotation,
+  type CircuitProject,
+  type SchematicDocument,
+} from "@icm/model";
+import type { SymbolResolver } from "@icm/symbols";
+
+import { instanceDisplayEdits } from "../instance-display/instance-display-edits";
+import { bindingForEditedModel } from "../netlist-export/netlist-authoring";
+import {
+  effectiveRouteAttachment,
+  isRoutedMarker,
+} from "../wiring/route-interaction-geometry";
+
+type Instance = SchematicDocument["instances"][number];
+type TransactionResult = { ok: boolean };
+
+export interface SelectionPropertyCommandDependencies {
+  project: CircuitProject;
+  document: SchematicDocument;
+  resolver: SymbolResolver;
+  selectedInstance: Instance | null | undefined;
+  selectedInstanceIsMos: boolean;
+  selectedAnnotation: Annotation | null | undefined;
+  commitStructure: (
+    transactionId: string,
+    edits: ProjectStructureEdit[],
+  ) => boolean;
+  transact: (edits: SchematicEdit[]) => TransactionResult;
+  replaceAnnotationSelection: (ids: readonly string[]) => void;
+  setStatus: (status: string) => void;
+  nextId: (prefix: string) => string;
+}
+
+/** Property-panel write commands and their annotation projection policy. */
+export function createSelectionPropertyCommands({
+  project,
+  document,
+  resolver,
+  selectedInstance,
+  selectedInstanceIsMos,
+  selectedAnnotation,
+  commitStructure,
+  transact,
+  replaceAnnotationSelection,
+  setStatus,
+}: SelectionPropertyCommandDependencies) {
+  const referenceLabelVisibilityEdits = (
+    instanceIds: readonly string[],
+    visible: boolean,
+  ): SchematicEdit[] => {
+    return instanceDisplayEdits(document, resolver, instanceIds, {
+      showReference: visible,
+    });
+  };
+
+  const valueVisibilityEdits = (
+    source: SchematicDocument,
+    instanceIds: readonly string[],
+    visible: boolean,
+  ): SchematicEdit[] => {
+    return instanceDisplayEdits(source, resolver, instanceIds, {
+      showValue: visible,
+    });
+  };
+
+  const updateSelectedModelTarget = (value: string): void => {
+    if (!selectedInstance?.netlist) return;
+    if (
+      selectedInstanceIsMos ||
+      reviewedExternalModelSuggestions(selectedInstance.symbolId).length > 0 ||
+      bindsProjectCell(selectedInstance.symbolId) ||
+      selectedInstance.netlist.binding?.kind === "external-subcircuit"
+    ) {
+      try {
+        const edits = planSetDeviceModelTarget(
+          project,
+          document.id,
+          selectedInstance.id,
+          value,
+        );
+        if (edits.length === 0) return;
+        if (commitStructure("set-mos-model-target", edits)) {
+          const target = value.trim();
+          const reviewed = target
+            ? reviewedExternalBindingForMaster(
+                target,
+                selectedInstance.symbolId,
+              )
+            : undefined;
+          // A Library gate or flip-flop bound to a Cell of the Project
+          // (#1450, #1689).
+          const cell = edits.some(
+            (edit) =>
+              edit.kind === "transact_document" &&
+              edit.edits.some(
+                (item) =>
+                  item.kind === "bulk_patch_instance_netlist" &&
+                  item.assignments.some(
+                    (assignment) => assignment.binding?.kind === "subcircuit",
+                  ),
+              ),
+          );
+          setStatus(
+            cell
+              ? `Bound ${selectedInstance.reference ?? selectedInstance.id} to Cell ${target}`
+              : reviewed
+                ? `Set reviewed external target ${target} and its X Reference`
+                : target
+                  ? `Set model target ${target}`
+                  : `Cleared model target for ${selectedInstance.id}`,
+          );
+        }
+      } catch (error) {
+        setStatus(
+          error instanceof Error
+            ? error.message
+            : "Could not set component model target",
+        );
+      }
+      return;
+    }
+    const nextBinding =
+      bindingForEditedModel(selectedInstance.symbolId, value) ?? null;
+    const currentBinding = selectedInstance.netlist.binding ?? null;
+    if (JSON.stringify(nextBinding) === JSON.stringify(currentBinding)) return;
+    if (
+      transact([
+        {
+          kind: "set_instance_binding",
+          instanceId: selectedInstance.id,
+          binding: nextBinding,
+        },
+      ]).ok
+    ) {
+      setStatus(
+        nextBinding?.kind === "model"
+          ? `Set model target ${nextBinding.name}`
+          : `Cleared model target for ${selectedInstance.id}`,
+      );
+    }
+  };
+
+  const updateSelectedReference = (value: string): boolean => {
+    if (!selectedInstance?.reference) return false;
+    const reference = value.trim();
+    if (!reference) {
+      setStatus("Reference cannot be empty");
+      return false;
+    }
+    if (reference === selectedInstance.reference) return true;
+    if (
+      transact([
+        {
+          kind: "set_instance_reference",
+          instanceId: selectedInstance.id,
+          reference,
+        },
+      ]).ok
+    ) {
+      setStatus(`Set Reference to ${reference}`);
+      return true;
+    }
+    return false;
+  };
+
+  const deleteSelectedAnnotation = (): void => {
+    if (!selectedAnnotation) return;
+    const result = transact([
+      {
+        kind: "remove_schematic_annotation",
+        annotationId: selectedAnnotation.id,
+      },
+    ]);
+    if (result.ok) replaceAnnotationSelection([]);
+  };
+
+  const reverseSelectedCurrentArrow = (): void => {
+    if (!selectedAnnotation || !isRoutedMarker(selectedAnnotation)) return;
+    const attachment = effectiveRouteAttachment(selectedAnnotation);
+    if (!attachment) return;
+    const direction: "forward" | "reverse" =
+      attachment.direction === "forward" ? "reverse" : "forward";
+    const anchor =
+      selectedAnnotation.kind === "route-marker" &&
+      selectedAnnotation.anchor.kind === "route"
+        ? { ...selectedAnnotation.anchor, direction }
+        : selectedAnnotation.anchor;
+    const result = transact([
+      {
+        kind: "upsert_schematic_annotation",
+        annotation: { ...selectedAnnotation, anchor },
+      },
+    ]);
+    if (result.ok) setStatus(`Current arrow points ${direction}`);
+  };
+
+  return {
+    referenceLabelVisibilityEdits,
+    valueVisibilityEdits,
+    updateSelectedModelTarget,
+    updateSelectedReference,
+    deleteSelectedAnnotation,
+    reverseSelectedCurrentArrow,
+  };
+}

@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 1,
+  "referenceId": "razavi-reference-v1",
+  "symbols": {
+    "pnp": {
+      "assetPath": "pnp-reference.png",
+      "pixelsPerLogical": 2.4,
+      "originPx": {
+        "x": 106.287598,
+        "y": 81.654561
+      },
+      "window": {
+        "width": 125,
+        "height": 164,
+        "minX": -44,
+        "minY": -34
+      }
+    },
+    "npn": {
+      "assetPath": "npn-reference.png",
+      "pixelsPerLogical": 2.4,
+      "originPx": {
+        "x": 106.535464,
+        "y": 82.056736
+      },
+      "window": {
+        "width": 125,
+        "height": 164,
+        "minX": -44,
+        "minY": -34
+      }
+    },
+    "diode": {
+      "assetPath": "diode-reference.png",
+      "pixelsPerLogical": 2.4,
+      "originPx": {
+        "x": 24.584502,
+        "y": 48.073238
+      },
+      "window": {
+        "width": 48,
+        "height": 96,
+        "minX": -10,
+        "minY": -20
+      }
+    },
+    "voltage-amplifier": {
+      "assetPath": "voltage-amplifier-reference.png",
+      "pixelsPerLogical": 2.4,
+      "originPx": {
+        "x": 63.298812,
+        "y": 67.588452
+      },
+      "window": {
+        "width": 125,
+        "height": 135,
+        "minX": -26,
+        "minY": -28
+      }
+    },
+    "ideal-switch": {
+      "assetPath": "ideal-switch-reference.png",
+      "pixelsPerLogical": 2.4,
+      "originPx": {
+        "x": 81.958059,
+        "y": 43.366862
+      },
+      "window": {
+        "width": 164,
+        "height": 72,
+        "minX": -34,
+        "minY": -18
+      }
+    },
+    "closed-switch": {
+      "assetPath": "closed-switch-reference.png",
+      "pixelsPerLogical": 2.4,
+      "originPx": {
+        "x": 48.162745,
+        "y": 19.604184
+      },
+      "window": {
+        "width": 96,
+        "height": 48,
+        "minX": -20,
+        "minY": -8
+      }
+    },
+    "externally-controlled-switch": {
+      "assetPath": "externally-controlled-switch-reference.png",
+      "pixelsPerLogical": 2.4,
+      "originPx": {
+        "x": 48.322912,
+        "y": 58.222795
+      },
+      "window": {
+        "width": 64,
+        "height": 116,
+        "minX": -20,
+        "minY": -24
+      }
+    }
+  }
+}

@@ -1,0 +1,305 @@
+import {
+  NetlistParameterNameSchema,
+  NetlistParameterValueSchema,
+  SignalFlowParametersSchema,
+} from "@icm/model";
+import type { Instance } from "@icm/model";
+import type { ComponentParameter } from "../component-insert/component-parameters";
+import {
+  effectiveComponentParameterValue,
+  updateComponentParameterValues,
+} from "../component-insert/component-parameters";
+import { differentialInputSibling } from "../editor-shell/differential-input-swap";
+import { differentialOutputSibling } from "../editor-shell/differential-output-swap";
+import { switchContactStyleSibling } from "../editor-shell/switch-contact-style";
+import {
+  logicGateInputInfo,
+  type LogicGateInputCount,
+} from "./logic-gate-input-count";
+import type { CanvasPropertyField } from "./component-property-fields";
+import { componentInternalMark } from "./component-visual-variants";
+
+export interface ComponentPropertyDetailsContext {
+  parameters: readonly ComponentParameter[];
+  modelTarget?: {
+    defaultValue: string;
+    suggestions: readonly string[];
+    warnings?: readonly string[];
+    /** The Project's Cells a Library part may be bound to (#1450). */
+    cells?: readonly string[];
+    /** The Project's external definitions a Library part may be bound to (#1928). */
+    externals?: readonly string[];
+  };
+  signalFlow?: boolean;
+}
+
+export interface ComponentPropertyDetailsValue {
+  inputs?: LogicGateInputCount;
+  netlistName?: string;
+  parameters?: Record<string, string>;
+  netlistTarget?: string;
+  symbol?: string;
+  signalFlow?: NonNullable<Instance["signalFlowParameters"]>;
+}
+
+/** Only the existing pin-compatible drawing variants are interchangeable. */
+function componentSymbolOptions(symbolId: string): string[] {
+  const options = new Set([symbolId]);
+  for (const candidate of options) {
+    for (const sibling of [
+      differentialInputSibling(candidate),
+      differentialOutputSibling(candidate),
+      switchContactStyleSibling(candidate),
+    ])
+      if (sibling) options.add(sibling);
+  }
+  return [...options];
+}
+
+export function componentPropertyDetailsValue(
+  instance: Instance,
+  context?: ComponentPropertyDetailsContext,
+): ComponentPropertyDetailsValue {
+  if (!context) return {};
+  return {
+    ...(logicGateInputInfo(instance.symbolId) !== null
+      ? { inputs: logicGateInputInfo(instance.symbolId)!.count }
+      : {}),
+    ...(instance.reference ? { netlistName: instance.reference } : {}),
+    ...(instance.netlist
+      ? {
+          parameters: {
+            ...Object.fromEntries(
+              context.parameters
+                .filter((parameter) => !parameter.compatibilityOnly)
+                .map((parameter) => [
+                  parameter.key,
+                  effectiveComponentParameterValue(instance, parameter),
+                ]),
+            ),
+            ...instance.netlist.parameters,
+          },
+        }
+      : {}),
+    ...(context.modelTarget
+      ? { netlistTarget: context.modelTarget.defaultValue }
+      : {}),
+    // Analog variants are authored through appearance's independent controls.
+    // A second symbol field would compete with those values on every edit.
+    ...(switchContactStyleSibling(instance.symbolId)
+      ? { symbol: instance.symbolId }
+      : {}),
+    // The body text's look is edited on the canvas, not as JSON here.
+    ...(context.signalFlow && componentInternalMark(instance) === undefined
+      ? { signalFlow: withoutFormulaFormat(instance.signalFlowParameters) }
+      : {}),
+  };
+}
+
+function withoutFormulaFormat(
+  parameters: Instance["signalFlowParameters"],
+): NonNullable<Instance["signalFlowParameters"]> {
+  const shown = { ...parameters };
+  delete shown.formulaFormat;
+  return shown;
+}
+
+export function parseComponentPropertyDetails(
+  decoded: Record<string, unknown>,
+  instance: Instance,
+  context?: ComponentPropertyDetailsContext,
+): ComponentPropertyDetailsValue {
+  const baseline = componentPropertyDetailsValue(instance, context);
+  const result: ComponentPropertyDetailsValue = {};
+  for (const key of [
+    "inputs",
+    "netlistName",
+    "parameters",
+    "netlistTarget",
+    "symbol",
+    "signalFlow",
+  ] as const) {
+    if (!(key in baseline)) {
+      if (key in decoded)
+        throw new Error(`${key} is not available for this component`);
+      continue;
+    }
+    const value = decoded[key];
+    if (key === "inputs") {
+      if (value !== 2 && value !== 3 && value !== 4)
+        throw new Error("inputs must be 2, 3, or 4");
+      result.inputs = value;
+    } else if (key === "parameters") {
+      if (typeof value !== "object" || value === null || Array.isArray(value))
+        throw new Error("parameters must be an object of raw string values");
+      if (Object.keys(value).length > 128)
+        throw new Error("parameters may contain at most 128 entries");
+      const names = new Set<string>();
+      const entries: [string, string][] = [];
+      for (const [name, raw] of Object.entries(value)) {
+        if (
+          !NetlistParameterNameSchema.safeParse(name).success ||
+          name !== name.trim()
+        )
+          throw new Error(`Invalid parameter name: ${name}`);
+        if (names.has(name.toLowerCase()))
+          throw new Error(`Duplicate parameter name: ${name}`);
+        names.add(name.toLowerCase());
+        if (
+          typeof raw !== "string" ||
+          (raw !== "" && !NetlistParameterValueSchema.safeParse(raw).success)
+        )
+          throw new Error(
+            `parameters.${name} must be a raw string (empty removes it)`,
+          );
+        entries.push([name, raw]);
+      }
+      result.parameters = Object.fromEntries(entries);
+      // The Digital Clock's primary timing controls still own its legacy
+      // pulse-source projection. Reuse that policy rather than leaving the
+      // displayed duty cycle disconnected from the waveform sent to SPICE.
+      if (instance.symbolId === "pulse-voltage-source") {
+        for (const key of ["period", "dutyCycle", "initial"]) {
+          const raw = result.parameters[key];
+          if (raw !== undefined && raw !== baseline.parameters?.[key])
+            result.parameters = updateComponentParameterValues(
+              instance.symbolId,
+              result.parameters,
+              key,
+              raw,
+            );
+        }
+      }
+    } else if (key === "signalFlow") {
+      const parsed = SignalFlowParametersSchema.safeParse(value);
+      if (!parsed.success)
+        throw new Error(`signalFlow: ${parsed.error.issues[0]?.message}`);
+      result.signalFlow = parsed.data;
+    } else {
+      if (
+        typeof value !== "string" ||
+        value.length > 128 ||
+        (key !== "netlistTarget" && !value.trim())
+      )
+        throw new Error(
+          `${key} must be ${key === "netlistTarget" ? "a" : "a nonempty"} string of at most 128 characters`,
+        );
+      if (
+        key === "symbol" &&
+        !componentSymbolOptions(instance.symbolId).includes(value)
+      )
+        throw new Error(
+          "symbol must be one of this component's compatible drawing variants",
+        );
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
+export function componentDetailFields(
+  instance: Instance,
+  context?: ComponentPropertyDetailsContext,
+): CanvasPropertyField[] {
+  if (!context) return [];
+  return [
+    ...(logicGateInputInfo(instance.symbolId) !== null
+      ? [
+          {
+            path: "inputs",
+            label: "Inputs",
+            kind: "choice" as const,
+            options: [2, 3, 4].map((count) => ({
+              value: count,
+              label: String(count),
+            })),
+            description: "",
+            help: "Changing input count preserves shared pins; connected removed pins must be disconnected first.",
+          },
+        ]
+      : []),
+    {
+      path: "placement",
+      label: "Placement",
+      kind: "text",
+      description: "",
+    },
+    {
+      path: "netlistName",
+      label: "Netlist name",
+      kind: "text",
+      description: "",
+      help: "Unique electrical instance name in this Cell. Double-click the drawing label to edit its visual text independently.",
+    },
+    {
+      path: "parameters",
+      label: "Parameters",
+      kind: "text",
+      description: "",
+    },
+    ...context.parameters.map((parameter) => ({
+      path: `parameters.${parameter.key}`,
+      label: parameter.label,
+      kind: parameter.options ? ("choice" as const) : ("text" as const),
+      ...(parameter.options ? { options: parameter.options } : {}),
+      description:
+        parameter.definitionParameter &&
+        !effectiveComponentParameterValue(instance, parameter)
+          ? parameter.defaultValue !== undefined
+            ? `Default: ${parameter.defaultValue}`
+            : "Required"
+          : "",
+      help: parameter.help,
+    })),
+    {
+      path: "netlistTarget",
+      label: "Target netlist",
+      kind:
+        context.modelTarget?.suggestions.length ||
+        context.modelTarget?.cells?.length ||
+        context.modelTarget?.externals?.length
+          ? "choice"
+          : "text",
+      options: [
+        ...new Set([
+          "",
+          ...(context.modelTarget?.cells ?? []),
+          ...(context.modelTarget?.externals ?? []),
+          ...(context.modelTarget?.suggestions ?? []),
+          context.modelTarget?.defaultValue ?? "",
+        ]),
+      ].map((value) => ({
+        value,
+        label: !value
+          ? "None"
+          : context.modelTarget?.cells?.includes(value)
+            ? `${value} · Project Cell`
+            : context.modelTarget?.externals?.includes(value)
+              ? `${value} · External subcircuit`
+              : value,
+      })),
+      description: "",
+      help: "Choose a suggested model or type a custom model name in JSON. An empty string clears the target; model compatibility checks still apply.",
+    },
+    {
+      path: "symbol",
+      label: "Drawing variant",
+      kind: "choice",
+      options: componentSymbolOptions(instance.symbolId).map((value) => ({
+        value,
+        label: value,
+      })),
+      description: "",
+    },
+    ...(componentInternalMark(instance) === undefined
+      ? [
+          {
+            path: "signalFlow",
+            label: "Signal flow",
+            kind: "text" as const,
+            description: "",
+          },
+        ]
+      : []),
+  ];
+}

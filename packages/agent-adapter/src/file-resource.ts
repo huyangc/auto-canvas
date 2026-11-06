@@ -1,0 +1,265 @@
+import { z } from "zod";
+
+import { lazyJsonSchema } from "./lazy-json-schema.js";
+import {
+  SimulationFileOperationSchema,
+  SimulationFileResultSchema,
+} from "@icm/simulation-service/files";
+import { ProblemSchema } from "@icm/simulation-service/contract";
+
+import { AGENT_API_VERSION } from "./schema.js";
+
+const StableIdSchema = z.string().min(1).max(256);
+const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
+
+/**
+ * The most one file-resource request or response carries, decoded. Its
+ * base64 envelope, about 13.4 MB, stays well under the 32 MiB WebSocket
+ * message a Durable Object receives, and the relay's few copies of it well
+ * under an isolate's 128 MB. At 1.5 MB, a Project of 75 Cells could no longer
+ * be downloaded.
+ */
+export const AGENT_FILE_RESOURCE_MAX_BYTES = 10_000_000;
+const AGENT_FILE_RESOURCE_MAX_FILES = 24;
+export const AGENT_FILE_CANDIDATE_TTL_MS = 5 * 60_000;
+
+const AgentFileBlobSchema = z.strictObject({
+  name: z.string().min(1).max(512),
+  mediaType: z.string().min(1).max(128),
+  encoding: z.literal("base64"),
+  data: z.string().min(4),
+  // No ceiling here: the editor enforces the one it advertises
+  // (capabilities `fileResource.maxBytes`) on what it accepts and sends. A
+  // ceiling built into the schema had held every installed client at the
+  // old one.
+  byteLength: z.number().int().positive(),
+  sha256: Sha256Schema,
+});
+
+const FileRequestBaseSchema = z.strictObject({
+  apiVersion: z.literal(AGENT_API_VERSION),
+  requestId: StableIdSchema,
+});
+
+export const AgentFileDownloadOptionsSchema = z
+  .strictObject({
+    artifact: z
+      .enum(["project", "svg", "png", "pdf", "simulation-plot"])
+      .describe(
+        "Project and Canvas exports. simulation-plot is a retired compatibility request and returns SIMULATION_PLOT_RETIRED; use simulation-input artifact access for raw/CSV/Spec results.",
+      ),
+    documentId: StableIdSchema.optional(),
+    simulation: z
+      .strictObject({
+        runId: StableIdSchema,
+        /** Historical plot selection, accepted only to return the retirement error. */
+        analysisIndex: z.number().int().nonnegative(),
+        format: z.enum(["svg", "png"]),
+      })
+      .optional(),
+  })
+  .superRefine((value, context) => {
+    if (value.artifact === "simulation-plot") {
+      if (!value.simulation)
+        context.addIssue({
+          code: "custom",
+          path: ["simulation"],
+          message:
+            "An explicit run and analysis record are required for plot export",
+        });
+      if (value.documentId)
+        context.addIssue({
+          code: "custom",
+          path: ["documentId"],
+          message: "Simulation plots address a run, not a Canvas document",
+        });
+    } else {
+      if (value.simulation)
+        context.addIssue({
+          code: "custom",
+          path: ["simulation"],
+          message: "Simulation selection is only used for simulation-plot",
+        });
+      if (value.artifact !== "project" && !value.documentId)
+        context.addIssue({
+          code: "custom",
+          path: ["documentId"],
+          message: "documentId is required for visual export",
+        });
+    }
+  });
+
+export const AgentFileResourceRequestSchema = z.discriminatedUnion(
+  "operation",
+  [
+    FileRequestBaseSchema.extend({
+      operation: z.literal("simulation-input"),
+      input: SimulationFileOperationSchema,
+    }),
+    AgentFileDownloadOptionsSchema.safeExtend({
+      apiVersion: z.literal(AGENT_API_VERSION),
+      requestId: StableIdSchema,
+      operation: z.literal("download"),
+    }),
+    FileRequestBaseSchema.extend({
+      operation: z.literal("stage"),
+      kind: z.enum(["project", "structural-spice"]),
+      files: z
+        .array(AgentFileBlobSchema)
+        .min(1)
+        .max(AGENT_FILE_RESOURCE_MAX_FILES),
+      entryPath: z.string().min(1).max(512).optional(),
+      namingProfile: z.enum(["native", "cadence-bang"]).optional(),
+    }),
+    FileRequestBaseSchema.extend({
+      operation: z.literal("inspect"),
+      candidateId: StableIdSchema,
+      documentId: StableIdSchema.optional(),
+    }),
+    FileRequestBaseSchema.extend({
+      operation: z.literal("import-cell"),
+      candidateId: StableIdSchema,
+      sourceDocumentId: StableIdSchema,
+      targetDocumentId: StableIdSchema,
+      mode: z.enum(["replace-body", "append"]),
+      expectedStructureRevision: z.number().int().nonnegative(),
+      expectedRevision: z.number().int().nonnegative(),
+    }),
+    FileRequestBaseSchema.extend({
+      operation: z.literal("discard"),
+      candidateId: StableIdSchema,
+    }),
+    FileRequestBaseSchema.extend({
+      operation: z.literal("request-approval"),
+      candidateId: StableIdSchema,
+    }),
+    FileRequestBaseSchema.extend({
+      operation: z.literal("open"),
+      candidateId: StableIdSchema,
+      background: z.boolean().optional(),
+    }),
+  ],
+);
+
+const FileResponseBaseSchema = z.strictObject({
+  apiVersion: z.literal(AGENT_API_VERSION),
+  requestId: StableIdSchema,
+});
+export const AgentFileCandidateSummarySchema = z.strictObject({
+  candidateId: StableIdSchema,
+  kind: z.enum(["project", "structural-spice"]),
+  expiresAt: z.string().datetime(),
+  projectName: z.string().min(1),
+  documentCount: z.number().int().nonnegative(),
+  instanceCount: z.number().int().nonnegative(),
+  documents: z
+    .array(
+      z.strictObject({
+        id: StableIdSchema,
+        name: z.string(),
+        instanceCount: z.number().int().nonnegative(),
+        terminalNames: z.array(z.string()),
+      }),
+    )
+    .optional(),
+  diagnostics: z.array(
+    z.strictObject({
+      severity: z.enum(["warning", "error"]),
+      message: z.string().min(1),
+    }),
+  ),
+});
+export const AgentFileResourceResponseSchema = z.union([
+  FileResponseBaseSchema.extend({
+    operation: z.literal("simulation-input"),
+    ok: z.literal(true),
+    result: z.union([
+      SimulationFileResultSchema,
+      z.strictObject({ ok: z.literal(false), error: ProblemSchema }),
+    ]),
+  }),
+  FileResponseBaseSchema.extend({
+    operation: z.literal("download"),
+    ok: z.literal(true),
+    artifact: AgentFileBlobSchema,
+  }),
+  FileResponseBaseSchema.extend({
+    operation: z.enum(["stage", "inspect"]),
+    ok: z.literal(true),
+    candidate: AgentFileCandidateSummarySchema,
+    documentCode: z
+      .string()
+      .optional()
+      .describe(
+        "Canonical staged SchematicDocument JSON, only for an explicit inspect.documentId; not a live document.",
+      ),
+  }),
+  FileResponseBaseSchema.extend({
+    operation: z.literal("import-cell"),
+    ok: z.literal(true),
+    targetDocumentId: StableIdSchema,
+    importedDocumentIds: z.array(StableIdSchema),
+    structureRevision: z.number().int().nonnegative(),
+    revision: z.number().int().nonnegative(),
+  }),
+  FileResponseBaseSchema.extend({
+    operation: z.literal("discard"),
+    ok: z.literal(true),
+    discarded: z.literal(true),
+  }),
+  FileResponseBaseSchema.extend({
+    operation: z.literal("request-approval"),
+    ok: z.literal(true),
+    candidate: AgentFileCandidateSummarySchema,
+    approval: z.literal("pending-human"),
+  }),
+  FileResponseBaseSchema.extend({
+    operation: z.literal("open"),
+    ok: z.literal(true),
+  }),
+  FileResponseBaseSchema.extend({
+    operation: z.enum([
+      "error",
+      "download",
+      "stage",
+      "inspect",
+      "discard",
+      "request-approval",
+      "open",
+      "simulation-input",
+      "import-cell",
+    ]),
+    ok: z.literal(false),
+    error: z.strictObject({
+      code: z.string().min(1),
+      message: z.string().min(1),
+    }),
+  }),
+]);
+
+export const agentFileResourceRequestJsonSchema = lazyJsonSchema(
+  AgentFileResourceRequestSchema,
+);
+export const agentFileResourceResponseJsonSchema = lazyJsonSchema(
+  AgentFileResourceResponseSchema,
+);
+
+/** Strict hosted parser. File requests intentionally have no legacy dialect. */
+export function parseAgentFileResourceRequest(
+  input: unknown,
+): { success: true; data: AgentFileResourceRequest } | { success: false } {
+  const parsed = AgentFileResourceRequestSchema.safeParse(input);
+  return parsed.success
+    ? { success: true, data: parsed.data }
+    : { success: false };
+}
+
+export type AgentFileResourceRequest = z.infer<
+  typeof AgentFileResourceRequestSchema
+>;
+export type AgentFileResourceResponse = z.infer<
+  typeof AgentFileResourceResponseSchema
+>;
+export type AgentFileCandidateSummary = z.infer<
+  typeof AgentFileCandidateSummarySchema
+>;

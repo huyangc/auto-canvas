@@ -1,0 +1,782 @@
+import { createRoutePath, freezeSnapshot } from "@icm/model";
+import { createEmptyDocument } from "@icm/model";
+import { describe, expect, it } from "vitest";
+
+import {
+  deriveMosBulkRouteFamily,
+  drawnSupplyLogicalNetIds,
+  hasExplicitMosBulkRoute,
+  isMosBulkTerminal,
+  mosBodiesOffSourceSupply,
+  mosBulkKind,
+  mosBulkShouldBeVisible,
+  resolveDetachedMosBulkDefault,
+  drawnSupplyNet,
+  resolveMosBulkConnection,
+  supplyDefaultMosBulkNet,
+} from "./mos-bulk.js";
+
+function mos(id: string, symbolId: "nmos" | "pmos" | "ndmos" | "pdmos") {
+  return {
+    id,
+    symbolId,
+    symbolVariantId: symbolId.endsWith("dmos")
+      ? "standard-3terminal"
+      : "textbook-3terminal",
+    placement: null,
+  };
+}
+
+describe("MOS bulk resolution", () => {
+  it.each(["nmos", "pmos"] as const)(
+    "keeps imported %s default bulk implicit without changing electrical membership",
+    (kind) => {
+      const document = createEmptyDocument("main", "Main");
+      document.instances.push(mos("M1", kind));
+      document.nets.push(
+        { id: "supply", terminals: [{ instanceId: "M1", pinName: "B" }] },
+        { id: "tail", terminals: [{ instanceId: "M1", pinName: "S" }] },
+      );
+      document.mosBulkDefaults =
+        kind === "nmos" ? { nmosNetId: "supply" } : { pmosNetId: "supply" };
+      const before = JSON.stringify(document);
+      expect(resolveMosBulkConnection(document, "M1")?.status).toBe("explicit");
+      expect(mosBulkShouldBeVisible(document, "M1")).toBe(false);
+      expect(JSON.stringify(document)).toBe(before);
+    },
+  );
+  /** A Cell with one ground marker, one VDD marker, and one MOS of each kind. */
+  function withSupplyMarkers() {
+    const document = createEmptyDocument("main", "Main");
+    document.instances.push(
+      mos("M1", "nmos"),
+      mos("M2", "pmos"),
+      { id: "GND1", symbolId: "ground", placement: null },
+      { id: "VDD1", symbolId: "vdd-port", placement: null },
+    );
+    document.nets.push(
+      {
+        id: "net-gnd",
+        terminals: [
+          { instanceId: "GND1", pinName: "0" },
+          { instanceId: "M1", pinName: "S" },
+        ],
+      },
+      {
+        id: "net-vdd",
+        terminals: [
+          { instanceId: "VDD1", pinName: "P" },
+          { instanceId: "M2", pinName: "S" },
+        ],
+      },
+    );
+    return document;
+  }
+
+  it("keeps imported bodies on the drawn VSS/VDD supplies implicit before and after a visible bulk route", () => {
+    const document = withSupplyMarkers();
+    for (const instance of document.instances.filter((item) =>
+      ["M1", "M2"].includes(item.id),
+    ))
+      instance.importProvenance = {
+        kind: "model",
+        sourceMasterName: instance.symbolId,
+        sourceTarget: instance.symbolId,
+      };
+    document.nets[0]!.terminals.push({ instanceId: "M1", pinName: "B" });
+    document.nets[1]!.terminals.push({ instanceId: "M2", pinName: "B" });
+
+    for (const [instanceId, netId] of [
+      ["M1", "net-gnd"],
+      ["M2", "net-vdd"],
+    ] as const) {
+      expect(resolveMosBulkConnection(document, instanceId)).toMatchObject({
+        status: "explicit",
+        net: { id: netId },
+      });
+      expect(mosBulkShouldBeVisible(document, instanceId)).toBe(false);
+    }
+
+    document.routes.push(
+      createRoutePath({
+        id: "authored-bulk",
+        netId: "net-gnd",
+        start: { kind: "terminal", instanceId: "M1", pinName: "B" },
+        end: { kind: "terminal", instanceId: "GND1", pinName: "0" },
+        bends: [],
+        modes: ["manual"],
+        presentation: "bulk-dashed",
+      }),
+    );
+    expect(mosBulkShouldBeVisible(document, "M1")).toBe(true);
+    document.routes = [];
+    expect(mosBulkShouldBeVisible(document, "M1")).toBe(false);
+  });
+
+  it("compares an imported bulk and its configured supply by Logical Net", () => {
+    const document = withSupplyMarkers();
+    document.nets.push({
+      id: "net-body",
+      terminals: [{ instanceId: "M1", pinName: "B" }],
+    });
+    document.connectivityEvidence.push(
+      {
+        id: "supply-name",
+        kind: "name-claim",
+        netId: "net-gnd",
+        name: "VSS",
+        scope: "global",
+        powerDomain: "ground",
+        owner: { kind: "power-marker", objectId: "GND1" },
+      },
+      {
+        id: "body-name",
+        kind: "name-claim",
+        netId: "net-body",
+        name: "VSS",
+        scope: "global",
+        owner: { kind: "global-declaration", sourceNetId: "source-body" },
+      },
+    );
+    document.mosBulkDefaults = { nmosNetId: "net-gnd" };
+    expect(resolveMosBulkConnection(document, "M1")?.net?.id).toBe("net-body");
+    expect(mosBulkShouldBeVisible(document, "M1")).toBe(false);
+  });
+
+  it("uses unique formal VSS/VDD Ports as the implicit supply in an imported Cell", () => {
+    const document = createEmptyDocument("ota", "OTA");
+    document.instances.push(
+      mos("MN", "nmos"),
+      mos("MP", "pmos"),
+      { id: "VSS", symbolId: "port", placement: null },
+      { id: "VDD", symbolId: "port", placement: null },
+    );
+    document.nets.push(
+      {
+        id: "net-vss",
+        terminals: [
+          { instanceId: "MN", pinName: "B" },
+          { instanceId: "VSS", pinName: "P" },
+        ],
+      },
+      {
+        id: "net-vdd",
+        terminals: [
+          { instanceId: "MP", pinName: "B" },
+          { instanceId: "VDD", pinName: "P" },
+        ],
+      },
+    );
+    document.netlist = {
+      name: "ota",
+      formalParameters: [],
+      terminals: [
+        {
+          id: "port-vss",
+          name: "vss",
+          netId: "net-vss",
+          direction: "passive",
+          interfaceInstanceIds: ["VSS"],
+        },
+        {
+          id: "port-vdd",
+          name: "VDD",
+          netId: "net-vdd",
+          direction: "passive",
+          interfaceInstanceIds: ["VDD"],
+        },
+      ],
+    };
+
+    expect(supplyDefaultMosBulkNet(document, "nmos")?.id).toBe("net-vss");
+    expect(supplyDefaultMosBulkNet(document, "pmos")?.id).toBe("net-vdd");
+    expect(mosBulkShouldBeVisible(document, "MN")).toBe(false);
+    expect(mosBulkShouldBeVisible(document, "MP")).toBe(false);
+  });
+
+  it("does not choose between a formal VSS Port and a different Ground marker", () => {
+    const document = withSupplyMarkers();
+    document.instances.push({
+      id: "PORT_VSS",
+      symbolId: "port",
+      placement: null,
+    });
+    document.nets[1]!.terminals.push({
+      instanceId: "PORT_VSS",
+      pinName: "P",
+    });
+    document.netlist = {
+      name: "main",
+      formalParameters: [],
+      terminals: [
+        {
+          id: "vss-port",
+          name: "VSS",
+          netId: "net-vdd",
+          direction: "passive",
+          interfaceInstanceIds: ["PORT_VSS"],
+        },
+      ],
+    };
+    expect(drawnSupplyNet(document, "ground")).toBeUndefined();
+  });
+
+  it("follows the supply the author drew when the Cell configures nothing", () => {
+    // No per-Cell setting, no button: the marker on the page is the answer,
+    // so a pasted copy and a drawing made before the policy existed behave
+    // like one drawn today.
+    const document = withSupplyMarkers();
+    const nmos = resolveMosBulkConnection(document, "M1");
+    expect(nmos?.status).toBe("supply-default");
+    expect(nmos?.net?.id).toBe("net-gnd");
+    const pmos = resolveMosBulkConnection(document, "M2");
+    expect(pmos?.status).toBe("supply-default");
+    expect(pmos?.net?.id).toBe("net-vdd");
+    // Policy explains membership; it never writes it, and it draws no lead.
+    expect(nmos?.materialized).toBe(false);
+    expect(mosBulkShouldBeVisible(document, "M1")).toBe(false);
+  });
+
+  it("follows a supply the author named rather than marked", () => {
+    // A rail or a formal Cell Pin declared as the positive supply is the same
+    // statement as a placed marker: it says which power domain the Net is.
+    // Plenty of drawings express their supplies only this way.
+    const document = createEmptyDocument("main", "Main");
+    document.instances.push(mos("M1", "pmos"));
+    document.nets.push(
+      { id: "net-rail", terminals: [{ instanceId: "M1", pinName: "S" }] },
+      { id: "net-out", terminals: [{ instanceId: "M1", pinName: "D" }] },
+    );
+    document.connectivityEvidence.push({
+      id: "rail-claim",
+      kind: "name-claim",
+      netId: "net-rail",
+      name: "VDD",
+      scope: "global",
+      powerDomain: "vdd",
+      owner: { kind: "power-marker", objectId: "M1" },
+    });
+    expect(drawnSupplyNet(document, "vdd")?.id).toBe("net-rail");
+    expect(resolveMosBulkConnection(document, "M1")?.net?.id).toBe("net-rail");
+    // The other domain was never drawn, so there is nothing to follow.
+    expect(drawnSupplyNet(document, "ground")).toBeUndefined();
+  });
+
+  it("lets the Cell's own default outrank the marker", () => {
+    const document = withSupplyMarkers();
+    document.nets.push({ id: "net-bias", terminals: [] });
+    document.mosBulkDefaults = { nmosNetId: "net-bias" };
+    const resolution = resolveMosBulkConnection(document, "M1");
+    expect(resolution?.status).toBe("cell-default");
+    expect(resolution?.net?.id).toBe("net-bias");
+    // The other polarity is unconfigured, so it still follows its marker.
+    expect(resolveMosBulkConnection(document, "M2")?.net?.id).toBe("net-vdd");
+  });
+
+  it("reclaims a body left alone on the Net its own binding named", () => {
+    // What a paste or a deleted supply marker leaves behind: the body sits on
+    // a Net nothing else reaches, named by its own policy binding. Read as a
+    // connection it strands the body — a matched pair ends up with one body
+    // on ground and the other on a node the netlist writes exactly once.
+    const document = withSupplyMarkers();
+    document.nets.push({
+      id: "net-residue",
+      terminals: [{ instanceId: "M1", pinName: "B" }],
+    });
+    document.instances[0] = {
+      ...document.instances[0]!,
+      mosBulkBinding: { origin: "cell-default", netId: "net-residue" },
+    };
+
+    const resolution = resolveMosBulkConnection(document, "M1");
+    expect(resolution?.status).toBe("supply-default");
+    expect(resolution?.net?.id).toBe("net-gnd");
+    // Nothing is rewritten: reclaiming is a reading, and the Document still
+    // holds the Net until an edit prunes it.
+    expect(document.nets.some((net) => net.id === "net-residue")).toBe(true);
+  });
+
+  it("keeps a body bias Net that more than one body shares", () => {
+    // Two bodies on one Net is a bias node somebody authored, not residue,
+    // even when a binding names it.
+    const document = withSupplyMarkers();
+    document.nets.push({
+      id: "net-bias",
+      terminals: [
+        { instanceId: "M1", pinName: "B" },
+        { instanceId: "M2", pinName: "B" },
+      ],
+    });
+    document.instances[0] = {
+      ...document.instances[0]!,
+      mosBulkBinding: { origin: "cell-default", netId: "net-bias" },
+    };
+    expect(resolveMosBulkConnection(document, "M1")?.net?.id).toBe("net-bias");
+  });
+
+  it("stays silent when the drawing offers more than one supply", () => {
+    // AVDD beside VDD is a question for the author. Guessing between them
+    // would be exactly the inference this policy refuses to make.
+    const document = withSupplyMarkers();
+    document.instances.push({
+      id: "VDD2",
+      symbolId: "vdd-port",
+      placement: null,
+    });
+    document.nets.push({
+      id: "net-avdd",
+      terminals: [{ instanceId: "VDD2", pinName: "P" }],
+    });
+    expect(supplyDefaultMosBulkNet(document, "pmos")).toBeUndefined();
+    expect(resolveMosBulkConnection(document, "M2")?.status).toBe("unresolved");
+    // The single ground marker is unaffected by the supply ambiguity.
+    expect(resolveMosBulkConnection(document, "M1")?.status).toBe(
+      "supply-default",
+    );
+  });
+
+  it("ignores a marker nobody has wired yet", () => {
+    // An unwired marker names no Net, so it neither answers nor competes.
+    const document = withSupplyMarkers();
+    document.instances.push({
+      id: "GND2",
+      symbolId: "ground",
+      placement: null,
+    });
+    expect(supplyDefaultMosBulkNet(document, "nmos")?.id).toBe("net-gnd");
+  });
+
+  it("never repairs an imported instance's missing fourth node", () => {
+    // Imported source must carry its own body; inventing one would rewrite
+    // what the file said.
+    const document = withSupplyMarkers();
+    document.instances[0] = {
+      ...document.instances[0]!,
+      importProvenance: {
+        kind: "model",
+        sourceMasterName: "nch",
+        sourceTarget: "nch",
+      },
+    };
+    expect(resolveMosBulkConnection(document, "M1")?.status).toBe("unresolved");
+  });
+
+  it("maps expanded DMOS artwork to the existing N/P bulk domains", () => {
+    expect(mosBulkKind(mos("M1", "ndmos"))).toBe("nmos");
+    expect(mosBulkKind(mos("M2", "pdmos"))).toBe("pmos");
+  });
+
+  it("distinguishes MOS bulk B from BJT base B", () => {
+    const document = createEmptyDocument("main", "Main");
+    document.instances.push(mos("M1", "nmos"), {
+      id: "Q1",
+      symbolId: "npn",
+      placement: null,
+    });
+
+    expect(
+      isMosBulkTerminal(document, {
+        kind: "terminal",
+        instanceId: "M1",
+        pinName: "B",
+      }),
+    ).toBe(true);
+    expect(
+      isMosBulkTerminal(document, {
+        kind: "terminal",
+        instanceId: "Q1",
+        pinName: "B",
+      }),
+    ).toBe(false);
+  });
+
+  it("prefers explicit membership over defaults and exposes body bias", () => {
+    const document = createEmptyDocument("main", "Main");
+    document.instances.push(mos("M1", "nmos"));
+    document.nets.push(
+      {
+        id: "net-vss",
+
+        terminals: [],
+      },
+      {
+        id: "net-body",
+
+        terminals: [{ instanceId: "M1", pinName: "B" }],
+      },
+    );
+    document.mosBulkDefaults = { nmosNetId: "net-vss" };
+
+    expect(resolveMosBulkConnection(document, "M1")).toMatchObject({
+      status: "explicit",
+      net: { id: "net-body" },
+    });
+    expect(mosBulkShouldBeVisible(document, "M1")).toBe(true);
+  });
+
+  it("does not reclaim an imported B-only fragment with its own authored name", () => {
+    const document = createEmptyDocument("main", "Main");
+    document.instances.push({
+      ...mos("M1", "nmos"),
+      sourceRef: {
+        fileId: "source.sp",
+        start: { offset: 0, line: 1, column: 1 },
+        end: { offset: 1, line: 1, column: 2 },
+      },
+    });
+    document.nets.push(
+      { id: "net-vss", terminals: [] },
+      { id: "net-body", terminals: [{ instanceId: "M1", pinName: "B" }] },
+    );
+    document.mosBulkDefaults = { nmosNetId: "net-vss" };
+    document.connectivityEvidence.push(
+      {
+        id: "source-vss",
+        kind: "spice-source",
+        netId: "net-vss",
+        sourceNetId: "source-vss",
+      },
+      {
+        id: "source-body",
+        kind: "spice-source",
+        netId: "net-body",
+        sourceNetId: "source-vss",
+      },
+    );
+    expect(resolveDetachedMosBulkDefault(document, "M1")?.id).toBe("net-vss");
+    document.connectivityEvidence.push({
+      id: "body-name",
+      kind: "name-claim",
+      netId: "net-body",
+      name: "VBODY",
+      scope: "global",
+      owner: { kind: "global-declaration", sourceNetId: "source-body" },
+    });
+    expect(resolveDetachedMosBulkDefault(document, "M1")).toBeUndefined();
+  });
+
+  it("uses the configured stable cell default", () => {
+    const document = createEmptyDocument("main", "Main");
+    document.instances.push(mos("M1", "nmos"));
+    document.nets.push(
+      {
+        id: "net-cell-substrate",
+
+        terminals: [],
+      },
+      {
+        id: "net-vss",
+
+        terminals: [],
+      },
+    );
+    document.mosBulkDefaults = { nmosNetId: "net-cell-substrate" };
+
+    expect(resolveMosBulkConnection(document, "M1")).toMatchObject({
+      status: "cell-default",
+      net: { id: "net-cell-substrate" },
+      materialized: false,
+    });
+  });
+
+  it("does not infer a bulk connection from supply names or roles", () => {
+    const document = createEmptyDocument("main", "Main");
+    document.instances.push(mos("M1", "pmos"));
+    document.nets.push(
+      {
+        id: "net-avdd",
+
+        terminals: [],
+      },
+      {
+        id: "net-vdd",
+
+        terminals: [],
+      },
+    );
+
+    expect(resolveMosBulkConnection(document, "M1")).toMatchObject({
+      status: "unresolved",
+      net: undefined,
+      materialized: false,
+    });
+  });
+
+  it("keeps a materialized Cell default visually implicit", () => {
+    const document = createEmptyDocument("main", "Main");
+    document.instances.push({
+      ...mos("M1", "nmos"),
+      mosBulkBinding: {
+        netId: "net-cell-substrate",
+        origin: "cell-default",
+      },
+    });
+    document.nets.push({
+      id: "net-cell-substrate",
+
+      terminals: [{ instanceId: "M1", pinName: "B" }],
+    });
+    document.mosBulkDefaults = { nmosNetId: "net-cell-substrate" };
+
+    expect(mosBulkShouldBeVisible(document, "M1")).toBe(false);
+  });
+
+  it.each([false, true])(
+    "gives an explicit multi-segment bulk route precedence over stale default metadata (immutable=%s)",
+    (immutable) => {
+      const document = createEmptyDocument("main", "Main");
+      document.instances.push({
+        ...mos("M1", "nmos"),
+        mosBulkBinding: {
+          netId: "net-vss",
+          origin: "cell-default",
+        },
+      });
+      document.nets.push({
+        id: "net-vss",
+        terminals: [{ instanceId: "M1", pinName: "B" }],
+      });
+      document.junctions.push(
+        { id: "J1", netId: "net-vss", position: { x: 100, y: 100 } },
+        { id: "J2", netId: "net-vss", position: { x: 200, y: 100 } },
+      );
+      document.routes.push(
+        createRoutePath({
+          id: "bulk-near",
+          netId: "net-vss",
+          start: { kind: "terminal", instanceId: "M1", pinName: "B" },
+          end: { kind: "junction", junctionId: "J1" },
+          bends: [],
+          modes: ["manual"],
+          presentation: "bulk-dashed",
+        }),
+        createRoutePath({
+          id: "bulk-distal",
+          netId: "net-vss",
+          start: { kind: "junction", junctionId: "J1" },
+          end: { kind: "junction", junctionId: "J2" },
+          bends: [],
+          modes: ["manual"],
+          presentation: "bulk-dashed",
+        }),
+      );
+      document.mosBulkDefaults = { nmosNetId: "net-vss" };
+      if (immutable) freezeSnapshot(document);
+
+      expect(hasExplicitMosBulkRoute(document, "M1")).toBe(true);
+      expect(deriveMosBulkRouteFamily(document, document.routes[1]!)).toEqual({
+        routeIds: ["bulk-distal", "bulk-near"],
+        instanceIds: ["M1"],
+      });
+      expect(resolveMosBulkConnection(document, "M1")).toMatchObject({
+        status: "explicit",
+        net: { id: "net-vss" },
+      });
+      expect(mosBulkShouldBeVisible(document, "M1")).toBe(true);
+      const family = deriveMosBulkRouteFamily(document, document.routes[1]!)!;
+      family.routeIds.length = 0;
+      family.instanceIds.push("unrelated");
+      expect(deriveMosBulkRouteFamily(document, document.routes[0]!)).toEqual({
+        routeIds: ["bulk-distal", "bulk-near"],
+        instanceIds: ["M1"],
+      });
+      const changed = structuredClone(document);
+      changed.instances[0]!.symbolId = "npn";
+      if (immutable) freezeSnapshot(changed);
+      expect(hasExplicitMosBulkRoute(changed, "M1")).toBe(false);
+      expect(
+        deriveMosBulkRouteFamily(changed, changed.routes[1]!),
+      ).toBeUndefined();
+    },
+  );
+
+  it("does not guess when imported fourth-node evidence is missing", () => {
+    const document = createEmptyDocument("main", "Main");
+    // A Cell default a manual PMOS would take: an imported one must not.
+    document.nets.push({ id: "net-vdd", terminals: [] });
+    document.mosBulkDefaults = { pmosNetId: "net-vdd" };
+    document.instances.push({
+      ...mos("M1", "pmos"),
+      sourceRef: {
+        fileId: "source.sp",
+        start: { offset: 0, line: 1, column: 1 },
+        end: { offset: 1, line: 1, column: 2 },
+      },
+    });
+
+    expect(resolveMosBulkConnection(document, "M1")).toMatchObject({
+      status: "unresolved",
+      net: undefined,
+    });
+  });
+});
+
+describe("a default body on another supply than its source (#1336)", () => {
+  /**
+   * A level shifter's two PMOS: VDDH and VDDL drawn as supplies, the Cell's
+   * PMOS default on VDDL, which was drawn first, and M1's source on VDDH.
+   */
+  function levelShifter() {
+    const document = createEmptyDocument("main", "Main");
+    document.instances.push(
+      mos("M1", "pmos"),
+      mos("M2", "pmos"),
+      { id: "VH", symbolId: "vdd-port", placement: null },
+      { id: "VL", symbolId: "vdd-port", placement: null },
+    );
+    document.nets.push(
+      {
+        id: "net-vddh",
+        terminals: [
+          { instanceId: "VH", pinName: "P" },
+          { instanceId: "M1", pinName: "S" },
+        ],
+      },
+      {
+        id: "net-vddl",
+        terminals: [
+          { instanceId: "VL", pinName: "P" },
+          { instanceId: "M2", pinName: "S" },
+        ],
+      },
+      {
+        id: "net-out",
+        terminals: [
+          { instanceId: "M1", pinName: "D" },
+          { instanceId: "M2", pinName: "D" },
+        ],
+      },
+    );
+    for (const [marker, netId, name] of [
+      ["VH", "net-vddh", "VDDH"],
+      ["VL", "net-vddl", "VDDL"],
+    ] as const)
+      document.connectivityEvidence.push({
+        id: `claim-${marker}`,
+        kind: "name-claim",
+        netId,
+        name,
+        scope: "global",
+        powerDomain: "vdd",
+        owner: { kind: "power-marker", objectId: marker },
+      });
+    document.mosBulkDefaults = { pmosNetId: "net-vddl" };
+    return document;
+  }
+
+  it("lists a PMOS whose default body is VDDL while its source is on VDDH", () => {
+    const document = levelShifter();
+    expect([...drawnSupplyLogicalNetIds(document, "vdd")].sort()).toEqual([
+      "net-vddh",
+      "net-vddl",
+    ]);
+    // M2's source is on the default itself, so only M1 is asked about.
+    expect(
+      mosBodiesOffSourceSupply(document).map((item) => ({
+        instance: item.instance.id,
+        status: item.status,
+        body: item.bodyNet.id,
+        source: item.sourceNet.id,
+      })),
+    ).toEqual([
+      {
+        instance: "M1",
+        status: "cell-default",
+        body: "net-vddl",
+        source: "net-vddh",
+      },
+    ]);
+  });
+
+  it("leaves a body wired explicitly alone", () => {
+    const document = levelShifter();
+    document.nets[0]!.terminals.push({ instanceId: "M1", pinName: "B" });
+    expect(resolveMosBulkConnection(document, "M1")?.status).toBe("explicit");
+    expect(mosBodiesOffSourceSupply(document)).toEqual([]);
+  });
+
+  it("lists a body a netlist placed on the conventional VDD, drawn as a supply or not", () => {
+    // No default, so the bodies have none; a netlist projection put M1's
+    // on the Net labelled VDD, where it reads as wired.
+    const document = levelShifter();
+    delete document.mosBulkDefaults;
+    expect(resolveMosBulkConnection(document, "M1")?.status).toBe("unresolved");
+    document.nets.push({
+      id: "net-vdd",
+      terminals: [{ instanceId: "M1", pinName: "B" }],
+    });
+    document.connectivityEvidence.push({
+      id: "claim-vdd",
+      kind: "name-claim",
+      netId: "net-vdd",
+      name: "VDD",
+      scope: "local",
+      owner: { kind: "net-label", annotationId: "label-vdd" },
+    });
+    expect(mosBodiesOffSourceSupply(document)).toEqual([]);
+    expect(
+      mosBodiesOffSourceSupply(
+        document,
+        undefined,
+        new Map([["M1", "conventional"]]),
+      ).map((item) => ({
+        instance: item.instance.id,
+        status: item.status,
+        body: item.bodyNet.id,
+        source: item.sourceNet.id,
+      })),
+    ).toEqual([
+      {
+        instance: "M1",
+        status: "conventional",
+        body: "net-vdd",
+        source: "net-vddh",
+      },
+    ]);
+  });
+
+  it("compares supplies only, never an internal node", () => {
+    const document = levelShifter();
+    // M1 drawn the other way round: its drain on VDDH, its source on the
+    // output node, which is no supply.
+    for (const net of document.nets)
+      for (const terminal of net.terminals)
+        if (terminal.instanceId === "M1" && terminal.pinName !== "G")
+          terminal.pinName = terminal.pinName === "S" ? "D" : "S";
+    expect(mosBodiesOffSourceSupply(document)).toEqual([]);
+  });
+
+  it("reads a copied Ground marker without its name claim as the same ground", () => {
+    // A copy can carry a marker whose claim stayed behind, so it stands on a
+    // Net of its own. The netlist writes both as node 0: one ground, not two
+    // supplies to choose between.
+    const document = createEmptyDocument("main", "Main");
+    document.instances.push(
+      mos("M1", "nmos"),
+      { id: "GND1", symbolId: "ground", placement: null },
+      { id: "GND2", symbolId: "ground", placement: null },
+    );
+    document.nets.push(
+      { id: "net-gnd", terminals: [{ instanceId: "GND1", pinName: "0" }] },
+      {
+        id: "net-gnd-copy",
+        terminals: [
+          { instanceId: "GND2", pinName: "0" },
+          { instanceId: "M1", pinName: "S" },
+        ],
+      },
+    );
+    document.connectivityEvidence.push({
+      id: "claim-gnd",
+      kind: "name-claim",
+      netId: "net-gnd",
+      name: "0",
+      scope: "global",
+      powerDomain: "ground",
+      owner: { kind: "power-marker", objectId: "GND1" },
+    });
+    document.mosBulkDefaults = { nmosNetId: "net-gnd" };
+    expect(drawnSupplyLogicalNetIds(document, "ground").size).toBe(2);
+    expect(mosBodiesOffSourceSupply(document)).toEqual([]);
+  });
+});

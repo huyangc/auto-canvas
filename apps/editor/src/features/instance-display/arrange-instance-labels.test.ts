@@ -1,0 +1,1826 @@
+import { describe, expect, it } from "vitest";
+import {
+  createEmptyDocument,
+  createRoutePath,
+  canonicalPortTextDocument,
+  roleLabelFormat,
+  type Annotation,
+  type Rect,
+} from "@icm/model";
+import { executeTransaction } from "@icm/edit-engine";
+import { InMemorySymbolResolver, builtInSymbols } from "@icm/symbols";
+import {
+  createLabelClearanceContext,
+  defaultInstanceLabelPlacement,
+  diagnoseLabelClearance,
+  instanceLabelRowOffset,
+  instanceValueRowOffset,
+  outwardDefaultInstanceLabelPlacement,
+  outwardPlaceUprightInstanceLabel,
+  placeUprightInstanceLabel,
+  resolveDocumentStyleProfile,
+} from "@icm/derived";
+import { defaultInstanceDisplayAnnotations } from "./default-instance-display";
+import { arrangeInstanceLabels } from "./arrange-instance-labels";
+import { instanceParameterVisibilityEdits } from "@icm/edit-engine";
+import { vddPowerLabelAnnotation } from "../component-insert/vdd-power-label";
+
+const resolver = new InMemorySymbolResolver(builtInSymbols);
+function fixture() {
+  const doc = createEmptyDocument("d", "Labels");
+  const instance = {
+    id: "r",
+    reference: "RBIAS",
+    symbolId: "resistor",
+    placement: {
+      position: { x: 100, y: 100 },
+      rotation: 0 as 0 | 90 | 180 | 270,
+      mirror: "none" as const,
+    },
+    netlist: { parameters: { value: "1k" } },
+  };
+  doc.instances.push(instance);
+  doc.annotations.push(
+    ...defaultInstanceDisplayAnnotations(
+      doc,
+      instance,
+      resolver,
+      resolveDocumentStyleProfile(doc.presentation),
+      { showValue: true },
+    ),
+  );
+  return { doc, instance };
+}
+function apply(
+  doc: ReturnType<typeof fixture>["doc"],
+  edits: ReturnType<typeof arrangeInstanceLabels>,
+) {
+  for (const edit of edits)
+    if (edit.kind === "upsert_schematic_annotation") {
+      const index = doc.annotations.findIndex(
+        (a) => a.id === edit.annotation.id,
+      );
+      doc.annotations[index] = edit.annotation;
+    }
+}
+/** A straight wire between two free points. */
+function wire(
+  doc: ReturnType<typeof fixture>["doc"],
+  id: string,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+) {
+  if (!doc.nets.some((net) => net.id === "n"))
+    doc.nets.push({ id: "n", terminals: [] });
+  doc.junctions.push(
+    { id: `${id}-a`, netId: "n", position: from },
+    { id: `${id}-b`, netId: "n", position: to },
+  );
+  doc.routes.push(
+    createRoutePath({
+      id,
+      netId: "n",
+      start: { kind: "junction", junctionId: `${id}-a` },
+      end: { kind: "junction", junctionId: `${id}-b` },
+      bends: [],
+      modes: ["manual"],
+    }),
+  );
+}
+/** A transistor showing its Reference and W/L in their default rows. */
+function transistor(
+  doc: ReturnType<typeof fixture>["doc"],
+  id: string,
+  symbolId: "nmos" | "pmos",
+  position: { x: number; y: number },
+  mirror: "none" | "horizontal" = "none",
+  rotation: 0 | 270 = 0,
+) {
+  const instance = {
+    id,
+    reference: id.toUpperCase(),
+    symbolId,
+    placement: { position, rotation, mirror },
+    netlist: { parameters: { w: "10u", l: "0.5u" } },
+  };
+  doc.instances.push(instance);
+  doc.annotations.push(
+    ...defaultInstanceDisplayAnnotations(
+      doc,
+      instance,
+      resolver,
+      resolveDocumentStyleProfile(doc.presentation),
+      { showValue: true },
+    ),
+  );
+  return instance;
+}
+/** Overlap of two labels' drawn ink. */
+function inkOverlaps(
+  context: ReturnType<typeof createLabelClearanceContext>,
+  a: Parameters<typeof context.measure>[0],
+  b: Parameters<typeof context.measure>[0],
+): boolean {
+  const p = context.measure(a).inkBounds;
+  const q = context.measure(b).inkBounds;
+  return (
+    p.x < q.x + q.width &&
+    p.x + p.width > q.x &&
+    p.y < q.y + q.height &&
+    p.y + p.height > q.y
+  );
+}
+describe("opt-in label arrangement", () => {
+  it("does not trade a crowded value row for its own Reference's (#1307)", () => {
+    // Free text covers the value's slot twice and every nearby step once,
+    // except the one up, which is the Reference's own row. Its single
+    // conflict, the Reference itself, used to win and stacked the value onto
+    // its Reference.
+    const { doc, instance } = fixture();
+    const value = doc.annotations.find(
+      (a) => a.binding?.kind === "instance-value",
+    )!;
+    const reference = doc.annotations.find(
+      (a) => a.binding?.kind === "instance-reference",
+    )!;
+    const context = createLabelClearanceContext(doc, resolver);
+    const at = context.measure(value).position;
+    const step = doc.presentation.grid;
+    for (const [index, [dx, dy]] of (
+      [
+        [0, 0],
+        [step / 2, 0],
+        [0, 2 * step],
+        [-2 * step, 0],
+        [2 * step, 0],
+      ] as const
+    ).entries())
+      doc.annotations.push({
+        id: `obstacle-${index}`,
+        kind: "instance-label",
+        content: { runs: [{ kind: "text", value: "WW" }] },
+        anchor: { kind: "free", position: { x: at.x + dx, y: at.y + dy } },
+        alignment: "start",
+        rotation: 0,
+        locked: true,
+      });
+    apply(doc, arrangeInstanceLabels(doc, resolver, [instance.id], {}));
+    const after = createLabelClearanceContext(doc, resolver);
+    const [movedReference, movedValue] = [reference, value].map((label) =>
+      doc.annotations.find((a) => a.id === label.id)!,
+    );
+    expect(inkOverlaps(after, movedReference!, movedValue!)).toBe(false);
+  });
+  it("keeps a clear Reference where it is rather than move the part's labels to clear the value", () => {
+    // The value's default row is covered twice. Every other side clears the
+    // value but puts the Reference on a label: one conflict against two, so
+    // the whole group used to move and the part's name was drawn over text.
+    // Wires just above the Reference row, and a row higher, leave the group
+    // no room to slide up, and a wire between its rows does not count as
+    // room.
+    const { doc, instance } = fixture();
+    doc.nets.push({ id: "n", terminals: [] });
+    doc.junctions.push(
+      { id: "a", netId: "n", position: { x: 0, y: 92 } },
+      { id: "b", netId: "n", position: { x: 92, y: 92 } },
+      { id: "c", netId: "n", position: { x: 108, y: 92 } },
+      { id: "d", netId: "n", position: { x: 200, y: 92 } },
+    );
+    for (const [id, start, end] of [
+      ["left", "a", "b"],
+      ["right", "c", "d"],
+    ] as const)
+      doc.routes.push(
+        createRoutePath({
+          id,
+          netId: "n",
+          start: { kind: "junction", junctionId: start },
+          end: { kind: "junction", junctionId: end },
+          bends: [],
+          modes: ["manual"],
+        }),
+      );
+    wire(doc, "left-high", { x: 0, y: 80 }, { x: 92, y: 80 });
+    wire(doc, "right-high", { x: 108, y: 80 }, { x: 200, y: 80 });
+    const reference = doc.annotations.find(
+      (a) => a.binding?.kind === "instance-reference",
+    )!;
+    const value = doc.annotations.find(
+      (a) => a.binding?.kind === "instance-value",
+    )!;
+    const context = createLabelClearanceContext(doc, resolver);
+    const style = resolveDocumentStyleProfile(doc.presentation);
+    const resolved = resolver.resolve(instance.symbolId)!;
+    const obstacle = (id: string, position: { x: number; y: number }) =>
+      doc.annotations.push({
+        id,
+        kind: "instance-label",
+        content: { runs: [{ kind: "text", value: "W" }] },
+        anchor: { kind: "free", position },
+        alignment: "middle",
+        rotation: 0,
+        locked: true,
+      });
+    const valueAt = context.measure(value).position;
+    obstacle("value-1", valueAt);
+    obstacle("value-2", { x: valueAt.x + 4, y: valueAt.y });
+    for (const side of ["left", "top", "bottom"] as const) {
+      // Where the name stands over its value on that side.
+      const placement = placeUprightInstanceLabel(
+        instance,
+        resolved,
+        style,
+        { x: 0, y: 0 },
+        side,
+        doc.presentation.grid,
+        1,
+        "reference-over-value",
+      )!;
+      const ink = createLabelClearanceContext(doc, resolver).measure({
+        ...reference,
+        anchor: { kind: "free", position: placement.position },
+        alignment: placement.alignment,
+      }).inkBounds;
+      obstacle(`name-${side}`, {
+        x: ink.x + ink.width / 2,
+        y: ink.y + ink.height,
+      });
+    }
+    const before = context.measure(reference).position;
+
+    apply(doc, arrangeInstanceLabels(doc, resolver, [instance.id], {}));
+
+    const after = createLabelClearanceContext(doc, resolver);
+    const moved = doc.annotations.find((a) => a.id === reference.id)!;
+    expect(after.measure(moved).position).toEqual(before);
+    expect(after.conflicts(moved)).toEqual([]);
+  });
+  it("moves a Cell Pin's name off a part placed over it, and leaves a name moved by hand", () => {
+    // Port vin at (100,100) faces right; its name stands to its left, where
+    // a resistor placed later now lies.
+    const doc = createEmptyDocument("d", "Pin name");
+    const port = {
+      id: "vin",
+      symbolId: "port",
+      placement: {
+        position: { x: 100, y: 100 },
+        rotation: 0 as const,
+        mirror: "none" as const,
+      },
+    };
+    doc.instances.push(port);
+    doc.netlist = {
+      name: "d",
+      formalParameters: [],
+      terminals: [
+        {
+          id: "terminal-vin",
+          name: "vin",
+          netId: "net-vin",
+          direction: "input",
+          interfaceInstanceIds: ["vin"],
+        },
+      ],
+    };
+    const name = defaultInstanceDisplayAnnotations(
+      doc,
+      port,
+      resolver,
+      resolveDocumentStyleProfile(doc.presentation),
+      { formalTerminalId: "terminal-vin", formalName: "vin" },
+    )[0]!;
+    doc.annotations.push(name);
+    const before = createLabelClearanceContext(doc, resolver);
+    const ink = before.measure(name).inkBounds;
+    doc.instances.push({
+      id: "R9",
+      reference: "R9",
+      symbolId: "resistor",
+      placement: {
+        position: { x: Math.round(ink.x + ink.width / 2), y: 100 },
+        rotation: 90,
+        mirror: "none",
+      },
+      netlist: { parameters: { value: "1k" } },
+    });
+    expect(createLabelClearanceContext(doc, resolver).conflicts(name)).toEqual([
+      "R9",
+    ]);
+
+    const edits = arrangeInstanceLabels(doc, resolver, ["vin"], {});
+    apply(doc, edits);
+    const moved = doc.annotations.find((a) => a.id === name.id)!;
+    expect(moved.alignment).toBe("middle");
+    expect(createLabelClearanceContext(doc, resolver).conflicts(moved)).toEqual(
+      [],
+    );
+
+    // A name its author put somewhere else stays there.
+    const placed = structuredClone(doc);
+    const authored = placed.annotations.find((a) => a.id === name.id)!;
+    Object.assign(authored, {
+      alignment: "end",
+      anchor: { ...name.anchor, localOffset: { x: -13, y: 4 } },
+    });
+    expect(arrangeInstanceLabels(placed, resolver, ["vin"], {})).toEqual([]);
+  });
+  it("compacts a visible value into a hidden reference slot, preserving bindings and undo-sized edits", () => {
+    const { doc, instance } = fixture();
+    const reference = doc.annotations.find(
+      (a) => a.binding?.kind === "instance-reference",
+    )!;
+    reference.visible = false;
+    const before = structuredClone(doc);
+    const value = doc.annotations.find(
+      (a) => a.binding?.kind === "instance-value",
+    )!;
+    expect(value).toBeDefined();
+    const edits = arrangeInstanceLabels(doc, resolver, [instance.id], {
+      avoidCollisions: false,
+    });
+    expect(doc).toEqual(before);
+    expect(edits).toHaveLength(1);
+    apply(doc, edits);
+    const preferred = defaultInstanceLabelPlacement(
+      instance,
+      resolver.resolve("resistor")!,
+      resolveDocumentStyleProfile(doc.presentation),
+      doc.presentation.grid,
+    )!;
+    expect(
+      createLabelClearanceContext(doc, resolver).measure(
+        doc.annotations.find((a) => a.id === value.id)!,
+      ).position,
+    ).toEqual(preferred.position);
+    expect(doc.annotations.find((a) => a.id === value.id)?.binding).toEqual(
+      value.binding,
+    );
+    expect(arrangeInstanceLabels(doc, resolver, [instance.id], {})).toEqual([]);
+  });
+  it("restyles only default reference projections, without renaming the device", () => {
+    const { doc, instance } = fixture();
+    const before = structuredClone(doc.instances);
+    apply(
+      doc,
+      arrangeInstanceLabels(doc, resolver, [instance.id], {
+        referenceStyle: "first-letter-subscript",
+        avoidCollisions: false,
+      }),
+    );
+    expect(
+      doc.annotations.find((a) => a.binding?.kind === "instance-reference")
+        ?.formatOverride,
+    ).toEqual(canonicalPortTextDocument("RBIAS"));
+    expect(doc.instances).toEqual(before);
+    expect(
+      arrangeInstanceLabels(doc, resolver, [instance.id], {
+        referenceStyle: "first-letter-subscript",
+      }),
+    ).toEqual([]);
+  });
+  it.each(["locked", "manual", "custom", "hidden"])(
+    "preserves %s labels",
+    (kind) => {
+      const { doc, instance } = fixture();
+      doc.annotations = doc.annotations.filter(
+        (a) => a.binding?.kind === "instance-reference",
+      );
+      const annotation = doc.annotations[0]!;
+      if (kind === "locked") annotation.locked = true;
+      if (kind === "hidden") annotation.visible = false;
+      if (kind === "custom")
+        annotation.formatOverride = {
+          runs: [
+            {
+              kind: "span",
+              style: "bold",
+              children: [{ kind: "text", value: "RBIAS" }],
+            },
+          ],
+        };
+      if (kind === "manual" && annotation.anchor.kind === "object")
+        annotation.anchor.localOffset.x += 70;
+      expect(
+        arrangeInstanceLabels(doc, resolver, [instance.id], {
+          referenceStyle: "first-letter-subscript",
+        }),
+      ).toEqual([]);
+    },
+  );
+  it("gives a Pin's name with no look of its own its standard look, with the first-letter style (#1419)", () => {
+    // Pins placed as rfp, with no look, and renamed before a rename gave
+    // them one: vrfp, and beside it labels left as they are: a look of the
+    // author's own, a lock, a name moved by hand, a name with no standard
+    // look.
+    const doc = createEmptyDocument("d", "Pins");
+    doc.netlist = { name: "d", formalParameters: [], terminals: [] };
+    const profile = resolveDocumentStyleProfile(doc.presentation);
+    const pin = (name: string) => {
+      const port = {
+        id: name,
+        symbolId: "port",
+        placement: {
+          position: { x: 100, y: 60 * doc.instances.length },
+          rotation: 0 as const,
+          mirror: "none" as const,
+        },
+      };
+      doc.instances.push(port);
+      doc.netlist!.terminals.push({
+        id: `terminal-${name}`,
+        name,
+        netId: `net-${name}`,
+        direction: "input",
+        interfaceInstanceIds: [name],
+      });
+      const label = defaultInstanceDisplayAnnotations(
+        doc,
+        port,
+        resolver,
+        profile,
+        { formalTerminalId: `terminal-${name}`, formalName: "rfp" },
+      )[0]!;
+      doc.annotations.push(label);
+      return label;
+    };
+    const stale = pin("vrfp");
+    expect(stale.formatOverride).toBeUndefined();
+    pin("vrfn").formatOverride = {
+      runs: [
+        {
+          kind: "span",
+          style: "bold",
+          children: [{ kind: "text", value: "vrfn" }],
+        },
+      ],
+    };
+    pin("vbn").locked = true;
+    const manual = pin("vcm");
+    if (manual.anchor.kind === "object") manual.anchor.localOffset.y += 30;
+    pin("rfin");
+    const ids = doc.instances.map((instance) => instance.id);
+
+    expect(arrangeInstanceLabels(doc, resolver, ids, {})).toEqual([]);
+    expect(
+      arrangeInstanceLabels(doc, resolver, ids, {
+        referenceStyle: "first-letter-subscript",
+      }),
+    ).toEqual([
+      {
+        kind: "upsert_schematic_annotation",
+        annotation: {
+          ...stale,
+          formatOverride: roleLabelFormat("voltage-node", "vrfp"),
+        },
+      },
+    ]);
+  });
+  it("never stacks a value onto its own Reference in a crowded MOS pair (#1307)", () => {
+    // A Gilbert switching pair: 60 units apart, the mirrored device's labels
+    // facing the other's across a 12-unit gap.
+    const doc = createEmptyDocument("d", "Pair");
+    const profile = resolveDocumentStyleProfile(doc.presentation);
+    const devices = [
+      { id: "m3", reference: "M3", x: -110, mirror: "none" as const },
+      { id: "m4", reference: "M4", x: -50, mirror: "horizontal" as const },
+      { id: "m5", reference: "M5", x: 50, mirror: "none" as const },
+      { id: "m6", reference: "M6", x: 110, mirror: "horizontal" as const },
+    ];
+    for (const device of devices) {
+      const instance = {
+        id: device.id,
+        reference: device.reference,
+        symbolId: "nmos",
+        placement: {
+          position: { x: device.x, y: -40 },
+          rotation: 0 as const,
+          mirror: device.mirror,
+        },
+        netlist: { parameters: { w: "10u", l: "150n" } },
+      };
+      doc.instances.push(instance);
+      doc.annotations.push(
+        ...defaultInstanceDisplayAnnotations(doc, instance, resolver, profile, {
+          showValue: true,
+        }),
+      );
+    }
+    apply(
+      doc,
+      arrangeInstanceLabels(
+        doc,
+        resolver,
+        devices.map((d) => d.id),
+        {},
+      ),
+    );
+    const context = createLabelClearanceContext(doc, resolver);
+    for (const device of devices) {
+      const [reference, value] = (
+        ["instance-reference", "instance-value"] as const
+      ).map((kind) =>
+        doc.annotations.find(
+          (a) => a.binding?.kind === kind && a.binding.instanceId === device.id,
+        )!,
+      );
+      const a = context.measure(reference!).inkBounds;
+      const b = context.measure(value!).inkBounds;
+      const overlapping =
+        a.x < b.x + b.width &&
+        a.x + a.width > b.x &&
+        a.y < b.y + b.height &&
+        a.y + a.height > b.y;
+      expect(overlapping, device.reference).toBe(false);
+    }
+  });
+  it("counts a label boxed in by a loop of wire as crowded, and an open one as clear (#1519)", () => {
+    const { doc } = fixture();
+    const box = { x: 290, y: 95, width: 20, height: 10 };
+    wire(doc, "top", { x: 270, y: 80 }, { x: 330, y: 80 });
+    wire(doc, "bottom", { x: 270, y: 120 }, { x: 330, y: 120 });
+    wire(doc, "left", { x: 270, y: 80 }, { x: 270, y: 120 });
+    expect(createLabelClearanceContext(doc, resolver).enclosedAt(box)).toBe(
+      false,
+    );
+    wire(doc, "right", { x: 330, y: 80 }, { x: 330, y: 120 });
+    expect(createLabelClearanceContext(doc, resolver).enclosedAt(box)).toBe(
+      true,
+    );
+  });
+
+  it("puts each part's labels on the side away from the centre line when asked (#1519)", () => {
+    const doc = createEmptyDocument("d", "Pair");
+    const left = transistor(doc, "m1", "nmos", { x: 100, y: 100 });
+    const right = transistor(doc, "m2", "nmos", { x: 400, y: 100 });
+    apply(
+      doc,
+      arrangeInstanceLabels(doc, resolver, [left.id, right.id], {
+        side: "outside",
+      }),
+    );
+    const context = createLabelClearanceContext(doc, resolver);
+    const part = (id: string) =>
+      context.symbols.find((symbol) => symbol.id === id)!.bounds;
+    for (const annotation of doc.annotations) {
+      const ink = context.measure(annotation).inkBounds;
+      const owner =
+        annotation.binding && "instanceId" in annotation.binding
+          ? annotation.binding.instanceId
+          : undefined;
+      if (owner === left.id)
+        expect(ink.x + ink.width).toBeLessThanOrEqual(part(left.id).x);
+      else
+        expect(ink.x).toBeGreaterThanOrEqual(
+          part(right.id).x + part(right.id).width,
+        );
+    }
+  });
+
+  it("arranges a new part's labels at placement when their default rows cross a wire (#1519)", () => {
+    const { doc, instance } = fixture();
+    const style = resolveDocumentStyleProfile(doc.presentation);
+    const value = doc.annotations.find(
+      (a) => a.binding?.kind === "instance-value",
+    )!;
+    const ink = createLabelClearanceContext(doc, resolver).measure(
+      value,
+    ).inkBounds;
+    const y = ink.y + ink.height / 2;
+    doc.annotations = [];
+    wire(doc, "across", { x: ink.x - 20, y }, { x: ink.x + ink.width + 20, y });
+    doc.annotations.push(
+      ...defaultInstanceDisplayAnnotations(doc, instance, resolver, style, {
+        showValue: true,
+        clearOfWiring: true,
+      }),
+    );
+    const context = createLabelClearanceContext(doc, resolver);
+    for (const annotation of doc.annotations)
+      expect(context.conflicts(annotation)).toEqual([]);
+  });
+
+  it("centres a VDD marker's supply name over its bar on request, and puts it back beside it (#1528)", () => {
+    const doc = createEmptyDocument("d", "Supply");
+    const instance = {
+      id: "vdd1",
+      symbolId: "vdd-port",
+      placement: {
+        position: { x: 100, y: 100 },
+        rotation: 0 as const,
+        mirror: "none" as const,
+      },
+    };
+    doc.instances.push(instance);
+    doc.nets.push({ id: "vdd", terminals: [] });
+    const beside = vddPowerLabelAnnotation({
+      instance,
+      resolved: resolver.resolve("vdd-port")!,
+      netId: "vdd",
+      grid: doc.presentation.grid,
+      name: "VDD",
+    });
+    doc.annotations.push(beside);
+    apply(
+      doc,
+      arrangeInstanceLabels(doc, resolver, [instance.id], { side: "top" }),
+    );
+    const context = createLabelClearanceContext(doc, resolver);
+    const bar = context.symbols.find((symbol) => symbol.id === "vdd1")!.bounds;
+    const ink = context.measure(doc.annotations[0]!).inkBounds;
+    expect(
+      Math.abs(ink.x + ink.width / 2 - (bar.x + bar.width / 2)),
+    ).toBeLessThan(1);
+    expect(ink.y + ink.height).toBeLessThanOrEqual(bar.y - 4);
+    expect(ink.y + ink.height).toBeGreaterThan(bar.y - 10);
+    apply(
+      doc,
+      arrangeInstanceLabels(doc, resolver, [instance.id], { side: "right" }),
+    );
+    expect(doc.annotations[0]).toEqual(beside);
+  });
+
+  it("moves a crowded label group to a free side of its part (#1307)", () => {
+    // A feedback resistor drawn across the top of an op amp: its default
+    // value row lands on the amplifier, while the space above is empty.
+    const { doc, instance } = fixture();
+    instance.placement = {
+      position: { x: 260, y: -60 },
+      rotation: 90,
+      mirror: "none",
+    };
+    doc.annotations = [];
+    doc.annotations.push(
+      ...defaultInstanceDisplayAnnotations(
+        doc,
+        instance,
+        resolver,
+        resolveDocumentStyleProfile(doc.presentation),
+        { showValue: true },
+      ),
+    );
+    doc.instances.push({
+      id: "x3",
+      symbolId: "opamp",
+      placement: {
+        position: { x: 260, y: 0 },
+        rotation: 0,
+        mirror: "none",
+      },
+    });
+    const before = createLabelClearanceContext(doc, resolver);
+    expect(
+      doc.annotations.some((a) => before.conflicts(a).includes("x3")),
+    ).toBe(true);
+    apply(doc, arrangeInstanceLabels(doc, resolver, [instance.id], {}));
+    const after = createLabelClearanceContext(doc, resolver);
+    for (const annotation of doc.annotations) {
+      expect(after.conflicts(annotation)).toEqual([]);
+      // Both rows moved above the resistor, together.
+      expect(after.measure(annotation).position.y).toBeLessThan(-60);
+    }
+    // R_F reads first and its value under it, nearest the resistor (#1384).
+    const [name, value] = (
+      ["instance-reference", "instance-value"] as const
+    ).map((kind) =>
+      after.measure(doc.annotations.find((a) => a.binding?.kind === kind)!),
+    );
+    expect(value!.position.x).toBe(name!.position.x);
+    expect(name!.inkBounds.y + name!.inkBounds.height).toBeLessThanOrEqual(
+      value!.inkBounds.y,
+    );
+  });
+  it("puts a value an earlier rule stacked over its name above a part under it (#1384)", () => {
+    // A Miller op amp's compensation capacitor, turned so its labels stand
+    // above it in the outward rule's rows: "1p" over C_C.
+    const doc = createEmptyDocument("d", "Miller compensation");
+    const style = resolveDocumentStyleProfile(doc.presentation);
+    const instance = {
+      id: "cc",
+      reference: "CC",
+      symbolId: "capacitor",
+      placement: {
+        position: { x: 100, y: 100 },
+        rotation: 270 as const,
+        mirror: "none" as const,
+      },
+      netlist: { parameters: { value: "1p" } },
+    };
+    doc.instances.push(instance);
+    const resolved = resolver.resolve("capacitor")!;
+    for (const slot of ["reference", "value"] as const) {
+      const placed = outwardDefaultInstanceLabelPlacement(
+        instance,
+        resolved,
+        style,
+        doc.presentation.grid,
+        slot,
+      )!;
+      doc.annotations.push({
+        id: `${slot}-cc`,
+        kind: slot === "reference" ? "instance-label" : "instance-value",
+        binding:
+          slot === "reference"
+            ? { kind: "instance-reference", instanceId: "cc" }
+            : { kind: "instance-value", instanceId: "cc" },
+        anchor: {
+          kind: "object",
+          objectId: "cc",
+          localOffset: {
+            x: placed.position.x - 100,
+            y: placed.position.y - 100,
+          },
+          fallbackPosition: placed.position,
+        },
+        alignment: placed.alignment,
+        rotation: 0,
+        locked: false,
+      });
+    }
+    const ink = (id: string) =>
+      createLabelClearanceContext(doc, resolver).measure(
+        doc.annotations.find((a) => a.id === id)!,
+      ).inkBounds;
+    expect(ink("value-cc").y).toBeLessThan(ink("reference-cc").y);
+
+    apply(doc, arrangeInstanceLabels(doc, resolver, ["cc"], {}));
+
+    // C_C over 1p, which takes the row nearest the plates: the current
+    // rule's rows.
+    const name = ink("reference-cc");
+    const value = ink("value-cc");
+    expect(name.y + name.height).toBeLessThanOrEqual(value.y);
+    const at = (id: string) => {
+      const label = doc.annotations.find((a) => a.id === id)!;
+      return label.anchor.kind === "object"
+        ? label.anchor.fallbackPosition
+        : null;
+    };
+    expect(at("reference-cc")).toEqual(
+      defaultInstanceLabelPlacement(
+        instance,
+        resolved,
+        style,
+        doc.presentation.grid,
+        "reference-over-value",
+      )!.position,
+    );
+    expect(at("value-cc")).toEqual(
+      defaultInstanceLabelPlacement(
+        instance,
+        resolved,
+        style,
+        doc.presentation.grid,
+        "value",
+      )!.position,
+    );
+  });
+  it("takes up a group an earlier arrangement stacked value first above its part, and leaves one placed by hand (#1384)", () => {
+    // A feedback resistor across the top of an op amp, its labels above it
+    // exactly where the outward placer stacks a group there: 10k over R_F.
+    const stacked = (slide: number) => {
+      const { doc, instance } = fixture();
+      instance.placement = {
+        position: { x: 260, y: -60 },
+        rotation: 90,
+        mirror: "none",
+      };
+      doc.instances.push({
+        id: "x3",
+        symbolId: "opamp",
+        placement: {
+          position: { x: 260, y: 0 },
+          rotation: 0,
+          mirror: "none",
+        },
+      });
+      const style = resolveDocumentStyleProfile(doc.presentation);
+      const resolved = resolver.resolve("resistor")!;
+      for (const annotation of doc.annotations) {
+        // Turned a quarter, the resistor's left side faces up the drawing.
+        const placed = outwardPlaceUprightInstanceLabel(
+          instance,
+          resolved,
+          style,
+          { x: 0, y: 0 },
+          "left",
+          doc.presentation.grid,
+          1,
+          annotation.binding?.kind === "instance-value" ? "value" : "reference",
+        )!;
+        const position = { x: placed.position.x + slide, y: placed.position.y };
+        annotation.alignment = placed.alignment;
+        annotation.anchor = {
+          kind: "object",
+          objectId: instance.id,
+          localOffset: { x: position.x - 260, y: position.y + 60 },
+          fallbackPosition: position,
+        };
+      }
+      return { doc, instance };
+    };
+    const { doc, instance } = stacked(0);
+    const ink = (kind: string) =>
+      createLabelClearanceContext(doc, resolver).measure(
+        doc.annotations.find((a) => a.binding?.kind === kind)!,
+      ).inkBounds;
+    expect(ink("instance-value").y).toBeLessThan(ink("instance-reference").y);
+
+    apply(doc, arrangeInstanceLabels(doc, resolver, [instance.id], {}));
+
+    // R_F over 10k, above the resistor and clear of the op amp.
+    const name = ink("instance-reference");
+    const value = ink("instance-value");
+    expect(name.y + name.height).toBeLessThanOrEqual(value.y);
+    expect(value.y + value.height).toBeLessThan(-60);
+    const after = createLabelClearanceContext(doc, resolver);
+    for (const annotation of doc.annotations)
+      expect(after.conflicts(annotation)).toEqual([]);
+
+    // Slid off those rows, the group counts as placed by hand and stays.
+    const moved = stacked(4);
+    expect(
+      arrangeInstanceLabels(moved.doc, resolver, [moved.instance.id], {}),
+    ).toEqual([]);
+  });
+  it("keeps a value with its Reference instead of hopping across a wire (#1307)", () => {
+    // A vertical resistor whose value row is crossed by a wire leaving to
+    // the right: the group moves to the free left side.
+    const { doc, instance } = fixture();
+    instance.placement = {
+      position: { x: -60, y: 0 },
+      rotation: 0,
+      mirror: "none",
+    };
+    doc.annotations = [];
+    doc.annotations.push(
+      ...defaultInstanceDisplayAnnotations(
+        doc,
+        instance,
+        resolver,
+        resolveDocumentStyleProfile(doc.presentation),
+        { showValue: true },
+      ),
+    );
+    doc.nets.push({ id: "n", terminals: [] });
+    doc.junctions.push(
+      { id: "a", netId: "n", position: { x: -60, y: 25 } },
+      { id: "b", netId: "n", position: { x: 60, y: 25 } },
+    );
+    doc.routes.push(
+      createRoutePath({
+        id: "w",
+        netId: "n",
+        start: { kind: "junction", junctionId: "a" },
+        end: { kind: "junction", junctionId: "b" },
+        bends: [],
+        modes: ["manual"],
+      }),
+    );
+    const before = createLabelClearanceContext(doc, resolver);
+    expect(doc.annotations.some((a) => before.conflicts(a).includes("w"))).toBe(
+      true,
+    );
+    apply(doc, arrangeInstanceLabels(doc, resolver, [instance.id], {}));
+    const after = createLabelClearanceContext(doc, resolver);
+    const positions = doc.annotations.map((a) => {
+      expect(after.conflicts(a)).toEqual([]);
+      return after.measure(a).position;
+    });
+    // Same side, left of the part, Reference row above the value row.
+    for (const position of positions) expect(position.x).toBeLessThan(-60);
+    expect(positions[0]!.x).toBe(positions[1]!.x);
+  });
+  it("uses a bounded collision candidate and preserves topology", () => {
+    const { doc, instance } = fixture();
+    const before = structuredClone(doc.instances);
+    const reference = doc.annotations.find(
+      (a) => a.binding?.kind === "instance-reference",
+    )!;
+    doc.annotations = [
+      reference,
+      { ...structuredClone(reference), id: "obstacle", locked: true },
+    ];
+    const beforeScore = createLabelClearanceContext(doc, resolver).conflicts(
+      reference,
+    ).length;
+    apply(doc, arrangeInstanceLabels(doc, resolver, [instance.id], {}));
+    expect(
+      createLabelClearanceContext(doc, resolver).conflicts(doc.annotations[0]!)
+        .length,
+    ).toBeLessThan(beforeScore);
+    expect(doc.instances).toEqual(before);
+    expect(doc.annotations[1]).toEqual({
+      ...reference,
+      id: "obstacle",
+      locked: true,
+    });
+  });
+  it("slides a part's labels along its side to fit between two rows of wiring", () => {
+    // An input transistor of a Miller op amp: its W/L row crosses the tail
+    // wire below, the gate wire takes its left side, a bias line runs under
+    // the pair, and labels above it would stand beyond the mirror's wire.
+    // Its right side, a little above the middle, fits both rows between the
+    // mirror's wire and the tail.
+    const doc = createEmptyDocument("d", "Input pair");
+    const m1 = transistor(doc, "m1", "nmos", { x: 90, y: -40 });
+    wire(doc, "tail", { x: 60, y: -20 }, { x: 200, y: -20 });
+    wire(doc, "gate", { x: 40, y: -40 }, { x: 70, y: -40 });
+    wire(doc, "mirror", { x: 40, y: -80 }, { x: 200, y: -80 });
+    wire(doc, "bias", { x: 40, y: -5 }, { x: 200, y: -5 });
+    const before = createLabelClearanceContext(doc, resolver);
+    expect(
+      doc.annotations.some((a) => before.conflicts(a).includes("tail")),
+    ).toBe(true);
+
+    apply(doc, arrangeInstanceLabels(doc, resolver, [m1.id], {}));
+
+    const after = createLabelClearanceContext(doc, resolver);
+    const body = after.symbols.find((s) => s.id === m1.id)!.bounds;
+    for (const label of doc.annotations) {
+      expect(after.conflicts(label), label.id).toEqual([]);
+      const ink = after.measure(label).inkBounds;
+      expect(ink.x).toBeGreaterThanOrEqual(body.x + body.width);
+      expect(ink.y).toBeGreaterThan(-80);
+      expect(ink.y + ink.height).toBeLessThan(-20);
+    }
+  });
+  it("never puts a wire between a part's Reference and its W/L", () => {
+    // A mirror transistor under a VDD rail, crowded on its sides: above it,
+    // between the rail and the part, there is room for the Reference only,
+    // and its W/L met nothing above the rail, away from the transistor.
+    const doc = createEmptyDocument("d", "Mirror");
+    const m3 = transistor(doc, "m3", "pmos", { x: 110, y: -100 });
+    wire(doc, "rail", { x: 40, y: -140 }, { x: 220, y: -140 });
+    wire(doc, "gate", { x: 40, y: -100 }, { x: 90, y: -100 });
+    wire(doc, "drain", { x: 40, y: -70 }, { x: 220, y: -70 });
+
+    apply(doc, arrangeInstanceLabels(doc, resolver, [m3.id], {}));
+
+    const after = createLabelClearanceContext(doc, resolver);
+    for (const label of doc.annotations) {
+      expect(after.conflicts(label), label.id).toEqual([]);
+      expect(after.measure(label).inkBounds.y).toBeGreaterThan(-140);
+    }
+  });
+  it("never leaves a part's labels beyond a wire that runs beside it", () => {
+    // A wire passes just right of the transistor, between it and its
+    // default labels, which meet nothing there.
+    const doc = createEmptyDocument("d", "Bypass");
+    const m1 = transistor(doc, "m1", "nmos", { x: 90, y: -40 });
+    wire(doc, "bypass", { x: 103, y: -100 }, { x: 103, y: 20 });
+    const before = createLabelClearanceContext(doc, resolver);
+    for (const label of doc.annotations) {
+      expect(before.conflicts(label)).toEqual([]);
+      expect(before.measure(label).inkBounds.x).toBeGreaterThan(103);
+    }
+
+    apply(doc, arrangeInstanceLabels(doc, resolver, [m1.id], {}));
+
+    const after = createLabelClearanceContext(doc, resolver);
+    for (const label of doc.annotations) {
+      expect(after.conflicts(label), label.id).toEqual([]);
+      const ink = after.measure(label).inkBounds;
+      expect(ink.x + ink.width).toBeLessThan(103);
+    }
+  });
+  it("lets a part's own wire run between its name and its W/L", () => {
+    // A transistor drawn with a Port at each pin: its bulk wire runs through
+    // its name's row, the Source Pin's name sits on its W/L's, and the Gate
+    // Pin's name takes its left side. Above and below its own bulk wire,
+    // both labels still read as the transistor's.
+    const doc = createEmptyDocument("d", "Basic transistor");
+    const instance = {
+      id: "m3",
+      reference: "M3",
+      symbolId: "nmos",
+      placement: {
+        position: { x: 400, y: 180 },
+        rotation: 0 as const,
+        mirror: "none" as const,
+      },
+      netlist: { parameters: { w: "1u", l: "150n" } },
+    };
+    doc.instances.push(instance);
+    doc.annotations.push(
+      ...defaultInstanceDisplayAnnotations(
+        doc,
+        instance,
+        resolver,
+        resolveDocumentStyleProfile(doc.presentation),
+        { showValue: true },
+      ),
+    );
+    doc.nets.push({ id: "n", terminals: [] });
+    doc.junctions.push({
+      id: "bulk-end",
+      netId: "n",
+      position: { x: 450, y: 180 },
+    });
+    doc.routes.push(
+      createRoutePath({
+        id: "bulk",
+        netId: "n",
+        start: { kind: "terminal", instanceId: "m3", pinName: "B" },
+        end: { kind: "junction", junctionId: "bulk-end" },
+        bends: [],
+        modes: ["manual"],
+      }),
+    );
+    for (const [id, value, x, y] of [
+      ["gate", "Gate", 324, 185],
+      ["source", "Source", 383, 230],
+      ["drain", "Drain", 387, 136],
+      ["bulk-name", "Bulk", 470, 185],
+    ] as const)
+      doc.annotations.push({
+        id,
+        kind: "instance-label",
+        content: { runs: [{ kind: "text", value }] },
+        anchor: { kind: "free", position: { x, y } },
+        alignment: "start",
+        rotation: 0,
+        locked: true,
+      });
+
+    apply(doc, arrangeInstanceLabels(doc, resolver, [instance.id], {}));
+
+    const after = createLabelClearanceContext(doc, resolver);
+    const [name, size] = (
+      ["instance-reference", "instance-value"] as const
+    ).map((kind) =>
+      after.measure(doc.annotations.find((a) => a.binding?.kind === kind)!),
+    );
+    for (const label of doc.annotations)
+      expect(after.conflicts(label), label.id).toEqual([]);
+    expect(name!.inkBounds.y + name!.inkBounds.height).toBeLessThan(180);
+    expect(size!.inkBounds.y).toBeGreaterThan(180);
+  });
+  describe("a name on its own dashed body tie (#1836)", () => {
+    /**
+     * RBIAS's name, alone beside it, with a dashed tie running down through
+     * its first letter and the whole side, a wire two grid steps past it,
+     * and wires fencing the other three sides: no side, slide or nudge is
+     * clear, but four units further out the name is.
+     */
+    function tied(crowded: boolean) {
+      const { doc, instance } = fixture();
+      doc.annotations = doc.annotations.filter(
+        (a) => a.binding?.kind !== "instance-value",
+      );
+      const context = createLabelClearanceContext(doc, resolver);
+      const name = doc.annotations[0]!;
+      const ink = context.measure(name).inkBounds;
+      const part = context.symbols[0]!.bounds;
+      const top = part.y - 60;
+      const bottom = part.y + part.height + 60;
+      wire(doc, "tie", { x: ink.x + 3, y: top }, { x: ink.x + 3, y: bottom });
+      doc.routes.at(-1)!.presentation = "bulk-dashed";
+      const beyond = ink.x + ink.width + 14;
+      wire(doc, "beyond", { x: beyond, y: top }, { x: beyond, y: bottom });
+      for (let x = part.x - 4; x > part.x - 64; x -= 6)
+        wire(doc, `left-${x}`, { x, y: top }, { x, y: bottom });
+      for (let step = 0; step < 10; step++)
+        for (const y of [
+          part.y - 4 - step * 6,
+          part.y + part.height + 4 + step * 6,
+        ])
+          wire(doc, `row-${y}`, { x: part.x - 70, y }, { x: ink.x - 1, y });
+      // With the room further out filled too, nothing near is clear.
+      if (crowded)
+        for (let x = ink.x + 9; x < ink.x + ink.width + 50; x += 6)
+          wire(doc, `out-${x}`, { x, y: top }, { x, y: bottom });
+      return { doc, instance, name };
+    }
+    const struck = (doc: ReturnType<typeof fixture>["doc"], id: string) =>
+      diagnoseLabelClearance(doc, resolver).some(
+        (finding) =>
+          finding.code === "VISUAL_LABEL_CLEARANCE" &&
+          finding.objectIds[0] === id,
+      );
+
+    it("takes the nearest spot the diagnostics leave clear", () => {
+      const { doc, instance, name } = tied(false);
+      expect(struck(doc, name.id)).toBe(true);
+      apply(doc, arrangeInstanceLabels(doc, resolver, [instance.id], {}));
+      expect(struck(doc, name.id)).toBe(false);
+      const context = createLabelClearanceContext(doc, resolver);
+      const moved = doc.annotations.find((a) => a.id === name.id)!;
+      expect(context.findingsAt(moved)).toEqual({
+        struck: [],
+        overlapped: [],
+        runsOn: [],
+      });
+    });
+
+    it("keeps the warning where no spot near is clear", () => {
+      const { doc, instance, name } = tied(true);
+      apply(doc, arrangeInstanceLabels(doc, resolver, [instance.id], {}));
+      expect(struck(doc, name.id)).toBe(true);
+    });
+  });
+
+  it("does not move a name from just beside other text onto it", () => {
+    // The Reference touches text just above it and a wire runs through it;
+    // one row up it would meet only that text, drawn over it, and two grid
+    // steps right only other text. Wires fence every other side. A name had
+    // been nudged so onto a Pin's name in a gain-boosted op amp.
+    const { doc, instance } = fixture();
+    const reference = doc.annotations.find(
+      (a) => a.binding?.kind === "instance-reference",
+    )!;
+    for (let x = 30; x <= 90; x += 6)
+      wire(doc, `left-${x}`, { x, y: 0 }, { x, y: 200 });
+    for (let y = 20; y <= 74; y += 6)
+      wire(doc, `top-${y}`, { x: 0, y }, { x: 200, y });
+    for (const y of [132, 138, 150, 156])
+      wire(doc, `bottom-${y}`, { x: 0, y }, { x: 200, y });
+    wire(doc, "through", { x: 105, y: 102 }, { x: 128, y: 102 });
+    for (const [id, value, x, y] of [
+      ["above", "I", 110, 89],
+      ["beyond", "WW", 156, 108],
+    ] as const)
+      doc.annotations.push({
+        id,
+        kind: "instance-label",
+        content: { runs: [{ kind: "text", value }] },
+        anchor: { kind: "free", position: { x, y } },
+        alignment: "start",
+        rotation: 0,
+        locked: true,
+      });
+    const before = createLabelClearanceContext(doc, resolver);
+    expect(before.conflicts(reference)).toEqual(["above", "through"]);
+    expect(
+      before.overlapsAt(before.measure(reference).inkBounds, reference.id),
+    ).toEqual([]);
+
+    apply(doc, arrangeInstanceLabels(doc, resolver, [instance.id], {}));
+
+    const after = createLabelClearanceContext(doc, resolver);
+    const moved = doc.annotations.find((a) => a.id === reference.id)!;
+    expect(after.overlapsAt(after.measure(moved).inkBounds, moved.id)).toEqual(
+      [],
+    );
+  });
+  /**
+   * A current-steering DAC unit: the switch M3 sits under the cascode M2,
+   * with its gate wire on the left, its output wire below and M4 to the
+   * right. M3's labels are arranged.
+   */
+  function dacUnit(m2x: number) {
+    const doc = createEmptyDocument("d", "DAC unit");
+    const m2 = transistor(doc, "m2", "pmos", { x: m2x, y: -40 });
+    const m3 = transistor(doc, "m3", "pmos", { x: 80, y: 40 });
+    transistor(doc, "m4", "pmos", { x: 140, y: 40 }, "horizontal");
+    for (const [id, from, to] of [
+      ["vcas", [20, -40], [m2x - 20, -40]],
+      ["d", [20, 40], [60, 40]],
+      ["db", [160, 40], [200, 40]],
+      ["outp", [90, 60], [90, 80]],
+      ["outp-bar", [40, 80], [90, 80]],
+      ["outn", [130, 60], [130, 80]],
+      ["outn-bar", [130, 80], [180, 80]],
+    ] as const)
+      wire(doc, id, { x: from[0], y: from[1] }, { x: to[0], y: to[1] });
+    apply(doc, arrangeInstanceLabels(doc, resolver, [m3.id], {}));
+    const after = createLabelClearanceContext(doc, resolver);
+    const labels = doc.annotations
+      .filter((a) => a.anchor.kind === "object" && a.anchor.objectId === m3.id)
+      .map((label) => ({
+        conflicts: after.conflicts(label),
+        ink: after.measure(label).inkBounds,
+      }));
+    const box = (id: string) =>
+      after.symbols.find((symbol) => symbol.id === id)!.bounds;
+    return { labels, m2: box(m2.id), m3: box(m3.id) };
+  }
+  it("keeps a part's labels nearer it than any other part", () => {
+    // Above M3 met nothing, so its W/L went two rows up, beside M2, and
+    // read as M2's.
+    const { labels, m2, m3 } = dacUnit(115);
+    const gap = (a: Rect, b: Rect) =>
+      Math.hypot(
+        Math.max(0, a.x - b.x - b.width, b.x - a.x - a.width),
+        Math.max(0, a.y - b.y - b.height, b.y - a.y - a.height),
+      );
+    for (const label of labels) {
+      expect(label.conflicts).toEqual([]);
+      expect(gap(label.ink, m3)).toBeLessThanOrEqual(gap(label.ink, m2) + 5);
+    }
+  });
+  it("slides a part's labels past its middle into the room above its gate wire", () => {
+    // M2 stands right above M3, so the one clear place beside M3 is left of
+    // it, above its gate wire: a group sliding there keeps only a quarter of
+    // its height beside the part.
+    const { labels, m3 } = dacUnit(100);
+    for (const label of labels) {
+      expect(label.conflicts).toEqual([]);
+      expect(label.ink.x + label.ink.width).toBeLessThanOrEqual(m3.x);
+      expect(label.ink.y + label.ink.height).toBeLessThanOrEqual(40);
+    }
+  });
+  it("moves a part's name off a free drawing note (#1323)", () => {
+    // A φ2 note written on a switch's default name read as one smudge.
+    const { doc, instance } = fixture();
+    const reference = doc.annotations.find(
+      (a) => a.binding?.kind === "instance-reference",
+    )!;
+    const before = createLabelClearanceContext(doc, resolver);
+    const at = before.measure(reference).position;
+    doc.drafting!.objects.push({
+      id: "note",
+      kind: "text",
+      locked: false,
+      zIndex: 0,
+      anchor: { kind: "free", position: { x: at.x + 4, y: at.y } },
+      content: { runs: [{ kind: "text", value: "phi2" }] },
+      alignment: "start",
+      rotation: 0,
+    });
+    expect(
+      createLabelClearanceContext(doc, resolver).conflicts(reference),
+    ).toContain("note");
+
+    apply(doc, arrangeInstanceLabels(doc, resolver, [instance.id], {}));
+
+    const after = createLabelClearanceContext(doc, resolver);
+    const moved = doc.annotations.find((a) => a.id === reference.id)!;
+    expect(after.conflicts(moved)).toEqual([]);
+  });
+  it("keeps a word's space between a part's labels and another label on their line", () => {
+    // A resistor's "2k" two units after an input Port's name read "v_inn2k".
+    const { doc, instance } = fixture();
+    const value = doc.annotations.find(
+      (a) => a.binding?.kind === "instance-value",
+    )!;
+    const context = createLabelClearanceContext(doc, resolver);
+    const ink = context.measure(value).inkBounds;
+    doc.annotations.push({
+      id: "pin-name",
+      kind: "instance-label",
+      content: { runs: [{ kind: "text", value: "vinn" }] },
+      anchor: {
+        kind: "free",
+        position: { x: ink.x - 2, y: context.measure(value).position.y },
+      },
+      alignment: "end",
+      rotation: 0,
+      locked: true,
+    });
+    expect(createLabelClearanceContext(doc, resolver).conflicts(value)).toEqual(
+      ["pin-name"],
+    );
+
+    apply(doc, arrangeInstanceLabels(doc, resolver, [instance.id], {}));
+
+    const after = createLabelClearanceContext(doc, resolver);
+    const moved = doc.annotations.find((a) => a.id === value.id)!;
+    expect(after.conflicts(moved)).toEqual([]);
+  });
+  it("keeps a part's labels from running into another part's on their row (#1412)", () => {
+    // A Butterworth ladder's C3 and C5, their values facing each other on
+    // one row: 637pF after C3, and 197pF before C5, where an earlier pass
+    // put C5's labels because RL stood beside it. "637pF 197pF" read as one.
+    const pair = (c5x: number) => {
+      const doc = createEmptyDocument("d", "Ladder");
+      const style = resolveDocumentStyleProfile(doc.presentation);
+      for (const [id, x, value] of [
+        ["c3", 0, "637pF"],
+        ["c5", c5x, "197pF"],
+      ] as const) {
+        const instance = {
+          id,
+          reference: id.toUpperCase(),
+          symbolId: "capacitor",
+          placement: {
+            position: { x, y: 0 },
+            rotation: 0 as const,
+            mirror: "none" as const,
+          },
+          netlist: { parameters: { value } },
+        };
+        doc.instances.push(instance);
+        const labels = defaultInstanceDisplayAnnotations(
+          doc,
+          instance,
+          resolver,
+          style,
+          { showValue: true },
+        );
+        if (id === "c5")
+          for (const label of labels) {
+            const placement = placeUprightInstanceLabel(
+              instance,
+              resolver.resolve("capacitor")!,
+              style,
+              { x: 0, y: 0 },
+              "left",
+              doc.presentation.grid,
+              1,
+              label.binding?.kind === "instance-value" ? "value" : "reference",
+            )!;
+            label.alignment = placement.alignment;
+            label.anchor = {
+              kind: "object",
+              objectId: id,
+              localOffset: {
+                x: placement.position.x - x,
+                y: placement.position.y,
+              },
+              fallbackPosition: placement.position,
+            };
+          }
+        doc.annotations.push(...labels);
+      }
+      return doc;
+    };
+    const labelsOf = (doc: ReturnType<typeof pair>, id: string) =>
+      doc.annotations.filter(
+        (a) => a.anchor.kind === "object" && a.anchor.objectId === id,
+      );
+    const valueGap = (doc: ReturnType<typeof pair>) => {
+      const context = createLabelClearanceContext(doc, resolver);
+      const [c3, c5] = ["c3", "c5"].map(
+        (id) =>
+          context.measure(
+            labelsOf(doc, id).find(
+              (a) => a.binding?.kind === "instance-value",
+            )!,
+          ).inkBounds,
+      );
+      return c5!.x - c3!.x - c3!.width;
+    };
+    // The values a word's space apart, but under a character's width.
+    const doc = pair(120 + Math.round(6 - valueGap(pair(120))));
+    expect(valueGap(doc)).toBeGreaterThan(4);
+    expect(valueGap(doc)).toBeLessThan(10);
+    const c5 = structuredClone(labelsOf(doc, "c5"));
+
+    apply(doc, arrangeInstanceLabels(doc, resolver, ["c3"], {}));
+
+    // C3's labels left the row's run; C5's stay where they were.
+    expect(labelsOf(doc, "c5")).toEqual(c5);
+    const after = createLabelClearanceContext(doc, resolver);
+    for (const label of labelsOf(doc, "c3")) {
+      const ink = after.measure(label).inkBounds;
+      expect(after.conflicts(label)).toEqual([]);
+      for (const other of c5) {
+        const theirs = after.measure(other).inkBounds;
+        const shared =
+          Math.min(ink.y + ink.height, theirs.y + theirs.height) -
+          Math.max(ink.y, theirs.y);
+        if (shared >= Math.min(ink.height, theirs.height) / 2)
+          expect(
+            Math.max(
+              theirs.x - ink.x - ink.width,
+              ink.x - theirs.x - theirs.width,
+            ),
+            `${label.id} and ${other.id}`,
+          ).toBeGreaterThanOrEqual(10);
+      }
+    }
+  });
+  it("keeps a part's value from reading as the name above it (#1347)", () => {
+    // A Pierce oscillator: the crystal's inductor Lm lies under the inverter
+    // X1, its series wires on both sides and a wire below it. Above Lm, its
+    // 10m stacked over L_m stood just under X₁ and read as X1's.
+    const doc = createEmptyDocument("d", "Pierce");
+    const style = resolveDocumentStyleProfile(doc.presentation);
+    for (const [id, reference, symbolId, position, rotation, value] of [
+      ["x1", "X1", "inverter", { x: 0, y: 0 }, 0, undefined],
+      ["lm", "Lm", "inductor", { x: 0, y: 90 }, 90, "10m"],
+    ] as const) {
+      const instance = {
+        id,
+        reference,
+        symbolId,
+        placement: { position, rotation, mirror: "none" as const },
+        netlist: { parameters: value ? { value } : {} },
+      };
+      doc.instances.push(instance);
+      doc.annotations.push(
+        ...defaultInstanceDisplayAnnotations(doc, instance, resolver, style, {
+          showValue: true,
+        }),
+      );
+    }
+    for (const [id, from, to] of [
+      ["rm", [-80, 90], [-30, 90]],
+      ["cm", [30, 90], [80, 90]],
+      ["c0", [-80, 115], [80, 115]],
+    ] as const)
+      wire(doc, id, { x: from[0], y: from[1] }, { x: to[0], y: to[1] });
+    const label = (kind: string, ownerId: string) =>
+      doc.annotations.find(
+        (a) =>
+          a.binding?.kind === kind &&
+          a.anchor.kind === "object" &&
+          a.anchor.objectId === ownerId,
+      )!;
+
+    apply(doc, arrangeInstanceLabels(doc, resolver, ["lm"], {}));
+
+    const after = createLabelClearanceContext(doc, resolver);
+    const ink = (kind: string, ownerId: string) =>
+      after.measure(label(kind, ownerId)).inkBounds;
+    const gap = (a: Rect, b: Rect) =>
+      Math.hypot(
+        Math.max(0, a.x - b.x - b.width, b.x - a.x - a.width),
+        Math.max(0, a.y - b.y - b.height, b.y - a.y - a.height),
+      );
+    const value = ink("instance-value", "lm");
+    const name = ink("instance-reference", "lm");
+    // Above Lm, clear of the wires beside and below it.
+    expect(value.y + value.height).toBeLessThanOrEqual(78);
+    expect(after.conflicts(label("instance-value", "lm"))).toEqual([]);
+    expect(after.conflicts(label("instance-reference", "lm"))).toEqual([]);
+    expect(gap(value, ink("instance-reference", "x1"))).toBeGreaterThan(
+      gap(value, name) + 5,
+    );
+  });
+  it("keeps a part's name from standing just before another part's value (#1347)", () => {
+    // RB shows its name only. RA's value was put by hand just under RB's
+    // name slot, so "RB" over "10k" would read as one part's labels.
+    const doc = createEmptyDocument("d", "Name before value");
+    const style = resolveDocumentStyleProfile(doc.presentation);
+    const place = (id: string, x: number, showValue: boolean) => {
+      const instance = {
+        id,
+        reference: id.toUpperCase(),
+        symbolId: "resistor",
+        placement: {
+          position: { x, y: 100 },
+          rotation: 0 as const,
+          mirror: "none" as const,
+        },
+        netlist: { parameters: { value: "10k" } },
+      };
+      doc.instances.push(instance);
+      doc.annotations.push(
+        ...defaultInstanceDisplayAnnotations(doc, instance, resolver, style, {
+          showValue,
+        }).filter(
+          (label) =>
+            showValue === false || label.binding?.kind === "instance-value",
+        ),
+      );
+    };
+    place("rb", 100, false);
+    place("ra", 400, true);
+    const name = doc.annotations.find(
+      (a) => a.binding?.kind === "instance-reference",
+    )!;
+    const valueIndex = doc.annotations.findIndex(
+      (a) => a.binding?.kind === "instance-value",
+    );
+    const before = createLabelClearanceContext(doc, resolver);
+    const nameInk = before.measure(name).inkBounds;
+    // RA's value, three units under RB's name and lined up with it.
+    const value = doc.annotations[valueIndex]!;
+    const valueInk = before.measure(value).inkBounds;
+    const valuePosition = before.measure(value).position;
+    doc.annotations[valueIndex] = {
+      ...value,
+      alignment: "start",
+      anchor: {
+        kind: "free",
+        position: {
+          x: nameInk.x,
+          y: valuePosition.y + nameInk.y + nameInk.height + 3 - valueInk.y,
+        },
+      },
+    };
+    const gap = (a: Rect, b: Rect) =>
+      Math.hypot(
+        Math.max(0, a.x - b.x - b.width, b.x - a.x - a.width),
+        Math.max(0, a.y - b.y - b.height, b.y - a.y - a.height),
+      );
+
+    // Nothing else is in the name's way: only the reading order moves it.
+    expect(createLabelClearanceContext(doc, resolver).conflicts(name)).toEqual(
+      [],
+    );
+
+    apply(doc, arrangeInstanceLabels(doc, resolver, ["rb"], {}));
+
+    const after = createLabelClearanceContext(doc, resolver);
+    const moved = after.measure(
+      doc.annotations.find((a) => a.id === name.id)!,
+    ).inkBounds;
+    const own = after.symbols.find((symbol) => symbol.id === "rb")!.bounds;
+    expect(
+      gap(moved, after.measure(doc.annotations[valueIndex]!).inkBounds),
+    ).toBeGreaterThan(gap(moved, own) + 5);
+  });
+  it("moves a name off a junction dot beside it", () => {
+    // A Schmitt trigger's M2 kept its name 0.2 units from the dot on its
+    // gate, where the input trunk met it.
+    const { doc, instance } = fixture();
+    const reference = doc.annotations.find(
+      (a) => a.binding?.kind === "instance-reference",
+    )!;
+    const ink = createLabelClearanceContext(doc, resolver).measure(
+      reference,
+    ).inkBounds;
+    const radius = resolveDocumentStyleProfile(doc.presentation).nodes
+      .junctionRadius;
+    // A T whose dot touches the name's right end; its wires run away from it.
+    const dot = {
+      x: Math.ceil(ink.x + ink.width + radius),
+      y: Math.round(ink.y + ink.height / 2),
+    };
+    doc.nets.push({ id: "t", terminals: [] });
+    doc.junctions.push({ id: "t-dot", netId: "t", position: dot });
+    for (const [end, dx, dy] of [
+      ["right", 60, 0],
+      ["up", 0, -60],
+      ["down", 0, 60],
+    ] as const) {
+      doc.junctions.push({
+        id: `t-${end}`,
+        netId: "t",
+        position: { x: dot.x + dx, y: dot.y + dy },
+      });
+      doc.routes.push(
+        createRoutePath({
+          id: `t-${end}-wire`,
+          netId: "t",
+          start: { kind: "junction", junctionId: "t-dot" },
+          end: { kind: "junction", junctionId: `t-${end}` },
+          bends: [],
+          modes: ["manual"],
+        }),
+      );
+    }
+    const before = createLabelClearanceContext(doc, resolver);
+    expect(before.conflicts(reference)).toEqual([]);
+    expect(before.dotsAt(before.measure(reference).inkBounds)).not.toEqual([]);
+
+    apply(doc, arrangeInstanceLabels(doc, resolver, [instance.id], {}));
+
+    const after = createLabelClearanceContext(doc, resolver);
+    const moved = doc.annotations.find((a) => a.id === reference.id)!;
+    expect(after.conflicts(moved)).toEqual([]);
+    expect(after.dotsAt(after.measure(moved).inkBounds)).toEqual([]);
+  });
+
+  /**
+   * A MOS showing its W/L, with m = 4 and its ×4 shown (so hidden by the
+   * W/L), and unless unwired a wire through its labels' default rows that
+   * sends them to another side when arranged. Turned 270°, its labels stand
+   * above it.
+   */
+  function hiddenMultiplier({
+    wired = true,
+    rotation = 0,
+  }: { wired?: boolean; rotation?: 0 | 270 } = {}) {
+    const { doc } = fixture();
+    doc.instances = [];
+    doc.annotations = [];
+    const mos = transistor(
+      doc,
+      "m1",
+      "nmos",
+      { x: 100, y: 100 },
+      "none",
+      rotation,
+    );
+    Object.assign(mos.netlist.parameters, { m: "4" });
+    for (const edit of instanceParameterVisibilityEdits(doc, mos, resolver, {
+      m: true,
+    }))
+      if (edit.kind === "upsert_schematic_annotation")
+        doc.annotations.push(edit.annotation);
+    const label = (kind: "name" | "value" | "times") =>
+      doc.annotations.find((annotation) => {
+        const binding = annotation.binding;
+        return kind === "name"
+          ? binding?.kind === "instance-reference"
+          : binding?.kind === "instance-value" &&
+              (binding.parameter === "m") === (kind === "times");
+      })!;
+    /** Where a label stands now. */
+    const at = (kind: "name" | "value" | "times") =>
+      createLabelClearanceContext(doc, resolver).measure(label(kind));
+    const name = at("name");
+    // Junctions stand on the document's grid.
+    const snap = (value: number) =>
+      Math.round(value / doc.presentation.grid) * doc.presentation.grid;
+    const x = snap(name.inkBounds.x + 4);
+    if (wired)
+      wire(
+        doc,
+        "w",
+        { x, y: snap(name.position.y - 60) },
+        { x, y: snap(name.position.y + 60) },
+      );
+    const arranged = (
+      options: Parameters<typeof arrangeInstanceLabels>[3] = {},
+    ) => arrangeInstanceLabels(doc, resolver, [mos.id], options);
+    const touches = (
+      edits: ReturnType<typeof arrangeInstanceLabels>,
+      id: string,
+    ) =>
+      edits.some(
+        (edit) =>
+          edit.kind === "upsert_schematic_annotation" &&
+          edit.annotation.id === id,
+      );
+    const profile = resolveDocumentStyleProfile(doc.presentation);
+    const row = instanceLabelRowOffset(profile, doc.presentation.grid);
+    /** A text row under the name as it stands now. */
+    const underName = () => {
+      const { position, alignment } = at("name");
+      return { position: { x: position.x, y: position.y + row }, alignment };
+    };
+    return {
+      doc,
+      name,
+      label,
+      at,
+      arranged,
+      touches,
+      underName,
+      valueRow: instanceValueRowOffset("nmos", profile, doc.presentation.grid),
+      row,
+    };
+  }
+
+  /** Moves a label off its slot, as a hand drag or an earlier rule did. */
+  function nudge(annotation: Annotation, dy: number, dx = 0) {
+    if (annotation.anchor.kind === "object")
+      annotation.anchor = {
+        ...annotation.anchor,
+        localOffset: {
+          x: annotation.anchor.localOffset.x + dx,
+          y: annotation.anchor.localOffset.y + dy,
+        },
+      };
+  }
+
+  it("arranges a ×m shown for its hidden W/L a text row under the name (#1434)", () => {
+    // Clear of everything, it stays where it is placed, not in the taller
+    // row a W/L fraction takes.
+    const clear = hiddenMultiplier({ wired: false });
+    clear.label("value").visible = false;
+    expect(clear.touches(clear.arranged(), clear.label("times").id)).toBe(
+      false,
+    );
+    // Sent to another side, it keeps that row there.
+    const { doc, name, label, at, arranged, underName } = hiddenMultiplier();
+    label("value").visible = false;
+    apply(doc, arranged());
+    expect(at("name").position).not.toEqual(name.position);
+    expect(at("times")).toMatchObject(underName());
+  });
+
+  it("takes a ×m hidden behind its W/L along with the part's name (#1434)", () => {
+    // From its own slot, and from the W/L's row under the name, where an
+    // arrangement before #1434 put a ×m shown as the value.
+    for (const placed of ["slot", "value row"] as const) {
+      const { doc, name, label, at, arranged, underName, valueRow, row } =
+        hiddenMultiplier();
+      if (placed === "value row") nudge(label("times"), valueRow - row);
+      apply(doc, arranged());
+      expect(at("name").position).not.toEqual(name.position);
+      // With the W/L hidden, ×4 shows a text row under the moved name.
+      label("value").visible = false;
+      expect(at("times")).toMatchObject(underName());
+    }
+  });
+
+  it("takes a hidden ×m to the W/L's place when no name is drawn (#1434)", () => {
+    const { doc, label, at, arranged } = hiddenMultiplier();
+    label("name").visible = false;
+    const before = at("value").position;
+    apply(doc, arranged());
+    const value = at("value");
+    expect(value.position).not.toEqual(before);
+    expect(at("times")).toMatchObject({
+      position: value.position,
+      alignment: value.alignment,
+    });
+  });
+
+  it("takes a switched-off ×m along with a name arranged alone, but not above the part (#1434)", () => {
+    // With its W/L hidden and its ×m switched off, the name moves alone.
+    const beside = hiddenMultiplier();
+    beside.label("value").visible = false;
+    beside.label("times").visible = false;
+    apply(beside.doc, beside.arranged());
+    expect(beside.at("name").position).not.toEqual(beside.name.position);
+    expect(beside.at("times")).toMatchObject(beside.underName());
+
+    // Wires beside and below the part send it above, into the row next to
+    // the part, where the row under it is the part's own.
+    const above = hiddenMultiplier({ wired: false });
+    above.label("value").visible = false;
+    above.label("times").visible = false;
+    const part = createLabelClearanceContext(above.doc, resolver).symbols.find(
+      (symbol) => symbol.id === "m1",
+    )!.bounds;
+    wire(above.doc, "right", { x: 120, y: 80 }, { x: 120, y: 120 });
+    wire(above.doc, "left", { x: 70, y: 80 }, { x: 70, y: 120 });
+    wire(above.doc, "below", { x: 80, y: 130 }, { x: 110, y: 130 });
+    const edits = above.arranged();
+    apply(above.doc, edits);
+    const name = above.at("name").inkBounds;
+    expect(name.y + name.height).toBeLessThanOrEqual(part.y);
+    expect(above.touches(edits, above.label("times").id)).toBe(false);
+  });
+
+  it("keeps the rows a ×m and its name are placed in above a turned MOS (#1434)", () => {
+    // Shown for its hidden W/L, the ×m stands nearest the part and its name
+    // a W/L's row over it, as placed: clear of everything, both stay.
+    const shown = hiddenMultiplier({ wired: false, rotation: 270 });
+    shown.label("value").visible = false;
+    const edits = shown.arranged();
+    expect(shown.touches(edits, shown.label("name").id)).toBe(false);
+    expect(shown.touches(edits, shown.label("times").id)).toBe(false);
+    // A name only restyled stays where it stood, and so does its hidden ×m.
+    const restyled = hiddenMultiplier({ wired: false, rotation: 270 });
+    delete restyled.label("name").formatOverride;
+    const restyle = restyled.arranged({
+      referenceStyle: "first-letter-subscript",
+    });
+    expect(restyled.touches(restyle, restyled.label("name").id)).toBe(true);
+    expect(restyled.touches(restyle, restyled.label("times").id)).toBe(false);
+  });
+
+  it("takes a hidden ×m to the W/L's place when the labels go above the part (#1434)", () => {
+    const { doc, at, arranged } = hiddenMultiplier({ wired: false });
+    const part = createLabelClearanceContext(doc, resolver).symbols.find(
+      (symbol) => symbol.id === "m1",
+    )!.bounds;
+    wire(doc, "right", { x: 120, y: 80 }, { x: 120, y: 120 });
+    wire(doc, "left", { x: 70, y: 80 }, { x: 70, y: 120 });
+    wire(doc, "below", { x: 80, y: 130 }, { x: 110, y: 130 });
+    apply(doc, arranged());
+    const value = at("value");
+    expect(value.inkBounds.y + value.inkBounds.height).toBeLessThanOrEqual(
+      part.y,
+    );
+    expect(at("times")).toMatchObject({
+      position: value.position,
+      alignment: value.alignment,
+    });
+  });
+
+  it("keeps a hidden ×m a text row under a name slid up beside the part (#1434)", () => {
+    const { doc, label, at, arranged, underName } = hiddenMultiplier({
+      wired: false,
+    });
+    const part = createLabelClearanceContext(doc, resolver).symbols.find(
+      (symbol) => symbol.id === "m1",
+    )!.bounds;
+    wire(doc, "right", { x: 120, y: 100 }, { x: 120, y: 160 });
+    wire(doc, "left", { x: 70, y: 80 }, { x: 70, y: 120 });
+    wire(doc, "over", { x: 80, y: 60 }, { x: 110, y: 60 });
+    wire(doc, "below", { x: 80, y: 130 }, { x: 110, y: 130 });
+    apply(doc, arranged());
+    const name = at("name");
+    expect(name.alignment).toBe("start");
+    expect(name.inkBounds.y + name.inkBounds.height).toBeLessThanOrEqual(
+      part.y,
+    );
+    label("value").visible = false;
+    expect(at("times")).toMatchObject(underName());
+  });
+
+  it("leaves a locked, turned, restyled or hand-placed hidden ×m where it is (#1434)", () => {
+    for (const hold of [
+      (times: Annotation) => (times.locked = true),
+      (times: Annotation) => (times.rotation = 90),
+      (times: Annotation) =>
+        (times.formatOverride = canonicalPortTextDocument("M4")),
+      (times: Annotation) => nudge(times, 40, 40),
+    ]) {
+      const { doc, label, arranged, touches } = hiddenMultiplier();
+      hold(label("times"));
+      const edits = arranged();
+      expect(touches(edits, label("name").id)).toBe(true);
+      expect(touches(edits, label("times").id)).toBe(false);
+      if (!label("times").locked) continue;
+      // The engine refuses any edit of a locked label: the arrangement holds.
+      expect(
+        executeTransaction(
+          doc,
+          {
+            transactionId: "arrange",
+            documentId: doc.id,
+            expectedRevision: doc.revision,
+            actor: { kind: "human", id: "test" },
+            dryRun: false,
+            edits,
+          },
+          { symbolResolver: resolver },
+        ).ok,
+      ).toBe(true);
+    }
+    // includeManual takes one moved by hand along too.
+    const manual = hiddenMultiplier();
+    nudge(manual.label("times"), 40, 40);
+    apply(manual.doc, manual.arranged({ includeManual: true }));
+    expect(manual.at("times")).toMatchObject(manual.underName());
+  });
+});

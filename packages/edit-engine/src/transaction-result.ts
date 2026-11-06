@@ -1,0 +1,154 @@
+import { isFrozenSnapshot } from "@icm/model";
+import type {
+  ExternalSubcircuitDefinition,
+  SchematicDocument,
+} from "@icm/model";
+import type { DocumentContactEvidence } from "@icm/derived";
+import type { SymbolResolver } from "@icm/symbols";
+
+import type { SchematicEdit } from "./edit-schema.js";
+import type { PreparedTransaction } from "./prepared-transaction.js";
+
+/** Public outcome protocol for one atomic transaction execution. */
+export type EditErrorCode =
+  | "INVALID_TRANSACTION"
+  | "DOCUMENT_MISMATCH"
+  | "STALE_REVISION"
+  | "OBJECT_NOT_FOUND"
+  | "EDIT_PRECONDITION"
+  | "EDIT_CONTEXT_REQUIRED"
+  | "HISTORY_CONTEXT_REQUIRED"
+  | "HISTORY_EMPTY"
+  | "INVALID_RESULT"
+  /** An unexpected runtime exception inside the engine or the editor's
+   * transaction fence; the Project and revision are unchanged. */
+  | "INTERNAL_ERROR";
+
+export interface EditDiagnostic {
+  code: string;
+  severity: "error" | "warning" | "info";
+  message: string;
+  objectIds?: readonly string[];
+  path?: ReadonlyArray<string | number>;
+  parameters?: Readonly<Record<string, string | number | boolean | null>>;
+}
+
+export interface EditDiff {
+  documentId: string;
+  fromRevision: number;
+  toRevision: number;
+  editKinds: readonly SchematicEdit["kind"][];
+  changedObjectIds: readonly string[];
+}
+
+export interface AppliedTransaction {
+  ok: true;
+  applied: boolean;
+  revision: number;
+  proposedRevision: number;
+  document: SchematicDocument;
+  diff: EditDiff;
+  diagnostics: readonly EditDiagnostic[];
+  /**
+   * Junction endpoints the conductor-topology normalizer folded away in this
+   * transaction, mapped to the Base Net whose conductor absorbed them.
+   * Effect validation treats these as surviving connectivity, not as loss.
+   */
+  coalescedEndpoints?: ReadonlyMap<string, string>;
+}
+
+export interface RejectedTransaction {
+  ok: false;
+  applied: false;
+  revision: number;
+  document: SchematicDocument;
+  error: {
+    code: EditErrorCode;
+    message: string;
+  };
+  diagnostics: readonly EditDiagnostic[];
+}
+
+export type EditTransactionResult = AppliedTransaction | RejectedTransaction;
+
+/**
+ * A Document's already-derived contact evidence, offered by a caller that holds
+ * it for the revision being edited.
+ *
+ * The engine uses it only when the Document is the very object it is about to
+ * transform, compared by identity. `DocumentContactEvidence` carries no
+ * document id or revision of its own, so identity is the only guard available
+ * here; a hint for any other Document is ignored, and the engine derives what
+ * it needs rather than answering from the wrong revision.
+ */
+export interface ContactEvidenceHint {
+  document: SchematicDocument;
+  evidence: DocumentContactEvidence;
+}
+
+export interface EditExecutionContext {
+  /** Internal calculation hints. Unregistered or changed inputs execute normally. */
+  preparedTransactions?: readonly PreparedTransaction[];
+  symbolResolver?: SymbolResolver;
+  /**
+   * Optional. The editor already derives this for the committed Document when
+   * it builds its connectivity index, and contact reconciliation would
+   * otherwise derive it a second time for the same revision.
+   */
+  beforeContactEvidence?: ContactEvidenceHint;
+  /**
+   * Instances whose pins moved without an edit of their own in this
+   * transaction, as a caller's do when its Cell symbol changes. Like a moved
+   * part's, their pins gain no connection by landing on a wire (#1316).
+   */
+  pinsMovedInstanceIds?: ReadonlySet<string>;
+  /**
+   * The Project's external definitions, so a part bound to a device its
+   * library models only at a few sizes keeps one of them (#1485). Without
+   * them no part is fitted.
+   */
+  externalSubcircuitDefinitions?: readonly ExternalSubcircuitDefinition[];
+}
+
+export function rejectTransaction(
+  document: SchematicDocument,
+  code: EditErrorCode,
+  message: string,
+  diagnostics: readonly EditDiagnostic[] = [],
+  path?: ReadonlyArray<string | number>,
+  objectIds?: readonly string[],
+): RejectedTransaction {
+  const finalDiagnostics =
+    path === undefined && objectIds === undefined
+      ? diagnostics
+      : diagnostics.map((diagnostic) => {
+          const next: EditDiagnostic = { ...diagnostic };
+          if (path !== undefined) {
+            next.path = diagnostic.path ? [...path, ...diagnostic.path] : path;
+          }
+          if (objectIds !== undefined && diagnostic.objectIds === undefined) {
+            next.objectIds = objectIds;
+          }
+          return next;
+        });
+  const synthesized =
+    finalDiagnostics.length > 0
+      ? finalDiagnostics
+      : [
+          {
+            code,
+            severity: "error" as const,
+            message,
+            ...(path === undefined ? {} : { path }),
+            ...(objectIds === undefined ? {} : { objectIds }),
+          },
+        ];
+  return {
+    ok: false,
+    applied: false,
+    revision: document.revision,
+    document: isFrozenSnapshot(document) ? structuredClone(document) : document,
+    error: { code, message },
+    diagnostics: synthesized,
+  };
+}

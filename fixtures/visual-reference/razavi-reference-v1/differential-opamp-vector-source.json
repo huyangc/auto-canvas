@@ -1,0 +1,303 @@
+{
+  "schemaVersion": 1,
+  "id": "razavi-textbook-figure-13-48-differential-opamp",
+  "kind": "pdf-vector-extract",
+  "source": {
+    "title": "Design of Analog CMOS Integrated Circuits, Second Edition",
+    "sha256": "a6031d1149c2c6191a1f0e541065165b72dafc4bc4ab4b0ea37af41b7cb0f739",
+    "pdfPage": 583,
+    "printedPage": 564,
+    "figure": "13.48"
+  },
+  "selection": {
+    "triangleDuplicateCount": 2,
+    "trianglePathPdf": [
+      ["m", [269.294, 486.76720000000006]],
+      ["l", [269.294, 452.35920000000004]],
+      ["l", [309.437, 469.5642]],
+      ["l", [269.294, 486.76720000000006]]
+    ],
+    "triangleLineWidthPdfPt": 1.434,
+    "normalLineWidthPdfPt": 0.717,
+    "lineFingerprintsPdf": {
+      "input-plus": [
+        {
+          "x": 255.63,
+          "y": 458.0942
+        },
+        {
+          "x": 269.249,
+          "y": 458.0942
+        }
+      ],
+      "input-minus": [
+        {
+          "x": 255.63,
+          "y": 481.0332
+        },
+        {
+          "x": 269.249,
+          "y": 481.0332
+        }
+      ],
+      "output-minus": [
+        {
+          "x": 283.048,
+          "y": 458.0942
+        },
+        {
+          "x": 307.421,
+          "y": 458.0942
+        }
+      ],
+      "output-plus": [
+        {
+          "x": 282.735,
+          "y": 481.0332
+        },
+        {
+          "x": 307.107,
+          "y": 481.0332
+        }
+      ],
+      "input-plus-vertical": [
+        {
+          "x": 273.596,
+          "y": 458.8112
+        },
+        {
+          "x": 273.596,
+          "y": 463.1122
+        }
+      ],
+      "input-plus-horizontal": [
+        {
+          "x": 271.445,
+          "y": 460.9612
+        },
+        {
+          "x": 275.746,
+          "y": 460.9612
+        }
+      ],
+      "input-minus-horizontal": [
+        {
+          "x": 271.445,
+          "y": 478.1642
+        },
+        {
+          "x": 275.746,
+          "y": 478.1642
+        }
+      ],
+      "output-minus-horizontal": [
+        {
+          "x": 277.897,
+          "y": 460.9612
+        },
+        {
+          "x": 282.197,
+          "y": 460.9612
+        }
+      ],
+      "output-plus-vertical": [
+        {
+          "x": 280.047,
+          "y": 476.0152
+        },
+        {
+          "x": 280.047,
+          "y": 480.3162
+        }
+      ],
+      "output-plus-horizontal": [
+        {
+          "x": 277.897,
+          "y": 478.1642
+        },
+        {
+          "x": 282.197,
+          "y": 478.1642
+        }
+      ]
+    }
+  },
+  "normalization": {
+    "originPdf": {
+      "x": 292.233,
+      "y": 469.5637
+    },
+    "logicalUnitsPerPdfPoint": 0.871878,
+    "pinAnchorsLogical": [
+      {
+        "name": "IN+",
+        "x": -50,
+        "y": 10
+      },
+      {
+        "name": "IN-",
+        "x": -50,
+        "y": -10
+      },
+      {
+        "name": "OUT+",
+        "x": 40,
+        "y": 10
+      },
+      {
+        "name": "OUT-",
+        "x": 40,
+        "y": -10
+      }
+    ],
+    "derivation": {
+      "kind": "semantic-pin-extension",
+      "reason": "Preserve the existing FD Amp's four pin anchors; only the body artwork is replaced by Figure 13.48."
+    },
+    "strokeMapping": {
+      "normal": {
+        "sourcePdfPt": 0.717,
+        "targetRole": "normal"
+      },
+      "triangle": {
+        "sourcePdfPt": 1.434,
+        "targetRole": "emphasis"
+      }
+    },
+    "symbolGeometry": {
+      "trianglePathData": "M -20 -15.0002 L -20 14.9993 L 14.9998 0.000436 Z",
+      "input_plus": {
+        "from": {
+          "x": -31.913335,
+          "y": -10.0
+        },
+        "to": {
+          "x": -20.039234,
+          "y": -10.0
+        }
+      },
+      "input_minus": {
+        "from": {
+          "x": -31.913335,
+          "y": 10.0
+        },
+        "to": {
+          "x": -20.039234,
+          "y": 10.0
+        }
+      },
+      "output_plus": {
+        "from": {
+          "x": -8.281093,
+          "y": 10.0
+        },
+        "to": {
+          "x": 12.968307,
+          "y": 10.0
+        }
+      },
+      "output_minus": {
+        "from": {
+          "x": -8.008196,
+          "y": -10.0
+        },
+        "to": {
+          "x": 13.242077,
+          "y": -10.0
+        }
+      },
+      "input_plus_vertical": {
+        "from": {
+          "x": -16.249183,
+          "y": -9.374864
+        },
+        "to": {
+          "x": -16.249183,
+          "y": -5.624918
+        }
+      },
+      "input_plus_horizontal": {
+        "from": {
+          "x": -18.124591,
+          "y": -7.500327
+        },
+        "to": {
+          "x": -14.374646,
+          "y": -7.500327
+        }
+      },
+      "input_minus_horizontal": {
+        "from": {
+          "x": -18.124591,
+          "y": 7.498583
+        },
+        "to": {
+          "x": -14.374646,
+          "y": 7.498583
+        }
+      },
+      "output_minus_horizontal": {
+        "from": {
+          "x": -12.499237,
+          "y": -7.500327
+        },
+        "to": {
+          "x": -8.750163,
+          "y": -7.500327
+        }
+      },
+      "output_plus_vertical": {
+        "from": {
+          "x": -10.6247,
+          "y": 5.624918
+        },
+        "to": {
+          "x": -10.6247,
+          "y": 9.374864
+        }
+      },
+      "output_plus_horizontal": {
+        "from": {
+          "x": -12.499237,
+          "y": 7.498583
+        },
+        "to": {
+          "x": -8.750163,
+          "y": 7.498583
+        }
+      }
+    }
+  },
+  "rasterWitness": {
+    "kind": "source-pdf-crop",
+    "sourcePdfPage": 583,
+    "dpi": 300.0,
+    "selectionBoundsPdf": {
+      "left": 268.544,
+      "top": 451.6092,
+      "right": 294.0,
+      "bottom": 487.5172
+    },
+    "pixels": {
+      "width": 107,
+      "height": 150
+    },
+    "pixelsPerPdfPoint": {
+      "x": 4.167616341344726,
+      "y": 4.168054397762668
+    },
+    "cropBoxPx": {
+      "left": 977,
+      "top": 2024,
+      "right": 1084,
+      "bottom": 2174
+    },
+    "assetPath": "differential-opamp-reference.png",
+    "originPx": {
+      "x": 98.726664,
+      "y": 74.835333
+    },
+    "pixelsPerLogical": 4.780299,
+    "threshold": 160
+  }
+}

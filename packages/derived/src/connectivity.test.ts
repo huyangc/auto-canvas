@@ -1,0 +1,164 @@
+/**
+ * Wire-transform audit batch 4, #17: the shared per-document connectivity
+ * context must be observationally identical to the per-net derivation —
+ * it exists purely to stop an all-nets sweep from re-deriving full-document
+ * contact evidence and routing geometry once per net.
+ */
+
+import { createEmptyDocument, createRoutePath } from "@icm/model";
+import { InMemorySymbolResolver, builtInSymbols } from "@icm/symbols";
+import { describe, expect, it } from "vitest";
+
+import {
+  deriveNetConnectivity,
+  deriveNetConnectivityContext,
+  deriveImportedRoutingGuidance,
+} from "./connectivity.js";
+
+const resolver = new InMemorySymbolResolver(builtInSymbols);
+
+describe("shared connectivity context (#17)", () => {
+  it("does not guide an imported default body terminal but still guides an independent body bias", () => {
+    const document = createEmptyDocument("main", "Main");
+    document.instances.push({
+      id: "M1",
+      symbolId: "nmos",
+      symbolVariantId: "textbook-3terminal",
+      placement: { position: { x: 100, y: 100 }, rotation: 0, mirror: "none" },
+    });
+    document.nets.push(
+      { id: "vss", terminals: [{ instanceId: "M1", pinName: "B" }] },
+      { id: "tail", terminals: [{ instanceId: "M1", pinName: "S" }] },
+    );
+    // A source reference describes device/Port terminals, not subsequently
+    // drawn dangling junctions. Preserve the body-visibility contract with a
+    // real second original terminal.
+    document.instances.push({
+      id: "BIAS",
+      symbolId: "port",
+      placement: { position: { x: 200, y: 200 }, rotation: 0, mirror: "none" },
+    });
+    document.nets[0]!.terminals.push({ instanceId: "BIAS", pinName: "P" });
+    document.importReference = {
+      files: [],
+      nets: [
+        {
+          id: "source-vss",
+          name: "VSS",
+          scope: "local",
+          terminals: structuredClone(document.nets[0]!.terminals),
+        },
+      ],
+    };
+    document.junctions.push({
+      id: "J1",
+      netId: "vss",
+      position: { x: 200, y: 200 },
+    });
+    document.connectivityEvidence.push({
+      id: "source",
+      kind: "spice-source",
+      netId: "vss",
+      sourceNetId: "source-vss",
+    });
+    document.mosBulkDefaults = { nmosNetId: "vss" };
+    const before = JSON.stringify(document);
+    expect(deriveImportedRoutingGuidance(document, resolver)).toHaveLength(0);
+    expect(JSON.stringify(document)).toBe(before);
+    document.mosBulkDefaults = undefined;
+    document.netlist = {
+      name: "main",
+      formalParameters: [],
+      terminals: [
+        {
+          id: "vss-port",
+          name: "VSS",
+          netId: "vss",
+          direction: "passive",
+          interfaceInstanceIds: ["BIAS"],
+        },
+      ],
+    };
+    document.revision += 1;
+    expect(deriveImportedRoutingGuidance(document, resolver)).toHaveLength(0);
+    document.netlist = undefined;
+    document.instances.push({ id: "GND", symbolId: "ground", placement: null });
+    document.nets[0]!.terminals.push({ instanceId: "GND", pinName: "0" });
+    document.revision += 1;
+    expect(deriveImportedRoutingGuidance(document, resolver)).toHaveLength(0);
+    document.mosBulkDefaults = { nmosNetId: "tail" };
+    document.revision += 1;
+    expect(deriveImportedRoutingGuidance(document, resolver)).toHaveLength(1);
+  });
+  it("pre-resolves and orders net-label bindings without changing connectivity", () => {
+    const document = createEmptyDocument("main", "Main");
+    document.nets.push({ id: "net-bias", terminals: [] });
+    document.junctions.push(
+      { id: "J1", netId: "net-bias", position: { x: 0, y: 0 } },
+      { id: "J2", netId: "net-bias", position: { x: 40, y: 0 } },
+      { id: "J3", netId: "net-bias", position: { x: 100, y: 0 } },
+      { id: "J4", netId: "net-bias", position: { x: 140, y: 0 } },
+    );
+    const routes = [
+      createRoutePath({
+        id: "route-a",
+        netId: "net-bias",
+        start: { kind: "junction", junctionId: "J1" },
+        end: { kind: "junction", junctionId: "J2" },
+        bends: [],
+        modes: ["manual"],
+      }),
+      createRoutePath({
+        id: "route-b",
+        netId: "net-bias",
+        start: { kind: "junction", junctionId: "J3" },
+        end: { kind: "junction", junctionId: "J4" },
+        bends: [],
+        modes: ["manual"],
+      }),
+    ];
+    document.routes.push(...routes);
+    for (const [id, route] of [
+      ["label-z", routes[0]!],
+      ["label-a", routes[1]!],
+    ] as const) {
+      document.annotations.push({
+        id,
+        kind: "net-label",
+        binding: { kind: "net-name", netId: "net-bias" },
+        netId: "net-bias",
+        anchor: {
+          kind: "route",
+          routeId: route.id,
+          legId: route.legs[0]!.id,
+          t: 0.5,
+          normalOffset: 10,
+          direction: "forward",
+          orientation: "horizontal",
+          fallbackPosition: { x: 20, y: -10 },
+        },
+        alignment: "middle",
+        rotation: 0,
+        locked: false,
+      });
+      document.connectivityEvidence.push({
+        id: `claim-${id}`,
+        kind: "name-claim",
+        netId: "net-bias",
+        name: "BIAS",
+        owner: { kind: "net-label", annotationId: id },
+        scope: "local",
+      });
+    }
+
+    const context = deriveNetConnectivityContext(document, resolver);
+    expect(
+      context.netLabelBindingsByNetId
+        .get("net-bias")
+        ?.map((binding) => binding.annotationId),
+    ).toEqual(["label-a", "label-z"]);
+    expect(
+      deriveNetConnectivity(document, resolver, document.nets[0]!, context),
+    ).toEqual(deriveNetConnectivity(document, resolver, document.nets[0]!));
+  });
+});

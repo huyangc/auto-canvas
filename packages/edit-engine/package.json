@@ -1,0 +1,30 @@
+{
+  "name": "@icm/edit-engine",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "development": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./component-drafts": {
+      "development": "./src/component-draft-management.ts",
+      "types": "./dist/component-draft-management.d.ts",
+      "default": "./dist/component-draft-management.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@icm/devices": "workspace:*",
+    "@icm/derived": "workspace:*",
+    "@icm/model": "workspace:*",
+    "@icm/netlist": "workspace:*",
+    "@icm/project-protocol": "workspace:*",
+    "@icm/symbols": "workspace:*",
+    "zod": "4.4.3"
+  }
+}

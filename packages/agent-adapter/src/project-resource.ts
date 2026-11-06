@@ -1,0 +1,479 @@
+import {
+  AgentComponentLibraryActionSchema,
+  AgentComponentLibraryResultSchema,
+} from "./component-resource.js";
+import { z } from "zod";
+
+import { lazyJsonSchema } from "./lazy-json-schema.js";
+
+import { AGENT_API_VERSION } from "./schema.js";
+
+const StableIdSchema = z.string().min(1).max(256);
+const ProjectRequestBaseSchema = z.strictObject({
+  apiVersion: z.literal(AGENT_API_VERSION),
+  requestId: StableIdSchema,
+});
+// Matches the Gallery's 2 MiB byte ceiling while allowing its complete UTF-8
+// Project Code to cross this character-counted schema boundary.
+const ProjectTextSchema = z.string().max(2_200_000);
+const NetlistFormatSchema = z.enum(["spice", "spectre"]);
+const NetlistNamingProfileSchema = z.enum(["native", "cadence-bang"]);
+const NetlistPortCaseSchema = z.enum(["lower", "upper"]);
+const ProjectNameSchema = z.string().min(1).max(256);
+const GalleryEntryStatusSchema = z.enum(["public", "rejected", "recycled"]);
+/**
+ * A Gallery entry's fields an Agent may set, at the Gallery's own limits
+ * (worker/gallery-store.ts), which checks them again; the MCP tool takes the
+ * same. No AI mark: what an Agent publishes or updates is marked AI, and
+ * only its author changes that, in the Editor (#1415).
+ */
+export const AgentGalleryEntryFields = z.strictObject({
+  name: z.string().trim().min(1).max(120).optional(),
+  description: z.string().max(1000).optional(),
+  tags: z.array(z.string().min(1).max(32)).max(12).optional(),
+}).shape;
+const CopyPlacementResultSchema = z.strictObject({
+  structureRevision: z.number().int().nonnegative(),
+  revision: z.number().int().nonnegative(),
+  instanceIds: z.array(StableIdSchema),
+  importedDocumentIds: z.array(StableIdSchema),
+  importedFileIds: z.array(StableIdSchema),
+  mapping: z.strictObject({
+    objects: z.record(z.string(), z.record(z.string(), z.string())),
+    cells: z.record(z.string(), z.string()),
+    files: z.record(z.string(), z.string()),
+  }),
+});
+
+export const AgentWorkspaceActionSchema = z.discriminatedUnion("action", [
+  z.strictObject({ action: z.literal("list") }),
+  z.strictObject({
+    action: z.literal("activate"),
+    workspaceId: StableIdSchema,
+  }),
+  z.strictObject({
+    action: z.literal("open"),
+    cloudProjectId: StableIdSchema,
+    background: z.boolean().optional(),
+  }),
+  z.strictObject({ action: z.literal("save"), asNew: z.boolean().optional() }),
+  // A blank working copy, as the tab strip's + opens one.
+  z.strictObject({
+    action: z.literal("new"),
+    name: ProjectNameSchema.optional(),
+    background: z.boolean().optional(),
+  }),
+  // The Project's own name; Cells keep theirs. Defaults to the bound copy.
+  z.strictObject({
+    action: z.literal("rename"),
+    name: ProjectNameSchema,
+    workspaceId: StableIdSchema.optional(),
+  }),
+  z.strictObject({
+    action: z.literal("copy"),
+    sourceWorkspaceId: StableIdSchema,
+    sourceDocumentId: StableIdSchema,
+    sourceRevision: z.number().int().nonnegative(),
+    sourceStructureRevision: z.number().int().nonnegative(),
+    targetWorkspaceId: StableIdSchema,
+    targetDocumentId: StableIdSchema,
+    expectedStructureRevision: z.number().int().nonnegative(),
+    expectedRevision: z.number().int().nonnegative(),
+    offset: z.strictObject({ x: z.number().finite(), y: z.number().finite() }),
+    selection: z
+      .strictObject({
+        instanceIds: z.array(StableIdSchema),
+        draftingIds: z.array(StableIdSchema),
+        routeIds: z.array(StableIdSchema),
+        junctionIds: z.array(StableIdSchema),
+        annotationIds: z.array(StableIdSchema),
+      })
+      .optional(),
+  }),
+]);
+
+/**
+ * Cross-Project Cell reuse stays a sibling resource because its source is the
+ * signed-in user's Cloud Project shelf, not the live Circuit snapshot. The
+ * imported result is still committed through the ordinary Project transaction
+ * boundary and becomes an independent project-local Cell closure.
+ */
+export const AgentProjectResourceRequestSchema = z.discriminatedUnion(
+  "operation",
+  [
+    ProjectRequestBaseSchema.extend({
+      operation: z.literal("components"),
+      request: AgentComponentLibraryActionSchema,
+    }),
+    ProjectRequestBaseSchema.extend({
+      operation: z.literal("workspace"),
+      request: AgentWorkspaceActionSchema,
+    }),
+    ProjectRequestBaseSchema.extend({
+      operation: z.literal("list-projects"),
+    }),
+    ProjectRequestBaseSchema.extend({
+      operation: z.literal("list-cells"),
+      cloudProjectId: StableIdSchema,
+    }),
+    ProjectRequestBaseSchema.extend({
+      operation: z.literal("import-cell"),
+      cloudProjectId: StableIdSchema,
+      sourceDocumentId: StableIdSchema,
+      expectedStructureRevision: z.number().int().nonnegative(),
+    }),
+    ProjectRequestBaseSchema.extend({
+      operation: z.literal("insert-gallery-entry"),
+      galleryEntryId: StableIdSchema,
+      sourceDocumentId: StableIdSchema.optional(),
+      targetDocumentId: StableIdSchema,
+      expectedRevision: z.number().int().nonnegative(),
+      expectedStructureRevision: z.number().int().nonnegative(),
+      position: z.strictObject({
+        x: z.number().finite(),
+        y: z.number().finite(),
+      }),
+    }),
+    ProjectRequestBaseSchema.extend({
+      operation: z.literal("list-gallery"),
+      cursor: z.string().min(1).max(2_048).optional(),
+      limit: z.number().int().min(1).max(60).optional(),
+      // Signed in as an AI account: every AI account's entries, hidden ones
+      // included with their status and reason, `status` narrowing them
+      // (#1540). A person's entries are never listed there.
+      scope: z.literal("ai-seats").optional(),
+      status: GalleryEntryStatusSchema.optional(),
+    }),
+    ProjectRequestBaseSchema.extend({
+      operation: z.literal("read-gallery-entry"),
+      galleryEntryId: StableIdSchema,
+      netlistFormat: NetlistFormatSchema.nullable().optional(),
+      namingProfile: NetlistNamingProfileSchema.optional(),
+      portCase: NetlistPortCaseSchema.optional(),
+      // The top Cell's figure, drawn by the same exporter as a file export.
+      render: z.enum(["svg", "png"]).optional(),
+    }),
+    ProjectRequestBaseSchema.extend({
+      operation: z.literal("read-gallery-entries"),
+      galleryEntryIds: z.array(StableIdSchema).min(1).max(12),
+      netlistFormat: NetlistFormatSchema.nullable().optional(),
+      namingProfile: NetlistNamingProfileSchema.optional(),
+      portCase: NetlistPortCaseSchema.optional(),
+    }),
+    // The bound working copy, published as the signed-in Editor account, as
+    // the Editor's Publish to Gallery does it.
+    ProjectRequestBaseSchema.extend({
+      operation: z.literal("publish-gallery-entry"),
+      ...AgentGalleryEntryFields,
+    }),
+    // Defaults to the entry the working copy was published as or opened from;
+    // fields left out keep the entry's current ones.
+    ProjectRequestBaseSchema.extend({
+      operation: z.literal("update-gallery-entry"),
+      galleryEntryId: StableIdSchema.optional(),
+      ...AgentGalleryEntryFields,
+      // An AI account takes over another AI account's entry as this update
+      // lands (#1499); a person's entry is never taken over.
+      takeOver: z.boolean().optional(),
+    }),
+    ProjectRequestBaseSchema.extend({
+      operation: z.literal("read-project-code"),
+    }),
+    ProjectRequestBaseSchema.extend({
+      operation: z.literal("replace-project-code"),
+      projectCode: ProjectTextSchema,
+      expectedStructureRevision: z.number().int().nonnegative(),
+    }),
+    ProjectRequestBaseSchema.extend({
+      operation: z.literal("read-netlist"),
+      format: NetlistFormatSchema.optional(),
+      namingProfile: NetlistNamingProfileSchema.optional(),
+      portCase: NetlistPortCaseSchema.optional(),
+      /** Public Cell-scoped spelling; rootDocumentId remains wire-compatible. */
+      documentId: StableIdSchema.optional(),
+      rootDocumentId: StableIdSchema.optional(),
+    }),
+    ProjectRequestBaseSchema.extend({
+      operation: z.literal("replace-netlist"),
+      netlist: ProjectTextSchema,
+      expectedStructureRevision: z.number().int().nonnegative(),
+      format: NetlistFormatSchema.optional(),
+      namingProfile: NetlistNamingProfileSchema.optional(),
+      portCase: NetlistPortCaseSchema.optional(),
+      documentId: StableIdSchema.optional(),
+      rootDocumentId: StableIdSchema.optional(),
+    }),
+  ],
+);
+
+const AgentCloudProjectSummarySchema = z.strictObject({
+  id: StableIdSchema,
+  name: z.string().min(1).max(256),
+  revision: z.number().int().nonnegative(),
+  updatedAt: z.string().min(1),
+  schemaVersion: z.number().int().positive(),
+});
+
+const AgentReusableCellSummarySchema = z.strictObject({
+  documentId: StableIdSchema,
+  name: z.string().min(1).max(256),
+  netlistName: z.string().min(1).max(256).nullable(),
+  formalPorts: z.array(
+    z.strictObject({
+      name: z.string().min(1).max(128),
+      direction: z.enum(["input", "output", "inout", "passive"]),
+    }),
+  ),
+});
+
+export const AgentGalleryEntrySummarySchema = z.strictObject({
+  id: StableIdSchema,
+  name: z.string().min(1),
+  author: z.string(),
+  description: z.string(),
+  createdAt: z.string(),
+  schemaVersion: z.number().int().positive(),
+  tags: z.array(z.string()),
+  netlistable: z.boolean().optional(),
+  likes: z.number().int().nonnegative().optional(),
+  /** The entry's saved AI mark, read only (#1439). */
+  aiGenerated: z.boolean().optional(),
+  /** Listed with scope ai-seats only: where it stands, and why (#1540). */
+  status: GalleryEntryStatusSchema.optional(),
+  rejectReason: z.string().optional(),
+});
+
+const AgentNetlistDiagnosticSchema = z.strictObject({
+  severity: z.enum(["error", "warning", "info"]),
+  code: z.string().min(1),
+  message: z.string().min(1),
+  objectIds: z.array(StableIdSchema),
+});
+
+export const AgentNetlistReadSchema = z.strictObject({
+  documentId: StableIdSchema.optional(),
+  format: NetlistFormatSchema,
+  status: z.enum(["ready", "blocked"]),
+  text: z.string().nullable(),
+  diagnostics: z.array(AgentNetlistDiagnosticSchema),
+});
+
+/** One independently requested Cell export. */
+export const AgentNetlistCellReadSchema = z.strictObject({
+  documentId: StableIdSchema,
+  format: NetlistFormatSchema,
+  status: z.enum(["ready", "blocked"]),
+  text: z.string().nullable(),
+  diagnostics: z.array(AgentNetlistDiagnosticSchema),
+});
+export type AgentNetlistCellRead = z.infer<typeof AgentNetlistCellReadSchema>;
+
+/** A drawing as the formal exporter writes it, carried inline. */
+export const AgentGalleryFigureSchema = z.strictObject({
+  documentId: StableIdSchema,
+  mediaType: z.enum(["image/svg+xml", "image/png"]),
+  encoding: z.literal("base64"),
+  data: z.string().min(4),
+  byteLength: z.number().int().positive(),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/u),
+});
+export type AgentGalleryFigure = z.infer<typeof AgentGalleryFigureSchema>;
+
+export const AgentGalleryEntryReadSchema = z.strictObject({
+  entry: AgentGalleryEntrySummarySchema,
+  projectCode: ProjectTextSchema,
+  netlist: AgentNetlistReadSchema.nullable(),
+});
+
+const ProjectResponseBaseSchema = z.strictObject({
+  apiVersion: z.literal(AGENT_API_VERSION),
+  requestId: StableIdSchema,
+});
+
+export const AgentProjectResourceResponseSchema = z.union([
+  ProjectResponseBaseSchema.extend({
+    operation: z.literal("components"),
+    ok: z.literal(true),
+    result: AgentComponentLibraryResultSchema,
+  }),
+  ProjectResponseBaseSchema.extend({
+    operation: z.literal("workspace"),
+    ok: z.literal(true),
+    result: z.union([
+      z.strictObject({
+        action: z.literal("list"),
+        activeWorkspaceId: StableIdSchema,
+        projects: z.array(
+          z.strictObject({
+            workspaceId: StableIdSchema,
+            projectId: StableIdSchema,
+            name: z.string(),
+            cloudProjectId: StableIdSchema.nullable(),
+            dirty: z.boolean(),
+            structureRevision: z.number().int(),
+            cells: z.array(
+              z.strictObject({
+                documentId: StableIdSchema,
+                name: z.string(),
+                revision: z.number().int(),
+              }),
+            ),
+          }),
+        ),
+      }),
+      z.strictObject({
+        action: z.enum(["open", "activate", "new", "rename"]),
+        applied: z.boolean(),
+        workspaceId: StableIdSchema.optional(),
+      }),
+      z.strictObject({
+        action: z.literal("save"),
+        project: AgentCloudProjectSummarySchema,
+      }),
+      z.strictObject({
+        action: z.literal("copy"),
+        ...CopyPlacementResultSchema.shape,
+      }),
+    ]),
+  }),
+  ProjectResponseBaseSchema.extend({
+    operation: z.literal("list-projects"),
+    ok: z.literal(true),
+    projects: z.array(AgentCloudProjectSummarySchema),
+  }),
+  ProjectResponseBaseSchema.extend({
+    operation: z.literal("list-cells"),
+    ok: z.literal(true),
+    project: AgentCloudProjectSummarySchema.pick({
+      id: true,
+      name: true,
+    }),
+    cells: z.array(AgentReusableCellSummarySchema),
+  }),
+  ProjectResponseBaseSchema.extend({
+    operation: z.literal("import-cell"),
+    ok: z.literal(true),
+    status: z.enum(["imported", "already-imported"]),
+    rootDocumentId: StableIdSchema,
+    importedDocumentIds: z.array(StableIdSchema),
+    structureRevision: z.number().int().nonnegative(),
+  }),
+  ProjectResponseBaseSchema.extend({
+    operation: z.literal("insert-gallery-entry"),
+    ok: z.literal(true),
+    galleryEntryId: StableIdSchema,
+    sourceDocumentId: StableIdSchema,
+    targetDocumentId: StableIdSchema,
+    ...CopyPlacementResultSchema.shape,
+  }),
+  ProjectResponseBaseSchema.extend({
+    operation: z.literal("list-gallery"),
+    ok: z.literal(true),
+    entries: z.array(AgentGalleryEntrySummarySchema),
+    nextCursor: z.string().nullable(),
+    total: z.number().int().nonnegative().nullable(),
+  }),
+  ProjectResponseBaseSchema.extend({
+    operation: z.literal("read-gallery-entry"),
+    ok: z.literal(true),
+    ...AgentGalleryEntryReadSchema.shape,
+    figure: AgentGalleryFigureSchema.optional(),
+  }),
+  ProjectResponseBaseSchema.extend({
+    operation: z.literal("read-gallery-entries"),
+    ok: z.literal(true),
+    entries: z.array(AgentGalleryEntryReadSchema),
+    remainingEntryIds: z.array(StableIdSchema),
+  }),
+  ProjectResponseBaseSchema.extend({
+    operation: z.enum(["publish-gallery-entry", "update-gallery-entry"]),
+    ok: z.literal(true),
+    galleryEntryId: StableIdSchema,
+    /** The entry's address in the Editor, such as `/g/<id>`. */
+    url: z.string().min(1),
+    previewRevision: z.string().min(1).optional(),
+  }),
+  ProjectResponseBaseSchema.extend({
+    operation: z.literal("read-project-code"),
+    ok: z.literal(true),
+    projectCode: ProjectTextSchema,
+    structureRevision: z.number().int().nonnegative(),
+  }),
+  ProjectResponseBaseSchema.extend({
+    operation: z.literal("replace-project-code"),
+    ok: z.literal(true),
+    applied: z.boolean(),
+    structureRevision: z.number().int().nonnegative(),
+    activeDocumentId: StableIdSchema,
+  }),
+  ProjectResponseBaseSchema.extend({
+    operation: z.literal("read-netlist"),
+    ok: z.literal(true),
+    structureRevision: z.number().int().nonnegative(),
+    netlist: AgentNetlistReadSchema,
+    cells: z.array(AgentNetlistCellReadSchema),
+  }),
+  ProjectResponseBaseSchema.extend({
+    operation: z.literal("replace-netlist"),
+    ok: z.literal(true),
+    applied: z.boolean(),
+    structureRevision: z.number().int().nonnegative(),
+  }),
+  ProjectResponseBaseSchema.extend({
+    operation: z.enum([
+      "components",
+      "workspace",
+      "list-projects",
+      "list-cells",
+      "import-cell",
+      "list-gallery",
+      "read-gallery-entry",
+      "read-gallery-entries",
+      "insert-gallery-entry",
+      "publish-gallery-entry",
+      "update-gallery-entry",
+      "read-project-code",
+      "replace-project-code",
+      "read-netlist",
+      "replace-netlist",
+      "error",
+    ]),
+    ok: z.literal(false),
+    error: z.strictObject({
+      code: z.string().min(1),
+      message: z.string().min(1),
+      recovery: z.enum(["sign-in", "refresh", "fix-input", "retry"]),
+      component: z
+        .strictObject({ id: z.string(), revision: z.number().int().positive() })
+        .optional(),
+    }),
+  }),
+]);
+
+export const agentProjectResourceRequestJsonSchema = lazyJsonSchema(
+  AgentProjectResourceRequestSchema,
+);
+export const agentProjectResourceResponseJsonSchema = lazyJsonSchema(
+  AgentProjectResourceResponseSchema,
+);
+
+export function parseAgentProjectResourceRequest(
+  input: unknown,
+): { success: true; data: AgentProjectResourceRequest } | { success: false } {
+  const parsed = AgentProjectResourceRequestSchema.safeParse(input);
+  return parsed.success
+    ? { success: true, data: parsed.data }
+    : { success: false };
+}
+
+export type AgentProjectResourceRequest = z.infer<
+  typeof AgentProjectResourceRequestSchema
+>;
+export type AgentProjectResourceResponse = z.infer<
+  typeof AgentProjectResourceResponseSchema
+>;
+export type AgentGalleryEntrySummary = z.infer<
+  typeof AgentGalleryEntrySummarySchema
+>;
+export type AgentGalleryEntryRead = z.infer<typeof AgentGalleryEntryReadSchema>;
+export type AgentNetlistRead = z.infer<typeof AgentNetlistReadSchema>;

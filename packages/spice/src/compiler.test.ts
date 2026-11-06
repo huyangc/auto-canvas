@@ -1,0 +1,577 @@
+import { resolve } from "node:path";
+import { describe, expect, it } from "vitest";
+import { builtInSymbols, createProjectSymbolResolver } from "@icm/symbols";
+
+import { compileSourceBundle, compileSpiceSources } from "./compiler.js";
+import { importCompileResult } from "./importer.js";
+import { loadSourceBundleFromFile } from "./node-source.js";
+
+describe("SPICE elaboration and Project import", () => {
+  it("draws every imported Instance instead of staging it off-sheet", async () => {
+    const compiled = await compileSpiceSources(
+      [
+        {
+          path: "shelf.spi",
+          bytes: Buffer.from(
+            [
+              "Shelf",
+              ".subckt amp in out vdd 0",
+              "R1 in out 1k",
+              "R2 out vdd 2k",
+              "C1 out 0 1p",
+              ".ends",
+              "XA1 a b vdd 0 amp",
+              ".end",
+              "",
+            ].join("\n"),
+          ),
+        },
+      ],
+      "shelf.spi",
+    );
+
+    const imported = importCompileResult(compiled);
+
+    const instances = imported.project!.documents.flatMap(
+      (document) => document.instances,
+    );
+    expect(instances.length).toBeGreaterThan(4);
+    expect(instances.every((instance) => instance.placement !== null)).toBe(
+      true,
+    );
+    // Each Cell Pin waits on its side of the devices, facing them: the
+    // supply above, ground below, the input left and the output right.
+    const child = imported.project!.documents.find(
+      (document) => document.sourceBinding?.cellName === "amp",
+    )!;
+    const devices = child.instances.filter(
+      (instance) => instance.symbolId !== "port",
+    );
+    const xs = devices.map((device) => device.placement!.position.x);
+    const ys = devices.map((device) => device.placement!.position.y);
+    const pin = (name: string) =>
+      child.instances.find(
+        (instance) =>
+          instance.id ===
+          child.netlist!.terminals.find((terminal) => terminal.name === name)!
+            .interfaceInstanceIds[0],
+      )!.placement!;
+    expect(pin("vdd").rotation).toBe(90);
+    expect(pin("vdd").position.y).toBeLessThan(Math.min(...ys));
+    expect(pin("0").rotation).toBe(270);
+    expect(pin("0").position.y).toBeGreaterThan(Math.max(...ys));
+    expect(pin("in").rotation).toBe(0);
+    expect(pin("in").position.x).toBeLessThan(Math.min(...xs));
+    expect(pin("out").rotation).toBe(180);
+    expect(pin("out").position.x).toBeGreaterThan(Math.max(...xs));
+    // Positions land on the Document grid, so the schema accepts them.
+    expect(
+      child.instances.every(
+        (instance) =>
+          instance.placement!.position.x % child.presentation.grid === 0 &&
+          instance.placement!.position.y % child.presentation.grid === 0,
+      ),
+    ).toBe(true);
+    // Deterministic: the same source imports to the same drawing.
+    expect(
+      importCompileResult(compiled).project!.documents.flatMap((document) =>
+        document.instances.map((instance) => instance.placement),
+      ),
+    ).toEqual(instances.map((instance) => instance.placement));
+  });
+
+  it("applies Cadence bang globals only through the explicit import profile", async () => {
+    const compiled = await compileSpiceSources(
+      [
+        {
+          path: "bang.spi",
+          bytes: Buffer.from("Bang profile\nR1 vdd! 0 1k\n.end\n"),
+        },
+      ],
+      "bang.spi",
+    );
+
+    const native = importCompileResult(compiled);
+    const cadence = importCompileResult(compiled, {
+      namingProfile: "cadence-bang",
+    });
+    const nativeEvidence = native.project!.documents[0]!.connectivityEvidence;
+    const cadenceEvidence = cadence.project!.documents[0]!.connectivityEvidence;
+
+    expect(nativeEvidence).toContainEqual(
+      expect.objectContaining({
+        kind: "net-name-hint",
+        sourceName: "vdd!",
+      }),
+    );
+    expect(nativeEvidence).not.toContainEqual(
+      expect.objectContaining({
+        kind: "name-claim",
+        name: "vdd",
+        scope: "global",
+      }),
+    );
+    expect(cadenceEvidence).toContainEqual(
+      expect.objectContaining({
+        kind: "name-claim",
+        name: "vdd",
+        scope: "global",
+        owner: expect.objectContaining({ kind: "global-declaration" }),
+      }),
+    );
+    expect(cadenceEvidence).toContainEqual(
+      expect.objectContaining({
+        kind: "net-name-hint",
+        sourceName: "vdd!",
+      }),
+    );
+  });
+
+  it("preserves a literal bang in an explicitly global generic SPICE name", async () => {
+    const imported = importCompileResult(
+      await compileSpiceSources(
+        [
+          {
+            path: "literal-bang.spi",
+            bytes: Buffer.from(
+              "Literal bang\n.global vdd!\nR1 vdd! 0 1k\n.end\n",
+            ),
+          },
+        ],
+        "literal-bang.spi",
+      ),
+    );
+
+    expect(imported.project!.documents[0]!.connectivityEvidence).toContainEqual(
+      expect.objectContaining({
+        kind: "name-claim",
+        name: "vdd!",
+        scope: "global",
+      }),
+    );
+    expect(
+      imported.project!.documents[0]!.connectivityEvidence,
+    ).not.toContainEqual(
+      expect.objectContaining({
+        kind: "name-claim",
+        name: "vdd",
+      }),
+    );
+  });
+
+  it("imports capacitor source positions onto stable plate pins", async () => {
+    const imported = importCompileResult(
+      await compileSpiceSources(
+        [
+          {
+            path: "capacitor.spi",
+            bytes: Buffer.from("Capacitor test\nC1 TOP BOT 2p\n.end\n"),
+          },
+        ],
+        "capacitor.spi",
+      ),
+    );
+    const capacitor = imported.project?.documents[0]?.instances[0];
+    expect(capacitor).toMatchObject({
+      symbolId: "capacitor",
+      importProvenance: {
+        terminalMapping: [
+          { sourcePosition: 0, pinName: "1" },
+          { sourcePosition: 1, pinName: "2" },
+        ],
+      },
+    });
+  });
+
+  it("imports ordered Cell formal parameter defaults", async () => {
+    const imported = importCompileResult(
+      await compileSpiceSources(
+        [
+          {
+            path: "parameterized.spi",
+            bytes: Buffer.from(`
+.subckt gain_cell IN OUT params: gain=10 bias={gain/2}
+R1 IN OUT 1k
+.ends gain_cell
+`),
+          },
+        ],
+        "parameterized.spi",
+      ),
+    );
+
+    expect(imported.successful).toBe(true);
+    expect(imported.project?.documents[0]?.netlist?.formalParameters).toEqual([
+      { name: "gain", defaultValue: "10" },
+      { name: "bias", defaultValue: "{gain/2}" },
+    ]);
+  });
+
+  it("imports reviewed diode and BJT contracts", async () => {
+    const source = Buffer.from(`
+.model DREF D
+.model QNREF NPN
+.model QPREF PNP
+D1 anode 0 DREF
+Q1 collector base emitter QNREF
+Q2 collector base emitter QPREF
+.end
+`);
+    const imported = importCompileResult(
+      await compileSpiceSources(
+        [{ path: "common.cir", bytes: source }],
+        "common.cir",
+      ),
+    );
+    expect(imported.successful).toBe(true);
+    expect(imported.project?.documents[0]?.netlist).toMatchObject({
+      name: "__flat__",
+      terminals: [],
+    });
+    expect(imported.project?.documents[0]?.connectivityEvidence).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "net-name-hint",
+          origin: "spice-import",
+        }),
+        expect.objectContaining({
+          kind: "name-claim",
+          owner: {
+            kind: "global-declaration",
+            sourceNetId: expect.any(String),
+          },
+        }),
+        expect.objectContaining({ kind: "spice-source" }),
+      ]),
+    );
+    expect(
+      imported.project?.documents[0]?.instances.map((instance) => [
+        instance.reference,
+        instance.symbolId,
+        instance.importProvenance,
+      ]),
+    ).toEqual([
+      [
+        "D1",
+        "diode",
+        expect.objectContaining({
+          kind: "model",
+          sourceMasterName: "DREF",
+          status: "resolved",
+          modelType: "d",
+        }),
+      ],
+      [
+        "Q1",
+        "npn",
+        expect.objectContaining({
+          kind: "model",
+          sourceMasterName: "QNREF",
+          status: "resolved",
+          modelType: "npn",
+        }),
+      ],
+      [
+        "Q2",
+        "pnp",
+        expect.objectContaining({
+          kind: "model",
+          sourceMasterName: "QPREF",
+          status: "resolved",
+          modelType: "pnp",
+        }),
+      ],
+    ]);
+  });
+
+  it("imports SPICE G syntax with an approved glyph and typed control Nets", async () => {
+    const compiled = await compileSpiceSources(
+      [
+        {
+          path: "vccs.cir",
+          bytes: Buffer.from("VCCS syntax test\nG1 out 0 ctrl 0 1m\n.end\n"),
+        },
+      ],
+      "vccs.cir",
+    );
+    expect(compiled.successful).toBe(true);
+    const vccs = compiled.ir?.cells
+      .flatMap((cell) => cell.instances)
+      .find(
+        (instance) =>
+          instance.target.kind === "primitive" &&
+          instance.target.family === "vccs",
+      );
+    expect(vccs?.target).toEqual({
+      kind: "primitive",
+      family: "vccs",
+    });
+    const imported = importCompileResult(compiled);
+    expect(imported.successful).toBe(true);
+    const drawn = imported.project!.documents[0]!.instances.find(
+      (instance) => instance.reference === "G1",
+    );
+    expect(drawn).toMatchObject({
+      symbolId: "vccs",
+      netlist: {
+        parameters: { gm: "1m" },
+        control: {
+          kind: "voltage",
+          positiveNetId: expect.any(String),
+          negativeNetId: expect.any(String),
+        },
+      },
+    });
+  });
+
+  it("preserves mixed-device IR and imports its switch as the catalog maps S cards", async () => {
+    const entry = resolve(
+      process.cwd(),
+      "netlists/mixed-device-acceptance/circuit.spi",
+    );
+    const compiled = compileSourceBundle(await loadSourceBundleFromFile(entry));
+    expect(compiled.successful).toBe(true);
+    expect(compiled.ir).not.toBeNull();
+    const ir = compiled.ir!;
+    expect(ir.topCells).toEqual(["mixed_device_acceptance"]);
+    expect(ir.cells).toHaveLength(8);
+    expect(ir.parameters.map((item) => [item.name, item.rawText])).toEqual([
+      ["RBASE", "4.7k"],
+      ["CCOMP", "2p"],
+      ["LISO", "8n"],
+    ]);
+    expect(ir.models.map((item) => [item.name, item.modelType])).toEqual([
+      ["DACC", "D"],
+      ["QNACC", "NPN"],
+      ["QPACC", "PNP"],
+      ["SWACC", "SW"],
+    ]);
+    const top = ir.cells.find(
+      (cell) => cell.name === "mixed_device_acceptance",
+    )!;
+    expect(top.instances).toHaveLength(7);
+    expect(top.instances[0]!.target).toEqual({
+      kind: "subcircuit",
+      cellName: "mixed_passive_cell",
+    });
+    expect(
+      top.instances[0]!.terminals.map((terminal) => terminal.name),
+    ).toEqual(["IN", "OUT", "VSS"]);
+
+    // Its one S card was the device the import once refused; the catalog
+    // maps S cards to the voltage-controlled switch, bound to the card's model.
+    const imported = importCompileResult(compiled);
+    expect(imported.successful, JSON.stringify(imported.diagnostics)).toBe(
+      true,
+    );
+    expect(
+      imported.project?.documents
+        .flatMap((document) => document.instances)
+        .find((instance) => instance.reference === "SROUTE"),
+    ).toMatchObject({
+      symbolId: "voltage-controlled-switch",
+      netlist: {
+        binding: { kind: "model", deviceClass: "switch", name: "SWACC" },
+      },
+    });
+  });
+
+  it("imports reviewed inductors with the scale-reconciled Razavi symbol", async () => {
+    const entry = resolve(
+      process.cwd(),
+      "netlists/rlc-broadband-50-to-200-match/circuit.spi",
+    );
+    const imported = importCompileResult(
+      compileSourceBundle(await loadSourceBundleFromFile(entry)),
+    );
+    expect(imported.project).not.toBeNull();
+    expect(imported.successful).toBe(true);
+    expect(
+      imported.project?.documents[0]?.instances
+        .filter((instance) => instance.symbolId === "inductor-compact")
+        .map((instance) => instance.reference),
+    ).toEqual(["L1", "L2"]);
+  });
+
+  it("preserves SKY130 X calls as external interfaces without losing source facts", async () => {
+    const entry = resolve(
+      process.cwd(),
+      "netlists/sky130-ota-5t-gain40-pm60-noise50uv-pvt/circuit.spi",
+    );
+    const imported = importCompileResult(
+      compileSourceBundle(await loadSourceBundleFromFile(entry)),
+    );
+    expect(imported.successful).toBe(true);
+    expect(
+      imported.diagnostics.filter(
+        (diagnostic) => diagnostic.code === "SPICE_IMPORT_UNSUPPORTED_SYMBOL",
+      ),
+    ).toEqual([]);
+    const document = imported.project!.documents[0]!;
+    const cellPinInstanceIds = new Set(
+      document.netlist!.terminals.flatMap(
+        (terminal) => terminal.interfaceInstanceIds,
+      ),
+    );
+    expect(
+      document.instances
+        .filter((instance) => cellPinInstanceIds.has(instance.id))
+        .every((instance) => instance.reference === undefined),
+    ).toBe(true);
+    expect(
+      document.instances
+        .filter((instance) => !cellPinInstanceIds.has(instance.id))
+        .every(
+          (instance) =>
+            instance.netlist?.binding?.kind === "external-subcircuit",
+        ),
+    ).toBe(true);
+    expect(
+      document.instances
+        .filter((instance) => !cellPinInstanceIds.has(instance.id))
+        .map((instance) => instance.symbolId)
+        .filter(
+          (symbolId, index, symbols) => symbols.indexOf(symbolId) === index,
+        )
+        .sort(),
+    ).toEqual(["nmos", "pmos"]);
+    expect(document.instances[0]!.importProvenance).toMatchObject({
+      kind: "opaque",
+      sourceMasterName: "sky130_fd_pr__nfet_01v8",
+      status: "resolved",
+      sourceTarget: "external-subcircuit:sky130_fd_pr__nfet_01v8",
+      symbolMappingRegistryId: "sky130-nfet-01v8",
+      terminalMapping: [
+        { sourcePosition: 0, pinName: "D" },
+        { sourcePosition: 1, pinName: "G" },
+        { sourcePosition: 2, pinName: "S" },
+        { sourcePosition: 3, pinName: "B" },
+      ],
+    });
+    expect(document.instances[0]!.reference).toBe("XM1");
+    expect(document.instances[0]!.netlist).toEqual({
+      binding: expect.objectContaining({ kind: "external-subcircuit" }),
+      parameters: { l: "1u", w: "96u", nf: "12" },
+    });
+    expect(document.instances[0]).toMatchObject({
+      symbolId: "nmos",
+    });
+    const resolved = createProjectSymbolResolver(
+      imported.project!,
+      builtInSymbols,
+    ).resolve(document.instances[0]!.symbolId);
+    const nmos = builtInSymbols.find((symbol) => symbol.id === "nmos");
+    expect(resolved).toMatchObject({
+      definition: {
+        pins: nmos?.pins,
+        primitives: nmos?.primitives,
+        defaultVariantId: "textbook-3terminal",
+        variants: nmos?.variants,
+      },
+      variant: expect.objectContaining({
+        id: "textbook-3terminal",
+        hiddenPinNames: ["B"],
+      }),
+    });
+    expect(
+      document.nets
+        .flatMap((net) => net.terminals)
+        .filter((terminal) => terminal.instanceId === "XM1")
+        .map((terminal) => terminal.pinName),
+    ).toEqual(expect.arrayContaining(["D", "G", "S", "B"]));
+  });
+
+  it("ignores an explicit mapping to a removed compatibility symbol", async () => {
+    const entry = resolve(
+      process.cwd(),
+      "netlists/sky130-ota-5t-gain40-pm60-noise50uv-pvt/circuit.spi",
+    );
+    const imported = importCompileResult(
+      compileSourceBundle(await loadSourceBundleFromFile(entry)),
+      {
+        symbolMappings: [
+          {
+            modelName: "sky130_fd_pr__nfet_01v8",
+            terminalCount: 4,
+            symbolId: "generic-block-4",
+            pinNames: ["DRAIN", "GATE", "SOURCE", "BULK"],
+            registryId: "project:reviewed-nfet",
+          },
+        ],
+      },
+    );
+    const document = imported.project!.documents[0]!;
+    const instance = document.instances.find(
+      (candidate) => candidate.reference === "XM1",
+    )!;
+    expect(instance).toMatchObject({
+      netlist: expect.objectContaining({
+        binding: expect.objectContaining({ kind: "external-subcircuit" }),
+      }),
+      importProvenance: expect.objectContaining({
+        symbolMappingRegistryId: "sky130-nfet-01v8",
+        terminalMapping: [
+          { sourcePosition: 0, pinName: "D" },
+          { sourcePosition: 1, pinName: "G" },
+          { sourcePosition: 2, pinName: "S" },
+          { sourcePosition: 3, pinName: "B" },
+        ],
+      }),
+    });
+    expect(
+      imported.diagnostics.filter(
+        (diagnostic) => diagnostic.code === "SPICE_IMPORT_UNSUPPORTED_SYMBOL",
+      ),
+    ).toEqual([]);
+  });
+
+  it("imports reviewed SKY130 external masters with declared interfaces", async () => {
+    const entry = resolve(
+      process.cwd(),
+      "netlists/sky130-thermometer-trim-resistor/circuit.spi",
+    );
+    const imported = importCompileResult(
+      compileSourceBundle(await loadSourceBundleFromFile(entry)),
+    );
+
+    expect(imported.successful).toBe(true);
+    expect(
+      imported.project?.externalSubcircuitDefinitions.map((definition) => [
+        definition.name,
+        definition.interfaceStatus,
+      ]),
+    ).toEqual(
+      expect.arrayContaining([
+        ["sky130_fd_pr__nfet_01v8", "declared"],
+        ["sky130_fd_pr__pfet_01v8", "declared"],
+        ["sky130_fd_pr__res_high_po", "declared"],
+      ]),
+    );
+    expect(
+      imported.project?.documents
+        .flatMap((document) => document.instances)
+        .filter(
+          (instance) =>
+            instance.netlist?.binding?.kind === "external-subcircuit",
+        )
+        .every((instance) => instance.reference?.startsWith("X")),
+    ).toBe(true);
+    const resistor = imported.project?.documents
+      .flatMap((document) => document.instances)
+      .find(
+        (instance) =>
+          instance.importProvenance?.sourceMasterName ===
+          "sky130_fd_pr__res_high_po",
+      );
+    expect(resistor).toMatchObject({
+      symbolId: "resistor",
+      importProvenance: {
+        terminalMapping: [
+          { sourcePosition: 0, pinName: "1" },
+          { sourcePosition: 1, pinName: "2" },
+          { sourcePosition: 2, pinName: "B" },
+        ],
+      },
+    });
+  });
+});

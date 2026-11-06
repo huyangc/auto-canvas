@@ -1,0 +1,28 @@
+{
+  "mounted": true,
+  "consoleErrors": [],
+  "nodeCryptoExternalized": false,
+  "projectDataIsolation": "clean",
+  "galleryEditorCodeLoaded": false,
+  "editorCodeLoaded": true,
+  "galleryEditorStylesLoaded": false,
+  "editorStylesLoaded": true,
+  "galleryPdfRuntimeLoaded": false,
+  "editorPdfRuntimeLoaded": false,
+  "editorLoadingScreens": ["Loading editor…"],
+  "editorNetlistLayoutChangedOnLoad": false,
+  "editorSimulationServiceLoaded": false,
+  "editorAgentRuntimeLoaded": false,
+  "editorAgentRuntimePreloaded": false,
+  "routePreloadBeforeStylesheets": true,
+  "editorFirstLoadJsonParser": false,
+  "editorFirstLoadRnl": false,
+  "editorJsonParserLoaded": false,
+  "editorSchematicFonts": [
+    "Metropolis-Bold.schematic.woff2 link",
+    "Metropolis-BoldItalic.schematic.woff2 link",
+    "Metropolis-Regular.schematic.woff2 link",
+    "Metropolis-RegularItalic.schematic.woff2 link"
+  ],
+  "artifactCodecWorkerBundlesModel": false
+}

@@ -1,0 +1,187 @@
+import type { CircuitProject, Instance, SchematicDocument } from "@icm/model";
+
+import { bindsProjectCell } from "./gate-cell.js";
+import { deviceDescriptor, subcircuitDescriptor } from "./registry.js";
+
+export type ReferencePolicy =
+  | { readonly kind: "none" }
+  | { readonly kind: "required"; readonly prefix: string };
+
+export const hierarchyReferencePolicy: ReferencePolicy = {
+  kind: "required",
+  prefix: "X",
+};
+
+export interface ReferenceIssue {
+  readonly code:
+    "MISSING_REFERENCE" | "WRONG_REFERENCE_PREFIX" | "DUPLICATE_REFERENCE";
+  readonly instanceId: string;
+  readonly reference?: string;
+  readonly otherInstanceId?: string;
+  /** The prefix a wrong-prefix Reference should start with. */
+  readonly expectedPrefix?: string;
+}
+
+export interface ReferenceIndex {
+  readonly byReference: ReadonlyMap<string, readonly string[]>;
+  readonly occupiedSuffixesByPrefix: ReadonlyMap<string, ReadonlySet<number>>;
+  readonly policyByInstanceId: ReadonlyMap<string, ReferencePolicy>;
+  readonly issues: readonly ReferenceIssue[];
+}
+
+export interface ReferenceAllocationOptions {
+  /** First suffix considered; defaults to the lowest legal suffix (1). */
+  readonly startAt?: number;
+  /** References reserved by a multi-instance plan that is not yet in the Cell. */
+  readonly reservedReferences?: ReadonlySet<string>;
+}
+
+export function referencePolicyForInstance(
+  instance: Instance,
+  project?: Pick<CircuitProject, "componentDefinitions">,
+): ReferencePolicy {
+  const binding = instance.netlist?.binding;
+  const prefix = deviceDescriptor(instance.symbolId, project)?.referencePrefix;
+  // A chopper bound to a Cell keeps its look, and so its References (#1928).
+  const keepsDevicePrefix =
+    binding?.kind === "subcircuit" &&
+    bindsProjectCell(instance.symbolId) &&
+    Boolean(prefix);
+  if (
+    (binding?.kind === "subcircuit" && !keepsDevicePrefix) ||
+    binding?.kind === "unresolved-subcircuit" ||
+    (binding?.kind === "external-subcircuit" && !prefix) ||
+    subcircuitDescriptor(instance.symbolId, project)
+  ) {
+    return hierarchyReferencePolicy;
+  }
+  return prefix ? { kind: "required", prefix } : { kind: "none" };
+}
+
+export function referencePolicyForSymbol(symbolId: string): ReferencePolicy {
+  if (subcircuitDescriptor(symbolId)) return hierarchyReferencePolicy;
+  const prefix = deviceDescriptor(symbolId)?.referencePrefix;
+  return prefix ? { kind: "required", prefix } : { kind: "none" };
+}
+
+/**
+ * The letter a device's References are written from — R, C, L, M, Q, D, V,
+ * I… — which a Reference label shows in italic over a subscript of the rest
+ * (R_L1, C_L). Subcircuit calls, whose X says how SPICE invokes them rather
+ * than what they are, and devices without a one-letter prefix have none.
+ */
+export function referenceDeviceLetter(
+  symbolId: string,
+  project?: Pick<CircuitProject, "componentDefinitions">,
+): string | undefined {
+  if (subcircuitDescriptor(symbolId, project)) return undefined;
+  const prefix = deviceDescriptor(symbolId, project)?.referencePrefix;
+  return prefix && /^[A-WYZ]$/u.test(prefix) ? prefix : undefined;
+}
+
+export function referenceSuffixForPolicy(
+  reference: string,
+  policy: ReferencePolicy,
+): number | null {
+  if (policy.kind === "none") return null;
+  return suffixForPrefix(reference, policy.prefix);
+}
+
+function suffixForPrefix(reference: string, prefix: string): number | null {
+  const match = new RegExp(`^${prefix}(\\d+)$`, "iu").exec(reference);
+  if (!match) return null;
+  const suffix = Number(match[1]);
+  return Number.isSafeInteger(suffix) && suffix > 0 ? suffix : null;
+}
+
+/** One per-Cell, case-folded reference authority for allocation and diagnosis. */
+export function createReferenceIndex(
+  document: SchematicDocument,
+  project?: Pick<CircuitProject, "componentDefinitions">,
+): ReferenceIndex {
+  const policyByInstanceId = new Map<string, ReferencePolicy>();
+  const byReference = new Map<string, string[]>();
+  const occupiedSuffixesByPrefix = new Map<string, Set<number>>();
+  const issues: ReferenceIssue[] = [];
+  for (const instance of document.instances) {
+    const policy = referencePolicyForInstance(instance, project);
+    policyByInstanceId.set(instance.id, policy);
+    const reference = instance.reference;
+    if (reference) {
+      const foldedReference = reference.toLowerCase();
+      const instances = byReference.get(foldedReference) ?? [];
+      instances.push(instance.id);
+      byReference.set(foldedReference, instances);
+    }
+    if (policy.kind === "none") {
+      continue;
+    }
+    if (!reference) {
+      issues.push({ code: "MISSING_REFERENCE", instanceId: instance.id });
+      continue;
+    }
+    // Keep imported/previously authored X references across model transitions.
+    // New native devices, including PDK wrappers, still allocate M/R/C/etc.
+    const retainedExternalReference =
+      Boolean(deviceDescriptor(instance.symbolId, project)?.referencePrefix) &&
+      /^x/iu.test(reference);
+    if (
+      !reference.toUpperCase().startsWith(policy.prefix.toUpperCase()) &&
+      !retainedExternalReference
+    ) {
+      issues.push({
+        code: "WRONG_REFERENCE_PREFIX",
+        instanceId: instance.id,
+        reference,
+        expectedPrefix: policy.prefix,
+      });
+    }
+    const suffix = suffixForPrefix(reference, policy.prefix);
+    if (suffix !== null) {
+      const occupied = occupiedSuffixesByPrefix.get(policy.prefix) ?? new Set();
+      occupied.add(suffix);
+      occupiedSuffixesByPrefix.set(policy.prefix, occupied);
+    }
+  }
+  for (const [foldedReference, instances] of byReference) {
+    if (instances.length < 2) continue;
+    for (const instanceId of instances) {
+      const otherInstanceId = instances.find(
+        (candidate) => candidate !== instanceId,
+      );
+      issues.push({
+        code: "DUPLICATE_REFERENCE",
+        instanceId,
+        reference: foldedReference,
+        ...(otherInstanceId ? { otherInstanceId } : {}),
+      });
+    }
+  }
+  return { byReference, occupiedSuffixesByPrefix, policyByInstanceId, issues };
+}
+
+export function nextReference(
+  index: ReferenceIndex,
+  policy: ReferencePolicy,
+  options: ReferenceAllocationOptions = {},
+): string | undefined {
+  if (policy.kind === "none") return undefined;
+  const occupied = index.occupiedSuffixesByPrefix.get(policy.prefix);
+  const reserved = options.reservedReferences;
+  let suffix = Math.max(1, options.startAt ?? 1);
+  while (
+    occupied?.has(suffix) ||
+    index.byReference.has(`${policy.prefix}${suffix}`.toLowerCase()) ||
+    reserved?.has(`${policy.prefix}${suffix}`.toLowerCase())
+  ) {
+    suffix += 1;
+  }
+  return `${policy.prefix}${suffix}`;
+}
+
+export function referenceIssuesForInstance(
+  index: ReferenceIndex,
+  instanceId: string,
+): readonly ReferenceIssue[] {
+  return index.issues.filter((issue) => issue.instanceId === instanceId);
+}

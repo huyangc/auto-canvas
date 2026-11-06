@@ -1,0 +1,181 @@
+import {
+  deriveRoutingAffectedClosure,
+  deriveInternalGroupSelection,
+  resolveDocumentRoutingGeometry,
+  type RoutingSelectionSeed,
+} from "@icm/derived";
+import type { Point, SchematicDocument, ScreenFlip } from "@icm/model";
+import type { SymbolResolver } from "@icm/symbols";
+
+import {
+  createRoutingOperationPlan,
+  type RoutingOperationPlan,
+} from "./routing-operation-plan.js";
+import {
+  proposeGroupMoveEdits,
+  proposeJunctionMoveEdits,
+  proposeGroupReflectionEdits,
+  proposeGroupRotationEdits,
+} from "./routing-planner.js";
+import type { SchematicEdit } from "./edit-schema.js";
+import type { RoutingTranslationSource } from "./route-operations.js";
+
+export type TransformOperation =
+  | { readonly kind: "translate"; readonly delta: Point }
+  | {
+      readonly kind: "rotate";
+      readonly center?: Point;
+      readonly degrees: 45 | 90 | 135 | 180 | 225 | 270 | 315;
+    }
+  | {
+      readonly kind: "mirror";
+      readonly center?: Point;
+      readonly axis: "x" | "y";
+    };
+
+/**
+ * Plan one topology-preserving transform from a stable selection seed.
+ * Internal conductors move rigidly, boundary conductors are locally stretched
+ * by the existing geometry planner, and external conductors remain untouched.
+ */
+export function planRoutingTransform(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  seed: RoutingSelectionSeed,
+  operation: TransformOperation,
+): RoutingOperationPlan {
+  return prepareRoutingTransform(document, resolver, seed)(operation);
+}
+
+/** The existing planner with source closure/geometry retained for one gesture.
+ * Callers discard this function when the source or selection changes. Nothing
+ * is persisted, and each resulting typed plan still uses the strict commit gate.
+ */
+export function prepareRoutingTransform(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  seed: RoutingSelectionSeed,
+): (operation: TransformOperation) => RoutingOperationPlan {
+  const affected = deriveRoutingAffectedClosure(document, seed, { resolver });
+  const affectedIds = new Set([
+    ...affected.instances,
+    ...affected.internalRoutes,
+    ...affected.boundaryRoutes,
+    ...affected.internalJunctions,
+    ...affected.electricalAnnotationIds,
+  ]);
+  const protectedIds = affected.protectedObjectIds.filter((id) =>
+    affectedIds.has(id),
+  );
+  let source: RoutingTranslationSource | undefined;
+  return (operation) => {
+    if (protectedIds.length > 0) {
+      return createRoutingOperationPlan(document, {
+        intent: "transform",
+        affected,
+        edits: [],
+        diagnostics: [
+          {
+            code: "ROUTING_TRANSFORM_PROTECTED",
+            severity: "error",
+            message:
+              "The transform includes locked or protected routing objects",
+            objectIds: protectedIds,
+          },
+        ],
+      });
+    }
+
+    let edits: readonly SchematicEdit[];
+    if (operation.kind === "translate") {
+      if (operation.delta.x === 0 && operation.delta.y === 0)
+        return createRoutingOperationPlan(document, {
+          intent: "transform",
+          affected,
+          edits: [],
+          diagnostics: [],
+        });
+      source ??= {
+        document,
+        routingGeometry: resolveDocumentRoutingGeometry(document, resolver),
+        internalSelection: deriveInternalGroupSelection(
+          document,
+          affected.instances,
+        ),
+      };
+      const moves = affected.instances.flatMap((instanceId) => {
+        const instance = document.instances.find(
+          (item) => item.id === instanceId,
+        );
+        return instance?.placement
+          ? [
+              {
+                instanceId,
+                position: {
+                  x: instance.placement.position.x + operation.delta.x,
+                  y: instance.placement.position.y + operation.delta.y,
+                },
+              },
+            ]
+          : [];
+      });
+      edits =
+        moves.length === 0
+          ? proposeJunctionMoveEdits(
+              document,
+              resolver,
+              affected.internalJunctions.map((junctionId) => {
+                const junction = document.junctions.find(
+                  (item) => item.id === junctionId,
+                )!;
+                return {
+                  junctionId,
+                  position: {
+                    x: junction.position.x + operation.delta.x,
+                    y: junction.position.y + operation.delta.y,
+                  },
+                };
+              }),
+              source,
+            ).edits
+          : proposeGroupMoveEdits(
+              document,
+              resolver,
+              moves,
+              affected.internalJunctions,
+              operation.delta,
+              source,
+            ).edits;
+    } else if (operation.kind === "rotate") {
+      const delta = (
+        operation.degrees > 180 ? operation.degrees - 360 : operation.degrees
+      ) as 45 | -45 | 90 | -90 | 135 | -135 | 180;
+      edits = proposeGroupRotationEdits(
+        document,
+        resolver,
+        affected.instances,
+        delta,
+        operation.center,
+        affected.internalJunctions,
+      ).edits;
+    } else {
+      const direction: ScreenFlip =
+        operation.axis === "y" ? "left-right" : "top-bottom";
+      edits = proposeGroupReflectionEdits(
+        document,
+        resolver,
+        affected.instances,
+        direction,
+        operation.center,
+        affected.internalJunctions,
+      ).edits;
+    }
+
+    return createRoutingOperationPlan(document, {
+      intent: "transform",
+      affected,
+      edits: [...edits],
+      diagnostics: [],
+    });
+  };
+}

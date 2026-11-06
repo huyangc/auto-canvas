@@ -1,0 +1,480 @@
+import {
+  createEmptyDocument,
+  createEmptyProject,
+  createRoutePath,
+} from "@icm/model";
+import { serializeProject } from "@icm/project-protocol";
+import { createHash } from "node:crypto";
+import { describe, expect, it, vi } from "vitest";
+
+import { createGalleryExampleCommands } from "./gallery-example-commands";
+import { hierarchicalSymbolId } from "@icm/symbols";
+
+const defaultViewBox = { x: 0, y: 0, width: 960, height: 640 };
+const digest = (text: string) =>
+  createHash("sha256").update(text).digest("hex");
+
+function dependencies(fetchImpl: typeof fetch = vi.fn<typeof fetch>()) {
+  return {
+    defaultViewBox,
+    captureRefreshTarget: () => () => true,
+    replaceActiveProject: vi.fn(),
+    guardDirtyReplacement: vi.fn(async (_intent, perform) => {
+      await perform();
+    }),
+    beginCopyPlacement: vi.fn(),
+    cancelAllTransientInteraction: vi.fn(),
+    setGalleryEntryContext: vi.fn(),
+    setStatus: vi.fn(),
+    setDailyOpenLimit: vi.fn(),
+    fetchImpl,
+  };
+}
+
+describe("Gallery and example commands", () => {
+  it("starts a whole-Document placement with interface composition policy", () => {
+    const input = dependencies();
+    const imported = createEmptyProject("imported", "Imported");
+    imported.documents[0]!.instances.push({
+      id: "R1",
+      symbolId: "resistor",
+      placement: {
+        position: { x: 100, y: 80 },
+        rotation: 0,
+        mirror: "none",
+      },
+    });
+    const commands = createGalleryExampleCommands(input);
+
+    expect(commands.beginProjectImportPlacement(imported, "Scene")).toBe(true);
+
+    expect(input.cancelAllTransientInteraction).toHaveBeenCalledOnce();
+    expect(input.beginCopyPlacement).toHaveBeenCalledWith(
+      expect.objectContaining({ instances: imported.documents[0]!.instances }),
+      { x: 100, y: 80 },
+    );
+    expect(input.setStatus).toHaveBeenCalledWith(
+      expect.stringContaining("Place Scene on the canvas"),
+    );
+  });
+
+  it("normalizes a switch Route collapsed by current pins before Gallery placement", () => {
+    const input = dependencies();
+    const imported = createEmptyProject("legacy-switch", "Legacy switch");
+    const document = imported.documents[0]!;
+    document.instances.push(
+      {
+        id: "X1",
+        symbolId: "ideal-switch",
+        placement: {
+          position: { x: 500, y: 200 },
+          rotation: 0,
+          mirror: "none",
+        },
+      },
+      {
+        id: "P1",
+        symbolId: "port",
+        placement: {
+          position: { x: 520, y: 200 },
+          rotation: 0,
+          mirror: "none",
+        },
+      },
+    );
+    document.nets.push({
+      id: "net-contact",
+      terminals: [
+        { instanceId: "X1", pinName: "2" },
+        { instanceId: "P1", pinName: "P" },
+      ],
+    });
+    document.netlist!.terminals.push({
+      id: "terminal-p1",
+      name: "OUT",
+      netId: "net-contact",
+      direction: "passive",
+      interfaceInstanceIds: ["P1"],
+    });
+    document.routes.push(
+      createRoutePath({
+        id: "legacy-ten-unit-route",
+        netId: "net-contact",
+        start: { kind: "terminal", instanceId: "P1", pinName: "P" },
+        end: { kind: "terminal", instanceId: "X1", pinName: "2" },
+        bends: [],
+        modes: ["manual"],
+      }),
+    );
+    const commands = createGalleryExampleCommands(input);
+
+    expect(commands.beginProjectImportPlacement(imported, "Switch")).toBe(true);
+
+    expect(input.beginCopyPlacement).toHaveBeenCalledWith(
+      expect.objectContaining({
+        routes: [],
+        nets: [
+          expect.objectContaining({
+            terminals: expect.arrayContaining([
+              { instanceId: "X1", pinName: "2" },
+              { instanceId: "P1", pinName: "P" },
+            ]),
+          }),
+        ],
+      }),
+      { x: 500, y: 200 },
+    );
+    expect(document.routes).toHaveLength(1);
+  });
+
+  it("places hierarchical Gallery content without replacing the active Project", () => {
+    const input = dependencies();
+    const imported = createEmptyProject("imported", "Imported");
+    imported.documents.push(createEmptyDocument("child", "Child"));
+    imported.documents[0]!.instances.push({
+      id: "X1",
+      reference: "X1",
+      symbolId: hierarchicalSymbolId("Child"),
+      placement: { position: { x: 0, y: 0 }, rotation: 0, mirror: "none" },
+      netlist: {
+        binding: { kind: "subcircuit", childDocumentId: "child" },
+        parameters: {},
+      },
+    });
+    const commands = createGalleryExampleCommands(input);
+
+    expect(commands.beginProjectImportPlacement(imported, "Hierarchy")).toBe(
+      true,
+    );
+    expect(input.beginCopyPlacement).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: expect.objectContaining({
+          documents: [imported.documents[1]],
+        }),
+      }),
+      expect.anything(),
+    );
+    expect(input.replaceActiveProject).not.toHaveBeenCalled();
+  });
+
+  it("starts placement for a drawing-only Gallery Project", () => {
+    const input = dependencies();
+    const imported = createEmptyProject("imported", "Drawing");
+    imported.documents[0]!.drafting = {
+      objects: [
+        {
+          id: "gallery-rectangle",
+          kind: "rectangle",
+          locked: false,
+          zIndex: 0,
+          anchor: { kind: "free", position: { x: 60, y: 40 } },
+          center: { x: 60, y: 40 },
+          width: 80,
+          height: 40,
+          rotation: 0,
+          lineStyle: "solid",
+        },
+      ],
+    };
+    const commands = createGalleryExampleCommands(input);
+
+    expect(commands.beginProjectImportPlacement(imported, "Drawing")).toBe(
+      true,
+    );
+    expect(input.beginCopyPlacement).toHaveBeenCalledWith(
+      expect.objectContaining({
+        draftingObjects: imported.documents[0]!.drafting.objects,
+      }),
+      { x: 60, y: 40 },
+    );
+    expect(input.replaceActiveProject).not.toHaveBeenCalled();
+  });
+
+  it("opens a Gallery Project and records the live entry context", async () => {
+    const project = createEmptyProject("gallery-project", "Project fallback");
+    const projectText = serializeProject(project);
+    const fetchImpl = vi.fn<typeof fetch>(async () =>
+      Response.json({
+        entry: {
+          name: "Published name",
+          author: "Ada",
+          description: "A circuit",
+          tags: ["ota"],
+          aiGenerated: true,
+        },
+        ownerUserId: "user-1",
+        projectText,
+      }),
+    );
+    const input = dependencies(fetchImpl);
+    const commands = createGalleryExampleCommands(input);
+
+    await commands.openGalleryEntryById("entry-1");
+
+    expect(input.guardDirtyReplacement).toHaveBeenCalledWith(
+      "Open gallery circuit Published name",
+      expect.any(Function),
+    );
+    expect(input.replaceActiveProject).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "gallery-project" }),
+      defaultViewBox,
+    );
+    expect(input.setGalleryEntryContext).toHaveBeenCalledWith({
+      id: "entry-1",
+      name: "Published name",
+      projectId: "gallery-project",
+      ownerUserId: "user-1",
+      author: "Ada",
+      description: "A circuit",
+      tags: ["ota"],
+      aiGenerated: true,
+      sourceDigest: digest(projectText),
+    });
+  });
+
+  it("opens a Gallery deep link in a tab without replacing the active Project", async () => {
+    const projectText = serializeProject(
+      createEmptyProject("gallery-project", "Published name"),
+    );
+    const input = {
+      ...dependencies(
+        vi.fn<typeof fetch>(async () =>
+          Response.json({
+            entry: { name: "Published name" },
+            projectText,
+          }),
+        ),
+      ),
+      openProjectInTab: vi.fn(async () => true),
+    };
+
+    await createGalleryExampleCommands(input).openGalleryEntryById(
+      "entry-1",
+      false,
+      true,
+    );
+
+    expect(input.openProjectInTab).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "gallery-project" }),
+      defaultViewBox,
+      expect.objectContaining({ id: "entry-1", projectId: "gallery-project" }),
+    );
+    expect(input.replaceActiveProject).not.toHaveBeenCalled();
+    expect(input.setGalleryEntryContext).not.toHaveBeenCalled();
+  });
+
+  it("keeps the active Project if a Gallery tab cannot be opened", async () => {
+    const input = dependencies(
+      vi.fn<typeof fetch>(async () =>
+        Response.json({
+          projectText: serializeProject(
+            createEmptyProject("gallery-project", "Published name"),
+          ),
+        }),
+      ),
+    );
+
+    await createGalleryExampleCommands(input).openGalleryEntryById(
+      "entry-1",
+      false,
+      true,
+    );
+
+    expect(input.replaceActiveProject).not.toHaveBeenCalled();
+    expect(input.setStatus).toHaveBeenCalledWith(
+      "Project tabs are unavailable; the current circuit was kept",
+    );
+  });
+
+  describe("a browser tab returning to a Gallery link", () => {
+    const opened = createEmptyProject("gallery-project", "Opened");
+    const openedText = serializeProject(opened);
+    const changed = createEmptyProject("gallery-project", "Changed");
+    changed.documents[0]!.instances.push({
+      id: "R1",
+      symbolId: "resistor",
+      placement: { position: { x: 100, y: 80 }, rotation: 0, mirror: "none" },
+    });
+    const changedText = serializeProject(changed);
+    const context = {
+      id: "entry-1",
+      name: "Published name",
+      projectId: "gallery-project",
+      ownerUserId: null,
+      author: "Ada",
+      description: "",
+      tags: [],
+      sourceDigest: digest(openedText),
+    };
+    const serving = (projectText: string) =>
+      vi.fn<typeof fetch>(async () =>
+        Response.json({ entry: { name: "Published name" }, projectText }),
+      );
+
+    it("brings its untouched copy up to the entry's current version", async () => {
+      const input = dependencies(serving(changedText));
+      await createGalleryExampleCommands(input).refreshGalleryEntry(context);
+
+      expect(input.replaceActiveProject).toHaveBeenCalledWith(
+        expect.objectContaining({
+          documents: [
+            expect.objectContaining({
+              instances: [expect.objectContaining({ id: "R1" })],
+            }),
+          ],
+        }),
+        defaultViewBox,
+      );
+      expect(input.setGalleryEntryContext).toHaveBeenCalledWith(
+        expect.objectContaining({ sourceDigest: digest(changedText) }),
+      );
+      expect(input.setStatus).toHaveBeenCalledWith(
+        "Opened the current Gallery version of Published name",
+      );
+    });
+
+    it("keeps the copy when the entry has not changed", async () => {
+      const input = dependencies(serving(openedText));
+      await createGalleryExampleCommands(input).refreshGalleryEntry(context);
+
+      expect(input.replaceActiveProject).not.toHaveBeenCalled();
+      expect(input.setStatus).not.toHaveBeenCalled();
+    });
+
+    it("updates a copy opened before its text was recorded", async () => {
+      const input = dependencies(serving(openedText));
+      const { sourceDigest: _, ...unrecorded } = context;
+      await createGalleryExampleCommands(input).refreshGalleryEntry(unrecorded);
+
+      expect(input.replaceActiveProject).toHaveBeenCalledOnce();
+    });
+
+    it("keeps the copy when the entry cannot be read", async () => {
+      const input = dependencies(
+        vi.fn<typeof fetch>(async () => Response.json({}, { status: 404 })),
+      );
+      await createGalleryExampleCommands(input).refreshGalleryEntry(context);
+
+      expect(input.replaceActiveProject).not.toHaveBeenCalled();
+      expect(input.setStatus).not.toHaveBeenCalled();
+    });
+  });
+
+  it("shows the daily-limit card when the account has opened its share of Gallery circuits", async () => {
+    const limited = vi.fn<typeof fetch>(async () =>
+      Response.json(
+        {
+          error: "daily-open-limit",
+          limit: 100,
+          resetAt: "2026-10-08T00:00:00.000Z",
+        },
+        { status: 429 },
+      ),
+    );
+    const input = dependencies(limited);
+    const commands = createGalleryExampleCommands(input);
+
+    await commands.openGalleryEntryById("someone-elses");
+    await commands.insertGalleryEntryById("someone-elses");
+
+    expect(input.replaceActiveProject).not.toHaveBeenCalled();
+    const limit = { limit: 100, resetAt: "2026-10-08T00:00:00.000Z" };
+    // Each attempt first clears a card an earlier one left.
+    expect(input.setDailyOpenLimit.mock.calls).toEqual([
+      [null],
+      [limit],
+      [null],
+      [limit],
+    ]);
+    expect(input.setStatus).not.toHaveBeenCalled();
+  });
+
+  it("reports unavailable Gallery payloads without replacing the Project", async () => {
+    const input = dependencies(
+      vi.fn<typeof fetch>(async () => Response.json({}, { status: 404 })),
+    );
+    const commands = createGalleryExampleCommands(input);
+
+    await commands.openGalleryEntryById("missing");
+
+    expect(input.replaceActiveProject).not.toHaveBeenCalled();
+    expect(input.setStatus).toHaveBeenCalledWith(
+      "This gallery entry is unavailable",
+    );
+  });
+
+  it("says what failed instead of calling every failure unavailable (2026-10-23)", async () => {
+    const statusFor = async (fetchImpl: typeof fetch) => {
+      const input = dependencies(vi.fn<typeof fetch>(fetchImpl));
+      await createGalleryExampleCommands(input).openGalleryEntryById("g1");
+      expect(input.replaceActiveProject).not.toHaveBeenCalled();
+      return input.setStatus.mock.calls.at(-1)?.[0];
+    };
+    expect(
+      await statusFor(async () =>
+        Response.json(
+          { error: "too-many-requests", retryAfterSeconds: 60 },
+          { status: 429 },
+        ),
+      ),
+    ).toBe("Too many requests. Wait 60 seconds and try again.");
+    expect(
+      await statusFor(async () => {
+        throw new TypeError("Failed to fetch");
+      }),
+    ).toBe("Could not reach the server. Check your connection and try again.");
+    expect(
+      await statusFor(async () =>
+        Response.json({ projectText: "{ not a project" }),
+      ),
+    ).toMatch(/^This gallery entry could not be opened: /);
+  });
+
+  it("opens a circuit drawn on a finer grid in a new tab instead of failing at the click (2026-10-17)", async () => {
+    const project = createEmptyProject("fine-grid", "Fine grid LDO");
+    const document = project.documents[0]!;
+    document.presentation.grid = 1;
+    document.instances.push({
+      id: "R1",
+      reference: "R1",
+      symbolId: "resistor",
+      placement: { position: { x: 123, y: 47 }, rotation: 0, mirror: "none" },
+      netlist: {
+        binding: { kind: "primitive", deviceClass: "resistor" },
+        parameters: { value: "1k" },
+      },
+    });
+    const projectText = serializeProject(project);
+    const input = {
+      ...dependencies(
+        vi.fn<typeof fetch>(async () =>
+          Response.json({ entry: { name: "Fine grid LDO" }, projectText }),
+        ),
+      ),
+      beginCopyPlacement: vi.fn(() => {
+        throw new Error(
+          "Source geometry is incompatible with target grid 10; composition does not rescale or snap electrical geometry",
+        );
+      }),
+      openProjectInTab: vi.fn(async () => true),
+    };
+
+    await createGalleryExampleCommands(input).insertGalleryEntryById("fine");
+
+    expect(input.openProjectInTab).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "fine-grid" }),
+      defaultViewBox,
+      expect.objectContaining({ id: "fine" }),
+    );
+    expect(input.replaceActiveProject).not.toHaveBeenCalled();
+    expect(input.setStatus).toHaveBeenLastCalledWith(
+      "Fine grid LDO is drawn on grid 1, finer than this canvas's grid 10, so it cannot be placed here; it opened in a new tab",
+    );
+
+    input.openProjectInTab.mockResolvedValue(false);
+    await createGalleryExampleCommands(input).insertGalleryEntryById("fine");
+    expect(input.setStatus).toHaveBeenLastCalledWith(
+      "Project tab was not opened; the current circuit was kept",
+    );
+  });
+});

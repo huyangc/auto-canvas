@@ -1,0 +1,570 @@
+import {
+  createEmptyDocument,
+  createEmptyProject,
+  deriveStableId,
+} from "@icm/model";
+import type { CircuitProject } from "@icm/model";
+import {
+  compareCircuitIR,
+  compileSpiceSources,
+  importSpiceSources,
+} from "@icm/spice";
+import { describe, expect, it } from "vitest";
+
+import type { DesignNetlistIR } from "./ir.js";
+import { analyzeDesignNetlist } from "./extract.js";
+import { printSpectreNetlist, printSpiceNetlist } from "./printers.js";
+
+function claimNet(
+  document: CircuitProject["documents"][number],
+  netId: string,
+  name: string,
+  scope: "local" | "global" = "local",
+): void {
+  const labelId = deriveStableId(
+    "fixture-net-label",
+    document.id,
+    netId,
+    name,
+    scope,
+  );
+  document.annotations.push({
+    id: labelId,
+    kind: "net-label",
+    binding: { kind: "net-name", netId },
+    netId,
+    anchor: { kind: "free", position: { x: 0, y: 0 } },
+    alignment: "start",
+    rotation: 0,
+    locked: false,
+  });
+  document.connectivityEvidence.push({
+    id: deriveStableId("fixture-net-name", document.id, netId),
+    kind: "name-claim",
+    netId,
+    name,
+    owner: { kind: "net-label", annotationId: labelId },
+    scope,
+  });
+}
+
+function structuralProject(): CircuitProject {
+  const project = createEmptyProject("roundtrip-project", "Roundtrip", "top");
+  const top = project.documents[0]!;
+  top.name = "top";
+  top.netlist = {
+    name: "top",
+    formalParameters: [],
+    terminals: [
+      {
+        id: "top-terminal-vin",
+        name: "VIN",
+        netId: "top-net-vin",
+        direction: "input",
+        interfaceInstanceIds: ["top-port-vin"],
+      },
+      {
+        id: "top-terminal-vout",
+        name: "VOUT",
+        netId: "top-net-vout",
+        direction: "output",
+        interfaceInstanceIds: ["top-port-vout"],
+      },
+    ],
+  };
+  top.instances.push(
+    { id: "top-port-vin", symbolId: "port", placement: null },
+    { id: "top-port-vout", symbolId: "port", placement: null },
+    {
+      id: "I1",
+      symbolId: "current-source",
+      placement: null,
+      reference: "I1",
+      netlist: {
+        binding: { kind: "primitive", deviceClass: "current-source" },
+        parameters: { dc: "10u" },
+      },
+    },
+    {
+      id: "X1",
+      symbolId: "leaf-symbol",
+      placement: null,
+      reference: "X1",
+      netlist: {
+        binding: { kind: "subcircuit", childDocumentId: "leaf" },
+        parameters: { scale: "2" },
+      },
+    },
+    {
+      id: "X2",
+      symbolId: "external-symbol",
+      placement: null,
+      reference: "X2",
+      netlist: {
+        binding: {
+          kind: "external-subcircuit",
+          definitionId: "external-master",
+        },
+        parameters: { l: "1u", nf: "4" },
+      },
+    },
+  );
+  top.nets.push(
+    {
+      id: "top-net-vin",
+
+      terminals: [
+        { instanceId: "top-port-vin", pinName: "P" },
+        { instanceId: "X1", pinName: "A" },
+        { instanceId: "X2", pinName: "P2" },
+      ],
+    },
+    {
+      id: "top-net-vout",
+
+      terminals: [
+        { instanceId: "top-port-vout", pinName: "P" },
+        { instanceId: "X1", pinName: "B" },
+        { instanceId: "X2", pinName: "P1" },
+      ],
+    },
+    {
+      id: "top-net-vdd",
+
+      terminals: [{ instanceId: "I1", pinName: "+" }],
+    },
+    {
+      id: "top-net-ground",
+
+      terminals: [{ instanceId: "I1", pinName: "-" }],
+    },
+  );
+  claimNet(top, "top-net-vin", "VIN");
+  claimNet(top, "top-net-vout", "VOUT");
+  claimNet(top, "top-net-vdd", "VDD", "global");
+  claimNet(top, "top-net-ground", "0", "global");
+
+  const leaf = createEmptyDocument("leaf", "leaf");
+  leaf.netlist = {
+    name: "leaf",
+    formalParameters: [{ name: "scale", defaultValue: "1" }],
+    terminals: [
+      {
+        id: "leaf-terminal-a",
+        name: "A",
+        netId: "leaf-net-a",
+        direction: "input",
+        interfaceInstanceIds: ["leaf-port-a"],
+      },
+      {
+        id: "leaf-terminal-b",
+        name: "B",
+        netId: "leaf-net-b",
+        direction: "output",
+        interfaceInstanceIds: ["leaf-port-b"],
+      },
+    ],
+  };
+  leaf.instances.push(
+    { id: "leaf-port-a", symbolId: "port", placement: null },
+    { id: "leaf-port-b", symbolId: "port", placement: null },
+    {
+      id: "C1",
+      symbolId: "capacitor",
+      placement: null,
+      reference: "C1",
+      netlist: {
+        binding: { kind: "primitive", deviceClass: "capacitor" },
+        parameters: { value: "2p" },
+      },
+    },
+    {
+      id: "R1",
+      symbolId: "resistor",
+      placement: null,
+      reference: "R1",
+      netlist: {
+        binding: { kind: "primitive", deviceClass: "resistor" },
+        parameters: { value: "1k" },
+      },
+    },
+  );
+  leaf.nets.push(
+    {
+      id: "leaf-net-a",
+
+      terminals: [
+        { instanceId: "leaf-port-a", pinName: "P" },
+        { instanceId: "C1", pinName: "1" },
+        { instanceId: "R1", pinName: "1" },
+      ],
+    },
+    {
+      id: "leaf-net-b",
+
+      terminals: [
+        { instanceId: "leaf-port-b", pinName: "P" },
+        { instanceId: "C1", pinName: "2" },
+      ],
+    },
+  );
+  claimNet(leaf, "leaf-net-a", "A");
+  claimNet(leaf, "leaf-net-b", "B");
+  leaf.noConnects.push({
+    id: "leaf-r1-open",
+    endpoint: { kind: "terminal", instanceId: "R1", pinName: "2" },
+  });
+  project.documents.push(leaf);
+  project.externalSubcircuitDefinitions.push({
+    id: "external-master",
+    name: "EXT_MASTER",
+    terminals: [
+      { id: "external-p1", name: "P1", direction: "passive" },
+      { id: "external-p2", name: "P2", direction: "passive" },
+    ],
+    formalParameters: [],
+    interfaceStatus: "declared",
+  });
+  return project;
+}
+
+function normalizedSemantics(ir: DesignNetlistIR) {
+  const topCellName = ir.cells.find((cell) => cell.id === ir.topCellId)?.name;
+  return {
+    topCellName,
+    globals: ir.globals,
+    externalMasters: (ir.externalMasters ?? []).map((master) => ({
+      name: master.name,
+      terminals: master.terminals.map((terminal) => ({
+        name: terminal.name,
+        direction: terminal.direction,
+      })),
+      formalParameters: master.formalParameters,
+    })),
+    cells: ir.cells.map((cell) => ({
+      name: cell.name,
+      ports: cell.ports.map((port) => ({
+        name: port.name,
+        netName: port.netName,
+      })),
+      nets: cell.nets
+        .map((net) => ({ name: net.name, scope: net.scope }))
+        .toSorted((left, right) => left.name.localeCompare(right.name)),
+      formalParameters: cell.formalParameters ?? [],
+      instances: cell.instances.map((instance) => ({
+        reference: instance.reference,
+        deviceClass: instance.deviceClass,
+        target: instance.target,
+        nodes: instance.nodes,
+        parameters: instance.parameters,
+      })),
+    })),
+  };
+}
+
+describe("structural SPICE round trip", () => {
+  it("re-exports an imported reviewed SKY130 X call with omitted count defaults", async () => {
+    const source = [
+      "SKY130 reviewed round trip",
+      ".subckt amp D G S B",
+      "XMBIASN D G S B sky130_fd_pr__nfet_01v8 l=0.15 w=1",
+      ".ends amp",
+      ".end",
+      "",
+    ].join("\n");
+    const imported = await importSpiceSources(
+      [
+        {
+          path: "sky130-roundtrip.spi",
+          bytes: new TextEncoder().encode(source),
+        },
+      ],
+      "sky130-roundtrip.spi",
+    );
+
+    expect(imported.successful).toBe(true);
+    const project = imported.project!;
+    const instance = project.documents
+      .flatMap((document) => document.instances)
+      .find((candidate) => candidate.reference === "XMBIASN")!;
+    expect(instance).toMatchObject({
+      reference: "XMBIASN",
+      symbolId: "nmos",
+      netlist: {
+        binding: { kind: "external-subcircuit" },
+        parameters: { l: "150n", w: "1u" },
+      },
+    });
+    expect(project.externalSubcircuitDefinitions[0]!.formalParameters).toEqual([
+      { name: "w", defaultValue: "1" },
+      { name: "l", defaultValue: "0.15" },
+      { name: "nf", defaultValue: "1" },
+      { name: "m", defaultValue: "1" },
+    ]);
+
+    const analysis = analyzeDesignNetlist(project, { format: "spice" });
+    expect(analysis.diagnostics).toEqual([]);
+    expect(analysis.ir).not.toBeNull();
+    const printed = printSpiceNetlist(analysis.ir!);
+    expect(printed).toContain(
+      "XMBIASN D G S B sky130_fd_pr__nfet_01v8 l=0.15 w=1",
+    );
+    expect(printed).not.toContain("XXMBIASN");
+    expect(printed).not.toMatch(/\bnf=/u);
+    expect(printed).not.toMatch(/\bm=/u);
+
+    const reparsed = await importSpiceSources(
+      [
+        {
+          path: "sky130-reexport.spi",
+          bytes: new TextEncoder().encode(printed),
+        },
+      ],
+      "sky130-reexport.spi",
+    );
+    expect(reparsed.successful).toBe(true);
+    const reanalysis = analyzeDesignNetlist(reparsed.project!, {
+      format: "spice",
+    });
+    expect(reanalysis.diagnostics).toEqual([]);
+    expect(reanalysis.ir).not.toBeNull();
+    expect(normalizedSemantics(reanalysis.ir!)).toEqual(
+      normalizedSemantics(analysis.ir!),
+    );
+  });
+
+  it("imports an IHP SG13G2 xschem netlist as its reviewed devices and writes it back the same", async () => {
+    // Device lines as IHP-Open-PDK's xschem symbols write them.
+    const lines = [
+      "XM1 vout vin vss vss sg13_lv_nmos w=2u l=0.13u ng=1 m=1",
+      "XM2 vout vin vdd vdd sg13_lv_pmos w=4u l=0.13u ng=2 m=1",
+      "XQ1 vdd vin vout vss npn13G2 le=900e-9 we=70.0n Nx=4",
+      "XQ2 vss vss vout pnpMPA a=1.4e-12 p=5.4e-06 m=1",
+      "XR1 vout vss vss rsil w=0.5e-6 l=5e-6 m=1",
+      "XC1 vout vss cap_cmim w=7.0e-6 l=7.0e-6 m=1",
+    ];
+    const source = [
+      "IHP SG13G2 round trip",
+      ".subckt amp vin vout vdd vss",
+      ...lines,
+      ".ends amp",
+      ".end",
+      "",
+    ].join("\n");
+    const imported = await importSpiceSources(
+      [{ path: "sg13g2.spi", bytes: new TextEncoder().encode(source) }],
+      "sg13g2.spi",
+    );
+    expect(imported.successful, JSON.stringify(imported.diagnostics)).toBe(
+      true,
+    );
+    const project = imported.project!;
+    const instance = (reference: string) =>
+      project.documents
+        .flatMap((document) => document.instances)
+        .find((candidate) => candidate.reference === reference)!;
+    for (const [reference, symbolId] of [
+      ["XM1", "nmos"],
+      ["XM2", "pmos"],
+      ["XQ1", "npn"],
+      ["XQ2", "pnp"],
+      ["XR1", "resistor"],
+      ["XC1", "capacitor"],
+    ] as const)
+      expect(instance(reference), reference).toMatchObject({
+        symbolId,
+        netlist: { binding: { kind: "external-subcircuit" } },
+      });
+    // Geometry stays in the metres it was written in.
+    expect(instance("XM1").netlist?.parameters).toMatchObject({
+      w: "2u",
+      l: "0.13u",
+    });
+
+    const analysis = analyzeDesignNetlist(project, { format: "spice" });
+    expect(analysis.diagnostics).toEqual([]);
+    const printed = printSpiceNetlist(analysis.ir!);
+    for (const line of lines) expect(printed).toContain(line);
+  });
+
+  it("re-imports its own M-card export of a SKY130 MOS as the X call the SKY130 profile runs (#1249)", async () => {
+    // As the Gallery entry's netlist reads: no .model card for either part.
+    const source = [
+      "SKY130 M-card round trip",
+      ".subckt amp D G S B VDD",
+      "M1 D G S B sky130_fd_pr__nfet_01v8 l=150n m=1 nf=1 w=1u",
+      "M2 D G VDD VDD sky130_fd_pr__pfet_01v8 l=150n m=1 nf=1 w=2u",
+      ".ends amp",
+      ".end",
+      "",
+    ].join("\n");
+    const imported = await importSpiceSources(
+      [{ path: "m-card.spi", bytes: new TextEncoder().encode(source) }],
+      "m-card.spi",
+    );
+    expect(imported.successful, JSON.stringify(imported.diagnostics)).toBe(
+      true,
+    );
+    const analysis = analyzeDesignNetlist(imported.project!, {
+      format: "spice",
+    });
+    expect(analysis.diagnostics).toEqual([]);
+    const printed = printSpiceNetlist(analysis.ir!);
+    // The SKY130 library defines both names as subcircuits: the M cards come
+    // back as the reviewed X calls, in micrometres.
+    expect(printed).toContain(
+      "XM1 D G S B sky130_fd_pr__nfet_01v8 l=0.15 w=1 nf=1 m=1",
+    );
+    expect(printed).toContain(
+      "XM2 D G VDD VDD sky130_fd_pr__pfet_01v8 l=0.15 w=2 nf=1 m=1",
+    );
+    expect(printed).not.toMatch(/^M\S* /mu);
+
+    const reparsed = await importSpiceSources(
+      [
+        {
+          path: "m-card-reexport.spi",
+          bytes: new TextEncoder().encode(printed),
+        },
+      ],
+      "m-card-reexport.spi",
+    );
+    expect(reparsed.successful).toBe(true);
+    const reanalysis = analyzeDesignNetlist(reparsed.project!, {
+      format: "spice",
+    });
+    expect(normalizedSemantics(reanalysis.ir!)).toEqual(
+      normalizedSemantics(analysis.ir!),
+    );
+    // What `verify` with expectedNetlist does: against the M-card file it
+    // came from, the topology is equal; the only differences are the two
+    // devices' binding style, a card there and a call here.
+    const compile = (text: string) =>
+      compileSpiceSources(
+        [{ path: "comparison.cir", bytes: new TextEncoder().encode(text) }],
+        "comparison.cir",
+      );
+    const [actual, expected] = await Promise.all([
+      compile(printed),
+      compile(source),
+    ]);
+    const comparison = compareCircuitIR(actual.ir!, expected.ir!, "amp");
+    expect(comparison.topology).toBe("equal");
+    expect(
+      comparison.differences.map(({ kind, object }) => [kind, object]),
+    ).toEqual([
+      ["binding", "m1"],
+      ["binding", "m2"],
+    ]);
+    expect(
+      compareCircuitIR(actual.ir!, expected.ir!, "amp", undefined, {
+        bindings: false,
+      }).status,
+    ).toBe("equal");
+  });
+
+  it("keeps Cadence bang spelling separate from global electrical identity", async () => {
+    const imported = await importSpiceSources(
+      [
+        {
+          path: "cadence.spi",
+          bytes: new TextEncoder().encode(
+            "Cadence bang\nV1 vdd! 0 DC 1.8\n.end\n",
+          ),
+        },
+      ],
+      "cadence.spi",
+      {},
+      { namingProfile: "cadence-bang" },
+    );
+    expect(imported.successful).toBe(true);
+
+    const native = analyzeDesignNetlist(imported.project!, {
+      format: "spice",
+      namingProfile: "native",
+    });
+    const cadence = analyzeDesignNetlist(imported.project!, {
+      format: "spice",
+      namingProfile: "cadence-bang",
+    });
+
+    expect(native.ir?.globals).toEqual(["0", "vdd"]);
+    expect(cadence.ir?.globals).toEqual(["0", "vdd!"]);
+    expect(printSpiceNetlist(native.ir!)).toContain(".global vdd");
+    expect(printSpiceNetlist(cadence.ir!)).toContain(".global vdd!");
+    expect(imported.project!.documents[0]!.connectivityEvidence).toContainEqual(
+      expect.objectContaining({
+        kind: "net-name-hint",
+        sourceName: "vdd!",
+      }),
+    );
+
+    imported.project!.documents[0]!.sourceStatus = "connectivity-modified";
+    expect(
+      analyzeDesignNetlist(imported.project!, {
+        format: "spice",
+        namingProfile: "cadence-bang",
+      }).ir,
+    ).toEqual(cadence.ir);
+  });
+
+  it("keeps capacitor plate pin order independent of schematic orientation", () => {
+    const project = structuralProject();
+    const capacitor = project.documents
+      .find((document) => document.id === "leaf")
+      ?.instances.find((instance) => instance.id === "C1");
+    expect(capacitor).toBeDefined();
+    if (!capacitor) return;
+    capacitor.placement = {
+      position: { x: 120, y: 80 },
+      rotation: 90,
+      mirror: "none",
+    };
+
+    const analysis = analyzeDesignNetlist(project);
+    expect(analysis.diagnostics).toEqual([
+      expect.objectContaining({ code: "GENERATED_NO_CONNECT_NODE" }),
+    ]);
+    const exported = analysis.ir?.cells
+      .find((cell) => cell.name === "leaf")
+      ?.instances.find((instance) => instance.reference === "C1");
+    expect(exported?.nodes).toEqual([
+      { pinName: "1", netName: "A" },
+      { pinName: "2", netName: "B" },
+    ]);
+    expect(printSpiceNetlist(analysis.ir!)).toContain("C1 A B 2p");
+    expect(printSpectreNetlist(analysis.ir!)).toContain(
+      "C1 (A B) capacitor c=2p",
+    );
+    expect(exported?.nodes).toHaveLength(2);
+  });
+
+  it("preserves a real Project's hierarchy, interfaces, globals, opens, and parameters", async () => {
+    const beforeAnalysis = analyzeDesignNetlist(structuralProject());
+    expect(beforeAnalysis.ir).not.toBeNull();
+    expect(beforeAnalysis.diagnostics).toEqual([
+      expect.objectContaining({ code: "GENERATED_NO_CONNECT_NODE" }),
+    ]);
+    const before = beforeAnalysis.ir!;
+    const text = printSpiceNetlist(before);
+    expect(text).toContain(".subckt leaf A B params: scale=1");
+    expect(text).toContain("R1 A NC0001 1k");
+
+    const imported = await importSpiceSources(
+      [
+        {
+          path: "roundtrip.spi",
+          bytes: new TextEncoder().encode(text),
+        },
+      ],
+      "roundtrip.spi",
+    );
+
+    expect(imported.successful).toBe(true);
+    expect(imported.project).not.toBeNull();
+    const after = analyzeDesignNetlist(imported.project!);
+    expect(after.diagnostics).toEqual([]);
+    expect(after.ir).not.toBeNull();
+    expect(normalizedSemantics(after.ir!)).toEqual(normalizedSemantics(before));
+  });
+});

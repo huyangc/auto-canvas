@@ -1,0 +1,407 @@
+import { describe, expect, it } from "vitest";
+import { compileSpiceSources } from "./compiler.js";
+import { compareCircuitIR } from "./comparison.js";
+
+async function ir(text: string) {
+  const r = await compileSpiceSources(
+    [{ path: "ref.cir", bytes: new TextEncoder().encode(text) }],
+    "ref.cir",
+  );
+  expect(r.successful, JSON.stringify(r.diagnostics)).toBe(true);
+  return r.ir!;
+}
+const reference = `.subckt amp IN OUT VDD VSS
+M7 OUT IN VSS VSS nfet w=10u l=1u
+R1 VDD OUT 10k
+.ends amp`;
+describe("read-only structural netlist comparison", () => {
+  const withValue = (value: string) => reference.replace("10k", value);
+  it.each([
+    ["0.1u", "100n"],
+    ["1u", "1000n"],
+    ["1mil", "25.4u"],
+    ["-2mil", "-50.8u"],
+    ["+001.200e-3", "1.2m"],
+    [".5MEGohm", "500k"],
+    ["1M", "0.001"],
+    ["-0u", "0"],
+    ["1e-400", "10e-401"],
+    ["1e400", "10e399"],
+    ["1e99999999999999999999", "10e99999999999999999998"],
+  ])("treats exact equivalent literals %s and %s as equal", async (a, b) => {
+    expect(
+      compareCircuitIR(await ir(withValue(a)), await ir(withValue(b)), "amp"),
+    ).toMatchObject({ status: "equal", differences: [], reasons: [] });
+  });
+  it.each([
+    ["1u", "1.001u"],
+    ["1e-400", "2e-400"],
+    ["9007199254740992", "9007199254740993"],
+    ["1.0000000000000001", "1"],
+    ["1e400", "2e400"],
+    ["1M", "1MEG"],
+    ["-1u", "1u"],
+  ])(
+    "keeps distinct literals %s and %s distinct without rounding evidence",
+    async (a, b) => {
+      const result = compareCircuitIR(
+        await ir(withValue(a)),
+        await ir(withValue(b)),
+        "amp",
+      );
+      expect(result).toMatchObject({ status: "different", reasons: [] });
+      expect(result.differences).toEqual([
+        {
+          kind: "parameter",
+          cell: "amp",
+          object: "r1.value",
+          actual: a,
+          expected: b,
+        },
+      ]);
+    },
+  );
+  it("reads R, C and L written end for end as the same device (#1296)", async () => {
+    const circuit = (lines: string[]) =>
+      ir([".subckt net A B C", ...lines, ".ends net"].join("\n"));
+    // A chain of two resistors through an unnamed node, a capacitor and an
+    // inductor, each written the other way round.
+    const expected = await circuit([
+      "R1 A mid 10k",
+      "R2 mid B 20k",
+      "C1 B C 1p",
+      "L1 C A 1n",
+      "D1 A C dmod",
+      ".model dmod d",
+    ]);
+    const swapped = await circuit([
+      "R1 net9 A 10k",
+      "R2 B net9 20k",
+      "C1 C B 1p",
+      "L1 A C 1n",
+      "D1 A C dmod",
+      ".model dmod d",
+    ]);
+    expect(compareCircuitIR(swapped, expected, "net")).toMatchObject({
+      topology: "equal",
+      differences: [],
+    });
+    // A diode has a polarity: written the other way it is another circuit.
+    const reversed = await circuit([
+      "R1 A mid 10k",
+      "R2 mid B 20k",
+      "C1 B C 1p",
+      "L1 C A 1n",
+      "D1 C A dmod",
+      ".model dmod d",
+    ]);
+    expect(compareCircuitIR(reversed, expected, "net").topology).toBe(
+      "different",
+    );
+  });
+  it("matches numeric units and ignores internal automatic names, not endpoints", async () => {
+    const expected = await ir(
+      reference
+        .replace("OUT IN", "internal IN")
+        .replace("VDD OUT", "VDD internal"),
+    );
+    const actual = await ir(
+      reference
+        .replace("OUT IN", "net42 IN")
+        .replace("VDD OUT", "VDD net42")
+        .replace("10k", "10000"),
+    );
+    expect(compareCircuitIR(actual, expected, "amp")).toMatchObject({
+      status: "equal",
+      differences: [],
+    });
+  });
+  it("locates gate, model, size, missing and extra device differences", async () => {
+    const expected = await ir(reference);
+    const actual = await ir(
+      reference
+        .replace("OUT IN", "OUT VSS")
+        .replace("nfet w=10u", "other w=20u")
+        .replace("R1", "R2"),
+    );
+    const result = compareCircuitIR(actual, expected, "amp");
+    expect(result.status).toBe("different");
+    expect(result.differences).toContainEqual(
+      expect.objectContaining({
+        kind: "connection",
+        object: "m7:1",
+        expected: ["m7:1", "port:in"],
+      }),
+    );
+    expect(result.differences).toContainEqual(
+      expect.objectContaining({ kind: "target", object: "m7" }),
+    );
+    expect(result.differences).toContainEqual(
+      expect.objectContaining({ kind: "parameter", object: "m7.w" }),
+    );
+    expect(result.differences.filter((d) => d.kind === "device")).toHaveLength(
+      2,
+    );
+  });
+  it("distinguishes Port order and global scope; never treats Port VDD as global VDD", async () => {
+    const expected = await ir(reference);
+    const actual = await ir(
+      `.global VDD\n${reference.replace("IN OUT VDD VSS", "OUT IN VDD VSS")}`,
+    );
+    const result = compareCircuitIR(actual, expected, "amp");
+    expect(result.status).toBe("different");
+    expect(result.differences.some((d) => d.kind === "port-order")).toBe(true);
+    expect(result.differences.some((d) => d.kind === "scope")).toBe(true);
+    expect(result.topology).toBe("different");
+  });
+  it("reports port order apart from topology, and skips it on request", async () => {
+    const expected = await ir(reference);
+    const actual = await ir(
+      reference.replace("IN OUT VDD VSS", "VDD VSS OUT IN"),
+    );
+    const result = compareCircuitIR(actual, expected, "amp");
+    expect(result).toMatchObject({
+      status: "different",
+      topology: "equal",
+      summary: "topology equal; 1 port-order difference",
+    });
+    expect(result.differences).toEqual([
+      {
+        kind: "port-order",
+        cell: "amp",
+        object: "ports",
+        actual: ["vdd", "vss", "out", "in"],
+        expected: ["in", "out", "vdd", "vss"],
+      },
+    ]);
+    expect(
+      compareCircuitIR(actual, expected, "amp", "amp", { portOrder: false }),
+    ).toMatchObject({ status: "equal", summary: "equal", differences: [] });
+    // A different port set is still an interface difference.
+    const renamed = await ir(reference.replaceAll("VSS", "GND"));
+    expect(
+      compareCircuitIR(renamed, expected, "amp", "amp", { portOrder: false })
+        .topology,
+    ).toBe("different");
+  });
+  it("reaches a reordered child Cell by port name, so its callers are not rewired", async () => {
+    const text = `.subckt child A B\nR1 A B 1k\n.ends child\n.subckt top I O\nX1 I O child\n.ends top`;
+    const reordered = text
+      .replace(".subckt child A B", ".subckt child B A")
+      .replace("X1 I O child", "X1 O I child");
+    const result = compareCircuitIR(await ir(reordered), await ir(text), "top");
+    expect(result).toMatchObject({ topology: "equal", comparedCells: 2 });
+    expect(result.differences).toEqual([
+      expect.objectContaining({ kind: "port-order", cell: "child" }),
+    ]);
+    // Calling the reordered Cell in the old order is a real rewiring.
+    const miswired = await ir(
+      text.replace(".subckt child A B", ".subckt child B A"),
+    );
+    expect(compareCircuitIR(miswired, await ir(text), "top").topology).toBe(
+      "different",
+    );
+  });
+  const sky130 = (card: string) => `.subckt amp IN OUT VDD VSS
+${card}
+R1 VDD OUT 10k
+.ends amp`;
+  it("pairs M1 with XM1 bound to the same device, and reads reviewed SKY130 micrometres", async () => {
+    // The Gallery's model binding against a redraw with the reviewed target.
+    const expected = await ir(
+      sky130("M1 OUT IN VSS VSS sky130_fd_pr__nfet_01v8 l=150n w=1u"),
+    );
+    const actual = await ir(
+      sky130("XM1 OUT IN VSS VSS sky130_fd_pr__nfet_01v8 l=0.15 w=1 nf=1 m=1"),
+    );
+    const result = compareCircuitIR(actual, expected, "amp");
+    expect(result).toMatchObject({
+      status: "different",
+      topology: "equal",
+      summary: "topology equal; 1 binding-style difference",
+      reasons: [],
+    });
+    expect(result.differences).toEqual([
+      {
+        kind: "binding",
+        cell: "amp",
+        object: "m1",
+        actual: "external-subcircuit",
+        expected: "model",
+      },
+    ]);
+    expect(
+      compareCircuitIR(actual, expected, "amp", "amp", { bindings: false }),
+    ).toMatchObject({ status: "equal", differences: [] });
+    // A really different length is still reported, as written.
+    const longer = await ir(
+      sky130("XM1 OUT IN VSS VSS sky130_fd_pr__nfet_01v8 l=0.18 w=1"),
+    );
+    expect(
+      compareCircuitIR(longer, expected, "amp", "amp", { bindings: false })
+        .differences,
+    ).toEqual([
+      {
+        kind: "parameter",
+        cell: "amp",
+        object: "m1.l",
+        actual: "0.18",
+        expected: "150n",
+      },
+    ]);
+    // Only the reviewed wrapper takes micrometres; a model card takes metres.
+    const metres = await ir(
+      sky130("M1 OUT IN VSS VSS sky130_fd_pr__nfet_01v8 l=0.15 w=1"),
+    );
+    expect(
+      compareCircuitIR(metres, expected, "amp").differences.map(
+        (difference) => difference.object,
+      ),
+    ).toEqual(["m1.l", "m1.w"]);
+    // SPICE's parallel multiplier is 1 when absent.
+    expect(
+      compareCircuitIR(
+        await ir(reference.replace("10k", "10k m=1")),
+        await ir(reference),
+        "amp",
+      ).status,
+    ).toBe("equal");
+  });
+  it("reads a 20 V device's own channel where a line leaves it out (#1486)", async () => {
+    const written = await ir(
+      sky130("XM1 OUT IN VSS VSS sky130_fd_pr__nfet_20v0 l=2.95 w=29.41 m=1"),
+    );
+    const countOnly = await ir(
+      sky130("XM1 OUT IN VSS VSS sky130_fd_pr__nfet_20v0 m=1"),
+    );
+    expect(compareCircuitIR(written, countOnly, "amp")).toMatchObject({
+      status: "equal",
+      differences: [],
+    });
+  });
+  it("keeps devices apart when their references collide or differ", async () => {
+    const expected = await ir(
+      sky130("M1 OUT IN VSS VSS sky130_fd_pr__nfet_01v8 l=150n w=1u"),
+    );
+    // M1 and XM1 are both present: each pairs by its own name.
+    const both = await ir(
+      sky130(
+        "M1 OUT IN VSS VSS sky130_fd_pr__nfet_01v8 l=150n w=1u\nXM1 OUT IN VSS VSS sky130_fd_pr__nfet_01v8 l=0.15 w=1",
+      ),
+    );
+    const extra = compareCircuitIR(both, expected, "amp").differences;
+    expect(extra.filter((d) => d.kind === "device")).toEqual([
+      {
+        kind: "device",
+        cell: "amp",
+        object: "xm1",
+        actual: true,
+        expected: false,
+      },
+    ]);
+    expect(extra.some((d) => d.kind === "binding")).toBe(false);
+    const other = await ir(
+      sky130("XM2 OUT IN VSS VSS sky130_fd_pr__nfet_01v8 l=0.15 w=1"),
+    );
+    expect(
+      compareCircuitIR(other, expected, "amp")
+        .differences.filter((d) => d.kind === "device")
+        .map((d) => d.object),
+    ).toEqual(["xm2", "m1"]);
+  });
+  it("compares type-only .model cards, and ignores declarations on request", async () => {
+    // An import round trip: the source declares polarity, the export does not.
+    const declared = await ir(
+      `${reference.replace("nfet", "nch")}\n.model nch nmos\n.model pch pmos`,
+    );
+    const exported = await ir(reference.replace("nfet", "nch"));
+    expect(compareCircuitIR(exported, declared, "amp")).toMatchObject({
+      status: "equal",
+      summary: "equal",
+      reasons: [],
+    });
+    const flipped = await ir(
+      `${reference.replace("nfet", "nch")}\n.model nch pmos`,
+    );
+    expect(compareCircuitIR(flipped, declared, "amp")).toMatchObject({
+      status: "different",
+      topology: "different",
+      differences: [
+        {
+          kind: "declaration",
+          cell: "amp",
+          object: "model nch",
+          actual: "pmos",
+          expected: "nmos",
+        },
+      ],
+    });
+    const bodies = await ir(`${reference}\n.model nfet nmos level=1`);
+    expect(
+      compareCircuitIR(bodies, bodies, "amp", "amp", { declarations: false }),
+    ).toMatchObject({ status: "equal", reasons: [] });
+  });
+  it("compares child definitions, not only instance calls", async () => {
+    const text = `.subckt child A B\nR1 A B 1k\n.ends child\n.subckt top I O\nX1 I O child\n.ends top`;
+    const result = compareCircuitIR(
+      await ir(text.replace("1k", "2k")),
+      await ir(text),
+      "top",
+    );
+    expect(result).toMatchObject({ status: "different", comparedCells: 2 });
+    expect(result.differences).toContainEqual(
+      expect.objectContaining({ cell: "child", kind: "parameter" }),
+    );
+  });
+  it("does not claim equality for expressions or model bodies", async () => {
+    const expression = await ir(reference.replace("10k", "{R}"));
+    // The wiring is still known, and the one-line summary says so.
+    expect(compareCircuitIR(expression, expression, "amp")).toMatchObject({
+      status: "inconclusive",
+      topology: "equal",
+      summary: "topology equal; 1 item needs manual comparison",
+    });
+    expect(
+      compareCircuitIR(expression, expression, "amp", "amp", {
+        parameters: false,
+      }).status,
+    ).toBe("equal");
+    const model = await ir(`${reference}\n.model nfet nmos level=1`);
+    expect(compareCircuitIR(model, model, "amp").status).toBe("inconclusive");
+  });
+  it("keeps over-budget literals inconclusive while retaining known differences", async () => {
+    const text = withValue("1".repeat(4097));
+    const expected = await ir(text);
+    const actual = await ir(text.replace("w=10u", "w=20u"));
+    const result = compareCircuitIR(actual, expected, "amp");
+    expect(result.status).toBe("inconclusive");
+    expect(result.reasons).toContainEqual(
+      expect.stringContaining("over-budget literal"),
+    );
+    expect(result.differences).toEqual([
+      {
+        kind: "parameter",
+        cell: "amp",
+        object: "m7.w",
+        actual: "20u",
+        expected: "10u",
+      },
+    ]);
+  });
+  it("reports a missing literal parameter rather than confusing it with zero", async () => {
+    const text = reference.replace("w=10u", "w=0");
+    const result = compareCircuitIR(
+      await ir(text.replace("w=0 ", "")),
+      await ir(text),
+      "amp",
+    );
+    expect(result.status).toBe("different");
+    expect(result.differences).toContainEqual({
+      kind: "parameter",
+      cell: "amp",
+      object: "m7.w",
+      actual: null,
+      expected: "0",
+    });
+  });
+});

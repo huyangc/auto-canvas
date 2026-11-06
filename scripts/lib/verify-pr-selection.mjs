@@ -1,0 +1,256 @@
+/** Which changed paths each step of `pnpm verify:pr` looks at. */
+
+/** What `pnpm format:check` covers: code, JSON and YAML, not Markdown. */
+/**
+ * The files `format:check` reads, by the same globs as package.json, so the
+ * merge queue and this check agree. docs/, fixtures/ and worker/ are not
+ * among them: generated files there, such as the Agent API artifacts and the
+ * Agent distribution manifest, keep their generator's layout.
+ */
+const FORMAT_CHECKED = [
+  /^apps\/.+\.(?:ts|tsx|json|css|html)$/u,
+  /^packages\/.+\.(?:ts|tsx|json)$/u,
+  /^references\/.+\.json$/u,
+  /^scripts\/.+\.mjs$/u,
+  /^[^/]+\.(?:json|yaml)$/u,
+];
+
+export function formattedPaths(paths) {
+  return paths.filter((path) =>
+    FORMAT_CHECKED.some((pattern) => pattern.test(path)),
+  );
+}
+
+/** Files `vitest related` can trace: workspace code and its tests. */
+export function unitSourcePaths(paths) {
+  return paths.filter(
+    (path) =>
+      /^(?:apps|packages|worker|scripts|containers)\//u.test(path) &&
+      /\.(?:[cm]?[jt]sx?)$/u.test(path) &&
+      !/(?:^|\/)e2e\//u.test(path) &&
+      !/\.generated\.[cm]?[jt]s$/u.test(path),
+  );
+}
+
+/** Import tracing cannot prove deleted sources, fixtures or build configuration. */
+export function unitTestCommand(plan, present) {
+  const sources = unitSourcePaths(plan.paths);
+  const untraceable = plan.paths.some(
+    (path) =>
+      !path.endsWith(".md") &&
+      !path.startsWith("docs/") &&
+      !path.startsWith("apps/editor/e2e/") &&
+      !sources.includes(path),
+  );
+  if (
+    plan.requiresFull ||
+    plan.groupPaths.highRisk?.length ||
+    untraceable ||
+    sources.some((path) => !present.includes(path))
+  ) {
+    return ["pnpm", "test:local"];
+  }
+  if (!sources.length) return null;
+  return [
+    "pnpm",
+    "exec",
+    "vitest",
+    "related",
+    "--run",
+    "--maxWorkers=2",
+    strictUnitRun(sources) ? "--no-passWithNoTests" : "--passWithNoTests",
+    ...sources,
+  ];
+}
+
+/** Built boundaries are explicit catalog obligations, independent of import tracing. */
+export function buildBoundaryGates(plan) {
+  return (plan.selectedGates ?? plan.gates).filter((gate) => gate.localBuild);
+}
+
+/**
+ * Files `pnpm lint` checks: workspace code, its tests and the browser specs
+ * (.oxlintrc.json leaves out generated code). A change to the lint
+ * configuration or to a tsconfig, which decides the types each file is
+ * linted with, checks them all.
+ */
+export function lintPaths(paths) {
+  if (
+    paths.some(
+      (path) =>
+        path === ".oxlintrc.json" || /(?:^|\/)tsconfig[^/]*\.json$/u.test(path),
+    )
+  )
+    return ["apps", "packages", "worker", "scripts"];
+  return paths.filter(
+    (path) =>
+      /^(?:apps|packages|worker|scripts)\//u.test(path) &&
+      /\.(?:[cm]?[jt]sx?)$/u.test(path),
+  );
+}
+
+/**
+ * Whether the unit step runs strictly. `vitest related` passes when it finds
+ * no test, as a change no test imports needs, but that also passes a
+ * describe left empty by deleting its last case, which the full run in the
+ * merge queue fails ("No test found in suite"). A changed test file is
+ * always found, so a change with one runs strictly.
+ */
+export function strictUnitRun(paths) {
+  return paths.some((path) => /\.test\.[cm]?[jt]sx?$/u.test(path));
+}
+
+/**
+ * Local census groups affected by drawing contracts and editor paths.
+ */
+function censusGroup(path) {
+  if (/\.(?:test|spec)\.[cm]?[jt]sx?$/u.test(path)) return [];
+  // Schema, codecs, device bindings, symbols and transaction validation can
+  // affect every historical drawing path, including the real Gallery insert.
+  if (
+    /^packages\/(?:model|devices|project-protocol|symbols|edit-engine)\/src\//u.test(
+      path,
+    ) ||
+    path.startsWith("packages/components/definitions/") ||
+    path.startsWith("apps/editor/census/") ||
+    path === "scripts/gallery-census.mjs"
+  )
+    return ["copy", "insert", "netlist", "transform"];
+  if (
+    path.startsWith("apps/editor/src/features/clipboard/") ||
+    path.startsWith("apps/editor/src/features/component-insert/") ||
+    path === "apps/editor/src/features/editor-shell/gallery-import.ts" ||
+    path ===
+      "apps/editor/src/features/editor-shell/gallery-example-commands.ts" ||
+    path === "apps/editor/src/document/project-import-normalization.ts" ||
+    path === "apps/editor/src/agent/browser-agent-project-host.ts" ||
+    path === "apps/editor/src/agent/workspace-copy.ts"
+  )
+    return ["copy", "insert"];
+  if (path === "packages/derived/src/instance-label-placement.ts")
+    return ["transform"];
+  // The census exports historical drawings as SPICE, not simulation source or
+  // VACASK results. Unknown design helpers still get the conservative check.
+  if (
+    path.startsWith("packages/netlist/src/") &&
+    !/^packages\/netlist\/src\/(?:simulation-|vacask-)/u.test(path)
+  )
+    return ["netlist"];
+  return [];
+}
+
+export function censusPaths(paths) {
+  return paths.filter((path) => censusGroup(path).length > 0);
+}
+
+/**
+ * A path may affect several groups: copying/placement, real Gallery
+ * open/insert, label transforms and netlist extraction with its Gallery mark.
+ */
+export function censusChecks(paths) {
+  const checks = new Set();
+  for (const path of paths) {
+    for (const group of censusGroup(path)) checks.add(group);
+  }
+  return [...checks].sort();
+}
+
+/**
+ * The soft size limit for product files (#1537): a changed one longer than
+ * this gets a warning, never a failure, and a reviewer decides whether to
+ * split it.
+ */
+export const PRODUCT_FILE_LINE_LIMIT = 1000;
+
+/**
+ * Product code: what the apps, packages, Worker and simulation containers
+ * ship. Tests, browser specs, test support and fixtures, the Gallery census,
+ * generated files and declarations are not.
+ */
+function isProductSource(path) {
+  return (
+    /^(?:apps|packages|worker|containers)\//u.test(path) &&
+    /\.[cm]?[jt]sx?$/u.test(path) &&
+    !/\.d\.[cm]?ts$/u.test(path) &&
+    !/\.(?:test|spec|test-support|test-fixture)\.[cm]?[jt]sx?$/u.test(path) &&
+    !/(?:^|\/)(?:e2e|census|test-support|test-fixtures)\//u.test(path) &&
+    !/\.generated\.[cm]?[jt]s$/u.test(path)
+  );
+}
+
+/**
+ * The changed product files past the soft size limit, longest first, each
+ * with its length in lines. `readText(path)` reads a file.
+ */
+export function oversizedProductFiles(paths, readText) {
+  return paths
+    .filter(isProductSource)
+    .map((path) => {
+      const text = readText(path);
+      const lines = text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
+      return { path, lines };
+    })
+    .filter((file) => file.lines > PRODUCT_FILE_LINE_LIMIT)
+    .sort(
+      (left, right) =>
+        right.lines - left.lines || left.path.localeCompare(right.path),
+    );
+}
+
+/** Spec files under the editor's Playwright directory. */
+export function browserSpecPaths(paths) {
+  return paths.filter((path) =>
+    /^apps\/editor\/e2e\/.+\.spec\.ts$/u.test(path),
+  );
+}
+
+/**
+ * Line numbers, in the new file, that a unified diff with `-U0` touches. A
+ * pure deletion counts as the line it followed.
+ */
+export function changedLines(diffText) {
+  const lines = [];
+  for (const match of diffText.matchAll(
+    /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/gmu,
+  )) {
+    const start = Number(match[1]);
+    const count = match[2] === undefined ? 1 : Number(match[2]);
+    if (count === 0) lines.push(Math.max(start, 1));
+    else
+      for (let line = start; line < start + count; line += 1) lines.push(line);
+  }
+  return lines;
+}
+
+/**
+ * Where a Playwright spec declares its tests: a `test(` whose first argument
+ * is the title, so a `test.skip(condition, …)` or `test.slow()` inside a body
+ * does not count, nor does `test.describe(`.
+ */
+export function testStartLines(source) {
+  return source
+    .split("\n")
+    .flatMap((text, index) =>
+      /^\s*test(?:\.(?:only|skip|fixme|fail))?\(\s*["'`]/u.test(text)
+        ? [index + 1]
+        : [],
+    );
+}
+
+/**
+ * The browser cases a change touches in one spec file, as Playwright
+ * `file:line` arguments: each test a changed line falls in, counted from its
+ * `test(` to the next one. A change above the first test, such as an import
+ * or a helper the tests share, runs the whole file.
+ */
+export function changedBrowserCases(file, source, lines) {
+  if (!lines.length) return [];
+  const starts = testStartLines(source);
+  if (!starts.length || lines.some((line) => line < starts[0])) return [file];
+  const touched = new Set(
+    lines.map((line) => starts.findLast((start) => start <= line)),
+  );
+  return [...touched]
+    .sort((left, right) => left - right)
+    .map((line) => `${file}:${line}`);
+}

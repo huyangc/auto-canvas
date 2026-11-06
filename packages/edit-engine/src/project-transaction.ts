@@ -1,0 +1,1624 @@
+import {
+  ComponentDefinitionSchema,
+  ComponentLibraryOriginSchema,
+  isFrozenSnapshot,
+  ComponentAuthoringDraftSchema,
+  ExternalSubcircuitDefinitionSchema,
+  SourceFileRecordSchema,
+  SchematicDocumentSchema,
+  ProjectSimulationFolderSchema,
+  ProjectModelSourceSchema,
+  ModelSourceAuthoringDraftsSchema,
+  ModelSourceDraftSchema,
+  CellSymbolPresentationSchema,
+  SimulationInputPathSchema,
+  SimulationRawFileSchema,
+  SimulationRawDependencySchema,
+  flattenRichText,
+  circuitComponentTerminals,
+  circuitComponentIssues,
+  CircuitComponentMappingError,
+  plainNameDocument,
+  type CircuitProject,
+  type RouteEndpoint,
+  type SchematicDocument,
+} from "@icm/model";
+import { routeEnd } from "@icm/model";
+import { bindsProjectCell, resolveReviewedExternalBinding } from "@icm/devices";
+import { resolveEndpointPoint } from "@icm/derived";
+import {
+  builtInSymbols,
+  createProjectSymbolResolver,
+  externalSubcircuitSymbolId,
+  hierarchicalSymbolId,
+  referencedProjectSymbolIds,
+  resolvePdkSymbolMappingForTerminalOrder,
+  type SymbolResolver,
+} from "@icm/symbols";
+import { z } from "zod";
+import { CircuitAuthoringInputSchema } from "./circuit-authoring.js";
+import { collectProjectModelSources } from "@icm/netlist";
+import {
+  planModelSourceApply,
+  ModelSourceApplyError,
+  modelSourceMigrationResolver,
+} from "./model-source-planner.js";
+import { reviewedExternalDefinitionEditIssue } from "./hierarchy-planner.js";
+
+import {
+  MAX_SCHEMATIC_EDITS_PER_TRANSACTION,
+  SchematicEditSchema,
+  type EditActor,
+  type SchematicEdit,
+} from "./edit-schema.js";
+import { executeTransaction } from "./transaction.js";
+import { diffDocumentObjectIds } from "./history.js";
+import {
+  CellSignalMigrationEditSchema,
+  applyCellSignalMigration,
+} from "./cell-signal-migration.js";
+import {
+  parseProjectSnapshot,
+  validateProjectResult,
+} from "./project-snapshot.js";
+import type { PreparedTransaction } from "./prepared-transaction.js";
+import { planInstanceSymbolGeometryRouteFollow } from "./transaction-route-follow.js";
+import {
+  projectDrawnGeometry,
+  redrawStretchedRoutesClear,
+} from "./stretched-route-clearance.js";
+import { planInstanceLabelReflow } from "./caller-label-reflow.js";
+import type {
+  AppliedTransaction,
+  EditDiagnostic,
+  EditTransactionResult,
+} from "./transaction-result.js";
+
+export const ApplyModelSourceEditSchema = z.strictObject({
+  kind: z.literal("apply_model_source"),
+  source: ProjectModelSourceSchema,
+  // Interface synchronization can include siblings whose authoring is unapplied.
+  authoringDefinitionIds: z.array(z.string().min(1)).max(256).optional(),
+  transform: z
+    .strictObject({
+      language: z.enum(["spice", "spectre"]).optional(),
+      process: z
+        .enum(["abstract", "sky130", "sg13g2", "tsmc28", "tsmc180", "custom"])
+        .optional(),
+    })
+    .optional(),
+  definitions: z
+    .array(
+      z.strictObject({
+        definitionId: z.string().min(1),
+        entry: z.string().min(1),
+        portMap: z
+          .record(z.string().min(1), z.string().min(1).nullable())
+          .optional(),
+        symbol: ComponentDefinitionSchema.nullable().optional(),
+        authoring: CircuitAuthoringInputSchema.optional(),
+        terminalDirections: z
+          .record(
+            z.string().min(1),
+            z.enum(["input", "output", "inout", "passive"]),
+          )
+          .optional(),
+        presentation: CellSymbolPresentationSchema.optional(),
+        callers: z
+          .array(
+            z.strictObject({
+              documentId: z.string().min(1),
+              instanceId: z.string().min(1),
+              expectedSymbolId: z.string().min(1),
+            }),
+          )
+          .max(1024)
+          .optional(),
+      }),
+    )
+    .min(1)
+    .max(256),
+});
+
+export const ProjectStructureEditSchema = z.discriminatedUnion("kind", [
+  CellSignalMigrationEditSchema,
+  z.strictObject({
+    kind: z.literal("associate_component_library"),
+    symbolId: z.string().min(1),
+    definitionId: z.string().min(1).optional(),
+    expectedOrigin: ComponentLibraryOriginSchema.nullable(),
+    origin: ComponentLibraryOriginSchema,
+  }),
+  z.strictObject({
+    kind: z.literal("discard_model_source_draft"),
+    sourceId: z.string().min(1),
+    expectedRevision: z.number().int().nonnegative(),
+    expectedDraft: ModelSourceDraftSchema,
+    definitionIds: z.array(z.string().min(1)).min(1).max(256).optional(),
+  }),
+  z.strictObject({
+    kind: z.literal("save_component_authoring_draft"),
+    draft: ComponentAuthoringDraftSchema,
+    expectedText: z.string().nullable(),
+  }),
+  z.strictObject({
+    kind: z.literal("remove_component_authoring_draft"),
+    draftId: z.string().min(1),
+    expectedText: z.string(),
+  }),
+  z.strictObject({
+    kind: z.literal("capture_component_definition"),
+    definition: ComponentDefinitionSchema,
+  }),
+  ApplyModelSourceEditSchema,
+  z.strictObject({
+    kind: z.literal("upsert_model_source"),
+    source: ProjectModelSourceSchema,
+  }),
+  z.strictObject({
+    kind: z.literal("save_model_source_draft"),
+    sourceId: z.string().min(1),
+    expectedRevision: z.number().int().nonnegative(),
+    language: z.enum(["spice", "spectre"]).optional(),
+    entry: SimulationInputPathSchema,
+    files: z.array(SimulationRawFileSchema).min(1).max(256),
+    dependencies: z.array(SimulationRawDependencySchema).max(256),
+    authoring: ModelSourceAuthoringDraftsSchema.optional(),
+  }),
+  z.strictObject({
+    kind: z.literal("reorder_documents"),
+    documentIds: z.array(z.string().min(1)).min(1),
+  }),
+  z.strictObject({
+    kind: z.literal("set_top_document"),
+    documentId: z.string().min(1),
+  }),
+  z.strictObject({
+    kind: z.literal("add_source_file"),
+    sourceFile: SourceFileRecordSchema,
+  }),
+  z.strictObject({
+    kind: z.literal("add_document"),
+    document: SchematicDocumentSchema,
+  }),
+  z.strictObject({
+    kind: z.literal("remove_document"),
+    documentId: z.string().min(1),
+  }),
+  z.strictObject({
+    kind: z.literal("rename_project"),
+    name: z.string().min(1).max(128),
+  }),
+  z.strictObject({
+    kind: z.literal("rename_document"),
+    documentId: z.string().min(1),
+    name: z.string().min(1).max(128),
+  }),
+  z.strictObject({
+    kind: z.literal("upsert_external_subcircuit_definition"),
+    definition: ExternalSubcircuitDefinitionSchema,
+  }),
+  z.strictObject({
+    kind: z.literal("remove_external_subcircuit_definition"),
+    definitionId: z.string().min(1),
+  }),
+  z.strictObject({
+    kind: z.literal("upsert_simulation_folder"),
+    folder: ProjectSimulationFolderSchema,
+  }),
+  z.strictObject({
+    kind: z.literal("remove_simulation_folder"),
+    folderId: z.string().min(1),
+  }),
+  z.strictObject({
+    kind: z.literal("transact_document"),
+    documentId: z.string().min(1),
+    expectedRevision: z.number().int().nonnegative(),
+    edits: z
+      .array(SchematicEditSchema)
+      .min(1)
+      .max(MAX_SCHEMATIC_EDITS_PER_TRANSACTION),
+  }),
+]);
+
+export const ProjectTransactionSchema = z.strictObject({
+  transactionId: z.string().min(1),
+  projectId: z.string().min(1),
+  expectedStructureRevision: z.number().int().nonnegative(),
+  actor: z.strictObject({
+    kind: z.enum(["human", "agent"]),
+    id: z.string().min(1),
+  }),
+  dryRun: z.boolean().optional(),
+  edits: z.array(ProjectStructureEditSchema).min(1).max(256),
+});
+
+export type ProjectStructureEdit = z.infer<typeof ProjectStructureEditSchema>;
+export type ProjectTransaction = z.infer<typeof ProjectTransactionSchema>;
+
+export type ProjectTransactionErrorCode =
+  | "INVALID_TRANSACTION"
+  | "PROJECT_MISMATCH"
+  | "STALE_STRUCTURE_REVISION"
+  | "OBJECT_NOT_FOUND"
+  | "EDIT_PRECONDITION"
+  | "DOCUMENT_TRANSACTION_REJECTED"
+  | "INVALID_RESULT";
+
+export interface AppliedProjectTransaction {
+  ok: true;
+  applied: boolean;
+  structureRevision: number;
+  proposedStructureRevision: number;
+  project: CircuitProject;
+  proposedProject: CircuitProject;
+  changedDocumentIds: readonly string[];
+  documentResults: readonly EditTransactionResult[];
+  diagnostics: readonly EditDiagnostic[];
+}
+
+export interface RejectedProjectTransaction {
+  ok: false;
+  applied: false;
+  structureRevision: number;
+  project: CircuitProject;
+  error: { code: ProjectTransactionErrorCode; message: string };
+  diagnostics: readonly EditDiagnostic[];
+}
+
+export type ProjectTransactionResult =
+  AppliedProjectTransaction | RejectedProjectTransaction;
+
+function rejectProjectTransaction(
+  project: CircuitProject,
+  code: ProjectTransactionErrorCode,
+  message: string,
+  diagnostics: readonly EditDiagnostic[] = [
+    { code, severity: "error", message },
+  ],
+): RejectedProjectTransaction {
+  return {
+    ok: false,
+    applied: false,
+    structureRevision: project.structureRevision,
+    project: isFrozenSnapshot(project) ? structuredClone(project) : project,
+    error: { code, message },
+    diagnostics,
+  };
+}
+
+export function rejectProjectStructureTransaction(
+  project: CircuitProject,
+  code: ProjectTransactionErrorCode,
+  message: string,
+): RejectedProjectTransaction {
+  return rejectProjectTransaction(project, code, message);
+}
+
+function replaceDocument(
+  project: CircuitProject,
+  document: SchematicDocument,
+): void {
+  const index = project.documents.findIndex(
+    (candidate) => candidate.id === document.id,
+  );
+  if (index < 0) throw new Error(`Document not found: ${document.id}`);
+  project.documents[index] = document;
+}
+
+interface ExternalCallerFailure {
+  /** What is wrong, independent of which Net, Route or flag shows it. */
+  key: string;
+  message: string;
+  objectIds: string[];
+  documentId: string;
+  instanceId: string;
+}
+
+/**
+ * Every place an external-subcircuit caller uses a pin its definition does not
+ * have, or draws a property-only terminal of its reviewed device. Each message
+ * names the part, its Cell and the ways out, since the part may be far from
+ * whatever edit is refused.
+ */
+function externalCallerValidationFailures(
+  project: CircuitProject,
+): ExternalCallerFailure[] {
+  const failures: ExternalCallerFailure[] = [];
+  const definitions = new Map(
+    project.externalSubcircuitDefinitions.map((definition) => [
+      definition.id,
+      definition,
+    ]),
+  );
+  for (const document of project.documents) {
+    for (const instance of document.instances) {
+      const binding = instance.netlist?.binding;
+      if (binding?.kind !== "external-subcircuit") continue;
+      const definition = definitions.get(binding.definitionId);
+      if (!definition) continue;
+      const reviewed =
+        definition.presentation || definition.implementation
+          ? undefined
+          : resolveReviewedExternalBinding(
+              definition.name,
+              definition.terminals.map((terminal) => terminal.name),
+              instance.symbolId,
+            );
+      const component = project.componentDefinitions?.find(
+        (item) => item.symbol.id === instance.symbolId && item.circuitBinding,
+      );
+      const terminalBindings = component
+        ? circuitComponentTerminals(component, definition)
+        : reviewed?.terminals;
+      const allowed = new Set(
+        (terminalBindings
+          ? terminalBindings.map((terminal) => terminal.pinName)
+          : definition.terminals.map((terminal) => terminal.name)
+        ).map((name) => name.toLowerCase()),
+      );
+      const part = instance.reference ?? instance.id;
+      const where = `${part} in Cell ${document.name}`;
+      const failure = (
+        kind: "unknown-pin" | "property-pin-drawn",
+        pinName: string,
+        message: string,
+        objectIds: string[],
+      ): ExternalCallerFailure => ({
+        key: [
+          kind,
+          document.id,
+          instance.id,
+          definition.id,
+          pinName.toLowerCase(),
+        ].join("\u0000"),
+        message,
+        objectIds,
+        documentId: document.id,
+        instanceId: instance.id,
+      });
+      const references = [
+        ...document.nets.flatMap((net) =>
+          net.terminals
+            .filter((terminal) => terminal.instanceId === instance.id)
+            .map((terminal) => ({
+              pinName: terminal.pinName,
+              objectIds: [instance.id, net.id],
+              canvas: false,
+            })),
+        ),
+        ...document.routes.flatMap((route) =>
+          [route.start, routeEnd(route)].flatMap((endpoint) =>
+            endpoint.kind === "terminal" && endpoint.instanceId === instance.id
+              ? [
+                  {
+                    pinName: endpoint.pinName,
+                    objectIds: [instance.id, route.id],
+                    canvas: true,
+                  },
+                ]
+              : [],
+          ),
+        ),
+        ...document.noConnects.flatMap((noConnect) =>
+          noConnect.endpoint.instanceId === instance.id
+            ? [
+                {
+                  pinName: noConnect.endpoint.pinName,
+                  objectIds: [instance.id, noConnect.id],
+                  canvas: true,
+                },
+              ]
+            : [],
+        ),
+      ];
+      for (const reference of references) {
+        const pin = `${part}.${reference.pinName}`;
+        if (!allowed.has(reference.pinName.toLowerCase())) {
+          failures.push(
+            failure(
+              "unknown-pin",
+              reference.pinName,
+              `${where} uses pin ${reference.pinName}, which its model ${definition.name} does not have. Disconnect ${pin}, clear ${part}'s model, or delete ${part}.`,
+              reference.objectIds,
+            ),
+          );
+          continue;
+        }
+        const terminal = terminalBindings?.find(
+          (candidate) =>
+            candidate.pinName.toLowerCase() === reference.pinName.toLowerCase(),
+        );
+        if (reference.canvas && terminal?.interaction === "property") {
+          failures.push(
+            failure(
+              "property-pin-drawn",
+              reference.pinName,
+              `${where} has a Wire or No Connect at ${pin}, a property-only terminal of its model ${definition.name}. Remove it and choose the Net in Properties, clear ${part}'s model, or delete ${part}.`,
+              reference.objectIds,
+            ),
+          );
+        }
+      }
+    }
+  }
+  return failures;
+}
+
+/**
+ * The first external caller this transaction leaves invalid that was not
+ * already invalid before it. A part that is already wrong — a Var Cap bound
+ * to the SKY130 varactor before #1298 is wired at P1/P2, pins the varactor
+ * does not have — is reported by export where it is, and must not refuse
+ * every unrelated Project edit, in other Cells included. An edit that makes a
+ * caller wrong is still refused.
+ */
+export function introducedExternalCallerFailure(
+  before: CircuitProject,
+  after: CircuitProject,
+): ExternalCallerFailure | null {
+  const supplyFailure = changedPropertySupplyFailure(before, after);
+  if (supplyFailure) return supplyFailure;
+  const failures = externalCallerValidationFailures(after);
+  if (failures.length === 0) return null;
+  const existing = new Set(
+    externalCallerValidationFailures(before).map((failure) => failure.key),
+  );
+  return failures.find((failure) => !existing.has(failure.key)) ?? null;
+}
+
+/** A symbol change must retain implicit supply semantics or make its connection explicit. */
+function changedPropertySupplyFailure(
+  before: CircuitProject,
+  after: CircuitProject,
+): ExternalCallerFailure | null {
+  for (const document of before.documents) {
+    const nextDocument = after.documents.find((d) => d.id === document.id);
+    if (!nextDocument) continue;
+    for (const instance of document.instances) {
+      const binding = instance.netlist?.binding;
+      if (binding?.kind !== "external-subcircuit") continue;
+      const previousArtwork = before.componentDefinitions?.find(
+        (component) => component.symbol.id === instance.symbolId,
+      );
+      const next = nextDocument.instances.find((i) => i.id === instance.id);
+      if (
+        !next ||
+        next.netlist?.binding?.kind !== "external-subcircuit" ||
+        next.netlist.binding.definitionId !== binding.definitionId
+      )
+        continue;
+      const nextArtwork = after.componentDefinitions?.find(
+        (component) => component.symbol.id === next.symbolId,
+      );
+      const definition = after.externalSubcircuitDefinitions.find(
+        (d) => d.id === binding.definitionId,
+      );
+      for (const previousMapping of previousArtwork?.circuitBinding
+        ?.terminals ?? []) {
+        if (!("supply" in previousMapping)) continue;
+        const terminal = definition?.terminals.find(
+          (t) => t.id === previousMapping.terminalId,
+        );
+        if (!terminal) continue;
+        const nextMapping = nextArtwork?.circuitBinding?.terminals.find(
+          (t) => t.terminalId === terminal.id,
+        );
+        if (
+          (nextMapping &&
+            "supply" in nextMapping &&
+            nextMapping.supply === previousMapping.supply) ||
+          nextDocument.nets.some((net) =>
+            net.terminals.some(
+              (endpoint) =>
+                endpoint.instanceId === instance.id &&
+                endpoint.pinName === terminal.name,
+            ),
+          )
+        )
+          continue;
+        const part = next.reference ?? next.id;
+        return {
+          key: [
+            "property-supply-lost",
+            document.id,
+            instance.id,
+            definition!.id,
+            terminal.id,
+          ].join("\u0000"),
+          message: `circuitBinding.${terminal.name}: ${part} in Cell ${nextDocument.name} has a property supply; keep a compatible mapping or explicitly connect ${part}.${terminal.name} before switching artwork`,
+          objectIds: [instance.id],
+          documentId: document.id,
+          instanceId: instance.id,
+        };
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * A caller's wiring follow, naming beside its wires each caller with a wire
+ * on a pin that moved (#1320). The pins moved with the Cell's symbol, though
+ * the Instance itself is unchanged, so a receipt that listed only the wires
+ * left out which blocks they belong to.
+ */
+function withRedrawnCallers(
+  result: AppliedTransaction,
+  before: { document: SchematicDocument; resolver: SymbolResolver },
+  resolver: SymbolResolver,
+  callerIds: ReadonlySet<string>,
+): AppliedTransaction {
+  const changed = new Set(result.diff.changedObjectIds);
+  const moved = (end: RouteEndpoint) => {
+    const from = resolveEndpointPoint(before.document, before.resolver, end);
+    const to = resolveEndpointPoint(result.document, resolver, end);
+    return !from || !to || from.x !== to.x || from.y !== to.y;
+  };
+  const callers = result.document.routes.flatMap((route) =>
+    changed.has(route.id)
+      ? [route.start, routeEnd(route)].flatMap((end) =>
+          end.kind === "terminal" && callerIds.has(end.instanceId) && moved(end)
+            ? [end.instanceId]
+            : [],
+        )
+      : [],
+  );
+  if (!callers.length) return result;
+  return {
+    ...result,
+    diff: {
+      ...result.diff,
+      changedObjectIds: [
+        ...new Set([...result.diff.changedObjectIds, ...callers]),
+      ].sort(),
+    },
+  };
+}
+
+export interface ProjectTransactionOptions {
+  /** In-process, engine-owned document calculations from a compound planner. */
+  readonly preparedTransactions?: readonly PreparedTransaction[];
+  /**
+   * Edits that move a caller's labels its redrawn wiring newly strikes
+   * (#1366), given the caller before the change and after its wiring
+   * follow. The editor supplies its label arrangement; without one, labels
+   * stay where they are.
+   */
+  readonly arrangeStruckLabels?: (
+    before: { document: SchematicDocument; resolver: SymbolResolver },
+    after: SchematicDocument,
+    resolver: SymbolResolver,
+  ) => readonly SchematicEdit[];
+}
+
+/**
+ * Applies structural and existing per-Document edits to one cloned Project.
+ * Intermediate values may temporarily be incomplete (for example, a child is
+ * added before its parent Instance); only the final Project is committed and
+ * validated. No caller receives a partially applied value.
+ */
+export function executeProjectTransaction(
+  sourceProject: CircuitProject,
+  input: ProjectTransaction | unknown,
+  options: ProjectTransactionOptions = {},
+): ProjectTransactionResult {
+  try {
+    return applyProjectTransaction(sourceProject, input, options);
+  } catch (error) {
+    if (error instanceof CircuitComponentMappingError)
+      return rejectProjectTransaction(
+        sourceProject,
+        "INVALID_RESULT",
+        error.message,
+      );
+    throw error;
+  }
+}
+
+function applyProjectTransaction(
+  sourceProject: CircuitProject,
+  input: ProjectTransaction | unknown,
+  options: ProjectTransactionOptions,
+): ProjectTransactionResult {
+  const project = parseProjectSnapshot(sourceProject);
+  const parsed = ProjectTransactionSchema.safeParse(input);
+  if (!parsed.success) {
+    return rejectProjectTransaction(
+      project,
+      "INVALID_TRANSACTION",
+      "Project transaction schema validation failed",
+      parsed.error.issues.map((issue) => ({
+        code: "INVALID_TRANSACTION",
+        severity: "error" as const,
+        message: issue.message,
+        path: issue.path.map((segment) =>
+          typeof segment === "symbol"
+            ? (segment.description ?? "symbol")
+            : segment,
+        ),
+      })),
+    );
+  }
+  const transaction = parsed.data;
+  if (transaction.projectId !== project.id) {
+    return rejectProjectTransaction(
+      project,
+      "PROJECT_MISMATCH",
+      `Transaction targets Project ${transaction.projectId}, not ${project.id}`,
+    );
+  }
+  if (transaction.expectedStructureRevision !== project.structureRevision) {
+    return rejectProjectTransaction(
+      project,
+      "STALE_STRUCTURE_REVISION",
+      `Expected Project structure revision ${transaction.expectedStructureRevision}, found ${project.structureRevision}`,
+    );
+  }
+
+  const candidate = structuredClone(project);
+  const changedDocumentIds = new Set<string>();
+  const documentResults: EditTransactionResult[] = [];
+  const explicitlyTouchedDocumentIds = new Set<string>();
+  const cellSymbolChangedDocumentIds = new Set<string>();
+  const externalSymbolChangedIds = new Set<string>();
+  let structuralChange = false;
+  // Only the shared Apply planner may replace an existing executable owner.
+  const plannedModelWrites = new Set<ProjectStructureEdit>();
+
+  for (
+    let editIndex = 0;
+    editIndex < transaction.edits.length;
+    editIndex += 1
+  ) {
+    const edit = transaction.edits[editIndex]!;
+    if (
+      edit.kind === "save_component_authoring_draft" ||
+      edit.kind === "remove_component_authoring_draft"
+    ) {
+      const id =
+        edit.kind === "save_component_authoring_draft"
+          ? edit.draft.id
+          : edit.draftId;
+      const current = candidate.componentAuthoringDrafts?.find(
+        (draft) => draft.id === id,
+      );
+      if ((current?.text ?? null) !== edit.expectedText)
+        return rejectProjectTransaction(
+          project,
+          "EDIT_PRECONDITION",
+          "The authoring draft changed; reopen it before saving.",
+        );
+      candidate.componentAuthoringDrafts = (
+        candidate.componentAuthoringDrafts ?? []
+      ).filter((draft) => draft.id !== id);
+      if (edit.kind === "save_component_authoring_draft")
+        candidate.componentAuthoringDrafts.push(structuredClone(edit.draft));
+      structuralChange = true;
+      continue;
+    }
+    if (edit.kind === "discard_model_source_draft") {
+      const source = candidate.modelSources?.find(
+        (source) => source.id === edit.sourceId,
+      );
+      if (
+        !source ||
+        source.revision !== edit.expectedRevision ||
+        JSON.stringify(source.draft) !== JSON.stringify(edit.expectedDraft)
+      )
+        return rejectProjectTransaction(
+          project,
+          "EDIT_PRECONDITION",
+          "The model draft changed; reread before discarding.",
+        );
+      if (edit.definitionIds) {
+        const selected = new Set(edit.definitionIds);
+        if (
+          selected.size !== edit.definitionIds.length ||
+          edit.definitionIds.some(
+            (id) =>
+              !source.draft?.authoring?.some((d) => d.definitionId === id),
+          )
+        )
+          return rejectProjectTransaction(
+            project,
+            "EDIT_PRECONDITION",
+            "The authoring draft selection changed; reread before deleting.",
+          );
+        source.draft!.authoring = source.draft!.authoring!.filter(
+          (d) => !selected.has(d.definitionId),
+        );
+      } else delete source.draft;
+      structuralChange = true;
+      continue;
+    }
+    if (edit.kind === "save_model_source_draft") {
+      const source = candidate.modelSources?.find(
+        (s) => s.id === edit.sourceId,
+      );
+      if (!source || source.revision !== edit.expectedRevision)
+        return rejectProjectTransaction(
+          project,
+          "EDIT_PRECONDITION",
+          "Model source revision is stale or missing; draft was not saved",
+        );
+      source.draft = {
+        language: edit.language ?? source.language,
+        entry: edit.entry,
+        files: structuredClone(edit.files),
+        dependencies: structuredClone(edit.dependencies),
+        baseRevision: edit.expectedRevision,
+        ...(edit.authoring
+          ? { authoring: structuredClone(edit.authoring) }
+          : {}),
+      };
+      structuralChange = true;
+      continue;
+    }
+    if (edit.kind === "apply_model_source") {
+      try {
+        const planned = planModelSourceApply(candidate, edit);
+        for (const write of planned)
+          if (write.kind === "upsert_model_source")
+            plannedModelWrites.add(write);
+        transaction.edits.splice(editIndex, 1, ...planned);
+        editIndex -= 1;
+      } catch (error) {
+        if (error instanceof ModelSourceApplyError) {
+          const d = error.diagnostic;
+          return rejectProjectTransaction(
+            project,
+            "EDIT_PRECONDITION",
+            error.message,
+            [
+              {
+                code: d.code,
+                severity: d.severity,
+                message: d.message,
+                parameters: {
+                  ...d.modelSource,
+                  ...((d.path ?? d.sourceRef?.fileId)
+                    ? { file: d.path ?? d.sourceRef?.fileId! }
+                    : {}),
+                  ...(d.sourceRef
+                    ? {
+                        line: d.sourceRef.start.line,
+                        column: d.sourceRef.start.column,
+                        startOffset: d.sourceRef.start.offset,
+                        endOffset: d.sourceRef.end.offset,
+                      }
+                    : {}),
+                },
+              },
+            ],
+          );
+        }
+        return rejectProjectTransaction(
+          project,
+          "EDIT_PRECONDITION",
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+      continue;
+    }
+    if (edit.kind === "reorder_documents") {
+      const byId = new Map(candidate.documents.map((cell) => [cell.id, cell]));
+      if (
+        edit.documentIds.length !== byId.size ||
+        new Set(edit.documentIds).size !== byId.size ||
+        edit.documentIds.some((id) => !byId.has(id))
+      ) {
+        return rejectProjectTransaction(
+          project,
+          "OBJECT_NOT_FOUND",
+          "Cell order must include each existing Cell exactly once",
+        );
+      }
+      structuralChange ||= candidate.documents.some(
+        (cell, index) => cell.id !== edit.documentIds[index],
+      );
+      candidate.documents = edit.documentIds.map((id) => byId.get(id)!);
+      continue;
+    }
+    if (edit.kind === "set_top_document") {
+      if (
+        !candidate.documents.some((document) => document.id === edit.documentId)
+      ) {
+        return rejectProjectTransaction(
+          project,
+          "OBJECT_NOT_FOUND",
+          `Cell does not exist: ${edit.documentId}`,
+        );
+      }
+      structuralChange ||= candidate.topDocumentId !== edit.documentId;
+      candidate.topDocumentId = edit.documentId;
+      continue;
+    }
+    if (edit.kind === "add_source_file") {
+      const existing = candidate.source.files.find(
+        (sourceFile) => sourceFile.id === edit.sourceFile.id,
+      );
+      if (existing) {
+        return rejectProjectTransaction(
+          project,
+          "EDIT_PRECONDITION",
+          `Source file already exists: ${edit.sourceFile.id}`,
+        );
+      }
+      candidate.source.files.push(structuredClone(edit.sourceFile));
+      structuralChange = true;
+      continue;
+    }
+
+    if (edit.kind === "add_document") {
+      if (
+        candidate.documents.some((document) => document.id === edit.document.id)
+      ) {
+        return rejectProjectTransaction(
+          project,
+          "EDIT_PRECONDITION",
+          `Document already exists: ${edit.document.id}`,
+        );
+      }
+      candidate.documents.push(structuredClone(edit.document));
+      changedDocumentIds.add(edit.document.id);
+      structuralChange = true;
+      continue;
+    }
+
+    if (edit.kind === "remove_document") {
+      const index = candidate.documents.findIndex(
+        (document) => document.id === edit.documentId,
+      );
+      if (index < 0) {
+        return rejectProjectTransaction(
+          project,
+          "OBJECT_NOT_FOUND",
+          `Document does not exist: ${edit.documentId}`,
+        );
+      }
+      if (edit.documentId === candidate.topDocumentId) {
+        return rejectProjectTransaction(
+          project,
+          "EDIT_PRECONDITION",
+          "The top Cell cannot be deleted",
+        );
+      }
+      const caller = candidate.documents.flatMap((document) =>
+        document.instances.flatMap((instance) => {
+          const binding = instance.netlist?.binding;
+          return binding?.kind === "subcircuit" &&
+            binding.childDocumentId === edit.documentId
+            ? [{ documentId: document.id, instanceId: instance.id }]
+            : [];
+        }),
+      )[0];
+      if (caller) {
+        return rejectProjectTransaction(
+          project,
+          "EDIT_PRECONDITION",
+          `Cell ${edit.documentId} is still referenced by ${caller.documentId}.${caller.instanceId}`,
+        );
+      }
+      candidate.documents.splice(index, 1);
+      changedDocumentIds.add(edit.documentId);
+      structuralChange = true;
+      continue;
+    }
+
+    if (edit.kind === "rename_project") {
+      // The Project's name is what a published circuit and a saved file are
+      // called, so it is renamed through the same transaction path as
+      // everything else rather than by rewriting the Project object.
+      if (candidate.name === edit.name) continue;
+      candidate.name = edit.name;
+      structuralChange = true;
+      continue;
+    }
+    if (edit.kind === "rename_document") {
+      const document = candidate.documents.find(
+        (item) => item.id === edit.documentId,
+      );
+      if (!document) {
+        return rejectProjectTransaction(
+          project,
+          "OBJECT_NOT_FOUND",
+          `Document does not exist: ${edit.documentId}`,
+        );
+      }
+      if (
+        candidate.documents.some(
+          (item) =>
+            item.id !== document.id &&
+            item.name.toLowerCase() === edit.name.toLowerCase(),
+        )
+      ) {
+        return rejectProjectTransaction(
+          project,
+          "EDIT_PRECONDITION",
+          `Cell name already exists: ${edit.name}`,
+        );
+      }
+      if (document.name === edit.name) continue;
+      const previousCellName = document.netlist?.name ?? document.name;
+      document.name = edit.name;
+      if (document.netlist) document.netlist.name = edit.name;
+      document.revision += 1;
+      changedDocumentIds.add(document.id);
+      for (const parent of candidate.documents) {
+        let changed = false;
+        for (const instance of parent.instances) {
+          const binding = instance.netlist?.binding;
+          if (
+            binding?.kind !== "subcircuit" ||
+            binding.childDocumentId !== document.id
+          )
+            continue;
+          // A Library gate or flip-flop bound to the Cell keeps its symbol
+          // (#1450, #1689).
+          if (!bindsProjectCell(instance.symbolId))
+            instance.symbolId = hierarchicalSymbolId(edit.name);
+          const masterAnnotation = parent.annotations.find(
+            (annotation) =>
+              annotation.id === `instance-master-${instance.id}` &&
+              annotation.kind === "instance-value" &&
+              annotation.anchor.kind === "object" &&
+              annotation.anchor.objectId === instance.id,
+          );
+          if (
+            masterAnnotation?.content &&
+            flattenRichText(masterAnnotation.content) === previousCellName
+          ) {
+            masterAnnotation.content = plainNameDocument(edit.name);
+          }
+          changed = true;
+        }
+        if (changed) {
+          parent.revision += 1;
+          changedDocumentIds.add(parent.id);
+        }
+      }
+      structuralChange = true;
+      continue;
+    }
+
+    if (edit.kind === "associate_component_library") {
+      const captured = candidate.componentDefinitions?.find(
+        (item) => item.symbol.id === edit.symbolId,
+      );
+      const owner = edit.definitionId
+        ? candidate.externalSubcircuitDefinitions.find(
+            (item) =>
+              item.id === edit.definitionId &&
+              !item.symbolId &&
+              externalSubcircuitSymbolId(item.id) === edit.symbolId,
+          )
+        : undefined;
+      const definition = owner ?? captured;
+      if (
+        !definition ||
+        JSON.stringify(definition.libraryOrigin ?? null) !==
+          JSON.stringify(edit.expectedOrigin)
+      )
+        return rejectProjectTransaction(
+          project,
+          "EDIT_PRECONDITION",
+          "Component publication association changed; reread before associating.",
+        );
+      if (
+        JSON.stringify(definition.libraryOrigin) !== JSON.stringify(edit.origin)
+      ) {
+        definition.libraryOrigin = structuredClone(edit.origin);
+        structuralChange = true;
+      }
+      continue;
+    }
+    if (edit.kind === "capture_component_definition") {
+      const previous = candidate.componentDefinitions?.find(
+        (definition) => definition.symbol.id === edit.definition.symbol.id,
+      );
+      if (previous) {
+        if (JSON.stringify(previous) === JSON.stringify(edit.definition))
+          continue;
+        return rejectProjectTransaction(
+          project,
+          "EDIT_PRECONDITION",
+          "Captured artwork is immutable; use a new symbol ID for a changed interface",
+        );
+      }
+      candidate.componentDefinitions ??= [];
+      candidate.componentDefinitions.push(structuredClone(edit.definition));
+      structuralChange = true;
+      continue;
+    }
+
+    if (edit.kind === "upsert_model_source") {
+      structuralChange = true;
+      const source = structuredClone(edit.source);
+      candidate.modelSources ??= [];
+      const index = candidate.modelSources.findIndex((s) => s.id === source.id);
+      if (index >= 0 && !plannedModelWrites.has(edit)) {
+        if (
+          JSON.stringify(candidate.modelSources[index]) ===
+          JSON.stringify(source)
+        )
+          continue;
+        return rejectProjectTransaction(
+          project,
+          "EDIT_PRECONDITION",
+          "Replace an existing model through Apply; use Save draft for unapplied text",
+        );
+      }
+      if (index < 0) candidate.modelSources.push(source);
+      else candidate.modelSources[index] = source;
+      continue;
+    }
+
+    if (edit.kind === "upsert_external_subcircuit_definition") {
+      externalSymbolChangedIds.add(edit.definition.id);
+      const index = candidate.externalSubcircuitDefinitions.findIndex(
+        (definition) => definition.id === edit.definition.id,
+      );
+      const reviewedIssue = reviewedExternalDefinitionEditIssue(
+        candidate.externalSubcircuitDefinitions[index],
+        edit.definition,
+      );
+      if (reviewedIssue)
+        return rejectProjectTransaction(
+          project,
+          "EDIT_PRECONDITION",
+          reviewedIssue,
+        );
+      if (index < 0) {
+        candidate.externalSubcircuitDefinitions.push(
+          structuredClone(edit.definition),
+        );
+      } else {
+        candidate.externalSubcircuitDefinitions[index] = structuredClone(
+          edit.definition,
+        );
+      }
+      const reviewedMapping =
+        edit.definition.presentation || edit.definition.implementation
+          ? undefined
+          : resolvePdkSymbolMappingForTerminalOrder(
+              edit.definition.name,
+              edit.definition.terminals.map((terminal) => terminal.name),
+            );
+      const externalSymbolId = externalSubcircuitSymbolId(edit.definition.id);
+      const currentResolver = plannedModelWrites.size
+        ? modelSourceMigrationResolver(candidate, project)
+        : createProjectSymbolResolver(candidate, builtInSymbols);
+      for (const document of candidate.documents) {
+        let changed = false;
+        for (const instance of document.instances) {
+          const binding = instance.netlist?.binding;
+          if (
+            binding?.kind !== "external-subcircuit" ||
+            binding.definitionId !== edit.definition.id
+          ) {
+            continue;
+          }
+          // The atomic interface planner owns explicit caller reconciliation,
+          // including its revision. Do not replace that caller in advance.
+          if (
+            transaction.edits
+              .slice(editIndex + 1)
+              .some(
+                (planned) =>
+                  planned.kind === "transact_document" &&
+                  planned.documentId === document.id &&
+                  planned.edits.some(
+                    (operation) =>
+                      operation.kind === "set_instance_symbol" &&
+                      operation.instanceId === instance.id,
+                  ),
+              )
+          )
+            continue;
+          // A gate keeps its symbol behind the standard cell of its
+          // function (#1450), as a PDK device keeps its native artwork.
+          const symbolId =
+            reviewedMapping?.symbolId === instance.symbolId ||
+            (!edit.definition.presentation &&
+              !edit.definition.implementation &&
+              resolveReviewedExternalBinding(
+                edit.definition.name,
+                edit.definition.terminals.map((terminal) => terminal.name),
+                instance.symbolId,
+              )) ||
+            (instance.symbolId !== externalSymbolId &&
+              edit.definition.terminals.every((terminal) =>
+                currentResolver
+                  .resolve(instance.symbolId)
+                  ?.definition.pins.some((pin) => pin.name === terminal.name),
+              ))
+              ? instance.symbolId
+              : externalSymbolId;
+          if (instance.symbolId === symbolId) continue;
+          instance.symbolId = symbolId;
+          changed = true;
+        }
+        if (changed) {
+          document.revision += 1;
+          changedDocumentIds.add(document.id);
+        }
+      }
+      structuralChange = true;
+      continue;
+    }
+
+    if (edit.kind === "remove_external_subcircuit_definition") {
+      const index = candidate.externalSubcircuitDefinitions.findIndex(
+        (definition) => definition.id === edit.definitionId,
+      );
+      if (index < 0) {
+        return rejectProjectTransaction(
+          project,
+          "OBJECT_NOT_FOUND",
+          `External subcircuit definition does not exist: ${edit.definitionId}`,
+        );
+      }
+      const caller = candidate.documents.flatMap((document) =>
+        document.instances.flatMap((instance) =>
+          instance.netlist?.binding?.kind === "external-subcircuit" &&
+          instance.netlist.binding.definitionId === edit.definitionId
+            ? [{ documentId: document.id, instanceId: instance.id }]
+            : [],
+        ),
+      )[0];
+      if (caller) {
+        return rejectProjectTransaction(
+          project,
+          "EDIT_PRECONDITION",
+          `External subcircuit ${edit.definitionId} is still referenced by ${caller.documentId}.${caller.instanceId}`,
+        );
+      }
+      candidate.externalSubcircuitDefinitions.splice(index, 1);
+      structuralChange = true;
+      continue;
+    }
+
+    if (edit.kind === "upsert_simulation_folder") {
+      // Missing circuit/file references are repairable authoring state. Prepare
+      // diagnoses them; saving a source draft must not require it to simulate.
+      const duplicateName = candidate.simulationFolders.find(
+        (folder) =>
+          folder.id !== edit.folder.id &&
+          folder.name.toLocaleLowerCase("en-US") ===
+            edit.folder.name.toLocaleLowerCase("en-US"),
+      );
+      if (duplicateName) {
+        return rejectProjectTransaction(
+          project,
+          "EDIT_PRECONDITION",
+          `Simulation folder name already exists: ${edit.folder.name}`,
+        );
+      }
+      const index = candidate.simulationFolders.findIndex(
+        (folder) => folder.id === edit.folder.id,
+      );
+      if (
+        index >= 0 &&
+        JSON.stringify(candidate.simulationFolders[index]) ===
+          JSON.stringify(edit.folder)
+      )
+        continue;
+      if (index >= 0)
+        candidate.simulationFolders[index] = structuredClone(edit.folder);
+      else candidate.simulationFolders.push(structuredClone(edit.folder));
+      structuralChange = true;
+      continue;
+    }
+
+    if (edit.kind === "remove_simulation_folder") {
+      const index = candidate.simulationFolders.findIndex(
+        (folder) => folder.id === edit.folderId,
+      );
+      if (index < 0) continue;
+      candidate.simulationFolders.splice(index, 1);
+      structuralChange = true;
+      continue;
+    }
+
+    if (edit.kind === "migrate_cell_signal") {
+      const beforeDocuments = new Map(
+        candidate.documents.map((document) => [
+          document.id,
+          structuredClone(document),
+        ]),
+      );
+      try {
+        for (const id of applyCellSignalMigration(candidate, edit)) {
+          changedDocumentIds.add(id);
+          const document = candidate.documents.find((item) => item.id === id)!;
+          const before = beforeDocuments.get(id)!;
+          const interfaceIds =
+            id === edit.documentId
+              ? document.netlist!.terminals.find(
+                  (terminal) => terminal.id === edit.terminalId,
+                )!.interfaceInstanceIds
+              : document.instances
+                  .filter(
+                    (instance) =>
+                      instance.netlist?.binding?.kind === "subcircuit" &&
+                      instance.netlist.binding.childDocumentId ===
+                        edit.documentId,
+                  )
+                  .map((instance) => instance.id);
+          documentResults.push({
+            ok: true,
+            applied: true,
+            revision: document.revision,
+            proposedRevision: document.revision,
+            document: structuredClone(document),
+            diagnostics: [],
+            diff: {
+              documentId: id,
+              fromRevision: before.revision,
+              toRevision: document.revision,
+              editKinds: [],
+              changedObjectIds: [
+                ...new Set([
+                  ...diffDocumentObjectIds(before, document),
+                  ...interfaceIds,
+                ]),
+              ].sort(),
+            },
+          });
+        }
+      } catch (error) {
+        return rejectProjectTransaction(
+          project,
+          "EDIT_PRECONDITION",
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+      structuralChange = true;
+      cellSymbolChangedDocumentIds.add(edit.documentId);
+      continue;
+    }
+
+    if (
+      edit.edits.some(
+        (documentEdit) =>
+          documentEdit.kind === "undo" || documentEdit.kind === "redo",
+      )
+    ) {
+      return rejectProjectTransaction(
+        project,
+        "EDIT_PRECONDITION",
+        "Project transactions cannot contain Document history edits",
+      );
+    }
+    explicitlyTouchedDocumentIds.add(edit.documentId);
+    if (
+      edit.edits.some(
+        (documentEdit) => documentEdit.kind === "set_cell_symbol_presentation",
+      )
+    ) {
+      cellSymbolChangedDocumentIds.add(edit.documentId);
+    }
+    const document = candidate.documents.find(
+      (item) => item.id === edit.documentId,
+    );
+    if (!document) {
+      return rejectProjectTransaction(
+        project,
+        "OBJECT_NOT_FOUND",
+        `Document does not exist: ${edit.documentId}`,
+      );
+    }
+    const resolver = plannedModelWrites.size
+      ? modelSourceMigrationResolver(candidate, project)
+      : createProjectSymbolResolver(candidate, builtInSymbols);
+    const result = executeTransaction(
+      document,
+      {
+        transactionId: `${transaction.transactionId}-document-${editIndex}`,
+        documentId: edit.documentId,
+        expectedRevision: edit.expectedRevision,
+        actor: transaction.actor as EditActor,
+        edits: edit.edits,
+      },
+      {
+        symbolResolver: resolver,
+        externalSubcircuitDefinitions: candidate.externalSubcircuitDefinitions,
+        ...(options.preparedTransactions
+          ? { preparedTransactions: options.preparedTransactions }
+          : {}),
+      },
+    );
+    documentResults.push(result);
+    if (!result.ok) {
+      return rejectProjectTransaction(
+        project,
+        "DOCUMENT_TRANSACTION_REJECTED",
+        result.error.message,
+        result.diagnostics.map((diagnostic) => ({
+          ...diagnostic,
+          parameters: {
+            ...diagnostic.parameters,
+            projectEditIndex: editIndex,
+            documentId: edit.documentId,
+          },
+        })),
+      );
+    }
+    if (result.applied) {
+      replaceDocument(candidate, result.document);
+      changedDocumentIds.add(edit.documentId);
+    }
+  }
+
+  if (plannedModelWrites.size && candidate.componentDefinitions) {
+    const liveSymbols = new Set(referencedProjectSymbolIds(candidate));
+    candidate.componentDefinitions = candidate.componentDefinitions.filter(
+      (component) => {
+        if (!component.circuitBinding || liveSymbols.has(component.symbol.id))
+          return true;
+        const owner = candidate.externalSubcircuitDefinitions.find(
+          (definition) =>
+            definition.id === component.circuitBinding!.definitionId,
+        );
+        return owner && circuitComponentIssues(component, owner).length === 0;
+      },
+    );
+  }
+
+  if (
+    cellSymbolChangedDocumentIds.size > 0 ||
+    externalSymbolChangedIds.size > 0
+  ) {
+    const originalResolver = createProjectSymbolResolver(
+      project,
+      builtInSymbols,
+    );
+    const resolver = createProjectSymbolResolver(candidate, builtInSymbols);
+    for (const parent of candidate.documents) {
+      // A caller edited explicitly by the request is its own geometry
+      // authority. Definition-only updates use the shared follow planner.
+      if (explicitlyTouchedDocumentIds.has(parent.id)) continue;
+      const originalParent = project.documents.find(
+        (document) => document.id === parent.id,
+      );
+      if (!originalParent) continue;
+      const callerIds = new Set(
+        parent.instances.flatMap((instance) => {
+          const binding = instance.netlist?.binding;
+          return (binding?.kind === "subcircuit" &&
+            cellSymbolChangedDocumentIds.has(binding.childDocumentId)) ||
+            (binding?.kind === "external-subcircuit" &&
+              externalSymbolChangedIds.has(binding.definitionId))
+            ? [instance.id]
+            : [];
+        }),
+      );
+      if (callerIds.size === 0) continue;
+      const followEdits = planInstanceSymbolGeometryRouteFollow(
+        parent,
+        originalParent,
+        originalResolver,
+        resolver,
+        callerIds,
+      );
+      const reflowEdits = planInstanceLabelReflow(
+        parent,
+        callerIds,
+        originalResolver,
+        resolver,
+      );
+      const symbolChanged = parent.instances.some((instance) => {
+        if (!callerIds.has(instance.id)) return false;
+        const before = originalParent.instances.find(
+          (i) => i.id === instance.id,
+        );
+        return (
+          before &&
+          JSON.stringify(
+            originalResolver.resolve(before.symbolId, before.symbolVariantId),
+          ) !==
+            JSON.stringify(
+              resolver.resolve(instance.symbolId, instance.symbolVariantId),
+            )
+        );
+      });
+      // A grown body can strike labels without moving a contact. Reflow that
+      // geometry independently; a body-only model edit has no drawing work.
+      const bodyLabelEdits =
+        followEdits.length === 0 && symbolChanged && options.arrangeStruckLabels
+          ? options.arrangeStruckLabels(
+              { document: originalParent, resolver: originalResolver },
+              parent,
+              resolver,
+            )
+          : [];
+      if (
+        followEdits.length === 0 &&
+        reflowEdits.length === 0 &&
+        bodyLabelEdits.length === 0
+      )
+        continue;
+      const withRedrawn = (extra: readonly SchematicEdit[]) => {
+        const redrawn = new Set(
+          extra.flatMap((edit) =>
+            edit.kind === "set_route_path" ? [edit.route.id] : [],
+          ),
+        );
+        return [
+          ...followEdits.filter(
+            (edit) =>
+              edit.kind !== "set_route_path" || !redrawn.has(edit.route.id),
+          ),
+          ...extra,
+        ];
+      };
+      const follow = (edits: readonly SchematicEdit[]) =>
+        executeTransaction(
+          parent,
+          {
+            transactionId: `${transaction.transactionId}-symbol-route-follow-${parent.id}`,
+            documentId: parent.id,
+            expectedRevision: parent.revision,
+            actor: transaction.actor as EditActor,
+            edits: [...edits],
+          },
+          // The callers' pins moved with their symbol: a pin that lands on
+          // another Net's wire keeps its own Net (#1316).
+          { symbolResolver: resolver, pinsMovedInstanceIds: callerIds },
+        );
+      // A wire the stretch lays over another Net's pin or wire, or across a
+      // part, is drawn clear of it, as a pin change in Properties is.
+      const routeEdits = withRedrawn(
+        redrawStretchedRoutesClear(
+          { document: originalParent, resolver: originalResolver },
+          resolver,
+          followEdits.flatMap((edit) =>
+            edit.kind === "set_route_path" ? [edit.route.id] : [],
+          ),
+          (extra) => {
+            const preview = follow(withRedrawn(extra));
+            return preview.ok ? preview.document : null;
+          },
+          // Judged as stretched, as a typed move is: an SRAM block's blb
+          // moved to its east side found its clear path down its own bit
+          // line, and normalization merged the two wires, so the redraw was
+          // refused for changing which wires there are.
+          (extra) => projectDrawnGeometry(parent, withRedrawn(extra)),
+        ),
+      );
+      // The callers' labels keep their place beside the changed block, and
+      // labels its redrawn wiring or its grown block newly cover move clear
+      // (#1366).
+      const reflowed = [...routeEdits, ...reflowEdits, ...bodyLabelEdits];
+      const followed = follow(reflowed);
+      const labelEdits =
+        followed.ok && options.arrangeStruckLabels
+          ? options.arrangeStruckLabels(
+              { document: originalParent, resolver: originalResolver },
+              followed.document,
+              resolver,
+            )
+          : [];
+      // A label move the transaction refuses never refuses the Pin change.
+      const labelled = labelEdits.length
+        ? follow([...reflowed, ...labelEdits])
+        : null;
+      if (!followed.ok && !labelled?.ok && routeEdits.length === 0) continue;
+      const routeResult = labelled?.ok
+        ? labelled
+        : followed.ok
+          ? followed
+          : follow(routeEdits);
+      documentResults.push(
+        routeResult.ok
+          ? withRedrawnCallers(
+              routeResult,
+              { document: originalParent, resolver: originalResolver },
+              resolver,
+              callerIds,
+            )
+          : routeResult,
+      );
+      if (!routeResult.ok) {
+        return rejectProjectTransaction(
+          project,
+          "DOCUMENT_TRANSACTION_REJECTED",
+          routeResult.error.message,
+          routeResult.diagnostics,
+        );
+      }
+      if (routeResult.applied) {
+        replaceDocument(candidate, routeResult.document);
+        changedDocumentIds.add(parent.id);
+      }
+    }
+  }
+
+  const applied =
+    structuralChange ||
+    documentResults.some((result) => result.ok && result.applied);
+  const proposedStructureRevision =
+    project.structureRevision + (applied ? 1 : 0);
+  candidate.structureRevision = proposedStructureRevision;
+  const externalCallerFailure = introducedExternalCallerFailure(
+    project,
+    candidate,
+  );
+  if (externalCallerFailure) {
+    return rejectProjectTransaction(
+      project,
+      "INVALID_RESULT",
+      externalCallerFailure.message,
+      [
+        {
+          code: "INVALID_RESULT",
+          severity: "error",
+          message: externalCallerFailure.message,
+          objectIds: externalCallerFailure.objectIds,
+          parameters: {
+            documentId: externalCallerFailure.documentId,
+            instanceId: externalCallerFailure.instanceId,
+          },
+        },
+      ],
+    );
+  }
+  const modelFailure = collectProjectModelSources(
+    candidate,
+    candidate.externalSubcircuitDefinitions.map((d) => d.id),
+  ).diagnostics.find((d) => d.severity === "error");
+  if (modelFailure) {
+    const file = modelFailure.path ?? modelFailure.sourceRef?.fileId;
+    const line = modelFailure.sourceRef?.start.line;
+    const message = `${file ? file + (line ? ":" + line : "") + ": " : ""}${modelFailure.message}`;
+    return rejectProjectTransaction(project, "EDIT_PRECONDITION", message, [
+      {
+        code: modelFailure.code,
+        severity: "error",
+        message,
+        parameters: {
+          ...modelFailure.modelSource,
+          ...(file ? { file } : {}),
+          ...(line
+            ? { line, column: modelFailure.sourceRef!.start.column }
+            : {}),
+        },
+      },
+    ]);
+  }
+  const validated = validateProjectResult(candidate);
+  if (!validated.success) {
+    return rejectProjectTransaction(
+      project,
+      "INVALID_RESULT",
+      "Project transaction produced an invalid Project",
+      validated.error.issues.map((issue) => ({
+        code: "INVALID_RESULT",
+        severity: "error" as const,
+        message: issue.message,
+        path: issue.path.map((segment) =>
+          typeof segment === "symbol"
+            ? (segment.description ?? "symbol")
+            : segment,
+        ),
+      })),
+    );
+  }
+  const proposedProject = validated.data;
+  return {
+    ok: true,
+    applied: transaction.dryRun === true ? false : applied,
+    structureRevision:
+      transaction.dryRun === true
+        ? project.structureRevision
+        : proposedStructureRevision,
+    proposedStructureRevision,
+    project:
+      transaction.dryRun === true ? structuredClone(project) : proposedProject,
+    proposedProject,
+    changedDocumentIds: [...changedDocumentIds].sort(),
+    documentResults,
+    diagnostics: [],
+  };
+}

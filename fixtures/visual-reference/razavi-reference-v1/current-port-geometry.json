@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "referenceId": "razavi-reference-v1",
+  "assetPath": "current-port-reference.png",
+  "assetSha256": "09b2cc33652e29b6b5fe784397bceb514db1c07f0772bb04e54a96d8927140e5",
+  "coordinateSystem": "reference-raster-pixels",
+  "pixels": { "width": 326, "height": 254 },
+  "pixelsPerLogical": 1.39,
+  "symbols": {
+    "current-source": {
+      "evidence": "I1 beneath the shared source node",
+      "originPx": { "x": 184, "y": 190 },
+      "circleRadiusPx": 15,
+      "arrowPx": {
+        "shaftStartY": 178,
+        "baseY": 188,
+        "tipY": 202,
+        "halfWidth": 6.5
+      },
+      "cropWindowPx": { "width": 37, "height": 37 }
+    }
+  },
+  "annotations": {
+    "routeCurrentArrow": {
+      "evidence": "I1 and I2 on vertical routes",
+      "headBaseY": 71,
+      "headTipY": 94,
+      "headWidthPx": 11,
+      "labelGapPx": 9,
+      "attachment": "the route itself supplies the shaft; the marker supplies only its head"
+    }
+  },
+  "ports": {
+    "hollowOrigin": {
+      "evidence": "Vin input and lower left port",
+      "centerPx": { "x": 64, "y": 118 },
+      "outerRadiusPx": 5,
+      "strokeWidthPx": 2,
+      "window": {
+        "width": 13,
+        "height": 13,
+        "minX": -4.3165467626,
+        "minY": -4.3165467626
+      }
+    }
+  },
+  "formal": {
+    "route-wire": {
+      "evidence": "Vin port lead between the hollow origin and M1 gate",
+      "originPx": { "x": 81, "y": 118.5 },
+      "window": {
+        "width": 13,
+        "height": 7,
+        "minX": -4.3165467626,
+        "minY": -2.5179856115
+      }
+    },
+    "route-current-arrow": {
+      "evidence": "I1 on the left vertical route",
+      "originPx": { "x": 124, "y": 82 },
+      "window": {
+        "width": 21,
+        "height": 58,
+        "minX": -7.1942446043,
+        "minY": -28.7769784173
+      }
+    }
+  }
+}

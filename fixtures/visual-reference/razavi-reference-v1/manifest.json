@@ -1,0 +1,586 @@
+{
+  "schemaVersion": 1,
+  "id": "razavi-reference-v1",
+  "visualAuthority": "sole",
+  "assetPath": "razavi-six-panel.png",
+  "sha256": "08c89f54345c835324528a63c7519dc3aeda17169febc20134e33056bc85790b",
+  "supplementalAssets": [
+    {
+      "path": "capacitor-reference.png",
+      "sha256": "e2b13a01eed7e7565080bc9d0d7c98bc8dc6714ceed3c7159096c8b5deb3dcbc",
+      "scope": ["capacitor geometry", "capacitor stroke treatment"]
+    },
+    {
+      "path": "current-port-reference.png",
+      "sha256": "09b2cc33652e29b6b5fe784397bceb514db1c07f0772bb04e54a96d8927140e5",
+      "scope": [
+        "route current-arrow treatment",
+        "current-source geometry",
+        "hollow port origin"
+      ]
+    },
+    {
+      "path": "vdd-reference.png",
+      "sha256": "fae2ed83a534e62bfdb9f0f7cef97892ef46fa8630be481ad1d8a83611361f84",
+      "scope": ["VDD supply marker geometry"]
+    },
+    {
+      "path": "delta-sigma-figure-21-38-reference.png",
+      "sha256": "88adc1f13614d2928e6a6b08116e9c57c0006b685671c8538ca79c683c38e72f",
+      "scope": [
+        "user-supplied raster witness for Figure 21.38 Delta-Sigma loop geometry"
+      ],
+      "source": {
+        "kind": "user-supplied-raster-witness",
+        "title": "Analysis and Design of Data Converters",
+        "figure": "21.38",
+        "provenance": "user-supplied screenshot; the available 100-page PDF copy excludes Chapter 21",
+        "sourceFileName": "figure-2-razavi.png",
+        "sourceSha256": "d328e1aafa7ae0b57bbfe9d0fba9c3d7e0b662079f3b77b4c35518c82bf0b9bd",
+        "sourcePixels": {
+          "width": 936,
+          "height": 624
+        },
+        "sourceCropPx": [306, 102, 382, 150]
+      }
+    },
+    {
+      "path": "delta-sigma-figure-21-33-reference.png",
+      "sha256": "dc3fd08dc3eb2aac6842f32016ecc0f0d7d77db137af2530e192e19f5c43d1a5",
+      "scope": [
+        "user-supplied raster witness for Figure 21.33 discrete-time integrator geometry"
+      ],
+      "source": {
+        "kind": "user-supplied-raster-witness",
+        "title": "Analysis and Design of Data Converters",
+        "figure": "21.33",
+        "provenance": "user-supplied screenshot; the available 100-page PDF copy excludes Chapter 21",
+        "sourceFileName": "figure-3-formula.png",
+        "sourceSha256": "cf02dea357a9f65be37931b181c265b721424d8cca3d1202943c6b4248e7e780",
+        "sourcePixels": {
+          "width": 654,
+          "height": 206
+        },
+        "sourceCropPx": [279, 34, 298, 121],
+        "sourceOverlayExclusionPx": {
+          "left": 137,
+          "top": 0,
+          "right": 152,
+          "bottom": 32,
+          "reason": "removes the non-source red annotation arrow while retaining the printed figure"
+        }
+      }
+    },
+    {
+      "path": "transconductance-reference.png",
+      "sha256": "84038eaab654faaa7fbfcf17c7df204bfbea546e27e0bc4f0b6b08e4b1747902",
+      "scope": [
+        "user-supplied raster witness for a right-tapered transconductance Signal Flow block"
+      ],
+      "source": {
+        "kind": "user-supplied-raster-witness",
+        "title": "Small-signal amplifier diagram",
+        "figure": "user-supplied transconductance example",
+        "provenance": "user-supplied schematic image in the Analog Canvas feature request",
+        "sourceFileName": "1a382eca-f95b-45a4-9c60-f9f7d4f74021.png",
+        "sourceSha256": "5795ff03bb255bf7c7a405fef9cf73f28a657ceebb842e51ffbcad0cbd3f1b62",
+        "sourcePixels": {
+          "width": 699,
+          "height": 447
+        },
+        "sourceCropPx": [47, 115, 109, 180]
+      }
+    }
+  ],
+  "vectorEvidence": [
+    {
+      "id": "razavi-data-converters-clock-pulse",
+      "kind": "pdf-vector-extract",
+      "source": {
+        "title": "Analysis and Design of Data Converters",
+        "sha256": "8a5c1bb42a5e32a84cd6af53e2f43db79ea8f511552c913ec65d2caa1d90a028",
+        "pdfPage": 352,
+        "printedPage": 334,
+        "figure": "16.8"
+      },
+      "extractPath": "data-converters-clock-pulse-vector-source.json",
+      "extractSha256": "b8ab067517050a6ad0af50fab0e607c36e489bf96aad5bfae7a6912e65d19a79",
+      "rasterPath": "data-converters-clock-pulse-reference.png",
+      "rasterSha256": "1bcbe9cb1df40034ec31deffa5017fae667462cb7f42cad6cf24af5040206819",
+      "scope": [
+        "clock pulse square-step presentation",
+        "pulse timing trace and CK label treatment"
+      ]
+    },
+    {
+      "id": "razavi-data-converters-timing-waveform",
+      "kind": "pdf-vector-extract",
+      "source": {
+        "title": "Analysis and Design of Data Converters",
+        "sha256": "8a5c1bb42a5e32a84cd6af53e2f43db79ea8f511552c913ec65d2caa1d90a028",
+        "pdfPage": 491,
+        "printedPage": 473,
+        "figure": "20.54"
+      },
+      "extractPath": "data-converters-timing-waveform-vector-source.json",
+      "extractSha256": "7c73a9b0b3d543bd27c4dce10b795d3e6390babd01aee3aa61b5afd3cf54896c",
+      "rasterPath": "data-converters-timing-waveform-reference.png",
+      "rasterSha256": "da1a88eec1a1740f17b6bce9f49b031d484abc3ff3430a8002452c6e457469a7",
+      "scope": [
+        "stacked digital waveform trace layout and labels",
+        "dashed timing guides and horizontal time-axis treatment"
+      ]
+    },
+    {
+      "id": "razavi-textbook-delay-cell",
+      "kind": "pdf-vector-extract",
+      "source": {
+        "title": "Analysis and Design of Data Converters",
+        "sha256": "8a5c1bb42a5e32a84cd6af53e2f43db79ea8f511552c913ec65d2caa1d90a028",
+        "pdfPage": 349,
+        "printedPage": 331,
+        "figure": "16.2(c)"
+      },
+      "extractPath": "delay-cell-vector-source.json",
+      "extractSha256": "e9ab459e58367ba0af48fd8ea91a035a7c8f13c6e7c42dad86c952342788abb1",
+      "rasterPath": "delay-cell-reference.png",
+      "rasterSha256": "b327960fe94f29386a2f7d4c5adb7eea9f231a51ae7060f870a331bb08f9fcfb",
+      "scope": [
+        "two-terminal delay-stage rectangle and lead proportions",
+        "Delta-T internal mark and body-to-wire stroke hierarchy"
+      ]
+    },
+    {
+      "id": "razavi-textbook-figure-15-21-inductor",
+      "kind": "pdf-vector-extract",
+      "source": {
+        "title": "Design of Analog CMOS Integrated Circuits, Second Edition",
+        "sha256": "a6031d1149c2c6191a1f0e541065165b72dafc4bc4ab4b0ea37af41b7cb0f739",
+        "pdfPage": 639,
+        "printedPage": 620,
+        "figure": "15.21"
+      },
+      "extractPath": "inductor-vector-source.json",
+      "extractSha256": "daaf4bfcee6f2ea39c6c389c10e67c52b4fba84c6ee3ba6118b825d2f0ef7464",
+      "rasterPath": "inductor-reference.png",
+      "rasterSha256": "f3327aecd75ddc7231a0e90117904d2815ba07c30e1761eccfdb7f27bb471070",
+      "scope": ["inductor geometry", "inductor stroke treatment"]
+    },
+    {
+      "id": "razavi-textbook-figure-8-26-opamp",
+      "kind": "pdf-vector-extract",
+      "source": {
+        "title": "Design of Analog CMOS Integrated Circuits, Second Edition",
+        "sha256": "a6031d1149c2c6191a1f0e541065165b72dafc4bc4ab4b0ea37af41b7cb0f739",
+        "pdfPage": 308,
+        "printedPage": 289,
+        "figure": "8.26"
+      },
+      "extractPath": "opamp-vector-source.json",
+      "extractSha256": "43f14106f9606b2c19539d8a4cd2b9cf14e0d56f8be76fe93cba7c2d45c4361e",
+      "rasterPath": "opamp-reference.png",
+      "rasterSha256": "77af2fb4d00f62f1e83580d21ac04a95dc41a7d7072d738dc70248373178083f",
+      "scope": [
+        "three-terminal op-amp geometry",
+        "op-amp polarity marks and stroke hierarchy"
+      ]
+    },
+    {
+      "id": "razavi-textbook-figure-13-48-differential-opamp",
+      "kind": "pdf-vector-extract",
+      "source": {
+        "title": "Design of Analog CMOS Integrated Circuits, Second Edition",
+        "sha256": "a6031d1149c2c6191a1f0e541065165b72dafc4bc4ab4b0ea37af41b7cb0f739",
+        "pdfPage": 583,
+        "printedPage": 564,
+        "figure": "13.48"
+      },
+      "extractPath": "differential-opamp-vector-source.json",
+      "extractSha256": "e735c93cbcb3962d51e2217bb225619dd45196ceed4be6a9703513205ccfe360",
+      "rasterPath": "differential-opamp-reference.png",
+      "rasterSha256": "9fa682862a9f779e57be2d48b5dbe8d55ec9d71fffc3509ecfa08cc493f460b5",
+      "scope": [
+        "fully differential op-amp triangle geometry",
+        "dual-output edge joins and polarity-mark proportions"
+      ]
+    },
+    {
+      "id": "razavi-textbook-closed-switch",
+      "kind": "pdf-vector-extract",
+      "source": {
+        "title": "Design of Analog CMOS Integrated Circuits, Second Edition",
+        "sha256": "a6031d1149c2c6191a1f0e541065165b72dafc4bc4ab4b0ea37af41b7cb0f739",
+        "pdfPage": 561,
+        "printedPage": 542,
+        "figure": "13.5 (S2)"
+      },
+      "extractPath": "closed-switch-vector-source.json",
+      "extractSha256": "19b8e3a8663b6198408b964b0dc39ca7a7fd803eb9a30c06aa14936fa160b626",
+      "rasterPath": "closed-switch-reference.png",
+      "rasterSha256": "f362378d17b4090873eb844121bc926a5ffe42137d02f9fca404d51bdf9d8986",
+      "scope": [
+        "two-terminal closed switch geometry",
+        "hollow-contact closure treatment"
+      ]
+    },
+    {
+      "id": "razavi-textbook-diode",
+      "kind": "pdf-vector-extract",
+      "source": {
+        "title": "Design of Analog CMOS Integrated Circuits, Second Edition",
+        "sha256": "a6031d1149c2c6191a1f0e541065165b72dafc4bc4ab4b0ea37af41b7cb0f739",
+        "pdfPage": 661,
+        "printedPage": 642,
+        "figure": "15.54"
+      },
+      "extractPath": "diode-vector-source.json",
+      "extractSha256": "6f4914befafb3340b9d8544625c15ad7fa381ecb0f7fac67e2a5c07817ad3d41",
+      "rasterPath": "diode-reference.png",
+      "rasterSha256": "2b098110b525242efcb3f7d27e1856ef484c475f6e7c365c128a6a4c63a10c03",
+      "scope": ["outline diode geometry", "double-width cathode bar"]
+    },
+    {
+      "id": "razavi-textbook-battery",
+      "kind": "pdf-vector-extract",
+      "source": {
+        "title": "Fundamentals of Microelectronics, First Edition",
+        "sha256": "4b5d1a96f998a6fb7f9ce2d1251a0087712032297e858e118f7476fa37d7d586",
+        "pdfPage": 95,
+        "printedPage": 70,
+        "figure": "3.11(a)"
+      },
+      "extractPath": "battery-vector-source.json",
+      "extractSha256": "d90d096efff1476c3068b30814ffd1ac33fd5fb5a2f83ae2dea061388d0a84f7",
+      "rasterPath": "battery-reference.png",
+      "rasterSha256": "6435e601506c2179db36594b84ff4789aabfd0396e8c4e80b4fd47087697c0f5",
+      "scope": [
+        "single-cell battery plate and polarity geometry",
+        "same-panel voltage-source diameter and stroke ratio"
+      ]
+    },
+    {
+      "id": "razavi-textbook-zener-diode",
+      "kind": "pdf-vector-extract",
+      "source": {
+        "title": "Fundamentals of Microelectronics, First Edition",
+        "sha256": "4b5d1a96f998a6fb7f9ce2d1251a0087712032297e858e118f7476fa37d7d586",
+        "pdfPage": 126,
+        "printedPage": 101,
+        "figure": "3.44(a)"
+      },
+      "extractPath": "zener-diode-vector-source.json",
+      "extractSha256": "8eafcf41158edda8570177370b1af9d8e8b7fbc7e87fac99b70a1a5e39f05973",
+      "rasterPath": "zener-diode-reference.png",
+      "rasterSha256": "ca0a4629953a0d6cfd1478d863409fc82a4a366cf73b9c6b8e79dd2616465c1e",
+      "scope": [
+        "Zener diode outline geometry",
+        "bent cathode-bar treatment",
+        "device-to-wire stroke hierarchy"
+      ]
+    },
+    {
+      "id": "razavi-textbook-ideal-switch",
+      "kind": "pdf-vector-extract",
+      "source": {
+        "title": "Design of Analog CMOS Integrated Circuits, Second Edition",
+        "sha256": "a6031d1149c2c6191a1f0e541065165b72dafc4bc4ab4b0ea37af41b7cb0f739",
+        "pdfPage": 560,
+        "printedPage": 541,
+        "figure": "13.4"
+      },
+      "extractPath": "ideal-switch-vector-source.json",
+      "extractSha256": "7bd12b0f49271d1b1ee6fb758a616bdf894e8c113a986d6e6201506e17ed42fe",
+      "rasterPath": "ideal-switch-reference.png",
+      "rasterSha256": "22cca5b94043dc9163c146ef615441c0f376804accf422f3c0d2bdfe03a3b2c7",
+      "scope": ["two-terminal ideal switch geometry"]
+    },
+    {
+      "id": "razavi-textbook-externally-controlled-switch",
+      "kind": "pdf-vector-extract",
+      "source": {
+        "title": "Design of Analog CMOS Integrated Circuits, Second Edition",
+        "sha256": "a6031d1149c2c6191a1f0e541065165b72dafc4bc4ab4b0ea37af41b7cb0f739",
+        "pdfPage": 696,
+        "printedPage": 677,
+        "figure": "16.38 (S1)"
+      },
+      "extractPath": "externally-controlled-switch-vector-source.json",
+      "extractSha256": "c382f9ea162a92bd3ad5c73c8bb4625212dffa84ca798faaa44080a1c1b2a03e",
+      "rasterPath": "externally-controlled-switch-reference.png",
+      "rasterSha256": "af7741d0d0ec17b66b092cf11fac74ec621828a335829d62009371d864cc869a",
+      "scope": [
+        "three-terminal externally controlled switch geometry",
+        "single-ended control lead, hollow contacts, and open blade"
+      ]
+    },
+    {
+      "id": "razavi-textbook-npn",
+      "kind": "pdf-vector-extract",
+      "source": {
+        "title": "Design of Analog CMOS Integrated Circuits, Second Edition",
+        "sha256": "a6031d1149c2c6191a1f0e541065165b72dafc4bc4ab4b0ea37af41b7cb0f739",
+        "pdfPage": 533,
+        "printedPage": 514,
+        "figure": "12.6"
+      },
+      "extractPath": "npn-vector-source.json",
+      "extractSha256": "b5499df1678ac7d630f48bd6c0c0cba299e44056d45729a86337198901dddb68",
+      "rasterPath": "npn-reference.png",
+      "rasterSha256": "9d8cde835580aefdf0bb7f1b2f3d06b751ef2c986897507bfe31fffff5c275e0",
+      "scope": ["direct NPN body and outward emitter arrow"]
+    },
+    {
+      "id": "razavi-textbook-pnp",
+      "kind": "pdf-vector-extract",
+      "source": {
+        "title": "Design of Analog CMOS Integrated Circuits, Second Edition",
+        "sha256": "a6031d1149c2c6191a1f0e541065165b72dafc4bc4ab4b0ea37af41b7cb0f739",
+        "pdfPage": 537,
+        "printedPage": 518,
+        "figure": "12.11"
+      },
+      "extractPath": "pnp-vector-source.json",
+      "extractSha256": "72b5e92f82af98bb09e25b67c20ee7a328d4907eea3dd4d281be0988174bef91",
+      "rasterPath": "pnp-reference.png",
+      "rasterSha256": "c0b3a2efb8ecddf8db9020c7f8734408fbc02e6010dba6cc17802efe839ff19d",
+      "scope": ["direct PNP body and inward upper-emitter arrow"]
+    },
+    {
+      "id": "razavi-textbook-voltage-amplifier",
+      "kind": "pdf-vector-extract",
+      "source": {
+        "title": "Design of Analog CMOS Integrated Circuits, Second Edition",
+        "sha256": "a6031d1149c2c6191a1f0e541065165b72dafc4bc4ab4b0ea37af41b7cb0f739",
+        "pdfPage": 307,
+        "printedPage": 288,
+        "figure": "8.24"
+      },
+      "extractPath": "voltage-amplifier-vector-source.json",
+      "extractSha256": "b2b2eee81b7e7ce00bc21bd30f84291be8b39b9e8c5b873b1a65fe59e3dce564",
+      "rasterPath": "voltage-amplifier-reference.png",
+      "rasterSha256": "f111f61f91eb2d45fb909c68eae62d083716a1be4a3865ce0ee2dcaf51c070f1",
+      "scope": ["single-ended voltage-gain block geometry"]
+    },
+    {
+      "id": "razavi-textbook-logic-xor-gate",
+      "kind": "pdf-vector-extract",
+      "source": {
+        "title": "Design of Analog CMOS Integrated Circuits, Second Edition",
+        "sha256": "a6031d1149c2c6191a1f0e541065165b72dafc4bc4ab4b0ea37af41b7cb0f739",
+        "pdfPage": 671,
+        "printedPage": 652,
+        "figure": "16.2"
+      },
+      "extractPath": "logic-xor-gate-vector-source.json",
+      "extractSha256": "39f282089c3e5431ff11b01a094f7b698a068276488185ce429bc26a32254274",
+      "rasterPath": "logic-xor-gate-reference.png",
+      "rasterSha256": "bdc0105584abbec9f10e4cd6851f5a2071b802cbdb2f2504107640a2a69ee592",
+      "scope": ["direct XOR body, exclusive curve, and lead junctions"]
+    },
+    {
+      "id": "razavi-textbook-logic-and-gate",
+      "kind": "pdf-vector-extract",
+      "source": {
+        "title": "Design of Analog CMOS Integrated Circuits, Second Edition",
+        "sha256": "a6031d1149c2c6191a1f0e541065165b72dafc4bc4ab4b0ea37af41b7cb0f739",
+        "pdfPage": 687,
+        "printedPage": 668,
+        "figure": "16.24(a)"
+      },
+      "extractPath": "logic-and-gate-vector-source.json",
+      "extractSha256": "5181ae0957f75795d636e132e894c12e7e2b81aa3f210e07eb36034f2e3b311b",
+      "rasterPath": "logic-and-gate-reference.png",
+      "rasterSha256": "96148c476267e75ccdd35cc9d453b1c69624db86623244c538c67797591a7a5e",
+      "scope": ["direct AND body and lead junctions"]
+    },
+    {
+      "id": "razavi-textbook-logic-nor-gate",
+      "kind": "pdf-vector-extract",
+      "source": {
+        "title": "Design of Analog CMOS Integrated Circuits, Second Edition",
+        "sha256": "a6031d1149c2c6191a1f0e541065165b72dafc4bc4ab4b0ea37af41b7cb0f739",
+        "pdfPage": 687,
+        "printedPage": 668,
+        "figure": "16.24(b)"
+      },
+      "extractPath": "logic-nor-gate-vector-source.json",
+      "extractSha256": "99be0b678d21f55eae8f9e94d43cd83a69be464e12bd3272003a9e61fa07dbe6",
+      "rasterPath": "logic-nor-gate-reference.png",
+      "rasterSha256": "15151d0b3854ec8a068dfb5974cb78551b3df624ffd580a4b4c0587e0d63b0eb",
+      "scope": ["direct NOR body, negation bubble, and lead junctions"]
+    },
+    {
+      "id": "razavi-textbook-logic-nand-gate",
+      "kind": "pdf-vector-extract",
+      "source": {
+        "title": "Design of Analog CMOS Integrated Circuits, Second Edition",
+        "sha256": "a6031d1149c2c6191a1f0e541065165b72dafc4bc4ab4b0ea37af41b7cb0f739",
+        "pdfPage": 688,
+        "printedPage": 669,
+        "figure": "16.25(a)"
+      },
+      "extractPath": "logic-nand-gate-vector-source.json",
+      "extractSha256": "3bc680cc6fd537605708ad7c14eee8621bacc59c71800935d13ba1b0b225ac1a",
+      "rasterPath": "logic-nand-gate-reference.png",
+      "rasterSha256": "a63cb3b84e5a409f30da039f00387e6769cad19a38ad7d90cc403d864c4280d0",
+      "scope": ["direct NAND body, negation bubble, and lead junctions"]
+    },
+    {
+      "id": "razavi-textbook-logic-inverter",
+      "kind": "pdf-vector-extract",
+      "source": {
+        "title": "Design of Analog CMOS Integrated Circuits, Second Edition",
+        "sha256": "a6031d1149c2c6191a1f0e541065165b72dafc4bc4ab4b0ea37af41b7cb0f739",
+        "pdfPage": 688,
+        "printedPage": 669,
+        "figure": "16.25(a)"
+      },
+      "extractPath": "logic-inverter-vector-source.json",
+      "extractSha256": "32f8386123fcbdc2fba59bb1a82dee9c7ea3c4394cbbbf2fb61fc4335c28c817",
+      "rasterPath": "logic-inverter-reference.png",
+      "rasterSha256": "4911da6e698c75449502cf3438166cb4ee48b33350b6ad0edf994ce6857b6c4c",
+      "scope": ["direct inverter triangle, negation bubble, and lead junctions"]
+    },
+    {
+      "id": "razavi-textbook-buffer",
+      "kind": "pdf-vector-extract",
+      "source": {
+        "title": "Design of Analog CMOS Integrated Circuits, Second Edition",
+        "sha256": "a6031d1149c2c6191a1f0e541065165b72dafc4bc4ab4b0ea37af41b7cb0f739",
+        "pdfPage": 703,
+        "printedPage": 684,
+        "figure": "16.53(a)"
+      },
+      "extractPath": "buffer-vector-source.json",
+      "extractSha256": "10ba76da5559df0353cfc89b3bf35eb311b4f091345dffff02291edb30f4ac62",
+      "rasterPath": "buffer-reference.png",
+      "rasterSha256": "6a51fc726184302657c5cc7a7290fb706b1e8e1a02ac39e431be37d3ec7cc3d1",
+      "scope": ["direct buffer triangle and lead/body seams"]
+    },
+    {
+      "id": "razavi-textbook-d-flip-flop",
+      "kind": "pdf-vector-extract",
+      "source": {
+        "title": "Design of Analog CMOS Integrated Circuits, Second Edition",
+        "sha256": "a6031d1149c2c6191a1f0e541065165b72dafc4bc4ab4b0ea37af41b7cb0f739",
+        "pdfPage": 687,
+        "printedPage": 668,
+        "figure": "16.23(a)"
+      },
+      "extractPath": "d-flip-flop-vector-source.json",
+      "extractSha256": "e4998a1a3a55bf9ce223eab734ed9b3e68bc0a6d74470c8414e3657e317def78",
+      "rasterPath": "d-flip-flop-reference.png",
+      "rasterSha256": "b3a7caab14b71944766da26cac934902a96fa7a304b4963cbb43ac49fe97fa2e",
+      "scope": [
+        "generic D/CK/Q/Q-bar flip-flop block without external circuit ports"
+      ]
+    },
+    {
+      "id": "razavi-ojsscs-figure-19-xfmr",
+      "kind": "pdf-vector-extract",
+      "source": {
+        "title": "LO Generation Techniques for Millimeter-Wave Receivers",
+        "sha256": "489edabe3248a336806a249d099401c94aab0b26913a6dee16d754e9e36baf31",
+        "pdfPage": 8,
+        "printedPage": 8,
+        "figure": "19(a)"
+      },
+      "extractPath": "xfmr-vector-source.json",
+      "extractSha256": "c5031902684968c25adf15fc1c8199551dc87d945889b47028be31ff15f5ffcd",
+      "rasterPath": "xfmr-reference.png",
+      "rasterSha256": "590a8a622514b117db6f9580952605d717e24654f972278d095eebaf404537dd",
+      "scope": [
+        "two-winding transformer topology and separation",
+        "same-name polarity-dot placement relative to each winding"
+      ]
+    },
+    {
+      "id": "razavi-bridged-tcoil-figure-2",
+      "kind": "pdf-vector-extract",
+      "source": {
+        "title": "The Bridged T-Coil",
+        "sha256": "30543c6d78f1ca1e3019746520319eeb39948899294bb8f4d792870b84b2b676",
+        "pdfPage": 1,
+        "printedPage": 9,
+        "figure": "2"
+      },
+      "extractPath": "tcoil-vector-source.json",
+      "extractSha256": "31fdf78732bebd61e893e275bc943ddecc17c5effb51bb57f2c5f62bd875fcd2",
+      "rasterPath": "tcoil-reference.png",
+      "rasterSha256": "5bf1ef2f5055e659365b2f447765d33a11aeaac8a96339157bef66a03fca146d",
+      "scope": [
+        "three-terminal bridged T-coil topology",
+        "winding, bridge-capacitor, junction, and polarity-dot placement"
+      ]
+    }
+  ],
+  "mosGeometryPath": "mos-geometry.json",
+  "mosGeometrySha256": "0e61e355ca658dcde5ac127a729fd9893bf58dd07547de8a061a952f3772d195",
+  "peripheralGeometryPath": "peripheral-geometry.json",
+  "peripheralGeometrySha256": "5bb3f3cbd8b08035040aeb4cf018be80853edf9c323426fe975a2bdb7ccb65e9",
+  "passiveGeometryPath": "passive-geometry.json",
+  "passiveGeometrySha256": "ebdbbcd9641c4a11aac4934eddf9c44b6865e69aa79d159c2d4c7db90082ff15",
+  "capacitorGeometryPath": "capacitor-geometry.json",
+  "capacitorGeometrySha256": "9137e7a492c6a5e66ae0476618942f099899260a09e80f47b3d5ebe57c97cf6a",
+  "currentPortGeometryPath": "current-port-geometry.json",
+  "currentPortGeometrySha256": "182bc62fdec937cec49051ba5ad1ff802b8d23a576ff2695f8fdce02b0fa66fd",
+  "vddGeometryPath": "vdd-geometry.json",
+  "vddGeometrySha256": "3c10d5be30fef640734aef44225a534a83ea510620fdc2b8f26a7abf161b3ff8",
+  "inductorGeometryPath": "inductor-geometry.json",
+  "inductorGeometrySha256": "a45c05a9335545e202626bae7e0da1bcbbc314ab46e0b964522dccd0cee55b19",
+  "opampGeometryPath": "opamp-geometry.json",
+  "opampGeometrySha256": "cc0b623c3620cf70161f353f7abcfa01b1f14daa5108d23f3800c0ca9c202c06",
+  "differentialOpampGeometryPath": "differential-opamp-geometry.json",
+  "differentialOpampGeometrySha256": "a3f16365d6a7f87d91459c1708c58152ac81aad7f8832c73144b74d13b148612",
+  "commonSymbolGeometryPath": "common-symbol-geometry.json",
+  "commonSymbolGeometrySha256": "1972b4584a02c9845c5a20d24005746f2ae258c5c250c740e67a644ae4d68d37",
+  "zenerDiodeGeometryPath": "zener-diode-geometry.json",
+  "zenerDiodeGeometrySha256": "0ceb7d8e0512e933dc36fff854a851491baf8e270748d6793b40a2fdc1bf1a15",
+  "batteryGeometryPath": "battery-geometry.json",
+  "batteryGeometrySha256": "475743760a5cede0055999d9628851dbe591b573c789983da296481a13b0e91a",
+  "logicGateGeometryPath": "logic-gate-geometry.json",
+  "logicGateGeometrySha256": "82ab85760e6c5db3f1201a792fbad19d7a3dad32dfc42c90bd69603f693c88f8",
+  "bufferDffGeometryPath": "buffer-dff-geometry.json",
+  "bufferDffGeometrySha256": "9748f512ca9deffbf2bd8e5a5fb9bc8c86bca27eec9b3e900d9f42545863e1eb",
+  "delayCellGeometryPath": "delay-cell-geometry.json",
+  "delayCellGeometrySha256": "b64afe75141020b265bc7826a1c21fa5f13cb9f898e9e6bc013f1e0ef3f84985",
+  "fidelityTargetsPath": "fidelity-targets.json",
+  "fidelityTargetsSha256": "884be97d4e7d61bd60ae9deabb7e1cbf7316b69c61bcee76b5228d774ea9cc77",
+  "pixels": {
+    "width": 1204,
+    "height": 794
+  },
+  "scope": [
+    "MOS geometry",
+    "arrow geometry",
+    "line width and cap treatment",
+    "textbook annotation typography",
+    "ground, supply, port, and source presentation",
+    "capacitor geometry and stroke treatment",
+    "route current-arrow treatment, current-source geometry, and hollow port origin",
+    "VDD supply marker geometry",
+    "PDF-derived inductor geometry and stroke treatment",
+    "PDF-derived three-terminal op-amp geometry and polarity marks",
+    "PDF-derived fully differential op-amp geometry and polarity marks",
+    "PDF-derived common BJT, diode, gain-block, and switch families",
+    "PDF-derived Zener diode geometry and bent-cathode treatment",
+    "PDF-derived logic-gate bodies, bubbles, and lead junctions",
+    "PDF-derived Buffer and generic D flip-flop geometry",
+    "PDF-derived page-331 Delay Cell geometry and Delta-T mark",
+    "PDF-derived transformer winding and polarity-dot layout",
+    "PDF-derived bridged T-coil topology and passive placement",
+    "PDF-derived clock-pulse presentation from Figure 16.8",
+    "PDF-derived stacked digital waveform presentation from Figure 20.54"
+  ],
+  "notes": [
+    "This manifest is the sole visual authority for Razavi style v1.",
+    "Supplemental rasters are user-supplied evidence within this same sole authority.",
+    "PDF vector evidence is scoped, hash-pinned source evidence and carries a raster witness for the existing comparison workflow.",
+    "The pulse source combines the existing independent voltage-source body with the Figure 16.8 square-step presentation; the PDF figure does not define the source's electrical contract.",
+    "Figure 20.54 is visual evidence for waveform presentation only; simulation semantics remain product-owned.",
+    "XFMR and T-coil reuse the reviewed Inductor and Capacitor artwork; their PDF evidence governs topology, placement, and polarity rather than introducing duplicate passive geometry.",
+    "Visio/VSS may establish legacy pin semantics but must not determine visual geometry."
+  ],
+  "deltaSigmaGeometryPath": "delta-sigma-geometry.json",
+  "deltaSigmaGeometrySha256": "79609db92814660f07b4d68865bcd3531259d71c4aec440e54b403233497a638"
+}

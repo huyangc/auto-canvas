@@ -1,0 +1,700 @@
+{
+  "schemaVersion": 1,
+  "id": "razavi-data-converters-timing-waveform",
+  "kind": "pdf-vector-extract",
+  "source": {
+    "title": "Analysis and Design of Data Converters",
+    "sha256": "8a5c1bb42a5e32a84cd6af53e2f43db79ea8f511552c913ec65d2caa1d90a028",
+    "pdfPage": 491,
+    "printedPage": 473,
+    "figure": "20.54"
+  },
+  "selection": {
+    "method": "direct-source-region-vector-fingerprint",
+    "boundsPdf": {
+      "left": 55.0,
+      "top": 470.0,
+      "right": 505.0,
+      "bottom": 595.0
+    },
+    "nativeObjectCount": 42,
+    "textObjectCount": 20,
+    "nativeSelectionSha256": "76dfc2ee5c6818fcfe6e4d1a696f0197f2d4531d9bb84d5ef26ef3e6ebc2453d",
+    "nativeObjects": [
+      {
+        "objectType": "line",
+        "x0": 179.177004,
+        "top": 530.551998,
+        "x1": 187.988004,
+        "bottom": 530.551998,
+        "linewidth": 0.0,
+        "fill": true,
+        "stroke": false,
+        "pathCommandCount": 2,
+        "pathSha256": "9a89024ea8eed7f9349fea9efe61197bc329b9e2444fb660d38610a9a0577dad"
+      },
+      {
+        "objectType": "line",
+        "x0": 179.177004,
+        "top": 530.551998,
+        "x1": 187.988004,
+        "bottom": 530.551998,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 2,
+        "pathSha256": "9a89024ea8eed7f9349fea9efe61197bc329b9e2444fb660d38610a9a0577dad"
+      },
+      {
+        "objectType": "line",
+        "x0": 155.004004,
+        "top": 530.3,
+        "x1": 167.731004,
+        "bottom": 530.3,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 2,
+        "pathSha256": "f69b772b674f460ed7055b9352da0cd9eab0f9c42f67936836082f6575424bd4"
+      },
+      {
+        "objectType": "line",
+        "x0": 141.289,
+        "top": 530.301001,
+        "x1": 147.025,
+        "bottom": 530.301001,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 2,
+        "pathSha256": "17f7b6e85231b866bc2529a6653f4d0e992e2b24662f65a04a2a56bc62bdab98"
+      },
+      {
+        "objectType": "line",
+        "x0": 221.599,
+        "top": 524.564,
+        "x1": 232.355,
+        "bottom": 524.564,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 2,
+        "pathSha256": "5d913d7a8e1ed0f584112b26364206a3b44312627fbcf747499767cfc932001e"
+      },
+      {
+        "objectType": "line",
+        "x0": 252.432008,
+        "top": 530.301,
+        "x1": 263.188008,
+        "bottom": 530.301,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 2,
+        "pathSha256": "d6af10412acf5ab0a4287073dd421a606556ff30315a1ac5cc67022b462e9b20"
+      },
+      {
+        "objectType": "line",
+        "x0": 221.599,
+        "top": 530.301,
+        "x1": 232.355,
+        "bottom": 530.301,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 2,
+        "pathSha256": "3f5abc7554c8082919f712e54ca9bb18a0e328bf38345bdf807b495679cc2852"
+      },
+      {
+        "objectType": "line",
+        "x0": 204.39,
+        "top": 524.564,
+        "x1": 221.599,
+        "bottom": 524.564,
+        "linewidth": 0.0,
+        "fill": true,
+        "stroke": false,
+        "pathCommandCount": 2,
+        "pathSha256": "0e7c076a77d53674adc62972c4b14fe51f8cd5e865550bc49588a56a3e0794f3"
+      },
+      {
+        "objectType": "line",
+        "x0": 204.39,
+        "top": 524.564,
+        "x1": 221.599,
+        "bottom": 524.564,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 2,
+        "pathSha256": "0e7c076a77d53674adc62972c4b14fe51f8cd5e865550bc49588a56a3e0794f3"
+      },
+      {
+        "objectType": "line",
+        "x0": 204.39,
+        "top": 530.301,
+        "x1": 221.599,
+        "bottom": 530.301,
+        "linewidth": 0.0,
+        "fill": true,
+        "stroke": false,
+        "pathCommandCount": 2,
+        "pathSha256": "d88aff63056042b8efa80f649480aafb563c152594ac0122f5d290ca75f18e2f"
+      },
+      {
+        "objectType": "line",
+        "x0": 204.39,
+        "top": 530.301,
+        "x1": 221.599,
+        "bottom": 530.301,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 2,
+        "pathSha256": "d88aff63056042b8efa80f649480aafb563c152594ac0122f5d290ca75f18e2f"
+      },
+      {
+        "objectType": "line",
+        "x0": 222.675,
+        "top": 536.037,
+        "x1": 232.355,
+        "bottom": 536.037,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 2,
+        "pathSha256": "a354da7cb80f34b1a4f04d085f85e1ae5ea9a5d52947e2520676c933c22518d6"
+      },
+      {
+        "objectType": "line",
+        "x0": 141.289999,
+        "top": 530.301001,
+        "x1": 158.498999,
+        "bottom": 530.301001,
+        "linewidth": 0.0,
+        "fill": true,
+        "stroke": false,
+        "pathCommandCount": 2,
+        "pathSha256": "7f95fce33ae68ae94bfec3472cc15cf1d625964da247996b9823398d1b612063"
+      },
+      {
+        "objectType": "line",
+        "x0": 141.289999,
+        "top": 530.301001,
+        "x1": 158.498999,
+        "bottom": 530.301001,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 2,
+        "pathSha256": "7f95fce33ae68ae94bfec3472cc15cf1d625964da247996b9823398d1b612063"
+      },
+      {
+        "objectType": "line",
+        "x0": 357.091996,
+        "top": 484.647999,
+        "x1": 357.091996,
+        "bottom": 547.747999,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 2,
+        "pathSha256": "87d48901b9aee082306086b1306456f04b23c5fc5c0585c0e284509e5ee7889c"
+      },
+      {
+        "objectType": "line",
+        "x0": 345.618998,
+        "top": 484.647999,
+        "x1": 345.618998,
+        "bottom": 547.747999,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 2,
+        "pathSha256": "6071354a943db448add116f8541c63faf1adca37b099a03c39611be19748e2ae"
+      },
+      {
+        "objectType": "line",
+        "x0": 368.563993,
+        "top": 478.912013,
+        "x1": 368.563993,
+        "bottom": 542.011013,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 2,
+        "pathSha256": "fa634a141f1bb835d345909b9db1ed8124f0620020ac93b36c290b4f897c7e07"
+      },
+      {
+        "objectType": "line",
+        "x0": 328.41001,
+        "top": 547.748,
+        "x1": 431.66401,
+        "bottom": 547.748,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 2,
+        "pathSha256": "92230b5e2644b508930b38a47f4e0d933ba33e6f49848ba3440b0776f70a254e"
+      },
+      {
+        "objectType": "curve",
+        "x0": 182.495,
+        "top": 526.809,
+        "x1": 184.56,
+        "bottom": 528.874,
+        "linewidth": 0.0,
+        "fill": true,
+        "stroke": false,
+        "pathCommandCount": 5,
+        "pathSha256": "f7ec21dc1dbe56bd9f84b510c4d1b1eac09aae029b1e7294ae5e2c5970d6cbce"
+      },
+      {
+        "objectType": "curve",
+        "x0": 182.495,
+        "top": 526.809,
+        "x1": 184.56,
+        "bottom": 528.874,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 6,
+        "pathSha256": "45adf3baa68eb76dcac2c221c6c822c09ab4847880215183398bb269f0e513f0"
+      },
+      {
+        "objectType": "curve",
+        "x0": 182.495,
+        "top": 531.906998,
+        "x1": 184.56,
+        "bottom": 533.971998,
+        "linewidth": 0.0,
+        "fill": true,
+        "stroke": false,
+        "pathCommandCount": 5,
+        "pathSha256": "2d982e74978c4ae5475acd263f12faf3faba86d63ff3a47ed07330a7cb5ebd8f"
+      },
+      {
+        "objectType": "curve",
+        "x0": 182.495,
+        "top": 531.906998,
+        "x1": 184.56,
+        "bottom": 533.971998,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 6,
+        "pathSha256": "d60ec669722a1343b7689b118a602d0c648f582988b6a78665d8eee712ff8999"
+      },
+      {
+        "objectType": "curve",
+        "x0": 159.484998,
+        "top": 528.058997,
+        "x1": 169.348998,
+        "bottom": 532.541997,
+        "linewidth": 0.0,
+        "fill": true,
+        "stroke": false,
+        "pathCommandCount": 3,
+        "pathSha256": "8654ee6a1dd3e51728830abfa8d8c9390be279213c977dc92f1c8cd8146b1531"
+      },
+      {
+        "objectType": "curve",
+        "x0": 159.843006,
+        "top": 528.507996,
+        "x1": 167.731006,
+        "bottom": 532.092996,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 3,
+        "pathSha256": "af700146a55a8d4653ac358639eeb1dc212791591e7f0740a8c8792cbf6dbc2e"
+      },
+      {
+        "objectType": "curve",
+        "x0": 139.764997,
+        "top": 528.597006,
+        "x1": 142.633997,
+        "bottom": 531.465006,
+        "linewidth": 0.0,
+        "fill": true,
+        "stroke": false,
+        "pathCommandCount": 5,
+        "pathSha256": "3b655880aba41bdb8e96040d825ba966a7d7cf66a2e07b2562bed25b9eaf0dc8"
+      },
+      {
+        "objectType": "curve",
+        "x0": 139.764997,
+        "top": 528.597006,
+        "x1": 142.633997,
+        "bottom": 531.465006,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 6,
+        "pathSha256": "68bd3ecf501d817c77aa666487169d17a3f03e3ba06afa402d798c2abee34e4d"
+      },
+      {
+        "objectType": "curve",
+        "x0": 242.751994,
+        "top": 521.561999,
+        "x1": 252.072994,
+        "bottom": 538.860999,
+        "linewidth": 1.4341,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 20,
+        "pathSha256": "60e7420efce8141a2e28e9d518237adde22e3d52a2198e4910b8859c526f9c8d"
+      },
+      {
+        "objectType": "curve",
+        "x0": 232.533994,
+        "top": 521.652001,
+        "x1": 243.467994,
+        "bottom": 538.861001,
+        "linewidth": 1.4341,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 4,
+        "pathSha256": "993782a515c13e410a749354576ad6f7ca5690a152d4a928d2f75bcd69d4a8ec"
+      },
+      {
+        "objectType": "curve",
+        "x0": 151.238006,
+        "top": 528.597006,
+        "x1": 154.106006,
+        "bottom": 531.465006,
+        "linewidth": 0.0,
+        "fill": true,
+        "stroke": false,
+        "pathCommandCount": 5,
+        "pathSha256": "ed2c0afbb443f8fdde5bcf0be3c69b421857442c97af0d18f303cd0669613d72"
+      },
+      {
+        "objectType": "curve",
+        "x0": 151.238006,
+        "top": 528.597006,
+        "x1": 154.106006,
+        "bottom": 531.465006,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 6,
+        "pathSha256": "88be37469f3ff4eb71efaf667e653f32cefd4de9addf2ac784576a98634206a9"
+      },
+      {
+        "objectType": "curve",
+        "x0": 152.763,
+        "top": 530.301001,
+        "x1": 227.335,
+        "bottom": 553.246001,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 5,
+        "pathSha256": "a64ce60372f771936a5871840a2a2c33e21e31d64291e1ace3956e1988ac83fb"
+      },
+      {
+        "objectType": "curve",
+        "x0": 260.228997,
+        "top": 528.597006,
+        "x1": 263.096997,
+        "bottom": 531.465006,
+        "linewidth": 0.0,
+        "fill": true,
+        "stroke": false,
+        "pathCommandCount": 5,
+        "pathSha256": "df69155711478a7fd7d1618a951793e941ca91e6e14c47ed7398ac4bfd881ba6"
+      },
+      {
+        "objectType": "curve",
+        "x0": 260.228997,
+        "top": 528.597006,
+        "x1": 263.096997,
+        "bottom": 531.465006,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 6,
+        "pathSha256": "b13c0e4f6d9a517b5812245905a04f77ff7f9e7f910e3dd1cd38251f2ee5d9fd"
+      },
+      {
+        "objectType": "curve",
+        "x0": 227.624,
+        "top": 534.195,
+        "x1": 231.496,
+        "bottom": 538.066,
+        "linewidth": 0.0,
+        "fill": true,
+        "stroke": false,
+        "pathCommandCount": 5,
+        "pathSha256": "b364e7b683492b5112216f7f13d886405e76f7082c2f096ce5954b37550c7ed6"
+      },
+      {
+        "objectType": "curve",
+        "x0": 227.624,
+        "top": 534.195,
+        "x1": 231.496,
+        "bottom": 538.066,
+        "linewidth": 1.4341,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 6,
+        "pathSha256": "953eae48a7ec9a79e2af7f6992d0ae2131c1544732b2d401f225c6867cba495e"
+      },
+      {
+        "objectType": "curve",
+        "x0": 334.146,
+        "top": 478.91201,
+        "x1": 414.455,
+        "bottom": 490.38401,
+        "linewidth": 1.4341,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 15,
+        "pathSha256": "36060d57cb1bd7d3e8b4007d59cb2b8ff45d4b59701d7af327ed8a68e590a9f9"
+      },
+      {
+        "objectType": "curve",
+        "x0": 331.278007,
+        "top": 496.120994,
+        "x1": 411.587007,
+        "bottom": 507.592994,
+        "linewidth": 1.4341,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 8,
+        "pathSha256": "b8a919c8f7fa41c7b54cd2ae4072b1178eb717b9880c9c22ae4709b2228c994d"
+      },
+      {
+        "objectType": "curve",
+        "x0": 334.146,
+        "top": 513.330003,
+        "x1": 417.323,
+        "bottom": 524.802003,
+        "linewidth": 1.4341,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 8,
+        "pathSha256": "f5824f12ebd32398fe9a42f9b4f27eed70b3e0dc2422878b31243151004c0a8b"
+      },
+      {
+        "objectType": "curve",
+        "x0": 423.418018,
+        "top": 545.506008,
+        "x1": 433.282018,
+        "bottom": 549.989008,
+        "linewidth": 0.0,
+        "fill": true,
+        "stroke": false,
+        "pathCommandCount": 3,
+        "pathSha256": "e092a4589135fe0f42a946abc4def1febae6c0715ee8dcf7770c12bd3e00a262"
+      },
+      {
+        "objectType": "curve",
+        "x0": 423.777002,
+        "top": 545.955007,
+        "x1": 431.664002,
+        "bottom": 549.541007,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 3,
+        "pathSha256": "9c2cba34c3f0c22bc3546f99296ce11adc8986cc74ff09c521089438a5c2ef0e"
+      },
+      {
+        "objectType": "curve",
+        "x0": 331.244995,
+        "top": 530.376998,
+        "x1": 417.315995,
+        "bottom": 542.045998,
+        "linewidth": 1.4341,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 7,
+        "pathSha256": "1875831e52743ee7506a056210970ef9960584d159c422119a8e86b86155f846"
+      },
+      {
+        "objectType": "rect",
+        "x0": 169.972,
+        "top": 518.8277,
+        "x1": 204.39,
+        "bottom": 541.773,
+        "linewidth": 1.4341,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 5,
+        "pathSha256": "5e02f65b9afce3d84461bb31b6988e395615bd351b6839a729fd0b1f25cc4e5b"
+      }
+    ],
+    "textObjects": [
+      {
+        "text": "CK",
+        "x0": 320.791,
+        "top": 481.05748,
+        "x1": 333.21662,
+        "bottom": 489.66248
+      },
+      {
+        "text": "X",
+        "x0": 320.207,
+        "top": 498.89248,
+        "x1": 325.946535,
+        "bottom": 507.49748
+      },
+      {
+        "text": "1",
+        "x0": 325.62,
+        "top": 502.63028,
+        "x1": 329.45918,
+        "bottom": 509.53528
+      },
+      {
+        "text": "X",
+        "x0": 206.226,
+        "top": 513.71248,
+        "x1": 211.965535,
+        "bottom": 522.31748
+      },
+      {
+        "text": "1",
+        "x0": 213.072,
+        "top": 517.45028,
+        "x1": 216.91118,
+        "bottom": 524.35528
+      },
+      {
+        "text": "X",
+        "x0": 318.773,
+        "top": 516.72948,
+        "x1": 324.512535,
+        "bottom": 525.33448
+      },
+      {
+        "text": "φ",
+        "x0": 264.68925,
+        "top": 522.066,
+        "x1": 270.068575,
+        "bottom": 532.391
+      },
+      {
+        "text": "2",
+        "x0": 327.053,
+        "top": 520.46728,
+        "x1": 330.89218,
+        "bottom": 527.37228
+      },
+      {
+        "text": "CK",
+        "x0": 124.349,
+        "top": 526.71048,
+        "x1": 136.77462,
+        "bottom": 535.31548
+      },
+      {
+        "text": "2",
+        "x0": 189.87,
+        "top": 526.95048,
+        "x1": 194.65438,
+        "bottom": 535.55548
+      },
+      {
+        "text": "X",
+        "x0": 206.226,
+        "top": 533.69948,
+        "x1": 211.965535,
+        "bottom": 542.30448
+      },
+      {
+        "text": "2",
+        "x0": 213.072,
+        "top": 537.43728,
+        "x1": 216.91118,
+        "bottom": 544.34228
+      },
+      {
+        "text": "1",
+        "x0": 270.436,
+        "top": 530.89528,
+        "x1": 274.27518,
+        "bottom": 537.80028
+      },
+      {
+        "text": "φ",
+        "x0": 319.96325,
+        "top": 527.951,
+        "x1": 325.342575,
+        "bottom": 538.276
+      },
+      {
+        "text": "1",
+        "x0": 326.337,
+        "top": 535.61428,
+        "x1": 330.17618,
+        "bottom": 542.51928
+      },
+      {
+        "text": "t",
+        "x0": 424.494,
+        "top": 551.90948,
+        "x1": 427.359465,
+        "bottom": 560.51448
+      },
+      {
+        "text": "(a)",
+        "x0": 187.181,
+        "top": 559.841735,
+        "x1": 196.73255,
+        "bottom": 568.446735
+      },
+      {
+        "text": "(b)",
+        "x0": 365.705,
+        "top": 559.841735,
+        "x1": 375.73843,
+        "bottom": 568.446735
+      },
+      {
+        "text": "Figure20.54",
+        "x0": 66.0,
+        "top": 575.960996,
+        "x1": 113.561286,
+        "bottom": 584.926996
+      },
+      {
+        "text": "Useofinputclocktoretimedivideroutputs.",
+        "x0": 121.68,
+        "top": 576.068588,
+        "x1": 280.154516,
+        "bottom": 585.034588
+      }
+    ]
+  },
+  "derivation": {
+    "visualScope": [
+      "stacked digital timing traces and left-side signal labels",
+      "dashed event guides and horizontal time axis"
+    ],
+    "semanticBoundary": "The circuit and waveform remain visual evidence only. The simulation engine derives transitions from current Document connectivity and never reads pixels or extracted geometry."
+  },
+  "rasterWitness": {
+    "kind": "source-pdf-crop",
+    "sourcePdfPage": 491,
+    "dpi": 200,
+    "pixels": {
+      "width": 1250,
+      "height": 348
+    },
+    "selectionBoundsPdf": {
+      "left": 55.0,
+      "top": 470.0,
+      "right": 505.0,
+      "bottom": 595.0
+    },
+    "sourceCropPx": {
+      "x": 152,
+      "y": 1305
+    },
+    "assetPath": "data-converters-timing-waveform-reference.png",
+    "threshold": 160
+  }
+}

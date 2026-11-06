@@ -1,0 +1,348 @@
+import { createRoutePath } from "@icm/model";
+import { resolveDocumentRoutingGeometry } from "@icm/derived";
+import { createEmptyDocument } from "@icm/model";
+import type { Annotation } from "@icm/model";
+import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
+import { describe, expect, it } from "vitest";
+
+import { draggedAnnotationAtPosition } from "./annotation-drag-model";
+
+const resolver = new InMemorySymbolResolver(builtInSymbols);
+
+function context(document: ReturnType<typeof createEmptyDocument>) {
+  const routing = resolveDocumentRoutingGeometry(document, resolver);
+  return {
+    document,
+    annotationGrid: 10,
+    resolver,
+    routeGeometryRecords: document.routes.flatMap((route) => {
+      const geometry = routing.routes.get(route.id);
+      return geometry ? [{ route, geometry }] : [];
+    }),
+  };
+}
+
+describe("annotation drag model", () => {
+  it("snaps free text to the Document grid", () => {
+    const document = createEmptyDocument("document", "Document");
+    document.presentation.grid = 10;
+    const annotation: Annotation = {
+      id: "note",
+      kind: "instance-label",
+      anchor: { kind: "free", position: { x: 0, y: 0 } },
+      alignment: "start",
+      rotation: 0,
+      locked: false,
+    };
+
+    expect(
+      draggedAnnotationAtPosition(context(document), annotation, {
+        x: 24,
+        y: 36,
+      }).anchor,
+    ).toEqual({ kind: "free", position: { x: 20, y: 40 } });
+  });
+
+  it("freely places an instance label while retaining its host-relative anchor", () => {
+    const document = createEmptyDocument("document", "Document");
+    document.presentation.grid = 10;
+    document.instances.push({
+      id: "R1",
+      symbolId: "resistor",
+      placement: {
+        position: { x: 100, y: 100 },
+        rotation: 0,
+        mirror: "none",
+      },
+    });
+    const annotation: Annotation = {
+      id: "reference-r1",
+      kind: "instance-label",
+      anchor: {
+        kind: "object",
+        objectId: "R1",
+        localOffset: { x: 0, y: -20 },
+        fallbackPosition: { x: 100, y: 80 },
+      },
+      alignment: "middle",
+      rotation: 0,
+      locked: false,
+    };
+
+    for (const position of [
+      { x: 1000, y: 1000 },
+      { x: -500, y: -700 },
+      { x: -500, y: 1000 },
+      { x: 1000, y: -700 },
+    ]) {
+      expect(
+        draggedAnnotationAtPosition(context(document), annotation, position),
+      ).toEqual({
+        ...annotation,
+        anchor: {
+          ...annotation.anchor,
+          localOffset: { x: position.x - 100, y: position.y - 100 },
+          fallbackPosition: position,
+        },
+      });
+    }
+  });
+
+  it.each(["nmos"])(
+    "freely places a %s value while keeping its host-relative anchor",
+    (symbolId) => {
+      const document = createEmptyDocument("document", "Document");
+      document.instances.push({
+        id: "device",
+        symbolId,
+        placement: {
+          position: { x: 100, y: 100 },
+          rotation: 0,
+          mirror: "none",
+        },
+      });
+      const annotation: Annotation = {
+        id: "value",
+        kind: "instance-value",
+        binding: { kind: "instance-value", instanceId: "device" },
+        anchor: {
+          kind: "object",
+          objectId: "device",
+          localOffset: { x: 30, y: 30 },
+          fallbackPosition: { x: 130, y: 130 },
+        },
+        alignment: "start",
+        rotation: 0,
+        locked: false,
+      };
+
+      for (const candidate of [
+        { x: 1003, y: 997 },
+        { x: -503, y: -697 },
+      ]) {
+        const dragged = draggedAnnotationAtPosition(
+          context(document),
+          annotation,
+          candidate,
+        );
+        const x = Math.round(candidate.x / 10) * 10;
+        const y = Math.round(candidate.y / 10) * 10;
+        expect(dragged).toEqual({
+          ...annotation,
+          anchor: {
+            kind: "object",
+            objectId: "device",
+            localOffset: { x: x - 100, y: y - 100 },
+            fallbackPosition: { x, y },
+          },
+        });
+      }
+    },
+  );
+
+  it("moves a power label anchored to its rail Junction", () => {
+    // A power rail's label anchors to the Junction at the rail's end, not to
+    // an Instance. Rendering resolves it as junction position + localOffset,
+    // so a drag that updates only fallbackPosition leaves the label where it
+    // was and the gesture appears to do nothing.
+    const document = createEmptyDocument("document", "Document");
+    document.presentation.grid = 10;
+    document.nets.push({ id: "vdd-net", terminals: [] });
+    document.junctions.push({
+      id: "vdd-junction",
+      netId: "vdd-net",
+      position: { x: 100, y: 100 },
+      role: "route-anchor",
+    });
+    const annotation: Annotation = {
+      id: "vdd-label",
+      kind: "power-label",
+      netId: "vdd-net",
+      binding: { kind: "net-name", netId: "vdd-net" },
+      anchor: {
+        kind: "object",
+        objectId: "vdd-junction",
+        localOffset: { x: 10, y: 10 },
+        fallbackPosition: { x: 110, y: 110 },
+      },
+      alignment: "start",
+      rotation: 0,
+      locked: false,
+    };
+
+    const dragged = draggedAnnotationAtPosition(context(document), annotation, {
+      x: 160,
+      y: 40,
+    });
+
+    expect(dragged.anchor.kind).toBe("object");
+    if (dragged.anchor.kind !== "object") return;
+    // localOffset is what rendering reads, so it has to carry the drag.
+    expect(dragged.anchor.localOffset).toEqual({ x: 60, y: -60 });
+    expect(dragged.anchor.fallbackPosition).toEqual({ x: 160, y: 40 });
+  });
+
+  it("moves a drafting label anchored to its rectangle", () => {
+    // Same class as the power label: the anchor target is not an Instance, so
+    // a lookup that only knows Instances silently drops the drag.
+    const document = createEmptyDocument("document", "Document");
+    document.presentation.grid = 10;
+    document.drafting = {
+      objects: [
+        {
+          id: "box",
+          kind: "rectangle",
+          center: { x: 200, y: 200 },
+          width: 80,
+          height: 40,
+          rotation: 0,
+          lineStyle: "solid",
+          locked: false,
+          zIndex: 0,
+          anchor: { kind: "free", position: { x: 200, y: 200 } },
+        },
+      ],
+    };
+    const annotation: Annotation = {
+      id: "box-label",
+      kind: "instance-label",
+      anchor: {
+        kind: "object",
+        objectId: "box",
+        localOffset: { x: 0, y: 0 },
+        fallbackPosition: { x: 200, y: 200 },
+      },
+      alignment: "middle",
+      rotation: 0,
+      locked: false,
+    };
+
+    const dragged = draggedAnnotationAtPosition(context(document), annotation, {
+      x: 230,
+      y: 170,
+    });
+
+    expect(dragged.anchor.kind).toBe("object");
+    if (dragged.anchor.kind !== "object") return;
+    expect(dragged.anchor.localOffset).toEqual({ x: 30, y: -30 });
+  });
+
+  it("freely places a routed Net Label while retaining its Net binding", () => {
+    const document = createEmptyDocument("document", "Document");
+    document.nets.push({ id: "net", terminals: [] });
+    document.junctions.push(
+      {
+        id: "j1",
+        netId: "net",
+        position: { x: 0, y: 0 },
+        role: "route-anchor",
+      },
+      {
+        id: "j2",
+        netId: "net",
+        position: { x: 100, y: 0 },
+        role: "route-anchor",
+      },
+    );
+    document.routes.push(
+      createRoutePath({
+        id: "route",
+        netId: "net",
+        start: { kind: "junction", junctionId: "j1" },
+        end: { kind: "junction", junctionId: "j2" },
+        bends: [],
+        modes: ["manual"],
+      }),
+    );
+    const annotation: Annotation = {
+      id: "imported-label",
+      kind: "net-label",
+      netId: "net",
+      anchor: {
+        kind: "route",
+        routeId: "route",
+        legId: document.routes[0]!.legs[0]!.id,
+        t: 0.1,
+        normalOffset: 0,
+        direction: "forward",
+        orientation: "follow",
+        fallbackPosition: { x: 10, y: 0 },
+      },
+      alignment: "middle",
+      rotation: 0,
+      locked: false,
+    };
+
+    const dragged = draggedAnnotationAtPosition(context(document), annotation, {
+      x: -150,
+      y: 20,
+    });
+
+    expect(dragged.anchor).toEqual({
+      kind: "free",
+      position: { x: -150, y: 20 },
+    });
+    expect(dragged.netId).toBe("net");
+  });
+
+  it("keeps a Net Label dropped beside its own wire on that wire (#1300)", () => {
+    const document = createEmptyDocument("document", "Document");
+    document.nets.push({ id: "net", terminals: [] });
+    document.junctions.push(
+      { id: "j1", netId: "net", position: { x: 0, y: 0 } },
+      { id: "j2", netId: "net", position: { x: 100, y: 0 } },
+    );
+    document.routes.push(
+      createRoutePath({
+        id: "route",
+        netId: "net",
+        start: { kind: "junction", junctionId: "j1" },
+        end: { kind: "junction", junctionId: "j2" },
+        bends: [],
+        modes: ["manual"],
+      }),
+    );
+    const legId = document.routes[0]!.legs[0]!.id;
+    const annotation: Annotation = {
+      id: "b0",
+      kind: "net-label",
+      netId: "net",
+      anchor: {
+        kind: "route",
+        routeId: "route",
+        legId,
+        t: 0.5,
+        normalOffset: -10,
+        direction: "forward",
+        orientation: "follow",
+        fallbackPosition: { x: 50, y: -10 },
+      },
+      alignment: "middle",
+      rotation: 0,
+      locked: false,
+    };
+    // The Agent's move-annotation places at one-unit precision.
+    const agentContext = { ...context(document), annotationGrid: 1 };
+    // Three units above the wire: still on it, at the dropped point.
+    expect(
+      draggedAnnotationAtPosition(agentContext, annotation, {
+        x: 40,
+        y: -3,
+      }).anchor,
+    ).toEqual({
+      ...annotation.anchor,
+      t: 0.4,
+      normalOffset: -3,
+      fallbackPosition: { x: 40, y: -3 },
+    });
+    // Past the wire's end, or well away from it, the label goes free as
+    // before.
+    for (const point of [
+      { x: 150, y: -3 },
+      { x: 40, y: -30 },
+    ])
+      expect(
+        draggedAnnotationAtPosition(agentContext, annotation, point).anchor,
+      ).toEqual({ kind: "free", position: point });
+  });
+});

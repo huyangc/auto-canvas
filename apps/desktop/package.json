@@ -1,0 +1,28 @@
+{
+  "name": "@icm/desktop",
+  "version": "0.9.2",
+  "private": true,
+  "productName": "Analog Canvas Preview",
+  "description": "Internal offline desktop preview of Analog Canvas",
+  "author": "Analog Canvas contributors; desktop shell adapted from LXY-freshman",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "main": "dist/main.mjs",
+  "scripts": {
+    "build:preview": "node scripts/build.mjs",
+    "start": "electron .",
+    "package:preview": "node scripts/package-preview.mjs",
+    "archive:preview": "node scripts/archive-preview.mjs",
+    "test:preview": "node scripts/accept-preview.mjs",
+    "security:preview": "node ../../scripts/desktop-package-security.mjs"
+  },
+  "devDependencies": {
+    "@icm/edit-engine": "workspace:*",
+    "@icm/project-protocol": "workspace:*",
+    "electron": "44.4.2",
+    "esbuild": "0.28.1",
+    "fflate": "0.8.3",
+    "rcedit": "5.0.2",
+    "zod": "4.4.3"
+  }
+}

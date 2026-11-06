@@ -1,0 +1,365 @@
+import { type SchematicDocument, type StyleOverrides } from "@icm/model";
+
+import {
+  logicalNetChoiceForNet,
+  logicalNetChoices,
+  logicalSupplyNetChoice,
+} from "../logical-net-choices";
+import { STYLE_KNOBS, styleOverrideDraft } from "./style-knobs";
+
+export interface CanvasPreferenceCodeValue {
+  showGrid: boolean;
+  annotationGrid: 1 | 5 | 10;
+  drawAngle: "free" | "45" | "orthogonal";
+  scrollBehavior: "auto" | "zoom" | "pan";
+}
+
+/** The one font of every text on the canvas and in its exports (#1725). */
+export type DocumentFontCode = "metropolis" | "serif";
+
+/** How wire crossings that are not connections draw on the canvas. */
+export type DocumentCrossingsCode = "plain" | "hop";
+
+export interface DocumentSettingsCodeValue {
+  font: DocumentFontCode;
+  crossings: DocumentCrossingsCode;
+  appearance: Record<keyof StyleOverrides, number>;
+  bulkDefaults: {
+    nmos: string;
+    pmos: string;
+  };
+  labels: {
+    first_letter_italic: boolean;
+    subscript_after_first: boolean;
+    subscript_case: "preserve" | "uppercase" | "lowercase";
+    subscript_italic: boolean;
+    underscore_subscript: boolean;
+  };
+  canvas: CanvasPreferenceCodeValue;
+}
+
+const DEFAULT_MOS_BULK_RAIL = {
+  nmos: "VSS",
+  pmos: "VDD",
+} as const;
+
+export type DocumentSettingsCodeParseResult =
+  | { ok: true; value: DocumentSettingsCodeValue }
+  | { ok: false; message: string };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function exactKeys(
+  value: Record<string, unknown>,
+  expected: readonly string[],
+  path: string,
+): string | null {
+  const allowed = new Set(expected);
+  const extra = Object.keys(value).find((key) => !allowed.has(key));
+  if (extra) return `${path}.${extra} is not supported`;
+  const missing = expected.find((key) => !(key in value));
+  return missing ? `${path}.${missing} is required` : null;
+}
+
+/** The sole copyable code surface for Document-wide and editor preferences. */
+export function documentSettingsCodeValue(
+  document: SchematicDocument,
+  canvas: CanvasPreferenceCodeValue,
+): DocumentSettingsCodeValue {
+  const netChoices = logicalNetChoices(document);
+  const bulkValue = (kind: "nmos" | "pmos"): string => {
+    const configuredId =
+      kind === "nmos"
+        ? document.mosBulkDefaults?.nmosNetId
+        : document.mosBulkDefaults?.pmosNetId;
+    const configured = logicalNetChoiceForNet(netChoices, configuredId);
+    const supply = logicalSupplyNetChoice(
+      document,
+      kind === "nmos" ? "ground" : "vdd",
+    );
+    return !configured || configured.netId === supply?.netId
+      ? DEFAULT_MOS_BULK_RAIL[kind]
+      : configured.netId;
+  };
+  return {
+    font: document.presentation.textFace ?? "metropolis",
+    crossings: document.presentation.crossingStyle ?? "plain",
+    appearance: styleOverrideDraft(document.presentation.styleOverrides),
+    bulkDefaults: {
+      nmos: bulkValue("nmos"),
+      pmos: bulkValue("pmos"),
+    },
+    labels: {
+      first_letter_italic: document.presentation.labelFirstLetterItalic ?? true,
+      subscript_after_first:
+        document.presentation.labelSubscriptAfterFirst ?? false,
+      subscript_case: document.presentation.labelSubscriptCase ?? "preserve",
+      subscript_italic: document.presentation.labelSubscriptItalic ?? true,
+      underscore_subscript:
+        document.presentation.labelUnderscoreSubscript ?? true,
+    },
+    canvas,
+  };
+}
+
+/** Resolve the reader-facing VSS/VDD policy or one explicit custom Net. */
+export function mosBulkDefaultNetIdFromCode(
+  document: SchematicDocument,
+  kind: "nmos" | "pmos",
+  value: string,
+): string | null {
+  if (value === DEFAULT_MOS_BULK_RAIL[kind]) {
+    return (
+      logicalSupplyNetChoice(document, kind === "nmos" ? "ground" : "vdd")
+        ?.netId ?? null
+    );
+  }
+  return (
+    logicalNetChoiceForNet(logicalNetChoices(document), value)?.netId ?? null
+  );
+}
+
+export function serializeDocumentSettingsCode(
+  value: DocumentSettingsCodeValue,
+): string {
+  return JSON.stringify(value, null, 2);
+}
+
+export function formatDocumentSettingsCode(
+  document: SchematicDocument,
+  canvas: CanvasPreferenceCodeValue,
+): string {
+  return serializeDocumentSettingsCode(
+    documentSettingsCodeValue(document, canvas),
+  );
+}
+
+export function defaultDocumentSettingsCode(
+  document: SchematicDocument,
+  canvas: CanvasPreferenceCodeValue,
+): string {
+  const current = documentSettingsCodeValue(document, canvas);
+  return serializeDocumentSettingsCode({
+    ...current,
+    font: "metropolis",
+    crossings: "plain",
+    appearance: Object.fromEntries(
+      STYLE_KNOBS.map((knob) => [knob.key, 1]),
+    ) as DocumentSettingsCodeValue["appearance"],
+    labels: {
+      first_letter_italic: true,
+      subscript_after_first: false,
+      subscript_case: "preserve",
+      subscript_italic: false,
+      underscore_subscript: true,
+    },
+  });
+}
+
+export function parseDocumentSettingsCode(
+  source: string,
+  document: SchematicDocument,
+): DocumentSettingsCodeParseResult {
+  return parseSettingsCode(source, document);
+}
+
+/** One reader belongs to one immutable, committed Document, never an engine draft. */
+export function createDocumentSettingsCodeParser(document: SchematicDocument) {
+  const validNetIds = new Set(
+    logicalNetChoices(document).map((net) => net.netId),
+  );
+  return (source: string): DocumentSettingsCodeParseResult =>
+    parseSettingsCode(source, document, validNetIds);
+}
+
+function parseSettingsCode(
+  source: string,
+  document: SchematicDocument,
+  preparedNetIds?: ReadonlySet<string>,
+): DocumentSettingsCodeParseResult {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(source);
+  } catch {
+    return { ok: false, message: "Properties code must be valid JSON" };
+  }
+  if (!isRecord(raw))
+    return { ok: false, message: "Properties code must be an object" };
+  const rootError = exactKeys(
+    raw,
+    [
+      ...(raw.font !== undefined ? ["font"] : []),
+      ...(raw.crossings !== undefined ? ["crossings"] : []),
+      "appearance",
+      "bulkDefaults",
+      "canvas",
+      ...(raw.labels !== undefined ? ["labels"] : []),
+    ],
+    "properties",
+  );
+  if (rootError) return { ok: false, message: rootError };
+  const font = raw.font ?? document.presentation.textFace ?? "metropolis";
+  if (font !== "metropolis" && font !== "serif")
+    return { ok: false, message: 'font must be "metropolis" or "serif"' };
+  const crossings =
+    raw.crossings ?? document.presentation.crossingStyle ?? "plain";
+  if (crossings !== "plain" && crossings !== "hop")
+    return { ok: false, message: 'crossings must be "plain" or "hop"' };
+
+  if (!isRecord(raw.appearance))
+    return { ok: false, message: "appearance must be an object" };
+  const appearanceKeys = STYLE_KNOBS.map((knob) => knob.key);
+  const appearanceError = exactKeys(
+    raw.appearance,
+    appearanceKeys,
+    "appearance",
+  );
+  if (appearanceError) return { ok: false, message: appearanceError };
+  const appearance = {} as DocumentSettingsCodeValue["appearance"];
+  for (const key of appearanceKeys) {
+    const factor = raw.appearance[key];
+    if (
+      typeof factor !== "number" ||
+      !Number.isFinite(factor) ||
+      factor < 0.5 ||
+      factor > 2
+    ) {
+      return {
+        ok: false,
+        message: `appearance.${key} must be a number from 0.5 to 2`,
+      };
+    }
+    appearance[key] = factor;
+  }
+
+  if (!isRecord(raw.bulkDefaults))
+    return { ok: false, message: "bulkDefaults must be an object" };
+  const bulkError = exactKeys(
+    raw.bulkDefaults,
+    ["nmos", "pmos"],
+    "bulkDefaults",
+  );
+  if (bulkError) return { ok: false, message: bulkError };
+  const validNetIds =
+    preparedNetIds ??
+    new Set(logicalNetChoices(document).map((net) => net.netId));
+  const bulkDefaults = {} as DocumentSettingsCodeValue["bulkDefaults"];
+  for (const [field, value] of Object.entries(raw.bulkDefaults)) {
+    const kind = field as "nmos" | "pmos";
+    if (typeof value !== "string") {
+      return {
+        ok: false,
+        message: `bulkDefaults.${field} must be ${DEFAULT_MOS_BULK_RAIL[kind]} or a Net id`,
+      };
+    }
+    if (value !== DEFAULT_MOS_BULK_RAIL[kind] && !validNetIds.has(value)) {
+      return {
+        ok: false,
+        message: `bulkDefaults.${field} must be ${DEFAULT_MOS_BULK_RAIL[kind]} or name a Net in this Cell`,
+      };
+    }
+    bulkDefaults[kind] = value;
+  }
+
+  const labels = raw.labels ?? {
+    first_letter_italic: document.presentation.labelFirstLetterItalic ?? true,
+    subscript_after_first:
+      document.presentation.labelSubscriptAfterFirst ?? false,
+    subscript_case: document.presentation.labelSubscriptCase ?? "preserve",
+    subscript_italic: document.presentation.labelSubscriptItalic ?? true,
+    underscore_subscript:
+      document.presentation.labelUnderscoreSubscript ?? true,
+  };
+  if (!isRecord(labels))
+    return { ok: false, message: "labels must be an object" };
+  const labelError = exactKeys(
+    labels,
+    [
+      ...["first_letter_italic", "subscript_after_first"].filter(
+        (key) => key in labels,
+      ),
+      "subscript_case",
+      "subscript_italic",
+      ...["underscore_subscript"].filter((key) => key in labels),
+    ],
+    "labels",
+  );
+  if (labelError) return { ok: false, message: labelError };
+  if (
+    !["preserve", "uppercase", "lowercase"].includes(
+      labels.subscript_case as string,
+    )
+  )
+    return {
+      ok: false,
+      message:
+        'labels.subscript_case must be "preserve", "uppercase", or "lowercase"',
+    };
+
+  if (typeof labels.subscript_italic !== "boolean")
+    return {
+      ok: false,
+      message: "labels.subscript_italic must be true or false",
+    };
+
+  for (const key of [
+    "underscore_subscript",
+    "subscript_after_first",
+    "first_letter_italic",
+  ] as const) {
+    if (labels[key] !== undefined && typeof labels[key] !== "boolean")
+      return { ok: false, message: `labels.${key} must be true or false` };
+  }
+
+  if (!isRecord(raw.canvas))
+    return { ok: false, message: "canvas must be an object" };
+  const canvasError = exactKeys(
+    raw.canvas,
+    ["showGrid", "annotationGrid", "drawAngle", "scrollBehavior"],
+    "canvas",
+  );
+  if (canvasError) return { ok: false, message: canvasError };
+  if (typeof raw.canvas.showGrid !== "boolean")
+    return { ok: false, message: "canvas.showGrid must be true or false" };
+  if (![1, 5, 10].includes(raw.canvas.annotationGrid as number))
+    return { ok: false, message: "canvas.annotationGrid must be 1, 5, or 10" };
+  if (!["free", "45", "orthogonal"].includes(raw.canvas.drawAngle as string))
+    return {
+      ok: false,
+      message: 'canvas.drawAngle must be "free", "45", or "orthogonal"',
+    };
+  if (!["auto", "zoom", "pan"].includes(raw.canvas.scrollBehavior as string))
+    return {
+      ok: false,
+      message: 'canvas.scrollBehavior must be "auto", "zoom", or "pan"',
+    };
+
+  return {
+    ok: true,
+    value: {
+      font,
+      crossings,
+      appearance,
+      bulkDefaults,
+      labels: {
+        first_letter_italic:
+          labels.first_letter_italic ??
+          document.presentation.labelFirstLetterItalic ??
+          true,
+        subscript_after_first:
+          labels.subscript_after_first ??
+          document.presentation.labelSubscriptAfterFirst ??
+          false,
+        subscript_case: labels.subscript_case,
+        subscript_italic: labels.subscript_italic,
+        underscore_subscript:
+          labels.underscore_subscript ??
+          document.presentation.labelUnderscoreSubscript ??
+          true,
+      } as DocumentSettingsCodeValue["labels"],
+      canvas: raw.canvas as unknown as CanvasPreferenceCodeValue,
+    },
+  };
+}

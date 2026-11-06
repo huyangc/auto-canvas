@@ -1,0 +1,1412 @@
+.canvas-panel {
+  grid-area: canvas;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+  background: #fafaf9;
+}
+
+.app-shell.library-open .canvas-panel {
+  grid-column: 2;
+}
+
+.schematic-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  background: #fff;
+  box-shadow: none;
+  touch-action: none;
+  /* Canvas drags are gestures, never reading flows: without this, a marquee
+     sweep starts a NATIVE browser text selection across the SVG labels in
+     DOM order, highlighting text far outside the dragged rectangle. */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Focus exists only to hand global shortcuts back from a prior input. The
+   canvas is not a form control and must never gain a browser-drawn frame. */
+.schematic-canvas:focus {
+  outline: none;
+}
+
+/* The inline text editor is the one place canvas text is really edited;
+   restore selection inside it so caret and range editing keep working. */
+.canvas-text-editor-overlay,
+.canvas-text-editor-overlay * {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.inline-canvas-text-editor {
+  box-sizing: border-box;
+  width: 100%;
+  height: 28px;
+  padding: 3px 6px;
+  border: 0;
+  border-bottom: 2px solid var(--icm-accent);
+  border-radius: 2px 2px 0 0;
+  outline: none;
+  color: var(--icm-text);
+  background: rgb(255 255 255 / 96%);
+  box-shadow: 0 1px 4px rgb(15 23 42 / 16%);
+  font:
+    13px "Google Sans Code Variable",
+    ui-monospace,
+    monospace;
+  font-weight: 700;
+}
+
+.net-label-placement-preview {
+  fill: var(--icm-accent);
+  paint-order: stroke;
+  stroke: var(--icm-surface);
+  stroke-width: 3px;
+  vector-effect: non-scaling-stroke;
+}
+
+/* The interactive scene reuses the formal renderer body without its exported
+   SVG wrapper. Supply that wrapper's canonical schematic typography here so
+   canvas labels and free text cannot fall back to the surrounding UI font. */
+.schematic-canvas text {
+  font-family: var(
+    --schematic-font-family,
+    "ICM Round Period",
+    "Metropolis",
+    "DejaVu Sans",
+    Arial,
+    "Helvetica Neue",
+    Helvetica,
+    sans-serif
+  );
+}
+
+/*
+ * Instance movement is previewed by rendering the Engine dry-run Document.
+ * Base-document hit geometry is stale until commit, so keep only the live snap
+ * guides instead of layering a contradictory interaction presentation over
+ * the projected formal scene.
+ */
+.schematic-canvas.semantic-move-preview
+  [data-layer="editor-overlay"]
+  > :not([data-layer="snap-guides"]),
+.schematic-canvas.semantic-move-preview .net-highlight-overlay,
+.schematic-canvas.semantic-move-preview .cell-symbol-layout-overlay {
+  visibility: hidden;
+}
+
+.hit-target {
+  fill: transparent;
+  stroke: transparent;
+  stroke-width: 2;
+  cursor: default;
+  pointer-events: all;
+}
+
+/* Analog Blocks are tapered or triangular. A rectangular interaction plane
+   made the empty corners beside those bodies behave like component artwork.
+   Their hit layer follows the authored body and leads instead: closed shapes
+   own their interior, while lines keep a small screen-space aiming band. */
+.analog-block-hit-target {
+  cursor: default;
+}
+
+.analog-block-hit-target.selected {
+  cursor: move;
+}
+
+.analog-block-hit-area {
+  fill: rgb(0 0 0 / 0.1%);
+  stroke: rgb(0 0 0 / 0.1%);
+  stroke-width: 10;
+  cursor: inherit;
+  pointer-events: stroke;
+  vector-effect: non-scaling-stroke;
+}
+
+.analog-block-hit-area.filled {
+  pointer-events: all;
+}
+
+.analog-block-hit-outline {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 2;
+  stroke-dasharray: 3 5;
+  vector-effect: non-scaling-stroke;
+}
+
+.analog-block-hit-target:hover:not(.selected) .analog-block-hit-outline {
+  stroke: rgb(var(--icm-accent-rgb) / 22%);
+}
+
+/* Selection traces the component's own lines instead of boxing it: the halo
+   layer paints a copy of the symbol artwork beneath the scene, so the hit
+   rectangle stays invisible and carries nothing but the cursor. Annotation
+   text has no artwork to trace and keeps the wash. would-move marks
+   everything a drag on the selection would carry, so the whole moving body
+   reads at a glance. */
+.hit-target.selected {
+  cursor: move;
+}
+
+.hit-target.annotation-text-hit.selected {
+  fill: rgb(var(--icm-accent-rgb) / 13%);
+  stroke: rgb(var(--icm-accent-rgb) / 60%);
+}
+
+/* A thick accent stroke under every line of the component. The halo is drawn
+   below the scene, so a per-instance colour override still shows through on
+   top unchanged — a highlight that recoloured the strokes would have erased
+   the colour the person deliberately set.
+   non-scaling-stroke keeps the halo a constant width on screen. A halo that
+   scaled with the drawing would swell when zoomed in and thin away to nothing
+   when zoomed out, which is exactly when a whole-schematic view needs it. */
+.selection-halo {
+  pointer-events: none;
+}
+
+.selection-halo * {
+  fill: none;
+  stroke: rgb(var(--icm-accent-rgb) / 42%);
+  stroke-width: 7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.selection-halo-body--would-move * {
+  stroke: rgb(var(--icm-accent-rgb) / 18%);
+  stroke-width: 6;
+}
+
+/* The part a selected label names: lit between selected and would-move. */
+.selection-halo-body--label-owner * {
+  stroke: rgb(var(--icm-accent-rgb) / 30%);
+  stroke-width: 6;
+}
+
+.wire-under-symbol-overlay .wire-under-symbol-paint {
+  stroke: #d3212c;
+  stroke-width: 2.5;
+  stroke-dasharray: 5 3;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+  opacity: 0.9;
+}
+
+.wire-under-symbol-overlay .wire-under-symbol-hit {
+  stroke: transparent;
+  stroke-width: 10;
+  cursor: pointer;
+  vector-effect: non-scaling-stroke;
+  pointer-events: stroke;
+}
+
+/* Findings on the canvas: an open severity-colored ring over a light halo,
+   never occluding the artwork it marks. Geometry scales with the schematic
+   (like junction dots) while non-scaling-stroke keeps the line crisp, so
+   rings shrink and fade on zoom-out instead of clouding the drawing. */
+.diagnostic-markers .diagnostic-marker-halo {
+  fill: none;
+  stroke: var(--icm-surface, #fff);
+  stroke-width: 4.5;
+  vector-effect: non-scaling-stroke;
+  opacity: 0.85;
+}
+
+.diagnostic-markers .diagnostic-marker-ring {
+  fill: none;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.diagnostic-marker[data-severity="error"] .diagnostic-marker-ring {
+  stroke: var(--icm-danger, #b42318);
+}
+
+.diagnostic-marker[data-severity="warning"] .diagnostic-marker-ring {
+  stroke: var(--icm-warning, #b54708);
+}
+
+.diagnostic-markers .diagnostic-marker-count {
+  font-size: 9px;
+  font-weight: 700;
+  paint-order: stroke;
+  stroke: var(--icm-surface, #fff);
+  stroke-width: 2.5;
+}
+
+.diagnostic-marker[data-severity="error"] .diagnostic-marker-count {
+  fill: var(--icm-danger, #b42318);
+}
+
+.diagnostic-marker[data-severity="warning"] .diagnostic-marker-count {
+  fill: var(--icm-warning, #b54708);
+}
+
+/* Simulated node voltages. A number sitting directly on a wire and the grid
+   is unreadable exactly where it matters, so each rides an opaque plate.
+   A voltage the author earned by naming the net reads as settled; one that
+   appeared because they pointed at something reads as passing, so a glance
+   tells them which numbers will still be there when they look away. */
+.operating-point-badges .operating-point-plate {
+  fill: var(--icm-surface, #fff);
+  stroke: var(--icm-border, #d5d9e0);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+  opacity: 0.92;
+}
+
+.operating-point-badges .operating-point-text {
+  font-size: 9px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  fill: var(--icm-accent-strong, #175cd3);
+}
+
+.operating-point-badge[data-reason="selected"] .operating-point-plate,
+.operating-point-badge[data-reason="hovered"] .operating-point-plate {
+  stroke-dasharray: 2 2;
+}
+
+.operating-point-badge[data-reason="all"] .operating-point-plate {
+  opacity: 0.78;
+}
+
+/* Ring-band hit only (an annulus path): the marker's centre stays
+   click-through, so the pin or junction it rings remains directly clickable
+   (and right-clickable) — the marker never captures what it annotates. */
+.diagnostic-markers .diagnostic-marker-hit {
+  fill: transparent;
+  stroke: none;
+  cursor: pointer;
+  pointer-events: fill;
+}
+
+.hit-target.annotation-text-hit.would-move {
+  fill: rgb(var(--icm-accent-rgb) / 7%);
+  stroke: rgb(var(--icm-accent-rgb) / 28%);
+}
+
+/* A selected label's line to what it belongs to: a soft glow under a dashed
+   core, ringed where it meets a wire or pin. */
+/* Butt ends: a label touching its owner has a zero-length line, which must
+   paint nothing until a drag stretches it. */
+.label-tether-glow {
+  stroke: rgb(var(--icm-accent-rgb) / 24%);
+  stroke-width: 6;
+  stroke-linecap: butt;
+  vector-effect: non-scaling-stroke;
+}
+
+.label-tether-line {
+  stroke: rgb(var(--icm-accent-rgb) / 90%);
+  stroke-width: 1.4;
+  stroke-dasharray: 4 3;
+  vector-effect: non-scaling-stroke;
+}
+
+.label-tether circle {
+  fill: none;
+  stroke: rgb(var(--icm-accent-rgb) / 90%);
+  stroke-width: 1.6;
+  vector-effect: non-scaling-stroke;
+}
+
+.route-hit.would-move {
+  stroke: rgb(var(--icm-accent-rgb) / 9%);
+  stroke-width: 14;
+}
+
+.flightline {
+  stroke: var(--icm-text-muted);
+  stroke-width: 1;
+  stroke-dasharray: 5 4;
+  pointer-events: none;
+  vector-effect: non-scaling-stroke;
+}
+
+.flightline-hit {
+  stroke: rgb(0 0 0 / 0.001);
+  stroke-width: 12;
+  pointer-events: stroke;
+  cursor: crosshair;
+  vector-effect: non-scaling-stroke;
+}
+
+.net-highlight-overlay .net-highlight-halo {
+  fill: none;
+  stroke: #008ff0;
+  stroke-width: 10;
+  opacity: 0.28;
+  vector-effect: non-scaling-stroke;
+}
+
+.net-highlight-overlay .net-highlight-core {
+  fill: none;
+  stroke: #00a6ff;
+  stroke-width: 5;
+  opacity: 0.96;
+  vector-effect: non-scaling-stroke;
+}
+
+.net-highlight-overlay circle {
+  fill: #00a6ff;
+  stroke: #fff;
+  stroke-width: 1.25;
+  opacity: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.net-highlight-overlay .net-highlight-endpoint {
+  fill: #00a6ff;
+  stroke: #fff;
+  stroke-width: 1.5;
+}
+
+/* What the selection connects to: the halo alone, under the drawing. The
+   group carries the halo's opacity so its overlapping parts stay one tint. */
+.net-highlight-overlay.connected-net-glow {
+  opacity: 0.28;
+}
+
+.net-highlight-overlay.connected-net-glow .net-highlight-halo,
+.net-highlight-overlay.connected-net-glow .connected-net-glow-body {
+  fill: none;
+  stroke: #008ff0;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 1;
+}
+
+.net-highlight-overlay.connected-net-glow .connected-net-glow-body {
+  stroke-width: 5;
+}
+
+.net-highlight-overlay.connected-net-glow .net-highlight-endpoint {
+  fill: #008ff0;
+  stroke: none;
+}
+
+.wire-preview {
+  fill: none;
+  stroke: var(--icm-accent);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+  pointer-events: none;
+  vector-effect: non-scaling-stroke;
+}
+
+.wire-preview.bulk-route-preview {
+  stroke: #000;
+  stroke-dasharray: 3 3;
+}
+
+/* A pin the draft passes straight through becomes a real contact on release.
+   Solid, like the Junction dot it is about to become, so it reads as a
+   connection rather than as another dash of the dashed preview line. */
+.wire-preview-contact {
+  fill: var(--icm-accent);
+  stroke: none;
+  pointer-events: none;
+}
+
+.vdd-rail-preview {
+  stroke: #000;
+  stroke-linecap: butt;
+  pointer-events: none;
+}
+
+/* Wire mode owns the canvas input surface. It sits above formal symbols/text
+   but below endpoint and route targets, so labels never steal a wiring click. */
+.wire-input-plane {
+  fill: transparent;
+  cursor: crosshair;
+  pointer-events: all;
+}
+
+/* CSS rules on the selection overlays have higher precedence than the SVG
+   presentation attributes. Disable those overlays at the canvas level while
+   wiring, leaving only endpoint and route hit targets above the input plane. */
+.schematic-canvas.wire-mode .hit-target,
+.schematic-canvas.wire-mode .analog-block-hit-area,
+.schematic-canvas.wire-mode .annotation-hit,
+.schematic-canvas.wire-mode .route-handle {
+  pointer-events: none;
+}
+
+.route-hit {
+  fill: none;
+  /* A fully transparent SVG stroke is not consistently targetable by browser
+     hit testing. The near-zero alpha keeps it visually absent while preserving
+     the 14px screen-space route hit band. */
+  stroke: rgb(0 0 0 / 0.1%);
+  stroke-width: 14;
+  cursor: pointer;
+  pointer-events: stroke;
+  vector-effect: non-scaling-stroke;
+}
+
+.route-hit.selected {
+  stroke: var(--icm-accent-selection);
+  stroke-width: 14;
+}
+
+.route-handle {
+  fill: var(--icm-surface);
+  stroke: var(--icm-accent);
+  stroke-width: 1.5;
+  cursor: move;
+  vector-effect: non-scaling-stroke;
+}
+
+/* The white-and-blue grab circles earn their keep on touch, where fingers
+   need a target. With a mouse they read as clutter — but they stay
+   functional (route drag, power-rail resize), so they fade instead of
+   disappearing and light up on approach. */
+@media (pointer: fine) {
+  .route-handle {
+    opacity: 0.4;
+  }
+
+  .route-handle:hover {
+    opacity: 1;
+  }
+}
+
+.endpoint-hit {
+  fill: transparent;
+  stroke: transparent;
+  cursor: crosshair;
+  vector-effect: non-scaling-stroke;
+}
+
+.endpoint-hit.active {
+  fill: var(--icm-surface);
+  stroke: var(--icm-accent);
+  stroke-width: 1.5;
+}
+
+.wire-snap-target {
+  fill: var(--icm-accent);
+  fill-opacity: 0.3;
+  stroke: var(--icm-accent);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.selection-box {
+  fill: var(--icm-accent-soft);
+  stroke: var(--icm-accent);
+  stroke-width: 1;
+  stroke-dasharray: 5 4;
+  pointer-events: none;
+  vector-effect: non-scaling-stroke;
+}
+
+/* Directional marquee affordance: a left-to-right window (solid blue) selects
+   only what it fully contains; a right-to-left crossing (dashed green) selects
+   anything it touches — the classic drafting-tool pairing. */
+.selection-box--window {
+  stroke-dasharray: none;
+}
+
+.selection-box--crossing {
+  fill: var(--icm-marquee-crossing-soft);
+  stroke: var(--icm-marquee-crossing);
+}
+
+/* Right-drag camera frame: hints navigation, not selection. */
+.zoom-box {
+  fill: var(--icm-accent-soft);
+  stroke: var(--icm-accent);
+  stroke-width: 1.5;
+  stroke-dasharray: 2 3;
+  pointer-events: none;
+  vector-effect: non-scaling-stroke;
+}
+
+.drafting-create-preview {
+  stroke: var(--icm-accent);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+  pointer-events: none;
+  vector-effect: non-scaling-stroke;
+}
+
+/* Two-phase drafting creation anchors + arrow head + snap marker + readout.
+   Editor overlay only; never appears in formal SVG/PNG/PDF export. */
+.drafting-create-anchor {
+  fill: var(--icm-accent);
+  stroke: var(--icm-accent);
+  pointer-events: none;
+  vector-effect: non-scaling-stroke;
+}
+
+.draft-create-anchor-end {
+  fill: var(--icm-surface);
+}
+
+.draft-create-anchor-vx {
+  fill: var(--icm-surface);
+}
+
+.drafting-create-head {
+  fill: var(--icm-accent);
+  stroke: var(--icm-accent);
+  pointer-events: none;
+}
+
+.drafting-create-snap {
+  fill: none;
+  stroke: var(--icm-accent);
+  stroke-width: 1.5;
+  pointer-events: none;
+  vector-effect: non-scaling-stroke;
+}
+
+.drafting-create-readout {
+  fill: var(--icm-text-muted);
+  font-size: 10px;
+  paint-order: stroke;
+  stroke: var(--icm-surface);
+  stroke-width: 3px;
+  pointer-events: none;
+}
+
+/* Selection handles for a selected drafting object (editor overlay only).
+   Endpoint/vertex/center markers showing where geometry can be edited. */
+.draft-handle {
+  fill: var(--icm-surface);
+  stroke: var(--icm-accent);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.draft-handle-center {
+  fill: var(--icm-accent);
+}
+
+.draft-group-bounds {
+  fill: none;
+  stroke: var(--icm-accent);
+  stroke-width: 1;
+  stroke-dasharray: 5 4;
+  pointer-events: none;
+  vector-effect: non-scaling-stroke;
+}
+
+.draft-group-scale-handle {
+  cursor: nwse-resize;
+}
+
+/* A diamond is the directly draggable midpoint of a quadratic curve. Endpoint
+   and existing-vertex handles stay circular, so a smooth bend is distinct from
+   explicit polyline vertex editing. */
+.draft-midpoint-handle {
+  fill: var(--icm-surface);
+  cursor: crosshair;
+}
+
+.snap-preview {
+  fill: var(--icm-surface);
+  stroke: var(--icm-accent);
+  stroke-width: 1.5;
+  pointer-events: none;
+  vector-effect: non-scaling-stroke;
+}
+
+.annotation-hit {
+  fill: transparent;
+  stroke: transparent;
+  /* Fixed screen-pixel hit tolerance (vector-effect: non-scaling-stroke makes
+     stroke-width screen-space, not logical). Matches route-hit width so thin
+     drafting lines/arrows are as easy to select as wires at any zoom. This wide
+     transparent stroke IS the hit band — keep it for both unselected and
+     selected, otherwise a selected thin line becomes unclickable. */
+  stroke-width: 14;
+  cursor: default;
+  pointer-events: all;
+  vector-effect: non-scaling-stroke;
+}
+
+.annotation-hit.selected {
+  fill: var(--icm-accent-selection);
+  /* Selection highlight rides on the SAME wide transparent hit stroke; do NOT
+     narrow stroke-width here — that would shrink the hit band to 1px and make
+     a selected thin arrow/construction line nearly impossible to re-grab. */
+  stroke: rgb(var(--icm-accent-rgb) / 45%);
+  cursor: move;
+}
+
+/* Open and closed path annotations have strokes, not selectable filled
+   interiors. SVG closes polyline fills implicitly even for an open L shape. */
+.annotation-hit.drafting-path-hit,
+.annotation-hit.drafting-path-hit.selected {
+  fill: none;
+  pointer-events: stroke;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.schematic-canvas.drawing-mode .annotation-hit {
+  pointer-events: none;
+}
+
+/* A rectangle is an outline, not a translucent panel. Keep the same generous
+   screen-space tolerance as other drafting strokes, but let its empty interior
+   pass clicks through to the canvas and any components placed underneath. */
+.annotation-hit.drafting-rectangle-hit,
+.annotation-hit.drafting-rectangle-hit.selected,
+.annotation-hit.drafting-circle-hit,
+.annotation-hit.drafting-circle-hit.selected {
+  fill: none;
+  stroke: transparent;
+  pointer-events: stroke;
+}
+
+/* An opaque foreground shape behaves like the visible object it represents.
+   Background shapes remain edge-selectable so circuit artwork above them
+   stays interactive. */
+.annotation-hit.drafting-shape-filled-hit,
+.annotation-hit.drafting-shape-filled-hit.selected {
+  fill: transparent;
+  pointer-events: all;
+}
+
+.annotation-hit.drafting-shape-background-hit,
+.annotation-hit.drafting-shape-background-hit.selected {
+  fill: none;
+  pointer-events: stroke;
+}
+
+/* Editor-only HTML inside the SVG foreignObject. It is deliberately separate
+   from formal SVG/export, but uses the same RichText AST as formal rendering. */
+.rich-text-editor-shell {
+  display: grid;
+  /* Saved formula chips contain unbroken LaTeX. Keep their intrinsic width
+     from stretching every control beyond the fixed canvas editor frame. */
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.35rem;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: 0.4rem;
+  overflow: visible;
+  border: 1px solid var(--icm-border-strong);
+  border-radius: var(--icm-radius-md);
+  color: var(--icm-text);
+  background: rgb(255 255 255 / 99%);
+  box-shadow: var(--icm-shadow-md);
+  font-family: var(
+    --schematic-font-family,
+    "ICM Round Period",
+    "Metropolis",
+    "DejaVu Sans",
+    Arial,
+    "Helvetica Neue",
+    Helvetica,
+    sans-serif
+  );
+}
+
+.canvas-grid-dot {
+  fill: var(--icm-grid-dot);
+}
+
+.rich-text-floating-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  text-align: left;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  gap: 0.1rem;
+  min-height: 2.15rem;
+  padding: 0.25rem;
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-md);
+  background: var(--icm-surface);
+  box-shadow: var(--icm-shadow-md);
+}
+
+.rich-text-floating-toolbar button {
+  min-width: 1.6rem;
+  min-height: 1.55rem;
+  padding: 0.1rem 0.2rem;
+  border: 0;
+  background: transparent;
+  font-size: var(--icm-font-sm);
+}
+
+.rich-text-floating-toolbar button:hover:not(:disabled) {
+  background: var(--icm-accent-tint);
+}
+
+.rich-text-floating-toolbar .rich-text-latex-button {
+  min-width: 3.2rem;
+  font-family: "Google Sans Code Variable", monospace;
+  font-size: var(--icm-font-xs);
+}
+
+.rich-text-editor [data-rich-text-style="lowercase"] {
+  text-transform: lowercase;
+}
+
+.rich-text-editor [data-rich-text-style="uppercase"] {
+  text-transform: uppercase;
+}
+
+.rich-text-toolbar-size-controls {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.rich-text-toolbar-separator {
+  flex: 0 0 1px;
+  width: 1px;
+  height: 1.2rem;
+  margin: 0 0.1rem;
+  background: var(--icm-border-strong);
+}
+
+/* Keep commit controls on a deliberate second row. The canvas editor has one
+   compact layout at both full- and half-window sizes, so this break is stable
+   instead of changing with incidental flex wrapping. */
+.rich-text-toolbar-action-break {
+  flex: 0 0 100%;
+  width: 0;
+  height: 0;
+}
+
+.rich-text-overbar-button {
+  text-decoration: overline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.rich-text-align-icon {
+  display: block;
+  width: 0.95rem;
+  height: 0.95rem;
+  fill: none;
+  stroke: currentcolor;
+  stroke-linecap: round;
+  stroke-width: 1.45;
+}
+
+.rich-text-floating-toolbar button[aria-pressed="true"] {
+  color: #fff;
+  background: var(--icm-accent);
+}
+
+.rich-text-floating-toolbar .rich-text-symbol-button {
+  min-width: 1.8rem;
+}
+
+.rich-text-floating-toolbar .rich-text-symbol-button[aria-expanded="true"] {
+  background: var(--icm-accent-tint);
+}
+
+/* A page-level portal right-aligned under the Ω button: the canvas editor's
+   foreignObject would clip a menu that hangs below its controls. */
+.rich-text-symbol-menu {
+  position: fixed;
+  z-index: 60;
+  display: grid;
+  gap: 0.25rem;
+  width: max-content;
+  padding: 0.25rem;
+  border: 1px solid var(--icm-border-strong);
+  border-radius: var(--icm-radius-sm);
+  color: var(--icm-text);
+  background: #fff;
+  box-shadow: var(--icm-shadow-md);
+  font-family:
+    "ICM Round Period", "Metropolis", "DejaVu Sans", Arial, "Helvetica Neue",
+    Helvetica, sans-serif;
+}
+
+.rich-text-symbol-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1.8rem);
+  gap: 0.1rem;
+}
+
+.rich-text-symbol-grid + .rich-text-symbol-grid {
+  padding-top: 0.25rem;
+  border-top: 1px solid var(--icm-border);
+}
+
+.rich-text-symbol-grid button {
+  width: 1.8rem;
+  min-width: 1.8rem;
+  min-height: 1.6rem;
+  padding: 0;
+  border: 0;
+  border-radius: var(--icm-radius-sm);
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  font-size: var(--icm-font-sm);
+  cursor: pointer;
+}
+
+.rich-text-symbol-grid button:hover:not(:disabled) {
+  background: var(--icm-accent-tint);
+}
+
+.rich-text-symbol-hint {
+  max-width: calc(8 * 1.8rem + 0.7rem);
+  margin: 0;
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-xs);
+  line-height: var(--icm-line-tight);
+}
+
+.rich-text-editable {
+  box-sizing: border-box;
+  max-width: 100%;
+  overflow-y: visible;
+  min-height: 2rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--icm-accent);
+  border-radius: 0.2rem;
+  outline: 0;
+  background: rgb(255 255 255 / 96%);
+  box-shadow: 0 1px 5px rgb(var(--icm-accent-rgb) / 16%);
+  font: inherit;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.rich-text-editable:focus {
+  box-shadow: 0 0 0 2px rgb(var(--icm-accent-rgb) / 25%);
+}
+
+.rich-text-editable[data-rich-text-style="overbar"],
+.rich-text-editable [data-rich-text-style="overbar"] {
+  display: inline-block;
+  box-sizing: content-box;
+  /* Keep the rule above the raised superscript on every platform font. */
+  padding-top: 0.12em;
+  border-top: 1px solid currentcolor;
+  line-height: 1;
+  text-decoration: none;
+}
+
+/* Scripts are upright, as the drawing renders them; italic set inside stays. */
+.rich-text-editable sub,
+.rich-text-editable sup {
+  font-style: normal;
+}
+
+.rich-text-editable [data-rich-text-script-stack] {
+  display: inline-grid;
+  margin-left: 0.046em;
+  line-height: 1;
+  vertical-align: baseline;
+}
+
+.rich-text-editable [data-rich-text-script-stack] > sub,
+.rich-text-editable [data-rich-text-script-stack] > sup {
+  position: relative;
+  grid-area: 1 / 1;
+  font-size: 76%;
+  line-height: 1;
+  vertical-align: baseline;
+}
+
+.rich-text-fraction-button,
+.rich-text-editable [data-rich-text-fraction] {
+  display: inline-grid;
+  grid-template-rows: auto auto;
+  text-align: center;
+  /* Inline grid exposes its first row baseline, the numerator baseline. */
+  vertical-align: 0.789em;
+  line-height: 1.15;
+}
+
+.rich-text-fraction-button {
+  font-size: 0.75em;
+  vertical-align: middle;
+}
+
+.rich-text-fraction-button > :first-child,
+.rich-text-editable [data-fraction-part="numerator"] {
+  border-bottom: 1px solid currentcolor;
+}
+
+.rich-text-editable [data-rich-text-fraction] {
+  margin: 0 0.12em;
+  font-size: 98.8%;
+  white-space: nowrap;
+}
+
+.rich-text-editable [data-fraction-part] {
+  display: block;
+  min-width: 0.9em;
+  min-height: 1em;
+  padding: 0.12em 0.16em;
+  outline: none;
+}
+
+.rich-text-editable [data-fraction-part]:focus {
+  background: var(--icm-accent-tint);
+}
+
+.rich-text-editable [data-rich-text-math] {
+  display: inline-block;
+  max-width: 100%;
+  padding: 0.08em 0.3em;
+  overflow: hidden;
+  border: 1px solid var(--icm-border-strong);
+  border-radius: var(--icm-radius-sm);
+  color: var(--icm-text-muted);
+  background: var(--icm-surface-muted);
+  font-family: "Google Sans Code Variable", monospace;
+  text-overflow: ellipsis;
+  vertical-align: baseline;
+  white-space: nowrap;
+}
+
+.rich-text-formula-popover {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--icm-border-strong);
+  border-radius: var(--icm-radius-md);
+  background: var(--icm-surface);
+  box-shadow: var(--icm-shadow-md);
+}
+
+.rich-text-formula-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.45rem 0.55rem;
+  border-bottom: 1px solid var(--icm-border);
+  background: var(--icm-surface-muted);
+}
+
+.rich-text-formula-header > div {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+}
+
+.rich-text-formula-header strong {
+  font-size: var(--icm-font-sm);
+}
+
+.rich-text-formula-header span,
+.rich-text-formula-preview > span,
+.rich-text-formula-source > span {
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-xs);
+}
+
+.rich-text-formula-header button {
+  width: 1.65rem;
+  height: 1.65rem;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  font-size: 1.15rem;
+  line-height: 1;
+}
+
+.rich-text-formula-header button:hover {
+  background: var(--icm-accent-tint);
+}
+
+.rich-text-formula-scroll-region {
+  display: grid;
+  gap: 0.45rem;
+  max-height: min(20rem, 48vh);
+  min-height: 0;
+  padding: 0.5rem 0.55rem;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.rich-text-formula-preview {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.rich-text-formula-mathfield {
+  min-width: 0;
+}
+
+.rich-text-formula-error {
+  color: var(--icm-danger, #b42318);
+  font-size: var(--icm-font-xs);
+}
+
+.signal-expression-preview {
+  box-sizing: border-box;
+  max-height: 48px;
+  overflow: auto;
+  padding: 0.35rem 0.55rem;
+  background: var(--icm-panel, #fff);
+  color: var(--icm-text);
+  font-size: var(--icm-font-xs);
+}
+
+.signal-expression-preview[role="alert"] {
+  color: var(--icm-danger, #b42318);
+}
+
+.rich-text-formula-mathfield math-field {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 2.2rem;
+  padding: 0.2rem 0.35rem;
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-sm);
+  outline: 0;
+  background: #fff;
+  font-size: 1.05rem;
+}
+
+.rich-text-formula-mathfield math-field:focus-within {
+  border-color: var(--icm-accent);
+  box-shadow: 0 0 0 2px rgb(var(--icm-accent-rgb) / 20%);
+}
+
+.rich-text-formula-mathfield math-field::part(virtual-keyboard-toggle),
+.rich-text-formula-mathfield math-field::part(menu-toggle) {
+  display: none;
+}
+
+.rich-text-formula-keyboard {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(1.8rem, 1fr));
+  gap: 0.18rem;
+}
+
+.rich-text-formula-keyboard button {
+  min-width: 0;
+  min-height: 1.8rem;
+  padding: 0.15rem;
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-sm);
+  background: var(--icm-surface-muted);
+  font-family: "Metropolis", "DejaVu Sans", Arial, sans-serif;
+  font-size: var(--icm-font-sm);
+}
+
+.rich-text-formula-keyboard button:hover {
+  border-color: var(--icm-accent);
+  background: var(--icm-accent-tint);
+}
+
+.rich-text-formula-more {
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-sm);
+  background: var(--icm-surface-muted);
+}
+
+.rich-text-formula-more > summary {
+  padding: 0.35rem 0.45rem;
+  color: var(--icm-text-muted);
+  cursor: pointer;
+  font-size: var(--icm-font-xs);
+  font-weight: 600;
+  list-style-position: inside;
+}
+
+.rich-text-formula-more[open] > summary {
+  border-bottom: 1px solid var(--icm-border);
+}
+
+.rich-text-formula-more-groups {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.45rem;
+}
+
+.rich-text-formula-more-groups section {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.rich-text-formula-more-groups h4 {
+  margin: 0;
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-xs);
+  font-weight: 600;
+}
+
+.rich-text-formula-more-grid {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(2rem, 1fr));
+  gap: 0.18rem;
+}
+
+.rich-text-formula-more-grid button {
+  min-width: 0;
+  min-height: 1.8rem;
+  padding: 0.15rem;
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-sm);
+  background: #fff;
+  font-family: "Metropolis", "DejaVu Sans", Arial, sans-serif;
+  font-size: var(--icm-font-sm);
+}
+
+.rich-text-formula-more-grid button:hover {
+  border-color: var(--icm-accent);
+  background: var(--icm-accent-tint);
+}
+
+.rich-text-formula-source {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.rich-text-formula-source textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 3.7rem;
+  max-height: 7rem;
+  padding: 0.35rem 0.45rem;
+  resize: none;
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-sm);
+  background: #fff;
+  font-family: "Google Sans Code Variable", monospace;
+  font-size: var(--icm-font-xs);
+  line-height: 1.35;
+}
+
+.rich-text-formula-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  padding: 0.4rem 0.55rem;
+  border-top: 1px solid var(--icm-border);
+  background: var(--icm-surface-muted);
+}
+
+.rich-text-formula-display-toggle {
+  display: inline-flex;
+  padding: 0.1rem;
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-sm);
+  background: #fff;
+}
+
+.rich-text-formula-display-toggle button {
+  border: 0;
+  background: transparent;
+}
+
+.rich-text-formula-actions button[aria-pressed="true"] {
+  color: #fff;
+  background: var(--icm-accent);
+}
+
+.rich-text-formula-primary-action {
+  color: #fff;
+  border-color: var(--icm-accent);
+  background: var(--icm-accent);
+}
+
+.rich-text-formula-conversion {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.55rem;
+  border-top: 1px solid var(--icm-border);
+  background: var(--icm-surface-muted);
+}
+
+.rich-text-formula-conversion > div:first-child {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.rich-text-formula-conversion strong {
+  font-size: var(--icm-font-sm);
+}
+
+.rich-text-formula-conversion span {
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-xs);
+  line-height: 1.35;
+}
+
+.rich-text-formula-conversion-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.4rem;
+}
+
+.rich-text-editable [data-rich-text-script-stack] > sup {
+  top: -0.44em;
+}
+
+.rich-text-editable [data-rich-text-script-stack] > sub {
+  top: 0.44em;
+}
+
+.rich-text-source-input {
+  display: block;
+  width: 100%;
+  overflow-x: hidden;
+  resize: none;
+}
+
+.smart-snap-guide {
+  stroke: rgb(var(--icm-accent-rgb) / 90%);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  pointer-events: none;
+  vector-effect: non-scaling-stroke;
+}
+
+.command-group-label {
+  display: block;
+  margin: 8px 8px 4px;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--icm-text-muted);
+}
+
+.annotation-drag-preview {
+  fill: var(--icm-accent);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.context-actions {
+  margin-top: 0.8rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--icm-border);
+}
+
+.context-actions button {
+  width: 100%;
+  margin-top: 0.35rem;
+  padding: 0.5rem 0.6rem;
+  border-color: var(--icm-border);
+  box-shadow: none;
+}
+
+.placement-tray {
+  display: block;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.placement-tray > summary small {
+  padding: 0;
+  background: transparent;
+}
+
+.placement-tray-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.45rem;
+  height: 1.45rem;
+  padding: 0 0.35rem;
+  border: 1px solid var(--icm-border);
+  border-radius: 999px;
+  color: var(--icm-text-muted);
+  background: var(--icm-surface-muted);
+  font-size: var(--icm-font-xs);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.placement-tray-list {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.placement-tray-entry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.placement-tray-entry button {
+  margin-top: 0;
+}
+
+.placement-tray-entry button:first-child {
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.placement-tray-entry button:last-child {
+  width: auto;
+  white-space: nowrap;
+}
+
+.wire-member-choice {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--icm-border);
+  border-radius: 6px;
+  background: var(--icm-surface);
+  color: var(--icm-text);
+  font:
+    12px/1.4 system-ui,
+    sans-serif;
+}
+.wire-member-choice label {
+  display: grid;
+  gap: 4px;
+}
+.wire-member-choice select,
+.wire-member-choice input {
+  width: 100%;
+}
+.wire-member-choice form {
+  display: grid;
+  gap: 4px;
+}
+.wire-member-choice [aria-label="Bus selection preview"] {
+  max-height: 36px;
+  overflow: auto;
+}
+.wire-member-choice button {
+  justify-self: end;
+}
+.wire-preview[data-blocked] {
+  stroke: var(--icm-danger, #b34336);
+  stroke-dasharray: 5 4;
+}
+.wire-preview[data-bus-width] {
+  stroke-width: 3;
+}
+.wire-connection-preview {
+  font:
+    11px system-ui,
+    sans-serif;
+  fill: var(--icm-text);
+}

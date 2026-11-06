@@ -1,0 +1,368 @@
+{
+  "schemaVersion": 1,
+  "referenceId": "razavi-reference-v1",
+  "targets": [
+    {
+      "id": "nmos",
+      "label": "nmos (3-term)",
+      "measurementPath": "mos-geometry.json",
+      "measurementKey": "nmos",
+      "symbolId": "nmos",
+      "useVariant": true,
+      "window": {
+        "width": 69,
+        "height": 69,
+        "minX": -20,
+        "minY": -20
+      }
+    },
+    {
+      "id": "pmos",
+      "label": "pmos (3-term)",
+      "measurementPath": "mos-geometry.json",
+      "measurementKey": "pmos",
+      "symbolId": "pmos",
+      "useVariant": true,
+      "window": {
+        "width": 69,
+        "height": 69,
+        "minX": -20,
+        "minY": -20
+      }
+    },
+    {
+      "id": "nmos4",
+      "label": "nmos (4-term)",
+      "measurementPath": "mos-geometry.json",
+      "measurementKey": "nmos",
+      "symbolId": "nmos",
+      "useVariant": false,
+      "window": {
+        "width": 69,
+        "height": 69,
+        "minX": -20,
+        "minY": -20
+      }
+    },
+    {
+      "id": "pmos4",
+      "label": "pmos (4-term)",
+      "measurementPath": "mos-geometry.json",
+      "measurementKey": "pmos",
+      "symbolId": "pmos",
+      "useVariant": false,
+      "window": {
+        "width": 69,
+        "height": 69,
+        "minX": -20,
+        "minY": -20
+      }
+    },
+    {
+      "id": "voltage-source",
+      "measurementPath": "peripheral-geometry.json",
+      "measurementKey": "voltage-source",
+      "symbolId": "voltage-source",
+      "useVariant": false,
+      "window": {
+        "width": 57,
+        "height": 69,
+        "minX": -20.058139,
+        "minY": -20
+      }
+    },
+    {
+      "id": "battery",
+      "measurementPath": "battery-geometry.json",
+      "measurementKey": "battery",
+      "symbolId": "battery",
+      "useVariant": false
+    },
+    {
+      "id": "current-source",
+      "measurementPath": "peripheral-geometry.json",
+      "measurementKey": "current-source",
+      "symbolId": "current-source",
+      "useVariant": false,
+      "window": {
+        "width": 43,
+        "height": 69,
+        "minX": -12.255814,
+        "minY": -20
+      }
+    },
+    {
+      "id": "current-source-compact",
+      "measurementPath": "current-port-geometry.json",
+      "measurementKey": "current-source",
+      "symbolId": "current-source",
+      "useVariant": false
+    },
+    {
+      "id": "vdd-port",
+      "measurementPath": "vdd-geometry.json",
+      "measurementKey": "vdd",
+      "symbolId": "vdd-port",
+      "useVariant": false
+    },
+    {
+      "id": "formal-port",
+      "measurementPath": "current-port-geometry.json",
+      "measurementCollection": "ports",
+      "measurementKey": "hollowOrigin",
+      "formalKind": "port"
+    },
+    {
+      "id": "formal-route-wire",
+      "measurementPath": "current-port-geometry.json",
+      "measurementCollection": "formal",
+      "measurementKey": "route-wire",
+      "formalKind": "wire"
+    },
+    {
+      "id": "formal-route-current-arrow",
+      "measurementPath": "current-port-geometry.json",
+      "measurementCollection": "formal",
+      "measurementKey": "route-current-arrow",
+      "formalKind": "route-current-arrow"
+    },
+    {
+      "id": "ground",
+      "measurementPath": "peripheral-geometry.json",
+      "measurementKey": "ground",
+      "symbolId": "ground",
+      "useVariant": false,
+      "window": {
+        "width": 23,
+        "height": 37,
+        "minX": -6.395349,
+        "minY": -10
+      }
+    },
+    {
+      "id": "resistor",
+      "measurementPath": "passive-geometry.json",
+      "measurementKey": "resistor",
+      "symbolId": "resistor",
+      "useVariant": false
+    },
+    {
+      "id": "inductor",
+      "measurementPath": "inductor-geometry.json",
+      "measurementKey": "inductor",
+      "symbolId": "inductor",
+      "useVariant": false
+    },
+    {
+      "id": "opamp",
+      "measurementPath": "opamp-geometry.json",
+      "measurementKey": "opamp",
+      "symbolId": "opamp",
+      "useVariant": false
+    },
+    {
+      "id": "opamp-differential-figure-13-48",
+      "measurementPath": "differential-opamp-geometry.json",
+      "measurementKey": "opamp-differential-inputs-swapped",
+      "symbolId": "opamp-differential-inputs-swapped",
+      "useVariant": false
+    },
+    {
+      "id": "capacitor-vertical",
+      "measurementPath": "capacitor-geometry.json",
+      "measurementKey": "capacitor-vertical",
+      "symbolId": "capacitor",
+      "useVariant": false
+    },
+    {
+      "id": "capacitor-horizontal",
+      "measurementPath": "capacitor-geometry.json",
+      "measurementKey": "capacitor-horizontal",
+      "symbolId": "capacitor",
+      "useVariant": false
+    },
+    {
+      "id": "closed-switch",
+      "measurementPath": "common-symbol-geometry.json",
+      "measurementKey": "closed-switch",
+      "symbolId": "closed-switch",
+      "useVariant": false
+    },
+    {
+      "id": "diode",
+      "measurementPath": "common-symbol-geometry.json",
+      "measurementKey": "diode",
+      "symbolId": "diode",
+      "useVariant": false,
+      "rotation": -90
+    },
+    {
+      "id": "zener-diode",
+      "measurementPath": "zener-diode-geometry.json",
+      "measurementKey": "zener-diode",
+      "symbolId": "zener-diode",
+      "useVariant": false,
+      "rotation": -90
+    },
+    {
+      "id": "ideal-switch",
+      "measurementPath": "common-symbol-geometry.json",
+      "measurementKey": "ideal-switch",
+      "symbolId": "ideal-switch",
+      "useVariant": false
+    },
+    {
+      "id": "externally-controlled-switch",
+      "measurementPath": "common-symbol-geometry.json",
+      "measurementKey": "externally-controlled-switch",
+      "symbolId": "externally-controlled-switch",
+      "useVariant": false
+    },
+    {
+      "id": "npn",
+      "measurementPath": "common-symbol-geometry.json",
+      "measurementKey": "npn",
+      "symbolId": "npn",
+      "useVariant": false
+    },
+    {
+      "id": "pnp",
+      "measurementPath": "common-symbol-geometry.json",
+      "measurementKey": "pnp",
+      "symbolId": "pnp",
+      "useVariant": false
+    },
+    {
+      "id": "voltage-amplifier",
+      "measurementPath": "common-symbol-geometry.json",
+      "measurementKey": "voltage-amplifier",
+      "symbolId": "voltage-amplifier",
+      "useVariant": false
+    },
+    {
+      "id": "logic-inverter",
+      "measurementPath": "logic-gate-geometry.json",
+      "measurementKey": "inverter",
+      "symbolId": "inverter",
+      "useVariant": false
+    },
+    {
+      "id": "logic-and-gate",
+      "measurementPath": "logic-gate-geometry.json",
+      "measurementKey": "and-gate",
+      "symbolId": "and-gate",
+      "useVariant": false
+    },
+    {
+      "id": "logic-nand-gate",
+      "measurementPath": "logic-gate-geometry.json",
+      "measurementKey": "nand-gate",
+      "symbolId": "nand-gate",
+      "useVariant": false
+    },
+    {
+      "id": "logic-nor-gate",
+      "measurementPath": "logic-gate-geometry.json",
+      "measurementKey": "nor-gate",
+      "symbolId": "nor-gate",
+      "useVariant": false
+    },
+    {
+      "id": "logic-xor-gate",
+      "measurementPath": "logic-gate-geometry.json",
+      "measurementKey": "xor-gate",
+      "symbolId": "xor-gate",
+      "useVariant": false
+    },
+    {
+      "id": "buffer",
+      "measurementPath": "buffer-dff-geometry.json",
+      "measurementKey": "buffer",
+      "symbolId": "buffer",
+      "useVariant": false
+    },
+    {
+      "id": "delay-cell",
+      "measurementPath": "delay-cell-geometry.json",
+      "measurementKey": "delay-cell",
+      "symbolId": "delay-cell",
+      "useVariant": false
+    },
+    {
+      "id": "d-flip-flop",
+      "measurementPath": "buffer-dff-geometry.json",
+      "measurementKey": "d-flip-flop",
+      "symbolId": "d-flip-flop",
+      "useVariant": false
+    },
+    {
+      "id": "signal-flow-adder-figure-21-38",
+      "label": "adder (Figure 21.38 raster witness)",
+      "measurementPath": "delta-sigma-geometry.json",
+      "measurementKey": "adder",
+      "assetPath": "delta-sigma-figure-21-38-reference.png",
+      "symbolId": "adder",
+      "useVariant": false,
+      "window": {
+        "width": 39,
+        "height": 35,
+        "minX": -17,
+        "minY": -15
+      },
+      "referenceRasterPath": "delta-sigma-figure-21-38-reference.png",
+      "referenceRasterSha256": "88adc1f13614d2928e6a6b08116e9c57c0006b685671c8538ca79c683c38e72f",
+      "pixelsPerLogical": 1.3,
+      "originPx": {
+        "x": 69.5,
+        "y": 70.5
+      },
+      "threshold": 230
+    },
+    {
+      "id": "signal-flow-integrator-figure-21-38",
+      "label": "integrator 1/s (Figure 21.38 raster witness)",
+      "measurementPath": "delta-sigma-geometry.json",
+      "measurementKey": "integrator",
+      "assetPath": "delta-sigma-figure-21-38-reference.png",
+      "symbolId": "integrator",
+      "useVariant": false,
+      "window": {
+        "width": 41,
+        "height": 43,
+        "minX": -19,
+        "minY": -23
+      },
+      "referenceRasterPath": "delta-sigma-figure-21-38-reference.png",
+      "referenceRasterSha256": "88adc1f13614d2928e6a6b08116e9c57c0006b685671c8538ca79c683c38e72f",
+      "pixelsPerLogical": 1.3,
+      "originPx": {
+        "x": 128,
+        "y": 68.5
+      },
+      "threshold": 200
+    },
+    {
+      "id": "signal-flow-discrete-time-integrator-figure-21-33",
+      "label": "discrete-time integrator z^-1/(1-z^-1) (Figure 21.33 raster witness)",
+      "measurementPath": "delta-sigma-geometry.json",
+      "measurementKey": "discrete-time-integrator",
+      "assetPath": "delta-sigma-figure-21-33-reference.png",
+      "symbolId": "discrete-time-integrator",
+      "useVariant": false,
+      "window": {
+        "width": 61,
+        "height": 55,
+        "minX": -19,
+        "minY": -16
+      },
+      "referenceRasterPath": "delta-sigma-figure-21-33-reference.png",
+      "referenceRasterSha256": "dc3fd08dc3eb2aac6842f32016ecc0f0d7d77db137af2530e192e19f5c43d1a5",
+      "pixelsPerLogical": 1.2,
+      "originPx": {
+        "x": 137.5,
+        "y": 82
+      },
+      "threshold": 100
+    }
+  ]
+}

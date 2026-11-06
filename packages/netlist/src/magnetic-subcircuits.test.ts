@@ -1,0 +1,328 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { describe, expect, it } from "vitest";
+
+import {
+  createEmptyProject,
+  type CircuitProject,
+  type ComponentDefinition,
+} from "@icm/model";
+
+import { findBuiltInBodies } from "./built-in-bodies.js";
+import { createDesignNetlistExport } from "./export.js";
+import { analyzeDesignNetlist } from "./extract.js";
+import { printVacaskWithLocations } from "./vacask-printer.js";
+
+/**
+ * One magnetic device inside Cell `dut`, each pin on a Cell Pin named after
+ * the node it reaches.
+ */
+function magneticProject(
+  symbolId: "tcoil" | "xfmr" | "center-tap-inductor",
+  pins: readonly (readonly [pin: string, node: string])[],
+  parameters: Record<string, string>,
+  reference = "X1",
+): CircuitProject {
+  const project = createEmptyProject("magnetic", "Magnetic", "dut");
+  const document = project.documents[0]!;
+  document.netlist!.name = "dut";
+  document.instances.push({
+    id: "device",
+    symbolId,
+    placement: null,
+    reference,
+    netlist: { parameters },
+  });
+  for (const [pin, node] of pins) {
+    document.instances.push({ id: node, symbolId: "port", placement: null });
+    document.nets.push({
+      id: node,
+      terminals: [
+        { instanceId: "device", pinName: pin },
+        { instanceId: node, pinName: "P" },
+      ],
+    });
+    document.netlist!.terminals.push({
+      id: `terminal-${node}`,
+      name: node,
+      netId: node,
+      direction: "inout",
+      interfaceInstanceIds: [node],
+    });
+  }
+  return project;
+}
+
+const tcoil = () =>
+  magneticProject(
+    "tcoil",
+    [
+      ["1", "a"],
+      ["2", "b"],
+      ["3", "tap"],
+    ],
+    { l1: "1n", l2: "2n", k: "0.5", cb: "10f" },
+  );
+
+const transformer = () =>
+  magneticProject(
+    "xfmr",
+    [
+      ["P-", "pm"],
+      ["P+", "pp"],
+      ["S-", "sm"],
+      ["S+", "sp"],
+    ],
+    { lp: "1n", ls: "4n", k: "0.8" },
+    "X7",
+  );
+
+function exported(project: CircuitProject, format: "spice" | "spectre") {
+  const result = createDesignNetlistExport(project, { format });
+  expect(
+    result.diagnostics.filter((item) => item.severity === "error"),
+  ).toEqual([]);
+  if (result.status !== "ready") throw new Error("export blocked");
+  return result.file.text;
+}
+
+describe("drawn magnetic devices", () => {
+  it("writes a T-coil as a call on its coupled-winding subcircuit", () => {
+    const text = exported(tcoil(), "spice");
+    expect(text).toContain("X1 a b tap tcoil l1=1n l2=2n k=0.5 cb=10f");
+    // L1 runs from its dot at pin 1 to the tap, L2 from its dot at the tap
+    // to pin 2, so the two windings aid end to end; CB bridges the ends.
+    expect(text).toContain(
+      [
+        ".subckt tcoil n1 n2 n3 params: l1=1n l2=1n k=1 cb=1p",
+        "L1 n1 n3 {l1}",
+        "L2 n3 n2 {l2}",
+        "K12 L1 L2 {k}",
+        "CB n1 n2 {cb}",
+        ".ends tcoil",
+      ].join("\n"),
+    );
+    // Defined once, ahead of the Cell that calls it.
+    expect(text.indexOf(".subckt tcoil")).toBeLessThan(
+      text.indexOf(".subckt dut"),
+    );
+    expect(text.split(".subckt tcoil").length).toBe(2);
+    // Spectre names the coupling through a mutual_inductor instance.
+    const spectre = exported(tcoil(), "spectre");
+    expect(spectre).toContain("X1 (a b tap) tcoil l1=1n l2=2n k=0.5 cb=10f");
+    expect(spectre).toContain("K12 mutual_inductor coupling=k ind1=L1 ind2=L2");
+  });
+
+  it("writes a centre-tap inductor as two series halves, uncoupled by default (#1513)", () => {
+    const project = magneticProject(
+      "center-tap-inductor",
+      [
+        ["1", "von"],
+        ["2", "vop"],
+        ["3", "vdd"],
+      ],
+      { l1: "2n", l2: "2n", k: "0" },
+    );
+    const text = exported(project, "spice");
+    expect(text).toContain("X1 von vop vdd ct_inductor l1=2n l2=2n k=0");
+    // No bridge capacitor: only the two halves and their coupling, 0 unless
+    // the part gives one.
+    expect(text).toContain(
+      [
+        ".subckt ct_inductor n1 n2 n3 params: l1=1n l2=1n k=0",
+        "L1 n1 n3 {l1}",
+        "L2 n3 n2 {l2}",
+        "K12 L1 L2 {k}",
+        ".ends ct_inductor",
+      ].join("\n"),
+    );
+    expect(exported(project, "spectre")).toContain(
+      "X1 (von vop vdd) ct_inductor l1=2n l2=2n k=0",
+    );
+  });
+
+  it("writes a transformer from the dotted + pins, in SPICE and Spectre", () => {
+    const spice = exported(transformer(), "spice");
+    expect(spice).toContain("X7 pm pp sm sp xfmr lp=1n ls=4n k=0.8");
+    expect(spice).toContain(
+      [
+        ".subckt xfmr p_minus p_plus s_minus s_plus params: lp=1n ls=1n k=1",
+        "LP p_plus p_minus {lp}",
+        "LS s_plus s_minus {ls}",
+        "K1 LP LS {k}",
+        ".ends xfmr",
+      ].join("\n"),
+    );
+    const spectre = exported(transformer(), "spectre");
+    expect(spectre).toContain("X7 (pm pp sm sp) xfmr lp=1n ls=4n k=0.8");
+    expect(spectre).toContain(
+      [
+        "subckt xfmr (p_minus p_plus s_minus s_plus)",
+        "parameters lp=1n ls=1n k=1",
+        "LP (p_plus p_minus) inductor l=lp",
+        "LS (s_plus s_minus) inductor l=ls",
+        "K1 mutual_inductor coupling=k ind1=LP ind2=LS",
+        "ends xfmr",
+      ].join("\n"),
+    );
+  });
+
+  it("lowers the copy of the definition a saved Project carries", () => {
+    // A saved file carries the definitions of the parts it uses; the copy
+    // comes back with its keys in another order but means the same device.
+    const source = JSON.parse(
+      readFileSync(
+        resolve(process.cwd(), "packages/components/definitions/tcoil.json"),
+        "utf8",
+      ),
+    ) as ComponentDefinition;
+    const reordered = Object.fromEntries(
+      Object.entries(source.electrical!).reverse(),
+    ) as ComponentDefinition["electrical"];
+    const project = tcoil();
+    project.componentDefinitions = [
+      { symbol: source.symbol, electrical: reordered },
+    ];
+    expect(exported(project, "spice")).toContain(
+      "X1 a b tap tcoil l1=1n l2=2n k=0.5 cb=10f",
+    );
+  });
+
+  it("offers the call's values for editing, not the subcircuit it names", () => {
+    const result = createDesignNetlistExport(tcoil(), {
+      includeLocations: true,
+    });
+    if (result.status !== "ready") throw new Error("export blocked");
+    const fields = result.locations.fields.filter(
+      (field) => field.instanceId === "device",
+    );
+    expect(fields.map((field) => [field.kind, field.rawValue])).toEqual([
+      ["reference", "X1"],
+      ["parameter", "1n"],
+      ["parameter", "2n"],
+      ["parameter", "0.5"],
+      ["parameter", "10f"],
+    ]);
+  });
+
+  it("writes one subcircuit however many devices call it", () => {
+    const project = tcoil();
+    const document = project.documents[0]!;
+    document.instances.push({
+      id: "second",
+      symbolId: "tcoil",
+      placement: null,
+      reference: "X2",
+      netlist: { parameters: { l1: "3n", l2: "3n", k: "0.3", cb: "5f" } },
+    });
+    for (const net of document.nets)
+      net.terminals.push({
+        instanceId: "second",
+        pinName: net.id === "a" ? "1" : net.id === "b" ? "2" : "3",
+      });
+    const text = exported(project, "spice");
+    expect(text).toContain("X2 a b tap tcoil l1=3n l2=3n k=0.3 cb=5f");
+    expect(text.split(".subckt tcoil").length).toBe(2);
+  });
+
+  it("refuses values the subcircuit cannot take", () => {
+    const outOfRange = tcoil();
+    outOfRange.documents[0]!.instances[0]!.netlist!.parameters = {
+      l1: "1n",
+      l2: "1n",
+      k: "1.2",
+      cb: "1p",
+      m: "2",
+    };
+    const blocked = createDesignNetlistExport(outOfRange);
+    expect(blocked.status).toBe("blocked");
+    expect(
+      blocked.diagnostics
+        .filter((item) => item.severity === "error")
+        .map((item) => [item.code, item.parameter]),
+    ).toEqual([
+      ["MAGNETIC_COUPLING_OUT_OF_RANGE", "k"],
+      ["MAGNETIC_PARAMETER_NOT_ACCEPTED", "m"],
+    ]);
+
+    const missing = transformer();
+    missing.documents[0]!.instances[0]!.netlist!.parameters = {
+      lp: "1n",
+      k: "0.9",
+    };
+    expect(
+      createDesignNetlistExport(missing)
+        .diagnostics.filter((item) => item.severity === "error")
+        .map((item) => [item.code, item.parameter]),
+    ).toEqual([["MISSING_REQUIRED_PARAMETER", "ls"]]);
+  });
+
+  it("writes its subcircuit under the reserved name where a Cell has the library's (#1928)", () => {
+    const project = tcoil();
+    project.documents[0]!.netlist!.name = "tcoil";
+    const text = exported(project, "spice");
+    expect(text).toContain("X1 a b tap icm_tcoil l1=1n l2=2n k=0.5 cb=10f");
+    expect(text).toContain(".subckt icm_tcoil n1 n2 n3 ");
+    expect(text).toContain(".subckt tcoil ");
+    expect(text.split(".subckt tcoil").length).toBe(2);
+    const spectre = exported(project, "spectre");
+    expect(spectre).toContain(
+      "X1 (a b tap) icm_tcoil l1=1n l2=2n k=0.5 cb=10f",
+    );
+    expect(spectre).toMatch(/^subckt icm_tcoil \(n1 n2 n3\)/mu);
+    // Read back, the renamed body is still the T-coil that wrote it.
+    for (const [format, written] of [
+      ["spice", text],
+      ["spectre", spectre],
+    ] as const)
+      expect(
+        findBuiltInBodies(written, format, "dut.sp").bodies.find(
+          (body) => body.name === "icm_tcoil",
+        ),
+        format,
+      ).toMatchObject({ kind: "subcircuit", symbolId: "tcoil" });
+  });
+
+  it.each([
+    ["xfmr", transformer],
+    [
+      "ct_inductor",
+      () =>
+        magneticProject(
+          "center-tap-inductor",
+          [
+            ["1", "von"],
+            ["2", "vop"],
+            ["3", "vdd"],
+          ],
+          { l1: "2n", l2: "2n", k: "0" },
+        ),
+    ],
+  ] as const)(
+    "reads the %s body written under its reserved name back as the part that wrote it (#1928)",
+    (body, fixture) => {
+      const project = fixture();
+      project.documents[0]!.netlist!.name = body;
+      const symbolId = project.documents[0]!.instances[0]!.symbolId;
+      for (const format of ["spice", "spectre"] as const) {
+        const written = exported(project, format);
+        expect(written).toMatch(new RegExp(`\\bicm_${body}\\b`, "u"));
+        expect(
+          findBuiltInBodies(written, format, "dut.sp").bodies.find(
+            (found) => found.name === `icm_${body}`,
+          ),
+          format,
+        ).toMatchObject({ kind: "subcircuit", symbolId });
+      }
+    },
+  );
+
+  it("projects coupled windings through the native mutual primitive", () => {
+    const analysis = analyzeDesignNetlist(transformer());
+    const printed = printVacaskWithLocations(analysis.ir!);
+    expect(printed.ok).toBe(true);
+    if (!printed.ok) return;
+    expect(printed.text).toContain("model __coupling mutual");
+    expect(printed.text).toMatch(/ind1="[^"]+" ind2="[^"]+"/u);
+  });
+});

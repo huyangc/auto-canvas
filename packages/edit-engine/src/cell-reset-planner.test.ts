@@ -1,0 +1,565 @@
+import { createRoutePath } from "@icm/model";
+import { resolveDocumentLogicalNets, resolveVisualAnchor } from "@icm/derived";
+import { InMemorySymbolResolver, builtInSymbols } from "@icm/symbols";
+import { describe, expect, it } from "vitest";
+
+import { createEmptyDocument, createEmptyProject } from "@icm/model";
+
+import { DocumentHistory } from "./history.js";
+import { planCellReset } from "./cell-reset-planner.js";
+
+function fixture() {
+  const project = createEmptyProject("project", "Project", "top");
+  const child = createEmptyDocument("child", "Child");
+  child.instances.push(
+    {
+      id: "P1",
+      symbolId: "port",
+      placement: {
+        position: { x: 0, y: 0 },
+        rotation: 0,
+        mirror: "none",
+      },
+    },
+    {
+      id: "R1",
+      symbolId: "resistor",
+      placement: {
+        position: { x: 100, y: 0 },
+        rotation: 0,
+        mirror: "none",
+      },
+      reference: "R1",
+      netlist: {
+        binding: { kind: "primitive", deviceClass: "resistor" },
+        parameters: {},
+      },
+    },
+  );
+  child.nets.push({
+    id: "net-in",
+
+    terminals: [
+      { instanceId: "P1", pinName: "P" },
+      { instanceId: "R1", pinName: "P" },
+    ],
+  });
+  child.nets.push({ id: "net-body", terminals: [] });
+  child.connectivityEvidence.push(
+    {
+      id: "source-interface",
+      kind: "spice-source",
+      netId: "net-in",
+      sourceNetId: "source-in",
+    },
+    {
+      id: "claim-body",
+      kind: "net-name-hint",
+      netId: "net-body",
+      sourceName: "BODY",
+      origin: "legacy-explicit-net-property",
+    },
+    {
+      id: "claim-route",
+      kind: "name-claim",
+      netId: "net-in",
+      name: "IN",
+      owner: { kind: "power-marker", objectId: "route-in" },
+      scope: "local",
+    },
+  );
+  child.routes.push(
+    createRoutePath({
+      id: "route-in",
+      netId: "net-in",
+      start: { kind: "terminal", instanceId: "P1", pinName: "P" },
+      end: { kind: "terminal", instanceId: "R1", pinName: "P" },
+      bends: [],
+      modes: ["manual"],
+    }),
+  );
+  child.drafting = {
+    objects: [
+      {
+        id: "note-1",
+        kind: "text",
+        locked: false,
+        zIndex: 0,
+        anchor: { kind: "free", position: { x: 20, y: 30 } },
+        content: { runs: [{ kind: "text", value: "note" }] },
+        alignment: "start",
+        rotation: 0,
+      },
+    ],
+  };
+  child.netlist = {
+    name: "Child",
+    formalParameters: [],
+    terminals: [
+      {
+        id: "terminal-in",
+        name: "IN",
+        netId: "net-in",
+        direction: "input",
+        interfaceInstanceIds: ["P1"],
+      },
+    ],
+  };
+  project.documents.push(child);
+  project.documents[0]!.instances.push({
+    id: "X1",
+    symbolId: "hierarchical-child",
+    placement: null,
+    reference: "X1",
+    netlist: {
+      parameters: {},
+      binding: { kind: "subcircuit", childDocumentId: child.id },
+    },
+  });
+  return { project, child };
+}
+
+function applyPlan(
+  document: ReturnType<typeof createEmptyDocument>,
+  edits: ReturnType<typeof planCellReset>["edits"],
+) {
+  const history = new DocumentHistory(document);
+  const result = history.transact({
+    transactionId: "cell-reset",
+    documentId: document.id,
+    expectedRevision: document.revision,
+    actor: { kind: "human", id: "test" },
+    edits: [...edits],
+  });
+  expect(result.ok).toBe(true);
+  return history;
+}
+
+describe("Cell reset lifecycle planner", () => {
+  it.each(["clear-drawing", "reset-placement"] as const)(
+    "%s removes orphan Junctions but preserves surviving object dependencies and undo",
+    (intent) => {
+      const { project, child } = fixture();
+      const anchor = (objectId: string) => ({
+        kind: "object" as const,
+        objectId,
+        localOffset: { x: 0, y: 0 },
+        fallbackPosition: { x: 0, y: 0 },
+      });
+      const ids = [
+        "orphan",
+        "label",
+        "claim",
+        "draft",
+        "arrow-from",
+        "arrow-to",
+        "leader-target",
+        "callout-target",
+        "group",
+        "constraint",
+      ];
+      child.junctions = ids.map((id, index) => ({
+        id,
+        netId: "net-in",
+        position: { x: index * 10, y: 30 },
+      }));
+      child.annotations.push({
+        id: "hidden-label",
+        kind: "net-label",
+        netId: "net-in",
+        binding: { kind: "net-name", netId: "net-in" },
+        anchor: anchor("label"),
+        alignment: "middle",
+        rotation: 0,
+        locked: true,
+        visible: false,
+      });
+      child.connectivityEvidence.push({
+        id: "junction-claim",
+        kind: "name-claim",
+        netId: "net-in",
+        name: "IN",
+        owner: { kind: "power-marker", objectId: "claim" },
+        scope: "local",
+      });
+      child.drafting!.objects[0]!.anchor = anchor("draft");
+      child.drafting!.objects.push(
+        {
+          id: "arrow",
+          kind: "arrow",
+          locked: true,
+          zIndex: 0,
+          anchor: { kind: "free", position: { x: 0, y: 0 } },
+          from: anchor("arrow-from"),
+          to: anchor("arrow-to"),
+        },
+        {
+          id: "leader",
+          kind: "leader",
+          locked: true,
+          zIndex: 0,
+          anchor: { kind: "free", position: { x: 0, y: 0 } },
+          target: anchor("leader-target"),
+        },
+        {
+          id: "callout",
+          kind: "callout",
+          locked: true,
+          zIndex: 0,
+          anchor: { kind: "free", position: { x: 0, y: 0 } },
+          target: anchor("callout-target"),
+          content: { runs: [{ kind: "text", value: "note" }] },
+          alignment: "start",
+          rotation: 0,
+        },
+      );
+      child.layoutGroups.push({
+        id: "layout",
+        kind: "custom",
+        objectIds: ["group"],
+        locked: true,
+      });
+      child.constraints.push({
+        id: "align",
+        kind: "align-x",
+        objectIds: ["constraint", "P1"],
+        locked: true,
+      });
+      const retainedIds =
+        intent === "clear-drawing"
+          ? ["label", "claim", "group", "constraint"]
+          : [
+              "label",
+              "claim",
+              "draft",
+              "arrow-from",
+              "arrow-to",
+              "leader-target",
+              "callout-target",
+            ];
+      const plan = planCellReset(project, child.id, intent);
+      for (const id of ids)
+        expect(plan.affectedObjectIds.includes(id)).toBe(
+          !retainedIds.includes(id),
+        );
+      const history = applyPlan(child, plan.edits);
+      expect(history.document.junctions.map((junction) => junction.id)).toEqual(
+        retainedIds,
+      );
+      expect(history.document.netlist).toEqual(child.netlist);
+      expect(history.document.nets).toEqual(child.nets);
+      expect(history.document.annotations).toEqual(child.annotations);
+      expect(
+        history.transact({
+          transactionId: "undo",
+          documentId: child.id,
+          expectedRevision: history.document.revision,
+          actor: { kind: "human", id: "test" },
+          edits: [{ kind: "undo" }],
+        }).ok,
+      ).toBe(true);
+      expect(history.document.junctions).toEqual(child.junctions);
+      expect(history.document.drafting).toEqual(child.drafting);
+      expect(history.document.routes).toEqual(child.routes);
+    },
+  );
+
+  it.each(["clear-drawing", "reset-placement"] as const)(
+    "%s still plans a reset when only an orphan Junction remains",
+    (intent) => {
+      const project = createEmptyProject("orphan-only", "Orphan", "main");
+      const document = project.documents[0]!;
+      document.nets.push({ id: "net", terminals: [] });
+      document.junctions.push({
+        id: "orphan",
+        netId: "net",
+        position: { x: 0, y: 0 },
+      });
+      const plan = planCellReset(project, document.id, intent);
+      expect(plan.affectedObjectIds).toEqual(["orphan"]);
+      const history = applyPlan(document, plan.edits);
+      expect(history.document.junctions).toEqual([]);
+      expect(history.document.nets).toEqual(document.nets);
+    },
+  );
+
+  it("retains a Power Rail-owned formal Pin through body reset", () => {
+    const project = createEmptyProject("rail-reset", "Rail reset", "main");
+    const document = project.documents[0]!;
+    const history = new DocumentHistory(document);
+    expect(
+      history.transact({
+        transactionId: "add-rail",
+        documentId: document.id,
+        expectedRevision: document.revision,
+        actor: { kind: "human", id: "test" },
+        edits: [
+          {
+            kind: "add_power_rail",
+            netId: "rail-net",
+            routeId: "rail-route",
+            startJunctionId: "rail-start",
+            endJunctionId: "rail-end",
+            labelId: "rail-label",
+            netName: "VDD",
+            scope: "local",
+            powerDomain: "vdd",
+            start: { x: 0, y: 0 },
+            end: { x: 100, y: 0 },
+          },
+        ],
+      }).ok,
+    ).toBe(true);
+    project.documents[0] = history.document;
+    const reset = planCellReset(project, document.id, "reset-body");
+    expect(reset.affectedObjectIds).toContain("rail-start");
+    expect(reset.affectedObjectIds).not.toContain("rail-end");
+    expect(
+      history.transact({
+        transactionId: "reset-body",
+        documentId: document.id,
+        expectedRevision: history.document.revision,
+        actor: { kind: "human", id: "test" },
+        edits: [...reset.edits],
+      }).ok,
+    ).toBe(true);
+    expect(history.document.netlist?.terminals).toEqual([
+      expect.objectContaining({
+        name: "VDD",
+        interfaceAnnotationId: "rail-label",
+      }),
+    ]);
+    expect(history.document.annotations.map((item) => item.id)).toEqual([
+      "rail-label",
+    ]);
+    expect(history.document.junctions.map((item) => item.id)).toEqual([
+      "rail-end",
+    ]);
+    expect(history.document.routes).toEqual([]);
+
+    // The supply's next rail takes the kept label and Pin over (#1410).
+    const redraw = (labelId: string, suffix: string) =>
+      history.transact({
+        transactionId: `redraw-${suffix}`,
+        documentId: document.id,
+        expectedRevision: history.document.revision,
+        actor: { kind: "human", id: "test" },
+        edits: [
+          {
+            kind: "add_power_rail",
+            netId: "rail-net",
+            routeId: `rail-route-${suffix}`,
+            startJunctionId: `rail-start-${suffix}`,
+            endJunctionId: `rail-end-${suffix}`,
+            labelId,
+            netName: "VDD",
+            scope: "local",
+            powerDomain: "vdd",
+            start: { x: 0, y: -40 },
+            end: { x: 200, y: -40 },
+          },
+        ],
+      });
+    expect(redraw("rail-label", "2").ok).toBe(true);
+    expect(history.document.netlist?.terminals).toEqual([
+      expect.objectContaining({
+        name: "VDD",
+        interfaceAnnotationId: "rail-label",
+      }),
+    ]);
+    expect(history.document.annotations).toEqual([
+      expect.objectContaining({
+        id: "rail-label",
+        anchor: expect.objectContaining({ objectId: "rail-end-2" }),
+      }),
+    ]);
+    expect(history.document.junctions.map((item) => item.id).sort()).toEqual([
+      "rail-end-2",
+      "rail-start-2",
+    ]);
+    // A label that stands on a rail is that rail's, and is not taken.
+    expect(redraw("rail-label", "3")).toMatchObject({
+      ok: false,
+      error: { code: "EDIT_PRECONDITION" },
+    });
+  });
+
+  it.each(["clear-drawing", "reset-placement"] as const)(
+    "%s keeps a wire's Net label where it was drawn and removes the wire's marker",
+    (intent) => {
+      const { project, child } = fixture();
+      // A wire whose geometry resolves: from P1's pin to a Junction beside it.
+      child.junctions.push({
+        id: "junction-in",
+        netId: "net-in",
+        position: { x: 60, y: 0 },
+        role: "route-anchor",
+      });
+      const wire = createRoutePath({
+        id: "route-labelled",
+        netId: "net-in",
+        start: { kind: "terminal", instanceId: "P1", pinName: "P" },
+        end: { kind: "junction", junctionId: "junction-in" },
+        bends: [],
+        modes: ["manual"],
+      });
+      child.routes.push(wire);
+      const onWire = {
+        kind: "route" as const,
+        routeId: wire.id,
+        legId: wire.legs[0]!.id,
+        t: 0.5,
+        normalOffset: -10,
+        direction: "forward" as const,
+        orientation: "horizontal" as const,
+        fallbackPosition: { x: 1, y: 2 },
+      };
+      child.annotations.push(
+        {
+          id: "label-in",
+          kind: "net-label",
+          binding: { kind: "net-name", netId: "net-in" },
+          netId: "net-in",
+          anchor: onWire,
+          alignment: "middle",
+          rotation: 0,
+          locked: false,
+        },
+        {
+          id: "marker-in",
+          kind: "route-marker",
+          markerKind: "current",
+          content: { runs: [{ kind: "text", value: "I" }] },
+          anchor: onWire,
+          alignment: "middle",
+          rotation: 0,
+          locked: false,
+        },
+      );
+      child.connectivityEvidence.push({
+        id: "claim-label",
+        kind: "name-claim",
+        netId: "net-in",
+        name: "IN",
+        owner: { kind: "net-label", annotationId: "label-in" },
+        scope: "local",
+      });
+      const plan = planCellReset(project, child.id, intent);
+      expect(plan.affectedObjectIds).toEqual(
+        expect.arrayContaining(["label-in", "marker-in"]),
+      );
+      expect(plan.summary).toContain(
+        "; keep 1 wire label where drawn, now free; remove 1 wire marker",
+      );
+
+      const resolver = new InMemorySymbolResolver(builtInSymbols);
+      const drawnAt = resolveVisualAnchor(child, resolver, onWire).position;
+      const history = new DocumentHistory(child, { symbolResolver: resolver });
+      const result = history.transact({
+        transactionId: `reset-${intent}`,
+        documentId: child.id,
+        expectedRevision: child.revision,
+        actor: { kind: "agent", id: "test" },
+        edits: [...plan.edits],
+      });
+      // Before, both resets left the label on a removed wire: INVALID_RESULT.
+      expect(result.ok).toBe(true);
+      expect(result.ok && result.diff.changedObjectIds).toEqual(
+        expect.arrayContaining(["label-in", "marker-in"]),
+      );
+      expect(
+        history.document.annotations.find((item) => item.id === "label-in")
+          ?.anchor,
+      ).toEqual({
+        kind: "free",
+        position: { x: Math.round(drawnAt.x), y: Math.round(drawnAt.y) },
+      });
+      expect(drawnAt).not.toEqual(onWire.fallbackPosition);
+      expect(
+        history.document.annotations.some((item) => item.id === "marker-in"),
+      ).toBe(false);
+      // The circuit keeps its name.
+      expect(
+        resolveDocumentLogicalNets(history.document).byBaseNetId.get("net-in")
+          ?.name,
+      ).toBe("IN");
+    },
+  );
+
+  it("clears drawing geometry without deleting logical objects", () => {
+    const { project, child } = fixture();
+    const plan = planCellReset(project, child.id, "clear-drawing");
+    expect(plan).toMatchObject({
+      preconditionToken: "child:0",
+      affectedObjectIds: ["claim-route", "note-1", "route-in"],
+      rollback: { kind: "document-undo" },
+      edits: [{ kind: "clear_cell_drawing" }],
+    });
+
+    const history = applyPlan(child, plan.edits);
+    expect(history.document.routes).toEqual([]);
+    expect(history.document.drafting?.objects).toEqual([]);
+    expect(history.document.instances).toHaveLength(2);
+    expect(history.document.nets[0]?.terminals).toHaveLength(2);
+    expect(
+      history.document.connectivityEvidence.some(
+        (evidence) => evidence.id === "claim-route",
+      ),
+    ).toBe(false);
+
+    const undone = history.transact({
+      transactionId: "undo-reset",
+      documentId: child.id,
+      expectedRevision: history.document.revision,
+      actor: { kind: "human", id: "test" },
+      edits: [{ kind: "undo" }],
+    });
+    expect(undone.ok).toBe(true);
+    expect(history.document.routes).toHaveLength(1);
+  });
+
+  it("returns placements to the tray while preserving devices and Nets", () => {
+    const { project, child } = fixture();
+    const plan = planCellReset(project, child.id, "reset-placement");
+    const history = applyPlan(child, plan.edits);
+
+    expect(history.document.instances).toHaveLength(2);
+    expect(
+      history.document.instances.every((item) => item.placement === null),
+    ).toBe(true);
+    expect(history.document.routes).toEqual([]);
+    expect(history.document.nets[0]?.terminals).toHaveLength(2);
+    expect(history.document.netlist?.terminals).toHaveLength(1);
+    expect(
+      history.document.connectivityEvidence.some(
+        (evidence) => evidence.id === "claim-route",
+      ),
+    ).toBe(false);
+  });
+
+  it("resets a referenced Cell body while retaining its formal interface", () => {
+    const { project, child } = fixture();
+    const plan = planCellReset(project, child.id, "reset-body");
+    expect(plan.diagnostics).toEqual([
+      expect.objectContaining({ code: "CELL_CALLERS_PRESERVED" }),
+    ]);
+    expect(plan.affectedObjectIds).toEqual(
+      expect.arrayContaining(["claim-body", "net-body"]),
+    );
+
+    const history = applyPlan(child, plan.edits);
+    expect(history.document.instances.map((item) => item.id)).toEqual(["P1"]);
+    expect(history.document.nets).toEqual([
+      expect.objectContaining({
+        id: "net-in",
+        terminals: [{ instanceId: "P1", pinName: "P" }],
+      }),
+    ]);
+    expect(history.document.netlist).toEqual(child.netlist);
+    expect(history.document.routes).toEqual([]);
+    expect(history.document.drafting?.objects).toEqual([]);
+    expect(
+      history.document.connectivityEvidence.map((item) => item.id),
+    ).toEqual(["source-interface"]);
+  });
+});

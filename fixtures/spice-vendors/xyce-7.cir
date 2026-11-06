@@ -1,0 +1,9 @@
+Xyce structural compatibility fixture
+.subckt divider in out
+R1 in out 10k
+R2 out 0 10k
+.ends divider
+X1 vin vout divider
+V1 vin 0 1
+.print tran V(vout)
+.end

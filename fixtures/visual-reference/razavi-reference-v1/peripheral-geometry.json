@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "referenceId": "razavi-reference-v1",
+  "referenceSha256": "08c89f54345c835324528a63c7519dc3aeda17169febc20134e33056bc85790b",
+  "coordinateSystem": "reference-raster-pixels",
+  "pixelsPerLogical": 1.72,
+  "symbols": {
+    "voltage-source": {
+      "evidencePanel": "a-Vx",
+      "originPx": { "x": 276, "y": 220 },
+      "circleRadiusPx": 18.5,
+      "polarityPx": {
+        "x": 248.5,
+        "plusY": 195,
+        "minusY": 243,
+        "halfWidth": 7,
+        "halfHeight": 7
+      }
+    },
+    "current-source": {
+      "evidencePanel": "c-I1",
+      "originPx": { "x": 813, "y": 117 },
+      "circleRadiusPx": 18.5,
+      "arrowPx": {
+        "shaftStartY": 105,
+        "baseY": 113,
+        "tipY": 129,
+        "halfWidth": 8
+      }
+    },
+    "ground": {
+      "evidencePanel": "a-ground",
+      "originPx": { "x": 179, "y": 262 },
+      "barStrokePx": 5,
+      "barsPx": [
+        { "y": 262, "halfWidth": 11 },
+        { "y": 272, "halfWidth": 7 },
+        { "y": 281, "halfWidth": 4 }
+      ]
+    }
+  },
+  "annotations": {
+    "solidNodeRadiusPx": 6.5,
+    "currentArrow": {
+      "evidencePanel": "b-Ix",
+      "totalLengthPx": 92,
+      "headLengthPx": 28.5,
+      "headWidthPx": 13.6,
+      "labelGapPx": 12
+    }
+  }
+}

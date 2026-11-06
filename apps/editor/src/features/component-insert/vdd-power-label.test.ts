@@ -1,0 +1,515 @@
+import {
+  executeTransaction,
+  proposedStandalonePowerConnection,
+} from "@icm/edit-engine";
+import type { SchematicEdit } from "@icm/edit-engine";
+import { defaultVddPowerLabelPlacement } from "@icm/derived";
+import { AnnotationSchema, createEmptyDocument } from "@icm/model";
+import type { Annotation } from "@icm/model";
+import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
+import { describe, expect, it } from "vitest";
+
+import { copySelection } from "../clipboard/clipboard";
+import { proposePaste } from "../clipboard/paste-proposal";
+import { vddPowerLabelAnnotation } from "./vdd-power-label";
+
+const resolver = new InMemorySymbolResolver(builtInSymbols);
+
+/** The name a placed VDD Port claims for its Net, as placement writes it. */
+function vddMarkerClaim(instanceId: string, netId: string) {
+  return {
+    id: `claim-${instanceId.toLowerCase()}`,
+    kind: "name-claim" as const,
+    netId,
+    name: "VDD",
+    scope: "global" as const,
+    powerDomain: "vdd" as const,
+    owner: { kind: "power-marker" as const, objectId: instanceId },
+  };
+}
+
+function objectAnchor(annotation: Annotation) {
+  if (annotation.anchor.kind !== "object") {
+    throw new Error("expected object-anchored annotation");
+  }
+  return annotation.anchor;
+}
+
+describe("vdd power label annotation", () => {
+  it("builds a schema-valid power label anchored to the device instance", () => {
+    const instance = {
+      id: "VDD3",
+      symbolId: "vdd-port",
+      placement: {
+        position: { x: 120, y: 80 },
+        rotation: 0 as const,
+        mirror: "none" as const,
+      },
+    };
+    const resolved = resolver.resolve("vdd-port");
+    if (!resolved) throw new Error("missing VDD Port Symbol");
+    const annotation = vddPowerLabelAnnotation({
+      instance,
+      resolved,
+      netId: "net-power-vdd3",
+      grid: 10,
+      name: "VDD",
+    });
+    expect(AnnotationSchema.parse(annotation)).toEqual(annotation);
+    expect(annotation).toMatchObject({
+      id: "power-label-vdd3",
+      kind: "power-label",
+      netId: "net-power-vdd3",
+      anchor: {
+        kind: "object",
+        objectId: "VDD3",
+      },
+    });
+    expect(objectAnchor(annotation).fallbackPosition.x).toBeGreaterThan(130);
+    expect(annotation.binding).toEqual({
+      kind: "net-name",
+      netId: "net-power-vdd3",
+    });
+    // Placed with its standard look stored: italic V, upright DD subscript.
+    expect(annotation.formatOverride).toEqual({
+      runs: [
+        {
+          kind: "span",
+          style: "italic",
+          children: [
+            {
+              kind: "span",
+              style: "bold",
+              children: [{ kind: "text", value: "V" }],
+            },
+          ],
+        },
+        {
+          kind: "span",
+          style: "subscript",
+          children: [
+            {
+              kind: "span",
+              style: "bold",
+              children: [{ kind: "text", value: "DD" }],
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("stores no supply format for a name outside the V convention", () => {
+    const resolved = resolver.resolve("vdd-port");
+    if (!resolved) throw new Error("missing VDD Port Symbol");
+    const annotation = vddPowerLabelAnnotation({
+      instance: {
+        id: "VDD4",
+        symbolId: "vdd-port",
+        placement: {
+          position: { x: 0, y: 0 },
+          rotation: 0 as const,
+          mirror: "none" as const,
+        },
+      },
+      resolved,
+      netId: "net-power-vdd4",
+      grid: 10,
+      name: "AVDD",
+    });
+    expect(annotation.formatOverride).toBeUndefined();
+  });
+
+  it("commits together with the standalone power connection edits", () => {
+    const document = createEmptyDocument("main", "Main");
+    const instance = {
+      id: "VDD1",
+      symbolId: "vdd-port",
+      placement: {
+        position: { x: 100, y: 100 },
+        rotation: 0 as const,
+        mirror: "none" as const,
+      },
+    };
+    const proposal = proposedStandalonePowerConnection(document, instance);
+    const powerNetId = proposal.powerNetId;
+    expect(powerNetId).toBeDefined();
+    const resolved = resolver.resolve("vdd-port");
+    if (!resolved) throw new Error("missing VDD Port Symbol");
+    const result = executeTransaction(
+      document,
+      {
+        transactionId: "vdd-label-test",
+        documentId: "main",
+        expectedRevision: 0,
+        actor: { kind: "human" as const, id: "test" },
+        dryRun: false,
+        edits: [
+          { kind: "add_instance", instance },
+          ...proposal.edits,
+          {
+            kind: "upsert_schematic_annotation",
+            annotation: vddPowerLabelAnnotation({
+              instance,
+              resolved,
+              netId: powerNetId!,
+              grid: document.presentation.grid,
+              name: "VDD",
+            }),
+          },
+        ],
+      },
+      { symbolResolver: resolver },
+    );
+    expect(
+      result.ok,
+      result.ok ? undefined : JSON.stringify(result.diagnostics),
+    ).toBe(true);
+    if (!result.ok) return;
+    expect(result.document.annotations).toHaveLength(1);
+    expect(result.document.annotations[0]).toMatchObject({
+      id: "power-label-vdd1",
+      kind: "power-label",
+      netId: "net-power-vdd1",
+    });
+  });
+
+  it("keeps a VDD Port label upright through rotations and mirrors its position", () => {
+    let document = createEmptyDocument("main", "Main");
+    const instance = {
+      id: "VDD1",
+      symbolId: "vdd-port",
+      placement: {
+        position: { x: 100, y: 100 },
+        rotation: 0 as const,
+        mirror: "none" as const,
+      },
+    };
+    const resolved = resolver.resolve("vdd-port");
+    if (!resolved) throw new Error("missing VDD Port Symbol");
+    document.instances.push(instance);
+    document.nets.push({
+      id: "net-vdd",
+      terminals: [{ instanceId: "VDD1", pinName: "P" }],
+    });
+    document.connectivityEvidence.push(vddMarkerClaim("VDD1", "net-vdd"));
+    document.annotations.push(
+      vddPowerLabelAnnotation({
+        instance,
+        resolved,
+        netId: "net-vdd",
+        grid: document.presentation.grid,
+        name: "VDD",
+      }),
+    );
+
+    for (const edit of [
+      {
+        kind: "rotate_instance" as const,
+        instanceId: "VDD1",
+        rotation: 90 as const,
+      },
+      {
+        kind: "rotate_instance" as const,
+        instanceId: "VDD1",
+        rotation: 180 as const,
+      },
+      {
+        kind: "rotate_instance" as const,
+        instanceId: "VDD1",
+        rotation: 270 as const,
+      },
+      {
+        kind: "rotate_instance" as const,
+        instanceId: "VDD1",
+        rotation: 0 as const,
+      },
+      {
+        kind: "mirror_instance" as const,
+        instanceId: "VDD1",
+        mirror: "horizontal" as const,
+      },
+    ]) {
+      const beforePosition = objectAnchor(
+        document.annotations[0]!,
+      ).fallbackPosition;
+      const beforeOrigin = document.instances[0]!.placement!.position;
+      const result = executeTransaction(
+        document,
+        {
+          transactionId: `orient-${document.revision}`,
+          documentId: document.id,
+          expectedRevision: document.revision,
+          actor: { kind: "human", id: "test" },
+          dryRun: false,
+          edits: [edit],
+        },
+        { symbolResolver: resolver },
+      );
+      expect(
+        result.ok,
+        result.ok ? undefined : JSON.stringify(result.diagnostics),
+      ).toBe(true);
+      if (!result.ok) return;
+      document = result.document;
+      const expected = defaultVddPowerLabelPlacement(
+        document.instances[0]!,
+        resolved,
+        document.presentation.grid,
+      );
+      const annotation = document.annotations[0]!;
+      expect(expected).not.toBeNull();
+      const afterOrigin = document.instances[0]!.placement!.position;
+      expect(objectAnchor(annotation).fallbackPosition).toEqual(
+        edit.kind === "mirror_instance"
+          ? {
+              x: afterOrigin.x - (beforePosition.x - beforeOrigin.x),
+              y: afterOrigin.y + (beforePosition.y - beforeOrigin.y),
+            }
+          : expected?.position,
+      );
+      expect(annotation).toMatchObject({
+        alignment: edit.kind === "mirror_instance" ? "end" : "start",
+        rotation: 0,
+      });
+    }
+  });
+
+  it("keeps a copied VDD Port label upright through two rotations", () => {
+    let document = createEmptyDocument("main", "Main");
+    const instance = {
+      id: "VDD1",
+      symbolId: "vdd-port",
+      placement: {
+        position: { x: 100, y: 100 },
+        rotation: 0 as const,
+        mirror: "none" as const,
+      },
+    };
+    const resolved = resolver.resolve("vdd-port");
+    if (!resolved) throw new Error("missing VDD Port Symbol");
+    document.instances.push(instance);
+    document.nets.push({
+      id: "net-vdd",
+      terminals: [{ instanceId: "VDD1", pinName: "P" }],
+    });
+    document.connectivityEvidence.push(vddMarkerClaim("VDD1", "net-vdd"));
+    document.annotations.push(
+      vddPowerLabelAnnotation({
+        instance,
+        resolved,
+        netId: "net-vdd",
+        grid: document.presentation.grid,
+        name: "VDD",
+      }),
+    );
+
+    // Copy through the real clipboard path, so the pasted label carries
+    // whatever identity and offsets a person's Ctrl-C / Ctrl-V would give it.
+    const clipboard = copySelection(document, ["VDD1"]);
+    expect(clipboard).not.toBeNull();
+    const paste = proposePaste(document, clipboard!, { x: 80, y: 0 }, 1);
+    const pasted = executeTransaction(
+      document,
+      {
+        transactionId: "paste-vdd",
+        documentId: document.id,
+        expectedRevision: document.revision,
+        actor: { kind: "human", id: "test" },
+        edits: paste.edits,
+      },
+      { symbolResolver: resolver },
+    );
+    if (!pasted.ok) throw new Error(JSON.stringify(pasted.diagnostics));
+    document = pasted.document;
+    const copyId = paste.instanceIds[0]!;
+
+    for (const rotation of [90, 180] as const) {
+      const result = executeTransaction(
+        document,
+        {
+          transactionId: `turn-${rotation}`,
+          documentId: document.id,
+          expectedRevision: document.revision,
+          actor: { kind: "human", id: "test" },
+          edits: [{ kind: "rotate_instance", instanceId: copyId, rotation }],
+        },
+        { symbolResolver: resolver },
+      );
+      expect(
+        result.ok,
+        result.ok ? undefined : JSON.stringify(result.diagnostics),
+      ).toBe(true);
+      if (!result.ok) return;
+      document = result.document;
+
+      const copy = document.instances.find(
+        (candidate) => candidate.id === copyId,
+      )!;
+      const label = document.annotations.find(
+        (candidate) =>
+          candidate.anchor.kind === "object" &&
+          candidate.anchor.objectId === copyId,
+      )!;
+      // Turning the symbol must never turn its name over: at 180° a rotated
+      // label reads upside down, which is exactly what a reader cannot do.
+      expect(label.rotation).toBe(0);
+      const expected = defaultVddPowerLabelPlacement(
+        copy,
+        resolved,
+        document.presentation.grid,
+      );
+      expect(expected).not.toBeNull();
+      // The drawn glyph and its stored anchor must stay the same place, or
+      // the selection box detaches from the text it is supposed to frame.
+      expect(objectAnchor(label).fallbackPosition).toEqual(expected?.position);
+      expect(label.alignment).toBe(expected?.alignment);
+    }
+  });
+
+  it("keeps a VDD Port label upright when the copy is turned before it lands", () => {
+    const document = createEmptyDocument("main", "Main");
+    const instance = {
+      id: "VDD1",
+      symbolId: "vdd-port",
+      placement: {
+        position: { x: 100, y: 100 },
+        rotation: 0 as const,
+        mirror: "none" as const,
+      },
+    };
+    const resolved = resolver.resolve("vdd-port");
+    if (!resolved) throw new Error("missing VDD Port Symbol");
+    document.instances.push(instance);
+    document.nets.push({
+      id: "net-vdd",
+      terminals: [{ instanceId: "VDD1", pinName: "P" }],
+    });
+    document.connectivityEvidence.push(vddMarkerClaim("VDD1", "net-vdd"));
+    document.annotations.push(
+      vddPowerLabelAnnotation({
+        instance,
+        resolved,
+        netId: "net-vdd",
+        grid: document.presentation.grid,
+        name: "VDD",
+      }),
+    );
+
+    const clipboard = copySelection(document, ["VDD1"]);
+    expect(clipboard).not.toBeNull();
+    const paste = proposePaste(document, clipboard!, { x: 80, y: 0 }, 1);
+    // Two quarter turns committed in the same transaction as the paste.
+    const orientation: SchematicEdit[] = [
+      {
+        kind: "rotate_instance",
+        instanceId: paste.instanceIds[0]!,
+        rotation: 90,
+      },
+      {
+        kind: "rotate_instance",
+        instanceId: paste.instanceIds[0]!,
+        rotation: 180,
+      },
+    ];
+    const result = executeTransaction(
+      document,
+      {
+        transactionId: "copy-turned-twice",
+        documentId: document.id,
+        expectedRevision: document.revision,
+        actor: { kind: "human", id: "test" },
+        edits: [...paste.edits, ...orientation],
+      },
+      { symbolResolver: resolver },
+    );
+    expect(
+      result.ok,
+      result.ok ? undefined : JSON.stringify(result.diagnostics),
+    ).toBe(true);
+    if (!result.ok) return;
+
+    const copyId = paste.instanceIds[0]!;
+    const copy = result.document.instances.find(
+      (candidate) => candidate.id === copyId,
+    )!;
+    expect(copy.placement?.rotation).toBe(180);
+    const label = result.document.annotations.find(
+      (candidate) =>
+        candidate.anchor.kind === "object" &&
+        candidate.anchor.objectId === copyId,
+    )!;
+    // Turning the symbol must never turn its name over: at 180 degrees a
+    // rotated label reads upside down, which is what a reader cannot do.
+    expect(label.rotation).toBe(0);
+    const expected = defaultVddPowerLabelPlacement(
+      copy,
+      resolved,
+      result.document.presentation.grid,
+    );
+    expect(expected).not.toBeNull();
+    // The drawn glyph and its stored anchor must agree, or the selection box
+    // detaches from the text it is supposed to frame.
+    expect(objectAnchor(label).fallbackPosition).toEqual(expected?.position);
+    expect(label.alignment).toBe(expected?.alignment);
+  });
+
+  it("does not pull a user-moved VDD Port label back to the automatic position", () => {
+    const document = createEmptyDocument("main", "Main");
+    const instance = {
+      id: "VDD1",
+      symbolId: "vdd-port",
+      placement: {
+        position: { x: 100, y: 100 },
+        rotation: 0 as const,
+        mirror: "none" as const,
+      },
+    };
+    const resolved = resolver.resolve("vdd-port");
+    if (!resolved) throw new Error("missing VDD Port Symbol");
+    const annotation = vddPowerLabelAnnotation({
+      instance,
+      resolved,
+      netId: "net-vdd",
+      grid: document.presentation.grid,
+      name: "VDD",
+    });
+    if (annotation.anchor.kind !== "object")
+      throw new Error("object anchor required");
+    annotation.anchor.localOffset.x += document.presentation.grid;
+    annotation.anchor.fallbackPosition.x += document.presentation.grid;
+    document.instances.push(instance);
+    document.nets.push({
+      id: "net-vdd",
+      terminals: [{ instanceId: "VDD1", pinName: "P" }],
+    });
+    document.connectivityEvidence.push(vddMarkerClaim("VDD1", "net-vdd"));
+    document.annotations.push(annotation);
+
+    const result = executeTransaction(
+      document,
+      {
+        transactionId: "rotate-user-label",
+        documentId: document.id,
+        expectedRevision: document.revision,
+        actor: { kind: "human", id: "test" },
+        dryRun: false,
+        edits: [{ kind: "rotate_instance", instanceId: "VDD1", rotation: 90 }],
+      },
+      { symbolResolver: resolver },
+    );
+    expect(
+      result.ok,
+      result.ok ? undefined : JSON.stringify(result.diagnostics),
+    ).toBe(true);
+    if (!result.ok) return;
+    const expected = defaultVddPowerLabelPlacement(
+      result.document.instances[0]!,
+      resolved,
+      result.document.presentation.grid,
+    );
+    expect(
+      objectAnchor(result.document.annotations[0]!).fallbackPosition,
+    ).not.toEqual(expected?.position);
+  });
+});

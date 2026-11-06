@@ -1,0 +1,686 @@
+// Recovery coordinator: bridges committed Projects and the IndexedDB store.
+//
+// Responsibilities, and nothing more:
+//
+// - give the current browser tab a working-copy identity persisted in
+//   sessionStorage so an ordinary reload continues the same session;
+// - coalesce bursts of committed Projects with the existing recovery
+//   scheduler, serialize/validate once per debounced batch, and enqueue the
+//   IndexedDB write through a serial chain so an in-flight write can never
+//   lose a newer revision;
+// - publish typed recovery state (`pending`/`stored`/failures) instead of a
+//   single ambiguous status string;
+// - fork a fresh working-copy identity at replacement boundaries while the
+//   outgoing Project's records stay retained in the store;
+// - summarize stored sessions (with valid/corrupt/unsupported-schema
+//   classification) and read/delete exactly one session on demand.
+//
+// The coordinator never mutates the live Project and never clears another
+// session's records. Storage failures only change coordinator state and user
+// messaging, never Project content.
+
+import { projectTextHasMeaningfulContent } from "./project-content";
+import { useEffect, useRef, useState } from "react";
+
+import {
+  CURRENT_PROJECT_FILE_VERSION,
+  serializeProject,
+} from "@icm/project-protocol";
+import type { CircuitProject } from "@icm/model";
+
+import {
+  finalizeBrowserRecoveryRecord,
+  reviewBrowserRecoveryProject,
+  type BrowserRecoveryCloudBinding,
+  type BrowserRecoveryFormalFileHint,
+  type BrowserRecoveryGeneration,
+  type BrowserRecoveryRecordV2,
+  type BrowserRecoverySession,
+  type BrowserRecoverySource,
+} from "./browser-recovery-contract";
+import {
+  createBrowserRecoveryStore,
+  migrateLegacyProjectRecovery,
+  type BrowserRecoveryStorageFailure,
+  type BrowserRecoveryStore,
+} from "./browser-recovery-store";
+import {
+  createRecoveryScheduler,
+  type RecoveryClearTimeout,
+  type RecoverySetTimeout,
+} from "./recovery-scheduler";
+
+export const WORKING_COPY_STORAGE_KEY = "icm.working-copy.v1";
+const RECOVERY_WRITE_DELAY_MS = 400;
+
+export type RecoveryState =
+  "idle" | "pending" | "stored" | "unavailable" | "quota-exceeded" | "failed";
+
+export interface RecoveryGenerationSummary {
+  recordId: string;
+  updatedAt: string;
+  review: "valid" | "corrupt" | "unsupported-schema";
+  /** Top-document revision at the time of the snapshot, when known. */
+  revision: number | null;
+  /**
+   * The Project's structure revision at the snapshot, which moves on every
+   * edit anywhere in it; `null` for copies stored before it was recorded.
+   */
+  structureRevision: number | null;
+  /** `null` means the field predates this additive recovery metadata. */
+  unsavedAtSnapshot: boolean | null;
+  /** Whether the snapshot clears the meaningful-content threshold. */
+  meaningfulContent: boolean;
+}
+
+export interface RecoveryStageOptions {
+  /** Defaults to true because normal staging follows a committed edit. */
+  unsavedAtSnapshot?: boolean;
+  cloudBinding?: BrowserRecoveryCloudBinding | null;
+}
+
+export interface RecoverySessionSummary {
+  workingCopyId: string;
+  projectId: string;
+  projectName: string;
+  source: BrowserRecoverySource;
+  /** Most recent `updatedAt` across the session's generations. */
+  updatedAt: string;
+  latest: RecoveryGenerationSummary | null;
+  previous: RecoveryGenerationSummary | null;
+}
+
+export type RecoveryProjectRead =
+  | {
+      status: "valid";
+      project: CircuitProject;
+      record: BrowserRecoveryRecordV2;
+    }
+  | { status: "corrupt"; message: string }
+  | { status: "unsupported-schema"; message: string; projectText: string }
+  | { status: "missing"; message: string }
+  | {
+      status: "failed";
+      failure: BrowserRecoveryStorageFailure;
+      message: string;
+    };
+
+export interface RecoverySessionStorage {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+}
+
+export interface RecoveryCoordinatorEvents {
+  onStateChange?(state: RecoveryState): void;
+  onSessionsChange?(sessions: RecoverySessionSummary[]): void;
+  onWorkingCopyChange?(workingCopyId: string): void;
+  onNotice?(message: string): void;
+}
+
+export interface RecoveryWorkingSession {
+  workingCopyId: string;
+  source: BrowserRecoverySource;
+  formalFileHint?: BrowserRecoveryFormalFileHint;
+}
+
+export interface RecoveryCoordinator {
+  readonly store: BrowserRecoveryStore;
+  readonly workingCopyId: string;
+  readonly state: RecoveryState;
+  readonly sessions: RecoverySessionSummary[];
+  /** Schedule a debounced recovery write for a successfully committed Project. */
+  stage(project: CircuitProject, options?: RecoveryStageOptions): void;
+  /** Drop a pending write without storing it (replacement boundary). */
+  cancelPending(): void;
+  /** Enqueue metadata/content for an inactive editor tab without activating it. */
+  writeSessionSnapshot(
+    session: RecoveryWorkingSession,
+    project: CircuitProject,
+    options?: RecoveryStageOptions,
+  ): void;
+  /** Flush any pending write and wait for the write chain to settle. */
+  flushNow(): Promise<RecoveryState>;
+  /**
+   * Fork a new working-copy identity for an incoming Project; pending writes
+   * for the outgoing identity are dropped, its stored records are retained.
+   */
+  beginWorkingCopy(source: BrowserRecoverySource): string;
+  captureWorkingSession(): RecoveryWorkingSession;
+  /** Enqueue outgoing writes first; resume an existing internal project tab. */
+  resumeWorkingSession(session: RecoveryWorkingSession): void;
+  /** Attach a formal-file hint to subsequent records (file service, WP-3). */
+  noteFormalFileHint(hint: BrowserRecoveryFormalFileHint): void;
+  /** Re-read stored records and publish fresh session summaries. */
+  discover(): Promise<void>;
+  /** Validate one stored generation and return its Project or typed failure. */
+  readSessionProject(
+    workingCopyId: string,
+    generation: BrowserRecoveryGeneration,
+  ): Promise<RecoveryProjectRead>;
+  /** Delete every record of one session; other sessions are untouched. */
+  deleteSession(workingCopyId: string): Promise<boolean>;
+  dispose(): void;
+}
+
+export interface CreateRecoveryCoordinatorOptions {
+  /** Session-local serializer for immutable editor snapshots; timers and writes remain unchanged. */
+  serializeProject?: (project: CircuitProject) => string;
+  store?: BrowserRecoveryStore;
+  events?: RecoveryCoordinatorEvents;
+  delayMs?: number;
+  setTimeout?: RecoverySetTimeout;
+  clearTimeout?: RecoveryClearTimeout;
+  getSessionStorage?: () => RecoverySessionStorage | null;
+  createId?: () => string;
+  now?: () => string;
+  /**
+   * The working copies this window has open in any tab. Retention never
+   * evicts their latest copy, so unsaved work in a background tab is as safe
+   * as in the active one.
+   */
+  openWorkingCopyIds?: () => readonly string[];
+}
+
+function randomId(prefix: string): string {
+  const cryptoApi = globalThis.crypto;
+  if (cryptoApi && typeof cryptoApi.randomUUID === "function") {
+    return `${prefix}-${cryptoApi.randomUUID()}`;
+  }
+  return `${prefix}-${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+}
+
+function defaultSessionStorage(): RecoverySessionStorage | null {
+  try {
+    const storage = globalThis.sessionStorage as RecoverySessionStorage | null;
+    return storage ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function summarizeGeneration(
+  record: BrowserRecoveryRecordV2 | null,
+): RecoveryGenerationSummary | null {
+  if (record === null) return null;
+  const review = reviewBrowserRecoveryProject(record);
+  return {
+    recordId: record.recordId,
+    updatedAt: record.updatedAt,
+    review:
+      review.status === "valid" || review.status === "corrupt"
+        ? review.status
+        : "unsupported-schema",
+    revision:
+      review.status === "valid" ? (readTopRevision(record) ?? null) : null,
+    structureRevision:
+      review.status === "valid" ? (record.structureRevision ?? null) : null,
+    unsavedAtSnapshot: record.unsavedAtSnapshot ?? null,
+    meaningfulContent:
+      review.status === "valid" &&
+      projectTextHasMeaningfulContent(record.projectText),
+  };
+}
+
+function readTopRevision(record: BrowserRecoveryRecordV2): number | undefined {
+  return record.documentRevisions[record.topDocumentId];
+}
+
+/** One working copy's Project, ready to become a recovery record. */
+export interface RecoveryCandidate {
+  project: CircuitProject;
+  session: RecoveryWorkingSession;
+  unsavedAtSnapshot: boolean;
+  cloudBinding: BrowserRecoveryCloudBinding | null;
+}
+
+/** The recovery record of a candidate, as every writer stores it. */
+export function recoveryRecordOf(
+  candidate: RecoveryCandidate,
+  recordId: string,
+  updatedAt: string,
+  serialize: (project: CircuitProject) => string = serializeProject,
+): BrowserRecoveryRecordV2 {
+  const { project, session } = candidate;
+  const documentRevisions: Record<string, number> = {};
+  for (const document of project.documents) {
+    documentRevisions[document.id] = document.revision;
+  }
+  return finalizeBrowserRecoveryRecord({
+    recordId,
+    workingCopyId: session.workingCopyId,
+    generation: "latest",
+    projectId: project.id,
+    projectName: project.name,
+    projectSchemaVersion: CURRENT_PROJECT_FILE_VERSION,
+    topDocumentId: project.topDocumentId,
+    documentRevisions,
+    structureRevision: project.structureRevision,
+    source: session.source,
+    updatedAt,
+    projectText: serialize(project),
+    unsavedAtSnapshot: candidate.unsavedAtSnapshot,
+    ...(candidate.cloudBinding === null
+      ? {}
+      : { cloudBinding: candidate.cloudBinding }),
+    ...(session.formalFileHint === undefined
+      ? {}
+      : { formalFileHint: session.formalFileHint }),
+  });
+}
+
+export function createRecoveryCoordinator(
+  options: CreateRecoveryCoordinatorOptions = {},
+): RecoveryCoordinator {
+  const events = options.events ?? {};
+  const store = options.store ?? createBrowserRecoveryStore();
+  const getSessionStorage = options.getSessionStorage ?? defaultSessionStorage;
+  const createId = options.createId ?? (() => randomId("working-copy"));
+  const now = options.now ?? (() => new Date().toISOString());
+
+  const storage = getSessionStorage();
+  let workingCopyId = storage?.getItem(WORKING_COPY_STORAGE_KEY) ?? "";
+  if (workingCopyId.length === 0) {
+    workingCopyId = createId();
+    try {
+      storage?.setItem(WORKING_COPY_STORAGE_KEY, workingCopyId);
+    } catch {
+      // A tab-scoped identity that cannot persist still works for this page.
+    }
+  }
+  let currentSource: BrowserRecoverySource = "new";
+  let formalFileHint: BrowserRecoveryFormalFileHint | undefined;
+  let state: RecoveryState = "idle";
+  let sessions: RecoverySessionSummary[] = [];
+  let recordCounter = 0;
+  // Said once each time open work outgrows the store, not on every write.
+  let overCapacityNoticed = false;
+
+  function publishState(next: RecoveryState): void {
+    if (state === next) return;
+    state = next;
+    events.onStateChange?.(next);
+  }
+
+  function publishSessions(next: RecoverySessionSummary[]): void {
+    sessions = next;
+    events.onSessionsChange?.(next);
+  }
+
+  // Serial write chain: a store write that is still in flight when the next
+  // debounced batch fires must not drop the newer revision, and this tab must
+  // never race two write transactions against the same session.
+  let writeChain: Promise<void> = Promise.resolve();
+
+  function enqueueWrite(candidate: RecoveryCandidate): void {
+    if (workingCopyId === candidate.session.workingCopyId)
+      publishState("pending");
+    const publishWriteState = (next: RecoveryState) => {
+      if (workingCopyId === candidate.session.workingCopyId) publishState(next);
+      else if (
+        next === "failed" ||
+        next === "quota-exceeded" ||
+        next === "unavailable"
+      )
+        events.onNotice?.(
+          `Local recovery for ${candidate.project.name} failed (${next}). Save or download this Project to keep its latest edits.`,
+        );
+    };
+    writeChain = writeChain.then(async () => {
+      let record: BrowserRecoveryRecordV2;
+      try {
+        record = buildRecord(candidate);
+      } catch (error) {
+        publishWriteState("failed");
+        events.onNotice?.(
+          `Recovery snapshot could not be serialized: ${
+            error instanceof Error ? error.message : "invalid Project"
+          }`,
+        );
+        return;
+      }
+      const outcome = await store.writeRecord(
+        record,
+        options.openWorkingCopyIds?.() ?? [],
+      );
+      if (outcome.status === "stored" || outcome.status === "unchanged") {
+        publishWriteState("stored");
+        if (outcome.overCapacity && !overCapacityNoticed) {
+          events.onNotice?.(
+            "Unsaved work in your open tabs is more than this browser keeps for recovery (12 MB). Every open tab still has its copy, but save to Cloud or download the Projects you need.",
+          );
+        }
+        overCapacityNoticed = outcome.overCapacity;
+        return;
+      }
+      if (outcome.status === "rejected-too-large") {
+        publishWriteState("failed");
+        events.onNotice?.(
+          "Recovery snapshot exceeds the 4 MB browser limit; the previous copy was kept. Download the Project to keep it safe.",
+        );
+        return;
+      }
+      publishWriteState(
+        outcome.failure === "quota-exceeded"
+          ? "quota-exceeded"
+          : outcome.failure === "storage-unavailable"
+            ? "unavailable"
+            : "failed",
+      );
+    });
+  }
+
+  function buildRecord(candidate: RecoveryCandidate): BrowserRecoveryRecordV2 {
+    recordCounter += 1;
+    return recoveryRecordOf(
+      candidate,
+      `${candidate.session.workingCopyId}-snapshot-${recordCounter}`,
+      now(),
+      options.serializeProject,
+    );
+  }
+
+  const scheduler = createRecoveryScheduler<RecoveryCandidate>({
+    delayMs: options.delayMs ?? RECOVERY_WRITE_DELAY_MS,
+    write: enqueueWrite,
+    ...(options.setTimeout === undefined
+      ? {}
+      : { setTimeout: options.setTimeout }),
+    ...(options.clearTimeout === undefined
+      ? {}
+      : { clearTimeout: options.clearTimeout }),
+  });
+
+  return {
+    store,
+
+    get workingCopyId(): string {
+      return workingCopyId;
+    },
+
+    get state(): RecoveryState {
+      return state;
+    },
+
+    get sessions(): RecoverySessionSummary[] {
+      return sessions;
+    },
+
+    stage(project: CircuitProject, options: RecoveryStageOptions = {}): void {
+      scheduler.schedule({
+        project,
+        session: {
+          workingCopyId,
+          source: currentSource,
+          ...(formalFileHint ? { formalFileHint: { ...formalFileHint } } : {}),
+        },
+        unsavedAtSnapshot: options.unsavedAtSnapshot ?? true,
+        cloudBinding: options.cloudBinding ?? null,
+      });
+    },
+
+    writeSessionSnapshot(session, project, stageOptions = {}) {
+      enqueueWrite({
+        project,
+        session: {
+          ...session,
+          ...(session.formalFileHint
+            ? { formalFileHint: { ...session.formalFileHint } }
+            : {}),
+        },
+        unsavedAtSnapshot: stageOptions.unsavedAtSnapshot ?? true,
+        cloudBinding: stageOptions.cloudBinding ?? null,
+      });
+    },
+
+    cancelPending(): void {
+      scheduler.cancel();
+    },
+
+    async flushNow(): Promise<RecoveryState> {
+      scheduler.flush();
+      await writeChain;
+      return state;
+    },
+
+    captureWorkingSession: () => ({
+      workingCopyId,
+      source: currentSource,
+      ...(formalFileHint ? { formalFileHint } : {}),
+    }),
+    resumeWorkingSession(session: RecoveryWorkingSession) {
+      scheduler.cancel();
+      workingCopyId = session.workingCopyId;
+      currentSource = session.source;
+      formalFileHint = session.formalFileHint;
+      try {
+        storage?.setItem(WORKING_COPY_STORAGE_KEY, workingCopyId);
+      } catch {
+        /* Memory remains authoritative. */
+      }
+      events.onWorkingCopyChange?.(workingCopyId);
+      publishState("idle");
+    },
+    beginWorkingCopy(source: BrowserRecoverySource): string {
+      scheduler.cancel();
+      workingCopyId = createId();
+      currentSource = source;
+      formalFileHint = undefined;
+      try {
+        storage?.setItem(WORKING_COPY_STORAGE_KEY, workingCopyId);
+      } catch {
+        // Persisted identity is best-effort; the in-memory identity rules.
+      }
+      events.onWorkingCopyChange?.(workingCopyId);
+      return workingCopyId;
+    },
+
+    noteFormalFileHint(hint: BrowserRecoveryFormalFileHint): void {
+      formalFileHint = hint;
+    },
+
+    async discover(): Promise<void> {
+      const read = await store.readAll();
+      if (read.status === "failed") {
+        publishSessions([]);
+        return;
+      }
+      if (read.undecodableCount > 0) {
+        events.onNotice?.(
+          `${read.undecodableCount} browser recovery record(s) are in an unreadable future format and were left untouched`,
+        );
+      }
+      const summaries = [...read.sessions]
+        .map((session: BrowserRecoverySession) => ({
+          workingCopyId: session.workingCopyId,
+          projectId:
+            session.latest?.projectId ?? session.previous?.projectId ?? "",
+          projectName:
+            session.latest?.projectName ?? session.previous?.projectName ?? "",
+          source: session.latest?.source ?? session.previous?.source ?? "new",
+          updatedAt:
+            session.latest?.updatedAt ?? session.previous?.updatedAt ?? "",
+          latest: summarizeGeneration(session.latest),
+          previous: summarizeGeneration(session.previous),
+        }))
+        .filter(
+          (summary) => summary.latest !== null || summary.previous !== null,
+        )
+        .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+      publishSessions(summaries);
+    },
+
+    async readSessionProject(
+      targetWorkingCopyId: string,
+      generation: BrowserRecoveryGeneration,
+    ): Promise<RecoveryProjectRead> {
+      const read = await store.readAll();
+      if (read.status === "failed") {
+        return {
+          status: "failed",
+          failure: read.failure ?? "storage-failed",
+          message: read.message ?? "recovery storage failed",
+        };
+      }
+      const session = read.sessions.find(
+        (candidate) => candidate.workingCopyId === targetWorkingCopyId,
+      );
+      const record = session ? session[generation] : null;
+      if (session === undefined || record === null) {
+        return {
+          status: "missing",
+          message: "no stored recovery record for this working copy",
+        };
+      }
+      const review = reviewBrowserRecoveryProject(record);
+      if (review.status === "valid") {
+        return { status: "valid", project: review.project, record };
+      }
+      if (review.status === "unsupported-schema") {
+        return {
+          status: "unsupported-schema",
+          message: review.message,
+          projectText: review.projectText,
+        };
+      }
+      return { status: "corrupt", message: review.message };
+    },
+
+    async deleteSession(targetWorkingCopyId: string): Promise<boolean> {
+      const outcome = await store.deleteSession(targetWorkingCopyId);
+      return outcome.status === "deleted";
+    },
+
+    dispose(): void {
+      scheduler.dispose();
+    },
+  };
+}
+
+export interface UseRecoveryCoordinatorOptions {
+  serializeProject?: (project: CircuitProject) => string;
+  store?: BrowserRecoveryStore;
+  delayMs?: number;
+  /** The working copies of every open tab; read at each write. */
+  openWorkingCopyIds?: () => readonly string[];
+}
+
+export interface UseRecoveryCoordinatorResult {
+  state: RecoveryState;
+  sessions: RecoverySessionSummary[];
+  /** True once startup discovery (after any migration) has settled. */
+  ready: boolean;
+  workingCopyId: string;
+  stage: (project: CircuitProject, options?: RecoveryStageOptions) => void;
+  writeSessionSnapshot: RecoveryCoordinator["writeSessionSnapshot"];
+  cancelPending: () => void;
+  flushNow: () => Promise<RecoveryState>;
+  beginWorkingCopy: (source: BrowserRecoverySource) => string;
+  captureWorkingSession: () => RecoveryWorkingSession;
+  resumeWorkingSession: (session: RecoveryWorkingSession) => void;
+  noteFormalFileHint: (hint: BrowserRecoveryFormalFileHint) => void;
+  discover: () => Promise<void>;
+  readSessionProject: (
+    workingCopyId: string,
+    generation: BrowserRecoveryGeneration,
+  ) => Promise<RecoveryProjectRead>;
+  deleteSession: (workingCopyId: string) => Promise<boolean>;
+}
+
+/**
+ * Browser-only recovery lifecycle; safe during server/static rendering (the
+ * mount effect, migration, and discovery simply never run there).
+ */
+export function useRecoveryCoordinator(
+  onNotice?: (message: string) => void,
+  options: UseRecoveryCoordinatorOptions = {},
+): UseRecoveryCoordinatorResult {
+  const [state, setState] = useState<RecoveryState>("idle");
+  const [sessions, setSessions] = useState<RecoverySessionSummary[]>([]);
+  const [ready, setReady] = useState(false);
+  const noticeRef = useRef(onNotice);
+  noticeRef.current = onNotice;
+  const openWorkingCopyIdsRef = useRef(options.openWorkingCopyIds);
+  openWorkingCopyIdsRef.current = options.openWorkingCopyIds;
+
+  const [coordinator] = useState(() =>
+    createRecoveryCoordinator({
+      openWorkingCopyIds: () => openWorkingCopyIdsRef.current?.() ?? [],
+      ...(options.serializeProject === undefined
+        ? {}
+        : { serializeProject: options.serializeProject }),
+      ...(options.store === undefined ? {} : { store: options.store }),
+      ...(options.delayMs === undefined ? {} : { delayMs: options.delayMs }),
+      events: {
+        onStateChange: (next) => setState(next),
+        onSessionsChange: (next) => setSessions(next),
+        onWorkingCopyChange: (next) => setWorkingCopyId(next),
+        onNotice: (message) => noticeRef.current?.(message),
+      },
+    }),
+  );
+  const [currentWorkingCopyId, setWorkingCopyId] = useState(
+    () => coordinator.workingCopyId,
+  );
+
+  useEffect(() => {
+    let disposed = false;
+    void (async () => {
+      const migration = await migrateLegacyProjectRecovery({
+        store: coordinator.store,
+      });
+      if (migration.status === "retained") {
+        noticeRef.current?.(
+          `The previous browser recovery could not be migrated (${migration.reason}); it was left in place`,
+        );
+      }
+      await coordinator.discover();
+      if (!disposed) setReady(true);
+    })().catch(() => {
+      if (!disposed) setReady(true);
+    });
+    const flushWhenHidden = () => {
+      if (globalThis.document?.visibilityState === "hidden") {
+        void coordinator.flushNow();
+      }
+    };
+    const flushOnPageHide = () => {
+      void coordinator.flushNow();
+    };
+    globalThis.window?.addEventListener("visibilitychange", flushWhenHidden);
+    globalThis.window?.addEventListener("pagehide", flushOnPageHide);
+    return () => {
+      disposed = true;
+      globalThis.window?.removeEventListener(
+        "visibilitychange",
+        flushWhenHidden,
+      );
+      globalThis.window?.removeEventListener("pagehide", flushOnPageHide);
+      coordinator.dispose();
+    };
+  }, [coordinator]);
+
+  return {
+    state,
+    sessions,
+    ready,
+    workingCopyId: currentWorkingCopyId,
+    stage: (project, stageOptions) => coordinator.stage(project, stageOptions),
+    writeSessionSnapshot: (session, project, stageOptions) =>
+      coordinator.writeSessionSnapshot(session, project, stageOptions),
+    cancelPending: () => coordinator.cancelPending(),
+    flushNow: () => coordinator.flushNow(),
+    beginWorkingCopy: (source) => {
+      const next = coordinator.beginWorkingCopy(source);
+      setWorkingCopyId(next);
+      return next;
+    },
+    captureWorkingSession: () => coordinator.captureWorkingSession(),
+    resumeWorkingSession: (session) =>
+      coordinator.resumeWorkingSession(session),
+    noteFormalFileHint: (hint) => coordinator.noteFormalFileHint(hint),
+    discover: () => coordinator.discover(),
+    readSessionProject: (id, generation) =>
+      coordinator.readSessionProject(id, generation),
+    deleteSession: (id) => coordinator.deleteSession(id),
+  };
+}

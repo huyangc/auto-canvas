@@ -1,0 +1,552 @@
+{
+  "schemaVersion": 1,
+  "id": "razavi-delta-sigma-signal-flow-v1",
+  "notes": [
+    "These measurements are calibrated from hash-pinned user-supplied raster witnesses, not PDF vector extraction.",
+    "The supplied PDF is limited to its first 100 pages and does not contain Chapter 21; it is not an authority for these figures.",
+    "Figure 21.38 directly witnesses the three summing circles, two 1/s bodies, and DAC body. Figure 21.33 directly witnesses a summing circle and the z^-1/(1-z^-1) body.",
+    "Multiplier, unit-delay, and quantizer do not have direct screenshot evidence here. Their marks and body choices are family-derived provisional calibrations.",
+    "The transconductance trapezoid is directly witnessed by the user-supplied small-signal amplifier diagram; its formula text remains renderer-owned and editable.",
+    "The quantizer body is deliberately square rather than the integrator's 40x26 it was provisionally derived from: it carries a transfer characteristic, not a line of formula text, so it needs comparable room on both axes. Its width and pin span remain family-standard.",
+    "Product connection geometry keeps every Signal Flow terminal on the 10-unit grid and limits the visible body-to-terminal lead to one grid cell."
+  ],
+  "witnesses": [
+    {
+      "id": "delta-sigma-figure-21-38",
+      "kind": "user-supplied-raster-witness",
+      "sourceSha256": "d328e1aafa7ae0b57bbfe9d0fba9c3d7e0b662079f3b77b4c35518c82bf0b9bd",
+      "sourcePixels": {
+        "width": 936,
+        "height": 624
+      },
+      "witnessPath": "delta-sigma-figure-21-38-reference.png",
+      "witnessSha256": "88adc1f13614d2928e6a6b08116e9c57c0006b685671c8538ca79c683c38e72f",
+      "evidence": [
+        "three summing junction circles",
+        "two 1/s formula bodies",
+        "DAC formula body"
+      ],
+      "source": {
+        "title": "Analysis and Design of Data Converters",
+        "figure": "21.38",
+        "provenance": "user-supplied screenshot; the available 100-page PDF copy excludes Chapter 21",
+        "sourceFileName": "figure-2-razavi.png"
+      },
+      "sourceCropPx": [306, 102, 382, 150],
+      "reproduction": "The repository stores this immutable cropped witness directly; regeneration from the private source screenshot is intentionally not required."
+    },
+    {
+      "id": "delta-sigma-figure-21-33",
+      "kind": "user-supplied-raster-witness",
+      "sourceSha256": "cf02dea357a9f65be37931b181c265b721424d8cca3d1202943c6b4248e7e780",
+      "sourcePixels": {
+        "width": 654,
+        "height": 206
+      },
+      "witnessPath": "delta-sigma-figure-21-33-reference.png",
+      "witnessSha256": "dc3fd08dc3eb2aac6842f32016ecc0f0d7d77db137af2530e192e19f5c43d1a5",
+      "evidence": ["summing junction circle", "z^-1/(1-z^-1) formula body"],
+      "source": {
+        "title": "Analysis and Design of Data Converters",
+        "figure": "21.33",
+        "provenance": "user-supplied screenshot; the available 100-page PDF copy excludes Chapter 21",
+        "sourceFileName": "figure-3-formula.png"
+      },
+      "sourceCropPx": [279, 34, 298, 121],
+      "sourceOverlayExclusionPx": {
+        "left": 137,
+        "top": 0,
+        "right": 152,
+        "bottom": 32,
+        "reason": "removes the non-source red annotation arrow while retaining the printed figure"
+      },
+      "reproduction": "The repository stores this immutable cropped witness directly; regeneration from the private source screenshot is intentionally not required."
+    },
+    {
+      "id": "small-signal-transconductance-block",
+      "kind": "user-supplied-raster-witness",
+      "sourceSha256": "5795ff03bb255bf7c7a405fef9cf73f28a657ceebb842e51ffbcad0cbd3f1b62",
+      "sourcePixels": {
+        "width": 699,
+        "height": 447
+      },
+      "witnessPath": "transconductance-reference.png",
+      "witnessSha256": "84038eaab654faaa7fbfcf17c7df204bfbea546e27e0bc4f0b6b08e4b1747902",
+      "evidence": [
+        "right-tapered transconductance trapezoid",
+        "centered g_m formula with the product-default unary plus omitted",
+        "horizontal signal-flow leads"
+      ],
+      "source": {
+        "title": "Small-signal amplifier diagram",
+        "figure": "user-supplied transconductance example",
+        "provenance": "user-supplied schematic image in the Analog Canvas feature request",
+        "sourceFileName": "1a382eca-f95b-45a4-9c60-f9f7d4f74021.png"
+      },
+      "sourceCropPx": [47, 115, 109, 180],
+      "reproduction": "Crop the source image at x=47, y=115, width=109, height=180 without resampling."
+    }
+  ],
+  "symbols": {
+    "adder": {
+      "evidenceStatus": "direct-raster",
+      "witnessId": "delta-sigma-figure-21-38",
+      "pinOrder": ["A", "B", "Y"],
+      "viewBox": {
+        "x": -24,
+        "y": -16,
+        "width": 48,
+        "height": 40
+      },
+      "pins": [
+        {
+          "name": "A",
+          "role": "input",
+          "at": {
+            "x": -20,
+            "y": 0
+          },
+          "direction": "west"
+        },
+        {
+          "name": "B",
+          "role": "input",
+          "at": {
+            "x": 0,
+            "y": 20
+          },
+          "direction": "south"
+        },
+        {
+          "name": "Y",
+          "role": "output",
+          "at": {
+            "x": 20,
+            "y": 0
+          },
+          "direction": "east"
+        }
+      ],
+      "circle": {
+        "center": {
+          "x": 0,
+          "y": 0
+        },
+        "radius": 12
+      },
+      "measurement": {
+        "window": {
+          "width": 39,
+          "height": 35,
+          "minX": -17,
+          "minY": -15
+        },
+        "targetRadius": 12,
+        "bodyKind": "circle",
+        "assetPath": "delta-sigma-figure-21-38-reference.png",
+        "pixelsPerLogical": 1.3,
+        "originPx": {
+          "x": 69.5,
+          "y": 70.5
+        },
+        "threshold": 230
+      }
+    },
+    "multiplier": {
+      "evidenceStatus": "family-derived-provisional",
+      "derivedFrom": "adder",
+      "pinOrder": ["A", "B", "Y"],
+      "viewBox": {
+        "x": -24,
+        "y": -16,
+        "width": 48,
+        "height": 40
+      },
+      "pins": [
+        {
+          "name": "A",
+          "role": "input",
+          "at": {
+            "x": -20,
+            "y": 0
+          },
+          "direction": "west"
+        },
+        {
+          "name": "B",
+          "role": "input",
+          "at": {
+            "x": 0,
+            "y": 20
+          },
+          "direction": "south"
+        },
+        {
+          "name": "Y",
+          "role": "output",
+          "at": {
+            "x": 20,
+            "y": 0
+          },
+          "direction": "east"
+        }
+      ],
+      "circle": {
+        "center": {
+          "x": 0,
+          "y": 0
+        },
+        "radius": 12
+      },
+      "measurement": {
+        "window": {
+          "width": 48,
+          "height": 40,
+          "minX": -24,
+          "minY": -16
+        },
+        "targetRadius": 12,
+        "bodyKind": "circle"
+      }
+    },
+    "transconductance": {
+      "evidenceStatus": "direct-raster",
+      "witnessId": "small-signal-transconductance-block",
+      "pinOrder": ["A", "Y"],
+      "viewBox": {
+        "x": -34,
+        "y": -39,
+        "width": 68,
+        "height": 78
+      },
+      "pins": [
+        {
+          "name": "A",
+          "role": "input",
+          "at": {
+            "x": -30,
+            "y": 0
+          },
+          "direction": "west"
+        },
+        {
+          "name": "Y",
+          "role": "output",
+          "at": {
+            "x": 30,
+            "y": 0
+          },
+          "direction": "east"
+        }
+      ],
+      "body": {
+        "left": -20,
+        "top": -35,
+        "right": 20,
+        "bottom": 35
+      },
+      "formulaPresentation": {
+        "defaultFormula": "g_m",
+        "supportsCoefficient": true,
+        "center": {
+          "x": 0,
+          "y": 0
+        },
+        "fontSize": 12,
+        "adaptiveFrame": {
+          "shape": "right-tapered-trapezoid",
+          "minBodyWidth": 40,
+          "minBodyHeight": 70,
+          "horizontalPadding": 4,
+          "verticalPadding": 4,
+          "leadLength": 10
+        }
+      },
+      "measurement": {
+        "window": {
+          "width": 109,
+          "height": 180,
+          "minX": 47,
+          "minY": 115
+        },
+        "targetBody": {
+          "width": 40,
+          "height": 70,
+          "referenceRatio": 0.571429
+        },
+        "bodyKind": "right-tapered-trapezoid",
+        "assetPath": "transconductance-reference.png",
+        "pixelsPerLogical": 2.34,
+        "originPx": {
+          "x": 54.5,
+          "y": 90
+        },
+        "threshold": 220
+      }
+    },
+    "integrator": {
+      "evidenceStatus": "direct-raster",
+      "witnessId": "delta-sigma-figure-21-38",
+      "pinOrder": ["A", "Y"],
+      "viewBox": {
+        "x": -34,
+        "y": -24,
+        "width": 68,
+        "height": 48
+      },
+      "pins": [
+        {
+          "name": "A",
+          "role": "input",
+          "at": {
+            "x": -30,
+            "y": 0
+          },
+          "direction": "west"
+        },
+        {
+          "name": "Y",
+          "role": "output",
+          "at": {
+            "x": 30,
+            "y": 0
+          },
+          "direction": "east"
+        }
+      ],
+      "body": {
+        "left": -20,
+        "top": -20,
+        "right": 20,
+        "bottom": 20
+      },
+      "formulaPresentation": {
+        "defaultFormula": "1/s",
+        "supportsCoefficient": true,
+        "center": {
+          "x": 0,
+          "y": 0
+        },
+        "fontSize": 12,
+        "adaptiveFrame": {
+          "minBodyWidth": 40,
+          "minBodyHeight": 30,
+          "horizontalPadding": 8,
+          "verticalPadding": 4,
+          "leadLength": 10
+        }
+      },
+      "measurement": {
+        "window": {
+          "width": 41,
+          "height": 43,
+          "minX": -19,
+          "minY": -23
+        },
+        "targetBody": {
+          "width": 40,
+          "height": 26
+        },
+        "bodyKind": "sharp-rectangle",
+        "assetPath": "delta-sigma-figure-21-38-reference.png",
+        "pixelsPerLogical": 1.3,
+        "originPx": {
+          "x": 128,
+          "y": 68.5
+        },
+        "threshold": 200
+      }
+    },
+    "unit-delay": {
+      "evidenceStatus": "family-derived-provisional",
+      "derivedFrom": "integrator",
+      "pinOrder": ["A", "Y"],
+      "viewBox": {
+        "x": -34,
+        "y": -24,
+        "width": 68,
+        "height": 48
+      },
+      "pins": [
+        {
+          "name": "A",
+          "role": "input",
+          "at": {
+            "x": -30,
+            "y": 0
+          },
+          "direction": "west"
+        },
+        {
+          "name": "Y",
+          "role": "output",
+          "at": {
+            "x": 30,
+            "y": 0
+          },
+          "direction": "east"
+        }
+      ],
+      "body": {
+        "left": -20,
+        "top": -15,
+        "right": 20,
+        "bottom": 15
+      },
+      "formulaPresentation": {
+        "defaultFormula": "z^-1",
+        "supportsCoefficient": true,
+        "center": {
+          "x": 0,
+          "y": 0
+        },
+        "fontSize": 12,
+        "adaptiveFrame": {
+          "minBodyWidth": 40,
+          "minBodyHeight": 30,
+          "horizontalPadding": 8,
+          "verticalPadding": 4,
+          "leadLength": 10
+        }
+      },
+      "measurement": {
+        "window": {
+          "width": 68,
+          "height": 48,
+          "minX": -34,
+          "minY": -24
+        },
+        "targetBody": {
+          "width": 40,
+          "height": 26
+        },
+        "bodyKind": "sharp-rectangle"
+      }
+    },
+    "quantizer": {
+      "evidenceStatus": "family-derived-provisional",
+      "derivedFrom": "integrator",
+      "pinOrder": ["A", "Y"],
+      "viewBox": {
+        "x": -34,
+        "y": -24,
+        "width": 68,
+        "height": 48
+      },
+      "pins": [
+        {
+          "name": "A",
+          "role": "input",
+          "at": {
+            "x": -30,
+            "y": 0
+          },
+          "direction": "west"
+        },
+        {
+          "name": "Y",
+          "role": "output",
+          "at": {
+            "x": 30,
+            "y": 0
+          },
+          "direction": "east"
+        }
+      ],
+      "body": {
+        "left": -20,
+        "top": -20,
+        "right": 20,
+        "bottom": 20
+      },
+      "measurement": {
+        "window": {
+          "width": 68,
+          "height": 48,
+          "minX": -34,
+          "minY": -24
+        },
+        "targetBody": {
+          "width": 40,
+          "height": 40
+        },
+        "bodyKind": "sharp-rectangle"
+      }
+    },
+    "discrete-time-integrator": {
+      "evidenceStatus": "direct-raster",
+      "witnessId": "delta-sigma-figure-21-33",
+      "pinOrder": ["A", "Y"],
+      "viewBox": {
+        "x": -44,
+        "y": -24,
+        "width": 88,
+        "height": 48
+      },
+      "pins": [
+        {
+          "name": "A",
+          "role": "input",
+          "at": {
+            "x": -40,
+            "y": 0
+          },
+          "direction": "west"
+        },
+        {
+          "name": "Y",
+          "role": "output",
+          "at": {
+            "x": 40,
+            "y": 0
+          },
+          "direction": "east"
+        }
+      ],
+      "body": {
+        "left": -30,
+        "top": -20,
+        "right": 30,
+        "bottom": 20
+      },
+      "formulaPresentation": {
+        "defaultFormula": "z^-1/(1-z^-1)",
+        "supportsCoefficient": true,
+        "center": {
+          "x": 0,
+          "y": 0
+        },
+        "fontSize": 12,
+        "adaptiveFrame": {
+          "minBodyWidth": 40,
+          "minBodyHeight": 30,
+          "horizontalPadding": 8,
+          "verticalPadding": 4,
+          "leadLength": 10
+        }
+      },
+      "measurement": {
+        "window": {
+          "width": 61,
+          "height": 55,
+          "minX": -19,
+          "minY": -16
+        },
+        "targetBody": {
+          "width": 56,
+          "height": 30,
+          "referenceRatio": 1.866667
+        },
+        "bodyKind": "sharp-rectangle",
+        "assetPath": "delta-sigma-figure-21-33-reference.png",
+        "pixelsPerLogical": 1.2,
+        "originPx": {
+          "x": 137.5,
+          "y": 82
+        },
+        "threshold": 100
+      },
+      "pinSpan": 40
+    }
+  }
+}

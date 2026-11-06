@@ -1,0 +1,10 @@
+/* Cross-cutting accessibility policy; loaded once by the Editor route entry. */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}

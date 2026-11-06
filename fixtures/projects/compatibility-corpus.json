@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 2,
+  "description": "Project compatibility corpus: canonical current files, explicitly retained migration witnesses, and rejected inputs.",
+  "current": [
+    "fixtures/projects/minimal/project.icproj.json",
+    "fixtures/projects/legacy-scalar-signals/project.icproj.json"
+  ],
+  "migrated": [
+    {
+      "path": "netlists/ngspice-ota-qualification/source.icproj.json",
+      "sourceSchemaVersion": 48
+    },
+    {
+      "path": "netlists/native-ota-library/legacy-source.icproj.json",
+      "sourceSchemaVersion": 48
+    },
+    {
+      "path": "fixtures/projects/manual-basics/project.icproj.json",
+      "sourceSchemaVersion": 58
+    },
+    {
+      "path": "fixtures/projects/crossing-routes/project.icproj.json",
+      "sourceSchemaVersion": 58
+    },
+    {
+      "path": "fixtures/projects/differential-stage/project.icproj.json",
+      "sourceSchemaVersion": 58
+    },
+    {
+      "path": "fixtures/projects/instance-value-display/project.icproj.json",
+      "sourceSchemaVersion": 58
+    },
+    {
+      "path": "netlists/native-ota/source.icproj.json",
+      "sourceSchemaVersion": 58
+    },
+    {
+      "path": "fixtures/projects/port-nets/project.icproj.json",
+      "sourceSchemaVersion": 58
+    },
+    {
+      "path": "fixtures/projects/hierarchical-gain-stage/project.icproj.json",
+      "sourceSchemaVersion": 58
+    }
+  ],
+  "rejected": [
+    {
+      "path": "fixtures/projects/rejected-missing-top/project.icproj.json",
+      "error": "Unknown top document"
+    }
+  ]
+}

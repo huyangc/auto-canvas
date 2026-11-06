@@ -1,0 +1,32 @@
+* Phase 9 third held-out topology-only fixture.
+* Eight-stage fully differential feedback ring; no simulation/performance claim.
+
+.subckt differential_delay_cell INP INN OUTP OUTN VBP VBN VDD VSS
+XMINP NDP INP TAIL VSS sky130_fd_pr__nfet_01v8 l=0.5 w=4
+XMINN NDN INN TAIL VSS sky130_fd_pr__nfet_01v8 l=0.5 w=4
+XMTAIL TAIL VBN VSS VSS sky130_fd_pr__nfet_01v8 l=1 w=8
+XMLOADP NDP VBP VDD VDD sky130_fd_pr__pfet_01v8 l=0.5 w=6
+XMLOADN NDN VBP VDD VDD sky130_fd_pr__pfet_01v8 l=0.5 w=6
+XMREGENP NDP OUTN VDD VDD sky130_fd_pr__pfet_01v8 l=0.5 w=3
+XMREGENN NDN OUTP VDD VDD sky130_fd_pr__pfet_01v8 l=0.5 w=3
+XMOUTPP OUTP NDP VDD VDD sky130_fd_pr__pfet_01v8 l=0.3 w=8
+XMOUTPN OUTP NDN VSS VSS sky130_fd_pr__nfet_01v8 l=0.3 w=4
+XMOUTNP OUTN NDN VDD VDD sky130_fd_pr__pfet_01v8 l=0.3 w=8
+XMOUTNN OUTN NDP VSS VSS sky130_fd_pr__nfet_01v8 l=0.3 w=4
+XMBIASP VBP VBP VDD VDD sky130_fd_pr__pfet_01v8 l=1 w=2
+XMBIASN VBN VBN VSS VSS sky130_fd_pr__nfet_01v8 l=1 w=2
+XMTAILC TAIL VBN VSS VSS sky130_fd_pr__nfet_01v8 l=1 w=4
+.ends differential_delay_cell
+
+.subckt differential_ring_8stage VBP VBN VDD VSS CLKP CLKN
+XST0 CLKP CLKN P0 N0 VBP VBN VDD VSS differential_delay_cell
+XST1 P0 N0 P1 N1 VBP VBN VDD VSS differential_delay_cell
+XST2 P1 N1 P2 N2 VBP VBN VDD VSS differential_delay_cell
+XST3 P2 N2 P3 N3 VBP VBN VDD VSS differential_delay_cell
+XST4 P3 N3 P4 N4 VBP VBN VDD VSS differential_delay_cell
+XST5 P4 N4 P5 N5 VBP VBN VDD VSS differential_delay_cell
+XST6 P5 N5 P6 N6 VBP VBN VDD VSS differential_delay_cell
+XST7 P6 N6 CLKP CLKN VBP VBN VDD VSS differential_delay_cell
+.ends differential_ring_8stage
+
+.end

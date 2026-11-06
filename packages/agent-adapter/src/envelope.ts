@@ -1,0 +1,290 @@
+/**
+ * Browser-safe web-session transport schemas shared by the Agent Host and
+ * Cloudflare relay. They never import Node builtins.
+ *
+ * Contract source: [`docs/specs/web-agent-session.md`](../../../docs/specs/web-agent-session.md)
+ * and [`Agent rationale`](../../../docs/adr/agent.md).
+ * The Circuit API payload carried by these messages is defined in `schema.ts`.
+ */
+
+import { z } from "zod";
+
+import { lazyJsonSchema } from "./lazy-json-schema.js";
+
+/** Relay protocol version. Bumped only on an incompatible envelope change. */
+export const AGENT_SESSION_PROTOCOL_VERSION = "1.0" as const;
+
+/** Browser/relay liveness policy. These control frames never enter Circuit API dispatch. */
+export const AGENT_HEARTBEAT_INTERVAL_MS = 15_000;
+export const AGENT_HEARTBEAT_TIMEOUT_MS = 45_000;
+export const AGENT_SSE_KEEPALIVE_INTERVAL_MS = 25_000;
+
+/** Relay observations, not a guarantee that the editor can execute a request. */
+export const AgentSessionStatusResponseSchema = z.strictObject({
+  ok: z.literal(true),
+  sessionId: z.string().min(1),
+  projectId: z.string().min(1),
+  contextRevision: z.string().min(1).optional(),
+  documentIds: z.array(z.string().min(1)),
+  authorization: z.enum(["active", "paused"]),
+  editor: z.enum(["attached", "detached"]),
+  observedAt: z.number().int().nonnegative(),
+  expiresAt: z.number().int().nonnegative(),
+});
+export type AgentSessionStatusResponse = z.infer<
+  typeof AgentSessionStatusResponseSchema
+>;
+export const agentSessionStatusResponseJsonSchema = lazyJsonSchema(
+  AgentSessionStatusResponseSchema,
+);
+
+const OpaqueIdSchema = z.string().min(1);
+const IsoTimestampSchema = z
+  .string()
+  .min(1)
+  .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/u);
+
+/** Kind of a relay message envelope. */
+const AgentSessionMessageKindSchema = z.enum([
+  "circuit-request",
+  "circuit-response",
+  "file-request",
+  "file-response",
+  "simulation-request",
+  "simulation-response",
+  "project-request",
+  "project-response",
+  "event",
+  "cancel",
+]);
+
+export const AgentClaimRequestSchema = z.strictObject({
+  claimCode: OpaqueIdSchema,
+});
+export const agentClaimRequestJsonSchema = lazyJsonSchema(
+  AgentClaimRequestSchema,
+);
+
+/** Durable Agent-side connector exchange. The connector is never a Circuit bearer. */
+export const AgentConnectorResumeRequestSchema = z.strictObject({
+  sessionId: OpaqueIdSchema,
+  connectorToken: OpaqueIdSchema,
+});
+export const agentConnectorResumeRequestJsonSchema = lazyJsonSchema(
+  AgentConnectorResumeRequestSchema,
+);
+
+/** Successful claim or connector resume. Secrets are returned only once. */
+export const AgentConnectionCredentialResponseSchema = z.strictObject({
+  ok: z.literal(true),
+  sessionId: OpaqueIdSchema,
+  agentToken: OpaqueIdSchema,
+  tokenExpiresAt: z.number().int().nonnegative(),
+  connectorToken: OpaqueIdSchema,
+  connectorExpiresAt: z.number().int().nonnegative(),
+  scopes: z.array(z.string().min(1)),
+  projectId: OpaqueIdSchema,
+  contextRevision: OpaqueIdSchema.optional(),
+  documentIds: z.array(OpaqueIdSchema),
+});
+export const agentConnectionCredentialResponseJsonSchema = lazyJsonSchema(
+  AgentConnectionCredentialResponseSchema,
+);
+
+/**
+ * One forwarded relay message. The `circuit-request`/`circuit-response` payload
+ * is the strict Circuit API schema from `schema.ts`; the relay never interprets
+ * or rewrites it.
+ */
+export const AgentSessionMessageSchema = z.strictObject({
+  protocolVersion: z.literal(AGENT_SESSION_PROTOCOL_VERSION),
+  sessionId: OpaqueIdSchema,
+  messageId: OpaqueIdSchema,
+  requestId: OpaqueIdSchema,
+  sentAt: IsoTimestampSchema,
+  contextRevision: OpaqueIdSchema.optional(),
+  /** Explicit open browser working copy; independent of the foreground tab. */
+  workspaceId: OpaqueIdSchema.max(256).optional(),
+  kind: AgentSessionMessageKindSchema,
+  payload: z.unknown(),
+  /**
+   * On a response: how long the editor worked on the request, from receipt
+   * to reply, and whether its tab was in the background. The relay passes
+   * both to the Agent with its own forwarding time (#1227).
+   */
+  timing: z
+    .strictObject({
+      workMs: z.number().int().nonnegative(),
+      visibility: z.enum(["visible", "hidden"]),
+    })
+    .optional(),
+});
+
+/** Authenticated browser liveness and current Project document roster. */
+export const AgentSessionControlMessageSchema = z.strictObject({
+  protocolVersion: z.literal(AGENT_SESSION_PROTOCOL_VERSION),
+  sessionId: OpaqueIdSchema,
+  kind: z.enum(["heartbeat", "heartbeat-ack"]),
+  nonce: OpaqueIdSchema,
+  /** Current roster, supplied only by the authenticated editor of this Project. */
+  projectId: OpaqueIdSchema.optional(),
+  contextRevision: OpaqueIdSchema.optional(),
+  documentIds: z.array(OpaqueIdSchema).max(1024).optional(),
+});
+
+const ActorKindSchema = z.enum(["human", "agent"]);
+
+/** An adapter release as its `x-agent-adapter-version` header names it. */
+export const AgentAdapterVersionSchema = z
+  .string()
+  .regex(/^\d{1,6}\.\d{1,6}\.\d{1,6}$/u);
+
+/** A bounded event delivered on the Agent SSE stream. */
+export const AgentSessionEventSchema = z.discriminatedUnion("type", [
+  z.strictObject({
+    type: z.literal("session.ready"),
+    sessionId: OpaqueIdSchema,
+    expiresAt: IsoTimestampSchema.optional(),
+  }),
+  z.strictObject({
+    type: z.literal("session.paused"),
+    sessionId: OpaqueIdSchema,
+  }),
+  // To the editor only: the release the paired adapter named on its last
+  // claim or resume, absent when it named none (#1844).
+  z.strictObject({
+    type: z.literal("agent.adapter"),
+    sessionId: OpaqueIdSchema,
+    version: AgentAdapterVersionSchema.optional(),
+  }),
+  z.strictObject({
+    type: z.literal("session.revoked"),
+    sessionId: OpaqueIdSchema,
+  }),
+  z.strictObject({
+    type: z.literal("session.renewed"),
+    sessionId: OpaqueIdSchema,
+    expiresAt: IsoTimestampSchema,
+  }),
+  z.strictObject({
+    type: z.literal("session.expired"),
+    sessionId: OpaqueIdSchema,
+  }),
+  z.strictObject({
+    type: z.literal("session.expiring"),
+    sessionId: OpaqueIdSchema,
+    expiresAt: IsoTimestampSchema,
+  }),
+  z.strictObject({
+    type: z.literal("editor.online"),
+    sessionId: OpaqueIdSchema,
+  }),
+  z.strictObject({
+    type: z.literal("editor.offline"),
+    sessionId: OpaqueIdSchema,
+  }),
+  z.strictObject({
+    type: z.literal("document.revision-changed"),
+    sessionId: OpaqueIdSchema,
+    documentId: OpaqueIdSchema,
+    revision: z.number().int().nonnegative(),
+    actorKind: ActorKindSchema,
+    requestId: OpaqueIdSchema.optional(),
+    changedObjectIds: z.array(OpaqueIdSchema),
+  }),
+  z.strictObject({
+    type: z.literal("document.replaced"),
+    sessionId: OpaqueIdSchema,
+  }),
+  z.strictObject({
+    type: z.literal("operation.started"),
+    sessionId: OpaqueIdSchema,
+    requestId: OpaqueIdSchema,
+  }),
+  z.strictObject({
+    type: z.literal("operation.completed"),
+    sessionId: OpaqueIdSchema,
+    requestId: OpaqueIdSchema,
+  }),
+  z.strictObject({
+    type: z.literal("operation.failed"),
+    sessionId: OpaqueIdSchema,
+    requestId: OpaqueIdSchema,
+  }),
+]);
+
+/** Typed transport error codes (web-session layer). */
+export const AgentTransportErrorCodeSchema = z.enum([
+  // Session lifecycle
+  "SESSION_NOT_FOUND",
+  "SESSION_EXPIRED",
+  "SESSION_PAUSED",
+  "SESSION_REVOKED",
+  "PROJECT_REPLACED",
+  "PROJECT_CONTEXT_STALE",
+  "NO_ACTIVE_PROJECT",
+  // Claim exchange
+  "CLAIM_INVALID",
+  "CLAIM_EXPIRED",
+  "CLAIM_ALREADY_USED",
+  // Persistent connector
+  "CONNECTOR_INVALID",
+  "CONNECTOR_EXPIRED",
+  // Token
+  "TOKEN_INVALID",
+  "TOKEN_EXPIRED",
+  "TOKEN_SCOPE_INSUFFICIENT",
+  // Transport and editor state
+  "EDITOR_OFFLINE",
+  "EDITOR_DISCONNECTED",
+  "REQUEST_TOO_LARGE",
+  "MESSAGE_TOO_LARGE",
+  "RATE_LIMITED",
+  "REQUEST_IN_PROGRESS",
+  "REQUEST_ID_REUSED",
+  "REQUEST_RESULT_UNAVAILABLE",
+  "REQUEST_TIMEOUT",
+  "UNSUPPORTED_PROTOCOL_VERSION",
+  "UNAUTHORIZED_ORIGIN",
+  // File Resource
+  "FILE_CONTENT_INVALID",
+  "FILE_TOO_LARGE",
+  "FILE_INTEGRITY_MISMATCH",
+  "FILE_CANDIDATE_NOT_FOUND",
+  "FILE_IMPORT_FAILED",
+  "FILE_EXPORT_FAILED",
+  // Simulation Resource
+  "SIMULATION_REQUEST_INVALID",
+  // Project Resource
+  "PROJECT_REQUEST_INVALID",
+]);
+
+/** Stable machine-readable failure envelope for every HTTP transport error. */
+export const AgentTransportErrorResponseSchema = z.strictObject({
+  ok: z.literal(false),
+  error: z.strictObject({
+    code: AgentTransportErrorCodeSchema,
+    message: z.string(),
+  }),
+});
+export const agentTransportErrorResponseJsonSchema = lazyJsonSchema(
+  AgentTransportErrorResponseSchema,
+);
+
+// The scopes live on their own browser subpath; the recovery guard
+// `isAgentSessionScope` is imported from there.
+export {
+  AgentSessionScopeSchema,
+  type AgentSessionScope,
+} from "./session-scope.js";
+
+export type AgentSessionControlMessage = z.infer<
+  typeof AgentSessionControlMessageSchema
+>;
+export type AgentSessionEvent = z.infer<typeof AgentSessionEventSchema>;
+export type AgentTransportErrorCode = z.infer<
+  typeof AgentTransportErrorCodeSchema
+>;
+export type AgentTransportErrorResponse = z.infer<
+  typeof AgentTransportErrorResponseSchema
+>;

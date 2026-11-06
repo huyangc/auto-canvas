@@ -1,0 +1,137 @@
+export type CanvasHitKind =
+  | "handle"
+  | "annotation"
+  | "instance-label"
+  | "instance"
+  | "drafting"
+  | "route"
+  | "junction";
+
+export interface CanvasHit {
+  kind: CanvasHitKind;
+  id: string;
+  selected: boolean;
+  element: Element;
+}
+
+// Thin electrical targets outrank the symbol's blank bounding box: a route
+// or junction hit means the pointer is on the wire stroke or the dot itself,
+// while an instance hit only means it is somewhere inside the hit rectangle.
+// A deliberate click on visible wire beside or under a body therefore selects
+// the wire; the symbol stays one cycle-click away, and a selected symbol's
+// stickiness bonus keeps drags over crossing wires on the symbol.
+const KIND_PRIORITY: Record<CanvasHitKind, number> = {
+  handle: 70,
+  // Visible annotation text owns a direct press over a conductor. A Net
+  // label commonly sits only 8 units off its wire, so its lower hit area and
+  // the route's non-scaling hit stroke overlap. Ranking the route first made
+  // a drag from the lower half of the text move the wire instead of the label.
+  annotation: 64,
+  route: 62,
+  junction: 61,
+  instance: 60,
+  "instance-label": 44,
+  drafting: 40,
+};
+const SELECTED_BONUS = 25;
+
+function readHit(element: Element): CanvasHit | null {
+  const hitElement =
+    element.closest?.("[data-canvas-hit-kind][data-canvas-hit-id]") ?? element;
+  const kind = hitElement.getAttribute(
+    "data-canvas-hit-kind",
+  ) as CanvasHitKind | null;
+  const id = hitElement.getAttribute("data-canvas-hit-id");
+  if (!kind || !id || !(kind in KIND_PRIORITY)) return null;
+  return {
+    kind,
+    id,
+    selected: hitElement.classList.contains("selected"),
+    element: hitElement,
+  };
+}
+
+/**
+ * Resolve once at pointer-down. `elements` must be in paint order (topmost
+ * first), as returned by `document.elementsFromPoint()`.
+ */
+export function rankCanvasHits(
+  elements: readonly Element[],
+  accepts: (hit: CanvasHit) => boolean = () => true,
+): CanvasHit[] {
+  const hits = elements
+    .map(readHit)
+    .filter((hit): hit is CanvasHit => hit !== null)
+    .filter(accepts);
+  const unique = hits.filter(
+    (hit, index) =>
+      hits.findIndex(
+        (candidate) => candidate.kind === hit.kind && candidate.id === hit.id,
+      ) === index,
+  );
+  const visibleAnnotationAtPoint = unique.some(
+    (hit) => hit.kind === "annotation",
+  );
+  return unique
+    .map((hit, paintIndex) => ({
+      hit,
+      paintIndex,
+      // Selection stickiness must not let a broad symbol box or wire hit
+      // stroke mask visible annotation text. Handles still outrank text by
+      // their base priority; Alt continues to cycle to the geometry below.
+      score:
+        KIND_PRIORITY[hit.kind] +
+        (hit.selected &&
+        (!visibleAnnotationAtPoint || hit.kind === "annotation")
+          ? SELECTED_BONUS
+          : 0),
+    }))
+    .sort(
+      (left, right) =>
+        right.score - left.score || left.paintIndex - right.paintIndex,
+    )
+    .map(({ hit }) => hit);
+}
+
+export function resolveCanvasHit(
+  elements: readonly Element[],
+  cycle = 0,
+  accepts?: (hit: CanvasHit) => boolean,
+): CanvasHit | null {
+  const hits = rankCanvasHits(elements, accepts);
+  if (hits.length === 0) return null;
+  return hits[Math.min(Math.max(0, cycle), hits.length - 1)]!;
+}
+
+export function resolveCanvasHitAtPoint(
+  owner: { elementsFromPoint?(x: number, y: number): Element[] },
+  client: { x: number; y: number },
+  cycle = 0,
+  accepts?: (hit: CanvasHit) => boolean,
+): CanvasHit | null {
+  return resolveCanvasHit(
+    owner.elementsFromPoint?.(client.x, client.y) ?? [],
+    cycle,
+    accepts,
+  );
+}
+
+/**
+ * A hit radius that stays the same size on screen at any zoom.
+ *
+ * Endpoint and Junction circles carried a radius in document units, so
+ * zooming out shrank them on screen until a Junction was barely clickable —
+ * while the route hit band beside them is 14 screen pixels and never
+ * changes, because CSS gives it a non-scaling stroke. A circle's radius has
+ * no such CSS, so the conversion happens here: the viewBox width against the
+ * width one hundred percent zoom shows is exactly the document-units-per-
+ * pixel factor the zoom readout already reports.
+ */
+export function screenScaleHitRadius(
+  viewBoxWidth: number,
+  referenceWidth: number,
+  pixels: number,
+): number {
+  if (!(viewBoxWidth > 0) || !(referenceWidth > 0)) return pixels;
+  return (pixels * viewBoxWidth) / referenceWidth;
+}

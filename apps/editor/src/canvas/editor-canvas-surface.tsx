@@ -1,0 +1,435 @@
+import { useEffect, useLayoutEffect, useRef, useMemo } from "react";
+import type { ComponentProps, CSSProperties, ReactNode, SVGProps } from "react";
+import type { PointerEvent as ReactPointerEvent } from "react";
+import { flushSync } from "react-dom";
+import { createPointerPreviewFrame } from "./pointer-preview-frame";
+import type { BoxPreviewRuntime } from "./box-preview-runtime";
+import { isDrawingTool } from "../interaction/interaction-state";
+import { schematicRoundPeriodFontFaceCss } from "@icm/derived";
+import { schematicWebFontFaceCss } from "@icm/exporters/browser-fonts";
+
+import {
+  CanvasGridOverlay,
+  CanvasInputPlanes,
+  ConnectedNetGlow,
+  NetHighlightOverlay,
+  DiagnosticMarkersOverlay,
+  WireUnderSymbolOverlay,
+  LabelTetherOverlay,
+  type LabelTether,
+} from "./editor-canvas-overlays";
+import { EditorCanvasHitLayer } from "./editor-canvas-hit-layer";
+import { EditorCellSymbolLayoutOverlay } from "./editor-cell-symbol-layout-overlay";
+import { EditorRouteHandles } from "./editor-route-handles";
+import { EditorSelectionHalo } from "./editor-selection-halo";
+import {
+  EditorDraftingHandles,
+  EditorDraftingHitTargets,
+} from "./editor-drafting-hit-targets";
+import {
+  EditorInteractionPreviews,
+  EditorPlacementPreview,
+} from "./editor-transient-preview-overlays";
+import {
+  EditorWiringOverlay,
+  WireMemberChoiceOverlay,
+  NetLabelEditorOverlay,
+} from "./editor-wiring-overlay";
+import type { CameraRuntime } from "./camera-runtime";
+import { EDITOR_SHORTCUT_REFERENCE } from "../interaction/editor-shortcut-reference";
+import { TextDraftEditorOverlay } from "../features/text-editing/text-draft-overlay";
+
+interface DomRoutedEvent {
+  currentTarget: Element;
+  target: EventTarget;
+}
+
+/**
+ * React routes a portal's events through its component ancestors. The text
+ * editor inside this SVG opens its symbol menu into the page body, so a press
+ * on that menu used to arrive here as a canvas press: the canvas took focus
+ * from the text and, finding a selected object under the menu, began moving
+ * it. The canvas answers only events whose DOM target it contains.
+ */
+function ownEvent(event: DomRoutedEvent): boolean {
+  return event.currentTarget.contains(event.target as Node);
+}
+
+function ownEventHandlers(
+  handlers: SVGProps<SVGSVGElement>,
+): SVGProps<SVGSVGElement> {
+  return Object.fromEntries(
+    Object.entries(handlers).map(([name, handler]) => [
+      name,
+      /^on[A-Z]/u.test(name) && typeof handler === "function"
+        ? (event: DomRoutedEvent) => {
+            if (ownEvent(event)) (handler as (event: unknown) => void)(event);
+          }
+        : handler,
+    ]),
+  ) as SVGProps<SVGSVGElement>;
+}
+
+export interface EditorCanvasSurfaceProps {
+  shortcutHintsVisible: boolean;
+  className: string;
+  /** The Document's chosen font stack, or null for the default Metropolis. */
+  textFontFamily: string | null;
+  viewBox: string;
+  cameraRuntime: CameraRuntime;
+  boxPreviewRuntime: BoxPreviewRuntime;
+  eventHandlers: SVGProps<SVGSVGElement>;
+  /**
+   * Native wheel handler, attached non-passively. React's onWheel rides the
+   * passive root listener, where preventDefault cannot stop browser page
+   * zoom (pinch) or history-swipe navigation (horizontal scroll).
+   */
+  onWheel: (event: WheelEvent, element: SVGSVGElement) => void;
+  /**
+   * Cursor-anchored zoom for Safari's proprietary trackpad gesture events
+   * (gesturestart/gesturechange), which Safari fires INSTEAD of ctrl+wheel
+   * for pinches. factor < 1 zooms in.
+   */
+  onPinch: (
+    factor: number,
+    clientX: number,
+    clientY: number,
+    element: SVGSVGElement,
+  ) => void;
+  grid: ComponentProps<typeof CanvasGridOverlay>;
+  sceneInnerHtml: { __html: string };
+  selectionHalo: ComponentProps<typeof EditorSelectionHalo>;
+  cellSymbolLayout: ComponentProps<typeof EditorCellSymbolLayoutOverlay> | null;
+  cellSymbolLayoutControls?: ReactNode;
+  netHighlight: ComponentProps<typeof NetHighlightOverlay>;
+  connectedNets: ComponentProps<typeof ConnectedNetGlow>;
+  wireUnderSymbol: ComponentProps<typeof WireUnderSymbolOverlay>;
+  diagnosticMarkers: ComponentProps<typeof DiagnosticMarkersOverlay>;
+  labelTethers: readonly LabelTether[];
+  copyPreviewInnerHtml: { __html: string } | null;
+  copyPreviewTransform: string | undefined;
+  inputPlanes: ComponentProps<typeof CanvasInputPlanes>;
+  placementPreview: ComponentProps<typeof EditorPlacementPreview>;
+  wiring: ComponentProps<typeof EditorWiringOverlay>;
+  routeHandles: ComponentProps<typeof EditorRouteHandles>;
+  selectionHitLayer: ComponentProps<typeof EditorCanvasHitLayer>;
+  draftingHitTargets: ComponentProps<typeof EditorDraftingHitTargets>;
+  draftingHandles: ComponentProps<typeof EditorDraftingHandles>;
+  interactionPreviews: ComponentProps<typeof EditorInteractionPreviews>;
+  /** Text the Text tool is writing before it is placed. */
+  textDraft?: ComponentProps<typeof TextDraftEditorOverlay>;
+  /** A card in the middle of the canvas, above the drawing. */
+  notice?: ReactNode;
+  noConnectPreview?: ReactNode;
+}
+
+function CanvasShortcutChord({ keys }: { keys: readonly string[] }) {
+  return (
+    <span className="canvas-shortcut-chord" aria-label={keys.join(" plus ")}>
+      {keys.map((key) => (
+        <kbd key={key}>{key}</kbd>
+      ))}
+    </span>
+  );
+}
+
+/** SVG scene composition; interaction semantics arrive through typed models. */
+export function EditorCanvasSurface({
+  shortcutHintsVisible,
+  className,
+  textFontFamily,
+  viewBox,
+  cameraRuntime,
+  boxPreviewRuntime,
+  eventHandlers,
+  onWheel,
+  onPinch,
+  grid,
+  sceneInnerHtml,
+  selectionHalo,
+  cellSymbolLayout,
+  cellSymbolLayoutControls,
+  netHighlight,
+  connectedNets,
+  wireUnderSymbol,
+  diagnosticMarkers,
+  labelTethers,
+  copyPreviewInnerHtml,
+  copyPreviewTransform,
+  inputPlanes,
+  placementPreview,
+  wiring,
+  routeHandles,
+  selectionHitLayer,
+  draftingHitTargets,
+  draftingHandles,
+  interactionPreviews,
+  textDraft,
+  notice,
+  noConnectPreview,
+}: EditorCanvasSurfaceProps) {
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  useLayoutEffect(() => {
+    const svg = svgRef.current;
+    if (svg) boxPreviewRuntime.attach(svg);
+  }, [boxPreviewRuntime, interactionPreviews.boxPreview]);
+  useLayoutEffect(() => {
+    const svg = svgRef.current;
+    return () => {
+      if (svg) boxPreviewRuntime.detach(svg);
+    };
+  }, [boxPreviewRuntime]);
+  const onPointerMoveRef = useRef(eventHandlers.onPointerMove);
+  onPointerMoveRef.current = eventHandlers.onPointerMove;
+  const pointerFrame = useMemo(
+    () =>
+      createPointerPreviewFrame<ReactPointerEvent<SVGSVGElement>>(
+        (event) => onPointerMoveRef.current?.(event),
+        (callback) => requestAnimationFrame(callback),
+        (frame) => cancelAnimationFrame(frame),
+      ),
+    [],
+  );
+  useLayoutEffect(() => {
+    pointerFrame.cancel();
+    return pointerFrame.cancel;
+  }, [pointerFrame, selectionHalo.document, inputPlanes.tool, viewBox]);
+  useEffect(() => {
+    // Enter finishes at the most recent pointer, even before its scheduled frame.
+    // Publish before the window shortcut handler reads the current tool session.
+    const beforeKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") pointerFrame.cancel();
+      else if (event.key === "Enter") flushSync(pointerFrame.flush);
+    };
+    window.addEventListener("keydown", beforeKey, true);
+    window.addEventListener("blur", pointerFrame.cancel);
+    return () => {
+      window.removeEventListener("keydown", beforeKey, true);
+      window.removeEventListener("blur", pointerFrame.cancel);
+      pointerFrame.cancel();
+    };
+  }, [pointerFrame]);
+  const onWheelRef = useRef(onWheel);
+  const onPinchRef = useRef(onPinch);
+  useEffect(() => {
+    onWheelRef.current = onWheel;
+    onPinchRef.current = onPinch;
+  });
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const listener = (event: WheelEvent) => {
+      // The editor lives inside this SVG through a foreignObject, but it owns
+      // ordinary document scrolling. React's delegated onWheel handler runs
+      // too late to protect it from this non-passive native canvas listener,
+      // which otherwise prevents the default scroll and zooms the camera.
+      const targetsTextEditor = event
+        .composedPath()
+        .some(
+          (target) =>
+            target instanceof Element &&
+            target.matches('[data-testid="canvas-text-editor"]'),
+        );
+      if (targetsTextEditor) return;
+      onWheelRef.current(event, svg);
+    };
+    svg.addEventListener("wheel", listener, { passive: false });
+    // Safari delivers trackpad pinches through its own gesture events (no
+    // ctrl+wheel); track the running scale and hand ratios to the shared
+    // cursor-anchored zoom. Other browsers simply never fire these.
+    type SafariGestureEvent = Event & {
+      scale?: number;
+      clientX: number;
+      clientY: number;
+    };
+    let lastScale = 1;
+    const gestureStart = (event: Event) => {
+      event.preventDefault();
+      lastScale = (event as SafariGestureEvent).scale ?? 1;
+    };
+    const gestureChange = (event: Event) => {
+      event.preventDefault();
+      const gesture = event as SafariGestureEvent;
+      if (!gesture.scale || gesture.scale <= 0 || lastScale <= 0) return;
+      const factor = lastScale / gesture.scale;
+      lastScale = gesture.scale;
+      onPinchRef.current(factor, gesture.clientX, gesture.clientY, svg);
+    };
+    const gestureEnd = (event: Event) => event.preventDefault();
+    svg.addEventListener("gesturestart", gestureStart, { passive: false });
+    svg.addEventListener("gesturechange", gestureChange, { passive: false });
+    svg.addEventListener("gestureend", gestureEnd, { passive: false });
+    return () => {
+      svg.removeEventListener("wheel", listener);
+      svg.removeEventListener("gesturestart", gestureStart);
+      svg.removeEventListener("gesturechange", gestureChange);
+      svg.removeEventListener("gestureend", gestureEnd);
+    };
+  }, []);
+  useLayoutEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    cameraRuntime.attach(svg);
+    return () => cameraRuntime.detach(svg);
+  }, [cameraRuntime]);
+  useLayoutEffect(() => {
+    cameraRuntime.refreshSurface();
+  }, [
+    cameraRuntime,
+    grid.visible,
+    inputPlanes.componentPlacementActive,
+    inputPlanes.copyPlacementActive,
+    inputPlanes.tool,
+  ]);
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const invalidate = () => cameraRuntime.invalidateSurfaceBounds();
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(invalidate);
+    observer?.observe(svg);
+    window.addEventListener("resize", invalidate);
+    window.addEventListener("scroll", invalidate, true);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", invalidate);
+      window.removeEventListener("scroll", invalidate, true);
+    };
+  }, [cameraRuntime]);
+  return (
+    <section className="canvas-panel">
+      {shortcutHintsVisible ? (
+        <aside
+          className="canvas-shortcut-menu"
+          data-testid="canvas-shortcut-hints"
+          aria-label="Keyboard shortcuts"
+        >
+          <div className="canvas-shortcut-menu-heading">
+            <p className="canvas-shortcut-menu-title">Keyboard shortcuts</p>
+            <span>Hints</span>
+          </div>
+          <ul className="canvas-shortcut-list">
+            {EDITOR_SHORTCUT_REFERENCE.map((shortcut) => (
+              <li key={shortcut.keys.join("-")}>
+                <CanvasShortcutChord keys={shortcut.keys} />
+                <span>{shortcut.action}</span>
+              </li>
+            ))}
+          </ul>
+        </aside>
+      ) : null}
+      <svg
+        ref={svgRef}
+        className={className}
+        data-testid="schematic-canvas"
+        style={
+          textFontFamily
+            ? ({
+                "--schematic-font-family": textFontFamily,
+              } as CSSProperties)
+            : undefined
+        }
+        role="img"
+        aria-label="Schematic canvas"
+        aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown"
+        tabIndex={-1}
+        viewBox={viewBox}
+        {...ownEventHandlers(eventHandlers)}
+        onPointerMove={(event) => {
+          if (!ownEvent(event)) return;
+          if (
+            event.buttons === 0 &&
+            (inputPlanes.tool === "wire" || isDrawingTool(inputPlanes.tool))
+          ) {
+            // SyntheticEvent.currentTarget is cleared after dispatch; retain the surface.
+            pointerFrame.schedule({
+              ...event,
+              currentTarget: event.currentTarget,
+            });
+          } else {
+            pointerFrame.cancel();
+            eventHandlers.onPointerMove?.(event);
+          }
+        }}
+        onPointerDownCapture={(event) => {
+          if (!ownEvent(event)) return;
+          pointerFrame.cancel();
+          eventHandlers.onPointerDownCapture?.(event);
+        }}
+        onPointerLeave={(event) => {
+          // Leaving only clears hover previews, wherever the pointer left from.
+          pointerFrame.cancel();
+          eventHandlers.onPointerLeave?.(event);
+        }}
+      >
+        {/* The schematic faces, so labels are drawn in the face they are
+            measured in on every system (#1413). */}
+        <style>
+          {schematicRoundPeriodFontFaceCss + schematicWebFontFaceCss}
+        </style>
+        <CanvasGridOverlay {...grid} />
+        <EditorSelectionHalo {...selectionHalo} />
+        <ConnectedNetGlow {...connectedNets} />
+        <g dangerouslySetInnerHTML={sceneInnerHtml} />
+        <NetHighlightOverlay {...netHighlight} />
+        <LabelTetherOverlay tethers={labelTethers} />
+        {copyPreviewInnerHtml ? (
+          <g
+            data-testid="copy-placement-preview"
+            className="copy-placement-preview"
+            transform={copyPreviewTransform}
+            dangerouslySetInnerHTML={copyPreviewInnerHtml}
+          />
+        ) : null}
+        <CanvasInputPlanes {...inputPlanes} />
+        <g data-layer="editor-overlay">
+          <EditorPlacementPreview {...placementPreview} />
+          <EditorWiringOverlay {...wiring} />
+          <EditorRouteHandles {...routeHandles} />
+          <EditorCanvasHitLayer {...selectionHitLayer} />
+          <EditorDraftingHitTargets {...draftingHitTargets} />
+          <WireUnderSymbolOverlay {...wireUnderSymbol} />
+          <DiagnosticMarkersOverlay {...diagnosticMarkers} />
+          {/* Above the diagnostics so a voltage is never hidden by a marker,
+              and below the handles so it never covers something grabbable. */}
+          <EditorDraftingHandles {...draftingHandles} />
+          <EditorInteractionPreviews
+            {...interactionPreviews}
+            boxPreview={
+              boxPreviewRuntime.current()
+                ? interactionPreviews.boxPreview
+                : null
+            }
+          />
+          {noConnectPreview}
+          {cellSymbolLayout ? (
+            <EditorCellSymbolLayoutOverlay {...cellSymbolLayout} />
+          ) : null}
+          <WireMemberChoiceOverlay
+            memberChoice={wiring.memberChoice}
+            wireRepeat={wiring.wireRepeat}
+            onContinuousTaps={wiring.onContinuousTaps}
+            onWireMemberChoose={wiring.onWireMemberChoose}
+            onWireExpressionPreview={wiring.onWireExpressionPreview}
+            onWireExpressionChoose={wiring.onWireExpressionChoose}
+            onWireMemberCancel={wiring.onWireMemberCancel}
+            viewBox={wiring.viewBox}
+          />
+          <NetLabelEditorOverlay
+            netLabelPlacement={wiring.netLabelPlacement}
+            onNetLabelTextChange={wiring.onNetLabelTextChange}
+            onNetLabelSubmit={wiring.onNetLabelSubmit}
+            onExpandNetLabels={wiring.onExpandNetLabels}
+            onNetLabelEscape={wiring.onNetLabelEscape}
+            viewBox={wiring.viewBox}
+          />
+          {textDraft ? <TextDraftEditorOverlay {...textDraft} /> : null}
+        </g>
+      </svg>
+      {cellSymbolLayoutControls}
+      {notice}
+    </section>
+  );
+}

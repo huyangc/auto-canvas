@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "referenceId": "razavi-reference-v1",
+  "family": {
+    "inputPitchPdf": 11.469,
+    "inputPitchLogical": 20.0,
+    "logicalUnitsPerPdfPoint": 1.743831,
+    "derivedSymbols": {
+      "or-gate": "nor-gate body with the output bubble removed",
+      "xnor-gate": "xor-gate body with the reviewed two-input negation bubble added"
+    }
+  },
+  "symbols": {
+    "xor-gate": {
+      "assetPath": "logic-xor-gate-reference.png",
+      "pixelsPerLogical": 2.4,
+      "originPx": {
+        "x": 101.194402,
+        "y": 58.080827
+      },
+      "window": {
+        "width": 202,
+        "height": 115,
+        "minX": -42,
+        "minY": -24
+      },
+      "rotation": 0
+    },
+    "and-gate": {
+      "assetPath": "logic-and-gate-reference.png",
+      "pixelsPerLogical": 2.4,
+      "originPx": {
+        "x": 71.036673,
+        "y": 38.088674
+      },
+      "window": {
+        "width": 154,
+        "height": 74,
+        "minX": -29.5,
+        "minY": -15.5
+      },
+      "rotation": 180
+    },
+    "nor-gate": {
+      "assetPath": "logic-nor-gate-reference.png",
+      "pixelsPerLogical": 2.4,
+      "originPx": {
+        "x": 72.048444,
+        "y": 44.084489
+      },
+      "window": {
+        "width": 151,
+        "height": 87,
+        "minX": -30,
+        "minY": -18.2
+      },
+      "rotation": 0
+    },
+    "nand-gate": {
+      "assetPath": "logic-nand-gate-reference.png",
+      "pixelsPerLogical": 2.4,
+      "originPx": {
+        "x": 37.711797,
+        "y": 82.235679
+      },
+      "window": {
+        "width": 74,
+        "height": 161,
+        "minX": -15.5,
+        "minY": -34.2
+      },
+      "rotation": 90
+    },
+    "inverter": {
+      "assetPath": "logic-inverter-reference.png",
+      "pixelsPerLogical": 2.4,
+      "originPx": {
+        "x": 37.71389,
+        "y": 67.768245
+      },
+      "window": {
+        "width": 72,
+        "height": 138,
+        "minX": -15.5,
+        "minY": -28.2
+      },
+      "rotation": 90
+    }
+  }
+}

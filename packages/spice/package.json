@@ -1,0 +1,27 @@
+{
+  "name": "@icm/spice",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "development": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./node": {
+      "development": "./src/node-source.ts",
+      "types": "./dist/node-source.d.ts",
+      "default": "./dist/node-source.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@icm/devices": "workspace:*",
+    "@icm/model": "workspace:*",
+    "@icm/symbols": "workspace:*",
+    "zod": "4.4.3"
+  }
+}

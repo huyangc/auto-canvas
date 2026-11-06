@@ -1,0 +1,336 @@
+import { describe, expect, it } from "vitest";
+
+import { startCanvasDragVisual } from "./canvas-drag-visual";
+
+class FakeElement {
+  readonly attributes = new Map<string, string>();
+
+  constructor(entries: Record<string, string>) {
+    Object.entries(entries).forEach(([name, value]) =>
+      this.attributes.set(name, value),
+    );
+  }
+
+  getAttribute(name: string): string | null {
+    return this.attributes.get(name) ?? null;
+  }
+
+  setAttribute(name: string, value: string): void {
+    this.attributes.set(name, value);
+  }
+
+  removeAttribute(name: string): void {
+    this.attributes.delete(name);
+  }
+}
+
+describe("startCanvasDragVisual", () => {
+  it("keeps duplicate-run ownership in paint order and restores each original bucket", () => {
+    const red = new FakeElement({
+      "data-role": "conductor-ink",
+      d: "M 0 0 L 50 0",
+      stroke: "red",
+    });
+    const blue = new FakeElement({
+      "data-role": "conductor-ink",
+      d: "M 0 0 L 50 0",
+      stroke: "blue",
+    });
+    const wires = ["a", "b", "c"].map(
+      (id) =>
+        new FakeElement({
+          "data-object-id": id,
+          "data-net-id": id,
+          points: "0,0 50,0",
+          stroke: "none",
+        }),
+    );
+    const root = {
+      querySelectorAll: () => [red, blue, ...wires],
+    } as unknown as ParentNode;
+    const visual = startCanvasDragVisual(root, ["a", "b", "c"]);
+    expect(wires.map((wire) => wire.getAttribute("stroke"))).toEqual([
+      "red",
+      "blue",
+      "none",
+    ]);
+    expect([red.getAttribute("d"), blue.getAttribute("d")]).toEqual(["", ""]);
+    visual.restore();
+    visual.restore();
+    expect(wires.map((wire) => wire.getAttribute("stroke"))).toEqual([
+      "none",
+      "none",
+      "none",
+    ]);
+    expect([red.getAttribute("d"), blue.getAttribute("d")]).toEqual([
+      "M 0 0 L 50 0",
+      "M 0 0 L 50 0",
+    ]);
+  });
+  it("takes up a large selected wire group without repeatedly reading shared ink", () => {
+    let reads = 0;
+    class Ink extends FakeElement {
+      override getAttribute(name: string) {
+        if (name === "d") reads++;
+        return super.getAttribute(name);
+      }
+    }
+    const runs = Array.from(
+      { length: 40 },
+      (_, i) => `M ${i * 100} 0 L ${i * 100 + 50} 0`,
+    );
+    const ink = new Ink({
+      "data-role": "conductor-ink",
+      d: runs.join(" "),
+      stroke: "#dc2626",
+      "stroke-width": "2",
+    });
+    const wires = runs.map(
+      (_, i) =>
+        new FakeElement({
+          "data-object-id": `r${i}`,
+          "data-net-id": "n",
+          stroke: "none",
+          points: `${i * 100},0 ${i * 100 + 50},0`,
+        }),
+    );
+    const root = {
+      querySelectorAll: (selector: string) =>
+        selector === '[data-role="conductor-ink"]' ? [ink] : wires,
+    } as unknown as ParentNode;
+    const visual = startCanvasDragVisual(
+      root,
+      wires.map((_, i) => `r${i}`),
+    );
+    expect(ink.getAttribute("d")).toBe("");
+    expect(
+      wires.every((wire) => wire.getAttribute("stroke") === "#dc2626"),
+    ).toBe(true);
+    expect(reads).toBeLessThanOrEqual(2);
+    visual.restore();
+    expect(ink.getAttribute("d")).toBe(runs.join(" "));
+    expect(wires.every((wire) => wire.getAttribute("stroke") === "none")).toBe(
+      true,
+    );
+  });
+  it("bends a coupling's arrow end by end with its inductors, and restores it (#1648)", () => {
+    const shaft = new FakeElement({
+      "data-role": "coupling-arrow",
+      "data-p0": "0 0",
+      "data-c": "50 -30",
+      "data-p1": "100 0",
+      d: "M 0 0 Q 50 -30 100 0",
+    });
+    const heads = [
+      new FakeElement({ "data-coupling-head": "0" }),
+      new FakeElement({ "data-coupling-head": "1" }),
+    ];
+    const name = new FakeElement({ "data-role": "coupling-name" });
+    const group = Object.assign(
+      new FakeElement({ "data-coupling-ends": "L1 L2" }),
+      {
+        querySelector: () => shaft,
+        querySelectorAll: () => [...heads, name],
+      },
+    );
+    const root = {
+      querySelectorAll: (selector: string) =>
+        selector === "[data-coupling-ends]" ? [group] : [],
+    } as unknown as ParentNode;
+    const visual = startCanvasDragVisual(root, ["L2"]);
+    visual.translateObject("L2", { x: 10, y: 4 });
+    // L1's end stays; L2's end follows it; the curve's middle goes half way.
+    expect(shaft.getAttribute("d")).toBe("M 0 0 Q 55 -28 110 4");
+    expect(heads[0]!.getAttribute("transform")).toBe("translate(0 0)");
+    expect(heads[1]!.getAttribute("transform")).toBe("translate(10 4)");
+    expect(name.getAttribute("transform")).toBe("translate(5 2)");
+    // Both inductors dragged together carry the arrow whole.
+    const both = startCanvasDragVisual(root, ["L1", "L2"]);
+    both.translate({ x: 10, y: 0 });
+    expect(shaft.getAttribute("d")).toBe("M 10 0 Q 60 -30 110 0");
+    both.restore();
+    visual.restore();
+    expect(shaft.getAttribute("d")).toBe("M 0 0 Q 50 -30 100 0");
+    expect(heads[1]!.getAttribute("transform")).toBeNull();
+    expect(name.getAttribute("transform")).toBeNull();
+  });
+
+  it("moves a junction independently of its stretched incident wires and restores both", () => {
+    const junction = new FakeElement({
+      "data-object-id": "J",
+      transform: "translate(10 20)",
+    });
+    const route = new FakeElement({
+      "data-object-id": "R",
+      points: "10,20 100,20",
+    });
+    const root = {
+      querySelectorAll: () => [junction, route],
+    } as unknown as ParentNode;
+    const visual = startCanvasDragVisual(root, ["J", "R"]);
+    visual.translateObject("J", { x: 0, y: -10 });
+    visual.setObjectPolyline("R", [
+      { x: 10, y: 10 },
+      { x: 100, y: 10 },
+    ]);
+    expect(junction.getAttribute("transform")).toBe(
+      "translate(0 -10) translate(10 20)",
+    );
+    expect(route.getAttribute("transform")).toBeNull();
+    visual.restore();
+    expect(junction.getAttribute("transform")).toBe("translate(10 20)");
+    expect(route.getAttribute("points")).toBe("10,20 100,20");
+  });
+  it("composes translation with existing transforms and restores exactly", () => {
+    const formal = new FakeElement({
+      "data-object-id": "M1",
+      transform: "rotate(90)",
+    });
+    const hit = new FakeElement({ "data-drag-object-id": "M1" });
+    const root = {
+      querySelectorAll: () => [formal, hit],
+    } as unknown as ParentNode;
+    const visual = startCanvasDragVisual(root, ["M1"]);
+    visual.translate({ x: 12.5, y: -3 });
+    expect(formal.getAttribute("transform")).toBe(
+      "translate(12.5 -3) rotate(90)",
+    );
+    expect(hit.getAttribute("transform")).toBe("translate(12.5 -3)");
+    visual.restore();
+    expect(formal.getAttribute("transform")).toBe("rotate(90)");
+    expect(hit.getAttribute("transform")).toBeNull();
+  });
+
+  it("previews and restores persisted polyline geometry", () => {
+    const route = new FakeElement({
+      "data-object-id": "route-1",
+      points: "0,0 10,0",
+    });
+    const sibling = new FakeElement({
+      "data-object-id": "route-2",
+      points: "0,10 10,10",
+    });
+    const root = {
+      querySelectorAll: () => [route, sibling],
+    } as unknown as ParentNode;
+    const visual = startCanvasDragVisual(root, ["route-1", "route-2"]);
+    visual.setObjectPolyline("route-1", [
+      { x: 0, y: 5 },
+      { x: 10, y: 5 },
+    ]);
+    expect(route.getAttribute("points")).toBe("0,5 10,5");
+    expect(sibling.getAttribute("points")).toBe("0,10 10,10");
+    visual.restore();
+    expect(route.getAttribute("points")).toBe("0,0 10,0");
+    expect(sibling.getAttribute("points")).toBe("0,10 10,10");
+  });
+
+  it("stretches a label tether end by end with whichever of its objects moves", () => {
+    const tether = () =>
+      new FakeElement({
+        "data-tether-label-id": "L",
+        "data-tether-owner-id": "P",
+        x1: "10",
+        y1: "20",
+        x2: "40",
+        y2: "60",
+      });
+    const rootWith = (line: FakeElement) =>
+      ({
+        querySelectorAll: (selector: string) =>
+          selector.includes("data-tether") ? [line] : [],
+      }) as unknown as ParentNode;
+    const ends = (line: FakeElement) =>
+      ["x1", "y1", "x2", "y2"].map((name) => line.getAttribute(name));
+
+    const labelOnly = tether();
+    const dragLabel = startCanvasDragVisual(rootWith(labelOnly), ["L"]);
+    dragLabel.translate({ x: 5, y: 7 });
+    expect(ends(labelOnly)).toEqual(["15", "27", "40", "60"]);
+    dragLabel.restore();
+    expect(ends(labelOnly)).toEqual(["10", "20", "40", "60"]);
+
+    const both = tether();
+    startCanvasDragVisual(rootWith(both), ["L", "P"]).translate({
+      x: 5,
+      y: 7,
+    });
+    expect(ends(both)).toEqual(["15", "27", "45", "67"]);
+
+    // A tether that renders after the drag began still stretches.
+    let late: FakeElement[] = [];
+    const lateRoot = {
+      querySelectorAll: (selector: string) =>
+        selector.includes("data-tether") ? late : [],
+    } as unknown as ParentNode;
+    const dragLate = startCanvasDragVisual(lateRoot, ["L"]);
+    const appeared = tether();
+    late = [appeared];
+    dragLate.translate({ x: 5, y: 7 });
+    expect(ends(appeared)).toEqual(["15", "27", "40", "60"]);
+    dragLate.restore();
+    expect(ends(appeared)).toEqual(["10", "20", "40", "60"]);
+
+    const ownerOnly = tether();
+    startCanvasDragVisual(rootWith(ownerOnly), ["L", "P"]).translateObject(
+      "P",
+      { x: -3, y: 2 },
+    );
+    expect(ends(ownerOnly)).toEqual(["10", "20", "37", "62"]);
+  });
+
+  it("paints a dragged wire itself while its run leaves the shared ink, and restores both", () => {
+    // Reported: dragging a Pin moved the Pin, but its wire stayed put until
+    // the drop, because only the wire's unpainted polyline moved.
+    const moving = "M 770 260 L 520 260 L 520 610";
+    const miters =
+      "M 770 261.2 L 770 260 L 768.8 260 M 521.2 610 L 520 610 L 520 608.8";
+    const other = "M 100 100 L 200 100";
+    const ink = new FakeElement({
+      "data-role": "conductor-ink",
+      d: `${moving} ${miters} ${other}`,
+      stroke: "#dc2626",
+      "stroke-width": "2",
+      "stroke-linecap": "square",
+      "stroke-linejoin": "miter",
+    });
+    const wire = new FakeElement({
+      "data-object-id": "route-1",
+      "data-net-id": "net-1",
+      points: "770,260 520,260 520,610",
+      fill: "none",
+      stroke: "none",
+    });
+    const still = new FakeElement({
+      "data-object-id": "route-2",
+      "data-net-id": "net-2",
+      points: "100,100 200,100",
+      fill: "none",
+      stroke: "none",
+    });
+    const root = {
+      querySelectorAll: () => [ink, wire, still],
+    } as unknown as ParentNode;
+
+    const visual = startCanvasDragVisual(root, ["route-1"]);
+    // The run and the miters at its two ends leave the ink; the other wire's
+    // run stays. The dragged wire is drawn in the ink's paint.
+    expect(ink.getAttribute("d")).toBe(other);
+    expect(wire.getAttribute("stroke")).toBe("#dc2626");
+    expect(wire.getAttribute("stroke-width")).toBe("2");
+    expect(wire.getAttribute("stroke-linecap")).toBe("square");
+    expect(still.getAttribute("stroke")).toBe("none");
+    visual.setObjectPolyline("route-1", [
+      { x: 830, y: 330 },
+      { x: 520, y: 330 },
+      { x: 520, y: 610 },
+    ]);
+    expect(wire.getAttribute("points")).toBe("830,330 520,330 520,610");
+
+    visual.restore();
+    expect(ink.getAttribute("d")).toBe(`${moving} ${miters} ${other}`);
+    expect(wire.getAttribute("stroke")).toBe("none");
+    expect(wire.getAttribute("stroke-width")).toBeNull();
+    expect(wire.getAttribute("points")).toBe("770,260 520,260 520,610");
+  });
+});

@@ -1,0 +1,769 @@
+import { describe, expect, it } from "vitest";
+
+import { resolveDraftingObjectGeometry } from "@icm/derived";
+import { createEmptyDocument, DraftingObjectSchema } from "@icm/model";
+import type { DraftingObject } from "@icm/model";
+import { InMemorySymbolResolver, builtInSymbols } from "@icm/symbols";
+
+import {
+  applyDraftingGeometryPatch,
+  applyDraftingHandle,
+  applyDraftingStylePatch,
+  deleteConstructionVertex,
+  draftingDragOrigin,
+  insertArrowWaypoint,
+  insertConstructionVertex,
+  mirrorDraftingObject,
+  planDraftingStacking,
+  rotateDraftingObject,
+  uprightOrUp,
+  setDraftingBearing,
+  setDraftingTangentAngle,
+  translateDraftingObject,
+} from "./drafting-manipulation";
+
+const document = createEmptyDocument("drafting", "Drafting");
+const resolver = new InMemorySymbolResolver(builtInSymbols);
+
+const arrow = (): Extract<DraftingObject, { kind: "arrow" }> => ({
+  id: "arrow-1",
+  kind: "arrow",
+  locked: false,
+  zIndex: 0,
+  anchor: { kind: "free", position: { x: 50, y: 0 } },
+  from: { kind: "free", position: { x: 0, y: 0 } },
+  to: { kind: "free", position: { x: 100, y: 0 } },
+  waypoints: [{ x: 50, y: 0 }],
+  curveControls: [null, null],
+});
+
+const construction = (): Extract<
+  DraftingObject,
+  { kind: "construction-line" }
+> => ({
+  id: "construction-1",
+  kind: "construction-line",
+  locked: false,
+  zIndex: 0,
+  anchor: { kind: "free", position: { x: 0, y: 0 } },
+  points: [
+    { x: 0, y: 0 },
+    { x: 50, y: 0 },
+    { x: 100, y: 0 },
+  ],
+  curveControls: [null, null],
+  lineStyle: "solid",
+});
+
+const rectangle = (): Extract<DraftingObject, { kind: "rectangle" }> => ({
+  id: "rectangle-1",
+  kind: "rectangle",
+  locked: false,
+  zIndex: 0,
+  anchor: { kind: "free", position: { x: 50, y: 50 } },
+  center: { x: 50, y: 50 },
+  width: 40,
+  height: 20,
+  rotation: 0,
+  lineStyle: "solid",
+});
+
+const circle = (): Extract<DraftingObject, { kind: "circle" }> => ({
+  id: "circle-1",
+  kind: "circle",
+  locked: false,
+  zIndex: 0,
+  anchor: { kind: "free", position: { x: 50, y: 50 } },
+  center: { x: 50, y: 50 },
+  radius: 20,
+  lineStyle: "solid",
+});
+
+describe("drafting manipulation", () => {
+  it("translates every free geometry point without detaching anchors", () => {
+    const moved = translateDraftingObject(arrow(), { x: 10, y: 20 }, 10);
+    expect(moved).toMatchObject({
+      anchor: { kind: "free", position: { x: 60, y: 20 } },
+      from: { kind: "free", position: { x: 10, y: 20 } },
+      to: { kind: "free", position: { x: 110, y: 20 } },
+      waypoints: [{ x: 60, y: 20 }],
+    });
+
+    const attached = {
+      ...arrow(),
+      to: {
+        kind: "object" as const,
+        objectId: "R1",
+        localOffset: { x: 0, y: 0 },
+        fallbackPosition: { x: 100, y: 0 },
+      },
+    };
+    expect(draftingDragOrigin(attached)).toBeNull();
+    expect(
+      translateDraftingObject(attached, { x: 10, y: 20 }, 10),
+    ).toMatchObject({
+      to: { kind: "object", objectId: "R1" },
+    });
+  });
+
+  it("moves only the requested endpoint, vertex, curve, or rectangle corner", () => {
+    const arrowObject = arrow();
+    const arrowGeometry = resolveDraftingObjectGeometry(
+      document,
+      resolver,
+      arrowObject,
+    );
+    expect(
+      applyDraftingHandle(
+        arrowObject,
+        { kind: "to" },
+        { x: 120, y: 10 },
+        arrowGeometry,
+        10,
+      ),
+    ).toMatchObject({
+      from: { position: { x: 0, y: 0 } },
+      to: { position: { x: 120, y: 10 } },
+    });
+
+    const line = construction();
+    const lineGeometry = resolveDraftingObjectGeometry(
+      document,
+      resolver,
+      line,
+    );
+    expect(
+      applyDraftingHandle(
+        line,
+        { kind: "curve", index: 0 },
+        { x: 30, y: 20 },
+        lineGeometry,
+        10,
+      ),
+    ).toMatchObject({ curveControls: [{ x: 40, y: 40 }, null] });
+
+    const box = rectangle();
+    const boxGeometry = resolveDraftingObjectGeometry(document, resolver, box);
+    const resized = applyDraftingHandle(
+      box,
+      { kind: "rectangle-corner", index: 0 },
+      { x: 20, y: 30 },
+      boxGeometry,
+      10,
+    );
+    expect(resized).toMatchObject({
+      center: { x: 45, y: 45 },
+      width: 50,
+      height: 30,
+      anchor: { position: { x: 45, y: 45 } },
+    });
+  });
+
+  for (const rotation of [0, 90, 180, 270]) {
+    it.each([1, 5, 10])(
+      `resizes a ${rotation}° rectangle on the %i-unit grid without moving its opposite corner`,
+      (grid) => {
+        const object = {
+          ...rectangle(),
+          center: { x: 150, y: 150 },
+          anchor: { kind: "free" as const, position: { x: 150, y: 150 } },
+          width: 100,
+          height: 100,
+          rotation,
+        };
+        const geometry = resolveDraftingObjectGeometry(
+          document,
+          resolver,
+          object,
+        );
+        if (geometry.kind !== "rectangle") throw new Error("Missing rectangle");
+        const opposite = geometry.corners[2]!;
+        const target = { x: 100 + 11 * grid, y: 100 + 7 * grid };
+        const resized = applyDraftingHandle(
+          object,
+          { kind: "rectangle-corner", index: 0 },
+          target,
+          geometry,
+          grid,
+        );
+        expect(DraftingObjectSchema.safeParse(resized).success).toBe(true);
+        const changed = resolveDraftingObjectGeometry(
+          document,
+          resolver,
+          resized,
+        );
+        if (changed.kind !== "rectangle") throw new Error("Missing rectangle");
+        expect(
+          Math.min(
+            ...changed.corners.map((corner) =>
+              Math.hypot(corner.x - opposite.x, corner.y - opposite.y),
+            ),
+          ),
+        ).toBeLessThan(1e-8);
+        for (const corner of changed.corners) {
+          expect(corner.x / grid).toBeCloseTo(Math.round(corner.x / grid), 8);
+          expect(corner.y / grid).toBeCloseTo(Math.round(corner.y / grid), 8);
+        }
+        const nearest = Math.min(
+          ...changed.corners.map((corner) =>
+            Math.max(
+              Math.abs(corner.x - target.x),
+              Math.abs(corner.y - target.y),
+            ),
+          ),
+        );
+        expect(nearest).toBeLessThanOrEqual(grid + 1e-8);
+      },
+    );
+  }
+
+  // The middle of a side moves that side alone: the opposite side and the
+  // other dimension stay exactly where they were.
+  for (const rotation of [0, 90, 180, 270]) {
+    it.each([1, 5, 10])(
+      `drags one side of a ${rotation}° rectangle on the %i-unit grid`,
+      (grid) => {
+        const object = {
+          ...rectangle(),
+          center: { x: 150, y: 150 },
+          anchor: { kind: "free" as const, position: { x: 150, y: 150 } },
+          width: 100,
+          height: 60,
+          rotation,
+        };
+        const geometry = resolveDraftingObjectGeometry(
+          document,
+          resolver,
+          object,
+        );
+        if (geometry.kind !== "rectangle") throw new Error("Missing rectangle");
+        const middle = (
+          corners: readonly { x: number; y: number }[],
+          side: number,
+        ) => {
+          const from = corners[side]!;
+          const to = corners[(side + 1) % 4]!;
+          return { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
+        };
+        for (const side of [0, 1, 2, 3]) {
+          const dragged = middle(geometry.corners, side);
+          const outward = {
+            x: dragged.x - geometry.center.x,
+            y: dragged.y - geometry.center.y,
+          };
+          const length = Math.hypot(outward.x, outward.y);
+          // Pull the side 4 grid steps (and a little) further out.
+          const target = {
+            x: Math.round(dragged.x + (outward.x / length) * (8 * grid + 1)),
+            y: Math.round(dragged.y + (outward.y / length) * (8 * grid + 1)),
+          };
+          const resized = applyDraftingHandle(
+            object,
+            { kind: "rectangle-edge", index: side },
+            target,
+            geometry,
+            grid,
+          );
+          expect(DraftingObjectSchema.safeParse(resized).success).toBe(true);
+          if (resized.kind !== "rectangle") throw new Error("Not a rectangle");
+          const setsHeight = side % 2 === 0;
+          const pitch = grid % 2 === 0 ? grid : grid * 2;
+          expect(setsHeight ? resized.width : resized.height).toBe(
+            setsHeight ? 100 : 60,
+          );
+          expect(setsHeight ? resized.height : resized.width).toBe(
+            (setsHeight ? 60 : 100) +
+              Math.round((8 * grid + 1) / pitch) * pitch,
+          );
+          const changed = resolveDraftingObjectGeometry(
+            document,
+            resolver,
+            resized,
+          );
+          if (changed.kind !== "rectangle")
+            throw new Error("Missing rectangle");
+          const opposite = middle(geometry.corners, (side + 2) % 4);
+          const kept = middle(changed.corners, (side + 2) % 4);
+          expect(
+            Math.hypot(kept.x - opposite.x, kept.y - opposite.y),
+          ).toBeLessThan(1e-8);
+        }
+      },
+    );
+  }
+
+  it("turns a rectangle over when a side is dragged past its opposite side", () => {
+    const object = {
+      ...rectangle(),
+      center: { x: 150, y: 150 },
+      anchor: { kind: "free" as const, position: { x: 150, y: 150 } },
+      width: 100,
+      height: 60,
+      rotation: 0,
+    };
+    const geometry = resolveDraftingObjectGeometry(document, resolver, object);
+    // The top side (y = 120) dragged below the bottom side (y = 180).
+    expect(
+      applyDraftingHandle(
+        object,
+        { kind: "rectangle-edge", index: 0 },
+        { x: 150, y: 230 },
+        geometry,
+        10,
+      ),
+    ).toMatchObject({
+      center: { x: 150, y: 205 },
+      width: 100,
+      height: 50,
+    });
+    // Dropped right on the opposite side, it keeps one step of height on
+    // its own side; a unit past, it turns over.
+    expect(
+      applyDraftingHandle(
+        object,
+        { kind: "rectangle-edge", index: 0 },
+        { x: 150, y: 180 },
+        geometry,
+        10,
+      ),
+    ).toMatchObject({ center: { x: 150, y: 175 }, height: 10 });
+    expect(
+      applyDraftingHandle(
+        object,
+        { kind: "rectangle-edge", index: 0 },
+        { x: 150, y: 181 },
+        geometry,
+        10,
+      ),
+    ).toMatchObject({ center: { x: 150, y: 185 }, height: 10 });
+  });
+
+  it("moves and resizes a circle while keeping it orientation-free", () => {
+    const object = circle();
+    const geometry = resolveDraftingObjectGeometry(document, resolver, object);
+    const resized = applyDraftingHandle(
+      object,
+      { kind: "circle-radius", index: 0 },
+      { x: 90, y: 50 },
+      geometry,
+      10,
+    );
+    expect(resized).toMatchObject({ radius: 40 });
+    expect(
+      translateDraftingObject(object, { x: 20, y: -10 }, 10),
+    ).toMatchObject({
+      center: { x: 70, y: 40 },
+      anchor: { kind: "free", position: { x: 70, y: 40 } },
+    });
+    expect(rotateDraftingObject(object, geometry, 90, 10)).toBeNull();
+    expect(
+      applyDraftingStylePatch(object, { lineStyle: "dotted" }),
+    ).toMatchObject({
+      styleOverride: { lineStyle: "dotted" },
+    });
+  });
+
+  it("inserts and deletes vertices while preserving explicit invariants", () => {
+    const inserted = insertConstructionVertex(construction(), { x: 80, y: 0 });
+    expect(inserted?.index).toBe(2);
+    expect(inserted?.object.points[2]).toEqual({ x: 80, y: 0 });
+    expect(inserted?.object.curveControls).toEqual([null, null, null]);
+
+    const deleted = deleteConstructionVertex(inserted!.object, 2);
+    expect(deleted.kind).toBe("updated");
+    if (deleted.kind === "updated") {
+      expect(deleted.object.points).toHaveLength(3);
+      expect(deleted.object.curveControls).toBeUndefined();
+    }
+    expect(
+      deleteConstructionVertex(
+        { ...construction(), points: construction().points.slice(0, 2) },
+        0,
+      ),
+    ).toEqual({ kind: "minimum" });
+  });
+
+  it("inserts an arrow waypoint on the nearest resolved segment", () => {
+    const object = arrow();
+    const geometry = resolveDraftingObjectGeometry(document, resolver, object);
+    if (geometry.kind !== "arrow") throw new Error("Expected arrow geometry");
+    const inserted = insertArrowWaypoint(object, geometry, { x: 80, y: 10 });
+    expect(inserted?.index).toBe(1);
+    expect(inserted?.object.waypoints).toEqual([
+      { x: 50, y: 0 },
+      { x: 80, y: 10 },
+    ]);
+  });
+
+  it("applies bounded style patches only to editable supported objects", () => {
+    expect(
+      applyDraftingStylePatch(arrow(), {
+        lineStyle: "dashed",
+        strokeScale: 1.5,
+      }),
+    ).toMatchObject({
+      styleOverride: { lineStyle: "dashed", strokeScale: 1.5 },
+    });
+    expect(
+      applyDraftingStylePatch(
+        { ...arrow(), locked: true },
+        { lineStyle: "dotted" },
+      ),
+    ).toBeNull();
+  });
+
+  it("rotates and sets bearing without detaching an attached arrow", () => {
+    const object = arrow();
+    const geometry = resolveDraftingObjectGeometry(document, resolver, object);
+    expect(rotateDraftingObject(object, geometry, 90, 10)).toMatchObject({
+      from: { position: { x: 50, y: -50 } },
+      to: { position: { x: 50, y: 50 } },
+    });
+    expect(setDraftingBearing(object, geometry, 90, 10)).toMatchObject({
+      kind: "updated",
+      object: {
+        from: { position: { x: 50, y: -50 } },
+        to: { position: { x: 50, y: 50 } },
+      },
+    });
+
+    const attached = {
+      ...object,
+      to: {
+        kind: "object" as const,
+        objectId: "R1",
+        localOffset: { x: 0, y: 0 },
+        fallbackPosition: { x: 100, y: 0 },
+      },
+    };
+    const attachedGeometry = resolveDraftingObjectGeometry(
+      document,
+      resolver,
+      attached,
+    );
+    expect(setDraftingBearing(attached, attachedGeometry, 90, 10)).toEqual({
+      kind: "attached-arrow",
+    });
+  });
+
+  it("updates one tangent control and normalizes rectangle bearing", () => {
+    const line = construction();
+    const geometry = resolveDraftingObjectGeometry(document, resolver, line);
+    if (geometry.kind !== "construction-line") {
+      throw new Error("Expected construction-line geometry");
+    }
+    expect(setDraftingTangentAngle(line, geometry, 0, 45, 10)).toMatchObject({
+      curveControls: [{ x: 30, y: 10 }, null],
+    });
+
+    const box = rectangle();
+    const boxGeometry = resolveDraftingObjectGeometry(document, resolver, box);
+    expect(setDraftingBearing(box, boxGeometry, -90, 10)).toMatchObject({
+      kind: "updated",
+      object: { rotation: 270 },
+    });
+  });
+});
+
+describe("drafting precise properties", () => {
+  const circle = (): DraftingObject => ({
+    id: "circle-1",
+    kind: "circle",
+    locked: false,
+    zIndex: 0,
+    anchor: { kind: "free", position: { x: 40, y: 40 } },
+    center: { x: 40, y: 40 },
+    radius: 25,
+    lineStyle: "solid",
+  });
+  const rectangle = (): DraftingObject => ({
+    id: "rect-1",
+    kind: "rectangle",
+    locked: false,
+    zIndex: 0,
+    anchor: { kind: "free", position: { x: 100, y: 40 } },
+    center: { x: 100, y: 40 },
+    width: 60,
+    height: 30,
+    rotation: 0,
+    lineStyle: "solid",
+  });
+
+  it("sets a circle radius and rectangle size as integers with a floor", () => {
+    expect(
+      applyDraftingGeometryPatch(circle(), { radius: 42.4 }),
+    ).toMatchObject({ radius: 42 });
+    expect(applyDraftingGeometryPatch(circle(), { radius: 0.2 })).toMatchObject(
+      { radius: 1 },
+    );
+    expect(
+      applyDraftingGeometryPatch(rectangle(), { width: 120.6, height: 44 }),
+    ).toMatchObject({ width: 121, height: 44 });
+    expect(
+      applyDraftingGeometryPatch(rectangle(), { height: 12 }),
+    ).toMatchObject({ width: 60, height: 12 });
+  });
+
+  it("refuses geometry edits on locked or mismatched objects", () => {
+    expect(
+      applyDraftingGeometryPatch({ ...circle(), locked: true }, { radius: 9 }),
+    ).toBeNull();
+    expect(applyDraftingGeometryPatch(circle(), { width: 9 })).toBeNull();
+    expect(applyDraftingGeometryPatch(rectangle(), { radius: 9 })).toBeNull();
+    expect(
+      applyDraftingGeometryPatch(circle(), { radius: Number.NaN }),
+    ).toBeNull();
+  });
+
+  it("applies precise stroke multipliers and explicit colors independently", () => {
+    const red = applyDraftingStylePatch(circle(), {
+      strokeScale: 1.35,
+      color: "#cc2200",
+    });
+    expect(red?.styleOverride).toEqual({
+      strokeScale: 1.35,
+      color: "#cc2200",
+    });
+    // An explicit undefined clears back to the profile foreground.
+    const cleared = applyDraftingStylePatch(red!, { color: undefined });
+    expect(cleared?.styleOverride).toEqual({ strokeScale: 1.35 });
+  });
+
+  it("fills only closed shapes and moves them between circuit planes", () => {
+    const filled = applyDraftingStylePatch(circle(), {
+      fillColor: "#9ca3af",
+    });
+    expect(filled?.styleOverride).toEqual({ fillColor: "#9ca3af" });
+    expect(
+      applyDraftingStylePatch(arrow(), { fillColor: "#dc2626" }),
+    ).toBeNull();
+    expect(planDraftingStacking([filled!], filled!.id, "back")).toMatchObject([
+      { layer: "background", zIndex: 0 },
+    ]);
+    expect(
+      planDraftingStacking(
+        [filled!, { ...rectangle(), zIndex: 11 }],
+        filled!.id,
+        "front",
+      ),
+    ).toMatchObject([{ layer: "foreground", zIndex: 12 }]);
+    expect(
+      planDraftingStacking([{ ...filled!, locked: true }], filled!.id, "front"),
+    ).toBeNull();
+  });
+
+  it("normalizes background peers when sending a shape to the absolute back", () => {
+    const selected = { ...circle(), id: "selected", zIndex: 7 };
+    const first = {
+      ...rectangle(),
+      id: "first",
+      layer: "background" as const,
+      zIndex: 0,
+    };
+    const second = {
+      ...circle(),
+      id: "second",
+      layer: "background" as const,
+      zIndex: 9,
+      locked: true,
+    };
+    expect(
+      planDraftingStacking([first, selected, second], selected.id, "back"),
+    ).toMatchObject([
+      { id: "selected", layer: "background", zIndex: 0 },
+      { id: "first", zIndex: 1 },
+      { id: "second", zIndex: 2, locked: true },
+    ]);
+  });
+});
+
+describe("mirrorDraftingObject", () => {
+  const geometryOf = (object: DraftingObject) =>
+    resolveDraftingObjectGeometry(document, resolver, object);
+  const noHosts = new Set<string>();
+  const note = (
+    alignment: "start" | "middle" | "end",
+  ): Extract<DraftingObject, { kind: "text" }> => ({
+    id: "note-1",
+    kind: "text",
+    locked: false,
+    zIndex: 0,
+    anchor: { kind: "free", position: { x: 40, y: 20 } },
+    content: { runs: [{ kind: "text", value: "Vout" }] },
+    alignment,
+    rotation: 0,
+  });
+
+  it("reflects an arrow and keeps which end is its head", () => {
+    expect(
+      mirrorDraftingObject(
+        arrow(),
+        { x: 120, y: 0 },
+        "left-right",
+        noHosts,
+        geometryOf,
+      ),
+    ).toMatchObject({
+      from: { kind: "free", position: { x: 240, y: 0 } },
+      to: { kind: "free", position: { x: 140, y: 0 } },
+      waypoints: [{ x: 190, y: 0 }],
+    });
+  });
+
+  it("reflects a turned rectangle to the opposite turn", () => {
+    expect(
+      mirrorDraftingObject(
+        { ...rectangle(), rotation: 30 },
+        { x: 0, y: 100 },
+        "top-bottom",
+        noHosts,
+        geometryOf,
+      ),
+    ).toMatchObject({ rotation: 330 });
+  });
+
+  it("reflects a text box and keeps its glyphs readable", () => {
+    const pivot = { x: 100, y: 60 };
+    const text = note("start");
+    const before = geometryOf(text).bounds;
+
+    const across = mirrorDraftingObject(
+      text,
+      pivot,
+      "left-right",
+      noHosts,
+      geometryOf,
+    );
+    if (across?.kind !== "text") throw new Error("Expected text");
+    // It grew rightward from its anchor; mirrored, it grows leftward.
+    expect(across.alignment).toBe("end");
+    const acrossBox = geometryOf(across).bounds;
+    expect(acrossBox.x + acrossBox.width).toBeCloseTo(
+      2 * pivot.x - before.x,
+      0,
+    );
+
+    const down = mirrorDraftingObject(
+      text,
+      pivot,
+      "top-bottom",
+      noHosts,
+      geometryOf,
+    );
+    if (down?.kind !== "text") throw new Error("Expected text");
+    expect(down.alignment).toBe("start");
+    const downBox = geometryOf(down).bounds;
+    // The box, not the baseline, is what reflects.
+    expect(downBox.y).toBeCloseTo(2 * pivot.y - (before.y + before.height), 0);
+  });
+
+  it("places a text turned a quarter as reading up the page", () => {
+    expect([0, 45, 90, 180, 270, 315].map(uprightOrUp)).toEqual([
+      0, 0, 270, 0, 270, 0,
+    ]);
+  });
+
+  it("turns a free text between reading across and reading up the page", () => {
+    const across = note("start");
+    const up = rotateDraftingObject(across, geometryOf(across), 90, 10);
+    expect(up).toMatchObject({ rotation: 270, anchor: across.anchor });
+    // Either way round, the next quarter turn reads across again.
+    expect(rotateDraftingObject(up!, geometryOf(up!), -90, 10)).toMatchObject({
+      rotation: 0,
+    });
+    const down = { ...across, rotation: 90 as const };
+    expect(rotateDraftingObject(down, geometryOf(down), 90, 10)).toMatchObject({
+      rotation: 0,
+    });
+    // A half turn would set it upside down.
+    expect(rotateDraftingObject(across, geometryOf(across), 180, 10)).toBe(
+      null,
+    );
+  });
+
+  it("turns and reflects a polarity text's marks, not its glyphs", () => {
+    const polarity = {
+      ...note("middle"),
+      polarity: "both" as const,
+      rotation: 90 as const,
+    };
+    const geometry = geometryOf(polarity);
+    // R turns the marks a quarter: from either side to above and below.
+    expect(rotateDraftingObject(polarity, geometry, 90, 10)).toMatchObject({
+      rotation: 180,
+      anchor: polarity.anchor,
+    });
+    expect(rotateDraftingObject(polarity, geometry, -90, 10)).toMatchObject({
+      rotation: 0,
+    });
+    // A mirror across the marks' axis trades their sides; along it, nothing.
+    expect(
+      mirrorDraftingObject(
+        polarity,
+        { x: 40, y: 0 },
+        "left-right",
+        noHosts,
+        geometryOf,
+      ),
+    ).toMatchObject({ rotation: 270, alignment: "middle" });
+    expect(
+      mirrorDraftingObject(
+        polarity,
+        { x: 0, y: 20 },
+        "top-bottom",
+        noHosts,
+        geometryOf,
+      ),
+    ).toMatchObject({ rotation: 90 });
+    expect(
+      mirrorDraftingObject(
+        { ...polarity, rotation: 0 },
+        { x: 0, y: 20 },
+        "top-bottom",
+        noHosts,
+        geometryOf,
+      ),
+    ).toMatchObject({ rotation: 180 });
+  });
+
+  it("mirrors an attached end's offset only when its host mirrors too", () => {
+    const attached = {
+      ...arrow(),
+      to: {
+        kind: "object" as const,
+        objectId: "R1",
+        localOffset: { x: 10, y: 5 },
+        fallbackPosition: { x: 110, y: 5 },
+      },
+    };
+    expect(
+      mirrorDraftingObject(
+        attached,
+        { x: 100, y: 0 },
+        "left-right",
+        new Set(["R1"]),
+        geometryOf,
+      ),
+    ).toMatchObject({
+      to: { localOffset: { x: -10, y: 5 }, fallbackPosition: { x: 90, y: 5 } },
+    });
+    expect(
+      mirrorDraftingObject(
+        attached,
+        { x: 100, y: 0 },
+        "left-right",
+        noHosts,
+        geometryOf,
+      ),
+    ).toMatchObject({ to: attached.to });
+    expect(
+      mirrorDraftingObject(
+        { ...attached, locked: true },
+        { x: 100, y: 0 },
+        "left-right",
+        noHosts,
+        geometryOf,
+      ),
+    ).toBeNull();
+  });
+});

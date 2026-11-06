@@ -1,0 +1,760 @@
+import {
+  drawnSwitchPhase,
+  resolveAnnotationName,
+  resolveAnnotationPresentation,
+  resolveSchematicStyleProfile,
+} from "@icm/derived";
+import {
+  controlledSourceExpressionSource,
+  createEmptyDocument,
+  flattenRichText,
+  plainNameDocument,
+  roleLabelFormat,
+} from "@icm/model";
+import type { Annotation } from "@icm/model";
+import { InMemorySymbolResolver, builtInSymbols } from "@icm/symbols";
+import { describe, expect, it } from "vitest";
+
+import {
+  defaultInstanceDisplayAnnotations,
+  missingDefaultInstanceDisplayAnnotations,
+} from "./default-instance-display";
+import {
+  createNewInstance,
+  initialInstanceNetlist,
+} from "../netlist-export/netlist-authoring";
+
+const resolver = new InMemorySymbolResolver(builtInSymbols);
+
+describe("default instance display annotations", () => {
+  it.each([
+    ["vcvs", "voltage-source", "A_{v}v_{1}"],
+    ["vccs", "current-source", "g_{m}v_{1}"],
+    ["cccs", "current-source", "βi_{1}"],
+    ["ccvs", "voltage-source", "R_{m}i_{1}"],
+  ])(
+    "places %s's literal expression at the existing %s source label slot",
+    (symbolId, sourceId, expression) => {
+      const document = createEmptyDocument(
+        "controlled-label",
+        "Controlled label",
+      );
+      const profile = resolveSchematicStyleProfile(
+        document.presentation.styleProfileId,
+      );
+      const at = {
+        position: { x: 100, y: 100 },
+        rotation: 0 as const,
+        mirror: "none" as const,
+      };
+      const controlled = createNewInstance(document, {
+        symbolId,
+        placement: at,
+        netlist: initialInstanceNetlist(symbolId, {}),
+      });
+      const ordinary = createNewInstance(document, {
+        symbolId: sourceId,
+        placement: at,
+        netlist: initialInstanceNetlist(sourceId, { dc: "1" }),
+      });
+      const controlledSymbol = resolver.resolve(symbolId)!.definition;
+      const ordinarySymbol = resolver.resolve(sourceId)!.definition;
+      expect(controlledSymbol.pins).toEqual(ordinarySymbol.pins);
+      expect(controlledSymbol.viewBox).toEqual(ordinarySymbol.viewBox);
+      const controlledAnnotations = defaultInstanceDisplayAnnotations(
+        document,
+        controlled,
+        resolver,
+        profile,
+        { showValue: true },
+      );
+      const controlledLabel = controlledAnnotations.find(
+        (annotation) => annotation.kind === "instance-label",
+      )!;
+      const ordinaryLabel = defaultInstanceDisplayAnnotations(
+        document,
+        ordinary,
+        resolver,
+        profile,
+        { showValue: true },
+      ).find((annotation) => annotation.kind === "instance-label")!;
+      expect(controlledAnnotations).toHaveLength(1);
+      expect(controlledLabel.alignment).toBe(ordinaryLabel.alignment);
+      expect(controlledLabel.anchor).toMatchObject({
+        kind: "object",
+        ...(ordinaryLabel.anchor.kind === "object"
+          ? { localOffset: ordinaryLabel.anchor.localOffset }
+          : {}),
+      });
+      expect(controlledLabel.binding).toBeUndefined();
+      expect(flattenRichText(controlledLabel.content!)).toBeTruthy();
+      expect(controlledSourceExpressionSource(controlledLabel.content!)).toBe(
+        expression,
+      );
+    },
+  );
+  it.each(
+    ["vcvs", "ccvs"].flatMap((symbolId) =>
+      ([0, 90, 180, 270] as const).map((rotation) => ({ symbolId, rotation })),
+    ),
+  )(
+    "keeps $symbolId's label slot after changing its outline at $rotation degrees",
+    ({ symbolId, rotation }) => {
+      const document = createEmptyDocument("source-label", "Source label");
+      const instance = createNewInstance(document, {
+        symbolId,
+        placement: { position: { x: 100, y: 100 }, rotation, mirror: "none" },
+        netlist: initialInstanceNetlist(symbolId, {}),
+      });
+      const profile = resolveSchematicStyleProfile(
+        document.presentation.styleProfileId,
+      );
+      const originalOutline = new InMemorySymbolResolver(
+        builtInSymbols.map((symbol) =>
+          symbol.id === symbolId
+            ? {
+                ...symbol,
+                primitives:
+                  resolver.resolve("voltage-source")!.definition.primitives,
+              }
+            : symbol,
+        ),
+      );
+      const labels = (symbols: InMemorySymbolResolver) =>
+        defaultInstanceDisplayAnnotations(
+          document,
+          instance,
+          symbols,
+          profile,
+          { showValue: true },
+        );
+      expect(labels(resolver)).toEqual(labels(originalOutline));
+    },
+  );
+  it.each([
+    ["vccs", "g_{m}v_{2}"],
+    ["cccs", "βi_{2}"],
+  ])(
+    "numbers the second %s label from its allocated Reference",
+    (symbolId, expected) => {
+      const document = createEmptyDocument("numbered-label", "Numbered label");
+      const placement = {
+        position: { x: 100, y: 100 },
+        rotation: 0 as const,
+        mirror: "none" as const,
+      };
+      const first = createNewInstance(document, {
+        symbolId,
+        placement,
+        netlist: initialInstanceNetlist(symbolId, {}),
+      });
+      document.instances.push(first);
+      const second = createNewInstance(document, {
+        symbolId,
+        placement,
+        netlist: initialInstanceNetlist(symbolId, {}),
+      });
+      const profile = resolveSchematicStyleProfile(
+        document.presentation.styleProfileId,
+      );
+      const label = defaultInstanceDisplayAnnotations(
+        document,
+        second,
+        resolver,
+        profile,
+      ).find((annotation) => annotation.kind === "instance-label");
+      expect(second.reference).toMatch(/2$/u);
+      expect(controlledSourceExpressionSource(label!.content!)).toBe(expected);
+    },
+  );
+  it.each([0, 90, 180, 270] as const)(
+    "uses the first label slot for a new value-only resistor at %s degrees",
+    (rotation) => {
+      const document = createEmptyDocument("value-only", "Value only");
+      const instance = createNewInstance(document, {
+        symbolId: "resistor",
+        placement: { position: { x: 100, y: 100 }, rotation, mirror: "none" },
+        netlist: initialInstanceNetlist("resistor", { value: "10k" }),
+      });
+      document.instances.push(instance);
+      const profile = resolveSchematicStyleProfile(
+        document.presentation.styleProfileId,
+      );
+      // The slot a name shown alone takes; above the part, a name with its
+      // value under it stands a row further out (#1384).
+      const [nameAlone] = defaultInstanceDisplayAnnotations(
+        document,
+        instance,
+        resolver,
+        profile,
+      );
+      const onlyValue = defaultInstanceDisplayAnnotations(
+        document,
+        instance,
+        resolver,
+        profile,
+        { showDesignator: false, showValue: true },
+      );
+      expect(onlyValue).toHaveLength(1);
+      expect(onlyValue[0]).toMatchObject({
+        kind: "instance-value",
+        anchor: nameAlone!.anchor,
+        alignment: nameAlone!.alignment,
+      });
+      document.annotations.push({
+        ...onlyValue[0]!,
+        sizeScale: 1.5,
+        anchor: { kind: "free", position: { x: 317, y: 219 } },
+      });
+      expect(
+        missingDefaultInstanceDisplayAnnotations(
+          document,
+          instance,
+          resolver,
+          profile,
+        ).filter((a) => a.kind === "instance-value"),
+      ).toEqual([]);
+    },
+  );
+  it("labels a chopper with the clock it switches on, Φ_ch at first (#1641)", () => {
+    const document = createEmptyDocument("chopper-label", "Chopper label");
+    const profile = resolveSchematicStyleProfile(
+      document.presentation.styleProfileId,
+    );
+    const chopper = createNewInstance(document, {
+      symbolId: "chopper",
+      placement: {
+        position: { x: 100, y: 100 },
+        rotation: 0,
+        mirror: "none",
+      },
+      netlist: initialInstanceNetlist("chopper", {}),
+    });
+    expect(chopper.reference).toBe("CH1");
+    const annotations = defaultInstanceDisplayAnnotations(
+      document,
+      chopper,
+      resolver,
+      profile,
+      { showValue: true },
+    );
+    // One label, the clock's name, not bound to the Reference.
+    expect(annotations).toHaveLength(1);
+    const [label] = annotations;
+    expect(label).toMatchObject({ kind: "instance-label" });
+    expect(label!.binding).toBeUndefined();
+    expect(flattenRichText(label!.content!)).toBe("Φch");
+    // The netlist reads the clock from it, as it reads a switch's phase.
+    document.instances.push(chopper);
+    document.annotations.push(label!);
+    expect(drawnSwitchPhase(document, chopper)).toEqual({
+      name: "Φch",
+      drawnName: "Φ_ch",
+    });
+  });
+
+  it("shows a live Battery Reference with a voltage-source binding", () => {
+    const document = createEmptyDocument("battery", "Battery");
+    const instance = createNewInstance(document, {
+      symbolId: "battery",
+      placement: {
+        position: { x: 100, y: 100 },
+        rotation: 0,
+        mirror: "none",
+      },
+      netlist: initialInstanceNetlist("battery", {}),
+    });
+    document.instances.push(instance);
+    const annotations = defaultInstanceDisplayAnnotations(
+      document,
+      instance,
+      resolver,
+      resolveSchematicStyleProfile(document.presentation.styleProfileId),
+    );
+
+    expect(instance.reference).toBe("B1");
+    expect(instance.netlist?.binding).toEqual({
+      kind: "primitive",
+      deviceClass: "voltage-source",
+    });
+    expect(annotations).toHaveLength(1);
+    expect(annotations[0]).toMatchObject({
+      kind: "instance-label",
+      binding: { kind: "instance-reference", instanceId: instance.id },
+      anchor: { kind: "object", objectId: instance.id },
+    });
+    expect(resolveAnnotationName(document, annotations[0]!)).toBe("B1");
+  });
+
+  it("creates a live Reference label and literal master label for an external call", () => {
+    const document = createEmptyDocument("main", "Main");
+    const instance = {
+      id: "opaque-import-id",
+      symbolId: "resistor",
+      placement: {
+        position: { x: 100, y: 100 },
+        rotation: 0 as const,
+        mirror: "none" as const,
+      },
+      reference: "X1",
+      netlist: {
+        binding: {
+          kind: "external-subcircuit" as const,
+          definitionId: "master-opamp",
+        },
+        parameters: {},
+      },
+    };
+    const annotations = defaultInstanceDisplayAnnotations(
+      document,
+      instance,
+      resolver,
+      resolveSchematicStyleProfile(document.presentation.styleProfileId),
+      { masterName: "sky130_fd_pr__nfet_01v8" },
+    );
+
+    expect(annotations).toMatchObject([
+      {
+        kind: "instance-label",
+        binding: {
+          kind: "instance-reference",
+          instanceId: "opaque-import-id",
+        },
+      },
+      {
+        id: "instance-master-opaque-import-id",
+        kind: "instance-value",
+      },
+    ]);
+  });
+
+  it("places a device Reference in its standard look without changing it", () => {
+    const document = createEmptyDocument("main", "Main");
+    const profile = resolveSchematicStyleProfile(
+      document.presentation.styleProfileId,
+    );
+    const placed = (reference: string) =>
+      defaultInstanceDisplayAnnotations(
+        document,
+        {
+          id: "device-1",
+          symbolId: "nmos",
+          placement: {
+            position: { x: 100, y: 100 },
+            rotation: 0 as const,
+            mirror: "none" as const,
+          },
+          reference,
+        },
+        resolver,
+        profile,
+      )[0];
+    // M1 is stored as italic M over an upright subscript 1: M₁.
+    expect(placed("M1")?.formatOverride).toEqual(
+      roleLabelFormat("device-reference", "M1"),
+    );
+    // The device letter stands over everything after it, as textbooks
+    // write M_tail or M_N1 (#1116).
+    expect(flattenRichText(placed("MTAIL")!.formatOverride!)).toBe("MTAIL");
+    expect(placed("MTAIL")?.formatOverride).toEqual(
+      roleLabelFormat("device-reference", "MTAIL", { deviceLetter: "M" }),
+    );
+    // A Reference that does not start with the device letter is shown
+    // exactly as written.
+    expect(placed("XTAIL")?.formatOverride).toBeUndefined();
+  });
+
+  it("writes a resistor's RL1, RFB and a capacitor's CL from their device letter", () => {
+    const document = createEmptyDocument("main", "Main");
+    const profile = resolveSchematicStyleProfile(
+      document.presentation.styleProfileId,
+    );
+    const look = (symbolId: string, reference: string) =>
+      defaultInstanceDisplayAnnotations(
+        document,
+        {
+          id: "device-1",
+          symbolId,
+          placement: {
+            position: { x: 100, y: 100 },
+            rotation: 0 as const,
+            mirror: "none" as const,
+          },
+          reference,
+        },
+        resolver,
+        profile,
+      )[0]?.formatOverride;
+    const letterOverRest = (letter: string, rest: string) => ({
+      base: letter,
+      subscript: rest,
+    });
+    const split = (format: ReturnType<typeof look>) => ({
+      base: flattenRichText({ runs: format!.runs.slice(0, 1) }),
+      subscript: flattenRichText({ runs: format!.runs.slice(1) }),
+    });
+    expect(split(look("resistor", "RL1"))).toEqual(letterOverRest("R", "L1"));
+    expect(split(look("resistor", "RFB"))).toEqual(letterOverRest("R", "FB"));
+    expect(split(look("capacitor", "CL"))).toEqual(letterOverRest("C", "L"));
+    // A plain index looks exactly as it always has.
+    expect(look("resistor", "R12")).toEqual(
+      roleLabelFormat("device-reference", "R12"),
+    );
+  });
+
+  /**
+   * A Cell name is a name, not a device designator. `M1` is an identifier
+   * whose leading symbol carries a subscripted index, and typesetting it that
+   * way is house style; `sky130_fd_pr__nfet_01v8` is a word, and the same
+   * rule turns it into "s" with everything else shrunk beneath it.
+   */
+  it("sets a master Cell name upright, with no subscript", () => {
+    const document = createEmptyDocument("main", "Main");
+    const annotations = defaultInstanceDisplayAnnotations(
+      document,
+      {
+        id: "call-1",
+        symbolId: "resistor",
+        placement: {
+          position: { x: 100, y: 100 },
+          rotation: 0 as const,
+          mirror: "none" as const,
+        },
+        reference: "X1",
+        netlist: {
+          binding: {
+            kind: "external-subcircuit" as const,
+            definitionId: "master-opamp",
+          },
+          parameters: {},
+        },
+      },
+      resolver,
+      resolveSchematicStyleProfile(document.presentation.styleProfileId),
+      { masterName: "CELLNAME" },
+    );
+
+    const master = annotations.find((annotation) =>
+      annotation.id.startsWith("instance-master-"),
+    );
+    expect(master?.content).toEqual({
+      runs: [
+        {
+          kind: "span",
+          style: "bold",
+          children: [{ kind: "text", value: "CELLNAME" }],
+        },
+      ],
+    });
+  });
+
+  it("shows only the Cell name in the reference slot for an internal hierarchy instance", () => {
+    const document = createEmptyDocument("main", "Main");
+    const instance = {
+      id: "call-1",
+      symbolId: "resistor",
+      placement: {
+        position: { x: 100, y: 100 },
+        rotation: 0 as const,
+        mirror: "none" as const,
+      },
+      reference: "X1",
+    };
+    const reference = defaultInstanceDisplayAnnotations(
+      document,
+      instance,
+      resolver,
+      resolveSchematicStyleProfile(document.presentation.styleProfileId),
+    )[0]!;
+    const annotations = defaultInstanceDisplayAnnotations(
+      document,
+      instance,
+      resolver,
+      resolveSchematicStyleProfile(document.presentation.styleProfileId),
+      { showDesignator: false, masterName: "GainStage" },
+    );
+
+    expect(annotations).toHaveLength(1);
+    expect(annotations[0]).toMatchObject({
+      id: "instance-master-call-1",
+      kind: "instance-value",
+      anchor: {
+        kind: "object",
+        objectId: "call-1",
+      },
+    });
+    expect(annotations[0]?.anchor).toEqual(reference.anchor);
+    expect(annotations[0]?.binding).toBeUndefined();
+  });
+
+  it("shows a formal Port terminal name as its only visible identity", () => {
+    const document = createEmptyDocument("main", "Main");
+    const instance = {
+      id: "derived-internal-port-id",
+      symbolId: "port",
+      placement: {
+        position: { x: 100, y: 100 },
+        rotation: 0 as const,
+        mirror: "none" as const,
+      },
+    };
+    const annotations = defaultInstanceDisplayAnnotations(
+      document,
+      instance,
+      resolver,
+      resolveSchematicStyleProfile(document.presentation.styleProfileId),
+      { formalTerminalId: "terminal-input" },
+    );
+
+    expect(annotations).toEqual([
+      expect.objectContaining({
+        binding: { kind: "cell-terminal-name", terminalId: "terminal-input" },
+      }),
+    ]);
+  });
+
+  it("places a V-led Pin name in its voltage-node look and any other name as written", () => {
+    const document = createEmptyDocument("main", "Main");
+    const instance = {
+      id: "P1",
+      symbolId: "port-filled",
+      placement: {
+        position: { x: 100, y: 100 },
+        rotation: 0 as const,
+        mirror: "none" as const,
+      },
+    };
+    const pinLabel = (formalName: string) =>
+      defaultInstanceDisplayAnnotations(
+        document,
+        instance,
+        resolver,
+        resolveSchematicStyleProfile(document.presentation.styleProfileId),
+        { formalTerminalId: "terminal-p1", formalName },
+      )[0];
+    for (const name of ["VBP", "VBN", "Vin", "Vout", "VcasP", "VCASN"])
+      expect(pinLabel(name)?.formatOverride).toEqual(
+        roleLabelFormat("voltage-node", name),
+      );
+    expect(pinLabel("CLK")?.formatOverride).toBeUndefined();
+    expect(pinLabel("V_ref")?.formatOverride).toBeUndefined();
+  });
+
+  it("materializes an imported reference once when a retained Instance is placed", () => {
+    const document = createEmptyDocument("main", "Main");
+    const instance = {
+      id: "imported-resistor-opaque-id",
+      symbolId: "resistor",
+      reference: "R7",
+      placement: {
+        position: { x: 100, y: 100 },
+        rotation: 0 as const,
+        mirror: "none" as const,
+      },
+      netlist: { parameters: { value: "10k" } },
+    };
+
+    const missing = missingDefaultInstanceDisplayAnnotations(
+      document,
+      instance,
+      resolver,
+      resolveSchematicStyleProfile(document.presentation.styleProfileId),
+    );
+    expect(missing).toEqual([
+      expect.objectContaining({
+        binding: {
+          kind: "instance-reference",
+          instanceId: "imported-resistor-opaque-id",
+        },
+      }),
+    ]);
+
+    document.annotations.push(...missing);
+    expect(
+      missingDefaultInstanceDisplayAnnotations(
+        document,
+        instance,
+        resolver,
+        resolveSchematicStyleProfile(document.presentation.styleProfileId),
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe("blocks that carry no designator", () => {
+  const styleProfile = (document: ReturnType<typeof createEmptyDocument>) =>
+    resolveSchematicStyleProfile(document.presentation.styleProfileId);
+
+  it("places a signal-flow block with no designator label", () => {
+    // A summing junction or a 1/s block is read by its shape, and a diagram
+    // full of X1, X2, X3 says nothing a reader needs.
+    for (const symbolId of [
+      "adder",
+      "multiplier",
+      "transconductance",
+      "integrator",
+      "unit-delay",
+      "quantizer",
+    ]) {
+      const document = createEmptyDocument("main", "Main");
+      const instance = {
+        id: `${symbolId}-1`,
+        symbolId,
+        placement: {
+          position: { x: 100, y: 100 },
+          rotation: 0 as const,
+          mirror: "none" as const,
+        },
+      };
+      expect(
+        defaultInstanceDisplayAnnotations(
+          document,
+          instance,
+          resolver,
+          styleProfile(document),
+          {},
+        ),
+        symbolId,
+      ).toEqual([]);
+    }
+  });
+
+  // A Symbol with no reference prefix once projected an empty designator: no
+  // glyph, but a hit box and a lone line break (#895).
+  it("gives a placed logic gate one visible X Reference label and no empty one", () => {
+    const document = createEmptyDocument("main", "Main");
+    const gate = createNewInstance(document, {
+      symbolId: "nand-gate",
+      placement: {
+        position: { x: 100, y: 100 },
+        rotation: 0 as const,
+        mirror: "none" as const,
+      },
+      netlist: initialInstanceNetlist("nand-gate", {}),
+    });
+    expect(gate.reference).toBe("X1");
+    const profile = styleProfile(document);
+    const annotations = defaultInstanceDisplayAnnotations(
+      document,
+      gate,
+      resolver,
+      profile,
+      {},
+    );
+    expect(annotations).toEqual([
+      expect.objectContaining({
+        kind: "instance-label",
+        binding: { kind: "instance-reference", instanceId: gate.id },
+      }),
+    ]);
+    expect(
+      resolveAnnotationName(
+        { ...document, instances: [gate] },
+        annotations[0]!,
+      ),
+    ).toBe("X1");
+  });
+
+  it("labels each compound magnetic device with its allocated X reference", () => {
+    for (const [symbolId, reference] of [
+      ["tcoil", "X1"],
+      ["xfmr", "X2"],
+    ] as const) {
+      const document = createEmptyDocument("main", "Main");
+      const annotations = defaultInstanceDisplayAnnotations(
+        document,
+        {
+          id: `${symbolId}-1`,
+          symbolId,
+          reference,
+          placement: {
+            position: { x: 100, y: 100 },
+            rotation: 0 as const,
+            mirror: "none" as const,
+          },
+        },
+        resolver,
+        styleProfile(document),
+        {},
+      );
+
+      expect(annotations).toEqual([
+        expect.objectContaining({
+          kind: "instance-label",
+          binding: {
+            kind: "instance-reference",
+            instanceId: `${symbolId}-1`,
+          },
+        }),
+      ]);
+    }
+  });
+});
+
+describe("Cell Pin names that would collide (#1105)", () => {
+  const style = resolveSchematicStyleProfile("razavi-textbook-v1");
+  const port = (id: string, x: number, mirror: "none" | "horizontal") => ({
+    id,
+    symbolId: "port",
+    placement: {
+      position: { x, y: 190 },
+      rotation: 0 as const,
+      mirror,
+    },
+  });
+  const named = (
+    document: ReturnType<typeof createEmptyDocument>,
+    instance: ReturnType<typeof port>,
+    name: string,
+  ) =>
+    defaultInstanceDisplayAnnotations(document, instance, resolver, style, {
+      formalTerminalId: `terminal-${instance.id}`,
+      formalName: name,
+    })[0]!;
+  /** Two output Pins facing each other, each name on its inner side. */
+  function facing() {
+    for (const [left, right] of [
+      ["none", "horizontal"],
+      ["horizontal", "none"],
+    ] as const) {
+      const document = createEmptyDocument("pins", "Pins");
+      const voutn = port("PN", 220, left);
+      const voutp = port("PP", 300, right);
+      const nameN = named(document, voutn, "Voutn");
+      const alone = named(document, voutp, "Voutp");
+      if (nameN.alignment === "start" && alone.alignment === "end")
+        return { document, voutn, voutp, nameN, alone };
+    }
+    throw new Error("no facing configuration");
+  }
+  const inkOf = (
+    document: ReturnType<typeof createEmptyDocument>,
+    annotation: Annotation,
+    name: string,
+  ) =>
+    resolveAnnotationPresentation(
+      document,
+      resolver,
+      { ...annotation, binding: undefined, content: plainNameDocument(name) },
+      style,
+    ).inkBounds;
+
+  it("puts the second Pin's name where the first one's is not", () => {
+    const { document, voutn, voutp, nameN, alone } = facing();
+    document.instances.push(voutn);
+    document.annotations.push(nameN);
+    const nameP = named(document, voutp, "Voutp");
+    expect(nameP.alignment).toBe("middle");
+    document.instances.push(voutp);
+    const a = inkOf(document, nameN, "Voutn");
+    const b = inkOf(document, nameP, "Voutp");
+    const overlaps =
+      a.x < b.x + b.width &&
+      b.x < a.x + a.width &&
+      a.y < b.y + b.height &&
+      b.y < a.y + a.height;
+    expect(overlaps).toBe(false);
+    // Alone, the name keeps its standard side, away from the wire.
+    expect(alone.alignment).toBe("end");
+  });
+});

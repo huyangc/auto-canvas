@@ -1,0 +1,596 @@
+import { executeProjectTransaction } from "@icm/edit-engine";
+import type { ProjectStructureEdit } from "@icm/edit-engine";
+import {
+  canonicalPortTextDocument,
+  createEmptyDocument,
+  createEmptyProject,
+} from "@icm/model";
+import { builtInSymbols, createProjectSymbolResolver } from "@icm/symbols";
+import { describe, expect, it, vi } from "vitest";
+
+import {
+  createProjectStructureCommands,
+  applyConfirmedCellInterfaceEdit,
+} from "./project-structure-commands";
+import type { CellInterfaceConfirmation } from "./project-structure-commands";
+import { localBlockSymbolTarget } from "./block-symbol-layout-target";
+
+function dependencies() {
+  const project = createEmptyProject("project", "Project");
+  const commitStructure = vi.fn<
+    (
+      transactionId: string,
+      edits: ProjectStructureEdit[],
+      activeDocumentId?: string,
+    ) => boolean
+  >(() => true);
+  return {
+    project,
+    activeDocument: project.documents[0]!,
+    resolver: createProjectSymbolResolver(project, builtInSymbols),
+    commitStructure,
+    setStatus: vi.fn(),
+    onCellCreated: vi.fn(),
+    nextSequence: vi.fn(() => 1),
+    createDocumentId: vi.fn(() => "document-child"),
+  };
+}
+
+describe("Project structure commands", () => {
+  it("authors a fresh unconnected scalar Pin as a bus inline without assigning its old identity", () => {
+    const input = dependencies();
+    const document = input.activeDocument;
+    document.instances.push({ id: "pin", symbolId: "port", placement: null });
+    document.nets.push({
+      id: "old-net",
+      terminals: [{ instanceId: "pin", pinName: "P" }],
+    });
+    document.netlist!.terminals.push({
+      id: "formal",
+      name: "IN",
+      netId: "old-net",
+      direction: "input",
+      interfaceInstanceIds: ["pin"],
+      signal: {
+        expression: "IN",
+        members: [{ id: "old-member", name: "IN", netId: "old-net" }],
+      },
+    });
+    const requestConfirmation =
+      vi.fn<(request: CellInterfaceConfirmation) => void>();
+    const commands = createProjectStructureCommands({
+      ...input,
+      requestConfirmation,
+    });
+    commands.renameCellTerminal("formal", "IN<3:0>");
+    expect(requestConfirmation).not.toHaveBeenCalled();
+    expect(input.commitStructure).toHaveBeenCalledTimes(1);
+    const result = executeProjectTransaction(input.project, {
+      transactionId: "initial-bus",
+      projectId: input.project.id,
+      expectedStructureRevision: input.project.structureRevision,
+      actor: { kind: "human", id: "test" },
+      edits: input.commitStructure.mock.calls[0]![1],
+    });
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    if (!result.ok) throw new Error(result.error.message);
+    const members =
+      result.project.documents[0]!.netlist!.terminals[0]!.signal!.members;
+    expect(members.map((member) => member.name)).toEqual([
+      "IN<3>",
+      "IN<2>",
+      "IN<1>",
+      "IN<0>",
+    ]);
+    expect(
+      members.every(
+        (member) => member.id !== "old-member" && member.netId !== "old-net",
+      ),
+    ).toBe(true);
+    document.nets[0]!.terminals.push({ instanceId: "load", pinName: "1" });
+    input.commitStructure.mockClear();
+    commands.renameCellTerminal("formal", "IN<3:0>");
+    expect(requestConfirmation).toHaveBeenCalledTimes(1);
+    expect(input.commitStructure).not.toHaveBeenCalled();
+  });
+  it("never applies a confirmation against a replaced Project snapshot", () => {
+    const project = createEmptyProject("project", "Project");
+    const request = {
+      title: "Delete",
+      message: "Delete Port",
+      confirmLabel: "Delete",
+      apply: vi.fn(() => true),
+    };
+    expect(() =>
+      applyConfirmedCellInterfaceEdit(
+        request,
+        project,
+        structuredClone(project),
+      ),
+    ).toThrow("Project changed");
+    expect(request.apply).not.toHaveBeenCalled();
+    expect(applyConfirmedCellInterfaceEdit(request, project, project)).toBe(
+      true,
+    );
+    expect(request.apply).toHaveBeenCalledTimes(1);
+  });
+  it("deletes only unused external definitions and preserves failure feedback", () => {
+    const input = dependencies();
+    input.project.externalSubcircuitDefinitions.push({
+      id: "ext",
+      name: "Amp",
+      terminals: [],
+      formalParameters: [],
+      interfaceStatus: "declared",
+    });
+    const commands = createProjectStructureCommands(input);
+    input.activeDocument.instances.push({
+      id: "X1",
+      symbolId: "block",
+      placement: null,
+      netlist: {
+        parameters: {},
+        binding: { kind: "external-subcircuit", definitionId: "ext" },
+      },
+    });
+    expect(commands.removeExternalSubcircuitDefinition("ext")).toMatchObject({
+      ok: false,
+      message: expect.stringContaining("X1"),
+    });
+    expect(input.commitStructure).not.toHaveBeenCalled();
+    input.activeDocument.instances = [];
+    expect(commands.removeExternalSubcircuitDefinition("ext").ok).toBe(true);
+    expect(input.commitStructure).toHaveBeenCalledWith(
+      "remove-external-subcircuit-definition",
+      [{ kind: "remove_external_subcircuit_definition", definitionId: "ext" }],
+    );
+    input.commitStructure.mockReturnValue(false);
+    expect(commands.removeExternalSubcircuitDefinition("ext").ok).toBe(false);
+    expect(commands.removeExternalSubcircuitDefinition("missing").ok).toBe(
+      false,
+    );
+  });
+
+  it("defers connected deletion and electrical merging until internal confirmation", () => {
+    const input = dependencies();
+    const child = input.activeDocument;
+    for (const name of ["A", "B"]) {
+      child.instances.push({
+        id: `P${name}`,
+        symbolId: "port",
+        placement: null,
+      });
+      child.nets.push({
+        id: `net-${name}`,
+        terminals: [{ instanceId: `P${name}`, pinName: "P" }],
+      });
+      child.netlist!.terminals.push({
+        id: name,
+        name,
+        netId: `net-${name}`,
+        direction: "passive",
+        interfaceInstanceIds: [`P${name}`],
+      });
+    }
+    const parent = createEmptyDocument("parent", "Parent");
+    parent.instances.push({
+      id: "X1",
+      symbolId: "hierarchical-main",
+      placement: null,
+      netlist: {
+        parameters: {},
+        binding: { kind: "subcircuit", childDocumentId: child.id },
+      },
+    });
+    parent.nets.push(
+      { id: "a", terminals: [{ instanceId: "X1", pinName: "A" }] },
+      { id: "b", terminals: [{ instanceId: "X1", pinName: "B" }] },
+    );
+    input.project.documents.push(parent);
+    const requestConfirmation =
+      vi.fn<(request: CellInterfaceConfirmation) => void>();
+    const commands = createProjectStructureCommands({
+      ...input,
+      requestConfirmation,
+    });
+    commands.renameCellTerminal("A", "B");
+    expect(input.commitStructure).not.toHaveBeenCalled();
+    const merge = requestConfirmation.mock.calls[0]![0];
+    expect(merge.title).toBe("Merge Cell Ports?");
+    merge.apply();
+    expect(JSON.stringify(input.commitStructure.mock.calls[0])).toContain(
+      "merge_nets",
+    );
+    input.commitStructure.mockClear();
+    commands.removeCellTerminalSelection(["A"], []);
+    expect(input.commitStructure).not.toHaveBeenCalled();
+    const deletion = requestConfirmation.mock.calls[1]![0];
+    expect(deletion.message).toContain("Parent/X1");
+    deletion.apply();
+    expect(input.commitStructure).toHaveBeenCalledWith(
+      "delete-cell-pin-selection",
+      expect.any(Array),
+    );
+  });
+
+  it("returns actionable external definition validation and commit results", () => {
+    const input = dependencies();
+    const commands = createProjectStructureCommands(input);
+    const definition = {
+      id: "external-amp",
+      name: "amplifier",
+      terminals: [{ id: "in", name: "IN", direction: "passive" as const }],
+      formalParameters: [],
+      interfaceStatus: "declared" as const,
+    };
+    expect(commands.setExternalSubcircuitDefinition(definition).ok).toBe(true);
+    input.commitStructure.mockClear();
+    const duplicate = commands.setExternalSubcircuitDefinition({
+      ...definition,
+      terminals: [
+        ...definition.terminals,
+        { id: "in2", name: "IN", direction: "passive" },
+      ],
+    });
+    expect(duplicate.ok).toBe(false);
+    expect(duplicate.message).toMatch(/duplicate/i);
+    expect(input.commitStructure).not.toHaveBeenCalled();
+    input.commitStructure.mockReturnValue(false);
+    expect(commands.setExternalSubcircuitDefinition(definition)).toMatchObject({
+      ok: false,
+      message: expect.stringContaining("not changed"),
+    });
+  });
+
+  it("does not silently replace a same-named external or shadow a local Cell", () => {
+    const input = dependencies();
+    const definition = {
+      id: "external-amp",
+      name: "amplifier",
+      terminals: [],
+      formalParameters: [],
+      interfaceStatus: "declared" as const,
+    };
+    input.project.externalSubcircuitDefinitions.push(definition);
+    const commands = createProjectStructureCommands(input);
+    expect(
+      commands.setExternalSubcircuitDefinition({ ...definition, id: "new-id" })
+        .ok,
+    ).toBe(false);
+    expect(
+      commands.setExternalSubcircuitDefinition({
+        ...definition,
+        name: input.activeDocument.netlist!.name,
+      }).ok,
+    ).toBe(false);
+    expect(input.commitStructure).not.toHaveBeenCalled();
+  });
+
+  it("creates a trimmed Cell with inherited presentation and activates it", () => {
+    const input = dependencies();
+    input.activeDocument.presentation.grid = 25;
+    input.activeDocument.instances.push({
+      id: "P1",
+      symbolId: "port",
+      placement: null,
+    });
+    input.activeDocument.nets.push({
+      id: "net-in",
+      terminals: [{ instanceId: "P1", pinName: "P" }],
+    });
+    input.activeDocument.netlist!.terminals.push({
+      id: "old-terminal",
+      name: "IN",
+      netId: "net-in",
+      direction: "input",
+      interfaceInstanceIds: ["P1"],
+    });
+    input.activeDocument.presentation.cellSymbol = {
+      minimumBodySize: { width: 100, height: 80 },
+      pinPlacements: [{ terminalId: "old-terminal", side: "west", offset: 0 }],
+    };
+    const commands = createProjectStructureCommands(input);
+
+    commands.createCell("  Child  ");
+
+    const [transactionId, edits, activeDocumentId] =
+      input.commitStructure.mock.calls[0]!;
+    expect(transactionId).toBe("create-cell");
+    expect(activeDocumentId).toBe("document-child");
+    expect(edits).toMatchObject([
+      {
+        kind: "add_document",
+        document: {
+          id: "document-child",
+          name: "Child",
+          presentation: { grid: 25 },
+          netlist: { name: "Child" },
+        },
+      },
+    ]);
+    expect(input.onCellCreated).toHaveBeenCalledOnce();
+    expect(input.setStatus).toHaveBeenCalledWith("Created Cell Child");
+    expect(edits[0]).toMatchObject({ kind: "add_document" });
+    if (edits[0]?.kind !== "add_document") return;
+    expect(edits[0].document.presentation.cellSymbol).toBeUndefined();
+    expect(
+      executeProjectTransaction(input.project, {
+        transactionId: "create-cell-test",
+        projectId: input.project.id,
+        expectedStructureRevision: input.project.structureRevision,
+        actor: { kind: "human", id: "test" },
+        edits,
+      }).ok,
+    ).toBe(true);
+  });
+
+  it("names the circuit and its Cell from Project Info in one edit", () => {
+    const deps = dependencies();
+    const commands = createProjectStructureCommands(deps);
+    const cell = deps.activeDocument;
+    expect(
+      commands.editProjectInfo({ name: "  Mixer  ", cellName: " mixer_core " }),
+    ).toBe(true);
+    const [transactionId, edits] = deps.commitStructure.mock.calls[0]!;
+    expect(transactionId).toBe("edit-project-info");
+    expect(edits).toEqual([
+      { kind: "rename_project", name: "Mixer" },
+      { kind: "rename_document", documentId: cell.id, name: "mixer_core" },
+    ]);
+    // The Edit Engine takes both as one transaction.
+    expect(
+      executeProjectTransaction(deps.project, {
+        transactionId,
+        projectId: deps.project.id,
+        expectedStructureRevision: deps.project.structureRevision,
+        actor: { kind: "human", id: "test" },
+        edits,
+      }).ok,
+    ).toBe(true);
+    // Unchanged names make no edit; a blank one refuses.
+    expect(
+      commands.editProjectInfo({
+        name: deps.project.name,
+        cellName: cell.name,
+      }),
+    ).toBe(true);
+    expect(commands.editProjectInfo({ name: " ", cellName: "x" })).toBe(false);
+    expect(deps.commitStructure).toHaveBeenCalledTimes(1);
+  });
+
+  it("deletes a Cell through the project structure boundary", () => {
+    const input = dependencies();
+    const child = createEmptyDocument("document-child", "Child");
+    input.project.documents.push(child);
+    const commands = createProjectStructureCommands(input);
+
+    expect(commands.deleteCell(child.id)).toBe(true);
+
+    expect(input.commitStructure).toHaveBeenCalledWith(
+      "delete-cell",
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "remove_document",
+          documentId: child.id,
+        }),
+      ]),
+      input.project.topDocumentId,
+    );
+    expect(input.setStatus).toHaveBeenCalledWith("Deleted Cell Child");
+  });
+
+  it("normalizes a parameter default and rejects clearing it without committing", () => {
+    const input = dependencies();
+    const child = createEmptyDocument("document-child", "Child");
+    input.project.documents.push(child);
+    child.netlist!.formalParameters = [{ name: "gain", defaultValue: "1" }];
+    const commands = createProjectStructureCommands(input);
+
+    expect(
+      commands.editCellParameter(
+        "gain",
+        { kind: "default", value: " 10 " },
+        child.id,
+      ).ok,
+    ).toBe(true);
+
+    expect(input.commitStructure).toHaveBeenCalledWith(
+      "cell-parameter-default",
+      expect.arrayContaining([
+        {
+          kind: "transact_document",
+          documentId: child.id,
+          expectedRevision: 0,
+          edits: [
+            {
+              kind: "set_cell_formal_parameters",
+              formalParameters: [{ name: "gain", defaultValue: "10" }],
+            },
+          ],
+        },
+      ]),
+    );
+    input.commitStructure.mockClear();
+    expect(
+      commands.editCellParameter(
+        "gain",
+        { kind: "default", value: "" },
+        child.id,
+      ).ok,
+    ).toBe(false);
+    expect(input.commitStructure).not.toHaveBeenCalled();
+  });
+
+  it("rejects off-grid Cell symbol dimensions before planning", () => {
+    const input = dependencies();
+    const commands = createProjectStructureCommands(input);
+
+    commands.setCellSymbolBodySize(
+      localBlockSymbolTarget(input.activeDocument),
+      95,
+      100,
+    );
+
+    expect(input.commitStructure).not.toHaveBeenCalled();
+    expect(input.setStatus).toHaveBeenCalledWith(
+      "Cell symbol size must use positive 10-unit grid values",
+    );
+  });
+
+  it("owns Cell Pin annotation edits and structural deletion", () => {
+    const input = dependencies();
+    input.activeDocument.instances.push({
+      id: "P1",
+      symbolId: "port",
+      placement: null,
+    });
+    input.activeDocument.nets.push({
+      id: "net-in",
+      terminals: [{ instanceId: "P1", pinName: "P" }],
+    });
+    input.activeDocument.netlist!.terminals.push({
+      id: "terminal-in",
+      name: "IN",
+      netId: "net-in",
+      direction: "input",
+      interfaceInstanceIds: ["P1"],
+    });
+    const annotation = {
+      id: "pin-label",
+      kind: "instance-label" as const,
+      binding: {
+        kind: "cell-terminal-name" as const,
+        terminalId: "terminal-in",
+      },
+      anchor: {
+        kind: "object" as const,
+        objectId: "P1",
+        localOffset: { x: 0, y: 0 },
+        fallbackPosition: { x: 0, y: 0 },
+      },
+      alignment: "middle" as const,
+      rotation: 0 as const,
+      locked: false,
+    };
+    input.activeDocument.annotations.push(annotation);
+    const commands = createProjectStructureCommands(input);
+
+    expect(commands.editCellTerminalAnnotation(annotation, "VIN")).toBe(true);
+    expect(input.commitStructure).toHaveBeenCalledWith(
+      "edit-cell-pin-label",
+      expect.any(Array),
+    );
+
+    input.commitStructure.mockClear();
+    expect(commands.deleteCellTerminal("terminal-in", "P1")).toBe(true);
+    expect(input.commitStructure).toHaveBeenCalledWith(
+      "delete-cell-pin",
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "transact_document" }),
+      ]),
+    );
+    expect(input.setStatus).toHaveBeenCalledWith("Deleted Cell Pin IN");
+  });
+
+  it("formats every Port label in a selected Cell as one atomic command", () => {
+    const input = dependencies();
+    const child = createEmptyDocument("child", "Child");
+    child.netlist!.terminals.push({
+      id: "terminal-in",
+      name: "IN",
+      netId: "net-in",
+      direction: "input",
+      interfaceInstanceIds: ["P1"],
+    });
+    child.annotations.push({
+      id: "label-in",
+      kind: "instance-label",
+      binding: { kind: "cell-terminal-name", terminalId: "terminal-in" },
+      formatOverride: { runs: [{ kind: "text", value: "IN" }] },
+      anchor: {
+        kind: "object",
+        objectId: "P1",
+        localOffset: { x: 0, y: 0 },
+        fallbackPosition: { x: 0, y: 0 },
+      },
+      alignment: "middle",
+      rotation: 0,
+      locked: false,
+    });
+    input.project.documents.push(child);
+    const commands = createProjectStructureCommands(input);
+    const options = {
+      suffixCase: "lowercase",
+      suffixPlacement: "baseline",
+    } as const;
+
+    commands.formatCellTerminalAnnotations(child.id, options);
+
+    expect(input.commitStructure).toHaveBeenCalledWith(
+      "format-cell-port-labels",
+      [
+        expect.objectContaining({
+          kind: "transact_document",
+          documentId: child.id,
+          edits: [
+            expect.objectContaining({
+              annotation: expect.objectContaining({
+                formatOverride: canonicalPortTextDocument("IN", options),
+              }),
+            }),
+          ],
+        }),
+      ],
+    );
+    expect(input.setStatus).toHaveBeenCalledWith("Formatted all Port labels");
+    expect(input.activeDocument.annotations).toEqual([]);
+
+    input.commitStructure.mockClear();
+    commands.formatCellTerminalAnnotations(input.activeDocument.id);
+    expect(input.commitStructure).not.toHaveBeenCalled();
+    expect(input.setStatus).toHaveBeenLastCalledWith(
+      "This Cell has no Port labels",
+    );
+  });
+
+  it("renames an annotation-owned Power Rail Cell Pin", () => {
+    const input = dependencies();
+    input.activeDocument.nets.push({ id: "net-vdd", terminals: [] });
+    input.activeDocument.netlist!.terminals.push({
+      id: "terminal-vdd",
+      name: "VDD",
+      netId: "net-vdd",
+      direction: "inout",
+      interfaceInstanceIds: [],
+      interfaceAnnotationId: "label-vdd",
+    });
+    const annotation = {
+      id: "label-vdd",
+      kind: "power-label" as const,
+      binding: {
+        kind: "cell-terminal-name" as const,
+        terminalId: "terminal-vdd",
+      },
+      netId: "net-vdd",
+      anchor: {
+        kind: "object" as const,
+        objectId: "junction-vdd",
+        localOffset: { x: 10, y: 10 },
+        fallbackPosition: { x: 10, y: 10 },
+      },
+      alignment: "start" as const,
+      rotation: 0 as const,
+      locked: false,
+    };
+    input.activeDocument.annotations.push(annotation);
+    const commands = createProjectStructureCommands(input);
+
+    expect(commands.editCellTerminalAnnotation(annotation, "AVDD")).toBe(true);
+    expect(input.commitStructure).toHaveBeenCalledWith(
+      "edit-cell-pin-label",
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "transact_document" }),
+      ]),
+    );
+  });
+});

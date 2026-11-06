@@ -1,0 +1,406 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import {
+  announceGalleryChange,
+  galleryCountLabel,
+  galleryQueryFromFilters,
+  galleryFeedQueryKey,
+  galleryPreviewUrl,
+  GALLERY_ENTRY_MISSING,
+  loadGalleryEntry,
+  loadGalleryFeed,
+  loadGalleryTagSummary,
+  primeGalleryPreview,
+  subscribeGalleryRefresh,
+  warmGalleryPreviews,
+  withLoadedTail,
+  GALLERY_SIGN_IN_REQUIRED,
+  WARMED_GALLERY_PREVIEWS,
+  type GalleryFeedEntry,
+} from "./gallery-client";
+import { resolveGalleryFilters } from "./gallery-filters";
+import { OFFLINE_FAILURE, requestFailureOf } from "./request-failure";
+
+it("loads the linked wall's complete query, including source, text and both negative filters", async () => {
+  const filters = resolveGalleryFilters(
+    "?source=analoggenie&q=mirror&netlist=0&ai=dataset&owner=alice&author=Old&tags=bias&parts=6-10&liked=1&attention=1&reason=unrouted",
+    null,
+  );
+  const query = galleryQueryFromFilters(filters, {
+    order: "random",
+    seed: "fixed",
+  });
+  expect(galleryFeedQueryKey(query)).toBe(
+    "source=analoggenie&q=mirror&attention=1&reason=unrouted&owner=alice&tags=bias&netlistable=0&ai=dataset&liked=1&parts=6-10&order=random&seed=fixed",
+  );
+  const asked: string[] = [];
+  await loadGalleryFeed(async (url) => {
+    asked.push(String(url));
+    return Response.json({ entries: [], nextCursor: null });
+  }, query);
+  expect(asked).toEqual([`/api/gallery?${galleryFeedQueryKey(query)}`]);
+});
+
+it("asks for the community's circuits alone while the datasets are hidden", () => {
+  const hidden = resolveGalleryFilters("?source=community&ai=0", null);
+  expect(
+    galleryFeedQueryKey(galleryQueryFromFilters(hidden, { order: "newest" })),
+  ).toBe("source=community&ai=0");
+});
+
+class FakeBroadcastChannel {
+  static readonly channels = new Map<string, Set<FakeBroadcastChannel>>();
+
+  private readonly listeners = new Set<
+    (event: MessageEvent<unknown>) => void
+  >();
+
+  constructor(readonly name: string) {
+    const peers = FakeBroadcastChannel.channels.get(name) ?? new Set();
+    peers.add(this);
+    FakeBroadcastChannel.channels.set(name, peers);
+  }
+
+  addEventListener(
+    type: string,
+    listener: (event: MessageEvent<unknown>) => void,
+  ): void {
+    if (type === "message") this.listeners.add(listener);
+  }
+
+  removeEventListener(
+    type: string,
+    listener: (event: MessageEvent<unknown>) => void,
+  ): void {
+    if (type === "message") this.listeners.delete(listener);
+  }
+
+  postMessage(data: unknown): void {
+    for (const peer of FakeBroadcastChannel.channels.get(this.name) ?? []) {
+      if (peer === this) continue;
+      for (const listener of peer.listeners) {
+        listener({ data } as MessageEvent<unknown>);
+      }
+    }
+  }
+
+  close(): void {
+    FakeBroadcastChannel.channels.get(this.name)?.delete(this);
+    this.listeners.clear();
+  }
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  FakeBroadcastChannel.channels.clear();
+});
+
+it("requests tag counts for the wall's filters, leaving out its tag choice", async () => {
+  const payload = {
+    tags: [{ tag: "ota", count: 2 }],
+    groups: [{ group: "Amplifiers", count: 2 }],
+  };
+  const fetchLike = vi
+    .fn<typeof fetch>()
+    .mockImplementation(async () => Response.json(payload));
+  expect(await loadGalleryTagSummary(fetchLike, { netlistable: true })).toEqual(
+    payload,
+  );
+  expect(fetchLike).toHaveBeenLastCalledWith(
+    "/api/gallery/tags?netlistable=1",
+    { credentials: "same-origin" },
+  );
+  await loadGalleryTagSummary(fetchLike, {
+    netlistable: false,
+    withoutNetlist: true,
+    ai: "human",
+  });
+  expect(fetchLike).toHaveBeenLastCalledWith(
+    "/api/gallery/tags?netlistable=0&ai=0",
+    { credentials: "same-origin" },
+  );
+  await loadGalleryTagSummary(fetchLike, { netlistable: false });
+  expect(fetchLike).toHaveBeenLastCalledWith("/api/gallery/tags", {
+    credentials: "same-origin",
+  });
+  // A wall narrowed to one contributor counts only their tags; the tag
+  // choice itself never narrows its own counts.
+  await loadGalleryTagSummary(fetchLike, {
+    author: "Singh",
+    ownerUserId: "user-1",
+    tags: ["ota"],
+    netlistable: true,
+  });
+  expect(fetchLike).toHaveBeenLastCalledWith(
+    "/api/gallery/tags?owner=user-1&netlistable=1",
+    { credentials: "same-origin" },
+  );
+  await loadGalleryTagSummary(fetchLike, { author: "Singh" });
+  expect(fetchLike).toHaveBeenLastCalledWith("/api/gallery/tags?author=Singh", {
+    credentials: "same-origin",
+  });
+});
+
+it("asks the server to search, and counts tags for the same search", async () => {
+  const fetchLike = vi
+    .fn<typeof fetch>()
+    .mockImplementation(async () =>
+      Response.json({ entries: [], nextCursor: null, total: 3 }),
+    );
+  // One query builder for the wall and the Editor panel: the words go to the
+  // server, trimmed, beside every other filter and the cursor.
+  await loadGalleryFeed(fetchLike, {
+    q: "  three stage ",
+    tags: ["ota"],
+    cursor: "c-1",
+  });
+  expect(fetchLike).toHaveBeenLastCalledWith(
+    "/api/gallery?q=three+stage&tags=ota&cursor=c-1",
+    { credentials: "same-origin" },
+  );
+  // The page carries the search the server says it applied, and only that.
+  fetchLike.mockImplementationOnce(async () =>
+    Response.json({ entries: [], nextCursor: null, total: 0, search: "zzz" }),
+  );
+  expect(await loadGalleryFeed(fetchLike, { q: "zzz" })).toMatchObject({
+    search: "zzz",
+  });
+  expect(await loadGalleryFeed(fetchLike, { q: "zzz" })).not.toHaveProperty(
+    "search",
+  );
+  await loadGalleryFeed(fetchLike, { q: "   " });
+  expect(fetchLike).toHaveBeenLastCalledWith("/api/gallery", {
+    credentials: "same-origin",
+  });
+  await loadGalleryTagSummary(fetchLike, { q: "stage", netlistable: true });
+  expect(fetchLike).toHaveBeenLastCalledWith(
+    "/api/gallery/tags?q=stage&netlistable=1",
+    { credentials: "same-origin" },
+  );
+  // A server answer is a count of matches, not "so far".
+  expect(galleryCountLabel(3, { searched: true })).toBe("3 matching circuits");
+  expect(galleryCountLabel(1, { searched: true })).toBe("1 matching circuit");
+});
+
+it("asks for Needs attention with its reason, AI, Liked and sizes, and reads their counts", async () => {
+  const filterCounts = {
+    attention: 2,
+    netlistable: 0,
+    liked: 1,
+    attentionKinds: { "global-vdd": 2, "suspected-disconnection": 1 },
+    componentRanges: { "0-5": 1, "6-10": 1, "26-": 1 },
+  };
+  const fetchLike = vi
+    .fn<typeof fetch>()
+    .mockImplementation(async () =>
+      Response.json({ entries: [], nextCursor: null, filterCounts }),
+    );
+  // The wall's quick filters reach the server; the browser filters nothing.
+  const filters = {
+    attention: true,
+    attentionKind: "suspected-disconnection",
+    ai: "ai" as const,
+    liked: true,
+    parts: ["6-10", "26-"],
+  };
+  expect(await loadGalleryFeed(fetchLike, filters)).toMatchObject({
+    filterCounts,
+  });
+  expect(fetchLike).toHaveBeenLastCalledWith(
+    "/api/gallery?attention=1&reason=suspected-disconnection&ai=1&liked=1&parts=6-10%2C26-",
+    { credentials: "same-origin" },
+  );
+  // The tag counts beside the wall are narrowed the same way.
+  await loadGalleryTagSummary(fetchLike, { ...filters, ai: "human" });
+  expect(fetchLike).toHaveBeenLastCalledWith(
+    "/api/gallery/tags?attention=1&reason=suspected-disconnection&ai=0&liked=1&parts=6-10%2C26-",
+    { credentials: "same-origin" },
+  );
+  // A reason means nothing outside Needs attention.
+  await loadGalleryFeed(fetchLike, { attentionKind: "global-vdd" });
+  expect(fetchLike).toHaveBeenLastCalledWith("/api/gallery", {
+    credentials: "same-origin",
+  });
+});
+
+describe("Gallery preview caching", () => {
+  it("starts the first page's previews, by the tiles' own URLs, as soon as it answers (#1590)", () => {
+    const entries = Array.from({ length: 12 }, (_, index) => ({
+      id: `e${index}`,
+      previewRevision: `r${index}`,
+    })) as GalleryFeedEntry[];
+    const loaded: string[] = [];
+    warmGalleryPreviews({ entries, nextCursor: null, total: 12 }, (url) =>
+      loaded.push(url),
+    );
+    expect(loaded).toHaveLength(WARMED_GALLERY_PREVIEWS);
+    expect(loaded[0]).toBe(galleryPreviewUrl("e0", "r0"));
+    // A signed-out or failed first page starts nothing.
+    warmGalleryPreviews(GALLERY_SIGN_IN_REQUIRED, (url) => loaded.push(url));
+    warmGalleryPreviews(OFFLINE_FAILURE, (url) => loaded.push(url));
+    expect(loaded).toHaveLength(WARMED_GALLERY_PREVIEWS);
+  });
+
+  it("uses one immutable URL per preview revision", () => {
+    expect(galleryPreviewUrl("entry-1", "revision 0")).toBe(
+      "/api/gallery/entry-1/preview.svg?v=revision%200&render=formula-label-v5",
+    );
+    expect(galleryPreviewUrl("entry-1", "revision-7")).toBe(
+      "/api/gallery/entry-1/preview.svg?v=revision-7&render=formula-label-v5",
+    );
+    expect(galleryPreviewUrl("entry-1")).toBe(
+      "/api/gallery/entry-1/preview.svg",
+    );
+  });
+
+  it("warms only a revisioned preview without delaying on failure", async () => {
+    const fetchLike = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("<svg/>"))
+      .mockRejectedValueOnce(new Error("offline")) as unknown as typeof fetch;
+
+    await primeGalleryPreview("entry-1", "revision-3", fetchLike);
+    await primeGalleryPreview("entry-1", "revision-4", fetchLike);
+    await primeGalleryPreview("entry-1", undefined, fetchLike);
+
+    expect(fetchLike).toHaveBeenCalledTimes(2);
+    expect(fetchLike).toHaveBeenNthCalledWith(
+      1,
+      "/api/gallery/entry-1/preview.svg?v=revision-3&render=formula-label-v5",
+      { credentials: "same-origin", cache: "reload" },
+    );
+  });
+});
+
+describe("Gallery refresh notifications", () => {
+  it("broadcasts a successful mutation to another tab", () => {
+    vi.stubGlobal(
+      "BroadcastChannel",
+      FakeBroadcastChannel as unknown as typeof BroadcastChannel,
+    );
+    const remote = new FakeBroadcastChannel("analog-canvas-gallery-change-v1");
+    const messages: unknown[] = [];
+    remote.addEventListener("message", (event) => messages.push(event.data));
+
+    announceGalleryChange({
+      entryId: "entry-1",
+      previewRevision: "revision-5",
+    });
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({
+      type: "gallery-changed",
+      entryId: "entry-1",
+      previewRevision: "revision-5",
+    });
+  });
+
+  it("accepts valid cross-tab messages and ignores malformed ones", () => {
+    vi.stubGlobal(
+      "BroadcastChannel",
+      FakeBroadcastChannel as unknown as typeof BroadcastChannel,
+    );
+    const changes: unknown[] = [];
+    const unsubscribe = subscribeGalleryRefresh((change) =>
+      changes.push(change),
+    );
+    const remote = new FakeBroadcastChannel("analog-canvas-gallery-change-v1");
+
+    remote.postMessage({ type: "gallery-changed", sourceId: "other-tab" });
+    remote.postMessage({
+      type: "gallery-changed",
+      sourceId: "other-tab",
+      entryId: "entry-2",
+      previewRevision: "revision-6",
+    });
+
+    expect(changes).toEqual([
+      { entryId: "entry-2", previewRevision: "revision-6" },
+    ]);
+    unsubscribe();
+  });
+});
+
+describe("refreshing a loaded wall", () => {
+  const entry = (id: string, second: number) => ({
+    id,
+    name: id,
+    author: "tz",
+    description: "",
+    createdAt: `2026-09-20T00:00:${String(second).padStart(2, "0")}.000Z`,
+    schemaVersion: 1,
+  });
+  const cursor = (item: ReturnType<typeof entry>) =>
+    `${item.createdAt}|${item.id}`;
+
+  it("keeps the older pages it had loaded behind the new first page", () => {
+    const loaded = [entry("c", 50), entry("b", 40), entry("a", 30)];
+    // A new circuit arrived: the first page now ends one entry earlier.
+    const page = {
+      entries: [entry("new", 55), entry("c", 50)],
+      nextCursor: cursor(entry("c", 50)),
+      total: 4,
+    };
+    const merged = withLoadedTail({ entries: loaded, nextCursor: null }, page);
+    expect(merged.entries.map((item) => item.id)).toEqual([
+      "new",
+      "c",
+      "b",
+      "a",
+    ]);
+    expect(merged.nextCursor).toBeNull();
+    expect(merged.total).toBe(4);
+  });
+
+  it("answers with the page when nothing older was loaded or all fits", () => {
+    const page = {
+      entries: [entry("c", 50)],
+      nextCursor: cursor(entry("c", 50)),
+    };
+    expect(
+      withLoadedTail({ entries: [entry("c", 50)], nextCursor: "x" }, page),
+    ).toBe(page);
+    const whole = { entries: [entry("c", 50)], nextCursor: null };
+    expect(
+      withLoadedTail(
+        { entries: [entry("c", 50), entry("a", 30)], nextCursor: null },
+        whole,
+      ),
+    ).toBe(whole);
+  });
+});
+
+describe("one Gallery tile", () => {
+  it("asks for the tile alone, which costs no daily open", async () => {
+    const fetchLike = vi.fn<typeof fetch>(async () =>
+      Response.json({ status: "public", entry: { id: "entry-1" } }),
+    );
+    await expect(loadGalleryEntry(fetchLike, "entry-1")).resolves.toEqual({
+      id: "entry-1",
+    });
+    expect(fetchLike).toHaveBeenCalledWith(
+      "/api/gallery/entry-1?summary=1",
+      expect.anything(),
+    );
+  });
+
+  it("calls a link's circuit removed only when the wall does not hold it", async () => {
+    const answer = (response: Response) =>
+      loadGalleryEntry(async () => response, "entry-1");
+    expect(await answer(new Response("", { status: 404 }))).toBe(
+      GALLERY_ENTRY_MISSING,
+    );
+    expect(
+      await answer(
+        Response.json({ status: "withdrawn", entry: { id: "entry-1" } }),
+      ),
+    ).toBe(GALLERY_ENTRY_MISSING);
+    const blocked = Response.json(
+      { error: "account-blocked" },
+      { status: 403 },
+    );
+    expect(await answer(blocked.clone())).toEqual(
+      await requestFailureOf(blocked),
+    );
+  });
+});

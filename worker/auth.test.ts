@@ -1,0 +1,1321 @@
+import { DatabaseSync } from "node:sqlite";
+import { describe, expect, it } from "vitest";
+
+import {
+  AI_SEATS,
+  AUTH_DISPLAY_NAME_MAX,
+  AUTH_SESSION_TTL_SECONDS,
+  AUTH_EMAIL_DAILY_LIMIT,
+  AUTH_LOGIN_CODE_ATTEMPTS,
+  AuthDO,
+  OWNER_ACCOUNT_IDS,
+  ownerTokenUserOf,
+  sessionUserOf,
+  type AuthEnv,
+  type SessionUser,
+} from "./auth";
+
+const ORIGIN = "https://canvas.test";
+
+function sqliteState() {
+  const db = new DatabaseSync(":memory:");
+  return {
+    storage: {
+      sql: {
+        exec<T>(query: string, ...bindings: unknown[]) {
+          const statement = db.prepare(query);
+          if (/^\s*(select|with|pragma)/iu.test(query)) {
+            const rows = statement.all(
+              ...(bindings as (string | number | null)[]),
+            ) as T[];
+            return {
+              toArray: () => rows,
+              one: () => {
+                if (rows.length !== 1) throw new Error("expected one row");
+                return rows[0]!;
+              },
+            };
+          }
+          statement.run(...(bindings as (string | number | null)[]));
+          return {
+            toArray: () => [] as T[],
+            one: () => {
+              throw new Error("no rows");
+            },
+          };
+        },
+      },
+      transactionSync<T>(callback: () => T): T {
+        return callback();
+      },
+    },
+  };
+}
+
+type FakeRoute = (url: string, init?: RequestInit) => Response | null;
+
+function harness(
+  env: Partial<AuthEnv> = {},
+  routes: FakeRoute[] = [],
+  state = sqliteState(),
+) {
+  const durable = new AuthDO(state, {
+    AUTH: undefined as never,
+    ...env,
+  });
+  const outbound: { url: string; init?: RequestInit }[] = [];
+  durable.fetchLike = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    outbound.push({ url, ...(init === undefined ? {} : { init }) });
+    for (const route of routes) {
+      const response = route(url, init);
+      if (response) return response;
+    }
+    throw new Error(`unmocked outbound fetch: ${url}`);
+  }) as typeof fetch;
+  const call = (
+    path: string,
+    init: RequestInit & { cookie?: string } = {},
+  ): Promise<Response> => {
+    const headers = new Headers(init.headers);
+    if (init.cookie) headers.set("Cookie", init.cookie);
+    if (init.method === "POST") headers.set("Origin", ORIGIN);
+    return durable.fetch(new Request(`${ORIGIN}${path}`, { ...init, headers }));
+  };
+  return { durable, call, outbound };
+}
+
+function cookieValue(response: Response, name: string): string | null {
+  for (const header of response.headers.getSetCookie()) {
+    const match = header.match(new RegExp(`^${name}=([^;]*)`, "u"));
+    if (match) return match[1] ?? null;
+  }
+  return null;
+}
+
+function resendCapture(sent: { to: string; text: string }[]): FakeRoute {
+  return (url, init) => {
+    if (!url.startsWith("https://api.resend.com/")) return null;
+    const body = JSON.parse(String(init?.body)) as {
+      to: string[];
+      text: string;
+    };
+    sent.push({ to: body.to[0] ?? "", text: body.text });
+    return Response.json({ id: "email-1" });
+  };
+}
+
+/** The six-digit code an emailed sign-in message carries. */
+function sentCode(message: { text: string }): string {
+  const code = /\b(\d{6})\b/u.exec(message.text)?.[1];
+  if (!code) throw new Error("no sign-in code sent");
+  return code;
+}
+
+async function emailSignIn(
+  auth: ReturnType<typeof harness>,
+  email: string,
+): Promise<string> {
+  const sent: { to: string; text: string }[] = [];
+  auth.durable.fetchLike = (async (
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ) => {
+    const response = resendCapture(sent)(String(input), init);
+    if (!response) throw new Error(`unmocked: ${String(input)}`);
+    return response;
+  }) as typeof fetch;
+  const start = await auth.call("/api/auth/email/start", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+  expect(start.status).toBe(202);
+  expect(sent[0]?.to).toBe(email);
+  const verified = await auth.call("/api/auth/email/verify", {
+    method: "POST",
+    body: JSON.stringify({ email, code: sentCode(sent[0]!) }),
+  });
+  expect(verified.status).toBe(200);
+  const session = cookieValue(verified, "icm_session");
+  if (!session) throw new Error("no session cookie set");
+  return `icm_session=${session}`;
+}
+
+async function me(
+  auth: ReturnType<typeof harness>,
+  cookie?: string,
+): Promise<SessionUser | null> {
+  const response = await auth.call(
+    "/api/auth/me",
+    cookie === undefined ? {} : { cookie },
+  );
+  expect(response.status).toBe(200);
+  return ((await response.json()) as { user: SessionUser | null }).user;
+}
+
+describe("runtime binding", () => {
+  it("never exposes the raw global fetch as the default seam", () => {
+    // `this.fetchLike(...)` on the raw global rebinds `this` to the DO,
+    // which the Workers runtime rejects with "Illegal invocation" (Node
+    // tolerates it, so only this identity check can catch a regression).
+    const durable = new AuthDO(sqliteState(), {} as AuthEnv);
+    expect(durable.fetchLike).not.toBe(fetch);
+    expect(durable.fetchLike).not.toBe(globalThis.fetch);
+  });
+});
+
+describe("account data migrations", () => {
+  it("renames the legacy tokenzhang account once without touching other users", () => {
+    const state = sqliteState();
+    new AuthDO(state, {} as AuthEnv);
+    state.storage.sql.exec(
+      `INSERT INTO users
+       (id, provider, provider_id, email, display_name, role, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?)`,
+      "legacy-user",
+      "github",
+      "1",
+      null,
+      "Token Zhang",
+      "user",
+      "2026-08-01T00:00:00.000Z",
+      "other-user",
+      "github",
+      "2",
+      null,
+      "Zhishuai Zhang",
+      "user",
+      "2026-08-01T00:00:00.000Z",
+    );
+    state.storage.sql.exec("DELETE FROM data_migrations");
+
+    new AuthDO(state, {} as AuthEnv);
+    expect(
+      state.storage.sql
+        .exec<{ id: string; display_name: string }>(
+          "SELECT id, display_name FROM users WHERE provider <> 'ai' ORDER BY id",
+        )
+        .toArray(),
+    ).toEqual([
+      { id: "legacy-user", display_name: "Zhishuai Zhang" },
+      { id: "other-user", display_name: "Zhishuai Zhang" },
+    ]);
+
+    state.storage.sql.exec(
+      "UPDATE users SET display_name = 'Token Zhang' WHERE id = 'legacy-user'",
+    );
+    new AuthDO(state, {} as AuthEnv);
+    expect(
+      state.storage.sql
+        .exec<{ display_name: string }>(
+          "SELECT display_name FROM users WHERE id = 'legacy-user'",
+        )
+        .one().display_name,
+    ).toBe("Token Zhang");
+  });
+
+  it("renames the Magic Li account once without touching another matching handle", () => {
+    const state = sqliteState();
+    new AuthDO(state, {} as AuthEnv);
+    state.storage.sql.exec(
+      `INSERT INTO users
+       (id, provider, provider_id, email, display_name, role, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?)`,
+      "2cf8ed78-a15d-4a24-8020-74dca560a897",
+      "github",
+      "3187863239",
+      null,
+      "3187863239-netizen",
+      "user",
+      "2026-09-19T00:00:00.000Z",
+      "other-user",
+      "github",
+      "same-handle",
+      null,
+      "3187863239-netizen",
+      "user",
+      "2026-09-19T00:00:00.000Z",
+    );
+    state.storage.sql.exec(
+      "DELETE FROM data_migrations WHERE id LIKE '%magic-li%'",
+    );
+
+    new AuthDO(state, {} as AuthEnv);
+    expect(
+      state.storage.sql
+        .exec<{ id: string; display_name: string }>(
+          "SELECT id, display_name FROM users WHERE provider <> 'ai' ORDER BY id",
+        )
+        .toArray(),
+    ).toEqual([
+      {
+        id: "2cf8ed78-a15d-4a24-8020-74dca560a897",
+        display_name: "Magic Li",
+      },
+      { id: "other-user", display_name: "3187863239-netizen" },
+    ]);
+
+    state.storage.sql.exec(
+      `UPDATE users SET display_name = 'Personal Choice'
+       WHERE id = '2cf8ed78-a15d-4a24-8020-74dca560a897'`,
+    );
+    new AuthDO(state, {} as AuthEnv);
+    expect(
+      state.storage.sql
+        .exec<{ display_name: string }>(
+          `SELECT display_name FROM users
+           WHERE id = '2cf8ed78-a15d-4a24-8020-74dca560a897'`,
+        )
+        .one().display_name,
+    ).toBe("Personal Choice");
+  });
+});
+
+describe("providers visibility (dark ship)", () => {
+  it("reports exactly the providers whose secrets exist", async () => {
+    const dark = harness();
+    expect(await (await dark.call("/api/auth/providers")).json()).toEqual({
+      github: false,
+      google: false,
+      email: false,
+    });
+    const lit = harness({
+      GH_OAUTH_CLIENT_ID: "gid",
+      GH_OAUTH_CLIENT_SECRET: "gsecret",
+      RESEND_API_KEY: "rk",
+    });
+    expect(await (await lit.call("/api/auth/providers")).json()).toEqual({
+      github: true,
+      google: false,
+      email: true,
+    });
+    const darkStart = await dark.call("/api/auth/github/start");
+    expect(darkStart.status).toBe(404);
+    const darkEmail = await dark.call("/api/auth/email/start", {
+      method: "POST",
+      body: JSON.stringify({ email: "a@b.co" }),
+    });
+    expect(darkEmail.status).toBe(404);
+  });
+});
+
+describe("emailed sign-in code", () => {
+  it("signs in end-to-end, renames, and signs out", async () => {
+    const auth = harness({
+      RESEND_API_KEY: "rk",
+      ADMIN_EMAILS: "Boss@Example.com, other@example.com",
+    });
+    const cookie = await emailSignIn(auth, "boss@example.com");
+
+    const user = await me(auth, cookie);
+    expect(user).toMatchObject({
+      provider: "email",
+      email: "boss@example.com",
+      displayName: "boss",
+      isAdmin: true,
+    });
+
+    const renamed = await auth.call("/api/auth/profile", {
+      method: "POST",
+      cookie,
+      body: JSON.stringify({ displayName: "  Token Zhang  " }),
+    });
+    expect(renamed.status).toBe(200);
+    expect((await me(auth, cookie))?.displayName).toBe("Token Zhang");
+
+    // Signing in again keeps the account and the chosen name.
+    const secondCookie = await emailSignIn(auth, "boss@example.com");
+    const again = await me(auth, secondCookie);
+    expect(again?.id).toBe(user?.id);
+    expect(again?.displayName).toBe("Token Zhang");
+
+    const logout = await auth.call("/api/auth/logout", {
+      method: "POST",
+      cookie,
+    });
+    expect(logout.status).toBe(200);
+    expect(await me(auth, cookie)).toBeNull();
+    expect(await me(auth)).toBeNull();
+  });
+
+  it("syncs a renamed profile to Gallery by stable owner id", async () => {
+    const syncs: Array<{ ownerUserId: string; displayName: string }> = [];
+    const auth = harness({
+      RESEND_API_KEY: "rk",
+      GALLERY: {
+        getByName: () => ({
+          fetch: async (input, init) => {
+            expect(String(input)).toBe("https://gallery/rename-owner");
+            syncs.push(JSON.parse(String(init?.body)));
+            return Response.json({ ok: true });
+          },
+        }),
+      },
+    });
+    const cookie = await emailSignIn(auth, "maker@example.com");
+    const before = await me(auth, cookie);
+
+    const renamed = await auth.call("/api/auth/profile", {
+      method: "POST",
+      cookie,
+      body: JSON.stringify({ displayName: "  Current Public Name  " }),
+    });
+
+    expect(renamed.status).toBe(200);
+    expect(syncs).toEqual([
+      {
+        ownerUserId: before!.id,
+        displayName: "Current Public Name",
+      },
+    ]);
+    expect((await me(auth, cookie))?.displayName).toBe("Current Public Name");
+  });
+
+  it("keeps the profile unchanged when Gallery cannot synchronize the byline", async () => {
+    const auth = harness({
+      RESEND_API_KEY: "rk",
+      GALLERY: {
+        getByName: () => ({
+          fetch: async () =>
+            Response.json({ error: "unavailable" }, { status: 503 }),
+        }),
+      },
+    });
+    const cookie = await emailSignIn(auth, "maker@example.com");
+
+    const renamed = await auth.call("/api/auth/profile", {
+      method: "POST",
+      cookie,
+      body: JSON.stringify({ displayName: "Unsynchronized Name" }),
+    });
+
+    expect(renamed.status).toBe(503);
+    expect(await renamed.json()).toEqual({
+      error: "gallery-byline-sync-failed",
+    });
+    expect((await me(auth, cookie))?.displayName).toBe("maker");
+  });
+
+  it("deletes the signed-in account with its Gallery and component data", async () => {
+    const calls: { url: string; body: unknown }[] = [];
+    const namespace = (reply: Record<string, number>) => ({
+      getByName: () => ({
+        fetch: async (input: Request | string, init?: RequestInit) => {
+          calls.push({
+            url: String(input),
+            body: JSON.parse(String(init?.body)),
+          });
+          return Response.json(reply);
+        },
+      }),
+    });
+    const auth = harness({
+      RESEND_API_KEY: "rk",
+      GALLERY: namespace({ entries: 2, likes: 3, projects: 1 }),
+      COMPONENT_LIBRARY: namespace({ deleted: 1 }),
+    });
+    const cookie = await emailSignIn(auth, "leaving@example.com");
+    const otherCookie = await emailSignIn(auth, "staying@example.com");
+    const leaving = await me(auth, cookie);
+
+    expect(
+      (await auth.call("/api/auth/account/delete", { method: "POST" })).status,
+    ).toBe(401);
+    // Deleting needs the dialog's explicit confirmation.
+    const unconfirmed = await auth.call("/api/auth/account/delete", {
+      method: "POST",
+      cookie,
+      body: JSON.stringify({}),
+    });
+    expect(unconfirmed.status).toBe(400);
+    expect(calls).toEqual([]);
+
+    const deleted = await auth.call("/api/auth/account/delete", {
+      method: "POST",
+      cookie,
+      body: JSON.stringify({ confirm: "delete-account" }),
+    });
+    expect(deleted.status).toBe(200);
+    expect(await deleted.json()).toEqual({
+      deleted: { circuits: 2, likes: 3, projects: 1, components: 1 },
+    });
+    expect(deleted.headers.get("set-cookie")).toMatch(
+      /^icm_session=; Path=\/; HttpOnly; SameSite=Lax; Max-Age=0/u,
+    );
+    expect(calls).toEqual([
+      {
+        url: "https://gallery/delete-account",
+        body: { userId: leaving!.id },
+      },
+      {
+        url: "https://components/delete-author",
+        body: { userId: leaving!.id },
+      },
+    ]);
+    expect(await me(auth, cookie)).toBeNull();
+    expect((await me(auth, otherCookie))?.email).toBe("staying@example.com");
+    // Signing in again starts a new, empty account.
+    const returning = await me(
+      auth,
+      await emailSignIn(auth, "leaving@example.com"),
+    );
+    expect(returning?.id).not.toBe(leaving!.id);
+  });
+
+  it("keeps the account when the Gallery cannot delete its data", async () => {
+    const auth = harness({
+      RESEND_API_KEY: "rk",
+      GALLERY: {
+        getByName: () => ({
+          fetch: async () =>
+            Response.json({ error: "unavailable" }, { status: 503 }),
+        }),
+      },
+    });
+    const cookie = await emailSignIn(auth, "leaving@example.com");
+    const failed = await auth.call("/api/auth/account/delete", {
+      method: "POST",
+      cookie,
+      body: JSON.stringify({ confirm: "delete-account" }),
+    });
+    expect(failed.status).toBe(503);
+    expect(await failed.json()).toEqual({ error: "gallery-delete-failed" });
+    // Still signed in, so trying again works once the Gallery is back.
+    expect((await me(auth, cookie))?.email).toBe("leaving@example.com");
+  });
+
+  it("unions the primary and additive administrator email secrets", async () => {
+    const auth = harness({
+      RESEND_API_KEY: "rk",
+      ADMIN_EMAILS: "owner@example.com",
+      ADMIN_EMAILS_EXTRA: " Added.Admin@Example.com ",
+    });
+
+    const ownerCookie = await emailSignIn(auth, "owner@example.com");
+    const addedCookie = await emailSignIn(auth, "added.admin@example.com");
+    const ordinaryCookie = await emailSignIn(auth, "user@example.com");
+
+    expect((await me(auth, ownerCookie))?.isAdmin).toBe(true);
+    expect((await me(auth, addedCookie))?.isAdmin).toBe(true);
+    expect((await me(auth, ordinaryCookie))?.isAdmin).toBe(false);
+  });
+
+  it("codes are single-use, expire, bound guessing, and are rate-limited", async () => {
+    const auth = harness({ RESEND_API_KEY: "rk" });
+    const sent: { to: string; text: string }[] = [];
+    auth.durable.fetchLike = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => resendCapture(sent)(String(input), init)!) as typeof fetch;
+    const ask = (email = "user@example.com") =>
+      auth.call("/api/auth/email/start", {
+        method: "POST",
+        body: JSON.stringify({ email }),
+      });
+    const verify = (code: string, email = "user@example.com") =>
+      auth.call("/api/auth/email/verify", {
+        method: "POST",
+        body: JSON.stringify({ email, code }),
+      });
+    const codeIn = (index: number) => sentCode(sent[index]!);
+
+    expect((await ask()).status).toBe(202);
+    // The email carries a code, never a link.
+    expect(sent[0]!.text).not.toMatch(/https?:\/\//u);
+    const first = await verify(codeIn(0));
+    expect(first.status).toBe(200);
+    expect(cookieValue(first, "icm_session")).toBeTruthy();
+    const reused = await verify(codeIn(0));
+    expect(reused.status).toBe(400);
+    expect(await reused.json()).toEqual({ error: "expired-code" });
+
+    // Asking again replaces the code before; a code typed with a space still
+    // works, once.
+    await ask();
+    await ask();
+    expect((await verify(codeIn(1))).status).toBe(400);
+    const spaced = `${codeIn(2).slice(0, 3)} ${codeIn(2).slice(3)}`;
+    expect((await verify(spaced)).status).toBe(200);
+
+    // A code that has expired by the time it is typed fails.
+    await ask();
+    auth.durable.now = () => new Date(Date.now() + 11 * 60 * 1000);
+    const expired = await verify(codeIn(3));
+    expect(await expired.json()).toEqual({ error: "expired-code" });
+    auth.durable.now = () => new Date();
+
+    // Wrong guesses count down, and the fifth ends the code, right or not.
+    await ask();
+    const right = codeIn(4);
+    const wrong = right === "000000" ? "000001" : "000000";
+    for (let left = AUTH_LOGIN_CODE_ATTEMPTS - 1; left > 0; left -= 1) {
+      const guess = await verify(wrong);
+      expect(await guess.json()).toEqual({
+        error: "invalid-code",
+        attemptsLeft: left,
+      });
+    }
+    expect((await verify(wrong)).status).toBe(429);
+    expect(await (await verify(right)).json()).toEqual({
+      error: "expired-code",
+    });
+    // A code for one address never signs in another.
+    expect((await verify(right, "other@example.com")).status).toBe(400);
+    expect((await verify("12345")).status).toBe(400);
+
+    const invalid = await auth.call("/api/auth/email/start", {
+      method: "POST",
+      body: JSON.stringify({ email: "not-an-email" }),
+    });
+    expect(invalid.status).toBe(400);
+
+    for (let index = sent.length; index < AUTH_EMAIL_DAILY_LIMIT; index += 1) {
+      const ok = await auth.call("/api/auth/email/start", {
+        method: "POST",
+        body: JSON.stringify({ email: "user@example.com" }),
+      });
+      expect(ok.status).toBe(202);
+    }
+    const overflow = await auth.call("/api/auth/email/start", {
+      method: "POST",
+      body: JSON.stringify({ email: "user@example.com" }),
+    });
+    expect(overflow.status).toBe(429);
+    const other = await auth.call("/api/auth/email/start", {
+      method: "POST",
+      body: JSON.stringify({ email: "someone-else@example.com" }),
+    });
+    expect(other.status).toBe(202);
+  });
+
+  it("rejects a rename that is empty, oversized, or anonymous", async () => {
+    const auth = harness({ RESEND_API_KEY: "rk" });
+    const cookie = await emailSignIn(auth, "user@example.com");
+    const anonymous = await auth.call("/api/auth/profile", {
+      method: "POST",
+      body: JSON.stringify({ displayName: "X" }),
+    });
+    expect(anonymous.status).toBe(401);
+    const empty = await auth.call("/api/auth/profile", {
+      method: "POST",
+      cookie,
+      body: JSON.stringify({ displayName: "   " }),
+    });
+    expect(empty.status).toBe(400);
+    const oversized = await auth.call("/api/auth/profile", {
+      method: "POST",
+      cookie,
+      body: JSON.stringify({
+        displayName: "x".repeat(AUTH_DISPLAY_NAME_MAX + 1),
+      }),
+    });
+    expect(oversized.status).toBe(400);
+  });
+
+  it("expires sessions after their TTL", async () => {
+    const auth = harness({ RESEND_API_KEY: "rk" });
+    const cookie = await emailSignIn(auth, "user@example.com");
+    expect(await me(auth, cookie)).not.toBeNull();
+    auth.durable.now = () => new Date(Date.now() + 31 * 24 * 60 * 60 * 1000);
+    expect(await me(auth, cookie)).toBeNull();
+  });
+});
+
+describe("GitHub OAuth", () => {
+  function githubRoutes(): FakeRoute[] {
+    return [
+      (url) =>
+        url.startsWith("https://github.com/login/oauth/access_token")
+          ? Response.json({ access_token: "gh-token" })
+          : null,
+      (url) =>
+        url === "https://api.github.com/user"
+          ? Response.json({ id: 4242, login: "tz", name: "Token Zhang" })
+          : null,
+      (url) =>
+        url === "https://api.github.com/user/emails"
+          ? Response.json([
+              { email: "old@example.com", primary: false, verified: true },
+              { email: "boss@example.com", primary: true, verified: true },
+              { email: "spoof@example.com", primary: false, verified: false },
+            ])
+          : null,
+    ];
+  }
+
+  it("round-trips authorize, callback, and admin detection", async () => {
+    const auth = harness(
+      {
+        GH_OAUTH_CLIENT_ID: "gid",
+        GH_OAUTH_CLIENT_SECRET: "gsecret",
+        ADMIN_EMAILS: "boss@example.com",
+      },
+      githubRoutes(),
+    );
+    const start = await auth.call("/api/auth/github/start");
+    expect(start.status).toBe(302);
+    const authorize = new URL(start.headers.get("location") ?? "");
+    expect(authorize.origin + authorize.pathname).toBe(
+      "https://github.com/login/oauth/authorize",
+    );
+    expect(authorize.searchParams.get("redirect_uri")).toBe(
+      `${ORIGIN}/api/auth/github/callback`,
+    );
+    const state = authorize.searchParams.get("state");
+    const stateCookie = cookieValue(start, "icm_oauth_state");
+    expect(state).toBe(stateCookie);
+
+    const callback = await auth.call(
+      `/api/auth/github/callback?code=abc&state=${state}`,
+      { cookie: `icm_oauth_state=${state}` },
+    );
+    expect(callback.status).toBe(302);
+    expect(callback.headers.get("location")).toBe(`${ORIGIN}/`);
+    const session = cookieValue(callback, "icm_session");
+    expect(session).toBeTruthy();
+
+    const user = await me(auth, `icm_session=${session}`);
+    expect(user).toMatchObject({
+      provider: "github",
+      displayName: "Token Zhang",
+      email: "boss@example.com",
+      isAdmin: true,
+    });
+  });
+
+  it("refuses a state mismatch without touching the provider", async () => {
+    const auth = harness(
+      { GH_OAUTH_CLIENT_ID: "gid", GH_OAUTH_CLIENT_SECRET: "gsecret" },
+      githubRoutes(),
+    );
+    const mismatch = await auth.call(
+      "/api/auth/github/callback?code=abc&state=forged",
+      { cookie: "icm_oauth_state=real" },
+    );
+    expect(mismatch.headers.get("location")).toContain("auth=failed");
+    expect(auth.outbound).toHaveLength(0);
+  });
+});
+
+describe("Google OAuth", () => {
+  it("uses only a verified email and defaults the display name", async () => {
+    const auth = harness(
+      { GOOGLE_CLIENT_ID: "cid", GOOGLE_CLIENT_SECRET: "csecret" },
+      [
+        (url) =>
+          url.startsWith("https://oauth2.googleapis.com/token")
+            ? Response.json({ access_token: "g-token" })
+            : null,
+        (url) =>
+          url.startsWith("https://openidconnect.googleapis.com/")
+            ? Response.json({
+                sub: "sub-1",
+                email: "person@example.com",
+                email_verified: true,
+                name: "",
+              })
+            : null,
+      ],
+    );
+    const start = await auth.call("/api/auth/google/start");
+    const state = new URL(start.headers.get("location") ?? "").searchParams.get(
+      "state",
+    );
+    const callback = await auth.call(
+      `/api/auth/google/callback?code=abc&state=${state}`,
+      { cookie: `icm_oauth_state=${state}` },
+    );
+    const session = cookieValue(callback, "icm_session");
+    const user = await me(auth, `icm_session=${session}`);
+    expect(user).toMatchObject({
+      provider: "google",
+      email: "person@example.com",
+      displayName: "person",
+      isAdmin: false,
+    });
+  });
+});
+
+describe("moderator appointment", () => {
+  it("lets only the admin set a role, applied across the email's accounts", async () => {
+    const auth = harness({
+      RESEND_API_KEY: "rk",
+      ADMIN_EMAILS: "owner@example.com",
+    });
+    const adminCookie = await emailSignIn(auth, "owner@example.com");
+    const reviewerCookie = await emailSignIn(auth, "reviewer@example.com");
+    expect((await me(auth, reviewerCookie))?.role).toBe("user");
+
+    const denied = await auth.call("/api/auth/users/role", {
+      method: "POST",
+      cookie: reviewerCookie,
+      body: JSON.stringify({
+        email: "reviewer@example.com",
+        role: "moderator",
+      }),
+    });
+    expect(denied.status).toBe(401);
+
+    const appointed = await auth.call("/api/auth/users/role", {
+      method: "POST",
+      cookie: adminCookie,
+      body: JSON.stringify({
+        email: "Reviewer@Example.com",
+        role: "moderator",
+      }),
+    });
+    expect(appointed.status).toBe(200);
+    expect((await me(auth, reviewerCookie))?.role).toBe("moderator");
+
+    const unknown = await auth.call("/api/auth/users/role", {
+      method: "POST",
+      cookie: adminCookie,
+      body: JSON.stringify({ email: "ghost@example.com", role: "moderator" }),
+    });
+    expect(unknown.status).toBe(404);
+
+    const revoked = await auth.call("/api/auth/users/role", {
+      method: "POST",
+      cookie: adminCookie,
+      body: JSON.stringify({ email: "reviewer@example.com", role: "user" }),
+    });
+    expect(revoked.status).toBe(200);
+    expect((await me(auth, reviewerCookie))?.role).toBe("user");
+  });
+});
+
+describe("AI accounts", () => {
+  async function owner(state = sqliteState()) {
+    const auth = harness(
+      { RESEND_API_KEY: "rk", ADMIN_EMAILS: "owner@example.com" },
+      [],
+      state,
+    );
+    return { auth, adminCookie: await emailSignIn(auth, "owner@example.com") };
+  }
+  const post = (
+    auth: ReturnType<typeof harness>,
+    path: string,
+    body: unknown,
+    cookie?: string,
+  ) =>
+    auth.call(path, {
+      method: "POST",
+      ...(cookie === undefined ? {} : { cookie }),
+      body: JSON.stringify(body),
+    });
+  /** The cookies a response set over those kept, as a Cookie header. */
+  function cookiesOf(response: Response, kept: string[] = []): string {
+    const jar = new Map(
+      kept.map((pair) => pair.split("=") as [string, string]),
+    );
+    for (const header of response.headers.getSetCookie()) {
+      const [pair] = header.split(";");
+      const [name, value] = pair!.split("=") as [string, string];
+      if (value) jar.set(name, value);
+      else jar.delete(name);
+    }
+    return [...jar].map(([name, value]) => `${name}=${value}`).join("; ");
+  }
+  const seat = AI_SEATS[0]!;
+  const switchTo = async (
+    auth: ReturnType<typeof harness>,
+    adminCookie: string,
+  ) => {
+    const switched = await post(
+      auth,
+      "/api/auth/ai-accounts/switch",
+      { userId: seat.userId },
+      adminCookie,
+    );
+    expect(switched.status).toBe(200);
+    return { switched, browser: cookiesOf(switched, [adminCookie]) };
+  };
+
+  it("makes each seat, converting an Agent's account in place", async () => {
+    const state = sqliteState();
+    new AuthDO(state, {} as AuthEnv);
+    const sql = state.storage.sql;
+    sql.exec("DELETE FROM users");
+    // The first seat's account signed in through a person's Google identity
+    // and was once made a moderator.
+    sql.exec(
+      `INSERT INTO users
+       (id, provider, provider_id, email, display_name, role, created_at)
+       VALUES (?, 'google', 'google-sub', 'person@example.com', ?,
+         'moderator', '2026-09-20T00:00:00.000Z')`,
+      seat.userId,
+      seat.formerName,
+    );
+    new AuthDO(state, {} as AuthEnv);
+    const rows = () =>
+      sql
+        .exec<{
+          id: string;
+          provider: string;
+          provider_id: string;
+          email: string | null;
+          display_name: string;
+          role: string;
+        }>(
+          "SELECT id, provider, provider_id, email, display_name, role FROM users",
+        )
+        .toArray();
+    expect(rows()).toEqual(
+      expect.arrayContaining(
+        AI_SEATS.map(({ seat: name, userId, displayName }) => ({
+          id: userId,
+          provider: "ai",
+          provider_id: name,
+          email: null,
+          display_name: displayName,
+          role: "user",
+        })),
+      ),
+    );
+    expect(rows()).toHaveLength(AI_SEATS.length);
+    // The listed name is the model's: starting again restores it.
+    sql.exec(
+      "UPDATE users SET display_name = 'Renamed' WHERE id = ?",
+      seat.userId,
+    );
+    new AuthDO(state, {} as AuthEnv);
+    expect(rows().find(({ id }) => id === seat.userId)?.display_name).toBe(
+      seat.displayName,
+    );
+    // A person's account under a listed id, by another name, is left alone.
+    const second = AI_SEATS[1]!;
+    sql.exec("DELETE FROM users WHERE id = ?", second.userId);
+    sql.exec(
+      `INSERT INTO users
+       (id, provider, provider_id, email, display_name, role, created_at)
+       VALUES (?, 'email', 'someone@example.com', 'someone@example.com',
+         'Someone', 'user', '2026-09-20T00:00:00.000Z')`,
+      second.userId,
+    );
+    new AuthDO(state, {} as AuthEnv);
+    expect(rows().find(({ id }) => id === second.userId)).toMatchObject({
+      provider: "email",
+      display_name: "Someone",
+    });
+    // The released email signs in to a new account of its own.
+    const auth = harness({ RESEND_API_KEY: "rk" }, [], state);
+    const person = await me(
+      auth,
+      await emailSignIn(auth, "person@example.com"),
+    );
+    expect(person?.id).not.toBe(seat.userId);
+  });
+
+  it("lists the seats to the super-admin alone", async () => {
+    const { auth, adminCookie } = await owner();
+    const memberCookie = await emailSignIn(auth, "member@example.com");
+    for (const cookie of [undefined, memberCookie])
+      expect(
+        (
+          await auth.call(
+            "/api/auth/ai-accounts",
+            cookie === undefined ? {} : { cookie },
+          )
+        ).status,
+      ).toBe(401);
+    const listed = await auth.call("/api/auth/ai-accounts", {
+      cookie: adminCookie,
+    });
+    expect(listed.headers.get("cache-control")).toBe("no-store");
+    expect(await listed.json()).toEqual({
+      accounts: AI_SEATS.map(({ seat: name, userId, displayName }) => ({
+        id: userId,
+        seat: name,
+        displayName,
+      })),
+    });
+  });
+
+  it("switches a browser to a seat and back in one click, for the super-admin alone", async () => {
+    const { auth, adminCookie } = await owner();
+    const memberCookie = await emailSignIn(auth, "member@example.com");
+    expect(
+      (
+        await post(
+          auth,
+          "/api/auth/ai-accounts/switch",
+          { userId: seat.userId },
+          memberCookie,
+        )
+      ).status,
+    ).toBe(401);
+    // A request from another site cannot switch the owner's browser.
+    const crossSite = await auth.durable.fetch(
+      new Request(`${ORIGIN}/api/auth/ai-accounts/switch`, {
+        method: "POST",
+        headers: { Origin: "https://elsewhere.test", Cookie: adminCookie },
+        body: JSON.stringify({ userId: seat.userId }),
+      }),
+    );
+    expect(crossSite.status).toBe(403);
+
+    const { switched, browser } = await switchTo(auth, adminCookie);
+    expect(
+      switched.headers
+        .getSetCookie()
+        .find((header) => header.startsWith("icm_owner_session=")),
+    ).toContain("Path=/api/auth; HttpOnly");
+    expect(await me(auth, browser)).toMatchObject({
+      id: seat.userId,
+      displayName: seat.displayName,
+      provider: "ai",
+      seat: seat.seat,
+      email: null,
+      isAdmin: false,
+      switchedFrom: { displayName: "owner" },
+    });
+    // As the seat, the browser holds no owner's power, and cannot delete
+    // the seat.
+    expect(
+      (await auth.call("/api/auth/ai-accounts", { cookie: browser })).status,
+    ).toBe(401);
+    expect(
+      (
+        await post(
+          auth,
+          "/api/auth/account/delete",
+          { confirm: "delete-account" },
+          browser,
+        )
+      ).status,
+    ).toBe(409);
+    // Its name is the model's, kept in AI_SEATS.
+    expect(
+      (await post(auth, "/api/auth/profile", { displayName: "Other" }, browser))
+        .status,
+    ).toBe(409);
+
+    const returned = await post(
+      auth,
+      "/api/auth/ai-accounts/return",
+      {},
+      browser,
+    );
+    expect(returned.status).toBe(200);
+    const back = cookiesOf(returned, browser.split("; "));
+    expect(back).not.toContain("icm_owner_session");
+    expect((await me(auth, back))?.isAdmin).toBe(true);
+    // The seat's session in this browser ended with the return.
+    expect(await me(auth, browser.split("; ")[0])).toBeNull();
+    // A second tab's ↩, after the first switched back, keeps the owner in.
+    const again = await post(auth, "/api/auth/ai-accounts/return", {}, back);
+    expect(again.status).toBe(200);
+    expect((await me(auth, back))?.isAdmin).toBe(true);
+  });
+
+  it("keeps the way back as long as the seat's session, and signs a stranded browser out", async () => {
+    const { auth, adminCookie } = await owner();
+    const start = Date.now();
+    // Switched on the 29th day of the owner's session ...
+    auth.durable.now = () =>
+      new Date(start + (AUTH_SESSION_TTL_SECONDS - 86_400) * 1000);
+    const { browser } = await switchTo(auth, adminCookie);
+    // ... the way back still works two days later.
+    auth.durable.now = () =>
+      new Date(start + (AUTH_SESSION_TTL_SECONDS + 86_400) * 1000);
+    expect((await me(auth, browser))?.switchedFrom).toEqual({
+      displayName: "owner",
+    });
+
+    // Without a live owner's session there is nothing to return to, and
+    // the browser is signed out rather than left as the seat.
+    const seatOnly = browser.split("; ")[0]!;
+    const refused = await post(
+      auth,
+      "/api/auth/ai-accounts/return",
+      {},
+      seatOnly,
+    );
+    expect(refused.status).toBe(401);
+    expect(cookiesOf(refused, [seatOnly])).toBe("");
+    expect(await me(auth, seatOnly)).toBeNull();
+  });
+
+  it("signs a switched browser out of both accounts", async () => {
+    const { auth, adminCookie } = await owner();
+    const { browser } = await switchTo(auth, adminCookie);
+    const signedOut = await post(auth, "/api/auth/logout", {}, browser);
+    expect(cookiesOf(signedOut, browser.split("; "))).toBe("");
+    for (const pair of browser.split("; "))
+      expect(
+        await me(auth, pair.replace("icm_owner_session=", "icm_session=")),
+      ).toBeNull();
+  });
+});
+
+describe("administrator account statistics", () => {
+  it("counts stored accounts without exposing the count to other visitors", async () => {
+    const auth = harness({
+      RESEND_API_KEY: "rk",
+      ADMIN_EMAILS: "owner@example.com",
+    });
+    const adminCookie = await emailSignIn(auth, "owner@example.com");
+    const memberCookie = await emailSignIn(auth, "member@example.com");
+
+    for (const cookie of [undefined, memberCookie]) {
+      const denied = await auth.call(
+        "/api/auth/admin/stats",
+        cookie ? { cookie } : {},
+      );
+      expect(denied.status).toBe(401);
+      expect(denied.headers.get("cache-control")).toBe("no-store");
+      expect(await denied.json()).toEqual({ error: "unauthorized" });
+    }
+
+    const result = await auth.call("/api/auth/admin/stats", {
+      cookie: adminCookie,
+    });
+    expect(result.status).toBe(200);
+    expect(result.headers.get("cache-control")).toBe("no-store");
+    expect(await result.json()).toEqual({ registeredAccounts: 2 });
+  });
+});
+
+describe("sessionUserOf (module seam for the gallery)", () => {
+  it("resolves the signed-in user through the binding and null otherwise", async () => {
+    const auth = harness({ RESEND_API_KEY: "rk", ADMIN_EMAILS: "b@e.co" });
+    const cookie = await emailSignIn(auth, "b@e.co");
+    let bindingFetches = 0;
+    const env = {
+      AUTH: {
+        getByName: () => ({
+          fetch: (input: Request | string, init?: RequestInit) => {
+            bindingFetches += 1;
+            return auth.durable.fetch(
+              typeof input === "string" ? new Request(input, init) : input,
+            );
+          },
+        }),
+      },
+    };
+    const signedIn = await sessionUserOf(
+      new Request(`${ORIGIN}/api/gallery/submissions`, {
+        headers: { Cookie: cookie },
+      }),
+      env,
+    );
+    expect(signedIn?.isAdmin).toBe(true);
+    expect(bindingFetches).toBe(1);
+    const anonymous = await sessionUserOf(
+      new Request(`${ORIGIN}/api/gallery/submissions`),
+      env,
+    );
+    expect(anonymous).toBeNull();
+    expect(bindingFetches).toBe(1);
+    const emptySession = await sessionUserOf(
+      new Request(`${ORIGIN}/api/gallery/submissions`, {
+        headers: { Cookie: "icm_visitor=visitor; icm_session=" },
+      }),
+      env,
+    );
+    expect(emptySession).toBeNull();
+    expect(bindingFetches).toBe(1);
+    const unbound = await sessionUserOf(
+      new Request(`${ORIGIN}/api/gallery/submissions`),
+      {},
+    );
+    expect(unbound).toBeNull();
+  });
+});
+
+describe("Owner tokens (#1769)", () => {
+  async function ownerHarness() {
+    const state = sqliteState();
+    const auth = harness(
+      { RESEND_API_KEY: "rk", ADMIN_EMAILS: "admin@example.com" },
+      [],
+      state,
+    );
+    const sql = state.storage.sql;
+    const owner = await emailSignIn(auth, "owner@example.com");
+    const [row] = sql
+      .exec<{
+        id: string;
+      }>("SELECT id FROM users WHERE email = ?", "owner@example.com")
+      .toArray();
+    const ownerId = OWNER_ACCOUNT_IDS[0]!;
+    sql.exec("UPDATE users SET id = ? WHERE id = ?", ownerId, row!.id);
+    sql.exec(
+      "UPDATE sessions SET user_id = ? WHERE user_id = ?",
+      ownerId,
+      row!.id,
+    );
+    const admin = await emailSignIn(auth, "admin@example.com");
+    const member = await emailSignIn(auth, "member@example.com");
+    const tokens = (cookie?: string, init: RequestInit = {}, path = "") =>
+      auth.call(`/api/auth/owner-tokens${path}`, {
+        ...init,
+        ...(cookie ? { cookie } : {}),
+      });
+    const mint = async (label: string) =>
+      (await (
+        await tokens(owner, { method: "POST", body: JSON.stringify({ label }) })
+      ).json()) as { id: string; token: string };
+    const lookup = async (token: string) =>
+      (
+        (await (
+          await auth.durable.fetch(
+            new Request("https://auth/internal/owner-token-user", {
+              headers: { Authorization: `Bearer ${token}` },
+            }),
+          )
+        ).json()) as { user: SessionUser | null }
+      ).user;
+    return { auth, sql, owner, admin, member, tokens, mint, lookup };
+  }
+
+  it("lets only the signed-in Owner mint, list and revoke tokens", async () => {
+    const { auth, owner, admin, member, tokens, lookup } = await ownerHarness();
+    const mint = (cookie?: string) =>
+      tokens(cookie, {
+        method: "POST",
+        body: JSON.stringify({ label: "laptop" }),
+      });
+    expect((await mint()).status).toBe(401);
+    expect((await mint(admin)).status).toBe(403);
+    expect((await mint(member)).status).toBe(403);
+    expect((await tokens(member)).status).toBe(403);
+    expect(
+      (await tokens(owner, { method: "POST", body: JSON.stringify({}) }))
+        .status,
+    ).toBe(400);
+    // Another site's page cannot mint with the Owner's cookie.
+    expect(
+      (
+        await auth.durable.fetch(
+          new Request(`${ORIGIN}/api/auth/owner-tokens`, {
+            method: "POST",
+            headers: { Cookie: owner, Origin: "https://evil.test" },
+            body: JSON.stringify({ label: "laptop" }),
+          }),
+        )
+      ).status,
+    ).toBe(403);
+
+    auth.durable.now = () => new Date("2026-10-21T00:00:00.000Z");
+    const minted = await mint(owner);
+    expect(minted.status).toBe(201);
+    const made = (await minted.json()) as {
+      id: string;
+      label: string;
+      token: string;
+      createdAt: string;
+    };
+    expect(made).toMatchObject({
+      label: "laptop",
+      createdAt: "2026-10-21T00:00:00.000Z",
+    });
+    expect(made.token).toMatch(/^acot_[A-Za-z0-9_-]{43}$/u);
+
+    auth.durable.now = () => new Date("2026-10-22T00:00:00.000Z");
+    expect((await lookup(made.token))?.isOwner).toBe(true);
+    expect(await lookup(`${made.token}x`)).toBeNull();
+    expect(await lookup("not-an-owner-token")).toBeNull();
+    expect(await (await tokens(owner)).json()).toEqual({
+      tokens: [
+        {
+          id: made.id,
+          label: "laptop",
+          createdAt: "2026-10-21T00:00:00.000Z",
+          lastUsedAt: "2026-10-22T00:00:00.000Z",
+        },
+      ],
+    });
+    // The token itself opens none of this, nor a session.
+    const bearer = { headers: { Authorization: `Bearer ${made.token}` } };
+    expect((await tokens(undefined, bearer)).status).toBe(401);
+    expect(
+      (await tokens(undefined, { ...bearer, method: "DELETE" }, `/${made.id}`))
+        .status,
+    ).toBe(401);
+    expect(await (await auth.call("/api/auth/me", bearer)).json()).toEqual({
+      user: null,
+    });
+
+    expect(
+      (await tokens(member, { method: "DELETE" }, `/${made.id}`)).status,
+    ).toBe(403);
+    expect(
+      (await tokens(owner, { method: "DELETE" }, "/no-such-token")).status,
+    ).toBe(404);
+    const revoked = await tokens(owner, { method: "DELETE" }, `/${made.id}`);
+    expect(await revoked.json()).toEqual({ revoked: made.id });
+    expect(await lookup(made.token)).toBeNull();
+    expect(await (await tokens(owner)).json()).toEqual({ tokens: [] });
+  });
+
+  it("resolves a token whose account is no longer the Owner without isOwner", async () => {
+    const { sql, mint, lookup } = await ownerHarness();
+    const { token } = await mint("desktop");
+    sql.exec(
+      "UPDATE users SET id = 'former-owner' WHERE id = ?",
+      OWNER_ACCOUNT_IDS[0],
+    );
+    sql.exec(
+      "UPDATE owner_tokens SET user_id = 'former-owner' WHERE user_id = ?",
+      OWNER_ACCOUNT_IDS[0],
+    );
+    const user = await lookup(token);
+    expect(user?.id).toBe("former-owner");
+    expect(user?.isOwner).toBeUndefined();
+  });
+
+  it("ownerTokenUserOf reads the bearer through the binding", async () => {
+    const { auth, owner, mint } = await ownerHarness();
+    const { token } = await mint("ci");
+    let bindingFetches = 0;
+    const env = {
+      AUTH: {
+        getByName: () => ({
+          fetch: (input: Request | string, init?: RequestInit) => {
+            bindingFetches += 1;
+            return auth.durable.fetch(
+              typeof input === "string" ? new Request(input, init) : input,
+            );
+          },
+        }),
+      },
+    };
+    const request = (headers: HeadersInit = {}) =>
+      new Request(`${ORIGIN}/api/gallery/sources/analoggenie/entries`, {
+        headers,
+      });
+    const bearer = { Authorization: `Bearer ${token}` };
+    expect((await ownerTokenUserOf(request(bearer), env))?.isOwner).toBe(true);
+    expect(bindingFetches).toBe(1);
+    // Anything but an Owner token's prefix never wakes the AuthDO.
+    expect(await ownerTokenUserOf(request(), env)).toBeNull();
+    expect(await ownerTokenUserOf(request({ Cookie: owner }), env)).toBeNull();
+    expect(
+      await ownerTokenUserOf(
+        request({ Authorization: "Bearer gallery-reader" }),
+        env,
+      ),
+    ).toBeNull();
+    expect(bindingFetches).toBe(1);
+    expect(await ownerTokenUserOf(request(bearer), {})).toBeNull();
+  });
+
+  it("removes an account's tokens with the account", async () => {
+    const { auth, sql, owner, mint, lookup } = await ownerHarness();
+    const { token } = await mint("old laptop");
+    const deleted = await auth.call("/api/auth/account/delete", {
+      method: "POST",
+      cookie: owner,
+      body: JSON.stringify({ confirm: "delete-account" }),
+    });
+    expect(deleted.status).toBe(200);
+    expect(await lookup(token)).toBeNull();
+    expect(
+      sql
+        .exec<{ count: number }>("SELECT COUNT(*) AS count FROM owner_tokens")
+        .one().count,
+    ).toBe(0);
+  });
+});

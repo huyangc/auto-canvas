@@ -1,0 +1,485 @@
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
+
+import type { DerivedRect, GridRect } from "@icm/model";
+import {
+  flattenRichText,
+  parseSignalExpression,
+  semanticTextDocument,
+} from "@icm/model";
+
+import {
+  canvasInsetsFromOverlays,
+  type CanvasInsets,
+} from "../../canvas/fit-view";
+import { RichTextEditor } from "./rich-text-editor";
+import { spliceVisibleEdit, type TextEditingSession } from "./text-editing";
+
+type TextEditingUpdate = Partial<
+  Pick<TextEditingSession, "content" | "sizeScale" | "alignment">
+>;
+
+export interface CanvasTextEditorOverlayProps {
+  session: TextEditingSession;
+  bounds: DerivedRect;
+  viewBox: GridRect;
+  disabled: boolean;
+  onUpdate(change: TextEditingUpdate): void;
+  onCommit(): void;
+  secondaryAction?: { label: string; onClick(): void } | undefined;
+  onCancel(): void;
+  onEscape?(): void;
+  onDelete(): void;
+  deleteLabel?: string;
+  showDelete?: boolean;
+  onDisplayAliasChange?(
+    enabled: boolean,
+  ): TextEditingSession["content"] | undefined;
+}
+
+/**
+ * The editor's own layout, in CSS pixels. Its contents — toolbar, buttons,
+ * text — are laid out at this size and then scaled as one, so the panel keeps
+ * its proportions instead of reflowing as the camera moves.
+ */
+// Leave the formatting row enough room for the grouped A−/A+ controls while
+// keeping Apply/Cancel on their separate row at normal toolbar spacing.
+const EDITOR_LAYOUT_WIDTH = 344;
+const EDITOR_LAYOUT_MIN_HEIGHT = 150;
+
+/**
+ * How much of the camera the panel occupies before its screen scale is known.
+ *
+ * The measured editor has one fixed screen width at both full- and half-window
+ * sizes. This fraction only supplies a stable first-paint scale before the SVG
+ * has reported its screen dimensions.
+ */
+const EDITOR_FALLBACK_VIEW_FRACTION = 1 / 2;
+const INLINE_EDITOR_LAYOUT_WIDTH = 176;
+const INLINE_EDITOR_LAYOUT_HEIGHT = 30;
+
+const NO_INSETS: CanvasInsets = { left: 0, right: 0, top: 0, bottom: 0 };
+
+/**
+ * The part of the camera nobody is standing on. The canvas element spans the
+ * whole workspace and the docks float over its edges, so a panel clamped to
+ * the whole camera could slide under a dock, even its collapsed rail.
+ */
+function unobscuredView(viewBox: GridRect, obscured: CanvasInsets): GridRect {
+  const width = viewBox.width - obscured.left - obscured.right;
+  const height = viewBox.height - obscured.top - obscured.bottom;
+  if (!(width > 0) || !(height > 0)) return viewBox;
+  return {
+    x: viewBox.x + obscured.left,
+    y: viewBox.y + obscured.top,
+    width,
+    height,
+  };
+}
+
+export interface CanvasTextEditorFrame {
+  /** Where the panel sits, in Document units. */
+  x: number;
+  y: number;
+  /** Document units covered, for clamping and for the counter-scale. */
+  width: number;
+  height: number;
+  /** Document units per CSS pixel of the panel's own layout. */
+  scale: number;
+  layoutWidth: number;
+  layoutHeight: number;
+}
+
+export function resolveCanvasTextEditorFrame(
+  bounds: DerivedRect,
+  viewBox: GridRect,
+  sizeScale: number,
+  pixelsPerUnit?: number | null,
+  preferredLayoutHeight?: number | null,
+  /** Document units of the camera hidden behind docks, per side. */
+  obscured: CanvasInsets = NO_INSETS,
+): CanvasTextEditorFrame {
+  const viewportInset = 8;
+  const visible = unobscuredView(viewBox, obscured);
+  const availableWidth = Math.max(0, visible.width - viewportInset * 2);
+  // Laying the panel out at true screen pixels is what lets its type be set
+  // against the rest of the chrome rather than against the drawing. Without a
+  // measurement — the first render, before the canvas is on screen — fall back
+  // to a fixed layout width, which still keeps the panel proportional.
+  const scale =
+    pixelsPerUnit && pixelsPerUnit > 0
+      ? 1 / pixelsPerUnit
+      : (viewBox.width * EDITOR_FALLBACK_VIEW_FRACTION) / EDITOR_LAYOUT_WIDTH;
+  // Full- and half-window workspaces use the same control surface. Only a
+  // canvas physically narrower than the editor makes it shrink.
+  const width = Math.min(availableWidth, EDITOR_LAYOUT_WIDTH * scale);
+  const layoutWidth = width / scale;
+  // A name longer than the box wraps, and the frame is sized before any of it
+  // is typed, so budget for a few wrapped lines instead of the one the
+  // committed bounds imply. Anything past that scrolls rather than being
+  // clipped away by the foreignObject.
+  const lineHeight = 15.116 * sizeScale * 1.2;
+  const layoutHeight = Math.max(
+    EDITOR_LAYOUT_MIN_HEIGHT,
+    54 + lineHeight * 3,
+    preferredLayoutHeight ?? 0,
+  );
+  const height = layoutHeight * scale;
+  const targetGap = 8;
+  const minX = visible.x + viewportInset;
+  const maxX = visible.x + visible.width - width - viewportInset;
+  const minY = visible.y + viewportInset;
+  const maxY = visible.y + visible.height - height - viewportInset;
+  const x = Math.max(minX, Math.min(maxX, bounds.x - 6));
+  const above = bounds.y - height - targetGap;
+  const below = bounds.y + bounds.height + targetGap;
+  const y =
+    above >= minY
+      ? above
+      : below <= maxY
+        ? below
+        : Math.max(minY, Math.min(maxY, above));
+  return {
+    x,
+    y,
+    width,
+    height,
+    scale,
+    layoutWidth,
+    layoutHeight,
+  };
+}
+
+function resolveInlineTextEditorFrame(
+  bounds: DerivedRect,
+  viewBox: GridRect,
+  pixelsPerUnit?: number | null,
+  obscured: CanvasInsets = NO_INSETS,
+): CanvasTextEditorFrame {
+  const viewportInset = 8;
+  const visible = unobscuredView(viewBox, obscured);
+  const scale =
+    pixelsPerUnit && pixelsPerUnit > 0
+      ? 1 / pixelsPerUnit
+      : (viewBox.width * 0.28) / INLINE_EDITOR_LAYOUT_WIDTH;
+  const availableWidth = Math.max(0, visible.width - viewportInset * 2);
+  const width = Math.min(availableWidth, INLINE_EDITOR_LAYOUT_WIDTH * scale);
+  const layoutWidth = width / scale;
+  const height = INLINE_EDITOR_LAYOUT_HEIGHT * scale;
+  const minX = visible.x + viewportInset;
+  const maxX = visible.x + visible.width - width - viewportInset;
+  const minY = visible.y + viewportInset;
+  const maxY = visible.y + visible.height - height - viewportInset;
+  const above = bounds.y - height - 6;
+  const below = bounds.y + bounds.height + 6;
+  return {
+    x: Math.max(minX, Math.min(maxX, bounds.x - 4)),
+    y:
+      above >= minY
+        ? above
+        : below <= maxY
+          ? below
+          : Math.max(minY, Math.min(maxY, above)),
+    width,
+    height,
+    scale,
+    layoutWidth,
+    layoutHeight: INLINE_EDITOR_LAYOUT_HEIGHT,
+  };
+}
+
+export function CanvasTextEditorOverlay({
+  session,
+  bounds,
+  viewBox,
+  disabled,
+  onUpdate,
+  onCommit,
+  secondaryAction,
+  onCancel,
+  onEscape,
+  onDelete,
+  deleteLabel,
+  showDelete,
+  onDisplayAliasChange,
+}: CanvasTextEditorOverlayProps) {
+  const anchorRef = useRef<SVGGElement | null>(null);
+  const [canvasSize, setCanvasSize] = useState<{
+    width: number;
+    height: number;
+  } | null>(null);
+  const [measuredLayoutHeight, setMeasuredLayoutHeight] = useState<
+    number | null
+  >(null);
+  // Screen pixels of the canvas under each floating dock, so the panel opens
+  // where it can be seen rather than under a Properties or Project dock.
+  const [obscuredPixels, setObscuredPixels] = useState<CanvasInsets>(NO_INSETS);
+  const measureObscured = useCallback((): void => {
+    const svg = anchorRef.current?.ownerSVGElement;
+    if (!svg) return;
+    // A dock hidden while text is edited (visibility: hidden) keeps its box
+    // but covers nothing.
+    const docks = [
+      ...svg.ownerDocument.querySelectorAll("[data-canvas-overlay]"),
+    ]
+      .filter((dock) => getComputedStyle(dock).visibility !== "hidden")
+      .map((dock) => dock.getBoundingClientRect());
+    const next = canvasInsetsFromOverlays(svg.getBoundingClientRect(), docks);
+    setObscuredPixels((current) =>
+      (["left", "right", "top", "bottom"] as const).every(
+        (side) => Math.abs(current[side] - next[side]) < 0.5,
+      )
+        ? current
+        : next,
+    );
+  }, []);
+  // Docks open and close around an edit (double-click opens Properties and
+  // closes the Netlist dock a render later), so look again after each render.
+  useLayoutEffect(() => {
+    measureObscured();
+  });
+
+  useEffect(() => {
+    setMeasuredLayoutHeight(null);
+  }, [session.id, session.owner]);
+
+  const handleLayoutHeightChange = useCallback((height: number): void => {
+    setMeasuredLayoutHeight((current) =>
+      current !== null && Math.abs(current - height) < 1 ? current : height,
+    );
+  }, []);
+
+  // How many screen pixels one Document unit covers. The panel is laid out in
+  // those pixels so its type can be set against the rest of the chrome, and
+  // the canvas can be resized under it, so the measurement is observed.
+  useLayoutEffect(() => {
+    const svg = anchorRef.current?.ownerSVGElement;
+    if (!svg) return;
+    const measure = () => {
+      const rect = svg.getBoundingClientRect();
+      setCanvasSize({ width: rect.width, height: rect.height });
+      measureObscured();
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(svg);
+    for (const dock of svg.ownerDocument.querySelectorAll(
+      "[data-canvas-overlay]",
+    ))
+      observer.observe(dock);
+    return () => observer.disconnect();
+  }, [measureObscured]);
+
+  // preserveAspectRatio="meet" fits the camera inside the element, so the
+  // painted scale is the smaller of the two ratios — not the width's alone.
+  const pixelsPerUnit =
+    canvasSize && viewBox.width > 0 && viewBox.height > 0
+      ? Math.min(
+          canvasSize.width / viewBox.width,
+          canvasSize.height / viewBox.height,
+        )
+      : null;
+  const obscured: CanvasInsets = pixelsPerUnit
+    ? {
+        left: obscuredPixels.left / pixelsPerUnit,
+        right: obscuredPixels.right / pixelsPerUnit,
+        top: obscuredPixels.top / pixelsPerUnit,
+        bottom: obscuredPixels.bottom / pixelsPerUnit,
+      }
+    : NO_INSETS;
+  const signalPreview = (() => {
+    const visible = flattenRichText(session.content);
+    if (
+      !visible.trim() ||
+      !["cell-terminal-name", "net-name"].includes(session.bindingKind ?? "") ||
+      session.displayAlias ||
+      (!session.signalExpression && visible === session.initialNameText)
+    )
+      return undefined;
+    try {
+      const expression =
+        session.signalExpression && session.initialNameText !== undefined
+          ? spliceVisibleEdit(
+              session.signalExpression,
+              session.initialNameText,
+              visible,
+            )
+          : visible;
+      const members = parseSignalExpression(expression);
+      return { members, error: undefined };
+    } catch (error) {
+      return {
+        members: undefined,
+        error:
+          error instanceof Error ? error.message : "Invalid signal expression",
+      };
+    }
+  })();
+  const frame = resolveCanvasTextEditorFrame(
+    bounds,
+    viewBox,
+    session.sizeScale,
+    pixelsPerUnit,
+    measuredLayoutHeight === null
+      ? null
+      : measuredLayoutHeight +
+          (signalPreview ? 48 : 0) +
+          (secondaryAction ? 40 : 0),
+    obscured,
+  );
+  const inlineFrame = resolveInlineTextEditorFrame(
+    bounds,
+    viewBox,
+    pixelsPerUnit,
+    obscured,
+  );
+  // A bound value (a parameter or a device value) edits its source text.
+  // A Symbol's body text is a label like any other and keeps every format.
+  const sourceOnly =
+    session.owner === "annotation" &&
+    session.bound &&
+    session.bindingKind !== "net-name" &&
+    session.bindingKind !== "cell-terminal-name";
+
+  if (session.plainTextKind) {
+    return (
+      <g
+        ref={anchorRef}
+        transform={`translate(${inlineFrame.x} ${inlineFrame.y}) scale(${inlineFrame.scale})`}
+      >
+        <foreignObject
+          data-testid="canvas-text-editor"
+          className="canvas-text-editor-overlay inline-canvas-text-editor-overlay"
+          pointerEvents="all"
+          x={0}
+          y={0}
+          width={inlineFrame.layoutWidth}
+          height={inlineFrame.layoutHeight}
+          onPointerDown={(event) => event.stopPropagation()}
+          onPointerMove={(event) => event.stopPropagation()}
+          onPointerUp={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
+          onDoubleClick={(event) => event.stopPropagation()}
+          onContextMenu={(event) => event.stopPropagation()}
+          onWheel={(event) => event.stopPropagation()}
+        >
+          <input
+            autoFocus
+            className="inline-canvas-text-editor"
+            autoComplete="off"
+            aria-label="Canvas text editor"
+            data-editor-kind={session.plainTextKind}
+            disabled={disabled}
+            value={flattenRichText(session.content)}
+            onChange={(event) =>
+              onUpdate({
+                content: semanticTextDocument(
+                  event.currentTarget.value,
+                  session.plainTextKind!,
+                ),
+              })
+            }
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                onCommit();
+              } else if (event.key === "Escape") {
+                event.preventDefault();
+                onCancel();
+              }
+            }}
+          />
+        </foreignObject>
+      </g>
+    );
+  }
+
+  return (
+    <g
+      ref={anchorRef}
+      transform={`translate(${frame.x} ${frame.y}) scale(${frame.scale})`}
+    >
+      <foreignObject
+        data-testid="canvas-text-editor"
+        className="canvas-text-editor-overlay"
+        pointerEvents="all"
+        x={0}
+        y={0}
+        width={frame.layoutWidth}
+        height={frame.layoutHeight}
+        onPointerDown={(event) => event.stopPropagation()}
+        onPointerMove={(event) => event.stopPropagation()}
+        onPointerUp={(event) => event.stopPropagation()}
+        onClick={(event) => event.stopPropagation()}
+        onDoubleClick={(event) => event.stopPropagation()}
+        onContextMenu={(event) => event.stopPropagation()}
+        onWheel={(event) => event.stopPropagation()}
+      >
+        <RichTextEditor
+          targetKey={`${session.owner}:${session.id}`}
+          content={session.content}
+          disabled={disabled}
+          sizeScale={session.sizeScale}
+          alignment={session.alignment}
+          defaultBold={session.defaultBold ?? false}
+          defaultItalic={session.defaultItalic ?? false}
+          sourceOnly={sourceOnly}
+          multiline={!session.bound}
+          onChange={(content) => onUpdate({ content })}
+          onSizeChange={(sizeScale) => onUpdate({ sizeScale })}
+          onAlignmentChange={(alignment) => onUpdate({ alignment })}
+          onCommit={() => {
+            if (!signalPreview?.error) onCommit();
+          }}
+          onCancel={onCancel}
+          {...(onEscape ? { onEscape } : {})}
+          onDelete={onDelete}
+          {...(deleteLabel ? { deleteLabel } : {})}
+          {...(showDelete !== undefined ? { showDelete } : {})}
+          {...(session.owner === "annotation" && session.bound && !sourceOnly
+            ? { formulaSemanticText: flattenRichText(session.content) }
+            : {})}
+          {...((session.visualInstanceId ||
+            session.cellPinTerminalId ||
+            session.netLabelName !== undefined) &&
+          onDisplayAliasChange
+            ? {
+                displayAlias: session.displayAlias ?? false,
+                onDisplayAliasChange,
+              }
+            : {})}
+          onLayoutHeightChange={handleLayoutHeightChange}
+        />
+        {secondaryAction ? (
+          <button
+            type="button"
+            onClick={secondaryAction.onClick}
+            disabled={Boolean(signalPreview?.error)}
+          >
+            {secondaryAction.label}
+          </button>
+        ) : null}
+        {signalPreview ? (
+          <div
+            className="signal-expression-preview"
+            role={signalPreview.error ? "alert" : "status"}
+            aria-label={
+              session.bindingKind === "net-name"
+                ? "Net Label signal preview"
+                : "Cell Pin signal preview"
+            }
+          >
+            {signalPreview.error ??
+              `${signalPreview.members!.length} ${signalPreview.members!.length === 1 ? "member" : "members"} · ${signalPreview.members!.slice(0, 8).join(" → ")}${signalPreview.members!.length > 8 ? " → …" : ""}`}
+          </div>
+        ) : null}
+      </foreignObject>
+    </g>
+  );
+}

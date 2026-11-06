@@ -1,0 +1,311 @@
+{
+  "schemaVersion": 1,
+  "id": "razavi-textbook-diode",
+  "kind": "pdf-vector-extract",
+  "source": {
+    "title": "Design of Analog CMOS Integrated Circuits, Second Edition",
+    "sha256": "a6031d1149c2c6191a1f0e541065165b72dafc4bc4ab4b0ea37af41b7cb0f739",
+    "pdfPage": 661,
+    "printedPage": 642,
+    "figure": "15.54"
+  },
+  "selection": {
+    "method": "direct-family-observation",
+    "boundsPdf": {
+      "left": 180.0,
+      "top": 95.0,
+      "right": 455.0,
+      "bottom": 125.0
+    },
+    "nativeObjectCount": 58,
+    "nativeObjectSha256": "290f08304871488218130321d7f220323b973f340fe24330eebf3846fd694a1f",
+    "nativeObjectSample": [
+      {
+        "objectType": "line",
+        "linewidth": 1.434,
+        "x0": 256.564,
+        "top": 95.5822,
+        "x1": 256.564,
+        "bottom": 108.1812,
+        "pathCommandCount": 2,
+        "pathSha256": "6d80c63d718b3e90d7a765c0abb255fde169caa8236dfe5a53f7053d4ad5856e"
+      },
+      {
+        "objectType": "line",
+        "linewidth": 1.434,
+        "x0": 253.696,
+        "top": 96.9582,
+        "x1": 253.696,
+        "bottom": 106.5312,
+        "pathCommandCount": 2,
+        "pathSha256": "bba6fabebb0bbe9d326926c7c2e35e635de7112bf114b17ec3e3557b24518a67"
+      },
+      {
+        "objectType": "line",
+        "linewidth": 0.717,
+        "x0": 247.782,
+        "top": 101.9922,
+        "x1": 253.656,
+        "bottom": 101.9922,
+        "pathCommandCount": 2,
+        "pathSha256": "d51d87d69680961823dfeac58522681578156285c9c8f2713e729ad0eb020b01"
+      },
+      {
+        "objectType": "line",
+        "linewidth": 1.434,
+        "x0": 220.363,
+        "top": 95.5822,
+        "x1": 220.363,
+        "bottom": 108.1812,
+        "pathCommandCount": 2,
+        "pathSha256": "c92aa67fe0336546ecb73200313e7b7f6bc9e522cc66d6f00451bc84178976d7"
+      },
+      {
+        "objectType": "line",
+        "linewidth": 1.434,
+        "x0": 223.231,
+        "top": 96.9582,
+        "x1": 223.231,
+        "bottom": 106.5312,
+        "pathCommandCount": 2,
+        "pathSha256": "343d7489528a06285823337a4fe9b1972ddb30ed12112ee0802edff3f2e1a38f"
+      },
+      {
+        "objectType": "line",
+        "linewidth": 0.717,
+        "x0": 223.272,
+        "top": 101.9922,
+        "x1": 229.145,
+        "bottom": 101.9922,
+        "pathCommandCount": 2,
+        "pathSha256": "e5e6991c6b636c06ead4bbd81cd2ede571519f503c88d07480e0f875ee1dcae1"
+      },
+      {
+        "objectType": "line",
+        "linewidth": 0.717,
+        "x0": 238.464,
+        "top": 117.0002,
+        "x1": 238.464,
+        "bottom": 123.4512,
+        "pathCommandCount": 2,
+        "pathSha256": "e030d93f7448739365bb74e0a0c1cbf3f3f5ad87e021ccb00df7ff17f54b1a40"
+      },
+      {
+        "objectType": "line",
+        "linewidth": 0.717,
+        "x0": 238.464,
+        "top": 113.4612,
+        "x1": 238.464,
+        "bottom": 119.1962,
+        "pathCommandCount": 2,
+        "pathSha256": "27979165f75300593cb05b8362b7c5a092c569a49c8a8f403094e060bf2d0640"
+      },
+      {
+        "objectType": "line",
+        "linewidth": 0.717,
+        "x0": 264.269,
+        "top": 73.3192,
+        "x1": 264.269,
+        "bottom": 96.2572,
+        "pathCommandCount": 2,
+        "pathSha256": "93e2e5c771af65235aae36de88acf54dd14ca04dd51e7a81410347de0fe33efc"
+      },
+      {
+        "objectType": "line",
+        "linewidth": 0.717,
+        "x0": 212.658,
+        "top": 73.3192,
+        "x1": 212.658,
+        "bottom": 96.2572,
+        "pathCommandCount": 2,
+        "pathSha256": "ade52bd3b693f23c01b4396435f409321c2a3eb62b77156b1d768f7afdc6cf77"
+      },
+      {
+        "objectType": "line",
+        "linewidth": 1.434,
+        "x0": 197.683,
+        "top": 99.9132,
+        "x1": 204.678,
+        "bottom": 99.9132,
+        "pathCommandCount": 2,
+        "pathSha256": "d44396d84f31e5e50db23ef58c428e5981d40636ae855a128bb289cf3f47fefe"
+      },
+      {
+        "objectType": "line",
+        "linewidth": 0.717,
+        "x0": 201.189,
+        "top": 106.3652,
+        "x1": 201.189,
+        "bottom": 114.1762,
+        "pathCommandCount": 2,
+        "pathSha256": "154381819f980d8e252bab6aa250458bc8f5f9643866779a944b4897efa394aa"
+      }
+    ]
+  },
+  "normalization": {
+    "pinAnchorsLogical": [
+      {
+        "name": "A",
+        "x": -20,
+        "y": 0
+      },
+      {
+        "name": "K",
+        "x": 20,
+        "y": 0
+      }
+    ],
+    "strokeMapping": {
+      "normal": {
+        "targetRole": "normal"
+      },
+      "emphasis": {
+        "targetRole": "emphasis"
+      }
+    },
+    "symbolDefinition": {
+      "schemaVersion": 1,
+      "id": "diode",
+      "name": "Diode",
+      "viewBox": {
+        "x": -24,
+        "y": -10,
+        "width": 48,
+        "height": 20
+      },
+      "pins": [
+        {
+          "name": "A",
+          "role": "anode",
+          "at": {
+            "x": -20,
+            "y": 0
+          },
+          "direction": "west",
+          "presentation": {
+            "visibility": "visible",
+            "leadLength": 10
+          }
+        },
+        {
+          "name": "K",
+          "role": "cathode",
+          "at": {
+            "x": 20,
+            "y": 0
+          },
+          "direction": "east",
+          "presentation": {
+            "visibility": "visible",
+            "leadLength": 10
+          }
+        }
+      ],
+      "primitives": [
+        {
+          "kind": "line",
+          "from": {
+            "x": -20,
+            "y": 0
+          },
+          "to": {
+            "x": -8.333334,
+            "y": 0
+          },
+          "style": {
+            "strokeRole": "normal",
+            "lineCap": "butt",
+            "lineJoin": "miter"
+          }
+        },
+        {
+          "kind": "polygon",
+          "points": [
+            {
+              "x": -8.333334,
+              "y": -6.75
+            },
+            {
+              "x": -8.333334,
+              "y": 6.75
+            },
+            {
+              "x": 5.833334,
+              "y": 0
+            }
+          ],
+          "fill": "none",
+          "stroke": "foreground",
+          "style": {
+            "strokeRole": "normal",
+            "lineCap": "butt",
+            "lineJoin": "miter"
+          }
+        },
+        {
+          "kind": "line",
+          "from": {
+            "x": 6.666666,
+            "y": -7.333334
+          },
+          "to": {
+            "x": 6.666666,
+            "y": 7.333334
+          },
+          "style": {
+            "strokeRole": "emphasis",
+            "lineCap": "butt",
+            "lineJoin": "miter"
+          }
+        },
+        {
+          "kind": "line",
+          "from": {
+            "x": 6.666666,
+            "y": 0
+          },
+          "to": {
+            "x": 20,
+            "y": 0
+          },
+          "style": {
+            "strokeRole": "normal",
+            "lineCap": "butt",
+            "lineJoin": "miter"
+          }
+        }
+      ],
+      "variants": [],
+      "aliases": [
+        "pn-diode",
+        "rectifier-diode"
+      ]
+    }
+  },
+  "rasterWitness": {
+    "kind": "source-pdf-crop",
+    "sourcePdfPage": 661,
+    "dpi": 385.606695,
+    "pixels": {
+      "width": 48,
+      "height": 96
+    },
+    "pixelsPerLogical": 2.4,
+    "originPx": {
+      "x": 24.584502,
+      "y": 48.073238
+    },
+    "window": {
+      "width": 48,
+      "height": 96,
+      "minX": -10,
+      "minY": -20
+    },
+    "sourceCropPx": {
+      "x": 1270,
+      "y": 684
+    },
+    "assetPath": "diode-reference.png",
+    "threshold": 160
+  }
+}

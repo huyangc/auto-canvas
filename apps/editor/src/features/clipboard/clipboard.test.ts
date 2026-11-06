@@ -1,0 +1,2943 @@
+import { createRoutePath, routeBends, routeEnd } from "@icm/model";
+import { executeTransaction, powerConnectionForSymbol } from "@icm/edit-engine";
+import {
+  defaultInstanceLabelPlacement,
+  resolveAnnotationText,
+  resolveDocumentLogicalNets,
+  resolveDocumentStyleProfile,
+  resolveRouteGeometry,
+} from "@icm/derived";
+import type { Annotation, DraftingObject, Instance } from "@icm/model";
+import {
+  createEmptyDocument,
+  createEmptyProject,
+  controlledSourceExpressionDocument,
+  controlledSourceExpressionSource,
+  defaultControlledSourceExpression,
+  flattenRichText,
+  semanticTextDocument,
+} from "@icm/model";
+import { buildSvgScene } from "@icm/render-svg";
+import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
+import { describe, expect, it } from "vitest";
+import { createLibraryExampleProject } from "../../examples/library-examples";
+import { captureProjectCopy } from "./project-copy";
+
+import { copySelection, captureDocumentComposition } from "./clipboard";
+import { clipboardPreviewDocument } from "./clipboard-preview";
+import { clipboardPlacementAnchor, orientClipboard } from "./copy-placement";
+import { proposePaste } from "./paste-proposal";
+
+const resolver = new InMemorySymbolResolver(builtInSymbols);
+
+describe("schematic clipboard", () => {
+  it("does not retain an unselected control across Projects sharing document-main", () => {
+    const source = createEmptyProject("source", "Source");
+    const target = createEmptyProject("target", "Target");
+    source.documents[0]!.instances.push(resistorInstance("R1", "R1"), {
+      ...resistorInstance("F1", "F1"),
+      symbolId: "cccs",
+      netlist: {
+        parameters: { gain: "2" },
+        control: {
+          kind: "terminal-current",
+          instanceId: "R1",
+          pinName: "1",
+          direction: "into",
+        },
+      },
+    });
+    target.documents[0]!.instances.push(resistorInstance("R1", "R9"));
+    const clipboard = captureProjectCopy(source, source.documents[0]!, {
+      instanceIds: ["F1"],
+      draftingIds: [],
+      routeIds: [],
+      junctionIds: [],
+      annotationIds: [],
+    })!;
+    const proposal = proposePaste(
+      target.documents[0]!,
+      clipboard,
+      { x: 80, y: 0 },
+      1,
+      target,
+    );
+    const copied = proposal.edits.find((e) => e.kind === "add_instance");
+    expect(
+      copied?.kind === "add_instance" && copied.instance.netlist?.control,
+    ).toEqual({
+      kind: "terminal-current",
+      pinName: "1",
+      direction: "into",
+      instanceId: undefined,
+    });
+  });
+  it.each(["together", "same-cell", "other-cell"])(
+    "keeps terminal-current references safe when copying %s",
+    (mode) => {
+      const document = createEmptyDocument("current-copy", "Current copy");
+      document.instances.push(resistorInstance("R1", "R1"), {
+        ...resistorInstance("F1", "F1"),
+        symbolId: "cccs",
+        netlist: {
+          parameters: { gain: "2" },
+          control: {
+            kind: "terminal-current",
+            instanceId: "R1",
+            pinName: "1",
+            direction: "out",
+          },
+        },
+      });
+      const target =
+        mode === "other-cell"
+          ? createEmptyDocument("other", "Other")
+          : document;
+      // An unrelated target with the same ID must never receive the copied control.
+      if (mode === "other-cell")
+        target.instances.push(resistorInstance("R1", "R9"));
+      const proposal = proposePaste(
+        target,
+        copySelection(document, mode === "together" ? ["F1", "R1"] : ["F1"])!,
+        { x: 80, y: 0 },
+        1,
+      );
+      const additions = proposal.edits
+        .filter((e) => e.kind === "add_instance")
+        .map((e) => e.instance);
+      const copied = additions.find((i) => i.symbolId === "cccs")!;
+      expect(copied.netlist!.control).toEqual({
+        kind: "terminal-current",
+        pinName: "1",
+        direction: "out",
+        instanceId:
+          mode === "together"
+            ? additions.find((i) => i.symbolId === "resistor")!.id
+            : mode === "same-cell"
+              ? "R1"
+              : undefined,
+      });
+      expect(document.instances[1]!.netlist!.control).toMatchObject({
+        instanceId: "R1",
+      });
+    },
+  );
+  it("copies a local Power Rail with its formal Cell Pin ownership", () => {
+    const source = createEmptyDocument("source", "Source");
+    const created = executeTransaction(
+      source,
+      {
+        transactionId: "create-local-rail",
+        documentId: source.id,
+        expectedRevision: source.revision,
+        actor: { kind: "human", id: "test" },
+        edits: [
+          {
+            kind: "add_power_rail",
+            netId: "rail-net",
+            routeId: "rail-route",
+            startJunctionId: "rail-start",
+            endJunctionId: "rail-end",
+            labelId: "rail-label",
+            netName: "AVDD",
+            scope: "local",
+            powerDomain: "vdd",
+            start: { x: 0, y: 0 },
+            end: { x: 100, y: 0 },
+          },
+        ],
+      },
+      { symbolResolver: resolver },
+    );
+    if (!created.ok) throw new Error(created.error.message);
+    const clipboard = copySelection(created.document, [], [], {
+      routeIds: ["rail-route"],
+      junctionIds: [],
+      annotationIds: [],
+    });
+    expect(clipboard?.cellTerminals).toEqual([
+      expect.objectContaining({
+        name: "AVDD",
+        interfaceAnnotationId: "rail-label",
+      }),
+    ]);
+
+    const target = createEmptyDocument("target", "Target");
+    const proposal = proposePaste(target, clipboard!, { x: 200, y: 0 }, 1);
+    expect(proposal.errors).toEqual([]);
+    const pasted = executeTransaction(
+      target,
+      {
+        transactionId: "paste-local-rail",
+        documentId: target.id,
+        expectedRevision: target.revision,
+        actor: { kind: "human", id: "test" },
+        edits: proposal.edits,
+      },
+      { symbolResolver: resolver },
+    );
+    expect(pasted.ok, JSON.stringify(pasted)).toBe(true);
+    if (!pasted.ok) return;
+    const terminal = pasted.document.netlist!.terminals[0]!;
+    expect(terminal.name).toBe("AVDD");
+    expect(
+      pasted.document.annotations.some(
+        (annotation) => annotation.id === terminal.interfaceAnnotationId,
+      ),
+    ).toBe(true);
+  });
+
+  it("copies inherited Ground authority onto the selected marker's new Base Net", () => {
+    const document = createEmptyDocument("legacy-gnd", "Ground");
+    document.instances.push(
+      {
+        id: "G1",
+        symbolId: "ground",
+        placement: { position: { x: 0, y: 0 }, rotation: 0, mirror: "none" },
+      },
+      {
+        id: "G2",
+        symbolId: "ground",
+        placement: { position: { x: 100, y: 0 }, rotation: 0, mirror: "none" },
+      },
+    );
+    document.nets.push({
+      id: "gnd",
+      terminals: ["G1", "G2"].map((instanceId) => ({
+        instanceId,
+        pinName: "0",
+      })),
+    });
+    document.connectivityEvidence.push({
+      id: "owner",
+      kind: "name-claim",
+      netId: "gnd",
+      name: "0",
+      scope: "global",
+      powerDomain: "ground",
+      owner: { kind: "power-marker", objectId: "G1" },
+    });
+    const copied = copySelection(document, ["G2"])!;
+    expect(copied.connectivityEvidence).toEqual([
+      expect.objectContaining({
+        name: "0",
+        owner: { kind: "power-marker", objectId: "G2" },
+      }),
+    ]);
+    const proposal = proposePaste(document, copied, { x: 300, y: 0 }, 1);
+    const pasted = executeTransaction(
+      document,
+      {
+        transactionId: "paste-ground",
+        documentId: document.id,
+        expectedRevision: 0,
+        actor: { kind: "human", id: "test" },
+        edits: proposal.edits,
+      },
+      { symbolResolver: resolver },
+    );
+    expect(pasted.ok, JSON.stringify(pasted)).toBe(true);
+    if (!pasted.ok) return;
+    const grounds = resolveDocumentLogicalNets(pasted.document).groups.filter(
+      (group) => group.name === "0",
+    );
+    expect(grounds).toHaveLength(1);
+    expect(grounds[0]!.baseNetIds).toHaveLength(2);
+    expect(document.connectivityEvidence).toHaveLength(1);
+  });
+  it.each(["fallback", "dry-run"])(
+    "keeps %s drawing previews at the same coordinates as the paste",
+    (mode) => {
+      const document = createEmptyDocument(
+        "drawing-preview",
+        "Drawing preview",
+      );
+      const free = (x: number, y: number) => ({
+        kind: "free" as const,
+        position: { x, y },
+      });
+      const common = {
+        locked: false,
+        zIndex: 0,
+        anchor: free(103, 107),
+      };
+      const text = {
+        content: semanticTextDocument("Vout", "instance-label"),
+        alignment: "end" as const,
+        rotation: 90 as const,
+        styleOverride: { sizeScale: 1.5, color: "#2244AA" },
+      };
+      const objects: DraftingObject[] = [
+        { ...common, ...text, id: "note", kind: "text" },
+        {
+          ...common,
+          id: "arrow",
+          kind: "arrow",
+          from: free(103, 107),
+          to: free(143, 147),
+          waypoints: [{ x: 123, y: 107 }],
+          curveControls: [{ x: 113, y: 97 }, null],
+        },
+        {
+          ...common,
+          id: "line",
+          kind: "construction-line",
+          points: [
+            { x: 103, y: 107 },
+            { x: 143, y: 147 },
+          ],
+          curveControls: [{ x: 113, y: 97 }],
+          lineStyle: "dashed",
+        },
+        {
+          ...common,
+          id: "rectangle",
+          kind: "rectangle",
+          center: { x: 103, y: 107 },
+          width: 40,
+          height: 20,
+          rotation: 30,
+          lineStyle: "solid",
+        },
+        {
+          ...common,
+          id: "circle",
+          kind: "circle",
+          center: { x: 103, y: 107 },
+          radius: 20,
+          lineStyle: "solid",
+        },
+        { ...common, id: "leader", kind: "leader", target: free(143, 147) },
+        {
+          ...common,
+          ...text,
+          id: "callout",
+          kind: "callout",
+          target: free(143, 147),
+        },
+      ];
+      document.drafting = { objects };
+      const before = structuredClone(document);
+      const clipboard = copySelection(
+        document,
+        [],
+        objects.map((object) => object.id),
+      )!;
+      const offset = { x: 60, y: 40 };
+      const proposal = proposePaste(document, clipboard, offset, 1);
+      const paste = executeTransaction(
+        document,
+        {
+          transactionId: "drawing-paste",
+          documentId: document.id,
+          expectedRevision: document.revision,
+          actor: { kind: "human", id: "test" },
+          edits: proposal.edits,
+        },
+        { symbolResolver: resolver },
+      );
+      expect(paste.ok, JSON.stringify(paste.diagnostics)).toBe(true);
+      if (!paste.ok) return;
+      const preview = clipboardPreviewDocument(
+        document,
+        clipboard,
+        offset,
+        [],
+        mode === "dry-run" ? resolver : undefined,
+        1,
+      );
+      const expected = paste.document.drafting!.objects.filter((object) =>
+        Object.values(proposal.idRemap.draftingObjects).includes(object.id),
+      );
+      expect(
+        preview.drafting!.objects.map((object, index) => ({
+          ...object,
+          id: objects[index]!.id,
+        })),
+      ).toEqual(
+        expected.map((object, index) => ({
+          ...object,
+          id: objects[index]!.id,
+        })),
+      );
+      expect(preview.drafting!.objects[0]!.anchor).toEqual(free(163, 147));
+      expect(preview.drafting!.objects[0]).toMatchObject(text);
+      expect(() => buildSvgScene(preview, resolver)).not.toThrow();
+      expect(document).toEqual(before);
+      expect(clipboard.draftingObjects).toEqual(objects);
+    },
+  );
+
+  it("keeps rotated mixed-copy text aligned with its remapped component labels", () => {
+    const document = createEmptyDocument("mixed-preview", "Mixed preview");
+    document.instances.push({
+      id: "R1",
+      reference: "R1",
+      symbolId: "resistor",
+      placement: { position: { x: 100, y: 100 }, rotation: 0, mirror: "none" },
+    });
+    const anchor = {
+      kind: "object" as const,
+      objectId: "R1",
+      localOffset: { x: 20, y: 30 },
+      fallbackPosition: { x: 120, y: 130 },
+    };
+    document.annotations.push({
+      id: "reference",
+      kind: "instance-label",
+      locked: false,
+      binding: { kind: "instance-reference", instanceId: "R1" },
+      anchor,
+      alignment: "start",
+      rotation: 0,
+    });
+    const note = {
+      kind: "text" as const,
+      locked: false,
+      zIndex: 0,
+      content: { runs: [{ kind: "text" as const, value: "Design note" }] },
+      alignment: "middle" as const,
+      rotation: 0 as const,
+    };
+    document.drafting = {
+      objects: [
+        {
+          ...note,
+          id: "free-note",
+          anchor: { kind: "free", position: { x: 143, y: 127 } },
+        },
+        { ...note, id: "attached-note", anchor },
+      ],
+    };
+    const before = structuredClone(document);
+    const clipboard = copySelection(
+      document,
+      ["R1"],
+      ["free-note", "attached-note"],
+    )!;
+    const turns = [{ kind: "rotate" as const, deltaDegrees: 90 as const }];
+    const offset = { x: 60, y: 40 };
+    const proposal = proposePaste(
+      document,
+      orientClipboard(clipboard, turns),
+      offset,
+      1,
+    );
+    const paste = executeTransaction(
+      document,
+      {
+        transactionId: "mixed-paste",
+        documentId: document.id,
+        expectedRevision: document.revision,
+        actor: { kind: "human", id: "test" },
+        edits: proposal.edits,
+      },
+      { symbolResolver: resolver },
+    );
+    expect(paste.ok, JSON.stringify(paste.diagnostics)).toBe(true);
+    if (!paste.ok) return;
+    const preview = clipboardPreviewDocument(
+      document,
+      clipboard,
+      offset,
+      turns,
+      resolver,
+      1,
+    );
+    expect(preview.drafting!.objects).toEqual(
+      paste.document.drafting!.objects.filter((object) =>
+        Object.values(proposal.idRemap.draftingObjects).includes(object.id),
+      ),
+    );
+    expect(preview.drafting!.objects[0]).toMatchObject({
+      anchor: { kind: "free", position: { x: 133, y: 183 } },
+      rotation: 90,
+    });
+    expect(preview.drafting!.objects[1]!.anchor).toEqual({
+      kind: "object",
+      objectId: proposal.instanceIds[0],
+      localOffset: { x: -30, y: 20 },
+      fallbackPosition: { x: 130, y: 160 },
+    });
+    expect(resolveAnnotationText(preview, preview.annotations[0]!)).toEqual(
+      resolveAnnotationText(
+        paste.document,
+        paste.document.annotations.find(
+          (annotation) =>
+            annotation.id === proposal.idRemap.annotations.reference,
+        )!,
+      ),
+    );
+    expect(
+      flattenRichText(resolveAnnotationText(preview, preview.annotations[0]!)),
+    ).toBe("R2");
+    expect(() => buildSvgScene(preview, resolver)).not.toThrow();
+    expect(document).toEqual(before);
+  });
+
+  it("copies a Cell Pin with an independent interface and Base Net", () => {
+    const document = createEmptyDocument("document-main", "Clipboard");
+    document.instances.push({
+      id: "P1",
+      symbolId: "port",
+      placement: {
+        position: { x: 100, y: 100 },
+        rotation: 0,
+        mirror: "none",
+      },
+    });
+    document.nets.push({
+      id: "net-input",
+
+      terminals: [{ instanceId: "P1", pinName: "P" }],
+    });
+    document.netlist = {
+      name: "cell",
+      terminals: [
+        {
+          id: "terminal-input",
+          name: "VIN",
+          netId: "net-input",
+          direction: "input",
+          interfaceInstanceIds: ["P1"],
+        },
+      ],
+      formalParameters: [],
+    };
+    document.annotations.push({
+      id: "cell-pin-label-p1",
+      kind: "instance-label",
+      binding: {
+        kind: "cell-terminal-name",
+        terminalId: "terminal-input",
+      },
+      anchor: {
+        kind: "object",
+        objectId: "P1",
+        localOffset: { x: 0, y: -20 },
+        fallbackPosition: { x: 100, y: 80 },
+      },
+      alignment: "middle",
+      rotation: 0,
+      locked: false,
+    });
+
+    const clipboard = copySelection(document, ["P1"]);
+    expect(clipboard).not.toBeNull();
+    const proposal = proposePaste(document, clipboard!, { x: 80, y: 0 }, 1);
+    const result = executeTransaction(
+      document,
+      {
+        transactionId: "paste-formal-marker",
+        documentId: document.id,
+        expectedRevision: document.revision,
+        actor: { kind: "human", id: "test" },
+        edits: proposal.edits,
+      },
+      { symbolResolver: resolver },
+    );
+
+    if (!result.ok) throw new Error(JSON.stringify(result, null, 2));
+    const originalTerminal = result.document.netlist?.terminals.find(
+      (terminal) => terminal.id === "terminal-input",
+    );
+    const copiedTerminal = result.document.netlist?.terminals.find((terminal) =>
+      terminal.interfaceInstanceIds.includes("P1_2"),
+    );
+    expect(originalTerminal).toMatchObject({
+      name: "VIN",
+      netId: "net-input",
+      direction: "input",
+      interfaceInstanceIds: ["P1"],
+    });
+    expect(copiedTerminal).toMatchObject({
+      name: "VIN",
+      direction: "input",
+      interfaceInstanceIds: ["P1_2"],
+    });
+    expect(copiedTerminal?.id).not.toBe(originalTerminal?.id);
+    expect(copiedTerminal?.netId).not.toBe(originalTerminal?.netId);
+    expect(result.document.nets).toHaveLength(2);
+    const copiedAnnotation = result.document.annotations.find(
+      (annotation) =>
+        annotation.anchor.kind === "object" &&
+        annotation.anchor.objectId === "P1_2",
+    );
+    expect(copiedAnnotation?.binding).toEqual({
+      kind: "cell-terminal-name",
+      terminalId: copiedTerminal?.id,
+    });
+    expect(copiedAnnotation?.formatOverride).toBeUndefined();
+
+    const rename = executeTransaction(
+      result.document,
+      {
+        transactionId: "rename-copied-formal-pin",
+        documentId: result.document.id,
+        expectedRevision: result.document.revision,
+        actor: { kind: "human", id: "test" },
+        edits: [
+          {
+            kind: "update_cell_terminal",
+            terminalId: copiedTerminal!.id,
+            name: "VIN_COPY_RENAMED",
+            direction: "output",
+          },
+        ],
+      },
+      { symbolResolver: resolver },
+    );
+    if (!rename.ok) throw new Error(JSON.stringify(rename, null, 2));
+    expect(
+      rename.document.netlist?.terminals.find(
+        (terminal) => terminal.id === "terminal-input",
+      ),
+    ).toMatchObject({ name: "VIN", direction: "input" });
+    expect(
+      rename.document.netlist?.terminals.find(
+        (terminal) => terminal.id === copiedTerminal?.id,
+      ),
+    ).toMatchObject({ name: "VIN_COPY_RENAMED", direction: "output" });
+
+    const preview = clipboardPreviewDocument(
+      document,
+      clipboard!,
+      { x: 80, y: 0 },
+      [],
+      resolver,
+    );
+    expect(() => buildSvgScene(preview, resolver)).not.toThrow();
+  });
+
+  it("draws the copied wires in the ghost that sits over its source", () => {
+    // The ghost is built at the origin and translated by an SVG transform,
+    // so its document overlaps the circuit it was copied from. Commit-time
+    // canonicalisation reads that overlap as the copy landing on the
+    // original and folds the copied Net and its Route into the source, so
+    // the preview drew parts with no wires between them — reported from a
+    // screenshot where a transistor carried two wires and the ghost showed
+    // neither.
+    const document = createEmptyDocument("document-main", "Clipboard");
+    document.instances.push(
+      {
+        id: "R1",
+        symbolId: "resistor",
+        placement: {
+          position: { x: 100, y: 100 },
+          rotation: 0,
+          mirror: "none",
+        },
+      },
+      {
+        id: "R2",
+        symbolId: "resistor",
+        placement: {
+          position: { x: 300, y: 100 },
+          rotation: 0,
+          mirror: "none",
+        },
+      },
+    );
+    const wired = executeTransaction(
+      document,
+      {
+        transactionId: "seed-wire",
+        documentId: document.id,
+        expectedRevision: document.revision,
+        actor: { kind: "human", id: "test" },
+        edits: [
+          {
+            kind: "connect_endpoints",
+            from: { kind: "terminal", instanceId: "R1", pinName: "2" },
+            to: { kind: "terminal", instanceId: "R2", pinName: "2" },
+            newNetId: "net-wire",
+          },
+        ],
+      },
+      { symbolResolver: resolver },
+    );
+    if (!wired.ok) throw new Error(wired.error.message);
+    const routed = executeTransaction(
+      wired.document,
+      {
+        transactionId: "seed-route",
+        documentId: wired.document.id,
+        expectedRevision: wired.document.revision,
+        actor: { kind: "human", id: "test" },
+        edits: [
+          {
+            kind: "set_route_path",
+            route: createRoutePath({
+              id: "route-wire",
+              netId: "net-wire",
+              start: { kind: "terminal", instanceId: "R1", pinName: "2" },
+              end: { kind: "terminal", instanceId: "R2", pinName: "2" },
+              bends: [],
+              modes: ["manual"],
+            }),
+          },
+        ],
+      },
+      { symbolResolver: resolver },
+    );
+    if (!routed.ok) throw new Error(routed.error.message);
+
+    const clipboard = copySelection(routed.document, ["R1", "R2"], [], {
+      routeIds: ["route-wire"],
+      junctionIds: [],
+      annotationIds: [],
+    });
+    expect(clipboard?.routes).toHaveLength(1);
+
+    const ghost = clipboardPreviewDocument(
+      routed.document,
+      clipboard!,
+      { x: 0, y: 0 },
+      [],
+      resolver,
+    );
+    // What the person is about to place is two parts AND the wire between
+    // them, so the ghost has to show all three.
+    expect(ghost.instances).toHaveLength(2);
+    expect(ghost.routes).toHaveLength(1);
+    expect(() => buildSvgScene(ghost, resolver)).not.toThrow();
+  });
+
+  it("draws every piece of a copied wire the paste splits", () => {
+    // R3's wire taps R1–R2's wire at a Junction the wire runs through. The
+    // paste splits the through wire there, one piece under a new ID, and a
+    // ghost keeping only the renamed wires drew half of it.
+    const document = createEmptyDocument("document-main", "Clipboard");
+    const at = (x: number, y: number) => ({
+      position: { x, y },
+      rotation: 0 as const,
+      mirror: "none" as const,
+    });
+    document.instances.push(
+      { ...resistorInstance("R1", "R1"), placement: at(100, 100) },
+      { ...resistorInstance("R2", "R2"), placement: at(300, 100) },
+      { ...resistorInstance("R3", "R3"), placement: at(200, 200) },
+    );
+    document.nets.push({
+      id: "net-n",
+      terminals: [
+        { instanceId: "R1", pinName: "2" },
+        { instanceId: "R2", pinName: "2" },
+        { instanceId: "R3", pinName: "1" },
+      ],
+    });
+    document.junctions.push({
+      id: "junction-tap",
+      netId: "net-n",
+      position: { x: 200, y: 120 },
+    });
+    document.routes.push(
+      createRoutePath({
+        id: "route-through",
+        netId: "net-n",
+        start: { kind: "terminal", instanceId: "R1", pinName: "2" },
+        end: { kind: "terminal", instanceId: "R2", pinName: "2" },
+        bends: [],
+        modes: ["manual"],
+      }),
+      createRoutePath({
+        id: "route-tap",
+        netId: "net-n",
+        start: { kind: "junction", junctionId: "junction-tap" },
+        end: { kind: "terminal", instanceId: "R3", pinName: "1" },
+        bends: [],
+        modes: ["manual"],
+      }),
+    );
+    const clipboard = copySelection(document, ["R1", "R2", "R3"], [], {
+      routeIds: ["route-through", "route-tap"],
+      junctionIds: ["junction-tap"],
+      annotationIds: [],
+    });
+    const ghost = clipboardPreviewDocument(
+      document,
+      clipboard!,
+      { x: 0, y: 0 },
+      [],
+      resolver,
+    );
+    // Both halves of the through wire, 100 units each along y = 120.
+    const alongThroughWire = ghost.routes
+      .flatMap((route) => {
+        const points =
+          resolveRouteGeometry(ghost, resolver, route)?.centerline ?? [];
+        return points.slice(1).map((to, index) => [points[index]!, to]);
+      })
+      .filter(([from, to]) => from!.y === 120 && to!.y === 120)
+      .reduce((sum, [from, to]) => sum + Math.abs(to!.x - from!.x), 0);
+    expect(ghost.routes).toHaveLength(3);
+    expect(alongThroughWire).toBe(200);
+    expect(() => buildSvgScene(ghost, resolver)).not.toThrow();
+  });
+
+  it("draws the ghost in a Cell whose block keeps a stored Pin layout", () => {
+    // A Cell placed somewhere, or whose block Pins were arranged, stores
+    // that layout in its presentation. The ghost inherited it while holding
+    // none or only some of the Cell's Pins, so it failed validation and no
+    // preview was drawn: copying a part showed nothing under the cursor.
+    const document = createEmptyDocument("document-cell", "Cell");
+    document.instances.push(
+      resistorInstance("R1", "R1"),
+      {
+        id: "P1",
+        symbolId: "port",
+        placement: { position: { x: 0, y: 100 }, rotation: 0, mirror: "none" },
+      },
+      {
+        id: "P2",
+        symbolId: "port",
+        placement: {
+          position: { x: 200, y: 100 },
+          rotation: 0,
+          mirror: "horizontal",
+        },
+      },
+    );
+    document.nets.push(
+      {
+        id: "net-in",
+        terminals: [
+          { instanceId: "P1", pinName: "P" },
+          { instanceId: "R1", pinName: "1" },
+        ],
+      },
+      {
+        id: "net-out",
+        terminals: [
+          { instanceId: "P2", pinName: "P" },
+          { instanceId: "R1", pinName: "2" },
+        ],
+      },
+    );
+    document.netlist!.terminals.push(
+      {
+        id: "terminal-in",
+        name: "in",
+        netId: "net-in",
+        direction: "input",
+        interfaceInstanceIds: ["P1"],
+      },
+      {
+        id: "terminal-out",
+        name: "out",
+        netId: "net-out",
+        direction: "output",
+        interfaceInstanceIds: ["P2"],
+      },
+    );
+    document.presentation.cellSymbol = {
+      pinPlacements: [
+        { terminalId: "terminal-in", side: "west", offset: 0 },
+        { terminalId: "terminal-out", side: "east", offset: 0 },
+      ],
+    };
+    for (const instanceIds of [["R1"], ["P1"]]) {
+      const clipboard = copySelection(document, instanceIds, [], {
+        routeIds: [],
+        junctionIds: [],
+        annotationIds: [],
+      });
+      const ghost = clipboardPreviewDocument(
+        document,
+        clipboard!,
+        { x: 0, y: 0 },
+        [],
+        resolver,
+      );
+      expect(ghost.instances.map((instance) => instance.symbolId)).toEqual(
+        instanceIds.map((id) => (id === "R1" ? "resistor" : "port")),
+      );
+      expect(buildSvgScene(ghost, resolver).formalBody).toContain(
+        "data-symbol-id",
+      );
+    }
+  });
+
+  it("duplicates selected components, their named electrical Net, and route atomically", () => {
+    const document = createEmptyDocument("document-main", "Clipboard");
+    document.instances.push(
+      {
+        id: "R1",
+        symbolId: "resistor",
+        placement: {
+          position: { x: 100, y: 100 },
+          rotation: 0,
+          mirror: "none",
+        },
+        reference: "R1",
+        netlist: {
+          binding: { kind: "primitive", deviceClass: "resistor" },
+          parameters: { value: "1k" },
+        },
+      },
+      {
+        id: "R2",
+        symbolId: "resistor",
+        placement: {
+          position: { x: 240, y: 100 },
+          rotation: 0,
+          mirror: "none",
+        },
+        reference: "R2",
+        netlist: {
+          binding: { kind: "primitive", deviceClass: "resistor" },
+          parameters: { value: "2k" },
+        },
+      },
+    );
+    document.nets.push({
+      id: "net-signal",
+
+      terminals: [
+        { instanceId: "R1", pinName: "2" },
+        { instanceId: "R2", pinName: "1" },
+      ],
+    });
+    document.connectivityEvidence.push({
+      id: "claim-signal",
+      kind: "name-claim",
+      netId: "net-signal",
+      name: "SIGNAL",
+      scope: "local",
+      owner: { kind: "net-label", annotationId: "label-signal" },
+    });
+    document.routes.push(
+      createRoutePath({
+        id: "route-signal",
+        netId: "net-signal",
+        start: { kind: "terminal", instanceId: "R1", pinName: "2" },
+        end: { kind: "terminal", instanceId: "R2", pinName: "1" },
+        bends: [{ x: 100, y: 80 }],
+        modes: ["manual", "manual"],
+      }),
+    );
+    document.annotations.push({
+      id: "label-signal",
+      kind: "net-label",
+      binding: { kind: "net-name", netId: "net-signal" },
+      netId: "net-signal",
+      anchor: { kind: "free", position: { x: 170, y: 80 } },
+      alignment: "middle",
+      rotation: 0,
+      locked: false,
+    });
+
+    const copied = copySelection(document, ["R1", "R2"], [], {
+      routeIds: ["route-signal"],
+      junctionIds: [],
+      annotationIds: ["label-signal"],
+    });
+    expect(copied?.routes).toHaveLength(1);
+    const proposal = proposePaste(document, copied!, { x: 20, y: 20 }, 1);
+    const result = executeTransaction(
+      document,
+      {
+        transactionId: "paste-1",
+        documentId: document.id,
+        expectedRevision: 0,
+        actor: { kind: "human", id: "test" },
+        edits: proposal.edits,
+      },
+      { symbolResolver: resolver },
+    );
+    expect(result).toMatchObject({ ok: true });
+    if (!result.ok) return;
+    expect(result.document.instances).toHaveLength(4);
+    expect(
+      result.document.instances.map((instance) => instance.reference),
+    ).toEqual(["R1", "R2", "R3", "R4"]);
+    expect(result.document.routes).toHaveLength(2);
+    expect(result.document.nets).toHaveLength(2);
+    expect(resolveDocumentLogicalNets(result.document).groups).toHaveLength(1);
+    expect(result.document.routes[1]).toMatchObject({
+      netId: "net-signal_2",
+      start: { instanceId: "R1_2" },
+    });
+    expect(routeEnd(result.document.routes[1]!)).toMatchObject({
+      instanceId: "R2_2",
+    });
+    expect(routeBends(result.document.routes[1]!)).toEqual([
+      { x: 120, y: 100 },
+    ]);
+    const repeatedPreview = clipboardPreviewDocument(
+      result.document,
+      copied!,
+      { x: 40, y: 40 },
+      [],
+      resolver,
+      2,
+    );
+    expect(repeatedPreview.instances).toHaveLength(2);
+    expect(() => buildSvgScene(repeatedPreview, resolver)).not.toThrow();
+  });
+
+  it("copies only an explicitly selected Instance when its dangling Wire is not selected", () => {
+    const document = createEmptyDocument("document-main", "Clipboard");
+    document.instances.push({
+      id: "M1",
+      symbolId: "nmos",
+      placement: {
+        position: { x: 100, y: 100 },
+        rotation: 0,
+        mirror: "none",
+      },
+    });
+    document.nets.push({
+      id: "signal",
+      terminals: [{ instanceId: "M1", pinName: "G" }],
+    });
+    document.junctions.push({
+      id: "J1",
+      netId: "signal",
+      position: { x: 20, y: 100 },
+    });
+    document.routes.push(
+      createRoutePath({
+        id: "dangling",
+        netId: "signal",
+        start: { kind: "terminal", instanceId: "M1", pinName: "G" },
+        end: { kind: "junction", junctionId: "J1" },
+        bends: [],
+        modes: ["manual"],
+      }),
+    );
+
+    const instanceOnly = copySelection(document, ["M1"], [], {
+      routeIds: [],
+      junctionIds: [],
+      annotationIds: [],
+    });
+    expect(instanceOnly).toMatchObject({
+      instances: [{ id: "M1" }],
+      nets: [],
+      routes: [],
+      junctions: [],
+    });
+
+    const explicitSubgraph = copySelection(document, ["M1"], [], {
+      routeIds: ["dangling"],
+      junctionIds: ["J1"],
+      annotationIds: [],
+    });
+    expect(explicitSubgraph?.nets.map((net) => net.id)).toEqual(["signal"]);
+    expect(explicitSubgraph?.routes.map((route) => route.id)).toEqual([
+      "dangling",
+    ]);
+    expect(explicitSubgraph?.junctions.map((junction) => junction.id)).toEqual([
+      "J1",
+    ]);
+  });
+
+  it("creates an isolated translated document for a copy-placement ghost", () => {
+    const document = createEmptyDocument("document-main", "Preview");
+    document.instances.push({
+      id: "R1",
+      symbolId: "resistor",
+      placement: {
+        position: { x: 100, y: 100 },
+        rotation: 0,
+        mirror: "none",
+      },
+    });
+    const clipboard = copySelection(document, ["R1"]);
+    expect(clipboard).not.toBeNull();
+    expect(clipboardPlacementAnchor(clipboard!)).toEqual({ x: 100, y: 100 });
+
+    const preview = clipboardPreviewDocument(document, clipboard!, {
+      x: 40,
+      y: -20,
+    });
+    expect(preview.instances[0]?.placement?.position).toEqual({
+      x: 140,
+      y: 80,
+    });
+    expect(document.instances[0]?.placement?.position).toEqual({
+      x: 100,
+      y: 100,
+    });
+
+    const rotatedPreview = clipboardPreviewDocument(
+      document,
+      clipboard!,
+      { x: 40, y: -20 },
+      [{ kind: "rotate", deltaDegrees: 90 }],
+    );
+    expect(rotatedPreview.instances[0]?.placement).toMatchObject({
+      position: { x: 140, y: 80 },
+      rotation: 90,
+    });
+
+    const mirroredPreview = clipboardPreviewDocument(
+      document,
+      clipboard!,
+      { x: 40, y: -20 },
+      [{ kind: "reflect", direction: "left-right" }],
+    );
+    expect(mirroredPreview.instances[0]?.placement).toMatchObject({
+      position: { x: 140, y: 80 },
+      rotation: 0,
+      mirror: "horizontal",
+    });
+  });
+
+  it("does not inherit reference-bearing metadata outside the copied fragment", () => {
+    const document = createEmptyDocument("document-main", "Preview");
+    document.instances.push(
+      {
+        id: "R1",
+        symbolId: "resistor",
+        placement: {
+          position: { x: 100, y: 100 },
+          rotation: 0,
+          mirror: "none",
+        },
+      },
+      {
+        id: "R3",
+        symbolId: "resistor",
+        placement: {
+          position: { x: 140, y: 20 },
+          rotation: 0,
+          mirror: "none",
+        },
+      },
+      {
+        id: "R2",
+        symbolId: "resistor",
+        placement: {
+          position: { x: 300, y: 100 },
+          rotation: 0,
+          mirror: "none",
+        },
+      },
+    );
+    document.nets.push(
+      {
+        id: "net-r1",
+
+        terminals: [{ instanceId: "R1", pinName: "1" }],
+      },
+      {
+        id: "net-r2",
+
+        terminals: [{ instanceId: "R2", pinName: "1" }],
+      },
+    );
+    document.connectivityEvidence.push(
+      {
+        id: "claim-r1",
+        kind: "net-name-hint",
+        netId: "net-r1",
+        sourceName: "N1",
+        origin: "legacy-explicit-net-property",
+      },
+      {
+        id: "claim-r2",
+        kind: "net-name-hint",
+        netId: "net-r2",
+        sourceName: "N2",
+        origin: "legacy-explicit-net-property",
+      },
+    );
+    document.mosBulkDefaults = { nmosNetId: "net-r2" };
+    document.layoutGroups.push({
+      id: "group-r2",
+      kind: "custom",
+      objectIds: ["R2"],
+      locked: false,
+    });
+    document.constraints.push({
+      id: "align-r1-r2",
+      kind: "align-y",
+      objectIds: ["R1", "R2"],
+      locked: false,
+    });
+
+    const clipboard = copySelection(document, ["R1"]);
+    expect(clipboard).not.toBeNull();
+    const preview = clipboardPreviewDocument(document, clipboard!, {
+      x: 40,
+      y: 0,
+    });
+
+    expect(preview.connectivityEvidence).toEqual([]);
+    expect(preview.mosBulkDefaults).toBeUndefined();
+    expect(preview.layoutGroups).toEqual([]);
+    expect(preview.constraints).toEqual([]);
+    expect(preview.netlist).toBeUndefined();
+    expect(() => buildSvgScene(preview, resolver)).not.toThrow();
+  });
+
+  it("orients a copied group as one rigid body about its anchor", () => {
+    const document = createEmptyDocument("document-main", "Rigid copy");
+    document.instances.push(
+      {
+        id: "R1",
+        symbolId: "resistor",
+        placement: {
+          position: { x: 100, y: 100 },
+          rotation: 0,
+          mirror: "none",
+        },
+      },
+      {
+        id: "R2",
+        symbolId: "resistor",
+        placement: {
+          position: { x: 200, y: 140 },
+          rotation: 0,
+          mirror: "none",
+        },
+      },
+    );
+    const clipboard = copySelection(document, ["R1", "R2"]);
+    expect(clipboard).not.toBeNull();
+
+    // Left-right reflection about the anchor (R1's origin): R2 lands the
+    // mirrored distance on the other side and both parts flip; the layout
+    // reflects instead of each part spinning in place.
+    const mirrored = orientClipboard(clipboard!, [
+      { kind: "reflect", direction: "left-right" },
+    ]);
+    expect(mirrored.instances.map((instance) => instance.placement)).toEqual([
+      { position: { x: 100, y: 100 }, rotation: 0, mirror: "horizontal" },
+      { position: { x: 0, y: 140 }, rotation: 0, mirror: "horizontal" },
+    ]);
+
+    // A quarter turn orbits R2 around the anchor while both parts turn.
+    const turned = orientClipboard(clipboard!, [
+      { kind: "rotate", deltaDegrees: 90 },
+    ]);
+    expect(turned.instances.map((instance) => instance.placement)).toEqual([
+      { position: { x: 100, y: 100 }, rotation: 90, mirror: "none" },
+      { position: { x: 60, y: 200 }, rotation: 90, mirror: "none" },
+    ]);
+  });
+
+  it("sets a turned copy's untouched label where a turn on the canvas sets it", () => {
+    // Reported: C then R on a transistor left the copy's M₂ on top of the
+    // turned body, because the label's offset turned rigidly with it.
+    const document = createEmptyDocument("document-main", "Turned copy");
+    const instance: Instance = {
+      id: "M1",
+      symbolId: "nmos",
+      reference: "M1",
+      netlist: { parameters: {} },
+      placement: { position: { x: 200, y: 200 }, rotation: 0, mirror: "none" },
+    };
+    document.instances.push(instance);
+    const placement = defaultInstanceLabelPlacement(
+      instance,
+      resolver.resolve("nmos")!,
+      resolveDocumentStyleProfile(document.presentation),
+      document.presentation.grid,
+      "reference",
+    )!;
+    document.annotations.push({
+      id: "label-m1",
+      kind: "instance-label",
+      binding: { kind: "instance-reference", instanceId: "M1" },
+      anchor: {
+        kind: "object",
+        objectId: "M1",
+        localOffset: {
+          x: placement.position.x - 200,
+          y: placement.position.y - 200,
+        },
+        fallbackPosition: placement.position,
+      },
+      alignment: placement.alignment,
+      rotation: 0,
+      locked: false,
+    });
+    const turned = executeTransaction(
+      document,
+      {
+        transactionId: "turn",
+        documentId: document.id,
+        expectedRevision: document.revision,
+        actor: { kind: "human", id: "test" },
+        edits: [{ kind: "rotate_instance", instanceId: "M1", rotation: 90 }],
+      },
+      { symbolResolver: resolver },
+    );
+    if (!turned.ok) throw new Error(JSON.stringify(turned.error));
+    const onCanvas = turned.document.annotations[0]!;
+
+    const copied = orientClipboard(
+      copySelection(document, ["M1"])!,
+      [{ kind: "rotate", deltaDegrees: 90 }],
+      undefined,
+      { resolver, presentation: document.presentation },
+    );
+    const label = copied.annotations.find(
+      (annotation) => annotation.id === "label-m1",
+    )!;
+    if (label.anchor.kind !== "object" || onCanvas.anchor.kind !== "object")
+      throw new Error("anchor");
+    expect(label.anchor.localOffset).toEqual(onCanvas.anchor.localOffset);
+    expect(label.alignment).toBe(onCanvas.alignment);
+    const turnedPart = copied.instances[0]!.placement!.position;
+    expect(label.anchor.fallbackPosition).toEqual({
+      x: turnedPart.x + label.anchor.localOffset.x,
+      y: turnedPart.y + label.anchor.localOffset.y,
+    });
+  });
+
+  it("uses the Edit Engine transform for an already oriented copied label", () => {
+    const document = createEmptyDocument("document-main", "Oriented label");
+    document.instances.push({
+      id: "R1",
+      symbolId: "resistor",
+      placement: {
+        position: { x: 100, y: 100 },
+        rotation: 90,
+        mirror: "none",
+      },
+    });
+    document.annotations.push({
+      id: "label-r1",
+      kind: "instance-label",
+      content: semanticTextDocument("R1", "instance-label"),
+      anchor: {
+        kind: "object",
+        objectId: "R1",
+        localOffset: { x: 0, y: -20 },
+        fallbackPosition: { x: 100, y: 80 },
+      },
+      alignment: "middle",
+      rotation: 0,
+      locked: false,
+    });
+    const clipboard = copySelection(document, ["R1"])!;
+    const operations = [{ kind: "rotate", deltaDegrees: 90 } as const];
+    const preview = clipboardPreviewDocument(
+      document,
+      clipboard,
+      { x: 40, y: 0 },
+      operations,
+      resolver,
+    );
+    const proposal = proposePaste(document, clipboard, { x: 40, y: 0 }, 1);
+    const result = executeTransaction(
+      document,
+      {
+        transactionId: "paste-oriented-label",
+        documentId: document.id,
+        expectedRevision: document.revision,
+        actor: { kind: "human", id: "test" },
+        // The same turn as an ordinary canvas rotation of the pasted part.
+        edits: [
+          ...proposal.edits,
+          { kind: "rotate_instance", instanceId: "R1_2", rotation: 180 },
+        ],
+      },
+      { symbolResolver: resolver },
+    );
+    if (!result.ok) throw new Error(JSON.stringify(result, null, 2));
+    const previewInstanceId = preview.instances[0]?.id;
+    const previewLabel = preview.annotations.find(
+      (annotation) =>
+        annotation.anchor.kind === "object" &&
+        annotation.anchor.objectId === previewInstanceId,
+    );
+    const committedLabel = result.document.annotations.find(
+      (annotation) => annotation.id === "label-r1_2",
+    );
+    expect(previewLabel?.anchor).toEqual({
+      kind: "object",
+      objectId: "R1_2",
+      localOffset: { x: 20, y: 0 },
+      fallbackPosition: { x: 160, y: 100 },
+    });
+    expect(committedLabel?.anchor).toEqual({
+      kind: "object",
+      objectId: "R1_2",
+      localOffset: { x: 20, y: 0 },
+      fallbackPosition: { x: 160, y: 100 },
+    });
+  });
+
+  function resistorInstance(
+    id: string,
+    reference: string | undefined,
+  ): Instance {
+    return {
+      id,
+      symbolId: "resistor",
+      placement: {
+        position: { x: 100, y: 100 },
+        rotation: 0,
+        mirror: "none",
+      },
+      ...(reference
+        ? {
+            reference: reference,
+            netlist: { parameters: {} },
+          }
+        : {}),
+    };
+  }
+
+  function instanceLabel(
+    instanceId: string,
+    text: string,
+    bound = true,
+  ): Annotation {
+    return {
+      id: `instance-label-${instanceId}`,
+      kind: "instance-label",
+      ...(bound
+        ? {
+            binding: {
+              kind: "instance-reference" as const,
+              instanceId,
+            },
+          }
+        : { content: semanticTextDocument(text, "instance-label") }),
+      anchor: {
+        kind: "object",
+        objectId: instanceId,
+        localOffset: { x: 0, y: -20 },
+        fallbackPosition: { x: 100, y: 80 },
+      },
+      alignment: "middle",
+      rotation: 0,
+      locked: false,
+    };
+  }
+
+  it("allocates object identity independently while projecting the new Reference", () => {
+    const document = createEmptyDocument("document-main", "Designator paste");
+    document.instances.push(resistorInstance("R1", "R1"));
+    document.annotations.push(instanceLabel("R1", "R1"));
+
+    const copied = copySelection(document, ["R1"]);
+    const proposal = proposePaste(document, copied!, { x: 20, y: 0 }, 1);
+    expect(proposal.instanceIds).toEqual(["R1_2"]);
+    // Executing the paste proves the rewritten label stays schema-valid.
+    const result = executeTransaction(
+      document,
+      {
+        transactionId: "paste-designator",
+        documentId: document.id,
+        expectedRevision: 0,
+        actor: { kind: "human", id: "test" },
+        edits: proposal.edits,
+      },
+      { symbolResolver: resolver },
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.document.instances).toHaveLength(2);
+    expect(result.document.instances[1]).toMatchObject({
+      id: "R1_2",
+      reference: "R2",
+    });
+    expect(
+      result.document.annotations
+        .filter((annotation) => annotation.kind === "instance-label")
+        .map((annotation) =>
+          flattenRichText(resolveAnnotationText(result.document, annotation)),
+        ),
+    ).toEqual(["R1", "R2"]);
+  });
+
+  it.each([["vcvs", "E", "A_{v}v_{2}"]])(
+    "renumbers an untouched %s expression when copying its Instance",
+    (symbolId, prefix, expected) => {
+      const document = createEmptyDocument("copy-control", "Copy control");
+      const ownerId = `${prefix}1`;
+      document.instances.push({
+        ...resistorInstance(ownerId, ownerId),
+        symbolId,
+      });
+      document.annotations.push({
+        ...instanceLabel(ownerId, "", false),
+        content: controlledSourceExpressionDocument(
+          defaultControlledSourceExpression(
+            symbolId as "vcvs" | "vccs" | "cccs" | "ccvs",
+            "1",
+          ),
+        ),
+      });
+      const proposal = proposePaste(
+        document,
+        copySelection(document, [ownerId])!,
+        { x: 20, y: 0 },
+        1,
+      );
+      const copiedLabel = proposal.edits.find(
+        (edit) =>
+          edit.kind === "upsert_schematic_annotation" &&
+          edit.annotation.kind === "instance-label",
+      );
+      expect(copiedLabel?.kind).toBe("upsert_schematic_annotation");
+      if (copiedLabel?.kind !== "upsert_schematic_annotation") return;
+      expect(
+        controlledSourceExpressionSource(copiedLabel.annotation.content!),
+      ).toBe(expected);
+    },
+  );
+
+  it("preserves a user-authored controlled-source formula when copying", () => {
+    const document = createEmptyDocument(
+      "copy-custom-control",
+      "Copy custom control",
+    );
+    document.instances.push({
+      ...resistorInstance("G1", "G1"),
+      symbolId: "vccs",
+    });
+    document.annotations.push({
+      ...instanceLabel("G1", "", false),
+      content: controlledSourceExpressionDocument("g_{x}v_{y}"),
+    });
+    const proposal = proposePaste(
+      document,
+      copySelection(document, ["G1"])!,
+      { x: 20, y: 0 },
+      1,
+    );
+    const copiedLabel = proposal.edits.find(
+      (edit) =>
+        edit.kind === "upsert_schematic_annotation" &&
+        edit.annotation.kind === "instance-label",
+    );
+    if (copiedLabel?.kind !== "upsert_schematic_annotation")
+      throw new Error("Missing copied label");
+    expect(
+      controlledSourceExpressionSource(copiedLabel.annotation.content!),
+    ).toBe("g_{x}v_{y}");
+  });
+
+  it("never grows a copied identity, and restarts one an earlier copy chained", () => {
+    const document = createEmptyDocument("document-main", "Copied copies");
+    document.instances.push(
+      resistorInstance("R1", "R1"),
+      resistorInstance("R1-copy-1-copy-3", "R2"),
+    );
+    document.annotations.push(
+      instanceLabel("R1", "R1"),
+      instanceLabel("R1-copy-1-copy-3", "R2"),
+    );
+    const paste = (current: typeof document, id: string) => {
+      const proposal = proposePaste(
+        current,
+        copySelection(current, [id])!,
+        { x: 20, y: 0 },
+        1,
+      );
+      const result = executeTransaction(
+        current,
+        {
+          transactionId: `paste-${id}`,
+          documentId: current.id,
+          expectedRevision: current.revision,
+          actor: { kind: "human", id: "test" },
+          edits: proposal.edits,
+        },
+        { symbolResolver: resolver },
+      );
+      if (!result.ok) throw new Error(JSON.stringify(result, null, 2));
+      return { id: proposal.instanceIds[0]!, document: result.document };
+    };
+    const copy = paste(document, "R1");
+    const copyOfCopy = paste(copy.document, copy.id);
+    const chained = paste(copyOfCopy.document, "R1-copy-1-copy-3");
+    expect([copy.id, copyOfCopy.id, chained.id]).toEqual([
+      "R1_2",
+      "R1_3",
+      "R1_4",
+    ]);
+    // One ordinal for the whole paste keeps the identities derived from a
+    // part, its label here, paired with it.
+    expect(
+      chained.document.annotations.map((annotation) => annotation.id),
+    ).toContain("instance-label-R1_4");
+  });
+
+  it("numbers copied objects that share a stem apart, and a label after its part", () => {
+    const document = createEmptyDocument("document-main", "Shared stems");
+    document.instances.push(
+      resistorInstance("R1", "R1"),
+      resistorInstance("R1-copy-1", "R2"),
+    );
+    // Only the older copy carries a label named after it.
+    document.annotations.push(instanceLabel("R1-copy-1", "R2"));
+    const proposal = proposePaste(
+      document,
+      copySelection(document, ["R1", "R1-copy-1"])!,
+      { x: 20, y: 0 },
+      1,
+    );
+    expect(proposal.instanceIds).toEqual(["R1_2", "R1_3"]);
+    expect(proposal.idRemap.annotations).toEqual({
+      "instance-label-R1-copy-1": "instance-label-R1_3",
+    });
+    const result = executeTransaction(
+      document,
+      {
+        transactionId: "paste-shared-stems",
+        documentId: document.id,
+        expectedRevision: document.revision,
+        actor: { kind: "human", id: "test" },
+        edits: proposal.edits,
+      },
+      { symbolResolver: resolver },
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  function pastedLabelOf(document: ReturnType<typeof createEmptyDocument>) {
+    const proposal = proposePaste(
+      document,
+      copySelection(document, [document.instances[0]!.id])!,
+      { x: 20, y: 0 },
+      1,
+    );
+    const label = proposal.edits.find(
+      (
+        edit,
+      ): edit is Extract<
+        typeof edit,
+        { kind: "upsert_schematic_annotation" }
+      > => edit.kind === "upsert_schematic_annotation",
+    )!.annotation;
+    const instance = proposal.edits.find(
+      (edit): edit is Extract<typeof edit, { kind: "add_instance" }> =>
+        edit.kind === "add_instance",
+    )!.instance;
+    return { label, instance, proposal };
+  }
+
+  it("keeps an authored label that spells the Reference as an alias", () => {
+    const document = createEmptyDocument("document-main", "Styled name");
+    document.instances.push(resistorInstance("R1", "R1"));
+    document.annotations.push(instanceLabel("R1", "R_1", false));
+
+    const { label } = pastedLabelOf(document);
+    expect(label.binding).toBeUndefined();
+    expect(label.content).toEqual(document.annotations[0]!.content);
+  });
+
+  it("keeps a capacitor alias through repeated copy placement", () => {
+    const document = createEmptyDocument("document-main", "Capacitor alias");
+    document.instances.push({
+      id: "C1",
+      reference: "C1",
+      symbolId: "capacitor",
+      placement: {
+        position: { x: 100, y: 100 },
+        rotation: 0,
+        mirror: "none",
+      },
+      netlist: { parameters: { value: "1p" } },
+    });
+    document.annotations.push(instanceLabel("C1", "CF", false));
+
+    let current = document;
+    let sourceId = "C1";
+    for (let sequence = 1; sequence <= 3; sequence += 1) {
+      const clipboard = copySelection(current, [sourceId]);
+      const proposal = proposePaste(
+        current,
+        clipboard!,
+        { x: 200 * sequence, y: 0 },
+        sequence,
+      );
+      const result = executeTransaction(
+        current,
+        {
+          transactionId: `paste-capacitor-alias-${sequence}`,
+          documentId: current.id,
+          expectedRevision: current.revision,
+          actor: { kind: "human", id: "test" },
+          edits: proposal.edits,
+        },
+        { symbolResolver: resolver },
+      );
+      if (!result.ok) throw new Error(JSON.stringify(result.diagnostics));
+      current = result.document;
+      sourceId = proposal.instanceIds[0]!;
+    }
+
+    const copies = current.instances.filter((instance) => instance.id !== "C1");
+    expect(copies.map((instance) => instance.reference)).toEqual([
+      "C2",
+      "C3",
+      "C4",
+    ]);
+    for (const copy of copies) {
+      const alias = current.annotations.find(
+        (annotation) =>
+          annotation.kind === "instance-label" &&
+          annotation.anchor.kind === "object" &&
+          annotation.anchor.objectId === copy.id,
+      );
+      expect(alias?.binding).toBeUndefined();
+      expect(alias?.content).toEqual(document.annotations[0]!.content);
+    }
+  });
+
+  it("keeps the label of a part that had no Reference hidden", () => {
+    const document = createEmptyDocument("document-main", "Unnamed part");
+    document.instances.push(resistorInstance("R1", undefined));
+    document.annotations.push(instanceLabel("R1", ""));
+
+    const { label, instance } = pastedLabelOf(document);
+    expect(instance.reference).toBe("R1");
+    expect(label.visible).toBe(false);
+  });
+
+  it("starts copied pins without source NoConnect declarations", () => {
+    const document = createEmptyDocument("document-main", "NoConnect copy");
+    document.instances.push({
+      id: "R1",
+      symbolId: "resistor",
+      placement: {
+        position: { x: 100, y: 100 },
+        rotation: 0,
+        mirror: "none",
+      },
+    });
+    document.noConnects.push({
+      id: "nc-r1-1",
+      endpoint: { kind: "terminal", instanceId: "R1", pinName: "1" },
+    });
+
+    const copied = copySelection(document, ["R1"]);
+    expect(copied?.noConnects).toEqual([]);
+    const result = executeTransaction(
+      document,
+      {
+        transactionId: "paste-no-connect",
+        documentId: document.id,
+        expectedRevision: 0,
+        actor: { kind: "human", id: "test" },
+        edits: proposePaste(document, copied!, { x: 20, y: 0 }, 1).edits,
+      },
+      { symbolResolver: resolver },
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.document.noConnects).toEqual(document.noConnects);
+  });
+
+  it("does not carry a source MOS bulk binding into a fresh instance", () => {
+    const document = createEmptyDocument("document-main", "Shared MOS bulk");
+    document.instances.push(
+      {
+        id: "M1",
+        symbolId: "nmos",
+        mosBulkBinding: { origin: "supply-default", netId: "net-global-0" },
+        placement: {
+          position: { x: 100, y: 100 },
+          rotation: 0,
+          mirror: "none",
+        },
+      },
+      {
+        id: "M2",
+        symbolId: "nmos",
+        mosBulkBinding: { origin: "supply-default", netId: "net-global-0" },
+        placement: {
+          position: { x: 220, y: 100 },
+          rotation: 0,
+          mirror: "none",
+        },
+      },
+    );
+    document.nets.push({
+      id: "net-global-0",
+
+      terminals: [
+        { instanceId: "M1", pinName: "B" },
+        { instanceId: "M2", pinName: "B" },
+      ],
+    });
+
+    const copied = copySelection(document, ["M1"]);
+    expect(copied?.nets).toEqual([]);
+
+    const preview = clipboardPreviewDocument(document, copied!, {
+      x: 80,
+      y: 0,
+    });
+    expect(() => buildSvgScene(preview, resolver)).not.toThrow();
+
+    const proposal = proposePaste(document, copied!, { x: 80, y: 0 }, 1);
+    expect(proposal.errors).toEqual([]);
+    const result = executeTransaction(
+      document,
+      {
+        transactionId: "paste-shared-mos-bulk",
+        documentId: document.id,
+        expectedRevision: 0,
+        actor: { kind: "human", id: "test" },
+        edits: proposal.edits,
+      },
+      { symbolResolver: resolver },
+    );
+    if (!result.ok) throw new Error(JSON.stringify(result, null, 2));
+    expect(result.document.nets[0]?.terminals).toEqual([
+      { instanceId: "M1", pinName: "B" },
+      { instanceId: "M2", pinName: "B" },
+    ]);
+    expect(result.document.instances[2]?.mosBulkBinding).toBeUndefined();
+  });
+
+  it("leaves an ordinary copied boundary terminal disconnected", () => {
+    const document = createEmptyDocument("document-main", "Boundary copy");
+    document.instances.push(
+      { id: "R1", symbolId: "resistor", placement: null },
+      { id: "R2", symbolId: "resistor", placement: null },
+    );
+    document.nets.push({
+      id: "signal",
+      terminals: [
+        { instanceId: "R1", pinName: "1" },
+        { instanceId: "R2", pinName: "1" },
+      ],
+    });
+
+    const copied = copySelection(document, ["R1"]);
+    const proposal = proposePaste(document, copied!, { x: 20, y: 0 }, 1);
+    const result = executeTransaction(
+      document,
+      {
+        transactionId: "paste-boundary-open",
+        documentId: document.id,
+        expectedRevision: 0,
+        actor: { kind: "human", id: "test" },
+        edits: proposal.edits,
+      },
+      { symbolResolver: resolver },
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(
+      result.document.nets.some((net) =>
+        net.terminals.some(
+          (terminal) => terminal.instanceId === proposal.instanceIds[0],
+        ),
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("captureDocumentComposition", () => {
+  it("uses composition identity while preserving an available designator", () => {
+    const source = createEmptyDocument("source-document", "Source");
+    source.instances.push({
+      id: "R7",
+      symbolId: "resistor",
+      reference: "R7",
+      placement: {
+        position: { x: 20, y: 20 },
+        rotation: 0,
+        mirror: "none",
+      },
+      netlist: {
+        binding: { kind: "primitive", deviceClass: "resistor" },
+        parameters: { value: "10k" },
+      },
+    });
+
+    const fragment = captureDocumentComposition(source)!;
+    const proposal = proposePaste(
+      createEmptyDocument("target-document", "Target"),
+      fragment,
+      { x: 0, y: 0 },
+      1,
+    );
+    const added = proposal.edits.find((edit) => edit.kind === "add_instance");
+
+    expect(fragment).toMatchObject({
+      intent: "compose-document",
+      sourceDocumentId: "source-document",
+      sourceGrid: 10,
+    });
+    expect(proposal.operationPlan).toMatchObject({
+      intent: "compose",
+      expectedElectricalEffect: {
+        kind: "compose",
+        boundaryPolicy: "preserve-target-physical",
+      },
+    });
+    expect(proposal.compositionOccurrence).toMatchObject({
+      id: "composition-source-document-1",
+      sourceDocumentId: "source-document",
+      targetDocumentId: "target-document",
+      objectIdRemap: {
+        instances: { R7: "R7_2" },
+      },
+    });
+    expect(added).toMatchObject({
+      kind: "add_instance",
+      instance: {
+        id: "R7_2",
+        reference: "R7",
+        netlist: { parameters: { value: "10k" } },
+      },
+    });
+  });
+
+  it("renumbers a mapped Reference and its independent RichText presentation together", () => {
+    const source = createEmptyDocument("source-document", "Source");
+    source.instances.push({
+      id: "M5",
+      symbolId: "nmos",
+      reference: "M5",
+      placement: {
+        position: { x: 20, y: 20 },
+        rotation: 0,
+        mirror: "none",
+      },
+      netlist: { parameters: {} },
+    });
+    source.annotations.push({
+      id: "instance-label-M5",
+      kind: "instance-label",
+      binding: { kind: "instance-reference", instanceId: "M5" },
+      formatOverride: semanticTextDocument("M5", "instance-label"),
+      anchor: {
+        kind: "object",
+        objectId: "M5",
+        localOffset: { x: 0, y: -20 },
+        fallbackPosition: { x: 20, y: 0 },
+      },
+      alignment: "middle",
+      rotation: 0,
+      locked: false,
+    });
+    const target = createEmptyDocument("target-document", "Target");
+    target.instances.push({
+      id: "existing-M5",
+      symbolId: "nmos",
+      reference: "M5",
+      placement: null,
+      netlist: { parameters: {} },
+    });
+
+    const proposal = proposePaste(
+      target,
+      captureDocumentComposition(source)!,
+      { x: 0, y: 0 },
+      1,
+    );
+    const result = executeTransaction(
+      target,
+      {
+        transactionId: "compose-reference-presentation",
+        documentId: target.id,
+        expectedRevision: target.revision,
+        actor: { kind: "human", id: "test" },
+        edits: proposal.edits,
+      },
+      { symbolResolver: resolver },
+    );
+
+    if (!result.ok) throw new Error(JSON.stringify(result, null, 2));
+    const copiedId = proposal.idRemap.instances.M5!;
+    expect(
+      result.document.instances.find((instance) => instance.id === copiedId)
+        ?.reference,
+    ).toBe("M6");
+    const copiedLabel = result.document.annotations.find(
+      (annotation) =>
+        annotation.binding?.kind === "instance-reference" &&
+        annotation.binding.instanceId === copiedId,
+    );
+    expect(copiedLabel?.formatOverride).toBeDefined();
+    expect(flattenRichText(copiedLabel!.formatOverride!)).toBe("M6");
+    expect(copiedLabel!.formatOverride!.runs[0]).toEqual(
+      semanticTextDocument("M6", "instance-label").runs[0],
+    );
+
+    const renamed = executeTransaction(
+      result.document,
+      {
+        transactionId: "rename-composed-reference",
+        documentId: result.document.id,
+        expectedRevision: result.document.revision,
+        actor: { kind: "human", id: "test" },
+        edits: [
+          {
+            kind: "set_instance_reference",
+            instanceId: copiedId,
+            reference: "M21",
+          },
+        ],
+      },
+      { symbolResolver: resolver },
+    );
+
+    if (!renamed.ok) throw new Error(JSON.stringify(renamed, null, 2));
+    expect(
+      renamed.document.instances.find((instance) => instance.id === copiedId)
+        ?.reference,
+    ).toBe("M21");
+    const renamedLabel = renamed.document.annotations.find(
+      (annotation) =>
+        annotation.binding?.kind === "instance-reference" &&
+        annotation.binding.instanceId === copiedId,
+    );
+    expect(flattenRichText(renamedLabel!.formatOverride!)).toBe("M21");
+    expect(renamedLabel!.formatOverride!.runs[0]).toEqual(
+      semanticTextDocument("M21", "instance-label").runs[0],
+    );
+  });
+
+  it("owns composed MOS bulk connections per instance without changing target defaults", () => {
+    const source = createLibraryExampleProject(
+      "fully-differential-two-stage-op-amp",
+    )!.documents[0]!;
+    const sourceBindings = source.instances.filter(
+      (instance) => instance.mosBulkBinding,
+    );
+    expect(sourceBindings.length).toBeGreaterThan(0);
+
+    const target = createEmptyDocument("target-document", "Target");
+    const fragment = captureDocumentComposition(source)!;
+    const proposal = proposePaste(target, fragment, { x: 0, y: 0 }, 1);
+    expect(proposal.errors).toEqual([]);
+    const result = executeTransaction(
+      target,
+      {
+        transactionId: "compose-mos-bulk",
+        documentId: target.id,
+        expectedRevision: target.revision,
+        actor: { kind: "human", id: "test" },
+        edits: proposal.edits,
+      },
+      { symbolResolver: resolver },
+    );
+    if (!result.ok) throw new Error(JSON.stringify(result, null, 2));
+
+    // A pasted supply marker settles the body policy this Cell had none of,
+    // exactly as placing that marker by hand does. Without it every pasted
+    // body stays unresolved and the netlist cannot export the fourth node.
+    const supplyNetId = (domain: "ground" | "vdd") => {
+      const marker = fragment.instances.find(
+        (instance) =>
+          powerConnectionForSymbol(instance.symbolId)?.domain === domain,
+      )!;
+      const pinName = powerConnectionForSymbol(marker.symbolId)!.pinName;
+      const net = fragment.nets.find((candidate) =>
+        candidate.terminals.some(
+          (terminal) =>
+            terminal.instanceId === marker.id && terminal.pinName === pinName,
+        ),
+      )!;
+      return proposal.idRemap.nets[net.id]!;
+    };
+    // This example carries Ground markers but names VDD through a label, so
+    // only the NMOS policy follows from its markers.
+    expect(result.document.mosBulkDefaults).toEqual({
+      nmosNetId: supplyNetId("ground"),
+    });
+    for (const sourceInstance of sourceBindings) {
+      const copiedInstanceId = proposal.idRemap.instances[sourceInstance.id]!;
+      const copiedNetId =
+        proposal.idRemap.nets[sourceInstance.mosBulkBinding!.netId]!;
+      // A body whose Net became this Cell's default follows that policy, as
+      // a freshly inserted MOS does; the rest stay instance-owned.
+      expect(
+        result.document.instances.find(
+          (instance) => instance.id === copiedInstanceId,
+        )?.mosBulkBinding,
+      ).toEqual({
+        origin:
+          result.document.mosBulkDefaults?.nmosNetId === copiedNetId ||
+          result.document.mosBulkDefaults?.pmosNetId === copiedNetId
+            ? "cell-default"
+            : "instance-override",
+        netId: copiedNetId,
+      });
+      expect(
+        result.document.nets
+          .find((net) => net.id === copiedNetId)
+          ?.terminals.some(
+            (terminal) =>
+              terminal.instanceId === copiedInstanceId &&
+              terminal.pinName === "B",
+          ),
+      ).toBe(true);
+    }
+  });
+
+  it("keeps a target Cell's own body policy when a composition is pasted", () => {
+    const source = createLibraryExampleProject(
+      "fully-differential-two-stage-op-amp",
+    )!.documents[0]!;
+    const target = createEmptyDocument("target-document", "Target");
+    target.nets.push({ id: "net-own-ground", terminals: [] });
+    target.mosBulkDefaults = { nmosNetId: "net-own-ground" };
+    const fragment = captureDocumentComposition(source)!;
+    const proposal = proposePaste(target, fragment, { x: 0, y: 0 }, 1);
+    expect(proposal.errors).toEqual([]);
+    const result = executeTransaction(
+      target,
+      {
+        transactionId: "compose-into-policy",
+        documentId: target.id,
+        expectedRevision: target.revision,
+        actor: { kind: "human", id: "test" },
+        edits: proposal.edits,
+      },
+      { symbolResolver: resolver },
+    );
+    if (!result.ok) throw new Error(JSON.stringify(result.error));
+    // A paste settles policy the Cell lacks; it never overrules policy the
+    // Cell already has.
+    expect(result.document.mosBulkDefaults).toEqual({
+      nmosNetId: "net-own-ground",
+    });
+  });
+
+  it("closes a still-derived source Cell bulk default before composition", () => {
+    const source = createEmptyDocument("source-document", "Source");
+    source.instances.push({
+      id: "M1",
+      symbolId: "nmos",
+      placement: {
+        position: { x: 20, y: 20 },
+        rotation: 0,
+        mirror: "none",
+      },
+    });
+    source.nets.push({ id: "net-substrate", terminals: [] });
+    source.mosBulkDefaults = { nmosNetId: "net-substrate" };
+
+    const fragment = captureDocumentComposition(source)!;
+    expect(fragment.instances[0]?.mosBulkBinding).toEqual({
+      origin: "cell-default",
+      netId: "net-substrate",
+    });
+    expect(fragment.nets[0]?.terminals).toEqual([
+      { instanceId: "M1", pinName: "B" },
+    ]);
+    const target = createEmptyDocument("target-document", "Target");
+    const result = executeTransaction(
+      target,
+      {
+        transactionId: "compose-derived-bulk",
+        documentId: target.id,
+        expectedRevision: target.revision,
+        actor: { kind: "human", id: "test" },
+        edits: proposePaste(target, fragment, { x: 0, y: 0 }, 1).edits,
+      },
+      { symbolResolver: resolver },
+    );
+    if (!result.ok) throw new Error(JSON.stringify(result, null, 2));
+    expect(result.document.instances[0]?.mosBulkBinding).toEqual({
+      origin: "instance-override",
+      netId: "net-substrate_2",
+    });
+    expect(result.document.nets[0]?.terminals).toEqual([
+      { instanceId: "M1_2", pinName: "B" },
+    ]);
+  });
+
+  it("composes Cell parameters and complete layout ownership through one object map", () => {
+    const source = createEmptyDocument("source-document", "Source");
+    source.instances.push(
+      {
+        id: "P1",
+        symbolId: "port",
+        placement: {
+          position: { x: 20, y: 20 },
+          rotation: 0,
+          mirror: "none",
+        },
+      },
+      {
+        id: "P2",
+        symbolId: "port",
+        placement: {
+          position: { x: 80, y: 20 },
+          rotation: 0,
+          mirror: "none",
+        },
+      },
+    );
+    source.nets.push(
+      {
+        id: "net-a",
+        terminals: [{ instanceId: "P1", pinName: "P" }],
+      },
+      {
+        id: "net-b",
+        terminals: [{ instanceId: "P2", pinName: "P" }],
+      },
+    );
+    source.netlist = {
+      name: "Source",
+      formalParameters: [{ name: "GAIN", defaultValue: "10" }],
+      terminals: [
+        {
+          id: "terminal-a",
+          name: "A",
+          netId: "net-a",
+          direction: "input",
+          interfaceInstanceIds: ["P1"],
+        },
+        {
+          id: "terminal-b",
+          name: "B",
+          netId: "net-b",
+          direction: "output",
+          interfaceInstanceIds: ["P2"],
+        },
+      ],
+    };
+    source.layoutGroups.push({
+      id: "mixed-group",
+      kind: "custom",
+      objectIds: ["P1", "net-a"],
+      locked: false,
+    });
+    source.constraints.push({
+      id: "pin-alignment",
+      kind: "align-y",
+      objectIds: ["P1", "P2"],
+      locked: false,
+    });
+
+    const target = createEmptyDocument("target-document", "Combined");
+    delete target.netlist;
+    const fragment = captureDocumentComposition(source)!;
+    const proposal = proposePaste(target, fragment, { x: 100, y: 0 }, 1);
+    expect(proposal.errors).toEqual([]);
+    expect(proposal.edits[0]).toEqual({
+      kind: "create_cell_interface",
+      name: "Combined",
+    });
+    const result = executeTransaction(
+      target,
+      {
+        transactionId: "compose-interface-layout",
+        documentId: target.id,
+        expectedRevision: target.revision,
+        actor: { kind: "human", id: "test" },
+        edits: proposal.edits,
+      },
+      { symbolResolver: resolver },
+    );
+    if (!result.ok) throw new Error(JSON.stringify(result, null, 2));
+
+    expect(result.document.netlist).toMatchObject({
+      name: "Combined",
+      formalParameters: [{ name: "GAIN", defaultValue: "10" }],
+      terminals: [
+        { id: "terminal-a_2", netId: "net-a_2" },
+        { id: "terminal-b_2", netId: "net-b_2" },
+      ],
+    });
+    expect(result.document.layoutGroups).toEqual([
+      {
+        id: "mixed-group_2",
+        kind: "custom",
+        objectIds: ["P1_2", "net-a_2"],
+        locked: false,
+      },
+    ]);
+    expect(result.document.constraints).toEqual([
+      {
+        id: "pin-alignment_2",
+        kind: "align-y",
+        objectIds: ["P1_2", "P2_2"],
+        locked: false,
+      },
+    ]);
+  });
+
+  it("reports formal-parameter conflicts before the transaction and makes the target grid fine enough (2026-10-17)", () => {
+    const source = createEmptyDocument("source-document", "Source");
+    source.presentation.grid = 5;
+    source.instances.push({
+      id: "R1",
+      symbolId: "resistor",
+      placement: {
+        position: { x: 5, y: 10 },
+        rotation: 0,
+        mirror: "none",
+      },
+    });
+    source.netlist = {
+      name: "Source",
+      terminals: [],
+      formalParameters: [{ name: "GAIN", defaultValue: "10" }],
+    };
+    const target = createEmptyDocument("target-document", "Target");
+    target.netlist = {
+      name: "Target",
+      terminals: [],
+      formalParameters: [{ name: "gain", defaultValue: "20" }],
+    };
+
+    const proposal = proposePaste(
+      target,
+      captureDocumentComposition(source)!,
+      { x: 0, y: 0 },
+      1,
+    );
+    expect(proposal.errors).toEqual([
+      expect.stringContaining("formal parameter conflict"),
+    ]);
+    // The source's grid 5 geometry stays where it is: the target takes grid
+    // 5, first, in the same transaction.
+    expect(proposal.adoptedGrid).toBe(5);
+    expect(proposal.edits[0]).toEqual({ kind: "set_document_grid", grid: 5 });
+    expect(
+      proposal.edits.find((edit) => edit.kind === "add_instance"),
+    ).toMatchObject({
+      instance: { placement: { position: { x: 5, y: 10 } } },
+    });
+  });
+
+  it("keeps repeated imported local names separate while explicit globals still join", () => {
+    const source = createEmptyDocument("source-document", "Source");
+    source.instances.push(
+      {
+        id: "R1",
+        symbolId: "resistor",
+        placement: {
+          position: { x: 20, y: 20 },
+          rotation: 0,
+          mirror: "none",
+        },
+      },
+      {
+        id: "R2",
+        symbolId: "resistor",
+        placement: {
+          position: { x: 80, y: 20 },
+          rotation: 0,
+          mirror: "none",
+        },
+      },
+    );
+    source.nets.push(
+      {
+        id: "net-out-a",
+        terminals: [{ instanceId: "R1", pinName: "1" }],
+      },
+      {
+        id: "net-out-b",
+        terminals: [{ instanceId: "R2", pinName: "1" }],
+      },
+      {
+        id: "net-vdd",
+        terminals: [{ instanceId: "R3", pinName: "1" }],
+      },
+    );
+    source.connectivityEvidence.push(
+      {
+        id: "claim-out-a",
+        kind: "net-name-hint",
+        netId: "net-out-a",
+        sourceName: "OUT",
+        origin: "spice-import",
+      },
+      {
+        id: "claim-out-b",
+        kind: "net-name-hint",
+        netId: "net-out-b",
+        sourceName: "out",
+        origin: "spice-import",
+      },
+      {
+        id: "claim-vdd",
+        kind: "name-claim",
+        netId: "net-vdd",
+        name: "VDD",
+        owner: { kind: "global-declaration", sourceNetId: "source-vdd" },
+        scope: "global",
+        powerDomain: "vdd",
+      },
+      {
+        id: "source-vdd",
+        kind: "spice-source",
+        netId: "net-vdd",
+        sourceNetId: "source-vdd",
+      },
+    );
+    const fragment = captureDocumentComposition(source)!;
+    const firstTarget = createEmptyDocument("target-document", "Target");
+    const firstProposal = proposePaste(
+      firstTarget,
+      fragment,
+      { x: 0, y: 0 },
+      1,
+    );
+    const first = executeTransaction(
+      firstTarget,
+      {
+        transactionId: "compose-first",
+        documentId: firstTarget.id,
+        expectedRevision: firstTarget.revision,
+        actor: { kind: "human", id: "test" },
+        edits: firstProposal.edits,
+      },
+      { symbolResolver: resolver },
+    );
+    if (!first.ok) throw new Error(JSON.stringify(first, null, 2));
+    const secondProposal = proposePaste(
+      first.document,
+      fragment,
+      { x: 200, y: 0 },
+      2,
+    );
+    const second = executeTransaction(
+      first.document,
+      {
+        transactionId: "compose-second",
+        documentId: first.document.id,
+        expectedRevision: first.document.revision,
+        actor: { kind: "human", id: "test" },
+        edits: secondProposal.edits,
+      },
+      { symbolResolver: resolver },
+    );
+    if (!second.ok) throw new Error(JSON.stringify(second, null, 2));
+
+    expect(firstProposal.compositionOccurrence).toMatchObject({
+      id: "composition-source-document-1",
+      sourceDocumentId: "source-document",
+      targetDocumentId: "target-document",
+    });
+    expect(secondProposal.compositionOccurrence).toMatchObject({
+      id: "composition-source-document-2",
+      sourceDocumentId: "source-document",
+      targetDocumentId: "target-document",
+    });
+    expect(firstProposal.compositionOccurrence?.id).not.toBe(
+      secondProposal.compositionOccurrence?.id,
+    );
+    const resolved = resolveDocumentLogicalNets(second.document);
+    expect(
+      resolved.groups.filter((group) =>
+        group.baseNetIds.some((netId) => netId.includes("net-out")),
+      ),
+    ).toHaveLength(4);
+    expect(
+      resolved.groups.some((group) => group.name?.toLowerCase() === "out"),
+    ).toBe(false);
+    expect(
+      resolved.groups.find((group) => group.name === "VDD")?.baseNetIds,
+    ).toHaveLength(2);
+  });
+
+  it("materializes a label-only Net while placing a Gallery document", () => {
+    const source = createEmptyDocument("document-main", "Label-only Net");
+    source.instances.push({
+      id: "VDD1",
+      symbolId: "vdd-port",
+      placement: {
+        position: { x: 100, y: 100 },
+        rotation: 0,
+        mirror: "none",
+      },
+    });
+    source.nets.push(
+      { id: "net-label-only", terminals: [] },
+      { id: "net-empty-source-fact", terminals: [] },
+    );
+    source.annotations.push({
+      id: "power-label-vdd1",
+      kind: "power-label",
+      binding: { kind: "net-name", netId: "net-label-only" },
+      anchor: {
+        kind: "object",
+        objectId: "VDD1",
+        localOffset: { x: 15, y: 10 },
+        fallbackPosition: { x: 115, y: 110 },
+      },
+      netId: "net-label-only",
+      alignment: "start",
+      rotation: 0,
+      locked: false,
+    });
+
+    const target = createEmptyDocument("target", "Target");
+    const clipboard = captureDocumentComposition(source);
+    expect(clipboard).not.toBeNull();
+    expect(clipboard?.nets.map((net) => net.id)).toEqual([
+      "net-label-only",
+      "net-empty-source-fact",
+    ]);
+    const proposal = proposePaste(target, clipboard!, { x: 200, y: 50 }, 1);
+    expect(proposal.errors).toEqual([]);
+    const result = executeTransaction(
+      target,
+      {
+        transactionId: "paste-label-only-net",
+        documentId: target.id,
+        expectedRevision: target.revision,
+        actor: { kind: "human", id: "test" },
+        edits: proposal.edits,
+      },
+      { symbolResolver: resolver },
+    );
+
+    if (!result.ok) throw new Error(JSON.stringify(result, null, 2));
+    const copiedNet = result.document.nets.find(
+      (net) => net.id === proposal.idRemap.nets["net-label-only"],
+    );
+    expect(copiedNet).toEqual({
+      id: "net-label-only_2",
+      terminals: [],
+    });
+    expect(result.document.nets).toContainEqual({
+      id: "net-empty-source-fact_2",
+      terminals: [],
+    });
+    expect(result.document.annotations).toEqual([
+      expect.objectContaining({
+        id: "power-label-vdd1_2",
+        netId: "net-label-only_2",
+        binding: { kind: "net-name", netId: "net-label-only_2" },
+      }),
+    ]);
+    expect(result.document.junctions).toEqual([]);
+  });
+
+  it("keeps standalone drafting geometry and its layout group", () => {
+    const document = createEmptyDocument("document-main", "Drafting scene");
+    document.drafting = {
+      objects: [
+        {
+          id: "scene-rectangle",
+          kind: "rectangle",
+          locked: false,
+          zIndex: 0,
+          anchor: { kind: "free", position: { x: 40, y: 30 } },
+          center: { x: 40, y: 30 },
+          width: 80,
+          height: 40,
+          rotation: 0,
+          lineStyle: "solid",
+        },
+        {
+          id: "scene-arrow",
+          kind: "arrow",
+          locked: false,
+          zIndex: 1,
+          anchor: { kind: "free", position: { x: 0, y: 0 } },
+          from: { kind: "free", position: { x: 0, y: 0 } },
+          to: { kind: "free", position: { x: 80, y: 0 } },
+        },
+        {
+          id: "scene-leader",
+          kind: "leader",
+          locked: false,
+          zIndex: 2,
+          anchor: { kind: "free", position: { x: 0, y: 20 } },
+          target: { kind: "free", position: { x: 80, y: 20 } },
+        },
+      ],
+    };
+    document.layoutGroups.push({
+      id: "scene-drafting-group",
+      kind: "custom",
+      objectIds: ["scene-rectangle", "scene-arrow", "scene-leader"],
+      locked: false,
+    });
+
+    const clipboard = captureDocumentComposition(document);
+    expect(clipboard?.draftingObjects.map((object) => object.kind)).toEqual([
+      "rectangle",
+      "arrow",
+      "leader",
+    ]);
+    expect(clipboard?.layoutGroups).toEqual([document.layoutGroups[0]]);
+    expect(clipboardPlacementAnchor(clipboard!)).toEqual({ x: 40, y: 30 });
+
+    const target = createEmptyDocument("target", "Target");
+    const proposal = proposePaste(target, clipboard!, { x: 100, y: 50 }, 1);
+    const pastedObjects = proposal.edits.flatMap((edit) =>
+      edit.kind === "upsert_drafting_object" ? [edit.object] : [],
+    );
+    expect(pastedObjects).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "scene-rectangle_2",
+          kind: "rectangle",
+          center: { x: 140, y: 80 },
+        }),
+        expect.objectContaining({
+          id: "scene-arrow_2",
+          kind: "arrow",
+          from: { kind: "free", position: { x: 100, y: 50 } },
+          to: { kind: "free", position: { x: 180, y: 50 } },
+        }),
+        expect.objectContaining({
+          id: "scene-leader_2",
+          kind: "leader",
+          anchor: { kind: "free", position: { x: 100, y: 70 } },
+          target: { kind: "free", position: { x: 180, y: 70 } },
+        }),
+      ]),
+    );
+    expect(
+      proposal.edits.find((edit) => edit.kind === "set_layout_group"),
+    ).toMatchObject({
+      group: {
+        objectIds: ["scene-rectangle_2", "scene-arrow_2", "scene-leader_2"],
+      },
+    });
+  });
+
+  it("retargets drafting anchors to copied Instances and Route legs", () => {
+    const document = createEmptyDocument("document-main", "Anchored drafting");
+    document.instances.push({
+      id: "R1",
+      symbolId: "resistor",
+      placement: {
+        position: { x: 20, y: 20 },
+        rotation: 0,
+        mirror: "none",
+      },
+    });
+    document.nets.push({ id: "net-guide", terminals: [] });
+    document.junctions.push(
+      {
+        id: "guide-start",
+        netId: "net-guide",
+        position: { x: 40, y: 40 },
+        role: "route-anchor",
+      },
+      {
+        id: "guide-end",
+        netId: "net-guide",
+        position: { x: 100, y: 40 },
+        role: "route-anchor",
+      },
+    );
+    const route = createRoutePath({
+      id: "guide-route",
+      netId: "net-guide",
+      start: { kind: "junction", junctionId: "guide-start" },
+      end: { kind: "junction", junctionId: "guide-end" },
+      bends: [],
+      modes: ["manual"],
+      styleOverride: { color: "#2244AA" },
+    });
+    document.routes.push(route);
+    document.drafting = {
+      objects: [
+        {
+          id: "anchored-arrow",
+          kind: "arrow",
+          locked: false,
+          zIndex: 0,
+          anchor: {
+            kind: "object",
+            objectId: "R1",
+            localOffset: { x: 0, y: 0 },
+            fallbackPosition: { x: 20, y: 20 },
+          },
+          from: {
+            kind: "object",
+            objectId: "R1",
+            localOffset: { x: 0, y: 0 },
+            fallbackPosition: { x: 20, y: 20 },
+          },
+          to: {
+            kind: "route",
+            routeId: route.id,
+            legId: route.legs[0]!.id,
+            t: 0.5,
+            normalOffset: 0,
+            direction: "forward",
+            orientation: "follow",
+            fallbackPosition: { x: 70, y: 40 },
+          },
+        },
+      ],
+    };
+
+    const clipboard = captureDocumentComposition(document)!;
+    const proposal = proposePaste(
+      createEmptyDocument("target", "Target"),
+      clipboard,
+      { x: 100, y: 50 },
+      1,
+    );
+    const pastedRoute = proposal.edits.find(
+      (edit) => edit.kind === "set_route_path",
+    );
+    const pastedArrow = proposal.edits.find(
+      (edit) =>
+        edit.kind === "upsert_drafting_object" &&
+        edit.object.id === "anchored-arrow_2",
+    );
+    expect(pastedRoute?.kind).toBe("set_route_path");
+    expect(
+      pastedRoute?.kind === "set_route_path"
+        ? pastedRoute.route.styleOverride
+        : undefined,
+    ).toEqual({ color: "#2244AA" });
+    expect(pastedArrow).toMatchObject({
+      kind: "upsert_drafting_object",
+      object: {
+        anchor: {
+          kind: "object",
+          objectId: "R1_2",
+          fallbackPosition: { x: 120, y: 70 },
+        },
+        from: {
+          kind: "object",
+          objectId: "R1_2",
+          fallbackPosition: { x: 120, y: 70 },
+        },
+        to: {
+          kind: "route",
+          routeId:
+            pastedRoute?.kind === "set_route_path"
+              ? pastedRoute.route.id
+              : undefined,
+          legId:
+            pastedRoute?.kind === "set_route_path"
+              ? pastedRoute.route.legs[0]!.id
+              : undefined,
+          fallbackPosition: { x: 170, y: 90 },
+        },
+      },
+    });
+  });
+
+  it("keeps a Power Rail that no device is wired to yet", () => {
+    const document = createEmptyDocument("document-main", "Main");
+    document.nets.push({
+      id: "net-vdd",
+
+      terminals: [],
+    });
+    document.connectivityEvidence.push({
+      id: "claim-vdd",
+      kind: "name-claim",
+      netId: "net-vdd",
+      name: "VDD",
+      owner: { kind: "power-marker", objectId: "rail-vdd" },
+      scope: "global",
+      powerDomain: "vdd",
+    });
+    document.junctions.push(
+      {
+        id: "junction-vdd-start",
+        netId: "net-vdd",
+        position: { x: 10, y: 10 },
+        role: "route-anchor",
+      },
+      {
+        id: "junction-vdd-end",
+        netId: "net-vdd",
+        position: { x: 110, y: 10 },
+        role: "route-anchor",
+      },
+    );
+    document.routes.push(
+      createRoutePath({
+        id: "rail-vdd",
+        netId: "net-vdd",
+        start: { kind: "junction", junctionId: "junction-vdd-start" },
+        end: { kind: "junction", junctionId: "junction-vdd-end" },
+        bends: [],
+        modes: ["manual"],
+        presentation: "power-rail",
+      }),
+    );
+
+    // A selection copy keeps only Nets whose every terminal is selected, so a
+    // rail with no device on it yet is not part of any selection.
+    expect(copySelection(document, [])).toBeNull();
+
+    const whole = captureDocumentComposition(document);
+    expect(whole?.routes).toHaveLength(1);
+    expect(whole?.routes[0]?.presentation).toBe("power-rail");
+    expect(whole?.junctions).toHaveLength(2);
+    expect(whole?.connectivityEvidence).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "name-claim", name: "VDD" }),
+      ]),
+    );
+  });
+
+  it("retains migrated Power Rail name claims when inserting an example", () => {
+    const example = createLibraryExampleProject("common-source-amplifier");
+    expect(example).not.toBeNull();
+    const clipboard = captureDocumentComposition(example!.documents[0]!);
+    expect(clipboard).not.toBeNull();
+    const target = createEmptyDocument("target", "Target");
+    const proposal = proposePaste(target, clipboard!, { x: 20, y: 20 }, 1);
+    expect(proposal.errors).toEqual([]);
+    const result = executeTransaction(
+      target,
+      {
+        transactionId: "paste-example",
+        documentId: target.id,
+        expectedRevision: target.revision,
+        actor: { kind: "human", id: "test" },
+        edits: proposal.edits,
+      },
+      { symbolResolver: resolver },
+    );
+    if (!result.ok) throw new Error(JSON.stringify(result, null, 2));
+    expect(
+      [...resolveDocumentLogicalNets(result.document).groups].some(
+        (logicalNet) => logicalNet.name === "VDD",
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("a copy stands on its own", () => {
+  it("reserves the numeric suffix of a preserved zero-padded reference", () => {
+    const source = createEmptyDocument("source", "Source");
+    source.instances.push(
+      ...["R01", "R2"].map((reference, index) => ({
+        id: reference,
+        symbolId: "resistor",
+        reference,
+        placement: {
+          position: { x: 100 + index * 100, y: 100 },
+          rotation: 0 as const,
+          mirror: "none" as const,
+        },
+      })),
+    );
+    const target = createEmptyDocument("target", "Target");
+    target.instances.push(structuredClone(source.instances[1]!));
+    const clipboard = copySelection(source, ["R01", "R2"]);
+    const proposal = proposePaste(target, clipboard!, { x: 0, y: 100 }, 1);
+    const result = executeTransaction(
+      target,
+      {
+        transactionId: "paste-padded-references",
+        documentId: target.id,
+        expectedRevision: target.revision,
+        actor: { kind: "human", id: "test" },
+        edits: proposal.edits,
+      },
+      { symbolResolver: resolver },
+    );
+    if (!result.ok) throw new Error(JSON.stringify(result.diagnostics));
+    expect(
+      result.document.instances
+        .filter((instance) => proposal.instanceIds.includes(instance.id))
+        .map((instance) => instance.reference),
+    ).toEqual(["R01", "R3"]);
+  });
+
+  it("gives a device without a netlist block a fresh designator", () => {
+    const document = createEmptyDocument("document-main", "Copy");
+    // An ideal switch carries no netlist block, so the internal copy id once
+    // leaked onto the canvas as "X1-copy-3". It now carries the `S` prefix its
+    // descriptor declares, so the copy takes the next free suffix in that
+    // sequence rather than any spelling derived from the original's id.
+    document.instances.push({
+      id: "X1",
+      symbolId: "ideal-switch",
+      reference: "S1",
+      placement: { position: { x: 100, y: 100 }, rotation: 0, mirror: "none" },
+    });
+
+    const clipboard = copySelection(document, ["X1"]);
+    expect(clipboard).not.toBeNull();
+    const proposal = proposePaste(document, clipboard!, { x: 80, y: 0 }, 3);
+    const result = executeTransaction(
+      document,
+      {
+        transactionId: "paste-switch",
+        documentId: document.id,
+        expectedRevision: document.revision,
+        actor: { kind: "human", id: "test" },
+        edits: proposal.edits,
+      },
+      { symbolResolver: resolver },
+    );
+    if (!result.ok) throw new Error(JSON.stringify(result.diagnostics));
+
+    const copy = result.document.instances.find(
+      (instance) => instance.id === proposal.instanceIds[0],
+    )!;
+    expect(copy.reference).toBe("S2");
+    expect(copy.reference).not.toMatch(/copy/u);
+  });
+
+  it("keeps a copied drafting snapshot as one layout group", () => {
+    const document = createEmptyDocument("document-main", "Grouped waveform");
+    document.drafting = {
+      objects: [
+        {
+          id: "wave-a",
+          kind: "construction-line",
+          locked: false,
+          zIndex: 0,
+          anchor: { kind: "free", position: { x: 100, y: 100 } },
+          points: [
+            { x: 100, y: 100 },
+            { x: 200, y: 100 },
+          ],
+          lineStyle: "solid",
+        },
+        {
+          id: "wave-b",
+          kind: "construction-line",
+          locked: false,
+          zIndex: 0,
+          anchor: { kind: "free", position: { x: 100, y: 140 } },
+          points: [
+            { x: 100, y: 140 },
+            { x: 200, y: 140 },
+          ],
+          lineStyle: "solid",
+        },
+      ],
+    };
+    document.layoutGroups.push({
+      id: "waveform-group",
+      kind: "custom",
+      objectIds: ["wave-a", "wave-b"],
+      locked: false,
+    });
+
+    const clipboard = copySelection(document, [], ["wave-a", "wave-b"]);
+    expect(clipboard?.layoutGroups).toEqual([document.layoutGroups[0]]);
+
+    const proposal = proposePaste(document, clipboard!, { x: 200, y: 0 }, 1);
+    const pastedObjects = proposal.edits.flatMap((edit) =>
+      edit.kind === "upsert_drafting_object" ? [edit.object] : [],
+    );
+    const pastedGroup = proposal.edits.find(
+      (edit) => edit.kind === "set_layout_group",
+    );
+    expect(pastedObjects).toHaveLength(2);
+    expect(pastedGroup).toMatchObject({
+      kind: "set_layout_group",
+      group: { objectIds: pastedObjects.map((object) => object.id) },
+    });
+
+    const preview = clipboardPreviewDocument(
+      document,
+      clipboard!,
+      { x: 200, y: 0 },
+      [],
+      resolver,
+      1,
+    );
+    expect(preview.drafting?.objects).toHaveLength(2);
+    expect(preview.layoutGroups).toHaveLength(1);
+    expect(preview.layoutGroups[0]!.objectIds).toEqual(
+      preview.drafting!.objects.map((object) => object.id),
+    );
+  });
+});

@@ -1,0 +1,280 @@
+{
+  "schemaVersion": 1,
+  "id": "razavi-textbook-logic-nor-gate",
+  "kind": "pdf-vector-extract",
+  "source": {
+    "title": "Design of Analog CMOS Integrated Circuits, Second Edition",
+    "sha256": "a6031d1149c2c6191a1f0e541065165b72dafc4bc4ab4b0ea37af41b7cb0f739",
+    "pdfPage": 687,
+    "printedPage": 668,
+    "figure": "16.24(b)"
+  },
+  "selection": {
+    "method": "direct-logic-gate-vector-normalization",
+    "nativeObjectCount": 5,
+    "nativeObjectSha256": "872df35952aa488661bf5afc8b04e5bfb6e2f09e2577551b7938c8b9aae37450",
+    "nativeObjects": [
+      {
+        "objectType": "line",
+        "x0": 461.997,
+        "top": 467.5342,
+        "x1": 470.643,
+        "bottom": 467.5342,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 2,
+        "pathSha256": "5af9df9ef7b8f5eae6810a9e9c037777e649079a08eb01f0acea96f0aef45603"
+      },
+      {
+        "objectType": "line",
+        "x0": 462.131,
+        "top": 479.0032,
+        "x1": 470.464,
+        "bottom": 479.0032,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 2,
+        "pathSha256": "1591f2fd90247f13e8b67ccf569cba9b739ac3ea8a3ef89a212adb1211e88bfd"
+      },
+      {
+        "objectType": "line",
+        "x0": 492.779,
+        "top": 473.2702,
+        "x1": 499.684,
+        "bottom": 473.2702,
+        "linewidth": 0.717,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 2,
+        "pathSha256": "a6e2821ab920b509735834c1342ac1e7d66122f48f8b25fd4d09d1cada150254"
+      },
+      {
+        "objectType": "curve",
+        "x0": 468.026,
+        "top": 463.0982,
+        "x1": 488.531,
+        "bottom": 483.5232,
+        "linewidth": 1.434,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 13,
+        "pathSha256": "4eab8c3bb1f33ad8f0dfeb403568f967f55fa85a17651a31702bc0a76b30cb1e"
+      },
+      {
+        "objectType": "curve",
+        "x0": 489.008,
+        "top": 471.2642,
+        "x1": 492.878,
+        "bottom": 475.1342,
+        "linewidth": 1.434,
+        "fill": false,
+        "stroke": true,
+        "pathCommandCount": 5,
+        "pathSha256": "36750078be1ff077ef7507681cd9b361473214af064c4ee4009214e04140b190"
+      }
+    ]
+  },
+  "normalization": {
+    "sourceInputPitchPdf": 11.469,
+    "logicalInputPitch": 20.0,
+    "logicalUnitsPerPdfPoint": 1.743831,
+    "sourceOriginPdf": {
+      "x": 480.8405,
+      "y": 473.2687
+    },
+    "pinAnchorsLogical": [
+      {
+        "name": "A",
+        "x": -40,
+        "y": -10
+      },
+      {
+        "name": "B",
+        "x": -40,
+        "y": 10
+      },
+      {
+        "name": "Y",
+        "x": 40,
+        "y": 0
+      }
+    ],
+    "strokeMapping": {
+      "normal": {
+        "sourcePdfPt": 0.717,
+        "targetRole": "normal"
+      },
+      "body": {
+        "sourcePdfPt": 1.434,
+        "targetRole": "emphasis"
+      }
+    },
+    "symbolDefinition": {
+      "schemaVersion": 1,
+      "id": "nor-gate",
+      "name": "NOR Gate",
+      "viewBox": {
+        "x": -44,
+        "y": -24,
+        "width": 88,
+        "height": 48
+      },
+      "pins": [
+        {
+          "name": "A",
+          "role": "input",
+          "at": {
+            "x": -40,
+            "y": -10
+          },
+          "direction": "west",
+          "presentation": {
+            "visibility": "visible",
+            "leadLength": 20
+          }
+        },
+        {
+          "name": "B",
+          "role": "input",
+          "at": {
+            "x": -40,
+            "y": 10
+          },
+          "direction": "west",
+          "presentation": {
+            "visibility": "visible",
+            "leadLength": 20
+          }
+        },
+        {
+          "name": "Y",
+          "role": "output",
+          "at": {
+            "x": 40,
+            "y": 0
+          },
+          "direction": "east",
+          "presentation": {
+            "visibility": "visible",
+            "leadLength": 20
+          }
+        }
+      ],
+      "primitives": [
+        {
+          "kind": "line",
+          "from": {
+            "x": -40.0,
+            "y": -10.0
+          },
+          "to": {
+            "x": -17.782719,
+            "y": -10.0
+          },
+          "style": {
+            "strokeRole": "normal",
+            "lineCap": "butt",
+            "lineJoin": "miter"
+          }
+        },
+        {
+          "kind": "line",
+          "from": {
+            "x": -40.0,
+            "y": 10.0
+          },
+          "to": {
+            "x": -18.094864,
+            "y": 10.0
+          },
+          "style": {
+            "strokeRole": "normal",
+            "lineCap": "butt",
+            "lineJoin": "miter"
+          }
+        },
+        {
+          "kind": "path",
+          "data": "M 13.410934 0.002616 C 13.410934 0.002616 13.410934 0.002616 11.027117 2.213794 C 8.643299 4.426715 3.875665 8.849071 -2.083006 11.829279 C -8.043421 14.809486 -15.196617 16.345802 -18.771471 17.114831 C -22.346325 17.882117 -22.346325 17.882117 -22.346325 17.882117 C -22.346325 17.882117 -22.346325 17.882117 -20.485657 14.786817 C -18.621501 11.689772 -14.896678 5.497428 -14.896678 -0.438574 C -14.896678 -6.374575 -18.621501 -12.055977 -20.485657 -14.896678 C -22.346325 -17.735635 -22.346325 -17.735635 -22.346325 -17.735635 C -22.346325 -17.735635 -22.346325 -17.735635 -18.771471 -16.991019 C -15.196617 -16.246403 -8.043421 -14.757172 -2.083006 -11.799634 C 3.875665 -8.84384 8.643299 -4.41974 11.027117 -2.208562 C 13.410934 0.002616 13.410934 0.002616 13.410934 0.002616",
+          "style": {
+            "strokeRole": "emphasis",
+            "lineCap": "butt",
+            "lineJoin": "miter",
+            "miterLimit": 4
+          }
+        },
+        {
+          "kind": "circle",
+          "center": {
+            "x": 17.617055,
+            "y": -0.121196
+          },
+          "radius": 3.374313,
+          "part": "negation-bubble",
+          "style": {
+            "strokeRole": "emphasis",
+            "lineCap": "butt",
+            "lineJoin": "miter",
+            "miterLimit": 4
+          }
+        },
+        {
+          "kind": "line",
+          "from": {
+            "x": 20.818729,
+            "y": 0.002616
+          },
+          "to": {
+            "x": 40.0,
+            "y": 0.0
+          },
+          "style": {
+            "strokeRole": "normal",
+            "lineCap": "butt",
+            "lineJoin": "miter"
+          }
+        }
+      ],
+      "variants": []
+    },
+    "compositionAnchors": {
+      "bodyOutput": {
+        "x": 13.410934,
+        "y": 0.002616
+      }
+    }
+  },
+  "derivation": {
+    "pinExtension": "native leads extend collinearly to the existing x=+/-40 electrical anchors",
+    "orientation": "native source orientation is recorded as 0 degrees relative to the product default"
+  },
+  "rasterWitness": {
+    "kind": "source-pdf-crop",
+    "sourcePdfPage": 687,
+    "dpi": 301.334031,
+    "pixels": {
+      "width": 151,
+      "height": 87
+    },
+    "pixelsPerLogical": 2.4,
+    "originPx": {
+      "x": 72.048444,
+      "y": 44.084489
+    },
+    "window": {
+      "width": 151,
+      "height": 87,
+      "minX": -30,
+      "minY": -18.2
+    },
+    "rotation": 0,
+    "sourceCropPx": {
+      "x": 1798,
+      "y": 2079
+    },
+    "assetPath": "logic-nor-gate-reference.png",
+    "threshold": 160
+  }
+}
