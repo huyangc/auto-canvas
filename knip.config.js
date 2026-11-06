@@ -1,5 +1,4 @@
-// Unused files and exports (#1535). `pnpm deadcode` runs Knip twice, and
-// `pnpm verify:pr` runs it before the unit tests:
+// Unused files and exports (#1535). `pnpm deadcode` runs Knip twice:
 //
 // - `knip`: every file and export something imports, tests included. An
 //   export only its own file uses drops `export` (a type may keep it).
@@ -83,7 +82,6 @@ export default {
         "vite.config.ts!",
         "vite.desktop.config.ts!",
         "dev/agent-worker.ts",
-        "census/*.ts",
         "e2e/**/*.spec.ts",
         // Specs load these by URL (e2e/helpers/page-modules.ts).
         "e2e/helpers/*-harness.tsx",
@@ -95,9 +93,10 @@ export default {
         "build/**/*.ts!",
         "dev/**/*.ts",
         "e2e/**/*.{ts,tsx,mjs}",
-        "census/**/*.ts",
-        // Sample Projects the tests open.
+        // Sample Projects the tests open. The Library registry is now only
+        // used by fixture tests after removing the Gallery example commands.
         "!src/demos/**!",
+        "!src/examples/library-examples.ts!",
         ...testSupport,
       ],
     },

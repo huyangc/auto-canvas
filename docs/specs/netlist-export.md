@@ -457,7 +457,7 @@ never invents an identifier.
 - `createDesignNetlistExport` reports it without withholding output;
   `unfinishedDrawingDiagnostics` answers fitness: Check Report, panel and
   copy/export refuse on a non-empty answer, and `designExtractsNetlist`
-  ([Gallery mark](community-gallery.md#list)) answers `false`.
+  (Gallery mark) answers `false`.
 - Export never omits a device or invents a model beyond the generic cards.
 
 ### Netlist panel and copy

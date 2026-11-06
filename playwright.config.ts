@@ -40,7 +40,7 @@ export default defineConfig({
   timeout: 60_000,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
-  // Keep local and CI attempt timings for e2e:slowest; CI saves each shard's report.
+  // Keep attempt timings in the local browser test report.
   reporter: [
     ["line"],
     ["json", { outputFile: "test-results/e2e-report.json" }],

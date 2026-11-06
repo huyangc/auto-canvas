@@ -25,8 +25,7 @@ function fixture() {
   git(root, "config", "core.autocrlf", "false");
   git(root, "config", "user.email", "fixture@example.invalid");
   git(root, "config", "user.name", "Fixture");
-  for (const path of ["package.json", "references/one.json"])
-    put(root, path, "{}\n");
+  for (const path of ["package.json"]) put(root, path, "{}\n");
   for (const path of [
     "apps/editor/old.ts",
     "packages/model/one.ts",

@@ -6,7 +6,6 @@ import {
   serializeProject,
   CURRENT_PROJECT_FILE_VERSION,
 } from "./index.js";
-import { publishProjectToGallery } from "../../../apps/editor/src/features/editor-shell/gallery-publish";
 
 function fixture() {
   const project = createEmptyProject("control-persistence", "Controls");
@@ -93,19 +92,11 @@ describe("controlled-source portable persistence", () => {
     },
   );
 
-  it("keeps selections through the Gallery payload and server parse/serialize boundary", async () => {
+  it("keeps selections through a portable payload and server parse/serialize boundary", () => {
     const before = fixture();
-    let stored = "";
-    const outcome = await publishProjectToGallery(
-      before,
-      { name: "Controls", description: "", tags: [], aiGenerated: false },
-      (async (_url, init) => {
-        const body = JSON.parse(String(init?.body));
-        stored = serializeProject(parseProject(body.projectText));
-        return Response.json({ id: "gallery-controls" }, { status: 201 });
-      }) as typeof fetch,
-    );
-    expect(outcome.status).toBe("published");
+    const payload = JSON.stringify({ projectText: serializeProject(before) });
+    const received = JSON.parse(payload);
+    const stored = serializeProject(parseProject(received.projectText));
     expect(controls(parseProject(stored))).toEqual(controls(before));
   });
 

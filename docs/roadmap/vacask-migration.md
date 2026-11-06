@@ -5,7 +5,7 @@ Owners: simulation integration and release owners.
 
 VACASK is a Profile-selected engine beside ngspice (Production:
 `vacask-sky130-candidate`); hosting is in
-[deployment](../deployment.md#where-the-simulator-runs).
+deployment.
 
 ## Remaining acceptance
 

@@ -51,7 +51,7 @@ commit; unmigratable data stays for raw download/discard.
 ## A page across deploys
 
 A deploy keeps the week's earlier content-hashed assets online
-([deployment](../deployment.md#assets-across-deploys)), so a page opened before
+(deployment), so a page opened before
 it keeps loading the dialogs and panels it has not used yet and keeps saving.
 The editor checks the live entry script every 10 minutes while visible and on
 focus (at most once a minute); once it differs it shows one dismissible notice
@@ -123,12 +123,12 @@ DELETE /api/projects/:id           explicitly delete one Project
 Each changed Save atomically snapshots the displaced revision; the newest
 three earlier revisions are kept (pruning is final); identical retries add
 nothing. Version history offers component comparison
-([snapshot comparison](community-gallery.md#version-history)), Restore
+(snapshot comparison), Restore
 (revision-checked Save keeping publication/favorite, never republishing) and
 Branch (independent Project without that binding). Routes:
 `GET /api/projects/:id/versions`, version `project`/`preview.svg` reads,
 `POST .../versions/:versionId/restore`; private, not cached. Full-store
-backups include snapshots; [Gallery-only backups](../gallery-backup.md) do
+backups include snapshots; Gallery-only backups do
 not. Storage: [Cloud Project storage](../../worker/gallery-store-cloud-projects.ts);
 authorization: [HTTP handler](../../worker/gallery-cloud-projects.ts).
 

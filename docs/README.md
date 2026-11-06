@@ -1,25 +1,22 @@
 # Project Documentation
 
 The current product, its contracts and unfinished work; Git holds history.
-When and how docs change: [AGENTS.md](../AGENTS.md#documentation).
+Repository process: [workflow](workflow.md).
 
-| Area                                                                     | Purpose                                                                 |
-| ------------------------------------------------------------------------ | ----------------------------------------------------------------------- |
-| [User guides](user/getting-started.md)                                   | Editing, hierarchy, simulation, saving, compatibility, and known limits |
-| [Product architecture](overall-product-plan.md)                          | System boundaries and sources of truth                                  |
-| [Specifications](specs/README.md)                                        | Current data, interaction, API, execution, and export contracts         |
-| [Architecture decisions](adr/README.md)                                  | Why consequential architectural choices were made                       |
-| [Agent guide](agent/README.md)                                           | Authorized workflows and on-demand knowledge                            |
-| [Roadmap](roadmap/README.md)                                             | Remaining work and acceptance questions                                 |
-| [Deployment](deployment.md)                                              | Production delivery, verification, rollback, and retained storage       |
-| [Testing](testing/README.md)                                             | Validation policy and contract ownership                                |
-| [Development workflow](development-workflow.md)                          | Original-skill stages, handoff and completion boundaries                |
-| [EDA tools](eda-import.md)                                               | Offline conversion and Aether/Virtuoso import                           |
-| [Skill references](../references/README.md#development-skill-references) | Fixed originals, setup, installation and updates                        |
+| Area                                            | Purpose                                                                 |
+| ----------------------------------------------- | ----------------------------------------------------------------------- |
+| [User guides](user/getting-started.md)          | Editing, hierarchy, simulation, saving, compatibility, and known limits |
+| [Product architecture](overall-product-plan.md) | System boundaries and sources of truth                                  |
+| [Specifications](specs/README.md)               | Current data, interaction, API, execution, and export contracts         |
+| [Architecture decisions](adr/README.md)         | Why consequential architectural choices were made                       |
+| [Agent guide](agent/README.md)                  | Authorized workflows and on-demand knowledge                            |
+| [Roadmap](roadmap/README.md)                    | Remaining work and acceptance questions                                 |
+| [Testing](testing/README.md)                    | Validation policy and contract ownership                                |
+| [EDA tools](eda-import.md)                      | Offline conversion and Aether/Virtuoso import                           |
 
 ## Contributor reading order
 
-1. [Development workflow](development-workflow.md), [AGENTS.md](../AGENTS.md),
+1. [Repository workflow](workflow.md), [AGENTS.md](../AGENTS.md),
    [product architecture](overall-product-plan.md).
 2. The domain's specs: electrical ([schematic model](specs/schematic-model.md),
    [Edit Engine](specs/edit-engine.md),
@@ -45,8 +42,8 @@ raise an unresolved disagreement for a product decision.
 ## Assets and retirement
 
 - An image lives beside the topic that references it; fixtures and goldens stay
-  in the fixture system; incident screenshots and run reports go in the Issue
-  or PR. A test fixture or pinned reference stays even when no Markdown links it.
+  in the fixture system; incident screenshots and run reports go in the task
+  report. A test fixture or pinned reference stays even when no Markdown links it.
 - Before deleting a doc, move its unique valid constraints to their owner and
   update incoming links.
 - Moving published Agent-resource sources updates the manifest and generated

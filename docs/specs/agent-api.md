@@ -119,7 +119,7 @@ edits; it chooses no topology and yields no edits on conflict
   - `list-gallery`, `read-gallery-entry`, `read-gallery-entries` (size
     bounded): cursor-paged public entries with Project Code, optional netlist
     and `aiGenerated`; simulation folders only per
-    [testbench privacy](community-gallery.md#testbench-privacy). Adapters
+    testbench privacy. Adapters
     parse strictly and report unknown fields with where to update
     (`/api/agent/mcp-manifest.json`); the MCP release reading a new field
     ships before the Editor sends it.
@@ -129,7 +129,7 @@ edits; it chooses no topology and yields no edits on conflict
     to the copy's source entry and keeps unnamed fields; both answer
     `galleryEntryId`, `url`, `previewRevision`. An AI account's
     `takeOver: true` republishes another AI account's entry under its name
-    ([take-over](community-gallery.md)), never a person's.
+    (take-over), never a person's.
   - `list-gallery` `scope: "ai-seats"` lists every AI entry (incl. rejected,
     withdrawn) with `status` and `rejectReason`, `status` filtering; a person
     gets `AI_ACCOUNT_REQUIRED`; `status` alone is `GALLERY_STATUS_NEEDS_SCOPE`.

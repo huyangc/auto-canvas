@@ -19,6 +19,5 @@ and links the spec instead of restating it.
 ## Retention test
 
 Add an ADR only when the choice is hard to reverse, surprising without its
-reason, and a real trade-off. New ADRs are `0001-slug.md` in the
-[original format](../../.agents/skills/domain-modeling/ADR-FORMAT.md), using the
+reason, and a real trade-off. New ADRs are `0001-slug.md` using the
 [template](adr.template.md). Topic ADRs keep `Status:` and their row here.
