@@ -76,7 +76,7 @@ scripts/codex-task.sh tasks/T001-<slug>
 `CODEX_MODEL` 可覆盖模型。日志在 `tasks/<id>/logs/round-<n>.jsonl`。
 
 沙箱里没有网络，依赖要事先装好（`pnpm install --frozen-lockfile`）。脚本设置
-`npm_config_verify_deps_before_run=false`，防止 pnpm 在运行脚本前尝试重装依赖、
+`pnpm_config_verify_deps_before_run=false`（以及旧版 pnpm 读取的 `npm_config_` 写法），防止 pnpm 在运行脚本前尝试重装依赖、
 在离线沙箱里清空 `node_modules`。
 
 ## 查看 Codex 的过程
@@ -128,8 +128,7 @@ node scripts/codex-log.mjs tasks/T001-<slug> --round 2 --follow
 
 `.github/workflows/ci.yml` 在每个 PR 和 `main` 的推送上运行一个 `Check` 任务：格式、
 文档链接、生成文件、器件库、类型检查、lint、编译和单元测试（带 PostgreSQL 16 服务，
-供 `apps/server` 的测试使用）。仿真模块的 `simulation-artifact-files.test.ts` 有 3 个
-接手前就存在的失败，CI 暂时排除这一个文件，删除仿真时去掉排除。浏览器测试和实机检查不在
+供 `apps/server` 的测试使用）。编辑器仿真模块及其历史失败测试已删除，CI 不再排除测试。浏览器测试和实机检查不在
 CI 里，它们的证据以 Opus 亲自重跑的结果为准，写进 PR 的 Evidence。
 
 ### Claude Code PR 操作
