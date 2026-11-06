@@ -35,7 +35,11 @@ yourself:
    action is missing from the report. `--show <n>` prints one command's output.
    The timeline shows actions and messages, not Codex's reasoning.
 3. Rerun every acceptance command. Compare against `.baseline/` for commands
-   that were already failing before the task.
+   that were already failing before the task. If the task deleted or renamed
+   a workspace package, first recreate `node_modules`
+   (`rm -rf node_modules apps/*/node_modules packages/*/node_modules && pnpm install --frozen-lockfile --offline`):
+   stale links otherwise resolve imports of the deleted package and hide the
+   break until CI (T007).
 4. Read the diff. Check it against the plan's steps and CODING_STANDARDS.md:
    removed behavior really is unreachable, kept behavior still has tests,
    no test was weakened to pass, no silent design change.
