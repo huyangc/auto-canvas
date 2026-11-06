@@ -64,6 +64,22 @@ export function pinPoints(
     }),
   );
 }
+/** A pin placed on a retained Junction of another Net would merge the Nets. */
+export function junctionContactProblem(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  pinNet: (instanceId: string, pinName: string) => string | undefined,
+): string | undefined {
+  for (const pin of pinPoints(document, resolver))
+    for (const junction of document.junctions)
+      if (
+        junction.position.x === pin.point.x &&
+        junction.position.y === pin.point.y &&
+        junction.netId !== pinNet(pin.instanceId, pin.pinName)
+      )
+        return `R10: pin ${pin.instanceId}.${pin.pinName} lands on Junction ${junction.id} of another Net`;
+  return undefined;
+}
 export function geometryProblem(
   document: SchematicDocument,
   resolver: SymbolResolver,

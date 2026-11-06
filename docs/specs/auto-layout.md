@@ -98,6 +98,15 @@ AutoLayoutDiagnostic[] }`. Fixed instances retain their exact placements;
   T012 replaces them. No input Route id survives. If any rule cannot be met, return no
   edits with a diagnostic naming the rule.
 
+- **Existing locks and conflicts.** Members of a locked layout group or
+  constraint are treated as fixed instances under R1, because the Edit Engine
+  refuses to transform them. A recognized group whose generated id already
+  names an existing group, or a locked annotation anchored to a Route, makes
+  the planner return no edits and an R5 or R2 diagnostic instead of a plan the
+  Edit Engine would reject or that would overwrite user intent. A placed pin
+  that lands on a retained Junction of another Net would merge the Nets, so
+  R10 refuses it too.
+
 ## Contract
 
 The public entry point is `planAutoLayout`. Edits use the existing

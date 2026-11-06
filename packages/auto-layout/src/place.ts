@@ -6,6 +6,7 @@ import {
   COLUMN_PITCH,
   enclosingBox,
   geometryProblem,
+  junctionContactProblem,
   MEMBER_PITCH,
   ROW_PITCH,
   pinPoints,
@@ -252,13 +253,15 @@ export function placeDocument(
   const newBox = enclosingBox(withPlacements(document, targets), resolver);
   const snap = (n: number) =>
     Math.round(n / document.presentation.grid) * document.presentation.grid;
-  const hasFixed = document.instances.some((i) =>
-    options.fixedInstanceIds?.has(i.id),
-  );
+  // The Edit Engine refuses to transform anything a lock references.
+  const fixed = new Set(options.fixedInstanceIds);
+  for (const owner of [...document.layoutGroups, ...document.constraints])
+    if (owner.locked) for (const id of owner.objectIds) fixed.add(id);
+  const hasFixed = document.instances.some((i) => fixed.has(i.id));
   const dx = hasFixed ? 0 : snap(oldBox.x - newBox.x),
     dy = hasFixed ? 0 : snap(oldBox.y - newBox.y);
   for (const [id, target] of targets) {
-    if (options.fixedInstanceIds?.has(id)) {
+    if (fixed.has(id)) {
       const old = document.instances.find((i) => i.id === id)!.placement;
       if (!old)
         return {
@@ -281,7 +284,9 @@ export function placeDocument(
         problem: "R10: template dimensions cannot align with Document grid",
       };
   const result = withPlacements(document, targets);
-  const problem = geometryProblem(result, resolver);
+  const problem =
+    geometryProblem(result, resolver) ??
+    junctionContactProblem(result, resolver, roles.pinNet);
   if (problem) return { placements: targets, problem };
   return { placements: targets };
 }

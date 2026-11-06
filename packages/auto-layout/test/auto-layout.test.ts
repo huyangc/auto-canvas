@@ -1,8 +1,14 @@
+import { readFileSync } from "node:fs";
 import { expect, it } from "vitest";
-import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
-import { executeTransaction } from "@icm/edit-engine";
+import {
+  builtInSymbols,
+  createProjectSymbolResolver,
+  InMemorySymbolResolver,
+} from "@icm/symbols";
+import { executeTransaction, type SchematicEdit } from "@icm/edit-engine";
+import { parseProject } from "@icm/project-protocol";
 import { planAutoLayout } from "../src/index.js";
-import { enclosingBox } from "../src/geometry.js";
+import { enclosingBox, pinPoints } from "../src/geometry.js";
 import { circuit } from "./document-fixture.js";
 
 const resolver = new InMemorySymbolResolver(builtInSymbols);
@@ -104,4 +110,88 @@ it("diagnoses an unresolved symbol without emitting partial edits", () => {
     edits: [],
     diagnostics: [{ rule: "R3" }],
   });
+});
+const commit = (document: ReturnType<typeof circuit>, edits: SchematicEdit[]) =>
+  executeTransaction(
+    document,
+    {
+      transactionId: "probe",
+      documentId: document.id,
+      expectedRevision: document.revision,
+      actor: { kind: "agent", id: "test" },
+      edits,
+    },
+    { symbolResolver: resolver },
+  );
+it("refuses a pin landing on a retained Junction of another Net", () => {
+  const document = circuit(
+    { a: "resistor", b: "resistor" },
+    { n1: ["a.1"], n2: ["a.2"], n3: ["b.1"], n4: ["b.2"] },
+  );
+  const free = planAutoLayout(document, resolver);
+  const placed = commit(document, free.edits);
+  if (!placed.ok) throw new Error("layout did not commit");
+  const pin = pinPoints(placed.document, resolver).find(
+    (p) => p.instanceId === "b" && p.pinName === "1",
+  )!;
+  document.junctions = [
+    { id: "j", netId: "n1", position: pin.point, role: "branch" },
+  ] as typeof document.junctions;
+  expect(planAutoLayout(document, resolver)).toMatchObject({
+    edits: [],
+    diagnostics: [{ code: "AUTO_LAYOUT_RULE_UNSATISFIED", rule: "R10" }],
+  });
+});
+it("refuses to overwrite an existing layout group by generated id", () => {
+  const document = circuit(
+    { a: "nmos", b: "nmos", c: "resistor" },
+    { d: ["a.D", "a.G", "b.G"], s: ["a.S", "b.S"], o: ["b.D"] },
+  );
+  document.layoutGroups = [
+    {
+      id: "auto-current-mirror-a",
+      kind: "custom",
+      objectIds: ["c"],
+      locked: false,
+    },
+  ];
+  expect(planAutoLayout(document, resolver)).toMatchObject({
+    edits: [],
+    diagnostics: [{ code: "AUTO_LAYOUT_RULE_UNSATISFIED", rule: "R5" }],
+  });
+});
+it("keeps members of a locked layout group or constraint in place", () => {
+  const document = circuit({ a: "resistor", b: "resistor" }, {});
+  const placement = {
+    position: { x: 500, y: 500 },
+    rotation: 0 as const,
+    mirror: "none" as const,
+  };
+  document.instances[0]!.placement = placement;
+  document.instances[1]!.placement = {
+    ...placement,
+    position: { x: 800, y: 500 },
+  };
+  document.layoutGroups = [
+    { id: "g", kind: "custom", objectIds: ["a"], locked: true },
+  ];
+  const plan = planAutoLayout(document, resolver);
+  expect(plan.diagnostics).toEqual([]);
+  const result = commit(document, plan.edits);
+  expect(result.applied, JSON.stringify(result.diagnostics)).toBe(true);
+  if (!result.ok) return;
+  expect(result.document.instances[0]!.placement).toEqual(placement);
+});
+it("diagnoses a locked Route-anchored annotation instead of a rejected plan", () => {
+  const project = parseProject(
+    readFileSync("apps/editor/src/examples/simulation-rlc.icproj.json", "utf8"),
+  );
+  const document = structuredClone(project.documents[0]!);
+  document.annotations.find((a) => a.anchor.kind === "route")!.locked = true;
+  expect(
+    planAutoLayout(
+      document,
+      createProjectSymbolResolver(project, builtInSymbols),
+    ),
+  ).toMatchObject({ edits: [], diagnostics: [{ rule: "R2" }] });
 });

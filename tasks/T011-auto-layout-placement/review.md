@@ -98,3 +98,20 @@ Known limits, carried to T012/T013, not defects of this task:
   the second input on the right. A side rule for differential inputs is a
   candidate refinement for T012's spec update.
 - Fixed instances are not yet placed around (T013).
+
+## PR review round 1 — fixed by Opus
+
+The codex PR review on `5558f77` raised one P1 and two P2 findings. Opus
+verified all three and fixed them directly, because each is a few lines and the
+task's three Codex rounds were used.
+
+| Finding                                                                             | Verified by                                                | Fix                                           |
+| ----------------------------------------------------------------------------------- | ---------------------------------------------------------- | --------------------------------------------- |
+| P1: a pin landing on a retained Junction of another Net merges the Nets             | Regression test fails without the fix                      | `junctionContactProblem` refuses it under R10 |
+| P2: a generated group id overwrites an existing group                               | Regression test fails without the fix                      | R5 diagnostic, no edits                       |
+| P2: locked groups and constraints produce a rejected plan                           | Probe: planner emitted `move_instance` for a locked member | Their members join the fixed set              |
+| Same class, found by Opus: a locked Route-anchored annotation gives a rejected plan | Regression test fails without the fix                      | R2 diagnostic, no edits                       |
+
+Each of the four new tests fails with its fix reverted and passes with it.
+Rerun: format, docs, typecheck, lint, build → 0; `pnpm test:local` → 7315
+passed; `pnpm deadcode | grep auto-layout` → no output.
