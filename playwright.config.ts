@@ -8,7 +8,9 @@ process.env.NO_PROXY = [process.env.NO_PROXY, "127.0.0.1", "localhost"]
 
 const e2ePort = Number(process.env.ICM_E2E_PORT ?? "4173");
 const e2eBaseUrl = `http://127.0.0.1:${e2ePort}`;
-const apiPort = 4311;
+// Parallel task worktrees each use their own ports and test database
+// (docs/workflow.md#并行任务).
+const apiPort = Number(process.env.AUTO_CANVAS_E2E_API_PORT ?? "4311");
 const apiUrl = `http://127.0.0.1:${apiPort}`;
 const chromiumExecutablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
 // A running editor to test instead of starting one: a live check of the

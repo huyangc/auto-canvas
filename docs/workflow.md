@@ -37,6 +37,34 @@ tasks/T001-<slug>/
 - **超出范围就停下**：Codex 遇到方案没覆盖的必要改动，要记录在 report，
   而不是自行设计。
 
+## 并行任务
+
+范围互不重叠的任务可以同时交给 Codex，再一起审查。
+
+- **先判断能否并行**：两个任务的 owned paths 不能有交集，也不能一个依赖另一个
+  的结果；有交集或依赖的按顺序做。删除类任务要连同所有引用方一起算范围。
+- **每个任务一个 worktree**，主目录留在 `main`。在 worktree 里装好依赖后，从该目录
+  运行 `scripts/codex-task.sh`：
+
+  ```bash
+  git worktree add .claude/worktrees/<id> -b task/<id>-<slug> origin/main
+  pnpm install --frozen-lockfile --offline
+  ```
+
+- **每个任务一条车道**，避免端口和测试库冲突。方案的验收命令里写明这三个环境变量：
+
+  | 车道 | `ICM_E2E_PORT` | `AUTO_CANVAS_E2E_API_PORT` | `AUTO_CANVAS_TEST_DATABASE_URL`    |
+  | ---- | -------------- | -------------------------- | ---------------------------------- |
+  | 1    | 4173           | 4311                       | `postgresql:///auto_canvas_test`   |
+  | 2    | 4273           | 4321                       | `postgresql:///auto_canvas_test_2` |
+  | 3    | 4373           | 4331                       | `postgresql:///auto_canvas_test_3` |
+
+  车道 2、3 的数据库要先用 `createdb` 建好。
+
+- **一起审查，逐个交付**：每轮结束后照常按 `codex-task` 审查，各自开 PR。PR 按顺序
+  合入；后合入的先 rebase 到最新 `main` 并重跑验收，再合入。
+- **最多三个并行**：受审查精力和本机资源限制。
+
 ## 运行 Codex
 
 ```bash
