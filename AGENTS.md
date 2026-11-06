@@ -5,9 +5,7 @@ routing (APR) with human fine-tuning. It starts from an analog-canvas snapshot
 (UPSTREAM.md). The repository workflow is in [docs/workflow.md](docs/workflow.md):
 Opus plans and reviews, Codex implements.
 
-These rules replace the upstream analog-canvas process. Ignore upstream stage
-skills under `.agents/skills/` (implement, implement-spec, pr, to-spec,
-to-tickets, retro) and `docs/development-workflow.md`: there are no Issues,
+These rules replace the upstream analog-canvas process: there are no Issues,
 deployments or Production acceptance here. Opus delivers reviewed work through
 a PR; see the workflow document.
 
