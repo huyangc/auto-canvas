@@ -16,8 +16,9 @@ Neither import nor export changes the Cloud save state.
 A Project carries topology, instances and parameters, component definitions,
 Cell interfaces, labels and drawing styles, simulation source folders,
 Project-owned external model sources and drafts, User Component origins and
-inductor couplings. It does not carry run results (use the simulation result
-export), Undo history, unfinished text edits or Agent credentials. Same-name
+inductor couplings. Saved simulation source folders are preserved through edits
+and saves, but are not displayed or executed. A Project does not carry run
+results, Undo history, unfinished text edits or Agent credentials. Same-name
 Nets and Ports keep their logical connection without merging separately drawn
 wires. A drawn Reference such as `M1` may export as `XM1`; the drawing is not
 renamed.

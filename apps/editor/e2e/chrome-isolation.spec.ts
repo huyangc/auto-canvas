@@ -136,11 +136,9 @@ test("compacts the editor header at half width and keeps account identity availa
       48,
     );
     const actionBounds = await actions
-      .locator(
-        '[data-testid="open-analog-simulation"], [data-testid="open-agent"]',
-      )
+      .locator('[data-testid="open-agent"]')
       .evaluateAll(edges);
-    expect(actionBounds).toHaveLength(2);
+    expect(actionBounds).toHaveLength(1);
     for (let index = 1; index < actionBounds.length; index++) {
       expect(actionBounds[index]!.left).toBeGreaterThanOrEqual(
         actionBounds[index - 1]!.right,
@@ -158,11 +156,6 @@ test("compacts the editor header at half width and keeps account identity availa
     if (width <= 760) {
       await expect(
         actions.getByTestId("open-agent").locator(".app-action-label"),
-      ).toBeHidden();
-      await expect(
-        actions
-          .getByTestId("open-analog-simulation")
-          .locator(".app-action-label"),
       ).toBeHidden();
     }
   }

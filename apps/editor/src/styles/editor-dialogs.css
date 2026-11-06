@@ -260,7 +260,7 @@
   min-width: 0;
 }
 
-/* Same tab affordance as the Simulation workspace, so switching definition
+/* Tabs keep switching definition
    scope reads as a tab and not as a pressed toggle. */
 .cell-manager-resource-tabs {
   display: flex;

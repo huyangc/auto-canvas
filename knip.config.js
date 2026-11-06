@@ -46,11 +46,6 @@ export default {
       entry: [
         "scripts/*.mjs!",
         "worker/index.ts!",
-        "containers/*/entrypoint.mjs!",
-        "containers/ngspice/gateway.mjs!",
-        "containers/ngspice/sg13g2/verify-image.mjs!",
-        "containers/simulation/*.mjs!",
-        "containers/vacask/image-smoke.mjs!",
         "tools/**/*.mjs!",
         // The batch runner's scripted Agent, run as a command (#1498).
         "scripts/lib/draw-batch-script-agent.mjs!",
@@ -58,17 +53,10 @@ export default {
       project: [
         "scripts/**/*.mjs!",
         "worker/**/*.ts!",
-        "containers/**/*.mjs!",
         "tools/**/*.mjs!",
-        "!scripts/lib/native-cross-project-fixture.mjs!",
         ...testSupport,
       ],
       paths: builtPackageSources,
-      // The image runs this smoke against files mounted at these paths.
-      ignoreUnresolved: [
-        "/opt/harness/vacask-harness.mjs",
-        "/proof/native-example-acceptance.mjs",
-      ],
     },
     "apps/editor": {
       // Its config loads the dev-server plugins, which load built packages.
@@ -85,7 +73,6 @@ export default {
         "e2e/**/*.spec.ts",
         // Specs load these by URL (e2e/helpers/page-modules.ts).
         "e2e/helpers/*-harness.tsx",
-        "e2e/helpers/simulation-files.ts",
       ],
       project: [
         "src/**/*.{ts,tsx}!",

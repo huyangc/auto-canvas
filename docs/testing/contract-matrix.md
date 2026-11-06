@@ -11,13 +11,12 @@ Primary test boundary per behavior, as an index for change impact.
 | Connectivity, diagnostics, and hierarchy interpretation          | `packages/derived/src/{connectivity-index,logical-net,current-contract,diagnostics/*.test.ts}`                     | Editor net highlighting and Agent snapshots     |
 | Formal SVG and export artifacts                                  | `packages/render-svg/src/*.test.ts`, `packages/exporters/src/exporters.test.ts`                                    | visual golden and release checks                |
 | Design-netlist extraction and printing                           | `packages/netlist/src/{current-contract,printers}.test.ts`                                                         | editor netlist authoring workflow               |
-| Analog Simulation deck compilation and source/probe mapping      | `packages/netlist/src/{simulation-compile,source-waveform}.test.ts`                                                | existing Agent Simulation browser workflow      |
-| Analog Simulation execution, lifecycle, and artifact contracts   | `packages/simulation-service/src/*.test.ts`                                                                        | existing Agent/MCP and browser wiring checks    |
-| ngspice process/environment; ngspice/VACASK rawfile and results  | `packages/spice-run/src/*.test.ts`                                                                                 | qualified fixture and hosted smoke checks       |
+| Saved source-folder preservation                                 | `apps/editor/src/document/project-snapshot-serializer.test.ts`                                                     | Project load/edit/save                          |
+| Retired editor simulation operations                             | `apps/editor/src/agent/simulation-unavailable.test.ts`                                                             | no simulation workspace in App                  |
 | Agent authentication, permissions, and session lifetime          | `packages/agent-adapter/src/{session-state,service,request-contract}.test.ts`                                      | browser Agent session workflow                  |
 | Browser recovery and persistence hardening                       | editor document unit contracts                                                                                     | recovery dialog and hardening Playwright specs  |
 | User-visible editing workflows                                   | focused editor unit contracts                                                                                      | `apps/editor/e2e/` scenarios                    |
-| Validation policy and change-impact selection                    | `scripts/lib/{validation-gates,ci-validation-plan,verify-pr-selection,test-impact}.test.mjs`                                           | focused required browser checks, small fallback |
+| Validation policy and change-impact selection                    | `scripts/lib/{validation-gates,ci-validation-plan,verify-pr-selection,test-impact}.test.mjs`                       | focused required browser checks, small fallback |
 
 Timing report accounting is protected by
 `scripts/lib/e2e-durations.test.mjs`; elapsed run time and cumulative retry cost

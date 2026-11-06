@@ -150,8 +150,8 @@ gate.
   `remove_route_geometry` removes a Route but keeps Net membership.
 - `upsert/remove_simulation_folder` address one version-4 folder by ID; an
   identical upsert or absent removal is no change. Removing a bound Cell or
-  file may leave preparation diagnostics, never an unsaveable Project
-  ([simulation](simulation.md)).
+  file may leave dangling source references, never an unsaveable Project.
+  The editor preserves these folders without displaying or executing them.
 
 ## Planners
 

@@ -422,9 +422,10 @@ it("keeps origin and bearer checks and fails artifact transfer clearly without a
     claim.agentToken,
   );
   expect(simulation.status).toBe(200);
+  // The editor no longer simulates (T006); its typed refusal passes through.
   expect(await simulation.json()).toMatchObject({
     ok: false,
-    error: { stage: "prepare" },
+    error: { code: "SIMULATION_UNAVAILABLE" },
   });
 });
 

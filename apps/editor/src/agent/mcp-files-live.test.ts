@@ -142,7 +142,7 @@ describe("MCP file tools on the live editor", () => {
       }),
     ).toMatchObject({
       ok: false,
-      error: { code: "SIMULATION_PLOT_RETIRED" },
+      error: { code: "SIMULATION_UNAVAILABLE" },
     });
     await expect(access(plotPath)).rejects.toThrow();
   });

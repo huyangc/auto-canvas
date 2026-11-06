@@ -75,8 +75,6 @@ export interface EditorAppChromeProps {
   netlistFormat: "spice" | "spectre";
   onExportNetlist: (format: "spice" | "spectre") => void;
   agentAction: { label: string; execute: () => void } | null;
-  simulationAction?: () => void;
-  simulationState?: "closed" | "open" | "maximized" | "minimized";
   drawingToolbar: ComponentProps<typeof DrawingToolbar>;
   hierarchyToolbar: ComponentProps<typeof HierarchyToolbar>;
   telemetry: ComponentProps<typeof EditorTestTelemetry>;
@@ -119,8 +117,6 @@ export function EditorAppChrome({
   onOpenNetlistConfiguration,
   onExportNetlist,
   agentAction,
-  simulationAction,
-  simulationState = "closed",
   drawingToolbar,
   hierarchyToolbar,
   telemetry,
@@ -328,40 +324,6 @@ export function EditorAppChrome({
           </details>
         </div>
         <div className="app-chrome-actions">
-          {/* Simulation and Agent are the right-side actions on both
-              wide and half-width layouts. Keeping them in one fixed group
-              leaves File, Edit, and Circuit anchored beside the brand. */}
-          {simulationAction ? (
-            <button
-              type="button"
-              className="app-action"
-              data-testid="open-analog-simulation"
-              aria-label="Analog simulation"
-              aria-pressed={
-                simulationState === "open" || simulationState === "maximized"
-              }
-              onClick={simulationAction}
-            >
-              <svg
-                className="app-action-icon"
-                viewBox="0 0 16 16"
-                aria-hidden="true"
-              >
-                <path
-                  d="M1.5 8c1.2-4 2.6-4 3.8 0s2.6 4 3.8 0 2.6-4 3.8 0"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                  strokeLinecap="round"
-                />
-              </svg>
-              <span className="app-action-label">
-                {simulationState === "minimized"
-                  ? "Simulate · Minimized"
-                  : "Simulate"}
-              </span>
-            </button>
-          ) : null}
           {agentAction ? (
             <button
               type="button"

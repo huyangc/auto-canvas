@@ -1,9 +1,12 @@
 # Current Product Architecture
 
-A local-first schematic editor with netlist interchange and simulation
-orchestration; humans and Agents edit one live Project through typed,
+A local-first schematic editor with netlist interchange; humans and Agents
+edit one live Project through typed,
 revision-checked operations. A Project persists circuit facts and simulation
-source folders, never processes, prepared decks, receipts or results.
+source folders, never processes, prepared decks, receipts or results. Saved
+source folders round-trip unchanged; the editor has no simulation workspace
+or executor. Legacy simulation packages and Agent protocol definitions await
+separate removal.
 
 ## Sources of truth
 
@@ -19,25 +22,17 @@ source folders, never processes, prepared decks, receipts or results.
 | Electrical read model                         | `@icm/derived` Base-Net/Logical-Net projections and connectivity index           |
 | Structural SPICE import                       | `@icm/spice` transient Circuit IR                                                |
 | Design-netlist export and source compilation  | `@icm/netlist`                                                                   |
-| Preparation and session-facing execution      | `@icm/simulation-service`                                                        |
-| Simulator evidence and result parsing         | `@icm/spice-run` and the configured executor                                     |
-| Hosted admission and bounded retention        | Worker managed control plane and artifact store                                  |
 | Browser authorization and transport           | [Web-session contract](specs/web-agent-session.md)                               |
 
 ## System shape
 
 ```text
 human UI / authorized Agent
-  ├─ typed Project edits → Edit Engine → Project / Documents / source folders
+  └─ typed Project edits → Edit Engine → Project / Documents / source folders
   │                                      ├─ connectivity / checks / navigation
   │                                      ├─ rendering / formal image export
   │                                      ├─ structural netlist export
   │                                      └─ Cloud Save / portable interchange
-  └─ prepare / run / read / cancel
-       → SimulationService ← immutable snapshot of selected authored input
-       → configured executor / managed admission
-       → ngspice + qualified models, or the hosted native VACASK candidate
-       → parsed results / artifacts → UI and Agent
 ```
 
 ## Core invariants
@@ -57,7 +52,7 @@ human UI / authorized Agent
   export, browser recovery and Gallery publication are distinct operations.
 - The author owns the Testbench; unsupported devices get located diagnostics,
   never guessed replacements.
-- Circuit, File, Project and simulation operations share authorization without
+- Circuit, File and Project operations share authorization without
   becoming competing mutation protocols.
 - A save, a pretty drawing or an exit code does not establish electrical
   correctness.

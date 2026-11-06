@@ -464,7 +464,7 @@ async function editorAnswer(
 }
 
 describe("public Agent session routes", () => {
-  it("relays typed simulation failures without revoking a session and replays a receipt once", async () => {
+  it("relays the editor's simulation refusal without revoking the session", async () => {
     const { env, objects, sockets } = routedFixture();
     const post = (path: string, body: unknown, token?: string) =>
       routeAgentSessionRequest(
@@ -499,71 +499,31 @@ describe("public Agent session routes", () => {
     sockets.set(id, [browser.socket]);
     const path = `/api/agent/sessions/${id}/simulation`,
       base = { apiVersion: "3.0" };
-    // A folder the Project lacks: the editor's typed failure passes through.
-    const error = await post(
-      path,
-      {
-        ...base,
-        requestId: "bad",
-        operation: "prepare",
-        source: {
-          kind: "project-folder",
-          folderId: "folder-1",
-          expectedStructureRevision: 0,
-        },
-      },
-      claim.agentToken,
-    );
-    expect(error!.status).toBe(200);
-    expect(await error!.json()).toMatchObject({
-      ok: false,
-      error: { stage: "prepare" },
-    });
-    // The session survives it: the divider prepares, and its start runs once.
-    const prepared = (await (await post(
-      path,
-      {
-        ...base,
-        requestId: "prepare",
-        operation: "prepare",
-        source: {
-          kind: "project-folder",
-          folderId: "divider",
-          expectedStructureRevision: 0,
-        },
-      },
-      claim.agentToken,
-    ))!.json()) as { ok: boolean; prepared: { id: string; digest: string } };
-    expect(prepared.ok).toBe(true);
-    const start = {
+    // The editor no longer simulates (T006): its typed refusal passes through.
+    const request = (requestId: string) => ({
       ...base,
-      requestId: "once",
-      operation: "start",
-      preparedId: prepared.prepared.id,
-      digest: prepared.prepared.digest,
-    };
-    const run = (await (await post(path, start, claim.agentToken))!.json()) as {
-      ok: boolean;
-      run: { id: string };
-    };
-    expect(run.ok).toBe(true);
+      requestId,
+      operation: "prepare",
+      source: {
+        kind: "project-folder",
+        folderId: "divider",
+        expectedStructureRevision: 0,
+      },
+    });
+    const refused = await post(path, request("first"), claim.agentToken);
+    expect(refused!.status).toBe(200);
+    expect(await refused!.json()).toMatchObject({
+      ok: false,
+      error: { code: "SIMULATION_UNAVAILABLE" },
+    });
+    // The session survives the refusal and still answers its own bearer.
     expect(
-      await (await post(path, start, claim.agentToken))!.json(),
-    ).toMatchObject({ ok: true, run: { id: run.run.id } });
-    expect(browser.families).toEqual([
-      "simulation",
-      "simulation",
-      "simulation",
-    ]);
-    // The start's receipt comes back once the run is accepted; its execution
-    // reaches the simulator just after. The repeated start never reached the
-    // editor (three requests above), so it cannot add a second execution.
-    await expect.poll(() => service.executions).toBe(1);
-    expect(
-      (await post(path, { ...start, requestId: "other" }, "wrong-token"))!
-        .status,
-    ).toBe(401);
-    expect(browser.families).toHaveLength(3);
+      await (await post(path, request("second"), claim.agentToken))!.json(),
+    ).toMatchObject({ ok: false, error: { code: "SIMULATION_UNAVAILABLE" } });
+    expect((await post(path, request("other"), "wrong-token"))!.status).toBe(
+      401,
+    );
+    expect(browser.families).toEqual(["simulation", "simulation"]);
   });
   it("publishes the exact Agent API contract", async () => {
     const { env } = routedFixture();

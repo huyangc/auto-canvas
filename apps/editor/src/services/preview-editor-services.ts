@@ -21,7 +21,6 @@ export function createPreviewEditorServices(): EditorServices {
     capabilities: {
       userComponents: true,
       agent: false,
-      simulation: false,
       externalLinks: false,
     },
     exportDelivery: {

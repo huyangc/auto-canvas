@@ -39,11 +39,8 @@ that affect their contracts.
 
 ## Environment-dependent execution
 
-Simulation and native model checks still need their engine-specific resources.
-A skipped target does not qualify environment-dependent behavior. Record the
-simulator, inputs, candidate and missing resources in the task report; one
-engine's assertions cannot qualify another engine. See the
-[simulation execution contract](../specs/simulation-execution.md).
+The editor does not run simulations. Tests for inherited packages remain until
+their separate removal; they do not qualify an editor simulation workflow.
 
 ## Timing evidence
 
@@ -95,11 +92,6 @@ foundry data; label simplified models and topology-only fixtures.
 Electrical behavior changes report simulator, models, analyses, corners and
 acceptance criteria, or why simulation is blocked; syntax inspection alone
 proves nothing electrical.
-
-Native model-source acceptance (operator-run, after `pnpm build`):
-`node scripts/model-source-smoke.mjs <HTTPS executor origin>`; hosted runs need
-`SIMULATION_SMOKE_TOKEN`. It proves the source pipeline, not transistor-level
-performance.
 
 Symbol geometry/pin changes state their known drawing impacts; repair old
 layouts only with a bounded one-off when a few deterministic rules suffice.

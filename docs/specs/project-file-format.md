@@ -10,9 +10,10 @@ Primary owner: `packages/project-protocol` (portable source and codec);
 An `.icproj.json` file holds one complete Project. [The loader](../../packages/project-protocol/src/load.ts)
 and its transforms/tests own each migration step; this spec owns the current
 shape and the boundary. The [schematic model](schematic-model.md),
-[connectivity](connectivity-and-routing.md), [netlist export](netlist-export.md)
-and [simulation](simulation.md#authored-authority) own the semantics the codec
-preserves.
+[connectivity](connectivity-and-routing.md) and [netlist export](netlist-export.md)
+own the circuit semantics the codec preserves. Legacy simulation source folders
+remain part of the Project format: opening, unrelated editing and saving preserve
+them, although the editor does not display or execute them.
 
 ## Read and write
 
@@ -203,7 +204,7 @@ Optional fields by first schema (older envelopes cannot carry them):
 | 66     | Project `modelSources`, external-definition `implementation` binding or placeholder                                         |
 | 67     | `spectre` sources, draft `language` (absent inherits the applied one)                                                       |
 | 68     | `draft.authoring` per owner, `componentAuthoringDrafts` (library snapshots at a fixed revision)                             |
-| 69     | `componentDefinitions[].libraryOrigin` (publication)                                            |
+| 69     | `componentDefinitions[].libraryOrigin` (publication)                                                                        |
 
 - `importReference` is never guessed for older files; source text is kept by
   private saves and backups, omitted from Gallery, and never a netlist export

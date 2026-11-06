@@ -1,3 +1,4 @@
+import { terminalCurrentDirectionPartners } from "../features/properties/terminal-current-direction";
 import { useCloudProjects } from "./use-cloud-projects";
 import { useBootLink, useRestoredTabLinks } from "./use-project-entry";
 import { useSignalMemberInspection } from "../features/selection/use-signal-member-inspection";
@@ -119,7 +120,6 @@ import {
 } from "../canvas/camera-runtime";
 import type { CanvasDragSession } from "../canvas/canvas-drag-session";
 import { instanceVisibleHitBox } from "../canvas/instance-geometry";
-import { resolveSimulationTransport } from "../features/simulation/deployment-transport";
 import type { SimulationSourceLocation } from "@icm/simulation-service/contract";
 import { createCanvasHitController } from "../canvas/canvas-hit-controller";
 import { LazyCellInterfaceConfirmationDialog as CellInterfaceConfirmationDialog } from "./lazy-editor-dialogs";
@@ -164,8 +164,6 @@ import {
   keptDocumentStyleOfSelection,
   releaseKeptDocumentStyleEdit,
 } from "../features/editor-shell/kept-document-style";
-import { terminalCurrentDirectionPartners } from "../features/simulation/terminal-current-pick";
-import { PUBLIC_SIMULATION_UI_ENABLED } from "../features/simulation/public-simulation-ui";
 import { useCellSymbolLayout } from "../features/hierarchy/use-cell-symbol-layout";
 import { CellSymbolLayoutToolbar } from "../features/hierarchy/cell-symbol-layout-toolbar";
 import { selectedBlockSymbolTarget } from "../features/hierarchy/block-symbol-layout-target";
@@ -200,7 +198,6 @@ import {
 } from "./editor-project-dock";
 import { EditorPropertiesDock } from "./editor-properties-dock";
 import { LazyProjectCodePanel as ProjectCodePanel } from "./lazy-editor-dialogs";
-import { recoverSourceDrafts } from "../features/simulation/source-draft-cache";
 import { useProjectCheck } from "./use-project-check";
 import { summarizeVisualDiagnostics } from "../features/selection/selection-inspector-details";
 import {
@@ -243,14 +240,6 @@ import {
   createAgentWorkspaceHandler,
   createAgentWorkspaceTargets,
 } from "./agent-workspace-requests";
-import {
-  useActiveSimulationFolder,
-  useSimulationPickCommands,
-  useSimulationPicking,
-  useSimulationSurface,
-  useModelTargetProfiles,
-} from "./use-simulation-surface";
-import { EditorSimulationSurface } from "./editor-simulation-surface";
 import { EditorDialogs } from "./editor-dialogs";
 import { EditorComponentEditor } from "./editor-component-editor";
 import { useEditorCommandRouter } from "./use-editor-command-router";
@@ -400,7 +389,6 @@ const RECENT_COMPONENTS_STORAGE_KEY = "icm.recent-components.v1";
 const LIBRARY_PANEL_STORAGE_KEY = "icm.library-panel-open.v1";
 const LIBRARY_WIDTH_STORAGE_KEY = "icm.library-panel-width.v1";
 const PROPERTIES_WIDTH_STORAGE_KEY = "icm.properties-panel-width.v1";
-const SIMULATION_WIDTH_STORAGE_KEY = "icm.simulation-panel-width.v2";
 // The drag floor only keeps the panel from disappearing behind its own
 // collapsed rail; how narrow the inspector is useful is the reader's call.
 const PROPERTIES_WIDTH_MIN = 160;
@@ -408,18 +396,6 @@ const PROPERTIES_WIDTH_MAX = 760;
 /** Only the untouched default opens this wide; a drag may go narrower. */
 const PROPERTIES_WIDTH_DEFAULT_MIN = 280;
 const PROPERTIES_WIDTH_RATIO = 0.24;
-const SIMULATION_WIDTH_MIN = 320;
-const SIMULATION_WIDTH_MAX = 1200;
-const SIMULATION_WIDTH_RATIO = 0.4;
-
-function defaultSimulationWidth(viewportWidth: number): number {
-  return Math.round(
-    Math.min(
-      SIMULATION_WIDTH_MAX,
-      Math.max(SIMULATION_WIDTH_MIN, viewportWidth * SIMULATION_WIDTH_RATIO),
-    ),
-  );
-}
 
 function defaultPropertiesWidth(viewportWidth: number): number {
   return Math.round(
@@ -455,8 +431,6 @@ export interface AppProps {
   project?: CircuitProject;
   /** Override the deployment's Agent UI capability in tests. */
   publicAgentUiEnabled?: boolean;
-  /** Override the deployment's analog Simulation UI capability in tests. */
-  publicSimulationUiEnabled?: boolean;
 }
 
 export function App(props: AppProps) {
@@ -552,8 +526,6 @@ function WorkspaceEditor({
   project: initialProject,
   publicAgentUiEnabled: requestedAgentUi = !import.meta.env?.ICM_DESKTOP &&
     PUBLIC_AGENT_UI_ENABLED,
-  publicSimulationUiEnabled: requestedSimulationUi = !import.meta.env
-    .ICM_DESKTOP && PUBLIC_SIMULATION_UI_ENABLED,
   restoredWorkspace,
   workspaceError,
   workspaceNotice,
@@ -575,10 +547,6 @@ function WorkspaceEditor({
   } = useEditorServices();
   const publicAgentUiEnabled =
     !import.meta.env?.ICM_DESKTOP && capabilities.agent && requestedAgentUi;
-  const publicSimulationUiEnabled =
-    !import.meta.env?.ICM_DESKTOP &&
-    capabilities.simulation &&
-    requestedSimulationUi;
   const [restoringWorkspace, setRestoringWorkspace] = useState(
     restoredWorkspace !== null,
   );
@@ -607,10 +575,6 @@ function WorkspaceEditor({
     pointerX: number;
     width: number;
   } | null>(null);
-  const simulationResizeOriginRef = useRef<{
-    pointerX: number;
-    width: number;
-  } | null>(null);
   const propertiesResizeOriginRef = useRef<{
     pointerX: number;
     width: number;
@@ -635,30 +599,6 @@ function WorkspaceEditor({
     setPropertiesWidthState(next);
     try {
       window.localStorage.setItem(PROPERTIES_WIDTH_STORAGE_KEY, String(next));
-    } catch {
-      // Resizing remains available when browser storage is unavailable.
-    }
-  };
-  const [simulationWidth, setSimulationWidthState] = useState(() => {
-    if (typeof window === "undefined") return defaultSimulationWidth(1100);
-    try {
-      const stored = Number(
-        window.localStorage.getItem(SIMULATION_WIDTH_STORAGE_KEY),
-      );
-      return Number.isFinite(stored) && stored > 0
-        ? Math.min(SIMULATION_WIDTH_MAX, Math.max(SIMULATION_WIDTH_MIN, stored))
-        : defaultSimulationWidth(window.innerWidth);
-    } catch {
-      return defaultSimulationWidth(window.innerWidth);
-    }
-  });
-  const setSimulationWidth = (width: number): void => {
-    const next = Math.round(
-      Math.min(SIMULATION_WIDTH_MAX, Math.max(SIMULATION_WIDTH_MIN, width)),
-    );
-    setSimulationWidthState(next);
-    try {
-      window.localStorage.setItem(SIMULATION_WIDTH_STORAGE_KEY, String(next));
     } catch {
       // Resizing remains available when browser storage is unavailable.
     }
@@ -816,9 +756,6 @@ function WorkspaceEditor({
   useEffect(() => () => cameraRuntime.dispose(), [cameraRuntime]);
   const [shortcutHintsVisible, setShortcutHintsVisible] = useState(false);
   const [gridDotsVisible, setGridDotsVisible] = useState(true);
-  const simulationTransport = resolveSimulationTransport(
-    import.meta.env.VITE_ICM_SIMULATION_TRANSPORT,
-  );
   // Annotations and drafting place on their own pitch; the Document grid
   // stays the electrical contract for devices, wires, and junctions.
   const [annotationGrid, setAnnotationGridState] = useState<1 | 5 | 10>(() => {
@@ -881,26 +818,6 @@ function WorkspaceEditor({
   >(null);
   const [modelEditorLocation, setModelEditorLocation] =
     useState<SimulationSourceLocation>();
-  const openProjectModelSource = (
-    sourceId: string,
-    location?: SimulationSourceLocation,
-  ) => {
-    const definition = project.externalSubcircuitDefinitions.find(
-      (d) => d.implementation?.sourceId === sourceId,
-    );
-    if (!definition) return;
-    setModelEditorDefinitionId(definition.id);
-    setModelEditorLocation(location);
-    setCellManagerOpen(true);
-  };
-  const {
-    activeSimulationFolderId,
-    setActiveSimulationFolderId,
-    activeSimulationFolder,
-  } = useActiveSimulationFolder({
-    project,
-    projectSessionId,
-  });
   const [canvasContextMenu, setCanvasContextMenu] = useState<{
     x: number;
     y: number;
@@ -968,7 +885,6 @@ function WorkspaceEditor({
     setAgentFileCandidate,
     agentProjectResources,
     browserAgentFileHost,
-    projectRunHistory,
     browserAgentSimulationHost,
     agentWorkspaceRef,
   } = useAgentProjectResources({
@@ -976,7 +892,6 @@ function WorkspaceEditor({
     editorDocumentController,
     projectSessionId,
     browserAgentHost,
-    simulationTransport,
     projectSwitchBlockerRef,
     openProjectInTabRef,
   });
@@ -1017,51 +932,16 @@ function WorkspaceEditor({
       agentWorkspaceRef,
     ],
   );
-  const {
-    simulationPickMode,
-    setSimulationPickModeState,
-    analogSimulationState,
-    setAnalogSimulationState,
-    simulationSourceBuffer,
-    analogSimulationOpened,
-    analogSimulationOpen,
-    analogSimulationMaximized,
-    humanSimulationSession,
-    openAnalogSimulation,
-    minimizeAnalogSimulation,
-    toggleAnalogSimulationMaximized,
-    exitAnalogSimulation,
-  } = useSimulationSurface({
-    publicSimulationUiEnabled,
-    dispatchProjectTransaction,
-    editorDocumentController,
-    projectSessionId,
-    simulationTransport,
-    setProjectPanel,
-    projectRunHistory,
-  });
   const [codeDraftDirty, setCodeDraftDirty] = useState(false);
   const noteCodeDraftDirty = useCallback((dirty: boolean) => {
     setCodeDraftDirty(dirty);
   }, []);
-  const captureAuthoredProject = async () => {
-    if (
-      simulationSourceBuffer.current &&
-      !(await simulationSourceBuffer.current.flush())
-    ) {
-      setStatus(
-        "Source edits need attention; open Code. No work was discarded.",
-      );
-      return null;
-    }
-    return editorDocumentController.project;
-  };
+  const captureAuthoredProject = async () => editorDocumentController.project;
   const {
     captureFileSession,
     restoreFileSession,
     cloudBinding,
     nativeBinding,
-
     savedProjectBaseline,
     replaceGuard,
     replaceGuardSaving,
@@ -1075,7 +955,6 @@ function WorkspaceEditor({
     isDirtyWork,
     hasUnsavedChanges,
     hasUnsafeWork,
-
     replaceActiveProject,
     saveProjectToCloud,
     saveProjectToCloudByHand,
@@ -1118,9 +997,7 @@ function WorkspaceEditor({
     },
     restoreWorkingSession: agentStartupRecovery !== null,
     externalWorkspaceRestored: restoredWorkspace !== null,
-    hasPendingEdits: () => simulationSourceBuffer.current?.dirty === true,
     beforeSnapshot: captureAuthoredProject,
-    onRecoverBuffers: recoverSourceDrafts,
     describeOpenBlocker: () => projectSwitchBlockerRef.current(),
     describeCloudSaveBlocker: () =>
       isCloudManagementInFlight()
@@ -1447,29 +1324,13 @@ function WorkspaceEditor({
       : controlPickState?.kind === "current"
         ? "sensor"
         : null;
-  const {
-    codeNetPreview,
-    setCodeNetPreview,
-    simulationPickNetsActive,
-    simulationPickTerminalsActive,
-    simulationPickActive,
-    simulationHoverNetId,
-    setSimulationHoverNetId,
-    analogPickedNet,
-    setAnalogPickedNet,
-    analogPickedTerminal,
-    setAnalogPickedTerminal,
-    simulationTerminalPickStart,
-    setSimulationTerminalPickStart,
-  } = useSimulationPicking({
-    document,
-    projectSessionId,
-    activeSimulationFolderId,
-    analogSimulationOpen,
-    simulationPickMode,
-    setSimulationPickModeState,
-    setControlPickState,
-  });
+  const [controlHoverNetId, setControlHoverNetId] = useState<string | null>(
+    null,
+  );
+  useEffect(() => {
+    setControlPickState(null);
+    setControlHoverNetId(null);
+  }, [document.id, projectSessionId]);
   const routeCounter = useRef(0);
   const canvasDragSessionRef = useRef<CanvasDragSession | null>(null);
   /**
@@ -1731,9 +1592,6 @@ function WorkspaceEditor({
     )
       setControlPickState(null);
   }, [selectedInstance?.id]);
-  const modelTargetProfiles = useModelTargetProfiles(
-    publicSimulationUiEnabled && selectionOpen && !!selectedInstance,
-  );
   const selectedContact = selectedEndpoint
     ? documentContactEvidence?.byEndpointKey.get(
         endpointKey(selectedEndpoint.endpoint),
@@ -1940,39 +1798,25 @@ function WorkspaceEditor({
     setSelectionOpen(true);
     setIssuesFocusToken((token) => token + 1);
   }
-  const {
-    simulationPickHighlight,
-    codeNetHighlight,
-    simulationCurrentEndpointKeys,
-    pickAnalogSimulationNet,
-    pickSimulationTerminal,
-    setSimulationPickMode,
-    setSimulationNetPickMode,
-    setSimulationTerminalPickMode,
-  } = useSimulationPickCommands({
-    setStatus,
-    project,
-    document,
-    projectConnectivityIndex,
-    documentStack,
-    activeSimulationFolder,
-    analogSimulationOpen,
-    simulationPickMode,
-    setSimulationPickModeState,
-    setControlPickState,
-    controlPickMode,
-    codeNetPreview,
-    simulationPickNetsActive,
-    simulationPickTerminalsActive,
-    simulationHoverNetId,
-    setSimulationHoverNetId,
-    setAnalogPickedNet,
-    setAnalogPickedTerminal,
-    simulationTerminalPickStart,
-    setSimulationTerminalPickStart,
-    logicalNets,
-    activateTool,
-  });
+  const controlPickHighlight = useMemo(
+    () =>
+      controlPickMode === "net" && controlHoverNetId
+        ? computeNetHighlight(
+            projectConnectivityIndex,
+            document.id,
+            controlHoverNetId,
+            undefined,
+            documentStack,
+          )
+        : undefined,
+    [
+      controlPickMode,
+      controlHoverNetId,
+      projectConnectivityIndex,
+      document.id,
+      documentStack,
+    ],
+  );
   const controlOptionHighlight = useMemo(
     () =>
       selectionOpen &&
@@ -2001,14 +1845,14 @@ function WorkspaceEditor({
     setControlOptionPreview(null);
   }, [selectionOpen, documentSettingsOpen, document.id, selectedInstance?.id]);
   const shownNetHighlight =
-    simulationPickNetsActive || controlPickMode === "net"
-      ? simulationPickHighlight
-      : (controlOptionHighlight ?? codeNetHighlight ?? highlightedNet);
+    controlPickMode === "net"
+      ? controlPickHighlight
+      : (controlOptionHighlight ?? highlightedNet);
   // What the selection connects to glows faintly unless a Net is already
   // highlighted or being picked (2026-10-14).
   const connectedNetHighlights = useMemo(
     () =>
-      shownNetHighlight || simulationPickNetsActive || controlPickMode === "net"
+      shownNetHighlight || controlPickMode === "net"
         ? []
         : selectionNetHighlights(
             projectConnectivityIndex,
@@ -2023,7 +1867,6 @@ function WorkspaceEditor({
           ),
     [
       shownNetHighlight,
-      simulationPickNetsActive,
       controlPickMode,
       projectConnectivityIndex,
       document,
@@ -2040,8 +1883,7 @@ function WorkspaceEditor({
     )
       return;
     activateTool("pointer");
-    setSimulationPickModeState(null);
-    setSimulationHoverNetId(null);
+    setControlHoverNetId(null);
     const kind =
       selectedInstance.symbolId === "vcvs" ||
       selectedInstance.symbolId === "vccs"
@@ -2173,7 +2015,7 @@ function WorkspaceEditor({
           ]);
       if (applied.ok) {
         setControlPickState(result.kind === "continue" ? result.state : null);
-        setSimulationHoverNetId(null);
+        setControlHoverNetId(null);
       } else {
         setStatus("Could not apply controlled-source selection");
         return;
@@ -3108,7 +2950,7 @@ function WorkspaceEditor({
     0,
   );
   // Fit and auto-fit describe committed content, never a transient move,
-  // handle, copy, or waveform preview. The committed formal scene already
+  // handle or copy preview. The committed formal scene already
   // measured those exact bounds, so keep that single successful derivation
   // instead of rebuilding the complete SVG solely to read its viewBox.
   const contentSceneBounds = committedSceneState.degraded
@@ -3345,7 +3187,6 @@ function WorkspaceEditor({
       ),
       tool,
       cellSymbolLayoutEnabled,
-      simulationPickMode,
       controlPickMode,
     },
     actions: {
@@ -3383,19 +3224,6 @@ function WorkspaceEditor({
         cancelInteraction();
         setComponentPreviewPoint(null);
         setStatus("Component placement ended");
-      },
-      pickSimulationNet: (kind, id) => {
-        const netId =
-          kind === "route"
-            ? document.routes.find((route) => route.id === id)?.netId
-            : kind === "annotation"
-              ? document.annotations.find((annotation) => annotation.id === id)
-                  ?.netId
-              : kind === "junction"
-                ? document.junctions.find((junction) => junction.id === id)
-                    ?.netId
-                : undefined;
-        if (netId) pickAnalogSimulationNet(netId);
       },
       pickControlledSource: (kind, id) => {
         if (
@@ -4466,7 +4294,6 @@ function WorkspaceEditor({
       setDocumentSettingsOpen,
       projectInfoOpen,
       setProjectInfoOpen,
-
       recoveryDialogOpen,
       setRecoveryDialogOpen,
       hasUnsafeWork,
@@ -4484,8 +4311,7 @@ function WorkspaceEditor({
       highlightedNetOrigin,
       controlPickState,
       setControlPickState,
-      simulationPickActive,
-      setSimulationHoverNetId,
+      setControlHoverNetId,
       lastCanvasPointRef,
       projectInputRef,
       selectedRoute,
@@ -4493,7 +4319,6 @@ function WorkspaceEditor({
       hasHierarchyEnterSelection,
       hasInspectableSelection,
       selectedHighlightNetId,
-      setSimulationPickMode,
       beginNetLabelEditing,
       beginWireLabelEditing,
       cancelNetLabelEditing: wireLabelEditing
@@ -4522,7 +4347,6 @@ function WorkspaceEditor({
       toggleHighlightedNet,
       toggleProjectPanel,
       circuitClipboard,
-
       openSelectedComponentDefinition,
       hasDefinitionSelection,
       activateTool,
@@ -4591,7 +4415,6 @@ function WorkspaceEditor({
         if (
           canvasContextMenuSuppressed.current ||
           canvasDragSessionRef.current !== null ||
-          simulationPickActive ||
           target.closest('[data-testid="canvas-text-editor"]')
         )
           return;
@@ -4774,11 +4597,9 @@ function WorkspaceEditor({
     projectInfoOpen,
     setProjectInfoOpen,
     projectNameEditing,
-
     projectSwitchBlockerRef,
     openProjectInTabRef,
     setAgentFileCandidate,
-    setAnalogSimulationState,
     codeDraftDirty,
     captureAuthoredProject,
     captureFileSession,
@@ -4792,9 +4613,7 @@ function WorkspaceEditor({
     restoreSavedProjectBaseline,
     hasExplicitBootTarget,
     getCurrentInteractionState,
-
     setHighlightedNetOrigin,
-    setCodeNetPreview,
     carriedCopyRef,
     documentViewBoxes,
     textEditing,
@@ -4812,7 +4631,6 @@ function WorkspaceEditor({
     bootRequestsNewProject,
     setStatus,
     openCloudProjectById,
-
     restoredCloudLink,
     restoredNewLink,
     restoredTabs,
@@ -4851,7 +4669,6 @@ function WorkspaceEditor({
       synchronizeExternalCommit,
       setCloudProjects,
       cloudListMutationRef,
-      simulationSourceBuffer,
       codeDraftDirty,
       restoreFileSession,
       saveProjectToCloud,
@@ -4875,7 +4692,6 @@ function WorkspaceEditor({
       synchronizeExternalCommit,
       agentPlanning,
       browserAgentHost,
-      simulationTransport,
       projectSwitchBlockerRef,
       openProjectInTabRef,
       setAgentFileCandidate,
@@ -4929,7 +4745,6 @@ function WorkspaceEditor({
         initiallyOpenProjectHome={restoredWorkspace === null}
         capabilities={capabilities}
         publicAgentUiEnabled={publicAgentUiEnabled}
-        publicSimulationUiEnabled={publicSimulationUiEnabled}
         setStatus={setStatus}
         userComponentsOpen={userComponentsOpen}
         setUserComponentsOpen={setUserComponentsOpen}
@@ -4961,8 +4776,6 @@ function WorkspaceEditor({
         cloudManagementBusy={cloudManagementBusy}
         renameShelfProject={renameShelfProject}
         deleteShelfProject={deleteShelfProject}
-        analogSimulationState={analogSimulationState}
-        openAnalogSimulation={openAnalogSimulation}
         nativeBinding={nativeBinding}
         savedProjectBaseline={savedProjectBaseline}
         isDirtyWork={isDirtyWork}
@@ -5118,22 +4931,18 @@ function WorkspaceEditor({
       />
       <div
         className={
-          analogSimulationOpen
-            ? `app-workspace simulation-mode${!visibleLibraryPanelOpen ? " library-collapsed" : ""}${analogSimulationMaximized ? " simulation-maximized" : ""}`
-            : visibleLibraryPanelOpen
-              ? "app-workspace"
-              : "app-workspace library-collapsed"
+          visibleLibraryPanelOpen
+            ? "app-workspace"
+            : "app-workspace library-collapsed"
         }
         style={
           {
             "--icm-shapes-width": `${libraryWidth}px`,
             "--icm-properties-width": `${propertiesWidth}px`,
-            "--icm-simulation-width": `${simulationWidth}px`,
           } as CSSProperties
         }
       >
-        {(selectionOpen || projectPanel !== null) &&
-        !analogSimulationMaximized ? (
+        {selectionOpen || projectPanel !== null ? (
           <div
             className="properties-resize-handle"
             role="separator"
@@ -5171,48 +4980,6 @@ function WorkspaceEditor({
               } else if (event.key === "ArrowRight") {
                 event.preventDefault();
                 setPropertiesWidth(propertiesWidth - step);
-              }
-            }}
-          />
-        ) : null}
-        {analogSimulationOpen && !analogSimulationMaximized ? (
-          <div
-            className="simulation-resize-handle"
-            role="separator"
-            aria-orientation="vertical"
-            aria-label="Resize the Simulation panel"
-            aria-valuenow={simulationWidth}
-            aria-valuemin={SIMULATION_WIDTH_MIN}
-            aria-valuemax={SIMULATION_WIDTH_MAX}
-            tabIndex={0}
-            data-testid="simulation-resize-handle"
-            onPointerDown={(event) => {
-              event.preventDefault();
-              event.currentTarget.setPointerCapture(event.pointerId);
-              simulationResizeOriginRef.current = {
-                pointerX: event.clientX,
-                width: simulationWidth,
-              };
-            }}
-            onPointerMove={(event) => {
-              const origin = simulationResizeOriginRef.current;
-              if (!origin) return;
-              setSimulationWidth(
-                origin.width - (event.clientX - origin.pointerX),
-              );
-            }}
-            onPointerUp={(event) => {
-              simulationResizeOriginRef.current = null;
-              event.currentTarget.releasePointerCapture(event.pointerId);
-            }}
-            onKeyDown={(event) => {
-              const step = event.shiftKey ? 32 : 8;
-              if (event.key === "ArrowLeft") {
-                event.preventDefault();
-                setSimulationWidth(simulationWidth + step);
-              } else if (event.key === "ArrowRight") {
-                event.preventDefault();
-                setSimulationWidth(simulationWidth - step);
               }
             }}
           />
@@ -5265,51 +5032,6 @@ function WorkspaceEditor({
           />
         ) : null}
         <EditorRightDock
-          simulationOpen={analogSimulationOpen}
-          simulationOpened={analogSimulationOpened}
-          maximized={analogSimulationMaximized}
-          onRestoreSimulation={openAnalogSimulation}
-          code={
-            analogSimulationOpened && humanSimulationSession ? (
-              <EditorSimulationSurface
-                projectSessionId={projectSessionId}
-                humanSimulationSession={humanSimulationSession}
-                projectRunHistory={projectRunHistory}
-                project={project}
-                document={document}
-                selectedInstance={selectedInstance}
-                activeSimulationFolder={activeSimulationFolder}
-                activeSimulationFolderId={activeSimulationFolderId}
-                setActiveSimulationFolderId={setActiveSimulationFolderId}
-                publicAgentUiEnabled={publicAgentUiEnabled}
-                agentSession={agentSession}
-                openAgentConnection={openAgentConnection}
-                guardDirtyReplacement={guardDirtyReplacement}
-                replaceActiveProject={replaceActiveProject}
-                setAnalogSimulationState={setAnalogSimulationState}
-                setStatus={setStatus}
-                analogSimulationOpen={analogSimulationOpen}
-                analogSimulationMaximized={analogSimulationMaximized}
-                toggleAnalogSimulationMaximized={
-                  toggleAnalogSimulationMaximized
-                }
-                minimizeAnalogSimulation={minimizeAnalogSimulation}
-                exitAnalogSimulation={exitAnalogSimulation}
-                transact={transact}
-                openProjectModelSource={openProjectModelSource}
-                simulationSourceBuffer={simulationSourceBuffer}
-                dispatchProjectTransaction={dispatchProjectTransaction}
-                simulationPickNetsActive={simulationPickNetsActive}
-                analogPickedNet={analogPickedNet}
-                setSimulationNetPickMode={setSimulationNetPickMode}
-                simulationPickTerminalsActive={simulationPickTerminalsActive}
-                analogPickedTerminal={analogPickedTerminal}
-                setSimulationTerminalPickMode={setSimulationTerminalPickMode}
-                navigateToLocator={navigateToLocator}
-                setCodeNetPreview={setCodeNetPreview}
-              />
-            ) : null
-          }
           project={
             projectPanel ? (
               <EditorProjectDock>
@@ -6077,7 +5799,7 @@ function WorkspaceEditor({
                               onStartControlPick: startControlPick,
                               onCancelControlPick: () => {
                                 setControlPickState(null);
-                                setSimulationHoverNetId(null);
+                                setControlHoverNetId(null);
                                 setStatus("Cancelled control pick");
                               },
                             }
@@ -6282,9 +6004,6 @@ function WorkspaceEditor({
                                   processReviewedLibrary(
                                     project,
                                     netlistPreferences.preferences,
-                                  ),
-                                  modelTargetProfiles.flatMap(
-                                    (profile) => profile.cellLibraries ?? [],
                                   ),
                                 ),
                                 externalSubcircuit: Boolean(
@@ -6690,13 +6409,8 @@ function WorkspaceEditor({
               : "",
             projectedMovePreviewDocument ? "semantic-move-preview" : "",
             panPreview ? "pan-mode" : "",
-            simulationPickNetsActive || controlPickMode === "net"
-              ? "simulation-net-pick-active"
-              : "",
+            controlPickMode === "net" ? "control-net-pick-active" : "",
             controlPickMode === "sensor" ? "control-sensor-pick-active" : "",
-            simulationPickTerminalsActive
-              ? "simulation-terminal-pick-active"
-              : "",
           ]
             .filter(Boolean)
             .join(" ")}
@@ -6908,7 +6622,7 @@ function WorkspaceEditor({
               wouldMoveIds,
               selectionPolicy,
               onInstanceClick: (instance, additive) => {
-                if (simulationPickActive || controlPickState) return;
+                if (controlPickState) return;
                 if (suppressInstanceClick.current) {
                   suppressInstanceClick.current = false;
                   return;
@@ -6951,17 +6665,7 @@ function WorkspaceEditor({
                     });
                   return;
                 }
-                if (simulationPickActive) {
-                  event.stopPropagation();
-                  event.preventDefault();
-                  if (simulationPickNetsActive) {
-                    const route = document.routes.find(
-                      (candidate) => candidate.id === routeId,
-                    );
-                    if (route) pickAnalogSimulationNet(route.netId);
-                  }
-                  return;
-                }
+
                 handleRoutePointerDown(event, routeId);
               },
               onInstanceContextMenu: (instance, clientX, clientY) => {
@@ -6985,12 +6689,10 @@ function WorkspaceEditor({
                 ),
               onAnnotationEdit: beginAnnotationTextEditing,
               onNetPointerEnter: (netId) => {
-                if (simulationPickNetsActive || controlPickMode === "net")
-                  setSimulationHoverNetId(netId);
+                if (controlPickMode === "net") setControlHoverNetId(netId);
               },
               onNetPointerLeave: () => {
-                if (simulationPickNetsActive || controlPickMode === "net")
-                  setSimulationHoverNetId(null);
+                if (controlPickMode === "net") setControlHoverNetId(null);
               },
             },
             endpoints: {
@@ -7018,28 +6720,16 @@ function WorkspaceEditor({
                           candidate.endpoint.pinName,
                         ),
                     )
-                  : simulationPickTerminalsActive
-                    ? wiringEndpoints.filter(
-                        (candidate) =>
-                          candidate.endpoint.kind === "terminal" &&
-                          simulationCurrentEndpointKeys.has(
-                            `${candidate.endpoint.instanceId}\u0000${candidate.endpoint.pinName}`,
-                          ),
-                      )
-                    : wiringEndpoints,
+                  : wiringEndpoints,
               tool,
-              selectedRoute:
-                simulationPickActive || controlPickState
-                  ? undefined
-                  : selectedRoute,
+              selectedRoute: controlPickState ? undefined : selectedRoute,
               selectedRouteSegmentIndex,
               selectedEndpoint,
               supplementalJunctionIds: supplementalSelection.junctionIds,
               junctionDotEndpointKeys,
-              selectionPolicy:
-                simulationPickActive || controlPickState
-                  ? unfilteredSelectionPolicy
-                  : selectionPolicy,
+              selectionPolicy: controlPickState
+                ? unfilteredSelectionPolicy
+                : selectionPolicy,
               endpointLabel: endpointTestId,
               ...(controlPickMode === "sensor"
                 ? {
@@ -7056,26 +6746,7 @@ function WorkspaceEditor({
                           : ("partner" as const)
                         : ("candidate" as const),
                   }
-                : simulationPickTerminalsActive
-                  ? {
-                      terminalPickState: (terminal: {
-                        kind: "terminal";
-                        instanceId: string;
-                        pinName: string;
-                      }) =>
-                        simulationTerminalPickStart?.instanceId ===
-                          terminal.instanceId &&
-                        simulationTerminalPickStart.pinName === terminal.pinName
-                          ? ("origin" as const)
-                          : simulationTerminalPickStart?.instanceId ===
-                                terminal.instanceId &&
-                              simulationTerminalPickStart.partnerPinNames.includes(
-                                terminal.pinName,
-                              )
-                            ? ("partner" as const)
-                            : ("candidate" as const),
-                    }
-                  : {}),
+                : {}),
               onEndpointActions: (candidate, clientX, clientY) => {
                 if (
                   candidate.endpoint.kind === "junction" &&
@@ -7113,11 +6784,7 @@ function WorkspaceEditor({
                     });
                   return;
                 }
-                if (simulationPickActive) {
-                  if (simulationPickNetsActive && candidate.netId)
-                    pickAnalogSimulationNet(candidate.netId);
-                  return;
-                }
+
                 if (
                   candidate.endpoint.kind === "junction" &&
                   consumeArmedDeleteOnObject(
@@ -7150,15 +6817,7 @@ function WorkspaceEditor({
                     });
                   return;
                 }
-                if (simulationPickActive) {
-                  event.stopPropagation();
-                  event.preventDefault();
-                  if (simulationPickTerminalsActive)
-                    pickSimulationTerminal(candidate);
-                  else if (candidate.netId)
-                    pickAnalogSimulationNet(candidate.netId);
-                  return;
-                }
+
                 // Middle press over an endpoint cycles the wire corner just
                 // like over bare canvas; it must never commit the wire.
                 if (event.button === 1 && tool === "wire") {
@@ -7177,12 +6836,10 @@ function WorkspaceEditor({
                 }
               },
               onNetPointerEnter: (netId) => {
-                if (simulationPickNetsActive || controlPickMode === "net")
-                  setSimulationHoverNetId(netId);
+                if (controlPickMode === "net") setControlHoverNetId(netId);
               },
               onNetPointerLeave: () => {
-                if (simulationPickNetsActive || controlPickMode === "net")
-                  setSimulationHoverNetId(null);
+                if (controlPickMode === "net") setControlHoverNetId(null);
               },
             },
           }}

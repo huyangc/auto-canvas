@@ -14,7 +14,6 @@ import {
   type FakeRelayOptions,
 } from "../../../../packages/agent-client/src/test-support/fake-relay";
 import { EditorDocumentController } from "../document/document-controller";
-import type { ProjectRunHistory } from "../features/simulation/project-run-history";
 import { agentCircuitServiceOptions } from "./agent-service-options";
 import type { BrowserAgentPlanningContext } from "./browser-agent-command";
 import { BrowserAgentFileHost } from "./browser-agent-file-host";
@@ -45,17 +44,8 @@ export interface LiveAgentEditorOptions {
   relay?: Pick<FakeRelayOptions, "claim" | "resume" | "baseUrl" | "manifest">;
   /** Project resource parts the browser takes from elsewhere. */
   projectHost?: Partial<BrowserAgentProjectHostOptions>;
-  /**
-   * The simulation service the editor's Simulation resource calls over the
-   * network. Given, the editor serves the Simulation resource; this is the
-   * service's side, not the editor's.
-   */
+  /** Legacy relay-test call shape, retained until T007; execution is unavailable. */
   simulationService?: typeof fetch;
-  /**
-   * The Project's run history the Simulation panel lists, which the App gives
-   * the Agent's Simulation resource (`ProjectRunHistory`).
-   */
-  runHistory?: ProjectRunHistory;
   client?: Partial<AgentSessionClientOptions>;
 }
 
@@ -102,23 +92,13 @@ export function liveAgentEditor(options: LiveAgentEditorOptions = {}) {
       host.dispatchProjectTransaction(request),
     ...options.projectHost,
   });
-  const simulationHost = options.simulationService
-    ? new BrowserAgentSimulationHost({
-        ...(options.runHistory ? { runHistory: options.runHistory } : {}),
-        owner: "agent",
-        files: fileHost.simulationFiles,
-        getProjectSessionId: () => controller.projectSessionId,
-        getProject: () => controller.project,
-        fetch: options.simulationService,
-      })
-    : null;
+  const simulationHost = new BrowserAgentSimulationHost();
   const service = createAgentCircuitService(
     agentCircuitServiceOptions({
       sessionId: "session-1",
       host,
       scopes,
       files: true,
-      simulation: Boolean(simulationHost),
       projects: true,
     }),
   );
@@ -145,16 +125,11 @@ export function liveAgentEditor(options: LiveAgentEditorOptions = {}) {
       if (!parsed.success) throw new Error("Project request off contract");
       return projectHost.handle(parsed.data);
     },
-    ...(simulationHost
-      ? {
-          simulation: async (request) => {
-            const parsed = parseAgentSimulationResourceRequest(request);
-            if (!parsed.success)
-              throw new Error("Simulation request off contract");
-            return simulationHost.handle(parsed.data);
-          },
-        }
-      : {}),
+    simulation: async (request) => {
+      const parsed = parseAgentSimulationResourceRequest(request);
+      if (!parsed.success) throw new Error("Simulation request off contract");
+      return simulationHost.handle(parsed.data);
+    },
   });
   const client = new AgentSessionClient({
     http,

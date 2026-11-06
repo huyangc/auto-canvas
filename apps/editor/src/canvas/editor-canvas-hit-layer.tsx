@@ -946,7 +946,7 @@ function EndpointHitTargets({
           <circle
             key={`${label}-current-pick-marker`}
             data-testid={`${label}-current-pick-marker`}
-            className={`simulation-terminal-pick-marker ${state}`}
+            className={`control-terminal-pick-marker ${state}`}
             cx={candidate.connection.contactPoint.x}
             cy={candidate.connection.contactPoint.y}
             r={visibleRadius}
@@ -998,8 +998,8 @@ function TerminalCurrentDirectionPreview({
   const right = { x: base.x + uy * halfWidth, y: base.y - ux * halfWidth };
   return (
     <g
-      className="simulation-terminal-direction-preview"
-      data-testid="simulation-terminal-direction-preview"
+      className="control-terminal-direction-preview"
+      data-testid="control-terminal-direction-preview"
     >
       <line x1={from.x} y1={from.y} x2={to.x} y2={to.y} />
       <polygon

@@ -22,20 +22,6 @@ export const LazyProjectCodePanel = lazyChunk("inline", () =>
   })),
 );
 
-export const LazySpiceSimulationSurface = import.meta.env?.ICM_DESKTOP
-  ? (
-      _props: ComponentProps<
-        typeof import("../features/simulation/spice-simulation-surface").SpiceSimulationSurface
-      >,
-    ) => null
-  : lazyChunk("inline", () =>
-      import("../features/simulation/spice-simulation-surface").then(
-        (module) => ({
-          default: module.SpiceSimulationSurface,
-        }),
-      ),
-    );
-
 export const LazyNetlistPreflightDialog = lazyChunk("dialog", () =>
   import("../features/netlist-export/netlist-preflight-dialog").then(
     (module) => ({ default: module.NetlistPreflightDialog }),

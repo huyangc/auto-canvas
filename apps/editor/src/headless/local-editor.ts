@@ -99,7 +99,6 @@ export function createLocalEditor(options: LocalEditorOptions) {
       host,
       scopes: LOCAL_AGENT_SCOPES,
       files: true,
-      simulation: false,
       projects: true,
     }),
   );

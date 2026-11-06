@@ -13,7 +13,6 @@ and links the spec instead of restating it.
 | Hierarchy and netlist | [Interfaces, references and deterministic export](hierarchy-netlist.md)              |
 | Agent                 | [Browser authority, transports and scoped resources](agent.md)                       |
 | Persistence           | [Save, recovery and file compatibility](persistence.md)                              |
-| Simulation            | [Authored experiment, execution and result boundaries](simulation.md)                |
 | Deployment            | [Production-only delivery and retained storage](deployment.md)                       |
 
 ## Retention test

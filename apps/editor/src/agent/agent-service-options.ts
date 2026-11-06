@@ -1,7 +1,5 @@
 import {
   AGENT_FILE_RESOURCE_MAX_BYTES,
-  AGENT_SIMULATION_MAX_TIMEOUT_MS,
-  AgentSimulationResourceCapabilitySchema,
   type AgentCircuitHostServiceOptions,
   type AgentOperationHost,
   type AgentPermissions,
@@ -27,7 +25,7 @@ function permissionsFromScopes(
 
 /**
  * How the editor serves one paired session: the circuit host, the
- * permissions its scopes grant, and the File, Simulation and Project
+ * permissions its scopes grant, and the File and Project
  * resources it hosts beside the four Circuit operations. The session hook
  * and the tests that run an Agent client against the real editor build the
  * service from these same options.
@@ -37,7 +35,6 @@ export function agentCircuitServiceOptions(options: {
   host: AgentOperationHost;
   scopes: readonly AgentSessionScope[];
   files: boolean;
-  simulation: boolean;
   projects: boolean;
 }): AgentCircuitHostServiceOptions {
   return {
@@ -55,25 +52,11 @@ export function agentCircuitServiceOptions(options: {
               "discard",
               "request-approval",
               "open",
-              "simulation-input",
               "import-cell",
             ] as const,
             maxBytes: AGENT_FILE_RESOURCE_MAX_BYTES,
             humanApprovalOperations: ["request-approval"] as const,
           },
-          ...(options.simulation
-            ? {
-                simulationResource: {
-                  path: "/api/agent/sessions/{sessionId}/simulation" as const,
-                  operations:
-                    AgentSimulationResourceCapabilitySchema.shape.operations
-                      .element.options,
-                  analyses: ["op", "dc", "ac", "tran", "noise"] as const,
-                  maxTimeoutMs: AGENT_SIMULATION_MAX_TIMEOUT_MS,
-                  synchronous: false as const,
-                },
-              }
-            : {}),
           ...(options.projects
             ? {
                 projectResource: {

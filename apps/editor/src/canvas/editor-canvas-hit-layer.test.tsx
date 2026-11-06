@@ -189,7 +189,7 @@ describe("editor canvas hit layer", () => {
       />,
     );
     expect(markup).toContain('data-testid="terminal-M1-D-current-pick-marker"');
-    expect(markup).toContain('class="simulation-terminal-pick-marker origin"');
+    expect(markup).toContain('class="control-terminal-pick-marker origin"');
     expect(markup).toContain('data-endpoint-kind="terminal"');
   });
 
@@ -218,7 +218,7 @@ describe("editor canvas hit layer", () => {
       />,
     );
     expect(markup).toContain(
-      'data-testid="simulation-terminal-direction-preview"',
+      'data-testid="control-terminal-direction-preview"',
     );
     expect(markup).toContain("<line");
     expect(markup).toContain("<polygon");

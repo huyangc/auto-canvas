@@ -52,17 +52,16 @@ sibling directory remain for the existing Worker; the editor does not mount them
     edit planner.
   - `search/`: the Project search dialog.
   - `selection/`: visual selection, deletion, geometry, and inspector details.
-  - `simulation/`: the analog Simulation workspace, run history and results,
-    source editing and waveform export/placement.
+  - `simulation/`: probe helpers retained only for netlist package tests until T007.
   - `text-editing/`: annotation and drafting-text editing.
   - `user-components/`: code and preview authoring, the private User Components library,
     shared definition contracts, and instance-isolated application.
   - `wiring/`: wire proposals, manual paths, and route interaction geometry.
   - `logical-net-choices.ts`, at the `features/` root: the Logical Net choice
-    list read by `app/`, `editor-shell/`, and `simulation/`.
+    list read by `app/` and `editor-shell/`.
 - `demos/`: demo project fixtures used by editor unit and Playwright tests.
 - `deployment/`: fail-closed resolution of the public UI build flags.
-- `examples/`: browser-bundled Library and Simulation starter Projects.
+- `examples/`: Project fixtures for netlist, clipboard and portable-file tests.
 - `presentation/`: the accepted Razavi presentation policy adapter.
 - `snap/`: shared snapping candidates and engine.
 - `styles/`: route-level style entries and their owner stylesheets.
@@ -134,7 +133,7 @@ to these owners:
 - `editor-properties.css`: editable properties and their derived context.
 - `editor-dialogs.css`: editor-owned modal workflows.
 - `editor-agent.css`: agent session presentation.
-- `editor-simulation.css`: the Simulation workspace, results and waveform tools.
+- `editor-controlled-source-pick.css`: controlled-source canvas picking.
 - `editor-accessibility.css`: the cross-cutting reduced-motion policy.
 - `editor-context-menu.css`: the right-click menus of the canvas and the project tabs.
 

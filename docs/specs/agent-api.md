@@ -109,12 +109,11 @@ edits; it chooses no topology and yields no edits on conflict
 ## Sibling resources
 
 - `/files` (File Resource): bounded Project/formal-artifact download,
-  Project/structural-SPICE candidate staging, simulation workspaces and
-  artifacts. Staging never changes the browser Project; replacement needs
+  Project/structural-SPICE candidate staging. Staging never changes the browser Project; replacement needs
   explicit human approval.
-- `/simulation`: prepare/run through the shared SimulationService
-  ([execution](simulation-execution.md)); saved setup changes are Project
-  structure edits.
+- `/simulation` and File simulation requests are inherited wire contracts,
+  absent from editor capabilities. The editor returns `SIMULATION_UNAVAILABLE`;
+  the remaining package and relay contracts await their separate removal.
 - `/projects` (`resources.project`):
   - `list-gallery`, `read-gallery-entry`, `read-gallery-entries` (size
     bounded): cursor-paged public entries with Project Code, optional netlist

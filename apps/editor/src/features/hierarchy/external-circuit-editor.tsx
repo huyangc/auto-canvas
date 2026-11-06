@@ -170,7 +170,7 @@ export function ExternalCircuitEditor({
             {reviewed
               ? `${reviewed.libraryId} · fixed PDK interface. Set parameters on instances.`
               : definition?.implementation?.kind === "placeholder"
-                ? "Unimplemented placeholder · attach a Project model before simulation."
+                ? "Unimplemented placeholder · attach a Project model for netlist export."
                 : "Legacy interface · model ownership has not been verified. Attach the matching Project model explicitly."}
           </p>
         </div>

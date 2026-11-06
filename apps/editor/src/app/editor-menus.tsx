@@ -46,7 +46,6 @@ import {
   type useNativeProjectTabs,
 } from "./use-native-project-tabs";
 import type { useProjectTabSessions } from "./use-project-tab-sessions";
-import type { useSimulationSurface } from "./use-simulation-surface";
 
 type ProjectFileLifecycle = ReturnType<typeof useProjectFileLifecycle>;
 type EditorPanels = ReturnType<typeof useEditorPanels>;
@@ -62,7 +61,6 @@ type EditorDerivedModel = ReturnType<typeof useEditorDerivedModel>;
 type NavigationController = ReturnType<typeof createEditorNavigationController>;
 type FileCommands = ReturnType<typeof createEditorFileCommands>;
 type CloudProjects = ReturnType<typeof useCloudProjects>;
-type SimulationSurface = ReturnType<typeof useSimulationSurface>;
 type AgentConnection = ReturnType<typeof useEditorAgentConnection>;
 type ProjectTabSessions = ReturnType<typeof useProjectTabSessions>;
 type NativeProjectTabs = ReturnType<typeof useNativeProjectTabs>;
@@ -77,7 +75,6 @@ export function EditorMenuBar({
   initiallyOpenProjectHome,
   capabilities,
   publicAgentUiEnabled,
-  publicSimulationUiEnabled,
   setStatus,
   userComponentsOpen,
   setUserComponentsOpen,
@@ -108,8 +105,6 @@ export function EditorMenuBar({
   cloudManagementBusy,
   renameShelfProject,
   deleteShelfProject,
-  analogSimulationState,
-  openAnalogSimulation,
   nativeBinding,
   savedProjectBaseline,
   isDirtyWork,
@@ -175,7 +170,6 @@ export function EditorMenuBar({
   initiallyOpenProjectHome: boolean;
   capabilities: EditorServices["capabilities"];
   publicAgentUiEnabled: boolean;
-  publicSimulationUiEnabled: boolean;
   setStatus: Dispatch<SetStateAction<string>>;
   userComponentsOpen: boolean;
   setUserComponentsOpen: Dispatch<SetStateAction<boolean>>;
@@ -206,8 +200,6 @@ export function EditorMenuBar({
   renameShelfProject: ProjectTabSessions["renameShelfProject"];
   deleteShelfProject: ProjectTabSessions["deleteShelfProject"];
   reloadCloudProjects: CloudProjects["reloadCloudProjects"];
-  analogSimulationState: SimulationSurface["analogSimulationState"];
-  openAnalogSimulation: SimulationSurface["openAnalogSimulation"];
   nativeBinding: ProjectFileLifecycle["nativeBinding"];
   savedProjectBaseline: ProjectFileLifecycle["savedProjectBaseline"];
   isDirtyWork: ProjectFileLifecycle["isDirtyWork"];
@@ -370,10 +362,6 @@ export function EditorMenuBar({
           />
         </>
       }
-      {...(publicSimulationUiEnabled
-        ? { simulationAction: openAnalogSimulation }
-        : {})}
-      simulationState={analogSimulationState}
       projectName={project.name}
       projectSchemaVersion={project.schemaVersion}
       hasUnsavedWork={hasUnsavedChanges()}

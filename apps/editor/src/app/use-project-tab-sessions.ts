@@ -131,9 +131,6 @@ interface ProjectTabSessionsOptions {
   projectSwitchBlockerRef: RefObject<() => string | null>;
   openProjectInTabRef: AgentProjectResourcesOptions["openProjectInTabRef"];
   setAgentFileCandidate: AgentProjectResources["setAgentFileCandidate"];
-  setAnalogSimulationState: Dispatch<
-    SetStateAction<"closed" | "open" | "maximized" | "minimized">
-  >;
   codeDraftDirty: boolean;
   captureAuthoredProject: () => Promise<CircuitProject | null>;
   captureFileSession: ProjectFileLifecycle["captureFileSession"];
@@ -150,7 +147,6 @@ interface ProjectTabSessionsOptions {
   setHighlightedNetOrigin: Dispatch<
     SetStateAction<HighlightedNetOrigin | null>
   >;
-  setCodeNetPreview: Dispatch<SetStateAction<HighlightedNetOrigin | null>>;
   carriedCopyRef: RefObject<{
     clipboard: SchematicClipboard;
     orientation: readonly PlacementOrientationOperation[];
@@ -216,7 +212,6 @@ export function useProjectTabSessions({
   projectSwitchBlockerRef,
   openProjectInTabRef,
   setAgentFileCandidate,
-  setAnalogSimulationState,
   codeDraftDirty,
   captureAuthoredProject,
   captureFileSession,
@@ -231,7 +226,6 @@ export function useProjectTabSessions({
   hasExplicitBootTarget,
   getCurrentInteractionState,
   setHighlightedNetOrigin,
-  setCodeNetPreview,
   carriedCopyRef,
   documentViewBoxes,
   textEditing,
@@ -273,8 +267,6 @@ export function useProjectTabSessions({
     setCanvasContextMenu(null);
     setNetlistFocusedInstance(null);
     setHighlightedNetOrigin(null);
-    setCodeNetPreview(null);
-    setAnalogSimulationState("closed");
     setNetlistPreflightOpen(false);
     activateDocumentSession(session.controller);
     restoreFileSession(session.file);

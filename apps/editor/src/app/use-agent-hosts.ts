@@ -1,5 +1,5 @@
 // The browser Agent's hosts on the live editor: the document host and its
-// planning context, the per-Project file and simulation resources, and the
+// planning context, the per-Project file resources, and the
 // Agent session the editor connects through.
 import {
   useEffect,
@@ -45,8 +45,6 @@ import {
   placementProcessFill,
   processTargetForShortName,
 } from "../features/netlist-export/netlist-process";
-import type { resolveSimulationTransport } from "../features/simulation/deployment-transport";
-import { ProjectRunHistory } from "../features/simulation/project-run-history";
 import type { EditorServices } from "../services/editor-services";
 import { DEFAULT_VIEWBOX } from "./default-view-box";
 
@@ -174,13 +172,12 @@ export function useBrowserAgentHost({
   };
 }
 
-/** The Agent's file, run-history and simulation services for each Project. */
+/** The Agent's resources for each Project. */
 export function useAgentProjectResources({
   runtime,
   editorDocumentController,
   projectSessionId,
   browserAgentHost,
-  simulationTransport,
   projectSwitchBlockerRef,
   openProjectInTabRef,
 }: {
@@ -188,7 +185,6 @@ export function useAgentProjectResources({
   editorDocumentController: EditorDocumentController;
   projectSessionId: string;
   browserAgentHost: BrowserAgentHost | null;
-  simulationTransport: ReturnType<typeof resolveSimulationTransport>;
   projectSwitchBlockerRef: RefObject<() => string | null>;
   openProjectInTabRef: RefObject<
     (
@@ -201,17 +197,13 @@ export function useAgentProjectResources({
 }) {
   const [agentFileCandidate, setAgentFileCandidate] =
     useState<AgentFileCandidateSummary | null>(null);
-  // Execution and artifacts belong to their originating controller, not the
-  // currently selected tab. Re-selecting a tab restores the same service.
+  // Re-selecting a tab restores the same file host.
   const agentProjectResources = useRef(
     new Map<
       EditorDocumentController,
       Map<
         string,
         {
-          history: ProjectRunHistory;
-          // Absent until the Agent runtime loads; the run history is the
-          // person's too, so it is kept from the start.
           files?: BrowserAgentFileHost;
           simulation?: BrowserAgentSimulationHost;
         }
@@ -223,13 +215,12 @@ export function useAgentProjectResources({
     resources = new Map();
     agentProjectResources.current.set(editorDocumentController, resources);
   }
-  const resourceKey = `${projectSessionId}:${simulationTransport}`;
+  const resourceKey = projectSessionId;
   const browserAgentFileHost = useMemo(
     () =>
       !import.meta.env?.ICM_DESKTOP && runtime && browserAgentHost
         ? (resources.get(resourceKey)?.files ??
           new runtime.BrowserAgentFileHost({
-            transport: simulationTransport,
             getProjectSessionId: () =>
               editorDocumentController.projectSessionId,
             getProject: () => editorDocumentController.project,
@@ -260,7 +251,6 @@ export function useAgentProjectResources({
     [
       editorDocumentController,
       resourceKey,
-      simulationTransport,
       resources,
       runtime,
       browserAgentHost,
@@ -268,61 +258,15 @@ export function useAgentProjectResources({
       projectSwitchBlockerRef,
     ],
   );
-  const projectRunHistory = useMemo(
-    () =>
-      !import.meta.env?.ICM_DESKTOP
-        ? (resources.get(resourceKey)?.history ??
-          new ProjectRunHistory(editorDocumentController.project.id))
-        : null,
-    [editorDocumentController, resourceKey, resources],
-  );
-  useEffect(() => {
-    projectRunHistory?.activate();
-  }, [projectRunHistory]);
   const browserAgentSimulationHost = useMemo(
-    () =>
-      !import.meta.env?.ICM_DESKTOP &&
-      runtime &&
-      browserAgentFileHost &&
-      projectRunHistory
-        ? (resources.get(resourceKey)?.simulation ??
-          new runtime.BrowserAgentSimulationHost({
-            runHistory: projectRunHistory,
-            owner: "agent",
-            files: browserAgentFileHost.simulationFiles,
-            getProjectSessionId: () =>
-              editorDocumentController.projectSessionId,
-            getProject: () => editorDocumentController.project,
-            transport: simulationTransport,
-          }))
-        : null,
-    [
-      runtime,
-      browserAgentFileHost,
-      resources,
-      projectRunHistory,
-      editorDocumentController,
-      resourceKey,
-      simulationTransport,
-    ],
+    () => (runtime ? new runtime.BrowserAgentSimulationHost() : null),
+    [runtime],
   );
-  if (projectRunHistory)
+  if (browserAgentFileHost && browserAgentSimulationHost)
     resources.set(resourceKey, {
-      history: projectRunHistory,
-      ...(browserAgentFileHost && browserAgentSimulationHost
-        ? {
-            files: browserAgentFileHost,
-            simulation: browserAgentSimulationHost,
-          }
-        : {}),
+      files: browserAgentFileHost,
+      simulation: browserAgentSimulationHost,
     });
-  useEffect(
-    () => () => {
-      for (const group of agentProjectResources.current.values())
-        for (const resource of group.values()) resource.history.dispose();
-    },
-    [],
-  );
   const agentWorkspaceRef = useRef<
     (
       request: Extract<AgentProjectResourceRequest, { operation: "workspace" }>,
@@ -336,7 +280,6 @@ export function useAgentProjectResources({
     setAgentFileCandidate,
     agentProjectResources,
     browserAgentFileHost,
-    projectRunHistory,
     browserAgentSimulationHost,
     agentWorkspaceRef,
   };

@@ -77,8 +77,7 @@ owns visual authority.
   occurrences in the same transaction. Adding a port to custom artwork
   refuses until mapping is repaired or callers choose automatic artwork.
   Compatible parameter overrides survive. Source, interface, artwork and
-  wiring validate together before a new revision reaches copy, export or
-  simulation.
+  wiring validate together before a new revision reaches copy or export.
 
 ## Component authoring
 
