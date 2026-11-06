@@ -20,7 +20,7 @@ import {
   wallStoresOf,
   wallTagCounts,
 } from "./gallery-wall-merge";
-import { sameOrigin } from "./same-origin";
+import { sameOrigin } from "../apps/server/src/agent-relay/same-origin.js";
 import { SITE_USAGE_NOTE } from "../apps/editor/src/usage-policy-note";
 import { llmsUsagePolicy, robotsTxt } from "./usage-policy";
 import {

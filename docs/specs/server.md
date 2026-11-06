@@ -4,7 +4,7 @@ Status: `accepted`
 
 Primary owner: `apps/server`
 
-The local Node server implements identity, private Cloud Project and shared Component Library HTTP APIs
+The local Node server implements identity, private Cloud Project, shared Component Library and Agent relay APIs
 consumed by the web editor. Project file semantics belong to
 [Project file format](project-file-format.md); browser recovery belongs to
 [persistence and recovery](persistence-and-recovery.md).
@@ -32,31 +32,31 @@ consumed by the web editor. Project file semantics belong to
 
 ## Contract
 
-Errors have `{error: string}` and may include a component error `code`. Unknown
+Identity and Project errors have `{error: string}`; Component Library errors may add a `code`. Agent errors retain their typed transport envelope. Unknown
 paths/methods outside the Component Library return 404 `Not found`.
 Project ids are ten characters drawn from `23456789abcdefghjkmnpqrstvwxyz`.
 A Project summary is `{id, name, updatedAt, revision, schemaVersion,
 galleryEntryId: null, favorite}`; an open payload adds `projectText`.
 Timestamps are ISO strings from PostgreSQL `timestamptz`.
 
-| Endpoint | Result |
-| --- | --- |
-| `GET /api/health` | `{ok:true}` after a database query succeeds |
-| `GET /api/auth/me` | `{user}`, `cache-control: no-store` |
-| `GET /api/auth/providers` | `{github:false, google:false, email:false}` |
-| `POST /api/auth/profile` | `{displayName}` trimmed to 1–40 characters → `{user}`; 400 `invalid-display-name` |
-| `POST /api/auth/logout` | `{ok:true}`; identity stays local |
-| `GET /api/projects` | `{projects}`, newest `updated_at` then id first; all Projects; `no-store` |
-| `POST /api/projects` | `{name, projectText, galleryEntryId?}` → 201 `{project}` summary |
-| `GET /api/projects/:id` | `{project}` open payload; 404 `not-found`; `no-store` |
-| `PUT /api/projects/:id` | Same body as POST, revision gate → `{project}` summary |
-| `PATCH /api/projects/:id` | `{favorite: boolean}` → `{project}` open payload |
-| `DELETE /api/projects/:id` | Hard delete → `{deleted: id, projects}` |
-| `GET /api/projects/:id/preview.svg` | SVG; 404 `not-found` when missing/empty |
-| `GET /api/projects/:id/versions` | `{versions, revision}` newest first |
-| `GET /api/projects/:id/versions/:vid/project` | `{projectText}` |
-| `GET /api/projects/:id/versions/:vid/preview.svg` | Historical SVG |
-| `POST /api/projects/:id/versions/:vid/restore` | No body; same revision gate and save semantics as PUT; favorite kept |
+| Endpoint                                          | Result                                                                            |
+| ------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `GET /api/health`                                 | `{ok:true}` after a database query succeeds                                       |
+| `GET /api/auth/me`                                | `{user}`, `cache-control: no-store`                                               |
+| `GET /api/auth/providers`                         | `{github:false, google:false, email:false}`                                       |
+| `POST /api/auth/profile`                          | `{displayName}` trimmed to 1–40 characters → `{user}`; 400 `invalid-display-name` |
+| `POST /api/auth/logout`                           | `{ok:true}`; identity stays local                                                 |
+| `GET /api/projects`                               | `{projects}`, newest `updated_at` then id first; all Projects; `no-store`         |
+| `POST /api/projects`                              | `{name, projectText, galleryEntryId?}` → 201 `{project}` summary                  |
+| `GET /api/projects/:id`                           | `{project}` open payload; 404 `not-found`; `no-store`                             |
+| `PUT /api/projects/:id`                           | Same body as POST, revision gate → `{project}` summary                            |
+| `PATCH /api/projects/:id`                         | `{favorite: boolean}` → `{project}` open payload                                  |
+| `DELETE /api/projects/:id`                        | Hard delete → `{deleted: id, projects}`                                           |
+| `GET /api/projects/:id/preview.svg`               | SVG; 404 `not-found` when missing/empty                                           |
+| `GET /api/projects/:id/versions`                  | `{versions, revision}` newest first                                               |
+| `GET /api/projects/:id/versions/:vid/project`     | `{projectText}`                                                                   |
+| `GET /api/projects/:id/versions/:vid/preview.svg` | Historical SVG                                                                    |
+| `POST /api/projects/:id/versions/:vid/restore`    | No body; same revision gate and save semantics as PUT; favorite kept              |
 
 Names are trimmed, at most 120 characters; null/missing names become `""`.
 `galleryEntryId`, if present, must be a non-empty string and is ignored.
@@ -72,10 +72,52 @@ All history responses use `private, no-store`. Current previews use
 revision, otherwise `private, no-cache`.
 
 Configuration and commands are in the [server README](../../apps/server/README.md).
-Vite dev and preview forward `/api/auth`, `/api/projects`, `/api/components` and `/api/health`
-while retaining the browser's Host/Origin. The narrower Agent relay remains
-independent. Gallery, Agent relay, simulation and account deletion
-are deliberately unimplemented by this server. The existing Worker is unchanged.
+Vite dev and preview forward `/api/auth`, `/api/projects`, `/api/components`,
+`/api/health` and `/api/agent/` (HTTP and WebSocket) while retaining the browser's
+Host/Origin. Gallery, simulation execution and account deletion are deliberately
+unimplemented by this server.
+
+## Agent relay
+
+The [Agent session contract](web-agent-session.md) and [Agent API](agent-api.md)
+retain their pairing, bearer, editor-secret, scopes, TTLs, rate limits and
+request ledger behavior. `/api/agent/sessions`, `/api/agent/claims` and
+`/api/agent/connectors/resume` handle pairing and recovery. The session routes
+`circuit`, `files`, `simulation` and `projects` forward requests to the editor;
+`events`, `control`, `status` and `activity` retain their existing behavior.
+`GET /api/agent/sessions/:id/editor` upgrades through Node's HTTP server and `ws`.
+The OpenAPI, kit and MCP manifest routes are served by the same router.
+
+`AGENT_ALLOWED_ORIGIN` defaults to the public request origin (including the
+Host preserved by Vite). Origin and bearer checks belong to the relay router;
+Agent routes do not inherit the identity/Project write guard.
+
+Migration `003-agent-relay.sql` stores each object's keys in
+`agent_relay_storage(object_name, key, value)` using Node V8 serialization in
+`bytea`, preserving binary and structured-clone values. Alarms are persisted
+separately in `agent_relay_alarms`. One Node process owns the live objects;
+multiple simultaneous relay processes sharing these tables are unsupported.
+Each object's entire cache loads behind `blockConcurrencyWhile`. Events
+interleave at awaits; cached storage completes without yielding to another
+I/O event. Writes persist in issue order. HTTP responses, WebSocket handshakes
+and messages wait for the writes made so far; persistence failure prevents
+successful output. Only `blockConcurrencyWhile` blocks event delivery.
+
+Startup re-arms every persisted alarm, including overdue alarms and sessions
+not yet accessed. Sockets do not survive restart: the editor reconnects using
+its stored proof, or asks to pair again if the session expired. Session state
+and request ledger survive; in-flight mutations retain the existing recovery
+rules. The browser Project remains authoritative.
+
+No simulation artifact bucket is provided. Authenticated artifact transfers
+return the existing 503 `ARTIFACT_STORAGE_UNAVAILABLE`; artifact status reports
+empty usage. Simulation operations still forward to the editor, preserving
+its typed success/failure replies, but artifact transfer and simulator
+execution are not supplied by this server.
+
+[Host tests](../../apps/server/src/agent-relay/host.test.ts) use PostgreSQL and
+real WebSockets to cover persistence, alarms, output gates, pairing, restart
+and the concurrent HTTP/editor reply path.
 
 ## Acceptance criteria
 
@@ -93,15 +135,15 @@ The public library keeps authors and revisions; each new record is authored by
 need no sign-in. Validation and exact publication content identity live in
 `@icm/component-library`, shared with the editor, desktop and Worker.
 
-| Endpoint | Result |
-| --- | --- |
-| `GET /api/components` | `{entries, nextCursor}`; `q`, `cursor`, `limit` (1–30), `view=summary`, `status=deleted` |
-| `GET /api/components?catalog=1` | Summary catalog with `catalogRevision`, `authors`, `nextCursor`; `type`, `order`, `author`, `since`; limit at most 128 |
-| `GET /api/components/:id` | `{entry}`, including native circuit resources when present |
-| `GET /api/components/:id?view=identity&revision=N` | `{id, revision, status}`; stale revision returns 409 |
-| `GET /api/components/:id?view=preview&revision=N` | `{id, revision, symbol}`; stale revision returns 409; malformed history returns 422 `This component needs repair.` |
-| `PUT /api/components/:id` | `{revision, definition, circuit?, idempotencyKey?}` → `{entry, outcome: created / updated / unchanged}` |
-| `PATCH /api/components/:id` | `{revision, action: delete / restore}` or `{revision, status: shared / official / deleted}` → `{entry}`; unchanged retries also have `outcome: unchanged` |
+| Endpoint                                           | Result                                                                                                                                                    |
+| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/components`                              | `{entries, nextCursor}`; `q`, `cursor`, `limit` (1–30), `view=summary`, `status=deleted`                                                                  |
+| `GET /api/components?catalog=1`                    | Summary catalog with `catalogRevision`, `authors`, `nextCursor`; `type`, `order`, `author`, `since`; limit at most 128                                    |
+| `GET /api/components/:id`                          | `{entry}`, including native circuit resources when present                                                                                                |
+| `GET /api/components/:id?view=identity&revision=N` | `{id, revision, status}`; stale revision returns 409                                                                                                      |
+| `GET /api/components/:id?view=preview&revision=N`  | `{id, revision, symbol}`; stale revision returns 409; malformed history returns 422 `This component needs repair.`                                        |
+| `PUT /api/components/:id`                          | `{revision, definition, circuit?, idempotencyKey?}` → `{entry, outcome: created / updated / unchanged}`                                                   |
+| `PATCH /api/components/:id`                        | `{revision, action: delete / restore}` or `{revision, status: shared / official / deleted}` → `{entry}`; unchanged retries also have `outcome: unchanged` |
 
 Component ids match `^[a-zA-Z0-9_-]{8,80}$`; invalid ids return 400
 `Invalid component ID`, unsupported methods return 405 `Method not allowed`.
@@ -122,8 +164,7 @@ catalog revision returns 409 `COMPONENT_CATALOG_CHANGED`. A matching `since`
 returns empty entries, null cursor, the revision and `notModified: true`.
 
 Seven-day per-user write receipts replay the original JSON and status with
-`x-component-write-recovered: true`; reusing a key for another request returns
-409. Duplicate new content by the same author returns 409
+`x-component-write-recovered: true`; reusing a key for another request returns 409. Duplicate new content by the same author returns 409
 `COMPONENT_ALREADY_PUBLISHED` with `existing: {id, revision}`. Updates compare
 exact normalized package content; unchanged definitions retain revision and
 timestamps. Soft deletion retains the definition and previous status; restore

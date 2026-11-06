@@ -17,7 +17,7 @@ import {
   gallerySourceOfEntryId,
   type GallerySource,
 } from "./gallery-sources";
-import { sameOrigin } from "./same-origin";
+import { sameOrigin } from "../apps/server/src/agent-relay/same-origin.js";
 import {
   GALLERY_MAX_DESCRIPTION_LENGTH,
   GALLERY_MAX_NAME_LENGTH,

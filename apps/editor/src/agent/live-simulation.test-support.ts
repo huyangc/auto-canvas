@@ -7,7 +7,7 @@ import {
 } from "@icm/simulation-service";
 import type { ArtifactRef } from "@icm/simulation-service/contract";
 import { ArtifactDownloadError } from "@icm/simulation-service/files";
-import { AgentArtifacts } from "../../../../worker/agent-artifacts";
+import { AgentArtifacts } from "../../../server/src/agent-relay/agent-artifacts";
 import { routeSimulationRequest } from "../../../../worker/simulation";
 import {
   nativeEnvironment,

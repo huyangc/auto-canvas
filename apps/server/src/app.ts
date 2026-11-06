@@ -1,10 +1,12 @@
 import { Hono } from "hono";
+import { AgentRelayHost } from "./agent-relay/host.js";
 import type { Pool } from "pg";
 import { registerComponents } from "./components.js";
 import { registerProjects } from "./projects.js";
 
 interface AppOptions {
   db: Pool;
+  agentRelay?: AgentRelayHost;
   user?: { displayName: string };
   limits?: { projectLimit: number };
 }
@@ -12,6 +14,7 @@ interface AppOptions {
 /** The single-user HTTP contract, also embedded directly by contract tests. */
 export function createApp({
   db,
+  agentRelay = new AgentRelayHost(db),
   user = { displayName: process.env.AUTO_CANVAS_USER_NAME ?? "Local user" },
   limits = {
     projectLimit: Number(process.env.AUTO_CANVAS_PROJECT_LIMIT ?? 200),
@@ -23,6 +26,7 @@ export function createApp({
   app.use("*", async (c, next) => {
     if (
       c.req.method !== "GET" &&
+      !c.req.path.startsWith("/api/agent/") &&
       c.req.path !== "/api/components" &&
       !c.req.path.startsWith("/api/components/")
     ) {
@@ -43,6 +47,7 @@ export function createApp({
       return c.json({ error: "Not found" }, 404);
     await next();
   });
+  app.all("/api/agent/*", (c) => agentRelay.fetch(c.req.raw));
   app.get("/api/health", async (c) => {
     await db.query("SELECT 1");
     return c.json({ ok: true });

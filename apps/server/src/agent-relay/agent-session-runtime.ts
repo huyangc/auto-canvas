@@ -19,7 +19,7 @@ import {
   type AgentTransportErrorResponse,
 } from "@icm/agent-adapter";
 import { agentOperatingKit } from "@icm/agent-adapter/kit";
-import type { AgentArtifactBucket } from "./agent-artifacts";
+import type { AgentArtifactBucket } from "./agent-artifacts.js";
 
 export const SESSION_STATE_KEY = "agent-session-v1";
 /**
@@ -76,6 +76,8 @@ export type DurableStateLike = {
   blockConcurrencyWhile?(callback: () => Promise<void>): void;
   acceptWebSocket?(socket: WebSocket, tags?: string[]): void;
   getWebSockets?(tag?: string): WebSocket[];
+  /** Node host upgrade seam; absent in the legacy Worker runtime. */
+  openWebSocket?(): Promise<{ socket: WebSocket; response: Response } | null>;
 };
 
 export type AgentSessionEnv = {

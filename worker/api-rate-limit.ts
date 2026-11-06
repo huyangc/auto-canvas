@@ -1,4 +1,4 @@
-import { bearerMatches } from "./bearer";
+import { bearerMatches } from "../apps/server/src/agent-relay/bearer.js";
 import { SITE_USAGE_NOTE } from "../apps/editor/src/usage-policy-note";
 
 /** Cloudflare's Workers rate limiting binding (`ratelimits` in wrangler.jsonc). */

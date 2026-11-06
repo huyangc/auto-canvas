@@ -12,7 +12,7 @@ import ngspiceProfile from "../containers/ngspice/hosted-sky130-profile.json" wi
 import sg13g2Profile from "../containers/ngspice/sg13g2/profile.json" with { type: "json" };
 import { sessionUserOf } from "./auth";
 import type { AuthEnv } from "./auth-do";
-import { bearerMatches } from "./bearer";
+import { bearerMatches } from "../apps/server/src/agent-relay/bearer.js";
 export type { SimulationRequestBody } from "./simulation-vacask";
 
 /** The answer to a signed-out request for computation. */

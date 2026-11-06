@@ -1,6 +1,6 @@
 import { ANALYTICS_PERSISTENCE_IDENTITY } from "../apps/editor/analytics/worker";
 import { sessionUserOf, type AuthNamespaceLike } from "./auth";
-import { sameOrigin } from "./same-origin";
+import { sameOrigin } from "../apps/server/src/agent-relay/same-origin.js";
 
 /**
  * Point-in-time recovery of the durable stores. Cloudflare keeps 30 days of
