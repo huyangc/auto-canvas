@@ -6,8 +6,8 @@ import {
   COMPONENT_LIBRARY_ID,
   parseSharedComponentPayload,
   type SharedComponent,
-} from "../../editor/src/features/user-components/component-library-contract";
-import { parseSharedComponentEntry } from "../../editor/src/features/user-components/component-library-entry";
+} from "@icm/component-library";
+import { parseSharedComponentEntry } from "@icm/component-library";
 import { APP_ORIGIN } from "./app-protocol.js";
 import { readLimited, writeDurable } from "./durable-files.js";
 

@@ -4,7 +4,7 @@ Status: `accepted`
 
 Primary owner: `apps/server`
 
-The local Node server implements identity and private Cloud Project HTTP APIs
+The local Node server implements identity, private Cloud Project and shared Component Library HTTP APIs
 consumed by the web editor. Project file semantics belong to
 [Project file format](project-file-format.md); browser recovery belongs to
 [persistence and recovery](persistence-and-recovery.md).
@@ -15,7 +15,7 @@ consumed by the web editor. Project file semantics belong to
   `provider: "local"`, `email: null`, `role: "user"`, `isAdmin: true`.
   No cookies, credentials, rate limiting or third-party sign-in are required.
 - All queries scope Projects by user. Versions cascade on Project deletion.
-- Every non-GET request rejects a differing Origin or a Sec-Fetch-Site other
+- Identity and Project non-GET requests reject a differing Origin or a Sec-Fetch-Site other
   than `same-origin`, `same-site` or `none` with 403 `forbidden`.
 - Saves parse and canonically serialize Project text, storing the current
   Project file version. A changed update atomically snapshots the displaced
@@ -32,8 +32,9 @@ consumed by the web editor. Project file semantics belong to
 
 ## Contract
 
-All errors have `{error: string}`; unknown paths/methods return 404 `Not found`.
-Ids are ten characters drawn from `23456789abcdefghjkmnpqrstvwxyz`.
+Errors have `{error: string}` and may include a component error `code`. Unknown
+paths/methods outside the Component Library return 404 `Not found`.
+Project ids are ten characters drawn from `23456789abcdefghjkmnpqrstvwxyz`.
 A Project summary is `{id, name, updatedAt, revision, schemaVersion,
 galleryEntryId: null, favorite}`; an open payload adds `projectText`.
 Timestamps are ISO strings from PostgreSQL `timestamptz`.
@@ -71,9 +72,9 @@ All history responses use `private, no-store`. Current previews use
 revision, otherwise `private, no-cache`.
 
 Configuration and commands are in the [server README](../../apps/server/README.md).
-Vite dev and preview forward `/api/auth`, `/api/projects` and `/api/health`
+Vite dev and preview forward `/api/auth`, `/api/projects`, `/api/components` and `/api/health`
 while retaining the browser's Host/Origin. The narrower Agent relay remains
-independent. Components, Gallery, Agent relay, simulation and account deletion
+independent. Gallery, Agent relay, simulation and account deletion
 are deliberately unimplemented by this server. The existing Worker is unchanged.
 
 ## Acceptance criteria
@@ -84,3 +85,55 @@ are deliberately unimplemented by this server. The existing Worker is unchanged.
 - [Browser workflow](../../apps/editor/e2e/cloud-projects-server.spec.ts)
   saves a placed part, reloads, opens from a fresh browser's shelf and reads
   the earlier revision after a changed save with all providers disabled.
+
+## Component Library
+
+The public library keeps authors and revisions; each new record is authored by
+`local`, whose admin privileges also permit promotion and management. Reads
+need no sign-in. Validation and exact publication content identity live in
+`@icm/component-library`, shared with the editor, desktop and Worker.
+
+| Endpoint | Result |
+| --- | --- |
+| `GET /api/components` | `{entries, nextCursor}`; `q`, `cursor`, `limit` (1–30), `view=summary`, `status=deleted` |
+| `GET /api/components?catalog=1` | Summary catalog with `catalogRevision`, `authors`, `nextCursor`; `type`, `order`, `author`, `since`; limit at most 128 |
+| `GET /api/components/:id` | `{entry}`, including native circuit resources when present |
+| `GET /api/components/:id?view=identity&revision=N` | `{id, revision, status}`; stale revision returns 409 |
+| `GET /api/components/:id?view=preview&revision=N` | `{id, revision, symbol}`; stale revision returns 409; malformed history returns 422 `This component needs repair.` |
+| `PUT /api/components/:id` | `{revision, definition, circuit?, idempotencyKey?}` → `{entry, outcome: created / updated / unchanged}` |
+| `PATCH /api/components/:id` | `{revision, action: delete / restore}` or `{revision, status: shared / official / deleted}` → `{entry}`; unchanged retries also have `outcome: unchanged` |
+
+Component ids match `^[a-zA-Z0-9_-]{8,80}$`; invalid ids return 400
+`Invalid component ID`, unsupported methods return 405 `Method not allowed`.
+PUT/PATCH require matching Origin when supplied and Sec-Fetch-Site, when
+supplied, must be `same-origin` or `none` (403 `Cross-origin writes are forbidden`).
+Bodies over 128 KiB + 1024 bytes return 413; definition validation also enforces
+128 KiB. Published symbol ids are `user-<id>-r<revision>`.
+
+Writes and derived-index backfills run in a PostgreSQL transaction protected
+by a library advisory lock, preserving Durable Object serialization. The
+catalog trigger invalidates that record's summary and increments its revision
+once per component INSERT, UPDATE or DELETE, including management changes.
+Unchanged publication and lifecycle retries do not change the catalog revision.
+Catalog pages bound accumulated summary bytes to 256 KiB, retaining a single
+oversized historical row intact. Query/cursor errors return 400 with
+`COMPONENT_CATALOG_QUERY` or `COMPONENT_CATALOG_CURSOR`; a cursor from an older
+catalog revision returns 409 `COMPONENT_CATALOG_CHANGED`. A matching `since`
+returns empty entries, null cursor, the revision and `notModified: true`.
+
+Seven-day per-user write receipts replay the original JSON and status with
+`x-component-write-recovered: true`; reusing a key for another request returns
+409. Duplicate new content by the same author returns 409
+`COMPONENT_ALREADY_PUBLISHED` with `existing: {id, revision}`. Updates compare
+exact normalized package content; unchanged definitions retain revision and
+timestamps. Soft deletion retains the definition and previous status; restore
+returns to that status. The local admin can inspect deleted records and repair
+or manage historical malformed definitions through metadata views.
+
+[Component contract tests](../../apps/server/src/component-library.test.ts),
+[catalog tests](../../apps/server/src/component-catalog.test.ts),
+[publication tests](../../apps/server/src/component-publication.test.ts),
+[lifecycle tests](../../apps/server/src/component-management.test.ts) and
+[editor client test](../../apps/server/src/component-client.test.ts) use real
+PostgreSQL. The [browser workflow](../../apps/editor/e2e/user-components-server.spec.ts)
+authors, publishes, reloads and places from a fresh browser context.

@@ -3,10 +3,10 @@ import { ComponentDefinitionSchema } from "@icm/model";
 import {
   sharedComponentNetlist,
   type SharedComponent,
-} from "./component-library-contract";
+} from "@icm/component-library";
 import type { SymbolInsertRequest } from "../component-insert/component-insert-request";
 
-export { sharedComponentNetlist } from "./component-library-contract";
+export { sharedComponentNetlist } from "@icm/component-library";
 
 /** Local captures have independent identities without claiming a public revision. */
 export function localComponentDefinition(

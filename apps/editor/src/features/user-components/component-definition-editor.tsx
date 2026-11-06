@@ -7,8 +7,8 @@ import {
   saveLibraryComponent,
   captureLibraryComponent as componentLibraryCapture,
 } from "./component-publication-host";
-import { componentPublicationContent } from "./component-publication-content";
-import { definitionError } from "./component-definition-error";
+import { componentPublicationContent } from "@icm/component-library";
+import { definitionError } from "@icm/component-library";
 import {
   lazy,
   Suspense,
@@ -61,7 +61,7 @@ import {
   parseSharedDefinition,
   componentCapability,
   type SharedComponent,
-} from "./component-library-contract";
+} from "@icm/component-library";
 import {
   manageSharedComponent,
   readSharedComponent,

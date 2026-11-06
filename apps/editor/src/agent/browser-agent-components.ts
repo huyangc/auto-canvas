@@ -23,7 +23,7 @@ import {
 import {
   parseSharedComponentPayload,
   type SharedComponent,
-} from "../features/user-components/component-library-contract";
+} from "@icm/component-library";
 import { planComponentPlacement } from "../features/user-components/component-placement";
 import {
   componentLibraryCapture,

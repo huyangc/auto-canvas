@@ -34,7 +34,7 @@ import {
   createExternalSubcircuitInstance,
 } from "@icm/edit-engine";
 import { newComponentDefinition } from "../src/features/user-components/component-definition-edit";
-import { publishedDefinition } from "../src/features/user-components/component-library-contract";
+import { publishedDefinition } from "@icm/component-library";
 import {
   ComponentLibraryDO,
   routeComponentLibraryRequest,

@@ -4,7 +4,7 @@ import type {
   Instance,
   ComponentAuthoringDraft,
 } from "@icm/model";
-import type { SharedComponent } from "../features/user-components/component-library-contract";
+import type { SharedComponent } from "@icm/component-library";
 import type { prepareComponentVariant } from "@icm/edit-engine";
 
 export interface ComponentEditorSession {

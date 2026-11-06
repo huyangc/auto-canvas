@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ComponentLibrarySummarySchema } from "@icm/agent-adapter";
-import { nativePackage } from "../../../../../worker/component-library.test-support";
-import { summarizeSharedComponent } from "./component-library-contract";
+import { nativePackage } from "../../../worker/component-library.test-support";
+import { summarizeSharedComponent } from "@icm/component-library";
 
 describe("component discovery diagnostics", () => {
   it("retains model file and source location for invalid native source without accepting the package", () => {

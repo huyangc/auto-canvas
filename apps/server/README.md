@@ -11,7 +11,7 @@ pnpm dev
 ```
 
 Startup also applies ordered SQL migrations transactionally. The migration
-ledger is `schema_migrations`; the local profile and Projects survive restarts.
+ledger is `schema_migrations`; the local profile, Projects and Component Library survive restarts.
 Use `pnpm build` to build all apps, or `pnpm --filter @icm/server... build` to
 build the server and its workspace dependencies.
 
@@ -32,10 +32,25 @@ single local user: it has no authentication challenge, cookies or sign-in
 providers. See the [HTTP contract](../../docs/specs/server.md).
 
 ```bash
-pnpm exec vitest run apps/server
-pnpm exec playwright test apps/editor/e2e/cloud-projects-server.spec.ts --workers=1
+pnpm exec vitest run apps/server packages/component-library
+pnpm exec playwright test apps/editor/e2e/cloud-projects-server.spec.ts apps/editor/e2e/user-components-server.spec.ts --workers=1
 ```
 
 Contract tests create and remove an isolated schema in the test database and
 fail with its URL when PostgreSQL is unreachable. Browser tests start a server
 on port 4311 against the test database and remove their own saved Project.
+
+The Vite dev/preview proxy forwards `/api/components` to this server. User
+Components support browsing, catalog filters, revision-bound identity/preview,
+publishing complete native circuit packages, idempotent publication retries,
+updates, promotion, soft deletion and restoration. Every new record belongs to
+the persisted local profile; the local user is an admin. Definitions, receipts,
+lifecycle history and derived catalog/content indexes live in PostgreSQL.
+Migration `002-component-library.sql` creates these tables and catalog triggers.
+
+For the manual persistence check, start both processes above, author and publish
+a User Component, restart both processes, then open User Components, find the
+published name and place it on the canvas. The real-server browser test checks
+the author/publish/reload/find/place path without API mocks and soft-deletes its
+published record afterward. The existing mocked browser suite still exercises
+the multi-account Worker contract.

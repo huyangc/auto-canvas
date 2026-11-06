@@ -7,7 +7,7 @@ import {
   parseSharedComponentPayload,
   componentCapability,
   type SharedComponent,
-} from "../features/user-components/component-library-contract";
+} from "@icm/component-library";
 import { useEditorServices } from "../services/editor-services";
 import {
   listNativeComponents,

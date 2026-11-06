@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { Pool } from "pg";
+import { registerComponents } from "./components.js";
 import { registerProjects } from "./projects.js";
 
 interface AppOptions {
@@ -20,7 +21,11 @@ export function createApp({
     throw new Error("AUTO_CANVAS_PROJECT_LIMIT must be a positive integer");
   const app = new Hono();
   app.use("*", async (c, next) => {
-    if (c.req.method !== "GET") {
+    if (
+      c.req.method !== "GET" &&
+      c.req.path !== "/api/components" &&
+      !c.req.path.startsWith("/api/components/")
+    ) {
       const origin = c.req.header("Origin");
       const site = c.req.header("Sec-Fetch-Site");
       if (
@@ -74,6 +79,10 @@ export function createApp({
       isAdmin: true,
     };
   }
+  registerComponents(app, db, async () => {
+    await ensureUser();
+    return sessionUser();
+  });
   app.get("/api/auth/me", async (c) => {
     c.header("cache-control", "no-store");
     return c.json({ user: await sessionUser() });

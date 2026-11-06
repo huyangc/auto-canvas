@@ -1,7 +1,7 @@
 import {
   parseSharedComponentEntry,
   parseSharedComponentMetadata,
-} from "./component-library-entry";
+} from "@icm/component-library";
 import type { ComponentDefinition } from "@icm/model";
 // The subpath holds only the library schemas, not the Agent adapter (#1673).
 import {
@@ -19,8 +19,8 @@ import {
   type RejectedSharedComponent,
   type ComponentLibrarySummaryPage,
   summarizeSharedComponent,
-} from "./component-library-contract";
-import { definitionError } from "./component-definition-error";
+} from "@icm/component-library";
+import { definitionError } from "@icm/component-library";
 
 import { ComponentLibraryError } from "./component-library-error";
 export { ComponentLibraryError } from "./component-library-error";

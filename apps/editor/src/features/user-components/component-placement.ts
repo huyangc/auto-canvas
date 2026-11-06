@@ -10,12 +10,12 @@ import { resolveDocumentStyleProfile } from "@icm/derived";
 import { createNewInstance } from "../netlist-export/netlist-authoring";
 import { defaultInstanceDisplayAnnotations } from "../instance-display/default-instance-display";
 import { planInsertedInstanceConnections } from "../component-insert/placement-connectivity";
-import { componentPublicationContent } from "./component-publication-content";
+import { componentPublicationContent } from "@icm/component-library";
 import { componentLibraryAssociation } from "./component-library-origin";
 import {
   sharedComponentNetlist,
   type SharedDefinitionPayload,
-} from "./component-library-contract";
+} from "@icm/component-library";
 
 function prepareNativeCapture(
   project: CircuitProject,

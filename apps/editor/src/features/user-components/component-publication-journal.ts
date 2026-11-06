@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { parseSharedComponentPayload } from "./component-library-contract";
-import { parseSharedComponentEntry } from "./component-library-entry";
+import { parseSharedComponentPayload } from "@icm/component-library";
+import { parseSharedComponentEntry } from "@icm/component-library";
 
 const OperationSchema = z.object({
   version: z.literal(1),

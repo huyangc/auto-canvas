@@ -1,7 +1,7 @@
 import {
   parseSharedComponentPayload,
   type SharedComponent,
-} from "./component-library-contract";
+} from "./component-library-contract.js";
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }

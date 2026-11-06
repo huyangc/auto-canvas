@@ -1,4 +1,4 @@
-import { parseSharedComponentEntry } from "./component-library-entry";
+import { parseSharedComponentEntry } from "@icm/component-library";
 import { useEffect, useRef, useState } from "react";
 import type { ComponentLibrarySummary } from "@icm/agent-adapter";
 import { readSessionUser, type SessionUser } from "../../components/account";
@@ -6,7 +6,7 @@ import { SymbolArtwork } from "../component-insert/symbol-artwork";
 import type {
   ComponentLibrarySummaryPage,
   SharedComponent,
-} from "./component-library-contract";
+} from "@icm/component-library";
 import {
   readSharedComponentRecord,
   ComponentLibraryError,
@@ -22,7 +22,7 @@ import type {
 } from "@icm/edit-engine";
 import { loadComponentCatalog as loadCatalog } from "./component-catalog-loading";
 import { ComponentCatalogControls } from "./component-catalog-controls";
-import type { ComponentCatalogQuery } from "./component-library-contract";
+import type { ComponentCatalogQuery } from "@icm/component-library";
 
 const capabilityLabel = (entry: ComponentLibrarySummary) =>
   entry.capability === "symbol-only"

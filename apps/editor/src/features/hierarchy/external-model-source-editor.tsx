@@ -56,7 +56,7 @@ import {
 import ProjectTextEditor from "../project-code/project-text-editor";
 import { SymbolArtwork } from "../component-insert/symbol-artwork";
 import { DefinitionWorkspace } from "../user-components/definition-workspace";
-import { definitionError } from "../user-components/component-definition-error";
+import { definitionError } from "@icm/component-library";
 import { CircuitInterfaceEditor } from "../user-components/circuit-interface-editor";
 import { newComponentDefinition } from "../user-components/component-definition-edit";
 import type { ExternalDefinitionResult } from "./project-structure-commands";

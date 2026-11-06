@@ -4,7 +4,7 @@ import { sharedComponentInsertRequest } from "../features/user-components/compon
 import type {
   SharedComponent,
   SharedDefinitionPayload,
-} from "../features/user-components/component-library-contract";
+} from "@icm/component-library";
 import type { EditorComponentEditorProps } from "./editor-component-editor";
 import type { RefObject } from "react";
 

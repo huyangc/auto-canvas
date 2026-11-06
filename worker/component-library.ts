@@ -3,7 +3,7 @@ import {
   COMPONENT_DEFINITION_MAX_BYTES,
   COMPONENT_LIBRARY_ID,
   parseSharedComponentPayload,
-} from "../apps/editor/src/features/user-components/component-library-contract";
+} from "@icm/component-library";
 export { ComponentLibraryDO } from "./component-library-do";
 
 export interface ComponentLibraryEnv {

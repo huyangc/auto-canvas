@@ -14,7 +14,7 @@ import { componentLibraryAssociation } from "../features/user-components/compone
 import { componentDefinitionInsertRequest } from "../features/user-components/component-definition-edit";
 import { writeComponentVariantDraft } from "../features/user-components/component-variant-draft";
 import { reloadedLibraryDraft } from "../features/user-components/library-circuit-authoring";
-import { publishedDefinition } from "../features/user-components/component-library-contract";
+import { publishedDefinition } from "@icm/component-library";
 import ComponentDefinitionEditor from "../features/user-components/component-definition-editor";
 
 export default function EditorComponentSessionBody(

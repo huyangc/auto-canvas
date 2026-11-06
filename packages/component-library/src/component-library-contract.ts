@@ -15,7 +15,7 @@ export type { ComponentCatalogQuery };
 import {
   definitionError,
   componentDefinitionDiagnostics,
-} from "./component-definition-error";
+} from "./component-definition-error.js";
 
 export type ComponentLibraryStatus = "shared" | "official" | "deleted";
 export interface SharedComponent {

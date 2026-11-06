@@ -565,7 +565,6 @@ it("serves the built editor with SPA fallback, MIME/COOP headers and path guards
       "/missing.js",
       "/%2e%2e%2fprivate.js",
       "/escape.js",
-      "/api/components",
       "/api/auth/unknown",
     ])
       expect((await request(path)).status).toBe(404);

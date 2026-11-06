@@ -1,7 +1,7 @@
 import type {
   ComponentCatalogQuery,
   ComponentLibrarySummaryPage,
-} from "./component-library-contract";
+} from "@icm/component-library";
 import {
   loadSharedComponentSummaries,
   ComponentLibraryError,
