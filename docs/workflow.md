@@ -49,6 +49,25 @@ scripts/codex-task.sh tasks/T001-<slug>
 
 沙箱里没有网络，依赖要事先装好（`pnpm install --frozen-lockfile`）。
 
+## 查看 Codex 的过程
+
+原始事件流可能有几 MB，不要直接读，用 `scripts/codex-log.mjs` 过滤：
+
+```bash
+node scripts/codex-log.mjs tasks/T001-<slug>
+node scripts/codex-log.mjs tasks/T001-<slug> --show 12
+node scripts/codex-log.mjs tasks/T001-<slug> --round 2 --follow
+```
+
+- **默认**：最新一轮的时间线，含每条命令的退出码和 Codex 的消息。审查时用它和
+  report 对账。
+- **`--show <n>`**：时间线里第 n 条命令的完整输出。
+- **`--follow`**：运行中只输出消息、错误和结果，供 Claude Code 的 `Monitor` 使用。
+  `codex-task.sh` 结束时写入 `round-<n>.exit`，它读到后输出 `END exit=<状态>` 并退出。
+  连续 15 分钟没有新事件时输出 `STALLED`，可能是命令耗时长，也可能是这一轮已经中断。
+
+日志只记录动作和消息，不包含 Codex 的思考过程。
+
 ## PR 评审与合入
 
 远端是 `git@github.com:huyangc/auto-canvas.git`（`origin`）。
