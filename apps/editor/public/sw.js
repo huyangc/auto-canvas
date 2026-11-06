@@ -14,7 +14,8 @@ function isLegacyShellCache(key) {
 // Offline lookups read only this worker's own cache, never another
 // deployment's or a legacy shell that shares the origin.
 function matchOwn(request) {
-  return caches.open(CACHE).then((cache) => cache.match(request));
+  // cacheName scopes the lookup without waiting for the cache to open.
+  return caches.match(request, { cacheName: CACHE });
 }
 
 function scopeUrl() {
@@ -178,9 +179,9 @@ self.addEventListener("fetch", (event) => {
       );
     } else {
       event.respondWith(
-        caches
-          .match(event.request)
-          .then((cached) => cached ?? fetchStaticAsset(event)),
+        matchOwn(event.request).then(
+          (cached) => cached ?? fetchStaticAsset(event),
+        ),
       );
     }
   }

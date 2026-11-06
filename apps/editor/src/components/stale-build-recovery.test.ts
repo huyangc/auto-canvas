@@ -120,8 +120,9 @@ describe("recovering from a build a page can no longer load", () => {
           keys: () =>
             Promise.resolve(
               overrides.keys ?? [
-                "icm-static-shell-abc",
-                "icm-static-shell-def",
+                "icm-static-shell-/:abc",
+                "icm-static-shell-legacy-def",
+                "icm-static-shell-/canvas/:ghi",
                 "some-other-cache",
               ],
             ),
@@ -150,11 +151,13 @@ describe("recovering from a build a page can no longer load", () => {
     const context = surfaces();
     await recoverFromStaleBuild(context.value);
     expect(context.deleted).toEqual([
-      "icm-static-shell-abc",
-      "icm-static-shell-def",
+      "icm-static-shell-/:abc",
+      "icm-static-shell-legacy-def",
     ]);
-    // A cache this app did not create is somebody else's to manage.
+    // A cache this app did not create is somebody else's to manage, including
+    // another deployment's shell on the same origin.
     expect(context.deleted).not.toContain("some-other-cache");
+    expect(context.deleted).not.toContain("icm-static-shell-/canvas/:ghi");
     expect(context.unregistered).toEqual(["sw"]);
     expect(context.reload).toHaveBeenCalledOnce();
   });
