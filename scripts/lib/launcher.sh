@@ -177,10 +177,11 @@ launcher_alive() {
 launcher_terminate() {
   local pid=$1
   local group=${2:-no}
+  local grace=${3:-$STOP_TIMEOUT}
   local target=$pid
   [[ "$group" != yes ]] || target="-$pid"
   kill -TERM -- "$target" 2>/dev/null || return 0
-  local deadline=$((SECONDS + STOP_TIMEOUT))
+  local deadline=$((SECONDS + grace))
   while launcher_alive "$pid"; do
     if ((SECONDS >= deadline)); then
       echo "Grace period expired; sending SIGKILL to $pid."
@@ -198,7 +199,10 @@ launcher_cleanup() {
   # already being handled. Finish cleanup before accepting more interrupts.
   trap '' INT TERM HUP
   if [[ -n "$launcher_editor_pid" ]]; then
-    launcher_terminate "$launcher_editor_pid"
+    # The editor supervisor SIGKILLs its own process group just before
+    # STOP_TIMEOUT. SECONDS counts whole seconds, so allow two more before
+    # killing the supervisor; killing it first would orphan the group.
+    launcher_terminate "$launcher_editor_pid" no $((STOP_TIMEOUT + 2))
   fi
   if [[ -n "$launcher_server_pid" ]]; then
     launcher_terminate "$launcher_server_pid" yes
