@@ -30,6 +30,23 @@ consumed by the web editor. Project file semantics belong to
 - Startup runs ordered SQL migrations in one transaction, tracked in
   `schema_migrations`. PostgreSQL owns all persistent state.
 
+## URL prefix
+
+`AUTO_CANVAS_BASE_PATH` is empty by default (root behavior). `/canvas/`
+normalizes to `/canvas`; `/` also means root. Nonempty prefixes consist of
+slash-separated unreserved ASCII path segments, excluding `.` and `..`.
+Invalid values fail startup/build. Apply the same value to the server, editor
+build and launchers; changing it requires rebuilding editor assets.
+
+All endpoint paths below are relative to that prefix. With `/canvas`, only
+`/canvas/api/*` answers API requests; `/canvas` redirects to `/canvas/` (308,
+retaining its query). Static editor and SPA fallback stay inside `/canvas/`;
+unknown prefixed API/asset paths and all paths outside the prefix return 404.
+Reverse proxies must preserve the prefix and Host, including WebSocket upgrades.
+At the Node boundary, a loopback peer may supply a single `X-Forwarded-Proto`
+(`http` or `https`) for TLS termination. Other peers and malformed scheme
+headers cannot change the public request origin. Forwarded host/path are ignored.
+
 ## Contract
 
 Identity and Project errors have `{error: string}`; Component Library errors may add a `code`. Agent errors retain their typed transport envelope. Unknown

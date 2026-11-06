@@ -1,3 +1,4 @@
+import { appUrl } from "../lib/app-url";
 import {
   type ReactNode,
   type ComponentProps,
@@ -424,7 +425,7 @@ export function EditorAppChrome({
             >
               <img
                 className="tokenzhang-link-icon"
-                src="/tokenzhang-favicon.png"
+                src={appUrl("tokenzhang-favicon.png")}
                 alt=""
                 width={12}
                 height={12}

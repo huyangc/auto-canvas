@@ -4,8 +4,11 @@ import { AgentRelayHost } from "./agent-relay/host.js";
 import { createApp } from "./app.js";
 import { createDb } from "./db.js";
 import { migrate } from "./migrate.js";
+import { normalizeBasePath } from "./base-path.js";
+import { publicUrl } from "./public-url.js";
 import { serveEditor } from "./static-editor.js";
 
+const basePath = normalizeBasePath(process.env.AUTO_CANVAS_BASE_PATH);
 const db = createDb();
 await migrate(db);
 if (process.argv.includes("--migrate")) {
@@ -13,11 +16,22 @@ if (process.argv.includes("--migrate")) {
 } else {
   const agentRelay = new AgentRelayHost(db);
   await agentRelay.start();
-  const app = createApp({ db, agentRelay });
-  if (process.env.EDITOR_ROOT) await serveEditor(app, process.env.EDITOR_ROOT);
+  const app = createApp({ db, agentRelay, basePath });
+  if (process.env.EDITOR_ROOT)
+    await serveEditor(app, process.env.EDITOR_ROOT, basePath);
   const server = serve(
     {
-      fetch: app.fetch,
+      fetch: (request, bindings) => {
+        const url = publicUrl(
+          request.url,
+          request.headers.get("x-forwarded-proto"),
+          bindings.incoming.socket.remoteAddress,
+        );
+        return app.fetch(
+          url.href === request.url ? request : new Request(url, request),
+          bindings,
+        );
+      },
       port: Number(process.env.PORT ?? 4310),
       hostname: process.env.HOST ?? "127.0.0.1",
     },

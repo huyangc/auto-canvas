@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { normalizeBasePath } from "./base-path.js";
 import { AgentRelayHost } from "./agent-relay/host.js";
 import type { Pool } from "pg";
 import { registerComponents } from "./components.js";
@@ -6,6 +7,7 @@ import { registerProjects } from "./projects.js";
 
 interface AppOptions {
   db: Pool;
+  basePath?: string;
   agentRelay?: AgentRelayHost;
   user?: { displayName: string };
   limits?: { projectLimit: number };
@@ -14,21 +16,24 @@ interface AppOptions {
 /** The single-user HTTP contract, also embedded directly by contract tests. */
 export function createApp({
   db,
-  agentRelay = new AgentRelayHost(db),
+  basePath = normalizeBasePath(process.env.AUTO_CANVAS_BASE_PATH),
+  agentRelay = new AgentRelayHost(db, undefined, undefined, basePath),
   user = { displayName: process.env.AUTO_CANVAS_USER_NAME ?? "Local user" },
   limits = {
     projectLimit: Number(process.env.AUTO_CANVAS_PROJECT_LIMIT ?? 200),
   },
 }: AppOptions): Hono {
+  basePath = normalizeBasePath(basePath);
   if (!Number.isSafeInteger(limits.projectLimit) || limits.projectLimit < 1)
     throw new Error("AUTO_CANVAS_PROJECT_LIMIT must be a positive integer");
   const app = new Hono();
   app.use("*", async (c, next) => {
+    const path = c.req.path.slice(basePath.length);
     if (
       c.req.method !== "GET" &&
-      !c.req.path.startsWith("/api/agent/") &&
-      c.req.path !== "/api/components" &&
-      !c.req.path.startsWith("/api/components/")
+      !path.startsWith("/api/agent/") &&
+      path !== "/api/components" &&
+      !path.startsWith("/api/components/")
     ) {
       const origin = c.req.header("Origin");
       const site = c.req.header("Sec-Fetch-Site");
@@ -40,9 +45,9 @@ export function createApp({
     }
     if (
       c.req.method === "HEAD" &&
-      (c.req.path.startsWith("/api/auth/") ||
-        c.req.path === "/api/projects" ||
-        c.req.path.startsWith("/api/projects/"))
+      (path.startsWith("/api/auth/") ||
+        path === "/api/projects" ||
+        path.startsWith("/api/projects/"))
     )
       return c.json({ error: "Not found" }, 404);
     await next();
@@ -84,10 +89,15 @@ export function createApp({
       isAdmin: true,
     };
   }
-  registerComponents(app, db, async () => {
-    await ensureUser();
-    return sessionUser();
-  });
+  registerComponents(
+    app,
+    db,
+    async () => {
+      await ensureUser();
+      return sessionUser();
+    },
+    basePath,
+  );
   app.get("/api/auth/me", async (c) => {
     c.header("cache-control", "no-store");
     return c.json({ user: await sessionUser() });
@@ -112,5 +122,13 @@ export function createApp({
   app.post("/api/auth/logout", (c) => c.json({ ok: true }));
   registerProjects(app, db, "local", limits.projectLimit);
   app.notFound((c) => c.json({ error: "Not found" }, 404));
-  return app;
+  if (!basePath) return app;
+  const mounted = new Hono();
+  mounted.notFound((c) => c.json({ error: "Not found" }, 404));
+  mounted.get(basePath, (c) => {
+    const url = new URL(c.req.url);
+    return c.redirect(`${basePath}/${url.search}`, 308);
+  });
+  mounted.route(basePath, app);
+  return mounted;
 }

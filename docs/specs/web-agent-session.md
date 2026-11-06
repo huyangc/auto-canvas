@@ -20,6 +20,21 @@ POST /api/agent/sessions/{sessionId}/projects
 GET  /api/agent/openapi.json
 ```
 
+## URL rules
+
+All paths above, session creation/control routes and editor WebSocket URLs
+are relative to `AUTO_CANVAS_BASE_PATH` (empty by default). With `/canvas`,
+the editor connects to `/canvas/api/agent/sessions/{sessionId}/editor` and
+all HTTP operations use `/canvas/api/agent/...`. Requests and upgrades outside
+the prefix return 404. Vite proxies preserve the prefix.
+
+Public pairing instructions, MCP manifest `ANALOG_CANVAS_API_URL`, Kit/OpenAPI
+links and OpenAPI server URLs use the request origin plus the normalized base
+path. The Kit's canonical endpoint paths are relative to that public base.
+File/Project capability paths include the prefix. `AGENT_ALLOWED_ORIGIN`
+continues to mean an origin only, without a path; same-origin checks never
+compare a browser Origin header with a prefixed URL.
+
 ## Pairing
 
 - The one-copy Agent handoff carries the [connection authorization and recovery

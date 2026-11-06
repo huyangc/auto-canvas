@@ -13,14 +13,28 @@ import {
   type InstallationStage,
 } from "./installation-diagnostics.js";
 
-export function installationOrigin(value: string): string {
+export function installationServerUrl(value: string): string {
   const url = new URL(value);
+  // Validate the original path before URL parsing can erase dot segments or
+  // reinterpret backslashes. Keep the same segment rules as AUTO_CANVAS_BASE_PATH.
+  const parts = /^https?:\/\/([^/?#\\\s@]+)(\/[^?#]*)?$/iu.exec(value);
+  const path = (parts?.[2] ?? "").replace(/\/$/u, "");
   if (
+    !parts ||
     url.username ||
     url.password ||
     url.search ||
     url.hash ||
-    url.pathname !== "/" ||
+    (path !== "" &&
+      path
+        .slice(1)
+        .split("/")
+        .some(
+          (segment) =>
+            !/^[A-Za-z0-9._~-]+$/u.test(segment) ||
+            segment === "." ||
+            segment === "..",
+        )) ||
     (url.protocol !== "https:" &&
       !(
         url.protocol === "http:" &&
@@ -28,9 +42,9 @@ export function installationOrigin(value: string): string {
       ))
   )
     throw Error(
-      "Use an exact HTTPS server origin (HTTP is allowed only for loopback)",
+      "Use an HTTPS server URL with an optional base path and no query, fragment or userinfo (HTTP is allowed only for loopback)",
     );
-  return url.origin;
+  return url.origin + path;
 }
 
 export function installationDeclaration(value: unknown) {
@@ -189,11 +203,11 @@ export async function installMcp(
         options.has(key)
       )
         throw Error(
-          "Usage: --install --origin <server origin> --host codex|config",
+          "Usage: --install --origin <server URL> --host codex|config",
         );
       options.set(key, value);
     }
-    const origin = installationOrigin(options.get("--origin") ?? "");
+    const serverUrl = installationServerUrl(options.get("--origin") ?? "");
     const host = options.get("--host") ?? "config";
     if (!["codex", "config"].includes(host))
       throw Error("Supported installation hosts: codex, config");
@@ -202,7 +216,7 @@ export async function installMcp(
       JSON.parse(
         (
           await download(
-            `${origin}/api/agent/mcp-manifest.json`,
+            `${serverUrl}/api/agent/mcp-manifest.json`,
             128_000,
             "manifest",
           )
@@ -267,7 +281,7 @@ export async function installMcp(
     const launch = {
       command: node,
       args: [executable],
-      env: { ANALOG_CANVAS_API_URL: origin },
+      env: { ANALOG_CANVAS_API_URL: serverUrl },
     };
     let configPath: string | undefined;
     let backupPath: string | undefined;
@@ -315,7 +329,7 @@ export async function installMcp(
       hostLoaded: false,
       stage: "host-loading" as const,
       nextAction: "verify-host-tools" as const,
-      origin,
+      origin: serverUrl,
       ...readiness,
       configPath,
       backupPath,

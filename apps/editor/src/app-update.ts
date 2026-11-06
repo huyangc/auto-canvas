@@ -1,3 +1,4 @@
+import { appUrl } from "./lib/app-url";
 /**
  * Whether a newer deploy than this page is live (2026-10-13): the page's own
  * entry script against the one the editor's address serves now. A deploy
@@ -6,14 +7,14 @@
  * work is saved, brings the new version.
  */
 const LIVE_ENTRY =
-  /<script[^>]*\btype="module"[^>]*\bsrc="(\/assets\/[^"]+\.js)"/u;
+  /<script[^>]*\btype="module"[^>]*\bsrc="(\/[^"]*assets\/[^"]+\.js)"/u;
 
 /** The content-hashed entry this page booted from; null off a built page. */
 export function pageEntryScript(
   root: Pick<Document, "querySelector"> = document,
 ): string | null {
   const src = root
-    .querySelector('script[type="module"][src^="/assets/"]')
+    .querySelector(`script[type="module"][src^="${appUrl("assets/")}"]`)
     ?.getAttribute("src");
   return src ?? null;
 }
@@ -23,13 +24,14 @@ export async function liveEntryScript(
   fetchLike: typeof fetch = fetch,
 ): Promise<string | null> {
   try {
-    const response = await fetchLike("/editor", {
+    const response = await fetchLike(appUrl("editor"), {
       cache: "no-store",
       credentials: "same-origin",
       headers: { accept: "text/html" },
     });
     if (!response.ok) return null;
-    return LIVE_ENTRY.exec(await response.text())?.[1] ?? null;
+    const entry = LIVE_ENTRY.exec(await response.text())?.[1];
+    return entry?.startsWith(appUrl("assets/")) ? entry : null;
   } catch {
     return null;
   }

@@ -82,7 +82,11 @@ const AgentCapabilitiesRequestSchema = RequestBaseSchema.extend({
 });
 /** Named non-Circuit resource advertised by a live browser Agent session. */
 export const AgentFileResourceCapabilitySchema = z.strictObject({
-  path: z.literal("/api/agent/sessions/{sessionId}/files"),
+  path: z
+    .string()
+    .regex(
+      /^\/(?:[A-Za-z0-9._~-]+\/)*api\/agent\/sessions\/\{sessionId\}\/files$/u,
+    ),
   operations: z.array(
     z.enum([
       "download",
@@ -101,7 +105,11 @@ export const AgentFileResourceCapabilitySchema = z.strictObject({
 
 /** Gallery discovery plus active and Cloud Project code operations. */
 export const AgentProjectResourceCapabilitySchema = z.strictObject({
-  path: z.literal("/api/agent/sessions/{sessionId}/projects"),
+  path: z
+    .string()
+    .regex(
+      /^\/(?:[A-Za-z0-9._~-]+\/)*api\/agent\/sessions\/\{sessionId\}\/projects$/u,
+    ),
   operations: z.tuple([
     z.literal("list-projects"),
     z.literal("workspace"),
