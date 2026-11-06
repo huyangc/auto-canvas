@@ -12,7 +12,7 @@ import {
 } from "../../request-failure";
 
 /** Private formal Project storage. One id owns one mutable current revision. */
-export const CLOUD_PROJECT_LIMIT = 20;
+export const CLOUD_PROJECT_LIMIT = 200;
 
 export interface CloudProjectSummary {
   id: string;
@@ -50,7 +50,11 @@ export type CloudProjectOpenOutcome =
   | { status: "unreachable"; message: string };
 
 export type CloudProjectListOutcome =
-  | { status: "listed"; projects: readonly CloudProjectSummary[] }
+  | {
+      status: "listed";
+      projects: readonly CloudProjectSummary[];
+      limit?: number;
+    }
   | { status: "signed-out" }
   | { status: "unreachable"; message: string };
 
@@ -199,9 +203,16 @@ async function requestCloudProjects(
     }
     const payload = (await response.json().catch(() => null)) as {
       projects?: unknown[];
+      limit?: unknown;
     } | null;
     return {
       status: "listed",
+      limit:
+        typeof payload?.limit === "number" &&
+        Number.isInteger(payload.limit) &&
+        payload.limit > 0
+          ? payload.limit
+          : CLOUD_PROJECT_LIMIT,
       projects: (payload?.projects ?? [])
         .map(summaryOf)
         .filter((item): item is CloudProjectSummary => item !== null),

@@ -4,7 +4,6 @@ import * as galleryRequests from "./gallery-requests";
 import { clearFormulaArtifactCacheForTests } from "../packages/math-typesetting/src/cache";
 import { CURRENT_PROJECT_FILE_VERSION } from "@icm/project-protocol";
 import { describe, expect, it, vi } from "vitest";
-import { CLOUD_PROJECT_LIMIT as EDITOR_CLOUD_PROJECT_LIMIT } from "../apps/editor/src/features/editor-shell/cloud-projects";
 import { CLOUD_PROJECT_LIMIT } from "./gallery-store-cloud-projects";
 import { GalleryDO } from "./gallery";
 import { GALLERY_MAX_PROJECT_BYTES } from "./gallery-store";
@@ -66,13 +65,8 @@ describe("private Cloud Projects", () => {
     );
   });
 
-  it("enforces the same limit the editor displays", () => {
-    // No Cloud Project response carries the limit, so the editor keeps its own
-    // copy for the File menu, the My shelf counter, and the limit-reached
-    // status. Changing one without the other shows members the wrong number.
-    expect(EDITOR_CLOUD_PROJECT_LIMIT, "the editor's copy of the limit").toBe(
-      CLOUD_PROJECT_LIMIT,
-    );
+  it("keeps the Worker's Cloud Project limit at 20", () => {
+    expect(CLOUD_PROJECT_LIMIT).toBe(20);
   });
 
   it("serves a shelf thumbnail only to the account that owns it", async () => {

@@ -1047,14 +1047,16 @@ function WorkspaceEditor({
     },
   });
   const startupCloudRestoreAttemptedRef = useRef(false);
-  const hasExplicitBootTarget =
-    restoredWorkspace !== null ||
-    bootRequestsNewProject ||
-    (typeof window !== "undefined" &&
-      (() => {
-        const search = new URLSearchParams(window.location.search);
-        return search.has("project");
-      })());
+  const [hasExplicitBootTarget] = useState(
+    () =>
+      restoredWorkspace !== null ||
+      bootRequestsNewProject ||
+      (typeof window !== "undefined" &&
+        (() => {
+          const search = new URLSearchParams(window.location.search);
+          return search.has("project") || search.has("example");
+        })()),
+  );
   useEffect(() => {
     if (
       startupCloudRestoreAttemptedRef.current ||
@@ -3620,6 +3622,9 @@ function WorkspaceEditor({
     restoreAfterRefresh,
     replaceActiveProject,
     openCloudProjectById,
+    guardDirtyReplacement,
+    netlistProfile:
+      netlistPreferences.preferences.profiles[netlistPreferences.selected],
   });
 
   function resetInteractionState(): void {

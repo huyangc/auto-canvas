@@ -79,7 +79,12 @@ export function useAgentStartupRecovery({
     )
       return null;
     const search = new URLSearchParams(window.location.search);
-    if (search.has("project") || search.get("new") === "1") return null;
+    if (
+      search.has("project") ||
+      search.has("example") ||
+      search.get("new") === "1"
+    )
+      return null;
     const saved = peekAgentSessionRecovery(window.sessionStorage);
     return saved?.projectSessionId === recoveryWorkingCopyId ? saved : null;
   });

@@ -93,6 +93,7 @@ describe("Web editor composition", () => {
     expect(await store.list()).toEqual({
       status: "listed",
       projects: [summary],
+      limit: 200,
     });
     expect(await store.open(summary.id)).toMatchObject({
       status: "opened",
@@ -124,6 +125,25 @@ describe("Web editor composition", () => {
     expect(JSON.parse(creation.body as string).galleryEntryId).toBe(
       "published",
     );
+  });
+
+  it("updates the store limit on each successful list and falls back for older servers", async () => {
+    const transport = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ projects: [], limit: 37 }))
+      .mockResolvedValueOnce(Response.json({}, { status: 503 }))
+      .mockResolvedValueOnce(Response.json({ projects: [], limit: 52 }))
+      .mockResolvedValueOnce(Response.json({ projects: [] }));
+    const { projectStore: store } = createWebEditorServices(transport);
+    expect(store.limit).toBe(200);
+    await store.list();
+    expect(store.limit).toBe(37);
+    await store.list();
+    expect(store.limit).toBe(37);
+    await store.list();
+    expect(store.limit).toBe(52);
+    await store.list();
+    expect(store.limit).toBe(200);
   });
 
   it("keeps the default browser transport lazy until an action runs", async () => {

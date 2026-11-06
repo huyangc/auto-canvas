@@ -19,13 +19,21 @@ export function createWebEditorServices(
   projectSerializer: NonNullable<EditorServices["projectSerializer"]>;
 } {
   const projectSerializer = createProjectSnapshotSerializer();
+  let projectLimit = CLOUD_PROJECT_LIMIT;
   return {
     projectSerializer,
     identity: { getSessionUser: () => fetchSessionUser(fetchLike) },
     projectStore: {
       kind: "cloud",
-      limit: CLOUD_PROJECT_LIMIT,
-      list: () => listCloudProjects(fetchLike),
+      get limit() {
+        return projectLimit;
+      },
+      list: async () => {
+        const outcome = await listCloudProjects(fetchLike);
+        if (outcome.status === "listed")
+          projectLimit = outcome.limit ?? CLOUD_PROJECT_LIMIT;
+        return outcome;
+      },
       open: (id) => openCloudProject(id, fetchLike),
       save: (project, binding, galleryEntryId) =>
         saveCloudProject(

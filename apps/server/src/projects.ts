@@ -201,7 +201,7 @@ export function registerProjects(
 ): void {
   app.get("/api/projects", async (c) => {
     c.header("cache-control", "no-store");
-    return c.json({ projects: await list(db, userId) });
+    return c.json({ projects: await list(db, userId), limit });
   });
   app.post("/api/projects", (c) => save(c, db, userId, limit));
   app.get("/api/projects/:id", async (c) => {
