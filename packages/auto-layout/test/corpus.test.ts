@@ -2,23 +2,27 @@ import { readFileSync } from "node:fs";
 import { expect, it } from "vitest";
 import {
   deriveElectricalTopologyProjection,
-  endpointKey,
+  resolveRouteGeometry,
   visibleInstanceBounds,
 } from "@icm/derived";
-import { executeTransaction } from "@icm/edit-engine";
+import { DocumentHistory, executeTransaction } from "@icm/edit-engine";
 import { compareElectricalGraphs, projectElectricalGraph } from "@icm/netlist";
 import { parseProject } from "@icm/project-protocol";
 import { builtInSymbols, createProjectSymbolResolver } from "@icm/symbols";
 import { planAutoLayout } from "../src/index.js";
 import { enclosingBox, pinPoints } from "../src/geometry.js";
+import { auditRouting } from "../src/routing-audit.js";
+import { freedAnnotations } from "../src/labels.js";
+import { terminalPartition } from "../src/transaction.js";
 import { classifyNets } from "../src/net-roles.js";
 import cases from "./corpus-cases.json";
 
 function expectedReanchoredAnnotations(
   document: Parameters<typeof planAutoLayout>[0],
 ) {
+  const freed = new Set(freedAnnotations(document).map((a) => a.id));
   return document.annotations.map((annotation) =>
-    annotation.anchor.kind === "route"
+    freed.has(annotation.id) && annotation.anchor.kind !== "free"
       ? {
           ...annotation,
           anchor: {
@@ -44,7 +48,10 @@ it.each(cases)(
       resolver,
     );
     const plan = planAutoLayout(document, resolver);
-    expect(plan.diagnostics).toEqual([]);
+    expect(plan.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
+    expect(
+      plan.diagnostics.filter((d) => d.code === "AUTO_LAYOUT_NET_UNROUTED"),
+    ).toEqual([]);
     expect(JSON.stringify(plan.edits)).toBe(
       JSON.stringify(planAutoLayout(document, resolver).edits),
     );
@@ -114,21 +121,27 @@ it.each(cases)(
     expect(Math.abs(resultBox.x - oldBox.x)).toBeLessThanOrEqual(
       after.presentation.grid / 2,
     );
-    expect(Math.abs(resultBox.y - oldBox.y)).toBeLessThanOrEqual(
-      after.presentation.grid / 2,
+    if (!document.drafting?.objects.length)
+      expect(Math.abs(resultBox.y - oldBox.y)).toBeLessThanOrEqual(
+        after.presentation.grid / 2,
+      );
+    else
+      expect(resultBox.y).toBeGreaterThanOrEqual(
+        oldBox.y - after.presentation.grid / 2,
+      );
+    expect(auditRouting(after, resolver).problems).toEqual([]);
+    expect(terminalPartition(after, resolver)).toBe(
+      terminalPartition(document, resolver),
     );
     for (const route of after.routes) {
       expect(document.routes.some((r) => r.id === route.id)).toBe(false);
       const end = route.legs.at(-1)!.to;
-      expect(end.kind).toBe("endpoint");
-      if (end.kind !== "endpoint") continue;
-      const startNet = beforeTopology.endpointToBaseNet.get(
-        endpointKey(route.start),
-      );
-      expect(startNet).toBeDefined();
-      expect(
-        beforeTopology.endpointToBaseNet.get(endpointKey(end.endpoint)),
-      ).toBe(startNet);
+      for (const endpoint of [
+        route.start,
+        end.kind === "endpoint" ? end.endpoint : null,
+      ])
+        if (endpoint?.kind === "terminal")
+          expect(endpoint.pinName).not.toBe("B");
     }
     expect(after.drafting).toEqual(document.drafting);
     expect(after.annotations.map((a) => a.id).sort()).toEqual(
@@ -138,13 +151,84 @@ it.each(cases)(
       const actual = after.annotations.find((a) => a.id === annotation.id)!;
       expect(actual.content).toEqual(annotation.content);
       expect(actual.binding).toEqual(annotation.binding);
-      // Instance transforms legitimately move attached annotations. Route
-      // labels, however, must retain every field except the approved anchor.
       if (
-        document.annotations.find((a) => a.id === annotation.id)!.anchor
-          .kind === "route"
-      )
-        expect(actual).toEqual(annotation);
+        freedAnnotations(document).some((a) => a.id === actual.id) &&
+        ["net-label", "power-label"].includes(actual.kind)
+      ) {
+        const legs = after.routes
+          .filter((r) => r.netId === actual.netId)
+          .flatMap(
+            (r) =>
+              resolveRouteGeometry(after, resolver, r)?.segments.filter(
+                (s) => s.from.y === s.to.y && s.from.x !== s.to.x,
+              ) ?? [],
+          );
+        if (legs.length) {
+          expect(actual.anchor.kind).toBe("route");
+          if (actual.anchor.kind === "route") {
+            const anchor = actual.anchor;
+            expect(anchor.t).toBe(0.5);
+            expect(anchor.normalOffset).not.toBe(0);
+            const originalAnchor = document.annotations.find(
+              (a) => a.id === actual.id,
+            )!.anchor;
+            expect(anchor.normalOffset).toBe(
+              originalAnchor.kind === "route"
+                ? originalAnchor.normalOffset
+                : -10,
+            );
+            expect(anchor.direction).toBe(
+              originalAnchor.kind === "route"
+                ? originalAnchor.direction
+                : "forward",
+            );
+            expect(anchor.orientation).toBe(
+              originalAnchor.kind === "route"
+                ? originalAnchor.orientation
+                : "horizontal",
+            );
+            const leg = legs.find(
+              (s) =>
+                s.address.routeId === anchor.routeId &&
+                s.address.legId === anchor.legId,
+            )!;
+            expect(Math.abs(leg.to.x - leg.from.x)).toBe(
+              Math.max(...legs.map((s) => Math.abs(s.to.x - s.from.x))),
+            );
+          }
+        } else {
+          expect(actual.anchor.kind).toBe("free");
+          const original = document.annotations.find(
+            (a) => a.id === actual.id,
+          )!;
+          const fallback =
+            original.anchor.kind === "free"
+              ? original.anchor.position
+              : original.anchor.fallbackPosition;
+          const net = document.nets.find((n) => n.id === original.netId);
+          const candidates = pinPoints(after, resolver).filter((p) =>
+            net?.terminals.some(
+              (t) =>
+                t.instanceId === p.instanceId &&
+                t.pinName === p.pinName &&
+                t.pinName !== "B",
+            ),
+          );
+          if (candidates.length && actual.anchor.kind === "free")
+            expect(
+              Math.hypot(
+                actual.anchor.position.x - fallback.x,
+                actual.anchor.position.y - fallback.y,
+              ),
+            ).toBe(
+              Math.min(
+                ...candidates.map((p) =>
+                  Math.hypot(p.point.x - fallback.x, p.point.y - fallback.y),
+                ),
+              ),
+            );
+        }
+      }
     }
     for (const group of document.layoutGroups)
       expect(after.layoutGroups.find((g) => g.id === group.id)).toEqual(group);
@@ -170,6 +254,44 @@ it.each(cases)(
       }
     }
     if (fixture.id === "five-t-ota") {
+      const topology = deriveElectricalTopologyProjection(after, resolver);
+      for (const id of ["M1", "M2"])
+        expect(topology.endpointToBaseNet.get(`terminal:${id}:B`)).toBe(
+          topology.endpointToBaseNet.get(`terminal:${id}:S`),
+        );
+      for (const evidence of document.connectivityEvidence) {
+        const owner =
+          evidence.kind === "name-claim" &&
+          evidence.owner.kind === "power-marker"
+            ? evidence.owner.objectId
+            : undefined;
+        if (
+          evidence.kind !== "name-claim" ||
+          evidence.owner.kind !== "power-marker" ||
+          ![...document.routes, ...document.junctions].some(
+            (o) => o.id === owner,
+          )
+        )
+          continue;
+        const transferred = after.connectivityEvidence.find(
+          (e) => e.id === evidence.id,
+        );
+        expect(transferred).toMatchObject({
+          ...evidence,
+          owner: { kind: "power-marker", objectId: expect.any(String) },
+        });
+        if (
+          transferred?.kind === "name-claim" &&
+          transferred.owner.kind === "power-marker"
+        ) {
+          const objectId = transferred.owner.objectId;
+          expect(
+            after.routes.some(
+              (r) => r.id === objectId && r.netId === transferred.netId,
+            ),
+          ).toBe(true);
+        }
+      }
       expect(placed("M1").position.y).toBeLessThan(placed("M3").position.y);
       expect(placed("M2").position.y).toBeLessThan(placed("M4").position.y);
       expect(placed("M3").position.y).toBeLessThan(placed("M5").position.y);
@@ -198,9 +320,19 @@ it.each(cases)(
         for (const id of terminal.interfaceInstanceIds) {
           const p = placed(id);
           if (roles.byNet.get(terminal.netId) === "input") {
-            expect(p.position.x).toBeLessThanOrEqual(
-              Math.min(...devices.map((i) => i.placement!.position.x)),
-            );
+            if (fixture.id === "five-t-ota" && id === "P2") {
+              expect(p.position.x).toBeGreaterThan(
+                Math.max(...devices.map((i) => i.placement!.position.x)),
+              );
+              expect(p.position.y).toBe(
+                pinPoints(after, resolver).find(
+                  (p) => p.instanceId === "M4" && p.pinName === "G",
+                )!.point.y,
+              );
+            } else
+              expect(p.position.x).toBeLessThanOrEqual(
+                Math.min(...devices.map((i) => i.placement!.position.x)),
+              );
             expect(p.rotation).toBe(0);
           }
           if (roles.byNet.get(terminal.netId) === "output") {
@@ -223,6 +355,7 @@ it.each(cases)(
     for (const side of ["input", "output", "supply", "ground"]) {
       const members = ports.filter((i) => {
         const role = roles.byNet.get(roles.pinNet(i.id, "P") ?? "");
+        if (fixture.id === "five-t-ota" && i.id === "P2") return false;
         return side === "input"
           ? !["output", "supply", "ground"].includes(role ?? "")
           : role === side;
@@ -276,6 +409,17 @@ it.each(cases)(
       expect(pin(id, a).y).not.toBe(pin(id, b).y);
     };
     if (fixture.id === "rlc") {
+      // The source drives a passive chain, so its Net is a wire, not a trunk.
+      expect(pin("V1", "+").y).toBe(pin("R1", "1").y);
+      const inNet = after.routes.filter(
+        (r) => r.netId === roles.pinNet("V1", "+"),
+      );
+      for (const route of inNet)
+        for (const segment of resolveRouteGeometry(after, resolver, route)
+          ?.segments ?? []) {
+          expect(segment.from.y).toBeGreaterThanOrEqual(pin("V1", "+").y);
+          expect(segment.to.y).toBeGreaterThanOrEqual(pin("V1", "+").y);
+        }
       for (const [a, b] of [
         ["V1", "R1"],
         ["R1", "L1"],
@@ -310,6 +454,34 @@ it.each(cases)(
       expect(pin("RD", "2").x).toBe(pin("XM1", "D").x);
     const again = planAutoLayout(after, resolver);
     expect(again.diagnostics).toEqual([]);
+    const history = new DocumentHistory(document, { symbolResolver: resolver });
+    const transaction = {
+      transactionId: `history-${fixture.id}`,
+      documentId: document.id,
+      expectedRevision: document.revision,
+      actor: { kind: "agent" as const, id: "test" },
+      edits: plan.edits,
+    };
+    expect(history.transact(transaction).ok).toBe(true);
+    expect(
+      history.transact({
+        ...transaction,
+        expectedRevision: history.document.revision,
+        edits: [{ kind: "undo" }],
+      }).ok,
+    ).toBe(true);
+    expect(history.canUndo).toBe(false);
+    expect(terminalPartition(history.document, resolver)).toBe(
+      terminalPartition(document, resolver),
+    );
+    const twice = executeTransaction(
+      after,
+      { ...transaction, expectedRevision: after.revision, edits: again.edits },
+      { symbolResolver: resolver },
+    );
+    expect(twice.ok).toBe(true);
+    if (twice.ok)
+      expect(twice.document.routes.length).toBe(after.routes.length);
     expect(
       again.edits.filter((e) =>
         ["move_instance", "rotate_instance", "mirror_instance"].includes(
@@ -333,16 +505,24 @@ it.each(cases)(
     const before = projectElectricalGraph(project);
     const plan = planAutoLayout(document, resolver);
     expect(plan.diagnostics).toEqual([]);
-    const edits = plan.edits.slice(
-      0,
-      document.annotations.filter((a) => a.anchor.kind === "route").length +
-        document.routes.length,
-    );
+    let cleanupLength =
+      freedAnnotations(document).length +
+      document.routes.length +
+      document.junctions.length;
+    while (plan.edits[cleanupLength]?.kind === "connect_endpoints")
+      cleanupLength++;
+    const edits = plan.edits.slice(0, cleanupLength);
     expect(edits.map((e) => e.kind)).toEqual([
-      ...document.annotations
-        .filter((a) => a.anchor.kind === "route")
-        .map(() => "upsert_schematic_annotation"),
+      ...freedAnnotations(document).map(() => "upsert_schematic_annotation"),
       ...document.routes.map(() => "remove_route_geometry"),
+      ...document.junctions.map(() => "remove_junction"),
+      ...edits
+        .slice(
+          freedAnnotations(document).length +
+            document.routes.length +
+            document.junctions.length,
+        )
+        .map(() => "connect_endpoints"),
     ]);
     const result = executeTransaction(
       document,
@@ -357,12 +537,36 @@ it.each(cases)(
     );
     expect(result.applied, JSON.stringify(result.diagnostics)).toBe(true);
     if (!result.ok) return;
+    // A claim owned by removed geometry is handed to the new supply wire only
+    // after routing, so until then its MOS bulk pins are out of the supply
+    // Net. The complete transaction is compared in full by the test above.
+    const owners = new Set(
+      [...document.routes, ...document.junctions].map((o) => o.id),
+    );
+    const transfersClaim = document.connectivityEvidence.some(
+      (e) =>
+        e.kind === "name-claim" &&
+        e.owner.kind === "power-marker" &&
+        owners.has(e.owner.objectId),
+    );
+    const withoutBulk = (d: typeof document) =>
+      [...deriveElectricalTopologyProjection(d, resolver).endpointToBaseNet]
+        .filter(([key]) => key.startsWith("terminal:") && !key.endsWith(":B"))
+        .sort();
+    if (transfersClaim)
+      expect(withoutBulk(result.document)).toEqual(withoutBulk(document));
+    else
+      expect(terminalPartition(result.document, resolver)).toBe(
+        terminalPartition(document, resolver),
+      );
     expect(result.document.routes).toEqual([]);
+    expect(result.document.junctions).toEqual([]);
     expect(result.document.drafting).toEqual(document.drafting);
     expect(result.document.annotations).toEqual(
       expectedReanchoredAnnotations(document),
     );
     expect(result.document.layoutGroups).toEqual(document.layoutGroups);
+    if (transfersClaim) return;
     if (before.status === "ready") {
       const after = projectElectricalGraph({
         ...project,

@@ -13,11 +13,11 @@ import {
   withPlacements,
 } from "./geometry.js";
 import { devicePins, isMarker } from "./placement-connectivity.js";
-import type { Placement } from "./types.js";
+import type { Placement, RecognizedGroup } from "./types.js";
 
 type PinPoint = ReturnType<typeof pinPoints>[number];
 
-function powerHosts(
+export function powerHosts(
   pins: PinPoint[],
   devices: Instance[],
   resolver: SymbolResolver,
@@ -99,6 +99,7 @@ function placeCellPins(
   resolver: SymbolResolver,
   roles: NetRoles,
   targets: Map<string, Placement>,
+  groups: RecognizedGroup[],
 ) {
   const grid = document.presentation.grid;
   const placed = new Set<string>();
@@ -109,7 +110,7 @@ function placeCellPins(
     .map((i) => {
       const net = roles.pinNet(i.id, "P");
       const role = roles.byNet.get(net ?? "") ?? "internal";
-      const side =
+      let side =
         role === "supply"
           ? "top"
           : role === "ground"
@@ -139,10 +140,20 @@ function placeCellPins(
           compareIds(a.instanceId, b.instanceId) ||
           compareIds(a.pinName, b.pinName),
       );
-      const host = connected[0]?.point ?? {
-        x: box.x + box.width / 2,
-        y: box.y + box.height / 2,
-      };
+      const rightGate = connected.find(
+        (p) =>
+          p.pinName === "G" &&
+          groups.some(
+            (g) =>
+              g.kind === "differential-pair" && g.members[1] === p.instanceId,
+          ),
+      );
+      if (rightGate && role === "input") side = "right";
+      const host = rightGate?.point ??
+        connected[0]?.point ?? {
+          x: box.x + box.width / 2,
+          y: box.y + box.height / 2,
+        };
       const vertical = side === "left" || side === "right";
       return { i, side, vertical, coordinate: vertical ? host.y : host.x };
     });
@@ -211,6 +222,7 @@ export function placeMarkers(
   resolver: SymbolResolver,
   roles: NetRoles,
   targets: Map<string, Placement>,
+  groups: RecognizedGroup[],
 ): void {
   const devices = document.instances
     .filter((i) => !isMarker(i))
@@ -224,5 +236,13 @@ export function placeMarkers(
     .filter((i) => ["ground", "vdd-port"].includes(i.symbolId))
     .sort((a, b) => compareIds(a.id, b.id));
   placePowerMarkers(document, power, devices, pins, resolver, roles, targets);
-  placeCellPins(document, deviceDocument, pins, resolver, roles, targets);
+  placeCellPins(
+    document,
+    deviceDocument,
+    pins,
+    resolver,
+    roles,
+    targets,
+    groups,
+  );
 }
