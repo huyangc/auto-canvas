@@ -4,7 +4,11 @@ import type { SymbolResolver } from "@icm/symbols";
 import { classifyNets } from "./net-roles.js";
 import { placeDocument } from "./place.js";
 import { compareIds, recognizeStructures } from "./recognize.js";
-import type { AutoLayoutOptions, AutoLayoutResult } from "./types.js";
+import type {
+  AutoLayoutOptions,
+  AutoLayoutResult,
+  Placement,
+} from "./types.js";
 
 export function planAutoLayout(
   document: SchematicDocument,
@@ -25,7 +29,21 @@ export function planAutoLayout(
     };
   const roles = classifyNets(document, resolver);
   const groups = recognizeStructures(document, roles);
-  const result = placeDocument(document, resolver, roles, groups, options);
+  // `set_layout_group` replaces by id, and a locked annotation cannot change.
+  const idConflict = groups.find((g) =>
+    document.layoutGroups.some((existing) => existing.id === g.id),
+  );
+  const lockedLabel = document.annotations.find(
+    (a) => a.locked && a.anchor.kind === "route",
+  );
+  const conflict = idConflict
+    ? `R5: layout group id ${idConflict.id} already exists`
+    : lockedLabel
+      ? `R2: annotation ${lockedLabel.id} is locked to a Route`
+      : undefined;
+  const result = conflict
+    ? { placements: new Map<string, Placement>(), problem: conflict }
+    : placeDocument(document, resolver, roles, groups, options);
   if (result.problem)
     return {
       edits: [],
