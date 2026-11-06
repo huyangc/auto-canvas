@@ -60,6 +60,11 @@ echo "Codex round $round on $branch → $logs/round-$round.jsonl"
 model_args=()
 [[ -n "${CODEX_MODEL:-}" ]] && model_args=(-m "$CODEX_MODEL")
 
+# pnpm 11 verifies dependencies before every script and, if it decides the
+# lockfile changed, reinstalls; in Codex's offline sandbox that wipes
+# node_modules. Codex never installs dependencies (AGENTS.md), so skip it.
+export npm_config_verify_deps_before_run=false
+
 set +e
 codex exec -C "$root" --approve-for-me --json \
   ${model_args[@]+"${model_args[@]}"} \
