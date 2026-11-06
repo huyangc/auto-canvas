@@ -1,49 +1,47 @@
-# Agent Entry
+# Agent Entry (Codex: implementer)
 
-Read README.md and docs/development-workflow.md before starting work.
-Use the selected original skills under .agents/skills/ and preserve their
-invocation policies, human checkpoints, dependencies and review separation.
+auto-canvas is a web schematic canvas for automatic analog placement and
+routing (APR) with human fine-tuning. It starts from an analog-canvas snapshot
+(UPSTREAM.md). The repository workflow is in [docs/workflow.md](docs/workflow.md):
+Opus plans and reviews, Codex implements.
 
-## Start a target
+These rules replace the upstream analog-canvas process. Ignore upstream stage
+skills under `.agents/skills/` (implement, implement-spec, pr, to-spec,
+to-tickets, retro) and `docs/development-workflow.md`: there are no Issues,
+PRs, deployments or Production acceptance here.
 
-- Run git status --short --branch. Identify the owner, goal, owned paths,
-  shared contracts and validation surface. Protect unrelated work; resolve
-  overlapping or unclear ownership before editing.
-- Use the current target branch or an isolated codex/ task branch. Keep
-  unrelated targets in separate commits. Working notes belong in ignored plan/.
-- Read the relevant domain instructions and accepted product contracts.
-  Plan validation from expected paths, then revise it from the actual diff.
+## When you are given a task
 
-## Agent skills
+1. Read the task's `plan.md` in full, then `review.md` if it exists. A review
+   lists findings from the previous round; fix every one marked `must-fix`.
+2. Run `git status --short --branch`. Work only on the branch the plan names.
+   Leave unrelated changes alone.
+3. Implement the plan's steps in order. Stay inside its owned paths. If a step
+   is impossible, wrong or would need an out-of-scope change, stop that step
+   and record why in the report instead of improvising a different design.
+4. Run every acceptance command in the plan. A failing command is fixed or
+   reported with its output; never weaken, skip or delete a test to make it
+   pass unless the plan puts that test in scope for removal.
+5. Write the task's `report.md` from `tasks/_template/report.md`.
 
-- Issue tracker and publication labels: docs/agents/issue-tracker.md.
-- Domain documentation: docs/agents/domain.md.
-- Choose a stage and its required inputs: docs/development-workflow.md.
-- Implement or validate behavior: docs/testing/README.md.
-- Review changes: CODING_STANDARDS.md and the originating Spec.
-- Deliver or recover Production: docs/deployment.md.
-- Change circuit assets or models: packages/components/README.md and the
-  circuit/model validation section in docs/testing/README.md.
+## Hard rules
 
-## Complete the requested scope
+- Do not commit, push, merge, rebase or switch branches. Opus commits after
+  review.
+- Do not edit `plan.md` or `review.md`.
+- Do not install, upgrade or remove dependencies or change `pnpm-lock.yaml`
+  unless the plan says so. The sandbox has no network.
+- Do not hand-edit generated files (`*.generated.ts`, generated docs); run the
+  generator script that owns the file.
+- Keep behavior the plan does not mention unchanged.
 
-Record intent, validation, test impact and known limitations in the commit or
-PR. Local implementation ends at the validated and reviewed commit; normal
-product delivery ends after the required merge checks and deployed behavior
-pass. Honor an explicit local-only or trial-branch scope. Resolve failed checks
-and report remaining work; preserve unresolved review findings.
+## Repository facts
 
-## Documentation
-
-The single rule for repository docs; other documents point here.
-
-- Change docs/ only when a contract changes (a rule, interface, limit,
-  user-facing behavior or cross-repo agreement), an ADR records a decision, or
-  a roadmap outcome or open question is added or resolved. Implementation notes,
-  validation logs, measurements and history belong in the commit or PR.
-- Write contracts as short rules in the shape of docs/specs/spec.template.md.
-  Replace obsolete text in place; a change that adds doc text deletes what it
-  makes obsolete.
-- Follow .agents/skills/writing-for-agents/SKILL.md: current state only, each
-  fact in one place with links elsewhere, rules over narrative, the
-  environment over restated config or scripts.
+- Node 24+ and pnpm 11.16. Checks: `pnpm build`, `pnpm typecheck`,
+  `pnpm test:local` (Vitest), `pnpm lint`, `pnpm format:check`,
+  `pnpm deadcode` (knip).
+- Packages are `packages/*` (`@icm/*`), apps are `apps/*`. Ownership and
+  contracts: [docs/overall-product-plan.md](docs/overall-product-plan.md) and
+  [docs/specs/](docs/specs/README.md).
+- Code standards: [CODING_STANDARDS.md](CODING_STANDARDS.md). Testing:
+  [docs/testing/README.md](docs/testing/README.md).
