@@ -1,10 +1,7 @@
 import type { WireCornerOrder, WireRoutingMode } from "@icm/edit-engine";
 
 import type { EditorTool } from "../../interaction/interaction-state";
-import {
-  SITE_CHANGE_LOG_URL,
-  SITE_PRIVACY_PATH,
-} from "../../components/site-resource-links";
+import { SITE_CHANGE_LOG_URL } from "../../components/site-resource-links";
 import { ToolIcon } from "./tool-icon";
 
 function toolLabel(
@@ -90,7 +87,6 @@ function issuesBadge(issues: {
 
 export function EditorStatusbar({
   externalLinksEnabled = true,
-  visitStats,
   status,
   tool,
   vddRailMode,
@@ -109,7 +105,6 @@ export function EditorStatusbar({
   onToggleWireOptions,
   onWireRoutingModeChange,
   onWireCornerOrderChange,
-  onOpenAnalytics,
   onToggleShortcutHints,
   onToggleGrid,
   onZoomOut,
@@ -117,7 +112,6 @@ export function EditorStatusbar({
   onFitView,
 }: {
   externalLinksEnabled?: boolean;
-  visitStats?: { pv: number; uv: number } | null | undefined;
   status: string;
   tool: EditorTool;
   vddRailMode: boolean;
@@ -143,7 +137,6 @@ export function EditorStatusbar({
   onToggleWireOptions: () => void;
   onWireRoutingModeChange: (mode: WireRoutingMode) => void;
   onWireCornerOrderChange: (order: WireCornerOrder) => void;
-  onOpenAnalytics: () => void;
   onToggleShortcutHints: () => void;
   onToggleGrid: () => void;
   onZoomOut: () => void;
@@ -275,30 +268,6 @@ export function EditorStatusbar({
             : null}
         </div>
       </div>
-      {visitStats ? (
-        <a
-          className="statusbar-analytics"
-          href="/analytics"
-          data-testid="statusbar-analytics"
-          title="Open visitor analytics"
-          onClick={(event) => {
-            if (
-              event.button !== 0 ||
-              event.metaKey ||
-              event.ctrlKey ||
-              event.shiftKey ||
-              event.altKey
-            ) {
-              return;
-            }
-            event.preventDefault();
-            onOpenAnalytics();
-          }}
-        >
-          {visitStats.uv.toLocaleString()} visitors ·{" "}
-          {visitStats.pv.toLocaleString()} views
-        </a>
-      ) : null}
       <div className="statusbar-view-controls">
         {externalLinksEnabled ? (
           <>
@@ -310,16 +279,6 @@ export function EditorStatusbar({
               rel="noreferrer"
             >
               Change Log
-            </a>
-            {/* A new tab, like Change Log: the drawing stays open here. */}
-            <a
-              className="statusbar-change-log statusbar-privacy"
-              data-testid="statusbar-privacy"
-              href={SITE_PRIVACY_PATH}
-              target="_blank"
-              rel="noreferrer"
-            >
-              Privacy
             </a>
           </>
         ) : null}

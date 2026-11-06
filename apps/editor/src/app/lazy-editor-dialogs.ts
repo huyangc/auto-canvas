@@ -42,32 +42,6 @@ export const LazyNetlistPreflightDialog = lazyChunk("dialog", () =>
   ),
 );
 
-export const LazyPublishGalleryDialog = import.meta.env?.ICM_DESKTOP
-  ? (
-      _props: ComponentProps<
-        typeof import("../features/editor-shell/publish-gallery-dialog").PublishGalleryDialog
-      >,
-    ) => null
-  : lazyChunk("dialog", () =>
-      import("../features/editor-shell/publish-gallery-dialog").then(
-        (module) => ({
-          default: module.PublishGalleryDialog,
-        }),
-      ),
-    );
-
-export const LazyVersionHistoryDialog = import.meta.env?.ICM_DESKTOP
-  ? (
-      _props: ComponentProps<
-        typeof import("../components/version-history-dialog").VersionHistoryDialog
-      >,
-    ) => null
-  : lazyChunk("dialog", () =>
-      import("../components/version-history-dialog").then((module) => ({
-        default: module.VersionHistoryDialog,
-      })),
-    );
-
 export const LazyProjectInfoDialog = lazyChunk("dialog", () =>
   import("../features/editor-shell/project-info-dialog").then((module) => ({
     default: module.ProjectInfoDialog,
@@ -137,18 +111,6 @@ export const LazyDocumentSettingsSection = lazyChunk("inline", () =>
   })),
 );
 
-export const LazyExamplesPanel = import.meta.env?.ICM_DESKTOP
-  ? (
-      _props: ComponentProps<
-        typeof import("../features/editor-shell/examples-panel").ExamplesPanel
-      >,
-    ) => null
-  : lazyChunk("inline", () =>
-      import("../features/editor-shell/examples-panel").then((module) => ({
-        default: module.ExamplesPanel,
-      })),
-    );
-
 const loadComponentDefinitionEditor = () =>
   import("../features/user-components/component-definition-editor");
 
@@ -167,33 +129,4 @@ export const LazyAgentPropertiesSection = import.meta.env?.ICM_DESKTOP
       import("../agent/connect-agent-panel").then((module) => ({
         default: module.AgentPropertiesSection,
       })),
-    );
-
-/** Community polling is absent when no community surface is mounted. */
-export const LazyGalleryPublishedNotice = import.meta.env?.ICM_DESKTOP
-  ? (
-      _props: ComponentProps<
-        typeof import("../features/editor-shell/gallery-published-notice").GalleryPublishedNotice
-      >,
-    ) => null
-  : lazyChunk("inline", () =>
-      import("../features/editor-shell/gallery-published-notice").then(
-        (module) => ({
-          default: module.GalleryPublishedNotice,
-        }),
-      ),
-    );
-
-export const LazyGalleryTopologyTaskNotice = import.meta.env?.ICM_DESKTOP
-  ? (
-      _props: ComponentProps<
-        typeof import("../features/editor-shell/gallery-topology-task-notice").GalleryTopologyTaskNotice
-      >,
-    ) => null
-  : lazyChunk("inline", () =>
-      import("../features/editor-shell/gallery-topology-task-notice").then(
-        (module) => ({
-          default: module.GalleryTopologyTaskNotice,
-        }),
-      ),
     );

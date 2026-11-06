@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { chooseComponent } from "./editor-fixtures.js";
-import { sessionUser, signIn } from "./gallery-fixtures.js";
+import { sessionUser, signIn } from "./account-fixtures.js";
 
 /** Each element's left, right and top edge in the viewport. */
 const edges = (elements: Element[]) =>
@@ -35,7 +35,7 @@ test("keeps editor chrome typography from suppressing SVG italics", async ({
 
 // The GitHub, change log and credit links are App.test's ("links GitHub and
 // the change log directly without a Help surface").
-test("keeps Gallery Library Netlist and Project Code together on the left at full and half width", async ({
+test("keeps Library Netlist and Project Code together on the left at full and half width", async ({
   page,
 }) => {
   await page.goto("/editor");
@@ -48,12 +48,7 @@ test("keeps Gallery Library Netlist and Project Code together on the left at ful
       .evaluateAll((buttons) =>
         buttons.map((button) => button.getAttribute("data-testid")),
       ),
-  ).toEqual([
-    "examples-toggle",
-    "library-toggle",
-    "netlist-panel-toggle",
-    "project-code-toggle",
-  ]);
+  ).toEqual(["library-toggle", "netlist-panel-toggle", "project-code-toggle"]);
   for (const width of [1440, 720]) {
     await page.setViewportSize({ width, height: 900 });
     const bounds = await panels.getByRole("button").evaluateAll(edges);
@@ -88,7 +83,7 @@ test("keeps Gallery Library Netlist and Project Code together on the left at ful
   }
 });
 
-test("compacts the editor header at half width and keeps the account role in its menu", async ({
+test("compacts the editor header at half width and keeps account identity available", async ({
   page,
 }) => {
   await page.route("**/api/auth/providers", (route) =>
@@ -109,8 +104,8 @@ test("compacts the editor header at half width and keeps the account role in its
   await expect(
     page.getByRole("heading", { name: "Analog Canvas" }),
   ).toBeHidden();
-  await expect(page.getByTestId("header-gallery-link")).toBeVisible();
-  await expect(page.getByTestId("header-arena-link")).toBeVisible();
+  await expect(page.getByTestId("header-gallery-link")).toHaveCount(0);
+  await expect(page.getByTestId("header-arena-link")).toHaveCount(0);
   await expect(page.getByTestId("account-name")).toBeVisible();
   await expect(page.getByTestId("account-owner")).toBeHidden();
 
@@ -118,7 +113,7 @@ test("compacts the editor header at half width and keeps the account role in its
   for (const width of [320, 390, 480, 720, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     const leftControls = page.locator(
-      ".app-brand > :is(.gallery-home-link, .header-gallery-link, .project-menu, .command-menu)",
+      ".app-brand > :is(.editor-brand, .project-menu, .command-menu)",
     );
     const leftBounds = (await leftControls.evaluateAll(edges)).filter(
       ({ right, left }) => right > left,
@@ -142,10 +137,10 @@ test("compacts the editor header at half width and keeps the account role in its
     );
     const actionBounds = await actions
       .locator(
-        '[data-testid="open-analog-simulation"], [data-testid="open-agent"], [data-testid="publish-gallery-button"]',
+        '[data-testid="open-analog-simulation"], [data-testid="open-agent"]',
       )
       .evaluateAll(edges);
-    expect(actionBounds).toHaveLength(3);
+    expect(actionBounds).toHaveLength(2);
     for (let index = 1; index < actionBounds.length; index++) {
       expect(actionBounds[index]!.left).toBeGreaterThanOrEqual(
         actionBounds[index - 1]!.right,
@@ -155,10 +150,10 @@ test("compacts the editor header at half width and keeps the account role in its
       ).toBeLessThanOrEqual(4);
     }
     expect(actionBounds.at(-1)!.right).toBeLessThanOrEqual(width);
-    await expect(actions.getByTestId("publish-gallery-button")).toBeVisible();
+    await expect(actions.getByTestId("publish-gallery-button")).toHaveCount(0);
     await expect(actions.getByTestId("open-agent")).toBeVisible();
     await expect(actions.locator(".tokenzhang-link-icon")).toBeVisible();
-    // The name, or at phone widths its round mark alone, opens the account.
+    // The name, or its round mark at phone widths, identifies the account.
     await expect(actions.getByTestId("account-name")).toBeVisible();
     if (width <= 760) {
       await expect(
@@ -171,12 +166,10 @@ test("compacts the editor header at half width and keeps the account role in its
       ).toBeHidden();
     }
   }
-
-  // Beside the drawing, account navigation keeps this window for workspace
-  // return; the account page's Owner role is account.test's.
-  const name = page.getByTestId("account-name");
-  await expect(name).toHaveAttribute("href", "/account");
-  await expect(name).not.toHaveAttribute("target", "_blank");
+  await page.getByTestId("account-name").click();
+  await expect(
+    page.getByRole("button", { name: "Sign out", exact: true }),
+  ).toBeVisible();
 });
 
 // A failed providers or session request falls back to the account menu.

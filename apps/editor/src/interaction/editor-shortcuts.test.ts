@@ -272,11 +272,8 @@ describe("editor shortcut contract", () => {
     expect(resolve("x")).toBeNull();
   });
 
-  it("gives the three primary panels browser-safe letter shortcuts", () => {
-    expect(resolve("g")).toEqual({
-      kind: "toggle-panel",
-      panel: "gallery",
-    });
+  it("gives the primary panels browser-safe letter shortcuts", () => {
+    expect(resolve("g")).toBeNull();
     expect(resolve("b")).toEqual({
       kind: "toggle-panel",
       panel: "library",

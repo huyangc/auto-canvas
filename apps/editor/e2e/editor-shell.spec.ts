@@ -1,5 +1,5 @@
 // The editor around the drawing: formal export, the command surface and
-// menus, panels, analytics, the Properties dock, Project Code and camera
+// menus, panels, the Properties dock, Project Code and camera
 // fitting. Recovery is recovery-dialog's and recovery-hardening's.
 
 import { expect, test } from "@playwright/test";
@@ -236,13 +236,13 @@ test("keeps panel tooltips visible and exposes panel keyboard shortcuts", async 
   page,
 }) => {
   await openEditor(page);
-  const gallery = page.getByTestId("examples-toggle");
-  await expect(gallery).not.toHaveAttribute("title");
-  await expect(gallery).toHaveAttribute("aria-keyshortcuts", "G");
-  await gallery.hover();
+  const library = page.getByTestId("library-toggle");
+  await expect(library).not.toHaveAttribute("title");
+  await expect(library).toHaveAttribute("aria-keyshortcuts", "B");
+  await library.hover();
   const tooltip = page.getByRole("tooltip");
-  await expect(tooltip).toContainText("Insert a circuit from the Gallery");
-  await expect(tooltip).toContainText("(G)");
+  await expect(tooltip).toContainText("Hide component library");
+  await expect(tooltip).toContainText("(B)");
   const tooltipBounds = await tooltip.boundingBox();
   expect(tooltipBounds).not.toBeNull();
   expect(tooltipBounds!.x).toBeGreaterThanOrEqual(8);
@@ -250,15 +250,15 @@ test("keeps panel tooltips visible and exposes panel keyboard shortcuts", async 
     await page.evaluate(() => window.innerWidth - 8),
   );
 
-  // B and N toggle their panels the same way (editor-shortcuts maps all three).
-  const initialPressed = await gallery.getAttribute("aria-pressed");
-  await page.keyboard.press("g");
-  await expect(gallery).toHaveAttribute(
+  // The Library shortcut toggles the same panel as its button.
+  const initialPressed = await library.getAttribute("aria-pressed");
+  await page.keyboard.press("b");
+  await expect(library).toHaveAttribute(
     "aria-pressed",
     initialPressed === "true" ? "false" : "true",
   );
-  await page.keyboard.press("g");
-  await expect(gallery).toHaveAttribute("aria-pressed", initialPressed!);
+  await page.keyboard.press("b");
+  await expect(library).toHaveAttribute("aria-pressed", initialPressed!);
 });
 
 test("keeps insertion, selection and inspection from resizing the canvas, and typing from triggering shortcuts", async ({
@@ -308,21 +308,6 @@ test("keeps the command surface compact, its menus dismissable, and publishes PW
   page,
 }) => {
   await page.goto("/editor");
-  // Publish rests in soft blue and turns solid blue under the pointer
-  // (#1612); the app-wide button hover once turned it grey instead.
-  const publish = page
-    .locator(".app-chrome-actions")
-    .getByTestId("publish-gallery-button");
-  // Read the settled colour: a running transition still reports its start.
-  const fill = () =>
-    publish.evaluate((element) => {
-      for (const animation of element.getAnimations()) animation.finish();
-      return getComputedStyle(element).backgroundColor;
-    });
-  expect(await fill()).toBe("rgba(35, 131, 226, 0.1)");
-  await publish.hover();
-  await expect.poll(fill).toBe("rgb(35, 131, 226)");
-
   // Header menus, one open at a time; a blank canvas click or Escape
   // dismisses them without navigating away.
   await expect(page.getByTestId("copy-netlist")).toBeHidden();
@@ -355,108 +340,6 @@ test("keeps the command surface compact, its menus dismissable, and publishes PW
       { src: "./icon-512.png?v=nmos-4", sizes: "512x512", purpose: "any" },
     ],
   });
-});
-
-test("shows first-party visitor analytics without tracking the dashboard itself", async ({
-  page,
-}) => {
-  await page.addInitScript(() => localStorage.setItem("theme", "dark"));
-  // An administrator: the page asks the session before the admin count.
-  await page.route("**/api/auth/me", (route) =>
-    route.fulfill({
-      json: {
-        user: {
-          id: "admin-1",
-          displayName: "Admin",
-          provider: "google",
-          isAdmin: true,
-        },
-      },
-    }),
-  );
-  await page.route("**/api/auth/admin/stats", async (route) => {
-    await route.fulfill({
-      contentType: "application/json",
-      body: JSON.stringify({ registeredAccounts: 42 }),
-    });
-  });
-  let dashboardTracked = false;
-  await page.route("**/api/track", async (route) => {
-    dashboardTracked = true;
-    await route.fulfill({ status: 204 });
-  });
-  await page.route("**/api/analytics", async (route) => {
-    const countries = [
-      "CN",
-      "US",
-      "GB",
-      "DE",
-      "FR",
-      "JP",
-      "SG",
-      "CA",
-      "AU",
-      "IN",
-      "NZ",
-    ].map((code, index) => ({ code, pv: 12 - index, uv: 11 - index }));
-    await route.fulfill({
-      contentType: "application/json",
-      body: JSON.stringify({
-        generatedAt: "2026-08-12T00:00:00.000Z",
-        totals: { pv: 12, uv: 7 },
-        today: { date: "2026-08-12", pv: 3, uv: 2 },
-        days: [
-          { date: "2026-05-15", pv: 1, uv: 1 },
-          { date: "2026-08-12", pv: 3, uv: 2 },
-        ],
-        countries,
-        points: [{ lat: 40, lng: 116, count: 8 }],
-        paths: [{ path: "/", pv: 12, uv: 7 }],
-        sources: [{ source: "direct-or-unknown", pv: 12, uv: 7 }],
-        breakdownStartedAt: "2026-08-12T00:00:00.000Z",
-        breakdownTotals: {
-          countries: { pv: 12, uv: 7 },
-          sources: { pv: 12, uv: 7 },
-          pages: { pv: 12, uv: 7 },
-        },
-      }),
-    });
-  });
-
-  await page.goto("/analytics");
-  await expect(page.getByRole("heading", { name: "Analytics" })).toBeVisible();
-  await expect(page.getByText("Registered accounts")).toBeVisible();
-  await expect(page.getByText("42", { exact: true })).toBeVisible();
-  await expect(page).toHaveTitle("Analytics — Analog Canvas");
-  await expect(
-    page.getByRole("link", { name: "Back to editor" }),
-  ).toHaveAttribute("href", "/");
-  await expect(page.getByRole("textbox", { name: "From" })).toHaveValue(
-    "2026-05-15",
-  );
-  await expect(
-    page.getByRole("textbox", { name: "To", exact: true }),
-  ).toHaveValue("2026-08-12");
-  await expect(
-    page.getByRole("button", { name: "Last 90 days" }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: "ISO 3166 Code" }),
-  ).toBeVisible();
-  await expect(page.getByText("China")).toBeVisible();
-  await expect(page.getByText("New Zealand")).toHaveCount(0);
-  await page.getByRole("button", { name: "Show all 11" }).click();
-  await expect(page.getByText("New Zealand")).toBeVisible();
-
-  const themeSwitch = page.getByRole("button", {
-    name: "Switch to light theme",
-  });
-  await themeSwitch.click();
-  await expect(page.locator("html")).toHaveClass(/light/);
-  await expect(
-    page.getByRole("button", { name: "Switch to dark theme" }),
-  ).toBeVisible();
-  expect(dashboardTracked).toBe(false);
 });
 
 // The settings code, its sixteen bounded choices, the serialized shape and
@@ -569,4 +452,44 @@ test("Fit View keeps the drawing clear of the Properties dock", async ({
     );
   expect(rights).toHaveLength(3);
   for (const right of rights) expect(right).toBeLessThanOrEqual(dockBox.x);
+});
+
+test("every web path opens the editor without community requests", async ({
+  page,
+}) => {
+  const communityRequests: string[] = [];
+  page.on("request", (request) => {
+    if (
+      /^\/api\/(?:gallery|arena|boards|analytics|track|stats)(?:[/?]|$)/u.test(
+        new URL(request.url()).pathname,
+      )
+    )
+      communityRequests.push(request.url());
+  });
+  await page.route("**/api/auth/me", (route) =>
+    route.fulfill({ json: { user: null } }),
+  );
+  await page.route("**/api/auth/providers", (route) =>
+    route.fulfill({ json: { github: false, google: false, email: false } }),
+  );
+  for (const path of [
+    "/",
+    "/editor",
+    "/g/anything",
+    "/analytics",
+    "/privacy",
+    "/account",
+    "/unknown",
+  ]) {
+    await page.goto(path);
+    await expect(page.getByTestId("schematic-canvas")).toBeVisible();
+    await expect(page.getByTestId("publish-gallery-button")).toHaveCount(0);
+    await expect(page.getByTestId("examples-toggle")).toHaveCount(0);
+    await openMenu(page, "Edit");
+    await expect(
+      page.getByRole("button", { name: "User Components…", exact: true }),
+    ).toBeVisible();
+    await page.keyboard.press("Escape");
+  }
+  expect(communityRequests).toEqual([]);
 });

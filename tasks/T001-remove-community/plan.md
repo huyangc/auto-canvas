@@ -32,10 +32,10 @@ Verified on `main` at `e57f81d`:
   wraps `App` with `createWebEditorServices()`.
 - `apps/editor/src/services/editor-services.tsx:54` defines
   `capabilities { community, localComponents?, agent, simulation,
-  externalLinks }`. Web (`services/web-editor-services.ts`) sets
+externalLinks }`. Web (`services/web-editor-services.ts`) sets
   `community: true` with a Cloud `projectStore` and `identity`; desktop
   (`services/preview-editor-services.ts`) sets `community: false,
-  localComponents: true` with `identity: null, projectStore: null`.
+localComponents: true` with `identity: null, projectStore: null`.
 - `community` currently gates two different things: Gallery features, and
   the User Components library and definition editing, via
   `community || localComponents` at `app/App.tsx:4120`,

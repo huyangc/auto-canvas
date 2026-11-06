@@ -967,14 +967,14 @@ test("shows the complete foldable categorized Library, quick-places a device, an
   const libraryChips = panel.locator('[data-testid^="shapes-chip-"]');
 
   await expect(panel).toHaveAttribute("data-open", "true");
-  // The panel toggles lead the drawing toolbar on one row, Examples first.
-  const [examplesBox, libraryBox] = await Promise.all(
-    ["examples-toggle", "library-toggle"].map((id) =>
+  // The panel toggles lead the drawing toolbar on one row, Library first.
+  const [libraryBox, netlistBox] = await Promise.all(
+    ["library-toggle", "netlist-panel-toggle"].map((id) =>
       page.getByTestId(id).boundingBox(),
     ),
   );
-  expect(examplesBox!.y).toBe(libraryBox!.y);
-  expect(examplesBox!.x).toBeLessThan(libraryBox!.x);
+  expect(libraryBox!.y).toBe(netlistBox!.y);
+  expect(libraryBox!.x).toBeLessThan(netlistBox!.x);
   const transistorCategory = page.getByTestId("shapes-category-transistors");
   const transistorChips = transistorCategory.locator(
     '[data-testid^="shapes-chip-"]',

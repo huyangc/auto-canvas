@@ -1,3 +1,4 @@
+import "./shelf-wall.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { TilePreview } from "./tile-preview";
 import { InlineConfirm } from "./inline-confirm";
@@ -26,7 +27,7 @@ import { downloadBlob } from "../hosts/download-link";
  * "My shelf": a member's own saved circuits as a wall rather than a list of
  * names in a menu. Every tile is private — the worker scopes both the listing
  * and each thumbnail to the signed-in account — so the shelf is a personal
- * corner of the same server the community gallery lives on.
+ * library of Cloud Projects.
  */
 
 export type ShelfState =
@@ -274,7 +275,7 @@ export function ShelfWall() {
 
   if (state.status === "loading") {
     return (
-      <p className="gallery-status" data-testid="shelf-loading">
+      <p className="shelf-status" data-testid="shelf-loading">
         Loading your shelf…
       </p>
     );
@@ -282,16 +283,16 @@ export function ShelfWall() {
 
   if (state.status === "signed-out") {
     return (
-      <p className="gallery-status" data-testid="shelf-signed-out">
+      <p className="shelf-status" data-testid="shelf-signed-out">
         Sign in to keep your own shelf. Circuits you save there stay private to
-        your account until you publish one to the gallery.
+        your account.
       </p>
     );
   }
 
   if (state.status === "unreachable") {
     return (
-      <p className="gallery-status" data-testid="shelf-unreachable">
+      <p className="shelf-status" data-testid="shelf-unreachable">
         Could not reach your shelf: {state.message}
       </p>
     );
@@ -299,7 +300,7 @@ export function ShelfWall() {
 
   if (state.projects.length === 0) {
     return (
-      <p className="gallery-status" data-testid="shelf-empty">
+      <p className="shelf-status" data-testid="shelf-empty">
         Your shelf is empty. Open the <a href="/editor">editor</a>, draw
         something, and use File → Save to keep it here.
       </p>
@@ -307,7 +308,7 @@ export function ShelfWall() {
   }
 
   return (
-    <section className="gallery-wall" data-testid="shelf-wall">
+    <section className="shelf-wall" data-testid="shelf-wall">
       {error ? (
         <p role="alert" className="shelf-action-error">
           {error}
@@ -329,9 +330,9 @@ export function ShelfWall() {
           .map((project) => ({
             key: project.id,
             node: (
-              <div className="gallery-tile-wrap">
+              <div className="shelf-tile-wrap">
                 <a
-                  className="gallery-tile"
+                  className="shelf-tile"
                   href={shelfProjectHref(project.id)}
                   data-testid={`shelf-tile-${project.id}`}
                 >
@@ -340,14 +341,14 @@ export function ShelfWall() {
                     src={cloudProjectPreviewUrl(project.id, project.revision)}
                     alt={`Preview of ${project.name}`}
                   />
-                  <span className="gallery-tile-copy">
-                    <span className="gallery-tile-name">
+                  <span className="shelf-tile-copy">
+                    <span className="shelf-tile-name">
                       {project.favorite ? (
                         <span aria-label="Favorite">★ </span>
                       ) : null}
                       {project.name}
                     </span>
-                    <span className="gallery-tile-meta">
+                    <span className="shelf-tile-meta">
                       <time dateTime={project.updatedAt}>
                         {formatUpdatedAt(project.updatedAt)}
                       </time>

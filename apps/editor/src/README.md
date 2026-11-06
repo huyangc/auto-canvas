@@ -3,9 +3,8 @@
 The editor source tree is organized by ownership rather than file type. Keep
 tests beside the implementation whose contract they protect.
 
-The sibling `../analytics/` directory is the complete cross-runtime first-party
-analytics module: dashboard, styles, browser tracking, HTTP routes, map data,
-and Durable Object storage. `src/` and the top-level Worker only mount it.
+The web entry opens the editor on every path. Legacy server modules in the
+sibling directory remain for the existing Worker; the editor does not mount them.
 
 ## Directory Responsibilities
 
@@ -40,7 +39,7 @@ and Durable Object storage. `src/` and the top-level Worker only mount it.
   - `component-insert/`: the insert dialog, placement tray, placement preview
     and snapping, symbol catalog and artwork, and VDD rail placement.
   - `drafting/`: drafting creation and manipulation.
-  - `editor-shell/`: file, export, Cloud Project, and Gallery commands;
+  - `editor-shell/`: file, export, Cloud Project commands;
     toolbars, status bar, library panels, document settings, and symbol
     sibling swaps.
   - `hierarchy/`: Cell management and interface dialogs, Cell symbol review,
@@ -56,7 +55,7 @@ and Durable Object storage. `src/` and the top-level Worker only mount it.
   - `simulation/`: the analog Simulation workspace, run history and results,
     source editing and waveform export/placement.
   - `text-editing/`: annotation and drafting-text editing.
-  - `user-components/`: code and preview authoring, the public component library,
+  - `user-components/`: code and preview authoring, the private User Components library,
     shared definition contracts, and instance-isolated application.
   - `wiring/`: wire proposals, manual paths, and route interaction geometry.
   - `logical-net-choices.ts`, at the `features/` root: the Logical Net choice
@@ -70,8 +69,7 @@ and Durable Object storage. `src/` and the top-level Worker only mount it.
 
 `main.tsx`, `styles.css`, and `vite-env.d.ts` remain at the source root because
 they are build/runtime entry infrastructure rather than product domains. The
-root also holds `gallery-client.ts`, `gallery.css`, and the static service
-worker test `service-worker-cache.test.ts`.
+root also holds the static service worker test `service-worker-cache.test.ts`.
 
 ## Editor Composition Boundaries
 

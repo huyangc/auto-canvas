@@ -9,6 +9,14 @@ import { captureProjectSaveSnapshot } from "../document/project-save-coordinator
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Web editor composition", () => {
+  it("keeps private components, Agent and simulation available without community", () => {
+    expect(createWebEditorServices().capabilities).toEqual({
+      userComponents: true,
+      agent: true,
+      simulation: true,
+      externalLinks: true,
+    });
+  });
   it("saves the same canonical snapshot used for recovery while later edits stay independent", async () => {
     const controller = new EditorDocumentController(
       createEmptyProject("saved", "Original"),

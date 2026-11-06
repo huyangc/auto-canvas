@@ -29,7 +29,7 @@ import {
   openProject,
   readAgentClaim,
 } from "./editor-fixtures.js";
-import { sessionUser, signIn } from "./gallery-fixtures.js";
+import { sessionUser, signIn } from "./account-fixtures.js";
 import { placedInstance } from "./canvas-fixtures.js";
 
 async function mockCloudProjects(page: Page) {
@@ -278,10 +278,8 @@ test("Check and Save keeps its snapshot safe while the drawing is replaced or ed
   expect(captured!.documents[0]!.instances).toHaveLength(1);
 });
 
-// The paired working copy's own Gallery round trip is web-agent-session's
-// ("restores the same paired working copy through refresh and Gallery…");
-// this is the Cloud binding through both.
-test("paired refresh and Gallery return preserve the saved Cloud binding", async ({
+// A paired working copy keeps its Cloud binding through refresh and Agent edits.
+test("paired refresh preserves the saved Cloud binding", async ({
   page,
   baseURL,
 }) => {
@@ -351,62 +349,6 @@ test("paired refresh and Gallery return preserve the saved Cloud binding", async
   await expect.poll(() => cloud.stored()?.revision).toBe(3);
   await expectStatus(page, "Saved New Circuit to Cloud");
   await expect(page.getByTestId("project-unsaved-indicator")).toHaveCount(0);
-
-  // Back from the Gallery, Ctrl+S still updates the same Cloud Project.
-  await page.getByRole("link", { name: "Back to the gallery" }).click();
-  await page.getByTestId("gallery-editor-link").click();
-  await expectRestoredCount("2");
-  await expect(page.getByTestId("project-unsaved-indicator")).toHaveCount(0);
-  await page.keyboard.press("Control+s");
-  await expect.poll(() => cloud.stored()?.revision).toBe(4);
-  expect(
-    await client.status(session.sessionId, session.agentToken),
-  ).toMatchObject({ editor: "attached" });
-});
-
-test("Continue without saving to the Gallery drops the edits without a second browser prompt", async ({
-  page,
-}) => {
-  const cloud = await mockCloudProjects(page);
-  const guard = page.getByRole("dialog", {
-    name: "Unsaved changes",
-  });
-  const leaveAndReturn = async () => {
-    await page.getByRole("link", { name: "Back to the gallery" }).click();
-    await guard
-      .getByRole("button", { name: "Continue without saving" })
-      .click();
-    // A second, browser-owned prompt would have kept the page here.
-    await expect(page).toHaveURL(/\/$/u);
-    // Back in the same window, its saved tabs are restored before anything
-    // is counted.
-    await page.goto("/editor");
-    await expect(page.getByTestId("status")).toContainText(
-      "Switched to New Circuit",
-      { timeout: 15_000 },
-    );
-  };
-
-  await page.goto("/editor");
-  // The guard protects meaningful drawings: three authored objects.
-  await placeResistors(page, [300, 380, 460]);
-  // A drawing never saved leaves the window's tabs (#1288).
-  await leaveAndReturn();
-  await expect(page.getByTestId("active-instance-count")).toHaveText("0");
-
-  // A Cloud Project returns to its saved version.
-  await placeResistors(page, [300]);
-  await page.keyboard.press("Control+s");
-  await expect.poll(() => cloud.stored()?.revision).toBe(1);
-  await expect(page.getByTestId("project-unsaved-indicator")).toHaveCount(0);
-  await placeResistors(page, [380, 460]);
-  await leaveAndReturn();
-  await expect(page.getByTestId("active-instance-count")).toHaveText("1");
-  await expect(page.getByTestId("project-unsaved-indicator")).toHaveCount(0);
-
-  // A New Circuit link opens a blank tab beside the ones brought back.
-  await page.goto("/editor?new=1");
-  await expect(page.getByTestId("active-instance-count")).toHaveText("0");
 });
 
 // The migration chain is legacy-load's and the split-Ground repair is

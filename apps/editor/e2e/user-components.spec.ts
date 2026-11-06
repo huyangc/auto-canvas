@@ -11,7 +11,7 @@ import {
 } from "./editor-fixtures";
 import { openSelectionShelf, placeComponent } from "./manual-editor-fixtures";
 import { placedInstance, onScreen, drawWire } from "./canvas-fixtures";
-import { mockProviders, sessionUser, signIn } from "./gallery-fixtures";
+import { mockProviders, sessionUser, signIn } from "./account-fixtures";
 import { analyzeDesignNetlist, createDesignNetlistExport } from "@icm/netlist";
 import { builtInSymbols, createProjectSymbolResolver } from "@icm/symbols";
 import { deviceDescriptor } from "@icm/devices";

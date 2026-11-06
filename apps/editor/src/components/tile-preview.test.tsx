@@ -19,7 +19,7 @@ describe("TilePreview", () => {
     expect(html).toContain('decoding="async"');
     expect(html).toContain('width="640"');
     expect(html).toContain('height="360"');
-    expect(html).not.toContain("gallery-tile-placeholder");
+    expect(html).not.toContain("shelf-tile-placeholder");
   });
 
   it("omits incomplete dimensions for an older Gallery response", () => {

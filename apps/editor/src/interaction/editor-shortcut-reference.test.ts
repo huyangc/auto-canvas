@@ -14,7 +14,6 @@ describe("editor shortcut reference", () => {
       "F: Fit view",
       "Home: Fit view",
       "Arrow keys: Pan view",
-      "G: Toggle Gallery",
       "B: Toggle Component Library",
       "N: Toggle Netlist",
       "I: Insert component",

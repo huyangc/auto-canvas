@@ -1,6 +1,5 @@
 // The editor's keyboard shortcuts, and the outside press that closes open
 // menus and commits text being edited.
-import { arenaGateShown } from "../components/arena-gate-request";
 import {
   useEffect,
   useLayoutEffect,
@@ -92,7 +91,6 @@ interface EditorShortcutDependencies {
   setDocumentSettingsOpen: Dispatch<SetStateAction<boolean>>;
   projectInfoOpen: boolean;
   setProjectInfoOpen: Dispatch<SetStateAction<boolean>>;
-  versionHistoryOpen: boolean;
   recoveryDialogOpen: ProjectFileLifecycle["recoveryDialogOpen"];
   setRecoveryDialogOpen: ProjectFileLifecycle["setRecoveryDialogOpen"];
   hasUnsafeWork: ProjectFileLifecycle["hasUnsafeWork"];
@@ -148,7 +146,6 @@ interface EditorShortcutDependencies {
   toggleHighlightedNet: NavigationController["toggleHighlightedNet"];
   toggleProjectPanel: (mode: EditorProjectPanelMode) => void;
   circuitClipboard: ReturnType<typeof useCircuitClipboard>;
-  toggleExamplesPanel: () => void;
   openSelectedComponentDefinition: () => void;
   hasDefinitionSelection: boolean;
   activateTool: (nextTool: EditorTool) => void;
@@ -256,7 +253,6 @@ function createEditorShortcutHandler({
   setDocumentSettingsOpen,
   projectInfoOpen,
   setProjectInfoOpen,
-  versionHistoryOpen,
   recoveryDialogOpen,
   setRecoveryDialogOpen,
   hasUnsafeWork,
@@ -303,7 +299,6 @@ function createEditorShortcutHandler({
   toggleHighlightedNet,
   toggleProjectPanel,
   circuitClipboard,
-  toggleExamplesPanel,
   openSelectedComponentDefinition,
   hasDefinitionSelection,
   activateTool,
@@ -314,9 +309,6 @@ function createEditorShortcutHandler({
   openNativeProject,
 }: EditorShortcutDependencies) {
   function onKeyDown(event: KeyboardEvent): void {
-    // The Arena gate over the editor owns every key, wherever focus is.
-    if (arenaGateShown()) return;
-    if (versionHistoryOpen) return;
     // Project Info is modal: the canvas never handles its keys.
     // This router sees Escape first, so it closes the dialog here.
     if (projectInfoOpen) {
@@ -329,7 +321,7 @@ function createEditorShortcutHandler({
     if (
       event.target instanceof Element &&
       (event.target.closest(".project-tab-name-input") ||
-        event.target.closest(".gallery-topology-comparison") ||
+        event.target.closest(".cloud-shelf-dialog") ||
         (event.target.closest(".project-menu") &&
           ["Escape", "ArrowUp", "ArrowDown", "Home", "End"].includes(
             event.key,
@@ -562,9 +554,7 @@ function createEditorShortcutHandler({
         toggleHighlightedNet();
         return;
       case "toggle-panel":
-        if (shortcut.panel === "gallery") {
-          toggleExamplesPanel();
-        } else if (shortcut.panel === "library") {
+        if (shortcut.panel === "library") {
           toggleLibraryPanel();
         } else if (shortcut.panel === "netlist") {
           toggleProjectPanel("netlist");

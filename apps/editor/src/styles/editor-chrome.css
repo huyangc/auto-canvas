@@ -664,26 +664,6 @@
   white-space: nowrap;
 }
 
-/* One-click return to the gallery landing page from the editor. */
-.toolbar-gallery-link {
-  display: inline-flex;
-  align-items: center;
-  height: var(--icm-control-h);
-  padding: 0 var(--icm-space-2);
-  border: 1px solid var(--icm-border-strong);
-  border-radius: var(--icm-radius-sm);
-  background: var(--icm-surface);
-  color: var(--icm-text);
-  font-size: var(--icm-font-sm);
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.toolbar-gallery-link:hover {
-  border-color: var(--icm-border-hover);
-  background: var(--icm-surface-hover);
-}
-
 .document-nav select {
   flex: 1 1 12rem;
   min-width: 5rem;
@@ -1135,21 +1115,6 @@
   box-shadow: none;
 }
 
-.statusbar-analytics {
-  margin-left: auto;
-  color: var(--icm-text-muted);
-  font-size: var(--icm-font-xs);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  text-decoration: none;
-}
-
-.statusbar-analytics:hover {
-  color: var(--icm-accent);
-  text-decoration: underline;
-  text-underline-offset: 0.15rem;
-}
-
 .statusbar-change-log {
   flex: 0 0 auto;
   color: var(--icm-text-muted);
@@ -1166,18 +1131,6 @@
 
 /* A narrower window hides the bar's least needed links whole; the zoom
    controls always stay. */
-@media (max-width: 760px) {
-  .statusbar-analytics,
-  .statusbar-change-log:not(.statusbar-privacy) {
-    display: none;
-  }
-}
-
-@media (max-width: 560px) {
-  .statusbar-privacy {
-    display: none;
-  }
-}
 
 @media (max-width: 420px) {
   .statusbar-hints-toggle {
@@ -1249,49 +1202,9 @@
   background: var(--icm-border);
 }
 
-/* The way to the Community Gallery, beside the wordmark and in its blue, so
-   it is found before the toolbar's Insert panel is mistaken for it. */
-.header-gallery-link {
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 6px;
-  height: var(--icm-control-h);
-  padding: 0 11px 0 9px;
-  border-radius: 999px;
-  color: var(--icm-accent);
-  background: var(--icm-accent-soft);
-  font-size: var(--icm-font-sm);
-  font-weight: 600;
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.header-gallery-link:hover {
-  color: #fff;
-  background: var(--icm-accent);
-}
-
-.header-gallery-link:focus-visible {
-  outline: 2px solid var(--icm-accent);
-  outline-offset: 2px;
-}
-
-.header-gallery-link svg {
-  width: 15px;
-  height: 15px;
-  fill: currentColor;
-}
-
-/* The Arena button's swords are a cartoon with its own colours, a size up. */
-.header-arena-link svg {
-  width: 18px;
-  height: 18px;
-}
-
 /* Project titles are variable-length content, never menubar layout inputs. */
 .app-chrome-main .app-brand,
-.app-chrome-main .gallery-home-link,
+.app-chrome-main .editor-brand,
 .project-menu,
 .hierarchy-entry {
   flex: 0 0 auto;
@@ -1390,9 +1303,6 @@
   width: 14px;
   height: 14px;
 }
-
-/* Publish to Gallery rests in the header links' soft blue and turns solid
-   under the pointer, or while its dialog is open. */
 .app-action-primary {
   border-color: transparent;
   color: var(--icm-accent);
@@ -1475,11 +1385,6 @@
     padding: 0;
   }
 }
-
-/* Half-screen editor chrome keeps the product mark and Gallery switch, then
-   lets the left menu group remain anchored while the actions stay on the
-   right. Support links are secondary at this width; the account name stays
-   visible while its role and full identity live behind the ellipsis menu. */
 @media (max-width: 900px) {
   .app-chrome-main {
     gap: var(--icm-space-2);
@@ -1490,7 +1395,7 @@
     gap: var(--icm-space-1);
   }
 
-  .app-chrome-main .gallery-home-link h1 {
+  .app-chrome-main .editor-brand h1 {
     display: none;
   }
 
@@ -1515,9 +1420,6 @@
     padding-inline: 0.35rem;
   }
 }
-
-/* The editor reuses the account contract from Gallery without importing the
-   Gallery page stylesheet. Only its compact header treatment lives here. */
 .app-chrome-actions .account-menu {
   display: inline-flex;
   align-items: center;
@@ -1619,15 +1521,6 @@
     margin-left: 0;
   }
 
-  .app-chrome-main .header-gallery-link {
-    gap: 0;
-    padding-inline: 8px;
-  }
-
-  .app-chrome-main .header-gallery-link > span {
-    display: none;
-  }
-
   .app-chrome-main .command-menu summary,
   .app-chrome-main .project-menu > summary {
     padding-inline: 2px;
@@ -1635,14 +1528,6 @@
 
   .app-chrome-main .app-action-primary {
     padding-inline: 8px;
-  }
-}
-
-/* The logo opens the Gallery too, so its own button goes first, and Arena's
-   with it: the Gallery header keeps the way to Arena. */
-@media (max-width: 420px) {
-  .app-chrome-main .header-gallery-link {
-    display: none;
   }
 }
 
@@ -1747,39 +1632,4 @@
   overflow-wrap: anywhere;
   font-size: var(--icm-font-sm);
   font-weight: 650;
-}
-
-/* After a publish or an update: what reached the Gallery, and a way to it. */
-.gallery-published-notice {
-  position: fixed;
-  top: 96px;
-  left: 50%;
-  z-index: 300;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  max-width: calc(100vw - 32px);
-  padding: 10px 14px;
-  border: 1px solid var(--icm-border);
-  border-radius: 8px;
-  background: var(--icm-surface);
-  color: var(--icm-text);
-  box-shadow: 0 4px 20px rgb(0 0 0 / 12%);
-  font-size: 13px;
-  transform: translateX(-50%);
-}
-
-.gallery-published-notice-mark {
-  color: #16a34a;
-  font-weight: 700;
-}
-
-.gallery-published-notice a,
-.gallery-published-notice button {
-  border: 0;
-  background: none;
-  color: var(--icm-accent);
-  cursor: pointer;
-  font: inherit;
-  white-space: nowrap;
 }

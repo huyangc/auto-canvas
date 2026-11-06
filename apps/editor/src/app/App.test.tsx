@@ -127,7 +127,7 @@ describe("editor shell", () => {
       actionRowStart,
     );
     const actionRow = markup.slice(actionRowStart, actionRowEnd);
-    expect(actionRow).toContain('data-testid="publish-gallery-button"');
+    expect(actionRow).not.toContain('data-testid="publish-gallery-button"');
     expect(actionRow).toContain('class="account-signin account-menu-fallback"');
     const netlistStart = markup.indexOf('aria-label="Netlist"');
     const netlistEnd = markup.indexOf("</div>", netlistStart);
@@ -168,12 +168,6 @@ describe("editor shell", () => {
       "Guide",
     ])
       expect(buttonNames).not.toContain(retired);
-    const agentEnd =
-      markup.indexOf("</button>", markup.indexOf('data-testid="open-agent"')) +
-      "</button>".length;
-    expect(markup.slice(agentEnd)).toMatch(
-      /^<button[^>]*data-testid="publish-gallery-button"/u,
-    );
     expect(markup).toContain("Not checked");
     expect(erc).not.toHaveBeenCalled();
     expect(checks).not.toHaveBeenCalled();
@@ -325,27 +319,6 @@ describe("editor shell", () => {
     expect(markup).not.toContain('data-testid="timing-simulation-panel"');
   });
 
-  it("links to first-party visitor analytics without crowding editor commands", () => {
-    const project = createEmptyProject("analytics-entry", "Analytics Entry");
-    const markup = renderToStaticMarkup(
-      <App
-        services={services}
-        project={project}
-        visitStats={{ pv: 42, uv: 17 }}
-      />,
-    );
-
-    // The live numbers read out in the otherwise-empty statusbar and the
-    // whole readout links to /analytics; the menubar carries no entry.
-    expect(markup).toContain('data-testid="statusbar-analytics"');
-    expect(markup).toContain('href="/analytics"');
-    expect(markup).toContain("17 visitors");
-    expect(markup).toContain("42 views");
-    expect(markup).not.toContain(">Analytics</a>");
-    const statusbar = markup.indexOf('class="app-statusbar"');
-    expect(markup.indexOf('href="/analytics"')).toBeGreaterThan(statusbar);
-  });
-
   it("opens Netlist beside shapes quick-place without a searchable catalog", () => {
     const project = createEmptyProject("selection-shelf", "Selection Shelf");
     const markup = renderToStaticMarkup(
@@ -367,7 +340,7 @@ describe("editor shell", () => {
     expect(markup).not.toContain('data-testid="shapes-insert"');
     expect(markup).toContain('data-testid="library-toggle"');
     expect(markup).toContain('data-testid="shapes-library-panel"');
-    expect(markup).toContain('data-testid="examples-toggle"');
+    expect(markup).not.toContain('data-testid="examples-toggle"');
     expect(markup).not.toContain('data-testid="shapes-fold-examples"');
     expect(markup).not.toContain("Common-Source Amplifier");
     expect(markup).not.toContain("Two-Stage Op Amp");

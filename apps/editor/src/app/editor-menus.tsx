@@ -1,6 +1,6 @@
+import type { useCloudProjects } from "./use-cloud-projects";
 // The editor's menus bound to its commands: the header with its project tabs,
 // File, Edit and Circuit menus and toolbars, and the canvas context menu.
-import { cloudShelfOpened } from "../components/arena-gate-request";
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import {
   deriveRoutingAffectedClosure,
@@ -41,7 +41,6 @@ import type { createEditorTransactionCommands } from "./editor-transaction-comma
 import type { useProjectCheck } from "./use-project-check";
 import type { useEditorAgentConnection } from "./use-agent-hosts";
 import type { useEditorDerivedModel } from "./use-editor-derived-model";
-import type { useGalleryPublishing } from "./use-gallery-publishing";
 import {
   loadNativeProjectWorkspace,
   type useNativeProjectTabs,
@@ -62,7 +61,7 @@ type ProjectStructureCommands = ReturnType<
 type EditorDerivedModel = ReturnType<typeof useEditorDerivedModel>;
 type NavigationController = ReturnType<typeof createEditorNavigationController>;
 type FileCommands = ReturnType<typeof createEditorFileCommands>;
-type GalleryPublishing = ReturnType<typeof useGalleryPublishing>;
+type CloudProjects = ReturnType<typeof useCloudProjects>;
 type SimulationSurface = ReturnType<typeof useSimulationSurface>;
 type AgentConnection = ReturnType<typeof useEditorAgentConnection>;
 type ProjectTabSessions = ReturnType<typeof useProjectTabSessions>;
@@ -82,7 +81,6 @@ export function EditorMenuBar({
   setStatus,
   userComponentsOpen,
   setUserComponentsOpen,
-  leftPanelMode,
   setSelectionOpen,
   searchOpen,
   toggleLibraryPanel,
@@ -105,9 +103,6 @@ export function EditorMenuBar({
   setDocumentSettingsOpen,
   setProjectInfoOpen,
   projectNameEditing,
-  publishGalleryOpen,
-  setPublishGalleryOpen,
-  setOpenedFromCheckNotice,
   cloudProjects,
   reloadCloudProjects,
   cloudManagementBusy,
@@ -151,7 +146,6 @@ export function EditorMenuBar({
   enterSelectedHierarchy,
   returnToTopDocument,
   toggleProjectPanel,
-  toggleExamplesPanel,
   cancelAllTransientInteraction,
   placeCellInstance,
   editorCommands,
@@ -172,8 +166,6 @@ export function EditorMenuBar({
   closeNativeTab,
   closeNativeTabs,
   saveNativeTab,
-  leaveForGallery,
-  leaveForArena,
 }: {
   identity: EditorServices["identity"];
   projectStore: EditorServices["projectStore"];
@@ -187,7 +179,6 @@ export function EditorMenuBar({
   setStatus: Dispatch<SetStateAction<string>>;
   userComponentsOpen: boolean;
   setUserComponentsOpen: Dispatch<SetStateAction<boolean>>;
-  leftPanelMode: EditorPanels["leftPanelMode"];
   setSelectionOpen: EditorPanels["setSelectionOpen"];
   searchOpen: EditorPanels["searchOpen"];
   toggleLibraryPanel: EditorPanels["toggleLibraryPanel"];
@@ -210,14 +201,11 @@ export function EditorMenuBar({
   setDocumentSettingsOpen: Dispatch<SetStateAction<boolean>>;
   setProjectInfoOpen: Dispatch<SetStateAction<boolean>>;
   projectNameEditing: RefObject<boolean>;
-  publishGalleryOpen: GalleryPublishing["publishGalleryOpen"];
-  setPublishGalleryOpen: GalleryPublishing["setPublishGalleryOpen"];
-  setOpenedFromCheckNotice: GalleryPublishing["setOpenedFromCheckNotice"];
-  cloudProjects: GalleryPublishing["cloudProjects"];
+  cloudProjects: CloudProjects["cloudProjects"];
   cloudManagementBusy: ProjectTabSessions["cloudManagementBusy"];
   renameShelfProject: ProjectTabSessions["renameShelfProject"];
   deleteShelfProject: ProjectTabSessions["deleteShelfProject"];
-  reloadCloudProjects: GalleryPublishing["reloadCloudProjects"];
+  reloadCloudProjects: CloudProjects["reloadCloudProjects"];
   analogSimulationState: SimulationSurface["analogSimulationState"];
   openAnalogSimulation: SimulationSurface["openAnalogSimulation"];
   nativeBinding: ProjectFileLifecycle["nativeBinding"];
@@ -256,7 +244,6 @@ export function EditorMenuBar({
   enterSelectedHierarchy: NavigationController["enterSelectedHierarchy"];
   returnToTopDocument: NavigationController["returnToTopDocument"];
   toggleProjectPanel: (mode: EditorProjectPanelMode) => void;
-  toggleExamplesPanel: () => void;
   cancelAllTransientInteraction: () => void;
   placeCellInstance: () => void;
   editorCommands: ReturnType<typeof createEditorCommandRouter>;
@@ -277,16 +264,11 @@ export function EditorMenuBar({
   closeNativeTab: NativeProjectTabs["closeNativeTab"];
   closeNativeTabs: NativeProjectTabs["closeNativeTabs"];
   saveNativeTab: NativeProjectTabs["saveNativeTab"];
-  leaveForGallery: () => void;
-  leaveForArena: () => void;
 }) {
   const { NativeHeaderActions, openExternalLink } = useEditorServices();
   return (
     <EditorAppChrome
-      communityEnabled={capabilities.community}
-      userComponentsEnabled={
-        capabilities.community || capabilities.localComponents === true
-      }
+      userComponentsEnabled={capabilities.userComponents}
       externalLinksEnabled={capabilities.externalLinks}
       hostActions={NativeHeaderActions ? <NativeHeaderActions /> : null}
       onOpenExternalLink={
@@ -369,7 +351,6 @@ export function EditorMenuBar({
             onDeleteShelf={deleteShelfProject}
             onShelfOpened={() => {
               void reloadCloudProjects();
-              cloudShelfOpened();
             }}
             onOpenShelf={(id) => {
               void openCloudProjectById(id, true);
@@ -396,8 +377,7 @@ export function EditorMenuBar({
       projectName={project.name}
       projectSchemaVersion={project.schemaVersion}
       hasUnsavedWork={hasUnsavedChanges()}
-      onOpenGallery={leaveForGallery}
-      onOpenArena={leaveForArena}
+
       fileCommands={{
         ...(NativeFileCommands ? { NativeFileCommands } : {}),
         ...(nativeProjectStore
@@ -562,14 +542,7 @@ export function EditorMenuBar({
             }
           : null
       }
-      publishGalleryOpen={publishGalleryOpen}
-      onPublishGallery={() => {
-        setOpenedFromCheckNotice(false);
-        setPublishGalleryOpen(true);
-      }}
       drawingToolbar={{
-        communityEnabled: capabilities.community,
-        leftPanelMode,
         libraryPanelOpen: visibleLibraryPanelOpen,
         projectPanel:
           projectPanel === "project-code"
@@ -591,7 +564,6 @@ export function EditorMenuBar({
           enabled: editorCommands.state({ id: "history.redo" }).enabled,
           execute: () => editorCommands.execute({ id: "history.redo" }),
         },
-        onToggleExamples: toggleExamplesPanel,
         onToggleLibrary: toggleLibraryPanel,
         onToggleNetlist: () => toggleProjectPanel("netlist"),
         onToggleProjectCode: () => toggleProjectPanel("project-code"),

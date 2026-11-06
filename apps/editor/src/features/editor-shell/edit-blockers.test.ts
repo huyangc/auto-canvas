@@ -12,7 +12,6 @@ const idle = {
   saving: false,
   replaceGuard: false,
   recoveryDialogOpen: false,
-  publishGalleryOpen: false,
   versionHistoryOpen: false,
 };
 

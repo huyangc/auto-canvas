@@ -52,8 +52,7 @@ export interface EditorServices {
   readonly NativeHeaderActions?: ComponentType;
   readonly openExternalLink?: (target: NativeExternalTarget) => Promise<void>;
   readonly capabilities: {
-    readonly community: boolean;
-    readonly localComponents?: boolean;
+    readonly userComponents: boolean;
     readonly agent: boolean;
     readonly simulation: boolean;
     readonly externalLinks: boolean;

@@ -1,6 +1,14 @@
 import { lazy, Suspense, useState } from "react";
 import type { CloudProjectSummary } from "./cloud-projects";
 
+const ShelfWall = import.meta.env?.ICM_DESKTOP
+  ? () => null
+  : lazy(() =>
+      import("../../components/shelf-wall").then((module) => ({
+        default: module.ShelfWall,
+      })),
+    );
+
 const InlineConfirm = lazy(() =>
   import("../../components/inline-confirm").then((module) => ({
     default: module.InlineConfirm,
@@ -22,6 +30,7 @@ export function ProjectShelf({
   onRename(id: string, name: string): Promise<void>;
   onDelete(id: string): Promise<void>;
 }) {
+  const [shelfOpen, setShelfOpen] = useState(false);
   const [editing, setEditing] = useState<{ id: string; name: string } | null>(
     null,
   );
@@ -44,6 +53,26 @@ export function ProjectShelf({
   };
   return (
     <>
+      <button type="button" onClick={() => setShelfOpen(true)}>
+        Browse Cloud Projects…
+      </button>
+      {shelfOpen ? (
+        <dialog
+          className="cloud-shelf-dialog"
+          aria-label="Cloud Projects"
+          ref={(dialog) => {
+            if (dialog && !dialog.open) dialog.showModal();
+          }}
+          onCancel={() => setShelfOpen(false)}
+        >
+          <button type="button" onClick={() => setShelfOpen(false)}>
+            Close
+          </button>
+          <Suspense fallback={<p>Loading Cloud Projects…</p>}>
+            <ShelfWall />
+          </Suspense>
+        </dialog>
+      ) : null}
       {projects.length ? (
         projects.map((project) => (
           <div className="project-shelf-row" key={project.id}>

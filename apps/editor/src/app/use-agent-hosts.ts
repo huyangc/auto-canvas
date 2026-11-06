@@ -18,7 +18,6 @@ import type {
   AgentProjectResourceResponse,
 } from "@icm/agent-adapter";
 import type { CircuitProject, GridRect } from "@icm/model";
-import type { AgentGalleryPublication } from "../agent/agent-gallery-publish";
 import type { AgentRuntime } from "../agent/agent-runtime-loader";
 import type { BrowserAgentPlanningContext } from "../agent/browser-agent-command";
 import type { BrowserAgentFileHost } from "../agent/browser-agent-file-host";
@@ -39,7 +38,6 @@ import type {
   ReplaceProjectOptions,
   useProjectFileLifecycle,
 } from "../document/use-project-file-lifecycle";
-import type { GalleryPublicationRecord } from "../features/editor-shell/gallery-publish";
 import type { useEditorPanels } from "../features/editor-shell/use-editor-panels";
 import type { NetlistExportPreferences } from "../features/netlist-export/netlist-export-preferences";
 import {
@@ -68,12 +66,10 @@ const useHostAgentSession = import.meta.env?.ICM_DESKTOP
 export function useAgentStartupRecovery({
   capabilities,
   restoredWorkspace,
-  initialGalleryEntryId,
   recoveryWorkingCopyId,
 }: {
   capabilities: EditorServices["capabilities"];
   restoredWorkspace: ProjectWorkspace | null;
-  initialGalleryEntryId: string | null;
   recoveryWorkingCopyId: UseRecoveryCoordinatorResult["workingCopyId"];
 }) {
   const [agentStartupRecovery] = useState(() => {
@@ -85,14 +81,7 @@ export function useAgentStartupRecovery({
     )
       return null;
     const search = new URLSearchParams(window.location.search);
-    if (
-      initialGalleryEntryId !== null ||
-      search.has("example") ||
-      search.has("project") ||
-      search.has("history") ||
-      search.get("new") === "1"
-    )
-      return null;
+    if (search.has("project") || search.get("new") === "1") return null;
     const saved = peekAgentSessionRecovery(window.sessionStorage);
     return saved?.projectSessionId === recoveryWorkingCopyId ? saved : null;
   });
@@ -342,22 +331,6 @@ export function useAgentProjectResources({
   >(async () => {
     throw new Error("Workspace is initializing");
   });
-  // The working copy an Agent publishes from, read when its request arrives.
-  const agentGalleryPublicationRef = useRef<
-    () => AgentGalleryPublication & {
-      controller: EditorDocumentController;
-      sessionId: string;
-    }
-  >(() => {
-    throw new Error("The Editor is initializing");
-  });
-  const recordGalleryPublicationRef = useRef<
-    (
-      outcome: GalleryPublicationRecord,
-      sessionId: string,
-      by: "person" | "agent",
-    ) => boolean
-  >(() => false);
   return {
     agentFileCandidate,
     setAgentFileCandidate,
@@ -366,8 +339,6 @@ export function useAgentProjectResources({
     projectRunHistory,
     browserAgentSimulationHost,
     agentWorkspaceRef,
-    agentGalleryPublicationRef,
-    recordGalleryPublicationRef,
   };
 }
 

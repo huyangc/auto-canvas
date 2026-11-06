@@ -6,7 +6,6 @@ import {
 } from "react";
 
 import { BugReportLink } from "../components/bug-report-link";
-import { CrossedSwordsIcon } from "../components/crossed-swords-icon";
 import { ProjectMenu } from "./project-menu";
 import { AccountMenu, AccountStatePreload } from "../components/account";
 import { DrawingToolbar } from "../features/editor-shell/drawing-toolbar";
@@ -41,7 +40,6 @@ interface AlignmentAction extends CommandAction {
 }
 
 export interface EditorAppChromeProps {
-  communityEnabled?: boolean;
   identityEnabled?: boolean;
   externalLinksEnabled?: boolean;
   userComponentsEnabled?: boolean;
@@ -52,8 +50,6 @@ export interface EditorAppChromeProps {
   projectName: string;
   projectSchemaVersion: number;
   hasUnsavedWork: boolean;
-  onOpenGallery: () => void;
-  onOpenArena: () => void;
   fileCommands: ComponentProps<typeof FileCommandMenu>;
   searchOpen: boolean;
   onInsertComponent: () => void;
@@ -81,8 +77,6 @@ export interface EditorAppChromeProps {
   agentAction: { label: string; execute: () => void } | null;
   simulationAction?: () => void;
   simulationState?: "closed" | "open" | "maximized" | "minimized";
-  publishGalleryOpen: boolean;
-  onPublishGallery: () => void;
   drawingToolbar: ComponentProps<typeof DrawingToolbar>;
   hierarchyToolbar: ComponentProps<typeof HierarchyToolbar>;
   telemetry: ComponentProps<typeof EditorTestTelemetry>;
@@ -90,10 +84,9 @@ export interface EditorAppChromeProps {
 
 /** Persistent command chrome above the document workspace. */
 export function EditorAppChrome({
-  communityEnabled = true,
   identityEnabled = true,
   externalLinksEnabled = true,
-  userComponentsEnabled = communityEnabled,
+  userComponentsEnabled = true,
   hostActions,
   onOpenExternalLink,
   projectTabs,
@@ -101,8 +94,6 @@ export function EditorAppChrome({
   projectName,
   projectSchemaVersion,
   hasUnsavedWork,
-  onOpenGallery,
-  onOpenArena,
   fileCommands,
   searchOpen,
   onInsertComponent,
@@ -130,8 +121,6 @@ export function EditorAppChrome({
   agentAction,
   simulationAction,
   simulationState = "closed",
-  publishGalleryOpen,
-  onPublishGallery,
   drawingToolbar,
   hierarchyToolbar,
   telemetry,
@@ -147,82 +136,23 @@ export function EditorAppChrome({
     mirrorLeftRight.enabled ||
     mirrorTopBottom.enabled ||
     alignmentActions.length > 0;
-  // A plain click leaves through the editor's own guard for unsaved work; a
-  // modified click opens the Gallery or Arena in another tab as any link
-  // would.
-  const leaveThrough =
-    (leave: () => void) =>
-    (event: MouseEvent<HTMLAnchorElement>): void => {
-      if (
-        event.button !== 0 ||
-        event.metaKey ||
-        event.ctrlKey ||
-        event.shiftKey ||
-        event.altKey
-      ) {
-        return;
-      }
-      event.preventDefault();
-      if (communityEnabled) leave();
-    };
-  const openGallery = leaveThrough(onOpenGallery);
   return (
     <header className="app-chrome">
       <div className="app-chrome-main">
         <div className="app-brand">
-          <a
-            className="gallery-home-link"
-            href={communityEnabled ? "/" : undefined}
-            aria-label={
-              communityEnabled
-                ? "Back to the gallery"
-                : "Analog Canvas desktop preview"
-            }
+          <div
+            className="editor-brand"
+            aria-label="Analog Canvas"
             title={
-              communityEnabled
-                ? "Back to the gallery"
+              identityEnabled
+                ? "Analog Canvas"
                 : "Desktop preview · Save projects to local files"
             }
-            onClick={openGallery}
           >
             <span className="app-brand-mark" aria-hidden="true" />
             <h1 title="Analog Canvas">Analog Canvas</h1>
-          </a>
+          </div>
           {projectHome}
-          {/* The one thing called Gallery: where circuits are browsed,
-              liked and opened. Inserting one into this drawing is the
-              toolbar's Insert. */}
-          {communityEnabled ? (
-            <a
-              className="header-gallery-link"
-              href="/"
-              data-testid="header-gallery-link"
-              title="Browse the Community Gallery"
-              onClick={openGallery}
-            >
-              <svg viewBox="0 0 16 16" aria-hidden="true">
-                <rect x="1.5" y="1.5" width="5.5" height="7" rx="1.2" />
-                <rect x="9" y="1.5" width="5.5" height="4.5" rx="1.2" />
-                <rect x="1.5" y="10.5" width="5.5" height="4" rx="1.2" />
-                <rect x="9" y="8" width="5.5" height="6.5" rx="1.2" />
-              </svg>
-              <span>Gallery</span>
-            </a>
-          ) : null}
-          {/* AnalogArena, where drawings are judged side by side: /arena
-              hands the visitor to chip-arena.com, signed in as here. */}
-          {communityEnabled ? (
-            <a
-              className="header-gallery-link header-arena-link"
-              href="/arena"
-              data-testid="header-arena-link"
-              title="Judge schematics side by side in AnalogArena"
-              onClick={leaveThrough(onOpenArena)}
-            >
-              <CrossedSwordsIcon />
-              <span>Arena</span>
-            </a>
-          ) : null}
           {/* File holds Project Info and the file commands; project tabs
               select projects. */}
           <ProjectMenu
@@ -398,7 +328,7 @@ export function EditorAppChrome({
           </details>
         </div>
         <div className="app-chrome-actions">
-          {/* Simulation, Agent, and Publish are the right-side actions on both
+          {/* Simulation and Agent are the right-side actions on both
               wide and half-width layouts. Keeping them in one fixed group
               leaves File, Edit, and Circuit anchored beside the brand. */}
           {simulationAction ? (
@@ -460,21 +390,7 @@ export function EditorAppChrome({
               <span className="app-action-label">Agent</span>
             </button>
           ) : null}
-          {communityEnabled ? (
-            <button
-              type="button"
-              className="app-action app-action-primary"
-              data-testid="publish-gallery-button"
-              aria-haspopup="dialog"
-              aria-expanded={publishGalleryOpen}
-              title="Publish to Gallery"
-              onClick={onPublishGallery}
-            >
-              <span className="publish-label">Publish</span>
-              <span className="publish-label-long"> to Gallery</span>
-            </button>
-          ) : null}
-          {/* Who is signed in, as the Gallery shows it; Sign in otherwise. */}
+          {/* Who is signed in; Sign in otherwise. */}
           {!import.meta.env?.ICM_DESKTOP && identityEnabled ? (
             <EditorAccountMenu />
           ) : null}

@@ -43,7 +43,7 @@ export type EditorShortcutIntent =
   | { kind: "edit-net-label" | "toggle-display-settings" | "turn-net-labels" }
   | {
       kind: "toggle-panel";
-      panel: "gallery" | "library" | "netlist";
+      panel: "library" | "netlist";
     }
   | { kind: "toggle-net-highlight" }
   | { kind: "edit-component-definition" }
@@ -296,9 +296,6 @@ export function resolveEditorShortcut(
       : { kind: "hierarchy-selection-required" };
   }
 
-  if (plain && key === "g") {
-    return { kind: "toggle-panel", panel: "gallery" };
-  }
   if (plain && key === "b") {
     return { kind: "toggle-panel", panel: "library" };
   }

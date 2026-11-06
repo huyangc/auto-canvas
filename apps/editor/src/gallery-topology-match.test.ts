@@ -6,7 +6,6 @@ import {
 } from "@icm/netlist";
 import { createEmptyProject } from "@icm/model";
 import { parseProject, serializeProject } from "@icm/project-protocol";
-import { projectWithTopologyRoot } from "./features/editor-shell/gallery-topology-project";
 import { CLOSE_MATCH_SIMILARITY } from "./gallery-topology-selection";
 import {
   comparisonCandidate,
@@ -53,20 +52,6 @@ const json = (value: unknown, status = 200) =>
   new Response(JSON.stringify(value), { status });
 
 describe("current Gallery topology matching", () => {
-  it("uses the visible Cell as the comparison root without changing the live Project", () => {
-    const project = resistorProject();
-    const child = structuredClone(project.documents[0]!);
-    child.id = "child";
-    child.name = "Child";
-    project.documents.push(child);
-    const rooted = projectWithTopologyRoot(project, child.id);
-    expect(rooted.topDocumentId).toBe("child");
-    expect(project.topDocumentId).not.toBe("child");
-    expect(projectWithTopologyRoot(project, project.topDocumentId)).toBe(
-      project,
-    );
-  });
-
   it("puts exact topologies first and ranks the nearest non-exact topology", async () => {
     const entries = [entry("partial"), entry("a-same-shape"), entry("z-exact")];
     const projects = new Map([
