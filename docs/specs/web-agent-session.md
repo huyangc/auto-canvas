@@ -93,8 +93,9 @@ GET  /api/agent/openapi.json
   empty and circuit operations return `NO_ACTIVE_PROJECT`. Manual pause stays
   authoritative across completion, recovery and renewal; transport failure
   never revokes.
-- Simulation services, prepared inputs and results keep their originating
-  controller; selecting another Project cannot retarget them.
+- The editor does not advertise a Simulation resource or simulation file
+  operations. Inherited requests receive `SIMULATION_UNAVAILABLE`; the legacy
+  relay/API definitions remain until their separate removal.
 - Project resource `workspace` lists live tabs and Cell revisions, activates,
   opens, saves and copies into a live target via the GUI planner (one Undo);
   Cloud discovery and `import-cell` read saved versions only.

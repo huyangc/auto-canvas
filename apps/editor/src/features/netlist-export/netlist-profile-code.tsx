@@ -36,7 +36,7 @@ export function NetlistProfileCode({
         <p>
           Templates are saved in this browser. Applied device mappings are saved
           with the circuit and can be undone. Model library files belong in the
-          Simulation source configuration.
+          Project model sources in Cell Manager.
         </p>
       )}
     </section>

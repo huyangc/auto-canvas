@@ -22,7 +22,6 @@ import {
 } from "../features/clipboard/project-copy";
 import type { CloudProjectSummary } from "../features/editor-shell/cloud-projects";
 import type { createProjectStructureCommands } from "../features/hierarchy/project-structure-commands";
-import { ProjectRunHistory } from "../features/simulation/project-run-history";
 import type { EditorServices } from "../services/editor-services";
 import { DEFAULT_VIEWBOX } from "./default-view-box";
 import type {
@@ -54,7 +53,6 @@ export function createAgentWorkspaceHandler({
   synchronizeExternalCommit,
   setCloudProjects,
   cloudListMutationRef,
-  simulationSourceBuffer,
   codeDraftDirty,
   restoreFileSession,
   saveProjectToCloud,
@@ -71,10 +69,6 @@ export function createAgentWorkspaceHandler({
   synchronizeExternalCommit: DocumentControllerState["synchronizeExternalCommit"];
   setCloudProjects: Dispatch<SetStateAction<readonly CloudProjectSummary[]>>;
   cloudListMutationRef: RefObject<number>;
-  simulationSourceBuffer: RefObject<{
-    dirty: boolean;
-    flush(): Promise<boolean>;
-  } | null>;
   codeDraftDirty: boolean;
   restoreFileSession: ProjectFileLifecycle["restoreFileSession"];
   saveProjectToCloud: ProjectFileLifecycle["saveProjectToCloud"];
@@ -183,9 +177,7 @@ export function createAgentWorkspaceHandler({
           if (outcome.status === "saved") {
             const stillCurrent =
               snapshot.matchesCurrentProject() &&
-              (targetWorkspaceId !== projectTabs.activeId ||
-                (!codeDraftDirty &&
-                  simulationSourceBuffer.current?.dirty !== true));
+              (targetWorkspaceId !== projectTabs.activeId || !codeDraftDirty);
             liveTarget.session.file.cloudBinding = {
               id: outcome.project.id,
               revision: outcome.project.revision,
@@ -363,7 +355,6 @@ export function createAgentWorkspaceTargets({
   synchronizeExternalCommit,
   agentPlanning,
   browserAgentHost,
-  simulationTransport,
   projectSwitchBlockerRef,
   openProjectInTabRef,
   setAgentFileCandidate,
@@ -381,7 +372,6 @@ export function createAgentWorkspaceTargets({
   synchronizeExternalCommit: DocumentControllerState["synchronizeExternalCommit"];
   agentPlanning: BrowserAgentHostState["agentPlanning"];
   browserAgentHost: BrowserAgentHost;
-  simulationTransport: AgentProjectResourcesOptions["simulationTransport"];
   projectSwitchBlockerRef: AgentProjectResourcesOptions["projectSwitchBlockerRef"];
   openProjectInTabRef: AgentProjectResourcesOptions["openProjectInTabRef"];
   setAgentFileCandidate: AgentProjectResources["setAgentFileCandidate"];
@@ -440,11 +430,10 @@ export function createAgentWorkspaceTargets({
     );
     const existing = agentProjectResources.current
       .get(controller)
-      ?.get(`${controller.projectSessionId}:${simulationTransport}`);
+      ?.get(`${controller.projectSessionId}`);
     const fileHost =
       existing?.files ??
       new runtime.BrowserAgentFileHost({
-        transport: simulationTransport,
         getProjectSessionId: () =>
           available() ? controller.projectSessionId : "closed",
         getProject: () => controller.project,
@@ -469,20 +458,8 @@ export function createAgentWorkspaceTargets({
         dispatchProjectTransaction: (request) =>
           host.dispatchProjectTransaction(request),
       });
-    const history =
-      existing?.history ?? new ProjectRunHistory(controller.project.id);
-    history.activate();
     const simulationHost =
-      existing?.simulation ??
-      new runtime.BrowserAgentSimulationHost({
-        runHistory: history,
-        owner: "agent",
-        files: fileHost.simulationFiles,
-        getProjectSessionId: () =>
-          available() ? controller.projectSessionId : "closed",
-        getProject: () => controller.project,
-        transport: simulationTransport,
-      });
+      existing?.simulation ?? new runtime.BrowserAgentSimulationHost();
     const projectHost = new runtime.BrowserAgentProjectHost({
       workspace: (request) => agentWorkspaceRef.current(request, workspaceId),
       getProjectSessionId: () =>
@@ -508,9 +485,8 @@ export function createAgentWorkspaceTargets({
         group = new Map();
         agentProjectResources.current.set(controller, group);
       }
-      group.set(`${controller.projectSessionId}:${simulationTransport}`, {
+      group.set(`${controller.projectSessionId}`, {
         files: fileHost,
-        history,
         simulation: simulationHost,
       });
     }

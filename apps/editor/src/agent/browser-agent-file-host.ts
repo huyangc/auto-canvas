@@ -8,16 +8,11 @@ import {
   type AgentFileResourceRequest,
   type AgentFileResourceResponse,
 } from "@icm/agent-adapter";
-import {
-  SimulationFiles,
-  type ArtifactPublisher,
-} from "@icm/simulation-service/files";
 import type {
   ProjectTransaction,
   ProjectTransactionResult,
 } from "@icm/edit-engine";
 import { planProjectCellBodyImport } from "@icm/edit-engine";
-import { createSimulationProjectFileHost } from "../features/simulation/project-file-host";
 import { createBrowserFormalExportSource } from "@icm/exporters";
 import { parseProject, serializeProject } from "@icm/project-protocol";
 import type { CircuitProject, SchematicDocument } from "@icm/model";
@@ -27,8 +22,6 @@ import { withImportedInstanceDisplays } from "../features/instance-display/impor
 import type { SymbolResolver } from "@icm/symbols";
 import { prepareDocumentFormulaArtifacts } from "../features/text-editing/formula-artifacts";
 import { importChunk } from "../components/chunk-import";
-import { simulationFileEngine } from "../features/simulation/file-engine";
-import { createBrowserSimulationArtifactStore } from "../features/simulation/browser-simulation-artifact-store";
 
 type StoredCandidate = {
   project: CircuitProject;
@@ -44,8 +37,6 @@ export interface BrowserAgentFileHostOptions {
   loadProjectCode?: () => Promise<
     typeof import("../features/project-code/project-code")
   >;
-  fetch?: typeof fetch;
-  transport?: "direct" | "managed";
   getProjectSessionId: () => string;
   getProject: () => CircuitProject;
   getDocument: (documentId: string) => SchematicDocument | null;
@@ -64,38 +55,14 @@ export interface BrowserAgentFileHostOptions {
 
 /**
  * Browser-only endpoint for named File Resource requests. It owns short-lived
- * candidate bytes and parsed projects. Simulation downloads register immutable
- * byte replicas with the existing authorized relay storage.
+ * candidate bytes and parsed projects.
  * A staged candidate has no authority to replace the live project by itself.
  */
 export class BrowserAgentFileHost {
-  readonly simulationFiles: SimulationFiles;
   private readonly candidates = new Map<string, StoredCandidate>();
   private readonly boundProjectSessionId: string;
-  setArtifactPublisher(
-    publisher: ArtifactPublisher,
-    options?: { leasedDownloads?: boolean },
-  ) {
-    this.simulationFiles.setArtifactPublisher(publisher, options);
-  }
-
   constructor(private readonly options: BrowserAgentFileHostOptions) {
     this.boundProjectSessionId = options.getProjectSessionId();
-    this.simulationFiles = new SimulationFiles(
-      Date.now,
-      options.dispatchProjectTransaction
-        ? createSimulationProjectFileHost({
-            getProject: options.getProject,
-            getProjectSessionId: options.getProjectSessionId,
-            dispatch: options.dispatchProjectTransaction,
-            actor: { kind: "agent", id: "simulation-file-resource" },
-          })
-        : undefined,
-      simulationFileEngine(options),
-      createBrowserSimulationArtifactStore(options.getProject().id, undefined, {
-        retainSession: true,
-      }),
-    );
   }
 
   async handle(
@@ -111,13 +78,11 @@ export class BrowserAgentFileHost {
     this.removeExpired();
     switch (request.operation) {
       case "simulation-input":
-        return {
-          apiVersion: AGENT_API_VERSION,
-          requestId: request.requestId,
-          operation: request.operation,
-          ok: true,
-          result: await this.simulationFiles.handle(request.input),
-        };
+        return this.error(
+          request,
+          "SIMULATION_UNAVAILABLE",
+          "Simulation files are unavailable in auto-canvas. Project source folders are preserved when saved.",
+        );
       case "download":
         return this.download(request);
       case "stage":
@@ -236,7 +201,6 @@ export class BrowserAgentFileHost {
   }
 
   clear(): void {
-    this.simulationFiles.clear();
     this.candidates.clear();
   }
 
@@ -351,8 +315,8 @@ export class BrowserAgentFileHost {
       if (request.artifact === "simulation-plot") {
         return this.error(
           request,
-          "SIMULATION_PLOT_RETIRED",
-          "Built-in simulation plots are retired. Read raw/CSV artifacts through simulation_files and plot externally.",
+          "SIMULATION_UNAVAILABLE",
+          "Simulation is unavailable in auto-canvas. Export a netlist to simulate externally.",
         );
       }
       if (request.artifact === "project") {

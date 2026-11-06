@@ -20,8 +20,8 @@ layout.
 
 ## The editor
 
-The header has **File**, **Edit** and **Circuit** menus and the **Simulate**,
-**Agent** and **Publish** actions. **File** holds Project Info (circuit and
+The header has **File**, **Edit** and **Circuit** menus and the **Agent**
+action. **File** holds Project Info (circuit and
 Cell names) and the file commands; **New Project** replaces the current tab's
 circuit after asking about unsaved work. **Circuit** holds **Hierarchy** (Cell
 Manager) and **Netlist**.
@@ -91,7 +91,7 @@ differential amplifiers `outputsSwapped`) to exchange the +/− positions;
 connections follow their pins.
 
 For a MOS, the **Bulk** row shows the body's Net or **Unconnected**; **Connect**
-draws a dashed body wire from the bulk terminal. Netlists and simulation use
+draws a dashed body wire from the bulk terminal. Exported netlists use
 real Bulk connections, including placement defaults; connect a missing Bulk or
 mark it NoConnect.
 
@@ -134,7 +134,7 @@ letter out in matching case: φ₁ is `phi1`, Φ₁ `PHI1`, Ω `OMEGA`.
 ### Label names and typography
 
 A label's name and its look are separate. The name, used by the netlist,
-simulation and Agents, is exactly what you typed; subscripts, overbars, slant
+netlist export and Agents, is exactly what you typed; subscripts, overbars, slant
 and weight only change the drawing (see
 [names and labels](../specs/names-and-labels.md)). Labels default to bold
 italic. If what you type cannot be the part's netlist name (a Greek letter, a
@@ -283,7 +283,7 @@ with a Net or Cell Pin named `Φ1`; an undriven phase becomes a Cell input. An
 overbar (`E̅N̅`) names a separate signal `EN_bar`. **Ctrl SW** uses its CTRL pin.
 Diodes without a model use a generic `DIODE` card, and NPN/PNP in Abstract or
 Custom generic `NPN`/`PNP` cards, until you choose a model or define one in
-your simulation files.
+Project-owned model sources in Cell Manager.
 
 ## Import Spectre / SCS
 

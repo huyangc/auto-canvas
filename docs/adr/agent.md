@@ -6,7 +6,7 @@ Owners: `packages/agent-adapter`, `packages/agent-client`, `apps/mcp-server`, `w
 Agents make revision-bound semantic edits through the
 [Agent API](../specs/agent-api.md) against the live browser, which is
 authoritative under [web-session authorization](../specs/web-agent-session.md).
-MCP is an Agent-side adapter; File, Simulation and Project are scoped sibling
+MCP is an Agent-side adapter; File and Project are scoped sibling
 resources, not other Circuit mutation paths.
 
 - Typed edits share human validation and undo; revision guards make retries

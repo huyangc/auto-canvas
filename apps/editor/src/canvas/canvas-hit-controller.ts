@@ -31,8 +31,6 @@ export interface CanvasHitControllerDependencies {
     componentPlacementPending?: boolean;
     tool: EditorTool;
     cellSymbolLayoutEnabled: boolean;
-    /** Which Simulation probe domain currently owns canvas presses. */
-    simulationPickMode: "net" | "terminal" | null;
     controlPickMode: "net" | "sensor" | null;
   };
   actions: {
@@ -80,7 +78,6 @@ export interface CanvasHitControllerDependencies {
     /** End the part placement in progress, as Esc does. */
     endComponentPlacement?: () => void;
     /** Name the Net a picked conductor, Junction, or Net label belongs to. */
-    pickSimulationNet?: (kind: CanvasHitKind, id: string) => void;
     pickControlledSource?: (kind: CanvasHitKind, id: string) => void;
   };
 }
@@ -102,7 +99,6 @@ export function createCanvasHitController({
     componentPlacementPending = false,
     tool,
     cellSymbolLayoutEnabled,
-    simulationPickMode,
     controlPickMode,
   },
   actions: {
@@ -118,7 +114,6 @@ export function createCanvasHitController({
     consumeArmedVerb,
     suppressNextClick,
     endComponentPlacement,
-    pickSimulationNet,
     pickControlledSource,
   },
 }: CanvasHitControllerDependencies) {
@@ -225,19 +220,18 @@ export function createCanvasHitController({
             event.currentTarget.ownerDocument,
             { x: event.clientX, y: event.clientY },
             event.altKey ? 1 : 0,
-            simulationPickMode === null && controlPickMode === null
+            controlPickMode === null
               ? (candidate) =>
                   selectionPolicy.allowsCanvasHit(candidate, "select")
               : undefined,
           )
         : null;
-    // The offer runs the verb, so it is withheld while a simulation probe is
+    // The offer runs the verb, so it is withheld while a control is
     // being picked: a pick must not rotate, copy, or delete what it names.
     const armedVerbConsumesHit =
       dispatching &&
       hit !== null &&
       hit.kind !== "handle" &&
-      simulationPickMode === null &&
       controlPickMode === null &&
       Boolean(consumeArmedVerb?.(hit.kind, hit.id));
     const compositeOwnsHit = Boolean(
@@ -271,7 +265,6 @@ export function createCanvasHitController({
         planSelectionMove(document, selection).previewObjectIds.length > 0,
       primaryInstanceId,
       armedVerbConsumesHit,
-      simulationPickMode,
       controlPickMode,
     });
 
@@ -294,9 +287,6 @@ export function createCanvasHitController({
     }
 
     switch (action.kind) {
-      case "simulation-pick":
-        pickSimulationNet?.(action.hitKind, action.id);
-        return;
       case "control-pick":
         pickControlledSource?.(action.hitKind, action.id);
         return;

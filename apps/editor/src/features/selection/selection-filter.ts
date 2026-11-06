@@ -183,7 +183,7 @@ function sameSelection(left: VisualSelection, right: VisualSelection): boolean {
 
 /**
  * One editor-local authority for direct targetability. The policy is not a
- * persisted model, Engine edit, or Agent contract. Drawing and Simulation
+ * persisted model, Engine edit, or Agent contract. Drawing
  * pick modes bypass it explicitly; electrical movement closure is computed
  * after selection and therefore remains intact when Wires or Junctions are
  * disabled.

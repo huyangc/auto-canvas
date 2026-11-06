@@ -198,12 +198,8 @@ export async function renameShelfProject(
 /** Run one workflow command from the Netlist menu. */
 export async function clickNetlistWorkflowCommand(
   page: Page,
-  command: "open-analog-simulation" | "check-and-save",
+  command: "check-and-save",
 ): Promise<void> {
-  if (command === "open-analog-simulation") {
-    await page.getByTestId(command).click();
-    return;
-  }
   const details = await openMenu(page, "File");
   await details.getByTestId(command).click();
 }

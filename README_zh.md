@@ -42,7 +42,8 @@ auto-canvas 基于 cascode-ai 的 [Analog Canvas](https://github.com/cascode-ai/
 
 - **自动摆放和绕线**：目前导入网表时器件按网格排开，不画导线。
 - **与 silicon-notebook 集成。**
-- **仿真**：从 analog-canvas 继承而来，正在删除。
+- **仿真**：编辑器已移除仿真界面和执行入口；可导出 SPICE、Spectre 或 RNL
+  在外部工具中使用，已有 Project 的仿真源文件夹保存时保持不变。
 
 ## 环境要求
 
@@ -86,9 +87,6 @@ pnpm dev
 | `pnpm test:e2e:local`     | 浏览器测试（Playwright），首次运行前执行 `pnpm setup:e2e` 安装 Chromium |
 | `pnpm mcp:package`        | 打包给 Agent 使用的 MCP 服务端                                          |
 | `pnpm test:desktop-build` | 编译桌面版界面                                                          |
-
-本地运行时，`simulation-artifact-files.test.ts` 里有 3 个测试失败。它们是从上游
-继承的，删除仿真后会一起去掉；CI 里已排除。
 
 ## 仓库结构
 

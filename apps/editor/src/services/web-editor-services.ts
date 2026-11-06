@@ -41,7 +41,6 @@ export function createWebEditorServices(
     capabilities: {
       userComponents: true,
       agent: true,
-      simulation: true,
       externalLinks: true,
     },
   } satisfies EditorServices;

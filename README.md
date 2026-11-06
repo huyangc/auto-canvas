@@ -49,7 +49,7 @@ Not done yet:
 - **Automatic placement and routing.** Netlist import places devices on a
   grid and draws no wires.
 - **silicon-notebook integration.**
-- **Simulation** is inherited from analog-canvas and is being removed.
+- **Simulation** is unavailable in the editor. Export SPICE, Spectre or RNL for external tools; saved Project source folders are preserved.
 
 ## Requirements
 
@@ -94,9 +94,6 @@ port, project limit, serving a built editor) is in
 | `pnpm test:e2e:local`     | Browser tests (Playwright); run `pnpm setup:e2e` once to install Chromium |
 | `pnpm mcp:package`        | Build the MCP server package for Agents                                   |
 | `pnpm test:desktop-build` | Build the desktop renderer                                                |
-
-Three tests in `simulation-artifact-files.test.ts` fail locally. They are
-inherited and go away with the simulation removal; CI excludes them.
 
 ## Repository layout
 

@@ -52,10 +52,6 @@ import {
 } from "./editor-runtime-helpers";
 import type { HighlightedNetOrigin } from "./use-editor-derived-model";
 import type { useNativeProjectTabs } from "./use-native-project-tabs";
-import type {
-  useSimulationPickCommands,
-  useSimulationPicking,
-} from "./use-simulation-surface";
 
 type ProjectFileLifecycle = ReturnType<typeof useProjectFileLifecycle>;
 type EditorPanels = ReturnType<typeof useEditorPanels>;
@@ -67,8 +63,6 @@ type SelectionInspection = ReturnType<typeof deriveSelectionInspectionModel>;
 type PropertiesEditor = ReturnType<typeof usePropertiesEditor>;
 type ComponentPlacement = ReturnType<typeof useComponentPlacement>;
 type NavigationController = ReturnType<typeof createEditorNavigationController>;
-type SimulationPicking = ReturnType<typeof useSimulationPicking>;
-type SimulationPickCommands = ReturnType<typeof useSimulationPickCommands>;
 
 interface EditorShortcutDependencies {
   nativeProjectStore: EditorServices["nativeProjectStore"];
@@ -111,8 +105,7 @@ interface EditorShortcutDependencies {
   highlightedNetOrigin: HighlightedNetOrigin | null;
   controlPickState: ControlPickState | null;
   setControlPickState: Dispatch<SetStateAction<ControlPickState | null>>;
-  simulationPickActive: boolean;
-  setSimulationHoverNetId: SimulationPicking["setSimulationHoverNetId"];
+  setControlHoverNetId: Dispatch<SetStateAction<string | null>>;
   lastCanvasPointRef: RefObject<Point | null>;
   projectInputRef: RefObject<HTMLInputElement | null>;
   selectedRoute: SelectionInspection["selectedRoute"];
@@ -120,7 +113,6 @@ interface EditorShortcutDependencies {
   hasHierarchyEnterSelection: boolean;
   hasInspectableSelection: boolean;
   selectedHighlightNetId: SelectionInspection["selectedHighlightNetId"];
-  setSimulationPickMode: SimulationPickCommands["setSimulationPickMode"];
   beginNetLabelEditing: PropertiesEditor["beginNetLabelEditing"];
   beginWireLabelEditing: (position: Point) => boolean;
   cancelNetLabelEditing: PropertiesEditor["cancelNetLabelEditing"];
@@ -270,8 +262,7 @@ function createEditorShortcutHandler({
   highlightedNetOrigin,
   controlPickState,
   setControlPickState,
-  simulationPickActive,
-  setSimulationHoverNetId,
+  setControlHoverNetId,
   lastCanvasPointRef,
   projectInputRef,
   selectedRoute,
@@ -279,7 +270,6 @@ function createEditorShortcutHandler({
   hasHierarchyEnterSelection,
   hasInspectableSelection,
   selectedHighlightNetId,
-  setSimulationPickMode,
   beginNetLabelEditing,
   beginWireLabelEditing,
   cancelNetLabelEditing,
@@ -340,9 +330,7 @@ function createEditorShortcutHandler({
     // The source workbench owns its keyboard scope, including portalled menus.
     if (
       event.target instanceof Element &&
-      event.target.closest(
-        ".simulation-code-workspace, [data-workspace-interaction], .inline-confirm",
-      )
+      event.target.closest("[data-workspace-interaction], .inline-confirm")
     )
       return;
     // The interface confirmation owns keys even though this router captures
@@ -361,15 +349,10 @@ function createEditorShortcutHandler({
       paintSnapGuides([]);
       return;
     }
-    if (event.key === "Escape" && simulationPickActive) {
-      event.preventDefault();
-      setSimulationPickMode(null);
-      return;
-    }
     if (event.key === "Escape" && controlPickState) {
       event.preventDefault();
       setControlPickState(null);
-      setSimulationHoverNetId(null);
+      setControlHoverNetId(null);
       setStatus("Cancelled control pick");
       return;
     }

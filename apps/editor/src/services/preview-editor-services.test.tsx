@@ -15,7 +15,6 @@ describe("desktop preview composition", () => {
         services={services}
         project={createEmptyProject("preview", "Preview")}
         publicAgentUiEnabled
-        publicSimulationUiEnabled
       />,
     );
     for (const marker of [

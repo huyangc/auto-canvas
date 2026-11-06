@@ -3,9 +3,6 @@ import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { readFile, stat } from "node:fs/promises";
 import { extname, isAbsolute, relative, resolve } from "node:path";
 
-import { handleLocalSimulation } from "./simulation-endpoint.js";
-export { createLocalSimulationHandler } from "./simulation-adapter.js";
-
 const TYPES: Readonly<Record<string, string>> = {
   ".css": "text/css; charset=utf-8",
   ".html": "text/html; charset=utf-8",
@@ -20,9 +17,6 @@ export interface LocalHostOptions {
   editorRoot: string;
   hostname?: "127.0.0.1" | "::1";
   port?: number;
-  /** Optional deployment-owned handler for the shared /api/simulate protocol.
-   * No binary, model path or version is discovered by the Editor host. */
-  simulationHandler?: (request: Request) => Promise<Response>;
 }
 
 export interface RunningLocalHost {
@@ -61,39 +55,8 @@ export async function startLocalHost(
       "same-origin-allow-popups",
     );
     response.setHeader("X-Content-Type-Options", "nosniff");
-    const isSimulate =
-      request.url === "/api/simulate" && request.method === "POST";
-    if (!isSimulate && request.method !== "GET" && request.method !== "HEAD") {
+    if (request.method !== "GET" && request.method !== "HEAD") {
       response.writeHead(405).end("Method Not Allowed");
-      return;
-    }
-    if (isSimulate) {
-      const address = server.address();
-      const authority =
-        address && typeof address !== "string"
-          ? `${hostname === "::1" ? "[::1]" : hostname}:${address.port}`
-          : "";
-      if (
-        request.headers.host !== authority ||
-        (request.headers.origin !== undefined &&
-          request.headers.origin !== `http://${authority}`)
-      ) {
-        request.resume();
-        response.writeHead(403, { "content-type": "application/json" });
-        response.end(JSON.stringify({ error: "origin-not-allowed" }));
-        return;
-      }
-      if (
-        !/^application\/json(?:;|$)/iu.test(
-          request.headers["content-type"] ?? "",
-        )
-      ) {
-        request.resume();
-        response.writeHead(415, { "content-type": "application/json" });
-        response.end(JSON.stringify({ error: "json-required" }));
-        return;
-      }
-      await handleLocalSimulation(request, response, options.simulationHandler);
       return;
     }
     if (request.url === "/healthz") {

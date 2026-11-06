@@ -12,7 +12,7 @@ Export converts persisted electrical facts into structural SPICE `.spi` and
 Spectre `.scs` design netlists (Cells, ordered interfaces, devices, nodes,
 targets, globals, raw parameters) by ordinary program logic: no AI, no drawing
 geometry, no host PDK search. Libraries, corners, stimuli, analyses and saves
-belong to a simulation deck ([simulation](simulation.md)).
+belong to an externally authored simulation deck.
 
 ## Authorities
 
@@ -207,8 +207,7 @@ VON`) and `icm_ideal_comparator_differential_vdd` (`VDD VIP VIN VOP VON`)
 
 - Every switch is an ngspice `S` card through `ideal_switch` (`SW`: RON 1 Ω,
   ROFF 1e12 Ω, VT 0.5 V, VH 0) printed once per using Cell; Spectre uses a hard
-  `bsource`, VACASK the qualified `icm_switch` (patched runtime,
-  [patch](../../containers/vacask/patches/README.md)). No clock is invented;
+  `bsource`, and the inherited VACASK projection uses `icm_switch`. No clock is invented;
   SPDT has no primitive.
 - Two-terminal switches follow the phase their label names (Φ₁ → `PHI1`; a
   label showing its own name is its own phase, `S1 a b S1 VSS ideal_switch`);
@@ -492,6 +491,5 @@ preferences are browser-local. Only the current schema is accepted.
   revision owns both generated dialects; no converted model is stored; edits
   that cannot reverse exactly return `MODEL_SOURCE_EDIT_REQUIRES_OWNER`. Model
   Copy omits the root/testbench and refuses pending drafts.
-- [Simulation](simulation.md) composes setup with this projection;
-  [execution](simulation-execution.md) owns runs. Structural export is not an
-  executable deck.
+- The editor exports structural netlists for external tools. It has no
+  simulation workspace or executor. Structural export is not an executable deck.

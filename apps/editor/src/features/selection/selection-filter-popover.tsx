@@ -126,7 +126,7 @@ export function SelectionFilterPopover({
         </fieldset>
       ))}
       <small>
-        Controls direct selection and editing. Drawing, simulation, visibility,
+        Controls direct selection and editing. Drawing, visibility,
         connectivity, and wire follow during device moves stay unchanged.
       </small>
     </aside>

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { base64EncodeBytes } from "@icm/agent-adapter";
 import { sha256Hex } from "@icm/derived";
-import { createEmptyProject, createSimulationFolder } from "@icm/model";
+import { createEmptyProject } from "@icm/model";
 import { serializeProject } from "@icm/project-protocol";
 import { AgentSessionError } from "../../../../packages/agent-client/src/errors";
 import {
@@ -197,68 +197,6 @@ describe("the Agent client's requests against the live editor", () => {
   });
 
   it.each([false, true])(
-    "invalidates Project snapshots after file updates, uncertain=%s",
-    async (uncertain) => {
-      const project = emptyAgentProject();
-      project.simulationFolders.push(
-        createSimulationFolder({
-          id: "folder",
-          name: "Bias",
-          profileId: "test",
-        }),
-      );
-      const { client, http, controller } = liveAgentEditor({ project });
-      await client.connect("session-1.code");
-      await client.snapshot("main");
-      expect(client.cachedSnapshot("main")).not.toBeNull();
-      if (uncertain) loseNextFileReply(http);
-      const owner = { kind: "project-folder" as const, folderId: "folder" };
-      const update = client.fileResource({
-        apiVersion: "3.0",
-        requestId: "update-source",
-        operation: "simulation-input",
-        input: {
-          action: "update",
-          owner,
-          expectedRevision: controller.project.structureRevision,
-          writes: [{ path: "run.cir", text: "new" }],
-          removes: [],
-          patches: [],
-          circuitEdits: [],
-        },
-      });
-      if (uncertain)
-        await expect(update).rejects.toMatchObject({
-          code: "EDITOR_DISCONNECTED",
-        });
-      else
-        expect(await update).toMatchObject({ ok: true, result: { ok: true } });
-      // The editor saved the file either way.
-      expect(
-        controller.project.simulationFolders[0]!.input.files.find(
-          (file) => file.path === "run.cir",
-        )?.text,
-      ).toBe("new");
-      expect(client.cachedSnapshot("main")).toBeNull();
-      const before = http.circuitCalls.length;
-      expect(
-        (await client.snapshot("main")).snapshot.project.structureRevision,
-      ).toBe(controller.project.structureRevision);
-      expect(http.circuitCalls.length).toBe(before + 1);
-      // Listing the folder changes nothing, so the cache stays.
-      expect(
-        await client.fileResource({
-          apiVersion: "3.0",
-          requestId: "list",
-          operation: "simulation-input",
-          input: { action: "list", owner },
-        }),
-      ).toMatchObject({ ok: true, result: { ok: true } });
-      expect(client.cachedSnapshot("main")).not.toBeNull();
-    },
-  );
-
-  it.each([false, true])(
     "invalidates cached circuit state after staged Cell import, uncertain=%s",
     async (uncertain) => {
       const { client, http, controller } = liveAgentEditor();
@@ -441,8 +379,8 @@ describe("the Agent client's requests against the live editor", () => {
         resource === "files"
           ? client.fileResource({
               ...envelope,
-              operation: "simulation-input",
-              input: { action: "list" },
+              operation: "download",
+              artifact: "project",
             })
           : client.projectResource({
               ...envelope,
@@ -451,7 +389,11 @@ describe("the Agent client's requests against the live editor", () => {
       // The retry reaches the editor, which answers it.
       expect(await call()).toMatchObject(
         resource === "files"
-          ? { ok: true, operation: "simulation-input", result: { ok: true } }
+          ? {
+              ok: true,
+              operation: "download",
+              artifact: { name: "project.icproj.json" },
+            }
           : {
               ok: true,
               operation: "read-project-code",

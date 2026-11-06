@@ -171,5 +171,6 @@ annotations and unlocked layout references.
   inconsistent edits refuse.
 - Custom artwork follows [Symbol DSL](symbol-dsl.md#source-backed-custom-artwork);
   a property supply cannot also have a route or No Connect.
-- Simulation source folders are [simulation](simulation.md)'s; output labels
-  never name or join Nets.
+- Saved simulation source folders remain in the Project format, preserved on
+  load/edit/save without an editor workspace or executor; output labels never
+  name or join Nets.

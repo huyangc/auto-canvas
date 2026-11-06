@@ -1,5 +1,5 @@
 import type { Instance } from "@icm/model";
-import { terminalCurrentDirectionPartners } from "../simulation/terminal-current-pick";
+import { terminalCurrentDirectionPartners } from "./terminal-current-direction";
 
 export interface CurrentControlOption {
   value: string;

@@ -140,7 +140,7 @@ describe("editor shell", () => {
     expect(markup).toContain('data-testid="project-code-toggle"');
     expect(markup).toContain("Review Netlist Issues…");
     expect(netlistMenu).not.toContain('data-testid="open-analog-simulation"');
-    expect(markup).toContain('data-testid="open-analog-simulation"');
+    expect(markup).not.toContain('data-testid="open-analog-simulation"');
     expect(netlistMenu).not.toContain('data-testid="check-and-save"');
     expect(markup).toContain('data-testid="check-and-save"');
     expect(markup).not.toContain("<summary>Run</summary>");
@@ -297,11 +297,7 @@ describe("editor shell", () => {
     );
     const persistedSimulation = structuredClone(project.simulationFolders);
     const markup = renderToStaticMarkup(
-      <App
-        services={services}
-        project={project}
-        publicSimulationUiEnabled={false}
-      />,
+      <App services={services} project={project} />,
     );
 
     expect(markup).not.toContain('data-testid="open-analog-simulation"');

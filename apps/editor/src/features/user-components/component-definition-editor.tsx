@@ -1138,7 +1138,7 @@ export default function ComponentDefinitionEditor(
           componentCapability({ definition: parsed.definition }) ===
             "symbol-only" ? (
             <p className="component-definition-note">
-              Symbol only · add a circuit implementation to simulate.
+              Symbol only · add a circuit implementation for netlist export.
             </p>
           ) : null}
           <ComponentDisplayName source={source} onChange={setSource} />

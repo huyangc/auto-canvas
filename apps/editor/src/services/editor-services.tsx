@@ -54,7 +54,6 @@ export interface EditorServices {
   readonly capabilities: {
     readonly userComponents: boolean;
     readonly agent: boolean;
-    readonly simulation: boolean;
     readonly externalLinks: boolean;
   };
   readonly exportDelivery: EditorExportDelivery;

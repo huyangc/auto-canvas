@@ -13,8 +13,8 @@ values, drafting text, formulas or Symbol body text.
 ## Two facts
 
 - The **electrical name** (`Instance.reference`, a Cell terminal `name`, a Net
-  name claim) is stored exactly as typed, connected or generated; netlists,
-  simulation and Agents read only it.
+  name claim) is stored exactly as typed, connected or generated; netlists
+  and Agents read only it.
 - The **label display** is the label's `formatOverride` (Project Code
   `format`), presentation only, never read back into a name.
 - The only link: a stored display spells its name (visible characters equal
@@ -168,7 +168,7 @@ refusals) apply only inside that export, never written back.
 - Importing SCS reads the escapes back: `DATA\<3\>` and `Vin\+` name the
   Nets `DATA<3>` and `Vin+`, as the drawing does, and the SCS export writes
   them again.
-- Hand-written ngspice source follows the same rules when run and writes any
+- The inherited ngspice source compiler follows the same rules and writes any
   other non-ASCII character as `u` + hex code point (`输入`→`u8f93u5165`)
   since ngspice reads such bytes as `_`; the source text is unchanged.
 - Two names that become one spelling (`φ1`/`phi1`, `DATA<3>`/`DATA_3_`) are

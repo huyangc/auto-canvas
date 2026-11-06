@@ -14,7 +14,7 @@ or renames it, and lists callers with **Jump to caller**.
 - **Set as Top**, or drag a Cell onto the **Top** row, changes the default
   entry; dragging among other rows only reorders the list (`Alt+Up/Down` with
   a row focused). Neither changes the circuit, the editing location or a
-  simulation's chosen Cell, and both are undoable.
+  the Netlist entry, and both are undoable.
 - Double-click a row to open the definition; edit its heading to rename it.
   Opening from the Manager has no caller context; enter through an instance
   (or the **Hierarchy** tree of concrete occurrences) to keep the parent path.
@@ -121,18 +121,17 @@ Components… → Create Component…**.
   removing a connected pin asks how to migrate (disconnect keeps the wire as a
   stub). **Fork model…** makes a private copy for independent edits.
 - A block without an applied implementation is visibly unimplemented and
-  cannot simulate; **Define implementation…** opens its source. Reviewed PDK
+  cannot export an implemented netlist; **Define implementation…** opens its source. Reviewed PDK
   interfaces are read-only: set parameters on instances.
 
 The Netlist sidebar and Copy Netlist include the full applied model bodies
 once per source; editing a model body there needs the Apply checkmark or
 `Ctrl/Cmd+Enter` and writes back to the same source. A supported Spectre
-model runs on ngspice through its derived SPICE; licensed Spectre execution is
-not provided. Move models still defined in simulation files into the Manager
-and remove the duplicates there.
+model exports through its derived SPICE. Run exported netlists in an external
+simulator. Move models still defined in saved source folders into the Manager
+when you need them in netlist exports.
 
-## Netlist entry and simulation
+## Netlist entry
 
 In the Netlist panel, **Entry** chooses which Cell to export without changing
-Top or your location (**Default Top** follows the saved one). A simulation
-experiment keeps its own **Simulation Cell**, unaffected by Top changes.
+Top or your location (**Default Top** follows the saved one).

@@ -40,8 +40,8 @@ services and discovers no simulator.
 Use the editor's **Agent** connection panel and the
 [MCP connection guide](../agent/mcp-install.md). Check session expiry, scopes
 and the authorized Project; replacing the Project or revoking the session needs
-a new authorization. A missing simulation environment is a configuration
-error, not an invalid session.
+a new authorization. Simulation operations return `SIMULATION_UNAVAILABLE`;
+export a netlist for use with an external simulator.
 
 ## Accessibility limits
 

@@ -10,7 +10,6 @@ import {
   AgentSessionScopeSchema,
   isReadOnlyCircuitRequest,
   isReadOnlyFileRequest,
-  isReadOnlySimulationRequest,
   isReadOnlyProjectRequest,
   parseAgentFileResourceRequest,
   parseAgentSimulationResourceRequest,
@@ -28,7 +27,6 @@ import {
 } from "@icm/agent-adapter";
 import { sha256Hex } from "@icm/derived";
 import type { CircuitProject } from "@icm/model";
-import { ArtifactDownloadError } from "@icm/simulation-service/files";
 
 import type { AgentConnectionStatus } from "./connect-agent-panel";
 import { claimDeadline, claimNow } from "./claim-clock";
@@ -103,7 +101,6 @@ type LiveSession = {
   allowReconnect: boolean;
   transport?: SessionTransport;
   acknowledgedContext?: string | undefined;
-  publishArtifact?: import("@icm/simulation-service/files").ArtifactPublisher;
   requestCache: Map<
     string,
     { payloadHash: string; response: unknown; byteLength: number }
@@ -197,10 +194,6 @@ export interface UseAgentSessionOptions {
     "host" | "fileHost" | "simulationHost" | "projectHost"
   > | null;
   fileHost?: {
-    setArtifactPublisher?: (
-      publisher: import("@icm/simulation-service/files").ArtifactPublisher,
-      options?: { leasedDownloads?: boolean },
-    ) => void;
     handle: (
       request: AgentFileResourceRequest,
     ) => Promise<AgentFileResourceResponse>;
@@ -208,7 +201,6 @@ export interface UseAgentSessionOptions {
   };
   /** Session-owned prepared inputs and run receipts; revoked with the session. */
   simulationHost?: {
-    clear?: () => Promise<void>;
     handle: (
       request: AgentSimulationResourceRequest,
     ) => Promise<AgentSimulationResourceResponse>;
@@ -230,22 +222,6 @@ export interface UseAgentSessionResult extends AgentSessionViewModel {
   reconnect: () => void;
   newConnection: () => Promise<void>;
   revoke: () => Promise<void>;
-}
-
-function attachArtifactPublisher(
-  live: LiveSession,
-  fileHost: UseAgentSessionOptions["fileHost"],
-): void {
-  if (
-    !fileHost?.setArtifactPublisher ||
-    !live.publishArtifact ||
-    live.attachedFileHosts.has(fileHost)
-  )
-    return;
-  fileHost.setArtifactPublisher(live.publishArtifact, {
-    leasedDownloads: true,
-  });
-  live.attachedFileHosts.add(fileHost);
 }
 
 function socketUrl(sessionId: string): string {
@@ -385,7 +361,6 @@ export function useAgentSession(
     if (live) stopReconnect(live);
     clearAgentSessionRecovery(window.sessionStorage);
     options.fileHost?.clear?.();
-    void options.simulationHost?.clear?.().catch(() => undefined);
     return live;
   }, [options.fileHost, options.simulationHost]);
 
@@ -524,65 +499,6 @@ export function useAgentSession(
           claimCode: live.claimCode,
           claimExpiresAt: live.claimExpiresAt,
         });
-        live.publishArtifact = async (ref, text, transfer) => {
-          if (liveRef.current !== live) throw new Error("Session changed");
-          const path = `/api/agent/sessions/${encodeURIComponent(live.sessionId)}/artifacts/${encodeURIComponent(ref.fileId ?? ref.id)}`;
-          const response = await fetch(path, {
-            method: "PUT",
-            headers: {
-              "x-editor-secret": live.editorSecret,
-              "x-artifact-ref": encodeURIComponent(JSON.stringify(ref)),
-              ...(transfer ? { "x-artifact-protocol": "2" } : {}),
-            },
-            body: new Blob([text], { type: ref.mediaType }),
-            signal: AbortSignal.timeout(120_000),
-          });
-          if (!response.ok) {
-            const body = (await response.json().catch(() => null)) as {
-              error?: { code?: string };
-            } | null;
-            throw new ArtifactDownloadError(
-              typeof body?.error?.code === "string"
-                ? body.error.code
-                : "ARTIFACT_UPLOAD_FAILED",
-              response.status === 401
-                ? "reauthorize"
-                : body?.error?.code === "ARTIFACT_QUOTA_EXCEEDED"
-                  ? "retry-after"
-                  : response.status === 413 || response.status === 409
-                    ? "not-retryable"
-                    : "retry-after",
-              `Artifact transfer rejected (HTTP ${response.status}); original browser evidence is unchanged`,
-            );
-          }
-          if (liveRef.current !== live)
-            throw new ArtifactDownloadError(
-              "SESSION_CHANGED",
-              "reauthorize",
-              "The download session changed",
-            );
-          if (!transfer) return path;
-          const descriptor = (await response.json()) as {
-            leaseId?: unknown;
-            expiresAt?: unknown;
-          };
-          if (
-            typeof descriptor.leaseId !== "string" ||
-            typeof descriptor.expiresAt !== "number"
-          )
-            throw new ArtifactDownloadError(
-              "ARTIFACT_PROTOCOL_UNAVAILABLE",
-              "retry-after",
-              "Worker has not enabled leased downloads",
-            );
-          return {
-            path,
-            leaseId: descriptor.leaseId,
-            expiresAt: descriptor.expiresAt,
-          };
-        };
-        attachArtifactPublisher(live, options.fileHost);
-
         const syncDeadline = (expiresAt: number) => {
           live.expiresAt = expiresAt;
           update({ expiresAt });
@@ -619,7 +535,6 @@ export function useAgentSession(
               host,
               scopes,
               files: Boolean(options.fileHost),
-              simulation: Boolean(options.simulationHost),
               projects: Boolean(options.projectHost),
             }),
           );
@@ -737,7 +652,6 @@ export function useAgentSession(
                 stopReconnect(live);
                 clearAgentSessionRecovery(window.sessionStorage);
                 options.fileHost?.clear?.();
-                void options.simulationHost?.clear?.();
                 socket.close(1000, "session revoked");
                 if (liveRef.current === live) liveRef.current = null;
                 update({
@@ -870,7 +784,6 @@ export function useAgentSession(
               }
               live.requestHashes.set(parsed.data.requestId, payloadHash);
               startWork();
-              attachArtifactPublisher(live, target.fileHost);
               void target.fileHost
                 .handle(fileRequest.data)
                 .then(sendFileResponse)
@@ -928,15 +841,13 @@ export function useAgentSession(
                   ok: false,
                   error: {
                     code: simulationRequest.success
-                      ? "SIMULATION_HOST_UNAVAILABLE"
+                      ? "SIMULATION_UNAVAILABLE"
                       : "SIMULATION_REQUEST_INVALID",
                     message: simulationRequest.success
-                      ? "The simulation host is not available; retry after reconnecting"
+                      ? "Simulation is unavailable in auto-canvas. Export a netlist to simulate externally."
                       : "The simulation request does not match the current contract; read capabilities and correct the request",
                     stage: "input",
-                    recovery: simulationRequest.success
-                      ? "retry-after"
-                      : "fix-input",
+                    recovery: "fix-input",
                   },
                 });
                 return;
@@ -977,8 +888,7 @@ export function useAgentSession(
                   });
                 })
                 .finally(() => {
-                  if (isReadOnlySimulationRequest(simulationRequest.data))
-                    live.requestHashes.delete(parsed.data.requestId);
+                  live.requestHashes.delete(parsed.data.requestId);
                   finishWork();
                 });
               return;
@@ -1298,7 +1208,6 @@ export function useAgentSession(
               stopReconnect(live);
               clearAgentSessionRecovery(window.sessionStorage);
               options.fileHost?.clear?.();
-              void options.simulationHost?.clear?.();
               liveRef.current = null;
               update({
                 status:
@@ -1629,7 +1538,6 @@ export function useAgentSession(
     const live = liveRef.current;
     if (!live) return;
     live.projectId = options.project.id;
-    attachArtifactPublisher(live, options.fileHost);
     update({ status: live.paused ? "paused" : "reconnecting" });
     if (live.socket) sendHeartbeat(live, live.socket);
   }, [
@@ -1640,11 +1548,6 @@ export function useAgentSession(
     options.projectSessionId,
     update,
   ]);
-
-  useEffect(() => {
-    const live = liveRef.current;
-    if (live) attachArtifactPublisher(live, options.fileHost);
-  }, [options.fileHost]);
 
   useEffect(() => {
     if (!options.enabled) return;
@@ -1673,7 +1576,6 @@ export function useAgentSession(
       if (!options.enabled) return;
       const live = liveRef.current;
       options.fileHost?.clear?.();
-      void options.simulationHost?.clear?.();
       if (live) {
         stopReconnect(live);
         if (!live.claimed) {

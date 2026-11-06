@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  createSimulationFolder,
   createEmptyDocument,
   createEmptyProject,
   freezeSnapshot,
 } from "@icm/model";
-import { serializeProject } from "@icm/project-protocol";
+import { parseProject, serializeProject } from "@icm/project-protocol";
 import { EditorDocumentController } from "./document-controller";
 import { createProjectSnapshotSerializer } from "./project-snapshot-serializer";
 
@@ -142,4 +143,50 @@ it("keeps a useful bounded cache when the open workspace exceeds its entry budge
   expect(save()).toEqual(first);
   // Four misses per pass, rather than evicting every unchanged open tab.
   expect(serialize).toHaveBeenCalledTimes(28);
+});
+
+it("loads dormant simulation folders, edits the schematic and saves their source bytes unchanged", () => {
+  const project = createEmptyProject("dormant-source", "Dormant source");
+  project.simulationFolders = [
+    createSimulationFolder({
+      id: "saved-source",
+      name: "Saved source",
+      profileId: "external",
+      documentId: project.topDocumentId,
+    }),
+  ];
+  project.simulationFolders[0]!.input.files.push({
+    path: "notes.txt",
+    text: "\ufeffsaved source\r\n参数 α\r\n  preserved whitespace\t\n",
+  });
+  const disk = serializeProject(project);
+  const loaded = parseProject(disk);
+  const foldersBefore = new TextEncoder().encode(
+    JSON.stringify(loaded.simulationFolders),
+  );
+  const sourceBefore = loaded.simulationFolders.flatMap((folder) =>
+    folder.input.files.map((file) => new TextEncoder().encode(file.text)),
+  );
+  const controller = new EditorDocumentController(loaded);
+  expect(
+    controller.transact([
+      {
+        kind: "add_instance",
+        instance: { id: "R1", symbolId: "resistor", placement: null },
+      },
+    ]).ok,
+  ).toBe(true);
+  const saved = createProjectSnapshotSerializer().serialize(controller.project);
+  const reopened = parseProject(saved);
+  expect(
+    reopened.documents[0]!.instances.map((instance) => instance.id),
+  ).toContain("R1");
+  expect(
+    new TextEncoder().encode(JSON.stringify(reopened.simulationFolders)),
+  ).toEqual(foldersBefore);
+  expect(
+    reopened.simulationFolders.flatMap((folder) =>
+      folder.input.files.map((file) => new TextEncoder().encode(file.text)),
+    ),
+  ).toEqual(sourceBefore);
 });

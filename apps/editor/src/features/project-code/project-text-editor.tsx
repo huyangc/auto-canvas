@@ -33,7 +33,7 @@ import {
 } from "@codemirror/language";
 import { searchKeymap } from "@codemirror/search";
 
-import { spiceCodeLanguage } from "../simulation/code-spice-language";
+import { spiceCodeLanguage } from "./spice-code-language";
 
 export type ProjectTextLanguage = "json" | "netlist";
 

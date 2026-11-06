@@ -4,16 +4,16 @@ The current product, its contracts and unfinished work; Git holds history.
 Repository process: [workflow](workflow.md).
 Local identity and Cloud Projects: [server contract](specs/server.md).
 
-| Area                                            | Purpose                                                                 |
-| ----------------------------------------------- | ----------------------------------------------------------------------- |
-| [User guides](user/getting-started.md)          | Editing, hierarchy, simulation, saving, compatibility, and known limits |
-| [Product architecture](overall-product-plan.md) | System boundaries and sources of truth                                  |
-| [Specifications](specs/README.md)               | Current data, interaction, API, execution, and export contracts         |
-| [Architecture decisions](adr/README.md)         | Why consequential architectural choices were made                       |
-| [Agent guide](agent/README.md)                  | Authorized workflows and on-demand knowledge                            |
-| [Roadmap](roadmap/README.md)                    | Remaining work and acceptance questions                                 |
-| [Testing](testing/README.md)                    | Validation policy and contract ownership                                |
-| [EDA tools](eda-import.md)                      | Offline conversion and Aether/Virtuoso import                           |
+| Area                                            | Purpose                                                         |
+| ----------------------------------------------- | --------------------------------------------------------------- |
+| [User guides](user/getting-started.md)          | Editing, hierarchy, saving, compatibility, and known limits     |
+| [Product architecture](overall-product-plan.md) | System boundaries and sources of truth                          |
+| [Specifications](specs/README.md)               | Current data, interaction, API, execution, and export contracts |
+| [Architecture decisions](adr/README.md)         | Why consequential architectural choices were made               |
+| [Agent guide](agent/README.md)                  | Authorized workflows and on-demand knowledge                    |
+| [Roadmap](roadmap/README.md)                    | Remaining work and acceptance questions                         |
+| [Testing](testing/README.md)                    | Validation policy and contract ownership                        |
+| [EDA tools](eda-import.md)                      | Offline conversion and Aether/Virtuoso import                   |
 
 ## Contributor reading order
 
@@ -25,8 +25,8 @@ Local identity and Cloud Projects: [server contract](specs/server.md).
    ([visual contract](specs/razavi-visual-contract.md),
    [visual language](specs/visual-language.md)), entry points
    ([editor](specs/editor-interaction.md), [Agent API](specs/agent-api.md),
-   [web sessions](specs/web-agent-session.md)), analysis
-   ([simulation](specs/simulation.md), [netlist](specs/netlist-export.md)).
+   [web sessions](specs/web-agent-session.md)),
+   [netlist export](specs/netlist-export.md).
 3. [Test system](testing/README.md) and the domain's tests; Agent-assisted
    schematic work also follows the [Agent workflow](agent/workflow.md).
 

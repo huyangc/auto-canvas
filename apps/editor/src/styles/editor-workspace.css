@@ -2,8 +2,8 @@
 
 .app-workspace {
   display: grid;
-  grid-template-columns: var(--icm-shapes-width) minmax(0, 1fr) auto auto;
-  grid-template-areas: "shapes canvas props simulation";
+  grid-template-columns: var(--icm-shapes-width) minmax(0, 1fr) auto;
+  grid-template-areas: "shapes canvas props";
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -11,30 +11,7 @@
 }
 
 .app-workspace.library-collapsed {
-  grid-template-columns: 0 minmax(0, 1fr) auto auto;
-}
-
-.app-workspace.simulation-mode {
-  transition: none;
-}
-
-.app-shell:has(> .app-workspace.simulation-maximized) {
-  grid-template-rows: minmax(0, 1fr) auto auto;
-}
-
-.app-workspace.simulation-mode.simulation-maximized {
-  /* Reserve the flexible first row; footer auto-placement follows it. */
-  grid-row: 1;
-  grid-template-columns: minmax(0, 1fr);
-  grid-template-areas: "simulation";
-}
-
-.app-workspace.simulation-maximized .canvas-panel,
-.app-workspace.simulation-maximized .shapes-panel,
-.app-workspace.simulation-maximized .properties-resize-handle,
-.app-workspace.simulation-maximized .library-resize-handle,
-.app-workspace.simulation-maximized .simulation-resize-handle {
-  display: none;
+  grid-template-columns: 0 minmax(0, 1fr) auto;
 }
 
 /* Sits on the Library's right edge, overlapping the canvas by a few pixels so
@@ -61,16 +38,6 @@
   outline: none;
 }
 
-.simulation-resize-handle {
-  grid-area: simulation;
-  z-index: 13;
-  width: 9px;
-  margin-left: -5px;
-  cursor: col-resize;
-  touch-action: none;
-  background: transparent;
-}
-
 .properties-resize-handle {
   grid-area: props;
   z-index: 14;
@@ -90,46 +57,9 @@
   z-index: 12;
   background: var(--icm-surface);
 }
-.editor-simulation-dock {
-  grid-area: simulation;
-  display: flex;
-  min-width: 0;
-  min-height: 0;
-  border-left: 1px solid var(--icm-border);
-  background: var(--icm-surface);
-}
-.editor-simulation-dock.open {
-  width: min(var(--icm-simulation-width), 70vw);
-  border-left: 1px solid var(--icm-border);
-}
-.editor-simulation-content {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-  min-width: 0;
-}
-.editor-right-dock[hidden],
-.editor-simulation-dock[hidden],
-.editor-simulation-content[hidden] {
-  display: none;
-}
 .editor-right-dock .selection-dock {
   height: 100%;
 }
-.simulation-restore-rail {
-  writing-mode: vertical-rl;
-  align-self: flex-start;
-  padding: 12px 6px;
-  border: 0;
-  background: transparent;
-}
-.app-workspace.simulation-maximized .editor-simulation-dock {
-  width: 100%;
-}
-
-.simulation-resize-handle:hover,
-.simulation-resize-handle:focus-visible,
 .properties-resize-handle:hover,
 .properties-resize-handle:focus-visible {
   background: linear-gradient(
@@ -624,12 +554,7 @@
   .app-workspace {
     grid-template-columns:
       min(220px, var(--icm-shapes-width)) minmax(0, 1fr)
-      auto auto;
-  }
-
-  .app-workspace.simulation-mode.simulation-maximized {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "simulation";
+      auto;
   }
 }
 
@@ -644,12 +569,6 @@
   .editor-right-dock {
     display: contents;
   }
-  .app-workspace.simulation-mode .selection-dock {
-    right: min(var(--icm-simulation-width), 70vw);
-  }
-  .app-workspace.simulation-mode .selection-dock.open {
-    width: min(var(--icm-properties-width), 30vw);
-  }
   .app-workspace,
   .app-workspace.library-collapsed {
     position: relative;
@@ -657,24 +576,12 @@
     /* The dragged width stays authoritative here too; only the ceiling
        narrows, so the Library can still be pulled open on a half-screen
        window. */
-    grid-template-columns:
-      min(var(--icm-shapes-width), 60vw) minmax(0, 1fr)
-      auto;
-    grid-template-areas: "shapes canvas simulation";
+    grid-template-columns: min(var(--icm-shapes-width), 60vw) minmax(0, 1fr);
+    grid-template-areas: "shapes canvas";
   }
 
   .app-workspace.library-collapsed {
-    grid-template-columns: 0 minmax(0, 1fr) auto;
-  }
-
-  .app-workspace.simulation-mode {
-    grid-template-columns: 0 minmax(0, 1fr) auto;
-    grid-template-areas: "shapes canvas simulation";
-  }
-
-  .app-workspace.simulation-mode.simulation-maximized {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "simulation";
+    grid-template-columns: 0 minmax(0, 1fr);
   }
 
   .app-workspace.library-collapsed .shapes-panel {

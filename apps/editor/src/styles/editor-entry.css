@@ -13,8 +13,7 @@
 @import "./editor-dialogs.css";
 @import "./editor-canvas-state.css";
 @import "./editor-agent.css";
-@import "./editor-simulation.css";
-@import "../features/simulation/code-workspace.css";
+@import "./editor-controlled-source-pick.css";
 @import "./editor-accessibility.css";
 @import "./editor-context-menu.css";
 @import "../components/version-history-dialog.css";

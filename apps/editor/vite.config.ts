@@ -8,7 +8,6 @@ import { defineConfig, type Plugin } from "vite";
 import { localNetlistConversion } from "./dev/netlist-conversion";
 import { apiServerProxy } from "./dev/api-server-proxy.js";
 import { localAgentRelay } from "./dev/agent-relay";
-import { localSimulation } from "./dev/local-simulation.js";
 import { localReplica } from "./dev/local-replica";
 import { lockedCanvasPackage } from "./build/rnl-canvas-package";
 
@@ -71,7 +70,6 @@ export default defineConfig({
     react(),
     localAgentRelay(),
     apiServerProxy(),
-    localSimulation(process.env.ICM_SIMULATION_URL),
     localNetlistConversion(),
     // After the Agent relay, whose narrower /api/agent/ proxy must win.
     localReplica(),
