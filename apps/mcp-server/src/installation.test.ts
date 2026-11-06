@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { codexMcpConfig } from "./installation-config.js";
 import {
-  installationOrigin,
+  installationServerUrl,
   installationDeclaration,
   verifyInstallationBytes,
   installMcp,
@@ -188,164 +188,184 @@ describe("verified offline MCP installation", () => {
       }
     }
   });
-  it("installs verified bytes, backs up host settings, launches offline through Homebrew's opt link and leaves settings intact on failed update", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "icm-mcp-install-"));
-    const fetchMock = vi.spyOn(globalThis, "fetch");
-    try {
-      const source = join(directory, "package", "bin");
-      const codex = join(directory, "host");
-      await mkdir(source, { recursive: true });
-      await mkdir(codex);
-      await writeFile(
-        join(source, "analog-canvas-mcp.mjs"),
-        `import readline from 'node:readline';
+  it.each(["", "/canvas", "/canvas/"])(
+    "installs verified bytes from base path '%s', backs up host settings, launches offline through Homebrew's opt link and leaves settings intact on failed update",
+    async (basePath) => {
+      const directory = await mkdtemp(join(tmpdir(), "icm-mcp-install-"));
+      const fetchMock = vi.spyOn(globalThis, "fetch");
+      try {
+        const source = join(directory, "package", "bin");
+        const codex = join(directory, "host");
+        await mkdir(source, { recursive: true });
+        await mkdir(codex);
+        await writeFile(
+          join(source, "analog-canvas-mcp.mjs"),
+          `import readline from 'node:readline';
 for await (const line of readline.createInterface({input:process.stdin})) {
 const m=JSON.parse(line); if(!m.id)continue;
 const result=m.method==='initialize'?{serverInfo:{name:'analog-canvas',version:'1.2.3'}}:{tools:['connect','connection_status','get_context','apply_actions'].map(name=>({name}))};
 process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');
 }`,
-      );
-      await writeFile(
-        join(source, "analog-canvas-headless.mjs"),
-        "export const headless = true;\n",
-      );
-      const archive = join(directory, "fixture.tgz");
-      execFileSync("tar", ["-czf", archive, "-C", directory, "package"], {
-        windowsHide: true,
-      });
-      const bytes = await readFile(archive);
-      const manifest = {
-        format: "analog-canvas-mcp-bootstrap-v1",
-        version: "1.2.3",
-        requirements: { node: ">=24.0.0" },
-        distribution: {
-          downloadUrl:
-            "https://github.com/cascode-ai/analog-canvas/releases/download/mcp-v1.2.3/analog-canvas-mcp-server-1.2.3.tgz",
-          sha256: createHash("sha256").update(bytes).digest("hex"),
-        },
-      };
-      fetchMock.mockImplementation(async (url) =>
-        String(url).endsWith("mcp-manifest.json")
-          ? Response.json(manifest)
-          : new Response(bytes),
-      );
-      const original =
-        'model = "keep"\n[mcp_servers.other]\ncommand = "unrelated"\n';
-      const config = join(codex, "config.toml");
-      await writeFile(config, original);
-      // Homebrew runs Node from a versioned Cellar directory that the next
-      // `brew upgrade` removes; the host launches it through the formula's
-      // `opt` link, which follows upgrades.
-      const brew = join(directory, "brew");
-      const cellarNode = join(
-        brew,
-        "Cellar",
-        "node",
-        "25.8.1_1",
-        "bin",
-        "node",
-      );
-      await mkdir(dirname(cellarNode), { recursive: true });
-      // The core offline installation contract also runs on Windows,
-      // whose executable naming and symlink privileges differ from Homebrew.
-      const node = process.platform === "win32" ? process.execPath : cellarNode;
-      if (process.platform !== "win32") {
-        await symlink(process.execPath, cellarNode);
-        await mkdir(join(brew, "opt"));
-        await symlink(
-          join("..", "Cellar", "node", "25.8.1_1"),
-          join(brew, "opt", "node"),
-          "dir",
         );
-      }
-      const installed = await installMcp(
-        ["--origin", launch.env.ANALOG_CANVAS_API_URL, "--host", "codex"],
-        { home: directory, codex, execPath: node },
-      );
-      expect(installed.launch.command).toBe(
-        process.platform === "win32"
-          ? process.execPath
-          : join(brew, "opt", "node", "bin", "node"),
-      );
-      expect(installed.hostLoaded).toBe(false);
-      expect(installed).toMatchObject({
-        stage: "host-loading",
-        nextAction: "verify-host-tools",
-      });
-      // Local mode's headless workspace lands beside the adapter it loads from.
-      expect(
-        await readFile(
-          join(
-            dirname(installed.launch.args[0]!),
-            "analog-canvas-headless.mjs",
+        await writeFile(
+          join(source, "analog-canvas-headless.mjs"),
+          "export const headless = true;\n",
+        );
+        const archive = join(directory, "fixture.tgz");
+        execFileSync("tar", ["-czf", archive, "-C", directory, "package"], {
+          windowsHide: true,
+        });
+        const bytes = await readFile(archive);
+        const manifest = {
+          format: "analog-canvas-mcp-bootstrap-v1",
+          version: "1.2.3",
+          requirements: { node: ">=24.0.0" },
+          distribution: {
+            downloadUrl:
+              "https://github.com/cascode-ai/analog-canvas/releases/download/mcp-v1.2.3/analog-canvas-mcp-server-1.2.3.tgz",
+            sha256: createHash("sha256").update(bytes).digest("hex"),
+          },
+        };
+        fetchMock.mockImplementation(async (url) =>
+          String(url).endsWith("mcp-manifest.json")
+            ? Response.json(manifest)
+            : new Response(bytes),
+        );
+        const original =
+          'model = "keep"\n[mcp_servers.other]\ncommand = "unrelated"\n';
+        const config = join(codex, "config.toml");
+        await writeFile(config, original);
+        // Homebrew runs Node from a versioned Cellar directory that the next
+        // `brew upgrade` removes; the host launches it through the formula's
+        // `opt` link, which follows upgrades.
+        const brew = join(directory, "brew");
+        const cellarNode = join(
+          brew,
+          "Cellar",
+          "node",
+          "25.8.1_1",
+          "bin",
+          "node",
+        );
+        await mkdir(dirname(cellarNode), { recursive: true });
+        // The core offline installation contract also runs on Windows,
+        // whose executable naming and symlink privileges differ from Homebrew.
+        const node =
+          process.platform === "win32" ? process.execPath : cellarNode;
+        if (process.platform !== "win32") {
+          await symlink(process.execPath, cellarNode);
+          await mkdir(join(brew, "opt"));
+          await symlink(
+            join("..", "Cellar", "node", "25.8.1_1"),
+            join(brew, "opt", "node"),
+            "dir",
+          );
+        }
+        const installed = await installMcp(
+          [
+            "--origin",
+            launch.env.ANALOG_CANVAS_API_URL + basePath,
+            "--host",
+            "codex",
+          ],
+          { home: directory, codex, execPath: node },
+        );
+        const serverUrl =
+          launch.env.ANALOG_CANVAS_API_URL + basePath.replace(/\/$/u, "");
+        expect(fetchMock).toHaveBeenNthCalledWith(
+          1,
+          `${serverUrl}/api/agent/mcp-manifest.json`,
+          expect.any(Object),
+        );
+        expect(installed.origin).toBe(serverUrl);
+        expect(installed.launch.env.ANALOG_CANVAS_API_URL).toBe(serverUrl);
+        expect(installed.launch.command).toBe(
+          process.platform === "win32"
+            ? process.execPath
+            : join(brew, "opt", "node", "bin", "node"),
+        );
+        expect(installed.hostLoaded).toBe(false);
+        expect(installed).toMatchObject({
+          stage: "host-loading",
+          nextAction: "verify-host-tools",
+        });
+        // Local mode's headless workspace lands beside the adapter it loads from.
+        expect(
+          await readFile(
+            join(
+              dirname(installed.launch.args[0]!),
+              "analog-canvas-headless.mjs",
+            ),
+            "utf8",
           ),
-          "utf8",
-        ),
-      ).toBe("export const headless = true;\n");
-      expect(await readFile(installed.backupPath!, "utf8")).toBe(original);
-      const configured = await readFile(config, "utf8");
-      expect(configured).toContain(original.trim());
-      expect(configured).toContain(launch.env.ANALOG_CANVAS_API_URL);
-      expect(configured).toContain(
-        `command = ${JSON.stringify(installed.launch.command)}`,
-      );
-      expect(fetchMock).toHaveBeenCalledTimes(2);
-      fetchMock.mockRejectedValue(Error("offline"));
-      await expect(
-        probeInstalledMcp(
-          installed.launch.command,
-          installed.launch.args[0]!,
-          "1.2.3",
-        ),
-      ).resolves.toMatchObject({ toolCount: 4 });
-      await expect(
-        installMcp(
-          ["--origin", launch.env.ANALOG_CANVAS_API_URL, "--host", "codex"],
-          { home: directory, codex },
-        ),
-      ).rejects.toMatchObject({
-        diagnostic: { stage: "manifest", code: "MANIFEST_FETCH_FAILED" },
-      });
-      expect(await readFile(config, "utf8")).toBe(configured);
-      fetchMock.mockImplementation(async (url) =>
-        String(url).endsWith("mcp-manifest.json")
-          ? Response.json(manifest)
-          : new Response("tampered"),
-      );
-      await expect(
-        installMcp(
-          ["--origin", launch.env.ANALOG_CANVAS_API_URL, "--host", "codex"],
-          { home: directory, codex },
-        ),
-      ).rejects.toThrow("integrity");
-      expect(await readFile(config, "utf8")).toBe(configured);
-      fetchMock.mockImplementation(async (url) =>
-        String(url).endsWith("mcp-manifest.json")
-          ? Response.json({
-              ...manifest,
-              version: "1.2.4",
-              distribution: {
-                ...manifest.distribution,
-                downloadUrl: manifest.distribution.downloadUrl.replaceAll(
-                  "1.2.3",
-                  "1.2.4",
-                ),
-              },
-            })
-          : new Response(bytes),
-      );
-      await expect(
-        installMcp(
-          ["--origin", launch.env.ANALOG_CANVAS_API_URL, "--host", "codex"],
-          { home: directory, codex },
-        ),
-      ).rejects.toThrow("identity");
-      expect(await readFile(config, "utf8")).toBe(configured);
-    } finally {
-      fetchMock.mockRestore();
-      await rm(directory, { recursive: true, force: true });
-    }
-  });
+        ).toBe("export const headless = true;\n");
+        expect(await readFile(installed.backupPath!, "utf8")).toBe(original);
+        const configured = await readFile(config, "utf8");
+        expect(configured).toContain(original.trim());
+        expect(configured).toContain(
+          `ANALOG_CANVAS_API_URL = ${JSON.stringify(serverUrl)}`,
+        );
+        expect(configured).toContain(
+          `command = ${JSON.stringify(installed.launch.command)}`,
+        );
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        fetchMock.mockRejectedValue(Error("offline"));
+        await expect(
+          probeInstalledMcp(
+            installed.launch.command,
+            installed.launch.args[0]!,
+            "1.2.3",
+          ),
+        ).resolves.toMatchObject({ toolCount: 4 });
+        await expect(
+          installMcp(
+            ["--origin", launch.env.ANALOG_CANVAS_API_URL, "--host", "codex"],
+            { home: directory, codex },
+          ),
+        ).rejects.toMatchObject({
+          diagnostic: { stage: "manifest", code: "MANIFEST_FETCH_FAILED" },
+        });
+        expect(await readFile(config, "utf8")).toBe(configured);
+        fetchMock.mockImplementation(async (url) =>
+          String(url).endsWith("mcp-manifest.json")
+            ? Response.json(manifest)
+            : new Response("tampered"),
+        );
+        await expect(
+          installMcp(
+            ["--origin", launch.env.ANALOG_CANVAS_API_URL, "--host", "codex"],
+            { home: directory, codex },
+          ),
+        ).rejects.toThrow("integrity");
+        expect(await readFile(config, "utf8")).toBe(configured);
+        fetchMock.mockImplementation(async (url) =>
+          String(url).endsWith("mcp-manifest.json")
+            ? Response.json({
+                ...manifest,
+                version: "1.2.4",
+                distribution: {
+                  ...manifest.distribution,
+                  downloadUrl: manifest.distribution.downloadUrl.replaceAll(
+                    "1.2.3",
+                    "1.2.4",
+                  ),
+                },
+              })
+            : new Response(bytes),
+        );
+        await expect(
+          installMcp(
+            ["--origin", launch.env.ANALOG_CANVAS_API_URL, "--host", "codex"],
+            { home: directory, codex },
+          ),
+        ).rejects.toThrow("identity");
+        expect(await readFile(config, "utf8")).toBe(configured);
+      } finally {
+        fetchMock.mockRestore();
+        await rm(directory, { recursive: true, force: true });
+      }
+    },
+  );
   it("reports an unsupported runtime before any download", async () => {
     const descriptor = Object.getOwnPropertyDescriptor(
       process.versions,
@@ -453,21 +473,58 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');
       ).match(/\[mcp_servers\.'analog-canvas'\]/gu),
     ).toHaveLength(1);
   });
-  it("does not confuse environments or accept credentials in origins", () => {
-    expect(
-      installationOrigin("https://analog-canvas-preview.tokenzhang.com/"),
-    ).toBe(launch.env.ANALOG_CANVAS_API_URL);
-    for (const url of [
-      "http://remote.example",
-      "https://u:p@example.com",
-      "https://example.com/path",
-      "https://example.com/?token=secret",
-    ])
-      expect(() => installationOrigin(url)).toThrow();
-    expect(installationOrigin("http://localhost:5173")).toBe(
-      "http://localhost:5173",
-    );
+  it.each([
+    ["https://editor.example", "https://editor.example"],
+    ["https://editor.example/", "https://editor.example"],
+    ["https://editor.example/canvas", "https://editor.example/canvas"],
+    ["https://editor.example/canvas/", "https://editor.example/canvas"],
+    [
+      "https://editor.example/a-b/c_1.2~3/",
+      "https://editor.example/a-b/c_1.2~3",
+    ],
+    ["http://localhost:5173", "http://localhost:5173"],
+    ["http://127.0.0.1:4310/canvas/", "http://127.0.0.1:4310/canvas"],
+    ["http://[::1]:4310/canvas", "http://[::1]:4310/canvas"],
+  ])("normalizes server URL %s to %s", (input, expected) => {
+    expect(installationServerUrl(input)).toBe(expected);
   });
+  it.each([
+    "http://remote.example",
+    "http://remote.example/canvas",
+    "https://u:p@example.com",
+    "https://u@example.com/canvas",
+    "https://@example.com/canvas",
+    "https://example.com/?token=secret",
+    "https://example.com/canvas?token=secret",
+    "https://example.com/canvas?",
+    "https://example.com/canvas#fragment",
+    "https://example.com/canvas#",
+    "https://example.com/canvas//",
+    "https://example.com//canvas",
+    "https://example.com/canvas/./child",
+    "https://example.com/canvas/../child",
+    "https://example.com/canvas/%2e%2e/child",
+    "https://example.com/canvas%2Fchild",
+    "https://example.com/canvas\\child",
+    "https://example.com\\canvas",
+    "https://example.com/canvas space",
+    "https://example.com/canvas\n",
+    "ftp://localhost/canvas",
+  ])(
+    "rejects unsafe server URL %s before downloading or configuring a host",
+    async (url) => {
+      const fetchMock = vi.spyOn(globalThis, "fetch");
+      try {
+        expect(() => installationServerUrl(url)).toThrow();
+        await expect(installMcp(["--origin", url])).rejects.toMatchObject({
+          diagnostic: { stage: "arguments", code: "INSTALL_ARGUMENTS_INVALID" },
+        });
+        expect(fetchMock).not.toHaveBeenCalled();
+      } finally {
+        fetchMock.mockRestore();
+      }
+    },
+  );
   it("rejects digest tampering and arbitrary distribution URLs", () => {
     const bytes = Buffer.from("bundle");
     const sha = createHash("sha256").update(bytes).digest("hex");

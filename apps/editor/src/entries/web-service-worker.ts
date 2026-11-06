@@ -13,9 +13,12 @@ export async function configureWebServiceWorker(
   }
   const registrations = await navigator.serviceWorker.getRegistrations();
   if (registrations.length === 0) return;
-  const wasControlled = navigator.serviceWorker.controller !== null;
-  await Promise.all(
-    registrations.map((registration) => registration.unregister()),
+  const owned = registrations.filter(
+    (registration) =>
+      registration.scope === new URL(baseUrl, window.location.href).href,
   );
+  if (!owned.length) return;
+  const wasControlled = navigator.serviceWorker.controller !== null;
+  await Promise.all(owned.map((registration) => registration.unregister()));
   if (wasControlled) window.location.reload();
 }

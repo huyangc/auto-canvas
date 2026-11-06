@@ -108,3 +108,70 @@ writes. HTTP and editor messages can interleave while awaiting replies. Run a
 single relay process per database; live sockets are held only by that process.
 Simulation and artifact transfer routes are retired and return 404. The relay
 serves the retained Agent operations through the editor connection.
+
+## Deploying beside silicon-notebook
+
+Set `AUTO_CANVAS_BASE_PATH=/canvas` and run `pnpm start`. The launcher builds
+assets for `/canvas/`, probes `/canvas/api/health`, and prints
+`http://127.0.0.1:4310/canvas/`. Use the same setting for a direct server and
+editor build, or for `pnpm dev`. Rebuild the editor whenever it changes;
+`SKIP_BUILD=1` requires an already matching build. Empty (the default) or `/`
+serves at the root; a trailing slash is normalized away. Prefix segments may
+contain ASCII letters, digits, `.`, `_`, `~` and `-`, excluding `.` and `..`
+segments. Queries, fragments, escapes, repeated slashes and full URLs are rejected.
+
+Place this Nginx block **before** the existing catch-all to Next.js on 3000.
+Keep the prefix in the upstream request: `proxy_pass` has no trailing slash.
+The notebook continues to own `/`, `/api/*` and `/mcp`.
+
+```nginx
+location = /canvas {
+    return 308 /canvas/;
+}
+location /canvas/ {
+    proxy_pass http://127.0.0.1:4310;
+    proxy_http_version 1.1;
+    proxy_set_header Host $http_host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_buffering off;
+    proxy_read_timeout 300s;
+}
+location / {
+    proxy_pass http://127.0.0.1:3000;
+    # Retain silicon-notebook's existing proxy settings here.
+}
+```
+
+The loopback Node listener trusts a single `X-Forwarded-Proto: http` or `https`
+from a loopback peer so TLS termination preserves the public origin for CSRF,
+Agent URLs and WebSocket origin checks. It ignores forwarded host/path headers;
+Nginx must overwrite the scheme header and preserve Host.
+
+The server returns 404 outside `/canvas/` and redirects `/canvas` to `/canvas/`.
+Static assets, API calls, Agent HTTP and WebSocket endpoints, pairing instructions,
+manifest bootstrap URLs and OpenAPI server URLs all carry the prefix.
+`AGENT_ALLOWED_ORIGIN` remains an origin such as `https://notebook.example.com`,
+without `/canvas`. `AUTO_CANVAS_API_URL` is the proxy target origin, without the
+prefix; Vite forwards the prefixed request unchanged. Public manifests and icons
+are relative to the deployment, and the service worker uses `/canvas/` as its scope.
+
+Run the built-server proxy integration and the opt-in browser workflow with:
+
+```bash
+AUTO_CANVAS_BASE_PATH=/canvas pnpm build
+node scripts/base-path-proxy.mjs --check
+AUTO_CANVAS_E2E_BASE_PATH=1 pnpm exec playwright test apps/editor/e2e/base-path.spec.ts --workers=1
+```
+
+The MCP installer accepts `--install --origin https://notebook.example.com/canvas`
+(a trailing slash is optional). It fetches the manifest under that base URL and
+retains `/canvas` in `ANALOG_CANVAS_API_URL` when configuring the stdio client.
+Bare origins remain supported; HTTP is allowed only for loopback servers.
+
+The proxy serves a notebook stand-in outside `/canvas/`, forwards HTTP and
+WebSocket upgrades unchanged, and creates/drops an isolated schema in
+`AUTO_CANVAS_TEST_DATABASE_URL`. The browser command builds and starts that
+setup itself, enabling the existing Agent UI flag in the test build, on `ICM_E2E_PORT` (default 4173); ordinary browser suites continue
+to use their existing root routes.

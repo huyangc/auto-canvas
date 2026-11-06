@@ -21,7 +21,18 @@ function loadWorker(
   fetchImpl: typeof fetch,
   openGate = Promise.resolve(),
   failStorage = false,
+  base = "/",
 ) {
+  const opened: string[] = [];
+  const matchedCacheNames: (string | undefined)[] = [];
+  const deleted: string[] = [];
+  const existing = [
+    "icm-static-shell-/canvas/:old",
+    "icm-static-shell-/:notebook",
+    "icm-static-shell-/other/:old",
+    // A shell named before caches were scoped by path.
+    "icm-static-shell-legacy-build",
+  ];
   const listeners = new Map<string, Listener>();
   const stored = new Map<string, Response>();
   const cache = {
@@ -47,20 +58,29 @@ function loadWorker(
   const scope = {
     addEventListener: (name: string, listener: Listener) =>
       listeners.set(name, listener),
-    registration: { scope: "https://analog-canvas.test/" },
+    registration: { scope: `https://analog-canvas.test${base}` },
   };
   const caches = {
-    open: () => openGate.then(() => cache),
-    keys: () => Promise.resolve([]),
-    match: (request: Request) => cache.match(request),
-    delete: () => Promise.resolve(true),
+    open: (name: string) => {
+      opened.push(name);
+      return openGate.then(() => cache);
+    },
+    keys: () => Promise.resolve(existing),
+    match: (request: Request, options?: { cacheName?: string }) => {
+      matchedCacheNames.push(options?.cacheName);
+      return cache.match(request);
+    },
+    delete: (name: string) => {
+      deleted.push(name);
+      return Promise.resolve(true);
+    },
   };
   const source = readFileSync(
     resolve(process.cwd(), "apps/editor/public/sw.js"),
     "utf8",
   );
   new Function("self", "caches", "fetch", source)(scope, caches, fetchImpl);
-  return { listeners, stored };
+  return { listeners, stored, opened, deleted, matchedCacheNames };
 }
 
 async function requestScript(
@@ -88,6 +108,95 @@ async function requestScript(
 }
 
 describe("static shell cache policy", () => {
+  it("confines prefixed fetches, cache storage and activation to its scope", async () => {
+    const { listeners, stored, opened, deleted, matchedCacheNames } =
+      loadWorker(
+        (async () => new Response("asset")) as typeof fetch,
+        Promise.resolve(),
+        false,
+        "/canvas/",
+      );
+    for (const path of [
+      "/canvas/api/components/x/preview.svg",
+      "/api/health",
+      "/assets/notebook.js",
+    ]) {
+      let responded = false;
+      const request = new Request(`https://analog-canvas.test${path}`);
+      Object.defineProperty(request, "destination", { value: "image" });
+      listeners.get("fetch")!({
+        request,
+        respondWith: () => {
+          responded = true;
+        },
+        waitUntil: () => undefined,
+      });
+      expect(responded, path).toBe(false);
+    }
+    const request = new Request(
+      "https://analog-canvas.test/canvas/assets/analog-canvas-extensions-abc.rnl",
+    );
+    let served!: Promise<Response>;
+    const pending: Promise<unknown>[] = [];
+    listeners.get("fetch")!({
+      request,
+      respondWith: (value) => {
+        served = value;
+      },
+      waitUntil: (value) => {
+        pending.push(value);
+      },
+    });
+    expect(await (await served).text()).toBe("asset");
+    await Promise.all(pending);
+    expect(stored.has("/canvas/assets/analog-canvas-extensions-abc.rnl")).toBe(
+      true,
+    );
+    expect(
+      opened.every((key) => key.startsWith("icm-static-shell-/canvas/:")),
+    ).toBe(true);
+    listeners.get("activate")!({
+      request,
+      respondWith: () => undefined,
+      waitUntil: (value) => {
+        pending.push(value);
+      },
+    });
+    await Promise.all(pending);
+    expect(deleted).toEqual(["icm-static-shell-/canvas/:old"]);
+    // Every read names this deployment's own cache, never the whole origin.
+    expect(matchedCacheNames.length).toBeGreaterThan(0);
+    expect(
+      matchedCacheNames.every((name) =>
+        name?.startsWith("icm-static-shell-/canvas/:"),
+      ),
+    ).toBe(true);
+  });
+
+  it("removes the legacy unscoped shell only when the root worker activates", async () => {
+    const pending: Promise<unknown>[] = [];
+    const { listeners, deleted } = loadWorker(
+      () => Promise.resolve(new Response("ok")),
+      Promise.resolve(),
+      false,
+      "/",
+    );
+    listeners.get("activate")!({
+      request: new Request("https://analog-canvas.test/"),
+      respondWith: () => undefined,
+      waitUntil: (value) => {
+        pending.push(value);
+      },
+    });
+    await Promise.all(pending);
+    // The root worker drops its own old shell and the legacy name, never a
+    // prefixed deployment's caches.
+    expect(deleted.sort()).toEqual([
+      "icm-static-shell-/:notebook",
+      "icm-static-shell-legacy-build",
+    ]);
+  });
+
   it("refreshes a rejected Canvas package on reload and keeps a verified offline fallback", async () => {
     const valid = new Uint8Array(
       readFileSync(

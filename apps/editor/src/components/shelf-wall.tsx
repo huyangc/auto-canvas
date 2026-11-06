@@ -1,3 +1,4 @@
+import { apiUrl, appUrl } from "../lib/app-url";
 import "./shelf-wall.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { TilePreview } from "./tile-preview";
@@ -57,7 +58,7 @@ export async function loadShelf(
 
 /** Opening a shelf tile hands the id to the editor, which loads the Project. */
 export function shelfProjectHref(projectId: string): string {
-  return `/editor?project=${encodeURIComponent(projectId)}`;
+  return appUrl(`editor?project=${encodeURIComponent(projectId)}`);
 }
 
 function formatUpdatedAt(value: string): string {
@@ -130,7 +131,7 @@ export function ShelfWall() {
 
   const historySource = useMemo<VersionHistorySource | undefined>(() => {
     if (!history) return undefined;
-    const endpoint = `/api/projects/${encodeURIComponent(history.id)}`;
+    const endpoint = apiUrl(`projects/${encodeURIComponent(history.id)}`);
     let revision = history.revision;
     return {
       currentLabel: "Current draft",
@@ -313,8 +314,8 @@ export function ShelfWall() {
   if (state.projects.length === 0) {
     return (
       <p className="shelf-status" data-testid="shelf-empty">
-        Your shelf is empty. Open the <a href="/editor">editor</a>, draw
-        something, and use File → Save to keep it here.
+        Your shelf is empty. Open the <a href={appUrl("editor")}>editor</a>,
+        draw something, and use File → Save to keep it here.
       </p>
     );
   }

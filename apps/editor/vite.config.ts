@@ -1,3 +1,4 @@
+import { normalizeBasePath } from "../server/src/base-path.js";
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -55,8 +56,7 @@ function versionStaticServiceWorker(): Plugin {
 }
 
 export default defineConfig({
-  // The server serves the editor from a domain root, so assets are absolute.
-  base: "/",
+  base: `${normalizeBasePath(process.env.AUTO_CANVAS_BASE_PATH)}/`,
   // The rnl runtime's Worker awaits at its top level, so Workers bundle as
   // ES modules; every Worker here is a module Worker already.
   worker: { format: "es" },

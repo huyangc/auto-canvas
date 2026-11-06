@@ -1,3 +1,4 @@
+import { apiUrl } from "../lib/app-url";
 import { createContext, lazy, Suspense, useEffect, useState } from "react";
 
 import { isDailyAllowanceRefusal } from "../daily-allowance";
@@ -10,7 +11,7 @@ const AccountMenuView = /* @__PURE__ */ lazy(
  * Gallery accounts (roadmap phase G2), dark-shipped: the worker reports
  * which sign-in providers are enabled; until any secret exists the whole
  * account area renders nothing. Sessions ride an HttpOnly cookie, so the
- * client only ever sees the public profile from `/api/auth/me`.
+ * client only ever sees the public profile from apiUrl(`auth/me`).
  */
 
 export interface SessionUser {
@@ -85,7 +86,7 @@ export async function readSessionUser(
   if (!fresh && cached && cached.expiresAt > Date.now()) return cached.request;
   const request = (async (): Promise<SessionUserResult> => {
     try {
-      const response = await fetchLike("/api/auth/me", {
+      const response = await fetchLike(apiUrl("auth/me"), {
         credentials: "same-origin",
       });
       if (!response.ok) return { available: false };
@@ -107,7 +108,7 @@ export async function loadAccountState(
   fetchLike: typeof fetch = fetch,
 ): Promise<AccountState> {
   try {
-    const providersRequest = fetchLike("/api/auth/providers", {
+    const providersRequest = fetchLike(apiUrl("auth/providers"), {
       credentials: "same-origin",
     });
     const userRequest = fetchSessionUser(fetchLike);
@@ -133,7 +134,7 @@ export async function requestEmailCode(
   fetchLike: typeof fetch = fetch,
 ): Promise<EmailCodeResult> {
   try {
-    const response = await fetchLike("/api/auth/email/start", {
+    const response = await fetchLike(apiUrl("auth/email/start"), {
       method: "POST",
       credentials: "same-origin",
       headers: { "content-type": "application/json" },
@@ -160,7 +161,7 @@ export async function verifyEmailCode(
   fetchLike: typeof fetch = fetch,
 ): Promise<EmailCodeResult> {
   try {
-    const response = await fetchLike("/api/auth/email/verify", {
+    const response = await fetchLike(apiUrl("auth/email/verify"), {
       method: "POST",
       credentials: "same-origin",
       headers: { "content-type": "application/json" },
@@ -200,7 +201,7 @@ export async function renameAccount(
   fetchLike: typeof fetch = fetch,
 ): Promise<SessionUser | null> {
   try {
-    const response = await fetchLike("/api/auth/profile", {
+    const response = await fetchLike(apiUrl("auth/profile"), {
       method: "POST",
       credentials: "same-origin",
       headers: { "content-type": "application/json" },
@@ -231,7 +232,7 @@ export async function deleteAccount(
   fetchLike: typeof fetch = fetch,
 ): Promise<DeleteAccountResult> {
   try {
-    const response = await fetchLike("/api/auth/account/delete", {
+    const response = await fetchLike(apiUrl("auth/account/delete"), {
       method: "POST",
       credentials: "same-origin",
       headers: { "content-type": "application/json" },
@@ -264,7 +265,7 @@ async function returnToOwner(
   fetchLike: typeof fetch = fetch,
 ): Promise<boolean> {
   try {
-    const response = await fetchLike("/api/auth/ai-accounts/return", {
+    const response = await fetchLike(apiUrl("auth/ai-accounts/return"), {
       method: "POST",
       credentials: "same-origin",
     });
@@ -276,7 +277,7 @@ async function returnToOwner(
 
 export async function signOut(fetchLike: typeof fetch = fetch): Promise<void> {
   try {
-    await fetchLike("/api/auth/logout", {
+    await fetchLike(apiUrl("auth/logout"), {
       method: "POST",
       credentials: "same-origin",
     });

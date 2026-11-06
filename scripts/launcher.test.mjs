@@ -67,6 +67,11 @@ beforeEach(async () => {
   ]) {
     cpSync(join(scripts, script), join(root, "scripts", script));
   }
+  mkdirSync(join(root, "apps/server/src"), { recursive: true });
+  cpSync(
+    join(scripts, "../apps/server/src/base-path.ts"),
+    join(root, "apps/server/src/base-path.ts"),
+  );
   mkdirSync(join(root, "node_modules"));
   mkdirSync(join(root, "bin"));
   mkdirSync(join(root, "apps/server/dist"), { recursive: true });
@@ -81,6 +86,7 @@ fs.writeFileSync('server-env.json', JSON.stringify(process.env));
 if (process.env.FIXTURE_MODE === 'crash') { console.error('fixture startup failure'); process.exit(7); }
 if (process.env.FIXTURE_MODE === 'hang') setInterval(() => {}, 1000);
 else http.createServer((req, res) => {
+  if (req.url !== (process.env.AUTO_CANVAS_BASE_PATH || '') + '/api/health') { res.statusCode = 404; res.end(); return; }
   res.setHeader('Content-Type', 'application/json');
   res.end(JSON.stringify({ok:true}));
 }).listen(Number(process.env.PORT), process.env.HOST);
@@ -293,6 +299,11 @@ test("missing dependencies and failed builds fail before starting a server", asy
   const missing = await launch("start").result;
   expect(missing.code).toBe(1);
   expect(missing.output).toContain("pnpm install --frozen-lockfile");
+  mkdirSync(join(root, "apps/server/src"), { recursive: true });
+  cpSync(
+    join(scripts, "../apps/server/src/base-path.ts"),
+    join(root, "apps/server/src/base-path.ts"),
+  );
   mkdirSync(join(root, "node_modules"));
   expect((await launch("start", { FIXTURE_BUILD_EXIT: "7" }).result).code).toBe(
     7,
@@ -472,3 +483,38 @@ test("editor supervisor kills a process group that ignores SIGTERM after STOP_TI
     })
     .toBe(1);
 }, 15_000);
+
+test("launchers normalize, export and probe the configured base path", async () => {
+  const started = await launch("start", { AUTO_CANVAS_BASE_PATH: "/canvas/" })
+    .result;
+  expect(started.code).toBe(0);
+  expect(started.output).toContain(`http://127.0.0.1:${env.PORT}/canvas/`);
+  expect(
+    JSON.parse(readFileSync(join(root, "server-env.json"), "utf8"))
+      .AUTO_CANVAS_BASE_PATH,
+  ).toBe("/canvas");
+  expect(
+    (
+      await launch("stop", { AUTO_CANVAS_BASE_PATH: "invalid-for-start" })
+        .result
+    ).code,
+  ).toBe(0);
+  const running = launch("dev", { AUTO_CANVAS_BASE_PATH: "/canvas/" });
+  await until(() => existsSync(join(root, "vite.pid")));
+  expect(
+    JSON.parse(readFileSync(join(root, "server-env.json"), "utf8"))
+      .AUTO_CANVAS_BASE_PATH,
+  ).toBe("/canvas");
+  running.child.kill("SIGINT");
+  expect((await running.result).code).toBe(130);
+});
+
+test("launchers reject an unsafe base before building or starting", async () => {
+  const invalid = await launch("start", {
+    AUTO_CANVAS_BASE_PATH: "/canvas/../api",
+  }).result;
+  expect(invalid.code).toBe(1);
+  expect(invalid.output).toContain("AUTO_CANVAS_BASE_PATH");
+  expect(existsSync(join(root, "server.pid"))).toBe(false);
+  expect(existsSync(join(root, "build.log"))).toBe(false);
+});

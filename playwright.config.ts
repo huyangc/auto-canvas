@@ -6,6 +6,7 @@ process.env.NO_PROXY = [process.env.NO_PROXY, "127.0.0.1", "localhost"]
   .filter(Boolean)
   .join(",");
 
+const prefixTest = process.env.AUTO_CANVAS_E2E_BASE_PATH === "1";
 const e2ePort = Number(process.env.ICM_E2E_PORT ?? "4173");
 const e2eBaseUrl = `http://127.0.0.1:${e2ePort}`;
 // Parallel task worktrees each use their own ports and test database
@@ -30,6 +31,9 @@ const editorServer = serveSource
 
 export default defineConfig({
   testDir: "apps/editor/e2e",
+  ...(prefixTest
+    ? { testMatch: "**/base-path.spec.ts" }
+    : { testIgnore: "**/base-path.spec.ts" }),
   // Each scenario owns an isolated browser context. Test-level parallelism
   // lets CI shards balance cases instead of assigning the entire suite to one
   // shard based on the three large spec files.
@@ -63,30 +67,44 @@ export default defineConfig({
   ...(externalBaseUrl
     ? {}
     : {
-        webServer: [
-          {
-            command:
-              "pnpm --filter @icm/server... build && node apps/server/dist/cli.js",
-            env: {
-              DATABASE_URL:
-                process.env.AUTO_CANVAS_TEST_DATABASE_URL ??
-                "postgresql:///auto_canvas_test",
-              PORT: String(apiPort),
-            },
-            url: `${apiUrl}/api/health`,
-            reuseExistingServer: false,
-            timeout: 120_000,
-          },
-          {
-            command: editorServer,
-            env: { AUTO_CANVAS_API_URL: apiUrl },
-            url: e2eBaseUrl,
-            reuseExistingServer:
-              !process.env.CI && process.env.ICM_E2E_ISOLATED !== "1",
-            // The test build runs first: about a second here, longer on a
-            // cold CI runner.
-            timeout: 120_000,
-          },
-        ],
+        webServer: prefixTest
+          ? [
+              {
+                command: "pnpm build && node scripts/base-path-proxy.mjs",
+                env: {
+                  AUTO_CANVAS_BASE_PATH: "/canvas",
+                  VITE_ICM_AGENT_UI: "enabled",
+                },
+                url: `${e2eBaseUrl}/canvas/api/health`,
+                gracefulShutdown: { signal: "SIGTERM", timeout: 10_000 },
+                reuseExistingServer: false,
+                timeout: 180_000,
+              },
+            ]
+          : [
+              {
+                command:
+                  "pnpm --filter @icm/server... build && node apps/server/dist/cli.js",
+                env: {
+                  DATABASE_URL:
+                    process.env.AUTO_CANVAS_TEST_DATABASE_URL ??
+                    "postgresql:///auto_canvas_test",
+                  PORT: String(apiPort),
+                },
+                url: `${apiUrl}/api/health`,
+                reuseExistingServer: false,
+                timeout: 120_000,
+              },
+              {
+                command: editorServer,
+                env: { AUTO_CANVAS_API_URL: apiUrl },
+                url: e2eBaseUrl,
+                reuseExistingServer:
+                  !process.env.CI && process.env.ICM_E2E_ISOLATED !== "1",
+                // The test build runs first: about a second here, longer on a
+                // cold CI runner.
+                timeout: 120_000,
+              },
+            ],
       }),
 });

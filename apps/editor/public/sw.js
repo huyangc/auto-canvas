@@ -3,7 +3,20 @@
 // Replaced by the Vite build with a digest of the emitted index.html. This
 // changes when its content-hashed application asset graph changes, allowing
 // activate() to remove the prior shell instead of retaining it indefinitely.
-const CACHE = "icm-static-shell-__ICM_BUILD_ID__";
+const CACHE_PREFIX = `icm-static-shell-${new URL(self.registration.scope).pathname}:`;
+const CACHE = `${CACHE_PREFIX}__ICM_BUILD_ID__`;
+const ROOT_SCOPE = new URL(self.registration.scope).pathname === "/";
+
+function isLegacyShellCache(key) {
+  return key.startsWith("icm-static-shell-") && key[17] !== "/";
+}
+
+// Offline lookups read only this worker's own cache, never another
+// deployment's or a legacy shell that shares the origin.
+function matchOwn(request) {
+  // cacheName scopes the lookup without waiting for the cache to open.
+  return caches.match(request, { cacheName: CACHE });
+}
 
 function scopeUrl() {
   return new URL(self.registration.scope);
@@ -30,17 +43,19 @@ self.addEventListener("install", (event) => {
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches
-      .keys()
-      .then((keys) =>
-        Promise.all(
-          keys
-            .filter(
-              (key) => key.startsWith("icm-static-shell-") && key !== CACHE,
-            )
-            .map((key) => caches.delete(key)),
-        ),
+    caches.keys().then((keys) =>
+      Promise.all(
+        keys
+          .filter(
+            (key) =>
+              (key.startsWith(CACHE_PREFIX) && key !== CACHE) ||
+              // Before scoped names, a root deployment named its shell
+              // icm-static-shell-<buildId>; only the root worker owns those.
+              (ROOT_SCOPE && isLegacyShellCache(key)),
+          )
+          .map((key) => caches.delete(key)),
       ),
+    ),
   );
 });
 
@@ -53,7 +68,7 @@ function isStaticAsset(request) {
     // has no destination. Imported/user package files stay outside this cache.
     /\.(?:ttf|woff2?)$/u.test(new URL(request.url).pathname) ||
     /^\/assets\/(?:analog-canvas-extensions-[^/]+\.rnl|rnl_runtime_wasm-[^/]+\.wasm)$/u.test(
-      new URL(request.url).pathname,
+      new URL(request.url).pathname.slice(scopeUrl().pathname.length - 1),
     )
   );
 }
@@ -63,7 +78,8 @@ function isSameOriginApi(request) {
   const scope = scopeUrl();
   return (
     requestUrl.origin === scope.origin &&
-    (requestUrl.pathname === "/api" || requestUrl.pathname.startsWith("/api/"))
+    (requestUrl.pathname === `${scope.pathname}api` ||
+      requestUrl.pathname.startsWith(`${scope.pathname}api/`))
   );
 }
 
@@ -117,6 +133,12 @@ function fetchStaticAsset(event) {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
+  const requestUrl = new URL(event.request.url);
+  if (
+    requestUrl.origin !== scopeUrl().origin ||
+    !requestUrl.pathname.startsWith(scopeUrl().pathname)
+  )
+    return;
 
   // APIs own their own HTTP caching policy. In particular, Gallery previews
   // use revisioned URLs; putting them in the build-scoped shell cache would
@@ -135,7 +157,7 @@ self.addEventListener("fetch", (event) => {
           }
           return response;
         })
-        .catch(() => caches.match(scopeUrl())),
+        .catch(() => matchOwn(scopeUrl())),
     );
     return;
   }
@@ -150,16 +172,16 @@ self.addEventListener("fetch", (event) => {
       // A rejected package must be refreshable instead of pinned in this cache.
       event.respondWith(
         fetchStaticAsset(event).catch(async (error) => {
-          const cached = await caches.match(event.request);
+          const cached = await matchOwn(event.request);
           if (cached) return cached;
           throw error;
         }),
       );
     } else {
       event.respondWith(
-        caches
-          .match(event.request)
-          .then((cached) => cached ?? fetchStaticAsset(event)),
+        matchOwn(event.request).then(
+          (cached) => cached ?? fetchStaticAsset(event),
+        ),
       );
     }
   }

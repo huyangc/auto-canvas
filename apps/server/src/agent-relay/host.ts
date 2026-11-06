@@ -1,3 +1,5 @@
+import { publicUrl } from "../public-url.js";
+import { normalizeBasePath } from "../base-path.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
@@ -318,7 +320,11 @@ export class AgentRelayHost implements AgentSessionNamespaceLike {
     private readonly allowedOrigin = process.env.AGENT_ALLOWED_ORIGIN,
     private readonly factory: SessionFactory = (state, env) =>
       new AgentSessionDO(state, env),
+    private readonly basePath = normalizeBasePath(
+      process.env.AUTO_CANVAS_BASE_PATH,
+    ),
   ) {
+    this.basePath = normalizeBasePath(this.basePath);
     this.idleMs = Number(process.env.AUTO_CANVAS_AGENT_IDLE_MS ?? 300_000);
     if (!Number.isSafeInteger(this.idleMs) || this.idleMs < 0)
       throw new Error("Invalid AUTO_CANVAS_AGENT_IDLE_MS");
@@ -423,6 +429,7 @@ export class AgentRelayHost implements AgentSessionNamespaceLike {
     return (
       (await routeAgentSessionRequest(request, {
         AGENT_SESSION: this,
+        AUTO_CANVAS_BASE_PATH: this.basePath,
         ...(this.allowedOrigin
           ? { AGENT_ALLOWED_ORIGIN: this.allowedOrigin }
           : {}),
@@ -448,13 +455,22 @@ export class AgentRelayHost implements AgentSessionNamespaceLike {
           for (const [key, value] of Object.entries(request.headers))
             if (value !== undefined)
               headers.set(key, Array.isArray(value) ? value.join(", ") : value);
-          const url = new URL(
-            request.url ?? "/",
-            `http://${request.headers.host ?? "localhost"}`,
+          const url = publicUrl(
+            new URL(
+              request.url ?? "/",
+              `http://${request.headers.host ?? "localhost"}`,
+            ).href,
+            typeof request.headers["x-forwarded-proto"] === "string"
+              ? request.headers["x-forwarded-proto"]
+              : undefined,
+            request.socket.remoteAddress,
           );
           const response =
             request.method === "GET" &&
-            /^\/api\/agent\/sessions\/[^/]+\/editor$/u.test(url.pathname)
+            url.pathname.startsWith(`${this.basePath}/`) &&
+            /^\/api\/agent\/sessions\/[^/]+\/editor$/u.test(
+              url.pathname.slice(this.basePath.length),
+            )
               ? await this.fetch(new Request(url, { headers }))
               : new Response("Not found", { status: 404 });
           if (!upgrade.upgraded) {

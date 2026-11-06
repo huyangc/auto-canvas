@@ -10,7 +10,9 @@ function browser(controller: object | null = null) {
   vi.stubGlobal("navigator", {
     serviceWorker: { register, getRegistrations, controller },
   });
-  vi.stubGlobal("window", { location: { reload } });
+  vi.stubGlobal("window", {
+    location: { reload, href: "https://editor.test/canvas/" },
+  });
   return { register, getRegistrations, reload };
 }
 
@@ -33,8 +35,8 @@ describe("Web service worker startup", () => {
     const first = vi.fn().mockReturnValue(pending);
     const second = vi.fn().mockResolvedValue(true);
     getRegistrations.mockResolvedValue([
-      { unregister: first },
-      { unregister: second },
+      { scope: "https://editor.test/", unregister: first },
+      { scope: "https://editor.test/", unregister: second },
     ]);
     const configured = configureWebServiceWorker(false, "/");
     await Promise.resolve();
@@ -50,7 +52,10 @@ describe("Web service worker startup", () => {
   it("does not reload an uncontrolled page after unregistering", async () => {
     const { getRegistrations, reload } = browser();
     getRegistrations.mockResolvedValue([
-      { unregister: vi.fn().mockResolvedValue(true) },
+      {
+        scope: "https://editor.test/",
+        unregister: vi.fn().mockResolvedValue(true),
+      },
     ]);
     await configureWebServiceWorker(false, "/");
     expect(reload).not.toHaveBeenCalled();
@@ -60,6 +65,19 @@ describe("Web service worker startup", () => {
     const { reload } = browser({});
     await configureWebServiceWorker(false, "/");
     expect(reload).not.toHaveBeenCalled();
+  });
+
+  it("leaves another application's worker registered in development", async () => {
+    const { getRegistrations } = browser();
+    const notebook = vi.fn();
+    const canvas = vi.fn().mockResolvedValue(true);
+    getRegistrations.mockResolvedValue([
+      { scope: "https://editor.test/", unregister: notebook },
+      { scope: "https://editor.test/canvas/", unregister: canvas },
+    ]);
+    await configureWebServiceWorker(false, "/canvas/");
+    expect(canvas).toHaveBeenCalledOnce();
+    expect(notebook).not.toHaveBeenCalled();
   });
 
   it("supports browsers without service workers", async () => {

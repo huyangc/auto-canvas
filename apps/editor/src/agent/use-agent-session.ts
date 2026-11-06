@@ -1,3 +1,4 @@
+import { apiUrl } from "../lib/app-url";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
@@ -216,7 +217,7 @@ export interface UseAgentSessionResult extends AgentSessionViewModel {
 
 function socketUrl(sessionId: string): string {
   const url = new URL(
-    `/api/agent/sessions/${sessionId}/editor`,
+    apiUrl(`agent/sessions/${sessionId}/editor`),
     window.location.href,
   );
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
@@ -328,7 +329,7 @@ export function useAgentSession(
       signal: AbortSignal,
     ) => {
       const response = await fetch(
-        `/api/agent/sessions/${live.sessionId}/control`,
+        apiUrl(`agent/sessions/${live.sessionId}/control`),
         {
           method: "POST",
           headers: {
@@ -420,7 +421,7 @@ export function useAgentSession(
         let claimExpiresAt: number | null = null;
         if (!recovery) {
           const requestStartedAt = claimNow();
-          const response = await fetch("/api/agent/sessions", {
+          const response = await fetch(apiUrl("agent/sessions"), {
             signal: operation.signal,
             method: "POST",
             headers: { "content-type": "application/json" },
@@ -1083,7 +1084,9 @@ export function useAgentSession(
           needsAuthorizationCheck: () => Date.now() >= live.expiresAt,
           checkAuthorization: async () => {
             const response = await fetch(
-              `/api/agent/sessions/${encodeURIComponent(live.sessionId)}/status`,
+              apiUrl(
+                `agent/sessions/${encodeURIComponent(live.sessionId)}/status`,
+              ),
               {
                 headers: { "x-editor-secret": live.editorSecret },
                 signal: AbortSignal.timeout(5_000),
@@ -1479,7 +1482,7 @@ export function useAgentSession(
         stopReconnect(live);
         if (!live.claimed) {
           clearAgentSessionRecovery(window.sessionStorage);
-          void fetch(`/api/agent/sessions/${live.sessionId}`, {
+          void fetch(apiUrl(`agent/sessions/${live.sessionId}`), {
             method: "DELETE",
             headers: { "x-editor-secret": live.editorSecret },
             keepalive: true,

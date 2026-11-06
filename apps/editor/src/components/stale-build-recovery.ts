@@ -1,3 +1,4 @@
+import { appUrl } from "../lib/app-url";
 /**
  * Get a page out of a build it can no longer load.
  *
@@ -13,7 +14,20 @@
  * reloads. Nothing here touches a Project: recovery copies live in
  * IndexedDB, which is deliberately not cleared.
  */
-const SHELL_CACHE_PREFIX = "icm-static-shell-";
+const SHELL_CACHE_PREFIX = `icm-static-shell-${import.meta.env.BASE_URL}:`;
+const LEGACY_SHELL_CACHE = "icm-static-shell-";
+
+/** Shell caches this deployment owns, as public/sw.js names them: its own
+ * scoped prefix, plus (at the root only) shells named before scoping. Another
+ * deployment's caches on the same origin are never touched. */
+function ownsShellCache(key: string): boolean {
+  if (key.startsWith(SHELL_CACHE_PREFIX)) return true;
+  return (
+    import.meta.env.BASE_URL === "/" &&
+    key.startsWith(LEGACY_SHELL_CACHE) &&
+    key[LEGACY_SHELL_CACHE.length] !== "/"
+  );
+}
 
 export type ModuleLoadDiagnosis =
   | {
@@ -60,7 +74,7 @@ export class TemporaryModuleLoadError extends Error {
 
 export interface StaleBuildRecoverySurfaces {
   readonly caches?: CacheStorage;
-  readonly serviceWorker?: ServiceWorkerContainer;
+  readonly serviceWorker?: Pick<ServiceWorkerContainer, "getRegistrations">;
   reload(): void;
 }
 
@@ -78,7 +92,7 @@ function moduleAssetUrl(error: unknown, currentUrl: string): string | null {
     const asset = new URL(match[0], current);
     if (
       asset.origin !== current.origin ||
-      !asset.pathname.startsWith("/assets/") ||
+      !asset.pathname.startsWith(appUrl("assets/")) ||
       !asset.pathname.endsWith(".js")
     ) {
       return null;
@@ -135,9 +149,7 @@ export async function recoverFromStaleBuild(
   try {
     const keys = (await surfaces.caches?.keys()) ?? [];
     await Promise.all(
-      keys
-        .filter((key) => key.startsWith(SHELL_CACHE_PREFIX))
-        .map((key) => surfaces.caches!.delete(key)),
+      keys.filter(ownsShellCache).map((key) => surfaces.caches!.delete(key)),
     );
   } catch (error) {
     // A browser that refuses cache access still deserves the reload.
@@ -160,7 +172,16 @@ export function browserStaleBuildRecovery(): StaleBuildRecoverySurfaces {
   return {
     ...(typeof caches !== "undefined" ? { caches } : {}),
     ...(typeof navigator !== "undefined" && "serviceWorker" in navigator
-      ? { serviceWorker: navigator.serviceWorker }
+      ? {
+          serviceWorker: {
+            getRegistrations: async () =>
+              (await navigator.serviceWorker.getRegistrations()).filter(
+                (registration) =>
+                  registration.scope ===
+                  new URL(appUrl(""), window.location.href).href,
+              ),
+          },
+        }
       : {}),
     reload: () => window.location.reload(),
   };

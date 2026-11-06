@@ -1,3 +1,4 @@
+import { apiUrl } from "../lib/app-url";
 import {
   AGENT_FILE_RESOURCE_MAX_BYTES,
   type AgentCircuitHostServiceOptions,
@@ -44,7 +45,7 @@ export function agentCircuitServiceOptions(options: {
     ...(options.files
       ? {
           fileResource: {
-            path: "/api/agent/sessions/{sessionId}/files" as const,
+            path: apiUrl("agent/sessions/{sessionId}/files"),
             operations: [
               "download",
               "stage",
@@ -60,7 +61,7 @@ export function agentCircuitServiceOptions(options: {
           ...(options.projects
             ? {
                 projectResource: {
-                  path: "/api/agent/sessions/{sessionId}/projects" as const,
+                  path: apiUrl("agent/sessions/{sessionId}/projects"),
                   operations: [
                     "list-projects",
                     "workspace",

@@ -41,7 +41,7 @@ export function installationFailureAt(
   const failures = {
     arguments: [
       "INSTALL_ARGUMENTS_INVALID",
-      "Use --install --origin <exact HTTPS origin> --host codex|config",
+      "Use --install --origin <server URL> --host codex|config (HTTPS or loopback HTTP, optional base path)",
       "stop",
     ],
     runtime: [
