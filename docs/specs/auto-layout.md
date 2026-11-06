@@ -141,6 +141,11 @@ pins }` lists, never Net ids.
   leg it stays free at the nearest pin of its Net. Preserve id, content and
   binding. If whole-list replay invalidates a preview Route/leg id, keep that
   label free instead of emitting a broken anchor.
+- **Name claims.** Every input `name-claim` must survive with its name, scope
+  and power domain; the partition check cannot see a lost name. A claim that
+  cannot move to a new Route of its Net makes the planner return no edits and
+  an R10 diagnostic. Fallback stubs use clearance-checked planning; a pin with
+  no clear stub stays an unrouted member, already reported by R14.
 - **R16 — Edit limit.** A complete list exceeding
   `MAX_SCHEMATIC_EDITS_PER_TRANSACTION` returns no edits and an R10 diagnostic.
 - **R17 — Diagnostics.** Every diagnostic has severity `error` or `warning`.

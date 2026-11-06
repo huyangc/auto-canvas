@@ -78,3 +78,15 @@ Known limits for T013 or later:
 - Annotation-to-annotation overlap is unchecked (`two-inverters`: `nbit`
   touches `XSN`).
 - No editor entry or lock field yet.
+
+## PR review round 1 — fixed by Opus
+
+The codex PR review on `e37b005` raised one P1 and one P2. Opus verified both
+and fixed them directly; each is a few lines.
+
+| Finding                                                                                                                                          | Fix                                                                                                                                         |
+| ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| P1: a Net left with one non-`B` terminal gets no new Route, so its power `name-claim` is dropped silently; the partition check cannot see a name | `lostNameClaim` compares every input claim with the final Document; a lost or changed claim refuses the plan under R10                      |
+| P2: fallback stubs skip clearance and can cross the obstacle                                                                                     | `planWireBatch` with `keepClear`; a pin with no clear stub stays an unrouted member, already reported, and the other nets keep their routes |
+
+Both new tests fail with their fix reverted and pass with it.

@@ -70,3 +70,21 @@ export function restorePinGroups(
     }));
   });
 }
+
+/** The partition check cannot see a name: VDD gone leaves the same pin sets.
+ * Returns the id of the first input claim not kept, or undefined. */
+export function lostNameClaim(
+  before: SchematicDocument,
+  after: SchematicDocument,
+): string | undefined {
+  return before.connectivityEvidence.find((claim) => {
+    if (claim.kind !== "name-claim") return false;
+    const kept = after.connectivityEvidence.find((e) => e.id === claim.id);
+    return (
+      kept?.kind !== "name-claim" ||
+      kept.name !== claim.name ||
+      kept.scope !== claim.scope ||
+      kept.powerDomain !== claim.powerDomain
+    );
+  })?.id;
+}

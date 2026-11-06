@@ -192,16 +192,16 @@ function fallbackLabels(
     const stub = planWireBatch(
       document,
       resolver,
-      [
-        {
-          id: `${id}-stub`,
-          from: { kind: "endpoint", endpoint },
-          to: { kind: "free", point },
-        },
-      ],
+      {
+        id: `${id}-stub`,
+        from: { kind: "endpoint", endpoint },
+        to: { kind: "free", point },
+      },
       MAX_SCHEMATIC_EDITS_PER_TRANSACTION,
+      { keepClear: true },
     );
-    if (typeof stub === "string") throw new Error(`R14 fallback stub: ${stub}`);
+    // No clear stub: this pin stays an unrouted member, already reported.
+    if (typeof stub === "string") continue;
     edits.push(...stub.edits, {
       kind: "upsert_schematic_annotation",
       annotation: {

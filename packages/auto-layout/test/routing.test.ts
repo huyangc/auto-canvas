@@ -32,7 +32,7 @@ it("freezes Base Net pins without MOS bulk pins, without mutating input", () => 
   expect(frozen.flatMap((g) => g.pins)).toHaveLength(4);
 });
 
-function obstructedTrunk(named: boolean) {
+function obstructedTrunk(named: boolean, obstacle = [100, 40]) {
   const document = circuit(
     {
       // A grounded source feeding two PMOS sources makes a supply trunk
@@ -55,7 +55,7 @@ function obstructedTrunk(named: boolean) {
     v: [-200, 100],
     a: [0, 100],
     b: [200, 100],
-    obstacle: [100, 40],
+    obstacle,
     c: [400, 100],
     d: [600, 100],
     g: [0, 160],
@@ -508,4 +508,70 @@ it("clears a drafting shape by the minimum whole-layout downward grid translatio
     ),
   ).toBe(true);
   expect(planAutoLayout(after, resolver).edits).toEqual([]);
+});
+
+it("refuses a plan that would lose a power claim with no replacement wire", () => {
+  const document = circuit({ r: "resistor" }, { vdd: ["r.1"], other: ["r.2"] });
+  document.instances[0]!.placement = {
+    position: { x: 100, y: 100 },
+    rotation: 0,
+    mirror: "none",
+  };
+  document.junctions.push({
+    id: "rail-end",
+    netId: "vdd",
+    position: { x: 200, y: 20 },
+  });
+  document.routes.push({
+    id: "rail",
+    netId: "vdd",
+    start: { kind: "terminal", instanceId: "r", pinName: "1" },
+    legs: [
+      {
+        id: "rail-leg",
+        mode: "manual",
+        to: {
+          kind: "endpoint",
+          endpoint: { kind: "junction", junctionId: "rail-end" },
+        },
+      },
+    ],
+  });
+  document.connectivityEvidence.push({
+    id: "vdd-claim",
+    kind: "name-claim",
+    name: "VDD",
+    netId: "vdd",
+    scope: "global",
+    powerDomain: "vdd",
+    owner: { kind: "power-marker", objectId: "rail-end" },
+  });
+  expect(planAutoLayout(document, resolver)).toMatchObject({
+    edits: [],
+    diagnostics: [{ severity: "error", rule: "R10" }],
+  });
+});
+
+it("never draws a fallback stub through the obstacle that blocked the net", () => {
+  const document = obstructedTrunk(true, [10, 50]);
+  const plan = planAutoLayout(document, resolver, {
+    fixedInstanceIds: new Set(document.instances.map((i) => i.id)),
+  });
+  expect(plan.diagnostics.map((d) => d.code)).toContain(
+    "AUTO_LAYOUT_NET_UNROUTED",
+  );
+  const result = executeTransaction(
+    document,
+    {
+      transactionId: "stub",
+      documentId: document.id,
+      expectedRevision: document.revision,
+      actor: { kind: "agent", id: "test" },
+      edits: plan.edits,
+    },
+    { symbolResolver: resolver },
+  );
+  if (!result.ok) throw new Error(JSON.stringify(result.diagnostics));
+  expect(auditRouting(result.document, resolver).problems).toEqual([]);
+  expect(result.document.routes.some((r) => r.netId === "good")).toBe(true);
 });

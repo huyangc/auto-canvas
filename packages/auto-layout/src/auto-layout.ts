@@ -10,7 +10,12 @@ import {
   routeDocument,
   transferPowerClaims,
 } from "./route.js";
-import { preview, restorePinGroups, terminalPartition } from "./transaction.js";
+import {
+  lostNameClaim,
+  preview,
+  restorePinGroups,
+  terminalPartition,
+} from "./transaction.js";
 import { classifyNets } from "./net-roles.js";
 import { placeDocument } from "./place.js";
 import { compareIds, recognizeStructures } from "./recognize.js";
@@ -238,5 +243,7 @@ export function planAutoLayout(
     return refuse(
       "R10: whole-list replay changed a terminal Base Net partition",
     );
+  const lost = lostNameClaim(document, final.document);
+  if (lost) return refuse(`R10: name claim ${lost} would be lost`);
   return { edits, groups, diagnostics: routed.diagnostics };
 }
