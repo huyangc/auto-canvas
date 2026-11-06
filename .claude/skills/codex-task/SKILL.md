@@ -50,8 +50,10 @@ Follow [PR review and merge](../../../docs/workflow.md#pr-评审与合入):
 2. Read the review the codex hook posts to the PR. Verify each finding. Fix P0/P1
    findings that hold, push, and read the re-review. No comment on the current
    head means no review: run it by hand.
-3. Merge only if this delivery authorizes it, every `gh pr checks` entry is
-   `pass` and `~/.claude/hooks/codex-pr-review.sh verify <PR>` succeeds:
+3. Merge only if this delivery authorizes it, `gh pr checks` meets the workflow's
+   merge condition (only the `merge_group` jobs may be `skipping`) and
+   `~/.claude/hooks/codex-pr-review.sh verify <PR>` succeeds, or the workflow's
+   manual check does where the hook is not installed:
    `gh pr merge <PR> --rebase`. Confirm `state` is `MERGED`. Otherwise hand back
    the PR link and its status.
 

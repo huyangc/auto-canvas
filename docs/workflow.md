@@ -67,8 +67,10 @@ scripts/codex-task.sh tasks/T001-<slug>
   授权范围时才交人决定。P2/P3 可说明理由后不改。优先级解析失败时保守阻塞。
 - **驳回意见**：在 PR 上给出理由与证据，并用代码注释记录取舍、用回归测试钉住保留的
   行为。文档或配置类改动没有可测行为时，在 PR 上说明即可。
-- **合入条件**：`gh pr checks` 每个检查都是 `pass`，且 PR 上已贴出针对其远端
-  `headRefOid` 的评审；任何新提交之后都要评审新的远端 head。`mergeStateStatus: CLEAN`、
+- **合入条件**：`gh pr checks` 里没有失败、取消或进行中的检查，除 `ci.yml` 中只在
+  `merge_group` 上运行的 `Core *`、`Browser tests*` 可以是 `skipping` 外，其余检查都是
+  `pass`；且 PR 上已贴出针对其远端 `headRefOid` 的评审；任何新提交之后都要评审新的
+  远端 head。`mergeStateStatus: CLEAN`、
   本地 `git rev-parse HEAD`、agent 汇报和 hook 本地状态都不算证据。满足后用
   `gh pr merge <PR号> --rebase` 合入；用户要自己合入时只交回 PR 链接和状态。
 - **合入结果**：只认 `gh pr view <PR号> --json state` 返回 `MERGED`。stacked PR 使用
@@ -101,7 +103,9 @@ codex exec review --base origin/main --ephemeral \
 ~/.claude/hooks/codex-pr-review.sh verify <PR号>
 ```
 
-合入前 `verify` 必须成功，它以 PR 评论和远端 `headRefOid` 对账。
+合入前 `verify` 必须成功，它以 PR 评论和远端 `headRefOid` 对账。没有 hook 时人工做同样的
+核对：`gh pr view <PR号> --json headRefOid,comments`，确认有一条评审评论的 head SHA 与
+`headRefOid` 一致，且退出码为零、输出非空。
 
 ## Claude Code 技能
 
