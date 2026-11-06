@@ -203,7 +203,7 @@ Optional fields by first schema (older envelopes cannot carry them):
 | 66     | Project `modelSources`, external-definition `implementation` binding or placeholder                                         |
 | 67     | `spectre` sources, draft `language` (absent inherits the applied one)                                                       |
 | 68     | `draft.authoring` per owner, `componentAuthoringDrafts` (library snapshots at a fixed revision)                             |
-| 69     | `componentDefinitions[].libraryOrigin` ([publication](component-publication.md))                                            |
+| 69     | `componentDefinitions[].libraryOrigin` (publication)                                            |
 
 - `importReference` is never guessed for older files; source text is kept by
   private saves and backups, omitted from Gallery, and never a netlist export
@@ -234,6 +234,6 @@ Optional fields by first schema (older envelopes cannot carry them):
   `galleryEntries`, `galleryEntryVersions`, `galleryLikes`, `cloudProjects`,
   `cloudProjectVersions`) and optional opaque `after`, one raw row per page.
   The store has outgrown the 100 MB `schema-restore` request: roll back via
-  [point-in-time recovery](../deployment.md#point-in-time-recovery) (30 days)
+  point-in-time recovery (30 days)
   or row by row. Gallery-only backups (`analog-canvas-gallery-backup-v2`, no
   Cloud Projects) never go to the full-store `schema-restore`.

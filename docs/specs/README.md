@@ -10,7 +10,6 @@ on. Each topic has one owner spec; others link to it.
 | [`edit-engine.md`](edit-engine.md)                                 | Typed edits, transactions, revisions, Undo (sole owner)               |
 | [`circuit-ir.md`](circuit-ir.md)                                   | Transient dialect-neutral import IR                                   |
 | [`symbol-dsl.md`](symbol-dsl.md)                                   | Symbol pins, variants, source-backed artwork, User Components         |
-| [`component-publication.md`](component-publication.md)             | User Component identity, exact content, destination, write recovery   |
 | [`spice-frontend.md`](spice-frontend.md)                           | Lossless SPICE syntax, includes, dialect profiles, elaboration        |
 | [`simulation.md`](simulation.md)                                   | Source folders, configuration, compilation                            |
 | [`simulation-execution.md`](simulation-execution.md)               | Profiles, preparation, execution, artifacts                           |
@@ -29,9 +28,6 @@ on. Each topic has one owner spec; others link to it.
 | [`rnl-interchange.md`](rnl-interchange.md)                         | RNL export formats and import (proposed)                              |
 | [`performance.md`](performance.md)                                 | Benchmark workloads and release budgets                               |
 | [`editor-interaction.md`](editor-interaction.md)                   | Gestures, selection, previews, controls (sole owner)                  |
-| [`community-gallery.md`](community-gallery.md)                     | Gallery feed, accounts, moderation                                    |
-| [`selection-boards.md`](selection-boards.md)                       | Link-shared lists of Gallery entries, changes and their record        |
-| [`analog-arena.md`](analog-arena.md)                               | Contract with the AnalogArena Worker (cross-repo)                     |
 
 ## Writing a spec
 

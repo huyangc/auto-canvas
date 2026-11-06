@@ -142,7 +142,7 @@ owns visual authority.
 - Public-library editing uses an isolated snapshot in the Project's
   non-executable drafts at its fixed library revision, never replacing
   drawing captures; destination and write rules are in
-  [publication](component-publication.md).
+  publication.
 - Library shows public discovery. **My shelf** holds personal publications, Project
   drafts/capacity and authorized deleted records; administrators can review all
   removals. Management results use one dismissible message without resizing the

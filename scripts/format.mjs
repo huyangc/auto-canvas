@@ -7,7 +7,6 @@ import { resolveConfig } from "prettier";
 const patterns = [
   "apps/**/*.{ts,tsx,json,css,html}",
   "packages/**/*.{ts,tsx,json}",
-  "references/**/*.json",
   "scripts/**/*.mjs",
   "*.{json,yaml}",
 ];

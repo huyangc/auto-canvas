@@ -142,7 +142,7 @@ redraws seen drawings), whether the name was typed, connected or generated:
 
 ## Existing drawings
 
-An administrator maintenance pass ([Community Gallery](community-gallery.md#administration))
+An administrator maintenance pass (Community Gallery)
 gives drawn supply, Reference, Cell Pin and Net labels without their own look
 the standard look, may nudge restyled labels a few grid units, sets
 `labelSubscriptItalic` false where no slant was chosen, and refuses any change

@@ -13,7 +13,7 @@ This spec owns saved source folders, compilation, mapped edits, drafts,
 language assistance and Code interaction. [Execution](simulation-execution.md)
 owns Profiles, admission, runs and artifacts; [results](simulation-results.md)
 owns numeric records and Spec reports. The Worker prepares saved folders the
-same way for Gallery [simulation checks](community-gallery.md#simulation-checks).
+same way for Gallery simulation checks.
 
 ## Authored authority
 
@@ -218,4 +218,4 @@ conversions and a generation digest; spans are never persisted.
 
 Electrical acceptance names simulator, models, corner and criteria; mocked
 success qualifies nothing. The [test contract matrix](../testing/contract-matrix.md)
-owns layers; [deployment](../deployment.md) owns Production verification.
+owns layers; deployment owns Production verification.

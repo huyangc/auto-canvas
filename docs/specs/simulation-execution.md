@@ -16,7 +16,7 @@ Owners: `packages/simulation-service`, `packages/spice-run`, `worker`,
   owns preparation and presentation; its Executor is the execution port shared
   by GUI and MCP. On Production the managed control plane owns admission,
   idempotency, queueing, retry, cancellation and retention.
-- Gallery [simulation checks](community-gallery.md#simulation-checks) are one
+- Gallery simulation checks are one
   more managed caller (`prepareFolderExecutionInput`, account
   `gallery-simulation-check`, judged by `executionSpecReport`).
 - Model-library selection belongs to the execution environment. Stimuli are
@@ -51,7 +51,7 @@ Owners: `packages/simulation-service`, `packages/spice-run`, `worker`,
 - Targets (`VACASK_UPSTREAM_URL`/`VACASK_UPSTREAM_TOKEN` operator host, or a
   `VACASK` container binding) are locations, not engines; missing targets never
   fall back; an ngspice target never registers VACASK.
-  [Deployment](../deployment.md) owns registration; the
+  Deployment owns registration; the
   [qualification roadmap](../roadmap/vacask-migration.md) owns scope evidence.
 - Worker and harness share `validateNativeExecutionInput` (revision, entry bytes,
   disjoint portable paths, registry digests, bounds). The Worker forwards exact
@@ -119,7 +119,7 @@ type ModelLibrarySelection =
   rather than presenting normalized `ide` as signed terminal current.
 - Qualification requires original-model electrical checks, Canvas/reference
   numerical agreement, and saved-Project GUI/MCP execution through the real
-  executor. [The qualification workflow](../../.github/workflows/sg13g2-tests.yml)
+  executor. The qualification workflow
   retains native, service and browser evidence.
 
 ### Hosted SKY130 Profile
@@ -304,4 +304,4 @@ Shared minimums for the hosted runner and the local host:
 - `scripts/simulation-acceptance.mjs` and `scripts/preview-simulation-smoke.mjs`
   check the OTA through the hosted path.
 - Recorded fixtures and local runs prove protocol handling, not hosted
-  qualification; [deployment](../deployment.md) owns Production verification.
+  qualification; deployment owns Production verification.
