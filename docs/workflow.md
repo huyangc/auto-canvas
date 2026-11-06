@@ -43,7 +43,7 @@ scripts/codex-task.sh tasks/T001-<slug>
 ```
 
 脚本会检查分支、拼出提示词（AGENTS.md + plan.md + review.md），然后用
-`codex exec`（workspace-write 沙箱、自动审批）在仓库根目录运行。环境变量
+`codex exec --approve-for-me`（workspace-write 沙箱，审批请求交给自动审查）在仓库根目录运行。环境变量
 `CODEX_MODEL` 可覆盖模型。日志在 `tasks/<id>/logs/round-<n>.jsonl`。
 
 沙箱里没有网络，依赖要事先装好（`pnpm install --frozen-lockfile`）。

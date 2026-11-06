@@ -27,7 +27,7 @@ current="$(git branch --show-current)"
 
 logs="$task/logs"
 mkdir -p "$logs"
-round=$(( $(find "$logs" -name 'round-*.jsonl' | wc -l) + 1 ))
+round=$(( $(find "$logs" -name 'round-*.jsonl' -size +0 | wc -l) + 1 ))
 
 if (( round == 1 )); then
   outside="$(git status --porcelain --untracked-files=all | awk '{print $NF}' | grep -v "^$task/" || true)"
@@ -59,7 +59,7 @@ model_args=()
 [[ -n "${CODEX_MODEL:-}" ]] && model_args=(-m "$CODEX_MODEL")
 
 set +e
-codex exec -C "$root" -s workspace-write --approve-for-me --json \
+codex exec -C "$root" --approve-for-me --json \
   ${model_args[@]+"${model_args[@]}"} \
   -o "$logs/round-$round-last.md" - <"$prompt" \
   >"$logs/round-$round.jsonl" 2>"$logs/round-$round.stderr"
