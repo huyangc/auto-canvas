@@ -1,11 +1,6 @@
 import { z } from "zod";
 
 import { lazyJsonSchema } from "./lazy-json-schema.js";
-import {
-  SimulationFileOperationSchema,
-  SimulationFileResultSchema,
-} from "@icm/simulation-service/files";
-import { ProblemSchema } from "@icm/simulation-service/contract";
 
 import { AGENT_API_VERSION } from "./schema.js";
 
@@ -43,59 +38,21 @@ const FileRequestBaseSchema = z.strictObject({
 
 export const AgentFileDownloadOptionsSchema = z
   .strictObject({
-    artifact: z
-      .enum(["project", "svg", "png", "pdf", "simulation-plot"])
-      .describe(
-        "Project and Canvas exports. simulation-plot is a retired compatibility request and returns SIMULATION_PLOT_RETIRED; use simulation-input artifact access for raw/CSV/Spec results.",
-      ),
+    artifact: z.enum(["project", "svg", "png", "pdf"]),
     documentId: StableIdSchema.optional(),
-    simulation: z
-      .strictObject({
-        runId: StableIdSchema,
-        /** Historical plot selection, accepted only to return the retirement error. */
-        analysisIndex: z.number().int().nonnegative(),
-        format: z.enum(["svg", "png"]),
-      })
-      .optional(),
   })
   .superRefine((value, context) => {
-    if (value.artifact === "simulation-plot") {
-      if (!value.simulation)
-        context.addIssue({
-          code: "custom",
-          path: ["simulation"],
-          message:
-            "An explicit run and analysis record are required for plot export",
-        });
-      if (value.documentId)
-        context.addIssue({
-          code: "custom",
-          path: ["documentId"],
-          message: "Simulation plots address a run, not a Canvas document",
-        });
-    } else {
-      if (value.simulation)
-        context.addIssue({
-          code: "custom",
-          path: ["simulation"],
-          message: "Simulation selection is only used for simulation-plot",
-        });
-      if (value.artifact !== "project" && !value.documentId)
-        context.addIssue({
-          code: "custom",
-          path: ["documentId"],
-          message: "documentId is required for visual export",
-        });
-    }
+    if (value.artifact !== "project" && !value.documentId)
+      context.addIssue({
+        code: "custom",
+        path: ["documentId"],
+        message: "documentId is required for visual export",
+      });
   });
 
 export const AgentFileResourceRequestSchema = z.discriminatedUnion(
   "operation",
   [
-    FileRequestBaseSchema.extend({
-      operation: z.literal("simulation-input"),
-      input: SimulationFileOperationSchema,
-    }),
     AgentFileDownloadOptionsSchema.safeExtend({
       apiVersion: z.literal(AGENT_API_VERSION),
       requestId: StableIdSchema,
@@ -171,14 +128,6 @@ export const AgentFileCandidateSummarySchema = z.strictObject({
 });
 export const AgentFileResourceResponseSchema = z.union([
   FileResponseBaseSchema.extend({
-    operation: z.literal("simulation-input"),
-    ok: z.literal(true),
-    result: z.union([
-      SimulationFileResultSchema,
-      z.strictObject({ ok: z.literal(false), error: ProblemSchema }),
-    ]),
-  }),
-  FileResponseBaseSchema.extend({
     operation: z.literal("download"),
     ok: z.literal(true),
     artifact: AgentFileBlobSchema,
@@ -226,7 +175,6 @@ export const AgentFileResourceResponseSchema = z.union([
       "discard",
       "request-approval",
       "open",
-      "simulation-input",
       "import-cell",
     ]),
     ok: z.literal(false),

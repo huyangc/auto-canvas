@@ -8,7 +8,6 @@
     "dev": "vite"
   },
   "dependencies": {
-    "@lezer/json": "1.0.3",
     "@codemirror/autocomplete": "6.20.3",
     "@codemirror/commands": "6.11.0",
     "@codemirror/lang-json": "6.0.2",
@@ -17,11 +16,11 @@
     "@codemirror/search": "6.7.2",
     "@codemirror/state": "6.7.4",
     "@codemirror/view": "6.43.11",
-    "@icm/simulation-service": "workspace:*",
     "@fontsource-variable/google-sans-code": "^5.3.0",
     "@icm/agent-adapter": "workspace:*",
-    "@icm/devices": "workspace:*",
+    "@icm/component-library": "workspace:*",
     "@icm/derived": "workspace:*",
+    "@icm/devices": "workspace:*",
     "@icm/edit-engine": "workspace:*",
     "@icm/exporters": "workspace:*",
     "@icm/math-typesetting": "workspace:*",
@@ -32,20 +31,19 @@
     "@icm/rnl": "workspace:*",
     "@icm/spice": "workspace:*",
     "@icm/symbols": "workspace:*",
+    "@lezer/json": "1.0.3",
     "@rich-netlist/runtime": "0.5.2",
     "fflate": "0.8.3",
     "mathlive": "0.110.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
-    "zod": "4.4.3",
-    "@icm/component-library": "workspace:*"
+    "zod": "4.4.3"
   },
   "devDependencies": {
     "@icm/agent-client": "workspace:*",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.4",
     "@vitejs/plugin-react": "6.0.5",
-    "fake-indexeddb": "^6.2.5",
-    "wrangler": "4.131.1"
+    "fake-indexeddb": "^6.2.5"
   }
 }

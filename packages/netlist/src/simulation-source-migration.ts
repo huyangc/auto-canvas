@@ -10,7 +10,6 @@ import {
   type SimulationExpression,
   type SimulationSourceExpression,
 } from "@icm/model";
-import { deckRequestsRawfile } from "@icm/spice-run";
 import { unquoteSimulationToken } from "@icm/spice";
 import { buildSimulationPlan } from "./simulation-compile.js";
 import { inspectSimulationSourceGraph } from "./simulation-source-graph.js";
@@ -232,4 +231,15 @@ function unresolvedAnalysis(
     case "noise":
       return `* Unresolved Noise intent: ${JSON.stringify(analysis)}\nnoise v(__UNRESOLVED_OUTPUT__) __UNRESOLVED_SOURCE__ ${analysis.sweep} ${analysis.points} ${analysis.startHz} ${analysis.stopHz}`;
   }
+}
+
+/** Legacy raw setups only request collection when their authored deck did. */
+function deckRequestsRawfile(deck: string): boolean {
+  for (const raw of deck.split(/\r?\n/u)) {
+    const line = raw.trim();
+    if (line.length === 0 || line.startsWith("*")) continue;
+    if (/^\.save\b/iu.test(line)) return true;
+    if (/(^|\s|;)write(\s|$)/iu.test(line)) return true;
+  }
+  return false;
 }

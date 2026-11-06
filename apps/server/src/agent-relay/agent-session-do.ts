@@ -4,7 +4,6 @@ import {
   AgentAdapterVersionSchema,
   AgentCircuitResponseSchema,
   AgentFileResourceResponseSchema,
-  AgentSimulationResourceResponseSchema,
   AgentProjectResourceResponseSchema,
   AgentSessionControlMessageSchema,
   AgentSessionEventSchema,
@@ -15,16 +14,12 @@ import {
   invalidAgentRequestResponse,
   isReadOnlyCircuitRequest,
   isReadOnlyFileRequest,
-  isReadOnlySimulationRequest,
   isReadOnlyProjectRequest,
   parseAgentCircuitRequest,
   parseAgentFileResourceRequest,
-  parseAgentSimulationResourceRequest,
   parseAgentProjectResourceRequest,
   type AgentCircuitRequest,
   type AgentFileResourceRequest,
-  type AgentFileResourceResponse,
-  type AgentSimulationResourceRequest,
   type AgentProjectResourceRequest,
   type AgentSessionEvent,
   type AgentSessionScope,
@@ -39,7 +34,6 @@ import {
   EDITOR_SOCKET_TAG,
   EXPIRY_WARNING_MS,
   FORWARD_TIMEOUT_MS,
-  SIMULATION_FORWARD_TIMEOUT_MS,
   SESSION_STATE_KEY,
   bearerToken,
   editorSecret,
@@ -52,7 +46,6 @@ import {
   relayHeaders,
   requestLedgerKey,
   sha256Text,
-  simulationOperationScopes,
   projectOperationScopes,
   transportStatus,
   type AgentSessionEnv,
@@ -60,7 +53,6 @@ import {
   type PendingForward,
   type WebSocketPairConstructor,
 } from "./agent-session-runtime.js";
-import { AgentArtifacts } from "./agent-artifacts.js";
 
 // requestId is session-wide; identical payloads in different Project bindings
 // must never replay an earlier Project's cached result.
@@ -79,8 +71,7 @@ function scopedRequestHash(
 }
 
 /** Downloads an ended session still has to delete from R2. */
-const ARTIFACT_CLEANUP_KEY = "agent-artifact-cleanup";
-const ARTIFACT_CLEANUP_RETRY_MS = 60_000;
+
 /** The release the paired adapter named, for the editor to show (#1844). */
 const ADAPTER_VERSION_KEY = "agent-adapter-version";
 
@@ -109,7 +100,6 @@ interface RequestTrace {
 
 /** One temporary Agent session; the host supplies storage and sockets. */
 export class AgentSessionDO {
-  private readonly artifacts: AgentArtifacts;
   /** Reason-only tombstone: no bearer, connector, editor proof or Project data. */
   private replacedUntil = 0;
   private machine: AgentSessionMachine | null = null;
@@ -126,10 +116,6 @@ export class AgentSessionDO {
     private readonly state: DurableStateLike,
     private readonly env: AgentSessionEnv,
   ) {
-    this.artifacts = new AgentArtifacts(
-      state.storage,
-      env.SIMULATION_ARTIFACTS,
-    );
     this.ready = this.initialize();
     this.state.blockConcurrencyWhile?.(() => this.ready);
   }
@@ -138,7 +124,7 @@ export class AgentSessionDO {
     const resource = new URL(request.url).pathname.slice(1);
     if (
       request.method !== "POST" ||
-      !["circuit", "files", "simulation", "projects"].includes(resource)
+      !["circuit", "files", "projects"].includes(resource)
     )
       return this.handleFetch(request);
     const trace: RequestTrace = { started: performance.now() };
@@ -229,72 +215,7 @@ export class AgentSessionDO {
         allowedOrigin,
       );
     }
-    if (
-      url.pathname.startsWith("/artifacts/") ||
-      url.pathname === "/artifact-status"
-    ) {
-      const now = Date.now();
-      if (request.method === "PUT") {
-        if (!machine.authorizeEditor(editorSecret(request)))
-          return jsonResponse({ error: "Unauthorized" }, 401, allowedOrigin);
-        if (machine.statusAt(now) !== "active")
-          return jsonResponse(
-            { error: "Session is not active" },
-            403,
-            allowedOrigin,
-          );
-      } else {
-        const auth = machine.authorize(bearerToken(request), now);
-        if (!auth.ok)
-          return jsonResponse(
-            errorBody(auth.code, errorMessage(auth.code)),
-            transportStatus(auth.code),
-            allowedOrigin,
-          );
-        if (!machine.assertScope(auth.session.scopes, "simulation.run").ok)
-          return jsonResponse(
-            errorBody(
-              "TOKEN_SCOPE_INSUFFICIENT",
-              errorMessage("TOKEN_SCOPE_INSUFFICIENT"),
-            ),
-            403,
-            allowedOrigin,
-          );
-      }
-      if (url.pathname === "/artifact-status") {
-        if (request.method !== "GET")
-          return jsonResponse(
-            { error: "Method not allowed" },
-            405,
-            allowedOrigin,
-          );
-        return jsonResponse(
-          { ok: true, usage: await this.artifacts.usage() },
-          200,
-          allowedOrigin,
-        );
-      }
-      const response = await this.artifacts.handle(
-        request,
-        machine.sessionId,
-        url.pathname.slice("/artifacts/".length),
-      );
-      if (response.ok) {
-        machine.recordActivity(now);
-        await this.persist();
-      }
-      const maintenanceAt = await this.artifacts.nextMaintenanceAt();
-      if (maintenanceAt)
-        await this.state.storage.setAlarm?.(
-          Math.min(
-            maintenanceAt,
-            Date.now() < machine.expiresAt - EXPIRY_WARNING_MS
-              ? machine.expiresAt - EXPIRY_WARNING_MS
-              : machine.expiresAt,
-          ),
-        );
-      return response;
-    }
+
     if (request.method === "POST" && url.pathname === "/claim") {
       return this.claim(request, machine, allowedOrigin);
     }
@@ -351,9 +272,7 @@ export class AgentSessionDO {
     }
     if (
       request.method === "POST" &&
-      ["/circuit", "/files", "/simulation", "/projects"].includes(
-        url.pathname,
-      ) &&
+      ["/circuit", "/files", "/projects"].includes(url.pathname) &&
       machine.contextRevision
     ) {
       const auth = machine.authorize(bearerToken(request), Date.now());
@@ -415,9 +334,7 @@ export class AgentSessionDO {
     if (request.method === "POST" && url.pathname === "/files") {
       return this.files(request, machine, allowedOrigin, trace);
     }
-    if (request.method === "POST" && url.pathname === "/simulation") {
-      return this.simulation(request, machine, allowedOrigin, trace);
-    }
+
     if (request.method === "POST" && url.pathname === "/projects") {
       return this.projects(request, machine, allowedOrigin, trace);
     }
@@ -543,7 +460,6 @@ export class AgentSessionDO {
     if (
       envelope.kind === "circuit-response" ||
       envelope.kind === "file-response" ||
-      envelope.kind === "simulation-response" ||
       envelope.kind === "project-response"
     ) {
       const pending = this.pendingForwards.get(envelope.requestId);
@@ -555,11 +471,7 @@ export class AgentSessionDO {
           ? AgentCircuitResponseSchema.safeParse(envelope.payload)
           : envelope.kind === "file-response"
             ? AgentFileResourceResponseSchema.safeParse(envelope.payload)
-            : envelope.kind === "simulation-response"
-              ? AgentSimulationResourceResponseSchema.safeParse(
-                  envelope.payload,
-                )
-              : AgentProjectResourceResponseSchema.safeParse(envelope.payload);
+            : AgentProjectResourceResponseSchema.safeParse(envelope.payload);
       if (!response.success) {
         clearTimeout(pending.timeout);
         this.pendingForwards.delete(envelope.requestId);
@@ -621,16 +533,6 @@ export class AgentSessionDO {
 
   async alarm(): Promise<void> {
     await this.ready;
-    await this.artifacts.maintenance();
-    const left = await this.state.storage.get<string[]>(ARTIFACT_CLEANUP_KEY);
-    if (left?.length) {
-      const still = await this.artifacts.deleteObjects(left);
-      await this.state.storage.put(ARTIFACT_CLEANUP_KEY, still);
-      if (still.length)
-        await this.state.storage.setAlarm?.(
-          Date.now() + ARTIFACT_CLEANUP_RETRY_MS,
-        );
-    }
     if (this.replacedUntil) {
       if (Date.now() < this.replacedUntil) {
         await this.state.storage.setAlarm?.(this.replacedUntil);
@@ -644,10 +546,7 @@ export class AgentSessionDO {
     const machine = await this.loadMachine();
     if (machine && Date.now() < machine.expiresAt - EXPIRY_WARNING_MS) {
       await this.state.storage.setAlarm?.(
-        Math.min(
-          machine.expiresAt - EXPIRY_WARNING_MS,
-          (await this.artifacts.nextMaintenanceAt()) ?? Infinity,
-        ),
+        machine.expiresAt - EXPIRY_WARNING_MS,
       );
       return;
     }
@@ -659,12 +558,7 @@ export class AgentSessionDO {
       };
       this.emit(event);
       this.notifyEditor(event);
-      await this.state.storage.setAlarm?.(
-        Math.min(
-          machine.expiresAt,
-          (await this.artifacts.nextMaintenanceAt()) ?? Infinity,
-        ),
-      );
+      await this.state.storage.setAlarm?.(machine.expiresAt);
       return;
     }
     if (machine) {
@@ -1228,18 +1122,14 @@ export class AgentSessionDO {
     });
     try {
       const forwardStarted = performance.now();
-      const result =
-        fileRequest.operation === "simulation-input" &&
-        fileRequest.input.action === "release-download"
-          ? await this.releaseArtifactLease(machine, fileRequest)
-          : await this.forwardToEditor(
-              machine,
-              fileRequest,
-              "file-request",
-              request.headers.get("x-agent-context") ?? undefined,
-              request.headers.get("x-agent-workspace") ?? undefined,
-              trace,
-            );
+      const result = await this.forwardToEditor(
+        machine,
+        fileRequest,
+        "file-request",
+        request.headers.get("x-agent-context") ?? undefined,
+        request.headers.get("x-agent-workspace") ?? undefined,
+        trace,
+      );
       if (trace) trace.result = result as RequestTrace["result"];
       // Export blobs are explicitly one-shot: the DO retains only an unavailable
       // idempotency marker, never their bytes. Candidate summaries are safe to cache.
@@ -1275,214 +1165,6 @@ export class AgentSessionDO {
         type: "operation.failed",
         sessionId: machine.sessionId,
         requestId: fileRequest.requestId,
-      });
-      return jsonResponse(
-        errorBody(code, errorMessage(code)),
-        transportStatus(code),
-        allowedOrigin,
-      );
-    }
-  }
-
-  private async releaseArtifactLease(
-    machine: AgentSessionMachine,
-    request: AgentFileResourceRequest,
-  ): Promise<AgentFileResourceResponse> {
-    if (
-      request.operation !== "simulation-input" ||
-      request.input.action !== "release-download"
-    )
-      throw new Error("INVALID_ARTIFACT_ACK");
-    const response = await this.artifacts.handle(
-      new Request("https://internal/artifacts/" + request.input.fileId, {
-        method: "DELETE",
-        headers: { "x-artifact-lease": request.input.leaseId },
-      }),
-      machine.sessionId,
-      request.input.fileId,
-    );
-    const result =
-      response.ok || response.status === 404
-        ? { ok: true, released: response.ok }
-        : {
-            ok: false,
-            error: {
-              code: "ARTIFACT_ACK_FAILED",
-              message:
-                "Verified local evidence is safe; the download lease will expire",
-              stage: "export",
-              recovery: "retry-after",
-            },
-          };
-    return AgentFileResourceResponseSchema.parse({
-      apiVersion: "3.0",
-      requestId: request.requestId,
-      operation: request.operation,
-      ok: true,
-      result,
-    });
-  }
-
-  /**
-   * Relay one Simulation Resource request to the browser.
-   *
-   * Structurally the same as `files`, with two deliberate differences. The
-   * forward waits on the simulation ceiling rather than the edit ceiling, and
-   * a completed run IS cached against its requestId: a retry after a dropped
-   * response must return the numbers that were already computed, not start a
-   * second container run and bill the deployment twice for one question.
-   */
-  private async simulation(
-    request: Request,
-    machine: AgentSessionMachine,
-    allowedOrigin: string | null,
-    trace?: RequestTrace,
-  ): Promise<Response> {
-    const raw = await request.text();
-    const size = machine.checkSize(new TextEncoder().encode(raw).byteLength);
-    if (!size.ok) {
-      return jsonResponse(
-        errorBody(size.code, errorMessage(size.code)),
-        transportStatus(size.code),
-        allowedOrigin,
-      );
-    }
-    let input: unknown;
-    try {
-      input = JSON.parse(raw);
-    } catch {
-      return jsonResponse(
-        errorBody(
-          "SIMULATION_REQUEST_INVALID",
-          "Simulation Resource request must be valid JSON",
-        ),
-        400,
-        allowedOrigin,
-      );
-    }
-    const parsed = parseAgentSimulationResourceRequest(input);
-    if (!parsed.success) {
-      return jsonResponse(
-        errorBody(
-          "SIMULATION_REQUEST_INVALID",
-          errorMessage("SIMULATION_REQUEST_INVALID"),
-        ),
-        400,
-        allowedOrigin,
-      );
-    }
-    const simulationRequest = parsed.data;
-    const auth = machine.authorize(bearerToken(request), Date.now());
-    if (!auth.ok)
-      return jsonResponse(
-        errorBody(auth.code, errorMessage(auth.code)),
-        transportStatus(auth.code),
-        allowedOrigin,
-      );
-    const scopeAllowed = simulationOperationScopes(simulationRequest).every(
-      (required) => machine.assertScope(auth.session.scopes, required).ok,
-    );
-    if (!scopeAllowed) {
-      return jsonResponse(
-        errorBody(
-          "TOKEN_SCOPE_INSUFFICIENT",
-          errorMessage("TOKEN_SCOPE_INSUFFICIENT"),
-        ),
-        403,
-        allowedOrigin,
-      );
-    }
-    const readOnly = isReadOnlySimulationRequest(simulationRequest);
-    if (trace)
-      trace.identity = {
-        requestId: simulationRequest.requestId,
-        operation: simulationRequest.operation,
-      };
-    const begin = await this.beginRequest(
-      machine,
-      simulationRequest.requestId,
-      await scopedRequestHash(
-        raw,
-        request.headers.get("x-agent-context") ?? machine.contextRevision,
-        request.headers.get("x-agent-workspace"),
-      ),
-      readOnly ? "read" : "write",
-    );
-    if (begin.kind === "cached") {
-      if (trace) {
-        trace.cache = "hit";
-        trace.result = begin.result as RequestTrace["result"];
-      }
-      return jsonResponse(begin.result, 200, allowedOrigin);
-    }
-    if (begin.kind === "rejected")
-      return jsonResponse(
-        errorBody(begin.code, errorMessage(begin.code)),
-        transportStatus(begin.code),
-        allowedOrigin,
-      );
-    if (
-      simulationRequest.operation !== "capabilities" &&
-      simulationRequest.operation !== "authoring-help"
-    )
-      machine.recordActivity(Date.now());
-    if (!readOnly) await this.persist();
-    this.emit({
-      type: "operation.started",
-      sessionId: machine.sessionId,
-      requestId: simulationRequest.requestId,
-    });
-    try {
-      const forwardStarted = performance.now();
-      const result = await this.forwardToEditor(
-        machine,
-        simulationRequest,
-        "simulation-request",
-        request.headers.get("x-agent-context") ?? undefined,
-        request.headers.get("x-agent-workspace") ?? undefined,
-        trace,
-      );
-      if (trace) trace.result = result as RequestTrace["result"];
-      machine.completeRequest(simulationRequest.requestId, result, Date.now());
-      if (
-        simulationRequest.operation !== "capabilities" &&
-        simulationRequest.operation !== "authoring-help"
-      )
-        machine.recordActivity(Date.now());
-      await this.persist();
-      this.emit({
-        type: "operation.completed",
-        sessionId: machine.sessionId,
-        requestId: simulationRequest.requestId,
-      });
-      return jsonResponse(
-        result,
-        200,
-        allowedOrigin,
-        this.relayTiming(
-          simulationRequest,
-          "simulation",
-          result,
-          forwardStarted,
-        ),
-      );
-    } catch (error) {
-      const value = error instanceof Error ? error.message : "";
-      const code: AgentTransportErrorCode =
-        value === "REQUEST_TIMEOUT" || value === "MESSAGE_TOO_LARGE"
-          ? value
-          : value === "EDITOR_OFFLINE"
-            ? "EDITOR_OFFLINE"
-            : "EDITOR_DISCONNECTED";
-      machine.failRequest(
-        simulationRequest.requestId,
-        code === "EDITOR_OFFLINE",
-      );
-      await this.persist();
-      this.emit({
-        type: "operation.failed",
-        sessionId: machine.sessionId,
-        requestId: simulationRequest.requestId,
       });
       return jsonResponse(
         errorBody(code, errorMessage(code)),
@@ -1857,12 +1539,10 @@ export class AgentSessionDO {
     payload:
       | AgentCircuitRequest
       | AgentFileResourceRequest
-      | AgentSimulationResourceRequest
       | AgentProjectResourceRequest,
     kind:
       | "circuit-request"
       | "file-request"
-      | "simulation-request"
       | "project-request" = "circuit-request",
     contextRevision?: string,
     workspaceId?: string,
@@ -1877,15 +1557,10 @@ export class AgentSessionDO {
       if (!socket) throw new Error("EDITOR_OFFLINE");
       const requestId = payload.requestId;
       const response = new Promise<unknown>((resolve, reject) => {
-        const timeout = setTimeout(
-          () => {
-            this.pendingForwards.delete(requestId);
-            reject(new Error("REQUEST_TIMEOUT"));
-          },
-          kind === "simulation-request"
-            ? SIMULATION_FORWARD_TIMEOUT_MS
-            : FORWARD_TIMEOUT_MS,
-        );
+        const timeout = setTimeout(() => {
+          this.pendingForwards.delete(requestId);
+          reject(new Error("REQUEST_TIMEOUT"));
+        }, FORWARD_TIMEOUT_MS);
         this.pendingForwards.set(requestId, {
           resolve,
           reject,
@@ -2013,10 +1688,7 @@ export class AgentSessionDO {
     if (this.publishedExpiresAt !== this.machine.expiresAt) {
       this.publishedExpiresAt = this.machine.expiresAt;
       await this.state.storage.setAlarm?.(
-        Math.min(
-          Math.max(Date.now(), this.machine.expiresAt - EXPIRY_WARNING_MS),
-          (await this.artifacts.nextMaintenanceAt()) ?? Infinity,
-        ),
+        Math.max(Date.now(), this.machine.expiresAt - EXPIRY_WARNING_MS),
       );
       const event: AgentSessionEvent = {
         type: "session.renewed",
@@ -2046,17 +1718,10 @@ export class AgentSessionDO {
   }
 
   /**
-   * End the session's storage. Downloads R2 could not delete stay listed,
-   * with an alarm to retry them, so the session ends either way.
+   * End the session's state and request ledger together.
    */
+
   private async clearStoredSession(): Promise<void> {
-    const left = [
-      ...((await this.state.storage.get<string[]>(ARTIFACT_CLEANUP_KEY)) ?? []),
-      ...(await this.artifacts.clear()),
-    ];
     await this.state.storage.deleteAll?.();
-    if (!left.length) return;
-    await this.state.storage.put(ARTIFACT_CLEANUP_KEY, left);
-    await this.state.storage.setAlarm?.(Date.now() + ARTIFACT_CLEANUP_RETRY_MS);
   }
 }

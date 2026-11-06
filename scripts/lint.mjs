@@ -12,7 +12,7 @@
  *                                   changed since the merge base with <ref>
  *
  * A type-aware rule reads each file through the nearest tsconfig.json that
- * includes it: its package's, or for tests, worker/, scripts/ and the other
+ * includes it: its package's, or for tests, scripts/ and the other
  * code no package claims, the root one. A file no tsconfig.json included would
  * get Node's types only when another file in the same run happened to load
  * them, so one file linted alone could pass with a floating promise. An @icm/*

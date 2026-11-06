@@ -13,7 +13,7 @@ import {
   generateCircuitSource,
   planCircuitSourceEdit,
 } from "./simulation-circuit-source.js";
-import { parseVacaskRawfile } from "../../spice-run/src/vacask-rawfile.js";
+import { parseVacaskRawfile } from "./test-support/vacask-rawfile.js";
 import { nativeParameterDeclarationEdit } from "./simulation-native-parameter-edit.js";
 import { locateSimulationText } from "./simulation-source-map.js";
 

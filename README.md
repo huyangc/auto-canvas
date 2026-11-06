@@ -49,7 +49,8 @@ Not done yet:
 - **Automatic placement and routing.** Netlist import places devices on a
   grid and draws no wires.
 - **silicon-notebook integration.**
-- **Simulation** is unavailable in the editor. Export SPICE, Spectre or RNL for external tools; saved Project source folders are preserved.
+- **Simulation** is not part of auto-canvas. Export SPICE, Spectre or RNL
+  for external tools; saved Project simulation folders are preserved.
 
 ## Requirements
 
@@ -110,11 +111,9 @@ packages/
   spice, netlist, rnl, project-protocol                        import, export, file format
   render-svg, exporters, math-typesetting                      rendering and figure export
   agent-adapter, agent-client, agent-routing                   Agent API
-  simulation-service, spice-run                                inherited simulation (being removed)
 eda/            Offline Aether / Virtuoso import tools
 docs/           Contracts, guides and the development workflow
 tasks/          One directory per development task: plan, report, review
-worker/         Inherited Cloudflare Worker, being replaced by apps/server
 ```
 
 ## How development works

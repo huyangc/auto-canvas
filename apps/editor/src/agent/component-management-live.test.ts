@@ -12,7 +12,7 @@ import {
 import {
   componentLibraryHarness,
   nativePackage,
-} from "../../../../worker/component-library.test-support";
+} from "../../../server/src/component-library.test-support";
 
 it("guards a shared source while publication has invalidated candidate validation", async () => {
   const project = createEmptyProject("shared-drafts", "Shared drafts");
@@ -169,10 +169,10 @@ it("manages saved checkpoints over the live bridge while preserving current raw 
 });
 
 it("shares lifecycle permissions with HTTP even for malformed public records", async () => {
-  const library = componentLibraryHarness();
-  library.seed({
+  const library = await componentLibraryHarness();
+  await library.seed({
     id: "invalid-record",
-    authorId: "alice",
+    authorId: "local",
     definition: { bad: true },
   });
   const editor = liveAgentEditor({
@@ -183,7 +183,6 @@ it("shares lifecycle permissions with HTTP even for malformed public records", a
           init?.method ?? "GET",
           url.pathname.slice("/api/components".length) + url.search,
           init?.body ? JSON.parse(String(init.body)) : undefined,
-          "alice",
         );
       },
     },
@@ -239,9 +238,9 @@ it("shares lifecycle permissions with HTTP even for malformed public records", a
     ok: true,
     result: { entry: { status: "shared", revision: 3 } },
   });
-  library.seed({
+  await library.seed({
     id: "valid-deleted",
-    authorId: "alice",
+    authorId: "local",
     status: "deleted",
     definition: { symbol: nativePackage().definition.symbol },
   });

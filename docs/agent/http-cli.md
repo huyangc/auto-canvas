@@ -12,8 +12,7 @@ stdin reads `analog-canvas://contract/tools/{name}`, the quickstart and other
 references. It is the same AgentSessionClient, operation registry, validation,
 error classification and download logic as MCP, with JSON content-block output
 and failure exit codes. It needs the installed package and its Node version,
-but no host configuration, checkout or simulator; plotting needs Python ≥3.10
-and matplotlib (nothing is installed automatically).
+but no host configuration or checkout.
 
 Each invocation is a new process: connector credentials persist, process-local
 context does not. Set `ANALOG_CANVAS_API_URL` to the exact server. The
@@ -25,14 +24,12 @@ A `project_cells` `bind-workspace` target persists only when
 `ANALOG_CANVAS_TASK_DIR` names an absolute task directory (one per task, apart
 from credentials); otherwise CLI binding is rejected. Tab switches do not
 retarget it; a closed or replaced copy fails closed (`bind-workspace` with
-`workspaceId:null`, then choose another); a new Claim clears it. Result bases
-follow the MCP rules, never the working directory.
+`workspaceId:null`, then choose another); a new Claim clears it.
 
 For caller-managed exact retries, `--http circuit` takes the published Circuit
 request unchanged, including requestId and transactionId: keep it before
 sending and, after an uncertain exit, retry it unchanged rather than a
-higher-level write that allocates a new ID. It is not a simulation retry
-command: an uncertain non-Circuit write needs reconciliation first. The client
+higher-level write that allocates a new ID. An uncertain non-Circuit write needs reconciliation first. The client
 owns bearer refresh, credential storage, bounded retries and verified
 downloads; do not rebuild them. Circuit rules: [native authoring](shared/authoring.md).
 For raw HTTP, use the exact origin's `/api/agent/kit`.

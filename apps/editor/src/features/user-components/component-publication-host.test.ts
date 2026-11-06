@@ -7,7 +7,7 @@ import { APP_ORIGIN } from "../../../../desktop/src/app-protocol";
 import {
   componentLibraryHarness,
   nativePackage,
-} from "../../../../../worker/component-library.test-support";
+} from "../../../../server/src/component-library.test-support";
 import { newComponentDefinition } from "./component-definition-edit";
 import {
   captureLibraryComponent,
@@ -101,16 +101,15 @@ it.each(["native", "artwork"] as const)(
 
 it("retains hosted unchanged/duplicate outcomes and source provenance through the shared host entry", async () => {
   vi.stubEnv("ICM_DESKTOP", "");
-  const route = componentLibraryHarness();
+  const route = await componentLibraryHarness();
   vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
     if (input === "/api/auth/me")
-      return Response.json({ user: { id: "alice" } });
+      return Response.json({ user: { id: "local" } });
     if (!input.startsWith("/api/components/")) throw Error("Unexpected route");
     return route(
       init!.method!,
       input.slice("/api/components".length),
       JSON.parse(String(init!.body)),
-      "alice",
     );
   });
   const request = {
@@ -134,6 +133,6 @@ it("retains hosted unchanged/duplicate outcomes and source provenance through th
   ).toMatchObject({
     componentId: "hosted-component",
     revision: 1,
-    authorId: "alice",
+    authorId: "local",
   });
 });

@@ -56,9 +56,6 @@ A refused payload names the field, e.g. `structureEdits[0].edits[1].kind`.
 `analog-canvas://contract/advanced-edits` is the HTTP envelope for offline
 tooling, not this tool's argument schema; do not load it for one edit.
 
-Simulation tools take arguments flat (`{action, …}`) or in `request`. `detail`
-`summary|full` shapes a response; `text|mapped` selects a source projection.
-
 ## Wiring and movement
 
 - `connect` takes `via`, `routingMode` and `cornerOrder` (45° rules:
@@ -176,7 +173,7 @@ Tool descriptions cover each action; these are the extra rules.
 - `project_cells` Cloud import copies one Cell's dependency closure (no live
   link); sign-in, stale-revision and library-compatibility failures are
   recoverable. `bind-workspace` targets a copy for this client's Circuit,
-  Project, File and Simulation requests; `workspaceId:null` returns to the
+  Project and File requests; `workspaceId:null` returns to the
   human's tab. A closed target fails `WORKSPACE_NOT_FOUND`: list and bind
   again, never redirect an edit. `new`/`rename` return the `workspaceId`;
   `rename` defaults to the bound copy.

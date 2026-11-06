@@ -24,45 +24,20 @@ describe("host-facing inline schemas", () => {
       expect(JSON.stringify(schema)).not.toContain('"allOf"');
     }
   });
-  it("discloses DUT subcircuit identity and port order where the caller supplies them", () => {
-    const schema = listToolDefinitions().find(
-      (tool) => tool.name === "simulation_folder",
-    )!.inputSchema as any;
-    const create = schema.oneOf.find(
-      (branch: any) => branch.properties.action.const === "create",
-    );
-    expect(create.properties.dut.properties).toMatchObject({
-      name: {
-        type: "string",
-        description: expect.stringContaining("exported subcircuit name"),
-      },
-      ports: {
-        type: "array",
-        description: expect.stringContaining("exact order"),
-        items: { type: "string" },
-      },
-    });
-  });
-  it("exposes simulation operations and basic fields without reference resolution", () => {
+
+  it("exposes retained operations and basic fields without reference resolution", () => {
     const tools = listToolDefinitions();
-    for (const name of [
-      "simulation",
-      "simulation_files",
-      "simulation_folder",
-      "connect",
-    ]) {
+    for (const name of ["netlist_code", "export_file", "connect"]) {
       const schema = tools.find((tool) => tool.name === name)!.inputSchema;
       expect(JSON.stringify(schema)).not.toContain('"$ref"');
       expect(JSON.stringify(schema)).not.toContain('"$defs"');
     }
     const schema = tools.find(
-      (tool) => tool.name === "simulation",
+      (tool) => tool.name === "export_file",
     )!.inputSchema;
     expect(schema.properties).toMatchObject({
-      requestId: { type: "string" },
-      waitMs: { type: "integer", maximum: 20000 },
-      detail: { type: "string", enum: ["summary", "full"] },
-      request: { oneOf: expect.any(Array) },
+      outputPath: { type: "string" },
+      artifact: { type: "string", enum: ["project", "svg", "png", "pdf"] },
     });
     expect(
       tools.find((tool) => tool.name === "advanced_transact")!.inputSchema

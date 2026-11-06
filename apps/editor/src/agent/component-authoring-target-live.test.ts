@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import { liveAgentEditor } from "./live-agent-editor.test-support";
-import { nativePackage } from "../../../../worker/component-library.test-support";
+import { nativePackage } from "../../../../packages/component-library/src/component-library.test-support";
 import {
   createCircuitComponentPackageProject,
   createExternalSubcircuitInstance,

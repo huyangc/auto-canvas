@@ -1,7 +1,7 @@
 /**
  * Reads and browser-hosted resources over the session transport:
  * capabilities, Snapshots through the cache, renders, and the file,
- * simulation and Project resources with the workspace binding.
+ * Project resources with the workspace binding.
  */
 import {
   parseAgentCircuitRequest,
@@ -18,8 +18,6 @@ import {
   type AgentSnapshotRequest,
   type AgentFileResourceRequest,
   type AgentFileResourceResponse,
-  type AgentSimulationResourceRequest,
-  type AgentSimulationResourceResponse,
   type AgentProjectResourceRequest,
   type AgentProjectResourceResponse,
 } from "@icm/agent-adapter";
@@ -39,32 +37,8 @@ import {
 type AgentRenderResponse = z.infer<typeof AgentRenderResponseSchema>;
 
 export abstract class AgentSessionResources extends AgentSessionTransport {
-  private metadataKey(request: AgentSimulationResourceRequest): string {
-    const { requestId: _id, ...selection } = request;
-    return JSON.stringify([
-      this.session?.sessionId,
-      this.session?.projectId,
-      this.http.workspaceId,
-      this.http.contextRevision,
-      Object.entries(selection).sort(([a], [b]) => a.localeCompare(b)),
-    ]);
-  }
-
   /** Internal convenience reads only. Explicit resource calls always refresh.
    * Short reuse never turns availability, execution or input status into authority. */
-  async simulationMetadataResource(
-    request: AgentSimulationResourceRequest,
-    options: { refresh?: boolean | undefined } = {},
-  ): Promise<AgentSimulationResourceResponse> {
-    await this.ensureSession();
-    const cached = this.simulationMetadata.get(this.metadataKey(request));
-    if (!options.refresh && cached && this.now() - cached.at < 30_000)
-      return {
-        ...structuredClone(cached.response),
-        requestId: request.requestId,
-      };
-    return this.simulationResource(request);
-  }
 
   /** Canonical HTTP requests retain caller-owned IDs through every retry. */
   async request(input: unknown): Promise<AgentCircuitResponse> {
@@ -90,11 +64,7 @@ export abstract class AgentSessionResources extends AgentSessionTransport {
   ): Promise<AgentFileResourceResponse> {
     request = structuredClone(request);
     const changesProject =
-      request.operation === "open" ||
-      request.operation === "import-cell" ||
-      (request.operation === "simulation-input" &&
-        request.input.action === "update" &&
-        request.input.owner.kind === "project-folder");
+      request.operation === "open" || request.operation === "import-cell";
     try {
       const response = await this.resourceRequest(
         "files",
@@ -121,171 +91,6 @@ export abstract class AgentSessionResources extends AgentSessionTransport {
   }
 
   /** Publication progresses independently of short relay RPCs. Poll metadata only. */
-  async artifactTransferVersion(): Promise<1 | 2> {
-    const response = await this.fileResource({
-      apiVersion: AGENT_API_VERSION,
-      requestId: this.newRequestId(),
-      operation: "simulation-input",
-      input: { action: "transfer-capabilities" },
-    });
-    if (
-      response.ok &&
-      response.operation === "simulation-input" &&
-      response.result.ok &&
-      "artifactTransfer" in response.result
-    )
-      return response.result.artifactTransfer.protocols.includes(2) ? 2 : 1;
-    const error = !response.ok
-      ? response.error
-      : response.operation === "simulation-input" && !response.result.ok
-        ? response.result.error
-        : undefined;
-    if (error && /INVALID|UNSUPPORTED|UNKNOWN/u.test(error.code)) return 1;
-    if (error) throw new Error(error.code);
-    throw new Error("ARTIFACT_CAPABILITIES_INVALID");
-  }
-  async prepareArtifactDownload(
-    artifactId: string,
-    requestId = this.newRequestId(),
-    options: {
-      waitMs?: number;
-      sleep?: (ms: number) => Promise<void>;
-      consumerId?: string;
-    } = {},
-  ): Promise<AgentFileResourceResponse> {
-    const deadline =
-      Date.now() + Math.max(0, Math.min(options.waitMs ?? 120_000, 120_000));
-    const pause =
-      options.sleep ??
-      ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
-    for (let attempt = 0; ; attempt++) {
-      const response = await this.fileResource({
-        apiVersion: AGENT_API_VERSION,
-        requestId: attempt ? this.newRequestId() : requestId,
-        operation: "simulation-input",
-        input: options.consumerId
-          ? {
-              action: "download-v2",
-              artifactId,
-              consumerId: options.consumerId,
-            }
-          : { action: "download", artifactId },
-      });
-      if (
-        !response.ok ||
-        response.operation !== "simulation-input" ||
-        response.result.ok ||
-        response.result.error.code !== "ARTIFACT_TRANSFER_PENDING" ||
-        Date.now() >= deadline ||
-        attempt >= 60
-      )
-        return response;
-      await pause(
-        Math.min(
-          Math.max(response.result.error.retryAfterMs ?? 2000, 500),
-          5000,
-          deadline - Date.now(),
-        ),
-      );
-    }
-  }
-
-  /** Invoke the canonical browser-hosted simulation-resource contract. */
-  async downloadArtifact(
-    path: string,
-    offset = 0,
-    digest?: string,
-    leaseId?: string,
-  ): Promise<Response> {
-    return this.withAuthorization((session) =>
-      this.http.downloadArtifact(
-        session.sessionId,
-        session.agentToken,
-        path,
-        offset,
-        digest,
-        leaseId,
-      ),
-    );
-  }
-  async releaseArtifactDownload(path: string, leaseId: string): Promise<void> {
-    return this.withAuthorization((session) =>
-      this.http.releaseArtifactDownload(
-        session.sessionId,
-        session.agentToken,
-        path,
-        leaseId,
-      ),
-    );
-  }
-
-  /** Invoke the canonical browser-hosted simulation-resource contract. */
-  async simulationResource(
-    request: AgentSimulationResourceRequest,
-  ): Promise<AgentSimulationResourceResponse> {
-    request = structuredClone(request);
-    const key = this.metadataKey(request);
-    this.simulationMetadata.delete(key);
-    // Export can repair publication; do not keep a prior directory after it.
-    if (request.operation === "export") this.simulationMetadata.clear();
-    const response = await this.resourceRequest(
-      "simulation",
-      request,
-      (session, attempts) =>
-        this.http.simulation(
-          session.sessionId,
-          session.agentToken,
-          request,
-          attempts,
-        ),
-    );
-    if (
-      request.operation === "resource-usage" &&
-      response.ok &&
-      "resources" in response
-    ) {
-      try {
-        const transfer = await this.withAuthorization((session) =>
-          this.http.artifactUsage(session.sessionId, session.agentToken),
-        );
-        return { ...response, resources: [...response.resources, transfer] };
-      } catch (error) {
-        return {
-          ...response,
-          resourceProblems: [
-            {
-              scope: "agent-session-transfer",
-              code:
-                error instanceof AgentSessionError
-                  ? error.code
-                  : "TRANSFER_STATUS_UNAVAILABLE",
-              message:
-                "Session transfer usage could not be observed; project storage status remains available",
-            },
-          ],
-        };
-      }
-    }
-    const reusable =
-      response.ok &&
-      ((request.operation === "capabilities" && "capabilities" in response) ||
-        (request.operation === "catalog" &&
-          "catalog" in response &&
-          response.catalog.execution !== "pending" &&
-          response.catalog.collection === "complete"));
-    this.simulationMetadata.delete(key);
-    if (reusable && key === this.metadataKey(request)) {
-      if (this.simulationMetadata.size >= 32)
-        this.simulationMetadata.delete(
-          this.simulationMetadata.keys().next().value!,
-        );
-      this.simulationMetadata.set(key, {
-        at: this.now(),
-        response: structuredClone(response),
-      });
-    }
-    return response;
-  }
 
   /** Discover and import reusable Cells through the browser's Cloud authority. */
   async projectResource(
@@ -356,7 +161,6 @@ export abstract class AgentSessionResources extends AgentSessionTransport {
       this.boundWorkspace = null;
       this.cache.clear();
       this.knownRevisions.clear();
-      this.simulationMetadata.clear();
       await this.status({ refresh: true });
       return { workspaceId: null, projectId: null, name: null };
     }
@@ -411,7 +215,6 @@ export abstract class AgentSessionResources extends AgentSessionTransport {
     }
     this.cache.clear();
     this.knownRevisions.clear();
-    this.simulationMetadata.clear();
     return { workspaceId, projectId: target.projectId, name: target.name };
   }
 

@@ -45,17 +45,11 @@ export default {
     ".": {
       entry: [
         "scripts/*.mjs!",
-        "worker/index.ts!",
         "tools/**/*.mjs!",
         // The batch runner's scripted Agent, run as a command (#1498).
         "scripts/lib/draw-batch-script-agent.mjs!",
       ],
-      project: [
-        "scripts/**/*.mjs!",
-        "worker/**/*.ts!",
-        "tools/**/*.mjs!",
-        ...testSupport,
-      ],
+      project: ["scripts/**/*.mjs!", "tools/**/*.mjs!", ...testSupport],
       paths: builtPackageSources,
     },
     "apps/editor": {
@@ -66,17 +60,14 @@ export default {
         "src/entries/*.{ts,tsx}!",
         "src/**/*.worker.ts!",
         "src/headless/index.ts!",
-        "analytics/worker.ts!",
         "vite.config.ts!",
         "vite.desktop.config.ts!",
-        "dev/agent-worker.ts",
         "e2e/**/*.spec.ts",
         // Specs load these by URL (e2e/helpers/page-modules.ts).
         "e2e/helpers/*-harness.tsx",
       ],
       project: [
         "src/**/*.{ts,tsx}!",
-        "analytics/**/*.{ts,tsx}!",
         "build/**/*.ts!",
         "dev/**/*.ts",
         "e2e/**/*.{ts,tsx,mjs}",

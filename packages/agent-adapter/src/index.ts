@@ -13,7 +13,6 @@ export * from "./request-replay.js";
 export * from "./schema.js";
 export * from "./service.js";
 export * from "./session-state.js";
-export * from "./simulation-resource.js";
 export * from "./project-resource.js";
 export * from "./snapshot.js";
 export * from "./transport-errors.js";

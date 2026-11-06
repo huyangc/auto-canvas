@@ -1,7 +1,5 @@
 import { agentApiHelp } from "./agent-api-help.generated.js";
-import { z } from "zod";
-import { EvidenceResourceUsageSchema } from "@icm/simulation-service/contract";
-import { lazyJsonSchema } from "./lazy-json-schema.js";
+
 import {
   AGENT_API_VERSION,
   agentCircuitRequestJsonSchema,
@@ -11,10 +9,7 @@ import {
   agentFileResourceRequestJsonSchema,
   agentFileResourceResponseJsonSchema,
 } from "./file-resource.js";
-import {
-  agentSimulationResourceRequestJsonSchema,
-  agentSimulationResourceResponseJsonSchema,
-} from "./simulation-resource.js";
+
 import {
   agentProjectResourceRequestJsonSchema,
   agentProjectResourceResponseJsonSchema,
@@ -67,8 +62,7 @@ const componentJsonSchemas = {
   agentCircuitResponse: agentCircuitResponseJsonSchema,
   agentFileResourceRequest: agentFileResourceRequestJsonSchema,
   agentFileResourceResponse: agentFileResourceResponseJsonSchema,
-  agentSimulationResourceRequest: agentSimulationResourceRequestJsonSchema,
-  agentSimulationResourceResponse: agentSimulationResourceResponseJsonSchema,
+
   agentProjectResourceRequest: agentProjectResourceRequestJsonSchema,
   agentProjectResourceResponse: agentProjectResourceResponseJsonSchema,
   agentClaimResponse: agentConnectionCredentialResponseJsonSchema,
@@ -103,12 +97,7 @@ const agentFileResourceRequestRef = {
 const agentFileResourceResponseRef = {
   $ref: "#/components/schemas/agentFileResourceResponse",
 } as const;
-const agentSimulationResourceRequestRef = {
-  $ref: "#/components/schemas/agentSimulationResourceRequest",
-} as const;
-const agentSimulationResourceResponseRef = {
-  $ref: "#/components/schemas/agentSimulationResourceResponse",
-} as const;
+
 const agentProjectResourceRequestRef = {
   $ref: "#/components/schemas/agentProjectResourceRequest",
 } as const;
@@ -316,24 +305,6 @@ const fileSessionResponses = {
   "504": transportErrorResponse(agentTransportErrorExamples["504"]),
 } as const;
 
-const simulationSessionResponses = {
-  "200": {
-    description:
-      "Scoped simulation-resource response. A run that reached the simulator returns its result -- including a failed or timed-out outcome, whose diagnostics are ngspice's own words. A run that never happened returns a typed refusal saying why.",
-    content: {
-      "application/json": { schema: agentSimulationResourceResponseRef },
-    },
-  },
-  "400": transportErrorResponse(agentTransportErrorExamples["413"]),
-  "401": transportErrorResponse(agentTransportErrorExamples["401"]),
-  "403": transportErrorResponse(agentTransportErrorExamples["403"]),
-  "404": transportErrorResponse(agentTransportErrorExamples["404"]),
-  "409": transportErrorResponse(agentTransportErrorExamples["409"]),
-  "413": transportErrorResponse(agentTransportErrorExamples["413"]),
-  "429": transportErrorResponse(agentTransportErrorExamples["429"]),
-  "503": transportErrorResponse(agentTransportErrorExamples["503"]),
-  "504": transportErrorResponse(agentTransportErrorExamples["504"]),
-} as const;
 const projectSessionResponses = {
   "200": {
     description:
@@ -375,129 +346,6 @@ export const agentCircuitOpenApi = {
     version: AGENT_API_VERSION,
   },
   paths: {
-    "/api/agent/sessions/{sessionId}/artifacts/{fileId}": {
-      get: {
-        operationId: "agentSessionArtifactDownload",
-        description: agentApiHelp.agentSessionArtifactDownload,
-        security: [{ bearerAuth: [] }],
-        parameters: [
-          {
-            name: "sessionId",
-            in: "path",
-            required: true,
-            schema: { type: "string", minLength: 1 },
-          },
-          {
-            name: "fileId",
-            in: "path",
-            required: true,
-            schema: { type: "string", pattern: "^[a-zA-Z0-9_-]{1,128}$" },
-          },
-          {
-            name: "Range",
-            in: "header",
-            schema: { type: "string", pattern: "^bytes=[0-9]+-[0-9]*$" },
-          },
-          { name: "If-Range", in: "header", schema: { type: "string" } },
-          {
-            name: "x-artifact-lease",
-            in: "header",
-            schema: { type: "string", format: "uuid" },
-          },
-        ],
-        responses: {
-          "200": {
-            description: "Complete file byte stream",
-            content: {
-              "application/octet-stream": {
-                schema: { type: "string", format: "binary" },
-              },
-            },
-          },
-          "206": {
-            description: "Requested byte range",
-            headers: { "Content-Range": { schema: { type: "string" } } },
-            content: {
-              "application/octet-stream": {
-                schema: { type: "string", format: "binary" },
-              },
-            },
-          },
-          "401": transportErrorResponse(agentTransportErrorExamples["401"]),
-          "403": { description: "Session is paused or lacks simulation.run" },
-          "404": {
-            description: "No registered transfer for this file and session",
-          },
-          "416": { description: "Invalid or unavailable byte range" },
-          "410": {
-            description: "Download lease expired; prepare the same file again",
-          },
-        },
-      },
-      delete: {
-        operationId: "agentSessionArtifactAcknowledge",
-        description: agentApiHelp.agentSessionArtifactAcknowledge,
-        security: [{ bearerAuth: [] }],
-        parameters: [
-          {
-            name: "sessionId",
-            in: "path",
-            required: true,
-            schema: { type: "string", minLength: 1 },
-          },
-          {
-            name: "fileId",
-            in: "path",
-            required: true,
-            schema: { type: "string", pattern: "^[a-zA-Z0-9_-]{1,128}$" },
-          },
-          {
-            name: "x-artifact-lease",
-            in: "header",
-            required: true,
-            schema: { type: "string", format: "uuid" },
-          },
-        ],
-        responses: {
-          "200": { description: "This lease released" },
-          "401": transportErrorResponse(agentTransportErrorExamples["401"]),
-          "403": { description: "Session is paused or lacks simulation.run" },
-          "404": { description: "Lease already absent" },
-        },
-      },
-    },
-    "/api/agent/sessions/{sessionId}/artifact-status": {
-      get: {
-        operationId: "agentSessionArtifactUsage",
-        description: agentApiHelp.agentSessionArtifactUsage,
-        security: [{ bearerAuth: [] }],
-        parameters: [
-          {
-            name: "sessionId",
-            in: "path",
-            required: true,
-            schema: { type: "string", minLength: 1 },
-          },
-        ],
-        responses: {
-          "200": {
-            description: "Transfer usage",
-            content: {
-              "application/json": {
-                schema: lazyJsonSchema(
-                  z.strictObject({
-                    ok: z.literal(true),
-                    usage: EvidenceResourceUsageSchema,
-                  }),
-                ),
-              },
-            },
-          },
-          "401": transportErrorResponse(agentTransportErrorExamples["401"]),
-          "403": { description: "Session is paused or lacks simulation.run" },
-        },
-      },
-    },
     "/api/agent/sessions/{sessionId}/status": {
       get: {
         operationId: "agentSessionStatus",
@@ -632,40 +480,7 @@ export const agentCircuitOpenApi = {
         responses: fileSessionResponses,
       },
     },
-    "/api/agent/sessions/{sessionId}/simulation": {
-      post: {
-        operationId: "agentSessionSimulationResource",
-        description: agentApiHelp.agentSessionSimulationResource,
-        security: [{ bearerAuth: [] }],
-        parameters: [
-          {
-            name: "x-agent-context",
-            in: "header",
-            schema: { type: "string" },
-          },
-          {
-            name: "x-agent-workspace",
-            in: "header",
-            description:
-              "Optional open working-copy ID from workspace list; routes without changing the foreground tab",
-            schema: { type: "string", minLength: 1, maxLength: 256 },
-          },
-          {
-            name: "sessionId",
-            in: "path",
-            required: true,
-            schema: { type: "string", minLength: 1 },
-          },
-        ],
-        requestBody: {
-          required: true,
-          content: {
-            "application/json": { schema: agentSimulationResourceRequestRef },
-          },
-        },
-        responses: simulationSessionResponses,
-      },
-    },
+
     "/api/agent/sessions/{sessionId}/projects": {
       post: {
         operationId: "agentSessionProjectResource",

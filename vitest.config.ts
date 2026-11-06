@@ -3,7 +3,6 @@ import { configDefaults, defineConfig } from "vitest/config";
 
 const moduleTests = [
   "apps/**/*.test.{ts,tsx}",
-  "worker/**/*.test.ts",
   "packages/**/*.test.{ts,tsx}",
   "scripts/**/*.test.mjs",
 ];

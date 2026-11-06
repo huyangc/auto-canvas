@@ -7,7 +7,7 @@ import {
 import {
   componentLibraryHarness,
   nativePackage,
-} from "../../../../../worker/component-library.test-support";
+} from "../../../../server/src/component-library.test-support";
 import { executeComponentPublication } from "./component-publication-operation";
 import {
   componentLibraryCapture,
@@ -75,8 +75,8 @@ describe("shared GUI and Agent publication operations", () => {
     }
   });
   it("retries the original snapshot after a lost reply and an edit, and refuses recovery from another account", async () => {
-    const route = componentLibraryHarness();
-    let user = "alice";
+    const route = await componentLibraryHarness();
+    let user = "local";
     let lose = true;
     const fetchLike: typeof fetch = async (input, init) => {
       if (input === "/api/auth/me")
@@ -85,7 +85,6 @@ describe("shared GUI and Agent publication operations", () => {
         "PUT",
         String(input).slice("/api/components".length),
         JSON.parse(String(init!.body)),
-        user,
       );
       if (lose) {
         lose = false;
@@ -109,7 +108,7 @@ describe("shared GUI and Agent publication operations", () => {
     await expect(
       executeComponentPublication({ ...input, payload: edited }),
     ).rejects.toThrow("original account");
-    user = "alice";
+    user = "local";
     const recovered = await executeComponentPublication({
       ...input,
       payload: edited,
@@ -142,16 +141,11 @@ describe("shared GUI and Agent publication operations", () => {
     ).toThrow("local definition changed");
   });
   it("captures and round-trips provenance without changing electrical analysis, and keeps explicit new intent", async () => {
-    const route = componentLibraryHarness();
+    const route = await componentLibraryHarness();
     const packaged = nativePackage();
     const entry = (
       await (
-        await route(
-          "PUT",
-          "/origin-roundtrip",
-          { ...packaged, revision: 0 },
-          "alice",
-        )
+        await route("PUT", "/origin-roundtrip", { ...packaged, revision: 0 })
       ).json()
     ).entry;
     const payload = await componentLibraryCapture(entry);
@@ -179,7 +173,7 @@ describe("shared GUI and Agent publication operations", () => {
     );
     const origin = payload.definition.libraryOrigin!;
     expect(
-      publicationFromOrigin(origin, entry, { id: "alice", isAdmin: false }),
+      publicationFromOrigin(origin, entry, { id: "local", isAdmin: false }),
     ).toEqual({
       kind: "update",
       componentId: entry.id,
@@ -190,7 +184,7 @@ describe("shared GUI and Agent publication operations", () => {
       publicationFromOrigin(
         origin,
         entry,
-        { id: "alice", isAdmin: false },
+        { id: "local", isAdmin: false },
         explicit,
       ),
     ).toBe(explicit);
@@ -250,12 +244,10 @@ describe("shared GUI and Agent publication operations", () => {
     expect(automaticPackage.definition.libraryOrigin).toEqual(origin);
     const autoEntry = (
       await (
-        await route(
-          "PUT",
-          "/automatic-artwork-origin",
-          { ...automaticPackage, revision: 0 },
-          "alice",
-        )
+        await route("PUT", "/automatic-artwork-origin", {
+          ...automaticPackage,
+          revision: 0,
+        })
       ).json()
     ).entry;
     const autoResult = executeProjectTransaction(switched.project, {
@@ -280,12 +272,10 @@ describe("shared GUI and Agent publication operations", () => {
     const artwork = { definition: { symbol: packaged.definition.symbol } };
     const artworkEntry = (
       await (
-        await route(
-          "PUT",
-          "/legacy-artwork-origin",
-          { ...artwork, revision: 0 },
-          "alice",
-        )
+        await route("PUT", "/legacy-artwork-origin", {
+          ...artwork,
+          revision: 0,
+        })
       ).json()
     ).entry;
     const legacyCapture = prepareComponentCapture(
@@ -304,17 +294,16 @@ describe("shared GUI and Agent publication operations", () => {
     ).toMatchObject({ componentId: artworkEntry.id });
   });
   it("recovers the fixed destination after server receipt expiry without creating another record", async () => {
-    const route = componentLibraryHarness();
+    const route = await componentLibraryHarness();
     const realNow = Date.now();
     let lose = true;
     const fetchLike: typeof fetch = async (input, init) => {
       if (input === "/api/auth/me")
-        return Response.json({ user: { id: "alice" } });
+        return Response.json({ user: { id: "local" } });
       const response = await route(
         init?.method ?? "GET",
         String(input).slice("/api/components".length),
         init?.body ? JSON.parse(String(init.body)) : undefined,
-        "alice",
       );
       if (init?.method === "PUT" && lose) {
         lose = false;
@@ -345,18 +334,13 @@ describe("shared GUI and Agent publication operations", () => {
     }
   });
   it("associates a reused legacy native capture without treating origin as artwork or consuming its draft", async () => {
-    const route = componentLibraryHarness();
+    const route = await componentLibraryHarness();
     const entry = (
       await (
-        await route(
-          "PUT",
-          "/native-legacy-reuse",
-          {
-            revision: 0,
-            ...nativePackage(),
-          },
-          "alice",
-        )
+        await route("PUT", "/native-legacy-reuse", {
+          revision: 0,
+          ...nativePackage(),
+        })
       ).json()
     ).entry;
     const payload = await componentLibraryCapture(entry);
@@ -393,17 +377,16 @@ describe("shared GUI and Agent publication operations", () => {
   it("reports recovered cloud success when saving its local receipt fails", async () => {
     const factory = new IDBFactory();
     vi.stubGlobal("indexedDB", factory);
-    const route = componentLibraryHarness();
+    const route = await componentLibraryHarness();
     let lose = true;
     let recovering = false;
     const fetchLike: typeof fetch = async (input, init) => {
       if (input === "/api/auth/me")
-        return Response.json({ user: { id: "alice" } });
+        return Response.json({ user: { id: "local" } });
       const response = await route(
         init?.method ?? "GET",
         String(input).slice("/api/components".length),
         init?.body ? JSON.parse(String(init.body)) : undefined,
-        "alice",
       );
       if (init?.method === "PUT" && lose) {
         lose = false;

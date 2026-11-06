@@ -1,39 +1,35 @@
 {
   "format": "analog-canvas-agent-distribution-v1",
   "version": 1,
-  "registrySha256": "b4d84d5d4c58dc1f856d0e541b3ea80e8c1a0e45e9f831481533f2067cf3ff10",
+  "registrySha256": "26c88aca8b7b33562d2425bca4abc0e1b0c25e914b631cf701ce1a7ae57c8c14",
   "sources": [
     {
-      "source": "docs/agent/simulation-specs.md",
-      "sha256": "b3112ef75f2da39bc9e9b30dd950df2733b766bb12fa36f0ac56047d33464332"
-    },
-    {
       "source": "docs/agent/mcp-quickstart.md",
-      "sha256": "a6ca3f6db92b2c0f1464bec3b9010b63c9ec6113dca78d1cc4bb9bdb703437fb"
+      "sha256": "1d28bf9cbf1ddedb1f7741a8aed4d22c962657b29ef307502fecc75d3dd24650"
     },
     {
       "source": "docs/agent/http-kit/skills/icm-circuit-session/SKILL.md",
-      "sha256": "030861cf994d95a7f2fdcece6566e88d8daaa4ed85d7c89702822c4a221496da"
+      "sha256": "96f9623af0461524ae0b102fd5570e73165338d1fe8f52190bb686925a943c27"
     },
     {
       "source": "docs/agent/shared/session.md",
-      "sha256": "486a1e6d0aea2957a16d2640a179c4a79c0ef156b47eb2ba3e44a567165cf2b8"
+      "sha256": "f989ec7e7b86632a9e1897a984a134d019796ce437539373411f32c25dcc60d3"
     },
     {
       "source": "docs/agent/shared/authoring.md",
-      "sha256": "983b3aa63d608ccceead1d0bf8a51237e7411b668633ed57b728e5a0ce2a7bd9"
+      "sha256": "efd58d4320605751478b4de8dc163eb83861ad7418f40dbc2516ab0ac6c14d18"
     },
     {
       "source": "docs/agent/workflow.md",
-      "sha256": "b63788b375b95396c7500a0631a4b2a1ca9eea1c9799914333285d1d2ba658a8"
+      "sha256": "aa031f8b483acf833dca8d76583491f7ee9653ccc845db5aca057fb4d36b8f3a"
     },
     {
       "source": "docs/agent/tool-behavior.md",
-      "sha256": "d6755e913583f37ba971b32feb79b2012ebfa4b8dee42e21129cbf9bf1294660"
+      "sha256": "4c48bfddd8e1a9f382d134078e4145beafe48b40be8c2eb09b6df9b9b6731934"
     },
     {
       "source": "docs/agent/response-semantics.md",
-      "sha256": "4462776ca6e477272429ad2756b9eb4663e8684da96a7d6bdfa5d658fef2cb84"
+      "sha256": "8950f8c7373d4b6e4ef1ac96d5e2e396370bc066e8ac281b6b73047f666ff42d"
     },
     {
       "source": "docs/agent/circuit-style-knowledge.md",
@@ -61,11 +57,11 @@
     },
     {
       "source": "docs/agent/http-kit/AGENTS.md",
-      "sha256": "01b547b8bf1832344f41c5d3abe73f0de20196c405f90a323532da5b233c92ed"
+      "sha256": "f9d2c84aad957015dd752983a9bc66cd4bc2f2417486f6dab3d9666a299aecad"
     },
     {
       "source": "docs/agent/http-cli.md",
-      "sha256": "86a7bb066e8934882890466e468b5ebaaa3277f6083dc527398b70e00235a43a"
+      "sha256": "987263876359df96a5b7108cd892b5d4bbf3ef5c2cf66b783338c8042cb9aaa3"
     },
     {
       "source": "packages/agent-adapter/src/agent-authoring-catalog.generated.ts",
@@ -81,7 +77,7 @@
     },
     {
       "source": "docs/agent/knowledge/pdk-and-symbols.md",
-      "sha256": "48e6079e4a7fcc7d5cc347ab4507c4df20ceeda3fc56c101186cd06ea9f0e856"
+      "sha256": "95677a1694980de9f37765a8a323f760078190d6ce2a1aecde4cd4d57acb719d"
     },
     {
       "source": "docs/agent/mcp-install.md",
@@ -89,35 +85,15 @@
     },
     {
       "source": "docs/agent/api-usage.md",
-      "sha256": "a4001a52cb1a17133dc8cbcbc26e000fafc74fb5e3fd04bb59bbc7ac1015eab6"
+      "sha256": "d75cb64295614149a606b1c19fb43450c6b0449e5a2739d22867ec4e5fdc6c66"
     },
     {
       "source": "docs/agent/examples.md",
       "sha256": "ec2d228fe4b3f86e1795ce7ea0f555d348a21ff660181a37924ffb6cc4b2f0ae"
     },
     {
-      "source": "docs/agent/simulation-evidence-storage.md",
-      "sha256": "c2a029d887351b005012d0ee6496c10ad42f6daf44bd142b6b0305fbf967824d"
-    },
-    {
-      "source": "docs/agent/simulation-result-handoff.md",
-      "sha256": "025575578e71edbaf74cbe568167b3286605d6587bf1106c3bc3238ab997cfcf"
-    },
-    {
       "source": "docs/agent/mcp/tools.md",
-      "sha256": "bf5a427f874d284dc574d80d21ef1b25828677f214b97c96468025beb23e18de"
-    },
-    {
-      "source": "docs/agent/mcp/simulation.md",
-      "sha256": "327afd32daf7e0270f7e78d2e69779c319dc78d4407dd5c77fd1fb1cc12c64c2"
-    },
-    {
-      "source": "docs/agent/mcp/simulation-reference.md",
-      "sha256": "0e0756b451a093bac477cdd896c4d95bd27c4ddb10491f7d4d3f4229d8681960"
-    },
-    {
-      "source": "docs/agent/shared/simulation.md",
-      "sha256": "cd861fb392f8765a6730279b55ea4475ed03a3182df050d91bffbe60d5b55685"
+      "sha256": "e9fa281ca3eb5baa0c4ffdee6d0395f3f30b764ade9ddf622c3d9aa4083d83a5"
     },
     {
       "source": "docs/agent/routegraph.md",
@@ -125,15 +101,15 @@
     },
     {
       "source": "docs/agent/local-workspace.md",
-      "sha256": "66da36a8ace81e9baee565afe8b0c7e0209dd2cd1f586b9f3117d56194dfc999"
+      "sha256": "b0a0a5c260acf832ad8b082fae1e1998161c30ccc4f781d463aef4dc085f02ab"
     },
     {
       "source": "docs/agent/mcp/tool-help.json",
-      "sha256": "4fbe205d99efaaeb5c18bc8190328d32bdf7319dceda7678e21cb42cf7dbb463"
+      "sha256": "2cc25845f3c8c0a78892d1e953e482674b502f3e84b560fb667ec025b7ea0fc7"
     },
     {
       "source": "docs/agent/http-kit/api-help.json",
-      "sha256": "c26a542c286aadebe5a39f15a63ba61903635a062ce51b6f3af0f6176a7e1b6f"
+      "sha256": "2decd74b1fc6bee403e288278748c2da235ca803655c51570e8bfdff786bd0bb"
     },
     {
       "source": "docs/agent/mcp/instructions.md",
@@ -145,20 +121,6 @@
     }
   ],
   "documents": [
-    {
-      "id": "reference/simulation-specs",
-      "source": "docs/agent/simulation-specs.md",
-      "consumers": [
-        "mcp",
-        "http-cli",
-        "http-kit"
-      ],
-      "task": "Simulation Spec rules and raw handoff",
-      "load": "on-demand",
-      "requires": [],
-      "uri": "analog-canvas://reference/simulation-specs",
-      "kitPath": "references/simulation-specs.md"
-    },
     {
       "id": "reference/quickstart",
       "source": "docs/agent/mcp-quickstart.md",
@@ -469,34 +431,6 @@
       "kitPath": "references/examples.md"
     },
     {
-      "id": "reference/simulation-evidence-storage",
-      "source": "docs/agent/simulation-evidence-storage.md",
-      "consumers": [
-        "mcp",
-        "http-cli",
-        "http-kit"
-      ],
-      "task": "Simulation evidence usage and recovery",
-      "load": "on-demand",
-      "requires": [],
-      "uri": "analog-canvas://reference/simulation-evidence-storage",
-      "kitPath": "references/simulation-evidence-storage.md"
-    },
-    {
-      "id": "reference/simulation-result-handoff",
-      "source": "docs/agent/simulation-result-handoff.md",
-      "consumers": [
-        "mcp",
-        "http-cli",
-        "http-kit"
-      ],
-      "task": "Agent simulation result handoff",
-      "load": "on-demand",
-      "requires": [],
-      "uri": "analog-canvas://reference/simulation-result-handoff",
-      "kitPath": "references/simulation-result-handoff.md"
-    },
-    {
       "id": "reference/mcp-tools",
       "source": "docs/agent/mcp/tools.md",
       "consumers": [
@@ -507,47 +441,6 @@
       "load": "on-demand",
       "requires": [],
       "uri": "analog-canvas://reference/mcp-tools"
-    },
-    {
-      "id": "reference/mcp-simulation",
-      "source": "docs/agent/mcp/simulation.md",
-      "consumers": [
-        "mcp",
-        "http-cli"
-      ],
-      "task": "MCP simulation calls and file ownership",
-      "load": "on-demand",
-      "requires": [],
-      "uri": "analog-canvas://reference/mcp-simulation"
-    },
-    {
-      "id": "reference/mcp-simulation-details",
-      "source": "docs/agent/mcp/simulation-reference.md",
-      "consumers": [
-        "mcp",
-        "http-cli"
-      ],
-      "task": "Detailed MCP simulation contracts",
-      "load": "on-demand",
-      "requires": [],
-      "uri": "analog-canvas://reference/mcp-simulation-details"
-    },
-    {
-      "id": "reference/simulation-workflow",
-      "source": "docs/agent/shared/simulation.md",
-      "consumers": [
-        "mcp",
-        "http-cli",
-        "http-kit"
-      ],
-      "task": "Shared simulation lifecycle",
-      "load": "on-demand",
-      "requires": [
-        "reference/simulation-specs",
-        "reference/simulation-result-handoff"
-      ],
-      "uri": "analog-canvas://reference/simulation-workflow",
-      "kitPath": "references/simulation-workflow.md"
     },
     {
       "id": "reference/knowledge/patterns",
@@ -617,7 +510,6 @@
       "file": "apps/mcp-server/src/resources.generated.ts",
       "sources": [
         "docs/agent/distribution.json",
-        "docs/agent/simulation-specs.md",
         "docs/agent/mcp-quickstart.md",
         "docs/agent/shared/session.md",
         "docs/agent/shared/authoring.md",
@@ -636,21 +528,15 @@
         "docs/agent/knowledge/hierarchy-and-large-circuits.md",
         "docs/agent/knowledge/pdk-and-symbols.md",
         "docs/agent/mcp-install.md",
-        "docs/agent/simulation-evidence-storage.md",
-        "docs/agent/simulation-result-handoff.md",
         "docs/agent/mcp/tools.md",
-        "docs/agent/mcp/simulation.md",
-        "docs/agent/mcp/simulation-reference.md",
-        "docs/agent/shared/simulation.md",
         "docs/agent/circuit-style-knowledge.md"
       ],
-      "sha256": "a8c8b2549443fef2e6762fae0af34f284ad38757f313e2d5018b5f83da6b066e"
+      "sha256": "7c775178d6ed90b49b81832dbf4407fde64d6f4fb096332e2116b50ba3e97ebc"
     },
     {
       "file": "packages/agent-adapter/src/agent-docs.generated.ts",
       "sources": [
         "docs/agent/distribution.json",
-        "docs/agent/simulation-specs.md",
         "docs/agent/http-kit/skills/icm-circuit-session/SKILL.md",
         "docs/agent/shared/session.md",
         "docs/agent/shared/authoring.md",
@@ -671,12 +557,9 @@
         "docs/agent/knowledge/pdk-and-symbols.md",
         "docs/agent/api-usage.md",
         "docs/agent/examples.md",
-        "docs/agent/simulation-evidence-storage.md",
-        "docs/agent/simulation-result-handoff.md",
-        "docs/agent/shared/simulation.md",
         "docs/agent/circuit-style-knowledge.md"
       ],
-      "sha256": "90b29813eddeb4db7ac125e5a5bcf22a14df73a1b1eba87398c698e5f4219906"
+      "sha256": "64dcd7048f231bc041429df3bdb50024359e3f41afa5937a476f0d7c2f59c854"
     },
     {
       "file": "packages/agent-adapter/src/agent-api-help.generated.ts",
@@ -684,7 +567,7 @@
         "docs/agent/distribution.json",
         "docs/agent/http-kit/api-help.json"
       ],
-      "sha256": "f2c6e686584ae50dc775fd5853960febf5abe25147dd1930aa2c1795f5bf52fb"
+      "sha256": "aeaaf6192637979cbe3047ab11a0a1c6ddc7c38dea26eedba5473121904cf352"
     },
     {
       "file": "apps/mcp-server/src/guidance.generated.ts",
@@ -693,7 +576,7 @@
         "docs/agent/mcp/instructions.md",
         "docs/agent/mcp/tool-help.json"
       ],
-      "sha256": "2b6ccb8aee248562cf63dcf7cf989b944845131e24dbbf10d52e83213d0fd665"
+      "sha256": "20efa1832279fdfb8bfa00c92674c952c39db6b6bfd4310f3a61f218e9226b23"
     },
     {
       "file": "apps/editor/src/agent/connection-guidance.generated.ts",

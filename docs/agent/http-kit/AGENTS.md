@@ -10,7 +10,7 @@
 - Use only the published session API (HTTPS, or HTTP on loopback) to change a
   circuit; never DOM, mouse, keyboard, visual automation, source repositories
   or a second edit path.
-- Circuit edits use `transact`; File, Simulation and Project resources have
+- Circuit edits use `transact`; File and Project resources have
   their own side effects. Preserve human edits, locks and revision conflicts.
 - Keep bearer tokens in memory only. Never put a claim code or token in a
   file, URL, log, annotation or user-visible response.

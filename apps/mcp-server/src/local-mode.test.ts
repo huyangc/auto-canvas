@@ -168,17 +168,7 @@ describe("MCP local mode (#1498)", () => {
       }),
     ).toMatchObject({ comparison: { status: "different" } });
 
-    // Simulation needs the website: refused, by name.
-    expect(
-      await tool("simulation", { request: { operation: "capabilities" } }),
-    ).toMatchObject({
-      ok: false,
-      error: {
-        code: "SIMULATION_UNAVAILABLE",
-        message: expect.stringContaining("needs the website"),
-      },
-    });
-    // So do the Gallery and the figure files the editor measures in a page.
+    // The Gallery and the figure files the editor measures in a page.
     for (const [name, args] of [
       ["gallery_circuits", { action: "list" }],
       [

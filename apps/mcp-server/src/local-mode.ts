@@ -14,7 +14,6 @@ import {
   type AgentProjectResourceRequest,
   type AgentProjectResourceResponse,
   type AgentSessionStatusResponse,
-  type AgentSimulationResourceResponse,
 } from "@icm/agent-adapter";
 import {
   AgentHttpClient,
@@ -163,14 +162,6 @@ export function parseLocalArguments(args: readonly string[]): LocalArguments {
 const LOCAL_SESSION_ID = "local";
 // Not a credential: nothing checks it, and it never leaves this process.
 const LOCAL_TOKEN = "local";
-
-function simulationUnavailable(): AgentSessionError {
-  return new AgentSessionError(
-    "SIMULATION_UNAVAILABLE",
-    "Simulation needs the website; a local workspace has no simulator",
-    "request-rejected",
-  );
-}
 
 /**
  * Project operations on what only the website has: the Gallery, Cloud
@@ -352,14 +343,6 @@ class LocalAgentHttp extends AgentHttpClient {
     );
     await this.persist();
     return response;
-  }
-
-  override async simulation(): Promise<AgentSimulationResourceResponse> {
-    throw simulationUnavailable();
-  }
-
-  override async downloadArtifact(): Promise<Response> {
-    throw simulationUnavailable();
   }
 
   /** Nothing to revoke: the workspace stays this process's until it ends. */

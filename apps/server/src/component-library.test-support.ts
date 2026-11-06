@@ -3,7 +3,7 @@ import pg from "pg";
 import { afterEach } from "vitest";
 import { createApp } from "./app.js";
 import { migrate } from "./migrate.js";
-export { nativePackage } from "../../../worker/component-library.test-support.js";
+export { nativePackage } from "../../../packages/component-library/src/component-library.test-support.js";
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {

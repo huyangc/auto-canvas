@@ -1,7 +1,7 @@
 # Circuit transaction and geometry contract
 
 The Circuit resource has four operations, `capabilities`, `snapshot`,
-`transact` and `render`; File, Simulation and Project are separate resources.
+`transact` and `render`; File and Project are separate resources.
 Capabilities reports versions, permissions, limits, transaction forms and edit
 kinds, not a Project Index. Snapshot projections: `bootstrap` (identities,
 counts), `state` (revision, counts, optional diagnostics), `folder-directory`

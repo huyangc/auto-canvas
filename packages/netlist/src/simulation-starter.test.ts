@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { parseProject, serializeProject } from "@icm/project-protocol";
 import ota from "../../../netlists/native-ota-library/legacy-source.icproj.json";
-import hostedSky130 from "../../../containers/ngspice/hosted-sky130-profile.json";
-import hostedSg13 from "../../../containers/ngspice/sg13g2/profile.json";
+import hostedSky130 from "./test-support/sky130-profile.json";
+import hostedSg13 from "./test-support/sg13g2-profile.json";
 import { createEmptyProject } from "@icm/model";
 import {
   createSimulationStarter,

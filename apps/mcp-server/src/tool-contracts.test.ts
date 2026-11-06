@@ -46,9 +46,10 @@ describe("on-demand tool contracts", () => {
         .operations,
     ).toContain("connect");
     expect(
-      directory.tools.find((t: { name: string }) => t.name === "simulation")
-        .operations,
-    ).toContain("prepare");
+      directory.tools.find(
+        (t: { name: string }) => t.name === "user_components",
+      ).operations,
+    ).toContain("publish");
     expect(directory.tools.every((t: object) => !("inputSchema" in t))).toBe(
       true,
     );
@@ -77,31 +78,6 @@ describe("on-demand tool contracts", () => {
     expect(JSON.stringify(toolInputSchema("apply_actions"))).toContain(
       "place-components",
     );
-  });
-
-  it("keeps the real property named title and resolves precise formats, not all plot details", () => {
-    const result = describeToolContract({
-      tool: "simulation_files",
-      operations: ["prepare-plot"],
-      field: "/request/formats",
-    }) as any;
-    expect(result.variants).toHaveLength(1);
-    expect(result.variants[0]).toMatchObject({
-      required: false,
-      operations: ["prepare-plot"],
-      schema: {
-        type: "array",
-        minItems: 1,
-        items: { type: "string", enum: ["png", "svg", "pdf"] },
-      },
-    });
-    expect(JSON.stringify(result)).not.toContain('"panels"');
-    const title = describeToolContract({
-      tool: "simulation_files",
-      operations: ["prepare-plot"],
-      field: "/request/title",
-    }) as any;
-    expect(title.variants[0].schema).toEqual({ type: "string" });
   });
 
   it("keeps each union field alternative and required status, including array elements", () => {
@@ -184,47 +160,27 @@ describe("on-demand tool contracts", () => {
 
   it("uses the same registry for parameterized resources and tool calls", async () => {
     const query = {
-      tool: "simulation_files",
-      operations: ["prepare-plot"],
-      field: "/request/formats",
+      tool: "user_components",
+      operations: ["insert"],
+      field: "/request/expectedLibraryRevision",
     };
     const result = text(await callTool("describe_tool", query, {} as never));
     expect(
       JSON.parse(
         readResourceContent(
-          "analog-canvas://contract/tools/simulation_files?operations=prepare-plot&field=%2Frequest%2Fformats",
+          "analog-canvas://contract/tools/user_components?operations=insert&field=%2Frequest%2FexpectedLibraryRevision",
         ).text,
       ),
     ).toEqual(result);
-  });
-
-  it("describes the shared legacy expression contract without expanding its DAG repeatedly", () => {
-    const full = describeToolContract({ tool: "simulation_output" }) as any;
-    expect(full.operations).toEqual(["list", "upsert", "remove"]);
-    expect(full.inputSchema).toBeDefined();
-    const upsert = describeToolContract({
-      tool: "simulation_output",
-      operations: ["upsert"],
-      field: "/expression",
-    }) as any;
-    expect(upsert).toMatchObject({
-      ok: false,
-      error: { code: "CONTRACT_SELECTION_TOO_BROAD" },
-      uri: "analog-canvas://contract/tools/simulation_output",
-    });
-    expect(
-      readResourceContent("analog-canvas://contract/tools/simulation_output")
-        .text,
-    ).toContain('"operand"');
   });
 
   it.each([
     { operations: ["undo"] },
     { tool: "apply_actions", operations: ["not-an-action"] },
     { tool: "missing" },
-    { tool: "simulation_files", field: "/request/missing" },
-    { tool: "simulation_files", field: "/request/~2" },
-    { tool: "simulation_files", field: "request/formats" },
+    { tool: "user_components", field: "/request/missing" },
+    { tool: "user_components", field: "/request/~2" },
+    { tool: "user_components", field: "request/formats" },
     { tool: "apply_actions", editKind: "set_instance_reference" },
   ])(
     "rejects an invalid selector without a browser call: %j",

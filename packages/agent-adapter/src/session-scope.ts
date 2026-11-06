@@ -22,15 +22,8 @@ export const AgentSessionScopeSchema = z.enum([
   "project.import",
   "visual.download",
   /**
-   * Compile and execute one structured simulation. Granted through the same
-   * human claim flow as the file scopes and, like them, independent of every
-   * edit scope: authorizing an Agent to draw a circuit is not authorizing it
-   * to spend a deployment's simulator time.
-   */
-  "simulation.run",
-  /**
    * Publish or update Community Gallery entries as the signed-in Editor
-   * account. Like simulation, independent of every edit scope: authorizing
+   * account. Independent of every edit scope: authorizing
    * an Agent to draw a circuit is not authorizing it to publish one.
    */
   "gallery.publish",

@@ -1,16 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { refuseApiFlood } from "../../../worker/api-rate-limit";
 import { requestFailureOf } from "./request-failure";
 import { SITE_USAGE_CONTACT } from "./usage-policy-note";
 
 describe("requestFailureOf", () => {
-  it("says the Worker's flood limit asks to wait, not that the server is down", async () => {
-    const refusal = await refuseApiFlood(
-      new Request("https://example.test/api/gallery", {
-        headers: { "cf-connecting-ip": "203.0.113.9" },
-      }),
-      { API_RATE_LIMITER: { limit: async () => ({ success: false }) } },
+  it("classifies an HTTP rate limit with its retry delay", async () => {
+    const refusal = Response.json(
+      { error: "too-many-requests" },
+      { status: 429, headers: { "retry-after": "60" } },
     );
     expect(await requestFailureOf(refusal!)).toEqual({
       failure: "rate-limited",

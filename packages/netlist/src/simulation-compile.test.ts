@@ -15,11 +15,7 @@ import {
   type SimulationStructuredSetup,
 } from "@icm/model";
 import { currentFiveTransistorOtaCircuitSource } from "../../../apps/editor/src/examples/five-transistor-ota.test-support.js";
-import {
-  buildSimulationDeck,
-  readSimulationData,
-  type SimulationRequest,
-} from "@icm/spice-run";
+import { parseNgspiceRawfile } from "./test-support/rawfile.js";
 
 import { compileStructuredSimulation } from "./simulation-compile.js";
 
@@ -1701,26 +1697,32 @@ describe.skipIf(!ngspiceOnPath())("running a compiled deck", () => {
     try {
       writeFileSync(
         join(directory, "deck.cir"),
-        buildSimulationDeck(compiled.request as SimulationRequest, null),
+        compiledDeck(compiled.request),
         "utf8",
       );
       execFileSync("ngspice", ["-b", "deck.cir"], {
         cwd: directory,
         encoding: "utf8",
       });
-      const reading = readSimulationData(
+      const reading = parseNgspiceRawfile(
         readFileSync(join(directory, "out.raw"), "utf8"),
       );
-      expect(reading.status).toBe("read");
-      if (reading.status !== "read") return;
-      const noise = reading.data.analyses[0];
-      expect(noise?.analysis).toBe("noise");
-      if (noise?.analysis !== "noise") return;
-      expect(noise.frequencyHz.length).toBeGreaterThan(10);
-      expect(noise.outputNoiseDensity.every(Number.isFinite)).toBe(true);
-      expect(noise.inputNoiseDensity.every(Number.isFinite)).toBe(true);
-      expect(noise.integratedOutputNoise).toBeGreaterThan(0);
-      expect(noise.integratedInputNoise).toBeGreaterThan(0);
+      expect(reading.ok).toBe(true);
+      if (!reading.ok) throw Error(reading.error.message);
+      expect(reading.plots.map((plot) => plot.plotName)).toEqual([
+        "Noise Spectral Density Curves",
+        "Integrated Noise",
+      ]);
+      const density = reading.plots[0]!;
+      expect(density.pointCount).toBeGreaterThan(10);
+      for (const name of ["onoise_spectrum", "inoise_spectrum"])
+        expect(
+          density.vectors
+            .find((v) => v.variable.name === name)!
+            .real.every(Number.isFinite),
+        ).toBe(true);
+      for (const vector of reading.plots[1]!.vectors)
+        expect(vector.real[0]).toBeGreaterThan(0);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
@@ -1758,24 +1760,23 @@ describe.skipIf(!ngspiceOnPath())("running a compiled deck", () => {
     try {
       writeFileSync(
         join(directory, "deck.cir"),
-        buildSimulationDeck(compiled.request as SimulationRequest, null),
+        compiledDeck(compiled.request),
         "utf8",
       );
       execFileSync("ngspice", ["-b", "deck.cir"], {
         cwd: directory,
         encoding: "utf8",
       });
-      const reading = readSimulationData(
+      const reading = parseNgspiceRawfile(
         readFileSync(join(directory, "out.raw"), "utf8"),
       );
-      expect(reading.status).toBe("read");
-      if (reading.status !== "read") return;
-      const operatingPoint = reading.data.analyses[0]!;
-      expect(operatingPoint.analysis).toBe("op");
-      if (operatingPoint.analysis !== "op") return;
-      const probes = operatingPoint.probes;
+      expect(reading.ok).toBe(true);
+      if (!reading.ok) throw Error(reading.error.message);
+      const operatingPoint = reading.plots[0]!;
+      expect(operatingPoint.plotName).toBe("Operating Point");
+      const probes = operatingPoint.vectors;
       const value = (name: string) =>
-        probes.find((probe) => probe.name === name)!.value;
+        probes.find((probe) => probe.variable.name === name)!.real[0];
       expect(value(compiled.vectors[0]!.vector)).toBeCloseTo(0.0005, 12);
       expect(value(compiled.vectors[1]!.vector)).toBeCloseTo(-0.0005, 12);
     } finally {
@@ -1788,10 +1789,7 @@ describe.skipIf(!ngspiceOnPath())("running a compiled deck", () => {
     expect(compiled.ok).toBe(true);
     if (!compiled.ok) return;
 
-    const deck = buildSimulationDeck(
-      compiled.request as SimulationRequest,
-      null,
-    );
+    const deck = compiledDeck(compiled.request);
     // `set appendwrite` needs a directory where `out.raw` does not exist yet,
     // which is exactly what the hosted harness makes for every run.
     const directory = mkdtempSync(join(tmpdir(), "icm-simulation-compile-"));
@@ -1801,29 +1799,28 @@ describe.skipIf(!ngspiceOnPath())("running a compiled deck", () => {
         cwd: directory,
         encoding: "utf8",
       });
-      const reading = readSimulationData(
+      const reading = parseNgspiceRawfile(
         readFileSync(join(directory, "out.raw"), "utf8"),
       );
 
-      expect(reading.status).toBe("read");
-      if (reading.status !== "read") return;
-      expect(reading.data.analyses.map((item) => item.analysis)).toEqual([
-        "op",
-        "ac",
+      expect(reading.ok).toBe(true);
+      if (!reading.ok) throw Error(reading.error.message);
+      expect(reading.plots.map((plot) => plot.plotName)).toEqual([
+        "Operating Point",
+        "AC Analysis",
       ]);
-      for (const analysis of reading.data.analyses) {
-        if (analysis.analysis !== "op" && analysis.analysis !== "ac")
-          throw new Error(`Unexpected ${analysis.analysis} result`);
-        const names = new Set(analysis.probes.map((probe) => probe.name));
-        for (const vector of compiled.vectors) {
+      for (const plot of reading.plots) {
+        const names = new Set(
+          plot.vectors.map((vector) => vector.variable.name),
+        );
+        for (const vector of compiled.vectors)
           expect(names).toContain(vector.vector);
-        }
       }
-      const operatingPoint = reading.data.analyses[0]!;
-      expect(operatingPoint.analysis).toBe("op");
-      if (operatingPoint.analysis !== "op") return;
+      const operatingPoint = reading.plots[0]!;
+      expect(operatingPoint.plotName).toBe("Operating Point");
       const value = (name: string) =>
-        operatingPoint.probes.find((probe) => probe.name === name)!.value;
+        operatingPoint.vectors.find((probe) => probe.variable.name === name)!
+          .real[0];
       // 1 V across two equal resistors, and 1 V / 2 kOhm out of the source.
       expect(value("v(in)")).toBeCloseTo(1, 12);
       expect(value("v(mid)")).toBeCloseTo(0.5, 12);
@@ -1855,10 +1852,7 @@ describe.skipIf(!ngspiceOnPath())("running a compiled deck", () => {
     expect(compiled.ok).toBe(true);
     if (!compiled.ok) return;
 
-    const deck = buildSimulationDeck(
-      compiled.request as SimulationRequest,
-      null,
-    );
+    const deck = compiledDeck(compiled.request);
     const directory = mkdtempSync(join(tmpdir(), "icm-hierarchy-current-"));
     try {
       writeFileSync(join(directory, "deck.cir"), deck, "utf8");
@@ -1866,22 +1860,32 @@ describe.skipIf(!ngspiceOnPath())("running a compiled deck", () => {
         cwd: directory,
         encoding: "utf8",
       });
-      const reading = readSimulationData(
+      const reading = parseNgspiceRawfile(
         readFileSync(join(directory, "out.raw"), "utf8"),
       );
 
-      expect(reading.status).toBe("read");
-      if (reading.status !== "read") return;
-      const operatingPoint = reading.data.analyses[0]!;
-      expect(operatingPoint.analysis).toBe("op");
-      if (operatingPoint.analysis !== "op") return;
+      expect(reading.ok).toBe(true);
+      if (!reading.ok) throw Error(reading.error.message);
+      const operatingPoint = reading.plots[0]!;
+      expect(operatingPoint.plotName).toBe("Operating Point");
       expect(
-        operatingPoint.probes.find(
-          (probe) => probe.name === "i(v.x1.vicmprb001)",
-        )?.value,
+        operatingPoint.vectors.find(
+          (probe) => probe.variable.name === "i(v.x1.vicmprb001)",
+        )?.real[0],
       ).toBeCloseTo(0.001, 12);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
   });
 });
+
+/** Test harness: run exactly the compiler output, with a SPICE title and terminator. */
+function compiledDeck(request: { netlist: string; testbench: string }): string {
+  const lines = [
+    "* Netlist compiler test",
+    request.netlist.trimEnd(),
+    request.testbench.trimEnd(),
+  ];
+  if (!/^\s*\.end\s*$/imu.test(request.testbench)) lines.push(".end");
+  return lines.join("\n") + "\n";
+}

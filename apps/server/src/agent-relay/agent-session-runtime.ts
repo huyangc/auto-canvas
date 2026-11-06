@@ -13,13 +13,11 @@ import {
   type AgentCircuitRequest,
   type AgentFileResourceRequest,
   type AgentSessionScope,
-  type AgentSimulationResourceRequest,
   type AgentProjectResourceRequest,
   type AgentTransportErrorCode,
   type AgentTransportErrorResponse,
 } from "@icm/agent-adapter";
 import { agentOperatingKit } from "@icm/agent-adapter/kit";
-import type { AgentArtifactBucket } from "./agent-artifacts.js";
 
 export const SESSION_STATE_KEY = "agent-session-v1";
 /**
@@ -44,8 +42,7 @@ function adapterVersion(request: Request): { adapterVersion?: string } {
 export const EDITOR_SOCKET_TAG = "editor";
 export const EDITOR_PROTOCOL = "icm-agent-session";
 export const FORWARD_TIMEOUT_MS = 30_000;
-/** Simulation start returns a receipt; it uses the ordinary RPC deadline. */
-export const SIMULATION_FORWARD_TIMEOUT_MS = FORWARD_TIMEOUT_MS;
+
 export const EXPIRY_WARNING_MS = 60_000;
 const CREATE_BODY_LIMIT = 64_000;
 const CLAIM_BODY_LIMIT = 8_000;
@@ -82,7 +79,6 @@ export type DurableStateLike = {
 
 export type AgentSessionEnv = {
   AGENT_ALLOWED_ORIGIN?: string;
-  SIMULATION_ARTIFACTS?: AgentArtifactBucket;
 };
 
 export type WebSocketPairShape = { 0: WebSocket; 1: WebSocket };
@@ -182,7 +178,7 @@ export async function routeAgentSessionRequest(
     );
     headers.set(
       "access-control-allow-headers",
-      "authorization, content-type, x-editor-secret, x-artifact-ref, x-artifact-protocol, x-artifact-lease, x-agent-context, x-agent-workspace, range, if-range",
+      "authorization, content-type, x-editor-secret, x-agent-context, x-agent-workspace, range, if-range",
     );
     return new Response(null, { status: 204, headers });
   }
@@ -332,7 +328,7 @@ export async function routeAgentSessionRequest(
   }
 
   const match =
-    /^\/api\/agent\/sessions\/([^/]+)(?:\/(circuit|files|simulation|projects|events|editor|control|status|activity|artifact-status|artifacts\/[a-zA-Z0-9_-]{1,128}))?$/u.exec(
+    /^\/api\/agent\/sessions\/([^/]+)(?:\/(circuit|files|projects|events|editor|control|status|activity))?$/u.exec(
       url.pathname,
     );
   if (!match) return jsonResponse({ error: "Not found" }, 404, allowedOrigin);
@@ -344,10 +340,7 @@ export async function routeAgentSessionRequest(
     method: request.method,
     headers,
   };
-  if (resource?.startsWith("artifacts/") && request.method === "PUT") {
-    init.body = request.body;
-    init.duplex = "half";
-  } else if (request.method !== "GET" && request.method !== "HEAD") {
+  if (request.method !== "GET" && request.method !== "HEAD") {
     const body = await readBoundedText(
       request,
       DEFAULT_AGENT_SESSION_LIMITS.maxRequestBytes,
@@ -450,17 +443,6 @@ export function fileOperationScopes(
   request: AgentFileResourceRequest,
 ): AgentSessionScope[] {
   switch (request.operation) {
-    case "simulation-input":
-      return request.input.action === "update" &&
-        request.input.owner.kind === "project-folder"
-        ? [
-            "simulation.run",
-            "project.import",
-            ...(request.input.circuitEdits.length
-              ? ["circuit.edit.connectivity" as const]
-              : []),
-          ]
-        : ["simulation.run"];
     case "import-cell":
       return [
         "project.import",
@@ -487,32 +469,6 @@ export function fileOperationScopes(
  * spending scope merely to discover it has none is being told to guess.
  * Running costs the deployment simulator time, so `run` needs its own grant.
  */
-export function simulationOperationScopes(
-  request: AgentSimulationResourceRequest,
-): AgentSessionScope[] {
-  switch (request.operation) {
-    case "capabilities":
-    case "authoring-help":
-      return [];
-    case "prepare":
-    case "run":
-    case "start":
-    case "read":
-    case "catalog":
-    case "cancel":
-    case "prepare-batch":
-    case "start-batch":
-    case "read-batch":
-    case "history":
-    case "history-usage":
-    case "resource-usage":
-    case "history-delete":
-    case "cancel-batch":
-    case "prepare-sweep":
-    case "export":
-      return ["simulation.run"];
-  }
-}
 
 export function projectOperationScopes(
   request: AgentProjectResourceRequest,

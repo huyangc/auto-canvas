@@ -12,8 +12,6 @@ import {
 
 export interface OperationSession {
   client: AgentSessionClient;
-  workspaceBase?: string;
-  workspaceBases?: Map<string, string>;
   workspaceRoot?: string;
   taskDirectory?: string;
 }

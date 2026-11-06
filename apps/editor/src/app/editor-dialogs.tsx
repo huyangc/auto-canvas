@@ -12,7 +12,7 @@ import type {
   summarizeProjectCells,
 } from "@icm/derived";
 import type { CircuitProject, SchematicDocument } from "@icm/model";
-import type { SimulationSourceLocation } from "@icm/simulation-service/contract";
+import type { SimulationSourceLocation } from "@icm/netlist";
 import type { createEditorCommandRouter } from "../commands/editor-command";
 import type { useDocumentController } from "../document/document-controller";
 import type { UseRecoveryCoordinatorResult } from "../document/recovery-coordinator";

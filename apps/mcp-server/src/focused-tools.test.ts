@@ -1,16 +1,11 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import {
-  FOCUSED_TOOLS,
-  canonicalSimulationSchema,
-  focusedTools,
-} from "./focused-tools.js";
+import { FOCUSED_TOOLS, focusedTools } from "./focused-tools.js";
 import { callTool, listToolDefinitions, toolInputSchema } from "./tools.js";
 import { selectToolSchema, contractOperations } from "./tool-contracts.js";
 import { inlineSchema } from "./inline-schema.js";
 import { declarationSchema } from "./declaration-schema.js";
 import { describeToolContract } from "./tools.js";
-import { simulationArguments } from "./operation-arguments.js";
 
 // The first tool listing builds every tool's contract: about a second
 // alone, and past the 5 s a test gets beside the full suite on a CI runner.
@@ -191,11 +186,7 @@ describe("focused tools", () => {
         (t) => t.definition.name === name,
       )!;
       const selected = selectToolSchema(toolInputSchema(source)!, operations);
-      expect(tool.definition.inputSchema).toEqual(
-        source === "simulation_files"
-          ? canonicalSimulationSchema(selected)
-          : selected,
-      );
+      expect(tool.definition.inputSchema).toEqual(selected);
       expect(contractOperations(tool.definition.inputSchema)).toEqual(
         [...operations].sort(
           (a, b) =>
@@ -231,12 +222,6 @@ describe("focused tools", () => {
   );
 
   it.each([
-    ["simulation_edit", "simulation_files", { request: { action: "update" } }],
-    [
-      "simulation_run",
-      "simulation",
-      { request: { operation: "start" }, waitMs: "bad" },
-    ],
     [
       "circuit_place",
       "apply_actions",
@@ -261,56 +246,6 @@ describe("focused tools", () => {
       expect(a.content[0]!.text).toContain("INVALID_TOOL_INPUT");
     },
   );
-
-  it("points a focused simulation error at the owning focused tool", async () => {
-    const tool = focusedTools(
-      [...new Set(FOCUSED_TOOLS.map((entry) => entry.source))].map(
-        (source) => ({
-          definition: {
-            name: source,
-            description: "canonical",
-            inputSchema: toolInputSchema(source)!,
-          },
-          handle: async () => ({ ok: true }),
-        }),
-      ),
-      () => "focused",
-    ).find((entry) => entry.definition.name === "simulation_source")!;
-    await expect(
-      tool.handle({ request: { action: "update" } }, {}),
-    ).rejects.toMatchObject({
-      code: "INVALID_TOOL_OPERATION",
-      message: "update is served by simulation_edit.",
-    });
-  });
-
-  it("routes already normalized simulation operations without another conversion", async () => {
-    const calls: unknown[] = [];
-    const originals = [
-      ...new Set(FOCUSED_TOOLS.map((entry) => entry.source)),
-    ].map((source) => ({
-      definition: {
-        name: source,
-        description: "canonical",
-        inputSchema: toolInputSchema(source)!,
-      },
-      handle: async (args: unknown) => {
-        calls.push(args);
-        return { ok: true };
-      },
-    }));
-    const tools = focusedTools(originals, () => "focused");
-    await tools
-      .find((tool) => tool.definition.name === "simulation_run")!
-      .handle({ request: { operation: "capabilities" } }, {});
-    await tools
-      .find((tool) => tool.definition.name === "simulation_source")!
-      .handle({ request: { action: "list" } }, {});
-    expect(calls).toEqual([
-      { request: { operation: "capabilities" } },
-      { request: { action: "list" } },
-    ]);
-  });
 
   it("uses numeric items for homogeneous closed tuples without changing the canonical schema", () => {
     const validator = z.strictObject({
@@ -493,66 +428,5 @@ describe("a focused tool splits actions that cannot share one call (#1231)", () 
       ok: false,
       code: "EDIT_PRECONDITION",
     });
-  });
-});
-
-describe("one envelope for simulation tools (#1231)", () => {
-  function sourceTool() {
-    const calls: unknown[] = [];
-    const originals = [
-      ...new Set(FOCUSED_TOOLS.map((entry) => entry.source)),
-    ].map((source) => ({
-      definition: {
-        name: source,
-        description: "canonical",
-        inputSchema: toolInputSchema(source)!,
-      },
-      handle: async (args: unknown) => {
-        calls.push(args);
-        return { ok: true };
-      },
-    }));
-    const tool = focusedTools(originals, () => "focused").find(
-      (entry) => entry.definition.name === "simulation_source",
-    )!;
-    // Pure routing fixture: use the same normalization function as execution.
-    const fields = new Set(
-      Object.keys((toolInputSchema("simulation_files") as any).properties),
-    );
-    return {
-      tool: {
-        handle: (args: unknown, session: object) =>
-          tool.handle(simulationArguments(args, fields, "action"), session),
-      },
-      calls,
-    };
-  }
-
-  it("puts flat arguments in the request and each detail where it belongs", async () => {
-    const { tool, calls } = sourceTool();
-    await tool.handle({ action: "list" }, {});
-    await tool.handle({ action: "read", path: "tb.cir", detail: "text" }, {});
-    await tool.handle(
-      { request: { action: "read", path: "tb.cir", detail: "full" } },
-      {},
-    );
-    await tool.handle(
-      { request: { action: "read", path: "tb.cir" }, detail: "mapped" },
-      {},
-    );
-    expect(calls).toEqual([
-      { request: { action: "list" } },
-      { request: { action: "read", path: "tb.cir", detail: "text" } },
-      { request: { action: "read", path: "tb.cir" }, detail: "full" },
-      { request: { action: "read", path: "tb.cir", detail: "mapped" } },
-    ]);
-  });
-
-  it("still holds flat arguments to the tool's own operations", async () => {
-    const { tool, calls } = sourceTool();
-    await expect(tool.handle({ action: "update" }, {})).rejects.toMatchObject({
-      code: "INVALID_TOOL_OPERATION",
-    });
-    expect(calls).toEqual([]);
   });
 });

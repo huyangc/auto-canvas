@@ -120,7 +120,7 @@ import {
 } from "../canvas/camera-runtime";
 import type { CanvasDragSession } from "../canvas/canvas-drag-session";
 import { instanceVisibleHitBox } from "../canvas/instance-geometry";
-import type { SimulationSourceLocation } from "@icm/simulation-service/contract";
+import type { SimulationSourceLocation } from "@icm/netlist";
 import { createCanvasHitController } from "../canvas/canvas-hit-controller";
 import { LazyCellInterfaceConfirmationDialog as CellInterfaceConfirmationDialog } from "./lazy-editor-dialogs";
 import type { CellInterfaceConfirmation } from "../features/hierarchy/project-structure-commands";
@@ -885,7 +885,6 @@ function WorkspaceEditor({
     setAgentFileCandidate,
     agentProjectResources,
     browserAgentFileHost,
-    browserAgentSimulationHost,
     agentWorkspaceRef,
   } = useAgentProjectResources({
     runtime: agentRuntime,
@@ -1101,7 +1100,6 @@ function WorkspaceEditor({
     agentFileCandidate,
     setAgentFileCandidate,
     browserAgentFileHost,
-    browserAgentSimulationHost,
     browserAgentProjectHost,
     captureAuthoredProject,
     cloudBinding,
@@ -4688,7 +4686,6 @@ function WorkspaceEditor({
     agentRuntime &&
     browserAgentHost &&
     browserAgentFileHost &&
-    browserAgentSimulationHost &&
     browserAgentProjectHost
   )
     agentTargetRef.current = createAgentWorkspaceTargets({
@@ -4702,7 +4699,6 @@ function WorkspaceEditor({
       setAgentFileCandidate,
       agentProjectResources,
       browserAgentFileHost,
-      browserAgentSimulationHost,
       agentWorkspaceRef,
       browserAgentProjectHost,
       backgroundAgentHosts,

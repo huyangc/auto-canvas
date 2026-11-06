@@ -67,7 +67,6 @@ export class AgentSessionClient extends AgentSessionTransactions {
       this.knownRevisions.clear();
       this.receipts.length = 0;
       this.capabilitiesCache = null;
-      this.simulationMetadata.clear();
       this.observation = null;
       this.session = this.activeSession(claim);
       await this.persistConnector(claim);

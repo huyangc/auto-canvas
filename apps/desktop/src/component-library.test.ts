@@ -5,7 +5,7 @@ import { afterEach, expect, it } from "vitest";
 import { newComponentDefinition } from "../../editor/src/features/user-components/component-definition-edit";
 import { createLocalComponentHandler } from "./component-library";
 import { APP_ORIGIN } from "./app-protocol";
-import { nativePackage } from "../../../worker/component-library.test-support";
+import { nativePackage } from "../../../packages/component-library/src/component-library.test-support";
 
 const directories: string[] = [];
 afterEach(async () => {

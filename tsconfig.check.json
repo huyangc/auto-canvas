@@ -5,8 +5,6 @@
     "noEmit": true,
     "paths": {
       "@icm/component-library": ["./packages/component-library/src/index.ts"],
-      "@icm/simulation-service": ["./packages/simulation-service/src/index.ts"],
-      "@icm/simulation-service/*": ["./packages/simulation-service/src/*"],
       "@icm/agent-adapter": ["./packages/agent-adapter/src/index.ts"],
       "@icm/agent-adapter/kit": ["./packages/agent-adapter/src/agent-kit.ts"],
       "@icm/agent-adapter/authoring": [
@@ -22,7 +20,6 @@
       "@icm/mcp-server": ["./apps/mcp-server/src/index.ts"],
       "@icm/agent-routing": ["./packages/agent-routing/src/index.ts"],
       "@icm/derived": ["./packages/derived/src/index.ts"],
-      "@icm/spice-run": ["./packages/spice-run/src/index.ts"],
       "@icm/devices": ["./packages/devices/src/index.ts"],
       "@icm/edit-engine": ["./packages/edit-engine/src/index.ts"],
       "@icm/edit-engine/component-drafts": [
@@ -57,7 +54,6 @@
   "include": [
     "apps/**/*.ts",
     "apps/**/*.tsx",
-    "worker/**/*.ts",
     "packages/**/*.ts",
     "vitest.config.ts"
   ]

@@ -85,7 +85,7 @@ The [Agent session contract](web-agent-session.md) and [Agent API](agent-api.md)
 retain their pairing, bearer, editor-secret, scopes, TTLs, rate limits and
 request ledger behavior. `/api/agent/sessions`, `/api/agent/claims` and
 `/api/agent/connectors/resume` handle pairing and recovery. The session routes
-`circuit`, `files`, `simulation` and `projects` forward requests to the editor;
+`circuit`, `files` and `projects` forward requests to the editor;
 `events`, `control`, `status` and `activity` retain their existing behavior.
 `GET /api/agent/sessions/:id/editor` upgrades through Node's HTTP server and `ws`.
 The OpenAPI, kit and MCP manifest routes are served by the same router.
@@ -111,11 +111,9 @@ its stored proof, or asks to pair again if the session expired. Session state
 and request ledger survive; in-flight mutations retain the existing recovery
 rules. The browser Project remains authoritative.
 
-No simulation artifact bucket is provided. Authenticated artifact transfers
-return the existing 503 `ARTIFACT_STORAGE_UNAVAILABLE`; artifact status reports
-empty usage. Simulation operations still forward to the editor, preserving
-its typed success/failure replies, but artifact transfer and simulator
-execution are not supplied by this server.
+Simulation execution and artifact transfer are removed. `/simulation`,
+`/artifacts/{fileId}` and `/artifact-status` return 404; the relay forwards
+Circuit, File and Project operations only.
 
 [Host tests](../../apps/server/src/agent-relay/host.test.ts) use PostgreSQL and
 real WebSockets to cover persistence, alarms, output gates, pairing, restart

@@ -1,6 +1,4 @@
-// What a failed request to the Worker came to, as one short line a screen can
-// show. The Worker's refusals stay distinct (worker/api-rate-limit.ts,
-// worker/gallery.ts) instead of all reading as "unavailable".
+// Keep request refusals distinct so Project loading can explain failures.
 import { dailyOpenResetTime, isDailyAllowanceRefusal } from "./daily-allowance";
 import { SITE_USAGE_CONTACT } from "./usage-policy-note";
 
@@ -22,7 +20,7 @@ export function isRequestFailure(value: unknown): value is RequestFailure {
   return typeof value === "object" && value !== null && "failure" in value;
 }
 
-/** A fetch that threw: the browser never reached the Worker. */
+/** A fetch that threw: the browser never reached the server. */
 export const OFFLINE_FAILURE: RequestFailure = {
   failure: "offline",
   message: "Could not reach the server. Check your connection and try again.",

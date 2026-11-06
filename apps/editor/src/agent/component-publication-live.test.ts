@@ -8,7 +8,7 @@ import {
 import {
   componentLibraryHarness,
   nativePackage,
-} from "../../../../worker/component-library.test-support";
+} from "../../../server/src/component-library.test-support";
 import { createCircuitComponentPackageProject } from "@icm/edit-engine";
 import { serializeProject, parseProject } from "@icm/project-protocol";
 import {
@@ -20,20 +20,19 @@ import { EditorDocumentController } from "../document/document-controller";
 import type { CircuitProject } from "@icm/model";
 import { externalSubcircuitSymbolId } from "@icm/symbols";
 
-function publicationEditor(project: CircuitProject) {
-  const library = componentLibraryHarness();
+async function publicationEditor(project: CircuitProject) {
+  const library = await componentLibraryHarness();
   return liveAgentEditor({
     project,
     projectHost: {
       fetch: async (input, init) => {
         if (input === "/api/auth/me")
-          return Response.json({ user: { id: "alice", isAdmin: false } });
+          return Response.json({ user: { id: "local", isAdmin: false } });
         const url = new URL(String(input), "https://components.test");
         return library(
           init?.method ?? "GET",
           url.pathname.slice("/api/components".length) + url.search,
           init?.body ? JSON.parse(String(init.body)) : undefined,
-          "alice",
         );
       },
     },
@@ -43,7 +42,7 @@ function publicationEditor(project: CircuitProject) {
 describe("publication through a live Editor", () => {
   it("shares identity decisions, exact duplicate diagnostics, unchanged updates and captured provenance", async () => {
     const packaged = nativePackage();
-    const { client, controller } = publicationEditor(
+    const { client, controller } = await publicationEditor(
       createCircuitComponentPackageProject(packaged, "live-publication"),
     );
     const selection = {
@@ -84,7 +83,7 @@ describe("publication through a live Editor", () => {
     expect(origin).toMatchObject({
       componentId: "live-publication-one",
       revision: 1,
-      authorId: "alice",
+      authorId: "local",
     });
     expect((await client.snapshot()).snapshot.project.structureRevision).toBe(
       controller.project.structureRevision,
@@ -198,7 +197,7 @@ describe("publication through a live Editor", () => {
     const owner = project.externalSubcircuitDefinitions[0]!;
     delete owner.symbolId;
     project.componentDefinitions = [];
-    const { client, controller } = publicationEditor(project);
+    const { client, controller } = await publicationEditor(project);
     await client.connect("session-1.code");
     const selection = {
       kind: "circuit" as const,

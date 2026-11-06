@@ -13,7 +13,7 @@ import type { CloudProjectSummary } from "../editor-shell/cloud-projects";
 import { CellInterfaceEditor } from "./cell-interface-dialog";
 import { ExternalCircuitEditor } from "./external-circuit-editor";
 import type { ApplyModelSourceEdit } from "./external-model-source-editor";
-import type { SimulationSourceLocation } from "@icm/simulation-service/contract";
+import type { SimulationSourceLocation } from "@icm/netlist";
 import type { ProjectStructureEdit } from "@icm/edit-engine";
 import type {
   CellParameterChange,

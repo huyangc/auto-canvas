@@ -196,11 +196,7 @@ export const AGENT_TRANSPORT_ERRORS: Record<
     category: "request-rejected",
     message: "Formal file export failed",
   },
-  SIMULATION_REQUEST_INVALID: {
-    status: 409,
-    category: "request-rejected",
-    message: "Simulation Resource request does not match its strict schema",
-  },
+
   PROJECT_REQUEST_INVALID: {
     status: 409,
     category: "request-rejected",

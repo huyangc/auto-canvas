@@ -3,7 +3,6 @@ import {
   createAgentCircuitService,
   parseAgentFileResourceRequest,
   parseAgentProjectResourceRequest,
-  parseAgentSimulationResourceRequest,
   type AgentSessionScope,
 } from "@icm/agent-adapter";
 import { createEmptyProject, type CircuitProject } from "@icm/model";
@@ -18,7 +17,7 @@ import { agentCircuitServiceOptions } from "./agent-service-options";
 import type { BrowserAgentPlanningContext } from "./browser-agent-command";
 import { BrowserAgentFileHost } from "./browser-agent-file-host";
 import { BrowserAgentHost } from "./browser-agent-host";
-import { BrowserAgentSimulationHost } from "./browser-agent-simulation-host";
+
 import {
   BrowserAgentProjectHost,
   type BrowserAgentProjectHostOptions,
@@ -45,7 +44,6 @@ export interface LiveAgentEditorOptions {
   /** Project resource parts the browser takes from elsewhere. */
   projectHost?: Partial<BrowserAgentProjectHostOptions>;
   /** Legacy relay-test call shape, retained until T007; execution is unavailable. */
-  simulationService?: typeof fetch;
   client?: Partial<AgentSessionClientOptions>;
 }
 
@@ -92,7 +90,7 @@ export function liveAgentEditor(options: LiveAgentEditorOptions = {}) {
       host.dispatchProjectTransaction(request),
     ...options.projectHost,
   });
-  const simulationHost = new BrowserAgentSimulationHost();
+
   const service = createAgentCircuitService(
     agentCircuitServiceOptions({
       sessionId: "session-1",
@@ -125,11 +123,6 @@ export function liveAgentEditor(options: LiveAgentEditorOptions = {}) {
       if (!parsed.success) throw new Error("Project request off contract");
       return projectHost.handle(parsed.data);
     },
-    simulation: async (request) => {
-      const parsed = parseAgentSimulationResourceRequest(request);
-      if (!parsed.success) throw new Error("Simulation request off contract");
-      return simulationHost.handle(parsed.data);
-    },
   });
   const client = new AgentSessionClient({
     http,
@@ -142,7 +135,6 @@ export function liveAgentEditor(options: LiveAgentEditorOptions = {}) {
     service,
     fileHost,
     projectHost,
-    simulationHost,
     http,
     client,
   };

@@ -111,9 +111,13 @@ edits; it chooses no topology and yields no edits on conflict
 - `/files` (File Resource): bounded Project/formal-artifact download,
   Project/structural-SPICE candidate staging. Staging never changes the browser Project; replacement needs
   explicit human approval.
-- `/simulation` and File simulation requests are inherited wire contracts,
-  absent from editor capabilities. The editor returns `SIMULATION_UNAVAILABLE`;
-  the remaining package and relay contracts await their separate removal.
+- Simulation execution and artifact transfer have been removed. `/simulation`,
+  `/artifacts/{fileId}` and `/artifact-status` return 404. The `simulation.run`
+  scope, simulation request/response envelopes, File `simulation-input` and
+  `simulation-plot` download requests are no longer accepted. MCP simulation
+  tools and result workspaces are removed. Project-owned simulation source
+  folders still round-trip unchanged, and legacy setup loading still migrates
+  into source folders. Export netlists with model sources for external tools.
 - `/projects` (`resources.project`):
   - `list-gallery`, `read-gallery-entry`, `read-gallery-entries` (size
     bounded): cursor-paged public entries with Project Code, optional netlist

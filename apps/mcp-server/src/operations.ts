@@ -1,32 +1,13 @@
 import { agentToolHelp } from "./guidance.generated.js";
 import { compareExpectedNetlist } from "./netlist-comparison.js";
 import { z } from "zod";
-import { downloadSimulationArtifact } from "./artifact-download.js";
-import { LocalWorkspace, defaultWorkspacePath } from "./local-workspace.js";
-import { workspaceTransfer } from "./workspace-transfer.js";
-import {
-  savedWorkspacePath,
-  rememberWorkspacePath,
-} from "./workspace-location.js";
-import { join } from "node:path";
-import { simulationAuthoringTools } from "./simulation-authoring-tools.js";
-import { PreparePlotSchema, preparePlot } from "./prepare-plot.js";
-import { workspaceSyncReceipt } from "./workspace-receipt.js";
-import { preparedSummary } from "./prepared-summary.js";
+
 import {
   adapterRelease,
   mcpManifestUrl,
   sessionMcpManifest,
 } from "./adapter-release.js";
-import {
-  SimulationOperationSchema,
-  ArtifactRefSchema,
-  simulationSpecAnnotationDiagnostics,
-} from "@icm/simulation-service/contract";
-import {
-  SimulationFileOperationSchema,
-  type SimulationFileOwner,
-} from "@icm/simulation-service/files";
+
 import {
   AGENT_API_VERSION,
   AGENT_MCP_VERSION,
@@ -63,15 +44,15 @@ import {
 } from "./results.js";
 import { exportFile, importFile, openGalleryEntry } from "./file-operations.js";
 import { compactSchema } from "./compact-schema.js";
-import { waitForSimulation } from "./simulation-wait.js";
+
 import {
   ContractQueryError,
   DescribeToolArgs,
   ToolContractRegistry,
 } from "./tool-contracts.js";
 import { editContract } from "./edit-contracts.js";
-import { focusedTools, FOCUSED_TOOLS } from "./focused-tools.js";
-import { simulationArguments } from "./operation-arguments.js";
+import { focusedTools } from "./focused-tools.js";
+
 import {
   inputIssues,
   inputIssueDetails,
@@ -101,41 +82,7 @@ const ConnectArgs = z.strictObject({
       "Pairing lists every capability; a resume summarizes them, counting edit kinds (editKindCount). full lists them on a resume too.",
     ),
 });
-const SimulationArgs = z
-  .strictObject({
-    request: SimulationOperationSchema,
-    requestId: z.string().min(1).optional(),
-    detail: z
-      .enum(["summary", "full"])
-      .optional()
-      .describe(
-        "Summary keeps launch/status/diagnostics and directory references. Full includes preparation mappings and run file metadata. Run samples always use files.",
-      ),
-    waitMs: z
-      .number()
-      .int()
-      .min(0)
-      .max(20_000)
-      .optional()
-      .describe(
-        "For run/start/read: hold the same Agent request for up to 20 seconds and return its latest run receipt. Resume a running receipt with read, never another submission.",
-      ),
-  })
-  .superRefine((value, context) => {
-    if (
-      value.waitMs &&
-      !["run", "start", "read"].includes(
-        (value.request as { operation?: string }).operation ??
-          (value.request as { action?: string }).action ??
-          "",
-      )
-    )
-      context.addIssue({
-        code: "custom",
-        path: ["waitMs"],
-        message: "waitMs is supported by run/start/read only",
-      });
-  });
+
 const ProjectCellsArgs = z.discriminatedUnion("action", [
   z.strictObject({
     action: z.literal("bind-workspace"),
@@ -269,137 +216,16 @@ const NetlistCodeArgs = z.discriminatedUnion("action", [
     rootDocumentId: z.string().min(1).optional(),
   }),
 ]);
-const SimulationFilesArgs = z.strictObject({
-  request: z.union([
-    PreparePlotSchema,
-    SimulationFileOperationSchema,
-    z.strictObject({ action: z.literal("workspace") }),
-    z.strictObject({
-      action: z.literal("sync"),
-      runId: z.string().min(1),
-      fileIds: z.array(z.string().min(1)).optional(),
-      analysisIndex: z.number().int().nonnegative().optional(),
-      roles: z.array(ArtifactRefSchema.shape.role.unwrap()).min(1).optional(),
-    }),
-  ]),
-  requestId: z.string().min(1).optional(),
-  outputPath: z.string().min(1).optional(),
-  basePath: z.string().min(1).optional(),
-  detail: z
-    .enum(["summary", "full"])
-    .optional()
-    .describe(
-      "Sync defaults to paths/counts/timing; full includes each file identity. The local index always retains complete metadata.",
-    ),
-  refresh: z
-    .boolean()
-    .optional()
-    .describe(
-      "Refresh the result directory instead of reusing a complete directory fetched within 30 seconds.",
-    ),
-});
 
 // Read the authoritative Zod envelope once, without building JSON discovery
 // schemas on the hot path. Both entry points normalize here before routing.
-const simulationEnvelopeFields = new Set(Object.keys(SimulationArgs.shape));
-const fileEnvelopeFields = new Set(Object.keys(SimulationFilesArgs.shape));
 
 /**
  * The text a save left in a source file, read back page by page. Undefined
  * when a read is refused or fails, or when the file no longer holds the text
  * the save left (`textDigest`), so a later edit is never checked as this one.
  */
-async function savedSourceText(
-  session: ToolSessionState,
-  owner: SimulationFileOwner,
-  path: string,
-  textDigest: string | undefined,
-): Promise<string | undefined> {
-  let text = "";
-  try {
-    for (let offset: number | null = 0; offset !== null;) {
-      const response = await session.client.fileResource({
-        apiVersion: AGENT_API_VERSION,
-        requestId: crypto.randomUUID(),
-        operation: "simulation-input",
-        input: {
-          action: "read",
-          owner,
-          path,
-          offset,
-          maxChars: 65536,
-          detail: "text",
-        },
-      });
-      if (
-        !response.ok ||
-        response.operation !== "simulation-input" ||
-        !response.result.ok ||
-        !("textDigest" in response.result) ||
-        (textDigest !== undefined && response.result.textDigest !== textDigest)
-      )
-        return undefined;
-      text += response.result.text;
-      offset = response.result.nextOffset;
-    }
-  } catch {
-    // The save stands; a check that cannot read it back stays silent.
-    return undefined;
-  }
-  return text;
-}
 
-async function localWorkspace(session: ToolSessionState, basePath?: string) {
-  const status = await session.client.status();
-  if (!status.sessionId)
-    throw new Error("Connect before creating or syncing a local workspace");
-  // Project.id is not an open-workspace identity: legacy drafts may still use
-  // project-main. Resolve the browser's active copy before selecting a disk base.
-  const response = await session.client.projectResource({
-    apiVersion: AGENT_API_VERSION,
-    requestId: crypto.randomUUID(),
-    operation: "workspace",
-    request: { action: "list" },
-  });
-  if (!response.ok || response.operation !== "workspace")
-    throw new Error(
-      response.ok ? "WORKSPACE_IDENTITY_UNAVAILABLE" : response.error.code,
-    );
-  if (response.result.action !== "list")
-    throw new Error("WORKSPACE_IDENTITY_UNAVAILABLE");
-  const { activeWorkspaceId, projects } = response.result;
-  const selectedWorkspaceId = session.client.workspaceId ?? activeWorkspaceId;
-  const active = projects.find(
-    (project) => project.workspaceId === selectedWorkspaceId,
-  );
-  if (!active) throw new Error("WORKSPACE_IDENTITY_UNAVAILABLE");
-  const scope = {
-    serverUrl: session.client.apiBaseUrl,
-    projectId: active.projectId,
-    projectIdentity: active.cloudProjectId
-      ? `cloud:${active.cloudProjectId}`
-      : `draft:${active.workspaceId}`,
-    sessionId: status.sessionId,
-  };
-  const key = `${new URL(scope.serverUrl).origin}\0${scope.projectIdentity}`;
-  const defaultPath = defaultWorkspacePath(scope, session.workspaceRoot);
-  const selectedPath =
-    basePath ??
-    session.workspaceBases?.get(key) ??
-    (await savedWorkspacePath(defaultPath)) ??
-    (session.taskDirectory
-      ? defaultWorkspacePath(
-          scope,
-          join(session.taskDirectory, ".analog-canvas"),
-        )
-      : defaultPath);
-  const workspace = await LocalWorkspace.open(scope, selectedPath);
-  await rememberWorkspacePath(defaultPath, workspace.basePath);
-  session.workspaceBases ??= new Map();
-  session.workspaceBases.set(key, workspace.basePath);
-  session.workspaceBase = workspace.basePath;
-  return workspace;
-}
 const ExportFileArgs = AgentFileDownloadOptionsSchema.safeExtend({
   outputPath: z.string().min(1),
 });
@@ -1100,293 +926,6 @@ const ORIGINAL_TOOLS: readonly ToolEntry[] = [
   },
   {
     definition: {
-      name: "simulation",
-      description: agentToolHelp["simulation"],
-      get inputSchema() {
-        return lazyContract(SimulationArgs);
-      },
-    },
-    handle: async (args, session) => {
-      const parsed = SimulationArgs.parse(args);
-      const { request, requestId, waitMs = 0, detail = "summary" } = parsed;
-      const effectiveRequestId = requestId ?? crypto.randomUUID();
-      let runId = "runId" in request ? request.runId : undefined;
-      let waiting = false;
-      try {
-        const waitStarted = Date.now();
-        const response = await session.client.simulationResource({
-          ...request,
-          ...(request.operation === "capabilities"
-            ? { detail: request.detail ?? "summary" }
-            : {}),
-          ...(waitMs > 0 && ["run", "start", "read"].includes(request.operation)
-            ? { waitMs }
-            : {}),
-          apiVersion: AGENT_API_VERSION,
-          requestId: effectiveRequestId,
-        });
-        if (response.ok && "run" in response) runId = response.run.id;
-        waiting = waitMs > 0 && response.ok && "run" in response;
-        const remainingWaitMs = Math.max(
-          0,
-          waitMs - (Date.now() - waitStarted),
-        );
-        const result = remainingWaitMs
-          ? await waitForSimulation(session.client, response, remainingWaitMs)
-          : response;
-        if (detail === "summary" && result.ok && "prepared" in result) {
-          return { ...result, prepared: preparedSummary(result.prepared) };
-        }
-        if (detail === "summary" && result.ok && "batch" in result) {
-          return {
-            ...result,
-            batch: {
-              ...result.batch,
-              items: result.batch.items.map((item) => ({
-                ...item,
-                prepared: preparedSummary(item.prepared),
-              })),
-            },
-          };
-        }
-        if (
-          detail === "summary" &&
-          result.ok &&
-          "run" in result &&
-          result.run.details?.collection === "complete"
-        ) {
-          const { artifacts, catalog: _catalog, ...run } = result.run;
-          return {
-            ...result,
-            runId,
-            run: {
-              ...run,
-              projection: "summary",
-              artifactCount: artifacts.length,
-              fileMetadata: { operation: "catalog", runId: run.id },
-            },
-          };
-        }
-        return { ...result, ...(runId ? { runId } : {}) };
-      } catch (error) {
-        if (!(error instanceof AgentSessionError)) throw error;
-        return {
-          ok: false,
-          requestId: effectiveRequestId,
-          ...(runId ? { runId } : {}),
-          ...(waiting && runId
-            ? { nextRequest: { operation: "read", runId } }
-            : {}),
-          error: {
-            code: error.code,
-            message: error.message,
-            stage: waiting ? "read" : request.operation,
-            ...(error.httpStatus === undefined
-              ? {}
-              : { httpStatus: error.httpStatus }),
-            recovery:
-              error.category === "unrecoverable-credential"
-                ? "reauthorize"
-                : waiting
-                  ? "read-run"
-                  : error.httpStatus !== undefined &&
-                      (error.httpStatus >= 500 ||
-                        error.httpStatus === 429 ||
-                        error.httpStatus === 408)
-                    ? "retry-same-request"
-                    : error.category === "request-rejected" &&
-                        error.code !== "INVALID_RESPONSE"
-                      ? "fix-input"
-                      : "retry-same-request",
-          },
-        };
-      }
-    },
-  },
-  ...simulationAuthoringTools,
-  {
-    definition: {
-      name: "simulation_files",
-      description: agentToolHelp["simulation_files"],
-      get inputSchema() {
-        return lazyContract(SimulationFilesArgs);
-      },
-    },
-    handle: async (args, session) => {
-      const parsed = SimulationFilesArgs.parse(args);
-      const { request, requestId, outputPath, basePath, detail, refresh } =
-        parsed;
-      if (request.action === "workspace") {
-        // status() is a cached local observation, not a network lease refresh.
-        const status = await session.client.status();
-        if (status.sessionId && status.projectId) {
-          try {
-            return (await localWorkspace(session, basePath)).describe();
-          } catch (error) {
-            // Explicit old indexes are still inspectable, never writable or
-            // silently attached to an identity they did not record.
-            if (
-              !basePath ||
-              !(error instanceof Error) ||
-              error.message !== "WORKSPACE_LEGACY_INDEX_READ_ONLY"
-            )
-              throw error;
-            const legacy = await LocalWorkspace.inspect(basePath);
-            if (legacy.projectIdentity !== null) throw error;
-            return { ...legacy, legacyReadOnly: true };
-          }
-        }
-        const path = basePath ?? session.workspaceBase;
-        if (path) {
-          try {
-            const result = await LocalWorkspace.inspect(path);
-            session.workspaceBase = result.basePath;
-            return result;
-          } catch (error) {
-            if (
-              !(error instanceof Error) ||
-              error.message !== "WORKSPACE_NOT_FOUND"
-            )
-              throw error;
-          }
-        }
-        return (await localWorkspace(session, basePath)).describe();
-      }
-      if (request.action === "sync" || request.action === "prepare-plot") {
-        const response = await session.client.simulationMetadataResource(
-          {
-            apiVersion: AGENT_API_VERSION,
-            requestId: requestId ?? crypto.randomUUID(),
-            operation: "catalog",
-            runId: request.runId,
-          },
-          { refresh },
-        );
-        if (!response.ok || !("catalog" in response)) return response;
-        const workspace = await localWorkspace(session, basePath);
-        if (request.action === "prepare-plot")
-          return preparePlot(
-            workspace,
-            response.catalog,
-            request,
-            workspaceTransfer(session.client),
-          );
-        const result = await workspace.sync(
-          response.catalog,
-          workspaceTransfer(session.client),
-          request.fileIds,
-          { analysisIndex: request.analysisIndex, roles: request.roles },
-        );
-        if (detail === "full") return result;
-        return workspaceSyncReceipt(result);
-      }
-      if (
-        outputPath &&
-        request.action !== "artifact" &&
-        request.action !== "download"
-      )
-        return {
-          ok: false,
-          error: {
-            code: "OUTPUT_REQUIRES_ARTIFACT",
-            message: "outputPath is only used for artifact downloads",
-            recovery: "fix-input",
-          },
-        };
-      if (outputPath && request.action === "artifact" && request.offset !== 0)
-        return {
-          ok: false,
-          error: {
-            code: "EXPORT_REQUIRES_START",
-            message: "A local export starts at offset 0",
-            recovery: "fix-input",
-          },
-        };
-      const response =
-        request.action === "download" ||
-        (outputPath && request.action === "artifact")
-          ? await session.client.prepareArtifactDownload(
-              request.artifactId,
-              requestId,
-              (await session.client.artifactTransferVersion()) === 2
-                ? { consumerId: crypto.randomUUID() }
-                : {},
-            )
-          : await session.client.fileResource({
-              apiVersion: AGENT_API_VERSION,
-              requestId: requestId ?? crypto.randomUUID(),
-              operation: "simulation-input",
-              input: request,
-            });
-      if (!response.ok || response.operation !== "simulation-input")
-        return response;
-      if (outputPath && response.result.ok && "download" in response.result) {
-        const { artifact } = response.result;
-        const transfer = workspaceTransfer(session.client, response);
-        const saved = await downloadSimulationArtifact(
-          artifact,
-          outputPath,
-          (offset) => transfer(artifact, offset),
-        );
-        await transfer.completed?.(artifact).catch(() => {});
-        return saved;
-      }
-      if (
-        !outputPath &&
-        request.action === "download" &&
-        response.result.ok &&
-        "download" in response.result
-      ) {
-        const { artifact } = response.result;
-        const workspace = await localWorkspace(session, basePath);
-        return {
-          ...(await workspace.download(
-            artifact,
-            workspaceTransfer(session.client, response),
-          )),
-          basePath: workspace.basePath,
-          indexPath: workspace.indexPath,
-        };
-      }
-      if (
-        request.action === "update" &&
-        response.result.ok &&
-        "source" in response.result
-      ) {
-        // The editor's receipt is a strict published schema, so the client
-        // checks what it saved, with the parser a run uses (#1398): a file
-        // written whole from the request, a file an edit changed read back
-        // once. A warning, not a refusal: the file is saved and the run
-        // proceeds.
-        const saved = new Map(
-          request.writes.map(({ path, text }) => [path, text]),
-        );
-        for (const file of response.result.update?.files ?? []) {
-          if (file.action === "removed" || saved.has(file.path)) continue;
-          const text = await savedSourceText(
-            session,
-            request.owner,
-            file.path,
-            file.textDigest,
-          );
-          if (text !== undefined) saved.set(file.path, text);
-        }
-        const specWarnings = [...saved].flatMap(([path, text]) =>
-          simulationSpecAnnotationDiagnostics(path, text).map(
-            ({ sourceRef, message }) => ({
-              path,
-              line: sourceRef.start.line,
-              message,
-            }),
-          ),
-        );
-        if (specWarnings.length) return { ...response.result, specWarnings };
-      }
-      return response.result;
-    },
-  },
-  {
-    definition: {
       name: "export_file",
       description: agentToolHelp["export_file"],
       get inputSchema() {
@@ -1400,7 +939,6 @@ const ORIGINAL_TOOLS: readonly ToolEntry[] = [
           artifact: parsed.artifact,
           outputPath: parsed.outputPath,
           ...(parsed.documentId ? { documentId: parsed.documentId } : {}),
-          ...(parsed.simulation ? { simulation: parsed.simulation } : {}),
         });
       })(),
   },
@@ -1784,14 +1322,6 @@ export async function executeOperation(
   let result: unknown;
   let input: unknown = args ?? {};
   try {
-    const source =
-      FOCUSED_TOOLS.find((tool) => tool.name === name)?.source ?? name;
-    if (source === "simulation" || source === "simulation_files")
-      input = simulationArguments(
-        input,
-        source === "simulation" ? simulationEnvelopeFields : fileEnvelopeFields,
-        source === "simulation" ? "operation" : "action",
-      );
     result = await tool.handle(input, session);
   } catch (error) {
     result = operationError(

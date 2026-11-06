@@ -9,7 +9,6 @@ import {
   AGENT_API_VERSION,
   type AgentCircuitRequest,
   type AgentCircuitResponse,
-  type AgentSimulationResourceResponse,
   type AgentSessionStatusResponse,
 } from "@icm/agent-adapter";
 import { z } from "zod";
@@ -128,13 +127,7 @@ export abstract class AgentSessionTransport {
   } | null = null;
   protected capabilitiesCache: AgentCapabilitiesResponse | null = null;
   private resumePromise: Promise<ActiveSession | null> | null = null;
-  protected simulationMetadata = new Map<
-    string,
-    {
-      at: number;
-      response: AgentSimulationResourceResponse;
-    }
-  >();
+
   protected readonly receipts: ApplyActionsReport[] = [];
 
   get apiBaseUrl(): string {
@@ -387,7 +380,6 @@ export abstract class AgentSessionTransport {
     this.session = null;
     this.boundWorkspace = null;
     this.http.workspaceId = undefined;
-    this.simulationMetadata.clear();
     this.capabilitiesCache = null;
     this.cache.clear();
     this.knownRevisions.clear();

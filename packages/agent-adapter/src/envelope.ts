@@ -50,8 +50,6 @@ const AgentSessionMessageKindSchema = z.enum([
   "circuit-response",
   "file-request",
   "file-response",
-  "simulation-request",
-  "simulation-response",
   "project-request",
   "project-response",
   "event",
@@ -253,8 +251,6 @@ export const AgentTransportErrorCodeSchema = z.enum([
   "FILE_CANDIDATE_NOT_FOUND",
   "FILE_IMPORT_FAILED",
   "FILE_EXPORT_FAILED",
-  // Simulation Resource
-  "SIMULATION_REQUEST_INVALID",
   // Project Resource
   "PROJECT_REQUEST_INVALID",
 ]);

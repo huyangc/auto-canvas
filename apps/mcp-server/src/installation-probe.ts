@@ -99,7 +99,7 @@ export function probeInstalledMcp(
                   "connect",
                   "connection_status",
                   "get_context",
-                  "simulation",
+                  "apply_actions",
                 ].every((n) => names.includes(n))
               )
                 throw Error("MCP tools are incomplete");

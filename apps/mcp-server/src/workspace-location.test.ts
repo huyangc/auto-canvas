@@ -4,8 +4,6 @@ import { describe, expect, it } from "vitest";
 import { createOperationSession } from "./operation-session.js";
 import { userWorkspaceRoot } from "./workspace-location.js";
 
-// Where workspaces go for the editor's open Projects is tested against the
-// real editor, in apps/editor/src/agent/mcp-workspace-location-live.test.ts.
 describe("workspace location policy", () => {
   it("uses platform user data without trusting cwd or a relative environment path", () => {
     const root = userWorkspaceRoot();
