@@ -103,6 +103,9 @@ export default {
     "apps/mcp-server": {
       project: ["src/**/*.ts!", ...testSupport],
     },
+    "apps/server": {
+      project: ["src/**/*.ts!", ...testSupport],
+    },
     "apps/local-host": {
       project: ["src/**/*.ts!", ...testSupport],
     },

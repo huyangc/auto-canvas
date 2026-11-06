@@ -2,6 +2,7 @@
 
 The current product, its contracts and unfinished work; Git holds history.
 Repository process: [workflow](workflow.md).
+Local identity and Cloud Projects: [server contract](specs/server.md).
 
 | Area                                            | Purpose                                                                 |
 | ----------------------------------------------- | ----------------------------------------------------------------------- |

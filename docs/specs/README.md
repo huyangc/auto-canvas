@@ -29,6 +29,9 @@ on. Each topic has one owner spec; others link to it.
 | [`performance.md`](performance.md)                                 | Benchmark workloads and release budgets                               |
 | [`editor-interaction.md`](editor-interaction.md)                   | Gestures, selection, previews, controls (sole owner)                  |
 
+Local hosting: [`server.md`](server.md) specifies the single-user identity and
+PostgreSQL Cloud Project HTTP contract.
+
 ## Writing a spec
 
 All specs are `accepted`. Add one only for a stable cross-module contract, from
