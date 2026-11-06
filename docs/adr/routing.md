@@ -15,4 +15,5 @@ transactions, but electrical changes and every commit pass the transaction gate
 - The evaluated transaction's Document is the authoritative preview; plans stay
   transient.
 - Moving preserves connection; only explicit cut disconnects. There is no
-  Contact object or autorouter, and any heading is valid.
+  Contact object; bounded auto-layout routing lives in `packages/auto-layout`,
+  and any heading is valid.

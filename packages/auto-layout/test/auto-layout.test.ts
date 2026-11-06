@@ -23,6 +23,7 @@ it("rejects more than forty instances with only the size diagnostic", () => {
     groups: [],
     diagnostics: [
       {
+        severity: "error",
         code: "AUTO_LAYOUT_TOO_LARGE",
         rule: "R3",
         message: "Auto layout supports at most 40 instances",
@@ -123,7 +124,7 @@ const commit = (document: ReturnType<typeof circuit>, edits: SchematicEdit[]) =>
     },
     { symbolResolver: resolver },
   );
-it("refuses a pin landing on a retained Junction of another Net", () => {
+it("removes an obsolete Junction before a pin can land on it", () => {
   const document = circuit(
     { a: "resistor", b: "resistor" },
     { n1: ["a.1"], n2: ["a.2"], n3: ["b.1"], n4: ["b.2"] },
@@ -137,10 +138,13 @@ it("refuses a pin landing on a retained Junction of another Net", () => {
   document.junctions = [
     { id: "j", netId: "n1", position: pin.point, role: "branch" },
   ] as typeof document.junctions;
-  expect(planAutoLayout(document, resolver)).toMatchObject({
-    edits: [],
-    diagnostics: [{ code: "AUTO_LAYOUT_RULE_UNSATISFIED", rule: "R10" }],
-  });
+  const plan = planAutoLayout(document, resolver);
+  expect(plan.diagnostics).toEqual([]);
+  const result = commit(document, plan.edits);
+  expect(result.applied).toBe(true);
+  if (!result.ok) return;
+  expect(result.document.junctions).toEqual([]);
+  expect(result.document.nets).toEqual(placed.document.nets);
 });
 it("refuses to overwrite an existing layout group by generated id", () => {
   const document = circuit(

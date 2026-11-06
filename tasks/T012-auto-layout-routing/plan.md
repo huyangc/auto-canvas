@@ -138,8 +138,13 @@ R14. Do not edit `packages/edit-engine`.
    - **R2 update.** Edit order becomes: (a) free every annotation anchored to a
      Route **or by an `object` anchor to a Junction** that step (c) removes, at
      its `fallbackPosition`; (b) `remove_route_geometry`; (c) `remove_junction`
-     for each Junction left with no Route; (d) groups; (e) instance transforms;
-     (f) routing (R11–R13); (g) label re-anchoring (R15).
+     for each Junction left with no Route; (c2) `connect_endpoints` restoring
+     every frozen pin group (R11) that (a)–(c) split, one edit per extra
+     component, joining a pin of that component to a pin of the group's first
+     component, so the cleanup prefix alone keeps every terminal's Base Net
+     partition and a later R14 failure keeps membership; (d) groups; (e)
+     instance transforms; (f) routing (R11–R13); (g) name-claim transfer (R12);
+     (h) label re-anchoring (R15).
    - **R7 update.** Two recognized differential pairs sharing one tail: return no
      edits and an R7 diagnostic instead of letting the second overwrite the
      first.
@@ -151,7 +156,10 @@ R14. Do not edit `packages/edit-engine`.
      commit the whole edit list with `dryRun` on the input and require: the
      transaction is accepted, and every terminal keeps its Base Net partition
      (`deriveElectricalTopologyProjection`). If either fails, return no edits
-     and an R10 diagnostic.
+     and an R10 diagnostic. Drafting objects are obstacles: if the placed
+     device bounds, grown by 60 units on every side, intersect the bounds of
+     any drafting object, translate the whole layout down by grid steps until
+     they do not (never up, never sideways).
    - **R11 Routing set.** Freeze, from the input Document before any edit, the
      pin groups per Base Net, using `deriveElectricalTopologyProjection`. Exclude
      MOS `B` pins and pins of Instances with `placement: null` in the result.
@@ -163,13 +171,24 @@ R14. Do not edit `packages/edit-engine`.
        are not joined to them by wire: the remaining membership stays unrouted,
        as a textbook draws each ground separately.
      - A supply Net with no `vdd-port` and no supply Cell Pin but with at least
-       two channel pins gets one horizontal trunk 40 units above the topmost
+       two MOS D/S pins gets one horizontal trunk 40 units above the topmost
        device row, wide enough to span its pins, passed as `trunk` to
        `planRouteNet`.
      - A ground Net with no `ground` marker and no ground Cell Pin gets the same
        trunk 40 units below the bottom row.
      - A supply or ground Cell Pin joins its Net's pins through a trunk the same
        way, with the Cell Pin on it.
+     - Name-claim transfer: a `name-claim` whose owner is `power-marker` with
+       an `objectId` among the Routes or Junctions removed in (b)–(c) is lost
+       with its owner, which drops supply-bound MOS bulk pins (`five-t-ota`
+       M1.B, M2.B). At step (g), re-upsert that same evidence (same `id`,
+       `name`, `scope`, `powerDomain`, `netId` of the frozen group's current
+       Net) with `owner.objectId` set to the trunk Route of its Net, or else
+       that Net's longest new Route. Opus spike on `five-t-ota`: freeing
+       `label-VDD1`, removing the rail Routes and Junctions, routing M1.S–M2.S
+       and transferring the claim to the new Route commits, keeps M1.B and
+       M2.B on VDD, and compares `equal`. If the Net has no new Route, keep R10
+       as the guard.
    - **R13 Signal order.** After power: first nets touching a recognized group,
      pair members before mirrors, then the rest by the lowest instance `id` they
      touch. Pins of one Net are one `planRouteNet` call.
@@ -183,8 +202,12 @@ R14. Do not edit `packages/edit-engine`.
      netlist's net names.
    - **R15 Labels.** After routing, each freed `net-label` or `power-label` whose
      Net has a Route moves to that Net's longest horizontal leg, using a `route`
-     anchor with `t: 0.5`. A label with no such leg stays free, at the nearest
-     pin of its Net. Its id, content and binding do not change.
+     anchor with `t: 0.5`. Keep the label's original `normalOffset`,
+     `direction` and `orientation` when it had a `route` anchor; otherwise use
+     `normalOffset: -10`, `direction: "forward"`, `orientation: "horizontal"`,
+     so the text sits above the wire, not on it. A label with no such leg stays
+     free, at the nearest pin of its Net. Its id, content and binding do not
+     change.
    - **R16 Edit limit.** If the complete list exceeds
      `MAX_SCHEMATIC_EDITS_PER_TRANSACTION`, return no edits and an R10 diagnostic.
    - **R17 Diagnostics.** `AutoLayoutDiagnostic` gains `severity: "error" |

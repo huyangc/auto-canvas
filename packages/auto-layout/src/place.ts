@@ -1,12 +1,14 @@
+import { visibleInstanceBounds } from "@icm/derived";
 import type { Instance, SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import { isMos, type NetRoles } from "./net-roles.js";
 import { compareIds, recognizeStructures } from "./recognize.js";
 import {
   COLUMN_PITCH,
+  boxesIntersect,
+  draftingBounds,
   enclosingBox,
   geometryProblem,
-  junctionContactProblem,
   MEMBER_PITCH,
   ROW_PITCH,
   pinPoints,
@@ -198,8 +200,19 @@ export function placeDocument(
     );
     return match ? [match] : [];
   });
+  const templates = [...groups, ...existing];
+  const tails = new Set<string>();
+  for (const group of templates) {
+    if (group.kind !== "differential-pair" || !group.tailInstanceId) continue;
+    if (tails.has(group.tailInstanceId))
+      return {
+        placements: targets,
+        problem: `R7: differential pairs share tail ${group.tailInstanceId}`,
+      };
+    tails.add(group.tailInstanceId);
+  }
   expandTemplates(
-    [...groups, ...existing].sort(
+    templates.sort(
       (a, b) =>
         Number(a.kind !== "differential-pair") -
           Number(b.kind !== "differential-pair") || compareIds(a.id, b.id),
@@ -248,7 +261,7 @@ export function placeDocument(
     resolver,
     roles,
   );
-  placeMarkers(document, resolver, roles, targets);
+  placeMarkers(document, resolver, roles, targets, templates);
   const oldBox = enclosingBox(document, resolver);
   const newBox = enclosingBox(withPlacements(document, targets), resolver);
   const snap = (n: number) =>
@@ -283,10 +296,57 @@ export function placeDocument(
         placements: targets,
         problem: "R10: template dimensions cannot align with Document grid",
       };
+  // R10: leave 60 units around devices for the bounded router's detours.
+  const initial = withPlacements(document, targets);
+  const obstacles = draftingBounds(initial, resolver);
+  const deviceIds = new Set(devices.map((i) => i.id));
+  const bounds = visibleInstanceBounds(initial, resolver).filter((b) =>
+    deviceIds.has(b.id),
+  );
+  if (obstacles.length && bounds.length) {
+    const grid = document.presentation.grid;
+    const maxShift = Math.max(
+      0,
+      Math.ceil(
+        (Math.max(...obstacles.map((b) => b.bounds.y + b.bounds.height)) -
+          Math.min(...bounds.map((b) => b.bounds.y)) +
+          60) /
+          grid,
+      ) * grid,
+    );
+    let shift = 0;
+    for (;;) {
+      const candidate = withPlacements(document, targets);
+      const occupied = visibleInstanceBounds(candidate, resolver).filter((b) =>
+        deviceIds.has(b.id),
+      );
+      const drafting = draftingBounds(candidate, resolver);
+      const blocked = occupied.some(({ bounds: b }) =>
+        drafting.some((o) =>
+          boxesIntersect(
+            {
+              x: b.x - 60,
+              y: b.y - 60,
+              width: b.width + 120,
+              height: b.height + 120,
+            },
+            o.bounds,
+          ),
+        ),
+      );
+      if (!blocked) break;
+      if (hasFixed || shift > maxShift)
+        return {
+          placements: targets,
+          problem:
+            "R10: drafting clearance cannot be achieved by translating the whole layout down",
+        };
+      for (const target of targets.values()) target.position.y += grid;
+      shift += grid;
+    }
+  }
   const result = withPlacements(document, targets);
-  const problem =
-    geometryProblem(result, resolver) ??
-    junctionContactProblem(result, resolver, roles.pinNet);
+  const problem = geometryProblem(result, resolver);
   if (problem) return { placements: targets, problem };
   return { placements: targets };
 }

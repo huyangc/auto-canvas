@@ -7,6 +7,7 @@ export interface AutoLayoutOptions {
   fixedInstanceIds?: ReadonlySet<string>;
 }
 export interface AutoLayoutDiagnostic {
+  severity: "error" | "warning";
   code: string;
   rule: string;
   message: string;

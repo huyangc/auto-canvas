@@ -1,5 +1,11 @@
-import { resolveEndpointPoint, visibleInstanceBounds } from "@icm/derived";
-import type { Point, SchematicDocument } from "@icm/model";
+import {
+  resolveEndpointPoint,
+  visibleInstanceBounds,
+  resolveDraftingObjectGeometry,
+  resolveDraftingTextInkBounds,
+  resolveDocumentRoutingGeometry,
+} from "@icm/derived";
+import type { DerivedRect, Point, SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import type { Placement } from "./types.js";
 
@@ -64,22 +70,6 @@ export function pinPoints(
     }),
   );
 }
-/** A pin placed on a retained Junction of another Net would merge the Nets. */
-export function junctionContactProblem(
-  document: SchematicDocument,
-  resolver: SymbolResolver,
-  pinNet: (instanceId: string, pinName: string) => string | undefined,
-): string | undefined {
-  for (const pin of pinPoints(document, resolver))
-    for (const junction of document.junctions)
-      if (
-        junction.position.x === pin.point.x &&
-        junction.position.y === pin.point.y &&
-        junction.netId !== pinNet(pin.instanceId, pin.pinName)
-      )
-        return `R10: pin ${pin.instanceId}.${pin.pinName} lands on Junction ${junction.id} of another Net`;
-  return undefined;
-}
 export function geometryProblem(
   document: SchematicDocument,
   resolver: SymbolResolver,
@@ -103,4 +93,29 @@ export function geometryProblem(
         return `R10: bounds overlap ${a.id}, ${b.id}`;
     }
   return undefined;
+}
+
+/** Shared drafting bounds, using actual text ink instead of its editing box. */
+export function draftingBounds(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+) {
+  const routing = resolveDocumentRoutingGeometry(document, resolver);
+  return (document.drafting?.objects ?? []).map((object) => ({
+    id: object.id,
+    bounds:
+      object.kind === "text"
+        ? resolveDraftingTextInkBounds(document, resolver, object, routing)
+        : resolveDraftingObjectGeometry(document, resolver, object, routing)
+            .bounds,
+  }));
+}
+
+export function boxesIntersect(a: DerivedRect, b: DerivedRect): boolean {
+  return (
+    a.x <= b.x + b.width &&
+    b.x <= a.x + a.width &&
+    a.y <= b.y + b.height &&
+    b.y <= a.y + a.height
+  );
 }

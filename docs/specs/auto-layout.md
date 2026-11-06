@@ -4,10 +4,10 @@ Status: `proposed`
 
 Primary owner: `packages/auto-layout`
 
-This contract defines pure structure recognition and template placement for one
+This contract defines pure structure recognition, template placement and bounded routing for one
 Schematic Document. It consumes the existing [model](schematic-model.md),
 [connectivity](connectivity-and-routing.md) and [typed edits](edit-engine.md).
-Routing, locks and the UI entry are **T012/T013, not yet specified**.
+Locks and the UI entry are **T013, not yet specified**.
 
 ## Rules
 
@@ -18,16 +18,18 @@ AutoLayoutDiagnostic[] }`. Fixed instances retain their exact placements;
   a collision with the template returns no edits and an R10 diagnostic.
   Obstacle-aware placement belongs to T013. Identical inputs produce byte-identical serialized edits. Break
   ties by instance id in code-unit order; use neither randomness nor time.
-- **R2 — Edits.** First re-anchor each route-anchored annotation, in Document
-  annotation order, with `upsert_schematic_annotation`: preserve every other
-  field and use a free anchor at its old `fallbackPosition`. Then remove each
-  Route's geometry in Document order, then
-  add new layout groups, then transform instances in id order. Place tray
-  instances; for already placed instances emit rotation, mirror and movement
-  in that order, only for changed values. Never clear/reset the drawing,
-  delete instances or edit connectivity. Preserve drafting, annotation
-  content and bindings, Nets and existing layout groups. Re-anchored labels
-  remain at their old page positions until T012 re-anchors them.
+- **R2 — Edits.** In Document order: (a) free every annotation anchored to
+  a Route or by an object anchor to a Junction removed in (c), at its
+  `fallbackPosition`, preserving all other fields; (b) `remove_route_geometry`
+  for every Route; (c) `remove_junction` for every Junction left without a
+  Route; (c2) restore frozen pin groups split by cleanup with `connect_endpoints`,
+  joining one pin per extra component to a pin of the first component;
+  (d) add layout groups; (e) transform instances in id order; (f) route
+  by R11–R13; (g) transfer removed power-marker name claims by R12;
+  (h) re-anchor labels by R15. Place tray instances; for placed
+  instances emit rotation, mirror and movement in that order, only when
+  changed. Preserve drafting, annotation content/bindings, Net membership and
+  existing layout groups. Never delete instances or reset the drawing.
 - **R3 — Content and limit.** Recognize NMOS, PMOS, resistors, capacitors,
   inductors (including compact), voltage/current sources, ground, VDD and
   port/filled-port markers. Other symbols, including hierarchy and multi-pin
@@ -65,11 +67,13 @@ AutoLayoutDiagnostic[] }`. Fixed instances retain their exact placements;
   axis, with 100-unit origin pitch. Differential left/right mirrors are
   `none`/`horizontal`; tails lie on the axis one row below. Mirror and
   matched left/right mirrors are `horizontal`/`none`. Place the diode side
-  over the left differential member it feeds. Stacked groups share an axis.
+  over the left differential member it feeds. Stacked groups share an axis. Two recognized differential pairs sharing one
+  tail return no edits and an R7 diagnostic.
 - **R8 — Horizontal flow and Cell Pins.** Order ungrouped row devices by net
   distance from input. Place input Cell Pins left, output right, supply top
   and ground bottom, 80 units outside the device box at the connected pin's
-  coordinate. Left pins use rotation 0 and mirror `none`; right pins use
+  coordinate. For a recognized differential pair, the Cell Pin on the right
+  member's gate goes on the right edge, level with that gate. Left pins use rotation 0 and mirror `none`; right pins use
   rotation 0 and mirror `horizontal` to keep labels upright. Top/bottom
   rotations are 90/270. On each side sort by the connected coordinate, then
   id, and shift later pins by grid steps until they are at least 40 apart.
@@ -92,20 +96,62 @@ AutoLayoutDiagnostic[] }`. Fixed instances retain their exact placements;
   `(snap(oldBox.x - newBox.x), snap(oldBox.y - newBox.y))`, where `snap`
   rounds to the Document grid and boxes are visible-instance envelopes.
   Fractional envelope edges leave the resulting corner within half a grid
-  step of the old corner. The Edit Engine may add Routes to preserve direct
-  contacts separated by placement (`reconcileTransformDirectContacts`).
-  These expected Routes connect endpoints on the same original Base Net;
-  T012 replaces them. No input Route id survives. If any rule cannot be met, return no
-  edits with a diagnostic naming the rule.
+  step of the old corner. A direct contact separated by placement is drawn
+  by R11–R13 like any other connection. Before returning, replay the complete
+  list with `dryRun` on the input. Require transaction acceptance and the same
+  Base Net partition for every terminal, using
+  `deriveElectricalTopologyProjection`. Otherwise return no edits and an R10
+  diagnostic. Drafting objects are obstacles: if placed device bounds grown
+  by 60 units on every side intersect any drafting bounds, translate the
+  whole layout down by grid steps until clear, never up or sideways.
+  No input Route id survives.
+- **R11 — Routing set.** Before any edit, freeze pin groups per input Base Net
+  with `deriveElectricalTopologyProjection`. Exclude MOS `B` pins and pins of
+  instances unplaced in the result. Route frozen `target: { kind: "pins",
+pins }` lists, never Net ids.
+- **R12 — Power.** Each ground/VDD marker gets one straight stub to its R6a
+  host pin. Never join markers to each other or wire other Net members to
+  those stubs; the remaining membership stays unrouted. A supply Net without
+  a VDD marker or supply Cell Pin, with at least two MOS D/S pins, gets a
+  horizontal trunk 40 units above its topmost device row, spanning its pins,
+  passed as `trunk` to `planRouteNet`. A ground Net without a ground marker
+  or Cell Pin gets the same trunk 40 units below its bottom row. A supply or
+  ground Cell Pin joins its Net through such a trunk, with the Cell Pin on it.
+  A grounded source driving a passive chain has a supply role under R4 but is
+  routed as a signal, so it gets no trunk.
+  Re-upsert each name claim owned by a removed Route/Junction power marker
+  with the same id, name, scope and powerDomain, using the frozen group's
+  current Net id and its trunk Route as owner, or its longest new Route.
+  Without a new Route, leave R10 as the guard. This preserves supply-bound
+  MOS bulk membership when the old rail and its naming authority are removed.
+- **R13 — Signal order.** After power, route Nets touching recognized groups,
+  pair members before mirrors, then the rest by their lowest instance id.
+  All pins of one Net go into one `planRouteNet` call.
+- **R14 — Fallback.** Catch each `planRouteNet` failure independently. Keep
+  other Nets' routes and the failed Net's unrouted electrical membership;
+  report `AUTO_LAYOUT_NET_UNROUTED` with severity `warning`. For an already
+  named Net, add one `net-label` per unconnected pin group, on a short stub
+  from one pin, bound to the existing Net name. An unnamed Net receives no
+  labels: never invent a name that would change the netlist.
+- **R15 — Labels.** After routing, each freed net/power label moves to its Net's
+  longest horizontal leg with a route anchor at `t: 0.5`. Preserve the original
+  route anchor's `normalOffset`, `direction` and `orientation`; otherwise use
+  `normalOffset: -10`, `direction: "forward"`, `orientation: "horizontal"`
+  to place the text above the wire. Without a horizontal
+  leg it stays free at the nearest pin of its Net. Preserve id, content and
+  binding. If whole-list replay invalidates a preview Route/leg id, keep that
+  label free instead of emitting a broken anchor.
+- **R16 — Edit limit.** A complete list exceeding
+  `MAX_SCHEMATIC_EDITS_PER_TRANSACTION` returns no edits and an R10 diagnostic.
+- **R17 — Diagnostics.** Every diagnostic has severity `error` or `warning`.
+  Only an error means no edits. All diagnostics predating R14 are errors.
 
 - **Existing locks and conflicts.** Members of a locked layout group or
   constraint are treated as fixed instances under R1, because the Edit Engine
   refuses to transform them. A recognized group whose generated id already
-  names an existing group, a locked annotation anchored to a Route, or a Route with a `locked` leg, makes
+  names an existing group, a locked annotation anchored to a removed Route or Junction, or a Route with a `locked` leg, makes
   the planner return no edits and an R5 or R2 diagnostic instead of a plan the
-  Edit Engine would reject or that would overwrite user intent. A placed pin
-  that lands on a retained Junction of another Net would merge the Nets, so
-  R10 refuses it too.
+  Edit Engine would reject or that would overwrite user intent.
 
 ## Contract
 
@@ -114,13 +160,13 @@ The public entry point is `planAutoLayout`. Edits use the existing
 records use the existing [presentation schema](../../packages/model/src/schema/presentation.ts).
 No file format or connectivity edit is introduced.
 
-Known limit: free net/power labels such as `in`, `out` and VDD retain their
-old page positions and can float away from the placed circuit until T012.
+Known limits: supply trunks are ordinary wires, without thick power-rail
+presentation. The existing bounded router can leave Nets unrouted under R14.
 
 ## Acceptance criteria
 
 The [nine-case corpus](../../packages/auto-layout/test/corpus.test.ts) commits
-real transactions and checks electrical equivalence, route removal, content
+real transactions and checks electrical equivalence, routing clearance, fallback labels, content
 preservation, grid, bounds, pin uniqueness, templates, vertical order, Cell
-Pin sides, determinism and stable repeated placement. The review command
+Pin sides, determinism and stable repeated placement and Route count. The review command
 `pnpm auto-layout:review` renders originals and results for human inspection.
