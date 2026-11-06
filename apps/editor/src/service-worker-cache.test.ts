@@ -24,6 +24,7 @@ function loadWorker(
   base = "/",
 ) {
   const opened: string[] = [];
+  const matchedCacheNames: (string | undefined)[] = [];
   const deleted: string[] = [];
   const existing = [
     "icm-static-shell-/canvas/:old",
@@ -65,7 +66,10 @@ function loadWorker(
       return openGate.then(() => cache);
     },
     keys: () => Promise.resolve(existing),
-    match: (request: Request) => cache.match(request),
+    match: (request: Request, options?: { cacheName?: string }) => {
+      matchedCacheNames.push(options?.cacheName);
+      return cache.match(request);
+    },
     delete: (name: string) => {
       deleted.push(name);
       return Promise.resolve(true);
@@ -76,7 +80,7 @@ function loadWorker(
     "utf8",
   );
   new Function("self", "caches", "fetch", source)(scope, caches, fetchImpl);
-  return { listeners, stored, opened, deleted };
+  return { listeners, stored, opened, deleted, matchedCacheNames };
 }
 
 async function requestScript(
@@ -105,12 +109,13 @@ async function requestScript(
 
 describe("static shell cache policy", () => {
   it("confines prefixed fetches, cache storage and activation to its scope", async () => {
-    const { listeners, stored, opened, deleted } = loadWorker(
-      (async () => new Response("asset")) as typeof fetch,
-      Promise.resolve(),
-      false,
-      "/canvas/",
-    );
+    const { listeners, stored, opened, deleted, matchedCacheNames } =
+      loadWorker(
+        (async () => new Response("asset")) as typeof fetch,
+        Promise.resolve(),
+        false,
+        "/canvas/",
+      );
     for (const path of [
       "/canvas/api/components/x/preview.svg",
       "/api/health",
@@ -159,6 +164,13 @@ describe("static shell cache policy", () => {
     });
     await Promise.all(pending);
     expect(deleted).toEqual(["icm-static-shell-/canvas/:old"]);
+    // Every read names this deployment's own cache, never the whole origin.
+    expect(matchedCacheNames.length).toBeGreaterThan(0);
+    expect(
+      matchedCacheNames.every((name) =>
+        name?.startsWith("icm-static-shell-/canvas/:"),
+      ),
+    ).toBe(true);
   });
 
   it("removes the legacy unscoped shell only when the root worker activates", async () => {

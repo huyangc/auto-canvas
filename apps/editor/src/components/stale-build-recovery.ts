@@ -14,10 +14,20 @@ import { appUrl } from "../lib/app-url";
  * reloads. Nothing here touches a Project: recovery copies live in
  * IndexedDB, which is deliberately not cleared.
  */
-const SHELL_CACHE_PREFIX =
-  import.meta.env.BASE_URL === "/"
-    ? "icm-static-shell-"
-    : `icm-static-shell-${import.meta.env.BASE_URL}:`;
+const SHELL_CACHE_PREFIX = `icm-static-shell-${import.meta.env.BASE_URL}:`;
+const LEGACY_SHELL_CACHE = "icm-static-shell-";
+
+/** Shell caches this deployment owns, as public/sw.js names them: its own
+ * scoped prefix, plus (at the root only) shells named before scoping. Another
+ * deployment's caches on the same origin are never touched. */
+function ownsShellCache(key: string): boolean {
+  if (key.startsWith(SHELL_CACHE_PREFIX)) return true;
+  return (
+    import.meta.env.BASE_URL === "/" &&
+    key.startsWith(LEGACY_SHELL_CACHE) &&
+    key[LEGACY_SHELL_CACHE.length] !== "/"
+  );
+}
 
 export type ModuleLoadDiagnosis =
   | {
@@ -139,9 +149,7 @@ export async function recoverFromStaleBuild(
   try {
     const keys = (await surfaces.caches?.keys()) ?? [];
     await Promise.all(
-      keys
-        .filter((key) => key.startsWith(SHELL_CACHE_PREFIX))
-        .map((key) => surfaces.caches!.delete(key)),
+      keys.filter(ownsShellCache).map((key) => surfaces.caches!.delete(key)),
     );
   } catch (error) {
     // A browser that refuses cache access still deserves the reload.
