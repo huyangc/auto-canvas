@@ -80,7 +80,6 @@ import {
   resolveDocumentLogicalNets,
   resolveMosBulkConnection,
 } from "@icm/derived";
-import type { SimulationAnalysis, SimulationRequest } from "@icm/spice-run";
 
 import { analyzeDesignNetlist, SIMULATION_DECK_GROUND } from "./extract.js";
 import {
@@ -96,6 +95,23 @@ import type {
   NetlistDiagnostic,
 } from "./ir.js";
 import { printSpiceCellInstances, printSpiceNetlist } from "./printers.js";
+
+/** Analyses a legacy simulation request may name (formerly @icm/spice-run). */
+export type SimulationAnalysis = "op" | "dc" | "ac" | "tran" | "noise";
+
+/** A legacy circuit-plus-testbench request, kept for Project migration. */
+export interface SimulationRequest {
+  /** Circuit netlist from @icm/netlist. Subcircuits and device cards only. */
+  netlist: string;
+  /** The author's testbench: stimulus, loads, analysis, prints. */
+  testbench: string;
+  /** Which analyses the caller expects from the prepared deck. */
+  analyses: readonly SimulationAnalysis[];
+  /** Wall-clock ceiling the former executor applied, in milliseconds. */
+  timeoutMs?: number;
+  /** Opaque caller revision, echoed so stale results can be rejected. */
+  inputRevision?: string;
+}
 
 /** The rawfile every compiled deck writes; the harness returns the one `.raw`. */
 const SIMULATION_RAWFILE_NAME = "out.raw";
