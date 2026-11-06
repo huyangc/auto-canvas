@@ -8,7 +8,8 @@ Opus plans and reviews, Codex implements.
 These rules replace the upstream analog-canvas process. Ignore upstream stage
 skills under `.agents/skills/` (implement, implement-spec, pr, to-spec,
 to-tickets, retro) and `docs/development-workflow.md`: there are no Issues,
-PRs, deployments or Production acceptance here.
+deployments or Production acceptance here. Opus delivers reviewed work through
+a PR; see the workflow document.
 
 ## When you are given a task
 
