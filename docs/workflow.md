@@ -77,7 +77,7 @@ node scripts/codex-log.mjs tasks/T001-<slug> --round 2 --follow
 下述全部条件。
 
 - **提交**：改动实现的提交要带 Test-Impact trailer，规则见
-  [docs/testing/README.md](testing/README.md)；CI 的 `Change scope` 会检查。
+  [docs/testing/README.md](testing/README.md#test-impact)；由 Opus 审查时核对，CI 不检查。
 - **评审证据**：PR 合入前必须经过 codex 评审，这是 Opus 审查之外的第二道独立阅读。
   每一轮的原始输出都要逐字贴回 PR，包括零意见和手动轮次，并附触发方式、完整命令、
   head SHA、退出码和输出字节数。一轮成功必须同时满足退出码为零且输出非空；
@@ -86,22 +86,21 @@ node scripts/codex-log.mjs tasks/T001-<slug> --round 2 --follow
   授权范围时才交人决定。P2/P3 可说明理由后不改。优先级解析失败时保守阻塞。
 - **驳回意见**：在 PR 上给出理由与证据，并用代码注释记录取舍、用回归测试钉住保留的
   行为。文档或配置类改动没有可测行为时，在 PR 上说明即可。
-- **合入条件**：`gh pr checks` 里没有失败、取消或进行中的检查，除 `ci.yml` 中只在
-  `merge_group` 上运行的 `Core *`、`Browser tests*` 可以是 `skipping` 外，其余检查都是
-  `pass`；且 PR 上已贴出针对其远端 `headRefOid` 的评审；任何新提交之后都要评审新的
+- **合入条件**：`gh pr checks` 里的检查全部是 `pass`（没有失败、取消、进行中或
+  `skipping`）；且 PR 上已贴出针对其远端 `headRefOid` 的评审；任何新提交之后都要评审新的
   远端 head。`mergeStateStatus: CLEAN`、
   本地 `git rev-parse HEAD`、agent 汇报和 hook 本地状态都不算证据。满足后用
   `gh pr merge <PR号> --rebase` 合入；用户要自己合入时只交回 PR 链接和状态。
 - **合入结果**：只认 `gh pr view <PR号> --json state` 返回 `MERGED`。stacked PR 使用
   自己的基分支。
 
-### CI 现状
+### CI
 
-`ci.yml` 的重检查（`Core contracts`、`Browser tests`）只在 merge queue 的 `merge_group`
-事件上运行，在 PR 上会被跳过。本仓库属于个人账号，GitHub merge queue 不可用，所以
-**CI 全绿目前只说明变更范围规划、Test-Impact 和相关环境工作流通过，不代表构建和测试
-通过**。在此修复之前，构建和测试的证据以 Opus 亲自重跑的验收命令为准，并写进 PR 的
-Evidence。
+`.github/workflows/ci.yml` 在每个 PR 和 `main` 的推送上运行一个 `Check` 任务：格式、
+文档链接、生成文件、器件库、类型检查、lint、编译和单元测试（带 PostgreSQL 16 服务，
+供 `apps/server` 的测试使用）。仿真模块的 `simulation-artifact-files.test.ts` 有 3 个
+接手前就存在的失败，CI 暂时排除这一个文件，删除仿真时去掉排除。浏览器测试和实机检查不在
+CI 里，它们的证据以 Opus 亲自重跑的结果为准，写进 PR 的 Evidence。
 
 ### Claude Code PR 操作
 

@@ -25,10 +25,8 @@ with one of them, correct the entry file.
 - Write product code yourself only for a fix of a few lines found in review,
   or when the user asks. Anything larger goes back to Codex as a review round.
 
-Ignore upstream stage skills under `.agents/skills/` and
-`docs/development-workflow.md`; they describe analog-canvas's Issue/PR/deploy
-process, which this repository does not use. Its PR process is the one in
-`docs/workflow.md`.
+The PR process is the one in `docs/workflow.md`; analog-canvas's upstream
+Issue/deploy process does not apply.
 
 ## Subagents
 

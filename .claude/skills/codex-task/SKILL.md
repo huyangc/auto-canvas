@@ -61,12 +61,13 @@ Follow [PR review and merge](../../../docs/workflow.md#pr-评审与合入):
 
 1. `git push -u origin task/<id>-<slug>`, then `gh pr create --base main` using
    `.github/pull_request_template.md`. Put the acceptance commands you reran
-   and their results under Evidence: CI on a PR does not run the build or tests.
+   and their results under Evidence: CI runs static checks, build and unit
+   tests, not browser tests or live checks.
 2. Read the review the codex hook posts to the PR. Verify each finding. Fix P0/P1
    findings that hold, push, and read the re-review. No comment on the current
    head means no review: run it by hand.
 3. Merge only if this delivery authorizes it, `gh pr checks` meets the workflow's
-   merge condition (only the `merge_group` jobs may be `skipping`) and
+   merge condition (every check `pass`) and
    `~/.claude/hooks/codex-pr-review.sh verify <PR>` succeeds, or the workflow's
    manual check does where the hook is not installed:
    `gh pr merge <PR> --rebase`. Confirm `state` is `MERGED`. Otherwise hand back

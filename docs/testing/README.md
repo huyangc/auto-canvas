@@ -52,6 +52,16 @@ slowest single attempt and elapsed time per run. Parallel runs can overlap;
 neither summed test cost nor queue time is test execution wall time. A run
 killed before producing its report has missing timing evidence, not zero cost.
 
+## Test-Impact
+
+Every commit that changes product code, tests or tooling ends its message with
+one trailer; Opus checks it in review (no CI check):
+
+```text
+Test-Impact: tests-updated
+Test-Impact: no-test-change — <evidence that behavior did not change>
+```
+
 ## Removing or simplifying a test
 
 Keep rejection, migration, authorization and input-hardening tests while their
