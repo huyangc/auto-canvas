@@ -1,14 +1,44 @@
 # Single-user server
 
-Node 24+ and PostgreSQL 16. Create `auto_canvas` and `auto_canvas_test`, owned by
-your OS user, before starting. From the repository root:
+Node 24+ and PostgreSQL 16. From the repository root, after
+`pnpm install --frozen-lockfile`:
 
 ```bash
-pnpm server:migrate
-pnpm server:dev
-# In another terminal:
-pnpm dev
+pnpm start  # build, start in the background, wait for health, print the editor URL
+pnpm stop  # stop the process listening on PORT (default 4310)
+pnpm dev   # background API + foreground Vite hot reload; Ctrl+C stops both
 ```
+
+`npm run start`, `npm run stop` and `npm run dev` also work; dependencies must
+be installed with pnpm. The launchers check PostgreSQL before building. When
+`psql` and `createdb` are available they create a missing `auto_canvas` database,
+owned by the connecting user, without changing existing databases. Create
+`auto_canvas_test` separately before tests. Custom `DATABASE_URL` databases
+must already exist. Without `psql`, connectivity is checked by server startup.
+
+The built app is served at <http://127.0.0.1:4310> by default, including the
+API and Agent relay. Development serves Vite on <http://localhost:5173>, proxying
+to the configured API host/port (`AUTO_CANVAS_API_URL` can override it).
+`pnpm dev:editor` runs only Vite; `pnpm server:dev` still builds and runs only
+the server in the foreground, and `pnpm server:migrate` applies migrations
+and exits. For the manual persistence check below, use `pnpm dev`.
+
+Copy [`.env.example`](../../.env.example) to `.env` at the repository root
+to customize configuration. `pnpm start`, `pnpm stop` and `pnpm dev` source
+this optional file as Bash with automatic export before applying defaults.
+Exported shell values take precedence (including empty values); quote values
+containing spaces or shell syntax. A missing `.env` is fine. Git ignores `.env`
+and tracks `.env.example`, which lists server and launcher settings and defaults.
+Direct server commands and tests do not load `.env` through these launchers.
+
+Logs append to `.local/logs/server.log` or `.local/logs/server-dev.log`.
+`SKIP_BUILD=1 pnpm start` reuses existing builds. `START_TIMEOUT` controls the
+health wait (default 60 seconds); `STOP_TIMEOUT` controls the shutdown grace
+period before SIGKILL (default 10 seconds). Both accept non-negative integer
+seconds. Start refuses occupied ports and reports their processes. Stop finds
+the listener by port, without a PID file, and reports "not running" if absent.
+Port inspection requires `lsof` (macOS/Linux) or `ss` (Linux); health checks
+require `curl`. An interrupted or failed launch cleans up the processes it started.
 
 Startup also applies ordered SQL migrations transactionally. The migration
 ledger is `schema_migrations`; the local profile, Projects, Component Library and Agent session state survive restarts.
@@ -22,10 +52,18 @@ build the server and its workspace dependencies.
 | `PORT`                          | `4310`                           | HTTP port                                                         |
 | `AUTO_CANVAS_USER_NAME`         | `Local user`                     | Initial display name; persisted profile takes precedence          |
 | `AUTO_CANVAS_PROJECT_LIMIT`     | `200`                            | Positive integer, maximum Projects for the local user             |
+| `AUTO_CANVAS_AGENT_IDLE_MS`     | `300000`                         | Agent session idle timeout in milliseconds                        |
 | `AGENT_ALLOWED_ORIGIN`          | request origin                   | Optional allowed browser origin for Agent HTTP/WebSocket requests |
 | `EDITOR_ROOT`                   | unset                            | Built editor directory; enables static assets and SPA fallback    |
 | `AUTO_CANVAS_API_URL`           | `http://127.0.0.1:4310`          | Vite dev/preview proxy target; configured in the editor process   |
 | `AUTO_CANVAS_TEST_DATABASE_URL` | `postgresql:///auto_canvas_test` | Contract and browser test database                                |
+| `START_TIMEOUT`                 | `60`                             | Launcher health wait in seconds                                   |
+| `STOP_TIMEOUT`                  | `10`                             | Launcher shutdown grace period in seconds                         |
+| `SKIP_BUILD`                    | `0`                              | Set to `1` to skip the build in `pnpm start`                      |
+| `PGCONNECT_TIMEOUT`             | `5`                              | PostgreSQL CLI connection timeout in seconds                      |
+
+`pnpm start` always sets `EDITOR_ROOT=apps/editor/dist`; `pnpm dev` unsets it
+and defaults `AUTO_CANVAS_API_URL` to the configured server URL.
 
 For a built editor, run `EDITOR_ROOT=apps/editor/dist node apps/server/dist/cli.js`.
 Unknown `/api/*` requests never fall back to HTML. The server is intended for a
@@ -49,7 +87,7 @@ the persisted local profile; the local user is an admin. Definitions, receipts,
 lifecycle history and derived catalog/content indexes live in PostgreSQL.
 Migration `002-component-library.sql` creates these tables and catalog triggers.
 
-For the manual persistence check, start both processes above, author and publish
+For the manual persistence check, run `pnpm dev`, author and publish
 a User Component, restart both processes, then open User Components, find the
 published name and place it on the canvas. The real-server browser test checks
 the author/publish/reload/find/place path without API mocks and soft-deletes its

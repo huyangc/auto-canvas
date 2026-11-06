@@ -59,26 +59,34 @@ createdb auto_canvas_test
 
 ```bash
 pnpm install --frozen-lockfile
-pnpm build
-pnpm server:dev
+pnpm start
 ```
 
-另开一个终端：
+打开命令打印的地址（默认为 <http://127.0.0.1:4310>）。命令会编译应用，在后台
+启动服务端，并在同一个地址提供编辑器、API 和 Agent 中转。使用 `pnpm stop` 停止。
+日志追加到 `.local/logs/server.log`。安装了 PostgreSQL 命令行工具时，启动脚本会
+创建缺失的 `auto_canvas` 数据库；运行测试前请单独创建 `auto_canvas_test`。
 
-```bash
-pnpm dev
-```
+开发时运行 `pnpm dev`：API 在后台启动，Vite 在 <http://localhost:5173> 提供编辑器
+热更新，Ctrl+C 会停止两者。API 日志追加到 `.local/logs/server-dev.log`。
+`pnpm dev:editor` 仅启动 Vite，可连接已经运行的服务端。
 
-打开 <http://127.0.0.1:5173>。编辑器的开发服务器会把 `/api/auth`、
-`/api/projects` 和 `/api/components` 转发给 `127.0.0.1:4310` 上的服务端。服务端
-启动时会自动执行数据库迁移。数据库地址、端口、工程数量上限、托管编译好的编辑器等
-配置见 [apps/server/README.md](apps/server/README.md)。
+`npm run start`、`npm run stop` 和 `npm run dev` 效果相同，但安装依赖必须使用 pnpm。
+服务端启动时自动执行数据库迁移。数据库地址、主机、端口、工程数量上限和启动脚本
+超时设置见 [apps/server/README.md](apps/server/README.md)。
+
+可将 [.env.example](.env.example) 复制为仓库根目录下的 `.env`，取消所需设置的注释。
+`start`、`stop` 和 `dev` 会在应用默认值前加载这份 Bash 配置；Shell 中已导出的
+环境变量优先。没有 `.env` 时使用默认值。Git 会忽略 `.env`。
 
 ## 常用命令
 
 | 命令                      | 作用                                                                    |
 | ------------------------- | ----------------------------------------------------------------------- |
-| `pnpm dev`                | 启动编辑器开发服务器（Vite）                                            |
+| `pnpm start`              | 编译整个应用并在后台启动                                                |
+| `pnpm stop`               | 停止指定端口上的服务端                                                  |
+| `pnpm dev`                | 服务端和 Vite 热更新，Ctrl+C 停止两者                                   |
+| `pnpm dev:editor`         | 仅启动编辑器开发服务器（Vite）                                          |
 | `pnpm server:dev`         | 编译并启动服务端，连接 `auto_canvas` 库                                 |
 | `pnpm server:migrate`     | 执行数据库迁移后退出                                                    |
 | `pnpm build`              | 编译所有包和应用                                                        |
