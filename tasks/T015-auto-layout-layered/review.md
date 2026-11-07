@@ -97,3 +97,20 @@ Known limits:
 - Where a rail trunk cannot be routed, pins fall back to `0` labels
   (`x8wctv9v73`), which is valid but untidy.
 - Drafting notes and boxes stay at their old positions.
+
+## PR review round 1 — fixed by Opus
+
+The codex PR review on `004f709` raised one P1 and one P2. Opus verified and
+fixed both, since the task's three Codex rounds were used.
+
+| Finding                                                                               | Fix                           | Check                                |
+| ------------------------------------------------------------------------------------- | ----------------------------- | ------------------------------------ |
+| P1: every candidate order compared all edge pairs, and a high-fanout Net expands to ` | A                             | ×                                    | B   | `edges;`orderRows` took 101 s on 101 instances | `crossingPairs` counts the same objective in O(E log E) per row pair with a Fenwick tree, and barycentres read a prebuilt adjacency map | Exact against the pairwise definition on seeded random segments. The high-fanout test finishes in 2 s and times out at 20 s with the old count |
+| P2: moving a tail that is also a mirror member left the other member behind           | Move every member of the node | The test fails with the fix reverted |
+
+The evaluation is unchanged: 32 of 33 complete, crossings 228 and 184, bends 286
+and 213. Rerun: format, docs, typecheck, lint, build → 0; `pnpm test:local` → 7381
+passed; deadcode finds nothing under auto-layout; review script → 0.
+
+Known limit for T014: the slowest document takes about 14 s, so the editor must
+not run the planner on the main thread.
