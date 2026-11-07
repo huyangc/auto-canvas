@@ -85,3 +85,13 @@ problems by searching their text for `drafting`, so an object id containing that
 word turned a real safety failure into a warning. `auditRouting` now returns
 `draftingProblems` and `unsafeProblems` by origin, and the planner, review script
 and held-out test use them. A new test pins the id case.
+
+## CI fix by Opus
+
+CI on `07db3b1` failed one test: `held-out.test.ts` asserted that `deadtime`
+plans in under 3 s, and the CI runner took 6.6 s (2.1 s locally). A wall-clock
+limit in a unit test depends on the machine, so it now asserts the deterministic
+bound that controls the work: at most 24 refinement candidates (R22). The test
+timeout rises from 10 s to 30 s for slow runners. Measured time is still reported
+by `pnpm auto-layout:review`. The plan's behavioral check of under 3 s holds on a
+developer machine; it is a target, not a CI gate.
