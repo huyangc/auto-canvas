@@ -3,6 +3,7 @@ import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
 import { executeTransaction } from "@icm/edit-engine";
 import {
   assignColumns,
+  crossingPairs,
   deviceRows,
   netLevels,
   orderRows,
@@ -302,4 +303,85 @@ it("R37 retains R9 for a partly connected MOS with unrelated source constraints"
     pins.find((p) => p.instanceId === id && p.pinName === name)!.point;
   expect(point("r", "1").y).toBe(point("r", "2").y);
   expect(point("v", "+").y).toBe(point("r", "1").y);
+});
+
+it("counts segment crossings exactly as the pairwise definition", () => {
+  // Deterministic pseudo-random segments, including ties at either end.
+  let seed = 7;
+  const next = () => (seed = (seed * 1103515245 + 12345) % 2147483648) % 9;
+  for (let trial = 0; trial < 50; trial++) {
+    const segments = Array.from(
+      { length: 2 + (trial % 13) },
+      () => [next(), next()] as [number, number],
+    );
+    let expected = 0;
+    for (let i = 0; i < segments.length; i++)
+      for (let j = i + 1; j < segments.length; j++) {
+        const [a, b] = [segments[i]!, segments[j]!];
+        if ((a[0] - b[0]) * (a[1] - b[1]) < 0) expected++;
+      }
+    expect(crossingPairs(segments)).toBe(expected);
+  }
+});
+
+it("orders a high-fanout two-row graph without a quadratic rescan", () => {
+  // 100 comparators in two rows share both input Nets, so each input expands to
+  // 2500 edges. Comparing every edge pair for every swap took 101 s here; a hang
+  // shows up as this test's timeout.
+  const symbols: Record<string, string> = { m: "nmos" };
+  const nets: Record<string, string[]> = {
+    top: ["m.D"],
+    mid: ["m.S"],
+    inp: [],
+    inn: [],
+  };
+  for (let i = 0; i < 100; i++) {
+    symbols[`c${i}`] = "comparator";
+    nets.inp!.push(`c${i}.IN+`);
+    nets.inn!.push(`c${i}.IN-`);
+    nets[i % 2 ? "top" : "mid"]!.push(`c${i}.OUT`);
+  }
+  const d = circuit(symbols, nets);
+  const roles = classifyNets(d, resolver);
+  const rows = deviceRows(
+    d,
+    d.instances,
+    resolver,
+    roles,
+    [],
+    netLevels(d.instances, resolver, roles),
+  );
+  expect(new Set(rows.nodes.map((n) => n.row)).size).toBeGreaterThan(1);
+  const ordered = orderRows(rows, d.instances, resolver, roles, []);
+  expect(ordered.flat().flatMap((n) => n.members)).toHaveLength(101);
+}, 20000);
+
+it("moves every member of a grouped tail node to the tail row", () => {
+  const d = circuit(
+    { a: "nmos", b: "nmos", t: "nmos", u: "nmos" },
+    {
+      da: ["a.D"],
+      db: ["b.D"],
+      ga: ["a.G"],
+      gb: ["b.G"],
+      shared: ["a.S", "b.S", "t.D"],
+      bias: ["t.G", "u.G", "u.D"],
+      bottom: ["t.S", "u.S"],
+    },
+  );
+  const roles = classifyNets(d, resolver),
+    groups = recognizeStructures(d, roles);
+  const mirror = groups.find((g) => g.kind === "current-mirror");
+  expect(mirror?.members.sort()).toEqual(["t", "u"]);
+  const rows = deviceRows(
+    d,
+    d.instances,
+    resolver,
+    roles,
+    groups,
+    netLevels(d.instances, resolver, roles),
+  );
+  expect(rows.placements.get("t")!.position.y).toBe(
+    rows.placements.get("u")!.position.y,
+  );
 });

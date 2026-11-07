@@ -208,9 +208,31 @@ export function deviceRows(
         .filter((g) => g.tailInstanceId === tail)
         .map((g) => nodes.find((n) => n.id === g.id)!.row + 1),
     );
-    placements.get(tail)!.position.y = node.row * ROW_PITCH;
+    // The node may be a whole group (a tail that is also a mirror member).
+    for (const id of node.members)
+      placements.get(id)!.position.y = node.row * ROW_PITCH;
   }
   return { nodes, placements };
+}
+
+/** Pairs of segments between two rows that cross: strictly opposite order at
+ * both ends. Sort by upper position, then lower, and count inversions of the
+ * lower positions with a Fenwick tree. */
+export function crossingPairs(segments: Array<[number, number]>): number {
+  if (segments.length < 2) return 0;
+  const sorted = [...segments].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const size = Math.max(...sorted.map((s) => s[1])) + 2;
+  const tree = new Array<number>(size + 1).fill(0);
+  let seen = 0,
+    count = 0;
+  for (const [, lower] of sorted) {
+    let atMost = 0;
+    for (let i = lower + 1; i > 0; i -= i & -i) atMost += tree[i]!;
+    count += seen - atMost;
+    for (let i = lower + 1; i <= size; i += i & -i) tree[i]!++;
+    seen++;
+  }
+  return count;
 }
 
 /** R40: subdivide long hypernets through virtual nodes in every intervening row. */
@@ -286,19 +308,31 @@ export function orderRows(
     new Map(
       ordered.flatMap((row) => row.map((n, index) => [n.id, index] as const)),
     );
+  // Edges grouped by their upper row, then by Net, so the objective below is
+  // counted in O(E log E): a high-fanout Net expands to |A|x|B| edges, and the
+  // pairwise scan this replaces took 101 s on a 101-instance document.
+  const byRow = new Map<number, typeof edges>();
+  for (const e of edges) {
+    const row = nodeById.get(e.a)!.row;
+    if (!byRow.has(row)) byRow.set(row, []);
+    byRow.get(row)!.push(e);
+  }
+  const groupsOf = [...byRow.values()].map((list) => {
+    const byNet = new Map<string, typeof edges>();
+    for (const e of list) {
+      if (!byNet.has(e.net)) byNet.set(e.net, []);
+      byNet.get(e.net)!.push(e);
+    }
+    return { list, nets: [...byNet.values()] };
+  });
   const crossings = () => {
     const p = positions();
     let count = 0;
-    for (let i = 0; i < edges.length; i++)
-      for (const b of edges.slice(i + 1)) {
-        const a = edges[i]!;
-        if (
-          a.net !== b.net &&
-          nodeById.get(a.a)!.row === nodeById.get(b.a)!.row &&
-          (p.get(a.a)! - p.get(b.a)!) * (p.get(a.b)! - p.get(b.b)!) < 0
-        )
-          count++;
-      }
+    for (const { list, nets } of groupsOf) {
+      count += crossingPairs(list.map((e) => [p.get(e.a)!, p.get(e.b)!]));
+      for (const net of nets)
+        count -= crossingPairs(net.map((e) => [p.get(e.a)!, p.get(e.b)!]));
+    }
     // Same-row Nets pull their span closed; unlike a crossing count this also
     // sees a disconnected signal chain that lives entirely within one row.
     for (const span of spans) {
@@ -325,16 +359,16 @@ export function orderRows(
     bestCount = crossings();
   for (let sweep = 0; sweep < 8; sweep++) {
     const down = sweep % 2 === 0;
+    const toward = new Map<string, string[]>();
+    for (const e of edges) {
+      const [from, to] = down ? [e.b, e.a] : [e.a, e.b];
+      if (!toward.has(from)) toward.set(from, []);
+      toward.get(from)!.push(to);
+    }
     for (const row of down ? ordered : [...ordered].reverse()) {
       const p = positions();
       const bary = (n: RowNode) => {
-        const neighbours = edges.flatMap((e) =>
-          down && e.b === n.id
-            ? [p.get(e.a)!]
-            : !down && e.a === n.id
-              ? [p.get(e.b)!]
-              : [],
-        );
+        const neighbours = (toward.get(n.id) ?? []).map((id) => p.get(id)!);
         for (const span of spans.filter((s) => s.members.includes(n.id)))
           neighbours.push(
             ...span.members.filter((id) => id !== n.id).map((id) => p.get(id)!),
