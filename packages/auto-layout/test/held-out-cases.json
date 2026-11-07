@@ -1,0 +1,35 @@
+[
+  {
+    "id": "fd-two-stage",
+    "file": "apps/editor/src/examples/fully-differential-two-stage-op-amp.icproj.json",
+    "documentId": "document-main"
+  },
+  {
+    "id": "common-source-ac",
+    "file": "apps/editor/src/examples/common-source-amplifier.icproj.json",
+    "documentId": "document-main"
+  },
+  {
+    "id": "skew",
+    "file": "fixtures/gallery-redline/f22q5vhdb5.icproj.json"
+  },
+  {
+    "id": "deadtime",
+    "file": "fixtures/gallery-redline/3tfmrzevfe.icproj.json"
+  },
+  {
+    "id": "ota-sky130",
+    "file": "apps/editor/src/examples/five-transistor-ota-sky130.icproj.json",
+    "documentId": "document-ota-5t"
+  },
+  {
+    "id": "widlar",
+    "file": "fixtures/gallery-redline/b5cn37k3a9.icproj.json",
+    "documentId": "document-main"
+  },
+  {
+    "id": "ltc3452",
+    "file": "fixtures/gallery-redline/ycg43babwa.icproj.json",
+    "documentId": "document-main"
+  }
+]

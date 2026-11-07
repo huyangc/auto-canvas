@@ -26,10 +26,45 @@ import type {
   Placement,
 } from "./types.js";
 
+import { emptyChoices, type LayoutOverrides } from "./layout-choices.js";
+import { refineLayout, type LayoutRun } from "./refine.js";
+
 export function planAutoLayout(
   document: SchematicDocument,
   resolver: SymbolResolver,
   options: AutoLayoutOptions = {},
+): AutoLayoutResult {
+  const fixed = new Set(options.fixedInstanceIds);
+  for (const owner of [...document.layoutGroups, ...document.constraints])
+    if (owner.locked) for (const id of owner.objectIds) fixed.add(id);
+  return refineLayout(
+    (overrides) => planLayoutOnce(document, resolver, options, overrides),
+    resolver,
+    fixed,
+  );
+}
+
+/** @internal One complete default/candidate plan, also used to verify refinement. */
+export function planLayoutOnce(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  options: AutoLayoutOptions,
+  overrides: LayoutOverrides,
+): LayoutRun {
+  const run: LayoutRun = {
+    result: { edits: [], groups: [], diagnostics: [] },
+    choices: emptyChoices(),
+  };
+  run.result = buildPlan(document, resolver, options, overrides, run);
+  return run;
+}
+
+function buildPlan(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  options: AutoLayoutOptions,
+  overrides: LayoutOverrides,
+  run: LayoutRun,
 ): AutoLayoutResult {
   if (document.instances.length > 40)
     return {
@@ -71,6 +106,8 @@ export function planAutoLayout(
         roles,
         groups,
         options,
+        overrides,
+        run.choices,
       );
   if (result.problem)
     return {
@@ -237,6 +274,7 @@ export function planAutoLayout(
     return refuse(
       `R10: final replay rejected: ${JSON.stringify(final.diagnostics)}`,
     );
+  run.final = final.document;
   if (
     terminalPartition(document, resolver) !==
     terminalPartition(final.document, resolver)
@@ -246,10 +284,11 @@ export function planAutoLayout(
     );
   const lost = lostNameClaim(document, final.document);
   if (lost) return refuse(`R10: name claim ${lost} would be lost`);
+  const audit = auditRouting(final.document, resolver);
+  const unsafe = audit.problems.filter((p) => !p.includes("drafting"));
+  if (unsafe.length) return refuse(`R10: ${unsafe.join("; ")}`);
   // The router does not know drafting objects; say so rather than hide it.
-  const drafting = auditRouting(final.document, resolver).problems.filter((p) =>
-    p.includes("drafting"),
-  );
+  const drafting = audit.problems.filter((p) => p.includes("drafting"));
   return {
     edits,
     groups,

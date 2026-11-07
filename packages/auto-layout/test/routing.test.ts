@@ -514,47 +514,97 @@ it("clears a drafting shape by the minimum whole-layout downward grid translatio
   expect(planAutoLayout(after, resolver).edits).toEqual([]);
 });
 
-it("refuses a plan that would lose a power claim with no replacement wire", () => {
-  const document = circuit({ r: "resistor" }, { vdd: ["r.1"], other: ["r.2"] });
-  document.instances[0]!.placement = {
-    position: { x: 100, y: 100 },
-    rotation: 0,
-    mirror: "none",
-  };
-  document.junctions.push({
-    id: "rail-end",
-    netId: "vdd",
-    position: { x: 200, y: 20 },
-  });
-  document.routes.push({
-    id: "rail",
-    netId: "vdd",
-    start: { kind: "terminal", instanceId: "r", pinName: "1" },
-    legs: [
-      {
-        id: "rail-leg",
-        mode: "manual",
-        to: {
-          kind: "endpoint",
-          endpoint: { kind: "junction", junctionId: "rail-end" },
+it.each(["supply", "ground"] as const)(
+  "R26 preserves a singleton %s claim and label on a replacement stub",
+  (role) => {
+    const document = circuit(
+      { r: "resistor" },
+      { vdd: ["r.1"], other: ["r.2"] },
+    );
+    document.instances[0]!.placement = {
+      position: { x: 100, y: 100 },
+      rotation: 0,
+      mirror: "none",
+    };
+    document.junctions.push({
+      id: "rail-end",
+      netId: "vdd",
+      position: { x: 200, y: 20 },
+    });
+    document.routes.push({
+      id: "rail",
+      netId: "vdd",
+      start: { kind: "terminal", instanceId: "r", pinName: "1" },
+      legs: [
+        {
+          id: "rail-leg",
+          mode: "manual",
+          to: {
+            kind: "endpoint",
+            endpoint: { kind: "junction", junctionId: "rail-end" },
+          },
         },
+      ],
+    });
+    document.connectivityEvidence.push({
+      id: "vdd-claim",
+      kind: "name-claim",
+      name: role === "supply" ? "VDD" : "GND",
+      netId: "vdd",
+      scope: "global",
+      powerDomain: role === "supply" ? "vdd" : "ground",
+      owner: { kind: "power-marker", objectId: "rail-end" },
+    });
+    document.annotations.push({
+      id: "supply-label",
+      kind: "power-label",
+      netId: "vdd",
+      binding: { kind: "net-name", netId: "vdd" },
+      anchor: {
+        kind: "route",
+        routeId: "rail",
+        legId: "rail-leg",
+        t: 0.5,
+        normalOffset: -10,
+        direction: "forward",
+        orientation: "horizontal",
+        fallbackPosition: { x: 200, y: 20 },
       },
-    ],
-  });
-  document.connectivityEvidence.push({
-    id: "vdd-claim",
-    kind: "name-claim",
-    name: "VDD",
-    netId: "vdd",
-    scope: "global",
-    powerDomain: "vdd",
-    owner: { kind: "power-marker", objectId: "rail-end" },
-  });
-  expect(planAutoLayout(document, resolver)).toMatchObject({
-    edits: [],
-    diagnostics: [{ severity: "error", rule: "R10" }],
-  });
-});
+      alignment: "start",
+      rotation: 0,
+      locked: false,
+    });
+    const plan = planAutoLayout(document, resolver);
+    expect(plan.diagnostics).toEqual([]);
+    const result = preview(document, resolver, plan.edits);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const after = result.document;
+    const claim = after.connectivityEvidence.find((e) => e.id === "vdd-claim");
+    expect(claim).toMatchObject({
+      name: role === "supply" ? "VDD" : "GND",
+      scope: "global",
+      powerDomain: role === "supply" ? "vdd" : "ground",
+    });
+    const route = after.routes[0]!;
+    expect(claim).toMatchObject({
+      owner: { kind: "power-marker", objectId: route.id },
+    });
+    const segments = resolveRouteGeometry(after, resolver, route)!.segments;
+    expect(segments).toHaveLength(1);
+    expect(segments[0]!.to).toEqual({
+      x: segments[0]!.from.x,
+      y: segments[0]!.from.y + (role === "supply" ? -40 : 40),
+    });
+    expect(
+      after.annotations.find((a) => a.id === "supply-label")!.anchor,
+    ).toEqual({
+      kind: "free",
+      position: segments[0]!.from,
+    });
+    expect(auditRouting(after, resolver).problems).toEqual([]);
+  },
+);
 
 it("never draws a fallback stub through the obstacle that blocked the net", () => {
   const document = obstructedTrunk(true, [10, 50]);
@@ -671,4 +721,100 @@ it("warns when a route crosses a drafting object it could not avoid", () => {
   expect(plan.diagnostics, JSON.stringify(plan.diagnostics)).toEqual([
     expect.objectContaining({ code: "AUTO_LAYOUT_DRAFTING_OVERLAP" }),
   ]);
+});
+
+it("R26 refuses a singleton stub whose free end lies inside a fixed obstacle", () => {
+  const document = circuit(
+    { r: "resistor", obstacle: "resistor" },
+    { supply: ["r.1"], other: ["r.2"], a: ["obstacle.1"], b: ["obstacle.2"] },
+  );
+  document.instances[0]!.placement = {
+    position: { x: 100, y: 100 },
+    rotation: 0,
+    mirror: "none",
+  };
+  document.instances[1]!.placement = {
+    position: { x: 100, y: 40 },
+    rotation: 0,
+    mirror: "none",
+  };
+  document.junctions.push({
+    id: "old-owner",
+    netId: "supply",
+    position: { x: 200, y: 60 },
+  });
+  document.routes.push({
+    id: "old-route",
+    netId: "supply",
+    start: { kind: "terminal", instanceId: "r", pinName: "1" },
+    legs: [
+      {
+        id: "old-leg",
+        mode: "manual",
+        to: {
+          kind: "endpoint",
+          endpoint: { kind: "junction", junctionId: "old-owner" },
+        },
+      },
+    ],
+  });
+  document.connectivityEvidence.push({
+    id: "supply-claim",
+    kind: "name-claim",
+    netId: "supply",
+    name: "VDD",
+    scope: "global",
+    powerDomain: "vdd",
+    owner: { kind: "power-marker", objectId: "old-owner" },
+  });
+  const plan = planAutoLayout(document, resolver, {
+    fixedInstanceIds: new Set(["r", "obstacle"]),
+  });
+  expect(plan.edits).toEqual([]);
+  expect(plan.diagnostics).toEqual([
+    expect.objectContaining({
+      severity: "error",
+      rule: "R10",
+      message: expect.stringContaining("singleton power stub"),
+    }),
+  ]);
+});
+
+it("R25 keeps several touching power pins joined through distinct exact stubs", () => {
+  const document = circuit(
+    { a: "resistor", b: "resistor", c: "resistor", g: "ground" },
+    {
+      first: ["a.1"],
+      second: ["b.2"],
+      third: ["c.2"],
+      ground: ["a.2", "b.1", "c.1", "g.0"],
+    },
+  );
+  document.instances.forEach((i, index) => {
+    i.placement = {
+      position: { x: 0, y: index === 0 ? 0 : index === 3 ? 30 : 40 },
+      rotation: 0,
+      mirror: "none",
+    };
+  });
+  const plan = planAutoLayout(document, resolver);
+  expect(plan.diagnostics).toEqual([]);
+  const result = preview(document, resolver, plan.edits);
+  expect(result.ok).toBe(true);
+  if (!result.ok) return;
+  expect(terminalPartition(result.document, resolver)).toBe(
+    terminalPartition(document, resolver),
+  );
+  const physical = deriveElectricalTopologyProjection(
+    result.document,
+    resolver,
+  ).endpointToPhysicalComponent;
+  const keys = [
+    { instanceId: "a", pinName: "2" },
+    { instanceId: "b", pinName: "1" },
+    { instanceId: "c", pinName: "1" },
+    { instanceId: "g", pinName: "0" },
+  ].map((p) => endpointKey({ kind: "terminal", ...p }));
+  expect(new Set(keys.map((k) => physical.get(k))).size).toBe(1);
+  expect(auditRouting(result.document, resolver).problems).toEqual([]);
 });

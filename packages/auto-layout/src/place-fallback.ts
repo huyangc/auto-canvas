@@ -1,7 +1,17 @@
-import { transformPoint, type Instance } from "@icm/model";
+import {
+  transformPoint,
+  type Instance,
+  type SchematicDocument,
+} from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
-import type { NetRoles } from "./net-roles.js";
-import { COLUMN_PITCH, placement, ROW_PITCH } from "./geometry.js";
+import { isMos, type NetRoles } from "./net-roles.js";
+import {
+  COLUMN_PITCH,
+  placement,
+  ROW_PITCH,
+  pinPoints,
+  withPlacements,
+} from "./geometry.js";
 import {
   deviceNets,
   devicePins,
@@ -10,7 +20,8 @@ import {
   signalDistances,
 } from "./placement-connectivity.js";
 import { compareIds } from "./recognize.js";
-import type { Placement } from "./types.js";
+import type { LayoutChoices, LayoutOverrides } from "./layout-choices.js";
+import type { Placement, RecognizedGroup } from "./types.js";
 
 type Distances = ReturnType<typeof signalDistances>;
 type Pin = ReturnType<typeof devicePins>[number];
@@ -222,4 +233,113 @@ export function placeFallback(
     roles,
     distances,
   );
+}
+
+/** R21: choose only orientations that R7/R9 leave free, using full Net HPWL. */
+export function orientByWireCost(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  roles: NetRoles,
+  targets: Map<string, Placement>,
+  templates: RecognizedGroup[],
+  fixed: ReadonlySet<string>,
+  overrides: LayoutOverrides,
+  choices: LayoutChoices,
+): void {
+  const distances = signalDistances(
+    document,
+    document.instances,
+    resolver,
+    roles,
+  );
+  const devices = [...document.instances].sort((a, b) =>
+    compareIds(a.id, b.id),
+  );
+  for (const i of devices) {
+    if (
+      fixed.has(i.id) ||
+      isMos(i.symbolId) ||
+      templates.some(
+        (g) => g.members.includes(i.id) || g.tailInstanceId === i.id,
+      )
+    )
+      continue;
+    const pins = devicePins(i, resolver);
+    const current = targets.get(i.id);
+    if (!current || pins.length < 2) continue;
+    if (
+      pins.length === 2 &&
+      pins.some((p) => distances.isPower(roles.pinNet(i.id, p.name) ?? ""))
+    )
+      continue;
+    if (pins.length === 2) {
+      const ranks = pins.map(
+        (p) => distances.nets.get(roles.pinNet(i.id, p.name) ?? "") ?? Infinity,
+      );
+      if (ranks[0] !== ranks[1]) continue;
+    }
+    const first = {
+      ...current,
+      position: { ...current.position },
+      mirror: "none" as const,
+    };
+    const second =
+      pins.length > 2
+        ? { ...first, mirror: "vertical" as const }
+        : {
+            ...first,
+            rotation: ((first.rotation + 180) % 360) as Placement["rotation"],
+          };
+    choices.orientations.set(i.id, [first, second]);
+  }
+  const cost = (id: string) => {
+    const nets = new Set(
+      deviceNets(
+        devices.find((i) => i.id === id)!,
+        resolver,
+        roles,
+      ),
+    );
+    const points = pinPoints(
+      withPlacements(
+        {
+          ...document,
+          instances: document.instances.filter((i) => targets.has(i.id)),
+        },
+        targets,
+      ),
+      resolver,
+    );
+    let total = 0;
+    for (const net of nets) {
+      const own = points
+        .filter((p) => roles.pinNet(p.instanceId, p.pinName) === net)
+        .map((p) => p.point);
+      if (own.length)
+        total +=
+          Math.max(...own.map((p) => p.x)) -
+          Math.min(...own.map((p) => p.x)) +
+          Math.max(...own.map((p) => p.y)) -
+          Math.min(...own.map((p) => p.y));
+    }
+    return total;
+  };
+  for (let pass = 0; pass < 2; pass++)
+    for (const [id, options] of choices.orientations) {
+      const forced = overrides.orientations.get(id);
+      let best = options[0]!,
+        bestCost = Infinity;
+      for (const option of forced ? [forced] : options) {
+        targets.set(id, {
+          ...option,
+          position: { ...targets.get(id)!.position },
+        });
+        const value = cost(id);
+        if (value < bestCost) {
+          best = option;
+          bestCost = value;
+        }
+      }
+      targets.set(id, { ...best, position: { ...targets.get(id)!.position } });
+    }
 }

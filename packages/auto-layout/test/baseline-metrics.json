@@ -1,0 +1,133 @@
+{
+  "commit": "05276cb",
+  "cases": [
+    {
+      "id": "five-t-ota",
+      "crossings": 0,
+      "bends": 2,
+      "wireLength": 1070,
+      "unrouted": 0,
+      "problems": 0
+    },
+    {
+      "id": "fig-17-19b",
+      "crossings": 2,
+      "bends": 5,
+      "wireLength": 1280,
+      "unrouted": 0,
+      "problems": 0
+    },
+    {
+      "id": "two-inverters",
+      "crossings": 1,
+      "bends": 2,
+      "wireLength": 1500,
+      "unrouted": 0,
+      "problems": 0
+    },
+    {
+      "id": "differential-stage",
+      "crossings": 0,
+      "bends": 0,
+      "wireLength": 360,
+      "unrouted": 0,
+      "problems": 0
+    },
+    {
+      "id": "common-source",
+      "crossings": 0,
+      "bends": 2,
+      "wireLength": 1000,
+      "unrouted": 0,
+      "problems": 0
+    },
+    {
+      "id": "rc-lowpass",
+      "crossings": 0,
+      "bends": 0,
+      "wireLength": 360,
+      "unrouted": 0,
+      "problems": 0
+    },
+    {
+      "id": "rc-highpass",
+      "crossings": 0,
+      "bends": 0,
+      "wireLength": 360,
+      "unrouted": 0,
+      "problems": 0
+    },
+    {
+      "id": "rlc",
+      "crossings": 0,
+      "bends": 0,
+      "wireLength": 480,
+      "unrouted": 0,
+      "problems": 0
+    },
+    {
+      "id": "two-stage-symbolic",
+      "crossings": 1,
+      "bends": 3,
+      "wireLength": 1010,
+      "unrouted": 0,
+      "problems": 0
+    },
+    {
+      "id": "fd-two-stage",
+      "crossings": null,
+      "bends": null,
+      "wireLength": null,
+      "unrouted": null,
+      "problems": null
+    },
+    {
+      "id": "common-source-ac",
+      "crossings": null,
+      "bends": null,
+      "wireLength": null,
+      "unrouted": null,
+      "problems": null
+    },
+    {
+      "id": "skew",
+      "crossings": null,
+      "bends": null,
+      "wireLength": null,
+      "unrouted": null,
+      "problems": null
+    },
+    {
+      "id": "deadtime",
+      "crossings": null,
+      "bends": null,
+      "wireLength": null,
+      "unrouted": null,
+      "problems": null
+    },
+    {
+      "id": "ota-sky130",
+      "crossings": 6,
+      "bends": 5,
+      "wireLength": 2720,
+      "unrouted": 1,
+      "problems": 0
+    },
+    {
+      "id": "widlar",
+      "crossings": 5,
+      "bends": 14,
+      "wireLength": 3140,
+      "unrouted": 1,
+      "problems": 3
+    },
+    {
+      "id": "ltc3452",
+      "crossings": 19,
+      "bends": 28,
+      "wireLength": 9900,
+      "unrouted": 1,
+      "problems": 0
+    }
+  ]
+}

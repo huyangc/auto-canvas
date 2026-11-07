@@ -19,16 +19,20 @@ import { powerHosts } from "./place-markers.js";
 import { isMarker } from "./placement-connectivity.js";
 import { compareIds } from "./recognize.js";
 import { preview } from "./transaction.js";
+import {
+  assignPowerHosts,
+  samePin,
+  touchingPins,
+  type PinContact,
+  type TerminalRef,
+} from "./pin-contacts.js";
 import type { AutoLayoutDiagnostic, RecognizedGroup } from "./types.js";
 
-interface TerminalRef {
-  instanceId: string;
-  pinName: string;
-}
 interface RoutingTarget {
   pins: TerminalRef[];
-  /** A marker stub: one wire between exactly these two pins. */
+  /** An exact contact stub: one wire between exactly these two pins. */
   stub?: true;
+  freeEnd?: { x: number; y: number };
   trunk?: { start: { x: number; y: number }; end: { x: number; y: number } };
 }
 
@@ -36,6 +40,8 @@ export interface PinGroup {
   netId: string;
   pins: TerminalRef[];
   named: boolean;
+  contacts: PinContact[];
+  needsPowerStub: boolean;
 }
 
 /** Freeze membership before removal, placement or routing can rename Nets. */
@@ -62,11 +68,31 @@ export function freezePinGroups(
       const group = groups.get(netId) ?? {
         netId,
         pins: [],
+        contacts: [],
+        needsPowerStub: false,
         named: Boolean(names.byBaseNetId.get(netId)?.name),
       };
       group.pins.push(ref);
       groups.set(netId, group);
     }
+  }
+  const contacts = touchingPins(document, resolver);
+  const removed = new Set(
+    [...document.routes, ...document.junctions].map((o) => o.id),
+  );
+  for (const group of groups.values()) {
+    group.contacts = contacts.filter((pair) =>
+      pair.every((p) => group.pins.some((ref) => samePin(ref, p))),
+    );
+    group.needsPowerStub =
+      group.pins.length === 1 &&
+      document.connectivityEvidence.some(
+        (e) =>
+          e.kind === "name-claim" &&
+          e.netId === group.netId &&
+          e.owner.kind === "power-marker" &&
+          removed.has(e.owner.objectId),
+      );
   }
   return [...groups.values()];
 }
@@ -93,8 +119,14 @@ function powerTargets(
     .sort((a, b) => compareIds(a.id, b.id));
   if (markers.length) {
     const hosts = powerHosts(points, devices, resolver, role === "ground");
-    return markers.flatMap((marker, index) => {
-      const host = hosts[Math.min(index, hosts.length - 1)];
+    const assigned = assignPowerHosts(
+      markers,
+      hosts,
+      points.filter((p) => !isMarker(instances.get(p.instanceId)!)),
+      group.contacts,
+    );
+    const targets: RoutingTarget[] = markers.flatMap((marker, index) => {
+      const host = assigned[index];
       return host
         ? [
             {
@@ -107,6 +139,32 @@ function powerTargets(
           ]
         : [];
     });
+    // R12 deliberately leaves other power members unwired. Input contacts
+    // are exceptions: replay must see them joined before reconciliation.
+    for (const pair of group.contacts)
+      if (
+        !targets.some((t) =>
+          pair.every((p) => t.pins.some((ref) => samePin(ref, p))),
+        )
+      )
+        targets.push({ pins: pair, stub: true });
+    return targets;
+  }
+  if (group.needsPowerStub) {
+    const pin = points[0];
+    return pin
+      ? [
+          {
+            pins: group.pins,
+            freeEnd: {
+              x: pin.point.x,
+              y:
+                pin.point.y +
+                (role === "ground" ? MARKER_OFFSET : -MARKER_OFFSET),
+            },
+          },
+        ]
+      : [];
   }
   const cell = group.pins.find((p) =>
     ["port", "port-filled"].includes(
@@ -328,13 +386,14 @@ export function routeDocument(
       : [{ pins: group.pins }];
     let failure: string | undefined;
     for (const target of targets) {
-      if (target.pins.length < 2) continue;
+      if (target.pins.length < 2 && !target.freeEnd) continue;
       let planned: SchematicEdit[];
       try {
-        if (target.stub) {
-          // Net-level routing may join a marker to another marker already on
-          // the host's component; R12 wants exactly marker to host.
-          const [marker, host] = target.pins as [TerminalRef, TerminalRef];
+        if (target.stub || target.freeEnd) {
+          // Pin-to-pin stubs preserve exact contacts; a singleton claim
+          // instead needs a clearance-checked wire to its outward free end.
+          const source = target.pins[0]!;
+          const host = target.pins[1]!;
           const stub = planWireBatch(
             working,
             resolver,
@@ -342,13 +401,17 @@ export function routeDocument(
               id: deriveStableId(
                 "auto-layout-stub",
                 working.id,
-                `${marker.instanceId}.${marker.pinName}`,
+                target.freeEnd
+                  ? `${source.instanceId}.${source.pinName}`
+                  : JSON.stringify([source, host]),
               ),
               from: {
                 kind: "endpoint",
-                endpoint: { kind: "terminal", ...marker },
+                endpoint: { kind: "terminal", ...source },
               },
-              to: { kind: "endpoint", endpoint: { kind: "terminal", ...host } },
+              to: target.freeEnd
+                ? { kind: "free", point: target.freeEnd }
+                : { kind: "endpoint", endpoint: { kind: "terminal", ...host } },
             },
             MAX_SCHEMATIC_EDITS_PER_TRANSACTION,
             { keepClear: true },
@@ -367,6 +430,13 @@ export function routeDocument(
           ).edits;
       } catch (error) {
         failure = error instanceof Error ? error.message : String(error);
+        if (target.freeEnd)
+          return {
+            document: working,
+            edits,
+            diagnostics,
+            problem: `R10: singleton power stub for ${group.netId}: ${failure}`,
+          };
         continue;
       }
       if (!planned.length) continue;
