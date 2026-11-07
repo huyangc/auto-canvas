@@ -2,7 +2,7 @@ import { transformPoint } from "./geometry.js";
 import { visibleInstanceBounds } from "@icm/derived";
 import { type Instance, type SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
-import { isMos, type NetRoles } from "./net-roles.js";
+import { isMos, isMosBulk, type NetRoles } from "./net-roles.js";
 import { compareIds } from "./recognize.js";
 import {
   deviceNets,
@@ -247,7 +247,9 @@ function rowGraph(
   );
   const nets = new Map<string, Set<RowNode>>();
   for (const i of devices)
-    for (const pin of devicePins(i, resolver).filter((p) => p.name !== "B")) {
+    for (const pin of devicePins(i, resolver).filter(
+      (p) => !isMosBulk(i.symbolId, p.name),
+    )) {
       const net = roles.pinNet(i.id, pin.name),
         node = nodeByMember.get(i.id);
       if (!net || !node || roles.rails.has(net)) continue;
@@ -641,10 +643,14 @@ export function assignColumns(
               const other = nodeByMember.get(j.id)!;
               if (component.get(other.id) === c) continue;
               for (const p of devicePins(i, resolver).filter(
-                (p) => p.name !== "B" && roles.pinNet(id, p.name) === net,
+                (p) =>
+                  !isMosBulk(i.symbolId, p.name) &&
+                  roles.pinNet(id, p.name) === net,
               ))
                 for (const q of devicePins(j, resolver).filter(
-                  (p) => p.name !== "B" && roles.pinNet(j.id, p.name) === net,
+                  (p) =>
+                    !isMosBulk(j.symbolId, p.name) &&
+                    roles.pinNet(j.id, p.name) === net,
                 ))
                   pulls.push(
                     x.get(component.get(other.id)!)! +
@@ -696,7 +702,12 @@ export function assignColumns(
     if (contact) {
       const target = targets.get(tail)!;
       const local = localPin(tail, contact.q).x - target.position.x;
-      target.position.x = Math.round((median(axes) - local) / grid) * grid;
+      const x = Math.round((median(axes) - local) / grid) * grid;
+      const delta = x - target.position.x;
+      // A tail can be a mirror member: its group moves whole, keeping its pitch.
+      const group = groups.find((g) => g.members.includes(tail));
+      for (const id of group?.members ?? [tail])
+        targets.get(id)!.position.x += delta;
     }
   }
   return targets;

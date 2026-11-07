@@ -12,6 +12,11 @@ export function isMos(symbolId: string): boolean {
   return symbolId === "nmos" || symbolId === "pmos";
 }
 
+/** A MOS bulk pin. Other symbols may have an ordinary pin named B. */
+export function isMosBulk(symbolId: string, pinName: string): boolean {
+  return isMos(symbolId) && pinName === "B";
+}
+
 export interface NetRoles {
   byNet: Map<string, NetRole>;
   /** R37: explicit power intent or the R12 multi-channel supply test. */
