@@ -10,7 +10,13 @@ import {
 import type { SymbolResolver } from "@icm/symbols";
 import { createPlacementEstimator } from "./estimate.js";
 import { boxesIntersect, transformPoint, withPlacements } from "./geometry.js";
-import { assignColumns, deviceRows, netLevels, orderRows } from "./layered.js";
+import {
+  searchColumns,
+  deviceRows,
+  netLevels,
+  orderRows,
+  type PlacementSearchCache,
+} from "./layered.js";
 import { isMosBulk, type NetRoles } from "./net-roles.js";
 import { devicePins, signalDistances } from "./placement-connectivity.js";
 import { compareIds } from "./recognize.js";
@@ -176,6 +182,8 @@ export function placeStages(
   resolver: SymbolResolver,
   roles: NetRoles,
   groups: RecognizedGroup[],
+  fixed: ReadonlySet<string> = new Set(),
+  searchCache?: PlacementSearchCache,
 ): Map<string, Placement> {
   const found = findStages(devices, resolver, roles, groups);
   const grid = document.presentation.grid;
@@ -274,7 +282,7 @@ export function placeStages(
       ownGroups,
       netLevels(stage.devices, resolver, roles),
     );
-    const placements = assignColumns(
+    const placements = searchColumns(
       localDocument,
       stage.devices,
       resolver,
@@ -282,6 +290,8 @@ export function placeStages(
       ownGroups,
       orderRows(rows, stage.devices, resolver, roles, ownGroups),
       rows,
+      fixed,
+      searchCache,
     );
     const bounds = visibleInstanceBounds(
       withPlacements(localDocument, placements),

@@ -18,7 +18,13 @@ import {
   type LayoutOverrides,
 } from "./layout-choices.js";
 import { placeFallback, orientByWireCost } from "./place-fallback.js";
-import { netLevels, deviceRows, orderRows, assignColumns } from "./layered.js";
+import {
+  netLevels,
+  deviceRows,
+  orderRows,
+  searchColumns,
+  type PlacementSearchCache,
+} from "./layered.js";
 import { placeStages } from "./stages.js";
 import { templatePlacement } from "./template-placement.js";
 import { isMos } from "./net-roles.js";
@@ -97,6 +103,7 @@ export function placeDocument(
   overrides: LayoutOverrides = emptyOverrides(),
   choices: LayoutChoices = emptyChoices(),
   strategy: LayoutStrategy = "template",
+  searchCache?: PlacementSearchCache,
 ): { placements: Map<string, Placement>; problem?: string } {
   let targets = new Map<string, Placement>();
   const devices = document.instances
@@ -108,6 +115,9 @@ export function placeDocument(
         placements: targets,
         problem: `R3: unresolved symbol ${i.symbolId}`,
       };
+  const fixed = new Set(options.fixedInstanceIds);
+  for (const owner of [...document.layoutGroups, ...document.constraints])
+    if (owner.locked) for (const id of owner.objectIds) fixed.add(id);
   const distances = signalDistances(document, devices, resolver, roles);
   // Reconstruct persisted intent for stable re-planning, without re-emitting it.
   const inferred = recognizeStructures(
@@ -134,7 +144,15 @@ export function placeDocument(
     if (result.problem) return result;
     targets = result.placements;
   } else if (strategy === "stages") {
-    targets = placeStages(document, devices, resolver, roles, templates);
+    targets = placeStages(
+      document,
+      devices,
+      resolver,
+      roles,
+      templates,
+      fixed,
+      searchCache,
+    );
   } else if (
     devices.some((i) => {
       const drain = roles.pinNet(i.id, "D");
@@ -157,7 +175,7 @@ export function placeDocument(
       levels,
     );
     const ordered = orderRows(rows, devices, resolver, roles, templates);
-    targets = assignColumns(
+    targets = searchColumns(
       document,
       devices,
       resolver,
@@ -165,6 +183,8 @@ export function placeDocument(
       templates,
       ordered,
       rows,
+      fixed,
+      searchCache,
     );
   } else {
     placeFallback(
@@ -177,9 +197,6 @@ export function placeDocument(
       roles,
     );
   }
-  const fixed = new Set(options.fixedInstanceIds);
-  for (const owner of [...document.layoutGroups, ...document.constraints])
-    if (owner.locked) for (const id of owner.objectIds) fixed.add(id);
   for (const id of fixed) {
     const old = document.instances.find((i) => i.id === id)?.placement;
     if (old) targets.set(id, structuredClone(old));

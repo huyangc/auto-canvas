@@ -1,6 +1,11 @@
+import { createPlacementEstimator } from "./estimate.js";
 import { transformPoint } from "./geometry.js";
 import { visibleInstanceBounds } from "@icm/derived";
-import { type Instance, type SchematicDocument } from "@icm/model";
+import {
+  type Instance,
+  type SchematicDocument,
+  reflectOrientation,
+} from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import { isMos, isMosBulk, type NetRoles } from "./net-roles.js";
 import { compareIds } from "./recognize.js";
@@ -711,4 +716,141 @@ export function assignColumns(
     }
   }
   return targets;
+}
+
+/** Planning-call-local cache; callers may translate returned placements. */
+export type PlacementSearchCache = Map<string, ReadonlyMap<string, Placement>>;
+
+/** R65: bounded first-improvement descent over row permutations and mirrors.
+ * Every candidate reuses R33, so alignment and group templates are recomputed
+ * together rather than moving individual members out of their columns. */
+export function searchColumns(
+  document: SchematicDocument,
+  devices: Instance[],
+  resolver: SymbolResolver,
+  roles: NetRoles,
+  groups: RecognizedGroup[],
+  ordered: RowNode[][],
+  rows: Rows,
+  fixed: ReadonlySet<string> = new Set(),
+  cache?: PlacementSearchCache,
+): Map<string, Placement> {
+  const key =
+    cache &&
+    JSON.stringify({
+      devices: devices.map((i) => i.id),
+      groups,
+      ordered,
+      placements: [...rows.placements],
+      fixed: [...fixed].sort(compareIds),
+    });
+  const copy = (targets: ReadonlyMap<string, Placement>) =>
+    new Map([...targets].map(([id, p]) => [id, structuredClone(p)]));
+  const cached = key === undefined ? undefined : cache?.get(key);
+  if (cached) return copy(cached);
+  const estimate = createPlacementEstimator(devices, resolver, roles);
+  let order = ordered.map((row) => [...row]);
+  let state = {
+    ...rows,
+    placements: new Map(
+      [...rows.placements].map(([id, p]) => [id, structuredClone(p)]),
+    ),
+  };
+  let best = assignColumns(
+    document,
+    devices,
+    resolver,
+    roles,
+    groups,
+    order,
+    state,
+  );
+  let score = estimate(best).score;
+  // A size-scaled call budget applies at every size, including >40 instances.
+  const limit = Math.min(160, Math.max(16, devices.length * 2));
+  let calls = 1;
+  const tryMove = (candidateOrder: RowNode[][], candidateRows: Rows) => {
+    if (calls >= limit) return false;
+    const candidate = assignColumns(
+      document,
+      devices,
+      resolver,
+      roles,
+      groups,
+      candidateOrder,
+      candidateRows,
+    );
+    calls++;
+    const next = estimate(candidate).score;
+    if (
+      next >= score ||
+      [...fixed].some((id) => {
+        const a = best.get(id),
+          b = candidate.get(id);
+        return (
+          a &&
+          b &&
+          (a.position.x !== b.position.x ||
+            a.position.y !== b.position.y ||
+            a.rotation !== b.rotation ||
+            a.mirror !== b.mirror)
+        );
+      })
+    )
+      return false;
+    best = candidate;
+    score = next;
+    order = candidateOrder;
+    state = candidateRows;
+    return true;
+  };
+  for (;;) {
+    let changed = false;
+    for (let r = 0; r < order.length && calls < limit; r++)
+      for (let at = 1; at < order[r]!.length && calls < limit; at++) {
+        const a = order[r]![at - 1]!,
+          b = order[r]![at]!;
+        if ([...a.members, ...b.members].some((id) => fixed.has(id))) continue;
+        // R32's shared-tail bundles must remain consecutive too.
+        const candidate = order.map((row) => [...row]);
+        [candidate[r]![at - 1], candidate[r]![at]] = [b, a];
+        const split = [
+          ...new Set(groups.flatMap((g) => g.tailInstanceId ?? [])),
+        ].some((tail) => {
+          const ids = new Set(
+            groups.filter((g) => g.tailInstanceId === tail).map((g) => g.id),
+          );
+          const positions = candidate[r]!.flatMap((n, i) =>
+            ids.has(n.id) ? [i] : [],
+          );
+          return (
+            positions.length > 1 &&
+            Math.max(...positions) - Math.min(...positions) + 1 !==
+              positions.length
+          );
+        });
+        if (!split) changed = tryMove(candidate, state) || changed;
+      }
+    const grouped = new Set(
+      groups.flatMap((g) => [
+        ...g.members,
+        ...(g.tailInstanceId ? [g.tailInstanceId] : []),
+      ]),
+    );
+    for (const i of [...devices].sort((a, b) => compareIds(a.id, b.id))) {
+      if (calls >= limit) break;
+      if (fixed.has(i.id) || grouped.has(i.id)) continue;
+      const p = state.placements.get(i.id);
+      if (!p) continue;
+      const candidate = { ...state, placements: new Map(state.placements) };
+      candidate.placements.set(i.id, {
+        ...p,
+        ...reflectOrientation(p, "left-right"),
+      });
+      changed = tryMove(order, candidate) || changed;
+    }
+    if (!changed || calls >= limit) break;
+  }
+  if (key !== undefined) cache?.set(key, copy(best));
+  return best;
 }

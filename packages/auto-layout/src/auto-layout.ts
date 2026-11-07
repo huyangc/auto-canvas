@@ -18,6 +18,7 @@ import {
   terminalPartition,
 } from "./transaction.js";
 import { auditRouting, floatingPins } from "./routing-audit.js";
+import type { PlacementSearchCache } from "./layered.js";
 import { classifyNets } from "./net-roles.js";
 import { placeDocument } from "./place.js";
 import { compareIds, recognizeStructures } from "./recognize.js";
@@ -45,6 +46,7 @@ export function planAutoLayout(
   resolver: SymbolResolver,
   options: AutoLayoutOptions = {},
 ): AutoLayoutResult {
+  const searchCache: PlacementSearchCache = new Map();
   const fixed = new Set(options.fixedInstanceIds);
   for (const owner of [...document.layoutGroups, ...document.constraints])
     if (owner.locked) for (const id of owner.objectIds) fixed.add(id);
@@ -63,6 +65,8 @@ export function planAutoLayout(
       options,
       overrides,
       strategy,
+      true,
+      searchCache,
     );
     runs.set(run.result, { run, overrides, strategy });
     return run;
@@ -121,6 +125,7 @@ export function planAutoLayout(
     selected.overrides,
     selected.strategy,
     false,
+    searchCache,
   );
   return selectRoutingAlternative(
     selected.run,
@@ -138,6 +143,7 @@ export function planLayoutOnce(
   overrides: LayoutOverrides,
   strategy: LayoutStrategy = "template",
   signalTrunks = true,
+  searchCache?: PlacementSearchCache,
 ): LayoutRun {
   const run: LayoutRun = {
     result: { edits: [], groups: [], diagnostics: [] },
@@ -151,6 +157,7 @@ export function planLayoutOnce(
     run,
     strategy,
     signalTrunks,
+    searchCache,
   );
   return run;
 }
@@ -163,6 +170,7 @@ function buildPlan(
   run: LayoutRun,
   strategy: LayoutStrategy,
   signalTrunks: boolean,
+  searchCache?: PlacementSearchCache,
 ): AutoLayoutResult {
   if (document.instances.length > 120)
     return {
@@ -207,6 +215,7 @@ function buildPlan(
         overrides,
         run.choices,
         strategy,
+        searchCache,
       );
   if (result.problem)
     return {

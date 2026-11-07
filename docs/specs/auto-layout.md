@@ -325,6 +325,18 @@ pins }` lists, never Net ids.
   R55's unrefined comparison: R61 was removed because round 1 measured no
   meaningful quality benefit for its extra planning time.
 
+- **R65 — Estimated row search.** After R33 column assignment in the layered
+  strategy and in every stage, visit adjacent row-node swaps, then horizontal
+  mirrors of ungrouped devices, in stable row and id order. Re-run R33 for every
+  candidate, carrying grouped members together and keeping shared-tail bundles
+  consecutive. Keep only strict R54 score improvements and reject candidates
+  that change a fixed instance's assigned placement. Stop at a local minimum or
+  after `min(160, max(16, 2 * deviceCount))` estimator calls, including the initial
+  placement. Cache identical row-search inputs only within one planning call,
+  returning independent copies for stage translations and refinement replays.
+  This budget applies above 40 instances too. The existing R1 fixed
+  placements and R40 grid checks still apply to the final layout.
+
 - **Existing locks and conflicts.** Members of a locked layout group or
   constraint are treated as fixed instances under R1, because the Edit Engine
   refuses to transform them. A recognized group whose generated id already
