@@ -7,7 +7,7 @@ Primary owner: `packages/auto-layout`
 This contract defines pure structure recognition, template placement and bounded routing for one
 Schematic Document. It consumes the existing [model](schematic-model.md),
 [connectivity](connectivity-and-routing.md) and [typed edits](edit-engine.md).
-Locks and the UI entry are **T013, not yet specified**.
+Locks and the UI entry are **T014, not yet specified**.
 
 ## Rules
 
@@ -16,7 +16,7 @@ Locks and the UI entry are **T013, not yet specified**.
   `{ edits: SchematicEdit[], groups: RecognizedGroup[], diagnostics:
 AutoLayoutDiagnostic[] }`. Fixed instances retain their exact placements;
   a collision with the template returns no edits and an R10 diagnostic.
-  Obstacle-aware placement belongs to T013. Identical inputs produce byte-identical serialized edits. Break
+  Obstacle-aware placement belongs to T014. Identical inputs produce byte-identical serialized edits. Break
   ties by instance id in code-unit order; use neither randomness nor time.
 - **R2 — Edits.** In Document order: (a) free every annotation anchored to
   a Route or by an object anchor to a Junction removed in (c), at its
@@ -58,27 +58,24 @@ AutoLayoutDiagnostic[] }`. Fixed instances retain their exact placements;
   previous row's lower net. Ground-connected devices end their stack.
   PMOS precede NMOS sharing a drain. Row pitch is 120 units. Without MOS, use R9.
 - **R6a — Power markers.** On each net, sort ground/VDD markers by id and
-  pair them with hosts sorted by device id, then x. Use one channel or
+  prefer the host pin they touch in the input (R25), then pair the remaining
+  markers with unused hosts sorted by device id, then x. Use one channel or
   two-pin-device terminal per host device: its lowest pin for ground, highest
   for VDD; never a MOS bulk pin. The marker pin sits at the host x, 40 units
   below for ground or above for VDD. Extra markers share the last host and
   are nudged by grid steps.
 - **R7 — Templates.** Group members share y and reflect about a vertical
-  axis, with 100-unit origin pitch. Differential left/right mirrors are
+  axis, with 100-unit origin pitch unless R18 aligns a stack. Differential left/right mirrors are
   `none`/`horizontal`; tails lie on the axis one row below. Mirror and
   matched left/right mirrors are `horizontal`/`none`. Place the diode side
   over the left differential member it feeds. Stacked groups share an axis. Two recognized differential pairs sharing one
   tail return no edits and an R7 diagnostic.
 - **R8 — Horizontal flow and Cell Pins.** Order ungrouped row devices by net
-  distance from input. Place input Cell Pins left, output right, supply top
-  and ground bottom, 80 units outside the device box at the connected pin's
-  coordinate. For a recognized differential pair, the Cell Pin on the right
-  member's gate goes on the right edge, level with that gate. Left pins use rotation 0 and mirror `none`; right pins use
+  distance from input. Place Cell Pins by R19 and R20, 80 units outside the
+  device box. Left pins use rotation 0 and mirror `none`; right pins use
   rotation 0 and mirror `horizontal` to keep labels upright. Top/bottom
-  rotations are 90/270. On each side sort by the connected coordinate, then
-  id, and shift later pins by grid steps until they are at least 40 apart.
-  With MOS present, a two-pin device's lower pin takes the x of the drain it
-  connects to one row below, when free.
+  rotations are 90/270. With MOS present, a two-pin device's lower pin takes
+  the x of the drain it connects to one row below, when free.
 - **R9 — Fallback.** Unrankable devices, generic blocks and all devices in a
   Document without MOS follow one horizontal signal row. Columns increase
   in net distance from input, or a grounded source's positive net when no
@@ -122,7 +119,8 @@ pins }` lists, never Net ids.
   Re-upsert each name claim owned by a removed Route/Junction power marker
   with the same id, name, scope and powerDomain, using the frozen group's
   current Net id and its trunk Route as owner, or its longest new Route.
-  Without a new Route, leave R10 as the guard. This preserves supply-bound
+  A singleton power Net receives the R26 stub when its claim needs a new owner;
+  without a clear replacement Route, leave R10 as the guard. This preserves supply-bound
   MOS bulk membership when the old rail and its naming authority are removed.
 - **R13 — Signal order.** After power, route Nets touching recognized groups,
   pair members before mirrors, then the rest by their lowest instance id.
@@ -155,6 +153,51 @@ pins }` lists, never Net ids.
   `MAX_SCHEMATIC_EDITS_PER_TRANSACTION` returns no edits and an R10 diagnostic.
 - **R17 — Diagnostics.** Every diagnostic has severity `error` or `warning`.
   Only an error means no edits. All diagnostics predating R14 are errors.
+
+- **R18 — Pin-aligned stacks.** Stacked groups share vertical channel pin
+  lines. Derive pitches from each pin's local `x` after orientation; the smaller
+  pitch is `MEMBER_PITCH`, the other follows, both on grid. Unstacked groups keep
+  `MEMBER_PITCH`. A tail's shared channel pin lies on the axis. PMOS above NMOS
+  sharing a drain align drain pins rather than origins. Read oriented `pin.at`;
+  never encode a symbol or pin offset.
+- **R19 — Cell Pin side.** Inputs and outputs use the left or right edge nearest
+  their host pin, measured from the device bounds' centre. Exact ties put inputs
+  left and outputs right. Supply and ground stay top and bottom.
+- **R20 — Port spacing.** Keep a Cell Pin level with its host. If two on one side
+  are less than 40 units apart, move the one whose Net has more pins away from
+  the other; a tie moves the later id. Its wire can tap elsewhere.
+- **R21 — Orientation by wire cost.** An instance without a template-fixed
+  orientation chooses between `none` and `vertical` for a multi-pin block, or
+  its two pin-to-pin flips for a two-pin part where R9 allows both. Minimize
+  half-perimeter wire length across its Nets given other placements; ties keep
+  the first option. Make two passes in id order.
+- **R22 — Refinement by routed cost.** Score each complete final preview as
+  `unrouted × 10000 + crossings × 1000 + offConvention × 300 + bends × 100 + wireLength / 10`,
+  with named weights. Count input Cell Pins on the right edge and output Cell
+  Pins on the left edge as `offConvention`, so a port leaves its conventional
+  side only when that saves a crossing. Signal flow stays left to right. In id order, try flipping one left/right Cell Pin side or one
+  R21 orientation. Replan fully, discard candidates with error diagnostics,
+  accept the best strictly improving move, and repeat for at most two passes
+  and 24 evaluated candidates total. Fixed instances never move. If all
+  candidates fail, retain the default. Identical inputs give identical results.
+- **R23 — Audit guard.** Audit the final preview. A Route crossing an Instance
+  or Routes of different Nets overlapping returns no edits and an R10 error
+  naming the objects. Drafting intersections remain warnings.
+- **R24 — Placement collisions.** For coincident pins or overlapping instances
+  that no template pins together, move the later id along its row or column in
+  grid steps, up to 40 steps. Refuse only if this fails; fixed/template conflicts
+  retain their existing rejection protection.
+
+- **R25 — Touching pins stay joined.** Pins coincident in the input on one
+  frozen pin group remain physically joined. A ground/VDD marker uses the pin
+  it touches as its R6a host before id-order pairing. Any other touching pair
+  on a power Net left unjoined by R12 becomes an additional exact,
+  clearance-checked stub target. Exclude MOS `B` pins. This prevents transform
+  reconciliation from adding an unchecked straight Route across other Nets.
+- **R26 — Single-pin power Nets.** A power Net with one routable pin and a
+  name claim owned by removed geometry receives one clearance-checked 40-unit
+  stub, up for supply and down for ground. Transfer the claim to the stub Route
+  under R12 and its label under R15. If no clear stub exists, refuse under R10.
 
 - **Existing locks and conflicts.** Members of a locked layout group or
   constraint are treated as fixed instances under R1, because the Edit Engine

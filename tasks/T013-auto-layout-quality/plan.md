@@ -97,7 +97,7 @@ Out of scope (do not change):
 
 ## Steps
 
-1. **Spec.** Add R18–R24 to `docs/specs/auto-layout.md`, update R7 and R8, and
+1. **Spec.** Add R18–R26 to `docs/specs/auto-layout.md`, update R7 and R8, and
    change every "T013" to "T014".
 
    - **R18 Pin-aligned stacks (replaces fixed pitch for stacks).** When one
@@ -122,8 +122,11 @@ Out of scope (do not change):
      the option with the smallest half-perimeter wire length over its Nets, given
      the other placements; ties keep the first. Two passes in `id` order.
    - **R22 Refinement by routed cost.** After a complete plan, score it from the
-     final preview: `unrouted × 10000 + crossings × 1000 + bends × 100 +
-wireLength / 10`, each weight a named constant. Candidate moves, in `id`
+     final preview: `unrouted × 10000 + crossings × 1000 + offConvention × 300 +
+bends × 100 + wireLength / 10`, each weight a named constant.
+     `offConvention` counts input Cell Pins on the right edge and output Cell
+     Pins on the left edge, so a port leaves its conventional side only when that
+     saves a crossing. Signal flow stays left to right. Candidate moves, in `id`
      order: flip one Cell Pin's side between left and right; flip one R21 choice.
      Replan each fully. Accept the best improving move, and repeat for at most two
      passes and at most 24 evaluated candidates. Fixed instances never move.
@@ -133,6 +136,20 @@ wireLength / 10`, each weight a named constant. Candidate moves, in `id`
      Route crossing an Instance or two Routes of different Nets overlapping is an
      `error`: return no edits and an R10 diagnostic naming them. Drafting
      intersections stay the existing warning.
+   - **R25 Touching pins stay joined.** Pins that coincide in the input and are
+     on one frozen pin group stay physically joined. A `ground` or `vdd-port`
+     marker's R6a host is the pin it touches, if any, before the id-order pairing.
+     Any other touching pair on a power Net that R12 would leave unjoined becomes
+     one more exact stub target. MOS `B` pins are excluded. Otherwise placement
+     separates the pair and the Edit Engine's `reconcileTransformDirectContacts`
+     adds a straight Route with no clearance check, which is how `fd-two-stage`
+     merges `net-tail-1` and `net-tail-2` into ground.
+   - **R26 Single-pin power Nets.** A power Net with one routable pin whose
+     `name-claim` is owned by removed geometry (`common-source-ac`:
+     `net-power-vdd7`, R3.1 only) gets one clearance-checked stub 40 units
+     outward, up for supply and down for ground. The stub Route takes the claim
+     under R12 and the label under R15. If no clear stub exists, R10 still
+     refuses.
    - **R24 Placement collisions.** A coincident pin or overlap between instances
      no template pins together is not a reason to refuse. Resolve it by moving the
      later `id` along its row or column in grid steps, up to 40 steps, and refuse

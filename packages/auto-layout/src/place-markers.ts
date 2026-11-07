@@ -13,7 +13,13 @@ import {
   withPlacements,
 } from "./geometry.js";
 import { devicePins, isMarker } from "./placement-connectivity.js";
-import type { Placement, RecognizedGroup } from "./types.js";
+import {
+  type CellSide,
+  type LayoutChoices,
+  type LayoutOverrides,
+} from "./layout-choices.js";
+import { assignPowerHosts, touchingPins } from "./pin-contacts.js";
+import type { Placement } from "./types.js";
 
 type PinPoint = ReturnType<typeof pinPoints>[number];
 
@@ -55,31 +61,56 @@ function placePowerMarkers(
   targets: Map<string, Placement>,
 ) {
   const grid = document.presentation.grid;
+  const contacts = touchingPins(document, resolver);
+  const assignments = new Map<string, PinPoint | undefined>();
+  for (const symbol of ["ground", "vdd-port"]) {
+    const nets = new Set(
+      markers
+        .filter((i) => i.symbolId === symbol)
+        .map((i) => roles.pinNet(i.id, symbol === "ground" ? "0" : "P")),
+    );
+    for (const net of nets) {
+      const members = markers.filter(
+        (i) =>
+          i.symbolId === symbol &&
+          roles.pinNet(i.id, symbol === "ground" ? "0" : "P") === net,
+      );
+      const connected = pins.filter(
+        (p) =>
+          net !== undefined && roles.pinNet(p.instanceId, p.pinName) === net,
+      );
+      const hosts = assignPowerHosts(
+        members.map((i) => ({
+          instanceId: i.id,
+          pinName: symbol === "ground" ? "0" : "P",
+        })),
+        powerHosts(connected, devices, resolver, symbol === "ground"),
+        connected,
+        contacts,
+      );
+      members.forEach((i, index) => assignments.set(i.id, hosts[index]));
+    }
+  }
   const used = new Map<string, number>();
   const placed: Instance[] = [];
   for (const i of markers) {
     const ground = i.symbolId === "ground";
-    const net = roles.pinNet(i.id, ground ? "0" : "P");
-    const connected = pins.filter(
-      (p) => net !== undefined && roles.pinNet(p.instanceId, p.pinName) === net,
-    );
-    const hosts = powerHosts(connected, devices, resolver, ground);
-    const key = `${i.symbolId}:${net}`;
+    const assigned = assignments.get(i.id);
+    const key = assigned
+      ? `${assigned.instanceId}:${assigned.pinName}`
+      : i.symbolId;
     const index = used.get(key) ?? 0;
     used.set(key, index + 1);
-    const host = hosts[Math.min(index, hosts.length - 1)]?.point ?? {
-      x: 0,
-      y: 0,
-    };
+    const host = assigned?.point ?? { x: 0, y: 0 };
     const local = devicePins(i, resolver)[0]?.at ?? { x: 0, y: 0 };
     targets.set(
       i.id,
       placement(
-        host.x - local.x + Math.max(0, index - hosts.length + 1) * grid,
+        host.x - local.x + index * grid,
         host.y + (ground ? MARKER_OFFSET : -MARKER_OFFSET) - local.y,
       ),
     );
-    if (index >= hosts.length)
+    if (index > 0 || !assigned)
       for (let attempt = 0; attempt < 200; attempt++) {
         const candidate = withPlacements(
           { ...document, instances: [...devices, ...placed, i] },
@@ -99,7 +130,8 @@ function placeCellPins(
   resolver: SymbolResolver,
   roles: NetRoles,
   targets: Map<string, Placement>,
-  groups: RecognizedGroup[],
+  overrides: LayoutOverrides,
+  choices: LayoutChoices,
 ) {
   const grid = document.presentation.grid;
   const placed = new Set<string>();
@@ -140,32 +172,61 @@ function placeCellPins(
           compareIds(a.instanceId, b.instanceId) ||
           compareIds(a.pinName, b.pinName),
       );
-      const rightGate = connected.find(
-        (p) =>
-          p.pinName === "G" &&
-          groups.some(
-            (g) =>
-              g.kind === "differential-pair" && g.members[1] === p.instanceId,
-          ),
-      );
-      if (rightGate && role === "input") side = "right";
-      const host = rightGate?.point ??
-        connected[0]?.point ?? {
-          x: box.x + box.width / 2,
-          y: box.y + box.height / 2,
-        };
+      const host = connected[0]?.point ?? {
+        x: box.x + box.width / 2,
+        y: box.y + box.height / 2,
+      };
+      if (side === "left" || side === "right") {
+        const centre = box.x + box.width / 2;
+        side =
+          host.x < centre
+            ? "left"
+            : host.x > centre
+              ? "right"
+              : role === "output"
+                ? "right"
+                : "left";
+        side = overrides.sides.get(i.id) ?? side;
+        choices.sides.set(i.id, side as CellSide);
+      }
       const vertical = side === "left" || side === "right";
-      return { i, side, vertical, coordinate: vertical ? host.y : host.x };
+      return {
+        i,
+        side,
+        vertical,
+        count: connected.length,
+        coordinate: snap(vertical ? host.y : host.x),
+      };
     });
   for (const side of ["left", "right", "top", "bottom"]) {
-    let previous = -Infinity;
-    for (const entry of entries
-      .filter((e) => e.side === side)
-      .sort(
-        (a, b) => a.coordinate - b.coordinate || compareIds(a.i.id, b.i.id),
-      )) {
-      let along = snap(entry.coordinate);
-      while (along < previous + CELL_PIN_SPACING) along += grid;
+    const members = entries.filter((e) => e.side === side);
+    // Move the more flexible Net, keeping less connected hosts level.
+    const settled: typeof entries = [];
+    for (const entry of members.sort(
+      (a, b) => a.count - b.count || compareIds(a.i.id, b.i.id),
+    )) {
+      const conflict = settled.find(
+        (other) =>
+          Math.abs(other.coordinate - entry.coordinate) < CELL_PIN_SPACING,
+      );
+      const direction =
+        conflict && entry.coordinate < conflict.coordinate ? -1 : 1;
+      for (
+        let attempt = 0;
+        attempt < 200 &&
+        settled.some(
+          (other) =>
+            Math.abs(other.coordinate - entry.coordinate) < CELL_PIN_SPACING,
+        );
+        attempt++
+      )
+        entry.coordinate += direction * grid;
+      settled.push(entry);
+    }
+    for (const entry of members.sort(
+      (a, b) => a.coordinate - b.coordinate || compareIds(a.i.id, b.i.id),
+    )) {
+      const along = entry.coordinate;
       const x = entry.vertical
         ? snap(
             side === "right"
@@ -200,9 +261,16 @@ function placeCellPins(
             placed.has(i.id),
         );
         if (
-          !geometryProblem(
-            withPlacements({ ...document, instances: prior }, targets),
-            resolver,
+          !prior.some(
+            (other) =>
+              other.id !== entry.i.id &&
+              geometryProblem(
+                withPlacements(
+                  { ...document, instances: [other, entry.i] },
+                  targets,
+                ),
+                resolver,
+              ),
           )
         )
           break;
@@ -211,8 +279,6 @@ function placeCellPins(
         else p.position.x += grid;
       }
       placed.add(entry.i.id);
-      const p = targets.get(entry.i.id)!;
-      previous = entry.vertical ? p.position.y : p.position.x;
     }
   }
 }
@@ -222,7 +288,8 @@ export function placeMarkers(
   resolver: SymbolResolver,
   roles: NetRoles,
   targets: Map<string, Placement>,
-  groups: RecognizedGroup[],
+  overrides: LayoutOverrides,
+  choices: LayoutChoices,
 ): void {
   const devices = document.instances
     .filter((i) => !isMarker(i))
@@ -243,6 +310,7 @@ export function placeMarkers(
     resolver,
     roles,
     targets,
-    groups,
+    overrides,
+    choices,
   );
 }

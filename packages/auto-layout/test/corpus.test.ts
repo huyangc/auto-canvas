@@ -16,6 +16,17 @@ import { freedAnnotations } from "../src/labels.js";
 import { terminalPartition } from "../src/transaction.js";
 import { classifyNets } from "../src/net-roles.js";
 import cases from "./corpus-cases.json";
+const targets: Record<string, [number, number]> = {
+  "five-t-ota": [0, 1],
+  "fig-17-19b": [0, 2],
+  "two-inverters": [1, 2],
+  "differential-stage": [0, 0],
+  "common-source": [0, 2],
+  "rc-lowpass": [0, 0],
+  "rc-highpass": [0, 0],
+  rlc: [0, 0],
+  "two-stage-symbolic": [0, 3],
+};
 
 function expectedReanchoredAnnotations(
   document: Parameters<typeof planAutoLayout>[0],
@@ -129,7 +140,10 @@ it.each(cases)(
       expect(resultBox.y).toBeGreaterThanOrEqual(
         oldBox.y - after.presentation.grid / 2,
       );
-    expect(auditRouting(after, resolver).problems).toEqual([]);
+    const audit = auditRouting(after, resolver);
+    expect(audit.problems).toEqual([]);
+    expect(audit.crossings).toBeLessThanOrEqual(targets[fixture.id]![0]);
+    expect(audit.bends).toBeLessThanOrEqual(targets[fixture.id]![1]);
     expect(terminalPartition(after, resolver)).toBe(
       terminalPartition(document, resolver),
     );
@@ -237,7 +251,53 @@ it.each(cases)(
     for (const group of plan.groups) {
       const [left, right] = group.members.map(placed);
       expect(left!.position.y).toBe(right!.position.y);
-      expect(right!.position.x - left!.position.x).toBe(100);
+      const stacked = plan.groups.find(
+        (other) =>
+          other !== group &&
+          other.members.some((id) =>
+            document.nets.some(
+              (n) =>
+                n.terminals.some(
+                  (t) => t.instanceId === id && ["D", "S"].includes(t.pinName),
+                ) &&
+                n.terminals.some(
+                  (t) =>
+                    group.members.includes(t.instanceId) &&
+                    ["D", "S"].includes(t.pinName),
+                ),
+            ),
+          ),
+      );
+      const pitch = right!.position.x - left!.position.x;
+      if (!stacked) expect(pitch).toBe(100);
+      else {
+        const [otherLeft, otherRight] = stacked.members.map(placed);
+        expect(
+          Math.min(pitch, otherRight!.position.x - otherLeft!.position.x),
+        ).toBe(100);
+        const points = pinPoints(after, resolver);
+        for (const net of document.nets) {
+          const own = net.terminals.filter(
+            (t) =>
+              group.members.includes(t.instanceId) &&
+              ["D", "S"].includes(t.pinName),
+          );
+          const other = net.terminals.filter(
+            (t) =>
+              stacked.members.includes(t.instanceId) &&
+              ["D", "S"].includes(t.pinName),
+          );
+          for (const a of own)
+            for (const b of other) {
+              const point = (t: typeof a) =>
+                points.find(
+                  (p) =>
+                    p.instanceId === t.instanceId && p.pinName === t.pinName,
+                )!.point;
+              expect(point(a).x).toBe(point(b).x);
+            }
+        }
+      }
       expect(left!.mirror).toBe(
         group.kind === "differential-pair" ? "none" : "horizontal",
       );
@@ -245,7 +305,12 @@ it.each(cases)(
         group.kind === "differential-pair" ? "horizontal" : "none",
       );
       if (group.tailInstanceId) {
-        expect(placed(group.tailInstanceId).position.x).toBe(
+        const tailPin = pinPoints(after, resolver).find(
+          (p) =>
+            p.instanceId === group.tailInstanceId &&
+            ["D", "+"].includes(p.pinName),
+        )!;
+        expect(tailPin.point.x).toBe(
           (left!.position.x + right!.position.x) / 2,
         );
         expect(placed(group.tailInstanceId).position.y).toBe(
@@ -310,76 +375,97 @@ it.each(cases)(
       }
     if (fixture.id === "common-source")
       expect(placed("RD").position.y).toBeLessThan(placed("XM1").position.y);
-    if (["five-t-ota", "two-inverters"].includes(fixture.id)) {
-      const roles = classifyNets(document, resolver);
-      const devices = after.instances.filter(
-        (i) =>
-          !["port", "port-filled", "ground", "vdd-port"].includes(i.symbolId),
-      );
-      for (const terminal of after.netlist!.terminals)
-        for (const id of terminal.interfaceInstanceIds) {
-          const p = placed(id);
-          if (roles.byNet.get(terminal.netId) === "input") {
-            if (fixture.id === "five-t-ota" && id === "P2") {
-              expect(p.position.x).toBeGreaterThan(
-                Math.max(...devices.map((i) => i.placement!.position.x)),
-              );
-              expect(p.position.y).toBe(
-                pinPoints(after, resolver).find(
-                  (p) => p.instanceId === "M4" && p.pinName === "G",
-                )!.point.y,
-              );
-            } else
-              expect(p.position.x).toBeLessThanOrEqual(
-                Math.min(...devices.map((i) => i.placement!.position.x)),
-              );
-            expect(p.rotation).toBe(0);
-          }
-          if (roles.byNet.get(terminal.netId) === "output") {
-            expect(p.position.x).toBeGreaterThanOrEqual(
-              Math.max(...devices.map((i) => i.placement!.position.x)),
-            );
-            expect(p.rotation).toBe(0);
-            expect(p.mirror).toBe("horizontal");
-          }
-          if (roles.byNet.get(terminal.netId) === "supply")
-            expect(p.rotation).toBe(90);
-          if (roles.byNet.get(terminal.netId) === "ground")
-            expect(p.rotation).toBe(270);
-        }
-    }
     const roles = classifyNets(document, resolver);
     const ports = after.instances.filter((i) =>
       ["port", "port-filled"].includes(i.symbolId),
     );
-    for (const side of ["input", "output", "supply", "ground"]) {
+    const deviceBox = enclosingBox(
+      {
+        ...after,
+        instances: after.instances.filter(
+          (i) =>
+            !["port", "port-filled", "ground", "vdd-port"].includes(i.symbolId),
+        ),
+      },
+      resolver,
+    );
+    const snap = (n: number) =>
+      Math.round(n / after.presentation.grid) * after.presentation.grid;
+    for (const port of ports) {
+      const p = port.placement!;
+      if (p.rotation === 0)
+        expect(p.position.x).toBe(
+          snap(
+            p.mirror === "horizontal"
+              ? deviceBox.x + deviceBox.width + 80
+              : deviceBox.x - 80,
+          ),
+        );
+      else
+        expect(p.rotation).toBe(
+          roles.byNet.get(roles.pinNet(port.id, "P") ?? "") === "supply"
+            ? 90
+            : 270,
+        );
+    }
+    for (const side of ["left", "right", "top", "bottom"]) {
       const members = ports.filter((i) => {
-        const role = roles.byNet.get(roles.pinNet(i.id, "P") ?? "");
-        if (fixture.id === "five-t-ota" && i.id === "P2") return false;
-        return side === "input"
-          ? !["output", "supply", "ground"].includes(role ?? "")
-          : role === side;
+        const p = i.placement!;
+        return side === "top"
+          ? p.rotation === 90
+          : side === "bottom"
+            ? p.rotation === 270
+            : p.rotation === 0 &&
+              (side === "right"
+                ? p.mirror === "horizontal"
+                : p.mirror === "none");
       });
-      const vertical = side === "input" || side === "output";
       const coordinates = members
         .map((i) =>
-          vertical ? i.placement!.position.y : i.placement!.position.x,
+          ["left", "right"].includes(side)
+            ? i.placement!.position.y
+            : i.placement!.position.x,
         )
         .sort((a, b) => a - b);
       for (let n = 1; n < coordinates.length; n++)
         expect(coordinates[n]! - coordinates[n - 1]!).toBeGreaterThanOrEqual(
           40,
         );
-      if (side === "output")
-        for (const i of members)
-          expect(i.placement).toMatchObject({
-            rotation: 0,
-            mirror: "horizontal",
-          });
     }
     const allPins = pinPoints(after, resolver);
     const pin = (id: string, name: string) =>
       allPins.find((p) => p.instanceId === id && p.pinName === name)!.point;
+    if (fixture.id === "five-t-ota") {
+      expect(pin("M2", "D").x).toBe(pin("M3", "D").x);
+      expect(pin("M1", "D").x).toBe(pin("M4", "D").x);
+      const drainNet = roles.pinNet("M4", "D");
+      const drainRoutes = {
+        ...after,
+        routes: after.routes.filter((r) => r.netId === drainNet),
+      };
+      expect(auditRouting(drainRoutes, resolver).bends).toBe(0);
+    }
+    if (fixture.id === "fig-17-19b") {
+      expect(pin("M1", "S").x).toBe(pin("M2", "D").x);
+      for (const port of ports.filter(
+        (i) => roles.byNet.get(roles.pinNet(i.id, "P") ?? "") === "input",
+      )) {
+        const gate = allPins.find(
+          (p) =>
+            p.pinName === "G" &&
+            roles.pinNet(p.instanceId, p.pinName) ===
+              roles.pinNet(port.id, "P"),
+        )!;
+        expect(pin(port.id, "P").y).toBe(gate.point.y);
+      }
+      const outputs = ports.filter(
+        (i) => roles.byNet.get(roles.pinNet(i.id, "P") ?? "") === "output",
+      );
+      expect(outputs.map((i) => i.placement!.mirror).sort()).toEqual([
+        "horizontal",
+        "none",
+      ]);
+    }
     if (["rlc", "common-source"].includes(fixture.id)) {
       const hosts = new Set<string>();
       for (const ground of after.instances.filter(
@@ -443,10 +529,11 @@ it.each(cases)(
       vertical(shunt!, "1", "2");
     }
     if (fixture.id === "two-stage-symbolic") {
+      expect(pin("X7", "IN+").y).toBeLessThan(pin("X7", "IN-").y);
       expect(placed("X7").position.x).toBeLessThan(placed("X8").position.x);
       expect(placed("X7").position.y).toBe(placed("X8").position.y);
-      expect(placed("P13").position.x).toBeLessThan(placed("X7").position.x);
       expect(placed("P12").position.x).toBeGreaterThan(placed("X8").position.x);
+      expect(placed("P13").position.x).toBeLessThan(placed("X7").position.x);
       horizontal("C10");
       expect(placed("C10").position.y).toBe(placed("X7").position.y - 120);
     }
