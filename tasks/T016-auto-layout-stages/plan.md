@@ -81,7 +81,7 @@ Out of scope (do not change):
 
 ## Steps
 
-1. **Spec.** Add R50–R56 to `docs/specs/auto-layout.md`.
+1. **Spec.** Add R50–R59 to `docs/specs/auto-layout.md`.
 
    - **R50 Stages.** A stage is a connected component of devices joined through a
      non-rail Net by DC conducting pins: MOS `D`/`S`, BJT collector and emitter, and
@@ -110,6 +110,22 @@ Out of scope (do not change):
      instances run all three with refinement. Above 40, score stages and layered by
      real routing without refinement and keep the lower. The R44 alternative still
      runs on the winner.
+   - **R57 Signal direction.** R54 does not change when a layout is reversed. After
+     R53, if the mean `x` of the input Cell Pins' host pins is right of the mean `x` of
+     the output Cell Pins' host pins, reverse the stage order and mirror each stage
+     (group handedness kept, as in R53). Crossings stay the same and signal runs left
+     to right. With no inputs or no outputs, keep the order.
+   - **R58 Refine the top two.** Replaces "run all three with refinement" in R55. Route
+     each strategy once without refinement and rank by routed score. Up to 40
+     instances, refine the top two with at most 14 candidates each and keep the lower
+     score; a tie keeps the higher-ranked. Above 40 instances, keep the current rule.
+     An unrefined rank does not predict the refined result: refining only the first
+     broke `ltc3452`'s ceiling (23 against 22; T015 had 19).
+   - **R59 Attached parts.** A single-device stage with one non-rail Net and one rail
+     pin (a shunt capacitor, a load or bias resistor) does not take a column. It stands
+     next to the host pin of its Net, in that stage's own span, below for ground and
+     above for supply, and only widens the stage if it must. This is R9's shunt rule
+     applied to stages.
    - **R56 Spacing.** Stages are at least 80 units apart, and a capacitor between
      them adds its own width. Compact gaps, so a drawing does not sprawl.
 
@@ -163,7 +179,7 @@ Evaluation targets, for **each** of dev and val, over documents completed in bot
 Over all 33 documents:
 
 - at least 32 complete, none throws;
-- no document more than 2 s slower than today, and none above 25 s.
+- no document above 12 s, measured with no other job running.
 
 If a target is missed, report where it stands. Never chase it with a rule for one case.
 

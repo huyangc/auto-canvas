@@ -252,6 +252,53 @@ pins }` lists, never Net ids.
   and refinement choices once with R39 disabled, without another refinement.
   Keep the lower R22 routed score, retaining the selected plan on a tie.
 
+- **R50 — Stages.** A stage is a connected component of devices joined on a
+  non-rail Net through DC conducting pins: MOS D/S, BJT C/E, and both pins of
+  resistors and inductors. Gates, bases and capacitors do not conduct. Recognized
+  group members always merge into one stage. Devices touching only rails or
+  non-conducting pins, including blocks without channel pins, form their own
+  stages. A capacitor joins the stage at its non-rail pin, or bridges two stages
+  under R53.
+- **R51 — Stage layout.** Lay out each stage independently with R30–R33 in
+  local coordinates, preserving templates, symmetry and shared-pin alignment.
+- **R52 — Stage rows.** Stages share rails. Align a stage's top row with the
+  supply when it touches one; otherwise align its bottom row with ground when
+  present. Centre a stage touching neither rail.
+- **R53 — Stage order.** Seed left-to-right order by increasing signal distance.
+  Minimize R54 using adjacent swaps, moving one stage to any position, and
+  horizontally mirroring one stage unless a group forbids it. Repeat until no
+  move improves, for at most five passes. Ties retain the earlier order. A
+  capacitor bridging two stages sits between them, level with its pins.
+- **R54 — Fast estimate.** Without routing, build a Manhattan minimum spanning
+  tree of each non-rail Net's non-bulk pins. Draw each edge as a horizontal-first
+  L path. Count proper crossings between different Nets, plus total Net length
+  divided by 1000 as a tie-break. This estimate is pure, deterministic and fast
+  enough for thousands of calls on 120 instances.
+- **R55 — Stage portfolio.** Stages join R36 as a third strategy at every size.
+  Up to 40 instances, compare all three strategies by real routing. Above 40,
+  compare stages and layered by real routing without refinement. Keep the lower routed score,
+  retaining the earlier strategy on ties. Run R44 once on the winner. This
+  supersedes R34, R36 and R42's strategy and large-document refinement budgets.
+- **R57 — Signal direction.** After R53, compare the mean x coordinates of
+  input and output Cell Pins' host pins. If inputs lie to the right of outputs,
+  reverse the stage order and mirror each stage where group handedness permits.
+  With no input or no output hosts, keep the order.
+- **R58 — Refine the top two.** Route each eligible strategy once without
+  refinement and rank by R22's routed score. Up to 40 instances, refine the top
+  two independently, reusing their initial routed plans, with at most 14
+  candidates each. Keep the lower refined score; ties retain the higher-ranked
+  strategy. Above 40 instances, keep R55's unrefined comparison. R44 runs once
+  on the winner.
+- **R59 — Attached parts.** A single-device stage with one non-rail Net and a
+  rail pin (a shunt capacitor, load or bias resistor) takes no separate column.
+  Place it next to its Net's host pin in the host stage's span, below for ground
+  and above for supply. Widen the host stage only when necessary. Rail shunt
+  capacitors attached under R50 follow the same rule, extending R9 to stages.
+  Keep the vertical rail escapes of hosts and attached parts clear of other
+  parts, including prior attachments; seek another x before widening the stage.
+- **R56 — Stage spacing.** Keep at least 80 units between stage bounds. A
+  bridging capacitor adds its own width to the gap. Compact gaps to avoid sprawl.
+
 - **Existing locks and conflicts.** Members of a locked layout group or
   constraint are treated as fixed instances under R1, because the Edit Engine
   refuses to transform them. A recognized group whose generated id already
