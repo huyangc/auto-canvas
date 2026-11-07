@@ -14,7 +14,7 @@ import { planAutoLayout } from "../src/index.js";
 import { pinPoints, withPlacements } from "../src/geometry.js";
 import { recognizeStructures } from "../src/recognize.js";
 import { refinementMetrics } from "../src/refine.js";
-import { auditRouting } from "../src/routing-audit.js";
+import { auditRouting, floatingPins } from "../src/routing-audit.js";
 import { terminalPartition } from "../src/transaction.js";
 import { circuit } from "./document-fixture.js";
 
@@ -384,4 +384,73 @@ it("moves every member of a grouped tail node to the tail row", () => {
   expect(rows.placements.get("t")!.position.y).toBe(
     rows.placements.get("u")!.position.y,
   );
+});
+
+it("keeps a mirror's pitch when its member is centred under two shared pairs", () => {
+  const d = circuit(
+    {
+      a: "nmos",
+      b: "nmos",
+      c: "nmos",
+      d: "nmos",
+      e: "nmos",
+      t: "nmos",
+      u: "nmos",
+    },
+    {
+      da: ["a.D"],
+      db: ["b.D"],
+      dc: ["c.D"],
+      dd: ["d.D"],
+      ga: ["a.G"],
+      gb: ["b.G"],
+      gc: ["c.G"],
+      gd: ["d.G"],
+      shared: ["a.S", "b.S", "c.S", "d.S", "t.D", "e.G"],
+      bias: ["t.G", "u.G", "u.D"],
+      bottom: ["t.S", "u.S"],
+      de: ["e.D"],
+      es: ["e.S"],
+    },
+  );
+  const roles = classifyNets(d, resolver),
+    groups = recognizeStructures(d, roles);
+  const mirror = groups.find((g) => g.kind === "current-mirror")!;
+  expect([...mirror.members].sort()).toEqual(["t", "u"]);
+  const rows = deviceRows(
+    d,
+    d.instances,
+    resolver,
+    roles,
+    groups,
+    netLevels(d.instances, resolver, roles),
+  );
+  const targets = assignColumns(
+    d,
+    d.instances,
+    resolver,
+    roles,
+    groups,
+    orderRows(rows, d.instances, resolver, roles, groups),
+    rows,
+  );
+  expect(
+    Math.abs(targets.get("t")!.position.x - targets.get("u")!.position.x),
+  ).toBe(100);
+});
+
+it("counts a non-MOS pin named B as a floating pin", () => {
+  const d = circuit({ g: "and-gate", r: "resistor" }, { n: ["g.B", "r.1"] });
+  d.instances.forEach((i, index) => {
+    i.placement = {
+      position: { x: index * 200, y: 0 },
+      rotation: 0,
+      mirror: "none",
+    };
+  });
+  expect(
+    floatingPins(d, resolver)
+      .map((p) => p.pinName)
+      .sort(),
+  ).toEqual(["1", "B"]);
 });

@@ -7,6 +7,7 @@ import {
 import { routeEndpoints, type Point, type SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import { boxesIntersect, draftingBounds } from "./geometry.js";
+import { isMosBulk } from "./net-roles.js";
 
 /** R43: logical membership alone does not draw a connection to another pin. */
 export function floatingPins(
@@ -19,7 +20,7 @@ export function floatingPins(
       resolver.resolve(instance.symbolId, instance.symbolVariantId)?.definition
         .pins ?? []
     )
-      .filter((pin) => pin.name !== "B")
+      .filter((pin) => !isMosBulk(instance.symbolId, pin.name))
       .map((pin) => {
         const ref = { instanceId: instance.id, pinName: pin.name };
         const key = endpointKey({ kind: "terminal", ...ref });
