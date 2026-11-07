@@ -285,10 +285,10 @@ function buildPlan(
   const lost = lostNameClaim(document, final.document);
   if (lost) return refuse(`R10: name claim ${lost} would be lost`);
   const audit = auditRouting(final.document, resolver);
-  const unsafe = audit.problems.filter((p) => !p.includes("drafting"));
-  if (unsafe.length) return refuse(`R10: ${unsafe.join("; ")}`);
+  if (audit.unsafeProblems.length)
+    return refuse(`R10: ${audit.unsafeProblems.join("; ")}`);
   // The router does not know drafting objects; say so rather than hide it.
-  const drafting = audit.problems.filter((p) => p.includes("drafting"));
+  const drafting = audit.draftingProblems;
   return {
     edits,
     groups,
