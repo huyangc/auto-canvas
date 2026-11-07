@@ -62,7 +62,9 @@ call: 5.8 s at 40 instances.
 
 - The nine corpus cases keep their `corpus.test.ts` crossing and bend targets and
   every explicit geometry assertion (pin alignment, `+` above `-`, Vout right).
-- The seven held-out cases keep committing with `unsafeProblems` empty.
+- The seven held-out cases keep committing with `unsafeProblems` empty, and none
+  gets more crossings than at `309a368`: `fd-two-stage` 12, `common-source-ac` 2,
+  `skew` 4, `deadtime` 17, `ota-sky130` 3, `widlar` 5, `ltc3452` 22.
 - R10, R23 and `lostNameClaim` stay as they are: they are why every completed case
   is electrically identical today.
 
@@ -99,7 +101,7 @@ Out of scope (do not change):
    `--baseline <report.json>` adds the before column. Run it now, before any
    placement change, and keep that output as `tmp/auto-layout-eval/baseline.json`.
 
-2. **Spec.** Replace R6 and the placement part of R9 in
+2. **Spec.** Replace R6 and the placement part of R9 (see R36 and R37) in
    `docs/specs/auto-layout.md` with R30–R35. Keep every other rule.
 
    - **R30 Net levels.** Each device contributes vertical constraints between
@@ -131,6 +133,48 @@ Out of scope (do not change):
      Group symmetry wins over median alignment.
    - **R34 Scale.** The instance limit becomes 120. `MAX_CANDIDATES` stays 24 up to
      40 instances and is 8 above that.
+   - **R36 Strategy portfolio.** Up to 40 instances, plan twice: once with the
+     T013 template placement (`rankRows`, templates, R9 fallback, restored from
+     `309a368` as one strategy module) and once with R30–R33, each with its own R22
+     refinement. Return the plan with the lower R22 routed score; a tie goes to the
+     template plan. Above 40 instances, use R30–R33 only. This is how existing
+     results cannot get worse, without a rule per circuit. This supersedes step 3's
+     deletion of `rankRows`.
+   - **R37 Rails.** R30's forced top and bottom, and its passive direction, use
+     rails only: Nets with a VDD or Ground claim or marker, a supply or ground Cell
+     Pin, or R12's MOS supply test (at least two MOS D/S pins). A grounded source
+     driving passives is not a rail. R30–R33 apply only when the document has a
+     transistor channel constraint; otherwise R9 places it.
+   - **R38 Touching pins, generalized.** R25 now covers every Net: any two non-`B`
+     pins that touch in the input and are on one frozen group get one exact,
+     clearance-checked stub after placement, unless placement keeps them touching.
+     Then `reconcileTransformDirectContacts` has nothing to add. This targets the
+     six refusals caused by its unchecked Routes.
+   - **R39 Trunks for high-fanout Nets.** A signal Net with at least three routable
+     pins is planned three ways: as today, with a horizontal trunk at its pins'
+     median `y` spanning them, and with a vertical trunk at the median `x`. Count
+     each candidate's proper crossings with Routes of other Nets already planned,
+     and keep the fewest crossings, then the fewest bends, then the shortest; a tie
+     keeps the order listed. A candidate that throws is dropped. In round 1, Nets
+     with four or more pins took part in 161 of 233 dev crossings.
+   - **R40 Order objective.** R32's sweeps also count Nets inside one row, by span,
+     and Nets crossing more than one row, through a virtual position in each row in
+     between, as in standard layered drawing.
+   - **R41 Integer geometry.** Any point computed through rotation or mirroring is
+     rounded to an integer before use, so no trunk or tap lands at
+     `50.00000000000001`.
+   - **R42 Scale.** `MAX_CANDIDATES` is 24 up to 40 instances, 8 from 41 to 80 and 0
+     above 80.
+   - **R43 No floating rail pins (replaces R12's "remaining membership stays
+     unrouted").** Every non-`B` pin of a rail is drawn connected. A pin with its own
+     marker keeps its stub. All other pins of the rail join one horizontal rail
+     trunk, above the top row for a supply and below the bottom row for ground,
+     together with one marker's host so the marker and trunk are one drawing. Never
+     add an instance to do this. A failure is an R14 warning that names the pins.
+     This applies to rails of every size and to both strategies.
+   - **R44 Routing alternative.** After R36 selects a plan, replan it once with R39
+     off, without refinement, and keep the lower routed score. R39 chooses greedily,
+     Net by Net, and can be worse overall: `8pvqfhsxqr` went from 52 to 73 crossings.
    - **R35 Unchanged small cases.** R7, R8, R18–R26 still apply. Corpus results may
      change only if their targets still hold.
 
@@ -183,9 +227,17 @@ runs:
 - crossings at most half the baseline; bends not above the baseline;
 - every completed document electrically equivalent, with `unsafeProblems` empty.
 
+A **floating pin** is a non-`B` pin that is the only pin of its physical component
+while its Base Net has other pins. The evaluator reports them per document, for
+human drawing and result, and in the totals. Floating pins must reach 0 on the nine
+corpus cases, and on human and held-out cases every remaining one must be a pin
+named in an R14 warning. Drawing these wires will raise crossings against the
+current numbers. That is expected: those wires were missing. Compare against the
+baseline and report both. Never leave a pin floating to protect a crossing count.
+
 Over all 33 documents:
 
-- at least 30 complete;
+- at least 32 complete;
 - no document throws;
 - at most 15 s for the 103-instance case on a developer machine.
 

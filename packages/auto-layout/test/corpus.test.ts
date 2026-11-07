@@ -11,7 +11,7 @@ import { parseProject } from "@icm/project-protocol";
 import { builtInSymbols, createProjectSymbolResolver } from "@icm/symbols";
 import { planAutoLayout } from "../src/index.js";
 import { enclosingBox, pinPoints } from "../src/geometry.js";
-import { auditRouting } from "../src/routing-audit.js";
+import { auditRouting, floatingPins } from "../src/routing-audit.js";
 import { freedAnnotations } from "../src/labels.js";
 import { terminalPartition } from "../src/transaction.js";
 import { classifyNets } from "../src/net-roles.js";
@@ -142,6 +142,7 @@ it.each(cases)(
       );
     const audit = auditRouting(after, resolver);
     expect(audit.problems).toEqual([]);
+    expect(floatingPins(after, resolver)).toEqual([]);
     expect(audit.crossings).toBeLessThanOrEqual(targets[fixture.id]![0]);
     expect(audit.bends).toBeLessThanOrEqual(targets[fixture.id]![1]);
     expect(terminalPartition(after, resolver)).toBe(

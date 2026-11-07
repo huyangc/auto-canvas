@@ -1,3 +1,5 @@
+import { createRoutePath } from "@icm/model";
+import { classifyNets } from "../src/net-roles.js";
 import { expect, it } from "vitest";
 import {
   deriveElectricalTopologyProjection,
@@ -11,11 +13,16 @@ import {
 } from "@icm/edit-engine";
 import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
 import { planAutoLayout } from "../src/index.js";
-import { freezePinGroups } from "../src/route.js";
+import { freezePinGroups, routeDocument } from "../src/route.js";
 import { preview, terminalPartition } from "../src/transaction.js";
-import { draftingBounds, boxesIntersect } from "../src/geometry.js";
+import {
+  draftingBounds,
+  boxesIntersect,
+  pinPoints,
+  transformPoint,
+} from "../src/geometry.js";
 import { visibleInstanceBounds } from "@icm/derived";
-import { auditRouting } from "../src/routing-audit.js";
+import { auditRouting, floatingPins } from "../src/routing-audit.js";
 import { circuit } from "./document-fixture.js";
 
 const resolver = new InMemorySymbolResolver(builtInSymbols);
@@ -203,7 +210,7 @@ it.each([true, false])(
   },
 );
 
-it("refuses two recognized differential pairs sharing a tail with an R7 error", () => {
+it("centres two recognized differential pairs over their shared tail", () => {
   const document = circuit(
     { a: "nmos", b: "nmos", c: "nmos", d: "nmos", tail: "current-source" },
     {
@@ -218,16 +225,23 @@ it("refuses two recognized differential pairs sharing a tail with an R7 error", 
       dg: ["d.G"],
     },
   );
-  expect(planAutoLayout(document, resolver)).toMatchObject({
-    edits: [],
-    diagnostics: [
-      {
-        severity: "error",
-        rule: "R7",
-        message: expect.stringContaining("share tail"),
-      },
-    ],
-  });
+  const plan = planAutoLayout(document, resolver);
+  expect(plan.diagnostics).toEqual([]);
+  const result = preview(document, resolver, plan.edits);
+  expect(result.ok).toBe(true);
+  if (!result.ok) return;
+  const pins = pinPoints(result.document, resolver);
+  const tail = pins.find((p) => p.instanceId === "tail" && p.pinName === "+")!;
+  const placed = result.document.instances;
+  const axis = (a: string, b: string) =>
+    (placed.find((i) => i.id === a)!.placement!.position.x +
+      placed.find((i) => i.id === b)!.placement!.position.x) /
+    2;
+  expect(tail.point.x).toBe((axis("a", "b") + axis("c", "d")) / 2);
+  expect(terminalPartition(result.document, resolver)).toBe(
+    terminalPartition(document, resolver),
+  );
+  expect(auditRouting(result.document, resolver).unsafeProblems).toEqual([]);
 });
 
 it("refuses an oversized complete edit list from a real annotation fixture", () => {
@@ -851,4 +865,245 @@ it("R25 keeps several touching power pins joined through distinct exact stubs", 
   ].map((p) => endpointKey({ kind: "terminal", ...p }));
   expect(new Set(keys.map((k) => physical.get(k))).size).toBe(1);
   expect(auditRouting(result.document, resolver).problems).toEqual([]);
+});
+
+it("R38 keeps touching signal pins physically joined after placement", () => {
+  const document = circuit(
+    { a: "resistor", b: "resistor", c: "resistor" },
+    {
+      signal: ["a.2", "b.1", "c.1"],
+      first: ["a.1"],
+      second: ["b.2"],
+      third: ["c.2"],
+    },
+  );
+  document.instances.forEach((i, index) => {
+    i.placement = {
+      position: { x: 0, y: index ? 40 : 0 },
+      rotation: 0,
+      mirror: "none",
+    };
+  });
+  expect(
+    freezePinGroups(document, resolver).find((g) => g.netId === "signal")!
+      .contacts,
+  ).toHaveLength(3);
+  const plan = planAutoLayout(document, resolver);
+  expect(plan.diagnostics).toEqual([]);
+  const result = preview(document, resolver, plan.edits);
+  expect(result.ok).toBe(true);
+  if (!result.ok) return;
+  const physical = deriveElectricalTopologyProjection(
+    result.document,
+    resolver,
+  ).endpointToPhysicalComponent;
+  const components = ["terminal:a:2", "terminal:b:1", "terminal:c:1"].map(
+    (key) => physical.get(key),
+  );
+  expect(components[0]).toBeDefined();
+  expect(new Set(components).size).toBe(1);
+  expect(terminalPartition(result.document, resolver)).toBe(
+    terminalPartition(document, resolver),
+  );
+  expect(auditRouting(result.document, resolver).unsafeProblems).toEqual([]);
+});
+
+it("R41 rounds a rotated pin before deriving a trunk or stub coordinate", () => {
+  const diagonal = 50 * Math.SQRT2;
+  expect(
+    transformPoint(
+      { x: diagonal, y: 0 },
+      { x: 0, y: 0 },
+      { rotation: 45, mirror: "none" },
+    ),
+  ).toEqual({ x: 50, y: 50 });
+  expect(
+    transformPoint(
+      { x: diagonal, y: 0 },
+      { x: 100, y: 100 },
+      { rotation: 45, mirror: "horizontal" },
+    ),
+  ).toEqual({ x: 50, y: 150 });
+});
+
+it("R39 chooses a vertical signal trunk that removes a crossing with an earlier Net", () => {
+  const document = circuit(
+    {
+      p0: "resistor",
+      p1: "resistor",
+      p2: "resistor",
+      p3: "resistor",
+      f0: "resistor",
+      f1: "resistor",
+    },
+    {
+      signal: ["p0.1", "p1.1", "p2.1", "p3.1"],
+      foreign: ["f0.1", "f1.1"],
+    },
+  );
+  const xy = [
+    [480, 320],
+    [480, 0],
+    [0, 240],
+    [80, 160],
+    [-100, 100],
+    [600, 100],
+  ];
+  document.instances.forEach((i, index) => {
+    const [x, y] = xy[index]!;
+    i.placement = { position: { x: x!, y: y! }, rotation: 0, mirror: "none" };
+  });
+  document.routes.push(
+    createRoutePath({
+      id: "earlier-wire",
+      netId: "foreign",
+      start: { kind: "terminal", instanceId: "f0", pinName: "1" },
+      end: { kind: "terminal", instanceId: "f1", pinName: "1" },
+      bends: [],
+      modes: ["manual"],
+    }),
+  );
+  const frozen = freezePinGroups(document, resolver).filter(
+    (g) => g.netId === "signal",
+  );
+  // The spanning tree crosses the earlier horizontal Net twice. A clear
+  // vertical trunk crosses it once; the horizontal median trunk is obstructed.
+  const result = routeDocument(
+    document,
+    resolver,
+    frozen,
+    classifyNets(document, resolver),
+    [],
+  );
+  expect(result.problem).toBeUndefined();
+  expect(result.diagnostics).toEqual([]);
+  const final = preview(document, resolver, result.edits);
+  expect(final.ok).toBe(true);
+  if (!final.ok) return;
+  const audit = auditRouting(final.document, resolver);
+  expect(audit.unsafeProblems).toEqual([]);
+  expect(audit.crossings).toBe(1);
+  expect(audit.bends).toBe(0);
+  const physical = deriveElectricalTopologyProjection(
+    final.document,
+    resolver,
+  ).endpointToPhysicalComponent;
+  expect(
+    new Set([0, 1, 2, 3].map((i) => physical.get(`terminal:p${i}:1`))).size,
+  ).toBe(1);
+});
+
+it.each(["ground", "supply"] as const)(
+  "R43 joins every unmarked %s pin to the marker host, including small rails",
+  (role) => {
+    for (const count of [2, 6]) {
+      const symbol = role === "ground" ? "ground" : "vdd-port";
+      const markerPin = role === "ground" ? "0" : "P";
+      const channel = role === "ground" ? "S" : "D";
+      const symbols = Object.fromEntries(
+        Array.from({ length: count }, (_, n) => [`m${n}`, "nmos"]),
+      );
+      const document = circuit(
+        { ...symbols, marker: symbol },
+        {
+          rail: [
+            ...Object.keys(symbols).map((id) => `${id}.${channel}`),
+            `marker.${markerPin}`,
+          ],
+        },
+      );
+      document.instances.forEach((instance, index) => {
+        instance.placement = {
+          position: { x: index * 160, y: 0 },
+          rotation: 0,
+          mirror: "none",
+        };
+      });
+      const host = pinPoints(document, resolver).find(
+        (p) => p.instanceId === "m0" && p.pinName === channel,
+      )!;
+      const marker = document.instances.at(-1)!;
+      marker.placement!.position = {
+        x: host.point.x,
+        y: host.point.y + (role === "ground" ? 40 : -40),
+      };
+      const result = routeDocument(
+        document,
+        resolver,
+        freezePinGroups(document, resolver),
+        classifyNets(document, resolver),
+        [],
+      );
+      expect(result.problem).toBeUndefined();
+      expect(result.diagnostics).toEqual([]);
+      const final = preview(document, resolver, result.edits);
+      expect(final.ok).toBe(true);
+      if (!final.ok) continue;
+      expect(floatingPins(final.document, resolver)).toEqual([]);
+      expect(auditRouting(final.document, resolver).unsafeProblems).toEqual([]);
+      expect(terminalPartition(final.document, resolver)).toBe(
+        terminalPartition(document, resolver),
+      );
+      expect(final.document.instances).toEqual(document.instances);
+      const physical = deriveElectricalTopologyProjection(
+        final.document,
+        resolver,
+      ).endpointToPhysicalComponent;
+      expect(
+        new Set(
+          document.nets[0]!.terminals.map((pin) =>
+            physical.get(endpointKey({ kind: "terminal", ...pin })),
+          ),
+        ).size,
+      ).toBe(1);
+    }
+  },
+);
+
+it("counts singleton physical pins despite a wire stub, excluding bulk and true singleton Nets", () => {
+  const document = circuit(
+    { a: "nmos", b: "resistor", c: "resistor", d: "resistor" },
+    {
+      shared: ["a.G", "a.B", "b.1", "c.1"],
+      alone: ["d.1"],
+    },
+  );
+  document.instances.forEach((instance, index) => {
+    instance.placement = {
+      position: { x: index * 160, y: 0 },
+      rotation: 0,
+      mirror: "none",
+    };
+  });
+  document.routes.push(
+    createRoutePath({
+      id: "connected-pair",
+      netId: "shared",
+      start: { kind: "terminal", instanceId: "b", pinName: "1" },
+      end: { kind: "terminal", instanceId: "c", pinName: "1" },
+      bends: [],
+      modes: ["manual"],
+    }),
+  );
+  expect(floatingPins(document, resolver)).toEqual([
+    { instanceId: "a", pinName: "G", netId: "shared" },
+  ]);
+  document.junctions.push({
+    id: "stub-end",
+    netId: "shared",
+    position: { x: -80, y: 0 },
+  });
+  document.routes.push(
+    createRoutePath({
+      id: "isolated-stub",
+      netId: "shared",
+      start: { kind: "terminal", instanceId: "a", pinName: "G" },
+      end: { kind: "junction", junctionId: "stub-end" },
+      bends: [],
+      modes: ["manual"],
+    }),
+  );
+  expect(floatingPins(document, resolver)).toEqual([
+    { instanceId: "a", pinName: "G", netId: "shared" },
+  ]);
 });

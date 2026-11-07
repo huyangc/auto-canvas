@@ -6,13 +6,22 @@ import { parseProject } from "@icm/project-protocol";
 import { builtInSymbols, createProjectSymbolResolver } from "@icm/symbols";
 import { planAutoLayout } from "../src/index.js";
 import { refinementMetrics } from "../src/refine.js";
-import { auditRouting } from "../src/routing-audit.js";
+import { auditRouting, floatingPins } from "../src/routing-audit.js";
 import { freezePinGroups } from "../src/route.js";
 import { terminalPartition, lostNameClaim } from "../src/transaction.js";
 import cases from "./held-out-cases.json";
 
+const crossingLimits: Record<string, number> = {
+  "fd-two-stage": 12,
+  "common-source-ac": 2,
+  skew: 4,
+  deadtime: 17,
+  "ota-sky130": 3,
+  widlar: 5,
+  ltc3452: 22,
+};
 it.each(cases)(
-  "$id: refuses safely or commits with preserved Nets and clear Routes",
+  "$id: commits without exceeding T013 crossings and preserves Nets",
   (fixture) => {
     const project = parseProject(readFileSync(fixture.file, "utf8"));
     const document = project.documents.find(
@@ -26,12 +35,7 @@ it.each(cases)(
     // reports measured time instead.
     expect(refinementMetrics(plan)?.candidates ?? 0).toBeLessThanOrEqual(24);
     const errors = plan.diagnostics.filter((d) => d.severity === "error");
-    if (["fd-two-stage", "common-source-ac", "skew"].includes(fixture.id))
-      expect(errors).toEqual([]);
-    if (errors.length) {
-      expect(plan.edits).toEqual([]);
-      return;
-    }
+    expect(errors).toEqual([]);
     const result = executeTransaction(
       document,
       {
@@ -61,7 +65,18 @@ it.each(cases)(
           component,
         );
       }
-    expect(auditRouting(result.document, resolver).unsafeProblems).toEqual([]);
+    const audit = auditRouting(result.document, resolver);
+    expect(audit.unsafeProblems).toEqual([]);
+    for (const pin of floatingPins(result.document, resolver))
+      expect(
+        plan.diagnostics.some(
+          (d) =>
+            d.rule === "R14" &&
+            d.severity === "warning" &&
+            d.message.includes(`${pin.instanceId}.${pin.pinName}`),
+        ),
+      ).toBe(true);
+    expect(audit.crossings).toBeLessThanOrEqual(crossingLimits[fixture.id]!);
   },
   30000,
 );

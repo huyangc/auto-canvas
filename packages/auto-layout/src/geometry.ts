@@ -5,9 +5,22 @@ import {
   resolveDraftingTextInkBounds,
   resolveDocumentRoutingGeometry,
 } from "@icm/derived";
-import type { DerivedRect, Point, SchematicDocument } from "@icm/model";
+import {
+  transformPoint as modelTransformPoint,
+  type DerivedRect,
+  type Point,
+  type SchematicDocument,
+} from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import type { Placement } from "./types.js";
+
+/** R41: derived symbol transforms must not leak floating point residue. */
+export const integerPoint = (p: Point): Point => ({
+  x: Math.round(p.x),
+  y: Math.round(p.y),
+});
+export const transformPoint: typeof modelTransformPoint = (...args) =>
+  integerPoint(modelTransformPoint(...args));
 
 export const ROW_PITCH = 120;
 export const MEMBER_PITCH = 100;
@@ -65,7 +78,13 @@ export function pinPoints(
         pinName: pin.name,
       });
       return point
-        ? [{ instanceId: instance.id, pinName: pin.name, point }]
+        ? [
+            {
+              instanceId: instance.id,
+              pinName: pin.name,
+              point: integerPoint(point),
+            },
+          ]
         : [];
     }),
   );

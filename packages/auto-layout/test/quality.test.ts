@@ -1,5 +1,8 @@
+import { createRoutePath } from "@icm/model";
+import * as routing from "../src/route.js";
+import * as refinement from "../src/refine.js";
 import { readFileSync } from "node:fs";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import {
   builtInSymbols,
   createProjectSymbolResolver,
@@ -183,24 +186,73 @@ it.each(cases)(
 );
 
 it("R23 refuses a replay Route crossing an Instance and overlapping another Net", () => {
-  const project = parseProject(
-    readFileSync("fixtures/gallery-redline/b5cn37k3a9.icproj.json", "utf8"),
+  const document = circuit(
+    {
+      a: "resistor",
+      b: "resistor",
+      obstacle: "resistor",
+      c: "resistor",
+      d: "resistor",
+    },
+    { first: ["a.1", "b.1"], second: ["c.1", "d.1"] },
   );
-  const document = project.documents.find((d) => d.id === "document-main")!;
-  const resolver = createProjectSymbolResolver(project, builtInSymbols);
-  const run = planLayoutOnce(
-    document,
-    resolver,
-    {},
-    { sides: new Map(), orientations: new Map([["Q1", placement(0, 0)]]) },
-  );
+  const resolver = new InMemorySymbolResolver(builtInSymbols);
+  const positions = [
+    [0, 0],
+    [300, 0],
+    [150, 0],
+    [0, 100],
+    [300, 100],
+  ];
+  document.instances.forEach((i, index) => {
+    i.placement = placement(...(positions[index] as [number, number]));
+  });
+  // Inject an unsafe router result explicitly: both Nets run through the
+  // obstacle and share the horizontal segment. The real final replay/audit
+  // must reject it independently of either placement strategy's geometry.
+  const stub = vi
+    .spyOn(routing, "routeDocument")
+    .mockImplementation((working) => ({
+      document: working,
+      diagnostics: [],
+      edits: [
+        ["a", "b", "first", -20],
+        ["c", "d", "second", 80],
+      ].map(([a, b, net, y]) => ({
+        kind: "set_route_path" as const,
+        route: createRoutePath({
+          id: `unsafe-${net}`,
+          netId: String(net),
+          start: { kind: "terminal", instanceId: String(a), pinName: "1" },
+          end: { kind: "terminal", instanceId: String(b), pinName: "1" },
+          bends: [
+            { x: -40, y: Number(y) },
+            { x: -40, y: 0 },
+            { x: 340, y: 0 },
+            { x: 340, y: Number(y) },
+          ],
+          modes: ["manual", "manual", "manual", "manual", "manual"],
+        }),
+      })),
+    }));
+  let run;
+  try {
+    run = planLayoutOnce(
+      document,
+      resolver,
+      { fixedInstanceIds: new Set(document.instances.map((i) => i.id)) },
+      emptyOverrides(),
+    );
+  } finally {
+    stub.mockRestore();
+  }
   expect(run.result.edits).toEqual([]);
   expect(run.result.diagnostics).toEqual([
     expect.objectContaining({
       severity: "error",
       rule: "R10",
       message: expect.stringMatching(
-        /Route .* crosses Instance R1.*different Nets overlap/,
+        /Route .* crosses Instance obstacle.*different Nets overlap/,
       ),
     }),
   ]);
@@ -321,4 +373,42 @@ it("R25 reserves a later marker's touching host before pairing an earlier marker
   );
   expect(targets.get("g1")!.position.x).toBe(160);
   expect(targets.get("g2")!.position.x).toBe(0);
+});
+
+it("R44 compares one routing-only replay of the selected refined placement", () => {
+  const fixture = cases.find((c) => c.id === "two-inverters")!;
+  const project = parseProject(readFileSync(fixture.file, "utf8"));
+  const document = project.documents.find((d) => d.id === fixture.documentId)!;
+  const resolver = createProjectSymbolResolver(project, builtInSymbols);
+  const routes = vi.spyOn(routing, "routeDocument");
+  const comparison = vi.spyOn(refinement, "selectRoutingAlternative");
+  try {
+    const result = planAutoLayout(document, resolver);
+    expect(routes.mock.calls.filter((call) => call[5] === false)).toHaveLength(
+      1,
+    );
+    expect(routes.mock.calls.at(-1)![5]).toBe(false);
+    expect(comparison).toHaveBeenCalledTimes(1);
+    const [selected, alternative] = comparison.mock.calls[0]!;
+    expect(selected.final).toBeDefined();
+    expect(alternative.final?.instances).toEqual(selected.final!.instances);
+    expect(alternative.choices).toEqual(selected.choices);
+    const committed = preview(document, resolver, result.edits);
+    expect(committed.ok).toBe(true);
+    if (!committed.ok) return;
+    const score = routedScore(
+      { result, choices: emptyChoices(), final: committed.document },
+      resolver,
+    );
+    expect(score).toBe(
+      Math.min(
+        routedScore(selected, resolver),
+        routedScore(alternative, resolver),
+      ),
+    );
+    expect(refinementMetrics(result)).toBeDefined();
+  } finally {
+    routes.mockRestore();
+    comparison.mockRestore();
+  }
 });
