@@ -94,3 +94,14 @@ Human cases, all completed documents, Opus's evaluations:
 The last row is the accepted state. Every round target is met: crossings lower (−0.3%),
 completed 32, bends not above 766, floating pins at most 96. For the stopping rule this
 round counts as **less than 5% improvement**.
+
+## PR review — codex round 1 on `2682237`
+
+One P2, verified by a hand-built test that failed before the fix: with a resistor on
+a transformer's S− and a coupling capacitor on S+, the capacitor's owner was the
+secondary channel component's root stage, which does not draw the transformer. Its
+contact list was empty and the stage strategy failed R10 on a NaN coordinate. Opus
+fixed it in `findStages`: a bridge owner is a device that draws a pin on the Net,
+preferring one in the conducting component. Human-case results are unchanged
+(755 / 766 / 82); package tests 128 pass; format, typecheck, lint (no new warning),
+build and review pass.
