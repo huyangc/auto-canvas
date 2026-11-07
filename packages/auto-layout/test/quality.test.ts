@@ -413,7 +413,7 @@ it("R44 compares one routing-only replay of the selected refined placement", () 
   }
 });
 
-it("R58 routes the portfolio first and refines its top two, reusing their initial routes", () => {
+it("R63 gives the second refinement slot to the next distinct strategy", () => {
   const resolver = new InMemorySymbolResolver(builtInSymbols);
   const document = circuit(
     { v: "voltage-source", r: "resistor", c: "capacitor", g: "ground" },
@@ -423,6 +423,11 @@ it("R58 routes the portfolio first and refines its top two, reusing their initia
       ground: ["c.2", "v.-", "g.0"],
     },
   );
+  const initial = (["template", "layered", "stages"] as const).map((strategy) =>
+    planLayoutOnce(document, resolver, {}, emptyOverrides(), strategy),
+  );
+  expect(initial[0]!.result.edits).toEqual(initial[1]!.result.edits);
+  expect(initial[2]!.result.edits).not.toEqual(initial[0]!.result.edits);
   const search = vi.spyOn(refinement, "refineLayout");
   const routes = vi.spyOn(routing, "routeDocument");
   try {
@@ -431,6 +436,10 @@ it("R58 routes the portfolio first and refines its top two, reusing their initia
       [],
     );
     expect(search).toHaveBeenCalledTimes(2);
+    expect(search.mock.calls.map((call) => call[4]!.result.edits)).toEqual([
+      initial[0]!.result.edits,
+      initial[2]!.result.edits,
+    ]);
     const scores = search.mock.calls.map((call) => {
       expect(call[4]!.final).toBeDefined();
       return routedScore(call[4]!, resolver);
@@ -450,5 +459,157 @@ it("R58 routes the portfolio first and refines its top two, reusing their initia
   } finally {
     search.mockRestore();
     routes.mockRestore();
+  }
+});
+
+it.each(["supply", "ground"] as const)(
+  "R62 keeps duplicate %s Cell Pin artwork clear of its trunk level",
+  (role) => {
+    const resolver = new InMemorySymbolResolver(builtInSymbols);
+    const document = circuit(
+      { host: "resistor", a: "port", b: "port", c: "port" },
+      { rail: ["host.1", "a.P", "b.P", "c.P"] },
+    );
+    const roles = classifyNets(document, resolver);
+    roles.byNet.set("rail", role);
+    roles.rails.set("rail", role);
+    const targets = new Map([["host", placement(0, 0)]]);
+    placeMarkers(
+      document,
+      resolver,
+      roles,
+      targets,
+      emptyOverrides(),
+      emptyChoices(),
+    );
+    const devices = {
+      ...document,
+      instances: document.instances.filter((i) => i.id === "host"),
+    };
+    const bounds = enclosingBox(withPlacements(devices, targets), resolver);
+    const points = pinPoints(withPlacements(document, targets), resolver);
+    const railPins = ["a", "b", "c"].map(
+      (id) => points.find((p) => p.instanceId === id)!.point,
+    );
+    for (const pin of railPins) expect(pin.x).toBeLessThan(bounds.x);
+    expect(railPins[0]!.x).toBeLessThan(railPins[1]!.x);
+    const direction = role === "ground" ? 1 : -1;
+    for (let n = 1; n < railPins.length; n++)
+      expect((railPins[n]!.y - railPins[0]!.y) * direction).toBeGreaterThan(20);
+  },
+);
+
+it("R63 refines identical strategies only once", () => {
+  const resolver = new InMemorySymbolResolver(builtInSymbols);
+  const document = circuit({ r: "resistor" }, { n: ["r.1"] });
+  const initial = (["template", "layered", "stages"] as const).map((strategy) =>
+    planLayoutOnce(document, resolver, {}, emptyOverrides(), strategy),
+  );
+  expect(initial[1]!.result.edits).toEqual(initial[0]!.result.edits);
+  expect(initial[2]!.result.edits).toEqual(initial[0]!.result.edits);
+  const search = vi.spyOn(refinement, "refineLayout");
+  try {
+    const result = planAutoLayout(document, resolver);
+    expect(result.diagnostics.filter((d) => d.severity === "error")).toEqual(
+      [],
+    );
+    expect(search).toHaveBeenCalledTimes(1);
+    expect(search.mock.calls[0]![4]!.result.edits).toEqual(
+      initial[0]!.result.edits,
+    );
+    expect(refinementMetrics(result)!.strategy).toBe("template");
+  } finally {
+    search.mockRestore();
+  }
+});
+
+it("R63 refines an initially refused distinct candidate and lets its repair win", () => {
+  const resolver = new InMemorySymbolResolver(builtInSymbols);
+  const document = circuit(
+    {
+      v: "voltage-source",
+      r: "resistor",
+      c: "capacitor",
+      g: "ground",
+      a: "port",
+      b: "port",
+    },
+    {
+      input: ["v.+", "r.1", "a.P"],
+      output: ["r.2", "c.1", "b.P"],
+      ground: ["c.2", "v.-", "g.0"],
+    },
+  );
+  document.netlist = {
+    name: "fixed-input",
+    formalParameters: [],
+    terminals: [
+      {
+        id: "input",
+        name: "input",
+        netId: "input",
+        direction: "input",
+        interfaceInstanceIds: ["a"],
+      },
+      {
+        id: "output",
+        name: "output",
+        netId: "output",
+        direction: "output",
+        interfaceInstanceIds: ["b"],
+      },
+    ],
+  };
+  document.instances.find((i) => i.id === "a")!.placement = placement(260, 0);
+  const options = { fixedInstanceIds: new Set(["a"]) };
+  const refused = planLayoutOnce(
+    document,
+    resolver,
+    options,
+    emptyOverrides(),
+    "template",
+  );
+  const valid = planLayoutOnce(
+    document,
+    resolver,
+    options,
+    emptyOverrides(),
+    "stages",
+  );
+  expect(routedScore(refused, resolver)).toBe(Infinity);
+  expect(refused.result.diagnostics).toEqual([
+    expect.objectContaining({ severity: "error", rule: "R10" }),
+  ]);
+  expect(Number.isFinite(routedScore(valid, resolver))).toBe(true);
+  const search = vi.spyOn(refinement, "refineLayout");
+  const comparison = vi.spyOn(refinement, "selectRoutingAlternative");
+  try {
+    const result = planAutoLayout(document, resolver, options);
+    expect(search).toHaveBeenCalledTimes(2);
+    expect(
+      search.mock.calls.map((call) => routedScore(call[4]!, resolver)),
+    ).toEqual([routedScore(valid, resolver), Infinity]);
+    const selected = comparison.mock.calls[0]![0];
+    expect(routedScore(selected, resolver)).toBeLessThan(
+      routedScore(valid, resolver),
+    );
+    // Template and layered are both refused; neither is deduplicated, and the
+    // all-refused tie rule ranks layered first. Either repair proves the rule.
+    expect(["template", "layered"]).toContain(
+      refinementMetrics(result)!.strategy,
+    );
+    expect(result.diagnostics.filter((d) => d.severity === "error")).toEqual(
+      [],
+    );
+    const committed = preview(document, resolver, result.edits);
+    expect(committed.ok).toBe(true);
+    if (committed.ok)
+      expect(
+        committed.document.instances.find((i) => i.id === "a")!.placement,
+      ).toEqual(placement(260, 0));
+    expect(planAutoLayout(document, resolver, options)).toEqual(result);
+  } finally {
+    search.mockRestore();
+    comparison.mockRestore();
   }
 });
