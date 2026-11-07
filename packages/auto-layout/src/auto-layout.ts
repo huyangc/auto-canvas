@@ -24,10 +24,15 @@ import { compareIds, recognizeStructures } from "./recognize.js";
 import type {
   AutoLayoutOptions,
   AutoLayoutResult,
+  LayoutStrategy,
   Placement,
 } from "./types.js";
 
-import { emptyChoices, type LayoutOverrides } from "./layout-choices.js";
+import {
+  emptyChoices,
+  emptyOverrides,
+  type LayoutOverrides,
+} from "./layout-choices.js";
 import {
   refineLayout,
   routedScore,
@@ -48,34 +53,55 @@ export function planAutoLayout(
     {
       run: LayoutRun;
       overrides: LayoutOverrides;
-      strategy: "template" | "layered";
+      strategy: LayoutStrategy;
     }
   >();
-  const refine = (strategy: "template" | "layered") =>
-    refineLayout(
-      (overrides) => {
-        const run = planLayoutOnce(
-          document,
-          resolver,
-          options,
-          overrides,
-          strategy,
+  const route = (strategy: LayoutStrategy, overrides: LayoutOverrides) => {
+    const run = planLayoutOnce(
+      document,
+      resolver,
+      options,
+      overrides,
+      strategy,
+    );
+    runs.set(run.result, { run, overrides, strategy });
+    return run;
+  };
+  // R58: rank real unrefined routes, then refine the top two independently.
+  // Valid ties prefer earlier strategies; all-refused ties retain layered so
+  // refinement can recover the same replay as the large-document portfolio.
+  const ranked = (["template", "layered", "stages"] as const)
+    .filter(
+      (strategy) => document.instances.length <= 40 || strategy !== "template",
+    )
+    .map((strategy) => runs.get(route(strategy, emptyOverrides()).result)!)
+    .sort((a, b) => {
+      const first = routedScore(a.run, resolver);
+      const second = routedScore(b.run, resolver);
+      if (!Number.isFinite(first) && !Number.isFinite(second))
+        return (
+          Number(b.strategy === "layered") - Number(a.strategy === "layered")
         );
-        runs.set(run.result, { run, overrides, strategy });
-        return run;
-      },
+      return first - second;
+    });
+  let selected = ranked[0]!;
+  for (const candidate of ranked.slice(
+    0,
+    document.instances.length <= 40 ? 2 : 1,
+  )) {
+    const refined = refineLayout(
+      (overrides) => route(candidate.strategy, overrides),
       resolver,
       fixed,
       document.instances.length,
+      candidate.run,
     );
-  const layered = refine("layered");
-  let selected = runs.get(layered)!;
-  if (document.instances.length <= 40) {
-    const template = runs.get(refine("template"))!;
+    const result = runs.get(refined)!;
     if (
-      routedScore(template.run, resolver) <= routedScore(selected.run, resolver)
+      candidate === ranked[0] ||
+      routedScore(result.run, resolver) < routedScore(selected.run, resolver)
     )
-      selected = template;
+      selected = result;
   }
   // Reuse the selected placement and refinement choices; do not search again.
   const alternative = planLayoutOnce(
@@ -86,7 +112,12 @@ export function planAutoLayout(
     selected.strategy,
     false,
   );
-  return selectRoutingAlternative(selected.run, alternative, resolver);
+  return selectRoutingAlternative(
+    selected.run,
+    alternative,
+    resolver,
+    selected.strategy,
+  );
 }
 
 /** @internal One complete default/candidate plan, also used to verify refinement. */
@@ -95,7 +126,7 @@ export function planLayoutOnce(
   resolver: SymbolResolver,
   options: AutoLayoutOptions,
   overrides: LayoutOverrides,
-  strategy: "template" | "layered" = "template",
+  strategy: LayoutStrategy = "template",
   signalTrunks = true,
 ): LayoutRun {
   const run: LayoutRun = {
@@ -120,7 +151,7 @@ function buildPlan(
   options: AutoLayoutOptions,
   overrides: LayoutOverrides,
   run: LayoutRun,
-  strategy: "template" | "layered",
+  strategy: LayoutStrategy,
   signalTrunks: boolean,
 ): AutoLayoutResult {
   if (document.instances.length > 120)

@@ -44,10 +44,12 @@ const measurements = [];
 const sections = [];
 const metrics = (document, resolver) => {
   const audit = auditRouting(document, resolver);
+  const bounds = buildSvgScene(document, resolver).viewBox;
   return {
     crossings: audit.crossings,
     bends: audit.bends,
     wireLength: audit.wireLength,
+    layoutWidth: Math.ceil(bounds.x + bounds.width) - Math.floor(bounds.x),
     unsafeProblems: audit.unsafeProblems,
     floatingPins: floatingPins(document, resolver),
   };
@@ -92,6 +94,7 @@ for (const file of readdirSync(folder)
     } finally {
       measurement.milliseconds = performance.now() - start;
     }
+    measurement.strategy = refinementMetrics(plan)?.strategy ?? null;
     measurement.candidates = refinementMetrics(plan)?.candidates ?? 0;
     measurement.diagnostics = [...plan.diagnostics];
     const transaction = plan.diagnostics.some((d) => d.severity === "error")
@@ -170,6 +173,7 @@ for (const split of ["dev", "val"]) {
       id: m.id,
       instances: m.instances,
       status: m.status,
+      strategy: m.strategy,
       human: metricText(m.human),
       ...(baseline
         ? {
@@ -202,6 +206,9 @@ for (const split of ["dev", "val"]) {
     crossings: items.reduce((s, m) => s + m.crossings, 0),
     bends: items.reduce((s, m) => s + m.bends, 0),
     wireLength: items.reduce((s, m) => s + m.wireLength, 0),
+    layoutWidth: items.every((m) => Number.isFinite(m.layoutWidth))
+      ? items.reduce((s, m) => s + m.layoutWidth, 0)
+      : null,
     floatingPins: items.every((m) => Array.isArray(m.floatingPins))
       ? items.reduce((s, m) => s + m.floatingPins.length, 0)
       : null,

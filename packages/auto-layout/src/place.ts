@@ -19,10 +19,16 @@ import {
 } from "./layout-choices.js";
 import { placeFallback, orientByWireCost } from "./place-fallback.js";
 import { netLevels, deviceRows, orderRows, assignColumns } from "./layered.js";
+import { placeStages } from "./stages.js";
 import { templatePlacement } from "./template-placement.js";
 import { isMos } from "./net-roles.js";
 import { placeMarkers } from "./place-markers.js";
-import type { AutoLayoutOptions, Placement, RecognizedGroup } from "./types.js";
+import type {
+  AutoLayoutOptions,
+  LayoutStrategy,
+  Placement,
+  RecognizedGroup,
+} from "./types.js";
 
 /** R24: repair unrelated collisions, preserving fixed/template conflicts. */
 function resolveCollisions(
@@ -90,7 +96,7 @@ export function placeDocument(
   options: AutoLayoutOptions,
   overrides: LayoutOverrides = emptyOverrides(),
   choices: LayoutChoices = emptyChoices(),
-  strategy: "template" | "layered" = "template",
+  strategy: LayoutStrategy = "template",
 ): { placements: Map<string, Placement>; problem?: string } {
   let targets = new Map<string, Placement>();
   const devices = document.instances
@@ -127,6 +133,8 @@ export function placeDocument(
     );
     if (result.problem) return result;
     targets = result.placements;
+  } else if (strategy === "stages") {
+    targets = placeStages(document, devices, resolver, roles, templates);
   } else if (
     devices.some((i) => {
       const drain = roles.pinNet(i.id, "D");

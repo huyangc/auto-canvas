@@ -2,6 +2,7 @@ import type { Instance } from "@icm/model";
 import type { SchematicEdit } from "@icm/edit-engine";
 
 export type Placement = NonNullable<Instance["placement"]>;
+export type LayoutStrategy = "template" | "layered" | "stages";
 export type NetRole = "supply" | "ground" | "input" | "output" | "internal";
 export interface AutoLayoutOptions {
   fixedInstanceIds?: ReadonlySet<string>;
