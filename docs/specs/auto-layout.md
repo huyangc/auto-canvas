@@ -33,7 +33,7 @@ AutoLayoutDiagnostic[] }`. Fixed instances retain their exact placements;
 - **R3 — Content and limit.** Recognize NMOS, PMOS, resistors, capacitors,
   inductors (including compact), voltage/current sources, ground, VDD and
   port/filled-port markers. Other symbols, including hierarchy and multi-pin
-  blocks, use the generic fallback. Above 40 instances return no edits and
+  blocks, use the generic fallback. Above 120 instances return no edits and
   one `AUTO_LAYOUT_TOO_LARGE` diagnostic.
 - **R4 — Net roles.** Each Base Net is supply, ground, input, output or
   internal. Supply comes from VDD claims/markers or supply Cell Pin/label
@@ -52,11 +52,6 @@ AutoLayoutDiagnostic[] }`. Fixed instances retain their exact placements;
   Record a MOS D or current-source positive terminal on a pair's shared S
   as its tail. Existing layout groups suppress intersecting new groups.
   New ids are `auto-<kind>-<first member id>`.
-- **R6 — Rows.** With MOS present, rank channel devices from supply toward
-  ground using MOS D/S and two-pin device terminals. Supply-connected
-  devices start at row zero; the next row shares its upper net with the
-  previous row's lower net. Ground-connected devices end their stack.
-  PMOS precede NMOS sharing a drain. Row pitch is 120 units. Without MOS, use R9.
 - **R6a — Power markers.** On each net, sort ground/VDD markers by id and
   prefer the host pin they touch in the input (R25), then pair the remaining
   markers with unused hosts sorted by device id, then x. Use one channel or
@@ -69,24 +64,24 @@ AutoLayoutDiagnostic[] }`. Fixed instances retain their exact placements;
   `none`/`horizontal`; tails lie on the axis one row below. Mirror and
   matched left/right mirrors are `horizontal`/`none`. Place the diode side
   over the left differential member it feeds. Stacked groups share an axis. Two recognized differential pairs sharing one
-  tail return no edits and an R7 diagnostic.
+  tail sit adjacent, with the tail centred between their axes (R32).
 - **R8 — Horizontal flow and Cell Pins.** Order ungrouped row devices by net
   distance from input. Place Cell Pins by R19 and R20, 80 units outside the
   device box. Left pins use rotation 0 and mirror `none`; right pins use
   rotation 0 and mirror `horizontal` to keep labels upright. Top/bottom
   rotations are 90/270. With MOS present, a two-pin device's lower pin takes
   the x of the drain it connects to one row below, when free.
-- **R9 — Fallback.** Unrankable devices, generic blocks and all devices in a
-  Document without MOS follow one horizontal signal row. Columns increase
-  in net distance from input, or a grounded source's positive net when no
-  input exists; column pitch is 160 units. Grounded-negative sources stand
-  vertically in the leftmost columns, positive up. Series two-pin elements
-  with neither pin on power lie horizontally, lower-distance pin left.
-  Shunts with one power pin stand vertically, rotated as their symbol's pin
-  axis requires, in the column just right of their node's driver, below the row for ground or above for supply, signal pin toward
-  the row. Multi-pin blocks sit on the row in distance order. A series
-  element bridging two nets already reached by earlier columns lies
-  horizontally 120 units above the row, centered between its net columns.
+- **R9 — Signal row.** A Document with no transistor channel constraint uses the
+  horizontal signal-row layout: columns increase in net distance from input,
+  or a grounded source's positive net when no input exists; column pitch is
+  160 units. Grounded-negative sources stand vertically in the leftmost
+  columns, positive up. Series two-pin elements with neither pin on power lie
+  horizontally, lower-distance pin left. Shunts with one power pin stand
+  vertically, in the column just right of their node's driver, below the row
+  for ground or above for supply, signal pin toward the row. Multi-pin blocks
+  sit on the row in distance order. A series element bridging two nets already
+  reached by earlier columns lies horizontally 120 units above the row,
+  centered between its net columns.
 - **R10 — Validity.** Origins lie on the Document grid. No pins coincide and
   no visible instance bounds overlap, except ground/VDD markers with their
   host device. With no fixed instances, translate the whole layout by
@@ -107,13 +102,9 @@ AutoLayoutDiagnostic[] }`. Fixed instances retain their exact placements;
   instances unplaced in the result. Route frozen `target: { kind: "pins",
 pins }` lists, never Net ids.
 - **R12 — Power.** Each ground/VDD marker gets one straight stub to its R6a
-  host pin. Never join markers to each other or wire other Net members to
-  those stubs; the remaining membership stays unrouted. A supply Net without
-  a VDD marker or supply Cell Pin, with at least two MOS D/S pins, gets a
-  horizontal trunk 40 units above its topmost device row, spanning its pins,
-  passed as `trunk` to `planRouteNet`. A ground Net without a ground marker
-  or Cell Pin gets the same trunk 40 units below its bottom row. A supply or
-  ground Cell Pin joins its Net through such a trunk, with the Cell Pin on it.
+  host pin. R43 connects every remaining non-bulk rail member through a
+  horizontal trunk, including one marker host to join the marker's drawing.
+  A supply or ground Cell Pin joins its Net through a trunk, with the Cell Pin on it.
   A grounded source driving a passive chain has a supply role under R4 but is
   routed as a signal, so it gets no trunk.
   Re-upsert each name claim owned by a removed Route/Junction power marker
@@ -191,13 +182,75 @@ pins }` lists, never Net ids.
 - **R25 — Touching pins stay joined.** Pins coincident in the input on one
   frozen pin group remain physically joined. A ground/VDD marker uses the pin
   it touches as its R6a host before id-order pairing. Any other touching pair
-  on a power Net left unjoined by R12 becomes an additional exact,
+  on any Net left unjoined by placement becomes an additional exact,
   clearance-checked stub target. Exclude MOS `B` pins. This prevents transform
   reconciliation from adding an unchecked straight Route across other Nets.
 - **R26 — Single-pin power Nets.** A power Net with one routable pin and a
   name claim owned by removed geometry receives one clearance-checked 40-unit
   stub, up for supply and down for ground. Transfer the claim to the stub Route
   under R12 and its label under R15. If no clear stub exists, refuse under R10.
+
+- **R30 — Net levels.** Devices constrain Nets vertically: NMOS D above S,
+  PMOS S above D, and source + above -. Two-pin passives with a rail
+  pin point away from that Net; other passives add no constraint.
+  Supply rails are forced to the top and ground rails to the bottom when present;
+  neither is required. Levels are longest paths. Break cycles deterministically
+  by dropping back edges in id-ordered depth-first search. Missing supply never
+  makes a constrained Document fall into one signal row.
+- **R31 — Rows and orientation.** A device whose channel terminals have
+  different levels occupies its upper Net's row, vertically. Two-pin parts
+  on one level lie horizontally in that row. Gate and block input Nets only
+  pull order and columns. Multi-pin blocks occupy their output Net's row.
+  Row pitch is 120 units. With no transistor channel constraint, R9 is unchanged.
+- **R32 — Order.** A recognized group is one node, with adjacent symmetric
+  members. A vertical channel chain may stay together. Seed rows by signal
+  distance; sweep barycentres down and up over Nets spanning adjacent rows,
+  keeping the fewest net crossings. At most eight sweeps; ties use signal
+  distance then id. Pairs sharing a tail sit adjacent and centre the tail
+  between their axes, replacing the R7 refusal.
+- **R33 — Columns.** Align shared channel pins (R18), longest chains first,
+  in the spirit of Brandes–Köpf. Other devices move toward the median of
+  neighbours' pins subject to order and a 40-unit gap between instance bounds.
+  Group symmetry takes priority over median alignment.
+- **R34 — Scale.** The instance limit is 120. R22 evaluates at most 24
+  candidates per strategy up to 40 instances, eight from 41 to 80, and zero above 80 (R42).
+- **R35 — Small cases.** R7, R8 and R18–R26 still apply. Every corpus target
+  and explicit geometry assertion must continue to hold.
+
+- **R36 — Strategy portfolio.** Up to 40 instances, refine both the T013
+  template placement restored from `309a368` and R30–R33 independently under
+  R22. Select the lower routed score; ties retain the template plan. Above 40
+  instances use layered placement only.
+- **R37 — Rails.** R30 uses only explicit VDD/Ground claims or markers,
+  supply/ground Cell Pins, or R12's supply test with at least two MOS D/S pins.
+  A grounded source driving passives is not a rail. Use R9 unless a transistor
+  channel constraint exists.
+- **R38 — General contacts.** R25 applies to every Net. Any two non-bulk pins
+  touching in the input on one frozen group receive an exact, clearance-checked
+  stub unless they remain touching. Replay reconciliation has no missing
+  contact to materialize.
+- **R39 — Signal trunks.** For signal Nets with at least three routable pins,
+  compare the existing tree, a horizontal trunk spanning the pins at median y,
+  and a vertical trunk at median x. Discard candidates that throw. Minimize
+  proper crossings with previously planned other Nets, then bends, then length;
+  ties retain the listed candidate order.
+- **R40 — Order objective.** Sweeps include same-row Net spans and virtual
+  positions in every intervening row for long Nets.
+- **R41 — Integer geometry.** Round points computed by rotation or mirroring
+  to integers before using them in placement, trunks, taps or stubs.
+- **R42 — Refinement scale.** R22's candidate budget is 24 per strategy up to
+  40 instances, eight from 41 to 80, and zero above 80.
+
+- **R43 — No floating rail pins.** Every non-bulk rail pin is drawn connected.
+  Pins with their own marker keep their stubs. All remaining rail pins join
+  one horizontal trunk above the device rows for supply or below them for
+  ground, together with one marker host. This applies to both strategies and
+  every rail size; never add an instance. Failures produce R14 warnings naming
+  the affected pins. A floating pin is the sole non-bulk pin in its physical
+  component while its Base Net has other non-bulk pins.
+- **R44 — Routing alternative.** After R36 selects a plan, replan its placement
+  and refinement choices once with R39 disabled, without another refinement.
+  Keep the lower R22 routed score, retaining the selected plan on a tie.
 
 - **Existing locks and conflicts.** Members of a locked layout group or
   constraint are treated as fixed instances under R1, because the Edit Engine

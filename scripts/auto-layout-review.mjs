@@ -1,6 +1,9 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { performance } from "node:perf_hooks";
-import { auditRouting } from "../packages/auto-layout/dist/routing-audit.js";
+import {
+  auditRouting,
+  floatingPins,
+} from "../packages/auto-layout/dist/routing-audit.js";
 import { refinementMetrics } from "../packages/auto-layout/dist/refine.js";
 import { terminalPartition } from "../packages/auto-layout/dist/transaction.js";
 import {
@@ -67,11 +70,33 @@ for (const fixture of [...cases, ...heldOut]) {
       );
   const committed = result?.ok && result.applied;
   const diagnostics = [...plan.diagnostics, ...(result?.diagnostics ?? [])];
-  const mustCommit =
-    !held || ["fd-two-stage", "common-source-ac", "skew"].includes(fixture.id);
-  if (!committed && mustCommit) failures++;
+  if (!committed) failures++;
   const after = committed ? result.document : document;
   const audit = committed ? auditRouting(after, resolver) : undefined;
+  const crossingLimits = {
+    "fd-two-stage": 12,
+    "common-source-ac": 2,
+    skew: 4,
+    deadtime: 17,
+    "ota-sky130": 3,
+    widlar: 5,
+    ltc3452: 22,
+  };
+  if (held && audit && audit.crossings > crossingLimits[fixture.id]) failures++;
+  const floating = committed ? floatingPins(after, resolver) : [];
+  if (!held && floating.length) failures++;
+  if (
+    held &&
+    floating.some(
+      (pin) =>
+        !diagnostics.some(
+          (d) =>
+            d.rule === "R14" &&
+            d.message.includes(`${pin.instanceId}.${pin.pinName}`),
+        ),
+    )
+  )
+    failures++;
   const beforeGraph = projectElectricalGraph(project);
   if (committed) {
     const afterGraph = projectElectricalGraph({
@@ -113,6 +138,7 @@ for (const fixture of [...cases, ...heldOut]) {
     crossings: audit?.crossings ?? null,
     bends: audit?.bends ?? null,
     wireLength: audit?.wireLength ?? null,
+    floatingPins: floating,
     diagnostics,
   });
   const boxes = [document, after].map(

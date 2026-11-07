@@ -13,10 +13,11 @@ import {
 import {
   lostNameClaim,
   preview,
+  restoreBulkPins,
   restorePinGroups,
   terminalPartition,
 } from "./transaction.js";
-import { auditRouting } from "./routing-audit.js";
+import { auditRouting, floatingPins } from "./routing-audit.js";
 import { classifyNets } from "./net-roles.js";
 import { placeDocument } from "./place.js";
 import { compareIds, recognizeStructures } from "./recognize.js";
@@ -27,7 +28,12 @@ import type {
 } from "./types.js";
 
 import { emptyChoices, type LayoutOverrides } from "./layout-choices.js";
-import { refineLayout, type LayoutRun } from "./refine.js";
+import {
+  refineLayout,
+  routedScore,
+  selectRoutingAlternative,
+  type LayoutRun,
+} from "./refine.js";
 
 export function planAutoLayout(
   document: SchematicDocument,
@@ -37,11 +43,50 @@ export function planAutoLayout(
   const fixed = new Set(options.fixedInstanceIds);
   for (const owner of [...document.layoutGroups, ...document.constraints])
     if (owner.locked) for (const id of owner.objectIds) fixed.add(id);
-  return refineLayout(
-    (overrides) => planLayoutOnce(document, resolver, options, overrides),
+  const runs = new Map<
+    AutoLayoutResult,
+    {
+      run: LayoutRun;
+      overrides: LayoutOverrides;
+      strategy: "template" | "layered";
+    }
+  >();
+  const refine = (strategy: "template" | "layered") =>
+    refineLayout(
+      (overrides) => {
+        const run = planLayoutOnce(
+          document,
+          resolver,
+          options,
+          overrides,
+          strategy,
+        );
+        runs.set(run.result, { run, overrides, strategy });
+        return run;
+      },
+      resolver,
+      fixed,
+      document.instances.length,
+    );
+  const layered = refine("layered");
+  let selected = runs.get(layered)!;
+  if (document.instances.length <= 40) {
+    const template = runs.get(refine("template"))!;
+    if (
+      routedScore(template.run, resolver) <= routedScore(selected.run, resolver)
+    )
+      selected = template;
+  }
+  // Reuse the selected placement and refinement choices; do not search again.
+  const alternative = planLayoutOnce(
+    document,
     resolver,
-    fixed,
+    options,
+    selected.overrides,
+    selected.strategy,
+    false,
   );
+  return selectRoutingAlternative(selected.run, alternative, resolver);
 }
 
 /** @internal One complete default/candidate plan, also used to verify refinement. */
@@ -50,12 +95,22 @@ export function planLayoutOnce(
   resolver: SymbolResolver,
   options: AutoLayoutOptions,
   overrides: LayoutOverrides,
+  strategy: "template" | "layered" = "template",
+  signalTrunks = true,
 ): LayoutRun {
   const run: LayoutRun = {
     result: { edits: [], groups: [], diagnostics: [] },
     choices: emptyChoices(),
   };
-  run.result = buildPlan(document, resolver, options, overrides, run);
+  run.result = buildPlan(
+    document,
+    resolver,
+    options,
+    overrides,
+    run,
+    strategy,
+    signalTrunks,
+  );
   return run;
 }
 
@@ -65,8 +120,10 @@ function buildPlan(
   options: AutoLayoutOptions,
   overrides: LayoutOverrides,
   run: LayoutRun,
+  strategy: "template" | "layered",
+  signalTrunks: boolean,
 ): AutoLayoutResult {
-  if (document.instances.length > 40)
+  if (document.instances.length > 120)
     return {
       edits: [],
       groups: [],
@@ -75,7 +132,7 @@ function buildPlan(
           severity: "error",
           code: "AUTO_LAYOUT_TOO_LARGE",
           rule: "R3",
-          message: "Auto layout supports at most 40 instances",
+          message: "Auto layout supports at most 120 instances",
         },
       ],
     };
@@ -108,6 +165,7 @@ function buildPlan(
         options,
         overrides,
         run.choices,
+        strategy,
       );
   if (result.problem)
     return {
@@ -159,6 +217,15 @@ function buildPlan(
       `R10: cleanup rejected: ${JSON.stringify(removed.diagnostics)}`,
     );
   edits.push(...restorePinGroups(frozen, removed.document, resolver));
+  // Bulk pins are never routed, but cleanup can split them off all the same.
+  edits.push(
+    ...restoreBulkPins(
+      freezePinGroups(document, resolver, { includeBulk: true }),
+      frozen,
+      removed.document,
+      resolver,
+    ),
+  );
   const cleanupLength = edits.length;
   for (const group of groups)
     edits.push({
@@ -245,6 +312,7 @@ function buildPlan(
     frozen,
     roles,
     structures,
+    signalTrunks,
   );
   if (routed.problem) return refuse(routed.problem);
   edits.push(...routed.edits);
@@ -289,11 +357,36 @@ function buildPlan(
     return refuse(`R10: ${audit.unsafeProblems.join("; ")}`);
   // The router does not know drafting objects; say so rather than hide it.
   const drafting = audit.draftingProblems;
+  const floating = floatingPins(final.document, resolver);
+  const floatingWarnings = [...new Set(floating.map((p) => p.netId))].flatMap(
+    (netId) => {
+      const pins = floating
+        .filter((p) => p.netId === netId)
+        .map((p) => `${p.instanceId}.${p.pinName}`);
+      if (
+        pins.every((pin) =>
+          routed.diagnostics.some(
+            (d) => d.rule === "R14" && d.message.includes(pin),
+          ),
+        )
+      )
+        return [];
+      return [
+        {
+          severity: "warning" as const,
+          code: "AUTO_LAYOUT_NET_UNROUTED",
+          rule: "R14",
+          message: `Net ${netId}: floating pins: ${pins.join(", ")}`,
+        },
+      ];
+    },
+  );
   return {
     edits,
     groups,
     diagnostics: [
       ...routed.diagnostics,
+      ...floatingWarnings,
       ...drafting.map((message) => ({
         severity: "warning" as const,
         code: "AUTO_LAYOUT_DRAFTING_OVERLAP",

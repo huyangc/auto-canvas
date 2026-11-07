@@ -14,6 +14,8 @@ export function isMos(symbolId: string): boolean {
 
 export interface NetRoles {
   byNet: Map<string, NetRole>;
+  /** R37: explicit power intent or the R12 multi-channel supply test. */
+  rails: Map<string, "supply" | "ground">;
   pinNet: (instanceId: string, pinName: string) => string | undefined;
 }
 
@@ -79,6 +81,9 @@ export function classifyNets(
         byNet.set(net, instance.symbolId === "ground" ? "ground" : "supply");
     }
   }
+  const rails = new Map<string, "supply" | "ground">();
+  for (const [net, role] of byNet)
+    if (role === "supply" || role === "ground") rails.set(net, role);
   for (const instance of document.instances) {
     if (instance.symbolId !== "voltage-source") continue;
     const positive = pinNet(instance.id, "+");
@@ -91,5 +96,12 @@ export function classifyNets(
     )
       byNet.set(positive, "supply");
   }
-  return { byNet, pinNet };
+  for (const [net, role] of byNet) {
+    if (role !== "supply" && role !== "ground") continue;
+    const channels = document.instances
+      .filter((i) => isMos(i.symbolId))
+      .flatMap((i) => ["D", "S"].filter((p) => pinNet(i.id, p) === net));
+    if (channels.length >= 2) rails.set(net, role);
+  }
+  return { byNet, rails, pinNet };
 }
