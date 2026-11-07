@@ -142,8 +142,12 @@ export function findStages(
       const net = roles.pinNet(i.id, p.name);
       if (!net || roles.rails.has(net)) return [];
       const channel = channels.get(net)?.[0];
-      const owner =
-        channel === undefined ? allPins.get(net)?.[0] : nodes[find(channel)];
+      // The owner must draw a pin on this Net. A transformer's secondary
+      // component can be rooted in a stage that does not hold its artwork.
+      const head = channel === undefined ? undefined : nodes[find(channel)];
+      const component = head === undefined ? undefined : root(head);
+      const pinned = allPins.get(net) ?? [];
+      const owner = pinned.find((id) => root(id) === component) ?? pinned[0];
       return owner ? [{ net, owner: root(owner) }] : [];
     });
     if (contacts.length === 2 && contacts[0]!.owner !== contacts[1]!.owner) {
