@@ -562,3 +562,35 @@ it("R60 conducts through a magnetic device's shared tap without an external tap 
     ["a", "b", "coil"],
   ]);
 });
+
+it("R60 attaches a secondary-side bridge to the stage that draws the transformer", () => {
+  const d = circuit(
+    {
+      transformer: "xfmr",
+      p: "resistor",
+      s: "resistor",
+      c: "capacitor",
+      m: "nmos",
+      r: "resistor",
+    },
+    {
+      primary: ["transformer.P+", "p.1"],
+      primaryReturn: ["transformer.P-", "p.2"],
+      secondaryMinus: ["transformer.S-", "s.1"],
+      secondaryPlus: ["transformer.S+", "c.1"],
+      coupled: ["c.2", "m.G"],
+      drain: ["m.D", "r.1"],
+    },
+  );
+  const { stages, bridges, roles, groups } = stagesOf(d);
+  const owner = stages.find((s) =>
+    s.devices.some((i) => i.id === "transformer"),
+  )!.id;
+  expect(bridges.map((b) => b.device.id)).toEqual(["c"]);
+  expect(bridges[0]!.owners).toContain(owner);
+  const targets = placeStages(d, d.instances, resolver, roles, groups);
+  for (const p of targets.values()) {
+    expect(Number.isFinite(p.position.x)).toBe(true);
+    expect(Number.isFinite(p.position.y)).toBe(true);
+  }
+});
