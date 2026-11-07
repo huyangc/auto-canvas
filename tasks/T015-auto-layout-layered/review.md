@@ -114,3 +114,12 @@ passed; deadcode finds nothing under auto-layout; review script → 0.
 
 Known limit for T014: the slowest document takes about 14 s, so the editor must
 not run the planner on the main thread.
+
+## PR review round 2 — P2 findings fixed by Opus
+
+Round 2 on `2662659` raised two P2 findings. Opus verified both and fixed them.
+
+| Finding                                                                                                      | Fix                                                                   | Check                                                   |
+| ------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------- | ------------------------------------------------------- |
+| Centring a shared tail that is also a mirror member moved only the tail, leaving origins 150 units apart     | The whole group translates                                            | The test reproduces 150 without the fix and 100 with it |
+| `floatingPins` skipped every pin named `B`, including `and-gate.B`, so real disconnected pins went uncounted | New `isMosBulk`, also used by the three same mistakes in `layered.ts` | The test fails with the audit fix reverted              |
