@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@icm/derived": "workspace:*",
+    "@icm/devices": "workspace:*",
     "@icm/edit-engine": "workspace:*",
     "@icm/model": "workspace:*",
     "@icm/symbols": "workspace:*"

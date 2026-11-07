@@ -445,3 +445,120 @@ it.each(["ground", "supply"] as const)(
     expect(geometryProblem(placed, resolver)).toBeUndefined();
   },
 );
+
+it("R60 keeps series switches out of channel stages", () => {
+  const d = withRails(
+    circuit(
+      { a: "ideal-switch", b: "closed-switch", m: "nmos", r: "resistor" },
+      {
+        input: ["a.1"],
+        middle: ["a.2", "b.1", "m.D"],
+        output: ["b.2", "r.1"],
+        gnd: ["m.S"],
+      },
+    ),
+  );
+  const stages = stagesOf(d).stages.map((s) => s.devices.map((i) => i.id));
+  for (const id of ["a", "b"])
+    expect(stages.find((s) => s.includes(id))).toEqual([id]);
+});
+
+it("R60 treats a variable capacitor as a bridge between conducting stages", () => {
+  const d = twoStages(true);
+  d.instances.find((i) => i.id === "c")!.symbolId = "variable-capacitor";
+  for (const net of d.nets)
+    for (const terminal of net.terminals)
+      if (terminal.instanceId === "c")
+        terminal.pinName = terminal.pinName === "1" ? "P1" : "P2";
+  const { stages, bridges } = stagesOf(d);
+  expect(stages.map((s) => s.devices.map((i) => i.id))).toEqual([
+    ["a", "ra"],
+    ["b", "rb"],
+  ]);
+  expect(bridges.map((b) => b.device.id)).toEqual(["c"]);
+});
+
+it("R60 conducts through a diode but not through a controlled switch", () => {
+  const d = circuit(
+    {
+      a: "externally-controlled-switch",
+      p: "resistor",
+      n: "diode",
+      control: "variable-resistor",
+    },
+    {
+      positive: ["a.P", "p.1"],
+      negative: ["a.N", "n.A"],
+      link: ["n.K", "p.2"],
+      control: ["a.CTRL", "control.P1"],
+    },
+  );
+  const stages = stagesOf(d).stages.map((s) => s.devices.map((i) => i.id));
+  expect(stages).toContainEqual(["n", "p"]);
+  expect(stages.find((s) => s.includes("a"))).toEqual(["a"]);
+});
+
+it("R60 joins each transformer winding without merging the isolated stages", () => {
+  const d = circuit(
+    {
+      transformer: "xfmr",
+      a: "resistor",
+      b: "resistor",
+      c: "resistor",
+      d: "resistor",
+    },
+    {
+      primaryMinus: ["transformer.P-", "a.1"],
+      primaryPlus: ["transformer.P+", "b.1"],
+      secondaryMinus: ["transformer.S-", "c.1"],
+      secondaryPlus: ["transformer.S+", "d.1"],
+    },
+  );
+  expect(stagesOf(d).stages.map((s) => s.devices.map((i) => i.id))).toEqual([
+    ["a", "b", "transformer"],
+    ["c", "d"],
+  ]);
+});
+
+it("R55 bounds and repeats planning of a 60-instance document", () => {
+  const symbols: Record<string, string> = {};
+  const nets: Record<string, string[]> = {};
+  for (let n = 0; n < 20; n++) {
+    symbols[`m${n}`] = "nmos";
+    symbols[`r${n}`] = "resistor";
+    symbols[`port${n}`] = "port";
+    nets[`signal${n}`] = [`m${n}.G`, `port${n}.P`];
+    nets[`channel${n}`] = [`m${n}.D`, `r${n}.1`];
+  }
+  const d = circuit(symbols, nets);
+  d.netlist = {
+    name: "large",
+    formalParameters: [],
+    terminals: Array.from({ length: 20 }, (_, n) => ({
+      id: `terminal${n}`,
+      name: `input${n}`,
+      netId: `signal${n}`,
+      direction: "input" as const,
+      interfaceInstanceIds: [`port${n}`],
+    })),
+  };
+  const before = JSON.stringify(d);
+  const plan = planAutoLayout(d, resolver);
+  expect(plan.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
+  const metrics = refinementMetrics(plan)!;
+  expect(metrics.candidates).toBe(0);
+  const repeated = planAutoLayout(d, resolver);
+  expect(repeated).toEqual(plan);
+  expect(refinementMetrics(repeated)).toEqual(metrics);
+  expect(JSON.stringify(d)).toBe(before);
+}, 30000);
+
+it("R60 conducts through a magnetic device's shared tap without an external tap Net", () => {
+  const d = circuit(
+    { a: "resistor", b: "resistor", coil: "center-tap-inductor" },
+    { left: ["a.1", "coil.1"], right: ["b.1", "coil.2"] },
+  );
+  expect(stagesOf(d).stages.map((s) => s.devices.map((i) => i.id))).toEqual([
+    ["a", "b", "coil"],
+  ]);
+});

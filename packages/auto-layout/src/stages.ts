@@ -1,3 +1,4 @@
+import { deviceDescriptor, drawnMagneticNetwork } from "@icm/devices";
 import { visibleInstanceBounds } from "@icm/derived";
 import {
   reflectOrientation,
@@ -10,20 +11,54 @@ import type { SymbolResolver } from "@icm/symbols";
 import { createPlacementEstimator } from "./estimate.js";
 import { boxesIntersect, transformPoint, withPlacements } from "./geometry.js";
 import { assignColumns, deviceRows, netLevels, orderRows } from "./layered.js";
-import { isMos, isMosBulk, type NetRoles } from "./net-roles.js";
+import { isMosBulk, type NetRoles } from "./net-roles.js";
 import { devicePins, signalDistances } from "./placement-connectivity.js";
 import { compareIds } from "./recognize.js";
 import type { Placement, RecognizedGroup } from "./types.js";
 
-const isCapacitor = (i: Instance) => /^capacitor(?:-|$)/u.test(i.symbolId);
-const conductingPins = (i: Instance, resolver: SymbolResolver) =>
-  devicePins(i, resolver).filter((p) =>
-    isMos(i.symbolId)
-      ? ["D", "S"].includes(p.name)
-      : ["npn", "pnp"].includes(i.symbolId)
-        ? ["C", "E"].includes(p.name)
-        : /^(?:resistor|inductor)(?:-|$)/u.test(i.symbolId),
-  );
+const isCapacitor = (i: Instance) =>
+  deviceDescriptor(i.symbolId)?.deviceClass === "capacitor";
+
+/** R60: descriptor order defines main terminals and paired inductor windings. */
+function conductingPairs(i: Instance): readonly (readonly string[])[] {
+  const descriptor = deviceDescriptor(i.symbolId);
+  if (!descriptor) return [];
+  switch (descriptor.deviceClass) {
+    case "mos":
+      return [["D", "S"]];
+    case "bjt":
+      return [["C", "E"]];
+    case "resistor":
+    case "diode":
+      return [descriptor.pinOrder.slice(0, 2)];
+    case "inductor": {
+      const network = drawnMagneticNetwork(descriptor);
+      if (!network)
+        return descriptor.pinOrder.length === 2 ? [descriptor.pinOrder] : [];
+      const pins = new Map(network.ports.map((p) => [p.port, p.pinName]));
+      return network.windings.map((w) => [
+        pins.get(w.dotted)!,
+        pins.get(w.undotted)!,
+      ]);
+    }
+    // Switches do not conduct yet: a merged switch network gets no channel
+    // levels in R30 and packs into one row (T017 review, round 2).
+    case "switch":
+    case "capacitor":
+    case "cccs":
+    case "ccvs":
+    case "current-source":
+    case "net-marker":
+    case "vccs":
+    case "vcvs":
+    case "voltage-source":
+      return [];
+  }
+}
+const conductingPins = (i: Instance, resolver: SymbolResolver) => {
+  const names = conductingPairs(i).flat();
+  return devicePins(i, resolver).filter((p) => names.includes(p.name));
+};
 interface Stage {
   id: string;
   devices: Instance[];
@@ -43,29 +78,48 @@ export function findStages(
   groups: RecognizedGroup[],
 ): { stages: Stage[]; bridges: Bridge[] } {
   const ordered = [...devices].sort((a, b) => compareIds(a.id, b.id));
-  const parent = new Map(ordered.map((i) => [i.id, i.id]));
-  const root = (id: string): string => {
-    const p = parent.get(id)!;
-    if (p === id) return id;
-    const r = root(p);
-    parent.set(id, r);
-    return r;
+  // Primary nodes precede extra windings, so every populated component has a
+  // real device owner. A transformer is drawn once, in its primary's stage;
+  // its secondary still joins secondary-side devices without shorting stages.
+  const nodes = ordered.map((i) => i.id);
+  const primary = new Map(nodes.map((id, index) => [id, index]));
+  const pairs = new Map(ordered.map((i) => [i.id, conductingPairs(i)]));
+  const channels = new Map<string, number[]>();
+  const parent = nodes.map((_, index) => index);
+  const find = (id: number): number => {
+    if (parent[id] !== id) parent[id] = find(parent[id]!);
+    return parent[id]!;
   };
-  const join = (a: string, b: string) => {
-    const x = root(a),
-      y = root(b);
-    parent.set(compareIds(x, y) < 0 ? y : x, compareIds(x, y) < 0 ? x : y);
+  const union = (a: number, b: number) => {
+    const x = find(a),
+      y = find(b);
+    parent[Math.max(x, y)] = Math.min(x, y);
   };
-  const channels = new Map<string, string[]>();
-  for (const i of ordered)
-    for (const p of conductingPins(i, resolver)) {
-      const net = roles.pinNet(i.id, p.name);
-      if (!net || roles.rails.has(net)) continue;
-      if (!channels.has(net)) channels.set(net, []);
-      const members = channels.get(net)!;
-      if (members.length) join(members[0]!, i.id);
-      members.push(i.id);
+  const root = (id: string) => nodes[find(primary.get(id)!)]!;
+  const join = (a: string, b: string) =>
+    union(primary.get(a)!, primary.get(b)!);
+  for (const i of ordered) {
+    const windingPins = new Map<string, number>();
+    for (const [index, pins] of pairs.get(i.id)!.entries()) {
+      const node = index === 0 ? primary.get(i.id)! : nodes.length;
+      if (index > 0) {
+        nodes.push(i.id);
+        parent.push(node);
+      }
+      for (const name of pins) {
+        // A shared tap connects windings even without an external Net on it.
+        const shared = windingPins.get(name);
+        if (shared !== undefined) union(shared, node);
+        else windingPins.set(name, node);
+        const net = roles.pinNet(i.id, name);
+        if (!net || roles.rails.has(net)) continue;
+        if (!channels.has(net)) channels.set(net, []);
+        const members = channels.get(net)!;
+        if (members.length) union(members[0]!, node);
+        members.push(node);
+      }
     }
+  }
   for (const g of groups)
     for (const id of [
       ...g.members.slice(1),
@@ -87,7 +141,9 @@ export function findStages(
     const contacts = devicePins(i, resolver).flatMap((p) => {
       const net = roles.pinNet(i.id, p.name);
       if (!net || roles.rails.has(net)) return [];
-      const owner = (channels.get(net) ?? allPins.get(net))?.[0];
+      const channel = channels.get(net)?.[0];
+      const owner =
+        channel === undefined ? allPins.get(net)?.[0] : nodes[find(channel)];
       return owner ? [{ net, owner: root(owner) }] : [];
     });
     if (contacts.length === 2 && contacts[0]!.owner !== contacts[1]!.owner) {

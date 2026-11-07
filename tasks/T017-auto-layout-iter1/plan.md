@@ -112,6 +112,41 @@ Out of scope: everything T016 excluded.
    - six rendered pairs, including both largest documents and a switched-capacitor
      one.
 
+### Round 2 amendment
+
+Added after round 1's review (see `review.md`). Keep R60 and R62 as implemented.
+
+6. **R63 Distinct, repairable portfolio.** In `planAutoLayout`
+   (`src/auto-layout.ts:73-105`):
+   - Drop a strategy whose initial edits equal those of an earlier strategy in the
+     fixed order `template`, `layered`, `stages`. Compare edits exactly.
+   - Rank the remaining candidates as today. Refine the best two. A refused initial
+     candidate may take the second slot when fewer than two valid distinct
+     candidates exist. It may also take the first slot when every candidate is
+     refused, as today.
+   - Refine no more candidates than today: two up to 40 instances, one above.
+   - Keep the result deterministic and keep R44.
+
+   Tests, hand-built: identical strategies are refined once, and the second slot
+   goes to the next distinct candidate. A candidate refused initially but
+   repairable by refinement is refined and can win.
+
+7. **Remove R61.** Restore zero refinement above 40 instances (`src/refine.ts`). Delete
+   R61 from the spec and record why: no measurable benefit in round 1. Change the
+   60-instance test so it checks only that the result is bounded and deterministic.
+
+8. **Investigate merged switch stages.** With R60, a switch network and its MOS
+   devices form one stage of 13–16 devices. Its layered in-stage placement gives more
+   crossings than the old single-device stages. Find out why, from dev documents
+   only, and report it.
+   - Fix it only if one general placement mechanism removes the cause, for example
+     ordering inside a stage.
+   - Otherwise change nothing.
+   - Never split stages by device class.
+
+Report round 2 like round 1, against both `tmp/t016-final-eval.json` and round 1
+(783 / 817 / 79). Also give the effect of step 6 alone.
+
 ## Acceptance
 
 Run from the repository root; all must pass.

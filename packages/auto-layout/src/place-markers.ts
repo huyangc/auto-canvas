@@ -194,6 +194,7 @@ function placeCellPins(
         i,
         side,
         vertical,
+        net,
         count: connected.length,
         coordinate: snap(vertical ? host.y : host.x),
       };
@@ -226,7 +227,21 @@ function placeCellPins(
     for (const entry of members.sort(
       (a, b) => a.coordinate - b.coordinate || compareIds(a.i.id, b.i.id),
     )) {
-      const along = entry.coordinate;
+      const railPins = members
+        .filter((other) => other.net === entry.net)
+        .sort((a, b) => compareIds(a.i.id, b.i.id));
+      const rank = railPins.indexOf(entry);
+      const along = entry.vertical
+        ? entry.coordinate
+        : snap(
+            box.x -
+              CELL_PIN_OFFSET -
+              (railPins.length - 1 - rank) * CELL_PIN_SPACING,
+          );
+      // R62: duplicate rail Cell Pins must not sit on the same trunk level.
+      // The first pin in routing order stays nearest the devices; later pins
+      // step outward so their artwork cannot block that pin's horizontal trunk.
+      const outward = entry.vertical ? 0 : rank * CELL_PIN_SPACING;
       const x = entry.vertical
         ? snap(
             side === "right"
@@ -238,8 +253,8 @@ function placeCellPins(
         ? along
         : snap(
             side === "top"
-              ? box.y - CELL_PIN_OFFSET
-              : box.y + box.height + CELL_PIN_OFFSET,
+              ? box.y - CELL_PIN_OFFSET - outward
+              : box.y + box.height + CELL_PIN_OFFSET + outward,
           );
       targets.set(
         entry.i.id,
