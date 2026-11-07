@@ -55,6 +55,7 @@ for (const fixture of [...cases, ...heldOut]) {
   const start = performance.now();
   const plan = planAutoLayout(document, resolver);
   const milliseconds = performance.now() - start;
+  const strategy = refinementMetrics(plan)?.strategy;
   const result = plan.diagnostics.some((d) => d.severity === "error")
     ? undefined
     : executeTransaction(
@@ -129,6 +130,7 @@ for (const fixture of [...cases, ...heldOut]) {
   measurements.push({
     section: held ? "held-out" : "corpus",
     baseline: baseline.cases.find((c) => c.id === fixture.id),
+    strategy,
     candidates: refinement?.candidates ?? 0,
     score: Number.isFinite(refinement?.score) ? refinement.score : null,
     id: fixture.id,
@@ -189,6 +191,7 @@ console.table(
     "after crossings/bends/length":
       m.crossings == null ? "—" : `${m.crossings}/${m.bends}/${m.wireLength}`,
     score: m.score ?? "—",
+    strategy: m.strategy,
     candidates: m.candidates,
     ms: m.milliseconds.toFixed(1),
   })),

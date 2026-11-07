@@ -412,3 +412,43 @@ it("R44 compares one routing-only replay of the selected refined placement", () 
     comparison.mockRestore();
   }
 });
+
+it("R58 routes the portfolio first and refines its top two, reusing their initial routes", () => {
+  const resolver = new InMemorySymbolResolver(builtInSymbols);
+  const document = circuit(
+    { v: "voltage-source", r: "resistor", c: "capacitor", g: "ground" },
+    {
+      input: ["v.+", "r.1"],
+      output: ["r.2", "c.1"],
+      ground: ["c.2", "v.-", "g.0"],
+    },
+  );
+  const search = vi.spyOn(refinement, "refineLayout");
+  const routes = vi.spyOn(routing, "routeDocument");
+  try {
+    const result = planAutoLayout(document, resolver);
+    expect(result.diagnostics.filter((d) => d.severity === "error")).toEqual(
+      [],
+    );
+    expect(search).toHaveBeenCalledTimes(2);
+    const scores = search.mock.calls.map((call) => {
+      expect(call[4]!.final).toBeDefined();
+      return routedScore(call[4]!, resolver);
+    });
+    expect(scores[0]).toBeLessThanOrEqual(scores[1]!);
+    let candidates = 0;
+    for (const call of search.mock.results) {
+      const count = refinementMetrics(call.value)!.candidates;
+      expect(count).toBeLessThanOrEqual(14);
+      candidates += count;
+    }
+    expect(routes).toHaveBeenCalledTimes(4 + candidates);
+    expect(
+      routes.mock.calls.slice(0, 3).every((call) => call[5] === true),
+    ).toBe(true);
+    expect(routes.mock.calls.at(-1)![5]).toBe(false);
+  } finally {
+    search.mockRestore();
+    routes.mockRestore();
+  }
+});

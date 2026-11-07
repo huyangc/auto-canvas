@@ -8,7 +8,7 @@ import {
 import { classifyNets } from "./net-roles.js";
 import { auditRouting } from "./routing-audit.js";
 import { compareIds } from "./recognize.js";
-import type { AutoLayoutResult } from "./types.js";
+import type { AutoLayoutResult, LayoutStrategy } from "./types.js";
 
 const UNROUTED_WEIGHT = 10000;
 const CROSSING_WEIGHT = 1000;
@@ -16,7 +16,7 @@ const OFF_CONVENTION_WEIGHT = 300;
 const BEND_WEIGHT = 100;
 const WIRE_LENGTH_DIVISOR = 10;
 const MAX_PASSES = 2;
-const MAX_CANDIDATES = 24;
+const MAX_CANDIDATES = 14;
 
 export interface LayoutRun {
   result: AutoLayoutResult;
@@ -25,7 +25,7 @@ export interface LayoutRun {
 }
 const measurements = new WeakMap<
   AutoLayoutResult,
-  { candidates: number; score: number }
+  { candidates: number; score: number; strategy?: LayoutStrategy }
 >();
 /** @internal Review tooling measures the bounded search without changing the API. */
 export function refinementMetrics(result: AutoLayoutResult) {
@@ -37,14 +37,17 @@ export function selectRoutingAlternative(
   current: LayoutRun,
   alternative: LayoutRun,
   resolver: SymbolResolver,
+  strategy?: LayoutStrategy,
 ): AutoLayoutResult {
   const score = routedScore(alternative, resolver);
-  if (score >= routedScore(current, resolver)) return current.result;
-  measurements.set(alternative.result, {
+  const selected =
+    score < routedScore(current, resolver) ? alternative : current;
+  measurements.set(selected.result, {
     candidates: measurements.get(current.result)?.candidates ?? 0,
-    score,
+    score: routedScore(selected, resolver),
+    ...(strategy ? { strategy } : {}),
   });
-  return alternative.result;
+  return selected.result;
 }
 /** @internal Shared by refinement and its behavioral tests. */
 export function routedScore(run: LayoutRun, resolver: SymbolResolver): number {
@@ -77,11 +80,11 @@ export function refineLayout(
   resolver: SymbolResolver,
   fixed: ReadonlySet<string>,
   instanceCount: number,
+  initial?: LayoutRun,
 ): AutoLayoutResult {
-  const limit =
-    instanceCount > 80 ? 0 : instanceCount > 40 ? 8 : MAX_CANDIDATES;
+  const limit = instanceCount > 40 ? 0 : MAX_CANDIDATES;
   let overrides = emptyOverrides();
-  let current = plan(overrides);
+  let current = initial ?? plan(overrides);
   let score = routedScore(current, resolver);
   let candidates = 0;
   for (let pass = 0; pass < MAX_PASSES && candidates < limit; pass++) {
