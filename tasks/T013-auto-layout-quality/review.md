@@ -77,3 +77,11 @@ Known limits. Held-out circuits commit safely, but that is not drawing quality:
   score accepts, not a pure improvement.
 - `two-inverters`: `nbit` still overlaps `XSN`.
 - Multi-stage arrangement beyond the ~5-device scope of v1 is untouched.
+
+## PR review round 1 — P2 fixed by Opus
+
+Round 1 on `9bff242` raised one P2, verified and fixed: R23 classified audit
+problems by searching their text for `drafting`, so an object id containing that
+word turned a real safety failure into a warning. `auditRouting` now returns
+`draftingProblems` and `unsafeProblems` by origin, and the planner, review script
+and held-out test use them. A new test pins the id case.

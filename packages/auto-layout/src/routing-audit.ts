@@ -52,17 +52,23 @@ export function auditRouting(
     const geometry = resolveRouteGeometry(document, resolver, r);
     return geometry ? [{ route: r, geometry }] : [];
   });
-  const problems: string[] = [];
+  // Kept apart by origin: messages hold object ids, so text cannot classify.
+  const draftingProblems: string[] = [];
+  const unsafeProblems: string[] = [];
   const boxes = visibleInstanceBounds(document, resolver);
   for (const object of draftingBounds(document, resolver)) {
     for (const box of boxes)
       if (boxesIntersect(box.bounds, object.bounds))
-        problems.push(`Instance ${box.id} intersects drafting ${object.id}`);
+        draftingProblems.push(
+          `Instance ${box.id} intersects drafting ${object.id}`,
+        );
     for (const { route, geometry } of routes)
       if (
         geometry.segments.some((s) => entersBox(s.from, s.to, object.bounds, 0))
       )
-        problems.push(`Route ${route.id} intersects drafting ${object.id}`);
+        draftingProblems.push(
+          `Route ${route.id} intersects drafting ${object.id}`,
+        );
   }
   for (const { route, geometry } of routes) {
     const ends = routeEndpoints(route);
@@ -95,7 +101,7 @@ export function auditRouting(
           );
         });
         if (!escape)
-          problems.push(`Route ${route.id} crosses Instance ${box.id}`);
+          unsafeProblems.push(`Route ${route.id} crosses Instance ${box.id}`);
       }
   }
 
@@ -107,7 +113,7 @@ export function auditRouting(
       for (const p of a.geometry.segments)
         for (const q of b.geometry.segments) {
           if (collinearOverlap(p.from, p.to, q.from, q.to))
-            problems.push(
+            unsafeProblems.push(
               `Routes ${a.route.id}/${b.route.id} of different Nets overlap`,
             );
           if (
@@ -129,7 +135,9 @@ export function auditRouting(
     }
   }
   return {
-    problems,
+    draftingProblems,
+    unsafeProblems,
+    problems: [...draftingProblems, ...unsafeProblems],
     crossings: crossings.size,
     bends: routes.reduce(
       (sum, { geometry }) =>

@@ -371,6 +371,40 @@ it("audits a wire that crosses its own device instead of leaving its pin outward
   );
 });
 
+it("classifies an unsafe crossing by origin, not by words in an object id", () => {
+  const document = circuit(
+    { "drafting-part": "resistor", b: "resistor" },
+    { n: ["drafting-part.1", "b.1"] },
+  );
+  document.instances.forEach((i, index) => {
+    i.placement = {
+      position: { x: 0, y: index * 100 },
+      rotation: 0,
+      mirror: "none",
+    };
+  });
+  document.routes.push({
+    id: "through-part",
+    netId: "n",
+    start: { kind: "terminal", instanceId: "drafting-part", pinName: "1" },
+    legs: [
+      {
+        id: "bad-leg",
+        mode: "manual",
+        to: {
+          kind: "endpoint",
+          endpoint: { kind: "terminal", instanceId: "b", pinName: "1" },
+        },
+      },
+    ],
+  });
+  const audit = auditRouting(document, resolver);
+  expect(audit.unsafeProblems).toContain(
+    "Route through-part crosses Instance drafting-part",
+  );
+  expect(audit.draftingProblems).toEqual([]);
+});
+
 it("preserves a freed route label's offset, direction and orientation", () => {
   const document = circuit(
     { a: "resistor", b: "resistor" },

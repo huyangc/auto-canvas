@@ -59,11 +59,7 @@ it.each(cases)(
           component,
         );
       }
-    expect(
-      auditRouting(result.document, resolver).problems.filter(
-        (p) => !p.includes("drafting"),
-      ),
-    ).toEqual([]);
+    expect(auditRouting(result.document, resolver).unsafeProblems).toEqual([]);
   },
   10000,
 );
