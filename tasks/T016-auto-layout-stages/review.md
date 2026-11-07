@@ -43,7 +43,7 @@ reported as missed.
 
 Opus made one fix after round 3: R57 used R4's `input` role, which needs a gate on the
 Net. An input reached through a series resistor is `internal`, so direction correction
-did nothing and `b23bz45g2q`'s input stayed on the right. Any non-rail, non-output Cell
+did nothing and one dev document's input stayed on the right. Any non-rail, non-output Cell
 Pin now counts as the input side. The new test fails with the fix reverted.
 
 Acceptance rerun by Opus on lane 1 (`tmp/t016-opus/`):
