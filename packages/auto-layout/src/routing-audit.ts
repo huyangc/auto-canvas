@@ -1,7 +1,54 @@
-import { resolveRouteGeometry, visibleInstanceBounds } from "@icm/derived";
+import {
+  deriveElectricalTopologyProjection,
+  endpointKey,
+  resolveRouteGeometry,
+  visibleInstanceBounds,
+} from "@icm/derived";
 import { routeEndpoints, type Point, type SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import { boxesIntersect, draftingBounds } from "./geometry.js";
+
+/** R43: logical membership alone does not draw a connection to another pin. */
+export function floatingPins(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+) {
+  const topology = deriveElectricalTopologyProjection(document, resolver);
+  const pins = document.instances.flatMap((instance) =>
+    (
+      resolver.resolve(instance.symbolId, instance.symbolVariantId)?.definition
+        .pins ?? []
+    )
+      .filter((pin) => pin.name !== "B")
+      .map((pin) => {
+        const ref = { instanceId: instance.id, pinName: pin.name };
+        const key = endpointKey({ kind: "terminal", ...ref });
+        return {
+          ...ref,
+          netId: topology.endpointToBaseNet.get(key),
+          component: topology.endpointToPhysicalComponent.get(key) ?? key,
+        };
+      }),
+  );
+  const physical = new Map<string, number>();
+  const logical = new Map<string, number>();
+  for (const pin of pins) {
+    physical.set(pin.component, (physical.get(pin.component) ?? 0) + 1);
+    if (pin.netId) logical.set(pin.netId, (logical.get(pin.netId) ?? 0) + 1);
+  }
+  return pins
+    .filter(
+      (pin) =>
+        pin.netId &&
+        logical.get(pin.netId)! > 1 &&
+        physical.get(pin.component) === 1,
+    )
+    .map(({ instanceId, pinName, netId }) => ({
+      instanceId,
+      pinName,
+      netId: netId!,
+    }));
+}
 
 function cross(a: Point, b: Point, c: Point): number {
   return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);

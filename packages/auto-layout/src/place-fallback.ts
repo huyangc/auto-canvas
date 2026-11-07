@@ -1,8 +1,5 @@
-import {
-  transformPoint,
-  type Instance,
-  type SchematicDocument,
-} from "@icm/model";
+import { transformPoint } from "./geometry.js";
+import { type Instance, type SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import { isMos, type NetRoles } from "./net-roles.js";
 import {

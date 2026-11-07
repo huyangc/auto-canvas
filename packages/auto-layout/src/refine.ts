@@ -31,6 +31,21 @@ const measurements = new WeakMap<
 export function refinementMetrics(result: AutoLayoutResult) {
   return measurements.get(result);
 }
+
+/** R44: compare one routing-only alternative, retaining refinement evidence. */
+export function selectRoutingAlternative(
+  current: LayoutRun,
+  alternative: LayoutRun,
+  resolver: SymbolResolver,
+): AutoLayoutResult {
+  const score = routedScore(alternative, resolver);
+  if (score >= routedScore(current, resolver)) return current.result;
+  measurements.set(alternative.result, {
+    candidates: measurements.get(current.result)?.candidates ?? 0,
+    score,
+  });
+  return alternative.result;
+}
 /** @internal Shared by refinement and its behavioral tests. */
 export function routedScore(run: LayoutRun, resolver: SymbolResolver): number {
   if (!run.final || run.result.diagnostics.some((d) => d.severity === "error"))
@@ -61,12 +76,15 @@ export function refineLayout(
   plan: (overrides: LayoutOverrides) => LayoutRun,
   resolver: SymbolResolver,
   fixed: ReadonlySet<string>,
+  instanceCount: number,
 ): AutoLayoutResult {
+  const limit =
+    instanceCount > 80 ? 0 : instanceCount > 40 ? 8 : MAX_CANDIDATES;
   let overrides = emptyOverrides();
   let current = plan(overrides);
   let score = routedScore(current, resolver);
   let candidates = 0;
-  for (let pass = 0; pass < MAX_PASSES && candidates < MAX_CANDIDATES; pass++) {
+  for (let pass = 0; pass < MAX_PASSES && candidates < limit; pass++) {
     let best = current,
       bestOverrides = overrides,
       bestScore = score;
@@ -103,7 +121,7 @@ export function refineLayout(
           orientations: new Map(overrides.orientations).set(id, flip),
         });
       for (const move of moves) {
-        if (candidates >= MAX_CANDIDATES) break;
+        if (candidates >= limit) break;
         candidates++;
         const candidate = plan(move);
         const value = routedScore(candidate, resolver);

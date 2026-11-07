@@ -12,9 +12,11 @@ import { enclosingBox, pinPoints } from "../src/geometry.js";
 import { circuit } from "./document-fixture.js";
 
 const resolver = new InMemorySymbolResolver(builtInSymbols);
-it("rejects more than forty instances with only the size diagnostic", () => {
+it("rejects more than 120 instances with only the size diagnostic", () => {
   const document = circuit(
-    Object.fromEntries(Array.from({ length: 41 }, (_, i) => [`i${i}`, "nmos"])),
+    Object.fromEntries(
+      Array.from({ length: 121 }, (_, i) => [`i${i}`, "nmos"]),
+    ),
     {},
   );
   const before = JSON.stringify(document);
@@ -26,7 +28,7 @@ it("rejects more than forty instances with only the size diagnostic", () => {
         severity: "error",
         code: "AUTO_LAYOUT_TOO_LARGE",
         rule: "R3",
-        message: "Auto layout supports at most 40 instances",
+        message: "Auto layout supports at most 120 instances",
       },
     ],
   });

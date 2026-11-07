@@ -13,11 +13,12 @@ import {
 } from "@icm/edit-engine";
 import { deriveStableId, type SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
-import { MARKER_OFFSET, pinPoints } from "./geometry.js";
+import { MARKER_OFFSET, pinPoints, integerPoint } from "./geometry.js";
 import { isMos, type NetRoles } from "./net-roles.js";
 import { powerHosts } from "./place-markers.js";
 import { isMarker } from "./placement-connectivity.js";
 import { compareIds } from "./recognize.js";
+import { auditRouting } from "./routing-audit.js";
 import { preview } from "./transaction.js";
 import {
   assignPowerHosts,
@@ -48,6 +49,7 @@ export interface PinGroup {
 export function freezePinGroups(
   document: SchematicDocument,
   resolver: SymbolResolver,
+  options: { includeBulk?: boolean } = {},
 ): PinGroup[] {
   const projection = deriveElectricalTopologyProjection(document, resolver);
   const names = resolveDocumentLogicalNets(document);
@@ -59,7 +61,8 @@ export function freezePinGroups(
       instance.symbolId,
       instance.symbolVariantId,
     )?.definition.pins ?? []) {
-      if (isMos(instance.symbolId) && pin.name === "B") continue;
+      if (!options.includeBulk && isMos(instance.symbolId) && pin.name === "B")
+        continue;
       const ref = { instanceId: instance.id, pinName: pin.name };
       const netId = projection.endpointToBaseNet.get(
         endpointKey({ kind: "terminal", ...ref }),
@@ -97,12 +100,13 @@ export function freezePinGroups(
   return [...groups.values()];
 }
 
-/** R12: markers connect only to their assigned R6a host, never each other. */
+/** R12/R43: preserve marker stubs and draw every remaining rail member. */
 function powerTargets(
   document: SchematicDocument,
   resolver: SymbolResolver,
   group: PinGroup,
   role: "supply" | "ground",
+  rail: boolean,
 ): RoutingTarget[] {
   const instances = new Map(document.instances.map((i) => [i.id, i]));
   const symbol = role === "ground" ? "ground" : "vdd-port";
@@ -139,15 +143,16 @@ function powerTargets(
           ]
         : [];
     });
-    // R12 deliberately leaves other power members unwired. Input contacts
-    // are exceptions: replay must see them joined before reconciliation.
-    for (const pair of group.contacts)
-      if (
-        !targets.some((t) =>
-          pair.every((p) => t.pins.some((ref) => samePin(ref, p))),
-        )
-      )
-        targets.push({ pins: pair, stub: true });
+    const remaining = group.pins.filter(
+      (pin) =>
+        !targets.some((target) => target.pins.some((ref) => samePin(pin, ref))),
+    );
+    if (remaining.length) {
+      // Include one stub's host so the trunk shares the marker's drawing.
+      const host = targets[0]?.pins[1];
+      const pins = host ? [...remaining, host] : remaining;
+      targets.unshift(...railTrunk(document, resolver, pins, role));
+    }
     return targets;
   }
   if (group.needsPowerStub) {
@@ -181,7 +186,10 @@ function powerTargets(
   const mosChannels = channel.filter((p) =>
     isMos(instances.get(p.instanceId)!.symbolId),
   );
-  if (!cell && mosChannels.length < 2) return [{ pins: group.pins }];
+  if (!cell && mosChannels.length < 2)
+    return rail
+      ? railTrunk(document, resolver, group.pins, role)
+      : [{ pins: group.pins }];
   const cellPoint = points.find(
     (p) => p.instanceId === cell?.instanceId,
   )?.point;
@@ -202,6 +210,62 @@ function powerTargets(
       trunk: { start: { x: left, y }, end: { x: right, y } },
     },
   ];
+}
+
+function railTrunk(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  pins: TerminalRef[],
+  role: "supply" | "ground",
+): RoutingTarget[] {
+  const all = pinPoints(document, resolver);
+  const devices = new Set(
+    document.instances.filter((i) => !isMarker(i)).map((i) => i.id),
+  );
+  const points = all.filter((p) => pins.some((ref) => samePin(p, ref)));
+  const outerPins = points.filter((p) => devices.has(p.instanceId));
+  const rowCentres = document.instances
+    .filter((i) => devices.has(i.id) && i.placement)
+    .map((i) => i.placement!.position.y);
+  const level = points[0]!.point.y;
+  const outsideRows =
+    role === "ground"
+      ? level > Math.max(...rowCentres)
+      : level < Math.min(...rowCentres);
+  // Split a level trunk at its pins. An explicit free trunk cannot pass over
+  // intermediate pins, nor reuse a host already incident to a marker stub.
+  if (
+    outsideRows &&
+    points.length > 1 &&
+    points.every((p) => p.point.y === points[0]!.point.y)
+  ) {
+    const ordered = [...points].sort(
+      (a, b) => a.point.x - b.point.x || compareIds(a.instanceId, b.instanceId),
+    );
+    const refs = ordered.map(({ instanceId, pinName }) => ({
+      instanceId,
+      pinName,
+    }));
+    return refs
+      .slice(1)
+      .map((pin, index) => ({ pins: [refs[index]!, pin], stub: true }));
+  }
+  const rows = all.filter((p) => devices.has(p.instanceId));
+  const ys = (rows.length ? rows : outerPins.length ? outerPins : points).map(
+    (p) => p.point.y,
+  );
+  // Keep the trunk between the outer pins and their 40-unit marker stubs.
+  const y =
+    role === "ground"
+      ? Math.max(...ys) + MARKER_OFFSET / 2
+      : Math.min(...ys) - MARKER_OFFSET / 2;
+  let left = Math.min(...points.map((p) => p.point.x));
+  let right = Math.max(...points.map((p) => p.point.x));
+  if (left === right) {
+    left -= document.presentation.grid;
+    right += document.presentation.grid;
+  }
+  return [{ pins, trunk: { start: { x: left, y }, end: { x: right, y } } }];
 }
 
 function signalPriority(
@@ -246,10 +310,10 @@ function fallbackLabels(
     );
     const direction = connection.outward ?? { x: 1, y: 0 };
     const length = document.presentation.grid * 2;
-    const point = {
+    const point = integerPoint({
       x: connection.gridLanding.x + direction.x * length,
       y: connection.gridLanding.y + direction.y * length,
-    };
+    });
     const stub = planWireBatch(
       document,
       resolver,
@@ -350,6 +414,7 @@ export function routeDocument(
   frozen: PinGroup[],
   roles: NetRoles,
   structures: RecognizedGroup[],
+  signalTrunks = true,
 ): {
   edits: SchematicEdit[];
   diagnostics: AutoLayoutDiagnostic[];
@@ -382,8 +447,27 @@ export function routeDocument(
           resolver,
           group,
           roles.byNet.get(group.netId) as "supply" | "ground",
+          roles.rails.has(group.netId),
         )
       : [{ pins: group.pins }];
+    // R38: freeze and wire direct contacts on every Net before the general tree.
+    // Whole-list reconciliation then has no missing physical connection to add.
+    const points = pinPoints(working, resolver);
+    const contacts = group.contacts.filter((pair) => {
+      const [a, b] = pair.map(
+        (ref) => points.find((p) => samePin(ref, p))!.point,
+      );
+      return (
+        (a!.x !== b!.x || a!.y !== b!.y) &&
+        !targets.some(
+          (t) =>
+            t.stub && pair.every((p) => t.pins.some((ref) => samePin(p, ref))),
+        )
+      );
+    });
+    targets.unshift(
+      ...contacts.map((pins): RoutingTarget => ({ pins, stub: true })),
+    );
     let failure: string | undefined;
     for (const target of targets) {
       if (target.pins.length < 2 && !target.freeEnd) continue;
@@ -418,24 +502,76 @@ export function routeDocument(
           );
           if (typeof stub === "string") throw new Error(stub);
           planned = stub.edits;
-        } else
-          planned = planRouteNet(
-            working,
-            resolver,
-            {
-              target: { kind: "pins", pins: target.pins },
-              ...(target.trunk ? { trunk: target.trunk } : {}),
-            },
-            MAX_SCHEMATIC_EDITS_PER_TRANSACTION,
-          ).edits;
+        } else {
+          const trunks: Array<RoutingTarget["trunk"]> = [target.trunk];
+          if (signalTrunks && !power(group) && target.pins.length >= 3) {
+            const pins = points.filter((p) =>
+              target.pins.some((ref) => samePin(ref, p)),
+            );
+            const xs = pins.map((p) => p.point.x).sort((a, b) => a - b);
+            const ys = pins.map((p) => p.point.y).sort((a, b) => a - b);
+            const median = (values: number[]) =>
+              Math.round(
+                (values[Math.floor((values.length - 1) / 2)]! +
+                  values[Math.floor(values.length / 2)]!) /
+                  2,
+              );
+            const x = median(xs),
+              y = median(ys);
+            trunks.push(
+              { start: { x: xs[0]!, y }, end: { x: xs.at(-1)!, y } },
+              { start: { x, y: ys[0]! }, end: { x, y: ys.at(-1)! } },
+            );
+          }
+          let best: { edits: SchematicEdit[]; score: number[] } | undefined;
+          let reason: unknown;
+          for (const trunk of trunks) {
+            try {
+              const candidate = planRouteNet(
+                working,
+                resolver,
+                {
+                  target: { kind: "pins", pins: target.pins },
+                  ...(trunk ? { trunk } : {}),
+                },
+                MAX_SCHEMATIC_EDITS_PER_TRANSACTION,
+              ).edits;
+              // Only high-fanout signal Nets need the R39 comparison.
+              if (trunks.length === 1) {
+                best = { edits: candidate, score: [] };
+                break;
+              }
+              const next = preview(working, resolver, candidate);
+              if (!next.ok) throw new Error(JSON.stringify(next.diagnostics));
+              const audit = auditRouting(next.document, resolver);
+              const score = [audit.crossings, audit.bends, audit.wireLength];
+              if (
+                !best ||
+                score.some(
+                  (v, i) =>
+                    v < best!.score[i]! &&
+                    score.slice(0, i).every((p, j) => p === best!.score[j]),
+                )
+              )
+                best = { edits: candidate, score };
+            } catch (error) {
+              reason = error;
+            }
+          }
+          if (!best) throw reason;
+          planned = best.edits;
+        }
       } catch (error) {
         failure = error instanceof Error ? error.message : String(error);
-        if (target.freeEnd)
+        if (
+          target.freeEnd ||
+          (target.stub && contacts.some((pair) => pair === target.pins))
+        )
           return {
             document: working,
             edits,
             diagnostics,
-            problem: `R10: singleton power stub for ${group.netId}: ${failure}`,
+            problem: `R10: ${target.freeEnd ? "singleton power stub" : "touching-pin stub"} for ${group.netId}: ${failure}`,
           };
         continue;
       }
@@ -456,7 +592,7 @@ export function routeDocument(
         severity: "warning",
         code: "AUTO_LAYOUT_NET_UNROUTED",
         rule: "R14",
-        message: `Net ${group.netId}: ${failure}`,
+        message: `Net ${group.netId}: ${failure}; pins: ${group.pins.map((p) => `${p.instanceId}.${p.pinName}`).join(", ")}`,
       });
       const labels = fallbackLabels(working, resolver, group);
       if (labels.length) {

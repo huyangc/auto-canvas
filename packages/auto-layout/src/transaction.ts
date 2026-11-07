@@ -71,6 +71,41 @@ export function restorePinGroups(
   });
 }
 
+/** Rejoin each MOS bulk pin that cleanup split from its input group to that
+ * group's first non-bulk pin. Runs after `restorePinGroups`, which leaves bulk
+ * pins out, so the non-bulk restoration is exactly as before. */
+export function restoreBulkPins(
+  withBulk: PinGroup[],
+  frozen: PinGroup[],
+  cleaned: SchematicDocument,
+  resolver: SymbolResolver,
+): SchematicEdit[] {
+  const after = deriveElectricalTopologyProjection(cleaned, resolver);
+  const net = (pin: { instanceId: string; pinName: string }) =>
+    after.endpointToBaseNet.get(endpointKey({ kind: "terminal", ...pin }));
+  return withBulk.flatMap((group) => {
+    const anchor = frozen.find((g) => g.netId === group.netId)?.pins[0];
+    if (!anchor) return [];
+    return group.pins
+      .filter(
+        (p) =>
+          p.pinName === "B" &&
+          !frozen.some((g) =>
+            g.pins.some(
+              (q) => q.instanceId === p.instanceId && q.pinName === p.pinName,
+            ),
+          ),
+      )
+      .filter((p) => net(p) === undefined || net(p) !== net(anchor))
+      .map((p): SchematicEdit => ({
+        kind: "connect_endpoints",
+        from: { kind: "terminal", ...anchor },
+        to: { kind: "terminal", ...p },
+        newNetId: group.netId,
+      }));
+  });
+}
+
 /** The partition check cannot see a name: VDD gone leaves the same pin sets.
  * Returns the id of the first input claim not kept, or undefined. */
 export function lostNameClaim(
