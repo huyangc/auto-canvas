@@ -1,5 +1,9 @@
 import { visibleInstanceBounds } from "@icm/derived";
-import type { Instance, SchematicDocument } from "@icm/model";
+import {
+  transformPoint,
+  type Instance,
+  type SchematicDocument,
+} from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import { isMos, type NetRoles } from "./net-roles.js";
 import { compareIds, recognizeStructures } from "./recognize.js";
@@ -16,11 +20,18 @@ import {
   withPlacements,
 } from "./geometry.js";
 import {
+  devicePins,
   isMarker,
   isSource,
   signalDistances,
 } from "./placement-connectivity.js";
-import { placeFallback } from "./place-fallback.js";
+import {
+  emptyChoices,
+  emptyOverrides,
+  type LayoutChoices,
+  type LayoutOverrides,
+} from "./layout-choices.js";
+import { placeFallback, orientByWireCost } from "./place-fallback.js";
 import { placeMarkers } from "./place-markers.js";
 import type { AutoLayoutOptions, Placement, RecognizedGroup } from "./types.js";
 
@@ -84,49 +95,145 @@ function rankRows(
   return rows;
 }
 
-/** Expand equal-row templates; stacked load/pair groups share one axis. */
+/** R18: derive origin pitches from oriented channel pins, not symbol offsets. */
 function expandTemplates(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
   groups: RecognizedGroup[],
   rows: Map<string, number>,
   roles: NetRoles,
   targets: Map<string, Placement>,
 ): void {
   const axes = new Map<string, number>();
+  const pitchOffsets = new Map<string, number>();
+  const mirror = (g: RecognizedGroup, index: number): Placement["mirror"] =>
+    (g.kind === "differential-pair") === (index === 0) ? "none" : "horizontal";
+  const channel = (id: string) => {
+    const instance = document.instances.find((i) => i.id === id)!;
+    return devicePins(instance, resolver).filter(
+      (p) => !isMos(instance.symbolId) || ["D", "S"].includes(p.name),
+    );
+  };
+  const shared = (a: string, b: string) =>
+    channel(a).flatMap((p) => {
+      const net = roles.pinNet(a, p.name);
+      if (!net || ["supply", "ground"].includes(roles.byNet.get(net) ?? ""))
+        return [];
+      return channel(b)
+        .filter((q) => roles.pinNet(b, q.name) === net)
+        .map((q) => ({ p, q }));
+    });
   let nextAxis = 0;
   for (const g of groups) {
     const stacked = groups.find(
       (other) =>
         axes.has(other.id) &&
-        other.members.some((a) =>
-          g.members.some((b) =>
-            [roles.pinNet(b, "D"), roles.pinNet(b, "S")].includes(
-              roles.pinNet(a, "D"),
-            ),
-          ),
-        ),
+        shared(other.members[0], g.members[0]).length &&
+        shared(other.members[1], g.members[1]).length,
     );
     const axis = stacked ? axes.get(stacked.id)! : nextAxis;
     if (!stacked) nextAxis += COLUMN_PITCH * 2;
     axes.set(g.id, axis);
+    let offset = 0;
+    if (stacked) {
+      const { p, q } = shared(stacked.members[0], g.members[0])[0]!;
+      const localX = (at: typeof p.at, m: Placement["mirror"]) =>
+        transformPoint(at, { x: 0, y: 0 }, { rotation: 0, mirror: m }).x;
+      offset =
+        pitchOffsets.get(stacked.id)! +
+        2 * (localX(q.at, mirror(g, 0)) - localX(p.at, mirror(stacked, 0)));
+    }
+    pitchOffsets.set(g.id, offset);
+  }
+  for (const g of groups) {
+    const axis = axes.get(g.id)!;
+    const minimum = Math.min(
+      ...groups
+        .filter((other) => axes.get(other.id) === axis)
+        .map((other) => pitchOffsets.get(other.id)!),
+    );
+    const pitch = MEMBER_PITCH + pitchOffsets.get(g.id)! - minimum;
     const row = Math.min(...g.members.map((id) => rows.get(id) ?? 0));
     g.members.forEach((id, index) => {
       rows.set(id, row);
       targets.set(
         id,
         placement(
-          axis + ((index === 0 ? -1 : 1) * MEMBER_PITCH) / 2,
+          axis + (index === 0 ? -pitch : pitch) / 2,
           row * ROW_PITCH,
-          (g.kind === "differential-pair") === (index === 0)
-            ? "none"
-            : "horizontal",
+          mirror(g, index),
         ),
       );
     });
     if (g.tailInstanceId) {
-      rows.set(g.tailInstanceId, row + 1);
-      targets.set(g.tailInstanceId, placement(axis, (row + 1) * ROW_PITCH));
+      const tail = g.tailInstanceId;
+      const { q } = shared(g.members[0], tail)[0] ?? {};
+      const offset = q
+        ? transformPoint(q.at, { x: 0, y: 0 }, { rotation: 0, mirror: "none" })
+            .x
+        : 0;
+      rows.set(tail, row + 1);
+      targets.set(tail, placement(axis - offset, (row + 1) * ROW_PITCH));
     }
   }
+}
+
+/** R24: repair unrelated collisions, preserving fixed/template conflicts. */
+function resolveCollisions(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  targets: Map<string, Placement>,
+  templates: RecognizedGroup[],
+  fixed: ReadonlySet<string>,
+): string | undefined {
+  const ordered = [...document.instances].sort((a, b) =>
+    compareIds(a.id, b.id),
+  );
+  const prior: Instance[] = [];
+  for (const instance of ordered) {
+    const target = targets.get(instance.id)!;
+    const axis = target.rotation === 90 || target.rotation === 270 ? "y" : "x";
+    const partial = () =>
+      withPlacements({ ...document, instances: [...prior, instance] }, targets);
+    let problem = geometryProblem(partial(), resolver);
+    if (
+      problem &&
+      (fixed.has(instance.id) ||
+        prior.some(
+          (i) =>
+            fixed.has(i.id) &&
+            geometryProblem(
+              withPlacements(
+                { ...document, instances: [i, instance] },
+                targets,
+              ),
+              resolver,
+            ),
+        ))
+    )
+      return problem;
+    if (
+      problem &&
+      prior.some(
+        (i) =>
+          templates.some(
+            (g) => g.members.includes(i.id) && g.members.includes(instance.id),
+          ) &&
+          geometryProblem(
+            withPlacements({ ...document, instances: [i, instance] }, targets),
+            resolver,
+          ),
+      )
+    )
+      return problem;
+    for (let step = 0; problem && step < 40; step++) {
+      target.position[axis] += document.presentation.grid;
+      problem = geometryProblem(partial(), resolver);
+    }
+    if (problem) return problem;
+    prior.push(instance);
+  }
+  return undefined;
 }
 
 /** R8: move a free two-pin load column directly over the drain below. */
@@ -173,6 +280,8 @@ export function placeDocument(
   roles: NetRoles,
   groups: RecognizedGroup[],
   options: AutoLayoutOptions,
+  overrides: LayoutOverrides = emptyOverrides(),
+  choices: LayoutChoices = emptyChoices(),
 ): { placements: Map<string, Placement>; problem?: string } {
   const targets = new Map<string, Placement>();
   const devices = document.instances
@@ -212,6 +321,8 @@ export function placeDocument(
     tails.add(group.tailInstanceId);
   }
   expandTemplates(
+    document,
+    resolver,
     templates.sort(
       (a, b) =>
         Number(a.kind !== "differential-pair") -
@@ -238,7 +349,18 @@ export function placeDocument(
         i.symbolId !== j.symbolId &&
         roles.pinNet(i.id, "D") === roles.pinNet(j.id, "D"),
     );
-    let x = counterpart ? targets.get(counterpart.id)!.position.x : 0;
+    let x = 0;
+    if (counterpart) {
+      const counterpartPin = pinPoints(
+        withPlacements(document, targets),
+        resolver,
+      ).find((p) => p.instanceId === counterpart.id && p.pinName === "D")!;
+      const own = devicePins(i, resolver).find((p) => p.name === "D")!;
+      x =
+        counterpartPin.point.x -
+        transformPoint(own.at, { x: 0, y: 0 }, { rotation: 0, mirror: "none" })
+          .x;
+    }
     while (
       [...targets.values()].some(
         (p) =>
@@ -261,15 +383,50 @@ export function placeDocument(
     resolver,
     roles,
   );
-  placeMarkers(document, resolver, roles, targets, templates);
+  const fixed = new Set(options.fixedInstanceIds);
+  for (const owner of [...document.layoutGroups, ...document.constraints])
+    if (owner.locked) for (const id of owner.objectIds) fixed.add(id);
+  for (const id of fixed) {
+    const old = document.instances.find((i) => i.id === id)?.placement;
+    if (old) targets.set(id, structuredClone(old));
+  }
+  const deviceCollision = resolveCollisions(
+    { ...document, instances: devices },
+    resolver,
+    targets,
+    templates,
+    fixed,
+  );
+  if (deviceCollision) return { placements: targets, problem: deviceCollision };
+  placeMarkers(document, resolver, roles, targets, overrides, emptyChoices());
+  orientByWireCost(
+    document,
+    resolver,
+    roles,
+    targets,
+    templates,
+    fixed,
+    overrides,
+    choices,
+  );
+  placeMarkers(document, resolver, roles, targets, overrides, choices);
+  for (const id of fixed) {
+    const old = document.instances.find((i) => i.id === id)?.placement;
+    if (old) targets.set(id, structuredClone(old));
+  }
+  const collision = resolveCollisions(
+    document,
+    resolver,
+    targets,
+    templates,
+    fixed,
+  );
+  if (collision) return { placements: targets, problem: collision };
   const oldBox = enclosingBox(document, resolver);
   const newBox = enclosingBox(withPlacements(document, targets), resolver);
   const snap = (n: number) =>
     Math.round(n / document.presentation.grid) * document.presentation.grid;
   // The Edit Engine refuses to transform anything a lock references.
-  const fixed = new Set(options.fixedInstanceIds);
-  for (const owner of [...document.layoutGroups, ...document.constraints])
-    if (owner.locked) for (const id of owner.objectIds) fixed.add(id);
   const hasFixed = document.instances.some((i) => fixed.has(i.id));
   const dx = hasFixed ? 0 : snap(oldBox.x - newBox.x),
     dy = hasFixed ? 0 : snap(oldBox.y - newBox.y);
