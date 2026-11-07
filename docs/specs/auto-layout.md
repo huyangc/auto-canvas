@@ -299,6 +299,32 @@ pins }` lists, never Net ids.
 - **R56 — Stage spacing.** Keep at least 80 units between stage bounds. A
   bridging capacitor adds its own width to the gap. Compact gaps to avoid sprawl.
 
+- **R60 — Device-class conduction.** R50 classifies devices with the device
+  registry. Resistors, inductors and diodes conduct through their main
+  terminals. Switches do not conduct yet: a merged switch network has no
+  channel levels under R30, packs into one row, and drew with more crossings
+  than single-switch stages. Capacitors, including variable capacitors,
+  remain bridges. MOS D/S, BJT C/E and source
+  behavior are unchanged. Drawn magnetic network definitions supply the
+  winding pairs: a transformer joins devices within each winding, never across
+  the isolation boundary. Its artwork belongs to its primary winding's stage.
+- **R62 — Rail Cell Pin clearance.** Place top and bottom Cell Pins outside
+  the device span in x. On each Net, put the first pin in routing order nearest
+  the devices and stagger subsequent pins outward. The trunk can then end at
+  its first Cell Pin without passing through its artwork or through duplicate
+  Cell Pins at the same level. This is a placement rule; routing is unchanged.
+
+- **R63 — Distinct, repairable portfolio.** Compare valid initial edit lists
+  exactly, keeping the first equal list in `template`, `layered`, `stages`
+  order before ranking by the existing routed score. A refused run returns no
+  edits, so refused runs are never treated as duplicates. Refine at most two distinct strategies
+  through 40 instances, reusing their initial routes. If fewer than two valid
+  distinct candidates exist, a refused candidate may fill the second slot; if
+  all are refused, refinement may repair the first candidate. Retain R58's
+  ranking ties and R44's single routing alternative. Above 40 instances keep
+  R55's unrefined comparison: R61 was removed because round 1 measured no
+  meaningful quality benefit for its extra planning time.
+
 - **Existing locks and conflicts.** Members of a locked layout group or
   constraint are treated as fixed instances under R1, because the Edit Engine
   refuses to transform them. A recognized group whose generated id already

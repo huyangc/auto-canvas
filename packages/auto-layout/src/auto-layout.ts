@@ -67,14 +67,24 @@ export function planAutoLayout(
     runs.set(run.result, { run, overrides, strategy });
     return run;
   };
-  // R58: rank real unrefined routes, then refine the top two independently.
-  // Valid ties prefer earlier strategies; all-refused ties retain layered so
-  // refinement can recover the same replay as the large-document portfolio.
+  // R63: discard exact duplicate edit lists in fixed strategy order before
+  // ranking. A refused distinct run can still be repaired by refinement.
+  // Valid ties prefer earlier strategies; all-refused ties prefer layered
+  // when it survives deduplication.
   const ranked = (["template", "layered", "stages"] as const)
     .filter(
       (strategy) => document.instances.length <= 40 || strategy !== "template",
     )
     .map((strategy) => runs.get(route(strategy, emptyOverrides()).result)!)
+    .filter((candidate, index, candidates) => {
+      // A refused run has no edits, so refused runs are never duplicates:
+      // each strategy's refinement may repair its refusal differently.
+      if (!Number.isFinite(routedScore(candidate.run, resolver))) return true;
+      const edits = JSON.stringify(candidate.run.result.edits);
+      return !candidates
+        .slice(0, index)
+        .some((earlier) => JSON.stringify(earlier.run.result.edits) === edits);
+    })
     .sort((a, b) => {
       const first = routedScore(a.run, resolver);
       const second = routedScore(b.run, resolver);
