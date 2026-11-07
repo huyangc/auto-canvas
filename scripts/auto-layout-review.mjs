@@ -88,7 +88,7 @@ for (const fixture of [...cases, ...heldOut]) {
         : terminalPartition(document, resolver) ===
           terminalPartition(after, resolver);
     const problems = [
-      ...audit.problems.filter((p) => !p.includes("drafting")),
+      ...audit.unsafeProblems,
       ...(!equivalent ? ["Electrical equivalence failed"] : []),
     ];
     for (const message of problems)
