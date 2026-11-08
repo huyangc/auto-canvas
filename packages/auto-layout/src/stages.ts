@@ -198,11 +198,12 @@ export function parallelAttachments(
         return [];
       const nets = pins.map((p) => roles.pinNet(device.id, p.name));
       if (!nets[0] || !nets[1] || nets[0] === nets[1]) return [];
-      const host = mos.find(
-        (i) =>
-          nets.includes(roles.pinNet(i.id, "D")) &&
-          nets.includes(roles.pinNet(i.id, "S")),
-      );
+      const host = mos.find((i) => {
+        const d = roles.pinNet(i.id, "D"),
+          s = roles.pinNet(i.id, "S");
+        // A shorted channel (D and S on one Net) matches any device on that Net.
+        return d !== s && nets.includes(d) && nets.includes(s);
+      });
       return host ? [{ device, host }] : [];
     });
 }
