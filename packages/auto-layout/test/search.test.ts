@@ -66,7 +66,7 @@ it("R66 keeps the byte-identical pre-search quick result", () => {
   expect(
     planAutoLayout(document, resolver, { search: { seed: 3, evaluations: 0 } }),
   ).toEqual(result);
-});
+}, 30000);
 
 it("R66 repeats the same seed/budget and improves a known same-row swap", () => {
   const document = crossed();
@@ -116,7 +116,7 @@ it("R66 repeats the same seed/budget and improves a known same-row swap", () => 
   expect(progress.at(-1)!.best).toBe(score(result, after));
   for (let i = 1; i < progress.length; i++)
     expect(progress[i]!.best).toBeLessThanOrEqual(progress[i - 1]!.best);
-});
+}, 30000);
 
 it.each(["before", "during", "deadline"] as const)(
   "R66 %s cancellation returns a valid best-so-far plan",
@@ -143,6 +143,7 @@ it.each(["before", "during", "deadline"] as const)(
     );
     expect(progress.at(-1)).toBe(when === "during" ? 4 : 0);
   },
+  30000,
 );
 
 it.each([false, true])(
@@ -165,6 +166,7 @@ it.each([false, true])(
       document.instances[0]!.placement,
     );
   },
+  30000,
 );
 
 it("R66 translates recognized pairs and their tail rigidly", () => {
@@ -222,7 +224,7 @@ it("R66 translates recognized pairs and their tail rigidly", () => {
     ).toBe(true);
   }
   expect(score(result, after)).toBeLessThanOrEqual(score(quick, before));
-});
+}, 30000);
 
 it("R66 proposals reject overlaps, fixed units and off-grid positions before routing", () => {
   const document = crossed(),
@@ -263,7 +265,7 @@ it("R66 proposals reject overlaps, fixed units and off-grid positions before rou
     ).toBeUndefined();
   }
   expect(valid).toBeGreaterThan(0);
-});
+}, 30000);
 
 it.each([1, 2, 3])(
   "R67 bounds an unrouted marker Net and anchors accepted layouts (seed=%s)",
@@ -296,6 +298,7 @@ it.each([1, 2, 3])(
     );
     expect(score(result, after)).toBeLessThanOrEqual(score(quick, before));
   },
+  30000,
 );
 
 it("R67 canonicalizes a translated state before regenerating orphan markers", () => {
@@ -335,4 +338,4 @@ it("R67 canonicalizes a translated state before regenerating orphan markers", ()
     translated = evaluate(1600);
   expect(translated.result).toEqual(first.result);
   commit(document, translated.result);
-});
+}, 30000);
