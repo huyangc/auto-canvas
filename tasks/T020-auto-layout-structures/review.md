@@ -128,3 +128,11 @@ Package tests pass (176). Quick-mode human results are unchanged.
 
 This branch was also rebased onto T019's two CI and review fixes. Import conflicts in
 `place.ts` and `search-moves.ts` were resolved, keeping both sides.
+
+## PR review — codex round 4 on `e8f50ab`
+
+One P2, the same class as round 3, reproduced with a hand-built test that failed before
+the fix with "R10: bounds overlap g, input". A fixed ground or supply marker was moved by
+`placePowerMarkers` and restored only after R71 had checked seats. `placeMarkers` now
+restores every fixed marker before any port seat is checked. Package tests pass (177).
+Quick-mode human results are unchanged.

@@ -437,3 +437,34 @@ it("R71 treats a fixed port as occupied instead of moving it away", () => {
     result.document.instances.find((i) => i.id === "fixedPort")!.placement,
   ).toEqual(at(300));
 });
+
+it("R71 treats a fixed power marker as occupied", () => {
+  const d = circuit(
+    { m: "nmos", g: "ground", input: "port" },
+    { gate: ["m.G", "input.P"], gnd: ["m.S", "g.0"], drain: ["m.D"] },
+  );
+  d.netlist = {
+    name: "fixed-marker",
+    formalParameters: [],
+    terminals: [
+      {
+        id: "gate",
+        name: "gate",
+        netId: "gate",
+        direction: "input" as const,
+        interfaceInstanceIds: ["input"],
+      },
+    ],
+  };
+  const at = (x: number): Placement => ({
+    position: { x, y: 0 },
+    rotation: 0,
+    mirror: "none",
+  });
+  d.instances.find((i) => i.id === "m")!.placement = at(400);
+  d.instances.find((i) => i.id === "g")!.placement = at(300);
+  const plan = planAutoLayout(d, resolver, {
+    fixedInstanceIds: new Set(["m", "g"]),
+  });
+  expect(plan.diagnostics.filter((x) => x.severity === "error")).toEqual([]);
+});
