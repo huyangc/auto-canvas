@@ -10,10 +10,11 @@ import { compareElectricalGraphs, projectElectricalGraph } from "@icm/netlist";
 import { parseProject } from "@icm/project-protocol";
 import { builtInSymbols, createProjectSymbolResolver } from "@icm/symbols";
 import { planAutoLayout } from "../src/index.js";
-import { enclosingBox, pinPoints } from "../src/geometry.js";
+import { enclosingBox, pinPoints, pinExit } from "../src/geometry.js";
 import { auditRouting, floatingPins } from "../src/routing-audit.js";
 import { freedAnnotations } from "../src/labels.js";
 import { terminalPartition } from "../src/transaction.js";
+import { devicePins, isMarker } from "../src/placement-connectivity.js";
 import { classifyNets } from "../src/net-roles.js";
 import cases from "./corpus-cases.json";
 const targets: Record<string, [number, number]> = {
@@ -392,7 +393,31 @@ it.each(cases)(
     );
     const snap = (n: number) =>
       Math.round(n / after.presentation.grid) * after.presentation.grid;
+    const localPorts = new Set<string>();
+    const devicePinsAfter = pinPoints(
+      { ...after, instances: after.instances.filter((i) => !isMarker(i)) },
+      resolver,
+    );
     for (const port of ports) {
+      const net = roles.pinNet(port.id, "P");
+      const hosts = devicePinsAfter.filter(
+        (p) =>
+          net !== undefined && roles.pinNet(p.instanceId, p.pinName) === net,
+      );
+      if (hosts.length !== 1 || roles.rails.has(net ?? "")) continue;
+      const host = hosts[0]!,
+        instance = after.instances.find((i) => i.id === host.instanceId)!;
+      const exit = pinExit(
+        devicePins(instance, resolver).find((p) => p.name === host.pinName)!,
+        instance.placement!,
+      );
+      if (
+        port.placement!.position.x === snap(host.point.x + exit.x * 80) &&
+        port.placement!.position.y === snap(host.point.y + exit.y * 80)
+      )
+        localPorts.add(port.id);
+    }
+    for (const port of ports.filter((p) => !localPorts.has(p.id))) {
       const p = port.placement!;
       if (p.rotation === 0)
         expect(p.position.x).toBe(
@@ -411,6 +436,7 @@ it.each(cases)(
     }
     for (const side of ["left", "right", "top", "bottom"]) {
       const members = ports.filter((i) => {
+        if (localPorts.has(i.id)) return false;
         const p = i.placement!;
         return side === "top"
           ? p.rotation === 90

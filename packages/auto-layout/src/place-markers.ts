@@ -1,6 +1,8 @@
+import { visibleSymbolInkBounds } from "@icm/derived";
+import { deviceDescriptor } from "@icm/devices";
 import type { Instance, SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
-import { isMos, type NetRoles } from "./net-roles.js";
+import { classifyNets, isMos, type NetRoles } from "./net-roles.js";
 import { compareIds } from "./recognize.js";
 import {
   CELL_PIN_OFFSET,
@@ -9,7 +11,9 @@ import {
   geometryProblem,
   MARKER_OFFSET,
   pinPoints,
+  pinExit,
   placement,
+  transformPoint,
   withPlacements,
 } from "./geometry.js";
 import { devicePins, isMarker } from "./placement-connectivity.js";
@@ -132,9 +136,11 @@ function placeCellPins(
   targets: Map<string, Placement>,
   overrides: LayoutOverrides,
   choices: LayoutChoices,
+  edgeOnly: ReadonlySet<string> = new Set(),
+  frozen: ReadonlySet<string> = new Set(),
 ) {
   const grid = document.presentation.grid;
-  const placed = new Set<string>();
+  const placed = new Set(frozen);
   const snap = (n: number) => Math.round(n / grid) * grid;
   const box = enclosingBox(deviceDocument, resolver);
   const entries = document.instances
@@ -196,11 +202,53 @@ function placeCellPins(
         vertical,
         net,
         count: connected.length,
+        singleHost:
+          !roles.rails.has(net ?? "") && connected.length === 1
+            ? connected[0]
+            : undefined,
         coordinate: snap(vertical ? host.y : host.x),
       };
     });
+  // R71: reserve safe single-host seats first; blocked seats use R19/R20.
+  for (const entry of [...entries].sort((a, b) => compareIds(a.i.id, b.i.id))) {
+    const host = entry.singleHost;
+    if (!host || edgeOnly.has(entry.i.id) || frozen.has(entry.i.id)) continue;
+    const instance = deviceDocument.instances.find(
+      (i) => i.id === host.instanceId,
+    )!;
+    const pin = devicePins(instance, resolver).find(
+      (p) => p.name === host.pinName,
+    )!;
+    const exit = pinExit(pin, targets.get(instance.id)!);
+    const p = placement(
+      snap(host.point.x + exit.x * CELL_PIN_OFFSET),
+      snap(host.point.y + exit.y * CELL_PIN_OFFSET),
+      exit.x > 0 ? "horizontal" : "none",
+      exit.y < 0 ? 90 : exit.y > 0 ? 270 : 0,
+    );
+    targets.set(entry.i.id, p);
+    const occupied = document.instances.filter(
+      (i) =>
+        i.id === entry.i.id ||
+        !isMarker(i) ||
+        i.symbolId === "ground" ||
+        i.symbolId === "vdd-port" ||
+        placed.has(i.id),
+    );
+    if (
+      !geometryProblem(
+        withPlacements({ ...document, instances: occupied }, targets),
+        resolver,
+      )
+    ) {
+      placed.add(entry.i.id);
+      choices.sides.delete(entry.i.id);
+    } else targets.delete(entry.i.id);
+  }
   for (const side of ["left", "right", "top", "bottom"]) {
-    const members = entries.filter((e) => e.side === side);
+    const members = entries.filter(
+      (e) => e.side === side && !placed.has(e.i.id),
+    );
     // Move the more flexible Net, keeping less connected hosts level.
     const settled: typeof entries = [];
     for (const entry of members.sort(
@@ -328,4 +376,175 @@ export function placeMarkers(
     overrides,
     choices,
   );
+}
+
+/** R72: reseat only reported, movable blockers, preserving every device exactly. */
+export function nextMarkerPlacements(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  blockers: ReadonlySet<string>,
+  fixed: ReadonlySet<string>,
+): Map<string, Placement> | undefined {
+  const targets = new Map(
+    document.instances.map((i) => [i.id, structuredClone(i.placement!)]),
+  );
+  const roles = classifyNets(document, resolver);
+  const devices = document.instances.filter(
+    (i) =>
+      !isMarker(i) &&
+      deviceDescriptor(i.symbolId)?.deviceClass !== "net-marker",
+  );
+  const deviceDocument = { ...document, instances: devices };
+  const pins = pinPoints(deviceDocument, resolver);
+  const ports = new Set(
+    document.instances
+      .filter(
+        (i) =>
+          blockers.has(i.id) &&
+          !fixed.has(i.id) &&
+          ["port", "port-filled"].includes(i.symbolId),
+      )
+      .map((i) => i.id),
+  );
+  // Reuse R19/R20 and spacing against all stationary ports. R71 is disabled
+  // only for blockers; the other local and edge seats stay exactly where they are.
+  placeCellPins(
+    document,
+    deviceDocument,
+    pins,
+    resolver,
+    roles,
+    targets,
+    { sides: new Map(), orientations: new Map() },
+    { sides: new Map(), orientations: new Map() },
+    ports,
+    new Set(
+      document.instances.filter((i) => !ports.has(i.id)).map((i) => i.id),
+    ),
+  );
+  const branchPins = pinPoints(document, resolver);
+  // R43 rail rows are derived from geometry, never diagnostic coordinates.
+  // A marker can clear every pin column and still touch a horizontal trunk;
+  // advance past that span before asking the unchanged router to replan.
+  const portsOnRail = new Set(
+    document.instances
+      .filter((i) => ["port", "port-filled"].includes(i.symbolId))
+      .map((i) => i.id),
+  );
+  const rows = pins.map((p) => p.point.y);
+  const centres = devices.map((i) => i.placement!.position.y);
+  const rails = [...roles.rails].flatMap(([net, role]) => {
+    const members = branchPins.filter(
+      (p) =>
+        roles.pinNet(p.instanceId, p.pinName) === net &&
+        deviceDescriptor(
+          document.instances.find((i) => i.id === p.instanceId)!.symbolId,
+        )?.deviceClass !== "net-marker",
+    );
+    if (members.length < 2 || !rows.length) return [];
+    const ground = role === "ground";
+    const level = members[0]!.point.y;
+    const outside = ground
+      ? level > Math.max(...centres)
+      : level < Math.min(...centres);
+    const y =
+      outside && members.every((p) => p.point.y === level)
+        ? level
+        : ground
+          ? Math.max(...rows) + MARKER_OFFSET / 2
+          : Math.min(...rows) - MARKER_OFFSET / 2;
+    const levels = new Set([
+      y,
+      ...members
+        .filter((p) => portsOnRail.has(p.instanceId))
+        .map((p) => p.point.y),
+    ]);
+    const xs = members.map((p) => p.point.x);
+    return [...levels].map((y) => ({
+      y,
+      left: Math.min(...xs),
+      right: Math.max(...xs),
+    }));
+  });
+  let moved = false;
+  for (const i of [...document.instances].sort((a, b) =>
+    compareIds(a.id, b.id),
+  )) {
+    if (!blockers.has(i.id) || fixed.has(i.id)) continue;
+    const port = ports.has(i.id);
+    if (!port && deviceDescriptor(i.symbolId)?.deviceClass !== "net-marker")
+      continue;
+    const old = i.placement!;
+    const connected = pins.filter(
+      (p) => roles.pinNet(p.instanceId, p.pinName) === roles.pinNet(i.id, "P"),
+    );
+    const host =
+      connected.length === 1 && !roles.rails.has(roles.pinNet(i.id, "P") ?? "")
+        ? connected[0]
+        : undefined;
+    const hostInstance = host && devices.find((i) => i.id === host.instanceId);
+    const hostPin =
+      hostInstance &&
+      devicePins(hostInstance, resolver).find((p) => p.name === host!.pinName);
+    const exit = hostPin && pinExit(hostPin, hostInstance!.placement!);
+    const snap = (n: number) =>
+      Math.round(n / document.presentation.grid) * document.presentation.grid;
+    const local =
+      port &&
+      host &&
+      exit &&
+      old.position.x === snap(host.point.x + exit.x * CELL_PIN_OFFSET) &&
+      old.position.y === snap(host.point.y + exit.y * CELL_PIN_OFFSET);
+    if (port && !local) targets.set(i.id, structuredClone(old));
+    const target = targets.get(i.id)!;
+    const axis =
+      port && (target.rotation === 0 || target.rotation === 180) ? "y" : "x";
+    // A local port first falls back to its R20 seat. An edge port and a power
+    // marker advance to the next slot along the existing edge/rail, by id.
+    const origin = target.position[axis];
+    const step = port ? CELL_PIN_SPACING : document.presentation.grid;
+    let free = false;
+    for (let attempt = local ? 0 : 1; attempt < 400; attempt++) {
+      // Nearest free slot in either direction; id order and positive ties are
+      // stable. Moving across an entire trunk is unnecessary at its near end.
+      const distance = Math.ceil(attempt / 2) * step;
+      target.position[axis] = origin + (attempt % 2 ? distance : -distance);
+      const candidate = withPlacements(document, targets);
+      const resolved = resolver.resolve(i.symbolId, i.symbolVariantId);
+      if (!resolved) break;
+      const ink = visibleSymbolInkBounds(resolved, i.signalFlowParameters);
+      const corners = [
+        { x: ink.x, y: ink.y },
+        { x: ink.x + ink.width, y: ink.y + ink.height },
+      ].map((p) => transformPoint(p, target.position, target));
+      const low = Math.min(...corners.map((p) => p[axis]));
+      const high = Math.max(...corners.map((p) => p[axis]));
+      // Avoid pin branch columns/rows without interpreting coordinates or Net
+      // names in diagnostic prose. Existing routes remain subject to full replay.
+      const branch = branchPins.some(
+        (p) =>
+          p.instanceId !== i.id &&
+          p.point[axis] >= low &&
+          p.point[axis] <= high,
+      );
+      const left = Math.min(...corners.map((p) => p.x)),
+        right = Math.max(...corners.map((p) => p.x));
+      const top = Math.min(...corners.map((p) => p.y)),
+        bottom = Math.max(...corners.map((p) => p.y));
+      const trunk = rails.some(
+        (rail) =>
+          top <= rail.y &&
+          rail.y <= bottom &&
+          left <= rail.right &&
+          rail.left <= right,
+      );
+      if (!branch && !trunk && !geometryProblem(candidate, resolver)) {
+        free = true;
+        break;
+      }
+    }
+    if (!free) return undefined;
+    moved = true;
+  }
+  return moved ? targets : undefined;
 }

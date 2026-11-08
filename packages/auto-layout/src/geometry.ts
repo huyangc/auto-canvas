@@ -11,7 +11,7 @@ import {
   type Point,
   type SchematicDocument,
 } from "@icm/model";
-import type { SymbolResolver } from "@icm/symbols";
+import type { SymbolPin, SymbolResolver } from "@icm/symbols";
 import type { Placement } from "./types.js";
 
 /** R41: derived symbol transforms must not leak floating point residue. */
@@ -137,4 +137,17 @@ export function boxesIntersect(a: DerivedRect, b: DerivedRect): boolean {
     a.y <= b.y + b.height &&
     b.y <= a.y + a.height
   );
+}
+
+/** World-space outward direction of a transformed symbol pin. */
+export function pinExit(pin: SymbolPin, orientation: Placement): Point {
+  const direction =
+    pin.direction === "west"
+      ? { x: -1, y: 0 }
+      : pin.direction === "east"
+        ? { x: 1, y: 0 }
+        : pin.direction === "north"
+          ? { x: 0, y: -1 }
+          : { x: 0, y: 1 };
+  return transformPoint(direction, { x: 0, y: 0 }, orientation);
 }

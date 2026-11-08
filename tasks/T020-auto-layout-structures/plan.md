@@ -167,6 +167,49 @@ Out of scope:
    - Six rendered pairs, including documents with a driver pair, a parallel diode and a
      single-gate port.
 
+### Round 2 amendment
+
+Added after round 1's review (see `review.md`). Keep R68–R71 as implemented.
+
+7. **R72 Blocker repair.** After a complete plan, read the R14 failures it reports.
+
+   **Repairable blockers.** A failure is repairable when its message names, as the
+   obstruction, either:
+   - a port (`port`, `port-filled`); or
+   - a power marker (`ground`, `vdd`, `vdd-port` and the other net-marker classes).
+
+   Collect those blocker instances.
+
+   **Repair.** Replan once with every collected blocker moved:
+   - an R71 local port falls back to R19/R20 at the edge;
+   - an edge port takes the next free R20 slot away from the trunk it blocked;
+   - a marker takes the next free position along its rail, as R6a and R12 order them,
+     clear of the blocked branch's column or row.
+
+   **Acceptance.** Keep the repaired plan only if it has strictly fewer floating pins
+   and no more crossings than the plan before it; otherwise keep that plan. Allow at
+   most two repair passes per plan.
+
+   **Where it applies.** Quick mode always runs the repair. In R66 search, run it on
+   the final best state only, before R44, so search cost per evaluation is unchanged.
+
+   **Constraints.**
+   - Never move a device or a fixed instance.
+   - Never change the router.
+   - Never key the repair to message text beyond the obstruction's instance id. If
+     `planRouteNet` already returns the obstruction in structured form, use that
+     instead, and report which source you used.
+
+   **Tests.** Hand-built:
+   - a local port blocking another Net's branch is moved back, and the Net routes;
+   - a ground marker blocking a ground branch is moved, and the branch routes;
+   - a repair that would add crossings is not kept;
+   - quick mode stays deterministic.
+
+Report round 2 as round 1, against T019 quick (755 / 766 / 82) and round 1
+(621 / 701 / 101). Give the effect of R72 alone on top of round 1. The floating-pin
+target (≤ 82) still applies.
+
 ## Acceptance
 
 Run from the repository root; all must pass.

@@ -98,14 +98,17 @@ it("R19 uses the role convention for a host exactly at the bounds centre", () =>
       ? {
           ...d,
           primitives: [],
-          pins: d.pins.map((p) => ({ ...p, at: { x: 0, y: p.at.y } })),
+          pins: d.pins.flatMap((p) => [
+            { ...p, at: { x: 0, y: p.at.y } },
+            { ...p, name: `aux${p.name}`, at: { x: 0, y: p.at.y * 2 } },
+          ]),
         }
       : d,
   );
   const resolver = new InMemorySymbolResolver(definitions);
   const document = circuit(
     { v: "voltage-source", input: "port", output: "port" },
-    { in: ["v.+", "input.P"], out: ["v.-", "output.P"] },
+    { in: ["v.+", "v.aux+", "input.P"], out: ["v.-", "v.aux-", "output.P"] },
   );
   const roles = classifyNets(document, resolver);
   roles.byNet.set("in", "input");
@@ -122,10 +125,16 @@ it.each([false, true])(
   (tie) => {
     const resolver = new InMemorySymbolResolver(builtInSymbols);
     const document = circuit(
-      { host: "opamp", extra: "resistor", a: "port", b: "port" },
       {
-        n1: ["host.IN-", "a.P"],
-        n2: ["host.IN+", "b.P", ...(!tie ? ["extra.1"] : [])],
+        host: "opamp",
+        extra: "resistor",
+        more: "resistor",
+        a: "port",
+        b: "port",
+      },
+      {
+        n1: ["host.IN-", "extra.1", "a.P"],
+        n2: ["host.IN+", "extra.2", "b.P", ...(!tie ? ["more.1"] : [])],
       },
     );
     const roles = classifyNets(document, resolver);
@@ -134,6 +143,7 @@ it.each([false, true])(
     const targets = new Map([
       ["host", placement(0, 0)],
       ["extra", placement(160, 0)],
+      ["more", placement(320, 0)],
     ]);
     const devices = {
       ...document,
@@ -273,12 +283,19 @@ it("R20 finds grid spacing when a third port starts between two settled ports", 
     builtInSymbols.map((s) => (s.id === host.id ? host : s)),
   );
   const document = circuit(
-    { host: host.id, a: "port", b: "port", c: "port" },
-    { na: ["host.p0", "a.P"], nb: ["host.p1", "b.P"], nc: ["host.p2", "c.P"] },
+    { host: host.id, peer: host.id, a: "port", b: "port", c: "port" },
+    {
+      na: ["host.p0", "peer.p0", "a.P"],
+      nb: ["host.p1", "peer.p1", "b.P"],
+      nc: ["host.p2", "peer.p2", "c.P"],
+    },
   );
   const roles = classifyNets(document, resolver);
   for (const net of ["na", "nb", "nc"]) roles.byNet.set(net, "input");
-  const targets = new Map([["host", placement(0, 0)]]);
+  const targets = new Map([
+    ["host", placement(0, 0)],
+    ["peer", placement(160, 0)],
+  ]);
   placeMarkers(
     document,
     resolver,

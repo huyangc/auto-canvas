@@ -38,12 +38,13 @@ export function selectRoutingAlternative(
   alternative: LayoutRun,
   resolver: SymbolResolver,
   strategy?: LayoutStrategy,
+  refined: AutoLayoutResult = current.result,
 ): AutoLayoutResult {
   const score = routedScore(alternative, resolver);
   const selected =
     score < routedScore(current, resolver) ? alternative : current;
   measurements.set(selected.result, {
-    candidates: measurements.get(current.result)?.candidates ?? 0,
+    candidates: measurements.get(refined)?.candidates ?? 0,
     score: routedScore(selected, resolver),
     ...(strategy ? { strategy } : {}),
   });

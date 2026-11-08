@@ -1,3 +1,4 @@
+import { deviceDescriptor } from "@icm/devices";
 import type { SchematicDocument } from "@icm/model";
 import { isMos, type NetRoles } from "./net-roles.js";
 import type { RecognizedGroup } from "./types.js";
@@ -17,6 +18,7 @@ export function recognizeStructures(
   const groups: RecognizedGroup[] = [];
   const pin = roles.pinNet;
   for (const kind of [
+    "cross-coupled",
     "differential-pair",
     "current-mirror",
     "matched-pair",
@@ -25,7 +27,12 @@ export function recognizeStructures(
       const a = mos[i]!;
       if (used.has(a.id)) continue;
       for (const b of mos.slice(i + 1)) {
-        if (used.has(b.id) || a.symbolId !== b.symbolId) continue;
+        if (
+          used.has(b.id) ||
+          deviceDescriptor(a.symbolId)?.mosBulkClass !==
+            deviceDescriptor(b.symbolId)?.mosBulkClass
+        )
+          continue;
         const as = pin(a.id, "S"),
           bs = pin(b.id, "S");
         const ad = pin(a.id, "D"),
@@ -35,20 +42,30 @@ export function recognizeStructures(
         if (!as || !bs || !ad || !bd || !ag || !bg) continue;
         const aDiode = ad === ag,
           bDiode = bd === bg;
+        // R68: mutual channel-to-gate links are symmetric; a one-way link
+        // identifies a driver, never a differential pair.
+        const aDrivesB = bg === ad || bg === as;
+        const bDrivesA = ag === bd || ag === bs;
+        const crossCoupled = aDrivesB && bDrivesA && !aDiode && !bDiode;
         const matches =
-          kind === "differential-pair"
-            ? as === bs &&
-              roles.byNet.get(as) !== "supply" &&
-              roles.byNet.get(as) !== "ground" &&
-              ad !== bd &&
-              ag !== bg
-            : kind === "current-mirror"
-              ? as === bs && ag === bg && aDiode !== bDiode
-              : ((aDiode && bDiode) || ag === bg) && (as === bs || ad === bd);
+          kind === "cross-coupled"
+            ? crossCoupled
+            : kind === "differential-pair"
+              ? !aDrivesB &&
+                !bDrivesA &&
+                as === bs &&
+                roles.byNet.get(as) !== "supply" &&
+                roles.byNet.get(as) !== "ground" &&
+                ad !== bd &&
+                ag !== bg
+              : kind === "current-mirror"
+                ? as === bs && ag === bg && aDiode !== bDiode
+                : ((aDiode && bDiode) || ag === bg) && (as === bs || ad === bd);
         if (!matches) continue;
+        const recordedKind = kind === "cross-coupled" ? "matched-pair" : kind;
         const group: RecognizedGroup = {
-          id: `auto-${kind}-${a.id}`,
-          kind,
+          id: `auto-${recordedKind}-${a.id}`,
+          kind: recordedKind,
           members: [a.id, b.id],
         };
         if (kind === "current-mirror")
@@ -60,7 +77,8 @@ export function recognizeStructures(
                 item.id !== a.id &&
                 item.id !== b.id &&
                 ((isMos(item.symbolId) && pin(item.id, "D") === as) ||
-                  (item.symbolId === "current-source" &&
+                  (deviceDescriptor(item.symbolId)?.deviceClass ===
+                    "current-source" &&
                     pin(item.id, "+") === as)),
             )
             .sort((x, y) => compareIds(x.id, y.id))[0];

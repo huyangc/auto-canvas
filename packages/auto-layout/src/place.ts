@@ -6,7 +6,7 @@ import {
 import { visibleInstanceBounds } from "@icm/derived";
 import { type Instance, type SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
-import { type NetRoles } from "./net-roles.js";
+import { classifyNets, type NetRoles } from "./net-roles.js";
 import { compareIds, persistedTemplates } from "./recognize.js";
 import {
   boxesIntersect,
@@ -24,7 +24,12 @@ import {
 } from "./layout-choices.js";
 import { placeFallback, orientByWireCost } from "./place-fallback.js";
 import { netLevels, deviceRows, orderRows, assignColumns } from "./layered.js";
-import { placeStages } from "./stages.js";
+import {
+  parallelAttachments,
+  placeParallelAttachments,
+  placeDriverAttachments,
+  placeStages,
+} from "./stages.js";
 import { templatePlacement } from "./template-placement.js";
 import { isMos } from "./net-roles.js";
 import { placeMarkers } from "./place-markers.js";
@@ -46,6 +51,18 @@ function resolveCollisions(
   const ordered = [...document.instances].sort((a, b) =>
     compareIds(a.id, b.id),
   );
+  const attached = parallelAttachments(
+    document.instances,
+    resolver,
+    classifyNets(document, resolver),
+  );
+  const unit = (id: string) => {
+    const host = attached.find((a) => a.device.id === id)?.host.id ?? id;
+    return [
+      host,
+      ...attached.filter((a) => a.host.id === host).map((a) => a.device.id),
+    ];
+  };
   const prior: Instance[] = [];
   for (const instance of ordered) {
     const target = targets.get(instance.id)!;
@@ -55,7 +72,7 @@ function resolveCollisions(
     let problem = geometryProblem(partial(), resolver);
     if (
       problem &&
-      (fixed.has(instance.id) ||
+      (unit(instance.id).some((id) => fixed.has(id)) ||
         prior.some(
           (i) =>
             fixed.has(i.id) &&
@@ -84,7 +101,8 @@ function resolveCollisions(
     )
       return problem;
     for (let step = 0; problem && step < 40; step++) {
-      target.position[axis] += document.presentation.grid;
+      for (const id of unit(instance.id))
+        targets.get(id)!.position[axis] += document.presentation.grid;
       problem = geometryProblem(partial(), resolver);
     }
     if (problem) return problem;
@@ -220,6 +238,20 @@ export function placeDocument(
     fixed,
   );
   if (deviceCollision) return { placements: targets, problem: deviceCollision };
+  if (!given)
+    placeParallelAttachments(
+      { ...document, instances: devices },
+      resolver,
+      roles,
+      targets,
+      fixed,
+    );
+  const attachmentIds = new Set(
+    parallelAttachments(devices, resolver, roles).flatMap((a) => [
+      a.device.id,
+      a.host.id,
+    ]),
+  );
   placeMarkers(document, resolver, roles, targets, overrides, emptyChoices());
   orientByWireCost(
     document,
@@ -227,10 +259,28 @@ export function placeDocument(
     roles,
     targets,
     templates,
-    fixed,
+    new Set([...fixed, ...attachmentIds]),
     overrides,
     choices,
   );
+  const attachedCollision = resolveCollisions(
+    { ...document, instances: devices },
+    resolver,
+    targets,
+    templates,
+    fixed,
+  );
+  if (attachedCollision)
+    return { placements: targets, problem: attachedCollision };
+  if (!given)
+    placeDriverAttachments(
+      { ...document, instances: devices },
+      resolver,
+      roles,
+      templates,
+      targets,
+      fixed,
+    );
   placeMarkers(document, resolver, roles, targets, overrides, choices);
   for (const id of fixed) {
     const old = document.instances.find((i) => i.id === id)?.placement;
@@ -360,6 +410,28 @@ export function placeDocument(
         return {
           placements: targets,
           problem: "R66: placement finishing split a group template",
+        };
+    }
+    for (const { device, host } of parallelAttachments(
+      devices,
+      resolver,
+      roles,
+    )) {
+      const oldHost = given.get(host.id)!,
+        nextHost = targets.get(host.id)!;
+      const old = given.get(device.id)!,
+        next = targets.get(device.id)!;
+      if (
+        next.rotation !== old.rotation ||
+        next.mirror !== old.mirror ||
+        next.position.x - old.position.x !==
+          nextHost.position.x - oldHost.position.x ||
+        next.position.y - old.position.y !==
+          nextHost.position.y - oldHost.position.y
+      )
+        return {
+          placements: targets,
+          problem: "R66: placement finishing split a parallel attachment",
         };
     }
     const grouped = new Set(templates.flatMap((g) => g.members));

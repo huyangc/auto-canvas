@@ -4,6 +4,8 @@ import {
 } from "@icm/edit-engine";
 import type { SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
+import { geometryProblem } from "./geometry.js";
+import { repairBlockers } from "./blocker-repair.js";
 import { freedAnnotations, reanchorLabels } from "./labels.js";
 import {
   freezePinGroups,
@@ -39,7 +41,11 @@ import {
   selectRoutingAlternative,
   type LayoutRun,
 } from "./refine.js";
-import type { SearchBounds } from "./search-bounds.js";
+import {
+  searchBounds,
+  spanProblem,
+  type SearchBounds,
+} from "./search-bounds.js";
 import { annealLayout } from "./search.js";
 
 export function planAutoLayout(
@@ -58,6 +64,27 @@ export function planAutoLayout(
       strategy: LayoutStrategy;
     }
   >();
+  let repairBounds: SearchBounds | undefined;
+  const repair = (
+    run: LayoutRun,
+    strategy: LayoutStrategy,
+    signalTrunks: boolean,
+  ) =>
+    repairBlockers(run, resolver, fixed, (placements) =>
+      repairBounds && spanProblem(document, resolver, placements, repairBounds)
+        ? run
+        : planLayoutOnce(
+            document,
+            resolver,
+            options,
+            emptyOverrides(),
+            strategy,
+            signalTrunks,
+            undefined,
+            undefined,
+            placements,
+          ),
+    );
   const route = (strategy: LayoutStrategy, overrides: LayoutOverrides) => {
     const run = planLayoutOnce(
       document,
@@ -116,7 +143,7 @@ export function planAutoLayout(
       selected = result;
   }
   // Reuse the selected placement and refinement choices; do not search again.
-  const alternative = planLayoutOnce(
+  const rawAlternative = planLayoutOnce(
     document,
     resolver,
     options,
@@ -124,11 +151,17 @@ export function planAutoLayout(
     selected.strategy,
     false,
   );
+  const alternative = options.search
+    ? rawAlternative
+    : repair(rawAlternative, selected.strategy, false);
   const quick = selectRoutingAlternative(
-    selected.run,
+    options.search
+      ? selected.run
+      : repair(selected.run, selected.strategy, true),
     alternative,
     resolver,
     selected.strategy,
+    selected.run.result,
   );
   if (!options.search) return quick;
   const quickRun = quick === alternative.result ? alternative : selected.run;
@@ -152,10 +185,15 @@ export function planAutoLayout(
         bounds,
       ),
   );
-  if (best.run === quickRun) return quick;
+  // R72 runs only after annealing, never in the per-evaluation callback.
+  if (quickRun.final) repairBounds = searchBounds(quickRun.final, resolver);
+  const repaired = repair(best.run, best.strategy, best.run !== alternative);
+  const repairedAlternative = best.alternative
+    ? repair(best.alternative, best.strategy, false)
+    : repaired;
   return selectRoutingAlternative(
-    best.run,
-    best.alternative ?? best.run,
+    repaired,
+    repairedAlternative,
     resolver,
     best.strategy,
   );
@@ -171,6 +209,7 @@ export function planLayoutOnce(
   signalTrunks = true,
   given?: ReadonlyMap<string, Placement>,
   bounds?: SearchBounds,
+  exact?: ReadonlyMap<string, Placement>,
 ): LayoutRun {
   const run: LayoutRun = {
     result: { edits: [], groups: [], diagnostics: [] },
@@ -186,6 +225,7 @@ export function planLayoutOnce(
     signalTrunks,
     given,
     bounds,
+    exact,
   );
   return run;
 }
@@ -200,6 +240,7 @@ function buildPlan(
   signalTrunks: boolean,
   given?: ReadonlyMap<string, Placement>,
   bounds?: SearchBounds,
+  exact?: ReadonlyMap<string, Placement>,
 ): AutoLayoutResult {
   if (document.instances.length > 120)
     return {
@@ -235,18 +276,32 @@ function buildPlan(
         : undefined;
   const result = conflict
     ? { placements: new Map<string, Placement>(), problem: conflict }
-    : placeDocument(
-        { ...document, junctions: [] },
-        resolver,
-        roles,
-        groups,
-        options,
-        overrides,
-        run.choices,
-        strategy,
-        given,
-        bounds,
-      );
+    : exact
+      ? {
+          placements: exact,
+          problem: geometryProblem(
+            {
+              ...document,
+              instances: document.instances.map((i) => ({
+                ...i,
+                placement: exact.get(i.id) ?? i.placement,
+              })),
+            },
+            resolver,
+          ),
+        }
+      : placeDocument(
+          { ...document, junctions: [] },
+          resolver,
+          roles,
+          groups,
+          options,
+          overrides,
+          run.choices,
+          strategy,
+          given,
+          bounds,
+        );
   if (result.problem)
     return {
       edits: [],

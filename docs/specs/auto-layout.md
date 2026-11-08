@@ -368,6 +368,55 @@ pins }` lists, never Net ids.
   width/height ratios against its actual quick result, their maximum, and
   instance span ratios for checking this rule.
 
+- **R68 — Driver and cross-coupled pairs.** Use device descriptors for MOS
+  classes and polarity. A one-way channel-to-gate connection excludes a
+  differential pair. Two same-type MOS with mutual gate-to-drain or
+  gate-to-source connections and neither drain tied to its own gate form a
+  `matched-pair`, before differential-pair recognition. The existing symmetric
+  template and persisted group kind apply; no model schema change is needed.
+
+- **R69 — Parallel attachments.** A two-terminal device whose distinct Nets
+  exactly match a MOS's drain and source attaches to the first matching MOS by
+  id. In all three strategies, place it beside the channel, away from the gate,
+  rotate its pins to match the drain/source levels where the symbol span allows,
+  and otherwise align the pin midpoint. Search outward on the grid for clear
+  artwork. This is a placement unit, without a persisted group. Collision
+  repair and R66 translation moves carry the attachment with its host; stage
+  moves merge intersecting units and cannot mirror a parallel unit.
+
+- **R70 — Gate-driver attachments.** Extend R59 with stages of at most three
+  devices whose sole non-rail link to other devices reaches only gate or
+  control pins of one receiver. Translate the whole stage onto the receiver's
+  pin-exit side, aligning its first output pin with the receiving pin, leaving
+  60 units of body clearance. Place upstream attachments after their receiver
+  stage. Apply the same finishing rule in template, layered and stages
+  placement. A device overlap or fixed member leaves the stage in place.
+
+- **R71 — Single-host ports.** A non-rail Cell Pin Net that reaches exactly
+  one device pin gets a local seat, 80 units along that pin's transformed exit
+  direction. Face the port toward the host; the existing port-label renderer
+  keeps text upright. Reserve local seats in id order. If a seat overlaps a
+  device, power marker or earlier port, use R19/R20. Rails and multiple-host
+  ports retain R19/R20 and their edge spacing; R71 seats are excluded from
+  edge spacing and side refinement.
+
+- **R72 — Blocker repair.** After a complete quick plan, collect movable ports
+  (`port`, `port-filled`) and descriptor-defined net markers named as R14
+  obstructions. The unchanged router throws plain errors, so resolve only its
+  obstruction label (`reference ?? id`) to an unambiguous instance; do not use
+  Net names, suggested detours or coordinates from the message. A local R71
+  port falls back to R19/R20. An edge port advances by R20 spacing along its
+  edge; a power marker advances by grid steps along its rail in R6a/R12 id
+  order. Choose the nearest free seat in either direction, with positive ties, whose
+  ink clears other pin branch rows/columns and R43 horizontal rail spans.
+  Preserve every device, fixed instance and unrelated marker placement, and
+  replay the complete routing/transaction pipeline. Keep a repair only with
+  strictly fewer floating pins and a strictly lower R22 routed score, so an
+  unrouted Net outweighs the few crossings its route may add; try at most two
+  passes.
+  In R66, repair only the final best state and its routing-only alternative
+  before R44, within R67 span bounds, with no repair work per energy evaluation.
+
 - **Existing locks and conflicts.** Members of a locked layout group or
   constraint are treated as fixed instances under R1, because the Edit Engine
   refuses to transform them. A recognized group whose generated id already
