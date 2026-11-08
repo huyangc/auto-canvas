@@ -90,3 +90,10 @@ The largest width ratio is 1.42.
 Some documents trade crossings for routed Nets. Three documents drop from 6, 9 and 5
 floating pins to 0. One of them gains 6 crossings. Lint shows no errors; warnings rose,
 mostly non-null assertions in new code, a pattern the package already uses.
+
+## PR review — codex round 1 on `901c50c`
+
+One P2, confirmed with a hand-built test that failed before the fix. A MOS with D and S
+on one Net matched any two-terminal device on that Net as a parallel host. Opus fixed it:
+the host's D and S Nets must differ. Package tests pass (173). Quick-mode human results
+are unchanged in every document.

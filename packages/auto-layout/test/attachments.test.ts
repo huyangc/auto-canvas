@@ -347,3 +347,33 @@ it("R70 accepts a two-terminal source stage without a conducting-pair descriptor
   expect(point("source", "+").y).toBe(point("host", "G").y);
   expect(point("source", "+").x).toBeLessThan(point("host", "G").x);
 });
+
+it("R69 never attaches a device to a MOS whose drain and source share a Net", () => {
+  const d = circuit(
+    { short: "nmos", real: "nmos", r: "resistor" },
+    {
+      shared: ["short.D", "short.S", "real.D", "r.1"],
+      other: ["real.S", "r.2"],
+      gs: ["short.G"],
+      gr: ["real.G"],
+    },
+  );
+  const attached = parallelAttachments(
+    d.instances,
+    resolver,
+    classifyNets(d, resolver),
+  ).map((a) => [a.device.id, a.host.id]);
+  expect(attached).toEqual([["r", "real"]]);
+  // Without the genuine host, the shorted MOS must not claim the resistor.
+  const alone = circuit(
+    { short: "nmos", r: "resistor" },
+    { shared: ["short.D", "short.S", "r.1"], other: ["r.2"], gs: ["short.G"] },
+  );
+  expect(
+    parallelAttachments(
+      alone.instances,
+      resolver,
+      classifyNets(alone, resolver),
+    ),
+  ).toEqual([]);
+});
