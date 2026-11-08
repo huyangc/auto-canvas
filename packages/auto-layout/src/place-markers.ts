@@ -367,7 +367,11 @@ export function placeMarkers(
     .filter((i) => ["ground", "vdd-port"].includes(i.symbolId))
     .sort((a, b) => compareIds(a.id, b.id));
   placePowerMarkers(document, power, devices, pins, resolver, roles, targets);
-  // Fixed ports keep their seats, so R71 and R20 must treat them as occupied.
+  // Fixed markers keep their seats, so R71 and R20 must treat them as occupied:
+  // restore fixed power markers and ports before any port seat is checked.
+  for (const i of document.instances)
+    if (fixed.has(i.id) && i.placement && isMarker(i))
+      targets.set(i.id, structuredClone(i.placement));
   const fixedPorts = new Set(
     document.instances
       .filter(
@@ -376,10 +380,7 @@ export function placeMarkers(
           i.placement &&
           ["port", "port-filled"].includes(i.symbolId),
       )
-      .map((i) => {
-        targets.set(i.id, structuredClone(i.placement!));
-        return i.id;
-      }),
+      .map((i) => i.id),
   );
   placeCellPins(
     document,
