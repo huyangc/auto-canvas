@@ -2,7 +2,7 @@ import { transformPoint } from "./geometry.js";
 import { visibleInstanceBounds } from "@icm/derived";
 import { type Instance, type SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
-import { isMos, isMosBulk, type NetRoles } from "./net-roles.js";
+import { isMos, isMosBulk, mosPolarity, type NetRoles } from "./net-roles.js";
 import { compareIds } from "./recognize.js";
 import {
   deviceNets,
@@ -55,7 +55,7 @@ export function netLevels(
     const pins = devicePins(i, resolver);
     let names: string[] = [];
     if (isMos(i.symbolId))
-      names = i.symbolId === "nmos" ? ["D", "S"] : ["S", "D"];
+      names = mosPolarity(i.symbolId) === "nmos" ? ["D", "S"] : ["S", "D"];
     else if (isSource(i)) names = ["+", "-"];
     else if (pins.length === 2) {
       const power = pins.find((p) =>

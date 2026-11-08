@@ -2,7 +2,7 @@ import { transformPoint } from "./geometry.js";
 // T013 placement restored from 309a368 for the R36 strategy portfolio.
 import { type Instance, type SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
-import { isMos, type NetRoles } from "./net-roles.js";
+import { isMos, mosPolarity, type NetRoles } from "./net-roles.js";
 import { compareIds } from "./recognize.js";
 import {
   COLUMN_PITCH,
@@ -65,8 +65,8 @@ function rankRows(
     }
     if (!changed) break;
   }
-  for (const p of devices.filter((i) => i.symbolId === "pmos"))
-    for (const n of devices.filter((i) => i.symbolId === "nmos")) {
+  for (const p of devices.filter((i) => mosPolarity(i.symbolId) === "pmos"))
+    for (const n of devices.filter((i) => mosPolarity(i.symbolId) === "nmos")) {
       if (
         roles.pinNet(p.id, "D") &&
         roles.pinNet(p.id, "D") === roles.pinNet(n.id, "D")
