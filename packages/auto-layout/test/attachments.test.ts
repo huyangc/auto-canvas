@@ -377,3 +377,63 @@ it("R69 never attaches a device to a MOS whose drain and source share a Net", ()
     ),
   ).toEqual([]);
 });
+
+it("R71 treats a fixed port as occupied instead of moving it away", () => {
+  const d = circuit(
+    { m1: "nmos", m2: "nmos", fixedPort: "port", free: "port" },
+    {
+      g1: ["m1.G", "fixedPort.P"],
+      g2: ["m2.G", "free.P"],
+      d1: ["m1.D"],
+      d2: ["m2.D"],
+      s: ["m1.S", "m2.S"],
+    },
+  );
+  d.netlist = {
+    name: "fixed-port",
+    formalParameters: [],
+    terminals: [
+      {
+        id: "g1",
+        name: "g1",
+        netId: "g1",
+        direction: "input" as const,
+        interfaceInstanceIds: ["fixedPort"],
+      },
+      {
+        id: "g2",
+        name: "g2",
+        netId: "g2",
+        direction: "input" as const,
+        interfaceInstanceIds: ["free"],
+      },
+    ],
+  };
+  const at = (x: number): Placement => ({
+    position: { x, y: 0 },
+    rotation: 0,
+    mirror: "none",
+  });
+  d.instances.find((i) => i.id === "m1")!.placement = at(0);
+  d.instances.find((i) => i.id === "m2")!.placement = at(400);
+  d.instances.find((i) => i.id === "fixedPort")!.placement = at(300);
+  const fixedInstanceIds = new Set(["m1", "m2", "fixedPort"]);
+  const plan = planAutoLayout(d, resolver, { fixedInstanceIds });
+  expect(plan.diagnostics.filter((x) => x.severity === "error")).toEqual([]);
+  const result = executeTransaction(
+    d,
+    {
+      transactionId: "fixed-port",
+      documentId: d.id,
+      expectedRevision: d.revision,
+      actor: { kind: "agent", id: "test" },
+      edits: plan.edits,
+    },
+    { symbolResolver: resolver },
+  );
+  expect(result.ok).toBe(true);
+  if (!result.ok) return;
+  expect(
+    result.document.instances.find((i) => i.id === "fixedPort")!.placement,
+  ).toEqual(at(300));
+});

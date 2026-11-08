@@ -353,6 +353,7 @@ export function placeMarkers(
   targets: Map<string, Placement>,
   overrides: LayoutOverrides,
   choices: LayoutChoices,
+  fixed: ReadonlySet<string> = new Set(),
 ): void {
   const devices = document.instances
     .filter((i) => !isMarker(i))
@@ -366,6 +367,20 @@ export function placeMarkers(
     .filter((i) => ["ground", "vdd-port"].includes(i.symbolId))
     .sort((a, b) => compareIds(a.id, b.id));
   placePowerMarkers(document, power, devices, pins, resolver, roles, targets);
+  // Fixed ports keep their seats, so R71 and R20 must treat them as occupied.
+  const fixedPorts = new Set(
+    document.instances
+      .filter(
+        (i) =>
+          fixed.has(i.id) &&
+          i.placement &&
+          ["port", "port-filled"].includes(i.symbolId),
+      )
+      .map((i) => {
+        targets.set(i.id, structuredClone(i.placement!));
+        return i.id;
+      }),
+  );
   placeCellPins(
     document,
     deviceDocument,
@@ -375,6 +390,8 @@ export function placeMarkers(
     targets,
     overrides,
     choices,
+    new Set(),
+    fixedPorts,
   );
 }
 

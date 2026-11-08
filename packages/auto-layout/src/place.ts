@@ -252,7 +252,15 @@ export function placeDocument(
       a.host.id,
     ]),
   );
-  placeMarkers(document, resolver, roles, targets, overrides, emptyChoices());
+  placeMarkers(
+    document,
+    resolver,
+    roles,
+    targets,
+    overrides,
+    emptyChoices(),
+    fixed,
+  );
   orientByWireCost(
     document,
     resolver,
@@ -281,7 +289,7 @@ export function placeDocument(
       targets,
       fixed,
     );
-  placeMarkers(document, resolver, roles, targets, overrides, choices);
+  placeMarkers(document, resolver, roles, targets, overrides, choices, fixed);
   for (const id of fixed) {
     const old = document.instances.find((i) => i.id === id)?.placement;
     if (old) targets.set(id, structuredClone(old));

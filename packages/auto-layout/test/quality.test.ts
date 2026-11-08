@@ -540,7 +540,7 @@ it("R63 refines identical strategies only once", () => {
   }
 });
 
-it("R63 refines an initially refused distinct candidate and lets its repair win", () => {
+it("R63 gives a refused distinct candidate the second refinement slot", () => {
   const resolver = new InMemorySymbolResolver(builtInSymbols);
   const document = circuit(
     {
@@ -577,44 +577,24 @@ it("R63 refines an initially refused distinct candidate and lets its repair win"
       },
     ],
   };
-  document.instances.find((i) => i.id === "a")!.placement = placement(260, 0);
+  // R71 now reserves a fixed port's seat, so this placement leaves only one
+  // valid distinct strategy; a refused one must take the second slot. Repair of
+  // a refused candidate is covered by the corpus two-inverters replan test.
+  document.instances.find((i) => i.id === "a")!.placement = placement(-180, 0);
   const options = { fixedInstanceIds: new Set(["a"]) };
-  const refused = planLayoutOnce(
-    document,
-    resolver,
-    options,
-    emptyOverrides(),
-    "template",
+  const initial = (["template", "layered", "stages"] as const).map((s) =>
+    planLayoutOnce(document, resolver, options, emptyOverrides(), s),
   );
-  const valid = planLayoutOnce(
-    document,
-    resolver,
-    options,
-    emptyOverrides(),
-    "stages",
-  );
-  expect(routedScore(refused, resolver)).toBe(Infinity);
-  expect(refused.result.diagnostics).toEqual([
-    expect.objectContaining({ severity: "error", rule: "R10" }),
-  ]);
-  expect(Number.isFinite(routedScore(valid, resolver))).toBe(true);
+  const scores = initial.map((run) => routedScore(run, resolver));
+  expect(scores.filter(Number.isFinite)).toHaveLength(1);
+  expect(scores).toContain(Infinity);
   const search = vi.spyOn(refinement, "refineLayout");
-  const comparison = vi.spyOn(refinement, "selectRoutingAlternative");
   try {
     const result = planAutoLayout(document, resolver, options);
     expect(search).toHaveBeenCalledTimes(2);
     expect(
       search.mock.calls.map((call) => routedScore(call[4]!, resolver)),
-    ).toEqual([routedScore(valid, resolver), Infinity]);
-    const selected = comparison.mock.calls[0]![0];
-    expect(routedScore(selected, resolver)).toBeLessThan(
-      routedScore(valid, resolver),
-    );
-    // Template and layered are both refused; neither is deduplicated, and the
-    // all-refused tie rule ranks layered first. Either repair proves the rule.
-    expect(["template", "layered"]).toContain(
-      refinementMetrics(result)!.strategy,
-    );
+    ).toEqual([scores.find(Number.isFinite), Infinity]);
     expect(result.diagnostics.filter((d) => d.severity === "error")).toEqual(
       [],
     );
@@ -623,10 +603,9 @@ it("R63 refines an initially refused distinct candidate and lets its repair win"
     if (committed.ok)
       expect(
         committed.document.instances.find((i) => i.id === "a")!.placement,
-      ).toEqual(placement(260, 0));
+      ).toEqual(placement(-180, 0));
     expect(planAutoLayout(document, resolver, options)).toEqual(result);
   } finally {
     search.mockRestore();
-    comparison.mockRestore();
   }
 });
