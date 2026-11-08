@@ -578,6 +578,7 @@ it.each(cases)(
       ),
     ).toEqual([]);
   },
+  30000,
 );
 
 // Commit the planner's first phases independently to isolate route removal
@@ -675,4 +676,5 @@ it.each(cases)(
       expect(terminals(result.document)).toEqual(terminals(document));
     }
   },
+  30000,
 );

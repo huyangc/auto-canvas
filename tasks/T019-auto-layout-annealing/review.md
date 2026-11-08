@@ -80,3 +80,6 @@ CI failed on `ddafcc1`. The three R67 seed cases took 7–8 s each on the CI run
 above vitest's default 5 s timeout; locally they finish within it. No assertion failed.
 Every search test now has the same 30 s timeout as the other planner-heavy tests (the
 held-out and large synthetic cases). The search tests pass (13).
+
+A second CI run then timed out the corpus `two-inverters` case at 5016 ms. No assertion
+failed. Both corpus test tables now use the same 30 s timeout.
