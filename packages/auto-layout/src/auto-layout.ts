@@ -39,6 +39,8 @@ import {
   selectRoutingAlternative,
   type LayoutRun,
 } from "./refine.js";
+import type { SearchBounds } from "./search-bounds.js";
+import { annealLayout } from "./search.js";
 
 export function planAutoLayout(
   document: SchematicDocument,
@@ -122,11 +124,40 @@ export function planAutoLayout(
     selected.strategy,
     false,
   );
-  return selectRoutingAlternative(
+  const quick = selectRoutingAlternative(
     selected.run,
     alternative,
     resolver,
     selected.strategy,
+  );
+  if (!options.search) return quick;
+  const quickRun = quick === alternative.result ? alternative : selected.run;
+  const best = annealLayout(
+    document,
+    resolver,
+    options.search,
+    fixed,
+    { run: selected.run, strategy: selected.strategy },
+    ranked.map(({ run, strategy }) => ({ run, strategy })),
+    { run: quickRun, strategy: selected.strategy },
+    (state, signalTrunks, bounds) =>
+      planLayoutOnce(
+        document,
+        resolver,
+        options,
+        { sides: state.sides, orientations: state.placements },
+        state.strategy,
+        signalTrunks,
+        state.placements,
+        bounds,
+      ),
+  );
+  if (best.run === quickRun) return quick;
+  return selectRoutingAlternative(
+    best.run,
+    best.alternative ?? best.run,
+    resolver,
+    best.strategy,
   );
 }
 
@@ -138,6 +169,8 @@ export function planLayoutOnce(
   overrides: LayoutOverrides,
   strategy: LayoutStrategy = "template",
   signalTrunks = true,
+  given?: ReadonlyMap<string, Placement>,
+  bounds?: SearchBounds,
 ): LayoutRun {
   const run: LayoutRun = {
     result: { edits: [], groups: [], diagnostics: [] },
@@ -151,6 +184,8 @@ export function planLayoutOnce(
     run,
     strategy,
     signalTrunks,
+    given,
+    bounds,
   );
   return run;
 }
@@ -163,6 +198,8 @@ function buildPlan(
   run: LayoutRun,
   strategy: LayoutStrategy,
   signalTrunks: boolean,
+  given?: ReadonlyMap<string, Placement>,
+  bounds?: SearchBounds,
 ): AutoLayoutResult {
   if (document.instances.length > 120)
     return {
@@ -207,6 +244,8 @@ function buildPlan(
         overrides,
         run.choices,
         strategy,
+        given,
+        bounds,
       );
   if (result.problem)
     return {

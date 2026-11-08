@@ -6,6 +6,17 @@ export type LayoutStrategy = "template" | "layered" | "stages";
 export type NetRole = "supply" | "ground" | "input" | "output" | "internal";
 export interface AutoLayoutOptions {
   fixedInstanceIds?: ReadonlySet<string>;
+  search?: {
+    seed: number;
+    evaluations: number;
+    deadline?: number;
+    signal?: AbortSignal;
+    onProgress?: (p: {
+      evaluations: number;
+      best: number;
+      current: number;
+    }) => void;
+  };
 }
 export interface AutoLayoutDiagnostic {
   severity: "error" | "warning";

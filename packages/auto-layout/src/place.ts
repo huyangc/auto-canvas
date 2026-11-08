@@ -1,3 +1,8 @@
+import {
+  anchorPlacements,
+  spanProblem,
+  type SearchBounds,
+} from "./search-bounds.js";
 import { visibleInstanceBounds } from "@icm/derived";
 import { type Instance, type SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
@@ -97,6 +102,8 @@ export function placeDocument(
   overrides: LayoutOverrides = emptyOverrides(),
   choices: LayoutChoices = emptyChoices(),
   strategy: LayoutStrategy = "template",
+  given?: ReadonlyMap<string, Placement>,
+  searchLimit?: SearchBounds,
 ): { placements: Map<string, Placement>; problem?: string } {
   let targets = new Map<string, Placement>();
   const devices = document.instances
@@ -122,8 +129,43 @@ export function placeDocument(
     return match ? [match] : [];
   });
   const templates = [...groups, ...existing];
+  const fixed = new Set(options.fixedInstanceIds);
+  for (const owner of [...document.layoutGroups, ...document.constraints])
+    if (owner.locked) for (const id of owner.objectIds) fixed.add(id);
   const levels = netLevels(devices, resolver, roles);
-  if (strategy === "template") {
+  if (given) {
+    const invalid = [...given].some(([id, p]) => {
+      const old = document.instances.find((i) => i.id === id)?.placement;
+      return (
+        !Number.isFinite(p.position.x) ||
+        !Number.isFinite(p.position.y) ||
+        p.position.x % document.presentation.grid ||
+        p.position.y % document.presentation.grid ||
+        (fixed.has(id) &&
+          (!old ||
+            old.rotation !== p.rotation ||
+            old.mirror !== p.mirror ||
+            old.position.x !== p.position.x ||
+            old.position.y !== p.position.y))
+      );
+    });
+    if (invalid || devices.some((i) => !given.has(i.id)))
+      return {
+        placements: targets,
+        problem: "R66: fixed or off-grid placement",
+      };
+    const supplied = structuredClone(new Map(given));
+    const anchorProblem =
+      searchLimit &&
+      anchorPlacements(document, resolver, supplied, fixed, searchLimit);
+    if (anchorProblem) return { placements: targets, problem: anchorProblem };
+    targets = new Map(devices.map((i) => [i.id, supplied.get(i.id)!]));
+    const problem = geometryProblem(
+      withPlacements({ ...document, instances: devices }, targets),
+      resolver,
+    );
+    if (problem) return { placements: targets, problem };
+  } else if (strategy === "template") {
     const result = templatePlacement(
       document,
       devices,
@@ -177,9 +219,6 @@ export function placeDocument(
       roles,
     );
   }
-  const fixed = new Set(options.fixedInstanceIds);
-  for (const owner of [...document.layoutGroups, ...document.constraints])
-    if (owner.locked) for (const id of owner.objectIds) fixed.add(id);
   for (const id of fixed) {
     const old = document.instances.find((i) => i.id === id)?.placement;
     if (old) targets.set(id, structuredClone(old));
@@ -216,7 +255,7 @@ export function placeDocument(
     fixed,
   );
   if (collision) return { placements: targets, problem: collision };
-  const oldBox = enclosingBox(document, resolver);
+  const oldBox = searchLimit?.anchor ?? enclosingBox(document, resolver);
   const newBox = enclosingBox(withPlacements(document, targets), resolver);
   const snap = (n: number) =>
     Math.round(n / document.presentation.grid) * document.presentation.grid;
@@ -224,6 +263,15 @@ export function placeDocument(
   const hasFixed = document.instances.some((i) => fixed.has(i.id));
   const dx = hasFixed ? 0 : snap(oldBox.x - newBox.x),
     dy = hasFixed ? 0 : snap(oldBox.y - newBox.y);
+  if (
+    searchLimit &&
+    hasFixed &&
+    (snap(oldBox.x - newBox.x) || snap(oldBox.y - newBox.y))
+  )
+    return {
+      placements: targets,
+      problem: "R67: anchoring would move a fixed instance",
+    };
   for (const [id, target] of targets) {
     if (fixed.has(id)) {
       const old = document.instances.find((i) => i.id === id)!.placement;
@@ -286,7 +334,7 @@ export function placeDocument(
         ),
       );
       if (!blocked) break;
-      if (hasFixed || shift > maxShift)
+      if (hasFixed || searchLimit || shift > maxShift)
         return {
           placements: targets,
           problem:
@@ -297,6 +345,56 @@ export function placeDocument(
     }
   }
   const result = withPlacements(document, targets);
+  if (given) {
+    // Collision repair and orientation finishing may not split a supplied
+    // template. Each group (including its tail) must translate rigidly.
+    for (const group of templates) {
+      const ids = [
+        ...group.members,
+        ...(group.tailInstanceId ? [group.tailInstanceId] : []),
+      ];
+      const first = ids[0]!;
+      const dx = targets.get(first)!.position.x - given.get(first)!.position.x;
+      const dy = targets.get(first)!.position.y - given.get(first)!.position.y;
+      if (
+        ids.some((id) => {
+          const old = given.get(id)!,
+            next = targets.get(id)!;
+          return (
+            next.rotation !== old.rotation ||
+            next.mirror !== old.mirror ||
+            next.position.x - old.position.x !== dx ||
+            next.position.y - old.position.y !== dy
+          );
+        })
+      )
+        return {
+          placements: targets,
+          problem: "R66: placement finishing split a group template",
+        };
+    }
+    const grouped = new Set(templates.flatMap((g) => g.members));
+    for (const net of document.nets) {
+      if (roles.rails.has(net.id)) continue;
+      const ids = net.terminals
+        .filter(
+          (t) => grouped.has(t.instanceId) && ["D", "S"].includes(t.pinName),
+        )
+        .map((t) => t.instanceId);
+      const shifts = ids.map((id) => ({
+        x: targets.get(id)!.position.x - given.get(id)!.position.x,
+        y: targets.get(id)!.position.y - given.get(id)!.position.y,
+      }));
+      if (shifts.some((p) => p.x !== shifts[0]!.x || p.y !== shifts[0]!.y))
+        return {
+          placements: targets,
+          problem: "R66: placement finishing split an aligned stack",
+        };
+    }
+  }
+  const span =
+    searchLimit && spanProblem(document, resolver, targets, searchLimit);
+  if (span) return { placements: targets, problem: span };
   const problem = geometryProblem(result, resolver);
   if (problem) return { placements: targets, problem };
   return { placements: targets };

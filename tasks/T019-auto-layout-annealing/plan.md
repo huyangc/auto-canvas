@@ -192,6 +192,37 @@ Out of scope:
    - the spread over seeds 1–3 at the 2-minute budget;
    - six rendered pairs at 10 minutes, including both largest documents.
 
+### Round 2 amendment
+
+Added after round 1's review (see `review.md`). Keep everything else from round 1.
+
+8. **R67 Bounded layout span.** Search must not drift.
+   - Reject a proposal before routing if the bounding box of all instances (devices and
+     markers) is wider or taller than **1.5×** the quick-mode result's box, plus two
+     column pitches.
+   - Anchor every accepted state to the quick-mode box's top-left corner, so a
+     translation alone never changes the state.
+   - Check whether the other drifting documents share the cause, an unrouted Net whose
+     cost does not depend on distance. If they have another cause, report it and fix
+     it with a general mechanism.
+   - Do not add a span term to the energy; energy weights are T020's.
+
+9. **Span reporting.** In the evaluation output, report the sum of layout width and of
+   layout height for every run. Also report each document's largest width and height
+   ratio against the quick result.
+
+Hand-built test for steps 8 and 9: a document with an unrouted marker Net. Searching it
+must keep the result within the bound.
+
+Rerun the step 7 report at all three budgets. Add these round targets:
+
+| Measure, at every budget                         | Required |
+| ------------------------------------------------ | -------- |
+| Largest width or height ratio against quick mode | ≤ 1.5    |
+| 10-minute targets from round 1                   | hold     |
+
+Report the short-budget held-out ceilings without gating on them (review note 3).
+
 ## Acceptance
 
 Run from the repository root; all must pass.
