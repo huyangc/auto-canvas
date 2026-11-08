@@ -13,6 +13,14 @@ export function isMos(symbolId: string): boolean {
   return deviceDescriptor(symbolId)?.deviceClass === "mos";
 }
 
+/** Channel polarity from the device registry, so MOS variants order correctly. */
+export function mosPolarity(symbolId: string): "nmos" | "pmos" | undefined {
+  const descriptor = deviceDescriptor(symbolId);
+  return descriptor?.deviceClass === "mos"
+    ? descriptor.mosBulkClass
+    : undefined;
+}
+
 /** A MOS bulk pin. Other symbols may have an ordinary pin named B. */
 export function isMosBulk(symbolId: string, pinName: string): boolean {
   return isMos(symbolId) && pinName === "B";

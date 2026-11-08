@@ -97,3 +97,12 @@ One P2, confirmed with a hand-built test that failed before the fix. A MOS with 
 on one Net matched any two-terminal device on that Net as a parallel host. Opus fixed it:
 the host's D and S Nets must differ. Package tests pass (173). Quick-mode human results
 are unchanged in every document.
+
+## PR review — codex round 2 on `e58ef8a`
+
+One P2, confirmed with a hand-built test that failed before the fix. R60/T020 widened
+`isMos` to the registry's MOS class, but `netLevels` and the template still chose
+channel order by comparing `symbolId` with `nmos`. So N-channel variants (`ndmos`,
+`depletion-nmos`) were leveled as P-channel. Opus added `mosPolarity` (from the
+descriptor's `mosBulkClass`) and used it in both places. Package tests pass (174).
+Quick-mode human results are unchanged.

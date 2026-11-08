@@ -454,3 +454,18 @@ it("counts a non-MOS pin named B as a floating pin", () => {
       .sort(),
   ).toEqual(["1", "B"]);
 });
+
+it("levels N-channel MOS variants by registry polarity", () => {
+  const stack = (symbol: string) =>
+    circuit(
+      { a: symbol, b: symbol },
+      { top: ["a.D"], mid: ["a.S", "b.D"], bottom: ["b.S"] },
+    );
+  const levels = (symbol: string) => {
+    const d = stack(symbol);
+    return netLevels(d.instances, resolver, classifyNets(d, resolver)).nets;
+  };
+  const nmos = levels("nmos");
+  for (const variant of ["ndmos", "depletion-nmos"])
+    expect(levels(variant)).toEqual(nmos);
+});
