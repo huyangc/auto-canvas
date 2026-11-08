@@ -106,3 +106,25 @@ channel order by comparing `symbolId` with `nmos`. So N-channel variants (`ndmos
 `depletion-nmos`) were leveled as P-channel. Opus added `mosPolarity` (from the
 descriptor's `mosBulkClass`) and used it in both places. Package tests pass (174).
 Quick-mode human results are unchanged.
+
+## PR review — codex round 3 on `e69d016`
+
+One P2, reproduced with a hand-built test that failed before the fix with "R10: coincident
+pin at 300,0". R71 checked a local seat against ports that `placeCellPins` had already
+moved, including fixed ones. A fixed port's own seat therefore looked free, and the later
+restoration of fixed placements collided. Opus fixed it: `placeMarkers` now takes the
+fixed set, restores fixed ports first, and passes them to `placeCellPins` as frozen. R71
+and R20 then treat them as occupied.
+
+This also removed the only route to the scenario the R63 test relied on: a fixed port at
+(260, 0) made the template refusal repairable. A probe searched more than 1,000
+fixed-instance placements of the same circuit. In none does a repaired refused candidate
+win, so the test now checks only the R63 rule this fixture can show: a refused distinct
+candidate takes the second refinement slot. With the input port fixed at (−180, 0),
+refinement runs twice, the second time from an infinite score. Repairing an all-refused
+portfolio stays covered by the corpus `two-inverters` replan test.
+
+Package tests pass (176). Quick-mode human results are unchanged.
+
+This branch was also rebased onto T019's two CI and review fixes. Import conflicts in
+`place.ts` and `search-moves.ts` were resolved, keeping both sides.
