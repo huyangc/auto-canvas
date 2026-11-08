@@ -73,3 +73,10 @@ Opus checked Codex's 10-minute raw report:
 
 Deadline-limited runs vary with machine load: Opus's 30 s run gave 687 crossings, and
 Codex's gave 704.
+
+## CI fix on PR #22
+
+CI failed on `ddafcc1`. The three R67 seed cases took 7–8 s each on the CI runner,
+above vitest's default 5 s timeout; locally they finish within it. No assertion failed.
+Every search test now has the same 30 s timeout as the other planner-heavy tests (the
+held-out and large synthetic cases). The search tests pass (13).
