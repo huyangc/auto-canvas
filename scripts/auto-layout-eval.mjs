@@ -2,12 +2,19 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
+import {
+  isMainThread,
+  parentPort,
+  Worker,
+  workerData,
+} from "node:worker_threads";
 import { planAutoLayout } from "../packages/auto-layout/dist/index.js";
 import {
   auditRouting,
   floatingPins,
 } from "../packages/auto-layout/dist/routing-audit.js";
 import { terminalPartition } from "../packages/auto-layout/dist/transaction.js";
+import { enclosingBox } from "../packages/auto-layout/dist/geometry.js";
 import { refinementMetrics } from "../packages/auto-layout/dist/refine.js";
 import { executeTransaction } from "../packages/edit-engine/dist/index.js";
 import {
@@ -25,12 +32,31 @@ import {
 } from "../packages/symbols/dist/index.js";
 
 const [folder, ...args] = process.argv.slice(2);
-if (!folder || (args.length && (args.length !== 2 || args[0] !== "--baseline")))
-  throw new Error(
-    "Usage: auto-layout-eval.mjs <folder> [--baseline <report.json>]",
-  );
-const baseline = args.length
-  ? JSON.parse(readFileSync(args[1], "utf8"))
+const flags = new Map();
+for (let i = 0; i < args.length; i += 2) {
+  if (
+    !["--baseline", "--search", "--seed", "--jobs"].includes(args[i]) ||
+    args[i + 1] === undefined
+  )
+    throw new Error(
+      "Usage: auto-layout-eval.mjs <folder> [--baseline <report.json>] [--search <seconds>] [--seed <n>] [--jobs <n>]",
+    );
+  flags.set(args[i], args[i + 1]);
+}
+if (!folder) throw new Error("A document folder is required");
+const seconds = Number(flags.get("--search") ?? 0);
+const seed = Number(flags.get("--seed") ?? 1);
+const jobs = Number(flags.get("--jobs") ?? 1);
+if (
+  !Number.isFinite(seconds) ||
+  seconds < 0 ||
+  !Number.isFinite(seed) ||
+  !Number.isSafeInteger(jobs) ||
+  jobs < 1
+)
+  throw new Error("Invalid search duration, seed or worker count");
+const baseline = flags.has("--baseline")
+  ? JSON.parse(readFileSync(flags.get("--baseline"), "utf8"))
   : undefined;
 const output = "tmp/auto-layout-eval";
 mkdirSync(output, { recursive: true });
@@ -45,18 +71,25 @@ const sections = [];
 const metrics = (document, resolver) => {
   const audit = auditRouting(document, resolver);
   const bounds = buildSvgScene(document, resolver).viewBox;
+  const instances = enclosingBox(document, resolver);
   return {
     crossings: audit.crossings,
     bends: audit.bends,
     wireLength: audit.wireLength,
     layoutWidth: Math.ceil(bounds.x + bounds.width) - Math.floor(bounds.x),
+    layoutHeight: Math.ceil(bounds.y + bounds.height) - Math.floor(bounds.y),
+    instanceWidth: instances.width,
+    instanceHeight: instances.height,
     unsafeProblems: audit.unsafeProblems,
     floatingPins: floatingPins(document, resolver),
   };
 };
-for (const file of readdirSync(folder)
-  .filter((f) => f.endsWith(".json") && !f.endsWith(".meta.json"))
-  .sort()) {
+const largestRatio = (items, key) => {
+  const values = items.map((item) => item[key]).filter(Number.isFinite);
+  return values.length ? Math.max(...values) : null;
+};
+function evaluateFile(file) {
+  let section = "";
   const id = file.slice(0, -5);
   const split =
     BigInt(`0x${createHash("sha256").update(id).digest("hex")}`) % 3n === 0n
@@ -87,35 +120,92 @@ for (const file of readdirSync(folder)
       milliseconds: 0,
       status: "original",
     };
+    const apply = (plan) =>
+      plan.diagnostics.some((d) => d.severity === "error")
+        ? undefined
+        : executeTransaction(
+            document,
+            {
+              transactionId: `eval-${id}`,
+              documentId: document.id,
+              expectedRevision: document.revision,
+              actor: { kind: "agent", id: "auto-layout-eval" },
+              edits: plan.edits,
+            },
+            { symbolResolver: resolver },
+          );
+    // Measure ratios against this document's actual quick result, even when
+    // no baseline file was supplied. Keep this reference run outside timing.
+    const quickPlan = planAutoLayout(document, resolver);
+    const quickTransaction = apply(quickPlan);
+    measurement.quick =
+      quickTransaction?.ok && quickTransaction.applied
+        ? metrics(quickTransaction.document, resolver)
+        : null;
     const start = performance.now();
     let plan;
     try {
-      plan = planAutoLayout(document, resolver);
+      const curve = [];
+      let evaluations = 0;
+      plan = planAutoLayout(
+        document,
+        resolver,
+        seconds
+          ? {
+              search: {
+                seed,
+                evaluations: 1_000_000_000,
+                deadline: Date.now() + seconds * 1000,
+                onProgress: (p) => {
+                  evaluations = p.evaluations;
+                  if (!curve.length || p.best < curve.at(-1).best)
+                    curve.push({
+                      ...p,
+                      milliseconds: performance.now() - start,
+                    });
+                },
+              },
+            }
+          : {},
+      );
+      measurement.evaluations = evaluations;
+      measurement.bestScoreCurve = curve;
     } finally {
       measurement.milliseconds = performance.now() - start;
     }
     measurement.strategy = refinementMetrics(plan)?.strategy ?? null;
     measurement.candidates = refinementMetrics(plan)?.candidates ?? 0;
     measurement.diagnostics = [...plan.diagnostics];
-    const transaction = plan.diagnostics.some((d) => d.severity === "error")
-      ? undefined
-      : executeTransaction(
-          document,
-          {
-            transactionId: `eval-${id}`,
-            documentId: document.id,
-            expectedRevision: document.revision,
-            actor: { kind: "agent", id: "auto-layout-eval" },
-            edits: plan.edits,
-          },
-          { symbolResolver: resolver },
-        );
+    const transaction = apply(plan);
     measurement.diagnostics.push(...(transaction?.diagnostics ?? []));
     const completed = transaction?.ok && transaction.applied;
     const after = completed ? transaction.document : document;
     measurement.status = completed ? "completed" : "refused";
     if (completed) {
       measurement.result = metrics(after, resolver);
+      const ratio = (value, reference) =>
+        reference ? value / reference : value === 0 ? 1 : null;
+      measurement.widthRatio = measurement.quick
+        ? ratio(measurement.result.layoutWidth, measurement.quick.layoutWidth)
+        : null;
+      measurement.heightRatio = measurement.quick
+        ? ratio(measurement.result.layoutHeight, measurement.quick.layoutHeight)
+        : null;
+      measurement.largestSpanRatio = measurement.quick
+        ? Math.max(measurement.widthRatio, measurement.heightRatio)
+        : null;
+      measurement.instanceWidthRatio = measurement.quick
+        ? ratio(
+            measurement.result.instanceWidth,
+            measurement.quick.instanceWidth,
+          )
+        : null;
+      measurement.instanceHeightRatio = measurement.quick
+        ? ratio(
+            measurement.result.instanceHeight,
+            measurement.quick.instanceHeight,
+          )
+        : null;
       const beforeGraph = projectElectricalGraph(project);
       const afterGraph = projectElectricalGraph({
         ...project,
@@ -148,60 +238,55 @@ for (const file of readdirSync(folder)
       resultSvg = render(after);
     writeFileSync(`${output}/${id}-human.svg`, humanSvg);
     writeFileSync(`${output}/${id}-result.svg`, resultSvg);
-    sections.push(
-      `<section id="${escape(id)}"><h2>${escape(id)} (${split}, ${measurement.instances} instances)</h2><p>${measurement.status}; ${measurement.milliseconds.toFixed(1)} ms</p><pre>${escape(JSON.stringify(measurement, null, 2))}</pre><div class="pair"><figure><figcaption>Human</figcaption>${humanSvg}</figure><figure><figcaption>Auto (${measurement.status})</figcaption>${resultSvg}</figure></div></section>`,
-    );
+    section = `<section id="${escape(id)}"><h2>${escape(id)} (${split}, ${measurement.instances} instances)</h2><p>${measurement.status}; ${measurement.milliseconds.toFixed(1)} ms</p><pre>${escape(JSON.stringify(measurement, null, 2))}</pre><div class="pair"><figure><figcaption>Human</figcaption>${humanSvg}</figure><figure><figcaption>Auto (${measurement.status})</figcaption>${resultSvg}</figure></div></section>`;
   } catch (error) {
     measurement.status = "threw";
     measurement.error = String(error?.stack ?? error);
   }
-  measurements.push(measurement);
-  console.log(
-    `${id}: ${measurement.status}; ${measurement.instances} instances; ${measurement.milliseconds?.toFixed(1) ?? "—"} ms`,
-  );
+  return { measurement, section };
 }
-const totals = [];
-const metricText = (m) =>
-  m ? `${m.crossings}/${m.bends}/${Math.round(m.wireLength)}` : "—";
-for (const split of ["dev", "val"]) {
-  const cases = measurements.filter((m) => m.split === split);
-  console.log(
-    `\n${split}: crossings / bends / wire length; floating pin counts`,
+if (!isMainThread) {
+  parentPort.postMessage(evaluateFile(workerData.file));
+} else {
+  const files = readdirSync(folder)
+    .filter((f) => f.endsWith(".json") && !f.endsWith(".meta.json"))
+    .sort();
+  const results = new Array(files.length);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(jobs, files.length) }, async () => {
+      while (next < files.length) {
+        const index = next++;
+        results[index] = await new Promise((resolve, reject) => {
+          const worker = new Worker(new URL(import.meta.url), {
+            workerData: { file: files[index] },
+            argv: process.argv.slice(2),
+          });
+          let result;
+          worker.once("message", (message) => {
+            result = message;
+          });
+          worker.once("error", reject);
+          worker.once("exit", (code) => {
+            if (code || !result)
+              reject(new Error(`Evaluation worker exited ${code}`));
+            else resolve(result);
+          });
+        });
+        const m = results[index].measurement;
+        console.log(
+          `${m.id}: ${m.status}; ${m.instances} instances; ${m.milliseconds?.toFixed(1) ?? "—"} ms; ${m.evaluations ?? 0} search evaluations`,
+        );
+      }
+    }),
   );
-  console.table(
-    cases.map((m) => ({
-      id: m.id,
-      instances: m.instances,
-      status: m.status,
-      strategy: m.strategy,
-      human: metricText(m.human),
-      ...(baseline
-        ? {
-            before: metricText(
-              baseline.cases.find((b) => b.id === m.id)?.result,
-            ),
-          }
-        : {}),
-      after: metricText(m.result),
-      humanFloating: m.human?.floatingPins.length ?? "—",
-      resultFloating: m.result?.floatingPins.length ?? "—",
-      ms: m.milliseconds?.toFixed(1),
-      equivalent: m.equivalent,
-      unsafe: m.result?.unsafeProblems.length ?? "—",
-      reason:
-        m.error ??
-        m.diagnostics
-          .filter((d) => d.severity === "error")
-          .map((d) => d.message)
-          .join("; "),
-    })),
-  );
-  const common = cases.filter(
-    (m) =>
-      m.status === "completed" &&
-      (!baseline ||
-        baseline.cases.some((b) => b.id === m.id && b.status === "completed")),
-  );
+  for (const result of results) {
+    measurements.push(result.measurement);
+    sections.push(result.section);
+  }
+  const totals = [];
+  const metricText = (m) =>
+    m ? `${m.crossings}/${m.bends}/${Math.round(m.wireLength)}` : "—";
   const sum = (items) => ({
     crossings: items.reduce((s, m) => s + m.crossings, 0),
     bends: items.reduce((s, m) => s + m.bends, 0),
@@ -209,51 +294,125 @@ for (const split of ["dev", "val"]) {
     layoutWidth: items.every((m) => Number.isFinite(m.layoutWidth))
       ? items.reduce((s, m) => s + m.layoutWidth, 0)
       : null,
+    layoutHeight: items.every((m) => Number.isFinite(m.layoutHeight))
+      ? items.reduce((s, m) => s + m.layoutHeight, 0)
+      : null,
     floatingPins: items.every((m) => Array.isArray(m.floatingPins))
       ? items.reduce((s, m) => s + m.floatingPins.length, 0)
       : null,
   });
-  const total = {
-    split,
-    documents: cases.length,
-    completed: cases.filter((m) => m.status === "completed").length,
-    common: common.length,
-    human: sum(common.map((m) => m.human)),
-    before: baseline
-      ? sum(common.map((m) => baseline.cases.find((b) => b.id === m.id).result))
-      : null,
-    after: sum(common.map((m) => m.result)),
-    allHuman: sum(cases.filter((m) => m.human).map((m) => m.human)),
-    allCompleted: sum(cases.filter((m) => m.result).map((m) => m.result)),
-  };
-  totals.push(total);
-  console.log(JSON.stringify(total));
-}
-writeFileSync(
-  `${output}/report.json`,
-  JSON.stringify({ cases: measurements, totals }, null, 2),
-);
-writeFileSync(
-  `${output}/index.html`,
-  `<!doctype html><html lang="en"><meta charset="utf-8"><title>Auto-layout evaluation</title><style>body{font:15px system-ui;background:#f1f4f7;margin:24px}section{background:white;padding:20px;margin:20px 0}pre{white-space:pre-wrap;font-size:12px}.pair{display:grid;grid-template-columns:1fr 1fr;gap:20px}figure{margin:0;min-width:0}svg{width:100%;height:650px;border:1px solid #ddd}</style><h1>Human / auto-layout pairs</h1>${sections.join("\n")}</html>`,
-);
-console.log(`Wrote ${output}/report.json and index.html`);
-if (
-  measurements.some(
-    (m) =>
-      m.status === "threw" ||
-      (m.status === "completed" &&
-        (!m.equivalent ||
-          m.result.unsafeProblems.length ||
-          m.result.floatingPins.some(
-            (pin) =>
-              !m.diagnostics.some(
-                (d) =>
-                  d.rule === "R14" &&
-                  d.severity === "warning" &&
-                  d.message.includes(`${pin.instanceId}.${pin.pinName}`),
+  for (const split of ["dev", "val"]) {
+    const cases = measurements.filter((m) => m.split === split);
+    console.log(
+      `\n${split}: crossings / bends / wire length; floating pin counts`,
+    );
+    console.table(
+      cases.map((m) => ({
+        id: m.id,
+        instances: m.instances,
+        status: m.status,
+        strategy: m.strategy,
+        human: metricText(m.human),
+        ...(baseline
+          ? {
+              before: metricText(
+                baseline.cases.find((b) => b.id === m.id)?.result,
               ),
-          ))),
+            }
+          : {}),
+        after: metricText(m.result),
+        humanFloating: m.human?.floatingPins.length ?? "—",
+        resultFloating: m.result?.floatingPins.length ?? "—",
+        ms: m.milliseconds?.toFixed(1),
+        layoutWidth: m.result?.layoutWidth,
+        layoutHeight: m.result?.layoutHeight,
+        widthRatio: m.widthRatio,
+        heightRatio: m.heightRatio,
+        largestSpanRatio: m.largestSpanRatio,
+        equivalent: m.equivalent,
+        unsafe: m.result?.unsafeProblems.length ?? "—",
+        reason:
+          m.error ??
+          m.diagnostics
+            .filter((d) => d.severity === "error")
+            .map((d) => d.message)
+            .join("; "),
+      })),
+    );
+    const common = cases.filter(
+      (m) =>
+        m.status === "completed" &&
+        (!baseline ||
+          baseline.cases.some(
+            (b) => b.id === m.id && b.status === "completed",
+          )),
+    );
+    const total = {
+      split,
+      documents: cases.length,
+      completed: cases.filter((m) => m.status === "completed").length,
+      common: common.length,
+      human: sum(common.map((m) => m.human)),
+      before: baseline
+        ? sum(
+            common.map((m) => baseline.cases.find((b) => b.id === m.id).result),
+          )
+        : null,
+      after: sum(common.map((m) => m.result)),
+      allHuman: sum(cases.filter((m) => m.human).map((m) => m.human)),
+      allCompleted: sum(cases.filter((m) => m.result).map((m) => m.result)),
+      quick: sum(cases.filter((m) => m.quick).map((m) => m.quick)),
+      largestWidthRatio: largestRatio(cases, "widthRatio"),
+      largestHeightRatio: largestRatio(cases, "heightRatio"),
+      largestInstanceWidthRatio: largestRatio(cases, "instanceWidthRatio"),
+      largestInstanceHeightRatio: largestRatio(cases, "instanceHeightRatio"),
+    };
+    totals.push(total);
+    console.log(JSON.stringify(total));
+  }
+  writeFileSync(
+    `${output}/report.json`,
+    JSON.stringify(
+      {
+        cases: measurements,
+        totals,
+        summary: {
+          completed: measurements.filter((m) => m.result).length,
+          result: sum(
+            measurements.filter((m) => m.result).map((m) => m.result),
+          ),
+          quick: sum(measurements.filter((m) => m.quick).map((m) => m.quick)),
+          largestWidthRatio: largestRatio(measurements, "widthRatio"),
+          largestHeightRatio: largestRatio(measurements, "heightRatio"),
+          largestSpanRatio: largestRatio(measurements, "largestSpanRatio"),
+        },
+      },
+      null,
+      2,
+    ),
+  );
+  writeFileSync(
+    `${output}/index.html`,
+    `<!doctype html><html lang="en"><meta charset="utf-8"><title>Auto-layout evaluation</title><style>body{font:15px system-ui;background:#f1f4f7;margin:24px}section{background:white;padding:20px;margin:20px 0}pre{white-space:pre-wrap;font-size:12px}.pair{display:grid;grid-template-columns:1fr 1fr;gap:20px}figure{margin:0;min-width:0}svg{width:100%;height:650px;border:1px solid #ddd}</style><h1>Human / auto-layout pairs</h1>${sections.join("\n")}</html>`,
+  );
+  console.log(`Wrote ${output}/report.json and index.html`);
+  if (
+    measurements.some(
+      (m) =>
+        m.status === "threw" ||
+        (m.status === "completed" &&
+          (!m.equivalent ||
+            m.result.unsafeProblems.length ||
+            m.result.floatingPins.some(
+              (pin) =>
+                !m.diagnostics.some(
+                  (d) =>
+                    d.rule === "R14" &&
+                    d.severity === "warning" &&
+                    d.message.includes(`${pin.instanceId}.${pin.pinName}`),
+                ),
+            ))),
+    )
   )
-)
-  process.exitCode = 1;
+    process.exitCode = 1;
+}

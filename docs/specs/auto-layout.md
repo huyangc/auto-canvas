@@ -12,12 +12,16 @@ Locks and the UI entry are **T014, not yet specified**.
 ## Rules
 
 - **R1 — Boundary and determinism.** Take a `SchematicDocument`, its
-  `SymbolResolver` and `{ fixedInstanceIds?: ReadonlySet<string> }`. Return
+  `SymbolResolver` and `AutoLayoutOptions` (optional fixed instance ids and
+  R66 search options). Return
   `{ edits: SchematicEdit[], groups: RecognizedGroup[], diagnostics:
 AutoLayoutDiagnostic[] }`. Fixed instances retain their exact placements;
   a collision with the template returns no edits and an R10 diagnostic.
   Obstacle-aware placement belongs to T014. Identical inputs produce byte-identical serialized edits. Break
-  ties by instance id in code-unit order; use neither randomness nor time.
+  ties by instance id in code-unit order. Quick mode uses neither randomness nor
+  time. With `search`, the same seed and evaluation budget produce byte-identical
+  edits; only a deadline or cancellation that truncates the run may change the
+  result. The PRNG is seeded and never uses `Math.random`.
 - **R2 — Edits.** In Document order: (a) free every annotation anchored to
   a Route or by an object anchor to a Junction removed in (c), at its
   `fallbackPosition`, preserving all other fields; (b) `remove_route_geometry`
@@ -324,6 +328,45 @@ pins }` lists, never Net ids.
   ranking ties and R44's single routing alternative. Above 40 instances keep
   R55's unrefined comparison: R61 was removed because round 1 measured no
   meaningful quality benefit for its extra planning time.
+
+- **R66 — Offline annealing.** Optional `search` takes `seed: number`,
+  `evaluations: number`, `deadline?: number` (epoch milliseconds),
+  `signal?: AbortSignal`, and
+  `onProgress?: (p: { evaluations: number; best: number; current: number }) => void`.
+  The evaluation budget is a nonnegative integer counting additional complete
+  candidate plans, including refused candidates and the final R44, after quick
+  mode. Start at R58/R63's winner and retain the other valid strategies as
+  alternative starts. Keep the completed quick result as the score ceiling.
+  Search device placements, orientations and Cell Pin sides using rigid same-row
+  node swaps, grid/column shifts, ungrouped mirrors, stage block moves, swaps,
+  reversals and mirrors, and Cell Pin flips. Templates, tails and aligned stacks
+  move together; a stage containing a template cannot mirror. Reject off-grid,
+  fixed, overlapping or coincident-pin states before routing. Placement finishing,
+  routing, replay, R10 and R23 use the quick planner's existing path. Refused
+  candidates have infinite energy. R22's named routed-score weights are shared.
+  Rank four proposed moves by R54 and route the best estimated proposal; this
+  pre-filter was retained after equal-budget dev comparison. Calibrate initial
+  heat from at most 16 sampled positive deltas for approximately 50% uphill
+  acceptance. Cool geometrically to 0.1% of that heat within the first 256
+  evaluations (or the smaller evaluation budget), retaining the low heat for
+  the remaining budget and the best state ever seen. Every 64 evaluations,
+  restart at the incumbent (75%) or another valid strategy (25%). Apply R44 once to the best search placement, within the budget
+  and remaining time, retaining quick mode on a tie. Cancellation returns the
+  valid best so far. A synchronous full plan cannot be interrupted midway;
+  deadline checks reserve time for finishing and the routing alternative.
+
+- **R67 — Bounded offline span.** Use the completed quick result's bounding
+  box of all instances, including markers, as the search reference. Reject
+  proposals before routing when either dimension exceeds 1.5 times its quick
+  dimension; this also satisfies the looser 1.5-times-plus-two-column-pitches
+  limit. Check both raw proposals and the shared placement finishing result.
+  Anchor finished search placements at the quick box's top-left corner, snapped
+  to the Document grid. Reject anchoring that would move a fixed instance or
+  require a further drafting-clearance translation. Translation alone therefore
+  cannot accumulate in accepted states. Keep the routed energy unchanged.
+  Evaluation reports include rendered layout width/height sums, each document's
+  width/height ratios against its actual quick result, their maximum, and
+  instance span ratios for checking this rule.
 
 - **Existing locks and conflicts.** Members of a locked layout group or
   constraint are treated as fixed instances under R1, because the Edit Engine

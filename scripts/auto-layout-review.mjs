@@ -22,6 +22,19 @@ import {
   createProjectSymbolResolver,
 } from "../packages/symbols/dist/index.js";
 
+const args = process.argv.slice(2);
+const flags = new Map();
+for (let i = 0; i < args.length; i += 2) {
+  if (!["--search", "--seed"].includes(args[i]) || args[i + 1] === undefined)
+    throw new Error(
+      "Usage: auto-layout-review.mjs [--search <seconds>] [--seed <n>]",
+    );
+  flags.set(args[i], args[i + 1]);
+}
+const seconds = Number(flags.get("--search") ?? 0);
+const seed = Number(flags.get("--seed") ?? 1);
+if (!Number.isFinite(seconds) || seconds < 0 || !Number.isFinite(seed))
+  throw new Error("Invalid search duration or seed");
 const cases = JSON.parse(
   readFileSync("packages/auto-layout/test/corpus-cases.json", "utf8"),
 );
@@ -53,7 +66,29 @@ for (const fixture of [...cases, ...heldOut]) {
   if (!document) throw new Error(`Missing Document for ${fixture.id}`);
   const resolver = createProjectSymbolResolver(project, builtInSymbols);
   const start = performance.now();
-  const plan = planAutoLayout(document, resolver);
+  let evaluations = 0;
+  const bestScoreCurve = [];
+  const plan = planAutoLayout(
+    document,
+    resolver,
+    seconds
+      ? {
+          search: {
+            seed,
+            evaluations: 1_000_000_000,
+            deadline: Date.now() + seconds * 1000,
+            onProgress: (p) => {
+              evaluations = p.evaluations;
+              if (!bestScoreCurve.length || p.best < bestScoreCurve.at(-1).best)
+                bestScoreCurve.push({
+                  ...p,
+                  milliseconds: performance.now() - start,
+                });
+            },
+          },
+        }
+      : {},
+  );
   const milliseconds = performance.now() - start;
   const strategy = refinementMetrics(plan)?.strategy;
   const result = plan.diagnostics.some((d) => d.severity === "error")
@@ -135,6 +170,8 @@ for (const fixture of [...cases, ...heldOut]) {
     score: Number.isFinite(refinement?.score) ? refinement.score : null,
     id: fixture.id,
     milliseconds,
+    evaluations,
+    bestScoreCurve,
     committed,
     routes: committed ? after.routes.length : null,
     crossings: audit?.crossings ?? null,
