@@ -78,3 +78,29 @@ it("assigns differential pairs before shared-gate matched candidates", () => {
     recognizeStructures(d, classifyNets(d, resolver)).map((g) => g.members),
   ).toEqual([["a", "b"]]);
 });
+
+it("R68 rejects a one-way channel-to-gate driver pair", () => {
+  const d = circuit(
+    { a: "nmos", b: "nmos" },
+    { s: ["a.S", "b.S"], ga: ["a.G", "b.D"], gb: ["b.G"], da: ["a.D"] },
+  );
+  expect(recognizeStructures(d, classifyNets(d, resolver))).toEqual([]);
+});
+
+it.each(["D", "S"])(
+  "R68 recognizes a mutual %s-to-gate cross pair",
+  (channel) => {
+    const other = channel === "D" ? "S" : "D";
+    const d = circuit(
+      { a: "nmos", b: "nmos" },
+      {
+        x: [`a.${channel}`, "b.G"],
+        y: [`b.${channel}`, "a.G"],
+        common: [`a.${other}`, `b.${other}`],
+      },
+    );
+    expect(recognizeStructures(d, classifyNets(d, resolver))).toEqual([
+      { id: "auto-matched-pair-a", kind: "matched-pair", members: ["a", "b"] },
+    ]);
+  },
+);

@@ -1,3 +1,4 @@
+import { deviceDescriptor } from "@icm/devices";
 import { deriveElectricalTopologyProjection, endpointKey } from "@icm/derived";
 import type { SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
@@ -9,7 +10,7 @@ const GROUND_NAME = /^(?:[ad]?vss|[ad]?gnd|vee|vgnd|vneg|ground)|^0$/iu;
 const OUTPUT_NAME = /^(?:v?o(?:ut)?[pn+-]?|q|qb|qn|y|z)$|^v?out/iu;
 
 export function isMos(symbolId: string): boolean {
-  return symbolId === "nmos" || symbolId === "pmos";
+  return deviceDescriptor(symbolId)?.deviceClass === "mos";
 }
 
 /** A MOS bulk pin. Other symbols may have an ordinary pin named B. */

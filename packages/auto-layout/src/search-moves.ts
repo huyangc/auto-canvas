@@ -14,7 +14,7 @@ import {
   persistedTemplates,
   recognizeStructures,
 } from "./recognize.js";
-import { findStages } from "./stages.js";
+import { parallelAttachments, findStages } from "./stages.js";
 import type { LayoutStrategy, Placement } from "./types.js";
 
 export interface SearchState {
@@ -79,6 +79,8 @@ export function createMoveGenerator(
       .map((t) => t.instanceId);
     for (const id of ids.slice(1)) join(ids[0]!, id);
   }
+  const attachments = parallelAttachments(devices, resolver, roles);
+  for (const { device, host } of attachments) join(host.id, device.id);
   const units = new Map<string, string[]>();
   for (const i of devices) {
     const head = root(i.id);
@@ -92,10 +94,20 @@ export function createMoveGenerator(
     (ids) => ids.length === 1 && !grouped.has(ids[0]!),
   );
   const found = findStages(devices, resolver, roles, groups);
-  const blocks = [
+  const rawBlocks = [
     ...found.stages.map((s) => s.devices.map((i) => i.id)),
     ...found.bridges.map((b) => [b.device.id]),
   ];
+  // Merge stage blocks that intersect a rigid placement unit.
+  const blocks: string[][] = [];
+  for (const block of rawBlocks) {
+    const expanded = new Set(block.flatMap((id) => units.get(root(id))!));
+    for (let i = blocks.length - 1; i >= 0; i--) {
+      if (!blocks[i]!.some((id) => expanded.has(id))) continue;
+      for (const id of blocks.splice(i, 1)[0]!) expanded.add(id);
+    }
+    blocks.push([...expanded].sort(compareIds));
+  }
   const pick = <T>(items: readonly T[]): T | undefined =>
     items[Math.floor(random() * items.length)];
   const grid = document.presentation.grid;
@@ -155,7 +167,14 @@ export function createMoveGenerator(
       const first = pick(eligible);
       if (!first) return;
       if (kind === 7) {
-        if (first.some((id) => grouped.has(id))) return;
+        if (
+          first.some(
+            (id) =>
+              grouped.has(id) ||
+              attachments.some((a) => a.host.id === id || a.device.id === id),
+          )
+        )
+          return;
         const axis =
           left(current, first) +
           Math.max(

@@ -9,7 +9,13 @@ import {
 } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import { createPlacementEstimator } from "./estimate.js";
-import { boxesIntersect, transformPoint, withPlacements } from "./geometry.js";
+import {
+  boxesIntersect,
+  geometryProblem,
+  pinExit,
+  transformPoint,
+  withPlacements,
+} from "./geometry.js";
 import { assignColumns, deviceRows, netLevels, orderRows } from "./layered.js";
 import { isMosBulk, type NetRoles } from "./net-roles.js";
 import { devicePins, signalDistances } from "./placement-connectivity.js";
@@ -167,6 +173,248 @@ export function findStages(
   }
   for (const b of bridges) b.owners = b.owners.map(root) as [string, string];
   return { stages: [...stages.values()], bridges };
+}
+
+/** R69: parallel artwork is a placement unit, never a persisted group. */
+export function parallelAttachments(
+  devices: Instance[],
+  resolver: SymbolResolver,
+  roles: NetRoles,
+) {
+  const mos = devices
+    .filter((i) => deviceDescriptor(i.symbolId)?.deviceClass === "mos")
+    .sort((a, b) => compareIds(a.id, b.id));
+  return [...devices]
+    .sort((a, b) => compareIds(a.id, b.id))
+    .flatMap((device) => {
+      const descriptor = deviceDescriptor(device.symbolId);
+      const pins = devicePins(device, resolver);
+      if (
+        !descriptor ||
+        descriptor.deviceClass === "net-marker" ||
+        descriptor.pinOrder.length !== 2 ||
+        pins.length !== 2
+      )
+        return [];
+      const nets = pins.map((p) => roles.pinNet(device.id, p.name));
+      if (!nets[0] || !nets[1] || nets[0] === nets[1]) return [];
+      const host = mos.find(
+        (i) =>
+          nets.includes(roles.pinNet(i.id, "D")) &&
+          nets.includes(roles.pinNet(i.id, "S")),
+      );
+      return host ? [{ device, host }] : [];
+    });
+}
+
+export function placeParallelAttachments(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  roles: NetRoles,
+  targets: Map<string, Placement>,
+  fixed: ReadonlySet<string>,
+): void {
+  const devices = document.instances;
+  const attached = parallelAttachments(devices, resolver, roles);
+  const grid = document.presentation.grid;
+  const snap = (n: number) => Math.round(n / grid) * grid;
+  for (const { device, host } of attached) {
+    if (fixed.has(device.id)) continue;
+    const hp = targets.get(host.id)!;
+    const hostPins = devicePins(host, resolver);
+    const drain = transformPoint(
+      hostPins.find((p) => p.name === "D")!.at,
+      hp.position,
+      hp,
+    );
+    const source = transformPoint(
+      hostPins.find((p) => p.name === "S")!.at,
+      hp.position,
+      hp,
+    );
+    const gate = hostPins.find((p) => p.name === "G")!;
+    const exit = pinExit(gate, hp);
+    const pins = devicePins(device, resolver);
+    const first = pins.find(
+      (p) => roles.pinNet(device.id, p.name) === roles.pinNet(host.id, "D"),
+    )!;
+    const second = pins.find((p) => p !== first)!;
+    const rotations = ([0, 90, 180, 270] as const)
+      .map((rotation) => {
+        const p: Placement = {
+          position: { x: 0, y: 0 },
+          rotation,
+          mirror: "none",
+        };
+        const a = transformPoint(first.at, p.position, p),
+          b = transformPoint(second.at, p.position, p);
+        return {
+          p,
+          a,
+          b,
+          error:
+            Math.abs(b.x - a.x - (source.x - drain.x)) +
+            Math.abs(b.y - a.y - (source.y - drain.y)),
+        };
+      })
+      .sort((a, b) => a.error - b.error);
+    const { p, a, b } = rotations[0]!;
+    // Where pin spans differ, keep their midpoint level with the channel.
+    const centre = {
+      x: (drain.x + source.x - a.x - b.x) / 2,
+      y: (drain.y + source.y - a.y - b.y) / 2,
+    };
+    const others = devices.filter(
+      (i) => i.id !== device.id && targets.has(i.id),
+    );
+    for (let distance = 60; distance <= 800; distance += grid) {
+      p.position = {
+        x: snap(centre.x - exit.x * distance),
+        y: snap(centre.y - exit.y * distance),
+      };
+      targets.set(device.id, p);
+      if (
+        !geometryProblem(
+          withPlacements(
+            { ...document, instances: [...others, device] },
+            targets,
+          ),
+          resolver,
+        )
+      )
+        break;
+    }
+  }
+}
+
+/** R70 extends R59: only one non-rail device boundary, at one receiver. */
+export function driverAttachments(
+  devices: Instance[],
+  resolver: SymbolResolver,
+  roles: NetRoles,
+  groups: RecognizedGroup[],
+) {
+  const found = findStages(devices, resolver, roles, groups);
+  return found.stages
+    .filter((s) => s.devices.length <= 3)
+    .flatMap((stage) => {
+      const ids = new Set(stage.devices.map((i) => i.id));
+      const nets = new Set(
+        stage.devices.flatMap((i) =>
+          devicePins(i, resolver)
+            .filter((p) => !isMosBulk(i.symbolId, p.name))
+            .flatMap((p) => roles.pinNet(i.id, p.name) ?? []),
+        ),
+      );
+      const links = [...nets]
+        .filter((net) => !roles.rails.has(net))
+        .flatMap((net) => {
+          const outside = devices
+            .filter((i) => !ids.has(i.id))
+            .flatMap((device) =>
+              devicePins(device, resolver)
+                .filter(
+                  (p) =>
+                    !isMosBulk(device.symbolId, p.name) &&
+                    roles.pinNet(device.id, p.name) === net,
+                )
+                .map((pin) => ({ device, pin })),
+            );
+          return outside.length ? [{ net, outside }] : [];
+        });
+      if (links.length !== 1) return [];
+      const { net, outside } = links[0]!;
+      const host = outside[0]!;
+      if (
+        outside.some(
+          (p) =>
+            p.device.id !== host.device.id ||
+            !(p.pin.role.includes("gate") || p.pin.role.includes("control")),
+        )
+      )
+        return [];
+      const outputs = stage.devices.flatMap((device) =>
+        devicePins(device, resolver)
+          .filter(
+            (pin) =>
+              roles.pinNet(device.id, pin.name) === net &&
+              !isMosBulk(device.symbolId, pin.name) &&
+              !pin.role.includes("gate") &&
+              !pin.role.includes("control"),
+          )
+          .map((pin) => ({ device, pin })),
+      );
+      // Prefer the stage's channel/output pin. A two-terminal source or
+      // passive-only stage still has an output at its sole receiver boundary.
+      const mainOutput = (p: (typeof outputs)[number]) =>
+        conductingPins(p.device, resolver).some(
+          (pin) => pin.name === p.pin.name,
+        ) || p.pin.role.includes("output");
+      outputs.sort((a, b) => Number(mainOutput(b)) - Number(mainOutput(a)));
+      const output = outputs[0];
+      return output ? [{ stage, host, output }] : [];
+    });
+}
+
+export function placeDriverAttachments(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  roles: NetRoles,
+  groups: RecognizedGroup[],
+  targets: Map<string, Placement>,
+  fixed: ReadonlySet<string>,
+): void {
+  const attachments = driverAttachments(
+    document.instances,
+    resolver,
+    roles,
+    groups,
+  );
+  const grid = document.presentation.grid;
+  const snap = (n: number) => Math.round(n / grid) * grid;
+  const visited = new Set<string>();
+  const place = (part: (typeof attachments)[number]) => {
+    if (visited.has(part.stage.id)) return;
+    visited.add(part.stage.id);
+    const parent = attachments.find((a) =>
+      a.stage.devices.some((i) => i.id === part.host.device.id),
+    );
+    if (parent) place(parent);
+    if (part.stage.devices.some((i) => fixed.has(i.id))) return;
+    const hp = targets.get(part.host.device.id)!;
+    const gate = transformPoint(part.host.pin.at, hp.position, hp);
+    const exit = pinExit(part.host.pin, hp);
+    const op = targets.get(part.output.device.id)!;
+    const output = transformPoint(part.output.pin.at, op.position, op);
+    const bounds = visibleInstanceBounds(
+      withPlacements({ ...document, instances: part.stage.devices }, targets),
+      resolver,
+    ).map((b) => b.bounds);
+    const left = Math.min(...bounds.map((b) => b.x)),
+      right = Math.max(...bounds.map((b) => b.x + b.width));
+    const top = Math.min(...bounds.map((b) => b.y)),
+      bottom = Math.max(...bounds.map((b) => b.y + b.height));
+    const dx = snap(
+      exit.x
+        ? gate.x + exit.x * 60 - (exit.x < 0 ? right : left)
+        : gate.x - output.x,
+    );
+    const dy = snap(
+      exit.y
+        ? gate.y + exit.y * 60 - (exit.y < 0 ? bottom : top)
+        : gate.y - output.y,
+    );
+    const trial = structuredClone(targets);
+    for (const i of part.stage.devices) {
+      const p = trial.get(i.id)!;
+      p.position.x += dx;
+      p.position.y += dy;
+    }
+    // A blocked proposal leaves the original stage exactly where it was.
+    if (!geometryProblem(withPlacements(document, trial), resolver))
+      for (const i of part.stage.devices) targets.set(i.id, trial.get(i.id)!);
+  };
+  for (const part of attachments) place(part);
 }
 
 /** R51–R53 and R56: local stacks, shared rail rows, compact stage permutations. */
