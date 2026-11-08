@@ -94,3 +94,21 @@ export function recognizeStructures(
   }
   return groups;
 }
+
+/** Persisted groups reconstructed as templates, so re-planning keeps intent. */
+export function persistedTemplates(
+  document: SchematicDocument,
+  roles: NetRoles,
+): RecognizedGroup[] {
+  const inferred = recognizeStructures(
+    { ...document, layoutGroups: [] },
+    roles,
+  );
+  return document.layoutGroups.flatMap((g) => {
+    const match = inferred.find(
+      (r) =>
+        r.kind === g.kind && r.members.every((id) => g.objectIds.includes(id)),
+    );
+    return match ? [match] : [];
+  });
+}

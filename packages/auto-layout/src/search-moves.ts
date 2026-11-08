@@ -9,7 +9,11 @@ import {
 import type { CellSide } from "./layout-choices.js";
 import { classifyNets } from "./net-roles.js";
 import { isMarker } from "./placement-connectivity.js";
-import { compareIds, recognizeStructures } from "./recognize.js";
+import {
+  compareIds,
+  persistedTemplates,
+  recognizeStructures,
+} from "./recognize.js";
 import { findStages } from "./stages.js";
 import type { LayoutStrategy, Placement } from "./types.js";
 
@@ -43,7 +47,11 @@ export function createMoveGenerator(
     .sort((a, b) => compareIds(a.id, b.id));
   const deviceDocument = { ...document, instances: devices, junctions: [] };
   const roles = classifyNets(document, resolver);
-  const groups = recognizeStructures({ ...document, layoutGroups: [] }, roles);
+  // The same templates placeDocument uses, including persisted groups.
+  const groups = [
+    ...recognizeStructures(document, roles),
+    ...persistedTemplates(document, roles),
+  ];
   const parents = new Map(devices.map((i) => [i.id, i.id]));
   const root = (id: string): string => {
     const parent = parents.get(id)!;

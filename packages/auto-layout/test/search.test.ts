@@ -12,6 +12,8 @@ import { searchBounds } from "../src/search-bounds.js";
 import { createMoveGenerator, randomStream } from "../src/search-moves.js";
 import { lostNameClaim, terminalPartition } from "../src/transaction.js";
 import type { AutoLayoutResult } from "../src/types.js";
+import { classifyNets } from "../src/net-roles.js";
+import { persistedTemplates, recognizeStructures } from "../src/recognize.js";
 import { circuit } from "./document-fixture.js";
 
 const resolver = new InMemorySymbolResolver(builtInSymbols);
@@ -338,4 +340,88 @@ it("R67 canonicalizes a translated state before regenerating orphan markers", ()
     translated = evaluate(1600);
   expect(translated.result).toEqual(first.result);
   commit(document, translated.result);
+}, 30000);
+
+it("R66 builds search units from the same templates as quick placement", () => {
+  const d = circuit(
+    { a: "nmos", b: "nmos", c: "nmos", d: "nmos", g: "ground" },
+    {
+      gate: ["a.G", "b.G", "c.G", "d.G", "a.D"],
+      db: ["b.D"],
+      dc: ["c.D"],
+      dd: ["d.D"],
+      gnd: ["a.S", "b.S", "c.S", "d.S", "g.0"],
+    },
+  );
+  d.layoutGroups = [
+    {
+      id: "kept",
+      kind: "current-mirror",
+      objectIds: ["a", "c"],
+      locked: false,
+    },
+  ];
+  const roles = classifyNets(d, resolver);
+  const templates = [
+    ...recognizeStructures(d, roles),
+    ...persistedTemplates(d, roles),
+  ];
+  // Persisted a/c leaves b/d as the only quick template; clearing the
+  // persisted group would instead pair a/b and c/d.
+  expect(templates.map((g) => g.members)).toEqual([["b", "d"]]);
+  const commit = (edits: AutoLayoutResult["edits"]) => {
+    const result = executeTransaction(
+      d,
+      {
+        transactionId: "units",
+        documentId: d.id,
+        expectedRevision: d.revision,
+        actor: { kind: "agent", id: "test" },
+        edits,
+      },
+      { symbolResolver: resolver },
+    );
+    expect(result.ok).toBe(true);
+    return result.ok ? result.document : d;
+  };
+  const offset = (doc: SchematicDocument, [a, b]: [string, string]) => {
+    const p = (id: string) =>
+      doc.instances.find((i) => i.id === id)!.placement!;
+    return [
+      p(b).position.x - p(a).position.x,
+      p(b).position.y - p(a).position.y,
+      p(a).mirror,
+      p(b).mirror,
+    ];
+  };
+  const quick = commit(planAutoLayout(d, resolver).edits);
+  const state = {
+    placements: new Map(quick.instances.map((i) => [i.id, i.placement!])),
+    sides: new Map(),
+    strategy: "layered" as const,
+  };
+  for (const seed of [1, 2, 3]) {
+    const propose = createMoveGenerator(
+      d,
+      resolver,
+      new Set(),
+      randomStream(seed),
+    );
+    let moved = 0;
+    for (let i = 0; i < 200; i++) {
+      const next = propose(state);
+      if (!next) continue;
+      moved++;
+      const view = {
+        ...quick,
+        instances: quick.instances.map((inst) => ({
+          ...inst,
+          placement: next.placements.get(inst.id)!,
+        })),
+      };
+      for (const g of templates)
+        expect(offset(view, g.members)).toEqual(offset(quick, g.members));
+    }
+    expect(moved).toBeGreaterThan(0);
+  }
 }, 30000);

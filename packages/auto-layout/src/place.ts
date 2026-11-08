@@ -7,7 +7,7 @@ import { visibleInstanceBounds } from "@icm/derived";
 import { type Instance, type SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import { type NetRoles } from "./net-roles.js";
-import { compareIds, recognizeStructures } from "./recognize.js";
+import { compareIds, persistedTemplates } from "./recognize.js";
 import {
   boxesIntersect,
   draftingBounds,
@@ -117,18 +117,7 @@ export function placeDocument(
       };
   const distances = signalDistances(document, devices, resolver, roles);
   // Reconstruct persisted intent for stable re-planning, without re-emitting it.
-  const inferred = recognizeStructures(
-    { ...document, layoutGroups: [] },
-    roles,
-  );
-  const existing = document.layoutGroups.flatMap((g) => {
-    const match = inferred.find(
-      (r) =>
-        r.kind === g.kind && r.members.every((id) => g.objectIds.includes(id)),
-    );
-    return match ? [match] : [];
-  });
-  const templates = [...groups, ...existing];
+  const templates = [...groups, ...persistedTemplates(document, roles)];
   const fixed = new Set(options.fixedInstanceIds);
   for (const owner of [...document.layoutGroups, ...document.constraints])
     if (owner.locked) for (const id of owner.objectIds) fixed.add(id);

@@ -83,3 +83,16 @@ held-out and large synthetic cases). The search tests pass (13).
 
 A second CI run then timed out the corpus `two-inverters` case at 5016 ms. No assertion
 failed. Both corpus test tables now use the same 30 s timeout.
+
+## PR review — codex round 2 on `07e405b`
+
+One P2, reproduced with a hand-built test that failed before the fix:
+
+- the document has four grounded NMOS sharing a gate, plus a persisted a/c current mirror;
+- quick placement then recognizes b/d as a matched pair;
+- search rebuilt its units with `layoutGroups` cleared, so it paired a/b and c/d, and
+  its moves shifted d without b.
+
+Opus extracted the planner's persisted-template reconstruction into
+`persistedTemplates` (`src/recognize.ts`). `placeDocument` and the move generator now
+share it. Package tests pass (142). Quick-mode human results are unchanged.
