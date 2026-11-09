@@ -73,6 +73,15 @@ function arrange(
     } else {
       const hasName = group.some((a) => a.kind === "instance-label");
       const hasValue = group.some((a) => a.kind === "instance-value");
+      // Several displayed parameters keep their own rows: the group moves
+      // rigidly with its name instead of stacking every value on one slot.
+      const values = group.filter((a) => a.kind === "instance-value").length;
+      const leader = group.find((a) => a.kind === "instance-label");
+      if (values > 1 && (!leader || group.some((a) => a.locked))) {
+        candidates.set(id, []);
+        for (const a of group) current.set(a.id, a);
+        continue;
+      }
       for (const side of INSTANCE_LABEL_SIDES) {
         // A locked member pins its whole name/value group to its current side.
         if (
@@ -93,6 +102,32 @@ function arrange(
           )
         )
           continue;
+        if (values > 1 && leader) {
+          const p = placeUprightInstanceLabel(
+            instance,
+            resolved,
+            objectStyleProfile(profile, leader),
+            { x: 0, y: 0 },
+            side,
+            document.presentation.grid,
+            leader.sizeScale,
+            "reference",
+          );
+          if (!p) continue;
+          const from = context.measure(leader).position;
+          const dx = p.position.x - from.x,
+            dy = p.position.y - from.y;
+          options.push(
+            group.map((a) => {
+              const q = context.measure(a).position;
+              return at(a, {
+                position: { x: q.x + dx, y: q.y + dy },
+                alignment: a === leader ? p.alignment : a.alignment,
+              });
+            }),
+          );
+          continue;
+        }
         const candidate = group.map((a) => {
           if (a.locked) return a;
           const p = placeUprightInstanceLabel(

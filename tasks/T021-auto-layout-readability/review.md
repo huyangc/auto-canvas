@@ -62,3 +62,15 @@ overlaps (5) exceed quick mode's (3). Accepted:
 | --- | -------- | ----------- | ---------------------------------------------------------------------------------------- | -------------------------------------------- |
 | 1   | note     | R74 weights | Search trades a few crossings for readability and for floating pins.                     | Calibrate with the pairwise preference task. |
 | 2   | note     | R73 scope   | Free and route-anchored labels are not seated, and drafting objects do not follow parts. | Follow-up.                                   |
+
+## PR review — codex round 1 on `e0c6290`
+
+One P2, confirmed with a hand-built test that failed before the fix. When an instance
+shows several `instance-value` annotations (separately displayed parameters), seating gave
+each one the aggregate-value slot and stacked them on one point. Opus fixed it in
+`seat-labels.ts`:
+
+- such a group now moves rigidly with its name, so the values keep their relative rows;
+- a group without a name, or with a locked member, stays where it is.
+
+Package tests pass (185). Quick-mode human results are unchanged.
