@@ -697,3 +697,56 @@ it.each(["layered", "stages", "template"] as const)(
     expect(gap).toBeLessThan(40 + d.presentation.grid);
   },
 );
+
+it.each(["layered", "stages", "template"] as const)(
+  "keeps 40 units between an axis device and the pairs in its row in %s",
+  async (strategy) => {
+    const { placeDocument } = await import("../src/place.js");
+    const { recognizeStructures } = await import("../src/recognize.js");
+    const { withPlacements } = await import("../src/geometry.js");
+    const { visibleInstanceBounds } = await import("@icm/derived");
+    // A voltage source feeding the shared bias Net is an axis device that
+    // shares the mirror load's row; its symbol has a wide visible inset.
+    const d = fixture();
+    d.instances.push({ id: "vs", symbolId: "voltage-source", placement: null });
+    d.nets
+      .find((n) => n.id === "bias")!
+      .terminals.push({ instanceId: "vs", pinName: "+" });
+    d.nets
+      .find((n) => n.id === "gnd")!
+      .terminals.push({ instanceId: "vs", pinName: "-" });
+    const components = detect(d);
+    expect(components[0]!.axis).toEqual(["t", "vs"]);
+    const roles = classifyNets(d, resolver);
+    const result = placeDocument(
+      d,
+      resolver,
+      roles,
+      recognizeStructures(d, roles),
+      {},
+      undefined,
+      undefined,
+      strategy,
+    );
+    expect(result.problem).toBeUndefined();
+    const bounds = new Map(
+      visibleInstanceBounds(withPlacements(d, result.placements), resolver).map(
+        (b) => [b.id, b.bounds],
+      ),
+    );
+    const y = (id: string) => result.placements.get(id)!.position.y;
+    let checked = 0;
+    for (const id of components[0]!.axis) {
+      const own = bounds.get(id)!;
+      for (const member of components[0]!.pairs.flat()) {
+        if (y(member) !== y(id)) continue;
+        const b = bounds.get(member)!;
+        const gap =
+          b.x < own.x ? own.x - (b.x + b.width) : b.x - (own.x + own.width);
+        expect(gap).toBeGreaterThanOrEqual(40);
+        checked++;
+      }
+    }
+    expect(checked).toBeGreaterThan(0);
+  },
+);
