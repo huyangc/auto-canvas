@@ -115,6 +115,7 @@ pins }` lists, never Net ids.
 - **R12 — Power.** Each ground/VDD marker gets one straight stub to its R6a
   host pin. R43 connects every remaining non-bulk rail member through a
   horizontal trunk, including one marker host to join the marker's drawing.
+  If the trunk is refused or incomplete, compare a plain tree under R86.
   A supply or ground Cell Pin joins its Net through a trunk, with the Cell Pin on it.
   A grounded source driving a passive chain has a supply role under R4 but is
   routed as a signal, so it gets no trunk.
@@ -128,8 +129,11 @@ pins }` lists, never Net ids.
   pair members before mirrors, then the rest by their lowest instance id.
   All pins of one Net go into one `planRouteNet` call.
 - **R14 — Fallback.** Catch each `planRouteNet` failure independently. Keep
-  other Nets' routes and the failed Net's unrouted electrical membership;
-  report `AUTO_LAYOUT_NET_UNROUTED` with severity `warning`. For an already
+  other Nets' routes and the failed Net's unrouted electrical membership.
+  Draw a partial Net's reachable components too. Report one
+  `AUTO_LAYOUT_NET_UNROUTED` warning as `Net <id>: <router reason>; pins: <pins>`,
+  preserving the router's reason verbatim. A partial Net lists only unjoined
+  component pins; a completely failed Net lists all its target pins. For an already
   named Net, add one `net-label` per unconnected pin group, on a short stub
   from one pin, bound to the existing Net name. An unnamed Net receives no
   labels: never invent a name that would change the netlist.
@@ -175,7 +179,9 @@ pins }` lists, never Net ids.
   the first option. Make two passes in id order.
 - **R22 — Refinement by routed cost.** Score each complete final preview as
   `unrouted × 10000 + crossings × 1000 + offConvention × 300 + bends × 100 + wireLength / 10 + labelOverlaps × 400 + labelClearance × 150 + terminalDepartures × 200`,
-  with named weights. Count input Cell Pins on the right edge and output Cell
+  with named weights. `unrouted` counts missing physical connections: for each
+  Base Net, the number of physical components among non-bulk symbol pins minus
+  one, summed (R86). Count input Cell Pins on the right edge and output Cell
   Pins on the left edge as `offConvention`, so a port leaves its conventional
   side only when that saves a crossing. Signal flow stays left to right. In id order, try flipping one left/right Cell Pin side or one
   R21 orientation. Replan fully, discard candidates with error diagnostics,
@@ -243,7 +249,8 @@ pins }` lists, never Net ids.
 - **R39 — Signal trunks.** For signal Nets with at least three routable pins,
   compare the existing tree, a horizontal trunk spanning the pins at median y,
   and a vertical trunk at median x. Discard candidates that throw. Minimize
-  proper crossings with previously planned other Nets, then bends, then length;
+  unjoined components, then proper crossings with previously planned other
+  Nets, then bends, then length;
   ties retain the listed candidate order.
 - **R40 — Order objective.** Sweeps include same-row Net spans and virtual
   positions in every intervening row for long Nets.
@@ -256,7 +263,8 @@ pins }` lists, never Net ids.
   Pins with their own marker keep their stubs. All remaining rail pins join
   one horizontal trunk above the device rows for supply or below them for
   ground, together with one marker host. This applies to both strategies and
-  every rail size; never add an instance. Failures produce R14 warnings naming
+  every rail size; never add an instance. A refused or incomplete trunk gets a
+  tree fallback under R86. Remaining failures produce R14 warnings naming
   the affected pins. A floating pin is the sole non-bulk pin in its physical
   component while its Base Net has other non-bulk pins.
 - **R44 — Routing alternative.** After R36 selects a plan, replan its placement
@@ -440,7 +448,8 @@ pins }` lists, never Net ids.
   whole-list replay before scoring.
 
 - **R74 — Readability energy.** `ROUTED_SCORE_WEIGHTS` exports all R22 energy
-  weights together. Count the unchanged derived diagnostics
+  weights together. The unchanged `unrouted` weight of 10000 multiplies missing
+  connections, not diagnostic count (R86). Count the unchanged derived diagnostics
   `VISUAL_LABEL_OVERLAP` (clustered), `VISUAL_LABEL_CLEARANCE`, and
   `VISUAL_TERMINAL_DEPARTURE` on the final seated preview, with starting weights
   400, 150, and 200 respectively. Cache counts per immutable preview and resolver.
@@ -547,6 +556,36 @@ pins }` lists, never Net ids.
   to six attributed fixtures totaling less than 20 KB. Hand cases require
   exact recognition under three seeded bijective renames and order shuffles.
 
+- **R85 — Base-Net clearance.** Auto-layout asks every Net route and stub,
+  including fallback stubs, to keep other Base Nets clear, even when names
+  join them into one Logical Net. Foreign pins and wires cannot be touched
+  or followed; proper wire crossings remain allowed. Refusal messages retain
+  Logical Net names. The Edit Engine's default Logical Net scope is unchanged.
+
+- **R86 — Rail fallback and partial Nets.** Auto-layout enables partial routing.
+  A blocked trunk branch is omitted; a tree stops when no remaining component
+  has a clear path. Record each unjoined component's endpoints and first router
+  refusal verbatim. Still refuse a blocked trunk, a missing tree seed, or a
+  result joining fewer than two components. For a rail, try a plain tree only
+  if the trunk threw or left components unjoined. Compare candidates by
+  `[unjoined components, crossings, bends, wireLength]`, retaining the earlier
+  candidate on ties; preview and audit only when comparing alternatives.
+  Draw the winner, report remaining pins under R14, and label disconnected
+  components of named Nets. `missingConnections` sums physical component
+  counts minus one for each Base Net, using all symbol pins except MOS bulk.
+  R22's existing `unrouted` weight applies to that count in every ranking and
+  search. Default Edit Engine calls remain all-or-nothing.
+
+- **R87 — Crossing-aware paths.** Auto-layout adds a cost of `20 × grid` for
+  each proper crossing with another Base Net's wire. A proper crossing is a
+  strict interior intersection; endpoint touches and collinear runs remain
+  clearance conflicts. R22 values one crossing at ten bends, and the bounded
+  router charges two grid steps per bend, giving the twenty-grid exchange
+  rate. Collect foreign segments once per clearance, indexed by orientation
+  and coordinate; only non-axis-aligned segments may be scanned. This is an
+  optional path-length cost, zero by default, leaving Agent/editor routing
+  unchanged. Net order and placement are unchanged.
+
 - **Existing locks and conflicts.** Members of a locked layout group or
   constraint are treated as fixed instances under R1, because the Edit Engine
   refuses to transform them. A recognized group whose generated id already
@@ -562,7 +601,10 @@ records use the existing [presentation schema](../../packages/model/src/schema/p
 No file format or connectivity edit is introduced.
 
 Known limits: supply trunks are ordinary wires, without thick power-rail
-presentation. The existing bounded router can leave Nets unrouted under R14.
+presentation. The bounded router can still leave components unreachable under
+R14, but draws reachable components and tries a tree for refused rail trunks.
+Crossing cost chooses among bounded candidates; it does not rip up earlier
+Nets or guarantee a globally crossing-free drawing.
 
 ## Acceptance criteria
 

@@ -9,13 +9,10 @@ import type { SymbolResolver } from "@icm/symbols";
 import { boxesIntersect, draftingBounds } from "./geometry.js";
 import { isMosBulk } from "./net-roles.js";
 
-/** R43: logical membership alone does not draw a connection to another pin. */
-export function floatingPins(
-  document: SchematicDocument,
-  resolver: SymbolResolver,
-) {
+/** Enumerate the same non-bulk symbol pins for both connectivity measures. */
+function connectionPins(document: SchematicDocument, resolver: SymbolResolver) {
   const topology = deriveElectricalTopologyProjection(document, resolver);
-  const pins = document.instances.flatMap((instance) =>
+  return document.instances.flatMap((instance) =>
     (
       resolver.resolve(instance.symbolId, instance.symbolVariantId)?.definition
         .pins ?? []
@@ -31,6 +28,32 @@ export function floatingPins(
         };
       }),
   );
+}
+
+/** R86: connections still needed to join each Base Net's physical components. */
+export function missingConnections(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+): number {
+  const components = new Map<string, Set<string>>();
+  for (const pin of connectionPins(document, resolver)) {
+    if (!pin.netId) continue;
+    const group = components.get(pin.netId) ?? new Set<string>();
+    group.add(pin.component);
+    components.set(pin.netId, group);
+  }
+  return [...components.values()].reduce(
+    (sum, group) => sum + Math.max(0, group.size - 1),
+    0,
+  );
+}
+
+/** R43: logical membership alone does not draw a connection to another pin. */
+export function floatingPins(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+) {
+  const pins = connectionPins(document, resolver);
   const physical = new Map<string, number>();
   const logical = new Map<string, number>();
   for (const pin of pins) {

@@ -7,11 +7,11 @@ import {
   type LayoutOverrides,
 } from "./layout-choices.js";
 import { classifyNets } from "./net-roles.js";
-import { auditRouting } from "./routing-audit.js";
+import { auditRouting, missingConnections } from "./routing-audit.js";
 import { compareIds } from "./recognize.js";
 import type { AutoLayoutResult, LayoutStrategy } from "./types.js";
 
-/** R74 starting weights; T022 will calibrate these together. */
+/** R74 weights; unrouted charges each missing physical connection (R86). */
 export const ROUTED_SCORE_WEIGHTS = {
   unrouted: 10000,
   crossings: 1000,
@@ -62,9 +62,7 @@ export function routedScore(run: LayoutRun, resolver: SymbolResolver): number {
   if (!run.final || run.result.diagnostics.some((d) => d.severity === "error"))
     return Infinity;
   const audit = auditRouting(run.final, resolver);
-  const unrouted = run.result.diagnostics.filter(
-    (d) => d.code === "AUTO_LAYOUT_NET_UNROUTED",
-  ).length;
+  const unrouted = missingConnections(run.final, resolver);
   const roles = classifyNets(run.final, resolver);
   const offConvention = run.final.instances.filter((i) => {
     if (!["port", "port-filled"].includes(i.symbolId) || !i.placement)

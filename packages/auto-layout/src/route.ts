@@ -323,7 +323,7 @@ function fallbackLabels(
         to: { kind: "free", point },
       },
       MAX_SCHEMATIC_EDITS_PER_TRANSACTION,
-      { keepClear: true },
+      { keepClear: true, netScope: "base" },
     );
     // No clear stub: this pin stays an unrouted member, already reported.
     if (typeof stub === "string") continue;
@@ -469,6 +469,7 @@ export function routeDocument(
       ...contacts.map((pins): RoutingTarget => ({ pins, stub: true })),
     );
     let failure: string | undefined;
+    const unjoinedPins: TerminalRef[] = [];
     for (const target of targets) {
       if (target.pins.length < 2 && !target.freeEnd) continue;
       let planned: SchematicEdit[];
@@ -498,7 +499,7 @@ export function routeDocument(
                 : { kind: "endpoint", endpoint: { kind: "terminal", ...host } },
             },
             MAX_SCHEMATIC_EDITS_PER_TRANSACTION,
-            { keepClear: true },
+            { keepClear: true, netScope: "base" },
           );
           if (typeof stub === "string") throw new Error(stub);
           planned = stub.edits;
@@ -523,7 +524,11 @@ export function routeDocument(
               { start: { x, y: ys[0]! }, end: { x, y: ys.at(-1)! } },
             );
           }
-          let best: { edits: SchematicEdit[]; score: number[] } | undefined;
+          // A rail's tree is tried only if its preferred trunk is incomplete.
+          if (target.trunk) trunks.push(undefined);
+          let best:
+            | { plan: ReturnType<typeof planRouteNet>; score: number[] }
+            | undefined;
           let reason: unknown;
           for (const trunk of trunks) {
             try {
@@ -535,16 +540,28 @@ export function routeDocument(
                   ...(trunk ? { trunk } : {}),
                 },
                 MAX_SCHEMATIC_EDITS_PER_TRANSACTION,
-              ).edits;
-              // Only high-fanout signal Nets need the R39 comparison.
-              if (trunks.length === 1) {
-                best = { edits: candidate, score: [] };
+                {
+                  netScope: "base",
+                  partial: true,
+                  crossingCost: 20 * working.presentation.grid,
+                },
+              );
+              if (
+                trunks.length === 1 ||
+                (target.trunk && trunk && !candidate.unjoined?.length)
+              ) {
+                best = { plan: candidate, score: [] };
                 break;
               }
-              const next = preview(working, resolver, candidate);
+              const next = preview(working, resolver, candidate.edits);
               if (!next.ok) throw new Error(JSON.stringify(next.diagnostics));
               const audit = auditRouting(next.document, resolver);
-              const score = [audit.crossings, audit.bends, audit.wireLength];
+              const score = [
+                candidate.unjoined?.length ?? 0,
+                audit.crossings,
+                audit.bends,
+                audit.wireLength,
+              ];
               if (
                 !best ||
                 score.some(
@@ -553,16 +570,34 @@ export function routeDocument(
                     score.slice(0, i).every((p, j) => p === best!.score[j]),
                 )
               )
-                best = { edits: candidate, score };
+                best = { plan: candidate, score };
             } catch (error) {
               reason = error;
             }
           }
           if (!best) throw reason;
-          planned = best.edits;
+          planned = best.plan.edits;
+          if (best.plan.unjoined?.length) {
+            failure ??= best.plan.unjoined[0]!.reason;
+            unjoinedPins.push(
+              ...best.plan.unjoined.flatMap((component) =>
+                component.endpoints.flatMap((endpoint) =>
+                  endpoint.kind === "terminal"
+                    ? [
+                        {
+                          instanceId: endpoint.instanceId,
+                          pinName: endpoint.pinName,
+                        },
+                      ]
+                    : [],
+                ),
+              ),
+            );
+          }
         }
       } catch (error) {
-        failure = error instanceof Error ? error.message : String(error);
+        failure ??= error instanceof Error ? error.message : String(error);
+        unjoinedPins.push(...target.pins);
         if (
           target.freeEnd ||
           (target.stub && contacts.some((pair) => pair === target.pins))
@@ -592,7 +627,7 @@ export function routeDocument(
         severity: "warning",
         code: "AUTO_LAYOUT_NET_UNROUTED",
         rule: "R14",
-        message: `Net ${group.netId}: ${failure}; pins: ${group.pins.map((p) => `${p.instanceId}.${p.pinName}`).join(", ")}`,
+        message: `Net ${group.netId}: ${failure}; pins: ${[...new Set(unjoinedPins.map((p) => `${p.instanceId}.${p.pinName}`))].join(", ")}`,
       });
       const labels = fallbackLabels(working, resolver, group);
       if (labels.length) {

@@ -75,6 +75,7 @@ function keepClear(
   document: SchematicDocument,
   resolver: SymbolResolver,
   intent: WireIntent,
+  netScope?: "base",
 ): WireIntent | string {
   const from = resolveWireIntentTarget(
     document,
@@ -123,6 +124,10 @@ function keepClear(
       : undefined,
   );
   points = fromLandings(document, resolver, points, ends);
+  const scopedId = (netId: string) =>
+    netScope === "base"
+      ? netId
+      : (context.logicalNetResolution.byBaseNetId.get(netId)?.id ?? netId);
   const netsOf = (anchor: typeof from, side: "from" | "to"): string[] => {
     const selectedEndpoint =
       side === "from" ? path.route.start : routeEnd(path.route);
@@ -146,10 +151,7 @@ function keepClear(
               connections.filter((connection) => connection.memberId === id),
             )
           : connections
-      ).map(
-        ({ netId }) =>
-          context.logicalNetResolution.byBaseNetId.get(netId)?.id ?? netId,
-      );
+      ).map(({ netId }) => scopedId(netId));
     }
     if (anchor.kind !== "endpoint") return [];
     const endpoint = anchor.endpoint;
@@ -180,9 +182,7 @@ function keepClear(
                     (end) => endpointKey(end) === memberKey,
                   ),
                 )?.netId);
-        return netId
-          ? [context.logicalNetResolution.byBaseNetId.get(netId)?.id ?? netId]
-          : [];
+        return netId ? [scopedId(netId)] : [];
       });
     }
     const netIds = [
@@ -211,14 +211,11 @@ function keepClear(
         )
         .map((connection) => connection.netId),
     ];
-    return netIds.flatMap((netId) =>
-      netId
-        ? [context.logicalNetResolution.byBaseNetId.get(netId)?.id ?? netId]
-        : [],
-    );
+    return netIds.flatMap((netId) => (netId ? [scopedId(netId)] : []));
   };
   const nets = { from: netsOf(from, "from"), to: netsOf(to, "to") };
   const clearance = createRouteClearance(document, resolver, context, {
+    netScope: netScope ?? "logical",
     logicalIds: new Set([...nets.from, ...nets.to]),
     signalWidth: path.route.members?.length ?? 1,
     routeContacts: [from, to].flatMap((anchor) =>
@@ -240,6 +237,7 @@ function keepClear(
         points,
         nets,
         path.route.members?.length ?? 1,
+        netScope,
       ) ?? intent
     );
   const clear = clearance.path(endOf(from), endOf(to));
@@ -248,7 +246,7 @@ function keepClear(
     // points: a hand-routed body wire was refused where leaving the route
     // to the editor worked, and nothing said so (#1527).
     const { waypoints: _refused, ...unforced } = intent;
-    const editor = keepClear(document, resolver, unforced);
+    const editor = keepClear(document, resolver, unforced, netScope);
     const bends = typeof clear === "string" ? [] : corners(clear.points!);
     const instead =
       typeof editor === "string"
@@ -276,6 +274,7 @@ function keepClear(
         clear.points,
         nets,
         path.route.members?.length ?? 1,
+        netScope,
       )) ??
     cleared
   );
@@ -299,6 +298,7 @@ function tapOwnWire(
   points: readonly Point[],
   nets: { from: readonly string[]; to: readonly string[] },
   signalWidth: number,
+  netScope?: "base",
 ): WireIntent | null {
   if (points.length < 3) return null;
   const context = deriveNetConnectivityContext(document, resolver);
@@ -309,8 +309,10 @@ function tapOwnWire(
         (route.members?.length ?? 1) !== signalWidth ||
         !routeElectricalConnections(route).every((connection) =>
           own.has(
-            context.logicalNetResolution.byBaseNetId.get(connection.netId)
-              ?.id ?? connection.netId,
+            netScope === "base"
+              ? connection.netId
+              : (context.logicalNetResolution.byBaseNetId.get(connection.netId)
+                  ?.id ?? connection.netId),
           ),
         )
       )
@@ -320,8 +322,10 @@ function tapOwnWire(
         logicalIds.map((id) =>
           route.members!.find(
             (member) =>
-              (context.logicalNetResolution.byBaseNetId.get(member.netId)?.id ??
-                member.netId) === id,
+              (netScope === "base"
+                ? member.netId
+                : (context.logicalNetResolution.byBaseNetId.get(member.netId)
+                    ?.id ?? member.netId)) === id,
           ),
         );
       if (
@@ -473,11 +477,11 @@ export function planWireBatch(
     | Parameters<typeof proposeWireIntent>[2]
     | Parameters<typeof proposeWireIntent>[2][],
   limit: number,
-  options: { keepClear?: boolean } = {},
+  options: { keepClear?: boolean; netScope?: "base" } = {},
 ): { edits: SchematicEdit[] } | string {
   if (!Array.isArray(input)) {
     const intent = options.keepClear
-      ? keepClear(document, resolver, input)
+      ? keepClear(document, resolver, input, options.netScope)
       : input;
     if (typeof intent === "string") return intent;
     return proposeWireIntent(document, resolver, intent);
@@ -672,7 +676,7 @@ export function planWireBatch(
       return `Wire ${index + 1}: ${selectedTo}`;
     const selected = { ...intent, from: selectedFrom, to: selectedTo };
     const cleared = options.keepClear
-      ? keepClear(working, resolver, selected)
+      ? keepClear(working, resolver, selected, options.netScope)
       : selected;
     if (typeof cleared === "string") return `Wire ${index + 1}: ${cleared}`;
     const planned = proposeWireIntent(working, resolver, cleared);
