@@ -50,3 +50,16 @@ The decision gate fails; the report has the full results. The next step should g
 placement to an optimizer: the LLM supplies the blocks, titles, roles and flow, and an
 optimizer chooses where blocks go. The block-placement refusals (12 of them) need fixing in
 any case.
+
+## PR review — codex round 1
+
+One P2, reproduced: `--partition llm` failed before reading a valid cached partition when
+the document had an unplaced device, because the human-drawing reference could not be
+extracted. The reference now only feeds comparison metrics:
+
+- if it is unavailable, the layout still runs and `partitionMetrics` is null;
+- when a LOADBench `partitioning.xml` sits beside the document, it is the reference.
+
+The extended integration test fails before the fix and passes after. LOADBench layouts are
+unchanged, and their metrics now use the LOADBench reference (median ARI 0.71, close to
+the ad hoc 0.69 in the report).

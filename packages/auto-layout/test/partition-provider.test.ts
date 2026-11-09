@@ -367,7 +367,25 @@ it("runs dry-run and cached V1/V2 evaluation with titled boxes and explicit cach
       "utf8",
     ),
   ).not.toContain("Synthetic &lt;input&gt;");
-}, 20_000);
+  // An unplaced device leaves no human-drawing reference, but the cached LLM
+  // partition (the payload ignores placement) still lays out.
+  const unplaced = structuredClone(d);
+  unplaced.instances[1]!.placement = null;
+  project.documents = [unplaced];
+  writeFileSync(join(folder, "synthetic.json"), serializeProject(project));
+  const netlistOnly = cli("auto-layout-eval.mjs", [
+    "--partition",
+    "llm",
+    "--variant",
+    "v1",
+  ]);
+  expect(netlistOnly.status, netlistOnly.stderr).toBe(0);
+  expect(readReport("v1").cases[0]).toMatchObject({
+    status: "completed",
+    partitionMetrics: null,
+    partitionValidity: { status: "valid-first-try" },
+  });
+}, 30_000);
 
 const openai = {
   model: "m",
