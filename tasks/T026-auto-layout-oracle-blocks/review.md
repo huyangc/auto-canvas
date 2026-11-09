@@ -59,3 +59,11 @@ becomes an `ORACLE_UNAVAILABLE` warning with no block metrics.
 
 On the same unplaced fixture, the fixed evaluator now fails exactly as `main`'s evaluator
 does: an unrelated route on the unplaced part. The oracle no longer adds a failure.
+
+## PR review — codex round 2 on `e152a91`
+
+One P2, reproduced: with the oracle unavailable, rendering still called `partitionBounds` on
+an undefined partition. The previous head marked a document with an unplaced, unrouted part
+`threw` ("Cannot read properties of undefined (reading 'blocks')"). Overlays are now skipped
+without a partition, as `blockMetrics` already did. With both fixes the same document
+completes default evaluation and renders its SVGs.
