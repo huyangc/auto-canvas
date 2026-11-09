@@ -7,6 +7,9 @@ import type { SymbolResolver } from "@icm/symbols";
 import { geometryProblem } from "./geometry.js";
 import { repairBlockers } from "./blocker-repair.js";
 import { freedAnnotations, reanchorLabels } from "./labels.js";
+import { finalizeFacing } from "./finalize-facing.js";
+import { seatLabels } from "./seat-labels.js";
+import { timePlanning } from "./timing.js";
 import {
   freezePinGroups,
   routeDocument,
@@ -52,6 +55,21 @@ export function planAutoLayout(
   document: SchematicDocument,
   resolver: SymbolResolver,
   options: AutoLayoutOptions = {},
+): AutoLayoutResult {
+  return timePlanning(() =>
+    finalizeFacing(
+      document,
+      resolver,
+      options,
+      planAutoLayoutMeasured(document, resolver, options),
+    ),
+  );
+}
+
+function planAutoLayoutMeasured(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  options: AutoLayoutOptions,
 ): AutoLayoutResult {
   const fixed = new Set(options.fixedInstanceIds);
   for (const owner of [...document.layoutGroups, ...document.constraints])
@@ -472,6 +490,25 @@ function buildPlan(
   edits.push(...reanchorLabels(named.document, resolver, freed, frozen));
   if (edits.length > MAX_SCHEMATIC_EDITS_PER_TRANSACTION)
     return refuse("R10: R16 complete edit list exceeds transaction limit");
+  const reanchored = preview(document, resolver, edits);
+  if (!reanchored.ok)
+    return refuse(
+      `R73: label seating preview rejected: ${JSON.stringify(reanchored.diagnostics)}`,
+    );
+  const fixedLabels = new Set(options.fixedInstanceIds);
+  for (const owner of [...document.layoutGroups, ...document.constraints])
+    if (owner.locked) for (const id of owner.objectIds) fixedLabels.add(id);
+  edits.push(
+    ...seatLabels(
+      reanchored.document,
+      resolver,
+      new Set(
+        [...result.placements.keys()].filter((id) => !fixedLabels.has(id)),
+      ),
+    ),
+  );
+  if (edits.length > MAX_SCHEMATIC_EDITS_PER_TRANSACTION)
+    return refuse("R73: complete edit list exceeds transaction limit");
   const final = preview(document, resolver, edits);
   if (!final.ok)
     return refuse(

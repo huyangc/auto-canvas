@@ -15,6 +15,8 @@ import {
 } from "../packages/auto-layout/dist/routing-audit.js";
 import { terminalPartition } from "../packages/auto-layout/dist/transaction.js";
 import { enclosingBox } from "../packages/auto-layout/dist/geometry.js";
+import { readabilityCounts } from "../packages/auto-layout/dist/readability.js";
+import { planningTiming } from "../packages/auto-layout/dist/timing.js";
 import { refinementMetrics } from "../packages/auto-layout/dist/refine.js";
 import { executeTransaction } from "../packages/edit-engine/dist/index.js";
 import {
@@ -73,6 +75,7 @@ const metrics = (document, resolver) => {
   const bounds = buildSvgScene(document, resolver).viewBox;
   const instances = enclosingBox(document, resolver);
   return {
+    ...readabilityCounts(document, resolver),
     crossings: audit.crossings,
     bends: audit.bends,
     wireLength: audit.wireLength,
@@ -173,6 +176,7 @@ function evaluateFile(file) {
     } finally {
       measurement.milliseconds = performance.now() - start;
     }
+    measurement.timing = planningTiming(plan);
     measurement.strategy = refinementMetrics(plan)?.strategy ?? null;
     measurement.candidates = refinementMetrics(plan)?.candidates ?? 0;
     measurement.diagnostics = [...plan.diagnostics];
@@ -288,6 +292,14 @@ if (!isMainThread) {
   const metricText = (m) =>
     m ? `${m.crossings}/${m.bends}/${Math.round(m.wireLength)}` : "—";
   const sum = (items) => ({
+    ...Object.fromEntries(
+      ["labelOverlaps", "labelClearance", "terminalDepartures"].map((key) => [
+        key,
+        items.every((m) => Number.isFinite(m[key]))
+          ? items.reduce((sum, m) => sum + m[key], 0)
+          : null,
+      ]),
+    ),
     crossings: items.reduce((s, m) => s + m.crossings, 0),
     bends: items.reduce((s, m) => s + m.bends, 0),
     wireLength: items.reduce((s, m) => s + m.wireLength, 0),
@@ -321,6 +333,12 @@ if (!isMainThread) {
             }
           : {}),
         after: metricText(m.result),
+        humanReadability: m.human
+          ? `${m.human.labelOverlaps}/${m.human.labelClearance}/${m.human.terminalDepartures}`
+          : "—",
+        resultReadability: m.result
+          ? `${m.result.labelOverlaps}/${m.result.labelClearance}/${m.result.terminalDepartures}`
+          : "—",
         humanFloating: m.human?.floatingPins.length ?? "—",
         resultFloating: m.result?.floatingPins.length ?? "—",
         ms: m.milliseconds?.toFixed(1),
