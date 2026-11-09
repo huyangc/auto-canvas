@@ -17,6 +17,14 @@ import type {
 export function compareIds(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
+
+/** R92: differential pairs face outward by default, every other unit inward. */
+export function facesOutward(g: RecognizedGroup): boolean {
+  return (
+    (g.facing ?? (g.kind === "differential-pair" ? "outward" : "inward")) ===
+    "outward"
+  );
+}
 interface Branch {
   instance: Instance;
   ids: string[];
@@ -177,6 +185,21 @@ export function recognizeSubstructures(
           candidates.push({ instance: i, ids: [i.id] });
       }
     }
+    // R91 counts branches, with two distinct bias gates and one supply-side Net.
+    if (candidates.length === 2) {
+      const [x, y] = candidates as [Branch, Branch];
+      if (
+        x.d === n &&
+        y.d === n &&
+        x.s !== undefined &&
+        x.s === y.s &&
+        x.g !== undefined &&
+        y.g !== undefined &&
+        x.g !== y.g &&
+        compatible(x, y)
+      )
+        return [member(x, "tail"), member(y, "tail")];
+    }
     if (candidates.length > 1) ambiguous("tail", [a, b, ...candidates], n);
     return candidates.length === 1 ? [member(candidates[0]!, "tail")] : [];
   };
@@ -280,6 +303,116 @@ export function recognizeSubstructures(
     a.ids.forEach((id) => used.add(id));
     b.ids.forEach((id) => used.add(id));
   }
+  // R90: discover reachability before resolving conflicts, so a later anchor
+  // cannot turn an earlier id-ordered choice into an arbitrary accepted pair.
+  type Pair = [Branch, Branch];
+  const symmetric = structures
+    .filter((s) =>
+      ["differential-pair", "cross-coupled-pair", "matched-pair"].includes(
+        s.kind,
+      ),
+    )
+    .map((s) =>
+      s.members
+        .filter((m) => m.role !== "tail")
+        .map((m) => all.find((b) => b.ids.includes(m.instanceIds[0]!))!),
+    )
+    .filter((bs): bs is Pair => bs.length === 2);
+  const candidates: Pair[] = [];
+  for (const [index, a] of active.entries()) {
+    if (
+      used.has(representative(a)) ||
+      diode(a) ||
+      a.d === a.s ||
+      ["supply", "ground"].includes(roles.byNet.get(a.s!) ?? "")
+    )
+      continue;
+    for (const b of active.slice(index + 1))
+      if (
+        !used.has(representative(b)) &&
+        !diode(b) &&
+        b.d !== b.s &&
+        !["supply", "ground"].includes(roles.byNet.get(b.s!) ?? "") &&
+        compatible(a, b) &&
+        a.g === b.g &&
+        a.s !== b.s &&
+        a.d !== b.d
+      )
+        candidates.push([a, b]);
+  }
+  const sameSides = (
+    a: string | undefined,
+    b: string | undefined,
+    p: string | undefined,
+    q: string | undefined,
+  ) =>
+    a !== undefined &&
+    b !== undefined &&
+    a !== b &&
+    ((a === p && b === q) || (a === q && b === p));
+  const anchored = ([a, b]: Pair, [p, q]: Pair) =>
+    sameSides(a.s, b.s, p.d, q.d) || sameSides(a.d, b.d, p.s, q.s);
+  const reachable = (pool: Pair[]) => {
+    const found: Pair[] = [];
+    for (let pass = 0; pass < pool.length; pass++) {
+      const next = pool.filter(
+        (p) =>
+          !found.includes(p) &&
+          [...symmetric, ...found].some((a) => anchored(p, a)),
+      );
+      if (!next.length) break;
+      found.push(...next);
+    }
+    return found;
+  };
+  const possible = reachable(candidates);
+  const conflicts = new Set(
+    possible.filter((p) =>
+      possible.some((q) => q !== p && p.some((b) => q.includes(b))),
+    ),
+  );
+  for (const p of conflicts)
+    ambiguous(
+      "common-gate-pair",
+      [...new Set(possible.filter((q) => p.some((b) => q.includes(b))).flat())],
+      p[0].g,
+    );
+  const common = reachable(possible.filter((p) => !conflicts.has(p)));
+  for (const [a, b] of common)
+    structures.push({
+      kind: "common-gate-pair",
+      members: [member(a, "member"), member(b, "member")],
+    });
+
+  // A cascode stack preserves the original input sides of a mirror composite.
+  for (const s of structures.filter((s) => s.kind === "differential-pair")) {
+    const inputs = s.members
+      .filter((m) => m.role === "input")
+      .map((m) => all.find((b) => b.ids.includes(m.instanceIds[0]!))!) as Pair;
+    const stack: Pair[] = [inputs];
+    const visited = new Set<Pair>();
+    for (const [a, b] of stack) {
+      for (const p of common) {
+        if (visited.has(p) || !sameSides(a.d, b.d, p[0].s, p[1].s)) continue;
+        visited.add(p);
+        const [x, y] = a.d === p[0].s ? p : [p[1], p[0]];
+        stack.push([x!, y!]);
+        for (const e of [...evidence(x!, y!), ...evidence(y!, x!)]) {
+          const forward = e.a === x;
+          structures.push({
+            kind: "differential-pair-mirror-load",
+            members: [
+              member(inputs[forward ? 0 : 1], "input-reference-side"),
+              member(inputs[forward ? 1 : 0], "input-output-side"),
+              member(e.reference, "load-reference"),
+              member(e.output, "load-output"),
+              ...s.members.filter((m) => m.role === "tail"),
+            ],
+          });
+        }
+      }
+    }
+  }
   for (const s of structures)
     s.members.sort(
       (a, b) =>
@@ -328,6 +461,7 @@ function movementUnits(
     "cross-coupled-pair",
     "differential-pair",
     "current-mirror",
+    "common-gate-pair",
     "matched-pair",
   ] as const) {
     for (const s of structures.filter((s) => s.kind === kind)) {
@@ -368,7 +502,9 @@ function movementUnits(
       )
         continue;
       const recordedKind =
-        kind === "cross-coupled-pair" ? "matched-pair" : kind;
+        kind === "cross-coupled-pair" || kind === "common-gate-pair"
+          ? "matched-pair"
+          : kind;
       const group: RecognizedGroup = {
         id: `auto-${recordedKind}-${members[0]}`,
         kind: recordedKind,
@@ -392,6 +528,33 @@ function movementUnits(
       members.forEach((id) => used.add(id));
     }
   }
+  for (const s of structures.filter((s) => s.kind === "differential-pair")) {
+    const tails = s.members.filter((m) => m.role === "tail");
+    if (tails.length !== 2) continue;
+    const members = tails.map((m) => m.instanceIds[0]!).sort(compareIds) as [
+      string,
+      string,
+    ];
+    if (members.some((id) => used.has(id) || (within && !within.has(id))))
+      continue;
+    const extras = tails
+      .flatMap((m) => m.instanceIds)
+      .filter(
+        (id) =>
+          !members.includes(id) &&
+          !persisted.has(id) &&
+          (!within || within.has(id)),
+      )
+      .sort(compareIds);
+    groups.push({
+      id: `auto-matched-pair-${members[0]}`,
+      kind: "matched-pair",
+      members,
+      facing: "outward",
+      ...(extras.length ? { extraMemberIds: extras } : {}),
+    });
+    members.forEach((id) => used.add(id));
+  }
   return alignStackedLoads(document, groups, roles);
 }
 
@@ -407,10 +570,11 @@ function alignStackedLoads(
     const pins = symbolId ? channelPins(symbolId) : undefined;
     return pins ? roles.pinNet(id, pins[end]) : undefined;
   };
+  // Preserve the existing orientation of loads touching only one pair drain.
+  // Full two-sided stack links below can then propagate that order along chains.
   const touches = (id: string, net: string | undefined) =>
     net !== undefined &&
     (channel(id, "drain") === net || channel(id, "source") === net);
-  // Stacked loads follow the left/right drains of the differential template.
   for (const load of groups.filter((g) => g.kind !== "differential-pair")) {
     const pair = pairs.find(
       (g) =>
@@ -419,6 +583,47 @@ function alignStackedLoads(
     );
     if (pair && !touches(load.members[0], channel(pair.members[0], "drain")))
       load.members.reverse();
+  }
+  // Traverse whole stack components from differential units first. A visited
+  // unit keeps its side order, avoiding oscillation between two neighbors.
+  const ordered = [...pairs].sort(
+    (a, b) =>
+      Number(a.kind !== "differential-pair") -
+        Number(b.kind !== "differential-pair") || compareIds(a.id, b.id),
+  );
+  const visited = new Set<string>();
+  for (const root of ordered) {
+    if (visited.has(root.id)) continue;
+    const queue = [root];
+    visited.add(root.id);
+    for (const anchor of queue)
+      for (const load of groups) {
+        if (visited.has(load.id)) continue;
+        const matches = (reverse: boolean) => {
+          const [a, b] = reverse ? [...load.members].reverse() : load.members;
+          for (const [end, other] of [
+            ["drain", "source"],
+            ["source", "drain"],
+            ["drain", "drain"],
+          ] as const) {
+            const p = channel(anchor.members[0], end),
+              q = channel(anchor.members[1], end);
+            if (
+              p !== undefined &&
+              q !== undefined &&
+              p !== q &&
+              channel(a!, other) === p &&
+              channel(b!, other) === q
+            )
+              return true;
+          }
+          return false;
+        };
+        if (!matches(false) && !matches(true)) continue;
+        if (!matches(false)) load.members.reverse();
+        visited.add(load.id);
+        queue.push(load);
+      }
   }
   return groups;
 }
@@ -434,8 +639,12 @@ export function persistedTemplates(
       document,
       structures.filter(
         (s) =>
-          (s.kind === "cross-coupled-pair" ? "matched-pair" : s.kind) ===
-          g.kind,
+          (s.kind === "cross-coupled-pair" || s.kind === "common-gate-pair"
+            ? "matched-pair"
+            : s.kind) === g.kind ||
+          (g.kind === "matched-pair" &&
+            s.kind === "differential-pair" &&
+            s.members.filter((m) => m.role === "tail").length === 2),
       ),
       roles,
       new Set(),
@@ -447,11 +656,6 @@ export function persistedTemplates(
     document,
     groups,
     roles,
-    movementUnits(
-      document,
-      structures.filter((s) => s.kind === "differential-pair"),
-      roles,
-      new Set(),
-    ),
+    movementUnits(document, structures, roles, new Set()),
   );
 }

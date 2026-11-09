@@ -28,6 +28,7 @@ export interface RecognizedGroup {
   id: string;
   kind: "differential-pair" | "current-mirror" | "matched-pair";
   members: [string, string];
+  facing?: "inward" | "outward";
   extraMemberIds?: string[];
   diodeInstanceId?: string;
   tailInstanceId?: string;
@@ -57,12 +58,17 @@ export interface Structure {
     | "differential-pair"
     | "cross-coupled-pair"
     | "matched-pair"
-    | "differential-pair-mirror-load";
+    | "differential-pair-mirror-load"
+    | "common-gate-pair";
   members: StructureMember[];
 }
 export interface Ambiguity {
   kind:
-    "mirror-reference" | "differential-pair" | "cross-coupled-pair" | "tail";
+    | "mirror-reference"
+    | "differential-pair"
+    | "cross-coupled-pair"
+    | "common-gate-pair"
+    | "tail";
   netId?: string;
   instanceIds: string[];
 }

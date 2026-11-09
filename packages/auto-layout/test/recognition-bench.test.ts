@@ -22,6 +22,7 @@ interface Case {
   models?: Record<string, string>;
   expected: RecognitionExpectation[];
   deferred?: string[];
+  deferredByKind?: Record<string, string[]>;
 }
 const cases: Case[] = casesJson;
 const resolver = new InMemorySymbolResolver(builtInSymbols);
@@ -37,6 +38,7 @@ const kinds = [
   "differential-pair-mirror-load",
   "cross-coupled-pair",
   "matched-pair",
+  "common-gate-pair",
 ];
 const canonical = (ss: RecognitionExpectation[]) =>
   ss
@@ -278,3 +280,51 @@ it.each(["differential-pair", "differential-pair-mirror-load"])(
     });
   },
 );
+
+it("defers structures by kind without hiding independent common-gate labels", () => {
+  const common = {
+    kind: "common-gate-pair",
+    members: { a: "member", b: "member" },
+  };
+  const matched = { ...common, kind: "matched-pair" };
+  const c: RecognitionCase = {
+    id: "kind-deferral",
+    source: "test",
+    labeledKinds: [common.kind, matched.kind],
+    expected: [common, matched],
+    predicted: [common, matched],
+    deferredByKind: { "matched-pair": ["a"] },
+  };
+  const score = scoreRecognition([c]);
+  expect(score.mismatches).toEqual([]);
+  expect(score.sources.test![common.kind]).toMatchObject({
+    expected: 1,
+    matched: 1,
+  });
+  expect(score.sources.test![matched.kind]).toMatchObject({
+    expected: 0,
+    predicted: 0,
+  });
+  c.deferred = ["b"];
+  expect(scoreRecognition([c]).sources.test![common.kind]).toMatchObject({
+    expected: 0,
+    predicted: 0,
+  });
+});
+
+it("scores both split-tail members and detects a missing second tail", () => {
+  const pair = {
+    kind: "differential-pair",
+    members: { a: "input", b: "input", t1: "tail", t2: "tail" },
+  };
+  const c: RecognitionCase = {
+    id: "split-tail-score",
+    source: "test",
+    labeledKinds: [pair.kind],
+    expected: [pair],
+    predicted: [pair],
+  };
+  expect(scoreRecognition([c]).sources.test![pair.kind]!.tails.correct).toBe(1);
+  c.predicted = [{ ...pair, members: { a: "input", b: "input", t1: "tail" } }];
+  expect(scoreRecognition([c]).sources.test![pair.kind]!.tails.wrong).toBe(1);
+});
