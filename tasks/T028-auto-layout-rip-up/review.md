@@ -93,3 +93,14 @@ frozen files, scripts, protected packages, lockfile vs 078f407 → no diff; git 
 
 Rendered human | before | after sheets (`tmp/t028/sheets/`, chosen by measurable change, never by
 id) were inspected and sent to the user.
+
+### PR 30 CI
+
+The first CI run failed in `scripts/launcher.test.mjs` (a process-group kill timing
+assertion, 3 ms where ≥ 400 ms is expected; T028 touches nothing under `scripts/`, and
+the same test passed on the preceding `main` runs). The rerun passed that test and failed
+`stages.test.ts` "is deterministic for a synthetic 120-device document" at its 30 s
+timeout (30.5 s on the runner). That one is T028's doing: the test plans a 121-Net chain
+twice and R96's finalist rip-up makes each plan about 1.26× slower (5.9 s → 7.4 s here);
+on the slow CI runner that crossed 30 s. The timeout is raised to 60 s with a comment, as
+T023 did for the held-out test, by Opus (a few lines found in review).
