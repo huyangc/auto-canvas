@@ -178,3 +178,14 @@ held-out result within its ceiling; floating pins over the 16 fixtures 14 → 1 
 their placement, all within ceilings.
 
 Verdict unchanged: accepted.
+
+## CI fix — Opus, small fix
+
+CI on the rebased head `0b3e993` failed in one test: the held-out fixture `ltc3452`
+timed out at 30 s. The run's machine was slow throughout: the `deadtime` fixture took
+28.6 s against 16.0 s on main's own run of `dcc2e62`, and `ltc3452` took 21.9 s on the
+pre-rebase head's passing run. On this machine the whole held-out file runs in 22 s and
+`ltc3452` alone in 8.4 s. The timeout exists to catch a hang, not to bound work (T013
+set it for the same reason after a 3 s limit failed on CI); R22's candidate count is the
+bound that is asserted. Opus raised it to 60 s, in `held-out.test.ts` only, and noted
+the reason in the comment. No other change.

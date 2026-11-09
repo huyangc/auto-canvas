@@ -32,7 +32,9 @@ it.each(cases)(
     const plan = planAutoLayout(document, resolver);
     // Work is bounded by R22's candidate limit, which holds on any machine; a
     // wall-clock limit here failed on the slower CI runner. The review script
-    // reports measured time instead.
+    // reports measured time instead. The timeout below only guards against a
+    // hang: with T023 drawing every routable Net, the slowest fixture takes
+    // about 8 s here and reached 30 s on a slow CI runner.
     expect(refinementMetrics(plan)?.candidates ?? 0).toBeLessThanOrEqual(24);
     const errors = plan.diagnostics.filter((d) => d.severity === "error");
     expect(errors).toEqual([]);
@@ -78,5 +80,5 @@ it.each(cases)(
       ).toBe(true);
     expect(audit.crossings).toBeLessThanOrEqual(crossingLimits[fixture.id]!);
   },
-  30000,
+  60000,
 );
