@@ -1,3 +1,9 @@
+import { describeCircuit } from "../packages/auto-layout/dist/partition-prompt.js";
+import { partitionMetrics } from "../packages/auto-layout/dist/partition-metrics.js";
+import {
+  readCachedPartition,
+  validateCachedResult,
+} from "./auto-layout-llm-partition.mjs";
 import { createHash } from "node:crypto";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -46,13 +52,15 @@ import {
 const [folder, ...args] = process.argv.slice(2);
 const flags = new Map();
 for (let i = 0; i < args.length; i += 2) {
-  if (args[i] === "--fixed-human") {
+  if (["--fixed-human", "--anonymize"].includes(args[i])) {
     flags.set(args[i], true);
     i--;
     continue;
   }
   if (
     ![
+      "--sample",
+      "--block-boxes",
       "--baseline",
       "--search",
       "--seed",
@@ -65,7 +73,7 @@ for (let i = 0; i < args.length; i += 2) {
     args[i + 1] === undefined
   )
     throw new Error(
-      "Usage: auto-layout-eval.mjs <folder> [--baseline <report.json>] [--search <seconds>] [--seed <n>] [--jobs <n>] [--partition human|loadbench --variant v1|v2] [--fixed-human] [--threshold <n>] [--split dev|val]",
+      "Usage: auto-layout-eval.mjs <folder> [--baseline <report.json>] [--search <seconds>] [--seed <n>] [--jobs <n>] [--partition human|loadbench|llm --variant v1|v2] [--fixed-human] [--threshold <n>] [--split dev|val] [--sample k] [--anonymize] [--block-boxes on|off]",
     );
   flags.set(args[i], args[i + 1]);
 }
@@ -84,9 +92,17 @@ if (
 const partitionSource = flags.get("--partition");
 const variant = flags.get("--variant") ?? "v1";
 const threshold = Number(flags.get("--threshold") ?? 3);
+const sample = Number(flags.get("--sample") ?? 0);
+const anonymize = flags.has("--anonymize");
+const blockBoxes = flags.get("--block-boxes") ?? "on";
 const fixedHuman = flags.has("--fixed-human");
 if (
-  (partitionSource && !["human", "loadbench"].includes(partitionSource)) ||
+  !Number.isSafeInteger(sample) ||
+  sample < 0 ||
+  !["on", "off"].includes(blockBoxes) ||
+  ((flags.has("--sample") || anonymize) && partitionSource !== "llm") ||
+  (partitionSource &&
+    !["human", "loadbench", "llm"].includes(partitionSource)) ||
   !["v1", "v2"].includes(variant) ||
   (flags.has("--variant") && !partitionSource) ||
   (fixedHuman && (partitionSource || seconds)) ||
@@ -104,7 +120,7 @@ const baseline = flags.has("--baseline")
   : undefined;
 const output =
   partitionSource || fixedHuman
-    ? `tmp/auto-layout-eval/${fixedHuman ? "v3" : `${variant}-${partitionSource}-${threshold}`}`
+    ? `tmp/auto-layout-eval/${fixedHuman ? "v3" : `${variant}-${partitionSource}-${threshold}${partitionSource === "llm" ? `-sample-${sample}${anonymize ? "-anon" : ""}` : ""}`}`
     : "tmp/auto-layout-eval";
 mkdirSync(output, { recursive: true });
 const escape = (value) =>
@@ -263,6 +279,49 @@ function evaluateFile(file) {
           message: String(error),
         },
       ];
+    }
+    if (partitionSource === "llm") {
+      measurement.partitionValidity = { status: "failed", l0Merges: 0 };
+      const entry = readCachedPartition(
+        describeCircuit(document, resolver, anonymize),
+        sample,
+        anonymize,
+      );
+      if (!entry) throw new Error("Missing LLM cache entry");
+      measurement.partitionValidity = {
+        status: entry.status,
+        l0Merges: entry.l0Merges,
+        model: entry.model,
+        stop_reason: entry.stop_reason,
+      };
+      if (!["valid-first-try", "repaired"].includes(entry.status))
+        throw new Error("Cached LLM partition failed");
+      const validated = validateCachedResult(
+        document,
+        resolver,
+        entry,
+        anonymize,
+      );
+      if (validated.errors.length) {
+        measurement.partitionValidity.status = "failed";
+        throw new Error(
+          `Invalid cached LLM partition: ${validated.errors.join("; ")}`,
+        );
+      }
+      measurement.partitionMetrics = partitionMetrics(
+        document,
+        resolver,
+        validated.partition,
+        partition,
+      );
+      partition = validated.partition;
+    } else if (partitionSource === "human") {
+      measurement.partitionMetrics = partitionMetrics(
+        document,
+        resolver,
+        partition,
+        partition,
+      );
     }
     measurement.partition = partition;
     measurement.partitionDiagnostics = partitionDiagnostics;
@@ -444,12 +503,12 @@ function evaluateFile(file) {
         },
       });
       // No overlay when the oracle was unavailable, as blockMetrics does.
-      if (!partition) return svg;
+      if (!partition || blockBoxes === "off") return svg;
       const overlays = partitionBounds(d, resolver, partition)
         .filter((b) => Number.isFinite(b.x))
         .map(
           (b) =>
-            `<g stroke="#7c3aed" fill="none"><rect x="${b.x}" y="${b.y}" width="${b.width}" height="${b.height}" stroke-dasharray="8 5"/><text x="${b.x + 3}" y="${b.y + 12}" stroke="none" fill="#7c3aed" font-size="12">${escape(b.role ?? "unlabeled")}</text></g>`,
+            `<g stroke="#7c3aed" fill="none"><rect x="${b.x}" y="${b.y}" width="${b.width}" height="${b.height}" stroke-dasharray="8 5"/><text x="${b.x + 3}" y="${b.y + 12}" stroke="none" fill="#7c3aed" font-size="12">${escape([partition.blocks.find((block) => block.id === b.id)?.title, b.role].filter(Boolean).join(" · ") || "unlabeled")}</text></g>`,
         )
         .join("");
       return svg.replace("</svg>", `${overlays}</svg>`);
@@ -461,6 +520,11 @@ function evaluateFile(file) {
     section = `<section id="${escape(id)}"><h2>${escape(id)} (${split}, ${measurement.instances} instances)</h2><p>${measurement.status}; ${measurement.milliseconds.toFixed(1)} ms</p><pre>${escape(JSON.stringify(measurement, null, 2))}</pre><div class="pair"><figure><figcaption>${hasHuman ? "Human" : "No human reference"}</figcaption>${humanSvg}</figure><figure><figcaption>Auto (${measurement.status})</figcaption>${resultSvg}</figure></div></section>`;
   } catch (error) {
     measurement.status = "threw";
+    if (partitionSource === "llm")
+      measurement.partitionValidity = {
+        ...measurement.partitionValidity,
+        status: "failed",
+      };
     measurement.error = String(error?.stack ?? error);
   }
   return { measurement, section };
