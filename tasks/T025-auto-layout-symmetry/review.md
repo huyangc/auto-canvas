@@ -174,3 +174,32 @@ path). This is an R89 violation that no test covered and it is larger than a few
 (the ordering sweeps must keep block order consistent), so it goes to Codex as round 4
 with plan section "Round 4" (rule O, two regressions). Verdict for round 3 stays
 accepted for what it covers; the PR waits for round 4.
+
+## Round 4 — accepted
+
+Reviewed: `git diff` of the round-4 working tree against `d28b346` on 2026-11-09;
+acceptance rerun by Opus on lane 1. The fix is what rule O asks for and nothing more:
+`orderRows` ranks blocks once from their mean slot after the initial tie sort (signal
+distance, then id; ties between blocks by block id) and reapplies that order to the
+block slots of a row after `bundleTails` in the initial pass, in every barycentre sweep
+and inside the transposition pass, so every scored order is consistent and
+`assignColumns`' rigid registration never meets a cycle. Half layouts pass no blocks and
+are unaffected. Computing the rank once rather than per sweep is a sound reading of O
+(the constraint cannot change under its own effect) and is noted in the report.
+
+| #   | Severity | Where                      | Finding                                                                                                                                                                                                                                              | Expected fix |
+| --- | -------- | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| 1   | note     | `layered.ts` `orderBlocks` | Six new cases (cross-linked and mirrored fixtures, three strategies) assert every pair midpoint on its block axis and no geometry problem; five failed before.                                                                                       | —            |
+| 2   | note     | human drawings             | Quick: one val drawing 35 → 34 crossings, 31 → 28 bends; everything else identical to the accepted round 3, symmetry 87/87 and 11/11 unchanged. Search: small shifts in seven documents, within budgeted-search noise; dev 221 → 219, val 299 → 294. | —            |
+| 3   | note     | timing                     | Quick summed time fell 32% against the recorded round-3 figure, so Codex reran a paired baseline as the plan requires: 0.975×.                                                                                                                       | —            |
+
+Acceptance rerun (lane 1, Opus, on the round-4 tree):
+
+```text
+pnpm format:check / docs:check / typecheck → 0; pnpm lint → 0 errors
+pnpm vitest run packages/auto-layout → 0; 371 passed
+pnpm test:local → 0; 7657 passed, 116 skipped
+pnpm deadcode 2>&1 | grep -E 'auto-layout|symmetry' → no output; pnpm build → 0; pnpm auto-layout:review → 0
+pnpm auto-layout:eval tmp/human-cases --baseline tmp/t025/base-quick.json --jobs 10 → 0; 33/33; identical to Codex's round-4 report on every document
+Opus's two-block probe (variants 1 and 3, which split before): every block's pair midpoints equal in all three strategies
+```

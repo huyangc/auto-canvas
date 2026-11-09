@@ -655,6 +655,8 @@ pins }` lists, never Net ids.
   one node: left partners in half-layout order, axis devices, then right partners
   in reverse. Register all block rows as one alignment component before outside
   R18 stack links; row compaction and median pulls translate the whole block.
+  Blocks that share rows keep one left-to-right order in every row;
+  `orderRows` enforces it inside its sweeps.
   Outside devices sharing a block row sit beside its span, never inside it;
   skip an R18 alignment that would violate that row order.
 

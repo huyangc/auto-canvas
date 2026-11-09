@@ -561,6 +561,46 @@ export function orderRows(
     new Map(
       ordered.flatMap((row) => row.map((n, index) => [n.id, index] as const)),
     );
+  // R89: choose one block order from the mean node positions after the tie
+  // sort. Keep it throughout the sweeps so row constraints cannot form a
+  // cycle when assignColumns registers each block as one rigid component.
+  const blockByMember = new Map(
+    (rows.blocks ?? []).flatMap((block) =>
+      block.map((id) => [id, block[0]!] as const),
+    ),
+  );
+  const blockByNode = new Map(
+    rows.nodes.flatMap((n) => {
+      const block = blockByMember.get(n.members[0]!);
+      return block === undefined ? [] : [[n.id, block] as const];
+    }),
+  );
+  const blockPositions = new Map<string, number[]>();
+  for (const row of ordered)
+    row.forEach((n, index) => {
+      const block = blockByNode.get(n.id);
+      if (block === undefined) return;
+      if (!blockPositions.has(block)) blockPositions.set(block, []);
+      blockPositions.get(block)!.push(index);
+    });
+  const blockMean = new Map(
+    [...blockPositions].map(([id, p]) => [
+      id,
+      p.reduce((sum, x) => sum + x, 0) / p.length,
+    ]),
+  );
+  const orderBlocks = (row: RowNode[]) => {
+    const blocks = row.filter((n) => blockByNode.has(n.id));
+    blocks.sort((a, b) => {
+      const ca = blockByNode.get(a.id)!,
+        cb = blockByNode.get(b.id)!;
+      return blockMean.get(ca)! - blockMean.get(cb)! || compareIds(ca, cb);
+    });
+    let index = 0;
+    row.forEach((n, slot) => {
+      if (blockByNode.has(n.id)) row[slot] = blocks[index++]!;
+    });
+  };
   // Edges grouped by their upper row, then by Net, so the objective below is
   // counted in O(E log E): a high-fanout Net expands to |A|x|B| edges, and the
   // pairwise scan this replaces took 101 s on a 101-instance document.
@@ -607,7 +647,10 @@ export function orderRows(
       row.splice(first, 0, ...bundle);
     }
   };
-  for (const row of ordered) bundleTails(row);
+  for (const row of ordered) {
+    bundleTails(row);
+    orderBlocks(row);
+  }
   let best = ordered.map((r) => [...r]),
     bestCount = crossings();
   for (let sweep = 0; sweep < 8; sweep++) {
@@ -632,6 +675,7 @@ export function orderRows(
       };
       row.sort((a, b) => bary(a) - bary(b) || tie(a, b));
       bundleTails(row);
+      orderBlocks(row);
     }
     // Barycentres alone can swap the ends of a same-row Net without closing
     // its span. Adjacent transpositions finish that compaction, subject to the
@@ -643,6 +687,7 @@ export function orderRows(
         const original = [...row];
         [row[index - 1], row[index]] = [row[index]!, row[index - 1]!];
         bundleTails(row);
+        orderBlocks(row);
         const next = crossings();
         if (next < score) score = next;
         else row.splice(0, row.length, ...original);
