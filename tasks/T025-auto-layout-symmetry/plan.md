@@ -649,3 +649,61 @@ report; Opus remeasures before accepting if the ratio is within 0.1 of the ceili
 As the Round 2 report, against the `f8f15fe` baselines, plus the rail-pairing count of K,
 and the acceptance fractions on all 33 documents. The six rendered pairs compare
 `tmp/t025/base-svg/` with the round-3 quick result.
+
+## Round 4: consistent block order across rows
+
+Added after the codex PR review of `7bdd199` (PR 29, round 2, P2; reproduced by Opus).
+Everything above stands; this section adds one rule and one regression.
+
+**Defect.** Two symmetric blocks joined through asymmetric devices (two copies of the
+step-1 fixture linked by resistors from one block's drain Nets to the other's input
+Nets) can be ordered differently in different rows by `orderRows`: block X left of
+block Y in one row and right of it in another. `assignColumns` then registers each
+block's rows as one alignment component through `align`, which rejects a merge that
+would create an ordering cycle, so the block is silently split across components and
+compaction moves its rows apart (`placeDocument(..., "layered")` completes with one
+pair's midpoint hundreds of units from the block's other pairs). R89 says the block is
+one rigid unit; the layered and stage strategies both use this path.
+
+### O. Blocks keep one order in every row
+
+In `orderRows`, blocks that share rows keep one left-to-right order in all of them.
+After the initial tie sort, after every barycentre sweep of a row, and after the
+adjacent-transposition pass, apply `orderBlocks(row)` the way `bundleTails` is applied:
+
+- the canonical block order ranks blocks by the mean position of their nodes over all
+  rows of the current order (ties by block id, `compareIds`);
+- within a row, the block nodes are re-placed into the slots that block nodes occupy, in
+  canonical order; non-block nodes stay where they are.
+
+The crossing objective is evaluated on the consistent order, so `best` is always
+consistent, and `assignColumns`' block alignment never meets a cycle. `orderRows` learns
+which nodes belong to which block from `rows.blocks` (the half layout passes no blocks,
+so nothing changes there). Do not add a second ordering algorithm: this is a constraint
+applied inside the existing sweeps, like `bundleTails`.
+
+### Tests
+
+- Regression in `symmetry.test.ts`: two copies of the step-1 fixture with distinct ids,
+  linked by two resistors (first block's `right` Net to the second block's `ina`, second
+  block's `left` Net to the first block's `inb`), through `placeDocument` in all three
+  strategies: no problem, and in every block every pair's midpoint
+  `(x_left + x_right) / 2` equals the block's axis (the tail's `+` pin x); the two blocks
+  do not overlap (`geometryProblem` undefined). Add the mirrored variant (second block's
+  `right` to the first block's `ina`, plus a resistor between the two `ba`/`bb` bias Nets)
+  as a second case. Both fail before the fix (Opus reproduced midpoints 90 vs 620 and
+  90 vs 700 for the second block).
+- Existing tests pass unchanged; `layered.test.ts` ordering tests in particular.
+
+### Spec
+
+R89: add "Blocks that share rows keep one left-to-right order in every row; `orderRows`
+enforces it inside its sweeps."
+
+### Report for round 4
+
+Acceptance as before (lane 1, base `f8f15fe`, baselines in `tmp/t025/`). Quick and search
+results on the 33 human drawings against `tmp/t025/review3/paired-result.json` and
+`tmp/t025/review3/search120.json` (the accepted round-3 results): report every document
+whose crossings, bends or symmetry counts change. No paired timing needed unless the
+quick summed time changes by more than 10% against `tmp/t025/review3/paired-result.json`.

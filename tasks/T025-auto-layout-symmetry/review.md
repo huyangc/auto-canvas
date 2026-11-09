@@ -163,3 +163,14 @@ feedback pays 52 → 66 crossings for 12 of 12 mirrored pairs.
 Both are fixes of a few lines found in review (CLAUDE.md); they are committed on top of
 the reviewed head and the PR review hook reruns on the new head. Acceptance rerun after
 the fixes is recorded in the PR.
+
+### PR 29 codex review, round 2 (head `7bdd199`): one P2, holds, sent back to Codex as round 4
+
+With two symmetric blocks linked by asymmetric resistors, `orderRows` can order the
+blocks differently in different rows; `align` then silently drops the block's rigid
+registration and compaction splits the block (Opus reproduced: second block's pair
+midpoints 90 vs 620 in one variant, 90 vs 700 in another; all three strategies share the
+path). This is an R89 violation that no test covered and it is larger than a few lines
+(the ordering sweeps must keep block order consistent), so it goes to Codex as round 4
+with plan section "Round 4" (rule O, two regressions). Verdict for round 3 stays
+accepted for what it covers; the PR waits for round 4.
