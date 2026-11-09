@@ -367,6 +367,11 @@ function evaluateFile(file) {
     const completed = transaction?.ok && transaction.applied;
     const after = completed ? transaction.document : document;
     measurement.status = completed ? "completed" : "refused";
+    if (!completed && baseline && !partitionSource && !fixedHuman && !seconds) {
+      // Losing a layout the baseline had is a regression, not a skipped check.
+      const before = baseline.cases.find((b) => b.id === id);
+      if (before?.status === "completed") measurement.baselineEqual = false;
+    }
     if (completed) {
       measurement.result = {
         ...metrics(after, resolver, components),

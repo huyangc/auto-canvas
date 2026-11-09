@@ -67,3 +67,15 @@ an undefined partition. The previous head marked a document with an unplaced, un
 `threw` ("Cannot read properties of undefined (reading 'blocks')"). Overlays are now skipped
 without a partition, as `blockMetrics` already did. With both fixes the same document
 completes default evaluation and renders its SVGs.
+
+## Rebase onto main with T025, and PR review on `d6e1e37`
+
+Rebased onto `078f407`. T025's symmetric components are rigid, so one spanning two
+partition blocks would pull devices out of their block. In partition mode, only components
+wholly inside one block apply. Without a partition, all 33 human cases match clean `main`
+in metrics and plan hash.
+
+One P2, reproduced: a case that completed in the baseline but is now refused skipped the
+equality check, so `--baseline` exited 0 on the worst regression. A previously completed
+case that is now refused is now unequal. A 121-instance fixture exits 0 before the fix and
+1 after.
