@@ -100,6 +100,7 @@
     "server:migrate": "pnpm --filter @icm/server... build && node apps/server/dist/cli.js --migrate"
   },
   "devDependencies": {
+    "@anthropic-ai/sdk": "1.6.0",
     "@playwright/test": "1.62.1",
     "@types/node": "24.13.3",
     "fflate": "0.8.3",
@@ -111,6 +112,7 @@
     "prettier": "3.9.6",
     "typescript": "7.0.2",
     "vite": "8.2.1",
-    "vitest": "4.1.10"
+    "vitest": "4.1.10",
+    "zod": "4.4.3"
   }
 }
