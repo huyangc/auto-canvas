@@ -307,6 +307,7 @@ export function recognizeStructures(
 ): RecognizedGroup[] {
   const { structures } = recognizeSubstructures(document, roles);
   return movementUnits(
+    document,
     structures,
     roles,
     new Set(document.layoutGroups.flatMap((g) => g.objectIds)),
@@ -315,6 +316,7 @@ export function recognizeStructures(
 
 /** Both inferred and persisted templates use the same branch representatives. */
 function movementUnits(
+  document: SchematicDocument,
   structures: Structure[],
   roles: NetRoles,
   persisted: Set<string>,
@@ -390,33 +392,33 @@ function movementUnits(
       members.forEach((id) => used.add(id));
     }
   }
-  return alignStackedLoads(groups, roles);
+  return alignStackedLoads(document, groups, roles);
 }
 
 function alignStackedLoads(
+  document: SchematicDocument,
   groups: RecognizedGroup[],
   roles: NetRoles,
   pairs = groups,
 ): RecognizedGroup[] {
-  const pin = roles.pinNet;
+  // MOS D/S and BJT C/E; a device without channel pins never matches.
+  const channel = (id: string, end: "drain" | "source") => {
+    const symbolId = document.instances.find((i) => i.id === id)?.symbolId;
+    const pins = symbolId ? channelPins(symbolId) : undefined;
+    return pins ? roles.pinNet(id, pins[end]) : undefined;
+  };
+  const touches = (id: string, net: string | undefined) =>
+    net !== undefined &&
+    (channel(id, "drain") === net || channel(id, "source") === net);
   // Stacked loads follow the left/right drains of the differential template.
   for (const load of groups.filter((g) => g.kind !== "differential-pair")) {
     const pair = pairs.find(
       (g) =>
         g.kind === "differential-pair" &&
-        load.members.some((id) =>
-          [pin(id, "D"), pin(id, "S")].includes(pin(g.members[0], "D")),
-        ),
+        load.members.some((id) => touches(id, channel(g.members[0], "drain"))),
     );
-    if (pair) {
-      const leftNet = pin(pair.members[0], "D");
-      if (
-        ![pin(load.members[0], "D"), pin(load.members[0], "S")].includes(
-          leftNet,
-        )
-      )
-        load.members.reverse();
-    }
+    if (pair && !touches(load.members[0], channel(pair.members[0], "drain")))
+      load.members.reverse();
   }
   return groups;
 }
@@ -429,6 +431,7 @@ export function persistedTemplates(
   const { structures } = recognizeSubstructures(document, roles);
   const groups = document.layoutGroups.flatMap((g) => {
     const match = movementUnits(
+      document,
       structures.filter(
         (s) =>
           (s.kind === "cross-coupled-pair" ? "matched-pair" : s.kind) ===
@@ -441,9 +444,11 @@ export function persistedTemplates(
     return match ? [match] : [];
   });
   return alignStackedLoads(
+    document,
     groups,
     roles,
     movementUnits(
+      document,
       structures.filter((s) => s.kind === "differential-pair"),
       roles,
       new Set(),
