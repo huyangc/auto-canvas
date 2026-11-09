@@ -22,3 +22,12 @@ roles, so an anonymized payload still carries roles that names helped decide. Th
 understates name dependence.
 
 The experiment itself is not yet run; results are appended after the real calls.
+
+## Provider change (user request, 2026-11-09)
+
+The user asked to use silicon-notebook's `deepseek-flash` configuration instead of the
+Anthropic API. The script now defaults to that service: OpenAI protocol,
+`https://api.deepseek.com`, model `deepseek-flash`, key in `SYSTEM_GENERAL_API_KEY`.
+`LLM_PARTITION_PROVIDER=claude-opus-5-5` keeps the original path. The key is read from
+the environment only and is absent from the cache files. JSON mode does not enforce the
+shape, so the prompt now states it (`PROMPT_VERSION` 2) and the same Zod schema checks it.
