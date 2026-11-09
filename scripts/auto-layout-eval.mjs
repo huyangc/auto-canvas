@@ -258,7 +258,6 @@ function evaluateFile(file) {
       classifyNets(document, resolver),
     );
     measurement.instances = document.instances.length;
-    const hasHuman = partitionSource !== "loadbench";
     // Oracle extraction is required only for partitioned runs. Default and
     // search evaluations proceed without block metrics when it fails, for
     // example on a document with unplaced devices.
@@ -270,6 +269,9 @@ function evaluateFile(file) {
     const loadbenchReference =
       partitionSource === "loadbench" ||
       (partitionSource === "llm" && existsSync(loadbenchXml));
+    // A LOADBench document's positions come from the importer, not a person:
+    // never report them as a human drawing or measure arrangement against them.
+    const hasHuman = !loadbenchReference;
     try {
       const oracle = loadbenchReference
         ? partitionFromLoadbench(document, readFileSync(loadbenchXml, "utf8"))
@@ -321,6 +323,14 @@ function evaluateFile(file) {
       measurement.partitionMetrics = partition
         ? partitionMetrics(document, resolver, validated.partition, partition)
         : null;
+      // Position-based metrics need a human drawing; ARI only needs the reference.
+      if (measurement.partitionMetrics && !hasHuman)
+        Object.assign(measurement.partitionMetrics, {
+          humanOverlap: null,
+          floorplanAgreement: null,
+          floorplanMatches: null,
+          floorplanRelations: null,
+        });
       partition = validated.partition;
     } else if (partitionSource === "human") {
       measurement.partitionMetrics = partitionMetrics(
@@ -707,20 +717,19 @@ if (!isMainThread) {
       documents: cases.length,
       completed: cases.filter((m) => m.status === "completed").length,
       common: common.length,
-      human:
-        partitionSource === "loadbench"
-          ? null
-          : sum(common.map((m) => m.human)),
+      // Totals cover human drawings only; imported LOADBench layouts have none.
+      human: common.some((m) => m.human)
+        ? sum(common.filter((m) => m.human).map((m) => m.human))
+        : null,
       before: baseline
         ? sum(
             common.map((m) => baseline.cases.find((b) => b.id === m.id).result),
           )
         : null,
       after: sum(common.map((m) => m.result)),
-      allHuman:
-        partitionSource === "loadbench"
-          ? null
-          : sum(cases.filter((m) => m.human).map((m) => m.human)),
+      allHuman: cases.some((m) => m.human)
+        ? sum(cases.filter((m) => m.human).map((m) => m.human))
+        : null,
       allCompleted: sum(cases.filter((m) => m.result).map((m) => m.result)),
       quick: sum(cases.filter((m) => m.quick).map((m) => m.quick)),
       largestWidthRatio: largestRatio(cases, "widthRatio"),

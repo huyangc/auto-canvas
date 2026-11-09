@@ -63,3 +63,16 @@ extracted. The reference now only feeds comparison metrics:
 The extended integration test fails before the fix and passes after. LOADBench layouts are
 unchanged, and their metrics now use the LOADBench reference (median ARI 0.69, the same as
 the ad hoc figure in the report).
+
+## PR review — codex round 2 on `50be579`
+
+One P2, reproduced by the extended integration test: with a LOADBench reference, an LLM run
+still treated the importer's positions as a human drawing. Human status now follows the
+detected reference type:
+
+- no human metrics, SVG or totals for such a case;
+- position-based partition metrics are null;
+- ARI against the XML remains.
+
+Aggregate human totals now cover only cases that have a human drawing. LOADBench layouts
+are unchanged across all 30 topologies.
