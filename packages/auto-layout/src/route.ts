@@ -18,8 +18,12 @@ import { isMos, type NetRoles } from "./net-roles.js";
 import { powerHosts } from "./place-markers.js";
 import { isMarker } from "./placement-connectivity.js";
 import { compareIds } from "./recognize.js";
-import { auditRouting } from "./routing-audit.js";
-import { preview } from "./transaction.js";
+import {
+  auditRouting,
+  crossingsByNet,
+  missingConnections,
+} from "./routing-audit.js";
+import { preview, restorePinGroups } from "./transaction.js";
 import {
   assignPowerHosts,
   samePin,
@@ -408,6 +412,235 @@ function replayEdits(
   });
 }
 
+interface GroupRouting {
+  document: SchematicDocument;
+  edits: SchematicEdit[];
+  diagnostics: AutoLayoutDiagnostic[];
+  problem?: string;
+  failed?: boolean;
+}
+
+/** The same R12–R14 procedure is used for the first pass and each R95 retry. */
+function routeGroup(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  frozen: PinGroup[],
+  group: PinGroup,
+  roles: NetRoles,
+  signalTrunks: boolean,
+): GroupRouting {
+  let working = document;
+  let failed = false;
+  const edits: SchematicEdit[] = [];
+  const diagnostics: AutoLayoutDiagnostic[] = [];
+  const power = (g: PinGroup) =>
+    ["supply", "ground"].includes(roles.byNet.get(g.netId) ?? "");
+  const targets: RoutingTarget[] = power(group)
+    ? powerTargets(
+        working,
+        resolver,
+        group,
+        roles.byNet.get(group.netId) as "supply" | "ground",
+        roles.rails.has(group.netId),
+      )
+    : [{ pins: group.pins }];
+  // R38: freeze and wire direct contacts on every Net before the general tree.
+  // Whole-list reconciliation then has no missing physical connection to add.
+  const points = pinPoints(working, resolver);
+  const contacts = group.contacts.filter((pair) => {
+    const [a, b] = pair.map(
+      (ref) => points.find((p) => samePin(ref, p))!.point,
+    );
+    return (
+      (a!.x !== b!.x || a!.y !== b!.y) &&
+      !targets.some(
+        (t) =>
+          t.stub && pair.every((p) => t.pins.some((ref) => samePin(p, ref))),
+      )
+    );
+  });
+  targets.unshift(
+    ...contacts.map((pins): RoutingTarget => ({ pins, stub: true })),
+  );
+  let failure: string | undefined;
+  const unjoinedPins: TerminalRef[] = [];
+  for (const target of targets) {
+    if (target.pins.length < 2 && !target.freeEnd) continue;
+    let planned: SchematicEdit[];
+    try {
+      if (target.stub || target.freeEnd) {
+        // Pin-to-pin stubs preserve exact contacts; a singleton claim
+        // instead needs a clearance-checked wire to its outward free end.
+        const source = target.pins[0]!;
+        const host = target.pins[1]!;
+        const stub = planWireBatch(
+          working,
+          resolver,
+          {
+            id: deriveStableId(
+              "auto-layout-stub",
+              working.id,
+              target.freeEnd
+                ? `${source.instanceId}.${source.pinName}`
+                : JSON.stringify([source, host]),
+            ),
+            from: {
+              kind: "endpoint",
+              endpoint: { kind: "terminal", ...source },
+            },
+            to: target.freeEnd
+              ? { kind: "free", point: target.freeEnd }
+              : { kind: "endpoint", endpoint: { kind: "terminal", ...host } },
+          },
+          MAX_SCHEMATIC_EDITS_PER_TRANSACTION,
+          { keepClear: true, netScope: "base" },
+        );
+        if (typeof stub === "string") throw new Error(stub);
+        planned = stub.edits;
+      } else {
+        const trunks: Array<RoutingTarget["trunk"]> = [target.trunk];
+        if (signalTrunks && !power(group) && target.pins.length >= 3) {
+          const pins = points.filter((p) =>
+            target.pins.some((ref) => samePin(ref, p)),
+          );
+          const xs = pins.map((p) => p.point.x).sort((a, b) => a - b);
+          const ys = pins.map((p) => p.point.y).sort((a, b) => a - b);
+          const median = (values: number[]) =>
+            Math.round(
+              (values[Math.floor((values.length - 1) / 2)]! +
+                values[Math.floor(values.length / 2)]!) /
+                2,
+            );
+          const x = median(xs),
+            y = median(ys);
+          trunks.push(
+            { start: { x: xs[0]!, y }, end: { x: xs.at(-1)!, y } },
+            { start: { x, y: ys[0]! }, end: { x, y: ys.at(-1)! } },
+          );
+        }
+        // A rail's tree is tried only if its preferred trunk is incomplete.
+        if (target.trunk) trunks.push(undefined);
+        let best:
+          | { plan: ReturnType<typeof planRouteNet>; score: number[] }
+          | undefined;
+        let reason: unknown;
+        for (const trunk of trunks) {
+          try {
+            const candidate = planRouteNet(
+              working,
+              resolver,
+              {
+                target: { kind: "pins", pins: target.pins },
+                ...(trunk ? { trunk } : {}),
+              },
+              MAX_SCHEMATIC_EDITS_PER_TRANSACTION,
+              {
+                netScope: "base",
+                partial: true,
+                crossingCost: 20 * working.presentation.grid,
+              },
+            );
+            if (
+              trunks.length === 1 ||
+              (target.trunk && trunk && !candidate.unjoined?.length)
+            ) {
+              best = { plan: candidate, score: [] };
+              break;
+            }
+            const next = preview(working, resolver, candidate.edits);
+            if (!next.ok) throw new Error(JSON.stringify(next.diagnostics));
+            const audit = auditRouting(next.document, resolver);
+            const score = [
+              candidate.unjoined?.length ?? 0,
+              audit.crossings,
+              audit.bends,
+              audit.wireLength,
+            ];
+            if (
+              !best ||
+              score.some(
+                (v, i) =>
+                  v < best!.score[i]! &&
+                  score.slice(0, i).every((p, j) => p === best!.score[j]),
+              )
+            )
+              best = { plan: candidate, score };
+          } catch (error) {
+            reason = error;
+          }
+        }
+        if (!best) throw reason;
+        planned = best.plan.edits;
+        if (best.plan.unjoined?.length) {
+          failure ??= best.plan.unjoined[0]!.reason;
+          unjoinedPins.push(
+            ...best.plan.unjoined.flatMap((component) =>
+              component.endpoints.flatMap((endpoint) =>
+                endpoint.kind === "terminal"
+                  ? [
+                      {
+                        instanceId: endpoint.instanceId,
+                        pinName: endpoint.pinName,
+                      },
+                    ]
+                  : [],
+              ),
+            ),
+          );
+        }
+      }
+    } catch (error) {
+      failed = true;
+      failure ??= error instanceof Error ? error.message : String(error);
+      unjoinedPins.push(...target.pins);
+      if (
+        target.freeEnd ||
+        (target.stub && contacts.some((pair) => pair === target.pins))
+      )
+        return {
+          document: working,
+          edits,
+          diagnostics,
+          problem: `R10: ${target.freeEnd ? "singleton power stub" : "touching-pin stub"} for ${group.netId}: ${failure}`,
+        };
+      continue;
+    }
+    if (!planned.length) continue;
+    const next = preview(working, resolver, planned);
+    if (!next.ok)
+      return {
+        document: working,
+        edits,
+        diagnostics,
+        problem: `R10: routing transaction rejected: ${JSON.stringify(next.diagnostics)}`,
+      };
+    edits.push(...replayEdits(working, frozen, group, planned));
+    working = next.document;
+  }
+  if (failure) {
+    diagnostics.push({
+      severity: "warning",
+      code: "AUTO_LAYOUT_NET_UNROUTED",
+      rule: "R14",
+      message: `Net ${group.netId}: ${failure}; pins: ${[...new Set(unjoinedPins.map((p) => `${p.instanceId}.${p.pinName}`))].join(", ")}`,
+    });
+    const labels = fallbackLabels(working, resolver, group);
+    if (labels.length) {
+      const next = preview(working, resolver, labels);
+      if (!next.ok)
+        return {
+          document: working,
+          edits,
+          diagnostics,
+          problem: `R10: fallback transaction rejected: ${JSON.stringify(next.diagnostics)}`,
+        };
+      edits.push(...replayEdits(working, frozen, group, labels));
+      working = next.document;
+    }
+  }
+  return { document: working, edits, diagnostics, failed };
+}
+
 export function routeDocument(
   document: SchematicDocument,
   resolver: SymbolResolver,
@@ -415,6 +648,7 @@ export function routeDocument(
   roles: NetRoles,
   structures: RecognizedGroup[],
   signalTrunks = true,
+  options: { ripUp?: boolean } = {},
 ): {
   edits: SchematicEdit[];
   diagnostics: AutoLayoutDiagnostic[];
@@ -440,211 +674,137 @@ export function routeDocument(
       compareIds(a.pins[0]?.instanceId ?? "", b.pins[0]?.instanceId ?? "") ||
       compareIds(a.netId, b.netId),
   );
+  const routedGroups = new Map<PinGroup, GroupRouting>();
+  const removals = new Map<PinGroup, SchematicEdit[]>();
   for (const group of ordered) {
-    const targets: RoutingTarget[] = power(group)
-      ? powerTargets(
-          working,
-          resolver,
-          group,
-          roles.byNet.get(group.netId) as "supply" | "ground",
-          roles.rails.has(group.netId),
-        )
-      : [{ pins: group.pins }];
-    // R38: freeze and wire direct contacts on every Net before the general tree.
-    // Whole-list reconciliation then has no missing physical connection to add.
-    const points = pinPoints(working, resolver);
-    const contacts = group.contacts.filter((pair) => {
-      const [a, b] = pair.map(
-        (ref) => points.find((p) => samePin(ref, p))!.point,
-      );
-      return (
-        (a!.x !== b!.x || a!.y !== b!.y) &&
-        !targets.some(
-          (t) =>
-            t.stub && pair.every((p) => t.pins.some((ref) => samePin(p, ref))),
-        )
-      );
-    });
-    targets.unshift(
-      ...contacts.map((pins): RoutingTarget => ({ pins, stub: true })),
+    const routed = routeGroup(
+      working,
+      resolver,
+      frozen,
+      group,
+      roles,
+      signalTrunks,
     );
-    let failure: string | undefined;
-    const unjoinedPins: TerminalRef[] = [];
-    for (const target of targets) {
-      if (target.pins.length < 2 && !target.freeEnd) continue;
-      let planned: SchematicEdit[];
-      try {
-        if (target.stub || target.freeEnd) {
-          // Pin-to-pin stubs preserve exact contacts; a singleton claim
-          // instead needs a clearance-checked wire to its outward free end.
-          const source = target.pins[0]!;
-          const host = target.pins[1]!;
-          const stub = planWireBatch(
-            working,
-            resolver,
-            {
-              id: deriveStableId(
-                "auto-layout-stub",
-                working.id,
-                target.freeEnd
-                  ? `${source.instanceId}.${source.pinName}`
-                  : JSON.stringify([source, host]),
-              ),
-              from: {
-                kind: "endpoint",
-                endpoint: { kind: "terminal", ...source },
-              },
-              to: target.freeEnd
-                ? { kind: "free", point: target.freeEnd }
-                : { kind: "endpoint", endpoint: { kind: "terminal", ...host } },
-            },
-            MAX_SCHEMATIC_EDITS_PER_TRANSACTION,
-            { keepClear: true, netScope: "base" },
-          );
-          if (typeof stub === "string") throw new Error(stub);
-          planned = stub.edits;
-        } else {
-          const trunks: Array<RoutingTarget["trunk"]> = [target.trunk];
-          if (signalTrunks && !power(group) && target.pins.length >= 3) {
-            const pins = points.filter((p) =>
-              target.pins.some((ref) => samePin(ref, p)),
-            );
-            const xs = pins.map((p) => p.point.x).sort((a, b) => a - b);
-            const ys = pins.map((p) => p.point.y).sort((a, b) => a - b);
-            const median = (values: number[]) =>
-              Math.round(
-                (values[Math.floor((values.length - 1) / 2)]! +
-                  values[Math.floor(values.length / 2)]!) /
-                  2,
-              );
-            const x = median(xs),
-              y = median(ys);
-            trunks.push(
-              { start: { x: xs[0]!, y }, end: { x: xs.at(-1)!, y } },
-              { start: { x, y: ys[0]! }, end: { x, y: ys.at(-1)! } },
-            );
-          }
-          // A rail's tree is tried only if its preferred trunk is incomplete.
-          if (target.trunk) trunks.push(undefined);
-          let best:
-            | { plan: ReturnType<typeof planRouteNet>; score: number[] }
-            | undefined;
-          let reason: unknown;
-          for (const trunk of trunks) {
-            try {
-              const candidate = planRouteNet(
-                working,
-                resolver,
-                {
-                  target: { kind: "pins", pins: target.pins },
-                  ...(trunk ? { trunk } : {}),
-                },
-                MAX_SCHEMATIC_EDITS_PER_TRANSACTION,
-                {
-                  netScope: "base",
-                  partial: true,
-                  crossingCost: 20 * working.presentation.grid,
-                },
-              );
-              if (
-                trunks.length === 1 ||
-                (target.trunk && trunk && !candidate.unjoined?.length)
-              ) {
-                best = { plan: candidate, score: [] };
-                break;
-              }
-              const next = preview(working, resolver, candidate.edits);
-              if (!next.ok) throw new Error(JSON.stringify(next.diagnostics));
-              const audit = auditRouting(next.document, resolver);
-              const score = [
-                candidate.unjoined?.length ?? 0,
-                audit.crossings,
-                audit.bends,
-                audit.wireLength,
-              ];
-              if (
-                !best ||
-                score.some(
-                  (v, i) =>
-                    v < best!.score[i]! &&
-                    score.slice(0, i).every((p, j) => p === best!.score[j]),
-                )
-              )
-                best = { plan: candidate, score };
-            } catch (error) {
-              reason = error;
-            }
-          }
-          if (!best) throw reason;
-          planned = best.plan.edits;
-          if (best.plan.unjoined?.length) {
-            failure ??= best.plan.unjoined[0]!.reason;
-            unjoinedPins.push(
-              ...best.plan.unjoined.flatMap((component) =>
-                component.endpoints.flatMap((endpoint) =>
-                  endpoint.kind === "terminal"
-                    ? [
-                        {
-                          instanceId: endpoint.instanceId,
-                          pinName: endpoint.pinName,
-                        },
-                      ]
-                    : [],
-                ),
-              ),
-            );
-          }
-        }
-      } catch (error) {
-        failure ??= error instanceof Error ? error.message : String(error);
-        unjoinedPins.push(...target.pins);
-        if (
-          target.freeEnd ||
-          (target.stub && contacts.some((pair) => pair === target.pins))
-        )
-          return {
-            document: working,
-            edits,
-            diagnostics,
-            problem: `R10: ${target.freeEnd ? "singleton power stub" : "touching-pin stub"} for ${group.netId}: ${failure}`,
-          };
-        continue;
-      }
-      if (!planned.length) continue;
-      const next = preview(working, resolver, planned);
-      if (!next.ok)
-        return {
-          document: working,
-          edits,
-          diagnostics,
-          problem: `R10: routing transaction rejected: ${JSON.stringify(next.diagnostics)}`,
-        };
-      edits.push(...replayEdits(working, frozen, group, planned));
-      working = next.document;
+    if (options.ripUp) {
+      removals.set(group, removeGroupRouting(working, routed.document));
+      routedGroups.set(group, routed);
     }
-    if (failure) {
-      diagnostics.push({
-        severity: "warning",
-        code: "AUTO_LAYOUT_NET_UNROUTED",
-        rule: "R14",
-        message: `Net ${group.netId}: ${failure}; pins: ${[...new Set(unjoinedPins.map((p) => `${p.instanceId}.${p.pinName}`))].join(", ")}`,
-      });
-      const labels = fallbackLabels(working, resolver, group);
-      if (labels.length) {
-        const next = preview(working, resolver, labels);
-        if (!next.ok)
-          return {
-            document: working,
-            edits,
-            diagnostics,
-            problem: `R10: fallback transaction rejected: ${JSON.stringify(next.diagnostics)}`,
-          };
-        edits.push(...replayEdits(working, frozen, group, labels));
-        working = next.document;
-      }
+    edits.push(...routed.edits);
+    diagnostics.push(...routed.diagnostics);
+    working = routed.document;
+    if (routed.problem)
+      return { document: working, edits, diagnostics, problem: routed.problem };
+  }
+  if (!options.ripUp) return { document: working, edits, diagnostics };
+  let score = routingScore(working, resolver);
+  const crossings = crossingsByNet(working, resolver);
+  const topology = deriveElectricalTopologyProjection(working, resolver);
+  const candidates = ordered
+    .map((group, order) => {
+      const pin = group.pins[0];
+      const netId =
+        pin &&
+        topology.endpointToBaseNet.get(
+          endpointKey({ kind: "terminal", ...pin }),
+        );
+      return {
+        group,
+        order,
+        crossings: netId ? (crossings.get(netId) ?? 0) : 0,
+      };
+    })
+    .filter(({ group, crossings }) => !power(group) && crossings > 0)
+    .sort((a, b) => b.crossings - a.crossings || a.order - b.order);
+  for (const { group } of candidates) {
+    try {
+      // Delete only objects authored by this group. Applying removal through
+      // the transaction authority advances revision beyond every retained plan.
+      const removal = removals.get(group)!;
+      if (!removal.length) continue;
+      const removed = preview(working, resolver, removal);
+      if (!removed.ok) continue;
+      const restored = preview(
+        removed.document,
+        resolver,
+        restorePinGroups(frozen, removed.document, resolver),
+      );
+      if (!restored.ok) continue;
+      const candidate = routeGroup(
+        restored.document,
+        resolver,
+        frozen,
+        group,
+        roles,
+        signalTrunks,
+      );
+      if (candidate.problem || candidate.failed) continue;
+      const nextScore = routingScore(candidate.document, resolver);
+      if (
+        !nextScore.some(
+          (value, i) =>
+            value < score[i]! &&
+            nextScore.slice(0, i).every((v, j) => v === score[j]),
+        )
+      )
+        continue;
+      working = candidate.document;
+      routedGroups.set(group, candidate);
+      score = nextScore;
+    } catch {
+      // A retry is optional: retain the exact prior routing and diagnostics.
     }
   }
-  return { document: working, edits, diagnostics };
+  // Full audit at the pass boundary also keeps any future incremental score honest.
+  routingScore(working, resolver);
+  return {
+    document: working,
+    edits: ordered.flatMap((group) => routedGroups.get(group)!.edits),
+    diagnostics: ordered.flatMap(
+      (group) => routedGroups.get(group)!.diagnostics,
+    ),
+  };
+}
+
+function routingScore(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+): number[] {
+  const audit = auditRouting(document, resolver);
+  return [
+    missingConnections(document, resolver),
+    audit.crossings,
+    audit.bends,
+    audit.wireLength,
+  ];
+}
+
+/** Reconciliation may merge authored segments into canonical Routes/Junctions.
+ * Track the materialized objects, not ids from the unreconciled planner edits. */
+function removeGroupRouting(
+  before: SchematicDocument,
+  after: SchematicDocument,
+): SchematicEdit[] {
+  const added = (key: "routes" | "junctions" | "annotations") => {
+    const existing = new Set(before[key].map((object) => object.id));
+    return after[key]
+      .map((object) => object.id)
+      .filter((id) => !existing.has(id))
+      .sort(compareIds);
+  };
+  return [
+    ...added("routes").map((routeId): SchematicEdit => ({
+      kind: "remove_route_geometry",
+      routeId,
+    })),
+    ...added("junctions").map((junctionId): SchematicEdit => ({
+      kind: "remove_junction",
+      junctionId,
+    })),
+    ...added("annotations").map((annotationId): SchematicEdit => ({
+      kind: "remove_schematic_annotation",
+      annotationId,
+    })),
+  ];
 }
 
 /** R12: carry naming authority from deleted rails onto the replacement wire. */
