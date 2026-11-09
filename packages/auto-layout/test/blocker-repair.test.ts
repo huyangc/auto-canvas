@@ -1,4 +1,5 @@
 import { expect, it } from "vitest";
+import { createRoutePath, routeEnd } from "@icm/model";
 import { executeTransaction } from "@icm/edit-engine";
 import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
 import { planAutoLayout, planLayoutOnce } from "../src/auto-layout.js";
@@ -38,12 +39,43 @@ function blockedPort(otherX = -240) {
     ],
   };
   const positions = new Map([
-    ["a", placement(0, 0)],
-    ["b", placement(otherX, 0)],
+    ["a", placement(0, -200)],
+    ["b", placement(otherX, -200)],
     ["host", placement(110, 60)],
     ["rail", placement(-400, 100, "none", 270)],
   ]);
   for (const i of d.instances) i.placement = positions.get(i.id) ?? null;
+  enclose(d, [
+    ["trapped", placement(10, 100)],
+    ["far", placement(300, 40)],
+    ["left", placement(-10, 80)],
+    ["right", placement(30, 80)],
+    ["roofLeft", placement(-20, 50, "none", 90)],
+    ["roofRight", placement(40, 50, "none", 90)],
+  ]);
+  if (otherX > 0) {
+    d.instances.find((i) => i.id === "far")!.placement = placement(100, -100);
+    d.instances.push(
+      {
+        id: "barrierTop",
+        symbolId: "resistor",
+        placement: placement(-220, 0, "none", 90),
+      },
+      {
+        id: "barrierBottom",
+        symbolId: "resistor",
+        placement: placement(420, 0, "none", 270),
+      },
+    );
+    d.nets.push({
+      id: "barrier",
+      terminals: [
+        { instanceId: "barrierTop", pinName: "1" },
+        { instanceId: "barrierBottom", pinName: "1" },
+      ],
+    });
+    d.layoutGroups[0]!.objectIds.push("barrierTop", "barrierBottom");
+  }
   return d;
 }
 function blockedGround() {
@@ -53,7 +85,41 @@ function blockedGround() {
   );
   d.instances[0]!.placement = placement(0, 0);
   d.instances[1]!.placement = placement(240, 80);
+  enclose(d, [
+    ["trapped", placement(-20, 70, "none", 90)],
+    ["far", placement(40, 70, "none", 270)],
+    ["left", placement(-20, 50, "none", 90)],
+    ["right", placement(-20, 90, "none", 90)],
+    ["columnWall", placement(10, 110)],
+  ]);
   return d;
+}
+// The movable marker is one wall of the pin's enclosure. The remaining
+// walls are fixed even in tests whose explicit fixed set lists only devices.
+function enclose(
+  d: ReturnType<typeof circuit>,
+  seats: Array<[string, ReturnType<typeof placement>]>,
+) {
+  d.instances.push(
+    ...seats.map(([id, placement]) => ({
+      id,
+      symbolId: "resistor",
+      placement,
+    })),
+  );
+  d.nets.push({
+    id: "blocked",
+    terminals: ["trapped", "far"].map((instanceId) => ({
+      instanceId,
+      pinName: "1",
+    })),
+  });
+  d.layoutGroups.push({
+    id: "enclosure",
+    kind: "custom",
+    objectIds: seats.map(([id]) => id),
+    locked: true,
+  });
 }
 function apply(d: ReturnType<typeof circuit>, plan: AutoLayoutResult) {
   expect(plan.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
@@ -196,20 +262,27 @@ it("R72 rejects a repair whose routed score is not lower", () => {
         undefined,
         placements,
       );
-      // Fewer floating pins, but two extra unrouted diagnostics outweigh them.
-      const unrouted = {
-        severity: "warning" as const,
-        code: "AUTO_LAYOUT_NET_UNROUTED",
-        rule: "R14",
-        message: "synthetic",
-      };
-      return {
-        ...candidate,
-        result: {
-          ...candidate.result,
-          diagnostics: [...candidate.result.diagnostics, unrouted, unrouted],
-        },
-      };
+      // Keep the improved connectivity, but add a costly detour that the
+      // audit measures. Rejection must come from score, not floating pins.
+      expect(candidate.final).toBeDefined();
+      const final = structuredClone(candidate.final!);
+      const route = final.routes[0]!;
+      final.routes[0] = createRoutePath({
+        id: route.id,
+        netId: route.netId,
+        start: route.start,
+        end: routeEnd(route),
+        bends: [{ x: 100000, y: 0 }],
+        modes: ["manual", "manual"],
+      });
+      const expensive = { ...candidate, final };
+      expect(floatingPins(final, resolver).length).toBeLessThan(
+        floatingPins(initial.final!, resolver).length,
+      );
+      expect(routedScore(expensive, resolver)).toBeGreaterThan(
+        routedScore(initial, resolver),
+      );
+      return expensive;
     },
   );
   expect(attempts).toBe(1);

@@ -61,10 +61,14 @@ const score = (result: AutoLayoutResult, final: SchematicDocument) =>
 it("R66 keeps the byte-identical pre-search quick result", () => {
   const document = crossed();
   const result = planAutoLayout(document, resolver);
-  // Recorded from the original HEAD planner, before adding the search hook.
+  // T023 records the quick result after Base Net clearance and partial routing.
+  // commit checks equivalence and safety; the previous quick result had one crossing.
+  expect(
+    auditRouting(commit(document, result), resolver).crossings,
+  ).toBeLessThanOrEqual(1);
   expect(
     createHash("sha256").update(JSON.stringify(result)).digest("hex"),
-  ).toBe("e6c8ce5827e27ad800bdaee1a459a3e19afeb58647400a21eb0b09681b044b7f");
+  ).toBe("3a873691880f213d5be464317065863290914c4f6bc8be9bd58c68c123c26311");
   expect(
     planAutoLayout(document, resolver, { search: { seed: 3, evaluations: 0 } }),
   ).toEqual(result);

@@ -12,6 +12,7 @@ import { planAutoLayout } from "../packages/auto-layout/dist/index.js";
 import {
   auditRouting,
   floatingPins,
+  missingConnections,
 } from "../packages/auto-layout/dist/routing-audit.js";
 import { terminalPartition } from "../packages/auto-layout/dist/transaction.js";
 import { enclosingBox } from "../packages/auto-layout/dist/geometry.js";
@@ -85,6 +86,7 @@ const metrics = (document, resolver) => {
     instanceHeight: instances.height,
     unsafeProblems: audit.unsafeProblems,
     floatingPins: floatingPins(document, resolver),
+    missingConnections: missingConnections(document, resolver),
   };
 };
 const largestRatio = (items, key) => {
@@ -293,7 +295,12 @@ if (!isMainThread) {
     m ? `${m.crossings}/${m.bends}/${Math.round(m.wireLength)}` : "—";
   const sum = (items) => ({
     ...Object.fromEntries(
-      ["labelOverlaps", "labelClearance", "terminalDepartures"].map((key) => [
+      [
+        "labelOverlaps",
+        "labelClearance",
+        "terminalDepartures",
+        "missingConnections",
+      ].map((key) => [
         key,
         items.every((m) => Number.isFinite(m[key]))
           ? items.reduce((sum, m) => sum + m[key], 0)
@@ -341,6 +348,8 @@ if (!isMainThread) {
           : "—",
         humanFloating: m.human?.floatingPins.length ?? "—",
         resultFloating: m.result?.floatingPins.length ?? "—",
+        humanMissing: m.human?.missingConnections ?? "—",
+        resultMissing: m.result?.missingConnections ?? "—",
         ms: m.milliseconds?.toFixed(1),
         layoutWidth: m.result?.layoutWidth,
         layoutHeight: m.result?.layoutHeight,

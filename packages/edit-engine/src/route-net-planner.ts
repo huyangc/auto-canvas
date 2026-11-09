@@ -29,6 +29,8 @@ import {
 import type { WireIntent } from "./wire-intent-planner.js";
 import { planWireBatch } from "./wire-batch-planner.js";
 
+type Unjoined = { endpoints: RouteEndpoint[]; reason: string };
+
 type Pin = { instanceId: string; pinName: string };
 export type RouteNetTarget =
   | { kind: "net"; net: string }
@@ -49,6 +51,11 @@ export function planRouteNet(
     trunk?: { start: Point; end: Point } | undefined;
   },
   maxEdits: number,
+  options: {
+    netScope?: "logical" | "base";
+    partial?: boolean;
+    crossingCost?: number;
+  } = {},
 ) {
   const context = deriveNetConnectivityContext(document, resolver);
   const target = input.target;
@@ -208,12 +215,16 @@ export function planRouteNet(
   // A generated wire over another Net's pin, through a part or onto another
   // Net's wire would read as a connection the netlist does not have.
   const clearance = createRouteClearance(document, resolver, context, {
+    netScope: options.netScope ?? "logical",
+    crossingCost: options.crossingCost ?? 0,
     logicalIds: new Set(
       components.flatMap((component) =>
         component.netId
           ? [
-              context.logicalNetResolution.byBaseNetId.get(component.netId)
-                ?.id ?? component.netId,
+              options.netScope === "base"
+                ? component.netId
+                : (context.logicalNetResolution.byBaseNetId.get(component.netId)
+                    ?.id ?? component.netId),
             ]
           : [],
       ),
@@ -225,6 +236,7 @@ export function planRouteNet(
     ),
   });
   let wires: WireIntent[];
+  const unjoined: Unjoined[] = [];
   if (input.trunk) {
     const { start, end } = input.trunk;
     if ((start.x === end.x) === (start.y === end.y))
@@ -305,10 +317,15 @@ export function planRouteNet(
           : [from, { x: tap.x, y: from.y }, tap],
         [best.node.endpoint, undefined],
       );
-      if (branchConflict)
-        throw new Error(
-          `route-net: the branch from ${best.node.key} ${branchConflict}`,
-        );
+      if (branchConflict) {
+        const reason = `route-net: the branch from ${best.node.key} ${branchConflict}`;
+        if (!options.partial) throw new Error(reason);
+        unjoined.push({
+          endpoints: component.nodes.map((node) => node.endpoint),
+          reason,
+        });
+        continue;
+      }
       wires.push({
         id: id(component.id),
         from: { kind: "endpoint", endpoint: best.node.endpoint },
@@ -316,11 +333,21 @@ export function planRouteNet(
       });
     }
   } else {
-    wires = planNetTree(document, resolver, components, clearance, id);
+    wires = planNetTree(
+      document,
+      resolver,
+      components,
+      clearance,
+      id,
+      options.partial,
+      unjoined,
+    );
   }
+  if (components.length - unjoined.length < 2)
+    throw new Error(unjoined[0]!.reason);
   const plan = planWireBatch(document, resolver, wires, maxEdits);
   if (typeof plan === "string") throw new Error(`route-net: ${plan}`);
-  return plan;
+  return { ...plan, ...(unjoined.length ? { unjoined } : {}) };
 }
 
 type TreeNode = RoutingGuidanceComponent["nodes"][number];
@@ -340,6 +367,8 @@ function planNetTree(
   components: readonly RoutingGuidanceComponent[],
   clearance: RouteClearance,
   id: (part: string) => string,
+  partial: boolean | undefined,
+  unjoined: Unjoined[],
 ): WireIntent[] {
   const sorted = [...components].sort((a, b) => a.id.localeCompare(b.id, "en"));
   const nodes = sorted.flatMap((component) =>
@@ -467,6 +496,7 @@ function planNetTree(
       path: ClearPath;
     } | null = null;
     let reason: string | null = null;
+    const reasons = new Map<string, string>();
     for (const { component, node } of nodes) {
       if (joined.has(component.id)) continue;
       // A joined pin or Junction, or straight onto a drawn wire.
@@ -505,6 +535,7 @@ function planNetTree(
         );
         if (typeof path === "string") {
           reason ??= path;
+          if (!reasons.has(component.id)) reasons.set(component.id, path);
           continue;
         }
         if (overOtherPins(path.points!, [node.point, target.point])) continue;
@@ -512,7 +543,15 @@ function planNetTree(
           best = { component, node, ...target, path };
       }
     }
-    if (!best) throw new Error(`route-net: ${reason ?? "no clear path"}`);
+    if (!best) {
+      if (!partial) throw new Error(`route-net: ${reason ?? "no clear path"}`);
+      for (const component of sorted.filter((c) => !joined.has(c.id)))
+        unjoined.push({
+          endpoints: component.nodes.map((node) => node.endpoint),
+          reason: `route-net: ${reasons.get(component.id) ?? "no clear path"}`,
+        });
+      break;
+    }
     wires.push({
       id: id(best.component.id),
       from: { kind: "endpoint", endpoint: best.node.endpoint },

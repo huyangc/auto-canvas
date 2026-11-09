@@ -105,6 +105,71 @@ function contactPoints(a: Point, b: Point, c: Point, d: Point): Point[] {
   return points;
 }
 
+type CrossingSegment = readonly [Point, Point];
+
+/** Index foreign segments once; each candidate visits only intersected rows/columns. */
+function crossingCounter(segments: CrossingSegment[]) {
+  type Entry = { coordinate: number; segments: CrossingSegment[] };
+  const rows = new Map<number, CrossingSegment[]>();
+  const columns = new Map<number, CrossingSegment[]>();
+  const diagonal: CrossingSegment[] = [];
+  for (const segment of segments) {
+    const [a, b] = segment;
+    const index = a.y === b.y ? rows : a.x === b.x ? columns : undefined;
+    if (!index) {
+      diagonal.push(segment);
+      continue;
+    }
+    const coordinate = index === rows ? a.y : a.x;
+    const bucket = index.get(coordinate) ?? [];
+    bucket.push(segment);
+    index.set(coordinate, bucket);
+  }
+  const ordered = (index: Map<number, CrossingSegment[]>): Entry[] =>
+    [...index]
+      .map(([coordinate, segments]) => ({ coordinate, segments }))
+      .sort((a, b) => a.coordinate - b.coordinate);
+  const horizontal = ordered(rows),
+    vertical = ordered(columns);
+  const proper = (a: Point, b: Point, c: Point, d: Point) => {
+    const cross = (p: Point, q: Point, r: Point) =>
+      (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
+    return (
+      cross(a, b, c) * cross(a, b, d) < 0 && cross(c, d, a) * cross(c, d, b) < 0
+    );
+  };
+  const count = (
+    index: Entry[],
+    low: number,
+    high: number,
+    a: Point,
+    b: Point,
+  ) => {
+    let left = 0,
+      right = index.length;
+    while (left < right) {
+      const middle = (left + right) >>> 1;
+      if (index[middle]!.coordinate <= low) left = middle + 1;
+      else right = middle;
+    }
+    let total = 0;
+    for (let i = left; i < index.length && index[i]!.coordinate < high; i++)
+      for (const [c, d] of index[i]!.segments) if (proper(a, b, c, d)) total++;
+    return total;
+  };
+  return (points: readonly Point[]) => {
+    let total = 0;
+    for (let i = 1; i < points.length; i++) {
+      const a = points[i - 1]!,
+        b = points[i]!;
+      total += count(horizontal, Math.min(a.y, b.y), Math.max(a.y, b.y), a, b);
+      total += count(vertical, Math.min(a.x, b.x), Math.max(a.x, b.x), a, b);
+      for (const [c, d] of diagonal) if (proper(a, b, c, d)) total++;
+    }
+    return total;
+  };
+}
+
 /**
  * The corners of a path drawn only with straight lines (M, L, H, V and Z,
  * absolute or relative), such as an op-amp's triangle; none for curves.
@@ -203,7 +268,11 @@ export function createRouteClearance(
   resolver: SymbolResolver,
   context: NetConnectivityContext,
   own: {
+    /** IDs in the selected scope; logical by default. */
     logicalIds: ReadonlySet<string>;
+    netScope?: "logical" | "base";
+    /** Extra path-length cost per proper crossing, zero by default. */
+    crossingCost?: number;
     endpointKeys: ReadonlySet<string>;
     signalWidth?: number;
     /** Explicit, validated taps may meet this route only at the selected point. */
@@ -215,12 +284,16 @@ export function createRouteClearance(
 ): RouteClearance {
   const logical = context.logicalNetResolution;
   const logicalOf = (netId: string | null | undefined) =>
-    netId ? (logical.byBaseNetId.get(netId)?.id ?? netId) : undefined;
+    netId
+      ? own.netScope === "base"
+        ? netId
+        : (logical.byBaseNetId.get(netId)?.id ?? netId)
+      : undefined;
   const ownNet = (logicalId: string | undefined) =>
     logicalId !== undefined && own.logicalIds.has(logicalId);
   const netText = (logicalId: string | undefined) =>
     logicalId
-      ? `a different Net (${logical.byId.get(logicalId)?.name ?? logicalId})`
+      ? `a different Net (${logical.byId.get(logicalId)?.name ?? logical.byBaseNetId.get(logicalId)?.name ?? logicalId})`
       : "no Net";
   const pinNet = new Map<string, string>();
   for (const net of document.nets)
@@ -346,6 +419,17 @@ export function createRouteClearance(
       ? [{ id: route.id, logicalId, points, endpoints: routeEndpoints(route) }]
       : [];
   });
+  const crossingCost = own.crossingCost ?? 0;
+  const crossings =
+    crossingCost === 0
+      ? undefined
+      : crossingCounter(
+          routes.flatMap((route) =>
+            route.points
+              .slice(1)
+              .map((to, i) => [route.points[i]!, to] as const),
+          ),
+        );
   const endpointText = (endpoint: RouteEndpoint) =>
     endpoint.kind === "terminal"
       ? `${labels.get(endpoint.instanceId) ?? endpoint.instanceId}.${endpoint.pinName}`
@@ -707,7 +791,8 @@ export function createRouteClearance(
           cost:
             length +
             Math.max(0, points.length - 2) * 2 * grid +
-            turnsAway * grid,
+            turnsAway * grid +
+            crossingCost * (crossings?.(points) ?? 0),
         },
       ];
     });

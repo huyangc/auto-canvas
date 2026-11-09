@@ -43,21 +43,23 @@ it("freezes Base Net pins without MOS bulk pins, without mutating input", () => 
   expect(frozen.flatMap((g) => g.pins)).toHaveLength(4);
 });
 
-function obstructedTrunk(named: boolean, obstacle = [100, 40]) {
+function obstructedTrunk(named: boolean, obstacle = [800, 250]) {
   const document = circuit(
     {
-      // A grounded source feeding two PMOS sources makes a supply trunk
-      // (R4, R12) whether or not the Net is named; the capacitor blocks it.
+      // The rail can join its other members; three walls enclose trapped.1.
       v: "voltage-source",
       a: "pmos",
       b: "pmos",
-      obstacle: "capacitor",
+      obstacle: "resistor",
+      trapped: "resistor",
+      wallLeft: "resistor",
+      wallRight: "resistor",
       c: "resistor",
       d: "resistor",
       g: "ground",
     },
     {
-      supply: ["v.+", "a.S", "b.S"],
+      supply: ["v.+", "a.S", "b.S", "trapped.1"],
       ground: ["v.-", "a.D", "b.D", "g.0"],
       good: ["c.1", "d.1"],
     },
@@ -67,15 +69,18 @@ function obstructedTrunk(named: boolean, obstacle = [100, 40]) {
     a: [0, 100],
     b: [200, 100],
     obstacle,
-    c: [400, 100],
-    d: [600, 100],
+    trapped: [800, 300],
+    wallLeft: [780, obstacle[1] === 270 ? 300 : 280],
+    wallRight: [820, obstacle[1] === 270 ? 300 : 280],
+    c: [400, 500],
+    d: [600, 500],
     g: [0, 160],
   };
   for (const i of document.instances) {
     const xy = positions[i.id as keyof typeof positions]!;
     i.placement = {
       position: { x: xy[0]!, y: xy[1]! },
-      rotation: 0,
+      rotation: i.id === "obstacle" ? 90 : 0,
       mirror: "none",
     };
   }
@@ -168,7 +173,7 @@ it.each([true, false])(
     const labels = result.document.annotations.filter(
       (a) => a.id !== "supply-label" && a.kind === "net-label",
     );
-    expect(labels).toHaveLength(named ? 3 : 0);
+    expect(labels).toHaveLength(named ? 2 : 0);
     for (const label of labels) {
       expect(label.binding).toEqual({ kind: "net-name", netId: "supply" });
       expect(label.anchor.kind).toBe("free");
@@ -179,7 +184,7 @@ it.each([true, false])(
     );
     expect(
       projection.endpointToPhysicalComponent.get(
-        endpointKey({ kind: "terminal", instanceId: "a", pinName: "S" }),
+        endpointKey({ kind: "terminal", instanceId: "trapped", pinName: "1" }),
       ),
     ).not.toBe(
       projection.endpointToPhysicalComponent.get(
@@ -660,7 +665,7 @@ it.each(["supply", "ground"] as const)(
 );
 
 it("never draws a fallback stub through the obstacle that blocked the net", () => {
-  const document = obstructedTrunk(true, [10, 50]);
+  const document = obstructedTrunk(true, [800, 270]);
   const plan = planAutoLayout(document, resolver, {
     fixedInstanceIds: new Set(document.instances.map((i) => i.id)),
   });
