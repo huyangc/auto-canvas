@@ -4,7 +4,28 @@ import type { SchematicEdit } from "@icm/edit-engine";
 export type Placement = NonNullable<Instance["placement"]>;
 export type LayoutStrategy = "template" | "layered" | "stages";
 export type NetRole = "supply" | "ground" | "input" | "output" | "internal";
+/** Experimental block semantics, independent of the partition's source. */
+export type BlockRole =
+  | "bias"
+  | "input"
+  | "gain"
+  | "output"
+  | "load"
+  | "cmfb"
+  | "compensation"
+  | "switch"
+  | "logic"
+  | "other";
+export interface LayoutPartition {
+  blocks: { id: string; role?: BlockRole; members: string[] }[];
+  /** Block ids in signal order, left to right; optional. */
+  flow?: string[];
+  /** Relative block centres in any common unit; enables the oracle floorplan. */
+  arrangement?: Record<string, { x: number; y: number }>;
+}
 export interface AutoLayoutOptions {
+  /** Experimental, internal; partitioned placement runs in quick mode only. */
+  partition?: LayoutPartition;
   fixedInstanceIds?: ReadonlySet<string>;
   search?: {
     seed: number;

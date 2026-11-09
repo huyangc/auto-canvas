@@ -1,4 +1,8 @@
 import {
+  partitionPlacementProblem,
+  partitionDocuments,
+} from "./partition-geometry.js";
+import {
   anchorPlacements,
   spanProblem,
   type SearchBounds,
@@ -149,7 +153,16 @@ export function placeDocument(
         problem: `R3: unresolved symbol ${i.symbolId}`,
       };
   const topology = symmetryTopology(document, resolver, roles);
-  const symmetry = topology.components;
+  // A partition owns block membership: a symmetric component spanning blocks
+  // would drag devices out of theirs, so only whole-in-one-block ones apply.
+  const partitionBlocks = options.partition?.blocks;
+  const symmetry = partitionBlocks
+    ? topology.components.filter((c) =>
+        partitionBlocks.some((b) =>
+          [...c.pairs.flat(), ...c.axis].every((id) => b.members.includes(id)),
+        ),
+      )
+    : topology.components;
   const symmetryIds = new Set(
     symmetry.flatMap((c) => [...c.pairs.flat(), ...c.axis]),
   );
@@ -192,6 +205,16 @@ export function placeDocument(
       resolver,
     );
     if (problem) return { placements: targets, problem };
+  } else if (options.partition) {
+    targets = placeStages(
+      document,
+      devices,
+      resolver,
+      roles,
+      templates,
+      { ...topology, components: symmetry },
+      options.partition,
+    );
   } else if (strategy === "template") {
     const result = templatePlacement(
       document,
@@ -257,6 +280,9 @@ export function placeDocument(
       roles,
     );
   }
+  const partitionTargets = options.partition
+    ? structuredClone(targets)
+    : undefined;
   for (const id of fixed) {
     const old = document.instances.find((i) => i.id === id)?.placement;
     if (old) targets.set(id, structuredClone(old));
@@ -271,13 +297,17 @@ export function placeDocument(
   );
   if (deviceCollision) return { placements: targets, problem: deviceCollision };
   if (!given)
-    placeParallelAttachments(
+    for (const local of partitionDocuments(
       { ...document, instances: devices },
-      resolver,
-      roles,
-      targets,
-      new Set([...fixed, ...symmetryIds]),
-    );
+      options.partition,
+    ))
+      placeParallelAttachments(
+        local,
+        resolver,
+        roles,
+        targets,
+        new Set([...fixed, ...symmetryIds]),
+      );
   const attachmentIds = new Set(
     parallelAttachments(devices, resolver, roles).flatMap((a) => [
       a.device.id,
@@ -314,14 +344,18 @@ export function placeDocument(
   if (attachedCollision)
     return { placements: targets, problem: attachedCollision };
   if (!given)
-    placeDriverAttachments(
+    for (const local of partitionDocuments(
       { ...document, instances: devices },
-      resolver,
-      roles,
-      templates,
-      targets,
-      new Set([...fixed, ...symmetryIds]),
-    );
+      options.partition,
+    ))
+      placeDriverAttachments(
+        local,
+        resolver,
+        roles,
+        templates,
+        targets,
+        new Set([...fixed, ...symmetryIds]),
+      );
   placeMarkers(document, resolver, roles, targets, overrides, choices, fixed);
   for (const id of fixed) {
     const old = document.instances.find((i) => i.id === id)?.placement;
@@ -522,5 +556,15 @@ export function placeDocument(
   if (span) return { placements: targets, problem: span };
   const problem = geometryProblem(result, resolver);
   if (problem) return { placements: targets, problem };
+  if (options.partition && partitionTargets) {
+    const problem = partitionPlacementProblem(
+      document,
+      resolver,
+      options.partition,
+      partitionTargets,
+      targets,
+    );
+    if (problem) return { placements: targets, problem };
+  }
   return { placements: targets };
 }

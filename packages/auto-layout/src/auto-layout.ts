@@ -1,3 +1,4 @@
+import { validatePartition } from "./partition.js";
 import {
   MAX_SCHEMATIC_EDITS_PER_TRANSACTION,
   type SchematicEdit,
@@ -56,6 +57,31 @@ export function planAutoLayout(
   resolver: SymbolResolver,
   options: AutoLayoutOptions = {},
 ): AutoLayoutResult {
+  if (options.partition) {
+    const validated = validatePartition(document, resolver, options.partition);
+    if (validated.diagnostics.some((d) => d.severity === "error"))
+      return { edits: [], groups: [], diagnostics: validated.diagnostics };
+    const { search, ...quickOptions } = options;
+    options = { ...quickOptions, partition: validated.partition };
+    const result = timePlanning(() =>
+      finalizeFacing(
+        document,
+        resolver,
+        options,
+        planAutoLayoutMeasured(document, resolver, options),
+      ),
+    );
+    result.diagnostics.push(...validated.diagnostics);
+    if (search)
+      result.diagnostics.push({
+        severity: "warning",
+        code: "AUTO_LAYOUT_PARTITION_QUICK_ONLY",
+        rule: "partition",
+        message:
+          "Experimental partition placement uses quick mode; search was not run",
+      });
+    return result;
+  }
   return timePlanning(() =>
     finalizeFacing(
       document,

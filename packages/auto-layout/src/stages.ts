@@ -21,7 +21,13 @@ import { isMosBulk, type NetRoles } from "./net-roles.js";
 import { devicePins, signalDistances } from "./placement-connectivity.js";
 import { compareIds } from "./recognize.js";
 import { symmetryTopology } from "./symmetry.js";
-import type { SymmetryComponent, Placement, RecognizedGroup } from "./types.js";
+import { partitionFloorplan } from "./partition-floorplan.js";
+import type {
+  LayoutPartition,
+  SymmetryComponent,
+  Placement,
+  RecognizedGroup,
+} from "./types.js";
 
 const isCapacitor = (i: Instance) =>
   deviceDescriptor(i.symbolId)?.deviceClass === "capacitor";
@@ -439,18 +445,27 @@ export function placeStages(
   roles: NetRoles,
   groups: RecognizedGroup[],
   topology = symmetryTopology(document, resolver, roles),
+  partition?: LayoutPartition,
 ): Map<string, Placement> {
   const symmetry = topology.components;
   const symmetryIds = new Set(
     symmetry.flatMap((c) => [...c.pairs.flat(), ...c.axis]),
   );
-  const found = findStages(devices, resolver, roles, groups, symmetry);
+  const found = partition
+    ? {
+        stages: partition.blocks.map((b) => ({
+          id: b.id,
+          devices: devices.filter((i) => b.members.includes(i.id)),
+        })),
+        bridges: [],
+      }
+    : findStages(devices, resolver, roles, groups, symmetry);
   const grid = document.presentation.grid;
   const snap = (n: number) => Math.round(n / grid) * grid;
   const ceil = (n: number) => Math.ceil(n / grid) * grid;
   // R59: only rail shunts and otherwise independent one-device stages attach.
   // Group members retain their template, even when they look like a leaf.
-  const candidates = found.stages.flatMap((stage) =>
+  const candidates = (partition ? [] : found.stages).flatMap((stage) =>
     stage.devices.flatMap((device) => {
       if (
         !(isCapacitor(device) || stage.devices.length === 1) ||
@@ -600,6 +615,8 @@ export function placeStages(
         : snap((height - b.top - b.bottom) / 2);
     for (const p of b.placements.values()) p.position.y += dy;
   }
+  if (partition)
+    return partitionFloorplan(document, resolver, blocks, partition);
   for (const part of attached) {
     const block = blocks.find((b) =>
       b.devices.some((i) => i.id === part.host.device.id),

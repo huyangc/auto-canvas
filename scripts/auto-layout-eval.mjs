@@ -13,6 +13,10 @@ import {
   symmetryCounts,
 } from "../packages/auto-layout/dist/symmetry.js";
 import { classifyNets } from "../packages/auto-layout/dist/net-roles.js";
+import { partitionFromPlacement } from "../packages/auto-layout/dist/partition-from-placement.js";
+import { partitionFromLoadbench } from "../packages/auto-layout/dist/partition-from-loadbench.js";
+import { validatePartition } from "../packages/auto-layout/dist/partition.js";
+import { partitionBounds } from "../packages/auto-layout/dist/partition-geometry.js";
 import { planAutoLayout } from "../packages/auto-layout/dist/index.js";
 import {
   auditRouting,
@@ -42,12 +46,26 @@ import {
 const [folder, ...args] = process.argv.slice(2);
 const flags = new Map();
 for (let i = 0; i < args.length; i += 2) {
+  if (args[i] === "--fixed-human") {
+    flags.set(args[i], true);
+    i--;
+    continue;
+  }
   if (
-    !["--baseline", "--search", "--seed", "--jobs"].includes(args[i]) ||
+    ![
+      "--baseline",
+      "--search",
+      "--seed",
+      "--jobs",
+      "--partition",
+      "--variant",
+      "--threshold",
+      "--split",
+    ].includes(args[i]) ||
     args[i + 1] === undefined
   )
     throw new Error(
-      "Usage: auto-layout-eval.mjs <folder> [--baseline <report.json>] [--search <seconds>] [--seed <n>] [--jobs <n>]",
+      "Usage: auto-layout-eval.mjs <folder> [--baseline <report.json>] [--search <seconds>] [--seed <n>] [--jobs <n>] [--partition human|loadbench --variant v1|v2] [--fixed-human] [--threshold <n>] [--split dev|val]",
     );
   flags.set(args[i], args[i + 1]);
 }
@@ -63,10 +81,31 @@ if (
   jobs < 1
 )
   throw new Error("Invalid search duration, seed or worker count");
+const partitionSource = flags.get("--partition");
+const variant = flags.get("--variant") ?? "v1";
+const threshold = Number(flags.get("--threshold") ?? 3);
+const fixedHuman = flags.has("--fixed-human");
+if (
+  (partitionSource && !["human", "loadbench"].includes(partitionSource)) ||
+  !["v1", "v2"].includes(variant) ||
+  (flags.has("--variant") && !partitionSource) ||
+  (fixedHuman && (partitionSource || seconds)) ||
+  (partitionSource && seconds) ||
+  !(threshold > 0 && Number.isFinite(threshold)) ||
+  (flags.has("--split") && !["dev", "val"].includes(flags.get("--split")))
+)
+  throw new Error(
+    "Invalid partition, variant, threshold, split or quick-mode combination",
+  );
+if (partitionSource === "loadbench" && variant === "v2")
+  throw new Error("LOADBench has no oracle arrangement; use v1");
 const baseline = flags.has("--baseline")
   ? JSON.parse(readFileSync(flags.get("--baseline"), "utf8"))
   : undefined;
-const output = "tmp/auto-layout-eval";
+const output =
+  partitionSource || fixedHuman
+    ? `tmp/auto-layout-eval/${fixedHuman ? "v3" : `${variant}-${partitionSource}-${threshold}`}`
+    : "tmp/auto-layout-eval";
 mkdirSync(output, { recursive: true });
 const escape = (value) =>
   String(value)
@@ -99,6 +138,73 @@ const largestRatio = (items, key) => {
   const values = items.map((item) => item[key]).filter(Number.isFinite);
   return values.length ? Math.max(...values) : null;
 };
+function blockMetrics(document, resolver, partition, human) {
+  if (!partition)
+    return {
+      blockOverlap: null,
+      arrangementAgreement: null,
+      arrangementMatches: 0,
+      arrangementRelations: 0,
+    };
+  const boxes = partitionBounds(document, resolver, partition);
+  let overlap = 0,
+    matches = 0,
+    relations = 0;
+  const centres = (d) =>
+    Object.fromEntries(
+      partition.blocks.map((b) => {
+        const points = d.instances
+          .filter((i) => b.members.includes(i.id))
+          .map((i) => i.placement?.position);
+        return [
+          b.id,
+          points.every(Boolean)
+            ? {
+                x: points.reduce((s, p) => s + p.x, 0) / points.length,
+                y: points.reduce((s, p) => s + p.y, 0) / points.length,
+              }
+            : null,
+        ];
+      }),
+    );
+  const actual = centres(document),
+    reference = human ? centres(human) : {};
+  for (let i = 0; i < boxes.length; i++)
+    for (const b of boxes.slice(i + 1)) {
+      const a = boxes[i];
+      overlap +=
+        Math.max(
+          0,
+          Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x),
+        ) *
+        Math.max(
+          0,
+          Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y),
+        );
+      if (reference[a.id] && reference[b.id]) {
+        const axes = ["x", "y"].filter(
+          (axis) => reference[a.id][axis] !== reference[b.id][axis],
+        );
+        // A pair agrees only when both non-tied human directions agree.
+        if (!axes.length) continue;
+        relations++;
+        if (
+          axes.every(
+            (axis) =>
+              Math.sign(actual[a.id][axis] - actual[b.id][axis]) ===
+              Math.sign(reference[a.id][axis] - reference[b.id][axis]),
+          )
+        )
+          matches++;
+      }
+    }
+  return {
+    blockOverlap: overlap,
+    arrangementAgreement: relations ? matches / relations : null,
+    arrangementMatches: matches,
+    arrangementRelations: relations,
+  };
+}
 function evaluateFile(file) {
   let section = "";
   const id = file.slice(0, -5);
@@ -130,12 +236,34 @@ function evaluateFile(file) {
       classifyNets(document, resolver),
     );
     measurement.instances = document.instances.length;
-    measurement.human = {
-      ...metrics(document, resolver, components),
-      equivalent: true,
-      milliseconds: 0,
-      status: "original",
-    };
+    const hasHuman = partitionSource !== "loadbench";
+    const oracle = hasHuman
+      ? partitionFromPlacement(document, resolver, threshold)
+      : partitionFromLoadbench(
+          document,
+          readFileSync(join(folder, `${id}.partitioning.xml`), "utf8"),
+        );
+    const validated = validatePartition(document, resolver, oracle);
+    if (validated.diagnostics.some((d) => d.severity === "error"))
+      throw new Error(JSON.stringify(validated.diagnostics));
+    const partition = validated.partition;
+    measurement.partition = partition;
+    measurement.partitionDiagnostics = validated.diagnostics;
+    measurement.hasHuman = hasHuman;
+    measurement.human = hasHuman
+      ? {
+          ...metrics(document, resolver, components),
+          ...blockMetrics(
+            document,
+            resolver,
+            partition,
+            hasHuman ? document : null,
+          ),
+          equivalent: true,
+          milliseconds: 0,
+          status: "original",
+        }
+      : null;
     const apply = (plan) =>
       plan.diagnostics.some((d) => d.severity === "error")
         ? undefined
@@ -156,8 +284,29 @@ function evaluateFile(file) {
     const quickTransaction = apply(quickPlan);
     measurement.quick =
       quickTransaction?.ok && quickTransaction.applied
-        ? metrics(quickTransaction.document, resolver, components)
+        ? {
+            ...metrics(quickTransaction.document, resolver, components),
+            ...blockMetrics(
+              quickTransaction.document,
+              resolver,
+              partition,
+              hasHuman ? document : null,
+            ),
+          }
         : null;
+    const layoutOptions = fixedHuman
+      ? { fixedInstanceIds: new Set(document.instances.map((i) => i.id)) }
+      : partitionSource
+        ? {
+            partition:
+              variant === "v2"
+                ? partition
+                : {
+                    blocks: partition.blocks,
+                    ...(partition.flow ? { flow: partition.flow } : {}),
+                  },
+          }
+        : {};
     const start = performance.now();
     let plan;
     try {
@@ -182,13 +331,16 @@ function evaluateFile(file) {
                 },
               },
             }
-          : {},
+          : layoutOptions,
       );
       measurement.evaluations = evaluations;
       measurement.bestScoreCurve = curve;
     } finally {
       measurement.milliseconds = performance.now() - start;
     }
+    measurement.planHash = createHash("sha256")
+      .update(JSON.stringify(plan))
+      .digest("hex");
     measurement.timing = planningTiming(plan);
     measurement.strategy = refinementMetrics(plan)?.strategy ?? null;
     measurement.candidates = refinementMetrics(plan)?.candidates ?? 0;
@@ -199,7 +351,26 @@ function evaluateFile(file) {
     const after = completed ? transaction.document : document;
     measurement.status = completed ? "completed" : "refused";
     if (completed) {
-      measurement.result = metrics(after, resolver, components);
+      measurement.result = {
+        ...metrics(after, resolver, components),
+        ...blockMetrics(after, resolver, partition, hasHuman ? document : null),
+      };
+      measurement.result.areaRatio =
+        hasHuman &&
+        measurement.human.layoutWidth * measurement.human.layoutHeight
+          ? (measurement.result.layoutWidth * measurement.result.layoutHeight) /
+            (measurement.human.layoutWidth * measurement.human.layoutHeight)
+          : null;
+      if (baseline && !partitionSource && !fixedHuman && !seconds) {
+        const before = baseline.cases.find((b) => b.id === id);
+        measurement.baselineEqual =
+          before?.status === "completed" &&
+          Object.entries(before.result).every(
+            ([key, value]) =>
+              JSON.stringify(measurement.result[key]) === JSON.stringify(value),
+          ) &&
+          (!before.planHash || before.planHash === measurement.planHash);
+      }
       const ratio = (value, reference) =>
         reference ? value / reference : value === 0 ? 1 : null;
       measurement.widthRatio = measurement.quick
@@ -242,7 +413,7 @@ function evaluateFile(file) {
       const box = buildSvgScene(d, resolver).viewBox;
       const x = Math.floor(box.x),
         y = Math.floor(box.y);
-      return renderDocumentSvg(d, resolver, {
+      const svg = renderDocumentSvg(d, resolver, {
         bounds: {
           x,
           y,
@@ -250,12 +421,20 @@ function evaluateFile(file) {
           height: Math.ceil(box.y + box.height) - y,
         },
       });
+      const overlays = partitionBounds(d, resolver, partition)
+        .filter((b) => Number.isFinite(b.x))
+        .map(
+          (b) =>
+            `<g stroke="#7c3aed" fill="none"><rect x="${b.x}" y="${b.y}" width="${b.width}" height="${b.height}" stroke-dasharray="8 5"/><text x="${b.x + 3}" y="${b.y + 12}" stroke="none" fill="#7c3aed" font-size="12">${escape(b.role ?? "unlabeled")}</text></g>`,
+        )
+        .join("");
+      return svg.replace("</svg>", `${overlays}</svg>`);
     };
-    const humanSvg = render(document),
+    const humanSvg = hasHuman ? render(document) : "",
       resultSvg = render(after);
-    writeFileSync(`${output}/${id}-human.svg`, humanSvg);
+    if (hasHuman) writeFileSync(`${output}/${id}-human.svg`, humanSvg);
     writeFileSync(`${output}/${id}-result.svg`, resultSvg);
-    section = `<section id="${escape(id)}"><h2>${escape(id)} (${split}, ${measurement.instances} instances)</h2><p>${measurement.status}; ${measurement.milliseconds.toFixed(1)} ms</p><pre>${escape(JSON.stringify(measurement, null, 2))}</pre><div class="pair"><figure><figcaption>Human</figcaption>${humanSvg}</figure><figure><figcaption>Auto (${measurement.status})</figcaption>${resultSvg}</figure></div></section>`;
+    section = `<section id="${escape(id)}"><h2>${escape(id)} (${split}, ${measurement.instances} instances)</h2><p>${measurement.status}; ${measurement.milliseconds.toFixed(1)} ms</p><pre>${escape(JSON.stringify(measurement, null, 2))}</pre><div class="pair"><figure><figcaption>${hasHuman ? "Human" : "No human reference"}</figcaption>${humanSvg}</figure><figure><figcaption>Auto (${measurement.status})</figcaption>${resultSvg}</figure></div></section>`;
   } catch (error) {
     measurement.status = "threw";
     measurement.error = String(error?.stack ?? error);
@@ -267,7 +446,18 @@ if (!isMainThread) {
 } else {
   const files = readdirSync(folder)
     .filter((f) => f.endsWith(".json") && !f.endsWith(".meta.json"))
-    .sort();
+    .sort()
+    .filter(
+      (f) =>
+        !flags.has("--split") ||
+        (BigInt(
+          `0x${createHash("sha256").update(f.slice(0, -5)).digest("hex")}`,
+        ) %
+          3n ===
+        0n
+          ? "val"
+          : "dev") === flags.get("--split"),
+    );
   const results = new Array(files.length);
   let next = 0;
   await Promise.all(
@@ -336,6 +526,18 @@ if (!isMainThread) {
           : null,
       ]),
     ),
+    blockOverlap: items.reduce((s, m) => s + (m.blockOverlap ?? 0), 0),
+    meanAreaRatio: items.filter((m) => Number.isFinite(m.areaRatio)).length
+      ? items.reduce((s, m) => s + (m.areaRatio ?? 0), 0) /
+        items.filter((m) => Number.isFinite(m.areaRatio)).length
+      : null,
+    arrangementAgreement: items.reduce(
+      (s, m) => s + (m.arrangementRelations ?? 0),
+      0,
+    )
+      ? items.reduce((s, m) => s + (m.arrangementMatches ?? 0), 0) /
+        items.reduce((s, m) => s + (m.arrangementRelations ?? 0), 0)
+      : null,
     crossings: items.reduce((s, m) => s + m.crossings, 0),
     bends: items.reduce((s, m) => s + m.bends, 0),
     wireLength: items.reduce((s, m) => s + m.wireLength, 0),
@@ -410,14 +612,20 @@ if (!isMainThread) {
       documents: cases.length,
       completed: cases.filter((m) => m.status === "completed").length,
       common: common.length,
-      human: sum(common.map((m) => m.human)),
+      human:
+        partitionSource === "loadbench"
+          ? null
+          : sum(common.map((m) => m.human)),
       before: baseline
         ? sum(
             common.map((m) => baseline.cases.find((b) => b.id === m.id).result),
           )
         : null,
       after: sum(common.map((m) => m.result)),
-      allHuman: sum(cases.filter((m) => m.human).map((m) => m.human)),
+      allHuman:
+        partitionSource === "loadbench"
+          ? null
+          : sum(cases.filter((m) => m.human).map((m) => m.human)),
       allCompleted: sum(cases.filter((m) => m.result).map((m) => m.result)),
       quick: sum(cases.filter((m) => m.quick).map((m) => m.quick)),
       largestWidthRatio: largestRatio(cases, "widthRatio"),
@@ -458,6 +666,7 @@ if (!isMainThread) {
     measurements.some(
       (m) =>
         m.status === "threw" ||
+        m.baselineEqual === false ||
         (m.status === "completed" &&
           (!m.equivalent ||
             m.result.unsafeProblems.length ||
