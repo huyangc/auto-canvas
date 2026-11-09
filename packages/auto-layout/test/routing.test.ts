@@ -23,7 +23,7 @@ import {
 } from "../src/geometry.js";
 import { visibleInstanceBounds } from "@icm/derived";
 import { auditRouting, floatingPins } from "../src/routing-audit.js";
-import { circuit } from "./document-fixture.js";
+import { addMirrorLoads, circuit } from "./document-fixture.js";
 
 const resolver = new InMemorySymbolResolver(builtInSymbols);
 
@@ -225,6 +225,11 @@ it("centres two recognized differential pairs over their shared tail", () => {
       dg: ["d.G"],
     },
   );
+
+  addMirrorLoads(document, [
+    ["a", "b"],
+    ["c", "d"],
+  ]);
   const plan = planAutoLayout(document, resolver);
   expect(plan.diagnostics).toEqual([]);
   const result = preview(document, resolver, plan.edits);

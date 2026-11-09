@@ -366,9 +366,8 @@ it("R66 builds search units from the same templates as quick placement", () => {
     ...recognizeStructures(d, roles),
     ...persistedTemplates(d, roles),
   ];
-  // Persisted a/c leaves b/d as the only quick template; clearing the
-  // persisted group would instead pair a/b and c/d.
-  expect(templates.map((g) => g.members)).toEqual([["b", "d"]]);
+  // The persisted mirror keeps its chosen output c in the quick template.
+  expect(templates.map((g) => g.members)).toEqual([["a", "c"]]);
   const commit = (edits: AutoLayoutResult["edits"]) => {
     const result = executeTransaction(
       d,

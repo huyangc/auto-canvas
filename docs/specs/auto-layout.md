@@ -47,15 +47,21 @@ AutoLayoutDiagnostic[] }`. Fixed instances retain their exact placements;
   a Cell Pin reaching a MOS drain or an output name makes an output. Other
   nets are internal. A grounded-negative voltage source supplies its positive
   net unless that net is input.
-- **R5 — Recognition.** Match MOS devices by connectivity, never Reference.
-  Differential pairs have equal symbols, shared non-power S, distinct D and
-  distinct G nets. Mirrors have equal symbols, shared S and G and exactly
-  one diode-connected member; record that member. Matched pairs have equal
-  symbols, either both diode-connected or shared G, and shared S or D.
-  Assign each instance at most once, in differential/mirror/matched order.
-  Record a MOS D or current-source positive terminal on a pair's shared S
-  as its tail. Existing layout groups suppress intersecting new groups.
-  New ids are `auto-<kind>-<first member id>`.
+- **R5 — Recognition.** Recognize logical transistor branches (R80) by
+  connectivity. D/G/S below also mean C/B/E for BJTs. A mirror reference has
+  D=G and D≠S; include every compatible output with the same G/S and D≠G,
+  D≠S. Two compatible reference branches on the same G/S are ambiguous and
+  produce no mirror. Roles are `reference` and `output`.
+  For each non-rail source Net and compatible family, remove candidates that
+  are diode-connected, have D=S, or drive another candidate's gate through D
+  or S. Exactly two remaining candidates with distinct D and G form a
+  `differential-pair` with `input` roles. Three or more require the mirror-load
+  evidence of R82; unresolved candidates are ambiguous. A tail is optional
+  supporting evidence (R81). Finally, on compatible branches belonging to no
+  mirror, pair or cross-coupled structure, retain the id-ordered matched rule:
+  both diode-connected or shared G, and shared S or D, with `member` roles.
+  Structures can overlap and recognition ignores persisted layout groups;
+  R83 selects the movement units consumed by placement.
 - **R6a — Power markers.** On each net, sort ground/VDD markers by id and
   prefer the host pin they touch in the input (R25), then pair the remaining
   markers with unused hosts sorted by device id, then x. Use one channel or
@@ -65,7 +71,8 @@ AutoLayoutDiagnostic[] }`. Fixed instances retain their exact placements;
   are nudged by grid steps.
 - **R7 — Templates.** Group members share y and reflect about a vertical
   axis, with 100-unit origin pitch unless R18 aligns a stack. Differential left/right mirrors are
-  `none`/`horizontal`; tails lie on the axis one row below. Mirror and
+  `none`/`horizontal`; tails lie on the axis one row toward the supply side:
+  below n pairs and above p pairs. Mirror and
   matched left/right mirrors are `horizontal`/`none`. Place the diode side
   over the left differential member it feeds. Stacked groups share an axis. Two recognized differential pairs sharing one
   tail sit adjacent, with the tail centred between their axes (R32).
@@ -368,12 +375,14 @@ pins }` lists, never Net ids.
   width/height ratios against its actual quick result, their maximum, and
   instance span ratios for checking this rule.
 
-- **R68 — Driver and cross-coupled pairs.** Use device descriptors for MOS
-  classes and polarity. A one-way channel-to-gate connection excludes a
-  differential pair. Two same-type MOS with mutual gate-to-drain or
-  gate-to-source connections and neither drain tied to its own gate form a
-  `matched-pair`, before differential-pair recognition. The existing symmetric
-  template and persisted group kind apply; no model schema change is needed.
+- **R68 — Driver and cross-coupled pairs.** Use R80 branches and families.
+  A branch whose D or S drives another candidate's gate is excluded from
+  differential-pair candidacy. Two compatible non-diode branches with mutual
+  gate-to-drain or gate-to-source connections form a `cross-coupled-pair`
+  with two `member` roles. A branch with multiple such partners is ambiguous;
+  neither it nor its partners forms an arbitrary cross pair. R83 maps the
+  structure to the existing symmetric `matched-pair` movement unit and
+  persisted kind; no model schema change is needed.
 
 - **R69 — Parallel attachments.** A two-terminal device whose distinct Nets
   exactly match a MOS's drain and source attaches to the first matching MOS by
@@ -449,6 +458,94 @@ pins }` lists, never Net ids.
   search can change a tied placement to one whose next cleanup the frozen
   partition guard refuses. This changes port artwork only; routing, marker stubs, R10,
   R23 and name-claim protection remain unchanged.
+
+- **R80 — Logical branches and families.** MOS uses D/G/S; BJT uses C/B/E.
+  Polarity is n for nmos-class MOS and NPN, p for pmos-class MOS and PNP.
+  Descriptor ids must match; when both instances have model identities,
+  those identities must match too (model name or external-subcircuit definition).
+  Depletion MOS and DMOS pair only with their own descriptor id: `nmos`,
+  `depletion-nmos` and `ndmos` are three distinct families, as are their p
+  equivalents. Never compare sizes or parameters.
+  Instances with equal descriptor, model identity and every symbol-pin Net
+  (including equally unconnected pins) form one logical branch. Its lowest id
+  is the representative; every structure member lists all branch instances.
+  Recognition never resolves structural ties by id, except the retained
+  matched-pair fallback in R5. Sort structures by kind and lowest instance id,
+  members by role then lowest id, and instance lists ascending.
+
+- **R81 — Pair tails.** On a pair's common source/emitter Net N, count tail
+  candidates by branch, excluding the pair itself: a same-polarity transistor
+  with drain/collector on N; a current source with + on N for n pairs or − on
+  N for p pairs and its other terminal off N; or a resistor between N and
+  ground for n pairs or supply for p pairs. Exactly one candidate gets the
+  `tail` role; several give a tail ambiguity and no tail. Zero candidates
+  leaves a valid pair without a tail. One tail may support multiple pairs.
+  Placement uses the pair members' polarity: the tail lies one row below n
+  pairs or above p pairs, including shared tails and tails in mirror units.
+
+- **R82 — Differential pair with mirror load.** A mirror reference drain on
+  input A's drain and an output drain on input B's distinct drain form a
+  `differential-pair-mirror-load`. Roles are `input-reference-side`,
+  `input-output-side`, `load-reference`, `load-output`, and optional `tail`.
+  A load touching only one drain is insufficient. On source Nets with three
+  or more candidates, accept only pairs identified uniquely by one such
+  composite. A candidate fitting multiple composites remains unpaired and
+  ambiguous. Other mirror outputs are not members of that composite.
+
+- **R83 — Movement units and persisted groups.** Choose units in cross-coupled,
+  differential-pair, mirror, matched order. A unit has two ascending branch
+  representatives, unless the existing stacked-load reversal aligns it with
+  the pair's drains. Skip a unit if either representative already belongs to
+  a unit or persisted layout group. Tails may overlap units. Mirror partners
+  prefer an output in a composite whose pair is already a unit; otherwise
+  choose the lowest output representative. Keep `diodeInstanceId` and
+  `tailInstanceId` as representatives. Cross-coupled units use `matched-pair`.
+  Ids remain `auto-<kind>-<lower member id>`.
+  Sorted `extraMemberIds` holds other outputs and fingers, excluding tails
+  and existing layout-group members; omit an empty list. Extra members place
+  freely, but `set_layout_group.objectIds` persists members plus extras.
+  Persisted templates use the same unit builder, restricted to the persisted
+  group: mirrors keep their reference and lowest output representative within
+  that group; pairs keep both members and their recognized tail. Apply the same
+  stacked-load reversal. Routing continues to use movement units.
+  Template channel helpers align BJT C/E just as MOS D/S and include BJTs in
+  template row ranking. BJT-only documents keep the generic fallback for the
+  layered strategy; layered BJT level and row rules are unchanged.
+
+- **R84 — Recognition benchmark.** Committed JSON cases contain `id`, `source`,
+  `symbols`, `nets` (`instance.pin` lists), optional `models` and `deferred`,
+  and `expected` structures with instance-to-role maps. Expectations can mark
+  `tailUnlabeled`. The scorer matches equal instance sets of the same kind
+  one-to-one; exact matches additionally require every role equal. Exclude
+  unlabeled tails from comparison. Before checking prediction eligibility,
+  remove any deferred tail member and compare that structure as tail-unlabeled,
+  including composites. Exclude any expected or remaining predicted structure
+  containing a deferred instance. Score only kinds labeled by each source;
+  count other predictions separately. Precision is matched/predicted, recall
+  matched/expected, and exact rate exact/expected; an empty denominator yields
+  one. Report labeled-tail outcomes (correct, wrong, missed, ambiguous) and
+  per-case missing, unexpected and role mismatches.
+  LOADBench conversion uses the first op-amp subcircuit, rewrites MOS X lines
+  as M and capacitors as 1p, grounds sourceNmos and adds a supply and primitive
+  models. Merge XML simple mirrors by reference-device set; label normal-array
+  pair inputs, leaving tails unlabeled, and label composites by drain Nets.
+  Defer devices in cascode, wide-swing, Wilson, improved-Wilson mirrors,
+  folded/cascoded differential pairs and voltage references.
+  CircuitGenome conversion strips the flat subcircuit wrapper, grounds gnd!,
+  adds supply/models and reads hierarchical slot variants. Label ordinary
+  input pairs, simple mirror/resistor tails and active mirror loads, including
+  same-gate/source outputs anywhere in the circuit. Defer every other slot or
+  variant except ordinary resistor/current-source loads, which label no
+  structure. Pair and composite expectations leave tails unlabeled whenever
+  the tail_current slot is deferred. Imported committed cases carry explicit ground markers and MIT
+  provenance. No local dataset or human drawing is required by tests.
+  Run `pnpm auto-layout:recognition [--loadbench <dir>] [--circuitgenome <dir>]
+[--units] [--out <file>]`. It always scores committed cases, prints source
+  and kind tables and optionally writes JSON mismatches. `--units` scores the
+  placement representation (mirror reference/output and pair input/tail),
+  ignoring matched units. `--emit-cases <file>` with `--circuitgenome` emits up
+  to six attributed fixtures totaling less than 20 KB. Hand cases require
+  exact recognition under three seeded bijective renames and order shuffles.
 
 - **Existing locks and conflicts.** Members of a locked layout group or
   constraint are treated as fixed instances under R1, because the Edit Engine

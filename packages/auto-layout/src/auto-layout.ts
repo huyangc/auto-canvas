@@ -386,7 +386,7 @@ function buildPlan(
       group: {
         id: group.id,
         kind: group.kind,
-        objectIds: group.members,
+        objectIds: [...group.members, ...(group.extraMemberIds ?? [])],
         locked: false,
       },
     });

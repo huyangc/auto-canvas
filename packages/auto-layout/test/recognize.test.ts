@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
 import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
 import { classifyNets } from "../src/net-roles.js";
-import { recognizeStructures } from "../src/recognize.js";
+import { persistedTemplates, recognizeStructures } from "../src/recognize.js";
 import { circuit } from "./document-fixture.js";
 
 const resolver = new InMemorySymbolResolver(builtInSymbols);
@@ -62,7 +62,7 @@ it("does not call shared drains or an open gate a differential pair", () => {
   );
   expect(recognizeStructures(d, classifyNets(d, resolver))).toEqual([]);
 });
-it("assigns differential pairs before shared-gate matched candidates", () => {
+it("leaves an ambiguous shared-source bank to the shared-gate matched rule", () => {
   const d = circuit(
     { a: "nmos", b: "nmos", c: "nmos" },
     {
@@ -76,7 +76,7 @@ it("assigns differential pairs before shared-gate matched candidates", () => {
   );
   expect(
     recognizeStructures(d, classifyNets(d, resolver)).map((g) => g.members),
-  ).toEqual([["a", "b"]]);
+  ).toEqual([["a", "c"]]);
 });
 
 it("R68 rejects a one-way channel-to-gate driver pair", () => {
@@ -104,3 +104,59 @@ it.each(["D", "S"])(
     ]);
   },
 );
+
+it("rebuilds a persisted mirror with its chosen output representative", () => {
+  const d = circuit(
+    { a: "nmos", b: "nmos", c: "nmos", d: "nmos", g: "ground" },
+    {
+      ref: ["a.D", "a.G", "b.G", "c.G", "d.G"],
+      db: ["b.D"],
+      dc: ["c.D"],
+      dd: ["d.D"],
+      ground: ["a.S", "b.S", "c.S", "d.S", "g.0"],
+    },
+  );
+  d.layoutGroups = [
+    {
+      id: "kept",
+      kind: "current-mirror",
+      objectIds: ["a", "c", "d"],
+      locked: false,
+    },
+  ];
+  const roles = classifyNets(d, resolver);
+  expect(recognizeStructures(d, roles)).toEqual([]);
+  expect(persistedTemplates(d, roles)).toEqual([
+    {
+      id: "auto-current-mirror-a",
+      kind: "current-mirror",
+      members: ["a", "c"],
+      diodeInstanceId: "a",
+      extraMemberIds: ["d"],
+    },
+  ]);
+});
+
+it("keeps persisted mirror load sides aligned with an inferred pair", () => {
+  const d = circuit(
+    { a: "nmos", b: "nmos", r: "pmos", o: "pmos" },
+    {
+      source: ["a.S", "b.S"],
+      ga: ["a.G"],
+      gb: ["b.G"],
+      left: ["a.D", "r.D", "r.G", "o.G"],
+      right: ["b.D", "o.D"],
+      supply: ["r.S", "o.S"],
+    },
+  );
+  d.layoutGroups = [
+    {
+      id: "load",
+      kind: "current-mirror",
+      objectIds: ["o", "r"],
+      locked: false,
+    },
+  ];
+  const roles = classifyNets(d, resolver);
+  expect(persistedTemplates(d, roles)[0]!.members).toEqual(["r", "o"]);
+});

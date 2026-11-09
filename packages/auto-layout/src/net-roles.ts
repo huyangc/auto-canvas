@@ -1,6 +1,6 @@
 import { deviceDescriptor } from "@icm/devices";
 import { deriveElectricalTopologyProjection, endpointKey } from "@icm/derived";
-import type { SchematicDocument } from "@icm/model";
+import type { Instance, SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import type { NetRole } from "./types.js";
 
@@ -19,6 +19,48 @@ export function mosPolarity(symbolId: string): "nmos" | "pmos" | undefined {
   return descriptor?.deviceClass === "mos"
     ? descriptor.mosBulkClass
     : undefined;
+}
+
+/** MOS and BJT channel names; base is a gate, never a MOS bulk. */
+export function channelPins(
+  symbolId: string,
+): { drain: string; gate: string; source: string } | undefined {
+  const descriptor = deviceDescriptor(symbolId);
+  if (descriptor?.deviceClass === "mos")
+    return { drain: "D", gate: "G", source: "S" };
+  if (descriptor?.deviceClass === "bjt")
+    return { drain: "C", gate: "B", source: "E" };
+  return undefined;
+}
+
+export function polarity(symbolId: string): "n" | "p" | undefined {
+  const descriptor = deviceDescriptor(symbolId);
+  if (descriptor?.mosBulkClass === "nmos" || descriptor?.id === "npn")
+    return "n";
+  if (descriptor?.mosBulkClass === "pmos" || descriptor?.id === "pnp")
+    return "p";
+  return undefined;
+}
+
+export function modelIdentity(instance: Instance): string | undefined {
+  const binding = instance.netlist?.binding;
+  return binding?.kind === "model"
+    ? `model:${binding.name}`
+    : binding?.kind === "external-subcircuit"
+      ? `subcircuit:${binding.definitionId}`
+      : undefined;
+}
+
+/** Sizes never establish a family; missing model metadata does not reject it. */
+export function familyCompatible(a: Instance, b: Instance): boolean {
+  const descriptor = deviceDescriptor(a.symbolId);
+  const am = modelIdentity(a),
+    bm = modelIdentity(b);
+  return (
+    !!descriptor &&
+    descriptor.id === deviceDescriptor(b.symbolId)?.id &&
+    (am === undefined || bm === undefined || am === bm)
+  );
 }
 
 /** A MOS bulk pin. Other symbols may have an ordinary pin named B. */

@@ -16,7 +16,7 @@ import { recognizeStructures } from "../src/recognize.js";
 import { refinementMetrics } from "../src/refine.js";
 import { auditRouting, floatingPins } from "../src/routing-audit.js";
 import { terminalPartition } from "../src/transaction.js";
-import { circuit } from "./document-fixture.js";
+import { addMirrorLoads, circuit } from "./document-fixture.js";
 
 const resolver = new InMemorySymbolResolver(builtInSymbols);
 it("levels a channel chain without any supply Net into multiple device rows", () => {
@@ -108,9 +108,14 @@ it("places two recognized pairs adjacent with their shared tail centred", () => 
       bottom: ["tail.S"],
     },
   );
+
+  addMirrorLoads(d, [
+    ["a", "b"],
+    ["c", "d"],
+  ]);
   const roles = classifyNets(d, resolver),
     groups = recognizeStructures(d, roles);
-  expect(groups).toHaveLength(2);
+  expect(groups.filter((g) => g.kind === "differential-pair")).toHaveLength(2);
   const rows = deviceRows(
     d,
     d.instances,
@@ -129,12 +134,14 @@ it("places two recognized pairs adjacent with their shared tail centred", () => 
     ordered,
     rows,
   );
-  const axes = groups.map(
-    (g) =>
-      (targets.get(g.members[0])!.position.x +
-        targets.get(g.members[1])!.position.x) /
-      2,
-  );
+  const axes = groups
+    .filter((g) => g.kind === "differential-pair")
+    .map(
+      (g) =>
+        (targets.get(g.members[0])!.position.x +
+          targets.get(g.members[1])!.position.x) /
+        2,
+    );
   const tailPin = pinPoints(withPlacements(d, targets), resolver).find(
     (p) => p.instanceId === "tail" && p.pinName === "D",
   )!;
@@ -413,9 +420,16 @@ it("keeps a mirror's pitch when its member is centred under two shared pairs", (
       es: ["e.S"],
     },
   );
+
+  addMirrorLoads(d, [
+    ["a", "b"],
+    ["c", "d"],
+  ]);
   const roles = classifyNets(d, resolver),
     groups = recognizeStructures(d, roles);
-  const mirror = groups.find((g) => g.kind === "current-mirror")!;
+  const mirror = groups.find(
+    (g) => g.kind === "current-mirror" && g.members.includes("t"),
+  )!;
   expect([...mirror.members].sort()).toEqual(["t", "u"]);
   const rows = deviceRows(
     d,

@@ -2,7 +2,13 @@ import { transformPoint } from "./geometry.js";
 // T013 placement restored from 309a368 for the R36 strategy portfolio.
 import { type Instance, type SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
-import { isMos, mosPolarity, type NetRoles } from "./net-roles.js";
+import {
+  channelPins,
+  isMos,
+  mosPolarity,
+  polarity,
+  type NetRoles,
+} from "./net-roles.js";
 import { compareIds } from "./recognize.js";
 import {
   COLUMN_PITCH,
@@ -24,8 +30,9 @@ function channels(
   resolver: SymbolResolver,
   roles: NetRoles,
 ): string[] {
-  const pins = isMos(instance.symbolId)
-    ? ["D", "S"]
+  const channel = channelPins(instance.symbolId);
+  const pins = channel
+    ? [channel.drain, channel.source]
     : (resolver
         .resolve(instance.symbolId, instance.symbolVariantId)
         ?.definition.pins.map((p) => p.name) ?? []);
@@ -94,8 +101,9 @@ function expandTemplates(
     (g.kind === "differential-pair") === (index === 0) ? "none" : "horizontal";
   const channel = (id: string) => {
     const instance = document.instances.find((i) => i.id === id)!;
+    const pins = channelPins(instance.symbolId);
     return devicePins(instance, resolver).filter(
-      (p) => !isMos(instance.symbolId) || ["D", "S"].includes(p.name),
+      (p) => !pins || [pins.drain, pins.source].includes(p.name),
     );
   };
   const shared = (a: string, b: string) =>
@@ -149,15 +157,26 @@ function expandTemplates(
         ),
       );
     });
-    if (g.tailInstanceId) {
-      const tail = g.tailInstanceId;
-      const { q } = shared(g.members[0], tail)[0] ?? {};
-      const offset = q
-        ? transformPoint(q.at, { x: 0, y: 0 }, { rotation: 0, mirror: "none" })
-            .x
-        : 0;
-      rows.set(tail, row + 1);
-      targets.set(tail, placement(axis - offset, (row + 1) * ROW_PITCH));
+  }
+  // Apply tails after all member templates, including a tail's mirror unit.
+  for (const g of groups) {
+    if (!g.tailInstanceId) continue;
+    const tail = g.tailInstanceId;
+    const pair = document.instances.find((i) => i.id === g.members[0])!;
+    const row =
+      rows.get(g.members[0])! + (polarity(pair.symbolId) === "p" ? -1 : 1);
+    const axis = axes.get(g.id)!;
+    const target = targets.get(tail) ?? placement(0, row * ROW_PITCH);
+    const { q } = shared(g.members[0], tail)[0] ?? {};
+    const offset = q ? transformPoint(q.at, { x: 0, y: 0 }, target).x : 0;
+    const delta = axis - offset - target.position.x;
+    const tailGroup = groups.find((other) => other.members.includes(tail));
+    for (const id of tailGroup?.members ?? [tail]) {
+      const member = targets.get(id) ?? target;
+      rows.set(id, row);
+      member.position.x += delta;
+      member.position.y = row * ROW_PITCH;
+      targets.set(id, member);
     }
   }
 }
