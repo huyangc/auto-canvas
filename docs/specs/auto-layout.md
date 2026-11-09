@@ -188,7 +188,8 @@ pins }` lists, never Net ids.
   MOS bulk membership when the old rail and its naming authority are removed.
 - **R13 — Signal order.** After power, route Nets touching recognized groups,
   pair members before mirrors, then the rest by their lowest instance id.
-  All pins of one Net go into one `planRouteNet` call.
+  All pins of one Net go into one `planRouteNet` call. This is the first
+  pass; R95 may reroute signal Nets afterwards.
 - **R14 — Fallback.** Catch each `planRouteNet` failure independently. Keep
   other Nets' routes and the failed Net's unrouted electrical membership.
   Draw a partial Net's reachable components too. Report one
@@ -250,6 +251,7 @@ pins }` lists, never Net ids.
   accept the best strictly improving move, and repeat for at most two passes
   and 24 evaluated candidates total. Fixed instances never move. If all
   candidates fail, retain the default. Identical inputs give identical results.
+  R96 replans the selected finalist with R95 after refinement.
 - **R23 — Audit guard.** Audit the final preview. A Route crossing an Instance
   or Routes of different Nets overlapping returns no edits and an R10 error
   naming the objects. Drafting intersections remain warnings.
@@ -335,7 +337,8 @@ pins }` lists, never Net ids.
   component while its Base Net has other non-bulk pins.
 - **R44 — Routing alternative.** After R36 selects a plan, replan its placement
   and refinement choices once with R39 disabled, without another refinement.
-  Keep the lower R22 routed score, retaining the selected plan on a tie.
+  R96 replans the selected finalist with R95 after R72 repair. Keep the lower
+  R22 routed score, retaining the selected plan on a tie.
 
 - **R50 — Stages.** A stage is a connected component of devices joined on a
   non-rail Net through DC conducting pins: MOS D/S, BJT C/E, and both pins of
@@ -374,7 +377,8 @@ pins }` lists, never Net ids.
   two independently, reusing their initial routed plans, with at most 14
   candidates each. Keep the lower refined score; ties retain the higher-ranked
   strategy. Above 40 instances, keep R55's unrefined comparison. R44 runs once
-  on the winner.
+  on the winner. R96 replans the selected finalist with R95, without adding
+  refinement candidates.
 - **R59 — Attached parts.** A single-device stage with one non-rail Net and a
   rail pin (a shunt capacitor, load or bias resistor) takes no separate column.
   Place it next to its Net's host pin in the host stage's span, below for ground
@@ -437,6 +441,8 @@ pins }` lists, never Net ids.
   and remaining time, retaining quick mode on a tie. Cancellation returns the
   valid best so far. A synchronous full plan cannot be interrupted midway;
   deadline checks reserve time for finishing and the routing alternative.
+  After repair, R96 replans the search's final best with R95; annealing energy
+  evaluations do not rip up. A zero evaluation budget equals quick mode.
 
 - **R67 — Bounded offline span.** Use the completed quick result's bounding
   box of all instances, including markers, as the search reference. Reject
@@ -666,7 +672,8 @@ pins }` lists, never Net ids.
   rate. Collect foreign segments once per clearance, indexed by orientation
   and coordinate; only non-axis-aligned segments may be scanned. This is an
   optional path-length cost, zero by default, leaving Agent/editor routing
-  unchanged. Net order and placement are unchanged.
+  unchanged. The first pass's order is unchanged; R95 reroutes afterwards
+  without changing placement.
 
 - **R88 — Seeded symmetry.** Detect an involution over devices and Base Nets
   from R81 differential input representatives and cross-coupled pairs, independently
@@ -768,6 +775,31 @@ pins }` lists, never Net ids.
   refuses any change to a block's relative positions or orientations. Conflicted
   and unmapped devices retain the existing placement rules around the block.
 
+- **R95 — Bounded rip-up and reroute.** After the R12–R14 first pass, count
+  distinct proper crossings per Base Net, attributing each crossing to both
+  Nets. Consider signal frozen groups with crossings in descending count,
+  breaking ties by R13 order. Power groups keep their first-pass routing.
+  Remove only the candidate group's authored Routes, Junctions and R14 labels
+  through validated edits, then rerun the same contacts, trunk candidates,
+  partial routing and crossing cost against all retained geometry. Keep the
+  retry only if `[missing connections, crossings, bends, wire length]` is
+  strictly smaller lexicographically. Failed or non-improving retries retain
+  the prior edits and diagnostics exactly. Replace the group's R14 warning
+  and fallback labels with those warranted by its accepted routing.
+  Compute candidates at the start of a single pass, at every instance count.
+  Transactional removal advances the planning revision beyond retained edits,
+  preventing generated Route id
+  collisions. Whole-list replay reproduces the accepted geometry and audit.
+  Routing and candidate ordering are deterministic. The internal routing
+  option defaults off; Editor and Agent routing defaults do not change.
+- **R96 — Finalist-only rerouting.** After R72 repair, replan the
+  selected placement once with exact placements and R95 enabled; the R44
+  alternative stays a plain replan. Replace the selected finalist only if its
+  R22 routed score strictly decreases, then compare them with R44 as before.
+  Apply the same procedure to offline search's final best. Initial strategy
+  ranking, R58 refinement candidates and annealing evaluations never run R95; finalist
+  replans do not count as refinement candidates.
+
 - **Existing locks and conflicts.** Members of a locked layout group or
   constraint are treated as fixed instances under R1, because the Edit Engine
   refuses to transform them. A recognized group whose generated id already
@@ -785,8 +817,11 @@ No file format or connectivity edit is introduced.
 Known limits: supply trunks are ordinary wires, without thick power-rail
 presentation. The bounded router can still leave components unreachable under
 R14, but draws reachable components and tries a tree for refused rail trunks.
-Crossing cost chooses among bounded candidates; it does not rip up earlier
-Nets or guarantee a globally crossing-free drawing.
+Crossing cost chooses among bounded candidates. R95 revisits crossed signal
+Nets once on the selected finalist, keeping strictly better routing; it does
+not guarantee a globally crossing-free drawing. The remaining crossing gap
+to applying rip-up inside every refinement candidate is known; that broader
+search has a higher planning cost.
 
 ## Acceptance criteria
 

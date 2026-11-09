@@ -114,6 +114,55 @@ function entersBox(
   return high > low;
 }
 
+/** A proper crossing excludes endpoint touches, using the audit's point precision. */
+function properCrossing(
+  a: Point,
+  b: Point,
+  c: Point,
+  d: Point,
+): string | undefined {
+  if (
+    cross(a, b, c) * cross(a, b, d) >= 0 ||
+    cross(c, d, a) * cross(c, d, b) >= 0
+  )
+    return undefined;
+  const dx = b.x - a.x,
+    dy = b.y - a.y;
+  const ex = d.x - c.x,
+    ey = d.y - c.y;
+  const t = ((c.x - a.x) * ey - (c.y - a.y) * ex) / (dx * ey - dy * ex);
+  return `${(a.x + t * dx).toFixed(3)},${(a.y + t * dy).toFixed(3)}`;
+}
+
+/** R95: attribute each distinct proper crossing to both participating Base Nets. */
+export function crossingsByNet(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+): Map<string, number> {
+  const routes = document.routes.flatMap((route) => {
+    const geometry = resolveRouteGeometry(document, resolver, route);
+    return geometry ? [{ route, geometry }] : [];
+  });
+  const points = new Map<string, Set<string>>();
+  for (let i = 0; i < routes.length; i++) {
+    const a = routes[i]!;
+    for (const b of routes.slice(i + 1)) {
+      if (a.route.netId === b.route.netId) continue;
+      for (const p of a.geometry.segments)
+        for (const q of b.geometry.segments) {
+          const point = properCrossing(p.from, p.to, q.from, q.to);
+          if (!point) continue;
+          for (const id of [a.route.netId, b.route.netId]) {
+            const net = points.get(id) ?? new Set<string>();
+            net.add(point);
+            points.set(id, net);
+          }
+        }
+    }
+  }
+  return new Map([...points].map(([id, crossings]) => [id, crossings.size]));
+}
+
 /** Committed-result audit shared by corpus tests and the review artifact. */
 export function auditRouting(
   document: SchematicDocument,
@@ -187,21 +236,8 @@ export function auditRouting(
             unsafeProblems.push(
               `Routes ${a.route.id}/${b.route.id} of different Nets overlap`,
             );
-          if (
-            cross(p.from, p.to, q.from) * cross(p.from, p.to, q.to) < 0 &&
-            cross(q.from, q.to, p.from) * cross(q.from, q.to, p.to) < 0
-          ) {
-            const dx = p.to.x - p.from.x,
-              dy = p.to.y - p.from.y;
-            const ex = q.to.x - q.from.x,
-              ey = q.to.y - q.from.y;
-            const t =
-              ((q.from.x - p.from.x) * ey - (q.from.y - p.from.y) * ex) /
-              (dx * ey - dy * ex);
-            crossings.add(
-              `${(p.from.x + t * dx).toFixed(3)},${(p.from.y + t * dy).toFixed(3)}`,
-            );
-          }
+          const point = properCrossing(p.from, p.to, q.from, q.to);
+          if (point) crossings.add(point);
         }
     }
   }

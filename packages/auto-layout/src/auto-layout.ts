@@ -129,6 +129,52 @@ function planAutoLayoutMeasured(
             placements,
           ),
     );
+  // R96 is deliberately outside ranking, refinement and annealing evaluations.
+  const ripUpFinalist = (
+    run: LayoutRun,
+    strategy: LayoutStrategy,
+    signalTrunks: boolean,
+  ) => {
+    if (!run.final || !Number.isFinite(routedScore(run, resolver))) return run;
+    const candidate = planLayoutOnce(
+      document,
+      resolver,
+      options,
+      emptyOverrides(),
+      strategy,
+      signalTrunks,
+      undefined,
+      undefined,
+      new Map(
+        run.final.instances.map((instance) => [
+          instance.id,
+          instance.placement!,
+        ]),
+      ),
+      true,
+    );
+    return routedScore(candidate, resolver) < routedScore(run, resolver)
+      ? candidate
+      : run;
+  };
+  const finish = (
+    run: LayoutRun,
+    alternative: LayoutRun,
+    strategy: LayoutStrategy,
+    signalTrunks: boolean,
+    refined = run.result,
+  ) =>
+    selectRoutingAlternative(
+      ripUpFinalist(
+        repair(run, strategy, signalTrunks),
+        strategy,
+        signalTrunks,
+      ),
+      repair(alternative, strategy, false),
+      resolver,
+      strategy,
+      refined,
+    );
   const route = (strategy: LayoutStrategy, overrides: LayoutOverrides) => {
     const run = planLayoutOnce(
       document,
@@ -195,19 +241,16 @@ function planAutoLayoutMeasured(
     selected.strategy,
     false,
   );
-  const alternative = options.search
-    ? rawAlternative
-    : repair(rawAlternative, selected.strategy, false);
+  if (!options.search)
+    return finish(selected.run, rawAlternative, selected.strategy, true);
+  const alternative = rawAlternative;
   const quick = selectRoutingAlternative(
-    options.search
-      ? selected.run
-      : repair(selected.run, selected.strategy, true),
+    selected.run,
     alternative,
     resolver,
     selected.strategy,
     selected.run.result,
   );
-  if (!options.search) return quick;
   const quickRun = quick === alternative.result ? alternative : selected.run;
   const best = annealLayout(
     document,
@@ -229,17 +272,17 @@ function planAutoLayoutMeasured(
         bounds,
       ),
   );
-  // R72 runs only after annealing, never in the per-evaluation callback.
+  // A zero evaluation budget retains quick mode's two finalists; annealLayout
+  // above still validates the search request and emits its progress event.
+  if (options.search.evaluations === 0)
+    return finish(selected.run, alternative, selected.strategy, true);
+  // R72/R96 run only after annealing, never in the per-evaluation callback.
   if (quickRun.final) repairBounds = searchBounds(quickRun.final, resolver);
-  const repaired = repair(best.run, best.strategy, best.run !== alternative);
-  const repairedAlternative = best.alternative
-    ? repair(best.alternative, best.strategy, false)
-    : repaired;
-  return selectRoutingAlternative(
-    repaired,
-    repairedAlternative,
-    resolver,
+  return finish(
+    best.run,
+    best.alternative ?? best.run,
     best.strategy,
+    best.run !== alternative,
   );
 }
 
@@ -254,6 +297,7 @@ export function planLayoutOnce(
   given?: ReadonlyMap<string, Placement>,
   bounds?: SearchBounds,
   exact?: ReadonlyMap<string, Placement>,
+  ripUp = false,
 ): LayoutRun {
   const run: LayoutRun = {
     result: { edits: [], groups: [], diagnostics: [] },
@@ -270,6 +314,7 @@ export function planLayoutOnce(
     given,
     bounds,
     exact,
+    ripUp,
   );
   return run;
 }
@@ -285,6 +330,7 @@ function buildPlan(
   given?: ReadonlyMap<string, Placement>,
   bounds?: SearchBounds,
   exact?: ReadonlyMap<string, Placement>,
+  ripUp = false,
 ): AutoLayoutResult {
   if (document.instances.length > 120)
     return {
@@ -492,6 +538,7 @@ function buildPlan(
     roles,
     structures,
     signalTrunks,
+    { ripUp },
   );
   if (routed.problem) return refuse(routed.problem);
   edits.push(...routed.edits);

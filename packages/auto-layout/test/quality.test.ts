@@ -404,7 +404,9 @@ it("R44 compares one routing-only replay of the selected refined placement", () 
     expect(routes.mock.calls.filter((call) => call[5] === false)).toHaveLength(
       1,
     );
-    expect(routes.mock.calls.at(-1)![5]).toBe(false);
+    expect(routes.mock.calls.at(-2)![5]).toBe(false);
+    expect(routes.mock.calls.at(-1)![5]).toBe(true);
+    expect(routes.mock.calls.at(-1)![6]).toEqual({ ripUp: true });
     expect(comparison).toHaveBeenCalledTimes(1);
     const [selected, alternative] = comparison.mock.calls[0]!;
     expect(selected.final).toBeDefined();
@@ -468,11 +470,13 @@ it("R63 gives the second refinement slot to the next distinct strategy", () => {
       expect(count).toBeLessThanOrEqual(14);
       candidates += count;
     }
-    expect(routes).toHaveBeenCalledTimes(4 + candidates);
+    expect(routes).toHaveBeenCalledTimes(5 + candidates);
     expect(
       routes.mock.calls.slice(0, 3).every((call) => call[5] === true),
     ).toBe(true);
-    expect(routes.mock.calls.at(-1)![5]).toBe(false);
+    expect(routes.mock.calls.at(-2)![5]).toBe(false);
+    expect(routes.mock.calls.at(-1)![5]).toBe(true);
+    expect(routes.mock.calls.at(-1)![6]).toEqual({ ripUp: true });
   } finally {
     search.mockRestore();
     routes.mockRestore();
