@@ -385,6 +385,36 @@ it("runs dry-run and cached V1/V2 evaluation with titled boxes and explicit cach
     partitionMetrics: null,
     partitionValidity: { status: "valid-first-try" },
   });
+  // With a LOADBench reference the positions are importer-made: no human
+  // metrics or human SVG, but ARI against the XML partition remains.
+  project.documents = [d];
+  writeFileSync(join(folder, "synthetic.json"), serializeProject(project));
+  writeFileSync(
+    join(folder, "synthetic.partitioning.xml"),
+    '<gmPart type="firstStage"><device name="a"/></gmPart><loadPart><device name="b"/></loadPart>',
+  );
+  // Earlier runs in this test wrote a human SVG here; start the check clean.
+  rmSync(join(directory, "tmp/auto-layout-eval/v1-llm-3-sample-0"), {
+    recursive: true,
+    force: true,
+  });
+  const referenced = cli("auto-layout-eval.mjs", [
+    "--partition",
+    "llm",
+    "--variant",
+    "v1",
+  ]);
+  expect(referenced.status, referenced.stderr).toBe(0);
+  const lb = readReport("v1").cases[0];
+  expect(lb).toMatchObject({
+    status: "completed",
+    hasHuman: false,
+    human: null,
+    partitionMetrics: { ari: 1, humanOverlap: null, floorplanAgreement: null },
+  });
+  expect(
+    readdirSync(join(directory, "tmp/auto-layout-eval/v1-llm-3-sample-0")),
+  ).not.toContain("synthetic-human.svg");
 }, 30_000);
 
 const openai = {
