@@ -237,18 +237,35 @@ function evaluateFile(file) {
     );
     measurement.instances = document.instances.length;
     const hasHuman = partitionSource !== "loadbench";
-    const oracle = hasHuman
-      ? partitionFromPlacement(document, resolver, threshold)
-      : partitionFromLoadbench(
-          document,
-          readFileSync(join(folder, `${id}.partitioning.xml`), "utf8"),
-        );
-    const validated = validatePartition(document, resolver, oracle);
-    if (validated.diagnostics.some((d) => d.severity === "error"))
-      throw new Error(JSON.stringify(validated.diagnostics));
-    const partition = validated.partition;
+    // Oracle extraction is required only for partitioned runs. Default and
+    // search evaluations proceed without block metrics when it fails, for
+    // example on a document with unplaced devices.
+    let partition;
+    let partitionDiagnostics = [];
+    try {
+      const oracle = hasHuman
+        ? partitionFromPlacement(document, resolver, threshold)
+        : partitionFromLoadbench(
+            document,
+            readFileSync(join(folder, `${id}.partitioning.xml`), "utf8"),
+          );
+      const validated = validatePartition(document, resolver, oracle);
+      partitionDiagnostics = validated.diagnostics;
+      if (validated.diagnostics.some((d) => d.severity === "error"))
+        throw new Error(JSON.stringify(validated.diagnostics));
+      partition = validated.partition;
+    } catch (error) {
+      if (partitionSource) throw error;
+      partitionDiagnostics = [
+        {
+          severity: "warning",
+          code: "ORACLE_UNAVAILABLE",
+          message: String(error),
+        },
+      ];
+    }
     measurement.partition = partition;
-    measurement.partitionDiagnostics = validated.diagnostics;
+    measurement.partitionDiagnostics = partitionDiagnostics;
     measurement.hasHuman = hasHuman;
     measurement.human = hasHuman
       ? {
