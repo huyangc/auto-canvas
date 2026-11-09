@@ -48,3 +48,14 @@ placement then needs its own optimization.
 | --- | -------- | --------- | ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
 | 1   | note     | V3        | The human-placement reference needs relaxed checks to exist at all.                                   | A throwaway relaxed build in a later experiment, if still useful. |
 | 2   | note     | LOADBench | 18 of 101 XMLs reference a capacitor missing from the converted netlist; they stay explicit failures. | Fix in T022's converter if LOADBench is used again.               |
+
+## PR review — codex round 1 on `2715321`
+
+One P2, reproduced. The evaluator extracted the human oracle unconditionally, so a
+document with an unplaced device failed default evaluation with "Oracle partition
+requires placed devices", before the planner ran. Opus fixed `scripts/auto-layout-eval.mjs`:
+oracle extraction is now required only with `--partition`, and otherwise its failure
+becomes an `ORACLE_UNAVAILABLE` warning with no block metrics.
+
+On the same unplaced fixture, the fixed evaluator now fails exactly as `main`'s evaluator
+does: an unrelated route on the unplaced part. The oracle no longer adds a failure.
