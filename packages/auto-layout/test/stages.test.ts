@@ -253,7 +253,9 @@ it("is deterministic for a synthetic 120-device document through the public port
   expect(planAutoLayout(d, resolver)).toEqual(plan);
   expect(refinementMetrics(plan)?.candidates).toBe(0);
   expect(JSON.stringify(d)).toBe(before);
-}, 30000);
+  // Two full plans of a 121-Net chain: about 7 s here, and R96's finalist
+  // rip-up pushed a slow CI runner past 30 s. The timeout only guards a hang.
+}, 60000);
 it("mirrors a whole stage to remove a crossing without disturbing its stack", () => {
   const d = circuit(
     { a: "nmos", b: "nmos", c: "nmos", d: "nmos", e: "nmos", f: "nmos" },
