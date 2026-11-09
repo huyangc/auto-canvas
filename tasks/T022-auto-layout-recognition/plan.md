@@ -1,7 +1,7 @@
 # T022 — Auto-layout: role-aware substructure recognition and a recognition benchmark
 
 - Branch: `task/T022-auto-layout-recognition`
-- Base: `main` at `5a1af66`
+- Base: `main` at `a188149` (rebased from `5a1af66` after round 1)
 - Lane: 2. Every acceptance command runs with `ICM_E2E_PORT=4273`,
   `AUTO_CANVAS_E2E_API_PORT=4321` and
   `AUTO_CANVAS_TEST_DATABASE_URL=postgresql:///auto_canvas_test_2`. The database
@@ -561,6 +561,63 @@ roles)` on top of `recognizeSubstructures`. It keeps its signature and returns
    - **Effect per document** of the ambiguous-source rule in quick mode, for every
      affected document, using anonymous labels.
    - Report the family rule chosen for depletion and DMOS.
+
+### Round 2 amendment
+
+Added after round 1's review (see `review.md`) and approved by the user on 2026-11-08. Keep everything round 1 built, except
+what the review's must-fix findings change.
+
+- **A0 Base.** Opus rebased the branch onto `main` at `a188149`, where T021 has merged.
+  The plan commit is now `37bb4f7`. T021 added
+  - R73 label seating (`src/seat-labels.ts`);
+  - R74 readability terms in `routedScore` (`src/refine.ts`, `src/readability.ts`);
+  - port facing (`src/face-ports.ts`, `src/finalize-facing.ts`).
+
+  Those files stay out of scope.
+
+- **A1 Tail direction.** A tail sits one row toward its supply side: below an n pair,
+  above a p pair. Polarity comes from `polarity()` on the pair members.
+  - **Code that may change:** the tail blocks of `src/template-placement.ts`
+    `expandTemplates`, and the tail-row code in `src/layered.ts` (`:207-220` and the other
+    tail sites the review lists). The rest of those files stays in its round-1 scope.
+  - **Spec:** state the rule in R7 and R81.
+- **A2 Persisted mirror partners.**
+  - `persistedTemplates` rebuilds each persisted group's unit from the recognized
+    structures, sharing the unit-building code with `recognizeStructures`.
+  - The assertion and comment at `test/search.test.ts:371` may change to `[["a", "c"]]`.
+    Nothing else in that file may change.
+- **A3 Baselines.** Layout targets now compare against T021 on `a188149`:
+  - **Quick, measured by Opus:** `tmp/t022/t021-quick.json`. On the 32 documents T021
+    completes, it has 650 crossings (dev 263, val 387), 702 bends, 63 floating pins,
+    219,860 wire length, 3 label overlaps, 59 label clearance and 13 terminal departures.
+  - **Search:** `tmp/t022/t021-search120.json`, measured by Opus with
+    `--search 120 --seed 1 --jobs 12`.
+
+  Compare on the documents both runs complete. Report the newly completed document
+  separately. The quick targets become:
+
+  | Measure, 32 common documents                         | Required                        |
+  | ---------------------------------------------------- | ------------------------------- |
+  | Crossings, dev and val                               | each not above T021 (263 / 387) |
+  | Bends, floating pins                                 | not above 702 / 63              |
+  | Label overlaps, label clearance, terminal departures | report; explain any rise        |
+  | Completed documents                                  | not fewer than 32               |
+  | Width ratio                                          | no document above 1.5           |
+
+  Report search on common documents against `t021-search120.json`. Search depends on
+  wall-clock time, so run it with nothing else heavy running.
+
+  Use the baseline file in every place the steps and the acceptance list name
+  `tmp/t020-accept/` or `tmp/auto-layout-eval/baseline.json`:
+  - `tmp/t022/t021-quick.json` for quick mode;
+  - `tmp/t022/t021-search120.json` for search.
+
+  The frozen-file `git diff --stat origin/main …` check now compares against
+  `a188149`, so it must be empty again.
+
+- **A4 Report.** Report quick mode with each round-2 fix alone (A1 tail direction, A2
+  persisted partners) and together. Also report the four recognition sources again,
+  with the corrected scorer.
 
 ## Acceptance
 
