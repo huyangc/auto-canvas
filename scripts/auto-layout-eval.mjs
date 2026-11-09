@@ -5,7 +5,13 @@ import {
   validateCachedResult,
 } from "./auto-layout-llm-partition.mjs";
 import { createHash } from "node:crypto";
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import {
@@ -258,20 +264,23 @@ function evaluateFile(file) {
     // example on a document with unplaced devices.
     let partition;
     let partitionDiagnostics = [];
+    // An LLM run uses the reference only for comparison metrics: LOADBench
+    // labels when the folder has them, otherwise the human-drawing oracle.
+    const loadbenchXml = join(folder, `${id}.partitioning.xml`);
+    const loadbenchReference =
+      partitionSource === "loadbench" ||
+      (partitionSource === "llm" && existsSync(loadbenchXml));
     try {
-      const oracle = hasHuman
-        ? partitionFromPlacement(document, resolver, threshold)
-        : partitionFromLoadbench(
-            document,
-            readFileSync(join(folder, `${id}.partitioning.xml`), "utf8"),
-          );
+      const oracle = loadbenchReference
+        ? partitionFromLoadbench(document, readFileSync(loadbenchXml, "utf8"))
+        : partitionFromPlacement(document, resolver, threshold);
       const validated = validatePartition(document, resolver, oracle);
       partitionDiagnostics = validated.diagnostics;
       if (validated.diagnostics.some((d) => d.severity === "error"))
         throw new Error(JSON.stringify(validated.diagnostics));
       partition = validated.partition;
     } catch (error) {
-      if (partitionSource) throw error;
+      if (partitionSource && partitionSource !== "llm") throw error;
       partitionDiagnostics = [
         {
           severity: "warning",
@@ -308,12 +317,10 @@ function evaluateFile(file) {
           `Invalid cached LLM partition: ${validated.errors.join("; ")}`,
         );
       }
-      measurement.partitionMetrics = partitionMetrics(
-        document,
-        resolver,
-        validated.partition,
-        partition,
-      );
+      // Without a reference (e.g. unplaced devices), the layout still runs.
+      measurement.partitionMetrics = partition
+        ? partitionMetrics(document, resolver, validated.partition, partition)
+        : null;
       partition = validated.partition;
     } else if (partitionSource === "human") {
       measurement.partitionMetrics = partitionMetrics(
