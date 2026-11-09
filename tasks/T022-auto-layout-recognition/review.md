@@ -132,3 +132,31 @@ git status --short packages/edit-engine packages/model packages/derived packages
 git diff --stat a188149 -- <frozen files> → empty
 git ls-files | grep -E 'human-cases|auto-layout-eval/|tmp/' → no output
 ```
+
+## PR review fix — Opus, small fix
+
+Codex's PR review round 1 (P2) found a bug in `alignStackedLoads`: it read only MOS `D`/`S`.
+A BJT pair with a mirror load therefore kept the load crossed. Undefined Nets also
+matched each other.
+
+**Fix (Opus, a few lines):**
+
+- resolve channel pins per device with `channelPins` (MOS D/S, BJT C/E);
+- never match an undefined Net.
+
+**Test.** The new `stacks a BJT mirror load over its pair by collector` passes. With the
+old helper it fails: the load sits crossed, 420 units from its pair collector against
+320 to the other collector.
+
+**Known limit.** In template placement, the BJT collectors still land 10 units apart (MOS
+D sits at x = 10 in its symbol, BJT C at x = 0). The test asserts sides, not exact
+alignment.
+
+**Layout.** Human-case quick results are byte-identical to the accepted round.
+
+```text
+pnpm format:check / typecheck / lint → 0
+pnpm vitest run packages/auto-layout → 0; 284 passed
+pnpm deadcode | grep auto-layout → no output
+pnpm build → 0; pnpm auto-layout:eval tmp/human-cases (quick) → results identical to round 2
+```

@@ -324,3 +324,51 @@ it("places a shared PMOS tail above both pairs on their median axis", () => {
   )!;
   expect(pin.point.x).toBe((axes[0]! + axes[1]!) / 2);
 });
+
+it("stacks a BJT mirror load over its pair by collector", () => {
+  // Ids put the output before the reference, so the load must be reversed.
+  const d = circuit(
+    {
+      a: "npn",
+      b: "npn",
+      t: "current-source",
+      o: "pnp",
+      r: "pnp",
+      v: "voltage-source",
+      g: "ground",
+    },
+    {
+      emitters: ["a.E", "b.E", "t.+"],
+      ba: ["a.B"],
+      bb: ["b.B"],
+      left: ["a.C", "r.C", "r.B", "o.B"],
+      right: ["b.C", "o.C"],
+      supply: ["v.+", "r.E", "o.E"],
+      ground: ["v.-", "g.0", "t.-"],
+    },
+  );
+  const roles = classifyNets(d, resolver);
+  const groups = recognizeStructures(d, roles);
+  expect(groups.map((g) => [g.kind, g.members])).toEqual([
+    ["differential-pair", ["a", "b"]],
+    ["current-mirror", ["r", "o"]],
+  ]);
+  const result = placeDocument(
+    d,
+    resolver,
+    roles,
+    groups,
+    {},
+    undefined,
+    undefined,
+    "template",
+  );
+  expect(result.problem).toBeUndefined();
+  const pins = pinPoints(withPlacements(d, result.placements), resolver);
+  const collector = (id: string) =>
+    pins.find((p) => p.instanceId === id && p.pinName === "C")!.point.x;
+  // Each load collector stacks over its own pair collector, never crossed.
+  const gap = (x: string, y: string) => Math.abs(collector(x) - collector(y));
+  expect(gap("r", "a")).toBeLessThan(gap("r", "b"));
+  expect(gap("o", "b")).toBeLessThan(gap("o", "a"));
+});
