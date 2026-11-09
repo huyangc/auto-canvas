@@ -18,6 +18,7 @@ const coreKinds = [
   "current-mirror",
   "differential-pair",
   "differential-pair-mirror-load",
+  "common-gate-pair",
 ];
 const allKinds = [...coreKinds, "cross-coupled-pair", "matched-pair"];
 const read = (path) => readFileSync(path, "utf8");
@@ -194,6 +195,33 @@ async function loadbench(dir) {
         );
       }
     }
+    for (const n of nodes.filter((n) => n.name === "MosfetGateConnectedCouple"))
+      expected.push(
+        expectation("common-gate-pair", [
+          [
+            n.children
+              .filter((c) => c.name === "MosfetNormalArray")
+              .flatMap(devices),
+            "member",
+          ],
+        ]),
+      );
+    const cascodePairs = new Set([
+      "MosfetFoldedCascodeDifferentialPair",
+      "MosfetCascodedDifferentialPair",
+    ]);
+    const deferredByKind = Object.fromEntries(
+      allKinds
+        .filter((kind) => kind !== "common-gate-pair")
+        .map((kind) => [
+          kind,
+          [
+            ...new Set(
+              nodes.filter((n) => cascodePairs.has(n.name)).flatMap(devices),
+            ),
+          ],
+        ]),
+    );
     const rewritten = body(
       read(join(dirname(path), "example_run/CombinedTestBench.cir")),
     )
@@ -217,9 +245,14 @@ async function loadbench(dir) {
         ".model sky130_fd_pr__nfet_01v8_lvt nmos level=1\n.model sky130_fd_pr__pfet_01v8_lvt pmos level=1",
       ),
       expected,
+      deferredByKind,
       deferred: [
         ...new Set(
-          nodes.filter((n) => deferredKinds.has(n.name)).flatMap(devices),
+          nodes
+            .filter(
+              (n) => deferredKinds.has(n.name) && !cascodePairs.has(n.name),
+            )
+            .flatMap(devices),
         ),
       ],
     });
@@ -317,6 +350,67 @@ async function circuitgenome(dir) {
           );
       }
     }
+    // Independent module port labels, never recognizer output. A cascode is
+    // labeled only over an in-scope input pair: R90 needs a recognized anchor,
+    // and source-degenerated pairs are deferred, so their cascodes are too.
+    const commonGateDevices = new Set();
+    if (pair && /^(telescopic|folded)_cascode_load_/u.test(variants.load)) {
+      const hierarchy = read(path.replace("_flat.ckt", "_hier.ckt"));
+      const ports = hierarchy
+        .split(/\r?\n/u)
+        .find((l) => l.startsWith(`.subckt ${variants.load} `))
+        .trim()
+        .split(/\s+/u)
+        .slice(2);
+      const actual = hierarchy
+        .split(/\r?\n/u)
+        .find((l) => l.startsWith("Xload "))
+        .trim()
+        .split(/\s+/u)
+        .slice(1, -1);
+      const bindings = Object.fromEntries(ports.map((p, i) => [p, actual[i]]));
+      const bias = new Set(
+        ports.filter((p) => p.startsWith("bias")).map((p) => bindings[p]),
+      );
+      const anchors = [[bindings.in1, bindings.in2]];
+      const loads = lines.filter(
+        (l) => /^m/iu.test(l[0]) && l[0].endsWith("_load"),
+      );
+      for (let pass = 0; pass < loads.length; pass++) {
+        let added = false;
+        for (let i = 0; i < loads.length; i++)
+          for (const b of loads.slice(i + 1)) {
+            const a = loads[i];
+            if (
+              commonGateDevices.has(a[0]) ||
+              commonGateDevices.has(b[0]) ||
+              a[5] !== b[5] ||
+              a[2] !== b[2] ||
+              !bias.has(a[2]) ||
+              a[3] === b[3] ||
+              a[1] === b[1] ||
+              !anchors.some(
+                ([x, y]) =>
+                  (a[3] === x && b[3] === y) || (a[3] === y && b[3] === x),
+              )
+            )
+              continue;
+            expected.push(
+              expectation("common-gate-pair", [[[a[0], b[0]], "member"]]),
+            );
+            commonGateDevices.add(a[0]);
+            commonGateDevices.add(b[0]);
+            anchors.push([a[1], b[1]]);
+            added = true;
+          }
+        if (!added) break;
+      }
+    }
+    const deferredByKind = Object.fromEntries(
+      allKinds
+        .filter((k) => k !== "common-gate-pair")
+        .map((k) => [k, [...commonGateDevices]]),
+    );
     for (const l of lines) {
       const slot = Object.keys(variants).find((s) => l[0].endsWith(`_${s}`));
       const labeled =
@@ -327,7 +421,7 @@ async function circuitgenome(dir) {
             : slot === "load" &&
               (active ||
                 /^(resistor|current_source)_load_/u.test(variants.load));
-      if (!labeled) deferred.push(l[0]);
+      if (!labeled && !commonGateDevices.has(l[0])) deferred.push(l[0]);
     }
     result.push({
       id: relative(dir, path).replace("_flat.ckt", ""),
@@ -339,6 +433,7 @@ async function circuitgenome(dir) {
       ),
       expected,
       deferred,
+      deferredByKind,
       variants,
     });
   }
@@ -350,24 +445,44 @@ function evaluate(c, units) {
   const recognized = recognition.recognizeSubstructures?.(d, roles);
   if (!units && !recognized)
     throw new Error("Build the role-aware recognizer first");
+  const groups = units ? recognition.recognizeStructures(d, roles) : [];
   const predicted = units
-    ? recognition
-        .recognizeStructures(d, roles)
-        .filter((g) => g.kind !== "matched-pair")
-        .map((g) => ({
-          kind: g.kind,
-          members: Object.fromEntries([
-            ...g.members.map((id) => [
-              id,
-              g.kind === "current-mirror"
-                ? id === g.diodeInstanceId
-                  ? "reference"
-                  : "output"
-                : "input",
+    ? groups.flatMap((g) => {
+        const common = recognized?.structures.find(
+          (s) =>
+            s.kind === "common-gate-pair" &&
+            g.members.every((id) =>
+              s.members.some((m) => m.instanceIds.includes(id)),
+            ),
+        );
+        if (g.kind === "matched-pair" && !common) return [];
+        const tailUnit = groups.find(
+          (t) => t.facing === "outward" && t.members.includes(g.tailInstanceId),
+        );
+        return [
+          {
+            kind: common ? "common-gate-pair" : g.kind,
+            members: Object.fromEntries([
+              ...g.members.map((id) => [
+                id,
+                common
+                  ? "member"
+                  : g.kind === "current-mirror"
+                    ? id === g.diodeInstanceId
+                      ? "reference"
+                      : "output"
+                    : "input",
+              ]),
+              ...(g.tailInstanceId
+                ? (tailUnit?.members ?? [g.tailInstanceId]).map((id) => [
+                    id,
+                    "tail",
+                  ])
+                : []),
             ]),
-            ...(g.tailInstanceId ? [[g.tailInstanceId, "tail"]] : []),
-          ]),
-        }))
+          },
+        ];
+      })
     : recognized.structures.map(flat);
   return {
     id: c.id,
@@ -375,6 +490,7 @@ function evaluate(c, units) {
     expected: c.expected,
     predicted,
     deferred: c.deferred,
+    deferredByKind: c.deferredByKind,
     labeledKinds: (c.source === "hand" ? allKinds : coreKinds).filter(
       (kind) => !units || kind !== "matched-pair",
     ),
@@ -469,6 +585,7 @@ if (flags.has("--emit-cases")) {
       ),
       expected: c.expected,
       deferred: c.deferred,
+      deferredByKind: c.deferredByKind,
       provenance: {
         tool: "CircuitGenome",
         version: "0.3.0",

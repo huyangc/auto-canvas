@@ -10,7 +10,7 @@ import {
   polarity,
   type NetRoles,
 } from "./net-roles.js";
-import { compareIds } from "./recognize.js";
+import { compareIds, facesOutward } from "./recognize.js";
 import {
   deviceNets,
   devicePins,
@@ -216,9 +216,12 @@ export function deviceRows(
     const tailRows = pairs.map(
       (g) => nodes.find((n) => n.id === g.id)!.row + (above ? -1 : 1),
     );
+    const splitTail = groups.some(
+      (g) => g.facing === "outward" && g.members.includes(tail),
+    );
     node.row = above
-      ? Math.min(node.row, ...tailRows)
-      : Math.max(node.row, ...tailRows);
+      ? Math.min(...(splitTail ? tailRows : [node.row, ...tailRows]))
+      : Math.max(...(splitTail ? tailRows : [node.row, ...tailRows]));
     // The node may be a whole group (a tail that is also a mirror member).
     for (const id of node.members)
       placements.get(id)!.position.y = node.row * ROW_PITCH;
@@ -466,9 +469,7 @@ export function assignColumns(
     if (!g) continue;
     g.members.forEach((id, index) => {
       targets.get(id)!.mirror =
-        (g.kind === "differential-pair") === (index === 0)
-          ? "none"
-          : "horizontal";
+        facesOutward(g) === (index === 0) ? "none" : "horizontal";
     });
   }
   // R18 derives relative group pitches before their axes enter compaction.
@@ -616,7 +617,11 @@ export function assignColumns(
       align(
         nodeByMember.get(pairs[0]!.members[0])!,
         nodeByMember.get(tail)!,
-        contact ? -localPin(tail, contact.q).x : 0,
+        groups.some((g) => g.facing === "outward" && g.members.includes(tail))
+          ? 0
+          : contact
+            ? -localPin(tail, contact.q).x
+            : 0,
       );
     }
   }
@@ -718,9 +723,15 @@ export function assignColumns(
       const target = targets.get(tail)!;
       const local = localPin(tail, contact.q).x - target.position.x;
       const x = Math.round((median(axes) - local) / grid) * grid;
-      const delta = x - target.position.x;
-      // A tail can be a mirror member: its group moves whole, keeping its pitch.
+      // A tail can be a mirror or split-tail member; move its whole unit.
       const group = groups.find((g) => g.members.includes(tail));
+      const delta =
+        group?.facing === "outward"
+          ? Math.round(median(axes) / grid) * grid -
+            (targets.get(group.members[0])!.position.x +
+              targets.get(group.members[1])!.position.x) /
+              2
+          : x - target.position.x;
       for (const id of group?.members ?? [tail])
         targets.get(id)!.position.x += delta;
     }

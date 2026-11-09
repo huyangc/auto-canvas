@@ -1206,5 +1206,342 @@
       "command": "circuitgenome synthesize --topology two_stage_opamp_fully_differential --format both --output-dir two_stage_opamp_fully_differential",
       "license": "MIT License, Copyright (c) 2026 Analog ML"
     }
+  },
+  {
+    "id": "complementary-folded-cascode",
+    "source": "hand",
+    "symbols": {
+      "a": "nmos",
+      "b": "nmos",
+      "c": "nmos",
+      "d": "nmos",
+      "p": "pmos",
+      "q": "pmos",
+      "r": "pmos",
+      "s": "pmos",
+      "pt": "pmos",
+      "t1": "nmos",
+      "t2": "nmos",
+      "vdd": "vdd-port",
+      "gnd": "ground",
+      "bias-port": "port",
+      "pbias-port": "port",
+      "tbias1-port": "port",
+      "tbias2-port": "port"
+    },
+    "nets": {
+      "left": ["a.D", "c.S"],
+      "in1": ["a.G", "p.G"],
+      "tail": ["a.S", "b.S", "t1.D", "t2.D"],
+      "right": ["b.D", "d.S"],
+      "in2": ["b.G", "q.G"],
+      "out1": ["c.D", "r.D"],
+      "bias": ["c.G", "d.G", "bias-port.P"],
+      "out2": ["d.D", "s.D"],
+      "pleft": ["p.D", "r.S"],
+      "ptail": ["p.S", "q.S", "pt.D"],
+      "pright": ["q.D", "s.S"],
+      "pbias": ["r.G", "s.G", "pbias-port.P"],
+      "ptbias": ["pt.G"],
+      "vdd": ["pt.S", "vdd.P"],
+      "tbias1": ["t1.G", "tbias1-port.P"],
+      "gnd": ["t1.S", "t2.S", "gnd.0"],
+      "tbias2": ["t2.G", "tbias2-port.P"]
+    },
+    "expected": [
+      {
+        "kind": "differential-pair",
+        "members": {
+          "a": "input",
+          "b": "input",
+          "t1": "tail",
+          "t2": "tail"
+        }
+      },
+      {
+        "kind": "differential-pair",
+        "members": {
+          "p": "input",
+          "q": "input",
+          "pt": "tail"
+        }
+      },
+      {
+        "kind": "common-gate-pair",
+        "members": {
+          "c": "member",
+          "d": "member"
+        }
+      },
+      {
+        "kind": "common-gate-pair",
+        "members": {
+          "r": "member",
+          "s": "member"
+        }
+      }
+    ]
+  },
+  {
+    "id": "telescopic-cascode",
+    "source": "hand",
+    "symbols": {
+      "a": "nmos",
+      "b": "nmos",
+      "c": "nmos",
+      "d": "nmos",
+      "r": "pmos",
+      "s": "pmos",
+      "vdd": "vdd-port"
+    },
+    "nets": {
+      "left": ["a.D", "c.S"],
+      "in1": ["a.G"],
+      "tail": ["a.S", "b.S"],
+      "right": ["b.D", "d.S"],
+      "in2": ["b.G"],
+      "out1": ["c.D", "r.D", "r.G", "s.G"],
+      "bias": ["c.G", "d.G"],
+      "out2": ["d.D", "s.D"],
+      "vdd": ["r.S", "s.S", "vdd.P"]
+    },
+    "expected": [
+      {
+        "kind": "differential-pair",
+        "members": {
+          "a": "input",
+          "b": "input"
+        }
+      },
+      {
+        "kind": "common-gate-pair",
+        "members": {
+          "c": "member",
+          "d": "member"
+        }
+      },
+      {
+        "kind": "current-mirror",
+        "members": {
+          "r": "reference",
+          "s": "output"
+        }
+      },
+      {
+        "kind": "differential-pair-mirror-load",
+        "members": {
+          "a": "input-reference-side",
+          "b": "input-output-side",
+          "r": "load-reference",
+          "s": "load-output"
+        }
+      }
+    ]
+  },
+  {
+    "id": "common-gate-chain",
+    "source": "hand",
+    "symbols": {
+      "a": "nmos",
+      "b": "nmos",
+      "c": "nmos",
+      "d": "nmos",
+      "e": "nmos",
+      "f": "nmos"
+    },
+    "nets": {
+      "left": ["a.D", "c.S"],
+      "in1": ["a.G"],
+      "tail": ["a.S", "b.S"],
+      "right": ["b.D", "d.S"],
+      "in2": ["b.G"],
+      "out1": ["c.D", "e.S"],
+      "bias": ["c.G", "d.G"],
+      "out2": ["d.D", "f.S"],
+      "top1": ["e.D"],
+      "bias2": ["e.G", "f.G"],
+      "top2": ["f.D"]
+    },
+    "expected": [
+      {
+        "kind": "differential-pair",
+        "members": {
+          "a": "input",
+          "b": "input"
+        }
+      },
+      {
+        "kind": "common-gate-pair",
+        "members": {
+          "c": "member",
+          "d": "member"
+        }
+      },
+      {
+        "kind": "common-gate-pair",
+        "members": {
+          "e": "member",
+          "f": "member"
+        }
+      }
+    ]
+  },
+  {
+    "id": "common-gate-unanchored",
+    "source": "hand",
+    "symbols": {
+      "c": "nmos",
+      "d": "nmos"
+    },
+    "nets": {
+      "out1": ["c.D"],
+      "bias": ["c.G", "d.G"],
+      "left": ["c.S"],
+      "out2": ["d.D"],
+      "right": ["d.S"]
+    },
+    "expected": []
+  },
+  {
+    "id": "common-gate-one-side",
+    "source": "hand",
+    "symbols": {
+      "a": "nmos",
+      "b": "nmos",
+      "c": "nmos",
+      "d": "nmos"
+    },
+    "nets": {
+      "left": ["a.D", "c.S", "d.S"],
+      "in1": ["a.G"],
+      "tail": ["a.S", "b.S"],
+      "right": ["b.D"],
+      "in2": ["b.G"],
+      "out1": ["c.D"],
+      "bias": ["c.G", "d.G"],
+      "out2": ["d.D"]
+    },
+    "expected": [
+      {
+        "kind": "differential-pair",
+        "members": {
+          "a": "input",
+          "b": "input"
+        }
+      },
+      {
+        "kind": "matched-pair",
+        "members": {
+          "c": "member",
+          "d": "member"
+        }
+      }
+    ]
+  },
+  {
+    "id": "three-parallel-tails",
+    "source": "hand",
+    "symbols": {
+      "a": "nmos",
+      "b": "nmos",
+      "t0": "nmos",
+      "t1": "nmos",
+      "t2": "nmos",
+      "gnd": "ground"
+    },
+    "nets": {
+      "left": ["a.D"],
+      "in1": ["a.G"],
+      "tail": ["a.S", "b.S", "t0.D", "t1.D", "t2.D"],
+      "right": ["b.D"],
+      "in2": ["b.G"],
+      "bias0": ["t0.G"],
+      "gnd": ["t0.S", "t1.S", "t2.S", "gnd.0"],
+      "bias1": ["t1.G"],
+      "bias2": ["t2.G"]
+    },
+    "expected": [
+      {
+        "kind": "differential-pair",
+        "members": {
+          "a": "input",
+          "b": "input"
+        }
+      }
+    ]
+  },
+  {
+    "id": "different-source-tails",
+    "source": "hand",
+    "symbols": {
+      "a": "nmos",
+      "b": "nmos",
+      "t1": "nmos",
+      "t2": "nmos"
+    },
+    "nets": {
+      "left": ["a.D"],
+      "in1": ["a.G"],
+      "tail": ["a.S", "b.S", "t1.D", "t2.D"],
+      "right": ["b.D"],
+      "in2": ["b.G"],
+      "bias1": ["t1.G"],
+      "s1": ["t1.S"],
+      "bias2": ["t2.G"],
+      "s2": ["t2.S"]
+    },
+    "expected": [
+      {
+        "kind": "differential-pair",
+        "members": {
+          "a": "input",
+          "b": "input"
+        }
+      }
+    ]
+  },
+  {
+    "id": "common-gate-conflicting-anchors",
+    "source": "hand",
+    "symbols": {
+      "p": "nmos",
+      "q": "nmos",
+      "r": "nmos",
+      "s": "nmos",
+      "a": "nmos",
+      "b": "nmos",
+      "c": "nmos"
+    },
+    "nets": {
+      "tail1": ["p.S", "q.S"],
+      "tail2": ["r.S", "s.S"],
+      "left": ["p.D", "r.D", "a.S"],
+      "right": ["q.D", "b.S"],
+      "third": ["s.D", "c.S"],
+      "bias": ["a.G", "b.G", "c.G"],
+      "input-p": ["p.G"],
+      "input-q": ["q.G"],
+      "input-r": ["r.G"],
+      "input-s": ["s.G"],
+      "out-a": ["a.D"],
+      "out-b": ["b.D"],
+      "out-c": ["c.D"]
+    },
+    "expected": [
+      {
+        "kind": "differential-pair",
+        "members": {
+          "p": "input",
+          "q": "input"
+        }
+      },
+      {
+        "kind": "differential-pair",
+        "members": {
+          "r": "input",
+          "s": "input"
+        }
+      }
+    ]
   }
 ]

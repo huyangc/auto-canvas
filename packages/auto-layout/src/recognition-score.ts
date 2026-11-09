@@ -10,6 +10,7 @@ export interface RecognitionCase {
   expected: RecognitionExpectation[];
   predicted: RecognitionExpectation[];
   deferred?: string[];
+  deferredByKind?: Record<string, string[]>;
   labeledKinds: string[];
   ambiguousTailInputs?: string[][];
 }
@@ -58,19 +59,25 @@ export function scoreRecognition(cases: RecognitionCase[]) {
   }[] = [];
   for (const c of cases) {
     const deferred = new Set(c.deferred);
+    const isDeferred = (id: string, kind: string) =>
+      deferred.has(id) || (c.deferredByKind?.[kind]?.includes(id) ?? false);
     const eligible = (s: RecognitionExpectation) =>
-      !Object.keys(s.members).some((id) => deferred.has(id));
+      !Object.keys(s.members).some((id) => isDeferred(id, s.kind));
     const expected = c.expected.filter(eligible);
     const predicted = c.predicted
       .map((s) => {
         const members = Object.entries(s.members);
-        if (!members.some(([id, role]) => role === "tail" && deferred.has(id)))
+        if (
+          !members.some(
+            ([id, role]) => role === "tail" && isDeferred(id, s.kind),
+          )
+        )
           return s;
         return {
           ...s,
           members: Object.fromEntries(
             members.filter(
-              ([id, role]) => role !== "tail" || !deferred.has(id),
+              ([id, role]) => role !== "tail" || !isDeferred(id, s.kind),
             ),
           ),
           tailUnlabeled: true,

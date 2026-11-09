@@ -60,6 +60,7 @@ AutoLayoutDiagnostic[] }`. Fixed instances retain their exact placements;
   supporting evidence (R81). Finally, on compatible branches belonging to no
   mirror, pair or cross-coupled structure, retain the id-ordered matched rule:
   both diode-connected or shared G, and shared S or D, with `member` roles.
+  R90 then recognizes anchored common-gate pairs outside those structures.
   Structures can overlap and recognition ignores persisted layout groups;
   R83 selects the movement units consumed by placement.
 - **R6a — Power markers.** On each net, sort ground/VDD markers by id and
@@ -487,7 +488,8 @@ pins }` lists, never Net ids.
   with drain/collector on N; a current source with + on N for n pairs or − on
   N for p pairs and its other terminal off N; or a resistor between N and
   ground for n pairs or supply for p pairs. Exactly one candidate gets the
-  `tail` role; several give a tail ambiguity and no tail. Zero candidates
+  `tail` role; two qualifying parallel branches get both tail roles under R91.
+  Other multiple candidates give a tail ambiguity and no tail. Zero candidates
   leaves a valid pair without a tail. One tail may support multiple pairs.
   Placement uses the pair members' polarity: the tail lies one row below n
   pairs or above p pairs, including shared tails and tails in mirror units.
@@ -502,13 +504,16 @@ pins }` lists, never Net ids.
   ambiguous. Other mirror outputs are not members of that composite.
 
 - **R83 — Movement units and persisted groups.** Choose units in cross-coupled,
-  differential-pair, mirror, matched order. A unit has two ascending branch
-  representatives, unless the existing stacked-load reversal aligns it with
-  the pair's drains. Skip a unit if either representative already belongs to
+  differential-pair, mirror, common-gate, matched order. Split tails form their
+  own matched unit. A unit has two ascending branch
+  representatives, unless stacked-unit alignment follows its anchor's left/right
+  channel Nets, including chains. Skip a unit if either representative already belongs to
   a unit or persisted layout group. Tails may overlap units. Mirror partners
   prefer an output in a composite whose pair is already a unit; otherwise
   choose the lowest output representative. Keep `diodeInstanceId` and
-  `tailInstanceId` as representatives. Cross-coupled units use `matched-pair`.
+  `tailInstanceId` as representatives. Cross-coupled and common-gate units use
+  `matched-pair`. Facing defaults to outward for differential pairs and inward
+  for other kinds; R92 permits an explicit override.
   Ids remain `auto-<kind>-<lower member id>`.
   Sorted `extraMemberIds` holds other outputs and fingers, excluding tails
   and existing layout-group members; omit an empty list. Extra members place
@@ -523,13 +528,16 @@ pins }` lists, never Net ids.
 
 - **R84 — Recognition benchmark.** Committed JSON cases contain `id`, `source`,
   `symbols`, `nets` (`instance.pin` lists), optional `models` and `deferred`,
-  and `expected` structures with instance-to-role maps. Expectations can mark
+  optional `deferredByKind: {kind: ids[]}`, and `expected` structures with
+  instance-to-role maps, including `common-gate-pair` with two `member` roles
+  and pairs with two `tail` members. Expectations can mark
   `tailUnlabeled`. The scorer matches equal instance sets of the same kind
   one-to-one; exact matches additionally require every role equal. Exclude
   unlabeled tails from comparison. Before checking prediction eligibility,
   remove any deferred tail member and compare that structure as tail-unlabeled,
   including composites. Exclude any expected or remaining predicted structure
-  containing a deferred instance. Score only kinds labeled by each source;
+  containing a deferred instance, globally or for its kind. Score only kinds
+  labeled by each source;
   count other predictions separately. Precision is matched/predicted, recall
   matched/expected, and exact rate exact/expected; an empty denominator yields
   one. Report labeled-tail outcomes (correct, wrong, missed, ambiguous) and
@@ -539,20 +547,27 @@ pins }` lists, never Net ids.
   models. Merge XML simple mirrors by reference-device set; label normal-array
   pair inputs, leaving tails unlabeled, and label composites by drain Nets.
   Defer devices in cascode, wide-swing, Wilson, improved-Wilson mirrors,
-  folded/cascoded differential pairs and voltage references.
+  folded/cascoded differential pairs and voltage references. Label every
+  `MosfetGateConnectedCouple` by its two normal arrays; for common-gate scoring
+  only, folded/cascoded differential pairs are not deferred. Cascode-mirror
+  deferral still applies.
   CircuitGenome conversion strips the flat subcircuit wrapper, grounds gnd!,
   adds supply/models and reads hierarchical slot variants. Label ordinary
   input pairs, simple mirror/resistor tails and active mirror loads, including
   same-gate/source outputs anywhere in the circuit. Defer every other slot or
   variant except ordinary resistor/current-source loads, which label no
-  structure. Pair and composite expectations leave tails unlabeled whenever
+  structure. Telescopic/folded load variants also label same-bias-gate pairs
+  whose sources are in1/in2 or the drains of an already-labeled common-gate
+  pair, using hierarchical bias port bindings. Those devices remain deferred
+  for other kinds. Pair and composite expectations leave tails unlabeled whenever
   the tail_current slot is deferred. Imported committed cases carry explicit ground markers and MIT
   provenance. No local dataset or human drawing is required by tests.
   Run `pnpm auto-layout:recognition [--loadbench <dir>] [--circuitgenome <dir>]
 [--units] [--out <file>]`. It always scores committed cases, prints source
   and kind tables and optionally writes JSON mismatches. `--units` scores the
   placement representation (mirror reference/output and pair input/tail),
-  ignoring matched units. `--emit-cases <file>` with `--circuitgenome` emits up
+  including common-gate units by their recognized identity and both split tails,
+  but ignoring ordinary matched units. `--emit-cases <file>` with `--circuitgenome` emits up
   to six attributed fixtures totaling less than 20 KB. Hand cases require
   exact recognition under three seeded bijective renames and order shuffles.
 
@@ -585,6 +600,43 @@ pins }` lists, never Net ids.
   and coordinate; only non-axis-aligned segments may be scanned. This is an
   optional path-length cost, zero by default, leaving Agent/editor routing
   unchanged. Net order and placement are unchanged.
+
+- **R90 — Anchored common-gate pairs.** Two compatible branches sharing G,
+  with distinct non-rail S and distinct D, neither diode-connected nor D=S,
+  outside mirror, differential, cross-coupled and matched structures, are
+  candidates. Accept only if their two sources match a recognized symmetric
+  unit's two drains by side, or their two drains match its two sources.
+  Symmetric anchors are differential, cross-coupled, matched or common-gate
+  pairs. Iterate to a fixed point. Reachable candidates sharing a branch are
+  ambiguous; reject both rather than choosing by id, and do not use rejected
+  anchors to support a chain. Each accepted structure has two `member` roles.
+  Movement and persistence use `matched-pair`, aligned by the anchor's sides.
+  A mirror on a common-gate chain's drains also forms the input pair's
+  composite, preserving the input-reference/output sides and its tails.
+
+- **R91 — Split tails.** Exactly two tail candidates on a pair's common-source
+  Net N are split tails when both are same-polarity transistors with D on N,
+  compatible families, the same S Net and distinct connected G Nets. Both
+  carry `tail`; composites include both. The pair's `tailInstanceId` is the
+  lower representative. The two tail representatives form a `matched-pair`
+  movement unit with `facing: "outward"`, centered on the pair axis one row
+  toward the supply. Other multiple-candidate cases remain ambiguous under R81.
+
+- **R92 — Template facing.** `RecognizedGroup.facing` optionally selects
+  `inward` or `outward`. The default is outward for differential pairs and
+  inward for all other kinds. Template and layered placement both use it:
+  outward means left unmirrored/right horizontally mirrored; inward reverses
+  those orientations. Only split-tail units set an explicit facing. Their
+  single-host gate ports use the existing R71 seats.
+
+- **R93 — Two-gate axis seats.** In the R71 local-seat pass, in port id order,
+  a non-rail port whose Net reaches exactly two device pins, both gates
+  (MOS G or BJT B), gets an axis seat if the gates lie on one horizontal line
+  and their exits face each other. Place it at the midpoint x, half
+  `CELL_PIN_OFFSET` (snapped to the grid) above the gate line, facing that
+  line with R71's orientation. If the R71 overlap check rejects it, try below.
+  If both seats overlap, use unchanged R19/R20 edge seating. This rule reads
+  geometry, not recognition, and honors fixed ports and forced edge reseating.
 
 - **Existing locks and conflicts.** Members of a locked layout group or
   constraint are treated as fixed instances under R1, because the Edit Engine

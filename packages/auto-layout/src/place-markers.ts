@@ -2,7 +2,12 @@ import { visibleSymbolInkBounds } from "@icm/derived";
 import { deviceDescriptor } from "@icm/devices";
 import type { Instance, SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
-import { classifyNets, isMos, type NetRoles } from "./net-roles.js";
+import {
+  channelPins,
+  classifyNets,
+  isMos,
+  type NetRoles,
+} from "./net-roles.js";
 import { compareIds } from "./recognize.js";
 import {
   CELL_PIN_OFFSET,
@@ -202,6 +207,7 @@ function placeCellPins(
         vertical,
         net,
         count: connected.length,
+        connected,
         singleHost:
           !roles.rails.has(net ?? "") && connected.length === 1
             ? connected[0]
@@ -209,24 +215,62 @@ function placeCellPins(
         coordinate: snap(vertical ? host.y : host.x),
       };
     });
-  // R71: reserve safe single-host seats first; blocked seats use R19/R20.
+  // R71/R93: reserve local seats in id order; blocked seats use R19/R20.
   for (const entry of [...entries].sort((a, b) => compareIds(a.i.id, b.i.id))) {
+    if (edgeOnly.has(entry.i.id) || frozen.has(entry.i.id)) continue;
+    const exitAt = (host: PinPoint) => {
+      const instance = deviceDocument.instances.find(
+        (i) => i.id === host.instanceId,
+      )!;
+      const pin = devicePins(instance, resolver).find(
+        (p) => p.name === host.pinName,
+      )!;
+      return pinExit(pin, targets.get(instance.id)!);
+    };
+    const seats: Placement[] = [];
     const host = entry.singleHost;
-    if (!host || edgeOnly.has(entry.i.id) || frozen.has(entry.i.id)) continue;
-    const instance = deviceDocument.instances.find(
-      (i) => i.id === host.instanceId,
-    )!;
-    const pin = devicePins(instance, resolver).find(
-      (p) => p.name === host.pinName,
-    )!;
-    const exit = pinExit(pin, targets.get(instance.id)!);
-    const p = placement(
-      snap(host.point.x + exit.x * CELL_PIN_OFFSET),
-      snap(host.point.y + exit.y * CELL_PIN_OFFSET),
-      exit.x > 0 ? "horizontal" : "none",
-      exit.y < 0 ? 90 : exit.y > 0 ? 270 : 0,
-    );
-    targets.set(entry.i.id, p);
+    if (host) {
+      const exit = exitAt(host);
+      seats.push(
+        placement(
+          snap(host.point.x + exit.x * CELL_PIN_OFFSET),
+          snap(host.point.y + exit.y * CELL_PIN_OFFSET),
+          exit.x > 0 ? "horizontal" : "none",
+          exit.y < 0 ? 90 : exit.y > 0 ? 270 : 0,
+        ),
+      );
+    } else if (
+      !roles.rails.has(entry.net ?? "") &&
+      entry.connected.length === 2
+    ) {
+      const [left, right] = [...entry.connected].sort(
+        (a, b) => a.point.x - b.point.x,
+      ) as [PinPoint, PinPoint];
+      const gates = [left, right].every((p) => {
+        const instance = deviceDocument.instances.find(
+          (i) => i.id === p.instanceId,
+        )!;
+        return channelPins(instance.symbolId)?.gate === p.pinName;
+      });
+      const a = exitAt(left),
+        b = exitAt(right);
+      if (
+        gates &&
+        left.point.y === right.point.y &&
+        left.point.x < right.point.x &&
+        a.x > 0 &&
+        b.x < 0 &&
+        a.y === 0 &&
+        b.y === 0
+      ) {
+        const x = snap((left.point.x + right.point.x) / 2),
+          offset = snap(CELL_PIN_OFFSET / 2);
+        seats.push(
+          placement(x, snap(left.point.y - offset), "none", 90),
+          placement(x, snap(left.point.y + offset), "none", 270),
+        );
+      }
+    }
     const occupied = document.instances.filter(
       (i) =>
         i.id === entry.i.id ||
@@ -235,15 +279,20 @@ function placeCellPins(
         i.symbolId === "vdd-port" ||
         placed.has(i.id),
     );
-    if (
-      !geometryProblem(
-        withPlacements({ ...document, instances: occupied }, targets),
-        resolver,
-      )
-    ) {
-      placed.add(entry.i.id);
-      choices.sides.delete(entry.i.id);
-    } else targets.delete(entry.i.id);
+    for (const p of seats) {
+      targets.set(entry.i.id, p);
+      if (
+        !geometryProblem(
+          withPlacements({ ...document, instances: occupied }, targets),
+          resolver,
+        )
+      ) {
+        placed.add(entry.i.id);
+        choices.sides.delete(entry.i.id);
+        break;
+      }
+      targets.delete(entry.i.id);
+    }
   }
   for (const side of ["left", "right", "top", "bottom"]) {
     const members = entries.filter(

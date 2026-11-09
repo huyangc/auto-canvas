@@ -9,7 +9,7 @@ import {
   polarity,
   type NetRoles,
 } from "./net-roles.js";
-import { compareIds } from "./recognize.js";
+import { compareIds, facesOutward } from "./recognize.js";
 import {
   COLUMN_PITCH,
   MEMBER_PITCH,
@@ -98,7 +98,7 @@ function expandTemplates(
   const axes = new Map<string, number>();
   const pitchOffsets = new Map<string, number>();
   const mirror = (g: RecognizedGroup, index: number): Placement["mirror"] =>
-    (g.kind === "differential-pair") === (index === 0) ? "none" : "horizontal";
+    facesOutward(g) === (index === 0) ? "none" : "horizontal";
   const channel = (id: string) => {
     const instance = document.instances.find((i) => i.id === id)!;
     const pins = channelPins(instance.symbolId);
@@ -169,8 +169,14 @@ function expandTemplates(
     const target = targets.get(tail) ?? placement(0, row * ROW_PITCH);
     const { q } = shared(g.members[0], tail)[0] ?? {};
     const offset = q ? transformPoint(q.at, { x: 0, y: 0 }, target).x : 0;
-    const delta = axis - offset - target.position.x;
     const tailGroup = groups.find((other) => other.members.includes(tail));
+    const delta =
+      tailGroup?.facing === "outward"
+        ? axis -
+          (targets.get(tailGroup.members[0])!.position.x +
+            targets.get(tailGroup.members[1])!.position.x) /
+            2
+        : axis - offset - target.position.x;
     for (const id of tailGroup?.members ?? [tail]) {
       const member = targets.get(id) ?? target;
       rows.set(id, row);
