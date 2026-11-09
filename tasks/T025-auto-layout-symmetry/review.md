@@ -142,3 +142,24 @@ never by id) were inspected and sent to the user: the fully differential OTA and
 switched-capacitor comparator now mirror all 10 pairs each; the 70-instance mixer goes
 85 → 49 crossings with 9 of 9 pairs mirrored; the two-stage amplifier with common-mode
 feedback pays 52 → 66 crossings for 12 of 12 mirrored pairs.
+
+### PR 29 codex review, round 1 (head `43cc3f2`): two P2 findings, both hold, both fixed by Opus
+
+- **BJT block skipped by the layered strategy.** `placeDocument`'s layered branch ran
+  only when a MOS device had distinct drain and source Nets, so a BJT-only differential
+  pair went to `placeFallback` and its detected block got no R89 geometry (partners both
+  mirror `none`; the finishing exclusions then kept them so). The portfolio still picked
+  the mirrored template result, so no human drawing changed. Fix: the layered branch also
+  runs when a symmetry component exists (`place.ts`, two lines). Regression: "gives a
+  BJT-only block the R89 layout in the layered strategy".
+- **Axis-run gap shrank below 40 after grid snapping.** Run offsets reserved exactly 40
+  units from fractional visible bounds; the later per-origin snap could move the two
+  origins in opposite directions (a current source and an inductor on the tail Net ended
+  32.24 apart). Fix: origins inside a run now differ by grid multiples chosen so the gap
+  is in `[40, 40 + grid)`, so the snap moves them together (`layered.ts` `symmetryRows`,
+  nine lines). Regression: "keeps at least 40 units inside an axis run after grid
+  snapping" in all three strategies.
+
+Both are fixes of a few lines found in review (CLAUDE.md); they are committed on top of
+the reviewed head and the PR review hook reruns on the new head. Acceptance rerun after
+the fixes is recorded in the PR.

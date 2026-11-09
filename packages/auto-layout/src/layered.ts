@@ -369,12 +369,20 @@ function symmetryRows(
     for (const row of ordered) {
       const run = row.flatMap((n) => n.members).filter((id) => axisIds.has(id));
       if (!run.length) continue;
-      let edge = 0;
+      // Origins in a run differ by grid multiples, so the later per-origin
+      // snap moves them together and the 40-unit gap survives (at least 40,
+      // less than 40 + grid).
+      const grid = document.presentation.grid;
       const offsets = new Map<string, number>();
+      let origin = 0;
+      let right = -Infinity;
       for (const id of run) {
         const b = bounds.find((b) => b.id === id)!.bounds;
-        offsets.set(id, edge - (b.x - placed.get(id)!.position.x));
-        edge += b.width + 40;
+        const inset = b.x - placed.get(id)!.position.x;
+        if (right !== -Infinity)
+          origin += Math.ceil((right + 40 - inset - origin) / grid) * grid;
+        offsets.set(id, origin);
+        right = origin + inset + b.width;
       }
       const pinCentre = (id: string) => {
         const i = half.find((i) => i.id === id)!;

@@ -535,3 +535,91 @@ it("keeps paired capacitors inside their block instead of seating one as a stage
     placed.get("a")!.position.x + placed.get("b")!.position.x,
   );
 });
+
+it("gives a BJT-only block the R89 layout in the layered strategy", async () => {
+  const { placeDocument } = await import("../src/place.js");
+  const { recognizeStructures } = await import("../src/recognize.js");
+  const { pinPoints, withPlacements } = await import("../src/geometry.js");
+  const { reflectOrientation } = await import("@icm/model");
+  const d = circuit(
+    { a: "npn", b: "npn", t: "current-source", g: "ground", v: "vdd-port" },
+    {
+      tail: ["a.E", "b.E", "t.+"],
+      ba: ["a.B"],
+      bb: ["b.B"],
+      ca: ["a.C"],
+      cb: ["b.C"],
+      gnd: ["t.-", "g.0"],
+      vdd: ["v.P"],
+    },
+  );
+  const roles = classifyNets(d, resolver);
+  expect(detect(d)).toEqual([
+    { pairs: [["a", "b"]], axis: ["t"], conflicted: [] },
+  ]);
+  const result = placeDocument(
+    d,
+    resolver,
+    roles,
+    recognizeStructures(d, roles),
+    {},
+    undefined,
+    undefined,
+    "layered",
+  );
+  expect(result.problem).toBeUndefined();
+  const a = result.placements.get("a")!,
+    b = result.placements.get("b")!;
+  expect(b.position.y).toBe(a.position.y);
+  expect({ rotation: b.rotation, mirror: b.mirror }).toEqual(
+    reflectOrientation(a, "left-right"),
+  );
+  const pins = pinPoints(withPlacements(d, result.placements), resolver);
+  const x = (id: string, pin: string) =>
+    pins.find((p) => p.instanceId === id && p.pinName === pin)!.point.x;
+  expect(x("a", "C") + x("b", "C")).toBe(2 * x("t", "+"));
+});
+
+it.each(["layered", "stages", "template"] as const)(
+  "keeps at least 40 units inside an axis run after grid snapping in %s",
+  async (strategy) => {
+    const { placeDocument } = await import("../src/place.js");
+    const { recognizeStructures } = await import("../src/recognize.js");
+    const { withPlacements } = await import("../src/geometry.js");
+    const { visibleInstanceBounds } = await import("@icm/derived");
+    // Fractional symbol widths: a current source and an inductor on the axis.
+    const d = circuit(
+      { a: "nmos", b: "nmos", t: "current-source", l: "inductor", g: "ground" },
+      {
+        tail: ["a.S", "b.S", "t.+", "l.1"],
+        ga: ["a.G"],
+        gb: ["b.G"],
+        da: ["a.D"],
+        db: ["b.D"],
+        gnd: ["t.-", "l.2", "g.0"],
+      },
+    );
+    const roles = classifyNets(d, resolver);
+    expect(detect(d)[0]!.axis).toEqual(["l", "t"]);
+    const result = placeDocument(
+      d,
+      resolver,
+      roles,
+      recognizeStructures(d, roles),
+      {},
+      undefined,
+      undefined,
+      strategy,
+    );
+    expect(result.problem).toBeUndefined();
+    const run = visibleInstanceBounds(
+      withPlacements(d, result.placements),
+      resolver,
+    )
+      .filter((b) => ["t", "l"].includes(b.id))
+      .sort((p, q) => p.bounds.x - q.bounds.x);
+    const gap = run[1]!.bounds.x - run[0]!.bounds.x - run[0]!.bounds.width;
+    expect(gap).toBeGreaterThanOrEqual(40);
+    expect(gap).toBeLessThan(40 + d.presentation.grid);
+  },
+);

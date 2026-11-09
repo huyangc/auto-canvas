@@ -213,7 +213,7 @@ export function placeDocument(
       topology,
     );
   } else if (
-    devices.some((i) => {
+    (devices.some((i) => {
       const drain = roles.pinNet(i.id, "D");
       const source = roles.pinNet(i.id, "S");
       return (
@@ -222,7 +222,9 @@ export function placeDocument(
         source !== undefined &&
         drain !== source
       );
-    }) &&
+    }) ||
+      // R94: a detected block (BJT pairs included) always gets the R89 layout.
+      symmetry.length > 0) &&
     levels.edges.length
   ) {
     const rows = deviceRows(
