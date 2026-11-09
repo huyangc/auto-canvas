@@ -9,6 +9,65 @@ Schematic Document. It consumes the existing [model](schematic-model.md),
 [connectivity](connectivity-and-routing.md) and [typed edits](edit-engine.md).
 Locks and the UI entry are **T014, not yet specified**.
 
+## Experimental internal block partition
+
+`AutoLayoutOptions.partition?: LayoutPartition` opts into hierarchical placement.
+It is an experiment, not a persisted model field or UI setting. Omitting it keeps
+the default planner unchanged. The source-independent contract is:
+
+```ts
+interface LayoutPartition {
+  blocks: { id: string; role?: BlockRole; members: string[] }[];
+  flow?: string[]; // distinct block ids, left to right; omitted ids follow
+  arrangement?: Record<string, { x: number; y: number }>; // relative centres
+}
+type BlockRole =
+  | "bias" | "input" | "gain" | "output" | "load" | "cmfb"
+  | "compensation" | "switch" | "logic" | "other";
+```
+
+Members are device instance ids; ports and rail markers are placed by the existing
+marker rules. Unknown members, duplicate membership, empty/duplicate block ids,
+empty blocks, invalid flow references and missing/nonfinite arrangement entries
+are refused before edits. Omitted devices form an `other` block (with a fresh id
+if needed). Its oracle centre defaults to the mean supplied centre. Recognized
+L0 structures, including their tails and parallel members, cannot span blocks:
+conflicting blocks merge transitively with warning diagnostics. The first block
+id survives; conflicting roles become `other`; flow references collapse and
+centres merge with member-count weights. The input contract is never mutated.
+
+V1 (no `arrangement`) uses the stages' layered in-block layout, including
+recognized templates, and rail alignment. Signal blocks follow `flow`, then
+signal distance. `bias`, `other`, `cmfb` and `compensation` blocks form a separate
+row below the signal blocks. V2 uses identical local layouts, scales oracle
+centres uniformly by median local span / median pair distance, then resolves
+overlap along the smaller overlap axis with an 80-unit gap. Snapped centres are first restored to oracle order. Subsequent suffix translations
+in oracle coordinate order preserve directional order (ties use block ids).
+Finishing may move devices within their block but may not cross the separating
+axes between blocks. A conflicting finishing operation is refused with a
+partition diagnostic. Parallel and driver attachment placement is scoped to each
+block. Experimental partitions always use quick mode; supplying `search` emits
+a warning and runs quick mode. Routing, refinement, repairs, label seating and
+transaction/electrical checks still run through the existing pipeline.
+
+The evaluation-only `partitionFromPlacement` starts with atomic L0 units and
+joins devices on shared non-rail Nets when their positions are within a threshold
+multiple of median device ink span (default 3, selected on dev), or both device bounds lie inside a drafting
+rectangle. It derives flow from x order and centres from mean device positions.
+These oracle coordinates do not enter V1. The LOADBench adapter reads functional
+parts from `partitioning.xml`, maps device names to converted references/ids,
+deduplicates repeated XML parts and merges overlapping labels before validation.
+
+`scripts/auto-layout-eval.mjs` accepts `--partition human|loadbench`,
+`--variant v1|v2` and `--fixed-human` (all instances fixed, V3). LOADBench input is
+a folder of converted project JSONs with matching `<stem>.partitioning.xml` files;
+it has no human reference and supports V1 only. `--threshold` and `--split dev|val`
+allow dev-only sensitivity probes. Outputs are git-ignored SVG/JSON/HTML files;
+dashed role boxes are evaluation overlays only. Area ratio uses drawing view-box
+width × height against the human; cohesion is summed pairwise block bounding-box
+overlap area. Arrangement agreement is the share of block pairs matching all non-tied human
+centroid directions on both axes; it is null when no pair has a specified direction. Report completion counts alongside metrics so refusals stay visible.
+
 ## Rules
 
 - **R1 — Boundary and determinism.** Take a `SchematicDocument`, its
