@@ -17,7 +17,7 @@ the default planner unchanged. The source-independent contract is:
 
 ```ts
 interface LayoutPartition {
-  blocks: { id: string; role?: BlockRole; members: string[] }[];
+  blocks: { id: string; title?: string; role?: BlockRole; members: string[] }[];
   flow?: string[]; // distinct block ids, left to right; omitted ids follow
   arrangement?: Record<string, { x: number; y: number }>; // relative centres
 }
@@ -67,6 +67,47 @@ dashed role boxes are evaluation overlays only. Area ratio uses drawing view-box
 width × height against the human; cohesion is summed pairwise block bounding-box
 overlap area. Arrangement agreement is the share of block pairs matching all non-tied human
 centroid directions on both axes; it is null when no pair has a specified direction. Report completion counts alongside metrics so refusals stay visible.
+
+The experimental LLM adapter (`partition-prompt.ts`, prompt version 1) describes
+only electrical device classes, symbols, pin-to-Net membership, explicit terminal
+or label names, classified Net roles/rails and recognized L0 structures. Net tokens
+are ordered by sorted terminal membership, never by source Net ids; devices are
+sorted by instance id. Geometry, drafting, annotations and layout groups are not
+prompt inputs. Anonymization replaces device ids with `D1…` everywhere and removes
+display names; classified electrical roles remain available. Unconnected pins have
+`net: null`. Neither the SDK nor network access belongs to the planner package.
+
+The script `scripts/auto-layout-llm-partition.mjs <folder>` accepts `--split dev|val`,
+`--limit n`, `--samples n`, `--anonymize`, `--max-usd n`, `--concurrency n` (default 6)
+and `--dry-run`. Samples are zero-based. Dry runs report aggregate payload bytes
+and a heuristic two-attempt cost estimate without constructing an SDK client.
+The script uses the SDK's credential/profile resolution and retries, structured
+JSON output, high effort and server-side refusal fallback. Each attempt records
+the serving model, stop reason and usage. Refusals and token-limit stops fail the
+sample; schema or partition errors receive one repair turn with the exact previous
+assistant content. Failed samples, as well as successful ones, are cached and are
+never automatically requested again.
+
+Caches live only in git-ignored `tmp/llm-partition/`, keyed by SHA-256 of the payload,
+prompt version, requested model, sample and anonymization mode. Cost uses $4/$20
+per million input/output tokens. Once completed usage reaches `--max-usd`, no new
+calls or repairs start; already in-flight calls can overshoot. Jobs stopped before
+their first call are not cached. Private cases, responses and credentials must
+never enter tracked files. Opus alone runs real calls: pilot and tune on dev, freeze
+the versioned prompt, then run val once.
+
+LLM proposals must cover every device exactly once and supply one unique integer
+grid cell per block (coordinates -16 through 16). Conversion uses a fixed 240-unit
+pitch, then the existing partition validation and L0 merging. Optional block titles
+are display-only. The evaluator accepts `--partition llm --sample k --anonymize`;
+it only reads caches and reports missing/failed entries as failed documents. V1
+drops the proposed arrangement; V2 retains it. `--block-boxes on|off` (default on)
+controls titled role boxes in evaluation SVGs; an editor switch is deferred.
+For each LLM partition it records first-try/repaired/failed validity and L0 merge
+counts, human-box pairwise overlap divided by total human block area, adjusted
+Rand index against the H partition, and proposed floorplan agreement with human
+centroid relations. Existing result-layout arrangement and routing metrics remain
+separate. No experiment outcome is asserted by these offline implementation tests.
 
 ## Rules
 

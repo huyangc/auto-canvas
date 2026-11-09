@@ -17,7 +17,7 @@ export type BlockRole =
   | "logic"
   | "other";
 export interface LayoutPartition {
-  blocks: { id: string; role?: BlockRole; members: string[] }[];
+  blocks: { id: string; title?: string; role?: BlockRole; members: string[] }[];
   /** Block ids in signal order, left to right; optional. */
   flow?: string[];
   /** Relative block centres in any common unit; enables the oracle floorplan. */
