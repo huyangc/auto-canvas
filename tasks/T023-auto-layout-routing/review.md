@@ -125,3 +125,56 @@ go from 9 to 1, crossings from 45 to 42 and bends from 98 to 108.
 | 5   | note     | lint                                           | Eight new non-null-assertion warnings in the three router files, a pattern both packages already use. No errors.                                             | None required.                                                      |
 | 6   | note     | one val document                               | One connection is still missing: a port whose only clear path is blocked by another Net's pin.                                                               | Follow-up with net order or placement.                              |
 | 7   | note     | T022 (`task/T022-auto-layout-recognition`)     | A trial merge with T022's pull-request head conflicts only in `docs/specs/auto-layout.md`, where both add rules at one place. Both test files merge cleanly. | Whichever merges second is rebased by Opus and re-measured.         |
+
+## Round 1 — re-measured after the rebase onto T022 (`dcc2e62`)
+
+T022 (PR #25) merged into `main` as `dcc2e62` after this round was reviewed. Opus
+rebased the task branch onto it. The one conflict was in `docs/specs/auto-layout.md`,
+where both tasks add rules at the same place; the resolution keeps T022's R80–R84 and
+then this task's R85–R87. Every other file of the reviewed commit is byte-identical
+after the rebase. Opus reran the whole acceptance on the rebased tree, on lane 3:
+
+```text
+pnpm install / build / format:check / docs:check / typecheck / lint → 0
+pnpm agent-docs:generated:check / components:check                    → 0
+pnpm vitest run packages/edit-engine                                  → 0; 952 passed
+pnpm vitest run packages/auto-layout                                  → 0; 289 passed (16 files, including T022's)
+pnpm test:local                                                       → 0; 7575 passed, 116 skipped
+pnpm deadcode | grep <task paths>                                     → no output; unfiltered findings equal the pre-task baseline
+pnpm auto-layout:review                                               → 0; corpus targets and held-out ceilings hold
+pnpm auto-layout:eval (quick, paired with pristine dcc2e62)           → 0; 33 of 33 completed
+default router fingerprint, dcc2e62 against the rebased result        → identical, 1284 lines
+```
+
+Quick mode against pristine `dcc2e62`, run at the same time with the same worker
+count. "32 common" are the documents `a188149` completed; T022 also completes the 33rd.
+
+| Measure, 32 common documents            | `dcc2e62` |      T023 | Plan target      |
+| --------------------------------------- | --------: | --------: | ---------------- |
+| Crossings, dev (17)                     |       239 |       229 | ≤ 245            |
+| Crossings, val (15)                     |       385 |       346 | ≤ 387            |
+| Bends                                   |       680 |       734 | ≤ 780            |
+| Floating pins                           |        54 |         1 | ≤ 6              |
+| Label overlaps / clearance / departures | 2 / 63 / 14 | 0 / 51 / 13 | ≤ 3 / 62 / 18  |
+| Wire length                             |   222,640 |   260,420 | report           |
+| Planning time, summed                   |   167.9 s |   205.8 s | ≤ 1.35× (1.24×)  |
+| Unsafe problems; not equivalent         |     0 / 0 |     0 / 0 | 0 / 0            |
+
+Every literal target holds. One proportional note: the plan's dev target (≤ 245) was
+7% below the `a188149` baseline of 263. T022 already took dev from 263 to 239, and this
+task takes it from 239 to 229, which is 4% rather than 7%. The remaining dev crossings
+come mostly from the documents whose floating pins went to zero. No document has more
+floating pins than on `dcc2e62`.
+
+The 33rd document (70 instances, dev), which T022 completes with 60 crossings, 58 bends
+and 17 floating pins, now has 85 crossings, 66 bends and 0 floating pins. Seven
+documents have more crossings than on `dcc2e62`; all seven go from floating pins to
+none (crossings 6→8, 9→10, 1→4, 7→9, 30→40, 46→54, 60→85; floating 3, 1, 10, 1, 8, 7,
+17 → 0). Nineteen documents have fewer crossings and seven are unchanged.
+
+Corpus and held-out fixtures on the rebased tree: nine corpus results unchanged; every
+held-out result within its ceiling; floating pins over the 16 fixtures 14 → 1 against
+`dcc2e62`. Three held-out results differ from the pre-rebase run because T022 changed
+their placement, all within ceilings.
+
+Verdict unchanged: accepted.
