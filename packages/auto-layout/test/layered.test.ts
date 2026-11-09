@@ -146,7 +146,8 @@ it("places two recognized pairs adjacent with their shared tail centred", () => 
     (p) => p.instanceId === "tail" && p.pinName === "D",
   )!;
   expect(tailPin.point.x).toBe((axes[0]! + axes[1]!) / 2);
-  expect(ordered[0]).toHaveLength(2);
+  expect(ordered[0]).toHaveLength(1);
+  expect(ordered[0]![0]!.members).toHaveLength(4);
   const plan = planAutoLayout(d, resolver);
   expect(plan.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
 });
@@ -482,4 +483,14 @@ it("levels N-channel MOS variants by registry polarity", () => {
   const nmos = levels("nmos");
   for (const variant of ["ndmos", "depletion-nmos"])
     expect(levels(variant)).toEqual(nmos);
+});
+
+it("levels BJT collector/emitter channels according to polarity", () => {
+  const d = circuit(
+    { n: "npn", p: "pnp" },
+    { nc: ["n.C"], ne: ["n.E"], pc: ["p.C"], pe: ["p.E"] },
+  );
+  const levels = netLevels(d.instances, resolver, classifyNets(d, resolver));
+  expect(levels.nets.get("nc")!).toBeLessThan(levels.nets.get("ne")!);
+  expect(levels.nets.get("pe")!).toBeLessThan(levels.nets.get("pc")!);
 });

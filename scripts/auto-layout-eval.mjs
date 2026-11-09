@@ -8,6 +8,11 @@ import {
   Worker,
   workerData,
 } from "node:worker_threads";
+import {
+  detectSymmetry,
+  symmetryCounts,
+} from "../packages/auto-layout/dist/symmetry.js";
+import { classifyNets } from "../packages/auto-layout/dist/net-roles.js";
 import { planAutoLayout } from "../packages/auto-layout/dist/index.js";
 import {
   auditRouting,
@@ -71,12 +76,13 @@ const escape = (value) =>
     .replaceAll('"', "&quot;");
 const measurements = [];
 const sections = [];
-const metrics = (document, resolver) => {
+const metrics = (document, resolver, components) => {
   const audit = auditRouting(document, resolver);
   const bounds = buildSvgScene(document, resolver).viewBox;
   const instances = enclosingBox(document, resolver);
   return {
     ...readabilityCounts(document, resolver),
+    symmetry: symmetryCounts(document, resolver, components),
     crossings: audit.crossings,
     bends: audit.bends,
     wireLength: audit.wireLength,
@@ -118,9 +124,14 @@ function evaluateFile(file) {
     );
     if (!document) throw new Error("Top Document missing");
     const resolver = createProjectSymbolResolver(project, builtInSymbols);
+    const components = detectSymmetry(
+      document,
+      resolver,
+      classifyNets(document, resolver),
+    );
     measurement.instances = document.instances.length;
     measurement.human = {
-      ...metrics(document, resolver),
+      ...metrics(document, resolver, components),
       equivalent: true,
       milliseconds: 0,
       status: "original",
@@ -145,7 +156,7 @@ function evaluateFile(file) {
     const quickTransaction = apply(quickPlan);
     measurement.quick =
       quickTransaction?.ok && quickTransaction.applied
-        ? metrics(quickTransaction.document, resolver)
+        ? metrics(quickTransaction.document, resolver, components)
         : null;
     const start = performance.now();
     let plan;
@@ -188,7 +199,7 @@ function evaluateFile(file) {
     const after = completed ? transaction.document : document;
     measurement.status = completed ? "completed" : "refused";
     if (completed) {
-      measurement.result = metrics(after, resolver);
+      measurement.result = metrics(after, resolver, components);
       const ratio = (value, reference) =>
         reference ? value / reference : value === 0 ? 1 : null;
       measurement.widthRatio = measurement.quick
@@ -293,7 +304,25 @@ if (!isMainThread) {
   const totals = [];
   const metricText = (m) =>
     m ? `${m.crossings}/${m.bends}/${Math.round(m.wireLength)}` : "—";
+  const symmetryKeys = [
+    "pairs",
+    "mirrored",
+    "level",
+    "orientationMirrored",
+    "axisDevices",
+    "onAxis",
+  ];
+  const symmetryText = (m) =>
+    m?.symmetry ? symmetryKeys.map((key) => m.symmetry[key]).join("/") : "—";
   const sum = (items) => ({
+    symmetry: Object.fromEntries(
+      symmetryKeys.map((key) => [
+        key,
+        items.every((m) => Number.isFinite(m.symmetry?.[key]))
+          ? items.reduce((total, m) => total + m.symmetry[key], 0)
+          : null,
+      ]),
+    ),
     ...Object.fromEntries(
       [
         "labelOverlaps",
@@ -346,6 +375,8 @@ if (!isMainThread) {
         resultReadability: m.result
           ? `${m.result.labelOverlaps}/${m.result.labelClearance}/${m.result.terminalDepartures}`
           : "—",
+        humanSymmetry: symmetryText(m.human),
+        resultSymmetry: symmetryText(m.result),
         humanFloating: m.human?.floatingPins.length ?? "—",
         resultFloating: m.result?.floatingPins.length ?? "—",
         humanMissing: m.human?.missingConnections ?? "—",

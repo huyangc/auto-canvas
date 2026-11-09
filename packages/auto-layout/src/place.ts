@@ -31,6 +31,7 @@ import {
   placeStages,
 } from "./stages.js";
 import { templatePlacement } from "./template-placement.js";
+import { symmetryTopology } from "./symmetry.js";
 import { isMos } from "./net-roles.js";
 import { placeMarkers } from "./place-markers.js";
 import type {
@@ -38,6 +39,7 @@ import type {
   LayoutStrategy,
   Placement,
   RecognizedGroup,
+  SymmetryComponent,
 } from "./types.js";
 
 /** R24: repair unrelated collisions, preserving fixed/template conflicts. */
@@ -47,6 +49,7 @@ function resolveCollisions(
   targets: Map<string, Placement>,
   templates: RecognizedGroup[],
   fixed: ReadonlySet<string>,
+  symmetry: SymmetryComponent[],
 ): string | undefined {
   const ordered = [...document.instances].sort((a, b) =>
     compareIds(a.id, b.id),
@@ -56,57 +59,69 @@ function resolveCollisions(
     resolver,
     classifyNets(document, resolver),
   );
-  const unit = (id: string) => {
-    const host = attached.find((a) => a.device.id === id)?.host.id ?? id;
-    return [
-      host,
-      ...attached.filter((a) => a.host.id === host).map((a) => a.device.id),
-    ];
+  const parents = new Map(ordered.map((i) => [i.id, i.id]));
+  const root = (id: string): string => {
+    const parent = parents.get(id)!;
+    return parent === id ? id : root(parent);
   };
+  const join = (a: string, b: string) => parents.set(root(b), root(a));
+  for (const { host, device } of attached) join(host.id, device.id);
+  for (const c of symmetry) {
+    const ids = [...c.pairs.flat(), ...c.axis];
+    for (const id of ids.slice(1)) join(ids[0]!, id);
+  }
   const prior: Instance[] = [];
+  const visited = new Set<string>();
   for (const instance of ordered) {
+    const head = root(instance.id);
+    if (visited.has(head)) continue;
+    visited.add(head);
+    const members = ordered.filter((i) => root(i.id) === head);
     const target = targets.get(instance.id)!;
     const axis = target.rotation === 90 || target.rotation === 270 ? "y" : "x";
     const partial = () =>
-      withPlacements({ ...document, instances: [...prior, instance] }, targets);
+      withPlacements(
+        { ...document, instances: [...prior, ...members] },
+        targets,
+      );
+    const internal = geometryProblem(
+      withPlacements({ ...document, instances: members }, targets),
+      resolver,
+    );
+    if (internal) return internal;
     let problem = geometryProblem(partial(), resolver);
+    const collides = (a: Instance, b: Instance) =>
+      geometryProblem(
+        withPlacements({ ...document, instances: [a, b] }, targets),
+        resolver,
+      );
     if (
       problem &&
-      (unit(instance.id).some((id) => fixed.has(id)) ||
+      (members.some((i) => fixed.has(i.id)) ||
         prior.some(
-          (i) =>
-            fixed.has(i.id) &&
-            geometryProblem(
-              withPlacements(
-                { ...document, instances: [i, instance] },
-                targets,
-              ),
-              resolver,
-            ),
+          (i) => fixed.has(i.id) && members.some((m) => collides(i, m)),
         ))
     )
       return problem;
     if (
       problem &&
-      prior.some(
-        (i) =>
-          templates.some(
-            (g) => g.members.includes(i.id) && g.members.includes(instance.id),
-          ) &&
-          geometryProblem(
-            withPlacements({ ...document, instances: [i, instance] }, targets),
-            resolver,
-          ),
+      prior.some((i) =>
+        members.some(
+          (m) =>
+            templates.some(
+              (g) => g.members.includes(i.id) && g.members.includes(m.id),
+            ) && collides(i, m),
+        ),
       )
     )
       return problem;
     for (let step = 0; problem && step < 40; step++) {
-      for (const id of unit(instance.id))
-        targets.get(id)!.position[axis] += document.presentation.grid;
+      for (const i of members)
+        targets.get(i.id)!.position[axis] += document.presentation.grid;
       problem = geometryProblem(partial(), resolver);
     }
     if (problem) return problem;
-    prior.push(instance);
+    prior.push(...members);
   }
   return undefined;
 }
@@ -133,6 +148,11 @@ export function placeDocument(
         placements: targets,
         problem: `R3: unresolved symbol ${i.symbolId}`,
       };
+  const topology = symmetryTopology(document, resolver, roles);
+  const symmetry = topology.components;
+  const symmetryIds = new Set(
+    symmetry.flatMap((c) => [...c.pairs.flat(), ...c.axis]),
+  );
   const distances = signalDistances(document, devices, resolver, roles);
   // Reconstruct persisted intent for stable re-planning, without re-emitting it.
   const templates = [...groups, ...persistedTemplates(document, roles)];
@@ -179,11 +199,19 @@ export function placeDocument(
       resolver,
       roles,
       templates,
+      topology,
     );
     if (result.problem) return result;
     targets = result.placements;
   } else if (strategy === "stages") {
-    targets = placeStages(document, devices, resolver, roles, templates);
+    targets = placeStages(
+      document,
+      devices,
+      resolver,
+      roles,
+      templates,
+      topology,
+    );
   } else if (
     devices.some((i) => {
       const drain = roles.pinNet(i.id, "D");
@@ -204,6 +232,7 @@ export function placeDocument(
       roles,
       templates,
       levels,
+      topology,
     );
     const ordered = orderRows(rows, devices, resolver, roles, templates);
     targets = assignColumns(
@@ -236,6 +265,7 @@ export function placeDocument(
     targets,
     templates,
     fixed,
+    symmetry,
   );
   if (deviceCollision) return { placements: targets, problem: deviceCollision };
   if (!given)
@@ -244,7 +274,7 @@ export function placeDocument(
       resolver,
       roles,
       targets,
-      fixed,
+      new Set([...fixed, ...symmetryIds]),
     );
   const attachmentIds = new Set(
     parallelAttachments(devices, resolver, roles).flatMap((a) => [
@@ -267,7 +297,7 @@ export function placeDocument(
     roles,
     targets,
     templates,
-    new Set([...fixed, ...attachmentIds]),
+    new Set([...fixed, ...attachmentIds, ...symmetryIds]),
     overrides,
     choices,
   );
@@ -277,6 +307,7 @@ export function placeDocument(
     targets,
     templates,
     fixed,
+    symmetry,
   );
   if (attachedCollision)
     return { placements: targets, problem: attachedCollision };
@@ -287,7 +318,7 @@ export function placeDocument(
       roles,
       templates,
       targets,
-      fixed,
+      new Set([...fixed, ...symmetryIds]),
     );
   placeMarkers(document, resolver, roles, targets, overrides, choices, fixed);
   for (const id of fixed) {
@@ -300,6 +331,7 @@ export function placeDocument(
     targets,
     templates,
     fixed,
+    symmetry,
   );
   if (collision) return { placements: targets, problem: collision };
   const oldBox = searchLimit?.anchor ?? enclosingBox(document, resolver);
@@ -393,6 +425,28 @@ export function placeDocument(
   }
   const result = withPlacements(document, targets);
   if (given) {
+    for (const c of symmetry) {
+      const ids = [...c.pairs.flat(), ...c.axis];
+      const first = ids[0]!;
+      const dx = targets.get(first)!.position.x - given.get(first)!.position.x;
+      const dy = targets.get(first)!.position.y - given.get(first)!.position.y;
+      if (
+        ids.some((id) => {
+          const old = given.get(id)!,
+            next = targets.get(id)!;
+          return (
+            next.rotation !== old.rotation ||
+            next.mirror !== old.mirror ||
+            next.position.x - old.position.x !== dx ||
+            next.position.y - old.position.y !== dy
+          );
+        })
+      )
+        return {
+          placements: targets,
+          problem: "R94: placement finishing split a symmetric block",
+        };
+    }
     // Collision repair and orientation finishing may not split a supplied
     // template. Each group (including its tail) must translate rigidly.
     for (const group of templates) {
