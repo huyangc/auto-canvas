@@ -249,3 +249,33 @@ it("faces a port along a sideways route without moving its terminal or changing 
   expect(facePorts(after.document, resolver, new Set())).toEqual([]);
   expect(facePorts(before, resolver, new Set(["p"]))).toEqual([]);
 });
+
+it("R73 keeps several displayed parameters on their own rows", () => {
+  const document = labeledPair(true);
+  const value = document.annotations.find((a) => a.id === "a-instance-value")!;
+  if (value.anchor.kind !== "object") throw new Error("expected object anchor");
+  // A second displayed parameter, one row below the first.
+  document.annotations.push({
+    ...value,
+    id: "a-instance-value-2",
+    anchor: {
+      ...value.anchor,
+      localOffset: {
+        x: value.anchor.localOffset.x,
+        y: value.anchor.localOffset.y + 20,
+      },
+      fallbackPosition: {
+        x: value.anchor.fallbackPosition.x,
+        y: value.anchor.fallbackPosition.y + 20,
+      },
+    },
+  });
+  const after = seated(document).document;
+  const context = createLabelClearanceContext(after, resolver);
+  const at = (id: string) =>
+    context.measure(after.annotations.find((a) => a.id === id)!).position;
+  const first = at("a-instance-value"),
+    second = at("a-instance-value-2");
+  expect(second.x - first.x).toBe(0);
+  expect(second.y - first.y).toBe(20);
+});
