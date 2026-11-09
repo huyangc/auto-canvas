@@ -88,3 +88,27 @@ protected packages: no change; frozen files vs 5314954: no diff; tracked private
 - One large dev document gains 17 bends.
 - The split-tail rule has no dev case. Its val effect is not a clean held-out measure
   (plan decision 1).
+
+## PR review fix — Opus
+
+**Finding.** Codex's PR review round 1 (P2): template placement gave groups their axes in
+the order differential pairs first, then id. A group could only stack on a group already
+placed. So a cascode chain's outer unit, or a mirror load on a cascode, whose id sorted
+before its anchor got its own axis.
+
+**Fix** (`expandTemplates`, about 10 lines): place groups in stack order. A unit stacked on
+an already placed unit goes next; otherwise the given order holds.
+
+**Test.** New: `template stacks every unit on its anchor's axis, whatever the id order`.
+It uses a railed two-level telescopic cascode with a mirror load whose ids sort before the
+lower cascode. It fails without the fix (a collector 350 against 30) and passes with it.
+
+**Acceptance rerun** (logs: `tmp/t024/accept2/`):
+
+- every command passes: 341 auto-layout tests; 7627 passed and 116 skipped locally;
+- protected and frozen files: no diff;
+- quick against main: 660 → 616 crossings (dev 314 → 295, val 346 → 321), 800 → 792
+  bends, floating pins 1 → 1;
+- one dev switched-capacitor document moves 36 → 39 crossings against round 1, as its
+  cascodes now stack under the pair. Accepted;
+- search against main: 536 → 517 crossings, 753 → 709 bends, floating pins 1 → 1.

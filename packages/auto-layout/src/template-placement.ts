@@ -115,8 +115,20 @@ function expandTemplates(
         .filter((q) => roles.pinNet(b, q.name) === net)
         .map((q) => ({ p, q }));
     });
+  // R90: place in stack order. A unit stacked on an already placed unit goes
+  // next, so a chain or a load on a cascode shares its anchor's axis whatever
+  // its id; otherwise keep the given order (differential pairs, then ids).
+  const stacks = (a: RecognizedGroup, b: RecognizedGroup) =>
+    shared(a.members[0], b.members[0]).length > 0 &&
+    shared(a.members[1], b.members[1]).length > 0;
+  const ordered: RecognizedGroup[] = [];
+  const pending = [...groups];
+  while (pending.length) {
+    const next = pending.findIndex((g) => ordered.some((o) => stacks(o, g)));
+    ordered.push(...pending.splice(Math.max(next, 0), 1));
+  }
   let nextAxis = 0;
-  for (const g of groups) {
+  for (const g of ordered) {
     const stacked = groups.find(
       (other) =>
         axes.has(other.id) &&
