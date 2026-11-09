@@ -33,6 +33,11 @@ export interface RecognizedGroup {
   diodeInstanceId?: string;
   tailInstanceId?: string;
 }
+export interface SymmetryComponent {
+  pairs: [string, string][];
+  axis: string[];
+  conflicted: string[];
+}
 export interface AutoLayoutResult {
   edits: SchematicEdit[];
   groups: RecognizedGroup[];

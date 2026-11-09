@@ -77,6 +77,7 @@ AutoLayoutDiagnostic[] }`. Fixed instances retain their exact placements;
   matched left/right mirrors are `horizontal`/`none`. Place the diode side
   over the left differential member it feeds. Stacked groups share an axis. Two recognized differential pairs sharing one
   tail sit adjacent, with the tail centred between their axes (R32).
+  Within an R88 component, the R89 block determines the member geometry.
 - **R8 — Horizontal flow and Cell Pins.** Order ungrouped row devices by net
   distance from input. Place Cell Pins by R19 and R20, 80 units outside the
   device box. Left pins use rotation 0 and mirror `none`; right pins use
@@ -167,6 +168,7 @@ pins }` lists, never Net ids.
   `MEMBER_PITCH`. A tail's shared channel pin lies on the axis. PMOS above NMOS
   sharing a drain align drain pins rather than origins. Read oriented `pin.at`;
   never encode a symbol or pin offset.
+  Outside stack groups attach to R89 block channel columns as one alignment unit.
 - **R19 — Cell Pin side.** Inputs and outputs use the left or right edge nearest
   their host pin, measured from the device bounds' centre. Exact ties put inputs
   left and outputs right. Supply and ground stay top and bottom.
@@ -219,6 +221,8 @@ pins }` lists, never Net ids.
   different levels occupies its upper Net's row, vertically. Two-pin parts
   on one level lie horizontally in that row. Gate and block input Nets only
   pull order and columns. Multi-pin blocks occupy their output Net's row.
+  BJT channels use collector above emitter for NPN and emitter above collector
+  for PNP, parallel to MOS channel levels.
   Row pitch is 120 units. With no transistor channel constraint, R9 is unchanged.
 - **R32 — Order.** A recognized group is one node, with adjacent symmetric
   members. A vertical channel chain may stay together. Seed rows by signal
@@ -226,10 +230,12 @@ pins }` lists, never Net ids.
   keeping the fewest net crossings. At most eight sweeps; ties use signal
   distance then id. Pairs sharing a tail sit adjacent and centre the tail
   between their axes, replacing the R7 refusal.
+  R89 replaces component members in each row with one contiguous block node.
 - **R33 — Columns.** Align shared channel pins (R18), longest chains first,
   in the spirit of Brandes–Köpf. Other devices move toward the median of
   neighbours' pins subject to order and a 40-unit gap between instance bounds.
   Group symmetry takes priority over median alignment.
+  R89 block offsets enter compaction as one alignment component before stack links.
 - **R34 — Scale.** The instance limit is 120. R22 evaluates at most 24
   candidates per strategy up to 40 instances, eight from 41 to 80, and zero above 80 (R42).
 - **R35 — Small cases.** R7, R8 and R18–R26 still apply. Every corpus target
@@ -281,6 +287,7 @@ pins }` lists, never Net ids.
   under R53.
 - **R51 — Stage layout.** Lay out each stage independently with R30–R33 in
   local coordinates, preserving templates, symmetry and shared-pin alignment.
+  R94 joins every R88 component into one stage and uses the shared R89 layout.
 - **R52 — Stage rows.** Stages share rails. Align a stage's top row with the
   supply when it touches one; otherwise align its bottom row with ground when
   present. Centre a stage touching neither rail.
@@ -356,7 +363,8 @@ pins }` lists, never Net ids.
   Search device placements, orientations and Cell Pin sides using rigid same-row
   node swaps, grid/column shifts, ungrouped mirrors, stage block moves, swaps,
   reversals and mirrors, and Cell Pin flips. Templates, tails and aligned stacks
-  move together; a stage containing a template cannot mirror. Reject off-grid,
+  move together; a stage containing a template cannot mirror.
+  R94 adds symmetric blocks to rigid units and finishing validation. Reject off-grid,
   fixed, overlapping or coincident-pin states before routing. Placement finishing,
   routing, replay, R10 and R23 use the quick planner's existing path. Refused
   candidates have infinite energy. R22's named routed-score weights are shared.
@@ -601,6 +609,55 @@ pins }` lists, never Net ids.
   optional path-length cost, zero by default, leaving Agent/editor routing
   unchanged. Net order and placement are unchanged.
 
+- **R88 — Seeded symmetry.** Detect an involution over devices and Base Nets
+  from R81 differential input representatives and cross-coupled pairs, independently
+  of placements and persisted layout groups. Rails map to themselves; markers
+  are excluded. Paired devices imply paired Nets at every same-named symbol pin,
+  including MOS bulk. Paired Nets imply same-symbol, family-compatible devices
+  only for mutually unique unmapped candidates at the same pin name. A self Net
+  similarly pairs mutually unique devices, except on rails: rail connectivity
+  never pairs devices. An unmapped device whose connected
+  Nets all map to themselves and that has no unmapped identical-topology twin
+  maps to itself. Compute implications from the preceding round, then apply
+  together to a fixpoint. Shared connections propose self mappings only as
+  defaults: non-self Net proposals replace them, including defaults from earlier
+  rounds. Rails remain hard self mappings. Different non-self proposals for a
+  Net conflict, removing that Net and its proposed partners permanently; nothing
+  propagates through them. Conflicts between pairs never invalidate device pairs.
+  A pair whose own pins propose two different non-self partners for one Net is
+  invalid and its devices are conflicted; shared defaults do not count.
+  Device-level partner disagreements also remove device mappings, and ids never
+  resolve a detection tie. Join pairs and axis devices through non-rail Nets
+  and retain only components containing a seed. The seed pair with the lowest
+  member id establishes left/right with its lower-id member left; sides propagate
+  through the component. Pairs reached only through self Nets use the same
+  lower-id-left drawing convention. Report partner pairs, axis devices and
+  touched conflicted devices.
+
+- **R89 — Symmetric blocks.** Partners use the smaller R31 row; axis devices
+  retain their rows. Build a half Document from left partners and axis devices,
+  folding right Nets onto left Nets. Reuse R32 and R33 with these rows and only
+  groups contained in the half, moving axis devices to each row's right end.
+  Before column assignment, orient recognized left members by R92: outward
+  `none`, inward `horizontal`. Other paired devices with a gate use
+  `horizontal` when the gate Net is self-mapped, otherwise `none`. Two-pin parts
+  and axis devices keep R31 orientation.
+  Axis devices sharing a row form one run in half-layout order with at least
+  40-unit gaps between visible bounds, origins snapped up to the grid, and its
+  pin-centre midpoint within half a grid of the axis. A lone axis
+  device centres its channel pin (D/S or C/E), otherwise its pin centre.
+  Choose the smallest grid axis A giving every pair origin pitch
+  `2·(A − x_left) ≥ MEMBER_PITCH` (100 units), keeping each row's left visible
+  extent at least 20 units left of A and, if that row has an axis run, at least
+  40 units left of the centred run's left edge. Reflect each left placement
+  about the axis, including orientation, to produce its right partner.
+  Preserve these relative offsets as one rigid block. Each occupied row has
+  one node: left partners in half-layout order, axis devices, then right partners
+  in reverse. Register all block rows as one alignment component before outside
+  R18 stack links; row compaction and median pulls translate the whole block.
+  Outside devices sharing a block row sit beside its span, never inside it;
+  skip an R18 alignment that would violate that row order.
+
 - **R90 — Anchored common-gate pairs.** Two compatible branches sharing G,
   with distinct non-rail S and distinct D, neither diode-connected nor D=S,
   outside mirror, differential, cross-coupled and matched structures, are
@@ -638,6 +695,18 @@ pins }` lists, never Net ids.
   If both seats overlap, use unchanged R19/R20 edge seating. This rule reads
   geometry, not recognition, and honors fixed ports and forced edge reseating.
 
+- **R94 — Symmetry across strategies and search.** Join all R88 component
+  members into a stage and forbid mirroring that stage. Stage-local placement
+  uses R89. Template placement uses one component template instead of its
+  contained group templates, removing its members from ranked singles. An outside
+  unit containing a block pair's tail retains R7 seating on the block axis one
+  row toward the supply. Detect topology once per placement call and pass its
+  components and Net map through the strategies and half layout.
+  Annealing moves all block members together and cannot mirror a containing
+  stage. Collision repair translates whole blocks. Given-state finishing
+  refuses any change to a block's relative positions or orientations. Conflicted
+  and unmapped devices retain the existing placement rules around the block.
+
 - **Existing locks and conflicts.** Members of a locked layout group or
   constraint are treated as fixed instances under R1, because the Edit Engine
   refuses to transform them. A recognized group whose generated id already
@@ -665,3 +734,10 @@ real transactions and checks electrical equivalence, routing clearance, fallback
 preservation, grid, bounds, pin uniqueness, templates, vertical order, Cell
 Pin sides, determinism and stable repeated placement and Route count. The review command
 `pnpm auto-layout:review` renders originals and results for human inspection.
+
+Evaluation detects R88 components on the input and measures both the human drawing
+and result with the same components. Report pairs, mirrored pairs, level pairs,
+mirrored orientations, axis devices and on-axis devices in per-document results
+and dev/val totals. The axis is the median pair pin-centre midpoint; mirrored
+pairs satisfy `|x_a + x_b − 2·axis| ≤ 40`, level pairs satisfy `|y_a − y_b| ≤ 20`,
+and axis-device pin centres lie within 60 units of the axis.

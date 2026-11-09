@@ -1,6 +1,10 @@
 import { transformPoint } from "./geometry.js";
 import { visibleInstanceBounds } from "@icm/derived";
-import { type Instance, type SchematicDocument } from "@icm/model";
+import {
+  reflectOrientation,
+  type Instance,
+  type SchematicDocument,
+} from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import {
   channelPins,
@@ -23,7 +27,8 @@ import {
   placement,
   withPlacements,
 } from "./geometry.js";
-import type { Placement, RecognizedGroup } from "./types.js";
+import { symmetryTopology } from "./symmetry.js";
+import type { SymmetryComponent, Placement, RecognizedGroup } from "./types.js";
 
 type Edge = readonly [string, string];
 interface Levels {
@@ -40,6 +45,7 @@ interface RowNode {
 interface Rows {
   nodes: RowNode[];
   placements: Map<string, Placement>;
+  blocks?: string[][];
 }
 const median = (values: number[]) => {
   const sorted = [...values].sort((a, b) => a - b);
@@ -63,6 +69,8 @@ export function netLevels(
     let names: string[] = [];
     if (isMos(i.symbolId))
       names = mosPolarity(i.symbolId) === "nmos" ? ["D", "S"] : ["S", "D"];
+    else if (channelPins(i.symbolId))
+      names = polarity(i.symbolId) === "n" ? ["C", "E"] : ["E", "C"];
     else if (isSource(i)) names = ["+", "-"];
     else if (pins.length === 2) {
       const power = pins.find((p) =>
@@ -128,6 +136,7 @@ export function deviceRows(
   roles: NetRoles,
   groups: RecognizedGroup[],
   levels: Levels,
+  topology = symmetryTopology(document, resolver, roles),
 ): Rows {
   const placements = new Map<string, Placement>();
   const distances = signalDistances(document, devices, resolver, roles).devices;
@@ -226,7 +235,227 @@ export function deviceRows(
     for (const id of node.members)
       placements.get(id)!.position.y = node.row * ROW_PITCH;
   }
-  return { nodes, placements };
+  return symmetryRows(
+    document,
+    devices,
+    resolver,
+    roles,
+    groups,
+    { nodes, placements },
+    topology.components,
+    topology.netMap,
+  );
+}
+
+/** R89: lay out just one half with the shared layered algorithms, then unfold
+ * it. The resulting row nodes carry one common block coordinate system. */
+function symmetryRows(
+  document: SchematicDocument,
+  devices: Instance[],
+  resolver: SymbolResolver,
+  roles: NetRoles,
+  groups: RecognizedGroup[],
+  rows: Rows,
+  components: SymmetryComponent[],
+  netMap: ReadonlyMap<string, string>,
+): Rows {
+  const blocks: string[][] = [];
+  for (const component of components) {
+    const ids = [...component.pairs.flat(), ...component.axis];
+    if (!ids.every((id) => rows.placements.has(id))) continue;
+    const halfIds = new Set([
+      ...component.pairs.map(([left]) => left),
+      ...component.axis,
+    ]);
+    const axisIds = new Set(component.axis);
+    const half = devices.filter((i) => halfIds.has(i.id));
+    const halfDocument = { ...document, instances: half };
+    const folded = new Map<string, string>();
+    for (const [left, right] of component.pairs)
+      for (const pin of devicePins(
+        devices.find((i) => i.id === left)!,
+        resolver,
+      )) {
+        const a = roles.pinNet(left, pin.name),
+          b = roles.pinNet(right, pin.name);
+        if (a && b && a !== b && netMap.get(b) === a) folded.set(b, a);
+      }
+    const halfRoles: NetRoles = {
+      ...roles,
+      pinNet: (id, name) => {
+        const net = roles.pinNet(id, name);
+        return net ? (folded.get(net) ?? net) : undefined;
+      },
+    };
+    const halfGroups = groups
+      .filter((g) => g.members.every((id) => halfIds.has(id)))
+      .map((g) => {
+        const copy = { ...g };
+        if (copy.tailInstanceId && !halfIds.has(copy.tailInstanceId))
+          delete copy.tailInstanceId;
+        return copy;
+      });
+    const halfRows = deviceRows(
+      halfDocument,
+      half,
+      resolver,
+      halfRoles,
+      halfGroups,
+      netLevels(half, resolver, halfRoles),
+      { components: [], netMap: new Map<string, string>() },
+    );
+    for (const [left, right] of component.pairs) {
+      const y = Math.min(
+        rows.placements.get(left)!.position.y,
+        rows.placements.get(right)!.position.y,
+      );
+      const p = halfRows.placements.get(left)!;
+      p.position.y = y;
+      const group = groups.find((g) => g.members.includes(left));
+      const channel = channelPins(half.find((i) => i.id === left)!.symbolId);
+      const gate = channel && roles.pinNet(left, channel.gate);
+      if (group) p.mirror = facesOutward(group) ? "none" : "horizontal";
+      else if (channel)
+        p.mirror = gate && netMap.get(gate) === gate ? "horizontal" : "none";
+    }
+    for (const id of component.axis)
+      halfRows.placements.get(id)!.position.y =
+        rows.placements.get(id)!.position.y;
+    for (const node of halfRows.nodes) {
+      node.row = Math.min(
+        ...node.members.map(
+          (id) => halfRows.placements.get(id)!.position.y / ROW_PITCH,
+        ),
+      );
+      for (const id of node.members)
+        halfRows.placements.get(id)!.position.y = node.row * ROW_PITCH;
+    }
+    const ordered = orderRows(halfRows, half, resolver, halfRoles, halfGroups);
+    for (const row of ordered)
+      row.sort(
+        (a, b) =>
+          Number(a.members.some((id) => axisIds.has(id))) -
+          Number(b.members.some((id) => axisIds.has(id))),
+      );
+    const placed = assignColumns(
+      halfDocument,
+      half,
+      resolver,
+      halfRoles,
+      halfGroups,
+      ordered,
+      halfRows,
+    );
+    const bounds = visibleInstanceBounds(
+      withPlacements(halfDocument, placed),
+      resolver,
+    );
+    const anchor = (id: string) => {
+      const i = half.find((i) => i.id === id)!;
+      const p = placed.get(id)!;
+      const pins = devicePins(i, resolver);
+      const channel = channelPins(i.symbolId);
+      const own = channel ? pins.filter((p) => p.name === channel.drain) : pins;
+      return (
+        own.reduce(
+          (sum, pin) => sum + transformPoint(pin.at, { x: 0, y: 0 }, p).x,
+          0,
+        ) / own.length
+      );
+    };
+    // Axis devices in one row form a run with R33 gaps. Express the run
+    // relative to its pin-centre midpoint; a lone device uses its channel.
+    const runLeft = new Map<number, number>();
+    for (const row of ordered) {
+      const run = row.flatMap((n) => n.members).filter((id) => axisIds.has(id));
+      if (!run.length) continue;
+      let edge = 0;
+      const offsets = new Map<string, number>();
+      for (const id of run) {
+        const b = bounds.find((b) => b.id === id)!.bounds;
+        offsets.set(id, edge - (b.x - placed.get(id)!.position.x));
+        edge += b.width + 40;
+      }
+      const pinCentre = (id: string) => {
+        const i = half.find((i) => i.id === id)!;
+        const pins = devicePins(i, resolver);
+        return (
+          pins.reduce(
+            (sum, pin) =>
+              sum + transformPoint(pin.at, { x: 0, y: 0 }, placed.get(id)!).x,
+            0,
+          ) / pins.length
+        );
+      };
+      const centre =
+        run.length === 1
+          ? offsets.get(run[0]!)! + anchor(run[0]!)
+          : (offsets.get(run[0]!)! +
+              pinCentre(run[0]!) +
+              offsets.get(run.at(-1)!)! +
+              pinCentre(run.at(-1)!)) /
+            2;
+      for (const id of run)
+        placed.get(id)!.position.x = offsets.get(id)! - centre;
+      runLeft.set(row[0]!.row, -centre);
+    }
+    const minimum = Math.max(
+      ...component.pairs.map(
+        ([left]) => placed.get(left)!.position.x + MEMBER_PITCH / 2,
+      ),
+      ...bounds
+        .filter((b) => !axisIds.has(b.id))
+        .map((b) => {
+          const row = placed.get(b.id)!.position.y / ROW_PITCH;
+          return (
+            b.bounds.x +
+            b.bounds.width +
+            Math.max(20, runLeft.has(row) ? 40 - runLeft.get(row)! : 20)
+          );
+        }),
+    );
+    const axis =
+      Math.ceil(minimum / document.presentation.grid) *
+      document.presentation.grid;
+    for (const id of component.axis) placed.get(id)!.position.x += axis;
+    for (const [left, right] of component.pairs) {
+      const p = placed.get(left)!;
+      placed.set(right, {
+        position: { x: 2 * axis - p.position.x, y: p.position.y },
+        ...reflectOrientation(p, "left-right"),
+      });
+    }
+    for (const [id, p] of placed) rows.placements.set(id, p);
+    rows.nodes = rows.nodes.flatMap((n) => {
+      const members = n.members.filter((id) => !ids.includes(id));
+      return members.length ? [{ ...n, members }] : [];
+    });
+    const partner = new Map(component.pairs);
+    for (const row of ordered) {
+      if (!row.length) continue;
+      const left = row
+        .flatMap((n) => n.members)
+        .filter((id) => !axisIds.has(id));
+      const onAxis = row
+        .flatMap((n) => n.members)
+        .filter((id) => axisIds.has(id));
+      rows.nodes.push({
+        id: JSON.stringify(["symmetry", ids[0], row[0]!.row]),
+        row: row[0]!.row,
+        distance: Math.min(...row.map((n) => n.distance)),
+        members: [
+          ...left,
+          ...onAxis,
+          ...left
+            .slice()
+            .reverse()
+            .map((id) => partner.get(id)!),
+        ],
+      });
+    }
+    blocks.push(ids);
+  }
+  return { ...rows, blocks };
 }
 
 /** Pairs of segments between two rows that cross: strictly opposite order at
@@ -434,6 +663,7 @@ export function assignColumns(
     [...rows.placements].map(([id, p]) => [id, structuredClone(p)]),
   );
   const nodes = ordered.flat();
+  const blocked = new Set(rows.blocks?.flat());
   const nodeByMember = new Map(
     nodes.flatMap((n) => n.members.map((id) => [id, n] as const)),
   );
@@ -466,7 +696,7 @@ export function assignColumns(
   };
   for (const n of nodes) {
     const g = groupById.get(n.id);
-    if (!g) continue;
+    if (!g || g.members.some((id) => blocked.has(id))) continue;
     g.members.forEach((id, index) => {
       targets.get(id)!.mirror =
         facesOutward(g) === (index === 0) ? "none" : "horizontal";
@@ -502,6 +732,7 @@ export function assignColumns(
     const minimum = Math.min(...component.map((g) => pitch.get(g.id)!));
     for (const g of component) {
       const width = MEMBER_PITCH + pitch.get(g.id)! - minimum;
+      if (g.members.some((id) => blocked.has(id))) continue;
       g.members.forEach((id, index) => {
         targets.get(id)!.position.x = (index === 0 ? -width : width) / 2;
       });
@@ -511,6 +742,7 @@ export function assignColumns(
   for (const g of groups)
     if (
       g.tailInstanceId &&
+      !blocked.has(g.tailInstanceId) &&
       !groups.some((other) => other.members.includes(g.tailInstanceId!))
     ) {
       const contact = shared(g.members[0], g.tailInstanceId)[0];
@@ -519,6 +751,76 @@ export function assignColumns(
           g.tailInstanceId,
           contact.q,
         ).x;
+    }
+  // Block partners need not themselves have a recognized two-member group
+  // (cascodes are common). Outside mirror loads still attach to both columns.
+  const blockLinks: Array<{ a: RowNode; b: RowNode }> = [];
+  const blockSeated = new Set<string>();
+  for (const block of rows.blocks ?? [])
+    for (const g of groups) {
+      if (g.members.some((id) => blocked.has(id))) continue;
+      const contacts = g.members.map((id) =>
+        block.flatMap((host) => shared(host, id).map((pin) => ({ host, pin }))),
+      );
+      const first = contacts[0]!.find((a) =>
+        contacts[1]!.some(
+          (b) =>
+            a.host !== b.host &&
+            targets.get(a.host)!.position.y === targets.get(b.host)!.position.y,
+        ),
+      );
+      const second =
+        first &&
+        contacts[1]!.find(
+          (b) =>
+            b.host !== first.host &&
+            targets.get(b.host)!.position.y ===
+              targets.get(first.host)!.position.y,
+        );
+      if (!first || !second) continue;
+      for (const [index, contact] of [first, second].entries()) {
+        const id = g.members[index]!;
+        const other = index === 0 ? second : first;
+        targets.get(id)!.mirror =
+          targets.get(contact.host)!.position.x <
+          targets.get(other.host)!.position.x
+            ? "horizontal"
+            : "none";
+        targets.get(id)!.position.x +=
+          localPin(contact.host, contact.pin.p).x -
+          localPin(id, contact.pin.q).x;
+      }
+      blockLinks.push({
+        a: nodeByMember.get(first.host)!,
+        b: nodeByMember.get(g.members[0])!,
+      });
+      blockSeated.add(g.id);
+    }
+  // R18: an outside load inherits both channel columns from a block. Carry
+  // that geometry through further stacked groups before compaction.
+  const seated = new Set([
+    ...blockSeated,
+    ...groups
+      .filter((g) => g.members.every((id) => blocked.has(id)))
+      .map((g) => g.id),
+  ]);
+  for (let pass = 0; pass < groups.length; pass++)
+    for (const g of groups) {
+      if (seated.has(g.id) || g.members.some((id) => blocked.has(id))) continue;
+      const host = groups.find(
+        (h) =>
+          seated.has(h.id) &&
+          shared(h.members[0], g.members[0]).length &&
+          shared(h.members[1], g.members[1]).length,
+      );
+      if (!host) continue;
+      for (const index of [0, 1] as const) {
+        const contact = shared(host.members[index], g.members[index])[0]!;
+        targets.get(g.members[index])!.position.x +=
+          localPin(host.members[index], contact.p).x -
+          localPin(g.members[index], contact.q).x;
+      }
+      seated.add(g.id);
     }
   const bounds = visibleInstanceBounds(
     withPlacements({ ...document, instances: devices }, targets),
@@ -578,7 +880,11 @@ export function assignColumns(
         offset.set(n.id, offset.get(n.id)! - shift);
       }
   };
-  for (const { a, b } of stackLinks) align(a, b, 0);
+  for (const block of rows.blocks ?? []) {
+    const own = [...new Set(block.map((id) => nodeByMember.get(id)!))];
+    for (const n of own.slice(1)) align(own[0]!, n, 0);
+  }
+  for (const { a, b } of [...blockLinks, ...stackLinks]) align(a, b, 0);
   const links = nodes.flatMap((a) =>
     nodes
       .filter((b) => b.row > a.row)
@@ -612,16 +918,19 @@ export function assignColumns(
     align(link.a, link.b, link.delta);
   for (const tail of new Set(groups.flatMap((g) => g.tailInstanceId ?? []))) {
     const pairs = groups.filter((g) => g.tailInstanceId === tail);
-    if (pairs.length === 1) {
+    if (pairs.length === 1 && !blocked.has(tail)) {
       const contact = shared(pairs[0]!.members[0], tail)[0];
       align(
         nodeByMember.get(pairs[0]!.members[0])!,
         nodeByMember.get(tail)!,
-        groups.some((g) => g.facing === "outward" && g.members.includes(tail))
-          ? 0
-          : contact
-            ? -localPin(tail, contact.q).x
-            : 0,
+        (targets.get(pairs[0]!.members[0])!.position.x +
+          targets.get(pairs[0]!.members[1])!.position.x) /
+          2 -
+          (groups.some(
+            (g) => g.facing === "outward" && g.members.includes(tail),
+          ) || !contact
+            ? 0
+            : localPin(tail, contact.q).x),
       );
     }
   }
@@ -711,7 +1020,7 @@ export function assignColumns(
         ) * grid;
   for (const tail of new Set(groups.flatMap((g) => g.tailInstanceId ?? []))) {
     const pairs = groups.filter((g) => g.tailInstanceId === tail);
-    if (pairs.length < 2) continue;
+    if (pairs.length < 2 || blocked.has(tail)) continue;
     const axes = pairs.map(
       (g) =>
         (targets.get(g.members[0])!.position.x +

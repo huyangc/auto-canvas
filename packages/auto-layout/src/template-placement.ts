@@ -24,6 +24,9 @@ import {
   signalDistances,
 } from "./placement-connectivity.js";
 import { placeFallback } from "./place-fallback.js";
+import { visibleInstanceBounds } from "@icm/derived";
+import { assignColumns, deviceRows, netLevels, orderRows } from "./layered.js";
+import { symmetryTopology } from "./symmetry.js";
 import type { Placement, RecognizedGroup } from "./types.js";
 function channels(
   instance: Instance,
@@ -243,14 +246,87 @@ export function templatePlacement(
   resolver: SymbolResolver,
   roles: NetRoles,
   templates: RecognizedGroup[],
+  topology = symmetryTopology(document, resolver, roles),
 ): { placements: Map<string, Placement>; problem?: string } {
   const targets = new Map<string, Placement>();
   const distances = signalDistances(document, devices, resolver, roles);
   const rows = devices.some((i) => isMos(i.symbolId))
     ? rankRows(devices, resolver, roles)
     : new Map<string, number>();
+  const symmetry = topology.components;
+  const componentIds = new Set(
+    symmetry.flatMap((c) => [...c.pairs.flat(), ...c.axis]),
+  );
+  const blockIds = new Set(componentIds);
+  if (symmetry.length) {
+    const layeredRows = deviceRows(
+      document,
+      devices,
+      resolver,
+      roles,
+      templates,
+      netLevels(devices, resolver, roles),
+      topology,
+    );
+    const placed = assignColumns(
+      document,
+      devices,
+      resolver,
+      roles,
+      templates,
+      orderRows(layeredRows, devices, resolver, roles, templates),
+      layeredRows,
+    );
+    // Outside R18 groups sharing a channel column travel with the block's
+    // template. Adding a block pair's R7 tail also brings its whole outside
+    // group on the next pass, preserving the layered axis seat. Other groups
+    // keep their existing expansion and row rules.
+    for (let pass = 0; pass < templates.length; pass++)
+      for (const g of templates) {
+        if (
+          !g.members.some((id) => blockIds.has(id)) &&
+          !g.members.every((id) => {
+            const i = devices.find((i) => i.id === id)!;
+            const channel = channelPins(i.symbolId);
+            return (
+              channel &&
+              [channel.drain, channel.source].some((name) => {
+                const net = roles.pinNet(id, name);
+                return (
+                  net &&
+                  !roles.rails.has(net) &&
+                  devices.some((other) => {
+                    const pins = channelPins(other.symbolId);
+                    return (
+                      blockIds.has(other.id) &&
+                      pins &&
+                      [pins.drain, pins.source].some(
+                        (p) => roles.pinNet(other.id, p) === net,
+                      )
+                    );
+                  })
+                );
+              })
+            );
+          })
+        )
+          continue;
+        for (const id of [
+          ...g.members,
+          ...(g.tailInstanceId ? [g.tailInstanceId] : []),
+        ])
+          blockIds.add(id);
+      }
+    for (const id of blockIds) {
+      targets.set(id, placed.get(id)!);
+      rows.set(id, placed.get(id)!.position.y / ROW_PITCH);
+    }
+  }
+  const outside = templates.filter(
+    (g) => !g.members.some((id) => blockIds.has(id)),
+  );
   const tails = new Set<string>();
-  for (const group of templates) {
+  for (const group of outside) {
     if (group.kind !== "differential-pair" || !group.tailInstanceId) continue;
     if (tails.has(group.tailInstanceId))
       return {
@@ -259,18 +335,36 @@ export function templatePlacement(
       };
     tails.add(group.tailInstanceId);
   }
+  const outsideTargets = new Map<string, Placement>();
   expandTemplates(
     document,
     resolver,
-    templates.sort(
+    outside.sort(
       (a, b) =>
         Number(a.kind !== "differential-pair") -
           Number(b.kind !== "differential-pair") || compareIds(a.id, b.id),
     ),
     rows,
     roles,
-    targets,
+    outsideTargets,
   );
+  if (targets.size && outsideTargets.size) {
+    const bounds = (placed: Map<string, Placement>) =>
+      visibleInstanceBounds(
+        withPlacements(
+          { ...document, instances: devices.filter((i) => placed.has(i.id)) },
+          placed,
+        ),
+        resolver,
+      ).map((b) => b.bounds);
+    const right = Math.max(...bounds(targets).map((b) => b.x + b.width));
+    const left = Math.min(...bounds(outsideTargets).map((b) => b.x));
+    const shift =
+      Math.ceil((right + 40 - left) / document.presentation.grid) *
+      document.presentation.grid;
+    for (const p of outsideTargets.values()) p.position.x += shift;
+  }
+  for (const [id, p] of outsideTargets) targets.set(id, p);
   const ranked = devices
     .filter((i) => rows.has(i.id) && !targets.has(i.id))
     .sort(
@@ -312,7 +406,16 @@ export function templatePlacement(
   }
   const ys = [...targets.values()].map((p) => p.position.y);
   const mainY = ys.length ? (Math.min(...ys) + Math.max(...ys)) / 2 : 0;
-  alignDrainLoads(document, resolver, roles, rows, targets);
+  alignDrainLoads(
+    {
+      ...document,
+      instances: document.instances.filter((i) => !blockIds.has(i.id)),
+    },
+    resolver,
+    roles,
+    rows,
+    targets,
+  );
   placeFallback(
     devices,
     targets,

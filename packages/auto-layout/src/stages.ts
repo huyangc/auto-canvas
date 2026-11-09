@@ -20,7 +20,8 @@ import { assignColumns, deviceRows, netLevels, orderRows } from "./layered.js";
 import { isMosBulk, type NetRoles } from "./net-roles.js";
 import { devicePins, signalDistances } from "./placement-connectivity.js";
 import { compareIds } from "./recognize.js";
-import type { Placement, RecognizedGroup } from "./types.js";
+import { symmetryTopology } from "./symmetry.js";
+import type { SymmetryComponent, Placement, RecognizedGroup } from "./types.js";
 
 const isCapacitor = (i: Instance) =>
   deviceDescriptor(i.symbolId)?.deviceClass === "capacitor";
@@ -82,6 +83,7 @@ export function findStages(
   resolver: SymbolResolver,
   roles: NetRoles,
   groups: RecognizedGroup[],
+  symmetry: SymmetryComponent[] = [],
 ): { stages: Stage[]; bridges: Bridge[] } {
   const ordered = [...devices].sort((a, b) => compareIds(a.id, b.id));
   // Primary nodes precede extra windings, so every populated component has a
@@ -132,6 +134,10 @@ export function findStages(
       ...(g.tailInstanceId ? [g.tailInstanceId] : []),
     ])
       join(g.members[0], id);
+  for (const c of symmetry) {
+    const ids = [...c.pairs.flat(), ...c.axis];
+    for (const id of ids.slice(1)) join(ids[0]!, id);
+  }
   const allPins = new Map<string, string[]>();
   for (const i of ordered.filter((i) => !isCapacitor(i)))
     for (const p of devicePins(i, resolver)) {
@@ -142,7 +148,14 @@ export function findStages(
       allPins.get(net)!.push(i.id);
     }
   const bridges: Bridge[] = [];
-  for (const i of ordered.filter(isCapacitor)) {
+  const symmetryIds = new Set(
+    symmetry.flatMap((c) => [...c.pairs.flat(), ...c.axis]),
+  );
+  // R94: a block member stays in its joined stage even when its terminals
+  // would otherwise qualify it for independent bridge placement.
+  for (const i of ordered.filter(
+    (i) => isCapacitor(i) && !symmetryIds.has(i.id),
+  )) {
     // Prefer a conducting owner over a receiver gate on a shared signal Net.
     const contacts = devicePins(i, resolver).flatMap((p) => {
       const net = roles.pinNet(i.id, p.name);
@@ -425,8 +438,13 @@ export function placeStages(
   resolver: SymbolResolver,
   roles: NetRoles,
   groups: RecognizedGroup[],
+  topology = symmetryTopology(document, resolver, roles),
 ): Map<string, Placement> {
-  const found = findStages(devices, resolver, roles, groups);
+  const symmetry = topology.components;
+  const symmetryIds = new Set(
+    symmetry.flatMap((c) => [...c.pairs.flat(), ...c.axis]),
+  );
+  const found = findStages(devices, resolver, roles, groups, symmetry);
   const grid = document.presentation.grid;
   const snap = (n: number) => Math.round(n / grid) * grid;
   const ceil = (n: number) => Math.ceil(n / grid) * grid;
@@ -436,7 +454,8 @@ export function placeStages(
     stage.devices.flatMap((device) => {
       if (
         !(isCapacitor(device) || stage.devices.length === 1) ||
-        groups.some((g) => g.members.includes(device.id))
+        groups.some((g) => g.members.includes(device.id)) ||
+        symmetryIds.has(device.id)
       )
         return [];
       const pins = devicePins(device, resolver);
@@ -522,6 +541,12 @@ export function placeStages(
       roles,
       ownGroups,
       netLevels(stage.devices, resolver, roles),
+      {
+        components: symmetry.filter((c) =>
+          stage.devices.some((i) => i.id === c.pairs[0]![0]),
+        ),
+        netMap: topology.netMap,
+      },
     );
     const placements = assignColumns(
       localDocument,
@@ -559,7 +584,8 @@ export function placeStages(
       top,
       bottom,
       rails,
-      canMirror: !ownGroups.length,
+      canMirror:
+        !ownGroups.length && !stage.devices.some((i) => symmetryIds.has(i.id)),
       distance: Math.min(
         ...stage.devices.map((i) => distances.get(i.id) ?? Infinity),
       ),

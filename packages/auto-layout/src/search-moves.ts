@@ -15,6 +15,7 @@ import {
   recognizeStructures,
 } from "./recognize.js";
 import { parallelAttachments, findStages } from "./stages.js";
+import { detectSymmetry } from "./symmetry.js";
 import type { LayoutStrategy, Placement } from "./types.js";
 
 export interface SearchState {
@@ -69,6 +70,14 @@ export function createMoveGenerator(
       grouped.add(id);
     }
   }
+  const symmetry = detectSymmetry(document, resolver, roles);
+  for (const c of symmetry) {
+    const ids = [...c.pairs.flat(), ...c.axis];
+    for (const id of ids) {
+      join(ids[0]!, id);
+      grouped.add(id);
+    }
+  }
   // Preserve R18 pin-aligned stacks as well as each individual template.
   for (const net of document.nets) {
     if (roles.rails.has(net.id)) continue;
@@ -93,7 +102,7 @@ export function createMoveGenerator(
   const singles = movable.filter(
     (ids) => ids.length === 1 && !grouped.has(ids[0]!),
   );
-  const found = findStages(devices, resolver, roles, groups);
+  const found = findStages(devices, resolver, roles, groups, symmetry);
   const rawBlocks = [
     ...found.stages.map((s) => s.devices.map((i) => i.id)),
     ...found.bridges.map((b) => [b.device.id]),
