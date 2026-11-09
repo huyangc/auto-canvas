@@ -285,6 +285,80 @@ it.each(["layered", "stages", "template"] as const)(
     ).toBeUndefined();
   },
 );
+for (const variant of ["cross-linked", "mirrored"] as const)
+  it.each(["layered", "stages", "template"] as const)(
+    `keeps ${variant} blocks rigid across rows in %s`,
+    async (strategy) => {
+      const { placeDocument } = await import("../src/place.js");
+      const { recognizeStructures } = await import("../src/recognize.js");
+      const { geometryProblem, pinPoints, withPlacements } =
+        await import("../src/geometry.js");
+      const d = fixture();
+      d.instances = [];
+      d.nets = [];
+      for (const prefix of ["x", "y"]) {
+        const block = fixture();
+        for (const i of block.instances) i.id = prefix + i.id;
+        for (const net of block.nets) {
+          net.id = prefix + net.id;
+          for (const t of net.terminals) t.instanceId = prefix + t.instanceId;
+        }
+        d.instances.push(...block.instances);
+        d.nets.push(...block.nets);
+      }
+      const link = (id: string, a: string, b: string) => {
+        d.instances.push({ id, symbolId: "resistor", placement: null });
+        d.nets
+          .find((n) => n.id === a)!
+          .terminals.push({
+            instanceId: id,
+            pinName: "1",
+          });
+        d.nets
+          .find((n) => n.id === b)!
+          .terminals.push({
+            instanceId: id,
+            pinName: "2",
+          });
+      };
+      link("r1", "xright", "yina");
+      if (variant === "cross-linked") link("r2", "yleft", "xinb");
+      else {
+        link("r2", "yright", "xina");
+        link("r3", "xba", "ybb");
+      }
+      const components = detect(d);
+      expect(components).toHaveLength(2);
+      const roles = classifyNets(d, resolver);
+      const result = placeDocument(
+        d,
+        resolver,
+        roles,
+        recognizeStructures(d, roles),
+        {},
+        undefined,
+        undefined,
+        strategy,
+      );
+      expect(result.problem).toBeUndefined();
+      const placed = withPlacements(d, result.placements);
+      expect(geometryProblem(placed, resolver)).toBeUndefined();
+      const pins = pinPoints(placed, resolver);
+      for (const component of components) {
+        expect(component.pairs).toHaveLength(4);
+        expect(component.axis).toHaveLength(1);
+        const axis = pins.find(
+          (p) => p.instanceId === component.axis[0] && p.pinName === "+",
+        )!.point.x;
+        for (const [a, b] of component.pairs)
+          expect(
+            (result.placements.get(a)!.position.x +
+              result.placements.get(b)!.position.x) /
+              2,
+          ).toBe(axis);
+      }
+    },
+  );
 it("keeps symmetry through annealing and preserves zero-budget quick mode", async () => {
   const { planAutoLayout } = await import("../src/index.js");
   const { executeTransaction } = await import("@icm/edit-engine");
