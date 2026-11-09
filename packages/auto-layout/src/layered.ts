@@ -376,11 +376,14 @@ function symmetryRows(
       const offsets = new Map<string, number>();
       let origin = 0;
       let right = -Infinity;
+      // The run's visible left edge relative to its first origin; the row
+      // clearance below measures from it, not from the origin.
+      let edge = 0;
       for (const id of run) {
         const b = bounds.find((b) => b.id === id)!.bounds;
         const inset = b.x - placed.get(id)!.position.x;
-        if (right !== -Infinity)
-          origin += Math.ceil((right + 40 - inset - origin) / grid) * grid;
+        if (right === -Infinity) edge = inset;
+        else origin += Math.ceil((right + 40 - inset - origin) / grid) * grid;
         offsets.set(id, origin);
         right = origin + inset + b.width;
       }
@@ -405,7 +408,7 @@ function symmetryRows(
             2;
       for (const id of run)
         placed.get(id)!.position.x = offsets.get(id)! - centre;
-      runLeft.set(row[0]!.row, -centre);
+      runLeft.set(row[0]!.row, edge - centre);
     }
     const minimum = Math.max(
       ...component.pairs.map(

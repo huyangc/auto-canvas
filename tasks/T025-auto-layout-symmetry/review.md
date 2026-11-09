@@ -203,3 +203,14 @@ pnpm deadcode 2>&1 | grep -E 'auto-layout|symmetry' → no output; pnpm build �
 pnpm auto-layout:eval tmp/human-cases --baseline tmp/t025/base-quick.json --jobs 10 → 0; 33/33; identical to Codex's round-4 report on every document
 Opus's two-block probe (variants 1 and 3, which split before): every block's pair midpoints equal in all three strategies
 ```
+
+### PR 29 codex review, round 3 (head `b057df4`): one P2, holds, fixed by Opus
+
+The axis clearance (rule E, "at least 40 units left of the run's left edge") measured the
+run from its first member's origin rather than its visible left edge, so a symbol with a
+wide inset on the axis (a voltage source on the shared bias Net, sharing the mirror
+load's row) sat 27.94 units from the load in all three strategies. Fix: `symmetryRows`
+records the run's visible left edge relative to its centre and the clearance uses it
+(`layered.ts`, four lines). Regression: "keeps 40 units between an axis device and the
+pairs in its row" in all three strategies. A few-lines fix found in review; acceptance
+rerun recorded in the PR.
