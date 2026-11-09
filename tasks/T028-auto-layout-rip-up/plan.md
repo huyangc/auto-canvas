@@ -348,3 +348,73 @@ rip-up pass 2, scoring); do not drop the rule or tune a constant on val. Opus de
 - **The prototype is evidence, not a model.** `tmp/t028/prototype-route.diff` shows the
   gain is real and where the id trap is; its rebuild-per-candidate loop and its revision
   hack must not be reproduced.
+
+## Round 2 amendment
+
+Added after round 1's review (`review.md`). Round 1 implemented R95 and R96 as specified
+and both are sound; two plan assumptions were wrong and two targets were set from the
+all-candidates prototype rather than from the finalist-only design. Everything not
+mentioned here stands. Where this section disagrees with text above, this section wins.
+
+Opus measured six variants of the round-1 tree on the 33 drawings, each paired with a
+`078f407` run (summed planning time; `tmp/t028/variant-*.json`):
+
+| Variant                                    | dev / val crossings |  time |
+| ------------------------------------------ | ------------------: | ----: |
+| Round 1 (both finalists, two passes)       |           271 / 310 | 1.46× |
+| Selected finalist only, two passes         |           271 / 310 | 1.26× |
+| **Selected finalist only, one pass**       |           271 / 310 | 1.23× |
+| Both finalists, five worst Nets per pass   |           273 / 317 | 1.32× |
+| Both finalists, three worst Nets, one pass |           275 / 323 | 1.29× |
+
+Ripping up the R44 alternative changed one document by one bend and never changed a
+winner; the second pass accepted 8 retries in 66 runs and removed no crossing.
+Changing the first pass's Net order (short Nets first, or high-fanout first) lowers
+crossings but strands pins on two drawings, so R13's order stays.
+
+### A. R96: the selected finalist only
+
+Rip up the selected plan after R72 repair; the R44 alternative is replanned as before,
+without rip-up. In `finish`, `ripUpFinalist` applies to `run` only. The same for the
+search path's final best. Update R44, R58, R66 and R96 wording accordingly.
+
+### B. R95: one pass
+
+One pass over the candidates, at every size. Remove the pass loop's second iteration and
+the "stop after a pass accepts nothing" clause (it is implied); keep the recomputation
+of candidates at the start of the pass. Say so in R95.
+
+### C. `quality.test.ts` enters scope for two expectations
+
+`packages/auto-layout/test/quality.test.ts` is owned for these two assertions only:
+
+- "R44 compares one routing-only replay of the selected refined placement" (`:404`):
+  with R96 the routing calls are: strategies and refinement candidates with
+  `signalTrunks = true`, the R44 alternative with `false`, then one rip-up replan of the
+  selected plan with `signalTrunks = true` and `{ ripUp: true }`. Assert exactly one
+  `signalTrunks === false` call, that the last call has `ripUp` true, and that
+  `selectRoutingAlternative` is still called once with the ripped-up selected run and the
+  plain alternative.
+- "R63 gives the second refinement slot to the next distinct strategy" (`:471`):
+  `routeDocument` is called `5 + candidates` times (three strategies, the alternative,
+  the rip-up replan, plus refinement candidates); the `signalTrunks` assertions on the
+  first three and the alternative call stand, and the rip-up call is identified by its
+  options argument.
+
+Nothing else in that file changes.
+
+### D. Targets
+
+Against `tmp/t028/base-quick.json`: dev crossings ≤ 272 (the measured finalist-only
+result; −5%), bends ≤ 400, wire ≤ 134,000, readability ≤ 1 / 36 / 9, floating pins and
+missing connections dev 0 / val ≤ 1 with no document above its baseline, symmetry counts
+unchanged, unsafe 0, inequivalent 0, planning time ≤ 1.25× a paired baseline run with
+both evaluations sequential on a quiet machine. The −10% target is withdrawn: reaching
+it needs rip-up inside the refinement candidates (the prototype's 246 at 2.8×), which this
+task does not do. Record in the spec's known-limits paragraph that R95 runs once on the
+selected finalist and that the remaining gap to the all-candidates result is known.
+
+### E. Report for round 2
+
+As step 6, plus: the per-document time ratio of the five largest documents, and the
+rip-up statistics (candidates, accepted, crossing reduction) for the single pass.
