@@ -319,3 +319,64 @@ it("rebuilds a persisted common-gate pair in anchor order instead of id order", 
   ];
   expect(persistedTemplates(d, roles)).toEqual([common]);
 });
+
+it("template stacks every unit on its anchor's axis, whatever the id order", () => {
+  // A two-level telescopic cascode with a mirror load. The upper cascode
+  // (b1/b2) and the mirror (m*) have ids sorting before the lower cascode
+  // (c/d), so id order alone would place them before their anchors.
+  const d = circuit(
+    {
+      a: "nmos",
+      b: "nmos",
+      t: "nmos",
+      c: "nmos",
+      d: "nmos",
+      b1: "nmos",
+      b2: "nmos",
+      mr: "pmos",
+      mo: "pmos",
+      vdd: "vdd-port",
+      gnd: "ground",
+    },
+    {
+      in1: ["a.G"],
+      in2: ["b.G"],
+      tail: ["a.S", "b.S", "t.D"],
+      tb: ["t.G"],
+      left: ["a.D", "c.S"],
+      right: ["b.D", "d.S"],
+      bias1: ["c.G", "d.G"],
+      mid1: ["c.D", "b1.S"],
+      mid2: ["d.D", "b2.S"],
+      bias2: ["b1.G", "b2.G"],
+      out1: ["b1.D", "mr.D", "mr.G", "mo.G"],
+      out2: ["b2.D", "mo.D"],
+      vdd: ["mr.S", "mo.S", "vdd.P"],
+      ground: ["t.S", "gnd.0"],
+    },
+  );
+  const roles = classifyNets(d, resolver);
+  const result = placeDocument(
+    d,
+    resolver,
+    roles,
+    recognizeStructures(d, roles),
+    {},
+    undefined,
+    undefined,
+    "template",
+  );
+  expect(result.problem).toBeUndefined();
+  const pins = pinPoints(withPlacements(d, result.placements), resolver);
+  const x = (id: string, pin: string) =>
+    pins.find((p) => p.instanceId === id && p.pinName === pin)!.point.x;
+  for (const [a, p, b, q] of [
+    ["a", "D", "c", "S"],
+    ["b", "D", "d", "S"],
+    ["c", "D", "b1", "S"],
+    ["d", "D", "b2", "S"],
+    ["b1", "D", "mr", "D"],
+    ["b2", "D", "mo", "D"],
+  ] as const)
+    expect(x(b, q)).toBe(x(a, p));
+});
