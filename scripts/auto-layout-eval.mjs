@@ -438,6 +438,8 @@ function evaluateFile(file) {
           height: Math.ceil(box.y + box.height) - y,
         },
       });
+      // No overlay when the oracle was unavailable, as blockMetrics does.
+      if (!partition) return svg;
       const overlays = partitionBounds(d, resolver, partition)
         .filter((b) => Number.isFinite(b.x))
         .map(
