@@ -167,7 +167,7 @@ pins }` lists, never Net ids.
   half-perimeter wire length across its Nets given other placements; ties keep
   the first option. Make two passes in id order.
 - **R22 — Refinement by routed cost.** Score each complete final preview as
-  `unrouted × 10000 + crossings × 1000 + offConvention × 300 + bends × 100 + wireLength / 10`,
+  `unrouted × 10000 + crossings × 1000 + offConvention × 300 + bends × 100 + wireLength / 10 + labelOverlaps × 400 + labelClearance × 150 + terminalDepartures × 200`,
   with named weights. Count input Cell Pins on the right edge and output Cell
   Pins on the left edge as `offConvention`, so a port leaves its conventional
   side only when that saves a crossing. Signal flow stays left to right. In id order, try flipping one left/right Cell Pin side or one
@@ -416,6 +416,39 @@ pins }` lists, never Net ids.
   passes.
   In R66, repair only the final best state and its routing-only alternative
   before R44, within R67 span bounds, with no repair work per energy evaluation.
+
+- **R73 — Label seating.** After routing and R15, seat visible, unlocked
+  annotations attached to the instances placed by the plan. Fixed instances'
+  annotations stay put. Evaluate the shared derived instance-label sides and
+  default name/value rows together, and `portLabelCandidates` for Cell Pins.
+  A locked name or value pins its group to its existing recognized side.
+  Greedily process the most conflicted group first (annotation-id ties), for at
+  most two passes. Minimize label overlaps, then wire conflicts, then part-ink
+  conflicts, then distance to the owner, lexicographically. Accepted positions
+  update the shared clearance context before the next group. Upserts change
+  only anchor offsets/fallback positions and alignment; retain content, bindings,
+  style, rotation and locks. Every complete candidate includes seating and
+  whole-list replay before scoring.
+
+- **R74 — Readability energy.** `ROUTED_SCORE_WEIGHTS` exports all R22 energy
+  weights together. Count the unchanged derived diagnostics
+  `VISUAL_LABEL_OVERLAP` (clustered), `VISUAL_LABEL_CLEARANCE`, and
+  `VISUAL_TERMINAL_DEPARTURE` on the final seated preview, with starting weights
+  400, 150, and 200 respectively. Cache counts per immutable preview and resolver.
+  These starting values await preference calibration in T022. Evaluation reports
+  the three counts for both human and automatic drawings and dev/val totals.
+  Review-only timing records cumulative seating and readability scoring time
+  across complete candidates, without changing deterministic output.
+
+  After quick/search selection, a movable non-rail port with one routed departure faces that
+  wire, keeping the terminal's world position fixed. Keep the old orientation
+  when rotation would move the envelope's top/left, overlap a part, or violate
+  the routing audit. Fixed ports, rail ports and trunk taps retain their existing
+  conventions. Reseat the selected result and replay its whole edit list.
+  Apply this correction only to the selected plan: correcting facing inside the
+  search can change a tied placement to one whose next cleanup the frozen
+  partition guard refuses. This changes port artwork only; routing, marker stubs, R10,
+  R23 and name-claim protection remain unchanged.
 
 - **Existing locks and conflicts.** Members of a locked layout group or
   constraint are treated as fixed instances under R1, because the Edit Engine

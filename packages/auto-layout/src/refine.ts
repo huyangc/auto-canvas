@@ -1,3 +1,4 @@
+import { readabilityCounts } from "./readability.js";
 import type { SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import {
@@ -10,11 +11,17 @@ import { auditRouting } from "./routing-audit.js";
 import { compareIds } from "./recognize.js";
 import type { AutoLayoutResult, LayoutStrategy } from "./types.js";
 
-const UNROUTED_WEIGHT = 10000;
-const CROSSING_WEIGHT = 1000;
-const OFF_CONVENTION_WEIGHT = 300;
-const BEND_WEIGHT = 100;
-const WIRE_LENGTH_DIVISOR = 10;
+/** R74 starting weights; T022 will calibrate these together. */
+export const ROUTED_SCORE_WEIGHTS = {
+  unrouted: 10000,
+  crossings: 1000,
+  offConvention: 300,
+  bends: 100,
+  wireLength: 0.1,
+  labelOverlaps: 400,
+  labelClearance: 150,
+  terminalDepartures: 200,
+} as const;
 const MAX_PASSES = 2;
 const MAX_CANDIDATES = 14;
 
@@ -66,12 +73,17 @@ export function routedScore(run: LayoutRun, resolver: SymbolResolver): number {
     const right = i.placement.mirror === "horizontal";
     return (role === "input" && right) || (role === "output" && !right);
   }).length;
+  const readability = readabilityCounts(run.final, resolver);
+  const weights = ROUTED_SCORE_WEIGHTS;
   return (
-    unrouted * UNROUTED_WEIGHT +
-    audit.crossings * CROSSING_WEIGHT +
-    offConvention * OFF_CONVENTION_WEIGHT +
-    audit.bends * BEND_WEIGHT +
-    audit.wireLength / WIRE_LENGTH_DIVISOR
+    unrouted * weights.unrouted +
+    audit.crossings * weights.crossings +
+    offConvention * weights.offConvention +
+    audit.bends * weights.bends +
+    audit.wireLength * weights.wireLength +
+    readability.labelOverlaps * weights.labelOverlaps +
+    readability.labelClearance * weights.labelClearance +
+    readability.terminalDepartures * weights.terminalDepartures
   );
 }
 
