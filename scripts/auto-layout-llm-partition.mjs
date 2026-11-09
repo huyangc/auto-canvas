@@ -24,7 +24,26 @@ import {
   createProjectSymbolResolver,
 } from "../packages/symbols/dist/index.js";
 
-export const MODEL = "claude-opus-5-5";
+// `deepseek-flash` mirrors silicon-notebook's `general` model service: the OpenAI
+// protocol, with the key read from the environment and never stored here.
+const PROVIDERS = {
+  "deepseek-flash": {
+    protocol: "openai",
+    model: "deepseek-flash",
+    baseURL: "https://api.deepseek.com",
+    apiKeyEnv: "SYSTEM_GENERAL_API_KEY",
+    usdPerMTok: [0.28, 1.12], // Peak-hour rate, so the budget errs high.
+  },
+  "claude-opus-5-5": {
+    protocol: "anthropic",
+    model: "claude-opus-5-5",
+    usdPerMTok: [4, 20],
+  },
+};
+const PROVIDER =
+  PROVIDERS[process.env.LLM_PARTITION_PROVIDER ?? "deepseek-flash"];
+if (!PROVIDER) throw new Error("Unknown LLM_PARTITION_PROVIDER");
+export const MODEL = PROVIDER.model;
 // Thinking counts toward this limit, and a truncated answer would fail only the
 // largest circuits, biasing the experiment.
 const MAX_TOKENS = 32000;
@@ -75,13 +94,96 @@ export function readCachedPartition(
   return existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : undefined;
 }
 const usageCost = (usage) =>
-  (usage.input_tokens * 4 + usage.output_tokens * 20) / 1_000_000;
+  (usage.input_tokens * PROVIDER.usdPerMTok[0] +
+    usage.output_tokens * PROVIDER.usdPerMTok[1]) /
+  1_000_000;
 const inputMessage = (payload) =>
   `<circuit-data>\n${JSON.stringify(payload)}\n</circuit-data>`;
 
-// The only network boundary. SDK retries and credential/profile resolution stay
-// in the SDK. Dry runs and imports never construct a client.
+/** Carries only a status: a response body may echo the request or a credential. */
+class ProviderError extends Error {
+  constructor(status) {
+    super("Provider request failed");
+    this.status = status;
+  }
+}
+const FINISH_REASONS = {
+  stop: "end_turn",
+  length: "max_tokens",
+  content_filter: "refusal",
+};
+const blockText = (content) =>
+  typeof content === "string"
+    ? content
+    : content
+        .filter((c) => c.type === "text")
+        .map((c) => c.text)
+        .join("");
+
+/** Adapts an OpenAI-protocol service to the scheduler's request and response. */
+export function openaiProvider(config = PROVIDER, fetchImpl = fetch) {
+  return async (request) => {
+    const key = process.env[config.apiKeyEnv];
+    if (!key) throw new ProviderError("no credential");
+    // JSON mode only guarantees JSON; the shape is checked by the same schema.
+    const body = JSON.stringify({
+      model: config.model,
+      max_tokens: request.max_tokens,
+      thinking: { type: "enabled" },
+      reasoning_effort: "high",
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: request.system },
+        ...request.messages.map((m) => ({
+          role: m.role,
+          content: blockText(m.content),
+        })),
+      ],
+    });
+    const attempts = 3;
+    for (let attempt = 1; ; attempt++) {
+      let response;
+      try {
+        response = await fetchImpl(`${config.baseURL}/chat/completions`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${key}`,
+          },
+          body,
+          signal: AbortSignal.timeout(600_000),
+        });
+      } catch {
+        if (attempt >= attempts) throw new ProviderError("connection");
+        await new Promise((done) => setTimeout(done, 2000 * attempt));
+        continue;
+      }
+      if (response.ok) {
+        const data = await response.json();
+        const choice = data.choices[0];
+        return {
+          content: [{ type: "text", text: choice.message.content ?? "" }],
+          usage: {
+            input_tokens: data.usage.prompt_tokens,
+            output_tokens: data.usage.completion_tokens,
+          },
+          stop_reason:
+            FINISH_REASONS[choice.finish_reason] ?? choice.finish_reason,
+          model: data.model,
+        };
+      }
+      const retryable =
+        [408, 409, 429].includes(response.status) || response.status >= 500;
+      if (!retryable || attempt >= attempts)
+        throw new ProviderError(response.status);
+      await new Promise((done) => setTimeout(done, 2000 * attempt));
+    }
+  };
+}
+
+// The only network boundary. Dry runs and imports never construct a client.
 function sdkProvider() {
+  if (PROVIDER.protocol === "openai") return openaiProvider();
   const client = new Anthropic({ logLevel: "off" });
   // Streaming keeps a long high-effort answer clear of request timeouts.
   return (request) => client.beta.messages.stream(request).finalMessage();
@@ -167,6 +269,7 @@ export async function runPartitionJobs(
           // Do not persist error messages, headers, request objects or stacks:
           // SDK errors can contain credentials or server-echoed request data.
           entry.errors = [
+            error instanceof ProviderError ||
             error instanceof Anthropic.APIError
               ? `API error (${error.status ?? "connection"})`
               : error instanceof Anthropic.AnthropicError

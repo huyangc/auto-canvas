@@ -13,6 +13,10 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
+// These scheduler tests assert one provider's model name and prices.
+vi.hoisted(() => {
+  process.env.LLM_PARTITION_PROVIDER = "claude-opus-5-5";
+});
 // The CLI is JavaScript; exercise its real scheduler with an injected provider.
 // @ts-expect-error The standalone script does not publish TypeScript declarations.
 import * as runner from "../../../scripts/auto-layout-llm-partition.mjs";
@@ -364,3 +368,75 @@ it("runs dry-run and cached V1/V2 evaluation with titled boxes and explicit cach
     ),
   ).not.toContain("Synthetic &lt;input&gt;");
 }, 20_000);
+
+const openai = {
+  model: "m",
+  baseURL: "https://example.test",
+  apiKeyEnv: "T027_TEST_KEY",
+};
+const reply = (body: object, status = 200) =>
+  ({ ok: status < 400, status, json: async () => body }) as unknown as Response;
+const request = {
+  max_tokens: 100,
+  system: "sys",
+  messages: [
+    { role: "user", content: "hello" },
+    { role: "assistant", content: [{ type: "text", text: "{}" }] },
+  ],
+};
+
+it("maps an OpenAI-protocol answer onto the scheduler's response", async () => {
+  process.env.T027_TEST_KEY = "synthetic-key";
+  try {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      reply({
+        model: "served",
+        choices: [{ message: { content: '{"a":1}' }, finish_reason: "length" }],
+        usage: { prompt_tokens: 3, completion_tokens: 4 },
+      }),
+    );
+    const result = await runner.openaiProvider(openai, fetchImpl)(request);
+    expect(result).toEqual({
+      content: [{ type: "text", text: '{"a":1}' }],
+      usage: { input_tokens: 3, output_tokens: 4 },
+      stop_reason: "max_tokens",
+      model: "served",
+    });
+    const [url, init] = fetchImpl.mock.calls[0]!;
+    expect(url).toBe("https://example.test/chat/completions");
+    const sent = JSON.parse(init.body);
+    expect(sent.response_format).toEqual({ type: "json_object" });
+    expect(sent.messages.map((m: { content: string }) => m.content)).toEqual([
+      "sys",
+      "hello",
+      "{}",
+    ]);
+  } finally {
+    delete process.env.T027_TEST_KEY;
+  }
+});
+
+it("reports only a status for provider failures and needs a credential", async () => {
+  delete process.env.T027_TEST_KEY;
+  const none = vi.fn();
+  await expect(
+    runner.openaiProvider(openai, none)(request),
+  ).rejects.toMatchObject({ status: "no credential" });
+  expect(none).not.toHaveBeenCalled();
+  process.env.T027_TEST_KEY = "synthetic-key";
+  try {
+    const denied = vi.fn().mockResolvedValue(reply({ echoed: "secret" }, 401));
+    const error = await runner
+      .openaiProvider(
+        openai,
+        denied,
+      )(request)
+      .catch((e: Error) => e);
+    expect(error).toMatchObject({ status: 401 });
+    expect(JSON.stringify(error)).not.toContain("secret");
+    expect(String((error as Error).message)).not.toContain("synthetic-key");
+    expect(denied).toHaveBeenCalledTimes(1);
+  } finally {
+    delete process.env.T027_TEST_KEY;
+  }
+});
