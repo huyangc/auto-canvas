@@ -2,7 +2,14 @@ import { transformPoint } from "./geometry.js";
 import { visibleInstanceBounds } from "@icm/derived";
 import { type Instance, type SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
-import { isMos, isMosBulk, mosPolarity, type NetRoles } from "./net-roles.js";
+import {
+  channelPins,
+  isMos,
+  isMosBulk,
+  mosPolarity,
+  polarity,
+  type NetRoles,
+} from "./net-roles.js";
 import { compareIds } from "./recognize.js";
 import {
   deviceNets,
@@ -202,12 +209,16 @@ export function deviceRows(
   for (const tail of new Set(groups.flatMap((g) => g.tailInstanceId ?? []))) {
     const node = nodes.find((n) => n.members.includes(tail));
     if (!node) continue;
-    node.row = Math.max(
-      node.row,
-      ...groups
-        .filter((g) => g.tailInstanceId === tail)
-        .map((g) => nodes.find((n) => n.id === g.id)!.row + 1),
+    const pairs = groups.filter((g) => g.tailInstanceId === tail);
+    const above =
+      polarity(devices.find((i) => i.id === pairs[0]!.members[0])!.symbolId) ===
+      "p";
+    const tailRows = pairs.map(
+      (g) => nodes.find((n) => n.id === g.id)!.row + (above ? -1 : 1),
     );
+    node.row = above
+      ? Math.min(node.row, ...tailRows)
+      : Math.max(node.row, ...tailRows);
     // The node may be a whole group (a tail that is also a mirror member).
     for (const id of node.members)
       placements.get(id)!.position.y = node.row * ROW_PITCH;
@@ -433,12 +444,14 @@ export function assignColumns(
   const shared = (a: string, b: string) => {
     const i = devices.find((i) => i.id === a)!,
       j = devices.find((i) => i.id === b)!;
-    const channel = (i: Instance) =>
-      devicePins(i, resolver).filter((p) =>
-        isMos(i.symbolId)
-          ? ["D", "S"].includes(p.name)
+    const channel = (i: Instance) => {
+      const pins = channelPins(i.symbolId);
+      return devicePins(i, resolver).filter((p) =>
+        pins
+          ? [pins.drain, pins.source].includes(p.name)
           : devicePins(i, resolver).length === 2,
       );
+    };
     return channel(i).flatMap((p) => {
       const net = roles.pinNet(a, p.name);
       if (!net || ["supply", "ground"].includes(roles.byNet.get(net) ?? ""))
@@ -598,12 +611,14 @@ export function assignColumns(
     align(link.a, link.b, link.delta);
   for (const tail of new Set(groups.flatMap((g) => g.tailInstanceId ?? []))) {
     const pairs = groups.filter((g) => g.tailInstanceId === tail);
-    if (pairs.length === 1)
+    if (pairs.length === 1) {
+      const contact = shared(pairs[0]!.members[0], tail)[0];
       align(
         nodeByMember.get(pairs[0]!.members[0])!,
         nodeByMember.get(tail)!,
-        0,
+        contact ? -localPin(tail, contact.q).x : 0,
       );
+    }
   }
   const x = new Map([...new Set(component.values())].map((id) => [id, 0]));
   const compact = () => {

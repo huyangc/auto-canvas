@@ -28,6 +28,7 @@ export interface RecognizedGroup {
   id: string;
   kind: "differential-pair" | "current-mirror" | "matched-pair";
   members: [string, string];
+  extraMemberIds?: string[];
   diodeInstanceId?: string;
   tailInstanceId?: string;
 }
@@ -35,4 +36,33 @@ export interface AutoLayoutResult {
   edits: SchematicEdit[];
   groups: RecognizedGroup[];
   diagnostics: AutoLayoutDiagnostic[];
+}
+
+export interface StructureMember {
+  role:
+    | "reference"
+    | "output"
+    | "input"
+    | "tail"
+    | "member"
+    | "input-reference-side"
+    | "input-output-side"
+    | "load-reference"
+    | "load-output";
+  instanceIds: string[];
+}
+export interface Structure {
+  kind:
+    | "current-mirror"
+    | "differential-pair"
+    | "cross-coupled-pair"
+    | "matched-pair"
+    | "differential-pair-mirror-load";
+  members: StructureMember[];
+}
+export interface Ambiguity {
+  kind:
+    "mirror-reference" | "differential-pair" | "cross-coupled-pair" | "tail";
+  netId?: string;
+  instanceIds: string[];
 }

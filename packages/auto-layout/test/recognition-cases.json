@@ -1,0 +1,1210 @@
+[
+  {
+    "id": "multi-output",
+    "source": "hand",
+    "symbols": {
+      "r": "nmos",
+      "x": "nmos",
+      "y": "nmos"
+    },
+    "nets": {
+      "g": ["r.D", "r.G", "x.G", "y.G"],
+      "s": ["r.S", "x.S", "y.S"],
+      "x": ["x.D"],
+      "y": ["y.D"]
+    },
+    "expected": [
+      {
+        "kind": "current-mirror",
+        "members": {
+          "r": "reference",
+          "x": "output",
+          "y": "output"
+        }
+      }
+    ]
+  },
+  {
+    "id": "bjt-mirror",
+    "source": "hand",
+    "symbols": {
+      "q1": "npn",
+      "q2": "npn"
+    },
+    "nets": {
+      "g": ["q1.B", "q1.C", "q2.B"],
+      "s": ["q1.E", "q2.E"],
+      "d": ["q2.C"]
+    },
+    "expected": [
+      {
+        "kind": "current-mirror",
+        "members": {
+          "q1": "reference",
+          "q2": "output"
+        }
+      }
+    ]
+  },
+  {
+    "id": "depletion-family",
+    "source": "hand",
+    "symbols": {
+      "r": "nmos",
+      "x": "depletion-nmos"
+    },
+    "nets": {
+      "g": ["r.D", "r.G", "x.G"],
+      "s": ["r.S", "x.S"],
+      "d": ["x.D"]
+    },
+    "expected": []
+  },
+  {
+    "id": "dmos-family",
+    "source": "hand",
+    "symbols": {
+      "r": "ndmos",
+      "x": "nmos"
+    },
+    "nets": {
+      "g": ["r.D", "r.G", "x.G"],
+      "s": ["r.S", "x.S"],
+      "d": ["x.D"]
+    },
+    "expected": []
+  },
+  {
+    "id": "different-models",
+    "source": "hand",
+    "symbols": {
+      "r": "nmos",
+      "x": "nmos"
+    },
+    "nets": {
+      "g": ["r.D", "r.G", "x.G"],
+      "s": ["r.S", "x.S"],
+      "d": ["x.D"]
+    },
+    "expected": [],
+    "models": {
+      "r": "one",
+      "x": "two"
+    }
+  },
+  {
+    "id": "pmos-source-tail",
+    "source": "hand",
+    "symbols": {
+      "a": "pmos",
+      "b": "pmos",
+      "t": "current-source",
+      "v": "vdd-port"
+    },
+    "nets": {
+      "s": ["a.S", "b.S", "t.-"],
+      "ga": ["a.G"],
+      "gb": ["b.G"],
+      "da": ["a.D"],
+      "db": ["b.D"],
+      "vdd": ["t.+", "v.P"]
+    },
+    "expected": [
+      {
+        "kind": "differential-pair",
+        "members": {
+          "a": "input",
+          "b": "input",
+          "t": "tail"
+        }
+      }
+    ]
+  },
+  {
+    "id": "reversed-nmos-source",
+    "source": "hand",
+    "symbols": {
+      "a": "nmos",
+      "b": "nmos",
+      "t": "current-source",
+      "g": "ground"
+    },
+    "nets": {
+      "s": ["a.S", "b.S", "t.-"],
+      "ga": ["a.G"],
+      "gb": ["b.G"],
+      "da": ["a.D"],
+      "db": ["b.D"],
+      "gnd": ["t.+", "g.0"]
+    },
+    "expected": [
+      {
+        "kind": "differential-pair",
+        "members": {
+          "a": "input",
+          "b": "input"
+        }
+      }
+    ]
+  },
+  {
+    "id": "ambiguous-tail",
+    "source": "hand",
+    "symbols": {
+      "a": "nmos",
+      "b": "nmos",
+      "t": "nmos",
+      "u": "nmos"
+    },
+    "nets": {
+      "s": ["a.S", "b.S", "t.D", "u.D"],
+      "ga": ["a.G"],
+      "gb": ["b.G"],
+      "da": ["a.D"],
+      "db": ["b.D"],
+      "tg": ["t.G"],
+      "ug": ["u.G"],
+      "ts": ["t.S"],
+      "us": ["u.S"]
+    },
+    "expected": [
+      {
+        "kind": "differential-pair",
+        "members": {
+          "a": "input",
+          "b": "input"
+        }
+      }
+    ]
+  },
+  {
+    "id": "pmos-resistor-tail",
+    "source": "hand",
+    "symbols": {
+      "a": "pmos",
+      "b": "pmos",
+      "t": "resistor",
+      "v": "vdd-port"
+    },
+    "nets": {
+      "s": ["a.S", "b.S", "t.1"],
+      "ga": ["a.G"],
+      "gb": ["b.G"],
+      "da": ["a.D"],
+      "db": ["b.D"],
+      "vdd": ["t.2", "v.P"]
+    },
+    "expected": [
+      {
+        "kind": "differential-pair",
+        "members": {
+          "a": "input",
+          "b": "input",
+          "t": "tail"
+        }
+      }
+    ]
+  },
+  {
+    "id": "bjt-pair",
+    "source": "hand",
+    "symbols": {
+      "a": "npn",
+      "b": "npn",
+      "t": "nmos"
+    },
+    "nets": {
+      "s": ["a.E", "b.E", "t.D"],
+      "ga": ["a.B"],
+      "gb": ["b.B"],
+      "da": ["a.C"],
+      "db": ["b.C"],
+      "tg": ["t.G"],
+      "ts": ["t.S"]
+    },
+    "expected": [
+      {
+        "kind": "differential-pair",
+        "members": {
+          "a": "input",
+          "b": "input",
+          "t": "tail"
+        }
+      }
+    ]
+  },
+  {
+    "id": "reference-fingers",
+    "source": "hand",
+    "symbols": {
+      "r": "nmos",
+      "f": "nmos",
+      "x": "nmos"
+    },
+    "nets": {
+      "g": ["r.D", "f.D", "r.G", "f.G", "x.G"],
+      "s": ["r.S", "f.S", "x.S"],
+      "d": ["x.D"]
+    },
+    "expected": [
+      {
+        "kind": "current-mirror",
+        "members": {
+          "r": "reference",
+          "f": "reference",
+          "x": "output"
+        }
+      }
+    ],
+    "models": {
+      "r": "same",
+      "f": "same",
+      "x": "same"
+    }
+  },
+  {
+    "id": "five-transistor-ota",
+    "source": "hand",
+    "symbols": {
+      "a": "nmos",
+      "b": "nmos",
+      "t": "nmos",
+      "r": "pmos",
+      "o": "pmos",
+      "v": "vdd-port",
+      "g": "ground"
+    },
+    "nets": {
+      "s": ["a.S", "b.S", "t.D"],
+      "ga": ["a.G"],
+      "gb": ["b.G"],
+      "da": ["a.D", "r.D", "r.G", "o.G"],
+      "db": ["b.D", "o.D"],
+      "vdd": ["r.S", "o.S", "v.P"],
+      "gnd": ["t.S", "g.0"],
+      "bias": ["t.G"]
+    },
+    "expected": [
+      {
+        "kind": "differential-pair",
+        "members": {
+          "a": "input",
+          "b": "input",
+          "t": "tail"
+        }
+      },
+      {
+        "kind": "current-mirror",
+        "members": {
+          "r": "reference",
+          "o": "output"
+        }
+      },
+      {
+        "kind": "differential-pair-mirror-load",
+        "members": {
+          "a": "input-reference-side",
+          "b": "input-output-side",
+          "r": "load-reference",
+          "o": "load-output",
+          "t": "tail"
+        }
+      }
+    ]
+  },
+  {
+    "id": "one-sided-load",
+    "source": "hand",
+    "symbols": {
+      "a": "nmos",
+      "b": "nmos",
+      "t": "nmos",
+      "r": "pmos",
+      "o": "pmos",
+      "v": "vdd-port",
+      "g": "ground"
+    },
+    "nets": {
+      "s": ["a.S", "b.S", "t.D"],
+      "ga": ["a.G"],
+      "gb": ["b.G"],
+      "da": ["a.D", "r.D", "r.G", "o.G"],
+      "db": ["b.D"],
+      "vdd": ["r.S", "o.S", "v.P"],
+      "gnd": ["t.S", "g.0"],
+      "bias": ["t.G"],
+      "other": ["o.D"]
+    },
+    "expected": [
+      {
+        "kind": "differential-pair",
+        "members": {
+          "a": "input",
+          "b": "input",
+          "t": "tail"
+        }
+      },
+      {
+        "kind": "current-mirror",
+        "members": {
+          "r": "reference",
+          "o": "output"
+        }
+      }
+    ]
+  },
+  {
+    "id": "ambiguous-switch-bank",
+    "source": "hand",
+    "symbols": {
+      "a": "nmos",
+      "b": "nmos",
+      "c": "nmos",
+      "d": "nmos"
+    },
+    "nets": {
+      "s": ["a.S", "b.S", "c.S", "d.S"],
+      "aD": ["a.D"],
+      "aG": ["a.G"],
+      "bD": ["b.D"],
+      "bG": ["b.G"],
+      "cD": ["c.D"],
+      "cG": ["c.G"],
+      "dD": ["d.D"],
+      "dG": ["d.G"]
+    },
+    "expected": []
+  },
+  {
+    "id": "switch-bank-mirror-loads",
+    "source": "hand",
+    "symbols": {
+      "a": "nmos",
+      "b": "nmos",
+      "c": "nmos",
+      "d": "nmos",
+      "t": "nmos",
+      "v": "vdd-port",
+      "g": "ground",
+      "r": "pmos",
+      "o": "pmos",
+      "u": "pmos",
+      "w": "pmos"
+    },
+    "nets": {
+      "s": ["a.S", "b.S", "c.S", "d.S", "t.D"],
+      "aD": ["a.D", "r.D", "r.G", "o.G"],
+      "aG": ["a.G"],
+      "bD": ["b.D", "o.D"],
+      "bG": ["b.G"],
+      "cD": ["c.D", "u.D", "u.G", "w.G"],
+      "cG": ["c.G"],
+      "dD": ["d.D", "w.D"],
+      "dG": ["d.G"],
+      "bias": ["t.G"],
+      "gnd": ["t.S", "g.0"],
+      "vdd": ["v.P", "r.S", "o.S", "u.S", "w.S"]
+    },
+    "expected": [
+      {
+        "kind": "differential-pair",
+        "members": {
+          "a": "input",
+          "b": "input",
+          "t": "tail"
+        }
+      },
+      {
+        "kind": "current-mirror",
+        "members": {
+          "r": "reference",
+          "o": "output"
+        }
+      },
+      {
+        "kind": "differential-pair-mirror-load",
+        "members": {
+          "a": "input-reference-side",
+          "b": "input-output-side",
+          "r": "load-reference",
+          "o": "load-output",
+          "t": "tail"
+        }
+      },
+      {
+        "kind": "differential-pair",
+        "members": {
+          "c": "input",
+          "d": "input",
+          "t": "tail"
+        }
+      },
+      {
+        "kind": "current-mirror",
+        "members": {
+          "u": "reference",
+          "w": "output"
+        }
+      },
+      {
+        "kind": "differential-pair-mirror-load",
+        "members": {
+          "c": "input-reference-side",
+          "d": "input-output-side",
+          "u": "load-reference",
+          "w": "load-output",
+          "t": "tail"
+        }
+      }
+    ]
+  },
+  {
+    "id": "cross-coupled",
+    "source": "hand",
+    "symbols": {
+      "a": "nmos",
+      "b": "nmos"
+    },
+    "nets": {
+      "s": ["a.S", "b.S"],
+      "x": ["a.D", "b.G"],
+      "y": ["b.D", "a.G"]
+    },
+    "expected": [
+      {
+        "kind": "cross-coupled-pair",
+        "members": {
+          "a": "member",
+          "b": "member"
+        }
+      }
+    ]
+  },
+  {
+    "id": "one-way-driver",
+    "source": "hand",
+    "symbols": {
+      "a": "nmos",
+      "b": "nmos"
+    },
+    "nets": {
+      "s": ["a.S", "b.S"],
+      "x": ["a.D", "b.G"],
+      "y": ["b.D"],
+      "g": ["a.G"]
+    },
+    "expected": []
+  },
+  {
+    "id": "diode-matched",
+    "source": "hand",
+    "symbols": {
+      "a": "nmos",
+      "b": "nmos"
+    },
+    "nets": {
+      "d": ["a.D", "a.G", "b.D", "b.G"],
+      "sa": ["a.S"],
+      "sb": ["b.S"]
+    },
+    "expected": [
+      {
+        "kind": "matched-pair",
+        "members": {
+          "a": "member",
+          "b": "member"
+        }
+      }
+    ]
+  },
+  {
+    "id": "one_stage_opamp/circuit_0001",
+    "source": "circuitgenome",
+    "symbols": {
+      "m1_input_pair": "pmos",
+      "m2_input_pair": "pmos",
+      "r1_load": "resistor",
+      "r2_load": "resistor",
+      "m1_tail_current": "pmos",
+      "m2_tail_current": "pmos",
+      "mnref_bias_gen": "nmos",
+      "mn7_bias_gen": "nmos",
+      "Vsupply": "voltage-source",
+      "benchmark_ground": "ground"
+    },
+    "nets": {
+      "n0": ["m1_input_pair.D", "r1_load.1"],
+      "n1": ["m1_input_pair.G"],
+      "n2": [
+        "m1_input_pair.S",
+        "m1_input_pair.B",
+        "m2_input_pair.S",
+        "m2_input_pair.B",
+        "m2_tail_current.D"
+      ],
+      "n3": ["m2_input_pair.D", "r2_load.1"],
+      "n4": ["m2_input_pair.G"],
+      "n5": [
+        "r1_load.2",
+        "r2_load.2",
+        "mnref_bias_gen.S",
+        "mnref_bias_gen.B",
+        "mn7_bias_gen.S",
+        "mn7_bias_gen.B",
+        "Vsupply.-",
+        "benchmark_ground.0"
+      ],
+      "n6": [
+        "m1_tail_current.D",
+        "m1_tail_current.G",
+        "m2_tail_current.G",
+        "mn7_bias_gen.D"
+      ],
+      "n7": [
+        "m1_tail_current.S",
+        "m1_tail_current.B",
+        "m2_tail_current.S",
+        "m2_tail_current.B",
+        "Vsupply.+"
+      ],
+      "n8": ["mnref_bias_gen.D", "mnref_bias_gen.G", "mn7_bias_gen.G"]
+    },
+    "models": {
+      "m1_input_pair": "pmos",
+      "m2_input_pair": "pmos",
+      "m1_tail_current": "pmos",
+      "m2_tail_current": "pmos",
+      "mnref_bias_gen": "nmos",
+      "mn7_bias_gen": "nmos"
+    },
+    "expected": [
+      {
+        "kind": "current-mirror",
+        "members": {
+          "m1_tail_current": "reference",
+          "m2_tail_current": "output"
+        }
+      },
+      {
+        "kind": "differential-pair",
+        "members": {
+          "m1_input_pair": "input",
+          "m2_input_pair": "input",
+          "m2_tail_current": "tail"
+        }
+      }
+    ],
+    "deferred": ["mnref_bias_gen", "mn7_bias_gen"],
+    "provenance": {
+      "tool": "CircuitGenome",
+      "version": "0.3.0",
+      "command": "circuitgenome synthesize --topology one_stage_opamp --format both --output-dir one_stage_opamp",
+      "license": "MIT License, Copyright (c) 2026 Analog ML"
+    }
+  },
+  {
+    "id": "one_stage_opamp/circuit_0003",
+    "source": "circuitgenome",
+    "symbols": {
+      "m1_input_pair": "pmos",
+      "m2_input_pair": "pmos",
+      "r1_load": "resistor",
+      "r2_load": "resistor",
+      "r1_tail_current": "resistor",
+      "mnref_bias_gen": "nmos",
+      "Vsupply": "voltage-source",
+      "benchmark_ground": "ground"
+    },
+    "nets": {
+      "n0": ["m1_input_pair.D", "r1_load.1"],
+      "n1": ["m1_input_pair.G"],
+      "n2": [
+        "m1_input_pair.S",
+        "m1_input_pair.B",
+        "m2_input_pair.S",
+        "m2_input_pair.B",
+        "r1_tail_current.2"
+      ],
+      "n3": ["m2_input_pair.D", "r2_load.1"],
+      "n4": ["m2_input_pair.G"],
+      "n5": [
+        "r1_load.2",
+        "r2_load.2",
+        "mnref_bias_gen.S",
+        "mnref_bias_gen.B",
+        "Vsupply.-",
+        "benchmark_ground.0"
+      ],
+      "n6": ["r1_tail_current.1", "Vsupply.+"],
+      "n7": ["mnref_bias_gen.D", "mnref_bias_gen.G"]
+    },
+    "models": {
+      "m1_input_pair": "pmos",
+      "m2_input_pair": "pmos",
+      "mnref_bias_gen": "nmos"
+    },
+    "expected": [
+      {
+        "kind": "differential-pair",
+        "members": {
+          "m1_input_pair": "input",
+          "m2_input_pair": "input",
+          "r1_tail_current": "tail"
+        }
+      }
+    ],
+    "deferred": ["mnref_bias_gen"],
+    "provenance": {
+      "tool": "CircuitGenome",
+      "version": "0.3.0",
+      "command": "circuitgenome synthesize --topology one_stage_opamp --format both --output-dir one_stage_opamp",
+      "license": "MIT License, Copyright (c) 2026 Analog ML"
+    }
+  },
+  {
+    "id": "one_stage_opamp/circuit_0004",
+    "source": "circuitgenome",
+    "symbols": {
+      "m1_input_pair": "pmos",
+      "m2_input_pair": "pmos",
+      "m1_load": "nmos",
+      "m2_load": "nmos",
+      "m1_tail_current": "pmos",
+      "m2_tail_current": "pmos",
+      "mnref_bias_gen": "nmos",
+      "mn7_bias_gen": "nmos",
+      "Vsupply": "voltage-source",
+      "benchmark_ground": "ground"
+    },
+    "nets": {
+      "n0": ["m1_input_pair.D", "m1_load.D", "m1_load.G", "m2_load.G"],
+      "n1": ["m1_input_pair.G"],
+      "n2": [
+        "m1_input_pair.S",
+        "m1_input_pair.B",
+        "m2_input_pair.S",
+        "m2_input_pair.B",
+        "m2_tail_current.D"
+      ],
+      "n3": ["m2_input_pair.D", "m2_load.D"],
+      "n4": ["m2_input_pair.G"],
+      "n5": [
+        "m1_load.S",
+        "m1_load.B",
+        "m2_load.S",
+        "m2_load.B",
+        "mnref_bias_gen.S",
+        "mnref_bias_gen.B",
+        "mn7_bias_gen.S",
+        "mn7_bias_gen.B",
+        "Vsupply.-",
+        "benchmark_ground.0"
+      ],
+      "n6": [
+        "m1_tail_current.D",
+        "m1_tail_current.G",
+        "m2_tail_current.G",
+        "mn7_bias_gen.D"
+      ],
+      "n7": [
+        "m1_tail_current.S",
+        "m1_tail_current.B",
+        "m2_tail_current.S",
+        "m2_tail_current.B",
+        "Vsupply.+"
+      ],
+      "n8": ["mnref_bias_gen.D", "mnref_bias_gen.G", "mn7_bias_gen.G"]
+    },
+    "models": {
+      "m1_input_pair": "pmos",
+      "m2_input_pair": "pmos",
+      "m1_load": "nmos",
+      "m2_load": "nmos",
+      "m1_tail_current": "pmos",
+      "m2_tail_current": "pmos",
+      "mnref_bias_gen": "nmos",
+      "mn7_bias_gen": "nmos"
+    },
+    "expected": [
+      {
+        "kind": "current-mirror",
+        "members": {
+          "m1_tail_current": "reference",
+          "m2_tail_current": "output"
+        }
+      },
+      {
+        "kind": "differential-pair",
+        "members": {
+          "m1_input_pair": "input",
+          "m2_input_pair": "input",
+          "m2_tail_current": "tail"
+        }
+      },
+      {
+        "kind": "current-mirror",
+        "members": {
+          "m1_load": "reference",
+          "m2_load": "output"
+        }
+      },
+      {
+        "kind": "differential-pair-mirror-load",
+        "members": {
+          "m1_input_pair": "input-reference-side",
+          "m2_input_pair": "input-output-side",
+          "m1_load": "load-reference",
+          "m2_load": "load-output",
+          "m2_tail_current": "tail"
+        }
+      }
+    ],
+    "deferred": ["mnref_bias_gen", "mn7_bias_gen"],
+    "provenance": {
+      "tool": "CircuitGenome",
+      "version": "0.3.0",
+      "command": "circuitgenome synthesize --topology one_stage_opamp --format both --output-dir one_stage_opamp",
+      "license": "MIT License, Copyright (c) 2026 Analog ML"
+    }
+  },
+  {
+    "id": "one_stage_opamp/circuit_0019",
+    "source": "circuitgenome",
+    "symbols": {
+      "m1_input_pair": "nmos",
+      "m2_input_pair": "nmos",
+      "m1_load": "pmos",
+      "m2_load": "pmos",
+      "m1_tail_current": "nmos",
+      "m2_tail_current": "nmos",
+      "mnref_bias_gen": "nmos",
+      "mnfeed_bias_gen": "nmos",
+      "mpfeed_bias_gen": "pmos",
+      "mpcasc_bias_gen": "pmos",
+      "mncdio_bias_gen": "nmos",
+      "mnpref_bias_gen": "nmos",
+      "mncasc_bias_gen": "nmos",
+      "mppref_bias_gen": "pmos",
+      "mp7_bias_gen": "pmos",
+      "Vsupply": "voltage-source",
+      "benchmark_ground": "ground"
+    },
+    "nets": {
+      "n0": ["m1_input_pair.D", "m1_load.D", "m1_load.G", "m2_load.G"],
+      "n1": ["m1_input_pair.G"],
+      "n2": [
+        "m1_input_pair.S",
+        "m1_input_pair.B",
+        "m2_input_pair.S",
+        "m2_input_pair.B",
+        "m2_tail_current.D"
+      ],
+      "n3": ["m2_input_pair.D", "m2_load.D"],
+      "n4": ["m2_input_pair.G"],
+      "n5": [
+        "m1_load.S",
+        "m1_load.B",
+        "m2_load.S",
+        "m2_load.B",
+        "mpfeed_bias_gen.S",
+        "mpfeed_bias_gen.B",
+        "mpcasc_bias_gen.S",
+        "mpcasc_bias_gen.B",
+        "mppref_bias_gen.S",
+        "mppref_bias_gen.B",
+        "mp7_bias_gen.S",
+        "mp7_bias_gen.B",
+        "Vsupply.+"
+      ],
+      "n6": [
+        "m1_tail_current.D",
+        "m1_tail_current.G",
+        "m2_tail_current.G",
+        "mp7_bias_gen.D"
+      ],
+      "n7": [
+        "m1_tail_current.S",
+        "m1_tail_current.B",
+        "m2_tail_current.S",
+        "m2_tail_current.B",
+        "mnref_bias_gen.S",
+        "mnref_bias_gen.B",
+        "mnfeed_bias_gen.S",
+        "mnfeed_bias_gen.B",
+        "mncdio_bias_gen.S",
+        "mncdio_bias_gen.B",
+        "mnpref_bias_gen.S",
+        "mnpref_bias_gen.B",
+        "mncasc_bias_gen.B",
+        "Vsupply.-",
+        "benchmark_ground.0"
+      ],
+      "n8": [
+        "mnref_bias_gen.D",
+        "mnref_bias_gen.G",
+        "mnfeed_bias_gen.G",
+        "mnpref_bias_gen.G"
+      ],
+      "n9": [
+        "mnfeed_bias_gen.D",
+        "mpfeed_bias_gen.D",
+        "mpfeed_bias_gen.G",
+        "mpcasc_bias_gen.G"
+      ],
+      "n10": [
+        "mpcasc_bias_gen.D",
+        "mncdio_bias_gen.D",
+        "mncdio_bias_gen.G",
+        "mncasc_bias_gen.G"
+      ],
+      "n11": ["mnpref_bias_gen.D", "mncasc_bias_gen.S"],
+      "n12": [
+        "mncasc_bias_gen.D",
+        "mppref_bias_gen.D",
+        "mppref_bias_gen.G",
+        "mp7_bias_gen.G"
+      ]
+    },
+    "models": {
+      "m1_input_pair": "nmos",
+      "m2_input_pair": "nmos",
+      "m1_load": "pmos",
+      "m2_load": "pmos",
+      "m1_tail_current": "nmos",
+      "m2_tail_current": "nmos",
+      "mnref_bias_gen": "nmos",
+      "mnfeed_bias_gen": "nmos",
+      "mpfeed_bias_gen": "pmos",
+      "mpcasc_bias_gen": "pmos",
+      "mncdio_bias_gen": "nmos",
+      "mnpref_bias_gen": "nmos",
+      "mncasc_bias_gen": "nmos",
+      "mppref_bias_gen": "pmos",
+      "mp7_bias_gen": "pmos"
+    },
+    "expected": [
+      {
+        "kind": "current-mirror",
+        "members": {
+          "m1_tail_current": "reference",
+          "m2_tail_current": "output"
+        }
+      },
+      {
+        "kind": "differential-pair",
+        "members": {
+          "m1_input_pair": "input",
+          "m2_input_pair": "input",
+          "m2_tail_current": "tail"
+        }
+      },
+      {
+        "kind": "current-mirror",
+        "members": {
+          "m1_load": "reference",
+          "m2_load": "output"
+        }
+      },
+      {
+        "kind": "differential-pair-mirror-load",
+        "members": {
+          "m1_input_pair": "input-reference-side",
+          "m2_input_pair": "input-output-side",
+          "m1_load": "load-reference",
+          "m2_load": "load-output",
+          "m2_tail_current": "tail"
+        }
+      }
+    ],
+    "deferred": [
+      "mnref_bias_gen",
+      "mnfeed_bias_gen",
+      "mpfeed_bias_gen",
+      "mpcasc_bias_gen",
+      "mncdio_bias_gen",
+      "mnpref_bias_gen",
+      "mncasc_bias_gen",
+      "mppref_bias_gen",
+      "mp7_bias_gen"
+    ],
+    "provenance": {
+      "tool": "CircuitGenome",
+      "version": "0.3.0",
+      "command": "circuitgenome synthesize --topology one_stage_opamp --format both --output-dir one_stage_opamp",
+      "license": "MIT License, Copyright (c) 2026 Analog ML"
+    }
+  },
+  {
+    "id": "two_stage_opamp_fully_differential/circuit_0064",
+    "source": "circuitgenome",
+    "symbols": {
+      "m1_input_pair": "pmos",
+      "m2_input_pair": "pmos",
+      "m1_load": "nmos",
+      "m2_load": "nmos",
+      "m1_tail_current": "pmos",
+      "m2_tail_current": "pmos",
+      "mnref_bias_gen": "nmos",
+      "mnfeed_bias_gen": "nmos",
+      "mpfeed_bias_gen": "pmos",
+      "mpcasc_bias_gen": "pmos",
+      "mncdio_bias_gen": "nmos",
+      "mnpref_bias_gen": "nmos",
+      "mncasc_bias_gen": "nmos",
+      "mppref_bias_gen": "pmos",
+      "mp4_bias_gen": "pmos",
+      "mn4_bias_gen": "nmos",
+      "mn5_bias_gen": "nmos",
+      "mp5_bias_gen": "pmos",
+      "mn7_bias_gen": "nmos",
+      "m1_cmfb": "nmos",
+      "m2_cmfb": "nmos",
+      "m3_cmfb": "nmos",
+      "m4_cmfb": "nmos",
+      "m5_cmfb": "pmos",
+      "m6_cmfb": "pmos",
+      "m7_cmfb": "nmos",
+      "m8_cmfb": "nmos",
+      "c1_comp_p": "capacitor",
+      "c1_comp_n": "capacitor",
+      "mn1_second_stage_p": "nmos",
+      "mp1_second_stage_p": "pmos",
+      "mn1_second_stage_n": "nmos",
+      "mp1_second_stage_n": "pmos",
+      "Vsupply": "voltage-source",
+      "benchmark_ground": "ground"
+    },
+    "nets": {
+      "n0": [
+        "m1_input_pair.D",
+        "m1_load.D",
+        "c1_comp_n.1",
+        "mn1_second_stage_n.G"
+      ],
+      "n1": ["m1_input_pair.G"],
+      "n2": [
+        "m1_input_pair.S",
+        "m1_input_pair.B",
+        "m2_input_pair.S",
+        "m2_input_pair.B",
+        "m2_tail_current.D"
+      ],
+      "n3": [
+        "m2_input_pair.D",
+        "m2_load.D",
+        "c1_comp_p.1",
+        "mn1_second_stage_p.G"
+      ],
+      "n4": ["m2_input_pair.G"],
+      "n5": ["m1_load.G", "m2_load.G", "m2_cmfb.D", "m4_cmfb.D", "m6_cmfb.D"],
+      "n6": [
+        "m1_load.S",
+        "m1_load.B",
+        "m2_load.S",
+        "m2_load.B",
+        "mnref_bias_gen.S",
+        "mnref_bias_gen.B",
+        "mnfeed_bias_gen.S",
+        "mnfeed_bias_gen.B",
+        "mncdio_bias_gen.S",
+        "mncdio_bias_gen.B",
+        "mnpref_bias_gen.S",
+        "mnpref_bias_gen.B",
+        "mncasc_bias_gen.B",
+        "mn4_bias_gen.S",
+        "mn4_bias_gen.B",
+        "mn5_bias_gen.S",
+        "mn5_bias_gen.B",
+        "mn7_bias_gen.S",
+        "mn7_bias_gen.B",
+        "m1_cmfb.B",
+        "m2_cmfb.B",
+        "m3_cmfb.B",
+        "m4_cmfb.B",
+        "m7_cmfb.S",
+        "m7_cmfb.B",
+        "m8_cmfb.S",
+        "m8_cmfb.B",
+        "mn1_second_stage_p.S",
+        "mn1_second_stage_p.B",
+        "mn1_second_stage_n.S",
+        "mn1_second_stage_n.B",
+        "Vsupply.-",
+        "benchmark_ground.0"
+      ],
+      "n7": [
+        "m1_tail_current.D",
+        "m1_tail_current.G",
+        "m2_tail_current.G",
+        "mn7_bias_gen.D"
+      ],
+      "n8": [
+        "m1_tail_current.S",
+        "m1_tail_current.B",
+        "m2_tail_current.S",
+        "m2_tail_current.B",
+        "mpfeed_bias_gen.S",
+        "mpfeed_bias_gen.B",
+        "mpcasc_bias_gen.S",
+        "mpcasc_bias_gen.B",
+        "mppref_bias_gen.S",
+        "mppref_bias_gen.B",
+        "mp4_bias_gen.S",
+        "mp4_bias_gen.B",
+        "mp5_bias_gen.S",
+        "mp5_bias_gen.B",
+        "m5_cmfb.S",
+        "m5_cmfb.B",
+        "m6_cmfb.S",
+        "m6_cmfb.B",
+        "mp1_second_stage_p.S",
+        "mp1_second_stage_p.B",
+        "mp1_second_stage_n.S",
+        "mp1_second_stage_n.B",
+        "Vsupply.+"
+      ],
+      "n9": [
+        "mnref_bias_gen.D",
+        "mnref_bias_gen.G",
+        "mnfeed_bias_gen.G",
+        "mnpref_bias_gen.G",
+        "mn5_bias_gen.G",
+        "mn7_bias_gen.G"
+      ],
+      "n10": [
+        "mnfeed_bias_gen.D",
+        "mpfeed_bias_gen.D",
+        "mpfeed_bias_gen.G",
+        "mpcasc_bias_gen.G"
+      ],
+      "n11": [
+        "mpcasc_bias_gen.D",
+        "mncdio_bias_gen.D",
+        "mncdio_bias_gen.G",
+        "mncasc_bias_gen.G"
+      ],
+      "n12": ["mnpref_bias_gen.D", "mncasc_bias_gen.S"],
+      "n13": [
+        "mncasc_bias_gen.D",
+        "mppref_bias_gen.D",
+        "mppref_bias_gen.G",
+        "mp4_bias_gen.G"
+      ],
+      "n14": [
+        "mp4_bias_gen.D",
+        "mn4_bias_gen.D",
+        "mn4_bias_gen.G",
+        "m7_cmfb.G",
+        "m8_cmfb.G"
+      ],
+      "n15": [
+        "mn5_bias_gen.D",
+        "mp5_bias_gen.D",
+        "mp5_bias_gen.G",
+        "mp1_second_stage_p.G",
+        "mp1_second_stage_n.G"
+      ],
+      "n16": ["m1_cmfb.D", "m3_cmfb.D", "m5_cmfb.D", "m5_cmfb.G", "m6_cmfb.G"],
+      "n17": ["m1_cmfb.G", "m3_cmfb.G"],
+      "n18": ["m1_cmfb.S", "m2_cmfb.S", "m7_cmfb.D"],
+      "n19": [
+        "m2_cmfb.G",
+        "c1_comp_p.2",
+        "mn1_second_stage_p.D",
+        "mp1_second_stage_p.D"
+      ],
+      "n20": ["m3_cmfb.S", "m4_cmfb.S", "m8_cmfb.D"],
+      "n21": [
+        "m4_cmfb.G",
+        "c1_comp_n.2",
+        "mn1_second_stage_n.D",
+        "mp1_second_stage_n.D"
+      ]
+    },
+    "models": {
+      "m1_input_pair": "pmos",
+      "m2_input_pair": "pmos",
+      "m1_load": "nmos",
+      "m2_load": "nmos",
+      "m1_tail_current": "pmos",
+      "m2_tail_current": "pmos",
+      "mnref_bias_gen": "nmos",
+      "mnfeed_bias_gen": "nmos",
+      "mpfeed_bias_gen": "pmos",
+      "mpcasc_bias_gen": "pmos",
+      "mncdio_bias_gen": "nmos",
+      "mnpref_bias_gen": "nmos",
+      "mncasc_bias_gen": "nmos",
+      "mppref_bias_gen": "pmos",
+      "mp4_bias_gen": "pmos",
+      "mn4_bias_gen": "nmos",
+      "mn5_bias_gen": "nmos",
+      "mp5_bias_gen": "pmos",
+      "mn7_bias_gen": "nmos",
+      "m1_cmfb": "nmos",
+      "m2_cmfb": "nmos",
+      "m3_cmfb": "nmos",
+      "m4_cmfb": "nmos",
+      "m5_cmfb": "pmos",
+      "m6_cmfb": "pmos",
+      "m7_cmfb": "nmos",
+      "m8_cmfb": "nmos",
+      "mn1_second_stage_p": "nmos",
+      "mp1_second_stage_p": "pmos",
+      "mn1_second_stage_n": "nmos",
+      "mp1_second_stage_n": "pmos"
+    },
+    "expected": [
+      {
+        "kind": "current-mirror",
+        "members": {
+          "m1_tail_current": "reference",
+          "m2_tail_current": "output"
+        }
+      },
+      {
+        "kind": "differential-pair",
+        "members": {
+          "m1_input_pair": "input",
+          "m2_input_pair": "input",
+          "m2_tail_current": "tail"
+        }
+      }
+    ],
+    "deferred": [
+      "mnref_bias_gen",
+      "mnfeed_bias_gen",
+      "mpfeed_bias_gen",
+      "mpcasc_bias_gen",
+      "mncdio_bias_gen",
+      "mnpref_bias_gen",
+      "mncasc_bias_gen",
+      "mppref_bias_gen",
+      "mp4_bias_gen",
+      "mn4_bias_gen",
+      "mn5_bias_gen",
+      "mp5_bias_gen",
+      "mn7_bias_gen",
+      "m1_cmfb",
+      "m2_cmfb",
+      "m3_cmfb",
+      "m4_cmfb",
+      "m5_cmfb",
+      "m6_cmfb",
+      "m7_cmfb",
+      "m8_cmfb",
+      "c1_comp_p",
+      "c1_comp_n",
+      "mn1_second_stage_p",
+      "mp1_second_stage_p",
+      "mn1_second_stage_n",
+      "mp1_second_stage_n"
+    ],
+    "provenance": {
+      "tool": "CircuitGenome",
+      "version": "0.3.0",
+      "command": "circuitgenome synthesize --topology two_stage_opamp_fully_differential --format both --output-dir two_stage_opamp_fully_differential",
+      "license": "MIT License, Copyright (c) 2026 Analog ML"
+    }
+  }
+]
