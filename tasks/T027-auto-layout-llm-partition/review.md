@@ -61,5 +61,5 @@ extracted. The reference now only feeds comparison metrics:
 - when a LOADBench `partitioning.xml` sits beside the document, it is the reference.
 
 The extended integration test fails before the fix and passes after. LOADBench layouts are
-unchanged, and their metrics now use the LOADBench reference (median ARI 0.71, close to
-the ad hoc 0.69 in the report).
+unchanged, and their metrics now use the LOADBench reference (median ARI 0.69, the same as
+the ad hoc figure in the report).
