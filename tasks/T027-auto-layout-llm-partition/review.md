@@ -31,3 +31,22 @@ Anthropic API. The script now defaults to that service: OpenAI protocol,
 `LLM_PARTITION_PROVIDER=claude-opus-5-5` keeps the original path. The key is read from
 the environment only and is absent from the cache files. JSON mode does not enforce the
 shape, so the prompt now states it (`PROMPT_VERSION` 2) and the same Zod schema checks it.
+
+## Experiment (Opus)
+
+Opus ran the procedure on `deepseek-flash`.
+
+1. **Pilot:** 3 dev documents.
+2. **Dev:** 18 documents, 3 samples each, plus one anonymized run.
+3. **One prompt revision**, version 3, made on dev only. It removed disconnected blocks
+   (20 of 89 → 0 of 120).
+4. **Val:** run once with the frozen prompt.
+5. **LOADBench:** 30 topologies.
+
+T026 and T028 merged meanwhile. T027 was rebased onto `65bd206`, and every layout was
+rerun from the cache, so the numbers in the report use today's `main` as V0.
+
+The decision gate fails; the report has the full results. The next step should give block
+placement to an optimizer: the LLM supplies the blocks, titles, roles and flow, and an
+optimizer chooses where blocks go. The block-placement refusals (12 of them) need fixing in
+any case.

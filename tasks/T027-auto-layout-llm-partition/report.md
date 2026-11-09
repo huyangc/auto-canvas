@@ -105,3 +105,87 @@ unchanged assistant content on repair.
 - Opus still owns real API calls, dev prompt tuning/freeze, the single LLM val run,
   LOADBench comparison and the experiment decision gate. No experimental quality
   claim is made from fake-provider tests or the default-layout baseline check.
+
+## Experiment results (Opus, after review)
+
+Provider: `deepseek-flash` (the user's choice), prompt version 3, frozen before val.
+Base: `main` with T026 and T028 (`65bd206`). Every layout reads the LLM cache.
+
+### Calls
+
+- **Coverage:** 216 calls (dev 18×3 + 18 anonymized, val 15×3, LOADBench 30), plus the
+  pilot and the dev runs for prompt version 2.
+- **Validity:** every call was valid on the first try; no repair was ever needed, and no
+  answer split an L0 structure.
+- **Cost:** about $3.8 in total, $0.01–0.02 per call. Median output was 9.5k tokens, most
+  of it thinking.
+- **Credentials:** none appear in any cache file or log.
+
+### Partition quality
+
+| Measure                                                                      | Dev           | Val         |
+| ---------------------------------------------------------------------------- | ------------- | ----------- |
+| Disconnected blocks (prompt v2 → v3)                                         | 20/89 → 0/120 | 0           |
+| Mean overlap of LLM blocks when drawn in the human picture (lower is better) | 0.07          | 0.11        |
+| Stability between samples (mean pairwise ARI)                                | 0.74          | 0.71        |
+| Blocks per document (LLM / human proxy)                                      | 3–15 / 1–8    | 3–16 / 1–14 |
+
+Against LOADBench's functional labels (30 op-amps), the agreement was:
+
+- ARI 0.69, median and mean;
+- 66% of devices in a block with a matching role, where `input` and `gain` count as one.
+
+Blocks are titled readably, for example "Main input pair", "Feedforward input stage" or
+"CMFB amplifier".
+
+### Layout
+
+Crossings use only documents completed by both the variant and V0. A completion of 14/18
+means four refused documents.
+
+| Variant                               | Dev: done | Dev: crossings vs V0 | Dev: arrangement | Val: done | Val: crossings vs V0 | Val: arrangement |
+| ------------------------------------- | --------- | -------------------- | ---------------- | --------- | -------------------- | ---------------- |
+| V0, today's main                      | 18/18     | —                    | 46%              | 15/15     | —                    | 36%              |
+| Human partition + human floorplan     | 18/18     | +9.2%                | 87%              | 15/15     | −12.9%               | 97%              |
+| LLM + automatic floorplan (3 samples) | 14–16/18  | +14% to +51%         | 43–46%           | 12–13/15  | +16% to +17%         | 28–34%           |
+| LLM + LLM floorplan (3 samples)       | 14/18     | −11% to −16%         | 54–57%           | 13–14/15  | −6% to +21%          | 44–46%           |
+| LLM + LLM floorplan, anonymized       | 15/18     | −3.2%                | 59%              | —         | —                    | —                |
+
+On LOADBench, crossings over the 25 topologies completed by every variant are:
+
+| Variant                   | Crossings |
+| ------------------------- | --------: |
+| V0                        |       204 |
+| LOADBench's own partition |       328 |
+| LLM + automatic floorplan |       309 |
+| LLM + LLM floorplan       |       299 |
+
+### Refusals
+
+- **Placement finishing crossed block boundaries:** 12 across both splits. This is a
+  limit of the block-placement prototype, not of the LLM.
+- **Touching-pin stub had no clear path:** 2.
+- **Whole-list replay rejected:** 3.
+
+### Decision gate (plan)
+
+| Criterion (LLM-V2, both splits) | Result                                           |
+| ------------------------------- | ------------------------------------------------ |
+| Arrangement agreement ≥ 75%     | **Fail**: dev 54–57%, val 44–46%                 |
+| No block overlap                | Pass                                             |
+| Crossings within +5% of V0      | Dev pass (−11% to −16%); val mixed (−6% to +21%) |
+| Refused ≤ 10%                   | **Fail**: dev 22%, val 7–13%                     |
+
+**The gate fails.** The LLM is good at the partition and poor at the floorplan:
+
+- **Its blocks are useful.** They are connected and titled, match LOADBench functional
+  labels at ARI 0.69, and stay stable across samples.
+- **Its block placement trails the human floorplan.** Its arrangement agreement is 44–57%,
+  against 87–97% for the human floorplan.
+- **Its results depend on names.** The dev crossing gain falls from −16% to −3% without
+  them.
+- **Large documents get worse.** The 103-instance val document goes from 106 to 172
+  crossings.
+
+A functional partition is also not by itself a drawing partition: LOADBench's own labels
+lay out worse than V0.
