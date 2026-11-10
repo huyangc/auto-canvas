@@ -33,6 +33,11 @@ a PR; see the workflow document.
 - Do not hand-edit generated files (`*.generated.ts`, generated docs); run the
   generator script that owns the file.
 - Keep behavior the plan does not mention unchanged.
+- Do not run anything that calls an LLM provider API and spends tokens (a
+  partition script, an evaluation with an LLM option, any new provider call)
+  unless the plan says the user confirmed that run. If a step needs one and the
+  plan does not say so, stop that step and record it in the report. Runs that
+  only read cached results and make no API call are fine.
 
 ## Repository facts
 
