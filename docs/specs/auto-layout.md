@@ -670,7 +670,9 @@ pins }` lists, never Net ids.
   clearance conflicts. R22 values one crossing at ten bends, and the bounded
   router charges two grid steps per bend, giving the twenty-grid exchange
   rate. Collect foreign segments once per clearance, indexed by orientation
-  and coordinate; only non-axis-aligned segments may be scanned. This is an
+  and coordinate; only non-axis-aligned segments may be scanned. Clearance checks
+  skip parts and foreign Routes whose padded bounds miss the path; the result of
+  every check is unchanged. This is an
   optional path-length cost, zero by default, leaving Agent/editor routing
   unchanged. The first pass's order is unchanged; R95 reroutes afterwards
   without changing placement.

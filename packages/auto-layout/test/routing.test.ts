@@ -1,6 +1,8 @@
 import { createRoutePath } from "@icm/model";
 import { classifyNets } from "../src/net-roles.js";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
+import * as transaction from "../src/transaction.js";
+import * as editEngine from "@icm/edit-engine";
 import {
   deriveElectricalTopologyProjection,
   endpointKey,
@@ -985,6 +987,95 @@ it("R39 chooses a vertical signal trunk that removes a crossing with an earlier 
     classifyNets(document, resolver),
     [],
   );
+  expect(result.problem).toBeUndefined();
+  expect(result.diagnostics).toEqual([]);
+  const final = preview(document, resolver, result.edits);
+  expect(final.ok).toBe(true);
+  if (!final.ok) return;
+  const audit = auditRouting(final.document, resolver);
+  expect(audit.unsafeProblems).toEqual([]);
+  expect(audit.crossings).toBe(1);
+  expect(audit.bends).toBe(0);
+  const physical = deriveElectricalTopologyProjection(
+    final.document,
+    resolver,
+  ).endpointToPhysicalComponent;
+  expect(
+    new Set([0, 1, 2, 3].map((i) => physical.get(`terminal:p${i}:1`))).size,
+  ).toBe(1);
+});
+
+it("R39 previews each signal trunk candidate once and reuses the winner", () => {
+  const document = circuit(
+    {
+      p0: "resistor",
+      p1: "resistor",
+      p2: "resistor",
+      p3: "resistor",
+      f0: "resistor",
+      f1: "resistor",
+    },
+    {
+      signal: ["p0.1", "p1.1", "p2.1", "p3.1"],
+      foreign: ["f0.1", "f1.1"],
+    },
+  );
+  const xy = [
+    [480, 320],
+    [480, 0],
+    [0, 240],
+    [80, 160],
+    [-100, 100],
+    [600, 100],
+  ];
+  document.instances.forEach((i, index) => {
+    const [x, y] = xy[index]!;
+    i.placement = { position: { x: x!, y: y! }, rotation: 0, mirror: "none" };
+  });
+  document.routes.push(
+    createRoutePath({
+      id: "earlier-wire",
+      netId: "foreign",
+      start: { kind: "terminal", instanceId: "f0", pinName: "1" },
+      end: { kind: "terminal", instanceId: "f1", pinName: "1" },
+      bends: [],
+      modes: ["manual"],
+    }),
+  );
+  const frozen = freezePinGroups(document, resolver).filter(
+    (g) => g.netId === "signal",
+  );
+  // The spanning tree crosses the earlier horizontal Net twice. A clear
+  // vertical trunk crosses it once; the horizontal median trunk is obstructed.
+  const previewSpy = vi.spyOn(transaction, "preview");
+  const plannerSpy = vi.spyOn(editEngine, "planRouteNet");
+  const result = routeDocument(
+    document,
+    resolver,
+    frozen,
+    classifyNets(document, resolver),
+    [],
+  );
+  const candidateCalls = previewSpy.mock.calls.filter(
+    ([input]) => input === document,
+  );
+  const plannedCandidates = [...plannerSpy.mock.results];
+  previewSpy.mockRestore();
+  plannerSpy.mockRestore();
+  // The obstructed horizontal trunk throws before preview. The tree and
+  // vertical trunk are previewed once each, with no replay of the winner.
+  expect(plannedCandidates.map((result) => result.type)).toEqual([
+    "return",
+    "throw",
+    "return",
+  ]);
+  expect(candidateCalls).toHaveLength(2);
+  expect(candidateCalls.map(([, , edits]) => edits)).toEqual(
+    plannedCandidates
+      .filter((result) => result.type === "return")
+      .map((result) => result.value.edits),
+  );
+  expect(new Set(candidateCalls.map(([, , edits]) => edits)).size).toBe(2);
   expect(result.problem).toBeUndefined();
   expect(result.diagnostics).toEqual([]);
   const final = preview(document, resolver, result.edits);

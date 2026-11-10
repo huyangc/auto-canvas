@@ -467,6 +467,7 @@ function routeGroup(
   for (const target of targets) {
     if (target.pins.length < 2 && !target.freeEnd) continue;
     let planned: SchematicEdit[];
+    let previewed: SchematicDocument | undefined;
     try {
       if (target.stub || target.freeEnd) {
         // Pin-to-pin stubs preserve exact contacts; a singleton claim
@@ -521,7 +522,11 @@ function routeGroup(
         // A rail's tree is tried only if its preferred trunk is incomplete.
         if (target.trunk) trunks.push(undefined);
         let best:
-          | { plan: ReturnType<typeof planRouteNet>; score: number[] }
+          | {
+              plan: ReturnType<typeof planRouteNet>;
+              score: number[];
+              document?: SchematicDocument;
+            }
           | undefined;
         let reason: unknown;
         for (const trunk of trunks) {
@@ -564,13 +569,14 @@ function routeGroup(
                   score.slice(0, i).every((p, j) => p === best!.score[j]),
               )
             )
-              best = { plan: candidate, score };
+              best = { plan: candidate, score, document: next.document };
           } catch (error) {
             reason = error;
           }
         }
         if (!best) throw reason;
         planned = best.plan.edits;
+        previewed = best.document;
         if (best.plan.unjoined?.length) {
           failure ??= best.plan.unjoined[0]!.reason;
           unjoinedPins.push(
@@ -606,16 +612,19 @@ function routeGroup(
       continue;
     }
     if (!planned.length) continue;
-    const next = preview(working, resolver, planned);
-    if (!next.ok)
-      return {
-        document: working,
-        edits,
-        diagnostics,
-        problem: `R10: routing transaction rejected: ${JSON.stringify(next.diagnostics)}`,
-      };
+    if (!previewed) {
+      const next = preview(working, resolver, planned);
+      if (!next.ok)
+        return {
+          document: working,
+          edits,
+          diagnostics,
+          problem: `R10: routing transaction rejected: ${JSON.stringify(next.diagnostics)}`,
+        };
+      previewed = next.document;
+    }
     edits.push(...replayEdits(working, frozen, group, planned));
-    working = next.document;
+    working = previewed;
   }
   if (failure) {
     diagnostics.push({

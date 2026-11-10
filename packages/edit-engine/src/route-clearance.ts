@@ -52,6 +52,41 @@ export interface RouteClearance {
 const EPSILON = 1e-6;
 /** Artwork coordinates are not grid values; this absorbs their rounding. */
 const TOLERANCE = 1e-3;
+// Stroke contacts are within TOLERANCE. Ten times that distance covers
+// rounding before the exact checks. Pin/Route checks on very short segments
+// have a wider cross/dot tolerance and bypass their filters below.
+const BOUNDS_PAD = 10 * TOLERANCE;
+type Box = { minX: number; minY: number; maxX: number; maxY: number };
+function paddedBox(points: readonly Point[]): Box {
+  let minX = Infinity,
+    minY = Infinity,
+    maxX = -Infinity,
+    maxY = -Infinity;
+  for (const point of points) {
+    minX = Math.min(minX, point.x);
+    minY = Math.min(minY, point.y);
+    maxX = Math.max(maxX, point.x);
+    maxY = Math.max(maxY, point.y);
+  }
+  return {
+    minX: minX - BOUNDS_PAD,
+    minY: minY - BOUNDS_PAD,
+    maxX: maxX + BOUNDS_PAD,
+    maxY: maxY + BOUNDS_PAD,
+  };
+}
+const boxesOverlap = (a: Box, b: Box) =>
+  a.minX <= b.maxX && b.minX <= a.maxX && a.minY <= b.maxY && b.minY <= a.maxY;
+const boxContains = (box: Box, point: Point) =>
+  point.x >= box.minX &&
+  point.x <= box.maxX &&
+  point.y >= box.minY &&
+  point.y <= box.maxY;
+// pointOnSegment uses cross/dot tolerances, not distances. On sub-unit
+// segments those tolerances can reach beyond the pad, so keep those scans.
+const hasShortSegment = (segments: readonly (readonly [Point, Point])[]) =>
+  segments.some(([a, b]) => Math.hypot(b.x - a.x, b.y - a.y) < 1);
+
 const same = (a: Point, b: Point) =>
   Math.abs(a.x - b.x) <= EPSILON && Math.abs(a.y - b.y) <= EPSILON;
 const format = (point: Point) => `(${point.x}, ${point.y})`;
@@ -273,6 +308,8 @@ export function createRouteClearance(
     netScope?: "logical" | "base";
     /** Extra path-length cost per proper crossing, zero by default. */
     crossingCost?: number;
+    /** Test aid: run every exact check without bounding-box prefilters. */
+    exhaustive?: boolean;
     endpointKeys: ReadonlySet<string>;
     signalWidth?: number;
     /** Explicit, validated taps may meet this route only at the selected point. */
@@ -332,6 +369,7 @@ export function createRouteClearance(
     interior: Rect | null;
     /** Drawn straight strokes, such as leads on the outline. */
     strokes: (readonly [Point, Point])[];
+    box: Box;
   }[] = [];
   for (const instance of document.instances) {
     if (!instance.placement) continue;
@@ -381,6 +419,11 @@ export function createRouteClearance(
       label,
       interior: width > 0 && height > 0 ? { x, y, width, height } : null,
       strokes,
+      box: paddedBox([
+        { x, y },
+        { x: x + width, y: y + height },
+        ...strokes.flatMap(([a, b]) => [a, b]),
+      ]),
     });
     const hidden = new Set(resolved.variant?.hiddenPinNames ?? []);
     for (const pin of resolved.definition.pins) {
@@ -415,21 +458,27 @@ export function createRouteClearance(
       routeElectricalConnections(route).every((connection) =>
         ownNet(logicalOf(connection.netId)),
       );
-    return points && points.length > 1 && !sameSignal
-      ? [{ id: route.id, logicalId, points, endpoints: routeEndpoints(route) }]
-      : [];
+    if (!points || points.length < 2 || sameSignal) return [];
+    const segments = points
+      .slice(1)
+      .map((to, index) => [points[index]!, to] as const);
+    return [
+      {
+        id: route.id,
+        logicalId,
+        points,
+        endpoints: routeEndpoints(route),
+        segments,
+        box: paddedBox(points),
+        shortSegment: hasShortSegment(segments),
+      },
+    ];
   });
   const crossingCost = own.crossingCost ?? 0;
   const crossings =
     crossingCost === 0
       ? undefined
-      : crossingCounter(
-          routes.flatMap((route) =>
-            route.points
-              .slice(1)
-              .map((to, i) => [route.points[i]!, to] as const),
-          ),
-        );
+      : crossingCounter(routes.flatMap((route) => route.segments));
   const endpointText = (endpoint: RouteEndpoint) =>
     endpoint.kind === "terminal"
       ? `${labels.get(endpoint.instanceId) ?? endpoint.instanceId}.${endpoint.pinName}`
@@ -457,6 +506,9 @@ export function createRouteClearance(
     const segments = points
       .slice(1)
       .map((to, index) => [points[index]!, to] as const);
+    const pathBox = paddedBox(points);
+    const segmentBoxes = segments.map(([a, b]) => paddedBox([a, b]));
+    const shortSegment = hasShortSegment(segments);
     const sharedBusContact = (
       point: Point,
       endpoint: RouteEndpoint | undefined,
@@ -487,6 +539,12 @@ export function createRouteClearance(
     const between = ([a, b]: readonly [Point, Point]) =>
       ` between ${format(a)} and ${format(b)}`;
     for (const pin of pins) {
+      if (
+        !own.exhaustive &&
+        !shortSegment &&
+        pin.points.every((point) => !boxContains(pathBox, point))
+      )
+        continue;
       if (
         endKeys.has(pin.key) ||
         own.endpointKeys.has(pin.key) ||
@@ -527,7 +585,10 @@ export function createRouteClearance(
       );
     };
     for (const body of bodies) {
+      if (!own.exhaustive && !boxesOverlap(pathBox, body.box)) continue;
       for (const [index, [a, b]] of segments.entries()) {
+        if (!own.exhaustive && !boxesOverlap(segmentBoxes[index]!, body.box))
+          continue;
         // A pin inside its own part's outline is left outward.
         if (
           (index === 0 &&
@@ -566,15 +627,20 @@ export function createRouteClearance(
       }
     }
     for (const route of routes) {
+      if (
+        !own.exhaustive &&
+        !shortSegment &&
+        !route.shortSegment &&
+        !boxesOverlap(pathBox, route.box)
+      )
+        continue;
       const selectedContact = (point: Point) =>
         (same(point, points[0]!) || same(point, points.at(-1)!)) &&
         own.routeContacts?.some(
           (contact) =>
             contact.routeId === route.id && same(contact.point, point),
         );
-      const routeSegments = route.points
-        .slice(1)
-        .map((to, index) => [route.points[index]!, to] as const);
+      const routeSegments = route.segments;
       const text = `Route ${route.id} of ${netText(route.logicalId)}`;
       for (const [index, point] of points.entries()) {
         if (!routeSegments.some(([c, d]) => pointOnSegment(point, c, d)))
