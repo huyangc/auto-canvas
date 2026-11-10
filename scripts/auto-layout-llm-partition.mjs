@@ -18,6 +18,7 @@ import {
   PARTITION_SYSTEM_PROMPT,
   PROMPT_VERSION,
 } from "../packages/auto-layout/dist/partition-prompt.js";
+import { parseFingerprintLibrary } from "../packages/auto-layout/dist/fingerprint.js";
 import { parseProject } from "../packages/project-protocol/dist/index.js";
 import {
   builtInSymbols,
@@ -89,10 +90,11 @@ export function cachedSamples(
   count = 3,
   anonymize = false,
   cacheDirectory = CACHE_DIRECTORY,
+  entries = [],
 ) {
-  const payload = describeCircuit(document, resolver, anonymize);
+  const payload = describeCircuit(document, resolver, anonymize, entries);
   const samples = [];
-  const entries = [];
+  const statuses = [];
   for (let sample = 0; sample < count; sample++) {
     const entry = readCachedPartition(
       payload,
@@ -105,13 +107,13 @@ export function cachedSamples(
       entry &&
       ["valid-first-try", "repaired"].includes(entry.status) &&
       parsed.success;
-    entries.push({
+    statuses.push({
       sample,
       status: !entry ? "missing" : valid ? entry.status : "failed",
     });
     if (valid) samples.push(parsed.data);
   }
-  return { samples, entries };
+  return { samples, entries: statuses };
 }
 
 const usageCost = (usage) =>
@@ -210,7 +212,7 @@ function sdkProvider() {
   return (request) => client.beta.messages.stream(request).finalMessage();
 }
 
-export function validateCachedResult(document, resolver, entry) {
+export function validateCachedResult(document, resolver, entry, entries = []) {
   const parsed = schema.safeParse(entry.output);
   if (!parsed.success)
     return {
@@ -218,7 +220,7 @@ export function validateCachedResult(document, resolver, entry) {
         (i) => `${i.path.join(".")}: ${i.message}`,
       ),
     };
-  return llmResultToPartition(document, resolver, parsed.data);
+  return llmResultToPartition(document, resolver, parsed.data, entries);
 }
 
 /** Shared scheduler for CLI and offline fake-provider tests. Samples are zero-based. */
@@ -238,8 +240,14 @@ export async function runPartitionJobs(
   const results = new Array(jobs.length);
   const pending = new Map();
   const run = async (job) => {
-    const { document, resolver, sample = 0, anonymize = false } = job;
-    const payload = describeCircuit(document, resolver, anonymize);
+    const {
+      document,
+      resolver,
+      sample = 0,
+      anonymize = false,
+      entries = [],
+    } = job;
+    const payload = describeCircuit(document, resolver, anonymize, entries);
     const key = cacheKey(payload, sample, anonymize);
     const cached = readCachedPartition(
       payload,
@@ -338,7 +346,7 @@ export async function runPartitionJobs(
           document,
           resolver,
           entry,
-          anonymize,
+          entries,
         );
         entry.errors = validated.errors;
         entry.attempts.at(-1).errors = validated.errors;
@@ -381,7 +389,7 @@ async function main(args) {
   const [folder, ...rest] = args;
   if (!folder)
     throw new Error(
-      "Usage: auto-layout-llm-partition.mjs <folder> [--split dev|val] [--limit n] [--samples n] [--anonymize] [--max-usd n] [--concurrency n] [--dry-run]",
+      "Usage: auto-layout-llm-partition.mjs <folder> [--split dev|val] [--limit n] [--samples n] [--anonymize] [--max-usd n] [--concurrency n] [--dry-run] [--library path]",
     );
   const flags = new Map();
   for (let i = 0; i < rest.length; i++) {
@@ -389,6 +397,7 @@ async function main(args) {
     if (["--anonymize", "--dry-run"].includes(flag)) flags.set(flag, true);
     else if (
       [
+        "--library",
         "--split",
         "--limit",
         "--samples",
@@ -412,6 +421,18 @@ async function main(args) {
     (flags.has("--split") && !["dev", "val"].includes(flags.get("--split")))
   )
     throw new Error("Invalid split, count or budget");
+  const library = parseFingerprintLibrary(
+    JSON.parse(
+      readFileSync(
+        flags.get("--library") ??
+          new URL(
+            "../packages/auto-layout/fingerprint-library.json",
+            import.meta.url,
+          ),
+        "utf8",
+      ),
+    ),
+  );
   const files = readdirSync(folder)
     .filter((f) => f.endsWith(".json") && !f.endsWith(".meta.json"))
     .sort()
@@ -439,10 +460,16 @@ async function main(args) {
       resolver,
       sample,
       anonymize: flags.has("--anonymize"),
+      entries: library.entries,
     }));
   });
   const estimates = jobs.map((job) => {
-    const payload = describeCircuit(job.document, job.resolver, job.anonymize);
+    const payload = describeCircuit(
+      job.document,
+      job.resolver,
+      job.anonymize,
+      job.entries,
+    );
     const bytes = Buffer.byteLength(JSON.stringify(payload));
     const cached = !!readCachedPartition(payload, job.sample, job.anonymize);
     // Heuristic only: 4 bytes/token, up to MAX_TOKENS output, two attempts.

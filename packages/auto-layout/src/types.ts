@@ -104,6 +104,8 @@ export interface RecognitionUnit {
   id: string;
   kind: string;
   members: { id: string; roles: string[] }[];
+  title?: string;
+  role?: BlockRole;
   source: "structure" | "template" | "persisted" | "attachment" | "device";
 }
 export interface PartitionBlock {
@@ -112,6 +114,6 @@ export interface PartitionBlock {
   role: BlockRole;
   members: string[];
   unitIds: string[];
-  provenance: "llm" | "attached" | "rule";
+  provenance: "llm" | "attached" | "rule" | "template";
   confidence: number;
 }

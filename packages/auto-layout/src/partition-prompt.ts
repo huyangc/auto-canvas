@@ -6,6 +6,7 @@ import { devicePins } from "./placement-connectivity.js";
 import { compareIds, recognizeSubstructures } from "./recognize.js";
 import { canonicalDevices, recognitionUnits } from "./units.js";
 import { reconcilePartition } from "./partition-reconcile.js";
+import type { FingerprintEntry } from "./fingerprint.js";
 import type { BlockRole } from "./types.js";
 
 /** @internal Frozen experiment prompt; bump whenever instructions change. */
@@ -45,6 +46,7 @@ export function describeCircuit(
   document: SchematicDocument,
   resolver: SymbolResolver,
   anonymize = false,
+  entries: readonly FingerprintEntry[] = [],
 ) {
   // Whitelist electrical inputs before recognition. Geometry and persisted layout
   // groups must not influence either the payload or the canonical Net ordering.
@@ -127,9 +129,10 @@ export function describeCircuit(
       role: roles.byNet.get(net.id) ?? "internal",
       rail: roles.rails.get(net.id) ?? null,
     })),
-    units: recognitionUnits(document, resolver).map((u) => ({
+    units: recognitionUnits(document, resolver, entries).map((u) => ({
       id: u.id,
       kind: u.kind,
+      ...(u.source === "template" && u.title ? { title: u.title } : {}),
       members: u.members
         .map((m) => ({ id: ids.get(m.id)!, roles: m.roles }))
         .sort((a, b) => compareIds(a.id, b.id)),
@@ -167,7 +170,8 @@ export function llmResultToPartition(
   document: SchematicDocument,
   resolver: SymbolResolver,
   result: LlmPartitionResult,
+  entries: readonly FingerprintEntry[] = [],
 ) {
-  const reconciled = reconcilePartition(document, resolver, [result]);
+  const reconciled = reconcilePartition(document, resolver, [result], entries);
   return { ...reconciled, errors: [] as string[], l0Merges: 0 };
 }

@@ -973,7 +973,9 @@ and axis-device pin centres lie within 60 units of the axis.
   pair, mirror, cross-coupled pair, common-gate pair, matched pair, device class.
 - **R111 — Complete rule partition.** Map channel-connected `findStages` onto
   units and merge stages spanned by a unit; bridge capacitors are included as
-  independent devices. Infer role by first match: differential pair with an input
+  independent devices. Split every resulting block into components connected
+  through non-rail nets, excluding MOS bulk pins, using the same connectivity
+  rule for remnants beside templates. Infer role by first match: differential pair with an input
   gate → input; differential pair → gain; mirror reference or diode-connected device
   without input/output nets → bias; output channel pin → output; only switches →
   switch; any logic gate → logic; only capacitors → compensation; otherwise other.
@@ -986,8 +988,8 @@ and axis-device pin centres lie within 60 units of the axis.
   sample keeps all units and zero samples has no LLM proposals. Drop unknown and
   later duplicate units. Keep the largest non-rail, non-MOS-bulk connected component
   (device count, then unit id); drop empties. Blocks with both >12 devices and >50%
-  of all devices split along rule blocks. Unsupported input/bias/output roles become
-  other without changing titles and halve confidence. Repeatedly attach units that
+  of all devices split along rule blocks. Unsupported input/bias/output roles are counted and reported in diagnostics
+  without changing the LLM role, title or consensus confidence. Repeatedly attach units that
   have at least one non-rail neighbour and whose every adjacent unit is already
   in the same accepted block (leaf attachment), then fill remaining rule blocks, split into
   connected components. LLM confidence is mean retained-unit consensus share;
@@ -1001,3 +1003,65 @@ and axis-device pin centres lie within 60 units of the axis.
   overlays, coverage/check counts, sample and consensus ARI, LOADBench block recall
   and role match, human-drawing overlap and planner merges, with dev/val totals. Real calls and
   recognition-quality acceptance belong to Opus, not the offline tests.
+- **R120 — Canonical block fingerprints.** Build a typed bipartite graph from
+  selected non-marker devices and their nets. Device labels contain descriptor
+  class, polarity and family (descriptor identity); unknown symbols retain their
+  symbol identity. Nets are internal when all non-bulk terminals belong to the
+  set, external when any terminal lies outside it, or supply/ground according to
+  `classifyNets`. Unconnected pins get individual internal nets. MOS D/G/S and
+  BJT C/B/E remain distinct; MOS bulk is absent. Two-pin resistors, capacitors,
+  inductors and switches have unlabeled edges. Reuse R110's canonical labelling
+  and SHA-256 the canonical JSON. Names, instance ordering, geometry and symmetric
+  pin swaps do not affect the fingerprint.
+- **R121 — Approved library boundary.** The version-1
+  [fingerprint library](../../packages/auto-layout/fingerprint-library.json)
+  ships empty. Entries contain hash, canonical graph, display title, role,
+  approvedBy and aggregate sources (document/occurrence counts and role counts).
+  Parsing rejects malformed graphs, invalid roles, mismatched hashes and duplicate
+  hashes. The package does no file or network I/O; scripts supply parsed entries.
+- **R122 — Bounded template matching.** Typed injective backtracking matches
+  device and net nodes and pin roles. Internal nets have no outside terminals;
+  external nets have inside terminals and must retain an external boundary when
+  the fingerprint is recomputed; rails retain their kind. Confirm every device
+  set by recomputing R120. A shared default budget of 100,000 visited search nodes
+  returns a deterministic partial result and exhaustion flag. Select disjoint
+  occurrences by decreasing device count, then canonical device order, then hash.
+  Stable input-id ordering resolves exact automorphisms without changing R110.
+- **R123 — Template recognition units.** Each library match unions the R110 units
+  it overlaps. Such a unit has kind/source template and carries the entry title
+  and role. When several matches join through one R110 unit, the first match in
+  R122 priority order supplies its title and role. The prompt includes the title.
+  Rule stages are computed without templates; each template gets its own block,
+  and the remaining devices keep their base rule block, split into connected
+  components. A template spanning stages never merges those stages.
+  Unclaimed template units become their own confidence-1, template-provenance
+  blocks before leaf attachment and rule completion; accepted LLM blocks retain
+  precedence. Template completion blocks are not leaf-attachment hosts. An empty
+  library preserves R110/R111/R113 results and the exact prompt-v4 payload bytes.
+  Reports count template units and blocks and use green template overlays; cache
+  reads and sample requests share the exact template payload rather than
+  reinterpreting base unit ids. Call, report and mining scripts accept
+  `--library <path>`, defaulting to the tracked library.
+- **R124 — Offline mining and explicit promotion.** The
+  [mining script](../../scripts/auto-layout-fingerprint-mine.mjs) reconciles cached
+  samples without library entries or network calls. Fingerprint only LLM-provenance blocks with
+  confidence ≥0.6, 2–16 devices and more than one unit. Aggregate by hash, counting
+  distinct document paths, occurrences, titles and roles and retaining examples
+  and members. A candidate needs ≥2 documents, a dominant role share ≥60%,
+  and precision ≥80%.
+  Each candidate is matched independently as a one-entry library across every
+  mined document. Record matched document and occurrence counts and documents
+  with exhausted search budgets; counts for exhausted searches may be partial.
+  Count `matchedAsBlock` when an occurrence's device set equals an LLM- or
+  attached-provenance block, and `matchedIntact` when all its devices lie in one
+  block. Precision is `matchedAsBlock / matchedOccurrences`, or zero without
+  occurrences. Order candidates by precision, then matched documents, then mining
+  documents, then hash. Fingerprints passing the document and role gates but
+  failing precision appear in a separate `rejected` list and HTML section without
+  drawings. Promotion also enforces the precision threshold.
+  JSON and HTML, including canonical structures and highlighted human drawings
+  where available, stay in `tmp/fingerprints/`. Only an explicit user-approved
+  `--promote <hash…> --approved-by <name>` invocation appends selected candidates
+  to the selected library path, formatted as Prettier JSON. Sources contain only counts and
+  roles; case ids, filenames, source titles and example members never enter sources.
+  Real-cache mining and candidate review remain a separate Opus step.

@@ -11,6 +11,7 @@ import {
   ruleBlock,
   rulePartition,
 } from "./units.js";
+import type { FingerprintEntry } from "./fingerprint.js";
 import type { LayoutPartition, PartitionBlock } from "./types.js";
 
 const CONSENSUS_THRESHOLD = 0.5;
@@ -88,8 +89,9 @@ export function reconcilePartition(
   document: SchematicDocument,
   resolver: SymbolResolver,
   samples: readonly LlmPartitionResult[] = [],
+  entries: readonly FingerprintEntry[] = [],
 ) {
-  const units = recognitionUnits(document, resolver);
+  const units = recognitionUnits(document, resolver, entries);
   const byId = new Map(units.map((u) => [u.id, u]));
   const ids = units.map((u) => u.id);
   const fallback = rulePartition(document, resolver, units);
@@ -261,18 +263,31 @@ export function reconcilePartition(
       blocks.push({
         id: `block-${blocks.length + 1}`,
         title: proposal.title + (parts.length > 1 ? ` (${n + 1})` : ""),
-        role: validRole ? proposal.role : "other",
+        role: proposal.role,
         members,
         unitIds: part,
         provenance: "llm",
         confidence:
-          (part.reduce((s, id) => s + support.get(id)!, 0) / part.length) *
-          (validRole ? 1 : 0.5),
+          part.reduce((s, id) => s + support.get(id)!, 0) / part.length,
       });
       for (const id of part) assigned.add(id);
     }
   }
   const llmDevices = blocks.reduce((s, b) => s + b.members.length, 0);
+  // Reserve every unclaimed template before leaf attachment and rule completion.
+  for (const unit of units) {
+    if (unit.source !== "template" || assigned.has(unit.id)) continue;
+    blocks.push({
+      id: `block-${blocks.length + 1}`,
+      title: unit.title!,
+      role: unit.role!,
+      members: unit.members.map((m) => m.id),
+      unitIds: [unit.id],
+      provenance: "template",
+      confidence: 1,
+    });
+    assigned.add(unit.id);
+  }
   // Each wave observes the same accepted blocks; then apply in canonical order.
   // A host with added units is marked attached, retaining its original confidence.
   for (;;) {
@@ -284,6 +299,7 @@ export function reconcilePartition(
         );
         const host = hosts.length === 1 ? hosts[0] : undefined;
         return host &&
+          host.provenance !== "template" &&
           ids.every(
             (mate) =>
               mate === id || !adjacent(id, mate) || host.unitIds.includes(mate),
@@ -326,6 +342,12 @@ export function reconcilePartition(
         adjustedRandIndex(finalClusters, c),
       ),
       blocksByProvenance: {
+        ...(units.some((u) => u.source === "template")
+          ? {
+              template: blocks.filter((b) => b.provenance === "template")
+                .length,
+            }
+          : {}),
         llm: blocks.filter((b) => b.provenance === "llm").length,
         attached: blocks.filter((b) => b.provenance === "attached").length,
         rule: blocks.filter((b) => b.provenance === "rule").length,
