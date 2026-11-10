@@ -1,4 +1,5 @@
-import { validatePartition } from "./partition.js";
+import { blockIntrusion } from "./partition-geometry.js";
+import { partitionGroups, validatePartition } from "./partition.js";
 import {
   MAX_SCHEMATIC_EDITS_PER_TRANSACTION,
   type SchematicEdit,
@@ -40,6 +41,7 @@ import {
   type LayoutOverrides,
 } from "./layout-choices.js";
 import {
+  refinementMetrics,
   refineLayout,
   routedScore,
   selectRoutingAlternative,
@@ -61,9 +63,8 @@ export function planAutoLayout(
     const validated = validatePartition(document, resolver, options.partition);
     if (validated.diagnostics.some((d) => d.severity === "error"))
       return { edits: [], groups: [], diagnostics: validated.diagnostics };
-    const { search, ...quickOptions } = options;
-    options = { ...quickOptions, partition: validated.partition };
-    const result = timePlanning(() =>
+    options = { ...options, partition: validated.partition };
+    let result = timePlanning(() =>
       finalizeFacing(
         document,
         resolver,
@@ -71,15 +72,37 @@ export function planAutoLayout(
         planAutoLayoutMeasured(document, resolver, options),
       ),
     );
-    result.diagnostics.push(...validated.diagnostics);
-    if (search)
+    const problem = result.diagnostics.find((d) => d.severity === "error");
+    if (!validated.partition.arrangement && (problem || !result.edits.length)) {
+      const { partition: _partition, ...fallbackOptions } = options;
+      result = planAutoLayout(document, resolver, fallbackOptions);
       result.diagnostics.push({
         severity: "warning",
-        code: "AUTO_LAYOUT_PARTITION_QUICK_ONLY",
+        code: "AUTO_LAYOUT_PARTITION_FALLBACK",
         rule: "partition",
-        message:
-          "Experimental partition placement uses quick mode; search was not run",
+        message: problem?.message ?? "Partition placement produced no edits",
       });
+    }
+    result.diagnostics.push(...validated.diagnostics);
+    // Facing/label seating runs after selection; measure the actual final preview.
+    const metrics = refinementMetrics(result);
+    const final = metrics && preview(document, resolver, result.edits);
+    if (metrics && final && final.ok) {
+      metrics.blockIntrusion = blockIntrusion(
+        final.document,
+        resolver,
+        validated.partition,
+      );
+      metrics.score = routedScore(
+        {
+          result,
+          final: final.document,
+          choices: emptyChoices(),
+          partition: validated.partition,
+        },
+        resolver,
+      );
+    }
     return result;
   }
   return timePlanning(() =>
@@ -260,8 +283,8 @@ function planAutoLayoutMeasured(
     { run: selected.run, strategy: selected.strategy },
     ranked.map(({ run, strategy }) => ({ run, strategy })),
     { run: quickRun, strategy: selected.strategy },
-    (state, signalTrunks, bounds) =>
-      planLayoutOnce(
+    (state, signalTrunks, bounds) => {
+      const run = planLayoutOnce(
         document,
         resolver,
         options,
@@ -270,7 +293,10 @@ function planAutoLayoutMeasured(
         signalTrunks,
         state.placements,
         bounds,
-      ),
+      );
+      if (state.sideRow) run.sideRow = state.sideRow;
+      return run;
+    },
   );
   // A zero evaluation budget retains quick mode's two finalists; annealLayout
   // above still validates the search request and emits its progress event.
@@ -302,6 +328,7 @@ export function planLayoutOnce(
   const run: LayoutRun = {
     result: { edits: [], groups: [], diagnostics: [] },
     choices: emptyChoices(),
+    ...(options.partition ? { partition: options.partition } : {}),
   };
   run.result = buildPlan(
     document,
@@ -348,7 +375,10 @@ function buildPlan(
   const frozen = freezePinGroups(document, resolver);
   const freed = freedAnnotations(document);
   const roles = classifyNets(document, resolver);
-  const groups = recognizeStructures(document, roles);
+  const groups = partitionGroups(
+    recognizeStructures(document, roles),
+    options.partition,
+  );
   // `set_layout_group` replaces by id, and a locked annotation cannot change.
   const idConflict = groups.find((g) =>
     document.layoutGroups.some((existing) => existing.id === g.id),
@@ -392,6 +422,7 @@ function buildPlan(
           given,
           bounds,
         );
+  if ("sideRow" in result) run.sideRow = result.sideRow;
   if (result.problem)
     return {
       edits: [],

@@ -1,3 +1,5 @@
+import { partitionDocuments } from "./partition-geometry.js";
+import { partitionGroups, partitionSymmetry } from "./partition.js";
 import { reflectOrientation, type SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import { COLUMN_PITCH, geometryProblem, withPlacements } from "./geometry.js";
@@ -16,12 +18,13 @@ import {
 } from "./recognize.js";
 import { parallelAttachments, findStages } from "./stages.js";
 import { detectSymmetry } from "./symmetry.js";
-import type { LayoutStrategy, Placement } from "./types.js";
+import type { LayoutPartition, LayoutStrategy, Placement } from "./types.js";
 
 export interface SearchState {
   placements: Map<string, Placement>;
   sides: Map<string, CellSide>;
   strategy: LayoutStrategy;
+  sideRow?: ReadonlySet<string>;
 }
 
 /** Seeded Mulberry32: all choices, including restarts, use this stream. */
@@ -42,6 +45,7 @@ export function createMoveGenerator(
   fixed: ReadonlySet<string>,
   random: () => number,
   bounds?: SearchBounds,
+  partition?: LayoutPartition,
 ) {
   const devices = document.instances
     .filter((i) => !isMarker(i))
@@ -49,10 +53,13 @@ export function createMoveGenerator(
   const deviceDocument = { ...document, instances: devices, junctions: [] };
   const roles = classifyNets(document, resolver);
   // The same templates placeDocument uses, including persisted groups.
-  const groups = [
-    ...recognizeStructures(document, roles),
-    ...persistedTemplates(document, roles),
-  ];
+  const groups = partitionGroups(
+    [
+      ...recognizeStructures(document, roles),
+      ...persistedTemplates(document, roles),
+    ],
+    partition,
+  );
   const parents = new Map(devices.map((i) => [i.id, i.id]));
   const root = (id: string): string => {
     const parent = parents.get(id)!;
@@ -61,7 +68,15 @@ export function createMoveGenerator(
     parents.set(id, head);
     return head;
   };
-  const join = (a: string, b: string) => parents.set(root(b), root(a));
+  const owner = new Map(
+    partition?.blocks.flatMap((b) =>
+      b.members.map((id) => [id, b.id] as const),
+    ),
+  );
+  const join = (a: string, b: string) => {
+    if (!partition || owner.get(a) === owner.get(b))
+      parents.set(root(b), root(a));
+  };
   const grouped = new Set<string>();
   for (const g of groups) {
     const ids = [...g.members, ...(g.tailInstanceId ? [g.tailInstanceId] : [])];
@@ -70,7 +85,10 @@ export function createMoveGenerator(
       grouped.add(id);
     }
   }
-  const symmetry = detectSymmetry(document, resolver, roles);
+  const symmetry = partitionSymmetry(
+    detectSymmetry(document, resolver, roles),
+    partition,
+  );
   for (const c of symmetry) {
     const ids = [...c.pairs.flat(), ...c.axis];
     for (const id of ids) {
@@ -86,9 +104,16 @@ export function createMoveGenerator(
         (t) => grouped.has(t.instanceId) && ["D", "S"].includes(t.pinName),
       )
       .map((t) => t.instanceId);
-    for (const id of ids.slice(1)) join(ids[0]!, id);
+    for (const id of ids.slice(1)) {
+      const first = partition
+        ? ids.find((other) => owner.get(other) === owner.get(id))!
+        : ids[0]!;
+      join(first, id);
+    }
   }
-  const attachments = parallelAttachments(devices, resolver, roles);
+  const attachments = partitionDocuments(deviceDocument, partition).flatMap(
+    (local) => parallelAttachments(local.instances, resolver, roles),
+  );
   for (const { device, host } of attachments) join(host.id, device.id);
   const units = new Map<string, string[]>();
   for (const i of devices) {
@@ -102,11 +127,15 @@ export function createMoveGenerator(
   const singles = movable.filter(
     (ids) => ids.length === 1 && !grouped.has(ids[0]!),
   );
-  const found = findStages(devices, resolver, roles, groups, symmetry);
-  const rawBlocks = [
-    ...found.stages.map((s) => s.devices.map((i) => i.id)),
-    ...found.bridges.map((b) => [b.device.id]),
-  ];
+  const found = partition
+    ? undefined
+    : findStages(devices, resolver, roles, groups, symmetry);
+  const rawBlocks = partition
+    ? partition.blocks.map((b) => b.members)
+    : [
+        ...found!.stages.map((s) => s.devices.map((i) => i.id)),
+        ...found!.bridges.map((b) => [b.device.id]),
+      ];
   // Merge stage blocks that intersect a rigid placement unit.
   const blocks: string[][] = [];
   for (const block of rawBlocks) {
@@ -136,8 +165,16 @@ export function createMoveGenerator(
       placements: structuredClone(current.placements),
       sides: new Map(current.sides),
       strategy: current.strategy,
+      ...(current.sideRow ? { sideRow: new Set(current.sideRow) } : {}),
     };
-    const kind = Math.floor(random() * (current.strategy === "stages" ? 8 : 4));
+    const kind = Math.floor(
+      random() *
+        (partition && current.sideRow?.size
+          ? 9
+          : partition || current.strategy === "stages"
+            ? 8
+            : 4),
+    );
     if (kind === 0) {
       const first = pick(movable);
       if (!first) return;
@@ -175,7 +212,25 @@ export function createMoveGenerator(
       const eligible = blocks.filter((ids) => !ids.some((id) => fixed.has(id)));
       const first = pick(eligible);
       if (!first) return;
-      if (kind === 7) {
+      if (kind === 8) {
+        const blockId = owner.get(first[0]!)!;
+        const side = current.sideRow!.has(blockId);
+        const other = pick(
+          eligible.filter(
+            (ids) => current.sideRow!.has(owner.get(ids[0]!)!) !== side,
+          ),
+        );
+        if (!other) return;
+        const dx = left(current, other) - left(current, first);
+        const dy = top(current, other) - top(current, first);
+        shift(next, first, dx, dy);
+        shift(next, other, -dx, -dy);
+        const sideRow = new Set(current.sideRow);
+        const otherId = owner.get(other[0]!)!;
+        sideRow.delete(side ? blockId : otherId);
+        sideRow.add(side ? otherId : blockId);
+        next.sideRow = sideRow;
+      } else if (kind === 7) {
         if (
           first.some(
             (id) =>

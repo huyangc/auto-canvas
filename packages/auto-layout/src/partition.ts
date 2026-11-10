@@ -1,14 +1,80 @@
 import type { SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
-import { classifyNets } from "./net-roles.js";
 import { isMarker } from "./placement-connectivity.js";
-import {
-  compareIds,
-  persistedTemplates,
-  recognizeStructures,
-  recognizeSubstructures,
-} from "./recognize.js";
-import type { AutoLayoutDiagnostic, LayoutPartition } from "./types.js";
+import { compareIds } from "./recognize.js";
+import { recognitionUnits } from "./units.js";
+import type {
+  AutoLayoutDiagnostic,
+  LayoutPartition,
+  RecognizedGroup,
+  SymmetryComponent,
+} from "./types.js";
+
+/** Keep placement templates local without promoting isolated members to groups. */
+export function partitionGroups(
+  groups: RecognizedGroup[],
+  partition?: LayoutPartition,
+): RecognizedGroup[] {
+  if (!partition) return groups;
+  return groups.flatMap((group) =>
+    partition.blocks.flatMap((block) => {
+      const members = [
+        ...group.members,
+        ...(group.extraMemberIds ?? []),
+      ].filter((id) => block.members.includes(id));
+      if (members.length < 2) return [];
+      const {
+        extraMemberIds: _extra,
+        tailInstanceId,
+        diodeInstanceId,
+        ...rest
+      } = group;
+      return [
+        {
+          ...rest,
+          id:
+            members[0] === group.members[0] && members[1] === group.members[1]
+              ? group.id
+              : `${group.id}:block:${block.id}`,
+          members: [members[0]!, members[1]!] as [string, string],
+          ...(members.length > 2 ? { extraMemberIds: members.slice(2) } : {}),
+          ...(tailInstanceId && block.members.includes(tailInstanceId)
+            ? { tailInstanceId }
+            : {}),
+          ...(diodeInstanceId && block.members.includes(diodeInstanceId)
+            ? { diodeInstanceId }
+            : {}),
+        },
+      ];
+    }),
+  );
+}
+
+/** A surviving symmetry pair and its local axis remain useful inside a block. */
+export function partitionSymmetry(
+  components: SymmetryComponent[],
+  partition?: LayoutPartition,
+): SymmetryComponent[] {
+  if (!partition) return components;
+  return components.flatMap((component) =>
+    partition.blocks.flatMap((block) => {
+      const pairs = component.pairs.filter((pair) =>
+        pair.every((id) => block.members.includes(id)),
+      );
+      return pairs.length
+        ? [
+            {
+              pairs,
+              axis: component.axis.filter((id) => block.members.includes(id)),
+              conflicted: component.conflicted.filter((id) =>
+                block.members.includes(id),
+              ),
+            },
+          ]
+        : [];
+    }),
+  );
+}
 
 /** Validate once at the planner boundary; never mutate the caller's contract. */
 export function validatePartition(
@@ -73,20 +139,9 @@ export function validatePartition(
       };
     }
   }
-  const roles = classifyNets(document, resolver);
-  const units = [
-    ...recognizeSubstructures(document, roles).structures.map((s) =>
-      s.members.flatMap((m) => m.instanceIds),
-    ),
-    ...[
-      ...recognizeStructures(document, roles),
-      ...persistedTemplates(document, roles),
-    ].map((g) => [
-      ...g.members,
-      ...(g.extraMemberIds ?? []),
-      ...(g.tailInstanceId ? [g.tailInstanceId] : []),
-    ]),
-  ];
+  const units = recognitionUnits(document, resolver).map((unit) =>
+    unit.members.map((member) => member.id),
+  );
   for (const unit of units) {
     const ids = new Set(
       unit.map((id) => owner.get(id)).filter((id) => id !== undefined),

@@ -1,3 +1,4 @@
+import { blockIntrusion } from "./partition-geometry.js";
 import { readabilityCounts } from "./readability.js";
 import type { SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
@@ -9,10 +10,15 @@ import {
 import { classifyNets } from "./net-roles.js";
 import { auditRouting, missingConnections } from "./routing-audit.js";
 import { compareIds } from "./recognize.js";
-import type { AutoLayoutResult, LayoutStrategy } from "./types.js";
+import type {
+  AutoLayoutResult,
+  LayoutStrategy,
+  LayoutPartition,
+} from "./types.js";
 
 /** R74 weights; unrouted charges each missing physical connection (R86). */
 export const ROUTED_SCORE_WEIGHTS = {
+  blockIntrusion: 500,
   unrouted: 10000,
   crossings: 1000,
   offConvention: 300,
@@ -29,10 +35,17 @@ export interface LayoutRun {
   result: AutoLayoutResult;
   choices: LayoutChoices;
   final?: SchematicDocument;
+  partition?: LayoutPartition;
+  sideRow?: ReadonlySet<string>;
 }
 const measurements = new WeakMap<
   AutoLayoutResult,
-  { candidates: number; score: number; strategy?: LayoutStrategy }
+  {
+    candidates: number;
+    score: number;
+    strategy?: LayoutStrategy;
+    blockIntrusion?: number;
+  }
 >();
 /** @internal Review tooling measures the bounded search without changing the API. */
 export function refinementMetrics(result: AutoLayoutResult) {
@@ -54,6 +67,15 @@ export function selectRoutingAlternative(
     candidates: measurements.get(refined)?.candidates ?? 0,
     score: routedScore(selected, resolver),
     ...(strategy ? { strategy } : {}),
+    ...(selected.partition && selected.final
+      ? {
+          blockIntrusion: blockIntrusion(
+            selected.final,
+            resolver,
+            selected.partition,
+          ),
+        }
+      : {}),
   });
   return selected.result;
 }
@@ -81,7 +103,11 @@ export function routedScore(run: LayoutRun, resolver: SymbolResolver): number {
     audit.wireLength * weights.wireLength +
     readability.labelOverlaps * weights.labelOverlaps +
     readability.labelClearance * weights.labelClearance +
-    readability.terminalDepartures * weights.terminalDepartures
+    readability.terminalDepartures * weights.terminalDepartures +
+    (run.partition
+      ? blockIntrusion(run.final, resolver, run.partition) *
+        weights.blockIntrusion
+      : 0)
   );
 }
 

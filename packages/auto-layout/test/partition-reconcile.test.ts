@@ -206,13 +206,9 @@ it("produces physically connected blocks even when a matched pair shares only ra
   const result = valid(d, []);
   // There is no non-rail edge between a and b, so a connected block is a singleton.
   expect(result.partition.blocks.map((b) => b.members.length)).toEqual([1, 1]);
-  expect(validatePartition(d, resolver, result.partition).diagnostics).toEqual([
-    expect.objectContaining({
-      severity: "warning",
-      message:
-        "L0 structure split across block-1, block-2; merged into block-1",
-    }),
-  ]);
+  expect(validatePartition(d, resolver, result.partition).diagnostics).toEqual(
+    [],
+  );
 });
 
 it("checks rail-only disconnection exactly between stage-local units before planner validation", () => {

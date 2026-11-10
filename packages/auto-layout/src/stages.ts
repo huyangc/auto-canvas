@@ -446,7 +446,8 @@ export function placeStages(
   groups: RecognizedGroup[],
   topology = symmetryTopology(document, resolver, roles),
   partition?: LayoutPartition,
-): Map<string, Placement> {
+  allowSideRow = true,
+): { placements: Map<string, Placement>; sideRow?: ReadonlySet<string> } {
   const symmetry = topology.components;
   const symmetryIds = new Set(
     symmetry.flatMap((c) => [...c.pairs.flat(), ...c.axis]),
@@ -465,40 +466,49 @@ export function placeStages(
   const ceil = (n: number) => Math.ceil(n / grid) * grid;
   // R59: only rail shunts and otherwise independent one-device stages attach.
   // Group members retain their template, even when they look like a leaf.
-  const candidates = (partition ? [] : found.stages).flatMap((stage) =>
-    stage.devices.flatMap((device) => {
-      if (
-        !(isCapacitor(device) || stage.devices.length === 1) ||
-        groups.some((g) => g.members.includes(device.id)) ||
-        symmetryIds.has(device.id)
-      )
-        return [];
-      const pins = devicePins(device, resolver);
-      if (pins.length !== 2) return [];
-      const signal = pins.filter((p) => {
-        const net = roles.pinNet(device.id, p.name);
-        return net && !roles.rails.has(net);
-      });
-      const rail = pins.flatMap(
-        (p) => roles.rails.get(roles.pinNet(device.id, p.name) ?? "") ?? [],
-      );
-      return signal.length === 1 && rail.length === 1
-        ? [
-            {
-              device,
-              pin: signal[0]!,
-              net: roles.pinNet(device.id, signal[0]!.name)!,
-              rail: rail[0]!,
-            },
-          ]
-        : [];
-    }),
+  const candidates = (partition?.arrangement ? [] : found.stages).flatMap(
+    (stage) =>
+      stage.devices.flatMap((device) => {
+        if (
+          !(isCapacitor(device) || stage.devices.length === 1) ||
+          groups.some((g) => g.members.includes(device.id)) ||
+          symmetryIds.has(device.id)
+        )
+          return [];
+        const pins = devicePins(device, resolver);
+        if (pins.length !== 2) return [];
+        const signal = pins.filter((p) => {
+          const net = roles.pinNet(device.id, p.name);
+          return net && !roles.rails.has(net);
+        });
+        const rail = pins.flatMap(
+          (p) => roles.rails.get(roles.pinNet(device.id, p.name) ?? "") ?? [],
+        );
+        return signal.length === 1 && rail.length === 1
+          ? [
+              {
+                device,
+                pin: signal[0]!,
+                net: roles.pinNet(device.id, signal[0]!.name)!,
+                rail: rail[0]!,
+              },
+            ]
+          : [];
+      }),
   );
   const candidateIds = new Set(candidates.map((c) => c.device.id));
   const attached = candidates.flatMap((part) => {
     const hosts = found.stages
       .flatMap((s) => s.devices)
-      .filter((i) => !candidateIds.has(i.id))
+      .filter(
+        (i) =>
+          !candidateIds.has(i.id) &&
+          (!partition ||
+            partition.blocks.some(
+              (b) =>
+                b.members.includes(i.id) && b.members.includes(part.device.id),
+            )),
+      )
       .flatMap((i) =>
         devicePins(i, resolver)
           .filter(
@@ -542,7 +552,7 @@ export function placeStages(
       )!.id;
     }) as [string, string],
   }));
-  if (!stages.length) return new Map();
+  if (!stages.length) return { placements: new Map() };
   const distances = signalDistances(document, devices, resolver, roles).devices;
   const blocks = stages.map((stage) => {
     const ownGroups = groups.filter((g) =>
@@ -615,8 +625,10 @@ export function placeStages(
         : snap((height - b.top - b.bottom) / 2);
     for (const p of b.placements.values()) p.position.y += dy;
   }
-  if (partition)
-    return partitionFloorplan(document, resolver, blocks, partition);
+  if (partition?.arrangement)
+    return {
+      placements: partitionFloorplan(document, resolver, blocks, partition),
+    };
   for (const part of attached) {
     const block = blocks.find((b) =>
       b.devices.some((i) => i.id === part.host.device.id),
@@ -762,13 +774,37 @@ export function placeStages(
     (a, b) => a.distance - b.distance || compareIds(a.id, b.id),
   );
   const mirrored = new Set<string>();
+  const sideCandidates = new Set(
+    partition?.blocks
+      .filter((b) => ["bias", "cmfb", "compensation"].includes(b.role ?? ""))
+      .map((b) => b.id),
+  );
+  let twoRows = false;
+  const localBounds = partition
+    ? blocks.map((b) =>
+        visibleInstanceBounds(
+          withPlacements({ ...document, instances: b.devices }, b.placements),
+          resolver,
+        ).map((b) => b.bounds),
+      )
+    : [];
+  const rowPitch = partition
+    ? ceil(
+        Math.max(...localBounds.flat().map((b) => b.y + b.height)) -
+          Math.min(...localBounds.flat().map((b) => b.y)) +
+          80,
+      )
+    : 0;
   const compose = () => {
     const targets = new Map<string, Placement>();
     const index = new Map(order.map((b, i) => [b.id, i]));
     const after = (b: Bridge) =>
       Math.min(index.get(b.owners[0])!, index.get(b.owners[1])!);
     let x = 0;
+    const rowX = [0, 0];
     order.forEach((b, at) => {
+      const row = twoRows && sideCandidates.has(b.id) ? 1 : 0;
+      if (twoRows) x = rowX[row]!;
       for (const [id, p] of b.placements) {
         const flip = mirrored.has(b.id);
         targets.set(id, {
@@ -776,7 +812,7 @@ export function placeStages(
           ...(flip ? reflectOrientation(p, "left-right") : {}),
           position: {
             x: x + (flip ? b.width - p.position.x : p.position.x),
-            y: p.position.y,
+            y: p.position.y + row * rowPitch,
           },
         });
       }
@@ -795,6 +831,7 @@ export function placeStages(
         x += cap.width + ceil(40);
       }
       if (!gapCaps.length) x += ceil(80);
+      rowX[row] = x;
     });
     for (const cap of bridgeInfo) {
       const ys = cap.nets.map((net, end) => {
@@ -836,6 +873,20 @@ export function placeStages(
   };
   for (let pass = 0; pass < 5; pass++) {
     let changed = false;
+    if (
+      allowSideRow &&
+      sideCandidates.size &&
+      sideCandidates.size < blocks.length
+    ) {
+      twoRows = !twoRows;
+      const targets = compose(),
+        next = estimate(targets).score;
+      if (next < score) {
+        best = targets;
+        score = next;
+        changed = true;
+      } else twoRows = !twoRows;
+    }
     for (let i = 1; i < order.length; i++) {
       const candidate = [...order];
       [candidate[i - 1], candidate[i]] = [candidate[i]!, candidate[i - 1]!];
@@ -893,6 +944,10 @@ export function placeStages(
             transformPoint(p.at, best.get(i.id)!.position, best.get(i.id)!).x,
         ),
     );
+    if (!xs.length && partition) {
+      for (const b of partition.blocks.filter((b) => b.role === side))
+        for (const id of b.members) xs.push(best.get(id)!.position.x);
+    }
     return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : undefined;
   };
   const inputX = hostMean("input"),
@@ -905,5 +960,5 @@ export function placeStages(
     }
     best = compose();
   }
-  return best;
+  return { placements: best, ...(twoRows ? { sideRow: sideCandidates } : {}) };
 }

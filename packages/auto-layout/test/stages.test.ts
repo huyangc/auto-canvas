@@ -65,7 +65,13 @@ it("cuts gates and shared rails into two independent common-source stacks", () =
     ["a", "ra"],
     ["b", "rb"],
   ]);
-  const targets = placeStages(d, d.instances, resolver, roles, groups);
+  const targets = placeStages(
+    d,
+    d.instances,
+    resolver,
+    roles,
+    groups,
+  ).placements;
   const bounds = visibleInstanceBounds(withPlacements(d, targets), resolver);
   const rightA = Math.max(
     ...bounds
@@ -109,7 +115,13 @@ it("keeps a coupling capacitor between its stages at its host pins' level", () =
   const { stages, bridges, roles, groups } = stagesOf(d);
   expect(stages).toHaveLength(2);
   expect(bridges).toHaveLength(1);
-  const targets = placeStages(d, d.instances, resolver, roles, groups);
+  const targets = placeStages(
+    d,
+    d.instances,
+    resolver,
+    roles,
+    groups,
+  ).placements;
   const cap = targets.get("c")!;
   expect(cap.position.x).toBeGreaterThan(targets.get("a")!.position.x);
   expect(cap.position.x).toBeLessThan(targets.get("b")!.position.x);
@@ -161,7 +173,13 @@ it("attaches a rail shunt capacitor without joining independent stages", () => {
       .find((s) => s.devices.some((i) => i.id === "a"))!
       .devices.map((i) => i.id),
   ).toContain("c");
-  const targets = placeStages(d, d.instances, resolver, roles, groups);
+  const targets = placeStages(
+    d,
+    d.instances,
+    resolver,
+    roles,
+    groups,
+  ).placements;
   const pin = pinPoints(withPlacements(d, targets), resolver).find(
     (p) => p.instanceId === "a" && p.pinName === "D",
   )!.point;
@@ -272,7 +290,7 @@ it("mirrors a whole stage to remove a crossing without disturbing its stack", ()
     },
   );
   const roles = classifyNets(d, resolver);
-  const targets = placeStages(d, d.instances, resolver, roles, []);
+  const targets = placeStages(d, d.instances, resolver, roles, []).placements;
   const estimate = createPlacementEstimator(d.instances, resolver, roles);
   const unmirrored = new Map(
     [...targets].map(([id, p]) => [id, { ...p, mirror: "none" as const }]),
@@ -304,8 +322,14 @@ it("R57 reverses a two-stage placement when input hosts lie right of output host
   roles.byNet.set("input", "input");
   roles.byNet.set("output", "output");
   const withoutPorts = { ...d, instances: devices };
-  const original = placeStages(withoutPorts, devices, resolver, roles, []);
-  const directed = placeStages(d, devices, resolver, roles, []);
+  const original = placeStages(
+    withoutPorts,
+    devices,
+    resolver,
+    roles,
+    [],
+  ).placements;
+  const directed = placeStages(d, devices, resolver, roles, []).placements;
   const host = (targets: typeof original, name: string) =>
     pinPoints(withPlacements(withoutPorts, targets), resolver).find(
       (p) => p.instanceId === "a" && p.pinName === name,
@@ -314,9 +338,13 @@ it("R57 reverses a two-stage placement when input hosts lie right of output host
   expect(host(directed, "D")).toBeLessThan(host(directed, "G"));
   const estimate = createPlacementEstimator(devices, resolver, roles);
   expect(estimate(directed).crossings).toBe(estimate(original).crossings);
-  expect(placeStages(d, devices, resolver, roles, [])).toEqual(directed);
+  expect(placeStages(d, devices, resolver, roles, []).placements).toEqual(
+    directed,
+  );
   d.instances = d.instances.filter((i) => i.id !== "output");
-  expect(placeStages(d, devices, resolver, roles, [])).toEqual(original);
+  expect(placeStages(d, devices, resolver, roles, []).placements).toEqual(
+    original,
+  );
 });
 
 it("R57 treats an input reached through a series resistor as the input side", () => {
@@ -336,7 +364,7 @@ it("R57 treats an input reached through a series resistor as the input side", ()
   // R4 calls this Net `internal`, as it does when no gate is on the Net.
   roles.byNet.set("input", "internal");
   roles.byNet.set("output", "output");
-  const targets = placeStages(d, devices, resolver, roles, []);
+  const targets = placeStages(d, devices, resolver, roles, []).placements;
   const x = (name: string) =>
     pinPoints(
       withPlacements({ ...d, instances: devices }, targets),
@@ -360,7 +388,13 @@ it.each(["ground", "supply"] as const)(
         .terminals.push({ instanceId: id, pinName: "2" });
     }
     const { roles, groups } = stagesOf(d);
-    const targets = placeStages(d, d.instances, resolver, roles, groups);
+    const targets = placeStages(
+      d,
+      d.instances,
+      resolver,
+      roles,
+      groups,
+    ).placements;
     const points = pinPoints(withPlacements(d, targets), resolver);
     const host = points.find(
       (p) => p.instanceId === "a" && p.pinName === "G",
@@ -392,7 +426,13 @@ it.each(["ground", "supply"] as const)(
       geometryProblem(withPlacements(d, targets), resolver),
     ).toBeUndefined();
     const base = twoStages();
-    const before = placeStages(base, base.instances, resolver, roles, groups);
+    const before = placeStages(
+      base,
+      base.instances,
+      resolver,
+      roles,
+      groups,
+    ).placements;
     const span = (p: typeof targets) => {
       const boxes = visibleInstanceBounds(
         withPlacements(d, p),
@@ -424,7 +464,13 @@ it.each(["ground", "supply"] as const)(
         .terminals.push({ instanceId: id, pinName: "2" });
     }
     const { roles, groups } = stagesOf(d);
-    const targets = placeStages(d, d.instances, resolver, roles, groups);
+    const targets = placeStages(
+      d,
+      d.instances,
+      resolver,
+      roles,
+      groups,
+    ).placements;
     const placed = withPlacements(d, targets);
     const points = pinPoints(placed, resolver);
     const boxes = visibleInstanceBounds(placed, resolver);
@@ -590,7 +636,13 @@ it("R60 attaches a secondary-side bridge to the stage that draws the transformer
   )!.id;
   expect(bridges.map((b) => b.device.id)).toEqual(["c"]);
   expect(bridges[0]!.owners).toContain(owner);
-  const targets = placeStages(d, d.instances, resolver, roles, groups);
+  const targets = placeStages(
+    d,
+    d.instances,
+    resolver,
+    roles,
+    groups,
+  ).placements;
   for (const p of targets.values()) {
     expect(Number.isFinite(p.position.x)).toBe(true);
     expect(Number.isFinite(p.position.y)).toBe(true);

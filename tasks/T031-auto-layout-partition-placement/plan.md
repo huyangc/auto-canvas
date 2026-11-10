@@ -160,6 +160,50 @@ Out of scope (do not change):
 7. **Report**, by Codex: what was built, tests, and a smoke run on dev with rule-only
    partitions (`--samples 0`). Opus runs the LLM-partition evaluation.
 
+### Round 2 amendment (after review round 1)
+
+**R134 Fallback to the default plan.** A partition must never turn a layout that the default
+path completes into a refusal.
+
+- In `planAutoLayout`, when a partition without `arrangement` yields a plan with an error
+  diagnostic or no edits, plan again without the partition, with the same other options.
+- Return that result, with the partition's validation diagnostics and one warning
+  `AUTO_LAYOUT_PARTITION_FALLBACK` (rule `partition`) that carries the first problem's
+  message.
+- Measure `blockIntrusion` on the fallback result against the partition, so the evaluator
+  can show it.
+- The `arrangement` path is unchanged: it still refuses.
+- The evaluator reports `partitionFallback` per document and counts fallbacks per split.
+
+**Block symmetry metric.** In `scripts/auto-layout-eval.mjs`, add `blockSymmetry` to each
+partition result and to the totals. It has the same counts as `symmetry` (`pairs`,
+`mirrored`, `level`, `orientationMirrored`, `axisDevices`, `onAxis`), measured on
+`partitionSymmetry(components, partition)`: the pairs that lie wholly inside one block, each
+block about its own axis. The existing `symmetry` metric, on whole components, stays
+unchanged.
+
+**Owned path added.** In `packages/auto-layout/test/partition-reconcile.test.ts`, only the
+rail-only test's expectation of the legacy `L0 structure split` warning: a reconciled
+partition now passes `validatePartition` with no diagnostics. Nothing else in that file.
+
+**Investigate: quick-mode crossings.** The LLM sample cache for dev is in
+`tmp/llm-partition/` (git-ignored). Run
+`pnpm auto-layout:eval tmp/human-cases --partition llm --samples 3 --split dev --jobs 8` and
+compare each document with the default quick layout. Round 1's tree gave five documents more
+crossings: +11, +5, +3, +3 and +2.
+
+- For the three largest, report what differs from the default layout: block order, the side
+  row, the local layout inside a block, trimmed groups or symmetry, or routing.
+- If one general mechanism inside the owned paths removes a cause, implement it and report
+  dev quick-mode crossings before and after. Do not evaluate val, and do not key anything to
+  a document.
+
+**Acceptance added.**
+
+```bash
+pnpm auto-layout:eval tmp/human-cases --partition llm --samples 3 --split dev --jobs 8   # expected: exit 0; 18 of 18 completed; fallbacks reported
+```
+
 ## Acceptance
 
 ```bash
