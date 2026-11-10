@@ -97,3 +97,25 @@ ran at the same time with the same jobs.
    20%; height falls by about 10%.
 3. **Six dev documents have more crossings in quick mode.**
 4. **A fallback plans twice.** With search it can take twice the search budget.
+
+## Subagent review before merge (opus, read-only)
+
+The user asked for an independent subagent review before merging. It read
+`917737a..856a2b9` through git objects. Verdict: merge-ready; no P0, P1 or P2.
+
+It went through every hunk for the default path and found no way for a plan without
+`partition` to differ from the base: the trimming helpers return their input, the side-row
+branch never runs, the score gains an exact `+ 0`, and seeded search draws the same random
+numbers.
+
+P3 notes, accepted as known limits:
+
+- After a fallback, `metrics.score` includes the intrusion penalty against a partition the
+  plan did not use, and the reported planning time covers only the second plan.
+- The oracle (`arrangement`) test no longer runs with `search`, so nothing tests that path
+  with search.
+- A trimmed group keeps its `kind` with fewer members: a current mirror cut by a block can
+  become a "current-mirror" of two outputs without its reference.
+
+**Rebase.** The branch was rebased without conflicts onto T029's round 4 head, which itself
+sits on `main` with T032.
