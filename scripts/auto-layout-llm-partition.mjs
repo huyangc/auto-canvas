@@ -50,29 +50,18 @@ const MAX_TOKENS = 32000;
 const CACHE_DIRECTORY = "tmp/llm-partition";
 const schema = z
   .object({
-    blocks: z
-      .array(
-        z
-          .object({
-            id: z.string().min(1),
-            title: z.string(),
-            role: z.enum(BLOCK_ROLES),
-            members: z.array(z.string()).min(1),
-            reason: z.string(),
-          })
-          .strict(),
-      )
-      .min(1),
-    flow: z.array(z.string()),
-    floorplan: z.array(
+    blocks: z.array(
       z
         .object({
-          block: z.string(),
-          column: z.number().int().min(-16).max(16),
-          row: z.number().int().min(-16).max(16),
+          id: z.string().min(1),
+          title: z.string(),
+          role: z.enum(BLOCK_ROLES),
+          units: z.array(z.string()),
+          reason: z.string(),
         })
         .strict(),
     ),
+    uncertain: z.array(z.string()),
   })
   .strict();
 
@@ -93,6 +82,38 @@ export function readCachedPartition(
   );
   return existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : undefined;
 }
+/** Read only shape-valid cached proposals; missing and failed samples remain visible. */
+export function cachedSamples(
+  document,
+  resolver,
+  count = 3,
+  anonymize = false,
+  cacheDirectory = CACHE_DIRECTORY,
+) {
+  const payload = describeCircuit(document, resolver, anonymize);
+  const samples = [];
+  const entries = [];
+  for (let sample = 0; sample < count; sample++) {
+    const entry = readCachedPartition(
+      payload,
+      sample,
+      anonymize,
+      cacheDirectory,
+    );
+    const parsed = entry && schema.safeParse(entry.output);
+    const valid =
+      entry &&
+      ["valid-first-try", "repaired"].includes(entry.status) &&
+      parsed.success;
+    entries.push({
+      sample,
+      status: !entry ? "missing" : valid ? entry.status : "failed",
+    });
+    if (valid) samples.push(parsed.data);
+  }
+  return { samples, entries };
+}
+
 const usageCost = (usage) =>
   (usage.input_tokens * PROVIDER.usdPerMTok[0] +
     usage.output_tokens * PROVIDER.usdPerMTok[1]) /
@@ -189,12 +210,7 @@ function sdkProvider() {
   return (request) => client.beta.messages.stream(request).finalMessage();
 }
 
-export function validateCachedResult(
-  document,
-  resolver,
-  entry,
-  anonymize = false,
-) {
+export function validateCachedResult(document, resolver, entry) {
   const parsed = schema.safeParse(entry.output);
   if (!parsed.success)
     return {
@@ -202,7 +218,7 @@ export function validateCachedResult(
         (i) => `${i.path.join(".")}: ${i.message}`,
       ),
     };
-  return llmResultToPartition(document, resolver, parsed.data, anonymize);
+  return llmResultToPartition(document, resolver, parsed.data);
 }
 
 /** Shared scheduler for CLI and offline fake-provider tests. Samples are zero-based. */

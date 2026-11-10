@@ -60,35 +60,59 @@ export function partitionMetrics(
         matches++;
     }
   const totalArea = boxes.reduce((sum, b) => sum + b.width * b.height, 0);
+  const matchesByReference = reference.blocks.map((b) => {
+    const candidates = partition.blocks
+      .map((a) => {
+        const intersection = a.members.filter((id) =>
+          b.members.includes(id),
+        ).length;
+        return {
+          block: a,
+          iou: intersection / new Set([...a.members, ...b.members]).size,
+        };
+      })
+      .sort((a, b) => b.iou - a.iou);
+    return { reference: b, match: candidates[0] };
+  });
+  const recalled = matchesByReference.filter(
+    (m) => m.match && m.match.iou >= 0.5,
+  );
+  return {
+    humanOverlap:
+      totalArea && Number.isFinite(totalArea) ? overlap / totalArea : null,
+    ari: adjustedRandIndex(
+      partition.blocks.map((b) => b.members),
+      reference.blocks.map((b) => b.members),
+    ),
+    blockRecall: reference.blocks.length
+      ? recalled.length / reference.blocks.length
+      : null,
+    roleMatch: recalled.length
+      ? recalled.filter((m) => m.reference.role === m.match!.block.role)
+          .length / recalled.length
+      : null,
+    floorplanAgreement: relations ? matches / relations : null,
+    floorplanMatches: matches,
+    floorplanRelations: relations,
+  };
+}
+
+/** @internal ARI on two complete partitions of the same universe. */
+export function adjustedRandIndex(a: string[][], b: string[][]): number {
   const choose2 = (n: number) => (n * (n - 1)) / 2;
-  const n = partition.blocks.reduce((sum, b) => sum + b.members.length, 0);
-  const pairs = choose2(n);
-  const rows = partition.blocks.reduce(
-    (sum, b) => sum + choose2(b.members.length),
-    0,
-  );
-  const columns = reference.blocks.reduce(
-    (sum, b) => sum + choose2(b.members.length),
-    0,
-  );
-  const intersections = partition.blocks.reduce(
-    (sum, a) =>
+  const pairs = choose2(a.flat().length);
+  const rows = a.reduce((sum, c) => sum + choose2(c.length), 0);
+  const columns = b.reduce((sum, c) => sum + choose2(c.length), 0);
+  const intersections = a.reduce(
+    (sum, c) =>
       sum +
-      reference.blocks.reduce(
-        (s, b) =>
-          s + choose2(a.members.filter((id) => b.members.includes(id)).length),
+      b.reduce(
+        (s, d) => s + choose2(c.filter((id) => d.includes(id)).length),
         0,
       ),
     0,
   );
   const expected = pairs ? (rows * columns) / pairs : 0;
   const denominator = (rows + columns) / 2 - expected;
-  return {
-    humanOverlap:
-      totalArea && Number.isFinite(totalArea) ? overlap / totalArea : null,
-    ari: denominator ? (intersections - expected) / denominator : 1,
-    floorplanAgreement: relations ? matches / relations : null,
-    floorplanMatches: matches,
-    floorplanRelations: relations,
-  };
+  return denominator ? (intersections - expected) / denominator : 1;
 }

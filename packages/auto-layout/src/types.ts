@@ -98,3 +98,20 @@ export interface Ambiguity {
   netId?: string;
   instanceIds: string[];
 }
+
+/** Atomic electrical grouping for experimental functional partitioning. */
+export interface RecognitionUnit {
+  id: string;
+  kind: string;
+  members: { id: string; roles: string[] }[];
+  source: "structure" | "template" | "persisted" | "attachment" | "device";
+}
+export interface PartitionBlock {
+  id: string;
+  title: string;
+  role: BlockRole;
+  members: string[];
+  unitIds: string[];
+  provenance: "llm" | "attached" | "rule";
+  confidence: number;
+}

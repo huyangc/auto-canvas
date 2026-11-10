@@ -22,8 +22,16 @@ interface LayoutPartition {
   arrangement?: Record<string, { x: number; y: number }>; // relative centres
 }
 type BlockRole =
-  | "bias" | "input" | "gain" | "output" | "load" | "cmfb"
-  | "compensation" | "switch" | "logic" | "other";
+  | "bias"
+  | "input"
+  | "gain"
+  | "output"
+  | "load"
+  | "cmfb"
+  | "compensation"
+  | "switch"
+  | "logic"
+  | "other";
 ```
 
 Members are device instance ids; ports and rail markers are placed by the existing
@@ -68,46 +76,54 @@ width × height against the human; cohesion is summed pairwise block bounding-bo
 overlap area. Arrangement agreement is the share of block pairs matching all non-tied human
 centroid directions on both axes; it is null when no pair has a specified direction. Report completion counts alongside metrics so refusals stay visible.
 
-The experimental LLM adapter (`partition-prompt.ts`, prompt version 1) describes
+The experimental LLM adapter (`partition-prompt.ts`, prompt version 4) describes
 only electrical device classes, symbols, pin-to-Net membership, explicit terminal
-or label names, classified Net roles/rails and recognized L0 structures. Net tokens
-are ordered by sorted terminal membership, never by source Net ids; devices are
-sorted by instance id. Geometry, drafting, annotations and layout groups are not
-prompt inputs. Anonymization replaces device ids with `D1…` everywhere and removes
-display names; classified electrical roles remain available. Unconnected pins have
-`net: null`. Neither the SDK nor network access belongs to the planner package.
+or label names, classified Net roles/rails, recognized structures and atomic units.
+Canonical device ordering uses labelled topology refinement and individualization,
+never placements or source ids. Anonymization substitutes `D1…` and removes display
+names. Unconnected pins have `net: null`. Drawing annotations, routes, drafting,
+references and group titles are excluded; recognized persisted template membership
+is used by unit recognition. The package remains pure and offline.
 
-The script `scripts/auto-layout-llm-partition.mjs <folder>` accepts `--split dev|val`,
+The LLM returns `{ blocks: {id, title, role, units, reason}[], uncertain: string[] }`.
+It groups indivisible units and names functions, with no flow, positions, floorplan
+or block order. Omitted/uncertain units are completed by rules. Shape-invalid answers
+receive one repair turn; graph-invalid groups are reconciled deterministically.
+T026's human and LOADBench partition paths and optional `arrangement` stay unchanged.
+
+`scripts/auto-layout-llm-partition.mjs <folder>` accepts `--split dev|val`,
 `--limit n`, `--samples n`, `--anonymize`, `--max-usd n`, `--concurrency n` (default 6)
-and `--dry-run`. Samples are zero-based. Dry runs report aggregate payload bytes
-and a heuristic two-attempt cost estimate without constructing an SDK client.
-The script uses the SDK's credential/profile resolution and retries, structured
-JSON output, high effort and server-side refusal fallback. Each attempt records
-the serving model, stop reason and usage. Refusals and token-limit stops fail the
-sample; schema or partition errors receive one repair turn with the exact previous
-assistant content. Failed samples, as well as successful ones, are cached and are
-never automatically requested again.
+and `--dry-run`. Samples are zero-based. Dry runs do not construct a network client.
+The default provider is `deepseek-flash`; the optional Anthropic provider retains
+its structured output and one-repair scheduler. Cost uses the selected provider's
+configured rates. Each attempt records serving model, stop reason and usage.
+Caches in git-ignored `tmp/llm-partition/` include successes and failures, keyed by
+payload, prompt version, model, sample and anonymization. Budget stops new calls
+and repairs; already in-flight calls can overshoot. Unstarted calls are not cached.
+Private cases, responses and credentials must never enter tracked files. Opus
+runs real calls: tune on dev, freeze the prompt, evaluate val once.
 
-Caches live only in git-ignored `tmp/llm-partition/`, keyed by SHA-256 of the payload,
-prompt version, requested model, sample and anonymization mode. Cost uses $4/$20
-per million input/output tokens. Once completed usage reaches `--max-usd`, no new
-calls or repairs start; already in-flight calls can overshoot. Jobs stopped before
-their first call are not cached. Private cases, responses and credentials must
-never enter tracked files. Opus alone runs real calls: pilot and tune on dev, freeze
-the versioned prompt, then run val once.
+The evaluator accepts `--partition llm --samples k` (default 3) and `--anonymize`.
+It reads available shape-valid cached samples only; missing/failed entries are
+reported and zero available samples explicitly selects rule-only completion.
+LLM partitions support V1 only; V2 is refused because there is no LLM arrangement.
+`--block-boxes on|off` controls title/role overlays: purple for LLM, blue for blocks
+extended by attachment, grey for rules. Placement and routing are unchanged.
 
-LLM proposals must cover every device exactly once and supply one unique integer
-grid cell per block (coordinates -16 through 16). Conversion uses a fixed 240-unit
-pitch, then the existing partition validation and L0 merging. Optional block titles
-are display-only. The evaluator accepts `--partition llm --sample k --anonymize`;
-it only reads caches and reports missing/failed entries as failed documents. V1
-drops the proposed arrangement; V2 retains it. `--block-boxes on|off` (default on)
-controls titled role boxes in evaluation SVGs; an editor switch is deferred.
-For each LLM partition it records first-try/repaired/failed validity and L0 merge
-counts, human-box pairwise overlap divided by total human block area, adjusted
-Rand index against the H partition, and proposed floorplan agreement with human
-centroid relations. Existing result-layout arrangement and routing metrics remain
-separate. No experiment outcome is asserted by these offline implementation tests.
+`scripts/auto-layout-partition-report.mjs <folder> --samples k` writes git-ignored
+`tmp/auto-layout-partition/report.json` and `index.html`, with final blocks on each
+available human drawing. Per-document and dev/val totals include device-weighted
+LLM coverage, check counts, provenance counts, pairwise sample ARI and final
+consensus-to-sample ARI, plus planner L0 merge counts and diagnostics. T029 checks
+completeness, unit integrity and non-rail/non-bulk block connectivity on the original
+partition before planner validation. Planner merge warnings are reported, not rejected;
+errors and broken T029 invariants reject the document. T031 will align the planner
+validator and placement with recognition units. Missing units in a sample are individual singleton clusters.
+LOADBench metrics use independent XML labels: ARI, reference block recall at
+membership IoU ≥ 0.5 and role agreement among recalled blocks (best IoU match,
+first final block breaks ties). Human overlap is pairwise block-box overlap area
+divided by summed box area. Unavailable metrics are null, and failures remain
+visible in completion counts. No offline test asserts real recognition targets.
 
 ## Rules
 
@@ -880,3 +896,52 @@ mirrored orientations, axis devices and on-axis devices in per-document results
 and dev/val totals. The axis is the median pair pin-centre midpoint; mirrored
 pairs satisfy `|x_a + x_b − 2·axis| ≤ 40`, level pairs satisfy `|y_a − y_b| ≤ 20`,
 and axis-device pin centres lie within 60 units of the axis.
+
+- **R110 — Atomic recognition units.** Collect every recognized Structure and
+  Ambiguity instance set, every candidate pair satisfying the matched,
+  differential, mirror, cross-coupled and anchored common-gate predicates,
+  persisted templates (including tails and extras), and every eligible R69
+  parallel-host relation. Enumerate candidates without greedy movement picks.
+  Both unit construction and rule partitioning call `findStages` with only
+  differential-pair and differential-pair-mirror-load input/tail relations. Each
+  relation joins every input finger and tail member; mirrors and other relations
+  never join stages. Thus a two-terminal current-source tail stays with its pair.
+  Restrict each relation to each resulting stage, split it into components
+  through non-rail nets excluding MOS bulk pins, then union overlapping components.
+  Every other non-marker device, including a bridge outside the stages, is a
+  singleton. Each unit is internally connected and stays within one stage;
+  multi-output bias mirrors therefore separate their reference from outputs in
+  other stages. Number
+  units in canonical topology order. Each carries kind, per-member roles and
+  source. Strongest kind order is differential pair with mirror load, differential
+  pair, mirror, cross-coupled pair, common-gate pair, matched pair, device class.
+- **R111 — Complete rule partition.** Map channel-connected `findStages` onto
+  units and merge stages spanned by a unit; bridge capacitors are included as
+  independent devices. Infer role by first match: differential pair with an input
+  gate → input; differential pair → gain; mirror reference or diode-connected device
+  without input/output nets → bias; output channel pin → output; only switches →
+  switch; any logic gate → logic; only capacitors → compensation; otherwise other.
+  Titles derive from roles (for example Bias and Input stage).
+- **R112 — Unit grouping only.** Prompt v4 requests connected functional blocks
+  containing unit ids, display titles, roles and reasons, plus uncertain unit ids.
+  It never requests placement, order, flow or a floorplan.
+- **R113 — Reconcile and complete.** Choose the sample with maximal mean unit ARI
+  (lowest index on ties). Keep medoid units with mean co-assignment ≥ 0.5; one
+  sample keeps all units and zero samples has no LLM proposals. Drop unknown and
+  later duplicate units. Keep the largest non-rail, non-MOS-bulk connected component
+  (device count, then unit id); drop empties. Blocks with both >12 devices and >50%
+  of all devices split along rule blocks. Unsupported input/bias/output roles become
+  other without changing titles and halve confidence. Repeatedly attach units that
+  have at least one non-rail neighbour and whose every adjacent unit is already
+  in the same accepted block (leaf attachment), then fill remaining rule blocks, split into
+  connected components. LLM confidence is mean retained-unit consensus share;
+  extended hosts become attached and retain confidence; rule confidence is zero.
+  Coverage counts LLM devices before attachment. The result covers every device
+  once, never splits a unit and has internally connected blocks before planner
+  validation. Legacy planner L0 merges are counted and reported; error diagnostics
+  still reject. T031 owns replacement of those merges and block-local placement.
+- **R114 — Offline evaluation.** Read up to k cached samples, allow missing samples,
+  explicitly report rule-only fallback and refuse LLM V2. Report provenance-coloured
+  overlays, coverage/check counts, sample and consensus ARI, LOADBench block recall
+  and role match, human-drawing overlap and planner merges, with dev/val totals. Real calls and
+  recognition-quality acceptance belong to Opus, not the offline tests.
