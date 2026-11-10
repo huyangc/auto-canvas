@@ -598,7 +598,7 @@ it("keeps paired capacitors inside their block instead of seating one as a stage
     resolver,
     roles,
     recognizeStructures(d, roles),
-  );
+  ).placements;
   const left = placed.get("cap-left")!,
     right = placed.get("cap-right")!;
   expect(right.position.y).toBe(left.position.y);

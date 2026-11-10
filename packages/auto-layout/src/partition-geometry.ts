@@ -1,8 +1,8 @@
 import { visibleInstanceBounds } from "@icm/derived";
 import type { SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
-import { withPlacements } from "./geometry.js";
-import type { LayoutPartition, Placement } from "./types.js";
+import { boxesIntersect } from "./geometry.js";
+import type { LayoutPartition } from "./types.js";
 
 export function partitionDocuments(
   document: SchematicDocument,
@@ -45,40 +45,24 @@ export function partitionBounds(
   });
 }
 
-/** Reject finishing that moves a member across another block's separating axis. */
-export function partitionPlacementProblem(
+/** R131: count each device once, even when it intrudes into several blocks. */
+export function blockIntrusion(
   document: SchematicDocument,
   resolver: SymbolResolver,
   partition: LayoutPartition,
-  before: ReadonlyMap<string, Placement>,
-  after: ReadonlyMap<string, Placement>,
-): string | undefined {
-  const old = partitionBounds(
-    withPlacements(document, before),
-    resolver,
-    partition,
+): number {
+  const boxes = partitionBounds(document, resolver, partition);
+  const owner = new Map(
+    partition.blocks.flatMap((block) =>
+      block.members.map((id) => [id, block.id] as const),
+    ),
   );
-  const next = partitionBounds(
-    withPlacements(document, after),
-    resolver,
-    partition,
-  );
-  for (let i = 0; i < old.length; i++)
-    for (let j = i + 1; j < old.length; j++) {
-      const a = old[i]!,
-        b = old[j]!,
-        c = next[i]!,
-        d = next[j]!;
-      const separated = (x: typeof a, y: typeof a) => [
-        x.x + x.width <= y.x,
-        y.x + y.width <= x.x,
-        x.y + x.height <= y.y,
-        y.y + y.height <= x.y,
-      ];
-      const prior = separated(a, b),
-        current = separated(c, d);
-      if (!current.some(Boolean) || prior.some((on, k) => on && !current[k]))
-        return `partition: placement finishing crossed block boundaries ${a.id}, ${b.id}`;
-    }
-  return undefined;
+  return visibleInstanceBounds(document, resolver).filter(
+    (device) =>
+      owner.has(device.id) &&
+      boxes.some(
+        (box) =>
+          box.id !== owner.get(device.id) && boxesIntersect(device.bounds, box),
+      ),
+  ).length;
 }

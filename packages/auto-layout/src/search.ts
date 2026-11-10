@@ -22,6 +22,7 @@ const stateOf = ({ run, strategy }: Start): SearchState => ({
   ),
   sides: new Map(run.choices.sides),
   strategy,
+  ...(run.sideRow ? { sideRow: run.sideRow } : {}),
 });
 
 /** R66: all energy evaluations use the same full routed and checked planner. */
@@ -83,6 +84,7 @@ export function annealLayout(
     fixed,
     random,
     bounds,
+    initial.run.partition,
   );
   const estimate = createPlacementEstimator(
     document.instances,

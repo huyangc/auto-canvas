@@ -1,7 +1,5 @@
-import {
-  partitionPlacementProblem,
-  partitionDocuments,
-} from "./partition-geometry.js";
+import { partitionGroups, partitionSymmetry } from "./partition.js";
+import { partitionDocuments } from "./partition-geometry.js";
 import {
   anchorPlacements,
   spanProblem,
@@ -141,8 +139,13 @@ export function placeDocument(
   strategy: LayoutStrategy = "template",
   given?: ReadonlyMap<string, Placement>,
   searchLimit?: SearchBounds,
-): { placements: Map<string, Placement>; problem?: string } {
+): {
+  placements: Map<string, Placement>;
+  problem?: string;
+  sideRow?: ReadonlySet<string>;
+} {
   let targets = new Map<string, Placement>();
+  let sideRow: ReadonlySet<string> | undefined;
   const devices = document.instances
     .filter((i) => !isMarker(i))
     .sort((a, b) => compareIds(a.id, b.id));
@@ -153,22 +156,16 @@ export function placeDocument(
         problem: `R3: unresolved symbol ${i.symbolId}`,
       };
   const topology = symmetryTopology(document, resolver, roles);
-  // A partition owns block membership: a symmetric component spanning blocks
-  // would drag devices out of theirs, so only whole-in-one-block ones apply.
-  const partitionBlocks = options.partition?.blocks;
-  const symmetry = partitionBlocks
-    ? topology.components.filter((c) =>
-        partitionBlocks.some((b) =>
-          [...c.pairs.flat(), ...c.axis].every((id) => b.members.includes(id)),
-        ),
-      )
-    : topology.components;
+  const symmetry = partitionSymmetry(topology.components, options.partition);
   const symmetryIds = new Set(
     symmetry.flatMap((c) => [...c.pairs.flat(), ...c.axis]),
   );
   const distances = signalDistances(document, devices, resolver, roles);
   // Reconstruct persisted intent for stable re-planning, without re-emitting it.
-  const templates = [...groups, ...persistedTemplates(document, roles)];
+  const templates = partitionGroups(
+    [...groups, ...persistedTemplates(document, roles)],
+    options.partition,
+  );
   const fixed = new Set(options.fixedInstanceIds);
   for (const owner of [...document.layoutGroups, ...document.constraints])
     if (owner.locked) for (const id of owner.objectIds) fixed.add(id);
@@ -206,7 +203,7 @@ export function placeDocument(
     );
     if (problem) return { placements: targets, problem };
   } else if (options.partition) {
-    targets = placeStages(
+    ({ placements: targets, sideRow } = placeStages(
       document,
       devices,
       resolver,
@@ -214,7 +211,10 @@ export function placeDocument(
       templates,
       { ...topology, components: symmetry },
       options.partition,
-    );
+      // The estimator can prefer a side row that costs more after routing.
+      // Keep a single-row candidate in the normal routed strategy comparison.
+      strategy !== "layered",
+    ));
   } else if (strategy === "template") {
     const result = templatePlacement(
       document,
@@ -227,14 +227,14 @@ export function placeDocument(
     if (result.problem) return result;
     targets = result.placements;
   } else if (strategy === "stages") {
-    targets = placeStages(
+    ({ placements: targets, sideRow } = placeStages(
       document,
       devices,
       resolver,
       roles,
       templates,
       topology,
-    );
+    ));
   } else if (
     (devices.some((i) => {
       const drain = roles.pinNet(i.id, "D");
@@ -280,9 +280,6 @@ export function placeDocument(
       roles,
     );
   }
-  const partitionTargets = options.partition
-    ? structuredClone(targets)
-    : undefined;
   for (const id of fixed) {
     const old = document.instances.find((i) => i.id === id)?.placement;
     if (old) targets.set(id, structuredClone(old));
@@ -309,10 +306,9 @@ export function placeDocument(
         new Set([...fixed, ...symmetryIds]),
       );
   const attachmentIds = new Set(
-    parallelAttachments(devices, resolver, roles).flatMap((a) => [
-      a.device.id,
-      a.host.id,
-    ]),
+    partitionDocuments({ ...document, instances: devices }, options.partition)
+      .flatMap((local) => parallelAttachments(local.instances, resolver, roles))
+      .flatMap((a) => [a.device.id, a.host.id]),
   );
   placeMarkers(
     document,
@@ -510,45 +506,53 @@ export function placeDocument(
           problem: "R66: placement finishing split a group template",
         };
     }
-    for (const { device, host } of parallelAttachments(
-      devices,
-      resolver,
-      roles,
+    for (const local of partitionDocuments(
+      { ...document, instances: devices },
+      options.partition,
     )) {
-      const oldHost = given.get(host.id)!,
-        nextHost = targets.get(host.id)!;
-      const old = given.get(device.id)!,
-        next = targets.get(device.id)!;
-      if (
-        next.rotation !== old.rotation ||
-        next.mirror !== old.mirror ||
-        next.position.x - old.position.x !==
-          nextHost.position.x - oldHost.position.x ||
-        next.position.y - old.position.y !==
-          nextHost.position.y - oldHost.position.y
-      )
-        return {
-          placements: targets,
-          problem: "R66: placement finishing split a parallel attachment",
-        };
-    }
-    const grouped = new Set(templates.flatMap((g) => g.members));
-    for (const net of document.nets) {
-      if (roles.rails.has(net.id)) continue;
-      const ids = net.terminals
-        .filter(
-          (t) => grouped.has(t.instanceId) && ["D", "S"].includes(t.pinName),
+      for (const { device, host } of parallelAttachments(
+        local.instances,
+        resolver,
+        roles,
+      )) {
+        const oldHost = given.get(host.id)!,
+          nextHost = targets.get(host.id)!;
+        const old = given.get(device.id)!,
+          next = targets.get(device.id)!;
+        if (
+          next.rotation !== old.rotation ||
+          next.mirror !== old.mirror ||
+          next.position.x - old.position.x !==
+            nextHost.position.x - oldHost.position.x ||
+          next.position.y - old.position.y !==
+            nextHost.position.y - oldHost.position.y
         )
-        .map((t) => t.instanceId);
-      const shifts = ids.map((id) => ({
-        x: targets.get(id)!.position.x - given.get(id)!.position.x,
-        y: targets.get(id)!.position.y - given.get(id)!.position.y,
-      }));
-      if (shifts.some((p) => p.x !== shifts[0]!.x || p.y !== shifts[0]!.y))
-        return {
-          placements: targets,
-          problem: "R66: placement finishing split an aligned stack",
-        };
+          return {
+            placements: targets,
+            problem: "R66: placement finishing split a parallel attachment",
+          };
+      }
+      const grouped = new Set(templates.flatMap((g) => g.members));
+      for (const net of document.nets) {
+        if (roles.rails.has(net.id)) continue;
+        const ids = net.terminals
+          .filter(
+            (t) =>
+              local.instances.some((i) => i.id === t.instanceId) &&
+              grouped.has(t.instanceId) &&
+              ["D", "S"].includes(t.pinName),
+          )
+          .map((t) => t.instanceId);
+        const shifts = ids.map((id) => ({
+          x: targets.get(id)!.position.x - given.get(id)!.position.x,
+          y: targets.get(id)!.position.y - given.get(id)!.position.y,
+        }));
+        if (shifts.some((p) => p.x !== shifts[0]!.x || p.y !== shifts[0]!.y))
+          return {
+            placements: targets,
+            problem: "R66: placement finishing split an aligned stack",
+          };
+      }
     }
   }
   const span =
@@ -556,15 +560,5 @@ export function placeDocument(
   if (span) return { placements: targets, problem: span };
   const problem = geometryProblem(result, resolver);
   if (problem) return { placements: targets, problem };
-  if (options.partition && partitionTargets) {
-    const problem = partitionPlacementProblem(
-      document,
-      resolver,
-      options.partition,
-      partitionTargets,
-      targets,
-    );
-    if (problem) return { placements: targets, problem };
-  }
-  return { placements: targets };
+  return { placements: targets, ...(sideRow ? { sideRow } : {}) };
 }

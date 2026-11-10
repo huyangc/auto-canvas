@@ -38,27 +38,26 @@ Members are device instance ids; ports and rail markers are placed by the existi
 marker rules. Unknown members, duplicate membership, empty/duplicate block ids,
 empty blocks, invalid flow references and missing/nonfinite arrangement entries
 are refused before edits. Omitted devices form an `other` block (with a fresh id
-if needed). Its oracle centre defaults to the mean supplied centre. Recognized
-L0 structures, including their tails and parallel members, cannot span blocks:
-conflicting blocks merge transitively with warning diagnostics. The first block
-id survives; conflicting roles become `other`; flow references collapse and
-centres merge with member-count weights. The input contract is never mutated.
+if needed). Its oracle centre defaults to the mean supplied centre. Recognition
+units from `recognitionUnits` cannot span blocks: conflicting blocks merge transitively with
+warning diagnostics. The first block id survives; conflicting roles become
+`other`; flow references collapse and centres merge with member-count weights.
+The input contract is never mutated. Greedy structures and persisted templates
+alone do not merge blocks.
 
-V1 (no `arrangement`) uses the stages' layered in-block layout, including
-recognized templates, and rail alignment. Signal blocks follow `flow`, then
-signal distance. `bias`, `other`, `cmfb` and `compensation` blocks form a separate
-row below the signal blocks. V2 uses identical local layouts, scales oracle
-centres uniformly by median local span / median pair distance, then resolves
-overlap along the smaller overlap axis with an 80-unit gap. Snapped centres are first restored to oracle order. Subsequent suffix translations
-in oracle coordinate order preserve directional order (ties use block ids).
-Finishing may move devices within their block but may not cross the separating
-axes between blocks. A conflicting finishing operation is refused with a
-partition diagnostic. Parallel and driver attachment placement is scoped to each
-block. Experimental partitions always use quick mode; supplying `search` emits
-a warning and runs quick mode. Routing, refinement, repairs, label seating and
-transaction/electrical checks still run through the existing pipeline.
+V1 (no `arrangement`) uses R130 stage ordering and compares a possible side row
+with the estimator. `flow` is retained as partition metadata; it does not force
+placement order. V2 retains the oracle floorplan: it scales oracle centres
+uniformly by median local span / median pair distance, then resolves overlap
+along the smaller overlap axis with an 80-unit gap. Snapped centres are first
+restored to oracle order. Subsequent suffix translations in oracle coordinate
+order preserve directional order (ties use block ids).
+Finishing can cross block boundaries, with R131 charging the final routed score.
+Parallel and driver attachment placement stays scoped to each block. Both quick
+mode and seeded search support partitions. Routing, refinement, repairs, label
+seating and transaction/electrical checks run through the existing pipeline.
 
-The evaluation-only `partitionFromPlacement` starts with atomic L0 units and
+The evaluation-only `partitionFromPlacement` starts with atomic recognition units and
 joins devices on shared non-rail Nets when their positions are within a threshold
 multiple of median device ink span (default 3, selected on dev), or both device bounds lie inside a drafting
 rectangle. It derives flow from x order and centres from mean device positions.
@@ -66,7 +65,7 @@ These oracle coordinates do not enter V1. The LOADBench adapter reads functional
 parts from `partitioning.xml`, maps device names to converted references/ids,
 deduplicates repeated XML parts and merges overlapping labels before validation.
 
-`scripts/auto-layout-eval.mjs` accepts `--partition human|loadbench`,
+`scripts/auto-layout-eval.mjs` accepts `--partition human|loadbench|llm`,
 `--variant v1|v2` and `--fixed-human` (all instances fixed, V3). LOADBench input is
 a folder of converted project JSONs with matching `<stem>.partitioning.xml` files;
 it has no human reference and supports V1 only. `--threshold` and `--split dev|val`
@@ -114,7 +113,7 @@ It reads available shape-valid cached samples only; missing/failed entries are
 reported and zero available samples explicitly selects rule-only completion.
 LLM partitions support V1 only; V2 is refused because there is no LLM arrangement.
 `--block-boxes on|off` controls title/role overlays: purple for LLM, blue for blocks
-extended by attachment, grey for rules. Placement and routing are unchanged.
+extended by attachment, grey for rules. Partition placement follows R130–R134; the router is unchanged.
 
 `scripts/auto-layout-partition-report.mjs <folder> --samples k` writes git-ignored
 `tmp/auto-layout-partition/report.json` and `index.html`, with final blocks on each
@@ -123,8 +122,8 @@ LLM coverage, check counts, provenance counts, pairwise sample ARI and final
 consensus-to-sample ARI, plus planner L0 merge counts and diagnostics. T029 checks
 completeness, unit integrity and non-rail/non-bulk block connectivity on the original
 partition before planner validation. Planner merge warnings are reported, not rejected;
-errors and broken T029 invariants reject the document. T031 will align the planner
-validator and placement with recognition units. Missing units in a sample are individual singleton clusters.
+errors and broken T029 invariants reject the document. The planner validator merges recognition-unit splits only; reconciled partitions
+therefore have zero planner merges. Missing units in a sample are individual singleton clusters.
 LOADBench metrics use independent XML labels: ARI, reference block recall at
 membership IoU ≥ 0.5 and role agreement among recalled blocks (best IoU match,
 first final block breaks ties). These three metrics restrict final blocks to devices
@@ -866,6 +865,51 @@ pins }` lists, never Net ids.
   Apply the same procedure to offline search's final best. Initial strategy
   ranking, R58 refinement candidates and annealing evaluations never run R95; finalist
   replans do not count as refinement candidates.
+
+- **R130a — Partition validation and local templates.** Only recognition
+  unit splits cause planner merges. Preserve the diagnostic text `L0 structure
+  split across …; merged into …` for evaluation tooling. Trim each recognized
+  or persisted group to each block's members, including parallel members;
+  fewer than two surviving members no longer form a group. Drop tail and diode
+  references outside that block. Symmetry components retain whole local pairs
+  and local axis/conflict members; a lone pair member is unconstrained.
+- **R130 — Partition stage ordering.** Without an oracle `arrangement`, feed
+  partition blocks through R53/R54 ordering and mirroring, R57 signal direction,
+  R56 spacing and R59 shunt attachment within the owning block. Compare a second
+  row for `bias`, `cmfb` and `compensation` blocks against a single row using the
+  same estimator; roles never force the side row. Input/output roles may supply
+  R57 direction when interface hosts do not. The V2 floorplan stays available.
+  Retain a single-row candidate in the routed strategy comparison, since an
+  estimated side-row improvement can become a routing regression.
+- **R131 — Soft block boundaries.** `blockIntrusion` counts distinct devices
+  whose final visible bounds intersect another block's enclosing visible bounds.
+  Count a device only once even if it intersects multiple foreign boxes. Add
+  `500 * blockIntrusion` to the routed score only when a partition is supplied,
+  using `ROUTED_SCORE_WEIGHTS.blockIntrusion`. Boundaries do not refuse finishing.
+  Report the count through `refinementMetrics` after final facing/label seating.
+- **R132 — Partition annealing.** Stage-block translations, swaps, reversals and
+  eligible mirrors use partition blocks, regardless of the starting strategy.
+  Keep rigid unit moves within their owning block. When R130 selects two rows,
+  also propose exchanging whole blocks between the signal and side rows.
+  Acceptance uses the full routed score, including R131. R67 bounds and all
+  existing fixed-instance, transaction and electrical invariants still apply.
+- **R133 — Partition determinism and safety.** Quick placement is deterministic;
+  search repeats for a given seed and evaluation budget without a deadline.
+  Deadline/abort requests retain the existing bounded-search semantics. Every
+  accepted result passes the existing replay, connectivity and name-claim checks.
+  Omitting the partition keeps the default output unchanged.
+- **R134 — Partition fallback.** If a valid partition without `arrangement`
+  produces an error or no edits, replan without it using the same other options.
+  Return the default result, partition validation diagnostics, and warning
+  `AUTO_LAYOUT_PARTITION_FALLBACK` (rule `partition`) carrying the first problem.
+  Measure final block intrusion against the validated partition. Invalid partitions
+  and the explicit `arrangement` path retain their refusal behavior.
+  Report fallback counts per split, block intrusion and block-local symmetry
+  (`pairs`, `mirrored`, `level`, `orientationMirrored`, `axisDevices`, `onAxis`)
+  alongside the unchanged whole-component symmetry, arrangement agreement and
+  area metrics. Block symmetry uses surviving within-block pairs about local axes. Accept
+  `--partition llm --search <seconds>`. Tune only on dev; keep third-party cases
+  and all case-keyed artifacts git-ignored. Rule-only smoke runs use `--samples 0`.
 
 - **Existing locks and conflicts.** Members of a locked layout group or
   constraint are treated as fixed instances under R1, because the Edit Engine

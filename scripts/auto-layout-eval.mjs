@@ -24,8 +24,14 @@ import {
 import { classifyNets } from "../packages/auto-layout/dist/net-roles.js";
 import { partitionFromPlacement } from "../packages/auto-layout/dist/partition-from-placement.js";
 import { partitionFromLoadbench } from "../packages/auto-layout/dist/partition-from-loadbench.js";
-import { validatePartition } from "../packages/auto-layout/dist/partition.js";
-import { partitionBounds } from "../packages/auto-layout/dist/partition-geometry.js";
+import {
+  partitionSymmetry,
+  validatePartition,
+} from "../packages/auto-layout/dist/partition.js";
+import {
+  blockIntrusion,
+  partitionBounds,
+} from "../packages/auto-layout/dist/partition-geometry.js";
 import { planAutoLayout } from "../packages/auto-layout/dist/index.js";
 import {
   auditRouting,
@@ -109,7 +115,6 @@ if (
   !["v1", "v2"].includes(variant) ||
   (flags.has("--variant") && !partitionSource) ||
   (fixedHuman && (partitionSource || seconds)) ||
-  (partitionSource && seconds) ||
   !(threshold > 0 && Number.isFinite(threshold)) ||
   (flags.has("--split") && !["dev", "val"].includes(flags.get("--split")))
 )
@@ -162,6 +167,7 @@ const largestRatio = (items, key) => {
 function blockMetrics(document, resolver, partition, human) {
   if (!partition)
     return {
+      blockIntrusion: null,
       blockOverlap: null,
       arrangementAgreement: null,
       arrangementMatches: 0,
@@ -220,6 +226,7 @@ function blockMetrics(document, resolver, partition, human) {
       }
     }
   return {
+    blockIntrusion: blockIntrusion(document, resolver, partition),
     blockOverlap: overlap,
     arrangementAgreement: relations ? matches / relations : null,
     arrangementMatches: matches,
@@ -391,6 +398,7 @@ function evaluateFile(file) {
         resolver,
         seconds
           ? {
+              ...layoutOptions,
               search: {
                 seed,
                 evaluations: 1_000_000_000,
@@ -418,6 +426,9 @@ function evaluateFile(file) {
     measurement.timing = planningTiming(plan);
     measurement.strategy = refinementMetrics(plan)?.strategy ?? null;
     measurement.candidates = refinementMetrics(plan)?.candidates ?? 0;
+    measurement.partitionFallback = plan.diagnostics.some(
+      (d) => d.code === "AUTO_LAYOUT_PARTITION_FALLBACK",
+    );
     measurement.diagnostics = [...plan.diagnostics];
     const transaction = apply(plan);
     measurement.diagnostics.push(...(transaction?.diagnostics ?? []));
@@ -432,6 +443,15 @@ function evaluateFile(file) {
     if (completed) {
       measurement.result = {
         ...metrics(after, resolver, components),
+        ...(partitionSource
+          ? {
+              blockSymmetry: symmetryCounts(
+                after,
+                resolver,
+                partitionSymmetry(components, partition),
+              ),
+            }
+          : {}),
         ...blockMetrics(after, resolver, partition, hasHuman ? document : null),
       };
       measurement.result.areaRatio =
@@ -595,13 +615,20 @@ if (!isMainThread) {
   const symmetryText = (m) =>
     m?.symmetry ? symmetryKeys.map((key) => m.symmetry[key]).join("/") : "—";
   const sum = (items) => ({
-    symmetry: Object.fromEntries(
-      symmetryKeys.map((key) => [
-        key,
-        items.every((m) => Number.isFinite(m.symmetry?.[key]))
-          ? items.reduce((total, m) => total + m.symmetry[key], 0)
-          : null,
-      ]),
+    ...Object.fromEntries(
+      ["symmetry", ...(partitionSource ? ["blockSymmetry"] : [])].map(
+        (metric) => [
+          metric,
+          Object.fromEntries(
+            symmetryKeys.map((key) => [
+              key,
+              items.every((m) => Number.isFinite(m[metric]?.[key]))
+                ? items.reduce((total, m) => total + m[metric][key], 0)
+                : null,
+            ]),
+          ),
+        ],
+      ),
     ),
     ...Object.fromEntries(
       [
@@ -616,6 +643,7 @@ if (!isMainThread) {
           : null,
       ]),
     ),
+    blockIntrusion: items.reduce((s, m) => s + (m.blockIntrusion ?? 0), 0),
     blockOverlap: items.reduce((s, m) => s + (m.blockOverlap ?? 0), 0),
     meanAreaRatio: items.filter((m) => Number.isFinite(m.areaRatio)).length
       ? items.reduce((s, m) => s + (m.areaRatio ?? 0), 0) /
@@ -669,6 +697,14 @@ if (!isMainThread) {
           : "—",
         humanSymmetry: symmetryText(m.human),
         resultSymmetry: symmetryText(m.result),
+        ...(partitionSource
+          ? {
+              blockSymmetry: symmetryText({
+                symmetry: m.result?.blockSymmetry,
+              }),
+              partitionFallback: m.partitionFallback,
+            }
+          : {}),
         humanFloating: m.human?.floatingPins.length ?? "—",
         resultFloating: m.result?.floatingPins.length ?? "—",
         humanMissing: m.human?.missingConnections ?? "—",
@@ -701,6 +737,7 @@ if (!isMainThread) {
       split,
       documents: cases.length,
       completed: cases.filter((m) => m.status === "completed").length,
+      partitionFallback: cases.filter((m) => m.partitionFallback).length,
       common: common.length,
       // Totals cover human drawings only; imported LOADBench layouts have none.
       human: common.some((m) => m.human)
