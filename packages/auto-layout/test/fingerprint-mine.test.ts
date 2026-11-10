@@ -188,6 +188,28 @@ it("promotes only selected valid candidates, with aggregate sources and no priva
   ).rejects.toThrow(/Duplicate/);
   expect(readFileSync(libraryPath, "utf8")).toBe(written);
 });
+it("refuses to promote a candidate with a project-local symbol, without naming it", async () => {
+  const dir = directory(),
+    candidatePath = join(dir, "candidates.json"),
+    libraryPath = join(dir, "library.json");
+  const result = aggregateFingerprints([record("one"), record("two")]);
+  const candidate = result.candidates[0];
+  const graph = JSON.parse(candidate.canonical);
+  const device = graph.nodes.findIndex((n: string[]) => n[0] === "device");
+  graph.nodes[device] = ["device", "unknown", "", "case-local-filter"];
+  candidate.canonical = JSON.stringify(graph);
+  writeFileSync(candidatePath, JSON.stringify(result));
+  writeFileSync(libraryPath, '{ "version": 1, "entries": [] }\n');
+  const refusal = promoteFingerprints(
+    [candidate.hash],
+    "Reviewer",
+    candidatePath,
+    libraryPath,
+  );
+  await expect(refusal).rejects.toThrow(/project-local symbol/);
+  await expect(refusal).rejects.not.toThrow(/case-local-filter/);
+  expect(JSON.parse(readFileSync(libraryPath, "utf8")).entries).toEqual([]);
+});
 it("mines real synthetic caches offline, renders highlights, and runs explicit CLI promotion", () => {
   const dir = directory(),
     folder = join(dir, "cases"),

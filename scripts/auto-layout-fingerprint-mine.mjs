@@ -189,6 +189,18 @@ export async function promoteFingerprints(
       !(candidate.precision >= MIN_PRECISION)
     )
       throw new Error(`Not a qualifying candidate: ${hash}`);
+    // A device without a built-in descriptor keeps its symbol id, and its edges
+    // keep that symbol's pin names: in a third-party case both are the author's
+    // own text. Only built-in symbols may enter the tracked library.
+    if (
+      JSON.parse(candidate.canonical).nodes.some(
+        (node) =>
+          node[0] === "device" &&
+          node[1] === "unknown" &&
+          !builtInSymbols.some((symbol) => symbol.id === node[3]),
+      )
+    )
+      throw new Error(`Candidate uses a project-local symbol: ${hash}`);
     library.entries.push({
       hash,
       canonical: candidate.canonical,
