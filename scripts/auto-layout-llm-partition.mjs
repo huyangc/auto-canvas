@@ -317,6 +317,11 @@ export async function runPartitionJobs(
         });
         if (response.stop_reason !== "end_turn") {
           entry.errors = [`Stopped: ${response.stop_reason}`];
+          // A refusal is this circuit's answer and is cached. An output limit or
+          // a provider-specific stop such as an overload is not: leave it
+          // uncached, so the next run asks again.
+          if (response.stop_reason !== "refusal")
+            return { ...entry, status: "unavailable" };
           break;
         }
         try {

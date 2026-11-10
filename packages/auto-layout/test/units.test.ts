@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
 import {
+  canonicalDevices,
   recognitionUnits,
   rulePartition,
   inferRole,
@@ -221,6 +222,93 @@ it("canonicalizes symmetric cycles without an id or insertion-order tie-break", 
   ];
   expect(describeCircuit(d, resolver, true)).toEqual(payload);
 });
+
+function symmetricCircuit(kind: "resistors" | "mirror" | "ring") {
+  const count = kind === "ring" ? 12 : 16;
+  const ids = Array.from({ length: count }, (_, n) => `device${n}`);
+  const symbol =
+    kind === "ring" ? "inverter" : kind === "mirror" ? "nmos" : "resistor";
+  const symbols = Object.fromEntries(ids.map((id) => [id, symbol]));
+  if (kind === "mirror") {
+    symbols.ref = "nmos";
+    return circuit(symbols, {
+      bias: ["ref.D", "ref.G", ...ids.map((id) => `${id}.G`)],
+      source: ["ref.S", ...ids.map((id) => `${id}.S`)],
+      ...Object.fromEntries(ids.map((id) => [`out-${id}`, [`${id}.D`]])),
+    });
+  }
+  return circuit(
+    symbols,
+    Object.fromEntries(
+      ids.flatMap((id, n) =>
+        kind === "ring"
+          ? [[`net${n}`, [`${id}.Y`, `${ids[(n + 1) % count]}.A`]]]
+          : [
+              [`${id}-a`, [`${id}.1`]],
+              [`${id}-b`, [`${id}.2`]],
+            ],
+      ),
+    ),
+  );
+}
+
+// Symmetric vertices have no unique source-id order. Compare their labelled
+// connectivity in canonical device order instead of comparing source ids.
+function canonicalTopology(d: ReturnType<typeof circuit>) {
+  const devices = canonicalDevices(d, resolver);
+  expect(devices.map((i) => i.id).sort()).toEqual(
+    d.instances.map((i) => i.id).sort(),
+  );
+  const indices = new Map(devices.map((i, n) => [i.id, n]));
+  return {
+    symbols: devices.map((i) => i.symbolId),
+    nets: d.nets
+      .filter((net) => net.terminals.length)
+      .map((net) =>
+        JSON.stringify(
+          net.terminals
+            .map((t) => [indices.get(t.instanceId), t.pinName])
+            .sort(),
+        ),
+      )
+      .sort(),
+  };
+}
+
+it.each(["resistors", "mirror", "ring"] as const)(
+  "canonicalizes symmetric %s within the default timeout and preserves topology",
+  (kind) => {
+    const d = symmetricCircuit(kind);
+    const topology = canonicalTopology(d);
+    const payload = describeCircuit(d, resolver, true);
+    // Reverse and interleave to exercise different first-leaf choices.
+    for (const stride of [1, 5]) {
+      const renamed = structuredClone(d);
+      const ids = new Map(
+        d.instances.map((i, n) => [i.id, `renamed-${d.instances.length - n}`]),
+      );
+      renamed.instances = d.instances
+        .map((_, n) => renamed.instances[(n * stride) % d.instances.length]!)
+        .reverse();
+      for (const i of renamed.instances) i.id = ids.get(i.id)!;
+      renamed.nets.reverse();
+      renamed.nets.forEach((net, n) => {
+        net.id = `renamed-net-${n}`;
+        net.terminals.reverse();
+        net.terminals.forEach((t) => {
+          t.instanceId = ids.get(t.instanceId)!;
+        });
+      });
+      expect(canonicalTopology(renamed)).toEqual(topology);
+      expect(describeCircuit(renamed, resolver, true)).toEqual(payload);
+    }
+    const changed = structuredClone(d);
+    changed.nets[1]!.terminals.push(changed.nets[0]!.terminals.pop()!);
+    expect(canonicalTopology(changed)).not.toEqual(topology);
+    expect(describeCircuit(changed, resolver, true)).not.toEqual(payload);
+  },
+);
+
 it("maps stages and bridge capacitors into a complete fallback with no L0 merge", () => {
   const d = circuit(
     { a: "nmos", b: "pmos", c: "capacitor" },

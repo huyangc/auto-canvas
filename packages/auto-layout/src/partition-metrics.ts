@@ -60,8 +60,12 @@ export function partitionMetrics(
         matches++;
     }
   const totalArea = boxes.reduce((sum, b) => sum + b.width * b.height, 0);
+  const labelled = new Set(reference.blocks.flatMap((b) => b.members));
+  const labelledBlocks = partition.blocks
+    .map((b) => ({ ...b, members: b.members.filter((id) => labelled.has(id)) }))
+    .filter((b) => b.members.length > 0);
   const matchesByReference = reference.blocks.map((b) => {
-    const candidates = partition.blocks
+    const candidates = labelledBlocks
       .map((a) => {
         const intersection = a.members.filter((id) =>
           b.members.includes(id),
@@ -81,7 +85,7 @@ export function partitionMetrics(
     humanOverlap:
       totalArea && Number.isFinite(totalArea) ? overlap / totalArea : null,
     ari: adjustedRandIndex(
-      partition.blocks.map((b) => b.members),
+      labelledBlocks.map((b) => b.members),
       reference.blocks.map((b) => b.members),
     ),
     blockRecall: reference.blocks.length

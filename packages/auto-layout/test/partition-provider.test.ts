@@ -109,22 +109,22 @@ it("repairs once with unchanged assistant content and records both attempts and 
   expect(result.results[0].attempts).toHaveLength(2);
   expect(result.costUsd).toBeCloseTo(0.0088);
 });
-it.each(["refusal", "max_tokens"])(
-  "records %s without parsing or repairing",
-  async (stop) => {
-    const provider = vi.fn().mockResolvedValue(response(answer, stop));
-    const result = await runPartitionJobs([job], {
-      provider,
-      cacheDirectory: cache(),
-    });
-    expect(provider).toHaveBeenCalledTimes(1);
-    expect(result.results[0]).toMatchObject({
-      status: "failed",
-      stop_reason: stop,
-      output: null,
-    });
-  },
-);
+it.each([
+  ["refusal", "failed"],
+  ["max_tokens", "unavailable"],
+])("records %s as %s without parsing or repairing", async (stop, status) => {
+  const provider = vi.fn().mockResolvedValue(response(answer, stop));
+  const result = await runPartitionJobs([job], {
+    provider,
+    cacheDirectory: cache(),
+  });
+  expect(provider).toHaveBeenCalledTimes(1);
+  expect(result.results[0]).toMatchObject({
+    status,
+    stop_reason: stop,
+    output: null,
+  });
+});
 it("records a double validation failure and continues to the next document", async () => {
   const provider = vi
     .fn()
@@ -176,6 +176,26 @@ it("never requests cached successes or failures and separates samples and anonym
     ]).size,
   ).toBe(4);
 });
+it.each(["max_tokens", "insufficient_system_resource"])(
+  "does not cache a response that stopped for %s, so the next run asks again",
+  async (reason) => {
+    const provider = vi
+      .fn()
+      .mockResolvedValueOnce(response(answer, reason))
+      .mockResolvedValueOnce(response());
+    const cacheDirectory = cache();
+    const first = await runPartitionJobs([job], { provider, cacheDirectory });
+    expect(first.results[0]).toMatchObject({
+      status: "unavailable",
+      errors: [`Stopped: ${reason}`],
+    });
+    // The spent tokens still count toward the budget.
+    expect(first.costUsd).toBeGreaterThan(0);
+    const second = await runPartitionJobs([job], { provider, cacheDirectory });
+    expect(second.results[0].status).toBe("valid-first-try");
+    expect(provider).toHaveBeenCalledTimes(2);
+  },
+);
 it("stops starting new calls at budget, including repair, without poisoning unstarted caches", async () => {
   const provider = vi.fn().mockResolvedValue(response());
   const cacheDirectory = cache();

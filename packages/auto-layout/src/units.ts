@@ -35,7 +35,11 @@ function canonicalOrder(
     const sorted = [...new Set(keys)].sort(compareIds);
     return keys.map((key) => sorted.indexOf(key));
   };
-  const visit = (seed: number[]): { order: number[]; key: string } => {
+  const visit = (
+    seed: number[],
+    prefix: number[],
+    firstOnly = false,
+  ): { order: number[]; key: string } => {
     let colors = seed;
     for (;;) {
       const next = rank(
@@ -74,6 +78,7 @@ function canonicalOrder(
     }
     let best: ReturnType<typeof visit> | undefined;
     const twins = new Set<string>();
+    const explored: { id: number; leaf: ReturnType<typeof visit> }[] = [];
     for (const id of tied) {
       const twin = JSON.stringify(
         edges[id]!.map((e) => [e.label, e.to]).sort(),
@@ -83,12 +88,28 @@ function canonicalOrder(
       const seed = colors.map((c, i) =>
         i === id ? Math.max(...colors) + 1 : c,
       );
-      const candidate = visit(seed);
+      const nextPrefix = [...prefix, id];
+      if (firstOnly) return visit(seed, nextPrefix, true);
+      const leaf = visit(seed, nextPrefix, true);
+      // Equal certificates define an automorphism. Only prune if it maps
+      // the explored branch to this one and fixes every individualized vertex.
+      if (
+        explored.some(({ id: previous, leaf: other }) => {
+          if (other.key !== leaf.key) return false;
+          const map = new Map(other.order.map((v, i) => [v, leaf.order[i]]));
+          return (
+            map.get(previous) === id && prefix.every((v) => map.get(v) === v)
+          );
+        })
+      )
+        continue;
+      const candidate = visit(seed, nextPrefix);
+      explored.push({ id, leaf });
       if (!best || candidate.key < best.key) best = candidate;
     }
     return best!;
   };
-  return visit(rank(labels)).order;
+  return visit(rank(labels), []).order;
 }
 
 /** @internal Shared canonical aliases for the prompt and unit numbering. */

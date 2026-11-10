@@ -94,11 +94,17 @@ T026's human and LOADBench partition paths and optional `arrangement` stay uncha
 `scripts/auto-layout-llm-partition.mjs <folder>` accepts `--split dev|val`,
 `--limit n`, `--samples n`, `--anonymize`, `--max-usd n`, `--concurrency n` (default 6)
 and `--dry-run`. Samples are zero-based. Dry runs do not construct a network client.
-The default provider is `deepseek-flash`; the optional Anthropic provider retains
-its structured output and one-repair scheduler. Cost uses the selected provider's
+The environment variable `LLM_PARTITION_PROVIDER` selects the provider. The default,
+`deepseek-flash`, sends the payload to `https://api.deepseek.com` over the OpenAI
+protocol and reads its key from `SYSTEM_GENERAL_API_KEY`. `claude-opus-5-5` uses the
+Anthropic SDK's credential resolution and retains its structured output. Both share
+the one-repair scheduler. Cost uses the selected provider's
 configured rates. Each attempt records serving model, stop reason and usage.
-Caches in git-ignored `tmp/llm-partition/` include successes and failures, keyed by
-payload, prompt version, model, sample and anonymization. Budget stops new calls
+Caches in git-ignored `tmp/llm-partition/` hold successes, answers that failed
+validation twice and refusals, keyed by
+payload, prompt version, model, sample and anonymization. A response that stops at the
+output limit or for another provider reason is reported as unavailable and is not
+cached, so the next run asks again. Budget stops new calls
 and repairs; already in-flight calls can overshoot. Unstarted calls are not cached.
 Private cases, responses and credentials must never enter tracked files. Opus
 runs real calls: tune on dev, freeze the prompt, evaluate val once.
@@ -121,7 +127,9 @@ errors and broken T029 invariants reject the document. T031 will align the plann
 validator and placement with recognition units. Missing units in a sample are individual singleton clusters.
 LOADBench metrics use independent XML labels: ARI, reference block recall at
 membership IoU ≥ 0.5 and role agreement among recalled blocks (best IoU match,
-first final block breaks ties). Human overlap is pairwise block-box overlap area
+first final block breaks ties). These three metrics restrict final blocks to devices
+labelled by the reference and drop empty blocks. Human overlap and floorplan metrics
+still use the whole partition. Human overlap is pairwise block-box overlap area
 divided by summed box area. Unavailable metrics are null, and failures remain
 visible in completion counts. No offline test asserts real recognition targets.
 
@@ -912,7 +920,11 @@ and axis-device pin centres lie within 60 units of the axis.
   singleton. Each unit is internally connected and stays within one stage;
   multi-output bias mirrors therefore separate their reference from outputs in
   other stages. Number
-  units in canonical topology order. Each carries kind, per-member roles and
+  units in canonical topology order. Canonical ordering minimizes the labelled-graph
+  certificate; equivalent search branches are pruned only when equal first-leaf
+  certificates define an automorphism mapping one branch vertex to the other and
+  fixing every previously individualized vertex (exact twins also share a branch).
+  Each carries kind, per-member roles and
   source. Strongest kind order is differential pair with mirror load, differential
   pair, mirror, cross-coupled pair, common-gate pair, matched pair, device class.
 - **R111 — Complete rule partition.** Map channel-connected `findStages` onto
