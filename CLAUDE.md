@@ -24,6 +24,12 @@ with one of them, correct the entry file.
   to `main`.
 - Write product code yourself only for a fix of a few lines found in review,
   or when the user asks. Anything larger goes back to Codex as a review round.
+- Before anything that spends LLM API tokens starts, ask the user and wait for
+  their confirmation: say what will run, about how many calls and the expected
+  cost. This holds inside delegated and autonomous runs, and for runs a plan
+  would hand to Codex. One confirmation covers the run described. Codex rounds,
+  the codex PR review and subagents are the workflow's own tools and are not
+  such runs. See [the workflow rules](docs/workflow.md#规则).
 
 The PR process is the one in `docs/workflow.md`; analog-canvas's upstream
 Issue/deploy process does not apply.
