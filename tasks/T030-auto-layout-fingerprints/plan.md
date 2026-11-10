@@ -167,6 +167,99 @@ Out of scope (do not change):
 8. **Report**, by Codex: what was built and the tests. Opus mines the real caches, which are
    dev, val and LOADBench, and reports the candidates.
 
+### Round 2 amendment (after review round 1)
+
+**Owned paths added:** `scripts/auto-layout-llm-partition.mjs` and its test
+`packages/auto-layout/test/partition-provider.test.ts`. `scripts/auto-layout-eval.mjs` stays
+with T031: keep every exported function it imports callable with today's arguments.
+
+1. **R113 soft role check only reports.** In `reconcilePartition`, an LLM role that the
+   electrical evidence does not support is still counted in `checks.softRole` and listed in
+   the diagnostics. The block keeps the LLM's role, and its confidence is the mean consensus
+   share alone. Update the spec sentence in R113 and the tests that expect `other` and a
+   halved confidence.
+
+2. **Rule partition without templates.** `rulePartition` computes its stage blocks from the
+   units as they are without library entries. With entries:
+   - every template unit is one rule block of its own, with the entry's title and role;
+   - every other device stays in the rule block it has without entries, less the template
+     devices, split into connected components.
+
+   So a template that spans two stages never merges them. `reconcilePartition` uses this
+   partition as its fallback. Test: a synthetic entry whose match spans two stages leaves
+   two separate rule blocks beside the template block.
+
+3. **Matcher support per candidate.** After aggregation, the mining script runs
+   `matchFingerprints` for each candidate, as a one-entry library, over every mined
+   document. `candidates.json` and the HTML page gain `matchedDocuments` and
+   `matchedOccurrences`, and note a budget that ran out. Order candidates by
+   `matchedDocuments`, then by `documents`.
+
+4. **Library in the call script; one cache reader.**
+   - `scripts/auto-layout-llm-partition.mjs` loads the library and passes its entries to
+     `describeCircuit`, so samples are requested and cached for the payload with template
+     units. With an empty library the payload, the cache keys and the dry-run output are
+     unchanged.
+   - `cachedSamples(document, resolver, count, anonymize, cacheDirectory, entries = [])`
+     builds the same payload. The report script uses it; remove the report's own
+     `templateSchema` and `samplesFor`.
+
+5. **`--library <path>`.** The call script, the report script and the mining script accept
+   `--library <path>`; the default is the tracked file. `--promote` writes to that path. An
+   experiment can then use a library file under `tmp/` and leave the tracked file empty.
+   Test the option on the mining script with a temporary library.
+
+**Acceptance added.** The last line replaces the old tracked-file grep, which also matched
+task document names.
+
+```bash
+node scripts/auto-layout-llm-partition.mjs tmp/human-cases --dry-run --split dev      # expected: exit 0; jobs 18; payloadBytes 91293, as on the base
+node scripts/auto-layout-fingerprint-mine.mjs tmp/human-cases --samples 0 --library tmp/fingerprints/empty-library.json   # expected: exit 0 with a copy of the empty library
+git ls-files | grep -E '^tmp/|(^|/)(human-cases|llm-partition|fingerprints)/'           # expected: no output
+```
+
+### Round 3 amendment (after review round 2)
+
+No step of this task calls an LLM provider. Any run that spends LLM API tokens needs the
+user's confirmation first; neither Codex nor the tests start one.
+
+**1. Mining precision (R124).** A library entry forces a unit wherever the matcher finds its
+pattern. So a candidate is useful only if those places are blocks the LLM draws. For each
+candidate, compare every matcher occurrence with the reconciled partition of its document
+(reconciled without library entries, as mining does today):
+
+- `matchedAsBlock`: occurrences whose device set equals one block with provenance `llm` or
+  `attached`;
+- `matchedIntact`: occurrences whose devices all lie in one block;
+- `precision` = `matchedAsBlock` / `matchedOccurrences`, or 0 without occurrences.
+
+Then:
+
+- A candidate also needs `precision` ≥ `MIN_PRECISION` (0.8, a named constant).
+  `--promote` refuses a hash below it.
+- `candidates.json` gains a `rejected` list: the fingerprints that pass the document and
+  role gates but fail precision, with the same fields. The HTML page shows them in a second
+  section, without drawings.
+- Order candidates by `precision`, then `matchedDocuments`, then `documents`, then hash.
+- When the matcher's budget ran out for a document, that document's occurrences are
+  partial; keep reporting it as today.
+
+Tests on synthetic caches: a pattern the LLM always draws as a block qualifies with
+precision 1; a small pattern that also matches inside larger LLM blocks is rejected and
+listed; `--promote` refuses the rejected hash.
+
+**2. Rule blocks are connected (R111).** A `findStages` stage need not be connected through
+the devices it owns: a transformer is drawn in its primary's stage, while its secondary
+joins other consumers. `rulePartition` then returns a block whose devices share no net.
+
+`rulePartition` splits every block into components connected through non-rail nets,
+excluding MOS bulk pins, with or without library entries. Use one code path for this and for
+the remnants beside a template. Test: the R60 transformer fixture of `stages.test.ts` gives
+rule blocks for which `partitionInvariantErrors` returns nothing, and the existing rule
+partition tests pass unchanged.
+
+**Acceptance.** As before; the dry run still gives 18 jobs and 91293 payload bytes.
+
 ## Acceptance
 
 ```bash

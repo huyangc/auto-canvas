@@ -15,6 +15,7 @@ import {
   persistedTemplates,
   recognizeSubstructures,
 } from "./recognize.js";
+import { matchFingerprints, type FingerprintEntry } from "./fingerprint.js";
 import { findStages, parallelAttachments } from "./stages.js";
 import type {
   BlockRole,
@@ -27,7 +28,7 @@ import type {
 /** Canonical labelled graph: refine colours, individualize ties, minimize the
  * adjacency certificate. Exact twins need only one branch. IDs and geometry
  * are deliberately absent from both the colours and the certificate. */
-function canonicalOrder(
+export function canonicalOrder(
   labels: string[],
   edges: { to: number; label: string }[][],
 ): number[] {
@@ -312,6 +313,7 @@ function pairCandidates(
 export function recognitionUnits(
   document: SchematicDocument,
   resolver: SymbolResolver,
+  entries: readonly FingerprintEntry[] = [],
 ): RecognitionUnit[] {
   const devices = canonicalDevices(document, resolver);
   const index = new Map(devices.map((i, n) => [i.id, n]));
@@ -425,6 +427,8 @@ export function recognitionUnits(
       pieces.push({ ...candidate, members });
     }
   }
+  const templates = matchFingerprints(document, resolver, entries).matches;
+  for (const match of templates) uf.join(match.deviceIds);
   const groups = new Map<string, string[]>();
   for (const i of devices)
     groups.set(uf.find(i.id), [...(groups.get(uf.find(i.id)) ?? []), i.id]);
@@ -446,6 +450,9 @@ export function recognitionUnits(
             )
         );
       });
+    const template = templates.find((match) =>
+      match.deviceIds.some((id) => ids.includes(id)),
+    );
     return {
       id: `U${n + 1}`,
       kind:
@@ -453,6 +460,14 @@ export function recognitionUnits(
         deviceDescriptor(devices[index.get(ids[0]!)!]!.symbolId)?.deviceClass ??
         "unknown",
       source: matches[0]?.source ?? "device",
+      ...(template
+        ? {
+            kind: "template",
+            source: "template" as const,
+            title: template.entry.title,
+            role: template.entry.role,
+          }
+        : {}),
       members: ids.map((id) => ({
         id,
         roles: [
@@ -616,12 +631,72 @@ export function ruleBlock(
   };
 }
 
-/** @internal R111: channel stages merged through atomic units, including bridges. */
+/** Split stage groups and template remnants using the same electrical connectivity. */
+function connectedUnitGroups(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  roles: NetRoles,
+  units: RecognitionUnit[],
+): RecognitionUnit[][] {
+  const connected = unionFind(units.map((u) => u.id));
+  const byNet = new Map<string, string[]>();
+  for (const u of units)
+    for (const member of u.members) {
+      const device = document.instances.find((i) => i.id === member.id)!;
+      for (const pin of devicePins(device, resolver)) {
+        const net = roles.pinNet(device.id, pin.name);
+        if (
+          !net ||
+          roles.rails.has(net) ||
+          isMosBulk(device.symbolId, pin.name)
+        )
+          continue;
+        byNet.set(net, [...(byNet.get(net) ?? []), u.id]);
+      }
+    }
+  for (const ids of byNet.values()) connected.join(ids);
+  const groups = new Map<string, RecognitionUnit[]>();
+  for (const u of units) {
+    const root = connected.find(u.id);
+    groups.set(root, [...(groups.get(root) ?? []), u]);
+  }
+  return [...groups.values()];
+}
+
+/** @internal R111: connected components of stages merged through atomic units. */
 export function rulePartition(
   document: SchematicDocument,
   resolver: SymbolResolver,
   units = recognitionUnits(document, resolver),
 ): { blocks: PartitionBlock[] } {
+  if (units.some((u) => u.source === "template")) {
+    // Preserve the original stage boundaries even when a template crosses them.
+    const base = rulePartition(document, resolver);
+    const roles = classifyNets(document, resolver);
+    const blocks: PartitionBlock[] = units
+      .filter((u) => u.source === "template")
+      .map((u) => ({
+        ...ruleBlock(document, resolver, [u], ""),
+        title: u.title!,
+        role: u.role!,
+        provenance: "template",
+        confidence: 1,
+      }));
+    for (const block of base.blocks) {
+      const remaining = units.filter(
+        (u) =>
+          u.source !== "template" && block.members.includes(u.members[0]!.id),
+      );
+      for (const group of connectedUnitGroups(
+        document,
+        resolver,
+        roles,
+        remaining,
+      ))
+        blocks.push(ruleBlock(document, resolver, group, ""));
+    }
+    return { blocks: blocks.map((b, n) => ({ ...b, id: `rule-${n + 1}` })) };
+  }
   const roles = classifyNets(document, resolver);
   const devices = document.instances.filter((i) => !isMarker(i));
   const uf = unionFind(devices.map((i) => i.id));
@@ -639,8 +714,8 @@ export function rulePartition(
     groups.set(root, [...(groups.get(root) ?? []), u]);
   }
   return {
-    blocks: [...groups.values()].map((group, n) =>
-      ruleBlock(document, resolver, group, `rule-${n + 1}`),
-    ),
+    blocks: [...groups.values()]
+      .flatMap((group) => connectedUnitGroups(document, resolver, roles, group))
+      .map((group, n) => ruleBlock(document, resolver, group, `rule-${n + 1}`)),
   };
 }

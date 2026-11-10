@@ -149,17 +149,22 @@ it("splits blocks above both size thresholds along rules", () => {
   expect(r.partition.blocks[0]!.title).toBe("Title (1)");
 });
 it.each(["input", "bias", "output"] as const)(
-  "downgrades unsupported %s with half confidence",
+  "reports unsupported %s without changing role or consensus confidence",
   (role) => {
     const d = circuit({ a: "resistor" }, {}),
       s = sample([[ids(d).a!]]);
     s.blocks[0]!.role = role;
     const r = valid(d, [s]);
     expect(r.statistics.checks.softRole).toBe(1);
+    expect(r.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ message: `Unsupported ${role} role` }),
+      ]),
+    );
     expect(r.partition.blocks[0]).toMatchObject({
       title: "Title",
-      role: "other",
-      confidence: 0.5,
+      role,
+      confidence: 1,
     });
   },
 );

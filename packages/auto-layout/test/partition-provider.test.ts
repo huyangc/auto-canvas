@@ -20,6 +20,8 @@ vi.hoisted(() => {
 // The CLI is JavaScript; exercise its real scheduler with an injected provider.
 // @ts-expect-error The standalone script does not publish TypeScript declarations.
 import * as runner from "../../../scripts/auto-layout-llm-partition.mjs";
+import { blockFingerprint } from "../src/fingerprint.js";
+import { describeCircuit } from "../src/partition-prompt.js";
 import { circuit } from "./document-fixture.js";
 
 // Resolve the pure implementation from source, including in a fresh checkout.
@@ -27,7 +29,8 @@ vi.mock(
   "../dist/partition-prompt.js",
   () => import("../src/partition-prompt.js"),
 );
-const { cacheKey, runPartitionJobs } = runner;
+vi.mock("../dist/fingerprint.js", () => import("../src/fingerprint.js"));
+const { cacheKey, runPartitionJobs, cachedSamples } = runner;
 const resolver = new InMemorySymbolResolver(builtInSymbols);
 const document = circuit(
   { a: "resistor", b: "resistor" },
@@ -362,7 +365,7 @@ it("runs dry-run, rule fallback, cached V1 and report while refusing LLM V2", as
     ),
     "utf8",
   );
-  expect(svg).toContain("Synthetic &lt;input&gt; · other");
+  expect(svg).toContain("Synthetic &lt;input&gt; · input");
   const v2 = cli("auto-layout-eval.mjs", [
     "--partition",
     "llm",
@@ -511,4 +514,87 @@ it("reports only a status for provider failures and needs a credential", async (
   } finally {
     delete process.env.T027_TEST_KEY;
   }
+});
+
+it("requests and reads template payload caches separately while preserving empty-library keys", async () => {
+  const entries = [
+    {
+      ...blockFingerprint(document, resolver, ["a", "b"]),
+      title: "Synthetic series",
+      role: "gain" as const,
+      approvedBy: "Test",
+      sources: { documents: 2, occurrences: 2, roles: { gain: 2 } },
+    },
+  ];
+  const output = {
+    ...answer,
+    blocks: [{ ...answer.blocks[0], units: ["U1"] }],
+  };
+  const provider = vi.fn().mockResolvedValue(response(output));
+  const cacheDirectory = cache();
+  const result = await runPartitionJobs([{ ...job, entries }], {
+    provider,
+    cacheDirectory,
+  });
+  expect(result.results[0].status).toBe("valid-first-try");
+  expect(provider.mock.calls[0]![0].messages[0].content).toContain(
+    "Synthetic series",
+  );
+  expect(
+    cachedSamples(document, resolver, 1, false, cacheDirectory, entries)
+      .samples,
+  ).toEqual([output]);
+  expect(
+    cachedSamples(document, resolver, 1, false, cacheDirectory).entries,
+  ).toEqual([{ sample: 0, status: "missing" }]);
+  expect(cacheKey(describeCircuit(document, resolver, false, []))).toBe(
+    cacheKey(describeCircuit(document, resolver)),
+  );
+  await runPartitionJobs([{ ...job, entries }], { provider, cacheDirectory });
+  expect(provider).toHaveBeenCalledTimes(1);
+
+  const folder = join(cacheDirectory, "cases");
+  mkdirSync(folder);
+  const project = createEmptyProject("synthetic", "Synthetic", document.id);
+  project.documents = [document];
+  writeFileSync(join(folder, "synthetic.json"), serializeProject(project));
+  const library = join(cacheDirectory, "library.json");
+  writeFileSync(library, JSON.stringify({ version: 1, entries }));
+  const cliCache = join(cacheDirectory, "tmp/llm-partition");
+  mkdirSync(cliCache, { recursive: true });
+  writeFileSync(
+    join(
+      cliCache,
+      `${cacheKey(describeCircuit(document, resolver, false, entries))}.json`,
+    ),
+    JSON.stringify(result.results[0]),
+  );
+  const cli = (script: string, args: string[]) =>
+    spawnSync(
+      process.execPath,
+      [resolve("scripts", script), folder, "--library", library, ...args],
+      { cwd: cacheDirectory, encoding: "utf8" },
+    );
+  const dry = cli("auto-layout-llm-partition.mjs", ["--dry-run"]);
+  expect(dry.status, dry.stderr).toBe(0);
+  expect(JSON.parse(dry.stdout)).toMatchObject({
+    jobs: 1,
+    cached: 1,
+    payloadBytes: Buffer.byteLength(
+      JSON.stringify(describeCircuit(document, resolver, false, entries)),
+    ),
+  });
+  const report = cli("auto-layout-partition-report.mjs", ["--samples", "1"]);
+  expect(report.status, report.stderr).toBe(0);
+  const data = JSON.parse(
+    readFileSync(
+      join(cacheDirectory, "tmp/auto-layout-partition/report.json"),
+      "utf8",
+    ),
+  );
+  expect(data.cases[0]).toMatchObject({
+    templateUnits: [{ title: "Synthetic series" }],
+    statistics: { samples: 1 },
+    entries: [{ status: "valid-first-try" }],
+  });
 });

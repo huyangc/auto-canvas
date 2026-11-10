@@ -7,6 +7,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { parseFingerprintLibrary } from "../packages/auto-layout/dist/fingerprint.js";
+import { recognitionUnits } from "../packages/auto-layout/dist/units.js";
 import { cachedSamples } from "./auto-layout-llm-partition.mjs";
 import {
   reconcilePartition,
@@ -28,13 +30,31 @@ import {
 } from "../packages/render-svg/dist/index.js";
 
 const [folder, ...args] = process.argv.slice(2);
-if (!folder || (args.length && (args.length !== 2 || args[0] !== "--samples")))
+const flags = new Map();
+for (let i = 0; i < args.length; i++) {
+  if (!["--samples", "--library"].includes(args[i]) || !args[i + 1])
+    throw new Error("Unknown or incomplete option");
+  flags.set(args[i], args[++i]);
+}
+if (!folder)
   throw new Error(
-    "Usage: auto-layout-partition-report.mjs <folder> [--samples k]",
+    "Usage: auto-layout-partition-report.mjs <folder> [--samples k] [--library path]",
   );
-const samples = Number(args[1] ?? 3);
+const samples = Number(flags.get("--samples") ?? 3);
 if (!Number.isSafeInteger(samples) || samples < 0)
   throw new Error("Invalid samples count");
+const library = parseFingerprintLibrary(
+  JSON.parse(
+    readFileSync(
+      flags.get("--library") ??
+        new URL(
+          "../packages/auto-layout/fingerprint-library.json",
+          import.meta.url,
+        ),
+      "utf8",
+    ),
+  ),
+);
 const output = "tmp/auto-layout-partition";
 mkdirSync(output, { recursive: true });
 const escape = (value) =>
@@ -60,8 +80,21 @@ for (const file of readdirSync(folder)
     );
     if (!document) throw new Error("Top Document missing");
     const resolver = createProjectSymbolResolver(project, builtInSymbols);
-    const cached = cachedSamples(document, resolver, samples);
-    const result = reconcilePartition(document, resolver, cached.samples);
+    const units = recognitionUnits(document, resolver, library.entries);
+    const cached = cachedSamples(
+      document,
+      resolver,
+      samples,
+      false,
+      undefined,
+      library.entries,
+    );
+    const result = reconcilePartition(
+      document,
+      resolver,
+      cached.samples,
+      library.entries,
+    );
     const validation = validatePartition(document, resolver, result.partition);
     const invariantErrors = partitionInvariantErrors(
       document,
@@ -111,6 +144,10 @@ for (const file of readdirSync(folder)
       hasHuman,
       loadbench,
       ...result,
+      templateUnits: units.filter((u) => u.source === "template"),
+      templateBlocks: result.partition.blocks.filter(
+        (b) => b.provenance === "template",
+      ),
       plannerMerges,
       plannerDiagnostics: validation.diagnostics,
       entries: cached.entries,
@@ -139,6 +176,7 @@ for (const file of readdirSync(folder)
             llm: "#7c3aed",
             attached: "#2563eb",
             rule: "#6b7280",
+            template: "#059669",
           }[block.provenance];
           return `<g fill="none" stroke="${color}"><rect x="${b.x}" y="${b.y}" width="${b.width}" height="${b.height}" stroke-dasharray="8 5"/><text x="${b.x + 3}" y="${b.y + 12}" fill="${color}" stroke="none" font-size="12">${escape(`${block.title} · ${block.role}`)}</text></g>`;
         })
@@ -174,7 +212,7 @@ const totals = Object.fromEntries(
           ),
         ].map((key) => [
           key,
-          completed.reduce((s, c) => s + c.statistics[field][key], 0),
+          completed.reduce((s, c) => s + (c.statistics[field][key] ?? 0), 0),
         ]),
       );
     const devices = completed.reduce((s, c) => s + c.devices, 0);
@@ -185,6 +223,14 @@ const totals = Object.fromEntries(
         completed: completed.length,
         failed: all.length - completed.length,
         plannerMerges: completed.reduce((sum, c) => sum + c.plannerMerges, 0),
+        templateUnits: completed.reduce(
+          (s, c) => s + c.templateUnits.length,
+          0,
+        ),
+        templateBlocks: completed.reduce(
+          (s, c) => s + c.templateBlocks.length,
+          0,
+        ),
         ruleOnly: completed.filter((c) => c.statistics.ruleOnly).length,
         llmCoverage: devices
           ? completed.reduce(
@@ -227,7 +273,7 @@ writeFileSync(
 );
 writeFileSync(
   join(output, "index.html"),
-  `<!doctype html><html><head><meta charset="utf-8"><title>Functional partitions</title><style>body{font:14px system-ui;margin:24px}svg{max-width:100%;height:auto}pre{white-space:pre-wrap}section{border-top:1px solid #ccc;margin-top:24px}</style></head><body><h1>Functional partitions</h1><p>Purple: LLM; blue: attached; grey: rule.</p><pre>${escape(JSON.stringify(totals, null, 2))}</pre>${sections.join("")}</body></html>`,
+  `<!doctype html><html><head><meta charset="utf-8"><title>Functional partitions</title><style>body{font:14px system-ui;margin:24px}svg{max-width:100%;height:auto}pre{white-space:pre-wrap}section{border-top:1px solid #ccc;margin-top:24px}</style></head><body><h1>Functional partitions</h1><p>Purple: LLM; blue: attached; grey: rule; green: template.</p><pre>${escape(JSON.stringify(totals, null, 2))}</pre>${sections.join("")}</body></html>`,
 );
 console.log(
   JSON.stringify({ documents: cases.length, totals, output }, null, 2),
