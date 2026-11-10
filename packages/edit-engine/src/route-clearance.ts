@@ -308,7 +308,7 @@ export function createRouteClearance(
     netScope?: "logical" | "base";
     /** Extra path-length cost per proper crossing, zero by default. */
     crossingCost?: number;
-    /** Test aid: run every exact check without bounding-box prefilters. */
+    /** @internal Test aid: run every exact check without bounding-box prefilters. */
     exhaustive?: boolean;
     endpointKeys: ReadonlySet<string>;
     signalWidth?: number;

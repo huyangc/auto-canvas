@@ -2,6 +2,7 @@ import { blockIntrusion } from "./partition-geometry.js";
 import { partitionGroups, validatePartition } from "./partition.js";
 import {
   MAX_SCHEMATIC_EDITS_PER_TRANSACTION,
+  documentObjectIds,
   type SchematicEdit,
 } from "@icm/edit-engine";
 import type { SchematicDocument } from "@icm/model";
@@ -53,6 +54,8 @@ import {
   type SearchBounds,
 } from "./search-bounds.js";
 import { annealLayout } from "./search.js";
+import { compactPlacements } from "./compact.js";
+import { symmetryTopology } from "./symmetry.js";
 
 export function planAutoLayout(
   document: SchematicDocument,
@@ -180,24 +183,76 @@ function planAutoLayoutMeasured(
       ? candidate
       : run;
   };
+  // R97 compacts only the R44 winner, outside all candidate evaluations.
+  const compact = (
+    run: LayoutRun,
+    strategy: LayoutStrategy,
+    signalTrunks: boolean,
+  ) => {
+    if (
+      options.partition ||
+      fixed.size ||
+      !run.final ||
+      !Number.isFinite(routedScore(run, resolver))
+    )
+      return run;
+    const roles = classifyNets(run.final, resolver);
+    const rigid = [
+      ...run.final.layoutGroups.map((group) => group.objectIds),
+      ...recognizeStructures({ ...run.final, layoutGroups: [] }, roles).map(
+        (group) => [
+          ...group.members,
+          ...(group.extraMemberIds ?? []),
+          ...(group.tailInstanceId ? [group.tailInstanceId] : []),
+          ...(group.diodeInstanceId ? [group.diodeInstanceId] : []),
+        ],
+      ),
+      ...symmetryTopology(run.final, resolver, roles).components.map(
+        (component) => [...component.pairs.flat(), ...component.axis],
+      ),
+    ];
+    const exact = compactPlacements(run.final, resolver, rigid);
+    if (!exact) return run;
+    const candidate = planLayoutOnce(
+      document,
+      resolver,
+      options,
+      emptyOverrides(),
+      strategy,
+      signalTrunks,
+      undefined,
+      undefined,
+      exact,
+      true,
+    );
+    // Compaction moves columns only; the winner's side and orientation choices stand.
+    return routedScore(candidate, resolver) < routedScore(run, resolver)
+      ? { ...candidate, choices: run.choices }
+      : run;
+  };
   const finish = (
     run: LayoutRun,
     alternative: LayoutRun,
     strategy: LayoutStrategy,
     signalTrunks: boolean,
     refined = run.result,
-  ) =>
-    selectRoutingAlternative(
-      ripUpFinalist(
-        repair(run, strategy, signalTrunks),
-        strategy,
-        signalTrunks,
-      ),
-      repair(alternative, strategy, false),
+  ) => {
+    const current = ripUpFinalist(
+      repair(run, strategy, signalTrunks),
+      strategy,
+      signalTrunks,
+    );
+    const other = repair(alternative, strategy, false);
+    const otherWins =
+      routedScore(other, resolver) < routedScore(current, resolver);
+    return selectRoutingAlternative(
+      otherWins ? current : compact(current, strategy, signalTrunks),
+      otherWins ? compact(other, strategy, false) : other,
       resolver,
       strategy,
       refined,
     );
+  };
   const route = (strategy: LayoutStrategy, overrides: LayoutOverrides) => {
     const run = planLayoutOnce(
       document,
@@ -302,7 +357,7 @@ function planAutoLayoutMeasured(
   // above still validates the search request and emits its progress event.
   if (options.search.evaluations === 0)
     return finish(selected.run, alternative, selected.strategy, true);
-  // R72/R96 run only after annealing, never in the per-evaluation callback.
+  // R72/R96/R97 run only after annealing, never in the per-evaluation callback.
   if (quickRun.final) repairBounds = searchBounds(quickRun.final, resolver);
   return finish(
     best.run,
@@ -570,6 +625,7 @@ function buildPlan(
     structures,
     signalTrunks,
     { ripUp },
+    documentObjectIds(document),
   );
   if (routed.problem) return refuse(routed.problem);
   edits.push(...routed.edits);

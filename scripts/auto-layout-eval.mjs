@@ -160,6 +160,14 @@ const metrics = (document, resolver, components) => {
     missingConnections: missingConnections(document, resolver),
   };
 };
+const median = (values) => {
+  const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
+  if (!sorted.length) return null;
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2
+    ? sorted[middle]
+    : (sorted[middle - 1] + sorted[middle]) / 2;
+};
 const largestRatio = (items, key) => {
   const values = items.map((item) => item[key]).filter(Number.isFinite);
   return values.length ? Math.max(...values) : null;
@@ -460,6 +468,13 @@ function evaluateFile(file) {
           ? (measurement.result.layoutWidth * measurement.result.layoutHeight) /
             (measurement.human.layoutWidth * measurement.human.layoutHeight)
           : null;
+      measurement.result.instanceAreaRatio =
+        hasHuman &&
+        measurement.human.instanceWidth * measurement.human.instanceHeight
+          ? (measurement.result.instanceWidth *
+              measurement.result.instanceHeight) /
+            (measurement.human.instanceWidth * measurement.human.instanceHeight)
+          : null;
       if (baseline && !partitionSource && !fixedHuman && !seconds) {
         const before = baseline.cases.find((b) => b.id === id);
         measurement.baselineEqual =
@@ -649,6 +664,8 @@ if (!isMainThread) {
       ? items.reduce((s, m) => s + (m.areaRatio ?? 0), 0) /
         items.filter((m) => Number.isFinite(m.areaRatio)).length
       : null,
+    medianAreaRatio: median(items.map((m) => m.areaRatio)),
+    medianInstanceAreaRatio: median(items.map((m) => m.instanceAreaRatio)),
     arrangementAgreement: items.reduce(
       (s, m) => s + (m.arrangementRelations ?? 0),
       0,
