@@ -66,3 +66,35 @@ force a unit where the LLM groups differently.
 | --- | -------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
 | 1   | must-fix | `scripts/auto-layout-fingerprint-mine.mjs` | A candidate qualifies on document count and role share only. Nothing measures whether the matcher's occurrences are blocks the LLM draws.                                                                                                          | Round 3 amendment, item 1: precision per candidate, a precision gate, and the rejected list. |
 | 2   | must-fix | `src/units.ts` (`rulePartition`)           | From the codex review of PR #32 (T029): a `findStages` stage need not be connected through the devices it owns. With a transformer, `rulePartition` returns a block of two resistors that share no net. `reconcilePartition` already repairs this. | Round 3 amendment, item 2: rule blocks are always split into connected components.           |
+
+## Round 3 — accepted
+
+Reviewed: the working tree after Codex round 3. The report matches the code.
+
+- **Finding 1 is fixed.** Mining measures `matchedAsBlock`, `matchedIntact` and
+  `precision` for every candidate, a candidate needs a precision of at least 0.8, rejected
+  fingerprints are listed, and `--promote` refuses them.
+- **Finding 2 is fixed.** `rulePartition` always splits its blocks into connected
+  components (`connectedUnitGroups`), with or without a template. The transformer fixture
+  now gives connected blocks.
+
+**Acceptance, rerun by Opus on lane 2** after rebasing onto T031:
+
+- format, docs, typecheck, lint and build exit 0;
+- `pnpm vitest run packages/auto-layout packages/edit-engine`: 1438 passed;
+- `pnpm test:local`: 7830 passed and 2 failed. The two failures are server tests
+  (`component-catalog`, `component-library`) that timed out at 5 s while three acceptance
+  runs shared the machine. They touch no auto-layout code and pass when rerun alone.
+- Default plan hashes equal the base on 33 of 33 human cases.
+- The dry run still gives 18 jobs and 91293 payload bytes.
+- The tracked library is empty.
+
+**Subagent review before merge (opus, read-only).** Verdict: merge-ready, with two P2
+privacy findings about promotion.
+
+| Severity | Finding                                                                                                                                                                                                                | Decision                                                                                                                         |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| P2       | A device without a built-in descriptor keeps its raw symbol id in the fingerprint, and its edges keep that symbol's pin names. Promotion would copy that text from a third-party case into the tracked library.        | Fixed by Opus: `--promote` refuses a candidate that contains a project-local symbol, and the error does not name it. Test added. |
+| P2       | A promoted title is the most frequent LLM title, and the LLM saw the case's net names.                                                                                                                                 | Accepted: promotion runs only after the user approves each candidate, title included. Nothing is promoted in this task.          |
+| P2       | The node budget bounds search nodes, not time: each node rebuilds candidates, and each full match recomputes a document fingerprint.                                                                                   | Known limit, unmeasured on large circuits. With an empty library the matcher returns before doing any work.                      |
+| P3       | When the budget runs out, the partial result can depend on input order, and `recognitionUnits` does not report it. A hand-written disconnected pattern passes the parser. A unit bridging two matches keeps one title. | Known limits.                                                                                                                    |
