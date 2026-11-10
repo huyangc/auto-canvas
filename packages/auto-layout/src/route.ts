@@ -7,6 +7,7 @@ import {
 } from "@icm/derived";
 import {
   MAX_SCHEMATIC_EDITS_PER_TRANSACTION,
+  documentObjectIds,
   planRouteNet,
   planWireBatch,
   type SchematicEdit,
@@ -32,6 +33,59 @@ import {
   type TerminalRef,
 } from "./pin-contacts.js";
 import type { AutoLayoutDiagnostic, RecognizedGroup } from "./types.js";
+
+/** Reserve the whole wire-id family before authoring stubs or fallback labels. */
+function freshWirePlan(
+  document: SchematicDocument,
+  reservedIds: ReadonlySet<string>,
+  prefix: string,
+  parts: string[],
+  plan: (id: string) => ReturnType<typeof planWireBatch>,
+):
+  | (Exclude<ReturnType<typeof planWireBatch>, string> & { id: string })
+  | string {
+  const occupied = new Set([...reservedIds, ...documentObjectIds(document)]);
+  const maxAttempts = 64;
+  let collision: string | undefined;
+  for (let salt = 0; salt < maxAttempts; salt++) {
+    const id = deriveStableId(
+      prefix,
+      ...parts,
+      ...(salt ? [String(salt)] : []),
+    );
+    const intent = prefix === "auto-layout-label" ? `${id}-stub` : id;
+    collision = [
+      id,
+      ...["-route", "-net", "-from-junction", "-to-junction"].map(
+        (suffix) => `${intent}${suffix}`,
+      ),
+    ].find((value) => occupied.has(value));
+    if (collision) continue;
+    const result = plan(id);
+    if (typeof result === "string") return result;
+    const generated = result.edits.flatMap((edit) =>
+      edit.kind === "set_route_path"
+        ? [edit.route.id]
+        : edit.kind === "attach_endpoint_to_route"
+          ? [edit.firstRouteId, edit.secondRouteId]
+          : edit.kind === "upsert_schematic_annotation"
+            ? [edit.annotation.id]
+            : edit.kind === "add_junction"
+              ? [
+                  edit.junctionId,
+                  ...(edit.split
+                    ? [edit.split.firstRouteId, edit.split.secondRouteId]
+                    : []),
+                ]
+              : [],
+    );
+    collision = generated.find((value) => occupied.has(value));
+    if (!collision) return { ...result, id };
+  }
+  throw new Error(
+    `${prefix} exhausted ${maxAttempts} id attempts: ${collision}`,
+  );
+}
 
 interface RoutingTarget {
   pins: TerminalRef[];
@@ -291,6 +345,7 @@ function fallbackLabels(
   document: SchematicDocument,
   resolver: SymbolResolver,
   group: PinGroup,
+  reservedIds: ReadonlySet<string>,
 ): SchematicEdit[] {
   if (!group.named) return [];
   const projection = deriveElectricalTopologyProjection(document, resolver);
@@ -307,34 +362,36 @@ function fallbackLabels(
     const connection = resolveEndpointConnection(document, resolver, endpoint);
     const netId = projection.endpointToBaseNet.get(endpointKey(endpoint));
     if (!connection || !netId) continue;
-    const id = deriveStableId(
-      "auto-layout-label",
-      document.id,
-      endpointKey(endpoint),
-    );
     const direction = connection.outward ?? { x: 1, y: 0 };
     const length = document.presentation.grid * 2;
     const point = integerPoint({
       x: connection.gridLanding.x + direction.x * length,
       y: connection.gridLanding.y + direction.y * length,
     });
-    const stub = planWireBatch(
+    const stub = freshWirePlan(
       document,
-      resolver,
-      {
-        id: `${id}-stub`,
-        from: { kind: "endpoint", endpoint },
-        to: { kind: "free", point },
-      },
-      MAX_SCHEMATIC_EDITS_PER_TRANSACTION,
-      { keepClear: true, netScope: "base" },
+      reservedIds,
+      "auto-layout-label",
+      [document.id, endpointKey(endpoint)],
+      (id) =>
+        planWireBatch(
+          document,
+          resolver,
+          {
+            id: `${id}-stub`,
+            from: { kind: "endpoint", endpoint },
+            to: { kind: "free", point },
+          },
+          MAX_SCHEMATIC_EDITS_PER_TRANSACTION,
+          { keepClear: true, netScope: "base" },
+        ),
     );
     // No clear stub: this pin stays an unrouted member, already reported.
     if (typeof stub === "string") continue;
     edits.push(...stub.edits, {
       kind: "upsert_schematic_annotation",
       annotation: {
-        id,
+        id: stub.id,
         kind: "net-label",
         netId,
         binding: { kind: "net-name", netId },
@@ -428,6 +485,7 @@ function routeGroup(
   group: PinGroup,
   roles: NetRoles,
   signalTrunks: boolean,
+  reservedIds: ReadonlySet<string>,
 ): GroupRouting {
   let working = document;
   let failed = false;
@@ -474,27 +532,36 @@ function routeGroup(
         // instead needs a clearance-checked wire to its outward free end.
         const source = target.pins[0]!;
         const host = target.pins[1]!;
-        const stub = planWireBatch(
+        const stub = freshWirePlan(
           working,
-          resolver,
-          {
-            id: deriveStableId(
-              "auto-layout-stub",
-              working.id,
-              target.freeEnd
-                ? `${source.instanceId}.${source.pinName}`
-                : JSON.stringify([source, host]),
+          reservedIds,
+          "auto-layout-stub",
+          [
+            working.id,
+            target.freeEnd
+              ? `${source.instanceId}.${source.pinName}`
+              : JSON.stringify([source, host]),
+          ],
+          (id) =>
+            planWireBatch(
+              working,
+              resolver,
+              {
+                id,
+                from: {
+                  kind: "endpoint",
+                  endpoint: { kind: "terminal", ...source },
+                },
+                to: target.freeEnd
+                  ? { kind: "free", point: target.freeEnd }
+                  : {
+                      kind: "endpoint",
+                      endpoint: { kind: "terminal", ...host },
+                    },
+              },
+              MAX_SCHEMATIC_EDITS_PER_TRANSACTION,
+              { keepClear: true, netScope: "base" },
             ),
-            from: {
-              kind: "endpoint",
-              endpoint: { kind: "terminal", ...source },
-            },
-            to: target.freeEnd
-              ? { kind: "free", point: target.freeEnd }
-              : { kind: "endpoint", endpoint: { kind: "terminal", ...host } },
-          },
-          MAX_SCHEMATIC_EDITS_PER_TRANSACTION,
-          { keepClear: true, netScope: "base" },
         );
         if (typeof stub === "string") throw new Error(stub);
         planned = stub.edits;
@@ -543,6 +610,7 @@ function routeGroup(
                 netScope: "base",
                 partial: true,
                 crossingCost: 20 * working.presentation.grid,
+                reservedIds,
               },
             );
             if (
@@ -633,7 +701,7 @@ function routeGroup(
       rule: "R14",
       message: `Net ${group.netId}: ${failure}; pins: ${[...new Set(unjoinedPins.map((p) => `${p.instanceId}.${p.pinName}`))].join(", ")}`,
     });
-    const labels = fallbackLabels(working, resolver, group);
+    const labels = fallbackLabels(working, resolver, group, reservedIds);
     if (labels.length) {
       const next = preview(working, resolver, labels);
       if (!next.ok)
@@ -658,6 +726,7 @@ export function routeDocument(
   structures: RecognizedGroup[],
   signalTrunks = true,
   options: { ripUp?: boolean } = {},
+  reservedIds: ReadonlySet<string> = new Set(),
 ): {
   edits: SchematicEdit[];
   diagnostics: AutoLayoutDiagnostic[];
@@ -693,6 +762,7 @@ export function routeDocument(
       group,
       roles,
       signalTrunks,
+      reservedIds,
     );
     if (options.ripUp) {
       removals.set(group, removeGroupRouting(working, routed.document));
@@ -745,6 +815,7 @@ export function routeDocument(
         group,
         roles,
         signalTrunks,
+        reservedIds,
       );
       if (candidate.problem || candidate.failed) continue;
       const nextScore = routingScore(candidate.document, resolver);

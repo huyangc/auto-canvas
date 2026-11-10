@@ -38,6 +38,31 @@ export type RouteNetTarget =
   | { kind: "pins"; pins: readonly Pin[] }
   | { kind: "import-net"; sourceNetId: string };
 
+/** Object identities in the Document namespace, including Route legs and bends. */
+export function documentObjectIds(document: SchematicDocument): Set<string> {
+  return new Set([
+    ...document.instances.map((o) => o.id),
+    ...document.nets.map((o) => o.id),
+    ...document.routes.map((o) => o.id),
+    ...document.junctions.map((o) => o.id),
+    ...document.annotations.map((o) => o.id),
+    ...document.layoutGroups.map((o) => o.id),
+    ...document.constraints.map((o) => o.id),
+    ...document.connectivityEvidence.map((o) => o.id),
+    ...document.noConnects.map((o) => o.id),
+    ...(document.inductorCouplings ?? []).map((o) => o.id),
+    ...(document.drafting?.objects ?? []).map((o) => o.id),
+    ...document.routes.flatMap((route) =>
+      route.legs.flatMap((leg) => [
+        leg.id,
+        ...(leg.to.kind === "bend" ? [leg.to.bendId] : []),
+      ]),
+    ),
+  ]);
+}
+
+const MAX_ID_ATTEMPTS = 64;
+
 /** Bounded convenience over existing visible-connectivity, MST and wire planners.
  * Not a general autorouter: each wire takes the cheapest of a few simple paths
  * that passes over no other Net's pin or wire and through no part, and the Net
@@ -55,7 +80,58 @@ export function planRouteNet(
     netScope?: "logical" | "base";
     partial?: boolean;
     crossingCost?: number;
+    /** Reserve identities removed by a caller before this routing preview. */
+    reservedIds?: ReadonlySet<string>;
   } = {},
+) {
+  // Without reservations the editor/Agent path retains its exact id choices.
+  const reserved =
+    options.reservedIds &&
+    new Set([...options.reservedIds, ...documentObjectIds(document)]);
+  let collision: string | undefined;
+  for (let attempt = 0; attempt < MAX_ID_ATTEMPTS; attempt++) {
+    const result = planRouteNetOnce(
+      document,
+      resolver,
+      input,
+      maxEdits,
+      options,
+      reserved,
+      attempt,
+    );
+    // Include hashed split pieces, whose ids do not contain the intent id.
+    const ids = result.edits.flatMap((edit) =>
+      edit.kind === "set_route_path"
+        ? [edit.route.id]
+        : edit.kind === "attach_endpoint_to_route"
+          ? [edit.firstRouteId, edit.secondRouteId]
+          : edit.kind === "upsert_schematic_annotation"
+            ? [edit.annotation.id]
+            : edit.kind === "add_junction"
+              ? [
+                  edit.junctionId,
+                  ...(edit.split
+                    ? [edit.split.firstRouteId, edit.split.secondRouteId]
+                    : []),
+                ]
+              : [],
+    );
+    collision = ids.find((id) => reserved?.has(id));
+    if (!collision) return result;
+  }
+  throw new Error(
+    `route-net exhausted ${MAX_ID_ATTEMPTS} id attempts: ${collision}`,
+  );
+}
+
+function planRouteNetOnce(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  input: Parameters<typeof planRouteNet>[2],
+  maxEdits: number,
+  options: NonNullable<Parameters<typeof planRouteNet>[4]>,
+  reserved: ReadonlySet<string> | undefined,
+  attempt: number,
 ) {
   const context = deriveNetConnectivityContext(document, resolver);
   const target = input.target;
@@ -210,8 +286,26 @@ export function planRouteNet(
     throw new Error(
       `route-net needs at least ${components.length - 1} connections, exceeding the ${maxEdits}-edit transaction limit`,
     );
-  const id = (part: string) =>
-    deriveStableId("route-net", document.id, String(document.revision), part);
+  const id = (part: string) => {
+    const parts = [document.id, String(document.revision), part];
+    let collision: string | undefined;
+    for (let salt = attempt; salt < attempt + MAX_ID_ATTEMPTS; salt++) {
+      const candidate = deriveStableId(
+        "route-net",
+        ...parts,
+        ...(salt ? [String(salt)] : []),
+      );
+      // Reserve exact intent-derived identities before the batch preview;
+      // inspect emitted split pieces separately, including hashed pieces.
+      collision = ["", "-route", "-net", "-from-junction", "-to-junction"]
+        .map((suffix) => `${candidate}${suffix}`)
+        .find((value) => reserved?.has(value));
+      if (!collision) return candidate;
+    }
+    throw new Error(
+      `route-net exhausted ${MAX_ID_ATTEMPTS} id attempts: ${collision}`,
+    );
+  };
   // A generated wire over another Net's pin, through a part or onto another
   // Net's wire would read as a connection the netlist does not have.
   const clearance = createRouteClearance(document, resolver, context, {

@@ -402,7 +402,8 @@ pins }` lists, never Net ids.
 - **R44 — Routing alternative.** After R36 selects a plan, replan its placement
   and refinement choices once with R39 disabled, without another refinement.
   R96 replans the selected finalist with R95 after R72 repair. Keep the lower
-  R22 routed score, retaining the selected plan on a tie.
+  R22 routed score, retaining the selected plan on a tie. R97 then compacts
+  only the R44 winner.
 
 - **R50 — Stages.** A stage is a connected component of devices joined on a
   non-rail Net through DC conducting pins: MOS D/S, BJT C/E, and both pins of
@@ -441,8 +442,8 @@ pins }` lists, never Net ids.
   two independently, reusing their initial routed plans, with at most 14
   candidates each. Keep the lower refined score; ties retain the higher-ranked
   strategy. Above 40 instances, keep R55's unrefined comparison. R44 runs once
-  on the winner. R96 replans the selected finalist with R95, without adding
-  refinement candidates.
+  on the winner. After R72 repair, R96 replans the selected finalist with R95,
+  then R97 compacts the R44 winner, without adding refinement candidates.
 - **R59 — Attached parts.** A single-device stage with one non-rail Net and a
   rail pin (a shunt capacitor, load or bias resistor) takes no separate column.
   Place it next to its Net's host pin in the host stage's span, below for ground
@@ -452,6 +453,7 @@ pins }` lists, never Net ids.
   parts, including prior attachments; seek another x before widening the stage.
 - **R56 — Stage spacing.** Keep at least 80 units between stage bounds. A
   bridging capacitor adds its own width to the gap. Compact gaps to avoid sprawl.
+  R97 may narrow a stage gap after routing, never below `2 × MARGIN` (40 units).
 
 - **R60 — Device-class conduction.** R50 classifies devices with the device
   registry. Resistors, inductors and diodes conduct through their main
@@ -506,7 +508,8 @@ pins }` lists, never Net ids.
   valid best so far. A synchronous full plan cannot be interrupted midway;
   deadline checks reserve time for finishing and the routing alternative.
   After repair, R96 replans the search's final best with R95; annealing energy
-  evaluations do not rip up. A zero evaluation budget equals quick mode.
+  evaluations do not rip up. R97 then compacts only the R44 winner. A zero
+  evaluation budget equals quick mode.
 
 - **R67 — Bounded offline span.** Use the completed quick result's bounding
   box of all instances, including markers, as the search reference. Reject
@@ -735,9 +738,9 @@ pins }` lists, never Net ids.
   router charges two grid steps per bend, giving the twenty-grid exchange
   rate. Collect foreign segments once per clearance, indexed by orientation
   and coordinate; only non-axis-aligned segments may be scanned. Clearance checks
-  skip parts and foreign Routes whose padded bounds miss the path; the result of
-  every check is unchanged. This is an
-  optional path-length cost, zero by default, leaving Agent/editor routing
+  skip pins, parts and foreign Routes whose padded bounds miss the path; the result of
+  every check is unchanged. The crossing cost is an optional path-length cost,
+  zero by default, leaving Agent/editor routing
   unchanged. The first pass's order is unchanged; R95 reroutes afterwards
   without changing placement.
 
@@ -866,6 +869,36 @@ pins }` lists, never Net ids.
   ranking, R58 refinement candidates and annealing evaluations never run R95; finalist
   replans do not count as refinement candidates.
 
+- **R97 — Column compaction.** After R72 repair and R96 rerouting, compact only
+  the R44 winner (a strictly lower R22 score selects the alternative; ties keep
+  the current plan). Occupied x intervals comprise each visible instance bound
+  widened by `MARGIN = 20`; each vertical wire and Junction widened by
+  `WIRE_MARGIN = 10`; and both ends of each horizontal wire widened by
+  `WIRE_MARGIN`. A horizontal segment ending on a Cell Pin's pin occupies its
+  whole length, preserving R71 seats. Preserve the whole span from the device
+  box (excluding Cell Pins and power markers) to each entirely external Cell
+  Pin box, preserving R8 seats. Each rigid unit occupies its members' bounding
+  span widened by `MARGIN`.
+  Derive rigid units from the routed finalist: persisted layout groups;
+  structures recognized with layout groups cleared, including extras, tails and
+  diode members; and each R88 symmetry component's pairs and axis devices.
+  Search gaps only between the lowest and highest instance bounds, floor their
+  widths to the Document grid, and discard zero-width gaps. Move each instance
+  left by the sum of gaps ending at or before its bounds' left edge. The enclosing
+  box's left edge, y coordinates and left-to-right order never change.
+  Replan these exact placements once with R95 and the winner's signal-trunk
+  setting; accept only a strict R22 routed-score decrease. Skip compaction for
+  partitions, any fixed instance (including locked groups/constraints), missing
+  final Documents or infinite scores. A finish adds at most one exact replan;
+  strategy ranking, refinement candidates and annealing evaluations never
+  compact, and this replan is not a refinement candidate.
+- **R98 — Fresh generated ids.** Every Route, Junction and label id generated by
+  auto-layout differs from every object id in its input Document, including
+  objects removed by the same edit list. Routing reserves these identities and
+  deterministically salts a colliding derivation until it is free, including
+  wire-derived Junction and split-Route ids. Without reservations, editor and
+  Agent routing retain their existing id choices and behavior.
+
 - **R130a — Partition validation and local templates.** Only recognition
   unit splits cause planner merges. Preserve the diagnostic text `L0 structure
   split across …; merged into …` for evaluation tooling. Trim each recognized
@@ -932,7 +965,7 @@ Crossing cost chooses among bounded candidates. R95 revisits crossed signal
 Nets once on the selected finalist, keeping strictly better routing; it does
 not guarantee a globally crossing-free drawing. The remaining crossing gap
 to applying rip-up inside every refinement candidate is known; that broader
-search has a higher planning cost.
+search has a higher planning cost. R97 compacts columns only; rows keep their pitch.
 
 ## Acceptance criteria
 
@@ -947,7 +980,11 @@ and result with the same components. Report pairs, mirrored pairs, level pairs,
 mirrored orientations, axis devices and on-axis devices in per-document results
 and dev/val totals. The axis is the median pair pin-centre midpoint; mirrored
 pairs satisfy `|x_a + x_b − 2·axis| ≤ 40`, level pairs satisfy `|y_a − y_b| ≤ 20`,
-and axis-device pin centres lie within 60 units of the axis.
+and axis-device pin centres lie within 60 units of the axis. Each completed case
+also reports `instanceAreaRatio`, the result's instance-box area divided by the
+human drawing's (null without a human drawing). Split summaries include
+`medianAreaRatio` and `medianInstanceAreaRatio` beside `meanAreaRatio`; medians
+exclude null ratios.
 
 - **R110 — Atomic recognition units.** Collect every recognized Structure and
   Ambiguity instance set, every candidate pair satisfying the matched,

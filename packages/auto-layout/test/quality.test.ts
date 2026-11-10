@@ -1,6 +1,7 @@
 import { createRoutePath } from "@icm/model";
 import * as routing from "../src/route.js";
 import * as refinement from "../src/refine.js";
+import * as compaction from "../src/compact.js";
 import { readFileSync } from "node:fs";
 import { expect, it, vi } from "vitest";
 import {
@@ -399,18 +400,26 @@ it("R44 compares one routing-only replay of the selected refined placement", () 
   const resolver = createProjectSymbolResolver(project, builtInSymbols);
   const routes = vi.spyOn(routing, "routeDocument");
   const comparison = vi.spyOn(refinement, "selectRoutingAlternative");
+  const compact = vi.spyOn(compaction, "compactPlacements");
   try {
     const result = planAutoLayout(document, resolver);
     expect(routes.mock.calls.filter((call) => call[5] === false)).toHaveLength(
       1,
     );
-    expect(routes.mock.calls.at(-2)![5]).toBe(false);
-    expect(routes.mock.calls.at(-1)![5]).toBe(true);
-    expect(routes.mock.calls.at(-1)![6]).toEqual({ ripUp: true });
+    expect(
+      routes.mock.calls.slice(-3).map((call) => [call[5], call[6]]),
+    ).toEqual([
+      [false, { ripUp: false }],
+      [true, { ripUp: true }],
+      [true, { ripUp: true }],
+    ]);
     expect(comparison).toHaveBeenCalledTimes(1);
     const [selected, alternative] = comparison.mock.calls[0]!;
     expect(selected.final).toBeDefined();
-    expect(alternative.final?.instances).toEqual(selected.final!.instances);
+    expect(compact).toHaveBeenCalledTimes(1);
+    expect(alternative.final?.instances).toEqual(
+      compact.mock.calls[0]![0].instances,
+    );
     expect(alternative.choices).toEqual(selected.choices);
     const committed = preview(document, resolver, result.edits);
     expect(committed.ok).toBe(true);
@@ -429,6 +438,7 @@ it("R44 compares one routing-only replay of the selected refined placement", () 
   } finally {
     routes.mockRestore();
     comparison.mockRestore();
+    compact.mockRestore();
   }
 });
 
@@ -470,13 +480,17 @@ it("R63 gives the second refinement slot to the next distinct strategy", () => {
       expect(count).toBeLessThanOrEqual(14);
       candidates += count;
     }
-    expect(routes).toHaveBeenCalledTimes(5 + candidates);
+    expect(routes).toHaveBeenCalledTimes(5 + candidates + 1);
     expect(
       routes.mock.calls.slice(0, 3).every((call) => call[5] === true),
     ).toBe(true);
-    expect(routes.mock.calls.at(-2)![5]).toBe(false);
-    expect(routes.mock.calls.at(-1)![5]).toBe(true);
-    expect(routes.mock.calls.at(-1)![6]).toEqual({ ripUp: true });
+    expect(
+      routes.mock.calls.slice(-3).map((call) => [call[5], call[6]]),
+    ).toEqual([
+      [false, { ripUp: false }],
+      [true, { ripUp: true }],
+      [true, { ripUp: true }],
+    ]);
   } finally {
     search.mockRestore();
     routes.mockRestore();
