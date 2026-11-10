@@ -282,6 +282,57 @@ become rule blocks instead. Test: an LLM proposal that covers only the input sta
 two-stage amplifier leaves the second stage to rule blocks, while a shunt capacitor whose
 only neighbour is that block attaches to it.
 
+### Round 4 amendment (after the PR review of `c24e2da`)
+
+Rounds 1–3 are committed. This round changes only `src/units.ts` (`canonicalOrder`),
+`src/partition-metrics.ts`, their tests and the spec sentences for them. T030 and T031 build
+on this branch and edit other parts of `units.ts`: change nothing outside `canonicalOrder`
+there.
+
+**1. Canonical ordering prunes equivalent branches (R110).** `canonicalOrder` branches on
+every member of a tied colour cell and skips only exact twins. With k identical branches
+that have private nets it explores k! leaves. Measured on this branch: 8 isolated resistors
+take 1.1 s, and a mirror with 7 outputs takes 0.18 s; each further branch multiplies the
+time by k. A bias mirror with 12 outputs would not finish.
+
+Add orbit pruning that is sound:
+
+- **Prefix.** Each search node knows the vertices individualized on the way to it.
+- **First leaf.** For a member of the tied cell, individualize it and refine; at every later
+  tied cell take the first member, until the colouring is discrete. That gives a leaf order
+  and its certificate key.
+- **Skip rule.** Skip member `b` when an already explored member `a` of the same cell has a
+  first leaf with the same key, and the vertex map π that sends the vertex at each position
+  of `a`'s leaf to the vertex at that position of `b`'s leaf has π(`a`) = `b` and π(v) = v
+  for every prefix vertex.
+- **Why it is sound.** Equal keys make π an automorphism of the labelled graph. It fixes
+  the prefix and maps `a` to `b`, and refinement depends only on the graph and the
+  individualized sequence. So the two subtrees give the same set of certificates.
+- **Otherwise** explore the member fully, as today.
+
+The result is still the minimum certificate, and it does not depend on input order.
+
+Tests, each on `canonicalDevices` and on the anonymized `describeCircuit` payload:
+
+- 16 isolated identical resistors and a mirror with 16 outputs on private nets each finish
+  inside the default test timeout. Today neither finishes.
+- A ring of 12 identical inverters, which has only rotations as automorphisms, keeps a
+  correct result.
+- For each fixture, renaming and reordering the instances leaves the payload unchanged.
+- Two fixtures that differ in one connection give different payloads.
+- The existing ordering tests pass unchanged.
+
+**2. Agreement on labelled devices only (R114).** A LOADBench reference can label only some
+devices. `partitionMetrics` then compares partitions of different universes, and
+`adjustedRandIndex` needs the same universe on both sides: `[[a,b],[c,d]]` against
+`[[a,b]]` gives 0.57 although the labelled devices agree fully.
+
+In `partitionMetrics`, compute `ari`, `blockRecall` and `roleMatch` on the partition
+restricted to the devices the reference labels; drop blocks left empty. `humanOverlap` and
+the floorplan metrics keep the whole partition. Test the example above: ARI 1, recall 1.
+
+**Lane.** Lane 2, as before.
+
 ## Acceptance
 
 ```bash

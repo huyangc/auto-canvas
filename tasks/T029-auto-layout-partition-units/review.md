@@ -129,7 +129,7 @@ block. Consensus dropped 12 unstable units, and 2 blocks emptied.
 | Complete, connected, no unit split, on both splits       | Met: 33 of 33, and 30 of 30 on LOADBench. |
 | LLM coverage at least 80%                                | Met: 97%.                                 |
 | Consensus-to-sample ARI at least the pairwise sample ARI | Met: 0.81–0.84 against 0.66–0.70.         |
-| LOADBench block recall at least 0.70, ARI at least 0.69  | **Not met:** recall 0.43, ARI 0.40.       |
+| LOADBench block recall at least 0.70, ARI at least 0.69  | **Not met:** recall 0.43, ARI 0.38.       |
 
 **The LOADBench target was wrong.** It came from T027's ARI of 0.69. T027 scored the LLM
 answer and the LOADBench reference after `validatePartition` had merged recognized
@@ -156,3 +156,53 @@ rendered blocks are the evidence for that.
 cases and 52 of 176 on LOADBench. Most are sound, such as current sources called `bias`. The
 check then sets the role to `other` and halves the confidence. T030 round 2 makes the check
 report only.
+
+## Round 4 — changes requested (from the PR review of `c24e2da`)
+
+The codex review of PR #32 raised two findings. Opus checked both; both hold.
+
+| #   | Severity | Where                             | Finding                                                                                                                                                                                                                                                                                      | Expected fix                                                                                              |
+| --- | -------- | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| 1   | must-fix | `src/units.ts` (`canonicalOrder`) | Identical branches with private nets cost k! search leaves. Reproduced: 6, 7 and 8 isolated resistors take 24 ms, 124 ms and 1144 ms; a mirror with 5, 6 and 7 outputs takes 3 ms, 22 ms and 182 ms. The prompt, the units and reconciliation all call it, so a 12-output mirror would hang. | Round 4 amendment, item 1: orbit pruning with an explicit automorphism check, and the tests listed there. |
+| 2   | must-fix | `src/partition-metrics.ts`        | ARI, block recall and role match compare the complete partition with a reference that labels only some devices. `adjustedRandIndex` needs one universe.                                                                                                                                      | Round 4 amendment, item 2: restrict the partition to the labelled devices for these three metrics.        |
+
+The LOADBench figures in "Real LLM results" above that come from the report script (ARI
+0.40, recall 0.43) carry finding 2's error. The part-level and stage-level table was
+computed on labelled devices only and stands. Opus reruns the report after this round and
+corrects the record.
+
+## Round 4 — accepted
+
+Reviewed: the uncommitted working tree after Codex round 4. The round's process was killed
+when the session restarted, after the code and tests were done and while the last
+acceptance command ran. There is no round 4 report; this review rests on Opus's own rerun.
+
+- **Finding 1 is fixed.** `canonicalOrder` prunes a branch only when the two first-leaf
+  certificates are equal and the vertex map they define sends the explored vertex to this
+  one and fixes every individualized vertex. Every change in `units.ts` is inside
+  `canonicalOrder`. Timings after the change: 8 isolated resistors 4 ms (was 1144 ms), a
+  mirror with 7 outputs 3 ms (was 182 ms). The new tests cover 16 resistors, a 16-output
+  mirror and a 12-inverter ring, under renaming and reordering, and a changed connection.
+- **Finding 2 is fixed.** ARI, block recall and role match use the partition restricted to
+  the devices the reference labels.
+- **Acceptance, rerun by Opus on lane 2.** Every command exits 0:
+  - `pnpm vitest run packages/auto-layout`: 447 of 447 tests pass before the two fixes
+    below, 449 of 449 after.
+  - `pnpm test:local`: 7793 passed, 117 skipped.
+  - `pnpm deadcode` reports nothing for auto-layout; `pnpm auto-layout:review` passes.
+- **Nothing else moved.**
+  - Default plans and metrics equal the T027 head on 33 of 33 human cases.
+  - The dry-run payload is still 91293 bytes with 18 cached samples, so the canonical order
+    and the prompt-v4 cache keys are unchanged.
+
+**Corrected LOADBench record.** With finding 2 fixed, the report gives mean ARI 0.38 and
+block recall 0.43 on the 30 circuits. The "Real LLM results" section above said ARI 0.40;
+its target row now reads 0.38. The conclusion does not change.
+
+**Two fixes by Opus, from the subagent review of PR #31 (T027).** Both are in files this
+task already changes.
+
+| #   | Severity | Where                                   | Finding                                                                                                                                                                                                     | Fix                                                                                                                                                                               |
+| --- | -------- | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | P2       | `scripts/auto-layout-llm-partition.mjs` | A response that stops at the output limit, or for a provider-specific reason such as an overload, was cached as a failure and never asked again. Three real samples hit this and had to be deleted by hand. | Only a refusal is cached as a failure. Any other stop is reported as `unavailable` and is not cached. Two tests added; the `max_tokens` expectation of one existing test follows. |
+| 2   | P2       | `docs/specs/auto-layout.md`             | The spec did not say how the provider is selected, where the payload goes or where the key comes from.                                                                                                      | The provider paragraph names `LLM_PARTITION_PROVIDER`, the DeepSeek endpoint and `SYSTEM_GENERAL_API_KEY`, and states the cache rule above.                                       |

@@ -256,3 +256,58 @@ it("measures reference block recall by IoU and role match among recalled blocks"
     ),
   ).toMatchObject({ blockRecall: 1 / 3 });
 });
+
+it("scores only reference-labelled devices while retaining whole-partition geometry", () => {
+  const d = circuit(
+    {
+      a: "resistor",
+      b: "resistor",
+      c: "resistor",
+      d: "resistor",
+    },
+    {},
+  );
+  d.instances.forEach((i, n) => {
+    i.placement = placement(n < 2 ? 0 : 400, 0);
+  });
+  const reference = {
+    blocks: [{ id: "ab", role: "gain" as const, members: ["a", "b"] }],
+  };
+  const partition = {
+    blocks: [
+      { id: "ab", role: "gain" as const, members: ["a", "b"] },
+      { id: "cd", role: "bias" as const, members: ["c", "d"] },
+    ],
+    arrangement: { ab: { x: 0, y: 0 }, cd: { x: 1, y: 0 } },
+  };
+  expect(partitionMetrics(d, resolver, partition, reference)).toEqual({
+    ari: 1,
+    blockRecall: 1,
+    roleMatch: 1,
+    humanOverlap: 0,
+    floorplanAgreement: 1,
+    floorplanMatches: 1,
+    floorplanRelations: 1,
+  });
+  // Unlabelled members must not lower IoU or change the best role match.
+  const combined = {
+    blocks: [
+      { id: "all", role: "gain" as const, members: ["a", "b", "c", "d"] },
+    ],
+  };
+  expect(
+    partitionMetrics(d, resolver, combined, {
+      blocks: [{ id: "a", role: "gain", members: ["a"] }],
+    }),
+  ).toMatchObject({
+    ari: 1,
+    blockRecall: 1,
+    roleMatch: 1,
+  });
+  d.instances.forEach((i) => {
+    i.placement = placement(0, 0);
+  });
+  expect(partitionMetrics(d, resolver, partition, reference).humanOverlap).toBe(
+    0.5,
+  );
+});
