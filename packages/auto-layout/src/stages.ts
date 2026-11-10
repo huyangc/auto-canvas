@@ -68,7 +68,7 @@ function conductingPairs(i: Instance): readonly (readonly string[])[] {
       return [];
   }
 }
-const conductingPins = (i: Instance, resolver: SymbolResolver) => {
+export const conductingPins = (i: Instance, resolver: SymbolResolver) => {
   const names = conductingPairs(i).flat();
   return devicePins(i, resolver).filter((p) => names.includes(p.name));
 };

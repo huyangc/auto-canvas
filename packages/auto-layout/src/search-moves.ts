@@ -1,5 +1,9 @@
 import { partitionDocuments } from "./partition-geometry.js";
-import { partitionGroups, partitionSymmetry } from "./partition.js";
+import {
+  partitionGroups,
+  partitionSymmetry,
+  placementPartition,
+} from "./partition.js";
 import { reflectOrientation, type SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import { COLUMN_PITCH, geometryProblem, withPlacements } from "./geometry.js";
@@ -52,6 +56,7 @@ export function createMoveGenerator(
     .sort((a, b) => compareIds(a.id, b.id));
   const deviceDocument = { ...document, instances: devices, junctions: [] };
   const roles = classifyNets(document, resolver);
+  partition = placementPartition(document, resolver, roles, partition);
   // The same templates placeDocument uses, including persisted groups.
   const groups = partitionGroups(
     [

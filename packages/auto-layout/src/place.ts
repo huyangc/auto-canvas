@@ -1,4 +1,8 @@
-import { partitionGroups, partitionSymmetry } from "./partition.js";
+import {
+  partitionGroups,
+  partitionSymmetry,
+  placementPartition,
+} from "./partition.js";
 import { partitionDocuments } from "./partition-geometry.js";
 import {
   anchorPlacements,
@@ -155,8 +159,16 @@ export function placeDocument(
         placements: targets,
         problem: `R3: unresolved symbol ${i.symbolId}`,
       };
+  // R94: detect topology once per placement call; R140 reuses its components.
   const topology = symmetryTopology(document, resolver, roles);
-  const symmetry = partitionSymmetry(topology.components, options.partition);
+  const partition = placementPartition(
+    document,
+    resolver,
+    roles,
+    options.partition,
+    topology.components,
+  );
+  const symmetry = partitionSymmetry(topology.components, partition);
   const symmetryIds = new Set(
     symmetry.flatMap((c) => [...c.pairs.flat(), ...c.axis]),
   );
@@ -164,7 +176,7 @@ export function placeDocument(
   // Reconstruct persisted intent for stable re-planning, without re-emitting it.
   const templates = partitionGroups(
     [...groups, ...persistedTemplates(document, roles)],
-    options.partition,
+    partition,
   );
   const fixed = new Set(options.fixedInstanceIds);
   for (const owner of [...document.layoutGroups, ...document.constraints])
@@ -202,7 +214,7 @@ export function placeDocument(
       resolver,
     );
     if (problem) return { placements: targets, problem };
-  } else if (options.partition) {
+  } else if (partition) {
     ({ placements: targets, sideRow } = placeStages(
       document,
       devices,
@@ -210,7 +222,7 @@ export function placeDocument(
       roles,
       templates,
       { ...topology, components: symmetry },
-      options.partition,
+      partition,
       // The estimator can prefer a side row that costs more after routing.
       // Keep a single-row candidate in the normal routed strategy comparison.
       strategy !== "layered",
@@ -296,7 +308,7 @@ export function placeDocument(
   if (!given)
     for (const local of partitionDocuments(
       { ...document, instances: devices },
-      options.partition,
+      partition,
     ))
       placeParallelAttachments(
         local,
@@ -306,7 +318,7 @@ export function placeDocument(
         new Set([...fixed, ...symmetryIds]),
       );
   const attachmentIds = new Set(
-    partitionDocuments({ ...document, instances: devices }, options.partition)
+    partitionDocuments({ ...document, instances: devices }, partition)
       .flatMap((local) => parallelAttachments(local.instances, resolver, roles))
       .flatMap((a) => [a.device.id, a.host.id]),
   );
@@ -342,7 +354,7 @@ export function placeDocument(
   if (!given)
     for (const local of partitionDocuments(
       { ...document, instances: devices },
-      options.partition,
+      partition,
     ))
       placeDriverAttachments(
         local,
@@ -508,7 +520,7 @@ export function placeDocument(
     }
     for (const local of partitionDocuments(
       { ...document, instances: devices },
-      options.partition,
+      partition,
     )) {
       for (const { device, host } of parallelAttachments(
         local.instances,
