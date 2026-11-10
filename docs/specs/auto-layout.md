@@ -905,7 +905,8 @@ pins }` lists, never Net ids.
   or persisted group to each block's members, including parallel members;
   fewer than two surviving members no longer form a group. Drop tail and diode
   references outside that block. Symmetry components retain whole local pairs
-  and local axis/conflict members; a lone pair member is unconstrained.
+  and local axis/conflict members; a lone pair member is unconstrained. Placement
+  trims groups and symmetry against the joined blocks defined by R140.
 - **R130 — Partition stage ordering.** Without an oracle `arrangement`, feed
   partition blocks through R53/R54 ordering and mirroring, R57 signal direction,
   R56 spacing and R59 shunt attachment within the owning block. Compare a second
@@ -921,7 +922,7 @@ pins }` lists, never Net ids.
   using `ROUTED_SCORE_WEIGHTS.blockIntrusion`. Boundaries do not refuse finishing.
   Report the count through `refinementMetrics` after final facing/label seating.
 - **R132 — Partition annealing.** Stage-block translations, swaps, reversals and
-  eligible mirrors use partition blocks, regardless of the starting strategy.
+  eligible mirrors use R140's joined partition blocks, regardless of the starting strategy.
   Keep rigid unit moves within their owning block. When R130 selects two rows,
   also propose exchanging whole blocks between the signal and side rows.
   Acceptance uses the full routed score, including R131. R67 bounds and all
@@ -944,6 +945,20 @@ pins }` lists, never Net ids.
   `--partition llm --search <seconds>`. Tune only on dev; keep third-party cases
   and all case-keyed artifacts git-ignored. Rule-only smoke runs use `--samples 0`.
 
+- **R140 — Symmetric stacks.** Without an `arrangement`, derive placement blocks
+  from whole-Document R88 symmetry components. For each component, join two blocks
+  containing any of its pair or axis devices when their own members share a
+  non-rail Net on R50 DC-conducting pins. Joins are transitive; gate-only and
+  rail-only connections do not join blocks. Each joined block keeps the first
+  block's id and title in partition order, concatenates members in partition
+  order, and keeps the common role only when all joined roles agree, otherwise
+  `other`. Rename flow ids to their surviving id and remove repeats. Unjoined
+  blocks remain unchanged; derivation does not depend on placement geometry.
+  Placement uses these blocks for R130 ordering and local layout, R130a group
+  and symmetry trimming, R59 attachments and R132 annealing. Validation, R131
+  scoring, R134 fallback, layout-group records and metrics keep the supplied
+  partition. No-partition and explicit `arrangement` paths remain unchanged.
+
 - **Existing locks and conflicts.** Members of a locked layout group or
   constraint are treated as fixed instances under R1, because the Edit Engine
   refuses to transform them. A recognized group whose generated id already
@@ -958,7 +973,8 @@ The public entry point is `planAutoLayout`. Edits use the existing
 records use the existing [presentation schema](../../packages/model/src/schema/presentation.ts).
 No file format or connectivity edit is introduced.
 
-Known limits: supply trunks are ordinary wires, without thick power-rail
+Known limits: pairs whose halves sit in blocks without a shared conducting Net
+keep block-local symmetry only. Supply trunks are ordinary wires, without thick power-rail
 presentation. The bounded router can still leave components unreachable under
 R14, but draws reachable components and tries a tree for refused rail trunks.
 Crossing cost chooses among bounded candidates. R95 revisits crossed signal

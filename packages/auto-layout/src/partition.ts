@@ -1,5 +1,8 @@
 import type { SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
+import type { NetRoles } from "./net-roles.js";
+import { conductingPins } from "./stages.js";
+import { symmetryTopology } from "./symmetry.js";
 import { isMarker } from "./placement-connectivity.js";
 import { compareIds } from "./recognize.js";
 import { recognitionUnits } from "./units.js";
@@ -9,6 +12,85 @@ import type {
   RecognizedGroup,
   SymmetryComponent,
 } from "./types.js";
+
+/** R140: join the conducting blocks of each whole-document symmetry component. */
+export function placementPartition(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  roles: NetRoles,
+  partition?: LayoutPartition,
+  components?: readonly SymmetryComponent[],
+): LayoutPartition | undefined {
+  if (!partition || partition.arrangement) return partition;
+  const owner = new Map(
+    partition.blocks.flatMap((block, index) =>
+      block.members.map((id) => [id, index] as const),
+    ),
+  );
+  const nets = partition.blocks.map(() => new Set<string>());
+  for (const instance of document.instances) {
+    const block = owner.get(instance.id);
+    if (block === undefined) continue;
+    for (const pin of conductingPins(instance, resolver)) {
+      const net = roles.pinNet(instance.id, pin.name);
+      if (net && !roles.rails.has(net)) nets[block]!.add(net);
+    }
+  }
+  const parents = partition.blocks.map((_, index) => index);
+  const root = (index: number): number => {
+    if (parents[index] !== index) parents[index] = root(parents[index]!);
+    return parents[index]!;
+  };
+  for (const component of components ??
+    symmetryTopology(document, resolver, roles).components) {
+    const blocks = [
+      ...new Set(
+        [...component.pairs.flat(), ...component.axis]
+          .map((id) => owner.get(id))
+          .filter((index) => index !== undefined),
+      ),
+    ];
+    for (const [index, a] of blocks.entries())
+      for (const b of blocks.slice(index + 1)) {
+        if (![...nets[a]!].some((net) => nets[b]!.has(net))) continue;
+        const first = root(a),
+          second = root(b);
+        parents[Math.max(first, second)] = Math.min(first, second);
+      }
+  }
+  const joined = new Map<number, LayoutPartition["blocks"]>();
+  partition.blocks.forEach((block, index) => {
+    const head = root(index);
+    if (!joined.has(head)) joined.set(head, []);
+    joined.get(head)!.push(block);
+  });
+  if (joined.size === partition.blocks.length) return partition;
+  const surviving = new Map(
+    partition.blocks.map((block, index) => [
+      block.id,
+      partition.blocks[root(index)]!.id,
+    ]),
+  );
+  return {
+    ...partition,
+    blocks: [...joined.values()].map((blocks) => {
+      const first = blocks[0]!;
+      if (blocks.length === 1) return first;
+      return {
+        ...first,
+        members: blocks.flatMap((block) => block.members),
+        ...(blocks.some((block) => block.role !== first.role)
+          ? { role: "other" as const }
+          : {}),
+      };
+    }),
+    ...(partition.flow
+      ? {
+          flow: [...new Set(partition.flow.map((id) => surviving.get(id)!))],
+        }
+      : {}),
+  };
+}
 
 /** Keep placement templates local without promoting isolated members to groups. */
 export function partitionGroups(
