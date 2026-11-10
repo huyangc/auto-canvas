@@ -105,3 +105,54 @@ the logs.
 Known limit: the planner validator still merges 17 greedy structure groups that span blocks
 in the rule-only partitions. T031 replaces that merge with unit-level validation and
 trimming groups to block members.
+
+## Real LLM results (Opus, after round 3)
+
+Provider `deepseek-flash`, prompt v4, 3 samples per document. 189 calls: 54 on dev, 45 on val
+and 90 on the 30 LOADBench circuits. 186 were valid on the first try; 3 stopped at the
+32000-token output limit and were valid on a retry. Cost: about $3.1. Reports are in
+`tmp/t029-results/` (git-ignored).
+
+| Corpus          | Documents | Complete | LLM coverage | LLM blocks | Rule blocks | Pairwise sample ARI | Consensus-to-sample ARI |
+| --------------- | --------- | -------- | ------------ | ---------- | ----------- | ------------------- | ----------------------- |
+| Human cases dev | 18        | 18       | 97.6%        | 84         | 8           | 0.67                | 0.82                    |
+| Human cases val | 15        | 15       | 97.5%        | 68         | 9           | 0.66                | 0.81                    |
+| LOADBench       | 30        | 30       | 97.0%        | 176        | 4           | 0.70                | 0.84                    |
+
+No sample named an unknown or duplicate unit, and none proposed a disconnected or oversized
+block. Consensus dropped 12 unstable units, and 2 blocks emptied.
+
+**Targets.**
+
+| Target                                                   | Result                                    |
+| -------------------------------------------------------- | ----------------------------------------- |
+| Complete, connected, no unit split, on both splits       | Met: 33 of 33, and 30 of 30 on LOADBench. |
+| LLM coverage at least 80%                                | Met: 97%.                                 |
+| Consensus-to-sample ARI at least the pairwise sample ARI | Met: 0.81–0.84 against 0.66–0.70.         |
+| LOADBench block recall at least 0.70, ARI at least 0.69  | **Not met:** recall 0.43, ARI 0.40.       |
+
+**The LOADBench target was wrong.** It came from T027's ARI of 0.69. T027 scored the LLM
+answer and the LOADBench reference after `validatePartition` had merged recognized
+structures in both, which inflates agreement. T029's report scores against the raw labels.
+Measured the same way for both tasks, on the labelled devices of the 30 circuits:
+
+| Mean ARI against LOADBench labels                | T027 (prompt v3) | T029 | Rules only | Best possible with T029's units |
+| ------------------------------------------------ | ---------------- | ---- | ---------- | ------------------------------- |
+| Parts (gm, load and bias parts; 8.7 per circuit) | 0.28             | 0.38 | 0.27       | 0.76                            |
+| Stages (2.7 per circuit)                         | 0.18             | 0.41 | 0.81       | 1.00                            |
+
+- T029 agrees with the labels better than T027 at both levels.
+- The LLM draws about 6 blocks per circuit, between LOADBench's parts and its stages. The
+  difference is granularity. LOADBench labels a tail transistor and each bias device as a
+  part of its own; the LLM, like a human drawing, keeps a tail with its pair.
+- The rule partition matches LOADBench's stages well (0.81).
+- Against the spatial grouping of the human drawings (the T026 oracle, 2–3 blocks per
+  drawing), mean ARI rises from 0.19 to 0.27 on dev and from 0.22 to 0.30 on val.
+
+No reference here measures drawing blocks directly. The layout results in T031 and the
+rendered blocks are the evidence for that.
+
+**Finding moved to T030.** The soft role check rejects 24 of 152 LLM blocks on the human
+cases and 52 of 176 on LOADBench. Most are sound, such as current sources called `bias`. The
+check then sets the role to `other` and halves the confidence. T030 round 2 makes the check
+report only.
