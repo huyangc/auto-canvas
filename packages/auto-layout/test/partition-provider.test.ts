@@ -40,12 +40,11 @@ const answer = {
       id: "signal",
       title: "Signal",
       role: "gain",
-      members: ["a", "b"],
+      units: ["U1", "U2"],
       reason: "series network",
     },
   ],
-  flow: ["signal"],
-  floorplan: [{ block: "signal", column: 0, row: 0 }],
+  uncertain: [],
 };
 const response = (output: unknown = answer, stop_reason = "end_turn") => ({
   content: [
@@ -74,7 +73,7 @@ afterEach(() => {
 it("repairs once with unchanged assistant content and records both attempts and serving model", async () => {
   const bad = response({
     ...answer,
-    blocks: [{ ...answer.blocks[0], members: ["a"] }],
+    blocks: [{ ...answer.blocks[0], units: "invalid" }],
   });
   const provider = vi
     .fn()
@@ -100,7 +99,7 @@ it("repairs once with unchanged assistant content and records both attempts and 
     role: "assistant",
     content: bad.content,
   });
-  expect(repair.messages[2].content).toContain("Missing device: b");
+  expect(repair.messages[2].content).toContain("blocks.0.units");
   expect(result.results[0]).toMatchObject({
     status: "repaired",
     model: "synthetic-serving-model",
@@ -259,7 +258,7 @@ it("never writes credentials or provider error objects", async () => {
   }
 });
 
-it("runs dry-run and cached V1/V2 evaluation with titled boxes and explicit cache failures", async () => {
+it("runs dry-run, rule fallback, cached V1 and report while refusing LLM V2", async () => {
   const directory = cache();
   const folder = join(directory, "cases");
   mkdirSync(folder);
@@ -283,21 +282,21 @@ it("runs dry-run and cached V1/V2 evaluation with titled boxes and explicit cach
   expect(dry.status, dry.stderr).toBe(0);
   expect(JSON.parse(dry.stdout)).toMatchObject({ jobs: 1, cached: 0 });
   const missing = cli("auto-layout-eval.mjs", ["--partition", "llm"]);
-  expect(missing.status).toBe(1);
+  expect(missing.status, missing.stderr).toBe(0);
   const readReport = (variant: string) =>
     JSON.parse(
       readFileSync(
         join(
           directory,
-          `tmp/auto-layout-eval/${variant}-llm-3-sample-0/report.json`,
+          `tmp/auto-layout-eval/${variant}-llm-3-samples-3/report.json`,
         ),
         "utf8",
       ),
     );
   expect(readReport("v1").cases[0]).toMatchObject({
-    status: "threw",
-    partitionValidity: { status: "failed" },
-    error: expect.stringContaining("Missing LLM cache entry"),
+    status: "completed",
+    partitionValidity: { status: "rule-only" },
+    partitionStatistics: { samples: 0, ruleOnly: true },
   });
   const output = {
     blocks: [
@@ -305,22 +304,18 @@ it("runs dry-run and cached V1/V2 evaluation with titled boxes and explicit cach
         id: "first",
         title: "Synthetic <input>",
         role: "input",
-        members: ["a"],
+        units: ["U1"],
         reason: "input",
       },
       {
         id: "second",
         title: "Synthetic output",
         role: "output",
-        members: ["b"],
+        units: ["U2"],
         reason: "output",
       },
     ],
-    flow: ["first", "second"],
-    floorplan: [
-      { block: "first", column: 1, row: 0 },
-      { block: "second", column: 0, row: 0 },
-    ],
+    uncertain: [],
   };
   await runPartitionJobs([{ document: d, resolver }], {
     provider: vi.fn().mockResolvedValue(response(output)),
@@ -337,17 +332,17 @@ it("runs dry-run and cached V1/V2 evaluation with titled boxes and explicit cach
   expect(first).toMatchObject({
     status: "completed",
     equivalent: true,
-    partitionValidity: { status: "valid-first-try" },
-    partitionMetrics: { floorplanAgreement: 0 },
+    partitionValidity: { status: "reconciled" },
+    partitionMetrics: { floorplanAgreement: null },
   });
   const svg = readFileSync(
     join(
       directory,
-      "tmp/auto-layout-eval/v1-llm-3-sample-0/synthetic-result.svg",
+      "tmp/auto-layout-eval/v1-llm-3-samples-3/synthetic-result.svg",
     ),
     "utf8",
   );
-  expect(svg).toContain("Synthetic &lt;input&gt; · input");
+  expect(svg).toContain("Synthetic &lt;input&gt; · other");
   const v2 = cli("auto-layout-eval.mjs", [
     "--partition",
     "llm",
@@ -356,17 +351,26 @@ it("runs dry-run and cached V1/V2 evaluation with titled boxes and explicit cach
     "--block-boxes",
     "off",
   ]);
-  expect(v2.status, v2.stderr).toBe(0);
-  expect(readReport("v2").cases[0].planHash).not.toBe(first.planHash);
-  expect(
+  expect(v2.status).toBe(1);
+  expect(v2.stderr).toContain("LLM partitions have no floorplan");
+  const report = cli("auto-layout-partition-report.mjs", ["--samples", "0"]);
+  expect(report.status, report.stderr).toBe(0);
+  const reportData = JSON.parse(
     readFileSync(
-      join(
-        directory,
-        "tmp/auto-layout-eval/v2-llm-3-sample-0/synthetic-result.svg",
-      ),
+      join(directory, "tmp/auto-layout-partition/report.json"),
       "utf8",
     ),
-  ).not.toContain("Synthetic &lt;input&gt;");
+  );
+  expect(reportData.cases[0]).toMatchObject({
+    status: "completed",
+    statistics: { ruleOnly: true, llmCoverage: 0 },
+  });
+  expect(
+    readFileSync(
+      join(directory, "tmp/auto-layout-partition/index.html"),
+      "utf8",
+    ),
+  ).toContain("#6b7280");
   // An unplaced device leaves no human-drawing reference, but the cached LLM
   // partition (the payload ignores placement) still lays out.
   const unplaced = structuredClone(d);
@@ -383,7 +387,7 @@ it("runs dry-run and cached V1/V2 evaluation with titled boxes and explicit cach
   expect(readReport("v1").cases[0]).toMatchObject({
     status: "completed",
     partitionMetrics: null,
-    partitionValidity: { status: "valid-first-try" },
+    partitionValidity: { status: "reconciled" },
   });
   // With a LOADBench reference the positions are importer-made: no human
   // metrics or human SVG, but ARI against the XML partition remains.
@@ -394,7 +398,7 @@ it("runs dry-run and cached V1/V2 evaluation with titled boxes and explicit cach
     '<gmPart type="firstStage"><device name="a"/></gmPart><loadPart><device name="b"/></loadPart>',
   );
   // Earlier runs in this test wrote a human SVG here; start the check clean.
-  rmSync(join(directory, "tmp/auto-layout-eval/v1-llm-3-sample-0"), {
+  rmSync(join(directory, "tmp/auto-layout-eval/v1-llm-3-samples-3"), {
     recursive: true,
     force: true,
   });
@@ -413,7 +417,7 @@ it("runs dry-run and cached V1/V2 evaluation with titled boxes and explicit cach
     partitionMetrics: { ari: 1, humanOverlap: null, floorplanAgreement: null },
   });
   expect(
-    readdirSync(join(directory, "tmp/auto-layout-eval/v1-llm-3-sample-0")),
+    readdirSync(join(directory, "tmp/auto-layout-eval/v1-llm-3-samples-3")),
   ).not.toContain("synthetic-human.svg");
 }, 30_000);
 

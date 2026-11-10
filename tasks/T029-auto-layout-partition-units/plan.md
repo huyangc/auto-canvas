@@ -203,6 +203,85 @@ Owned paths:
 7. **Report**, by Codex: what was built and the test results. Opus runs the real LLM calls
    and adds recognition results.
 
+### Round 2 amendment (after review round 1)
+
+**Amended step 1, R110 units.** A unit is a set of devices that are drawn together. Build
+units from **candidate relations**, never from greedy picks:
+
+1. **Candidate relation groups.** Each group is a set of devices. The groups are:
+   - every `Structure` from `recognizeSubstructures`, and every `Ambiguity` instance set;
+   - every **pair** satisfying R5/R68's matched, differential, mirror, cross-coupled and
+     common-gate predicates. Enumerate all candidate pairs in `units.ts`, not
+     `recognizeStructures`' greedy selection;
+   - persisted templates;
+   - every R69 parallel attachment, for each eligible host.
+2. **Restrict each group to stages.** Restrict each group to the devices of one
+   `findStages` stage, so a group spanning several stages yields one piece per stage.
+3. **Split by connectivity.** Within each piece, connect members that share a non-rail
+   net, excluding MOS bulk pins, and take the connected components.
+4. **Union.** Union the components across all groups with union-find. Every device not
+   covered becomes a singleton.
+
+Each unit is then:
+
+- independent of source ids and instance order;
+- inside one stage;
+- internally connected through non-rail nets.
+
+So connectivity checked between units in R113 is exact.
+
+A multi-output bias mirror therefore splits: its reference is a unit in the bias stage, and
+each output joins the units of its own stage. Tests:
+
+- the ambiguous-bank renaming test and the rail-only matched-pair test;
+- a multi-output mirror whose outputs are tails of two stages: the reference and the
+  outputs end up in different units;
+- the invariant that every unit lies in one stage and is internally connected.
+
+**Amended acceptance.** The stale `--baseline tmp/auto-layout-eval/baseline.json` line is
+replaced. Run `pnpm auto-layout:eval tmp/human-cases`; Opus compares its default output with
+the T027 head, recorded in `tmp/t027-results/{dev,val}/v0`.
+
+### Round 3 amendment (after review round 2)
+
+**Amended stage map (R110 step 2 and R111).** Stages come from `findStages(devices,
+resolver, roles, tailGroups)`, called the same way in `recognitionUnits` and
+`rulePartition`. `tailGroups` has one group per `differential-pair` or
+`differential-pair-mirror-load` structure from `recognizeSubstructures`; the group joins the
+pair's input devices with the structure's `tail` member or members. No other relation joins
+stages: mirrors, matched pairs and the rest do not.
+
+A pair therefore keeps a two-terminal current-source tail, which has no conducting channel
+and would otherwise fall into a stage of its own. A multi-output bias mirror still splits by
+stage.
+
+**Contract boundary with the planner validator.** `validatePartition` (`src/partition.ts`,
+T026) is outside this task. It still merges any greedy `recognizeStructures` group that
+spans blocks, because the partition placement path places such a group as one template.
+T031 replaces that merge: the validator will use recognition units as its atomic groups, and
+placement will trim groups to block members.
+
+Until then, the line between T029's contract and the planner's is:
+
+- **T029's invariants hold on the partitions that `reconcilePartition` and `rulePartition`
+  return:** complete, no unit split, every block internally connected. Tests assert them
+  there.
+- **A merge by the planner validator is reported, not rejected.** Its warning
+  `L0 structure split …; merged into …` counts as a planner merge. Error diagnostics still
+  reject.
+- **The partition report** shows planner merges per document and in total, on both splits.
+  A document is rejected only for error diagnostics or a broken T029 invariant.
+
+**Amended completion (R113 attach).** An unassigned unit attaches to an accepted block only
+when every unit adjacent to it through a non-rail net lies in that one block; that is, it is
+a leaf of the block. Waves repeat until nothing changes.
+
+The current rule is weaker: a unit attaches when it is adjacent to exactly one block. Wave
+after wave, that rule can pull whole stages the LLM left out into one block, and they should
+become rule blocks instead. Test: an LLM proposal that covers only the input stage of a
+two-stage amplifier leaves the second stage to rule blocks, while a shunt capacitor whose
+only neighbour is that block attaches to it.
+
 ## Acceptance
 
 ```bash

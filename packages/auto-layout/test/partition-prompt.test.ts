@@ -26,22 +26,18 @@ const answer = (): LlmPartitionResult => ({
       id: "first",
       title: "Input",
       role: "input",
-      members: ["alice"],
+      units: ["U1"],
       reason: "receives signal",
     },
     {
       id: "second",
       title: "Output",
       role: "output",
-      members: ["bob"],
+      units: ["U2"],
       reason: "drives output",
     },
   ],
-  flow: ["first", "second"],
-  floorplan: [
-    { block: "first", column: 0, row: 0 },
-    { block: "second", column: 1, row: 0 },
-  ],
+  uncertain: [],
 });
 it("ignores all placement, routes, annotations, drafting and layout-group content", () => {
   const d = sample();
@@ -157,114 +153,38 @@ it("includes only terminal/label names and anonymizes every device reference", (
   expect(
     JSON.parse(anonymous).devices.map((i: { id: string }) => i.id),
   ).toEqual(["D1", "D2"]);
-  const a = answer();
-  a.blocks[0]!.members = ["D1"];
-  a.blocks[1]!.members = ["D2"];
-  expect(
-    llmResultToPartition(d, resolver, a, true).partition?.blocks.map(
-      (b) => b.members,
-    ),
-    // Alias numbers are deliberately not in source order.
-  ).toEqual([["bob"], ["alice"]]);
+  const result = llmResultToPartition(d, resolver, answer());
+  expect(result.partition.blocks.flatMap((b) => b.members).sort()).toEqual([
+    "alice",
+    "bob",
+  ]);
 });
-it.each([
-  [
-    "Missing device",
-    (a: LlmPartitionResult) => {
-      a.blocks.pop();
-      a.floorplan.pop();
-      a.flow.pop();
-    },
-  ],
-  [
-    "Duplicate device",
-    (a: LlmPartitionResult) => {
-      a.blocks[1]!.members.push("alice");
-    },
-  ],
-  [
-    "Unknown device",
-    (a: LlmPartitionResult) => {
-      a.blocks[0]!.members.push("ghost");
-    },
-  ],
-  [
-    "Missing floorplan",
-    (a: LlmPartitionResult) => {
-      a.floorplan.pop();
-    },
-  ],
-  [
-    "Duplicate floorplan",
-    (a: LlmPartitionResult) => {
-      a.floorplan.push({ block: "first", column: 3, row: 1 });
-    },
-  ],
-  [
-    "Occupied grid",
-    (a: LlmPartitionResult) => {
-      a.floorplan[1]!.column = 0;
-    },
-  ],
-  [
-    "Unknown floorplan",
-    (a: LlmPartitionResult) => {
-      a.floorplan.push({ block: "ghost", column: 2, row: 0 });
-    },
-  ],
-  [
-    "Invalid grid",
-    (a: LlmPartitionResult) => {
-      a.floorplan[0]!.row = Infinity;
-    },
-  ],
-  [
-    "Flow",
-    (a: LlmPartitionResult) => {
-      a.flow.push("ghost");
-    },
-  ],
-  [
-    "Duplicate or empty block",
-    (a: LlmPartitionResult) => {
-      a.blocks[1]!.id = "first";
-    },
-  ],
-])("rejects %s", (error, mutate) => {
-  const a = answer();
-  mutate(a);
-  const validated = llmResultToPartition(sample(), resolver, a);
-  expect(validated.partition).toBeUndefined();
-  expect(validated.errors.join("; ")).toContain(error);
-});
-it("uses fixed grid pitch, display titles and existing L0 merges without changing the proposal", () => {
-  const a = answer(),
-    before = JSON.stringify(a);
-  expect(llmResultToPartition(sample(), resolver, a).partition).toMatchObject({
-    blocks: [{ title: "Input" }, { title: "Output" }],
-    arrangement: { first: { x: 0, y: 0 }, second: { x: 240, y: 0 } },
-  });
-  const mirror = circuit(
-    { alice: "nmos", bob: "nmos" },
-    {
-      g: ["alice.G", "alice.D", "bob.G"],
-      s: ["alice.S", "bob.S"],
-      o: ["bob.D"],
-    },
-  );
-  const payload = describeCircuit(mirror, resolver, true);
-  expect(payload.structures[0]?.kind).toBe("current-mirror");
-  expect(JSON.stringify(payload.structures)).not.toMatch(/alice|bob/);
-  const validated = llmResultToPartition(mirror, resolver, a);
-  expect(validated.l0Merges).toBe(1);
-  expect(validated.partition?.blocks[0]?.members).toEqual(["alice", "bob"]);
+it("groups units without flow or floorplan and completes omitted units", () => {
+  const d = sample(),
+    a = answer();
+  a.blocks.pop();
+  a.uncertain = ["U2"];
+  const before = JSON.stringify(a);
+  const result = llmResultToPartition(d, resolver, a);
+  expect(result.partition).not.toHaveProperty("arrangement");
+  expect(result.partition).not.toHaveProperty("flow");
+  expect(result.partition.blocks.flatMap((b) => b.members).sort()).toEqual([
+    "alice",
+    "bob",
+  ]);
   expect(JSON.stringify(a)).toBe(before);
 });
 it("measures human overlap, ARI and proposed floorplan directions independently", () => {
   const d = sample();
   d.instances[0]!.placement = placement(0, 0);
   d.instances[1]!.placement = placement(400, 0);
-  const p = llmResultToPartition(d, resolver, answer()).partition!;
+  const p = {
+    blocks: [
+      { id: "first", members: ["alice"] },
+      { id: "second", members: ["bob"] },
+    ],
+    arrangement: { first: { x: 0, y: 0 }, second: { x: 240, y: 0 } },
+  };
   expect(partitionMetrics(d, resolver, p, p)).toMatchObject({
     humanOverlap: 0,
     ari: 1,
@@ -283,39 +203,56 @@ it("measures human overlap, ARI and proposed floorplan directions independently"
   });
 });
 
-it("numbers anonymous devices independently of their source order", () => {
-  const symbols = Object.fromEntries(
-    Array.from({ length: 12 }, (_, n) => [
-      `m${String(n).padStart(2, "0")}`,
-      "nmos",
-    ]),
+it("uses canonical aliases and unit membership for symmetric anonymous devices", () => {
+  const d = circuit(
+    Object.fromEntries(Array.from({ length: 12 }, (_, n) => [`m${n}`, "nmos"])),
+    {},
   );
-  const d = circuit(symbols, {});
-  const aliases = (
-    describeCircuit(d, resolver, true).devices as {
-      id: string;
-      pins: unknown[];
-    }[]
-  ).map((x) => x.id);
-  expect(aliases).toEqual(aliases.map((_, n) => `D${n + 1}`));
-  const result = {
-    blocks: aliases.map((id, n) => ({
-      id: `b${n}`,
-      title: "t",
-      role: "other" as const,
-      members: [id],
-      reason: "r",
-    })),
-    flow: [],
-    floorplan: aliases.map((_, n) => ({
-      block: `b${n}`,
-      column: n % 17,
-      row: 0,
-    })),
+  const payload = describeCircuit(d, resolver, true);
+  expect(payload.devices.map((i) => i.id)).toEqual(
+    Array.from({ length: 12 }, (_, n) => `D${n + 1}`),
+  );
+  expect(
+    payload.units.flatMap((u) => u.members.map((m) => m.id)).sort(),
+  ).toEqual(payload.devices.map((i) => i.id).sort());
+  d.instances.reverse();
+  expect(describeCircuit(d, resolver, true)).toEqual(payload);
+});
+
+it("measures reference block recall by IoU and role match among recalled blocks", () => {
+  const d = circuit(
+    { a: "resistor", b: "resistor", c: "resistor", d: "resistor" },
+    {},
+  );
+  const reference = {
+    blocks: [
+      { id: "ab", role: "gain" as const, members: ["a", "b"] },
+      { id: "cd", role: "bias" as const, members: ["c", "d"] },
+    ],
   };
-  const { partition, errors } = llmResultToPartition(d, resolver, result, true);
-  expect(errors).toEqual([]);
-  const order = partition!.blocks.map((b) => b.members[0]);
-  expect([...order].sort()).toEqual(Object.keys(symbols));
-  expect(order).not.toEqual(Object.keys(symbols));
+  const proposed = {
+    blocks: [
+      { id: "a", role: "gain" as const, members: ["a"] },
+      { id: "bcd", role: "other" as const, members: ["b", "c", "d"] },
+    ],
+  };
+  expect(partitionMetrics(d, resolver, proposed, reference)).toMatchObject({
+    blockRecall: 1,
+    roleMatch: 0.5,
+    ari: 0,
+  });
+  expect(
+    partitionMetrics(
+      d,
+      resolver,
+      { blocks: [{ id: "all", members: ["a", "b", "c", "d"] }] },
+      {
+        blocks: [
+          { id: "a", members: ["a"] },
+          { id: "b", members: ["b"] },
+          { id: "cd", members: ["c", "d"] },
+        ],
+      },
+    ),
+  ).toMatchObject({ blockRecall: 1 / 3 });
 });
