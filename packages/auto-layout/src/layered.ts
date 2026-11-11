@@ -331,12 +331,28 @@ function symmetryRows(
         halfRows.placements.get(id)!.position.y = node.row * ROW_PITCH;
     }
     const ordered = orderRows(halfRows, half, resolver, halfRoles, halfGroups);
-    for (const row of ordered)
-      row.sort(
-        (a, b) =>
-          Number(a.members.some((id) => axisIds.has(id))) -
-          Number(b.members.some((id) => axisIds.has(id))),
-      );
+    const crossIds = new Set(
+      component.pairs.flatMap(([left, right]) => {
+        const a = channelPins(devices.find((i) => i.id === left)!.symbolId);
+        const b = channelPins(devices.find((i) => i.id === right)!.symbolId);
+        if (!a || !b) return [];
+        const gate = roles.pinNet(left, a.gate);
+        const drain = roles.pinNet(left, a.drain);
+        return gate !== undefined &&
+          drain !== undefined &&
+          gate === roles.pinNet(right, b.drain) &&
+          drain === roles.pinNet(right, b.gate)
+          ? [left]
+          : [];
+      }),
+    );
+    const axisOrder = (node: RowNode) =>
+      node.members.some((id) => axisIds.has(id))
+        ? 2
+        : node.members.some((id) => crossIds.has(id))
+          ? 1
+          : 0;
+    for (const row of ordered) row.sort((a, b) => axisOrder(a) - axisOrder(b));
     const placed = assignColumns(
       halfDocument,
       half,

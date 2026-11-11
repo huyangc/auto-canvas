@@ -28,7 +28,11 @@ import {
 import { auditRouting, floatingPins } from "./routing-audit.js";
 import { classifyNets } from "./net-roles.js";
 import { placeDocument } from "./place.js";
-import { compareIds, recognizeStructures } from "./recognize.js";
+import {
+  compareIds,
+  recognizeStructures,
+  recognizeSubstructures,
+} from "./recognize.js";
 import type {
   AutoLayoutOptions,
   AutoLayoutResult,
@@ -230,6 +234,45 @@ function planAutoLayoutMeasured(
       ? { ...candidate, choices: run.choices }
       : run;
   };
+  // R144 is a single optional replan of the compacted R44 winner.
+  const crossCoupled = (
+    run: LayoutRun,
+    strategy: LayoutStrategy,
+    signalTrunks: boolean,
+  ) => {
+    if (
+      fixed.size ||
+      !run.final ||
+      !Number.isFinite(routedScore(run, resolver))
+    )
+      return run;
+    const { structures } = recognizeSubstructures(
+      run.final,
+      classifyNets(run.final, resolver),
+    );
+    if (!structures.some((s) => s.kind === "cross-coupled-pair")) return run;
+    const candidate = planLayoutOnce(
+      document,
+      resolver,
+      options,
+      emptyOverrides(),
+      strategy,
+      signalTrunks,
+      undefined,
+      undefined,
+      new Map(
+        run.final.instances.map((instance) => [
+          instance.id,
+          instance.placement!,
+        ]),
+      ),
+      true,
+      true,
+    );
+    return routedScore(candidate, resolver) <= routedScore(run, resolver)
+      ? { ...candidate, choices: run.choices }
+      : run;
+  };
   const finish = (
     run: LayoutRun,
     alternative: LayoutRun,
@@ -246,8 +289,16 @@ function planAutoLayoutMeasured(
     const otherWins =
       routedScore(other, resolver) < routedScore(current, resolver);
     return selectRoutingAlternative(
-      otherWins ? current : compact(current, strategy, signalTrunks),
-      otherWins ? compact(other, strategy, false) : other,
+      otherWins
+        ? current
+        : crossCoupled(
+            compact(current, strategy, signalTrunks),
+            strategy,
+            signalTrunks,
+          ),
+      otherWins
+        ? crossCoupled(compact(other, strategy, false), strategy, false)
+        : other,
       resolver,
       strategy,
       refined,
@@ -379,6 +430,7 @@ export function planLayoutOnce(
   bounds?: SearchBounds,
   exact?: ReadonlyMap<string, Placement>,
   ripUp = false,
+  crossX = false,
 ): LayoutRun {
   const run: LayoutRun = {
     result: { edits: [], groups: [], diagnostics: [] },
@@ -397,6 +449,7 @@ export function planLayoutOnce(
     bounds,
     exact,
     ripUp,
+    crossX,
   );
   return run;
 }
@@ -413,6 +466,7 @@ function buildPlan(
   bounds?: SearchBounds,
   exact?: ReadonlyMap<string, Placement>,
   ripUp = false,
+  crossX = false,
 ): AutoLayoutResult {
   if (document.instances.length > 120)
     return {
@@ -624,7 +678,7 @@ function buildPlan(
     roles,
     structures,
     signalTrunks,
-    { ripUp },
+    { ripUp, ...(crossX ? { crossX } : {}) },
     documentObjectIds(document),
   );
   if (routed.problem) return refuse(routed.problem);

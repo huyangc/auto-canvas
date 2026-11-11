@@ -15,10 +15,10 @@ import {
 import { deriveStableId, type SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import { MARKER_OFFSET, pinPoints, integerPoint } from "./geometry.js";
-import { isMos, type NetRoles } from "./net-roles.js";
+import { channelPins, isMos, type NetRoles } from "./net-roles.js";
 import { powerHosts } from "./place-markers.js";
 import { isMarker } from "./placement-connectivity.js";
-import { compareIds } from "./recognize.js";
+import { compareIds, recognizeSubstructures } from "./recognize.js";
 import {
   auditRouting,
   crossingsByNet,
@@ -718,6 +718,93 @@ function routeGroup(
   return { document: working, edits, diagnostics, failed };
 }
 
+/** R144 seeds the tree with the drawing convention before orthogonal routing. */
+function routeCrossCoupled(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  frozen: PinGroup[],
+  roles: NetRoles,
+  reservedIds: ReadonlySet<string>,
+) {
+  let working = document;
+  const edits: SchematicEdit[] = [];
+  const nets = new Set<string>();
+  const points = pinPoints(document, resolver);
+  const { structures } = recognizeSubstructures(document, roles);
+  for (const pair of structures.filter(
+    (s) => s.kind === "cross-coupled-pair",
+  )) {
+    const members = pair.members.flatMap((m) => m.instanceIds);
+    if (members.length !== 2) continue;
+    const [a, b] = members as [string, string];
+    for (const [source, target] of [
+      [a, b],
+      [b, a],
+    ] as const) {
+      const sourcePins = channelPins(
+        document.instances.find((i) => i.id === source)!.symbolId,
+      );
+      const targetPins = channelPins(
+        document.instances.find((i) => i.id === target)!.symbolId,
+      );
+      if (!sourcePins || !targetPins) continue;
+      const net = roles.pinNet(source, sourcePins.gate);
+      if (!net || net !== roles.pinNet(target, targetPins.drain)) continue;
+      const from = { instanceId: source, pinName: sourcePins.gate };
+      const to = { instanceId: target, pinName: targetPins.drain };
+      const g = points.find((p) => samePin(p, from))?.point;
+      const d = points.find((p) => samePin(p, to))?.point;
+      const group = frozen.find((group) =>
+        group.pins.some((p) => samePin(p, from)),
+      );
+      if (!g || !d || !group) continue;
+      const width = Math.abs(d.x - g.x);
+      const height = Math.abs(d.y - g.y);
+      if (!width || !height || width < height) continue;
+      const corner = { x: d.x, y: g.y + Math.sign(d.y - g.y) * width };
+      try {
+        const wire = freshWirePlan(
+          working,
+          reservedIds,
+          "auto-layout-cross",
+          [document.id, source, target],
+          (id) =>
+            planWireBatch(
+              working,
+              resolver,
+              {
+                id,
+                from: {
+                  kind: "endpoint",
+                  endpoint: { kind: "terminal", ...from },
+                },
+                to: { kind: "endpoint", endpoint: { kind: "terminal", ...to } },
+                routingMode: "octilinear",
+                waypoints: [corner],
+              },
+              MAX_SCHEMATIC_EDITS_PER_TRANSACTION,
+              { netScope: "base" },
+            ),
+        );
+        if (typeof wire === "string") continue;
+        const next = preview(working, resolver, wire.edits);
+        if (
+          !next.ok ||
+          auditRouting(next.document, resolver).problems.length >
+            auditRouting(working, resolver).problems.length
+        )
+          continue;
+        edits.push(...replayEdits(working, frozen, group, wire.edits));
+        working = next.document;
+        nets.add(group.netId);
+      } catch {
+        // Optional geometry must never prevent the ordinary routing pass.
+      }
+    }
+  }
+  return { document: working, edits, nets };
+}
+
 export function routeDocument(
   document: SchematicDocument,
   resolver: SymbolResolver,
@@ -725,7 +812,7 @@ export function routeDocument(
   roles: NetRoles,
   structures: RecognizedGroup[],
   signalTrunks = true,
-  options: { ripUp?: boolean } = {},
+  options: { ripUp?: boolean; crossX?: boolean } = {},
   reservedIds: ReadonlySet<string> = new Set(),
 ): {
   edits: SchematicEdit[];
@@ -752,6 +839,11 @@ export function routeDocument(
       compareIds(a.pins[0]?.instanceId ?? "", b.pins[0]?.instanceId ?? "") ||
       compareIds(a.netId, b.netId),
   );
+  const cross = options.crossX
+    ? routeCrossCoupled(working, resolver, frozen, roles, reservedIds)
+    : { document: working, edits: [], nets: new Set<string>() };
+  working = cross.document;
+  edits.push(...cross.edits);
   const routedGroups = new Map<PinGroup, GroupRouting>();
   const removals = new Map<PinGroup, SchematicEdit[]>();
   for (const group of ordered) {
@@ -792,7 +884,12 @@ export function routeDocument(
         crossings: netId ? (crossings.get(netId) ?? 0) : 0,
       };
     })
-    .filter(({ group, crossings }) => !power(group) && crossings > 0)
+    // R144 seed wires may be split by reconciliation as the tree grows.
+    // Retain their whole Net so R95 cannot remove a canonical piece of the X.
+    .filter(
+      ({ group, crossings }) =>
+        !power(group) && !cross.nets.has(group.netId) && crossings > 0,
+    )
     .sort((a, b) => b.crossings - a.crossings || a.order - b.order);
   for (const { group } of candidates) {
     try {
@@ -838,7 +935,10 @@ export function routeDocument(
   routingScore(working, resolver);
   return {
     document: working,
-    edits: ordered.flatMap((group) => routedGroups.get(group)!.edits),
+    edits: [
+      ...cross.edits,
+      ...ordered.flatMap((group) => routedGroups.get(group)!.edits),
+    ],
     diagnostics: ordered.flatMap(
       (group) => routedGroups.get(group)!.diagnostics,
     ),
