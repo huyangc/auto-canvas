@@ -1,3 +1,4 @@
+import { stageComponents } from "../packages/auto-layout/dist/stage-symmetry.js";
 import { reconcilePartition } from "../packages/auto-layout/dist/partition-reconcile.js";
 import { partitionMetrics } from "../packages/auto-layout/dist/partition-metrics.js";
 import {
@@ -147,13 +148,14 @@ const escape = (value) =>
     .replaceAll('"', "&quot;");
 const measurements = [];
 const sections = [];
-const metrics = (document, resolver, components) => {
+const metrics = (document, resolver, components, stages) => {
   const audit = auditRouting(document, resolver);
   const bounds = buildSvgScene(document, resolver).viewBox;
   const instances = enclosingBox(document, resolver);
   return {
     ...readabilityCounts(document, resolver),
     symmetry: symmetryCounts(document, resolver, components),
+    symmetryStage: symmetryCounts(document, resolver, stages),
     crossings: audit.crossings,
     bends: audit.bends,
     wireLength: audit.wireLength,
@@ -272,11 +274,9 @@ async function evaluateFile(file) {
     );
     if (!document) throw new Error("Top Document missing");
     const resolver = createProjectSymbolResolver(project, builtInSymbols);
-    const components = detectSymmetry(
-      document,
-      resolver,
-      classifyNets(document, resolver),
-    );
+    const roles = classifyNets(document, resolver);
+    const components = detectSymmetry(document, resolver, roles);
+    const stages = stageComponents(document, resolver, roles, components);
     measurement.instances = document.instances.length;
     // Oracle extraction is required only for partitioned runs. Default and
     // search evaluations proceed without block metrics when it fails, for
@@ -354,7 +354,7 @@ async function evaluateFile(file) {
     measurement.hasHuman = hasHuman;
     measurement.human = hasHuman
       ? {
-          ...metrics(document, resolver, components),
+          ...metrics(document, resolver, components, stages),
           ...blockMetrics(
             document,
             resolver,
@@ -387,7 +387,7 @@ async function evaluateFile(file) {
     measurement.quick =
       quickTransaction?.ok && quickTransaction.applied
         ? {
-            ...metrics(quickTransaction.document, resolver, components),
+            ...metrics(quickTransaction.document, resolver, components, stages),
             ...blockMetrics(
               quickTransaction.document,
               resolver,
@@ -463,7 +463,7 @@ async function evaluateFile(file) {
     }
     if (completed) {
       measurement.result = {
-        ...metrics(after, resolver, components),
+        ...metrics(after, resolver, components, stages),
         ...(partitionSource
           ? {
               blockSymmetry: symmetryCounts(
@@ -644,19 +644,21 @@ if (!isMainThread) {
     m?.symmetry ? symmetryKeys.map((key) => m.symmetry[key]).join("/") : "—";
   const sum = (items) => ({
     ...Object.fromEntries(
-      ["symmetry", ...(partitionSource ? ["blockSymmetry"] : [])].map(
-        (metric) => [
-          metric,
-          Object.fromEntries(
-            symmetryKeys.map((key) => [
-              key,
-              items.every((m) => Number.isFinite(m[metric]?.[key]))
-                ? items.reduce((total, m) => total + m[metric][key], 0)
-                : null,
-            ]),
-          ),
-        ],
-      ),
+      [
+        "symmetry",
+        "symmetryStage",
+        ...(partitionSource ? ["blockSymmetry"] : []),
+      ].map((metric) => [
+        metric,
+        Object.fromEntries(
+          symmetryKeys.map((key) => [
+            key,
+            items.every((m) => Number.isFinite(m[metric]?.[key]))
+              ? items.reduce((total, m) => total + m[metric][key], 0)
+              : null,
+          ]),
+        ),
+      ]),
     ),
     ...Object.fromEntries(
       [
@@ -727,6 +729,10 @@ if (!isMainThread) {
           : "—",
         humanSymmetry: symmetryText(m.human),
         resultSymmetry: symmetryText(m.result),
+        humanSymmetryStage: symmetryText({ symmetry: m.human?.symmetryStage }),
+        resultSymmetryStage: symmetryText({
+          symmetry: m.result?.symmetryStage,
+        }),
         ...(partitionSource
           ? {
               blockSymmetry: symmetryText({

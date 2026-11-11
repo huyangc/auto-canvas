@@ -1,3 +1,4 @@
+import { stageComponents } from "./stage-symmetry.js";
 import {
   partitionGroups,
   partitionSymmetry,
@@ -237,6 +238,13 @@ export function placeDocument(
     options.partition,
     topology.components,
   );
+  if (!partition)
+    topology.components = stageComponents(
+      document,
+      resolver,
+      roles,
+      topology.components,
+    );
   const symmetry = partitionSymmetry(topology.components, partition);
   const symmetryIds = new Set(
     symmetry.flatMap((c) => [...c.pairs.flat(), ...c.axis]),

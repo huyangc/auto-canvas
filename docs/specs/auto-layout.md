@@ -417,7 +417,8 @@ pins }` lists, never Net ids.
   under R53.
 - **R51 — Stage layout.** Lay out each stage independently with R30–R33 in
   local coordinates, preserving templates, symmetry and shared-pin alignment.
-  R94 joins every R88 component into one stage and uses the shared R89 layout.
+  R94 joins every R145 stage component in default mode (R88 component with a
+  partition) into one stage and uses the shared R89 layout.
 - **R52 — Stage rows.** Stages share rails. Align a stage's top row with the
   supply when it touches one; otherwise align its bottom row with ground when
   present. Centre a stage touching neither rail.
@@ -838,8 +839,10 @@ pins }` lists, never Net ids.
   If both seats overlap, use unchanged R19/R20 edge seating. This rule reads
   geometry, not recognition, and honors fixed ports and forced edge reseating.
 
-- **R94 — Symmetry across strategies and search.** Join all R88 component
-  members into a stage and forbid mirroring that stage. Stage-local placement
+- **R94 — Symmetry across strategies and search.** In default mode use R145
+  stage components; with a partition retain R88 components and the existing
+  partition-local trimming. Join all component members into a stage and forbid
+  mirroring that stage. Stage-local placement
   uses R89. Template placement uses one component template instead of its
   contained group templates, removing its members from ranked singles. An outside
   unit containing a block pair's tail retains R7 seating on the block axis one
@@ -1050,6 +1053,19 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   R13 connects the remaining members of every Net. R95 retains Nets seeded with
   X wires, including any pieces reconciliation splits while routing the rest.
 
+- **R145 — Stage symmetry.** In default mode split each R88 component by
+  conduction: union pair members, then devices sharing a non-rail Net on R50
+  conducting pins. Each resulting part with at least two pairs becomes a stage
+  component. Merge all smaller parts (single pairs and axis-only parts) into the
+  part with the most pairs, breaking ties by the first pair in component order.
+  If only one component remains, retain the original component unchanged.
+  Preserve pair and axis order and copy the original conflicted list to every
+  stage component. This depends on topology, never placement or Document
+  instance, Net or terminal order. Each stage gets its own R89 block and axis
+  through R94 in every placement strategy, collision repair and frozen sets.
+  Annealing and R97 compaction use the same stage components as rigid units.
+  Partition mode and the R88 whole-component view remain unchanged.
+
 - **Existing locks and conflicts.** Members of a locked layout group or
   constraint are treated as fixed instances under R1, because the Edit Engine
   refuses to transform them. A recognized group whose generated id already
@@ -1083,7 +1099,10 @@ Pin sides, determinism and stable repeated placement and Route count. The review
 `pnpm auto-layout:review` renders originals and results for human inspection.
 
 Evaluation detects R88 components on the input and measures both the human drawing
-and result with the same components. Report pairs, mirrored pairs, level pairs,
+and result with the same components as `symmetry`. Also derive R145 stage
+components from that same input and measure human and result drawings as
+`symmetryStage`, printed beside `symmetry` in per-case and split summaries.
+Report pairs, mirrored pairs, level pairs,
 mirrored orientations, axis devices and on-axis devices in per-document results
 and dev/val totals. The axis is the median pair pin-centre midpoint; mirrored
 pairs satisfy `|x_a + x_b − 2·axis| ≤ 40`, level pairs satisfy `|y_a − y_b| ≤ 20`,

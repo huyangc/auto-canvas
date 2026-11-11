@@ -1,3 +1,4 @@
+import { stageComponents } from "./stage-symmetry.js";
 import { partitionDocuments } from "./partition-geometry.js";
 import {
   partitionGroups,
@@ -94,10 +95,10 @@ export function createMoveGenerator(
       grouped.add(id);
     }
   }
-  const symmetry = partitionSymmetry(
-    detectSymmetry(document, resolver, roles),
-    partition,
-  );
+  const components = detectSymmetry(document, resolver, roles);
+  const symmetry = partition
+    ? partitionSymmetry(components, partition)
+    : stageComponents(document, resolver, roles, components);
   for (const c of symmetry) {
     const ids = [...c.pairs.flat(), ...c.axis];
     for (const id of ids) {
