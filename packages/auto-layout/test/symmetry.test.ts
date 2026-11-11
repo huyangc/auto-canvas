@@ -610,6 +610,266 @@ it("keeps paired capacitors inside their block instead of seating one as a stage
   );
 });
 
+it.each([false, true])(
+  "keeps a capacitor pair on distinct self-mapped bias Nets (swapped: %s)",
+  (swapped) => {
+    const d = circuit(
+      { a: "nmos", b: "nmos", c: "pmos", d: "pmos" },
+      {
+        biasA: ["a.S", "b.S"],
+        biasB: ["c.S", "d.S"],
+        ga: ["a.G"],
+        gb: ["b.G"],
+        gc: ["c.G"],
+        gd: ["d.G"],
+        da: ["a.D"],
+        db: ["b.D"],
+        dc: ["c.D"],
+        dd: ["d.D"],
+      },
+    );
+    const topology = () =>
+      symmetryTopology(d, resolver, classifyNets(d, resolver));
+    expect(topology().netMap.get("biasA")).toBe("biasA");
+    expect(topology().netMap.get("biasB")).toBe("biasB");
+    d.instances.push(
+      { id: "cap-left", symbolId: "capacitor", placement: null },
+      { id: "cap-right", symbolId: "capacitor", placement: null },
+    );
+    for (const [net, id, pin] of [
+      ["da", "cap-left", "1"],
+      ["db", "cap-right", swapped ? "2" : "1"],
+      ["biasA", "cap-left", "2"],
+      ["biasB", "cap-right", swapped ? "1" : "2"],
+    ])
+      d.nets
+        .find((n) => n.id === net)!
+        .terminals.push({ instanceId: id!, pinName: pin! });
+    const result = topology();
+    expect(result.components.flatMap((c) => c.pairs)).toContainEqual([
+      "cap-left",
+      "cap-right",
+    ]);
+    expect(result.netMap.get("da")).toBe("db");
+    expect(result.netMap.get("biasA")).toBe("biasB");
+    d.instances.reverse();
+    d.nets.reverse();
+    expect(topology().components).toEqual(result.components);
+  },
+);
+
+const passiveFixture = (symbolId: string, leftPin = "1", rightPin = "2") =>
+  circuit(
+    {
+      a: "nmos",
+      b: "nmos",
+      t: "current-source",
+      "passive-left": symbolId,
+      "passive-right": symbolId,
+      g: "ground",
+    },
+    {
+      tail: ["a.S", "b.S", "t.+"],
+      ga: ["a.G", `passive-left.${rightPin}`],
+      gb: ["b.G", `passive-right.${leftPin}`],
+      da: ["a.D", `passive-left.${leftPin}`],
+      db: ["b.D", `passive-right.${rightPin}`],
+      gnd: ["t.-", "g.0"],
+    },
+  );
+
+it.each(["resistor", "capacitor", "inductor"])(
+  "pairs swapped %s pins and places both partners mirrored inside the block",
+  async (symbolId) => {
+    const { planAutoLayout } = await import("../src/index.js");
+    const { executeTransaction } = await import("@icm/edit-engine");
+    const { reflectOrientation } = await import("@icm/model");
+    const { visibleInstanceBounds } = await import("@icm/derived");
+    const { pinPoints } = await import("../src/geometry.js");
+    const d = passiveFixture(symbolId);
+    const components = detect(d);
+    expect(components).toEqual([
+      {
+        pairs: [
+          ["a", "b"],
+          ["passive-left", "passive-right"],
+        ],
+        axis: ["t"],
+        conflicted: [],
+      },
+    ]);
+    const topology = symmetryTopology(d, resolver, classifyNets(d, resolver));
+    expect(topology.netMap.get("da")).toBe("db");
+    expect(topology.netMap.get("ga")).toBe("gb");
+    const plan = planAutoLayout(d, resolver);
+    expect(plan.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
+    const applied = executeTransaction(
+      d,
+      {
+        transactionId: "swapped-passives",
+        documentId: d.id,
+        expectedRevision: d.revision,
+        actor: { kind: "agent", id: "test" },
+        edits: plan.edits,
+      },
+      { symbolResolver: resolver },
+    );
+    expect(applied.ok).toBe(true);
+    if (!applied.ok) return;
+    const placed = applied.document;
+    const points = pinPoints(placed, resolver);
+    const centre = (id: string) => {
+      const own = points.filter((p) => p.instanceId === id);
+      return {
+        x: own.reduce((s, p) => s + p.point.x, 0) / own.length,
+        y: own.reduce((s, p) => s + p.point.y, 0) / own.length,
+      };
+    };
+    const axis = (centre("a").x + centre("b").x) / 2;
+    expect(centre("passive-left").x).toBeLessThan(axis);
+    expect(centre("passive-right").x).toBeGreaterThan(axis);
+    expect(centre("passive-left").x + centre("passive-right").x).toBe(2 * axis);
+    expect(centre("passive-left").y).toBe(centre("passive-right").y);
+    const left = placed.instances.find(
+      (i) => i.id === "passive-left",
+    )!.placement!;
+    const right = placed.instances.find(
+      (i) => i.id === "passive-right",
+    )!.placement!;
+    expect({ rotation: right.rotation, mirror: right.mirror }).toEqual(
+      reflectOrientation(left, "left-right"),
+    );
+    const bounds = visibleInstanceBounds(placed, resolver);
+    const hosts = bounds.filter((b) => ["a", "b", "t"].includes(b.id));
+    for (const { bounds: b } of bounds.filter((b) =>
+      b.id.startsWith("passive-"),
+    )) {
+      expect(b.x).toBeGreaterThanOrEqual(
+        Math.min(...hosts.map((h) => h.bounds.x)),
+      );
+      expect(b.x + b.width).toBeLessThanOrEqual(
+        Math.max(...hosts.map((h) => h.bounds.x + h.bounds.width)),
+      );
+      expect(b.y).toBeGreaterThanOrEqual(
+        Math.min(...hosts.map((h) => h.bounds.y)),
+      );
+      expect(b.y + b.height).toBeLessThanOrEqual(
+        Math.max(...hosts.map((h) => h.bounds.y + h.bounds.height)),
+      );
+    }
+    d.instances.reverse();
+    d.nets.reverse();
+    for (const net of d.nets) net.terminals.reverse();
+    for (const [index, instance] of d.instances.entries())
+      instance.placement = {
+        position: { x: index * 170, y: index * -90 },
+        rotation: 90,
+        mirror: "horizontal",
+      };
+    expect(detect(d)).toEqual(components);
+  },
+);
+
+it("leaves an unpaired resistor and a resistor across mirrored Nets outside", () => {
+  const d = passiveFixture("resistor");
+  d.instances = d.instances.filter((i) => i.id !== "passive-right");
+  for (const net of d.nets)
+    net.terminals = net.terminals.filter(
+      (t) => t.instanceId !== "passive-right",
+    );
+  expect(detect(d)).toEqual([
+    { pairs: [["a", "b"]], axis: ["t"], conflicted: [] },
+  ]);
+  d.instances.push({ id: "across", symbolId: "resistor", placement: null });
+  d.nets
+    .find((n) => n.id === "da")!
+    .terminals.push({ instanceId: "across", pinName: "1" });
+  d.nets
+    .find((n) => n.id === "db")!
+    .terminals.push({ instanceId: "across", pinName: "2" });
+  expect(detect(d)).toEqual([
+    {
+      pairs: [["a", "b"]],
+      axis: ["t"],
+      conflicted: ["across", "passive-left"],
+    },
+  ]);
+  d.instances = d.instances.filter((i) => i.id !== "passive-left");
+  for (const net of d.nets)
+    net.terminals = net.terminals.filter(
+      (t) => t.instanceId !== "passive-left",
+    );
+  expect(detect(d)).toEqual([
+    { pairs: [["a", "b"]], axis: ["t"], conflicted: [] },
+  ]);
+});
+
+it("does not pair polar diodes with swapped pins", () => {
+  expect(detect(passiveFixture("diode", "A", "K"))).toEqual([
+    { pairs: [["a", "b"]], axis: ["t"], conflicted: [] },
+  ]);
+});
+
+it("keeps swapped identical-topology passives as twins instead of axis devices", () => {
+  const d = passiveFixture("resistor");
+  for (const net of d.nets)
+    net.terminals = net.terminals.filter(
+      (t) => !t.instanceId.startsWith("passive-"),
+    );
+  d.nets
+    .find((n) => n.id === "tail")!
+    .terminals.push(
+      { instanceId: "passive-left", pinName: "1" },
+      { instanceId: "passive-right", pinName: "2" },
+    );
+  d.nets
+    .find((n) => n.id === "gnd")!
+    .terminals.push(
+      { instanceId: "passive-left", pinName: "2" },
+      { instanceId: "passive-right", pinName: "1" },
+    );
+  expect(detect(d)).toEqual([
+    {
+      pairs: [["a", "b"]],
+      axis: ["t"],
+      conflicted: [],
+    },
+  ]);
+});
+
+it("pairs passives through a unique Net even when another Net has multiple candidates", () => {
+  const d = passiveFixture("resistor");
+  d.instances.push({ id: "extra", symbolId: "resistor", placement: null });
+  d.nets
+    .find((n) => n.id === "db")!
+    .terminals.push({ instanceId: "extra", pinName: "2" });
+  d.nets
+    .find((n) => n.id === "gnd")!
+    .terminals.push({ instanceId: "extra", pinName: "1" });
+  expect(detect(d)).toEqual([
+    {
+      pairs: [
+        ["a", "b"],
+        ["passive-left", "passive-right"],
+      ],
+      axis: ["t"],
+      conflicted: [],
+    },
+  ]);
+});
+
+it("does not choose between multiple passive partners", () => {
+  const d = passiveFixture("resistor");
+  d.instances.push({ id: "extra", symbolId: "resistor", placement: null });
+  for (const net of d.nets)
+    for (const t of [...net.terminals])
+      if (t.instanceId === "passive-right")
+        net.terminals.push({ ...t, instanceId: "extra" });
+  expect(detect(d)).toEqual([
+    { pairs: [["a", "b"]], axis: ["t"], conflicted: [] },
+  ]);
+});
+
 it("gives a BJT-only block the R89 layout in the layered strategy", async () => {
   const { placeDocument } = await import("../src/place.js");
   const { recognizeStructures } = await import("../src/recognize.js");

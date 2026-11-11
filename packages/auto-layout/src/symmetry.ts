@@ -1,3 +1,4 @@
+import { deviceDescriptor } from "@icm/devices";
 import {
   reflectOrientation,
   type Instance,
@@ -80,6 +81,11 @@ export function symmetryTopology(
     pins.get(id)!.flatMap((p) => roles.pinNet(id, p) ?? []);
   const compatible = (a: Instance, b: Instance) =>
     a.symbolId === b.symbolId && familyCompatible(a, b);
+  const nonPolar = (id: string) =>
+    pins.get(id)!.length === 2 &&
+    ["resistor", "capacitor", "inductor"].includes(
+      deviceDescriptor(byId.get(id)!.symbolId)?.deviceClass ?? "",
+    );
   const seeds: Pair[] = recognizeSubstructures(
     document,
     roles,
@@ -103,13 +109,45 @@ export function symmetryTopology(
     netMap = new Map<string, string>();
   const badDevices = new Set<string>(),
     badNets = new Set<string>();
-  const applyDevices = (pairs: Pair[]) => {
+  // Retain the chosen pin order as the pair propagates further Net mappings.
+  const pinMap = new Map<string, Pair[]>();
+  const equalPins = (id: string): Pair[] => pins.get(id)!.map((p) => [p, p]);
+  const swappedPins = (id: string): Pair[] => {
+    const [p, q] = pins.get(id)!;
+    return [
+      [p!, q!],
+      [q!, p!],
+    ];
+  };
+  const fits = (a: string, b: string, correspondence: Pair[]) =>
+    correspondence.every(([p, q]) => {
+      const n = roles.pinNet(a, p),
+        m = roles.pinNet(b, q);
+      return (
+        (!n || !netMap.has(n) || netMap.get(n) === n || netMap.get(n) === m) &&
+        (!m || !netMap.has(m) || netMap.get(m) === m || netMap.get(m) === n)
+      );
+    });
+  const correspondence = (a: string, b: string): Pair[] => {
+    const equal = equalPins(a);
+    if (!nonPolar(a) || !nonPolar(b) || fits(a, b, equal)) return equal;
+    const swapped = swappedPins(a);
+    return fits(a, b, swapped) ? swapped : equal;
+  };
+  type DevicePair = [string, string, Pair[]?];
+  const applyDevices = (pairs: DevicePair[], seed = false) => {
     const before = badDevices.size;
-    for (const [a, b] of pairs) {
+    for (const [a, b, proposed] of pairs) {
+      const matching = proposed ?? (seed ? equalPins(a) : correspondence(a, b));
+      pinMap.set(a, matching);
+      pinMap.set(
+        b,
+        matching.map(([p, q]) => [q, p]),
+      );
       const own = new Map<string, string>();
-      for (const pin of pins.get(a)!) {
-        const n = roles.pinNet(a, pin),
-          m = roles.pinNet(b, pin);
+      for (const [p, q] of matching) {
+        const n = roles.pinNet(a, p),
+          m = roles.pinNet(b, q);
         if (!n || !m || n === m) continue;
         // Only a pair's own non-self implications can invalidate it.
         // Shared defaults and disagreements with other pairs cannot.
@@ -125,22 +163,26 @@ export function symmetryTopology(
       }
     }
     return (
-      applyRound(deviceMap, badDevices, pairs) || before !== badDevices.size
+      applyRound(
+        deviceMap,
+        badDevices,
+        pairs.map(([a, b]) => [a, b]),
+      ) || before !== badDevices.size
     );
   };
-  applyDevices(seeds);
+  applyDevices(seeds, true);
   applyRound(
     netMap,
     badNets,
     [...roles.rails.keys()].map((n) => [n, n]),
   );
   for (;;) {
-    const devicePairs: Pair[] = [],
-      netPairs: Pair[] = [];
+    const devicePairs: DevicePair[] = [];
+    const netPairs: Pair[] = [];
     for (const [a, b] of deviceMap)
-      for (const pin of pins.get(a)!) {
-        const n = roles.pinNet(a, pin),
-          m = roles.pinNet(b, pin);
+      for (const [p, q] of pinMap.get(a)!) {
+        const n = roles.pinNet(a, p),
+          m = roles.pinNet(b, q);
         if (n && m) netPairs.push([n, m]);
       }
     const free = devices.filter(
@@ -151,16 +193,32 @@ export function symmetryTopology(
       for (const a of free)
         for (const pin of pins.get(a.id)!) {
           if (roles.pinNet(a.id, pin) !== n) continue;
-          const candidates = (device: Instance, net: string) =>
+          const unordered = n !== m && nonPolar(a.id);
+          const candidates = (device: Instance, net: string, pin: string) =>
             free.filter(
               (b) =>
                 b !== device &&
                 compatible(device, b) &&
-                roles.pinNet(b.id, pin) === net,
+                (unordered && nonPolar(b.id)
+                  ? nets(b.id).includes(net)
+                  : roles.pinNet(b.id, pin) === net),
             );
-          const choices = candidates(a, m);
-          if (choices.length === 1 && candidates(choices[0]!, n).length === 1)
-            devicePairs.push([a.id, choices[0]!.id]);
+          const choices = candidates(a, m, pin);
+          if (choices.length !== 1) continue;
+          const b = choices[0]!;
+          const otherPin =
+            unordered && roles.pinNet(b.id, pin) !== m
+              ? pins.get(b.id)!.find((q) => roles.pinNet(b.id, q) === m)!
+              : pin;
+          if (candidates(b, n, otherPin).length !== 1) continue;
+          // The matched non-self Net fixes the pin order. The other Nets
+          // impose no constraint, just as in the equal-pin candidate rule.
+          const matching = unordered
+            ? pin === otherPin
+              ? equalPins(a.id)
+              : swappedPins(a.id)
+            : correspondence(a.id, b.id);
+          devicePairs.push([a.id, b.id, matching]);
         }
     }
     for (const a of free) {
@@ -172,9 +230,14 @@ export function symmetryTopology(
           (b) =>
             a !== b &&
             compatible(a, b) &&
-            pins
-              .get(a.id)!
-              .every((p) => roles.pinNet(a.id, p) === roles.pinNet(b.id, p)),
+            [
+              correspondence(a.id, b.id),
+              ...(nonPolar(a.id) && nonPolar(b.id) ? [swappedPins(a.id)] : []),
+            ].some((matching) =>
+              matching.every(
+                ([p, q]) => roles.pinNet(a.id, p) === roles.pinNet(b.id, q),
+              ),
+            ),
         )
       )
         devicePairs.push([a.id, a.id]);
