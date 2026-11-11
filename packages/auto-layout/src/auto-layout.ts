@@ -1,3 +1,4 @@
+import { stageComponents } from "./stage-symmetry.js";
 import { blockIntrusion } from "./partition-geometry.js";
 import { partitionGroups, validatePartition } from "./partition.js";
 import {
@@ -212,9 +213,12 @@ function planAutoLayoutMeasured(
           ...(group.diodeInstanceId ? [group.diodeInstanceId] : []),
         ],
       ),
-      ...symmetryTopology(run.final, resolver, roles).components.map(
-        (component) => [...component.pairs.flat(), ...component.axis],
-      ),
+      ...stageComponents(
+        run.final,
+        resolver,
+        roles,
+        symmetryTopology(run.final, resolver, roles).components,
+      ).map((component) => [...component.pairs.flat(), ...component.axis]),
     ];
     const exact = compactPlacements(run.final, resolver, rigid);
     if (!exact) return run;
