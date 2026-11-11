@@ -174,3 +174,11 @@ git ls-files tmp | head -1                           # expected: no output
 - **No LLM calls.** Never set an API key and never run the partition CLI without
   `--dry-run`. Opus runs the approved re-sample.
 - **Human cases** stay git-ignored; never commit a case, excerpt, id or id-keyed data.
+
+### Round 2 amendment
+
+Owned paths gain `packages/auto-layout/src/partition-reconcile.ts`, for the block
+connectivity check only. Step 2 also replaces the prompt sentence "Each block must be one
+connected sub-circuit through non-rail nets, excluding MOS bulk pins." with "… through
+non-rail nets or listed couplings, …"; `PROMPT_VERSION` stays `"5"`. Step 4 also joins
+`cross-coupled-pair` candidates across R50 stages, so a rail-fed latch is one unit.
