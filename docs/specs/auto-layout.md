@@ -959,6 +959,25 @@ pins }` lists, never Net ids.
   scoring, R134 fallback, layout-group records and metrics keep the supplied
   partition. No-partition and explicit `arrangement` paths remain unchanged.
 
+- **R141 — LLM layout entry.** `planAutoLayoutWithLlm(document, resolver, options)`
+  is the asynchronous entry for an injected `llm` partitioner. `LlmPartitioner`
+  receives `{ system, payload, sample, anonymize }` and returns a promise of a
+  shape-valid `LlmPartitionResult` or `undefined` for no usable answer. The package
+  performs no network access. `llmPartition` builds the unchanged circuit payload
+  once, including optional fingerprint `entries`, and requests zero-based samples
+  concurrently (default three; anonymization defaults to false). Rejected or
+  missing answers are skipped; usable answers are reconciled in sample order.
+  It returns the partition, statistics, reconciliation diagnostics and per-sample
+  `answered`/`missing` status. With no usable answer its partition is undefined.
+  The layout entry plans with the reconciled partition and appends reconciliation
+  diagnostics as R141 warnings (`AUTO_LAYOUT_LLM_RECONCILED`). With no answer it
+  returns the default plan plus `AUTO_LAYOUT_LLM_UNAVAILABLE`, an R141 warning
+  without provider details. An explicit `options.partition` or absent `options.llm`
+  bypasses the partitioner and calls `planAutoLayout` unchanged. Identical answers
+  produce byte-identical results. The evaluation script uses a cache-only
+  partitioner and `llmPartition`; for measurement compatibility its no-answer path
+  still plans with the rule-only partition.
+
 - **Existing locks and conflicts.** Members of a locked layout group or
   constraint are treated as fixed instances under R1, because the Edit Engine
   refuses to transform them. A recognized group whose generated id already
@@ -968,7 +987,7 @@ pins }` lists, never Net ids.
 
 ## Contract
 
-The public entry point is `planAutoLayout`. Edits use the existing
+The public planning entries are `planAutoLayout` and `planAutoLayoutWithLlm`. Edits use the existing
 [edit-engine schema](../../packages/edit-engine/src/edit-schema.ts); group
 records use the existing [presentation schema](../../packages/model/src/schema/presentation.ts).
 No file format or connectivity edit is introduced.
