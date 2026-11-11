@@ -148,3 +148,15 @@ git ls-files tmp | head -1                           # expected: no output
 - **No LLM calls.** Nothing here spends API tokens.
 - **Human cases** stay in git-ignored `tmp/human-cases/`; never commit a case, excerpt,
   id or id-keyed data.
+
+### Round 2 amendment
+
+Step 2's "whose other Net is the image of `a`'s other Net when that image is known" is
+withdrawn: it treated self-mapped defaults as constraints and dropped existing capacitor
+pairs. Use instead: a free non-polar two-terminal device `a` with a pin `p` on a mapped Net
+`n ↔ m` (`m ≠ n`) has candidate `b` when some pin `q` of `b` lies on `m`; the
+correspondence is `p ↔ q` and the remaining pin to the remaining pin. Nothing is required
+of the other Nets. For pairs found otherwise (seeds keep equal names), choose the order
+that agrees with the non-self Net-map entries; with no such evidence, keep equal pin names.
+Every pair that paired on `3526e33` must pair with the same correspondence; only swapped
+passive pairs are added.
