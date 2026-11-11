@@ -777,6 +777,8 @@ pins }` lists, never Net ids.
   retain their rows. Build a half Document from left partners and axis devices,
   folding right Nets onto left Nets. Reuse R32 and R33 with these rows and only
   groups contained in the half, moving axis devices to each row's right end.
+  Cross-coupled members (mutual G/D or B/C Nets) come immediately before axis
+  devices, keeping all other nodes in their prior order.
   Before column assignment, orient recognized left members by R92: outward
   `none`, inward `horizontal`. Other paired devices with a gate use
   `horizontal` when the gate Net is self-mapped, otherwise `none`. Two-pin parts
@@ -1019,6 +1021,22 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   unchanged; no model or connectivity edit is introduced.
   Block connectivity accepts non-rail nets (excluding MOS bulk pins) or valid
   listed couplings, so isolated primary and secondary circuits may share a block.
+- **R144 — Cross-coupled X.** After R97, replan the R44 winner's exact placements
+  once with R95 `ripUp` and the router's optional `crossX: true`, preserving the
+  winner's signal-trunk setting. Skip fixed instances and Documents without a
+  recognized cross-coupled pair. Keep the candidate only when its R22 routed
+  score is no higher; ties keep the X as the drawing convention. Strategy ranking,
+  refinement candidates and annealing evaluations never enable `crossX`.
+  Before R13, for each placed two-device cross-coupled pair, connect each control
+  pin G (MOS) or B (BJT) to the opposite output D or C when they share a Net.
+  For control point g and output d, let up be the vertical direction from g to d
+  and corner = `(d.x, g.y + up * abs(d.x - g.x))`. Skip zero horizontal or vertical
+  separation and corners falling short of d. Plan g → corner → d with
+  `routingMode: "octilinear"`, the corner as the sole waypoint, and R98-reserved
+  ids. Preview without orthogonal keep-clear replanning; retain a wire only if
+  the preview succeeds and the routing audit's problem count does not grow.
+  R13 connects the remaining members of every Net. R95 retains Nets seeded with
+  X wires, including any pieces reconciliation splits while routing the rest.
 
 - **Existing locks and conflicts.** Members of a locked layout group or
   constraint are treated as fixed instances under R1, because the Edit Engine
