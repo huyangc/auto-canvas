@@ -21,7 +21,10 @@ vi.hoisted(() => {
 // @ts-expect-error The standalone script does not publish TypeScript declarations.
 import * as runner from "../../../scripts/auto-layout-llm-partition.mjs";
 import { blockFingerprint } from "../src/fingerprint.js";
-import { describeCircuit } from "../src/partition-prompt.js";
+import {
+  describeCircuit,
+  PARTITION_SYSTEM_PROMPT,
+} from "../src/partition-prompt.js";
 import { circuit } from "./document-fixture.js";
 
 // Resolve the pure implementation from source, including in a fresh checkout.
@@ -30,7 +33,7 @@ vi.mock(
   () => import("../src/partition-prompt.js"),
 );
 vi.mock("../dist/fingerprint.js", () => import("../src/fingerprint.js"));
-const { cacheKey, runPartitionJobs, cachedSamples } = runner;
+const { cacheKey, runPartitionJobs, cachedSamples, createPartitioner } = runner;
 const resolver = new InMemorySymbolResolver(builtInSymbols);
 const document = circuit(
   { a: "resistor", b: "resistor" },
@@ -597,4 +600,88 @@ it("requests and reads template payload caches separately while preserving empty
     statistics: { samples: 1 },
     entries: [{ status: "valid-first-try" }],
   });
+});
+
+it("reads only valid cache answers without calling a provider", async () => {
+  const cacheDirectory = cache();
+  const payload = describeCircuit(document, resolver);
+  const provider = vi.fn().mockRejectedValue(new Error("must stay offline"));
+  const partitioner = createPartitioner({ cacheDirectory, provider });
+  const entries = [
+    { status: "valid-first-try", output: answer },
+    { status: "repaired", output: answer },
+    { status: "failed", output: answer },
+    { status: "valid-first-try", output: { blocks: "invalid" } },
+  ];
+  entries.forEach((entry, sample) =>
+    writeFileSync(
+      join(cacheDirectory, `${cacheKey(payload, sample)}.json`),
+      JSON.stringify(entry),
+    ),
+  );
+  const results = await Promise.all(
+    [0, 1, 2, 3, 4].map((sample) =>
+      partitioner({
+        system: PARTITION_SYSTEM_PROMPT,
+        payload,
+        sample,
+        anonymize: false,
+      }),
+    ),
+  );
+  expect(results).toEqual([answer, answer, undefined, undefined, undefined]);
+  expect(results.filter(Boolean)).toEqual(
+    cachedSamples(document, resolver, 5, false, cacheDirectory).samples,
+  );
+  expect(provider).not.toHaveBeenCalled();
+  // Omitting a provider must also stay offline, including on a cache miss.
+  expect(
+    await createPartitioner({ cacheDirectory })({
+      system: PARTITION_SYSTEM_PROMPT,
+      payload,
+      sample: 4,
+      anonymize: false,
+    }),
+  ).toBeUndefined();
+  expect(readdirSync(cacheDirectory)).toHaveLength(4);
+});
+
+it("writes the same cache through the API-allowed adapter and the existing jobs", async () => {
+  const directCache = cache();
+  const adapterCache = cache();
+  const provider = vi.fn().mockResolvedValue(response());
+  const partitioner = createPartitioner({
+    cacheDirectory: adapterCache,
+    allowApi: true,
+    provider,
+    concurrency: 1,
+    maxUsd: 1,
+  });
+  const request = {
+    system: PARTITION_SYSTEM_PROMPT,
+    payload: describeCircuit(document, resolver, true),
+    sample: 2,
+    anonymize: true,
+  };
+  expect(await partitioner(request)).toEqual(answer);
+  const direct = await runPartitionJobs(
+    [{ ...job, sample: 2, anonymize: true }],
+    {
+      cacheDirectory: directCache,
+      provider,
+      concurrency: 1,
+      maxUsd: 1,
+    },
+  );
+  const filename = `${cacheKey(request.payload, 2, true)}.json`;
+  expect(readFileSync(join(adapterCache, filename), "utf8")).toBe(
+    readFileSync(join(directCache, filename), "utf8"),
+  );
+  expect(direct.results[0].status).toBe("valid-first-try");
+  // The SDK schema format includes fresh parser functions; compare wire data.
+  expect(JSON.stringify(provider.mock.calls[0])).toBe(
+    JSON.stringify(provider.mock.calls[1]),
+  );
+  expect(await partitioner(request)).toEqual(answer);
+  expect(provider).toHaveBeenCalledTimes(2);
 });

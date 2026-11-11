@@ -1,6 +1,9 @@
 import { reconcilePartition } from "../packages/auto-layout/dist/partition-reconcile.js";
 import { partitionMetrics } from "../packages/auto-layout/dist/partition-metrics.js";
-import { cachedSamples } from "./auto-layout-llm-partition.mjs";
+import {
+  cachedSamples,
+  createPartitioner,
+} from "./auto-layout-llm-partition.mjs";
 import { createHash } from "node:crypto";
 import {
   existsSync,
@@ -32,7 +35,10 @@ import {
   blockIntrusion,
   partitionBounds,
 } from "../packages/auto-layout/dist/partition-geometry.js";
-import { planAutoLayout } from "../packages/auto-layout/dist/index.js";
+import {
+  llmPartition,
+  planAutoLayout,
+} from "../packages/auto-layout/dist/index.js";
 import {
   auditRouting,
   floatingPins,
@@ -241,7 +247,7 @@ function blockMetrics(document, resolver, partition, human) {
     arrangementRelations: relations,
   };
 }
-function evaluateFile(file) {
+async function evaluateFile(file) {
   let section = "";
   const id = file.slice(0, -5);
   const split =
@@ -307,9 +313,16 @@ function evaluateFile(file) {
     }
     if (partitionSource === "llm") {
       const cached = cachedSamples(document, resolver, samples, anonymize);
-      const validated = reconcilePartition(document, resolver, cached.samples);
+      const proposed = await llmPartition(document, resolver, {
+        partitioner: createPartitioner(),
+        samples,
+        anonymize,
+      });
+      const validated = proposed.partition
+        ? proposed
+        : reconcilePartition(document, resolver, []);
       measurement.partitionValidity = {
-        status: cached.samples.length ? "reconciled" : "rule-only",
+        status: proposed.partition ? "reconciled" : "rule-only",
         l0Merges: 0,
         entries: cached.entries,
       };
@@ -567,7 +580,7 @@ function evaluateFile(file) {
   return { measurement, section };
 }
 if (!isMainThread) {
-  parentPort.postMessage(evaluateFile(workerData.file));
+  parentPort.postMessage(await evaluateFile(workerData.file));
 } else {
   const files = readdirSync(folder)
     .filter((f) => f.endsWith(".json") && !f.endsWith(".meta.json"))

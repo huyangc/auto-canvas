@@ -116,6 +116,38 @@ export function cachedSamples(
   return { samples, entries: statuses };
 }
 
+/** Inject into the layout entry; API use must be explicitly enabled by the caller. */
+export function createPartitioner({
+  cacheDirectory = CACHE_DIRECTORY,
+  allowApi = false,
+  provider,
+  concurrency,
+  maxUsd,
+  entries = [],
+} = {}) {
+  return async ({ system, payload, sample, anonymize }) => {
+    const entry = allowApi
+      ? (
+          await runPartitionJobs(
+            [{ system, payload, sample, anonymize, entries }],
+            {
+              provider,
+              cacheDirectory,
+              concurrency,
+              maxUsd,
+            },
+          )
+        ).results[0]
+      : readCachedPartition(payload, sample, anonymize, cacheDirectory);
+    const parsed = entry && schema.safeParse(entry.output);
+    return entry &&
+      ["valid-first-try", "repaired"].includes(entry.status) &&
+      parsed.success
+      ? parsed.data
+      : undefined;
+  };
+}
+
 const usageCost = (usage) =>
   (usage.input_tokens * PROVIDER.usdPerMTok[0] +
     usage.output_tokens * PROVIDER.usdPerMTok[1]) /
@@ -220,7 +252,11 @@ export function validateCachedResult(document, resolver, entry, entries = []) {
         (i) => `${i.path.join(".")}: ${i.message}`,
       ),
     };
-  return llmResultToPartition(document, resolver, parsed.data, entries);
+  // Prepared-payload jobs only validate the wire schema. The layout entry
+  // reconciles their answers together, against its original document and units.
+  return document
+    ? llmResultToPartition(document, resolver, parsed.data, entries)
+    : { errors: [], l0Merges: 0 };
 }
 
 /** Shared scheduler for CLI and offline fake-provider tests. Samples are zero-based. */
@@ -247,7 +283,8 @@ export async function runPartitionJobs(
       anonymize = false,
       entries = [],
     } = job;
-    const payload = describeCircuit(document, resolver, anonymize, entries);
+    const payload =
+      job.payload ?? describeCircuit(document, resolver, anonymize, entries);
     const key = cacheKey(payload, sample, anonymize);
     const cached = readCachedPartition(
       payload,
@@ -286,7 +323,7 @@ export async function runPartitionJobs(
             betas: ["server-side-fallback-2026-07-01"],
             fallbacks: "default",
             output_config: { effort: "high", format: zodOutputFormat(schema) },
-            system: PARTITION_SYSTEM_PROMPT,
+            system: job.system ?? PARTITION_SYSTEM_PROMPT,
             messages: structuredClone(messages),
           });
         } catch (error) {

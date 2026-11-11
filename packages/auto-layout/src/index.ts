@@ -1,4 +1,9 @@
 export { planAutoLayout } from "./auto-layout.js";
+export {
+  llmPartition,
+  planAutoLayoutWithLlm,
+  type LlmPartitioner,
+} from "./llm-layout.js";
 export type {
   AutoLayoutOptions,
   AutoLayoutDiagnostic,
