@@ -1003,21 +1003,33 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   for magnetically coupled inductors (transformer, coupled tank or balun).
   The electrical payload includes `couplings: [{ members: [deviceId, deviceId], k }]`,
   sorted by member ids and then canonically by record; anonymization replaces
-  these ids too. Omit the key when no coupling exists. Keep each coupling in
-  one block. Recognition reports valid two-inductor couplings with `primary`
+  these ids too. Canonical device ordering includes valid couplings as edges
+  in both directions, labelled by `k` text and the endpoint's dotted pin.
+  Anonymous unit and structure hints assign primary/secondary roles in alias
+  order, so interchangeable windings still produce identical payloads under
+  instance reordering. Omit the key when no coupling exists. Keep each coupling
+  in one block. Recognition reports valid two-inductor couplings with `primary`
   and `secondary` roles in recorded member order; missing, non-inductor or
   invalid-dot members are ignored. Magnetic coupling forms an atomic unit
   across isolated windings, independent of rail and stage boundaries.
   A block consisting of a recognized cross-coupled pair or coupled-inductor
   pair receives its corresponding role and title. Cross-coupled candidates
   also join across R50 stages, keeping a rail-fed latch in one atomic unit.
-  Placement reuses the two-member `matched-pair` movement/persistence template,
-  deriving the dotted pins from the coupling record. In all three strategies,
-  inductors are vertical and side by side in id order, with `MEMBER_PITCH`
+  Placement joins connected components of valid couplings into one
+  `matched-pair` movement/persistence template per component, while recognition
+  keeps one structure per coupling. The two lowest ids are `members`; the rest
+  are sorted `extraMemberIds`. `coupledDotPins` has one entry per member in
+  member then extra-member order. If a winding has conflicting dotted pins,
+  use its coupling with the lowest coupling id to choose the dotted pin.
+  Every successful plan, including quick, search and partition plans, emits one
+  R143 `warning` with code `AUTO_LAYOUT_COUPLING_DOT_CONFLICT` per conflicting
+  winding, naming the member and coupling ids.
+  In all three strategies, inductors are vertical and side by side in id order, with `MEMBER_PITCH`
   between pin columns and dotted pins level at the top. A top/bottom reflection
   accommodates opposite electrical dot pins and different winding lengths.
-  Collision repair and annealing translate the pair rigidly. Conflicting fixed
-  placements refuse the template. The coupling and its members survive commit
+  Anchor the component at its first fixed member, or its first member when none
+  is fixed. Collision repair and annealing translate the whole component
+  rigidly. Conflicting fixed placements refuse the template. The coupling and its members survive commit
   unchanged; no model or connectivity edit is introduced.
   Block connectivity accepts non-rail nets (excluding MOS bulk pins) or valid
   listed couplings, so isolated primary and secondary circuits may share a block.

@@ -72,6 +72,18 @@ export function describeCircuit(
   const ids = new Map(
     devices.map((i, n) => [i.id, anonymize ? `D${n + 1}` : i.id]),
   );
+  // Primary/secondary are recorded presentation roles, not electrical edge
+  // direction. Assign them by alias in anonymous hints so interchangeable
+  // windings cannot change the payload when canonical aliases swap.
+  if (anonymize && electrical.inductorCouplings)
+    electrical.inductorCouplings = electrical.inductorCouplings.map(
+      (coupling) => ({
+        ...coupling,
+        members: [...coupling.members].sort((a, b) =>
+          compareIds(ids.get(a.instanceId) ?? "", ids.get(b.instanceId) ?? ""),
+        ) as typeof coupling.members,
+      }),
+    );
   const names = new Map<string, string[]>();
   const addName = (net: string, name: string) => {
     names.set(
@@ -153,7 +165,11 @@ export function describeCircuit(
       role: roles.byNet.get(net.id) ?? "internal",
       rail: roles.rails.get(net.id) ?? null,
     })),
-    units: recognitionUnits(document, resolver, entries).map((u) => ({
+    units: recognitionUnits(
+      { ...document, inductorCouplings: electrical.inductorCouplings },
+      resolver,
+      entries,
+    ).map((u) => ({
       id: u.id,
       kind: u.kind,
       ...(u.source === "template" && u.title ? { title: u.title } : {}),

@@ -55,7 +55,7 @@ import type {
   SymmetryComponent,
 } from "./types.js";
 
-/** R143: reuse the rigid pair template, aligned by dotted pins, not origins. */
+/** R143: reuse the rigid group template, aligned by dotted pins, not origins. */
 function placeCoupledInductors(
   document: SchematicDocument,
   resolver: SymbolResolver,
@@ -65,12 +65,13 @@ function placeCoupledInductors(
 ): string | undefined {
   for (const group of templates) {
     if (!group.coupledDotPins) continue;
-    const locals = group.members.map((id, index) => {
+    const members = [...group.members, ...(group.extraMemberIds ?? [])];
+    const locals = members.map((id, index) => {
       const instance = document.instances.find((i) => i.id === id)!;
       const pins = devicePins(instance, resolver);
       const dot = pins.find((p) => p.name === group.coupledDotPins![index])!;
       const other = pins.find((p) => p !== dot)!;
-      // Both winding axes stay vertical and bumps face the same side. Reflect
+      // All winding axes stay vertical and bumps face the same side. Reflect
       // top/bottom only when the electrical dot is on the second pin.
       const at = placement(0, 0, dot.at.y > other.at.y ? "vertical" : "none");
       const pin = transformPoint(dot.at, at.position, at);
@@ -79,16 +80,16 @@ function placeCoupledInductors(
     });
     const anchor = Math.max(
       0,
-      group.members.findIndex((id) => fixed.has(id)),
+      members.findIndex((id) => fixed.has(id)),
     );
-    const id = group.members[anchor]!;
+    const id = members[anchor]!;
     const old = fixed.has(id)
       ? document.instances.find((i) => i.id === id)!.placement
       : targets.get(id);
     if (!old) return "R143: fixed coupled inductor is unplaced";
     const dx = old.position.x - locals[anchor]!.position.x;
     const dy = old.position.y - locals[anchor]!.position.y;
-    for (const [index, id] of group.members.entries()) {
+    for (const [index, id] of members.entries()) {
       const next = locals[index]!;
       next.position.x += dx;
       next.position.y += dy;
@@ -134,7 +135,12 @@ function resolveCollisions(
   const join = (a: string, b: string) => parents.set(root(b), root(a));
   for (const { host, device } of attached) join(host.id, device.id);
   for (const group of templates)
-    if (group.coupledDotPins) join(...group.members);
+    if (group.coupledDotPins)
+      for (const id of [
+        ...group.members.slice(1),
+        ...(group.extraMemberIds ?? []),
+      ])
+        join(group.members[0], id);
   for (const c of symmetry) {
     const ids = [...c.pairs.flat(), ...c.axis];
     for (const id of ids.slice(1)) join(ids[0]!, id);
@@ -367,7 +373,7 @@ export function placeDocument(
   }
   const coupledIds = templates
     .filter((g) => g.coupledDotPins)
-    .flatMap((g) => g.members);
+    .flatMap((g) => [...g.members, ...(g.extraMemberIds ?? [])]);
   for (const id of fixed) {
     const old = document.instances.find((i) => i.id === id)?.placement;
     if (old) targets.set(id, structuredClone(old));
@@ -413,7 +419,7 @@ export function placeDocument(
     roles,
     targets,
     templates,
-    new Set([...fixed, ...attachmentIds, ...symmetryIds]),
+    new Set([...fixed, ...attachmentIds, ...symmetryIds, ...coupledIds]),
     overrides,
     choices,
   );
@@ -572,6 +578,7 @@ export function placeDocument(
     for (const group of templates) {
       const ids = [
         ...group.members,
+        ...(group.coupledDotPins ? (group.extraMemberIds ?? []) : []),
         ...(group.tailInstanceId ? [group.tailInstanceId] : []),
       ];
       const first = ids[0]!;

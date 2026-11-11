@@ -84,7 +84,11 @@ export function createMoveGenerator(
   };
   const grouped = new Set<string>();
   for (const g of groups) {
-    const ids = [...g.members, ...(g.tailInstanceId ? [g.tailInstanceId] : [])];
+    const ids = [
+      ...g.members,
+      ...(g.coupledDotPins ? (g.extraMemberIds ?? []) : []),
+      ...(g.tailInstanceId ? [g.tailInstanceId] : []),
+    ];
     for (const id of ids) {
       join(ids[0]!, id);
       grouped.add(id);

@@ -74,19 +74,64 @@ function branches(document: SchematicDocument, roles: NetRoles): Branch[] {
 }
 
 /** Ignore malformed records consistently in recognition and template reconstruction. */
-function validInductorCouplings(document: SchematicDocument) {
-  return (document.inductorCouplings ?? []).filter(
+export function validInductorCouplings(document: SchematicDocument) {
+  const couplings = document.inductorCouplings ?? [];
+  if (!couplings.length) return [];
+  const instances = new Map(document.instances.map((i) => [i.id, i]));
+  return couplings.filter(
     (coupling) =>
       coupling.members.length === 2 &&
       coupling.members[0].instanceId !== coupling.members[1].instanceId &&
       coupling.members.every((m) => {
-        const instance = document.instances.find((i) => i.id === m.instanceId);
+        const instance = instances.get(m.instanceId);
         return (
           instance &&
           couplableInductorPins(instance.symbolId)?.includes(m.dotPin)
         );
       }),
   );
+}
+
+/** R143: connected windings share one template and one dot choice per member. */
+function coupledGroups(document: SchematicDocument): RecognizedGroup[] {
+  const adjacent = new Map<string, string[]>();
+  const dots = new Map<string, { couplingId: string; pin: string }>();
+  for (const coupling of validInductorCouplings(document)) {
+    const [a, b] = coupling.members;
+    for (const [member, other] of [
+      [a, b],
+      [b, a],
+    ] as const) {
+      const id = member.instanceId;
+      if (!adjacent.has(id)) adjacent.set(id, []);
+      adjacent.get(id)!.push(other.instanceId);
+      const old = dots.get(id);
+      if (!old || compareIds(coupling.id, old.couplingId) < 0)
+        dots.set(id, { couplingId: coupling.id, pin: member.dotPin });
+    }
+  }
+  const groups: RecognizedGroup[] = [];
+  const visited = new Set<string>();
+  for (const id of adjacent.keys()) {
+    if (visited.has(id)) continue;
+    const ids = [id];
+    visited.add(id);
+    for (const member of ids)
+      for (const next of adjacent.get(member)!) {
+        if (visited.has(next)) continue;
+        visited.add(next);
+        ids.push(next);
+      }
+    ids.sort(compareIds);
+    groups.push({
+      id: `auto-matched-pair-${ids[0]}`,
+      kind: "matched-pair",
+      members: [ids[0]!, ids[1]!],
+      ...(ids.length > 2 ? { extraMemberIds: ids.slice(2) } : {}),
+      coupledDotPins: ids.map((member) => dots.get(member)!.pin),
+    });
+  }
+  return groups.sort((a, b) => compareIds(a.id, b.id));
 }
 
 /** Pure, role-aware topology recognition. Layout groups only affect movement units. */
@@ -483,8 +528,20 @@ function movementUnits(
 ): RecognizedGroup[] {
   const used = new Set(persisted),
     groups: RecognizedGroup[] = [];
+  if (structures.some((s) => s.kind === "coupled-inductors"))
+    for (const group of coupledGroups(document)) {
+      const ids = [...group.members, ...(group.extraMemberIds ?? [])];
+      // Older persisted pairs may own only part of a component. Reconstruct
+      // the whole electrical component whenever that persisted group touches it.
+      if (
+        ids.some((id) => used.has(id)) ||
+        (within && !ids.some((id) => within.has(id)))
+      )
+        continue;
+      groups.push(group);
+      ids.forEach((id) => used.add(id));
+    }
   for (const kind of [
-    "coupled-inductors",
     "cross-coupled-pair",
     "differential-pair",
     "current-mirror",
@@ -529,9 +586,7 @@ function movementUnits(
       )
         continue;
       const recordedKind =
-        kind === "cross-coupled-pair" ||
-        kind === "common-gate-pair" ||
-        kind === "coupled-inductors"
+        kind === "cross-coupled-pair" || kind === "common-gate-pair"
           ? "matched-pair"
           : kind;
       const group: RecognizedGroup = {
@@ -539,14 +594,6 @@ function movementUnits(
         kind: recordedKind,
         members: members as [string, string],
       };
-      if (kind === "coupled-inductors") {
-        const coupling = validInductorCouplings(document).find((c) =>
-          c.members.every((m) => members.includes(m.instanceId)),
-        )!;
-        group.coupledDotPins = members.map(
-          (id) => coupling.members.find((m) => m.instanceId === id)!.dotPin,
-        ) as [string, string];
-      }
       const tail = s.members.find((m) => m.role === "tail");
       if (tail) group.tailInstanceId = rep(tail);
       if (reference) group.diodeInstanceId = rep(reference);
@@ -693,7 +740,11 @@ export function persistedTemplates(
   });
   return alignStackedLoads(
     document,
-    groups,
+    groups.filter(
+      (group, index) =>
+        !group.coupledDotPins ||
+        groups.findIndex((other) => other.id === group.id) === index,
+    ),
     roles,
     movementUnits(document, structures, roles, new Set()),
   );
