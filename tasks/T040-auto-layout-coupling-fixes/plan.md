@@ -129,3 +129,8 @@ git ls-files tmp | head -1                           # expected: no output
 
 - No LLM calls; never set an API key.
 - Human cases stay git-ignored; never commit a case, excerpt, id or id-keyed data.
+
+### Round 2 amendment
+
+Owned paths gain `packages/auto-layout/src/auto-layout.ts`, only to emit step 1's R143
+dotted-pin conflict warning in the layout result.
