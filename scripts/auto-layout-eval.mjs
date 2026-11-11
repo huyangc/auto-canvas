@@ -37,6 +37,7 @@ import {
   partitionBounds,
 } from "../packages/auto-layout/dist/partition-geometry.js";
 import {
+  defaultLayoutSearch,
   llmPartition,
   planAutoLayout,
 } from "../packages/auto-layout/dist/index.js";
@@ -68,7 +69,7 @@ import {
 const [folder, ...args] = process.argv.slice(2);
 const flags = new Map();
 for (let i = 0; i < args.length; i += 2) {
-  if (["--fixed-human", "--anonymize"].includes(args[i])) {
+  if (["--quick", "--fixed-human", "--anonymize"].includes(args[i])) {
     flags.set(args[i], true);
     i--;
     continue;
@@ -89,7 +90,7 @@ for (let i = 0; i < args.length; i += 2) {
     args[i + 1] === undefined
   )
     throw new Error(
-      "Usage: auto-layout-eval.mjs <folder> [--baseline <report.json>] [--search <seconds>] [--seed <n>] [--jobs <n>] [--partition human|loadbench|llm --variant v1|v2] [--fixed-human] [--threshold <n>] [--split dev|val] [--samples k] [--anonymize] [--block-boxes on|off]",
+      "Usage: auto-layout-eval.mjs <folder> [--baseline <report.json>] [--quick | --search <seconds>] [--seed <n>] [--jobs <n>] [--partition human|loadbench|llm --variant v1|v2] [--fixed-human] [--threshold <n>] [--split dev|val] [--samples k] [--anonymize] [--block-boxes on|off]",
     );
   flags.set(args[i], args[i + 1]);
 }
@@ -98,6 +99,7 @@ const seconds = Number(flags.get("--search") ?? 0);
 const seed = Number(flags.get("--seed") ?? 1);
 const jobs = Number(flags.get("--jobs") ?? 1);
 if (
+  (flags.has("--quick") && flags.has("--search")) ||
   !Number.isFinite(seconds) ||
   seconds < 0 ||
   !Number.isFinite(seed) ||
@@ -382,7 +384,9 @@ async function evaluateFile(file) {
           );
     // Measure ratios against this document's actual quick result, even when
     // no baseline file was supplied. Keep this reference run outside timing.
-    const quickPlan = planAutoLayout(document, resolver);
+    const quickPlan = planAutoLayout(document, resolver, {
+      search: { seed, evaluations: 0 },
+    });
     const quickTransaction = apply(quickPlan);
     measurement.quick =
       quickTransaction?.ok && quickTransaction.applied
@@ -414,28 +418,34 @@ async function evaluateFile(file) {
     try {
       const curve = [];
       let evaluations = 0;
-      plan = planAutoLayout(
-        document,
-        resolver,
-        seconds
-          ? {
-              ...layoutOptions,
-              search: {
-                seed,
-                evaluations: 1_000_000_000,
-                deadline: Date.now() + seconds * 1000,
-                onProgress: (p) => {
-                  evaluations = p.evaluations;
-                  if (!curve.length || p.best < curve.at(-1).best)
-                    curve.push({
-                      ...p,
-                      milliseconds: performance.now() - start,
-                    });
-                },
-              },
-            }
-          : layoutOptions,
-      );
+      const quickMode =
+        fixedHuman ||
+        flags.has("--quick") ||
+        (flags.has("--search") && !seconds);
+      const budget = seconds
+        ? 1_000_000_000
+        : quickMode
+          ? 0
+          : defaultLayoutSearch(document).evaluations;
+      measurement.searchMode = seconds
+        ? "deadline"
+        : quickMode
+          ? "quick"
+          : "bounded";
+      measurement.evaluationBudget = budget;
+      plan = planAutoLayout(document, resolver, {
+        ...layoutOptions,
+        search: {
+          seed,
+          evaluations: budget,
+          ...(seconds ? { deadline: Date.now() + seconds * 1000 } : {}),
+          onProgress: (p) => {
+            evaluations = p.evaluations;
+            if (!curve.length || p.best < curve.at(-1).best)
+              curve.push({ ...p, milliseconds: performance.now() - start });
+          },
+        },
+      });
       measurement.evaluations = evaluations;
       measurement.bestScoreCurve = curve;
     } finally {

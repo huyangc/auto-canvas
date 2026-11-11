@@ -7,9 +7,13 @@ import { routedScore } from "../src/refine.js";
 import { repairBlockers } from "../src/blocker-repair.js";
 import { placement } from "../src/geometry.js";
 import { emptyOverrides } from "../src/layout-choices.js";
-import { auditRouting, floatingPins } from "../src/routing-audit.js";
+import {
+  auditRouting,
+  floatingPins,
+  missingConnections,
+} from "../src/routing-audit.js";
 import { terminalPartition } from "../src/transaction.js";
-import type { AutoLayoutResult } from "../src/types.js";
+import type { AutoLayoutResult, Placement } from "../src/types.js";
 import { circuit } from "./document-fixture.js";
 
 const resolver = new InMemorySymbolResolver(builtInSymbols);
@@ -387,4 +391,126 @@ it("R72 identifies the complete obstruction id when another port has its prefix"
     );
   });
   expect(attempts).toBeGreaterThan(0);
+});
+
+it("repairs a floating output port when a device blocks the route on a fine grid", () => {
+  const d = circuit(
+    { host: "npn", output: "port" },
+    { signal: ["host.B", "output.P"] },
+  );
+  d.netlist = {
+    name: "stage",
+    formalParameters: [],
+    terminals: [
+      {
+        id: "terminal-output",
+        name: "output",
+        netId: "signal",
+        direction: "output",
+        interfaceInstanceIds: ["output"],
+      },
+    ],
+  };
+  d.presentation.grid = 1;
+  const positions = new Map([
+    ["host", placement(70, 0)],
+    ["output", placement(270, 0, "horizontal")],
+  ]);
+  const fixed = new Set(["host"]);
+  const run = (exact: ReadonlyMap<string, Placement>) =>
+    planLayoutOnce(
+      d,
+      resolver,
+      { fixedInstanceIds: fixed },
+      emptyOverrides(),
+      "template",
+      true,
+      undefined,
+      undefined,
+      exact,
+    );
+  for (const i of d.instances) i.placement = positions.get(i.id)!;
+  const initial = run(positions);
+  expect(floatingPins(initial.final!, resolver)).toHaveLength(2);
+  const repaired = repairBlockers(initial, resolver, fixed, run);
+  expect(floatingPins(repaired.final!, resolver)).toEqual([]);
+  const final = apply(d, repaired.result);
+  expect(floatingPins(final, resolver)).toEqual([]);
+  expect(missingConnections(final, resolver)).toBe(0);
+  expect(terminalPartition(final, resolver)).toBe(
+    terminalPartition(d, resolver),
+  );
+  expect(final.instances.find((i) => i.id === "host")!.placement).toEqual(
+    positions.get("host"),
+  );
+});
+
+it("reduces crossings on a repaired fanout while preserving both branch connections", () => {
+  const d = circuit(
+    {
+      drive: "opamp-wide",
+      left: "npn",
+      right: "npn",
+      load1: "resistor",
+      load2: "resistor",
+      port: "port",
+    },
+    {
+      bus: ["drive.OUT", "left.B", "right.B", "port.P"],
+      branch1: ["left.E", "load1.1"],
+      branch2: ["right.E", "load2.1"],
+    },
+  );
+  d.presentation.grid = 1;
+  d.netlist = {
+    name: "amp",
+    formalParameters: [],
+    terminals: [
+      {
+        id: "out",
+        direction: "output",
+        name: "out",
+        netId: "bus",
+        interfaceInstanceIds: ["port"],
+      },
+    ],
+  };
+  const positions = new Map([
+    ["drive", placement(0, 0)],
+    ["left", placement(110, 0)],
+    ["right", placement(220, 0)],
+    ["load1", placement(110, 120)],
+    ["load2", placement(220, 120)],
+    ["port", placement(340, 0, "horizontal")],
+  ]);
+  for (const i of d.instances) i.placement = positions.get(i.id)!;
+  const run = (exact: ReadonlyMap<string, Placement>) =>
+    planLayoutOnce(
+      d,
+      resolver,
+      {},
+      emptyOverrides(),
+      "template",
+      true,
+      undefined,
+      undefined,
+      exact,
+    );
+  const source = run(positions);
+  expect(floatingPins(source.final!, resolver)).toHaveLength(2);
+  const fixed = apply(
+    d,
+    repairBlockers(source, resolver, new Set(["load1"]), run).result,
+  );
+  expect(fixed.instances.find((i) => i.id === "load1")?.placement).toEqual(
+    positions.get("load1"),
+  );
+  const final = apply(
+    d,
+    repairBlockers(source, resolver, new Set(), run).result,
+  );
+  expect(missingConnections(final, resolver)).toBe(0);
+  expect(auditRouting(fixed, resolver).crossings).toBe(2);
+  expect(auditRouting(final, resolver).crossings).toBeLessThan(2);
+  expect(auditRouting(final, resolver).unsafeProblems).toEqual([]);
 });

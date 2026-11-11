@@ -205,8 +205,10 @@ it("clusters only through non-rail Nets and uses enclosing drafting rectangles",
   expect(partition.blocks.map((b) => b.members)).toEqual([["a", "b"], ["c"]]);
   expect(partitionFromPlacement(d, resolver, 1)).toEqual(partition);
 });
-it("keeps no-partition output byte-identical to the approved base", () => {
-  const plan = planAutoLayout(sample(), resolver);
+it("keeps no-partition quick output byte-identical to the approved base", () => {
+  const plan = planAutoLayout(sample(), resolver, {
+    search: { seed: 1, evaluations: 0 },
+  });
   // Captured from f8f15fe before the experimental hooks were introduced.
   expect(createHash("sha256").update(JSON.stringify(plan)).digest("hex")).toBe(
     "ba140966571e32b95d7889af40b4f3e4dfb4e875c137e7f140044e2dd90a1683",

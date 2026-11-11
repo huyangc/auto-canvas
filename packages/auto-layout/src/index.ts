@@ -1,4 +1,4 @@
-export { planAutoLayout } from "./auto-layout.js";
+export { defaultLayoutSearch, planAutoLayout } from "./auto-layout.js";
 export {
   llmPartition,
   planAutoLayoutWithLlm,

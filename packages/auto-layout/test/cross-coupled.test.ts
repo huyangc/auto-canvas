@@ -235,7 +235,9 @@ it("R144 preserves non-cross-coupled edits and finishing calls", () => {
   );
   const calls = vi.spyOn(routing, "routeDocument");
   try {
-    const result = planAutoLayout(document, resolver);
+    const result = planAutoLayout(document, resolver, {
+      search: { seed: 1, evaluations: 0 },
+    });
     expect(
       createHash("sha256").update(JSON.stringify(result.edits)).digest("hex"),
     ).toBe("0df0b8f611cf0b452e15ea3cea4bee39bf8cd04057d1192117044dddae67489b");

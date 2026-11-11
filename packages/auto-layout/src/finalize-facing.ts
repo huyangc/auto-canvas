@@ -53,7 +53,12 @@ export function finalizeFacing(
   const metrics = refinementMetrics(result);
   if (metrics)
     metrics.score = routedScore(
-      { result, final: final.document, choices: emptyChoices() },
+      {
+        result,
+        final: final.document,
+        choices: emptyChoices(),
+        ...(options.partition ? { partition: options.partition } : {}),
+      },
       resolver,
     );
   return result;
