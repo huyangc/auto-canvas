@@ -15,13 +15,20 @@ import type { SymbolResolver } from "@icm/symbols";
 import { classifyNets, type NetRoles } from "./net-roles.js";
 import { compareIds, persistedTemplates } from "./recognize.js";
 import {
+  MEMBER_PITCH,
+  placement,
+  transformPoint,
   boxesIntersect,
   draftingBounds,
   enclosingBox,
   geometryProblem,
   withPlacements,
 } from "./geometry.js";
-import { isMarker, signalDistances } from "./placement-connectivity.js";
+import {
+  devicePins,
+  isMarker,
+  signalDistances,
+} from "./placement-connectivity.js";
 import {
   emptyChoices,
   emptyOverrides,
@@ -48,6 +55,60 @@ import type {
   SymmetryComponent,
 } from "./types.js";
 
+/** R143: reuse the rigid pair template, aligned by dotted pins, not origins. */
+function placeCoupledInductors(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  templates: RecognizedGroup[],
+  targets: Map<string, Placement>,
+  fixed: ReadonlySet<string>,
+): string | undefined {
+  for (const group of templates) {
+    if (!group.coupledDotPins) continue;
+    const locals = group.members.map((id, index) => {
+      const instance = document.instances.find((i) => i.id === id)!;
+      const pins = devicePins(instance, resolver);
+      const dot = pins.find((p) => p.name === group.coupledDotPins![index])!;
+      const other = pins.find((p) => p !== dot)!;
+      // Both winding axes stay vertical and bumps face the same side. Reflect
+      // top/bottom only when the electrical dot is on the second pin.
+      const at = placement(0, 0, dot.at.y > other.at.y ? "vertical" : "none");
+      const pin = transformPoint(dot.at, at.position, at);
+      at.position = { x: index * MEMBER_PITCH - pin.x, y: -pin.y };
+      return at;
+    });
+    const anchor = Math.max(
+      0,
+      group.members.findIndex((id) => fixed.has(id)),
+    );
+    const id = group.members[anchor]!;
+    const old = fixed.has(id)
+      ? document.instances.find((i) => i.id === id)!.placement
+      : targets.get(id);
+    if (!old) return "R143: fixed coupled inductor is unplaced";
+    const dx = old.position.x - locals[anchor]!.position.x;
+    const dy = old.position.y - locals[anchor]!.position.y;
+    for (const [index, id] of group.members.entries()) {
+      const next = locals[index]!;
+      next.position.x += dx;
+      next.position.y += dy;
+      if (fixed.has(id)) {
+        const old = document.instances.find((i) => i.id === id)!.placement;
+        if (
+          !old ||
+          old.rotation !== next.rotation ||
+          old.mirror !== next.mirror ||
+          old.position.x !== next.position.x ||
+          old.position.y !== next.position.y
+        )
+          return "R143: fixed placement conflicts with coupled-inductor template";
+      }
+      targets.set(id, next);
+    }
+  }
+  return undefined;
+}
+
 /** R24: repair unrelated collisions, preserving fixed/template conflicts. */
 function resolveCollisions(
   document: SchematicDocument,
@@ -72,6 +133,8 @@ function resolveCollisions(
   };
   const join = (a: string, b: string) => parents.set(root(b), root(a));
   for (const { host, device } of attached) join(host.id, device.id);
+  for (const group of templates)
+    if (group.coupledDotPins) join(...group.members);
   for (const c of symmetry) {
     const ids = [...c.pairs.flat(), ...c.axis];
     for (const id of ids.slice(1)) join(ids[0]!, id);
@@ -292,6 +355,19 @@ export function placeDocument(
       roles,
     );
   }
+  if (!given) {
+    const problem = placeCoupledInductors(
+      document,
+      resolver,
+      templates,
+      targets,
+      fixed,
+    );
+    if (problem) return { placements: targets, problem };
+  }
+  const coupledIds = templates
+    .filter((g) => g.coupledDotPins)
+    .flatMap((g) => g.members);
   for (const id of fixed) {
     const old = document.instances.find((i) => i.id === id)?.placement;
     if (old) targets.set(id, structuredClone(old));
@@ -315,7 +391,7 @@ export function placeDocument(
         resolver,
         roles,
         targets,
-        new Set([...fixed, ...symmetryIds]),
+        new Set([...fixed, ...symmetryIds, ...coupledIds]),
       );
   const attachmentIds = new Set(
     partitionDocuments({ ...document, instances: devices }, partition)
@@ -362,7 +438,7 @@ export function placeDocument(
         roles,
         templates,
         targets,
-        new Set([...fixed, ...symmetryIds]),
+        new Set([...fixed, ...symmetryIds, ...coupledIds]),
       );
   placeMarkers(document, resolver, roles, targets, overrides, choices, fixed);
   for (const id of fixed) {

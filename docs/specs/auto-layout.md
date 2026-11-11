@@ -75,14 +75,17 @@ width × height against the human; cohesion is summed pairwise block bounding-bo
 overlap area. Arrangement agreement is the share of block pairs matching all non-tied human
 centroid directions on both axes; it is null when no pair has a specified direction. Report completion counts alongside metrics so refusals stay visible.
 
-The experimental LLM adapter (`partition-prompt.ts`, prompt version 4) describes
+The experimental LLM adapter (`partition-prompt.ts`, prompt version 5) describes
 only electrical device classes, symbols, pin-to-Net membership, explicit terminal
 or label names, classified Net roles/rails, recognized structures and atomic units.
 Canonical device ordering uses labelled topology refinement and individualization,
 never placements or source ids. Anonymization substitutes `D1…` and removes display
 names. Unconnected pins have `net: null`. Drawing annotations, routes, drafting,
 references and group titles are excluded; recognized persisted template membership
-is used by unit recognition. The package remains pure and offline.
+is used by unit recognition. Prompt version 5 adds the `cross-coupled` and
+`coupled-inductors` roles and a canonical `couplings` list with device members
+and coupling coefficients; the key is absent when there are no couplings.
+Listed couplings must stay inside one block. The package remains pure and offline.
 
 The LLM returns `{ blocks: {id, title, role, units, reason}[], uncertain: string[] }`.
 It groups indivisible units and names functions, with no flow, positions, floorplan
@@ -992,6 +995,30 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   are added. Passives whose Nets both map to themselves retain the axis rule, including the exclusion of identical-topology twins regardless of
   pin order. A lone passive between two Nets that map to each other stays outside
   the component; this rule does not recognize it as an axis device.
+- **R143 — Coupled modules.** Prompt version 5 adds `cross-coupled` for a
+  regenerative transistor pair driving each other's control pins (latch,
+  comparator core, negative-resistance core or load), and `coupled-inductors`
+  for magnetically coupled inductors (transformer, coupled tank or balun).
+  The electrical payload includes `couplings: [{ members: [deviceId, deviceId], k }]`,
+  sorted by member ids and then canonically by record; anonymization replaces
+  these ids too. Omit the key when no coupling exists. Keep each coupling in
+  one block. Recognition reports valid two-inductor couplings with `primary`
+  and `secondary` roles in recorded member order; missing, non-inductor or
+  invalid-dot members are ignored. Magnetic coupling forms an atomic unit
+  across isolated windings, independent of rail and stage boundaries.
+  A block consisting of a recognized cross-coupled pair or coupled-inductor
+  pair receives its corresponding role and title. Cross-coupled candidates
+  also join across R50 stages, keeping a rail-fed latch in one atomic unit.
+  Placement reuses the two-member `matched-pair` movement/persistence template,
+  deriving the dotted pins from the coupling record. In all three strategies,
+  inductors are vertical and side by side in id order, with `MEMBER_PITCH`
+  between pin columns and dotted pins level at the top. A top/bottom reflection
+  accommodates opposite electrical dot pins and different winding lengths.
+  Collision repair and annealing translate the pair rigidly. Conflicting fixed
+  placements refuse the template. The coupling and its members survive commit
+  unchanged; no model or connectivity edit is introduced.
+  Block connectivity accepts non-rail nets (excluding MOS bulk pins) or valid
+  listed couplings, so isolated primary and secondary circuits may share a block.
 
 - **Existing locks and conflicts.** Members of a locked layout group or
   constraint are treated as fixed instances under R1, because the Edit Engine
@@ -1045,10 +1072,12 @@ exclude null ratios.
   differential-pair and differential-pair-mirror-load input/tail relations. Each
   relation joins every input finger and tail member; mirrors and other relations
   never join stages. Thus a two-terminal current-source tail stays with its pair.
-  Restrict each relation to each resulting stage, split it into components
-  through non-rail nets excluding MOS bulk pins, then union overlapping components.
+  Except for R143's atomic coupled pairs, restrict each relation to each resulting
+  stage, split it into components through non-rail nets excluding MOS bulk pins,
+  then union overlapping components.
   Every other non-marker device, including a bridge outside the stages, is a
-  singleton. Each unit is internally connected and stays within one stage;
+  singleton. Each unit is internally connected through non-rail nets or couplings;
+  units other than R143's coupled pairs stay within one stage;
   multi-output bias mirrors therefore separate their reference from outputs in
   other stages. Number
   units in canonical topology order. Canonical ordering minimizes the labelled-graph

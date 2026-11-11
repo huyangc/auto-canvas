@@ -11,6 +11,8 @@ export type BlockRole =
   | "gain"
   | "output"
   | "load"
+  | "cross-coupled"
+  | "coupled-inductors"
   | "cmfb"
   | "compensation"
   | "switch"
@@ -50,6 +52,8 @@ export interface RecognizedGroup {
   kind: "differential-pair" | "current-mirror" | "matched-pair";
   members: [string, string];
   facing?: "inward" | "outward";
+  /** R143: polarity pins in member order; rederived from electrical coupling. */
+  coupledDotPins?: [string, string];
   extraMemberIds?: string[];
   diodeInstanceId?: string;
   tailInstanceId?: string;
@@ -67,6 +71,8 @@ export interface AutoLayoutResult {
 
 export interface StructureMember {
   role:
+    | "primary"
+    | "secondary"
     | "reference"
     | "output"
     | "input"
@@ -83,6 +89,7 @@ export interface Structure {
     | "current-mirror"
     | "differential-pair"
     | "cross-coupled-pair"
+    | "coupled-inductors"
     | "matched-pair"
     | "differential-pair-mirror-load"
     | "common-gate-pair";

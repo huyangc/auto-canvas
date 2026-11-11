@@ -4,7 +4,7 @@ import { classifyNets, isMosBulk } from "./net-roles.js";
 import { devicePins, isMarker } from "./placement-connectivity.js";
 import { adjustedRandIndex } from "./partition-metrics.js";
 import type { LlmPartitionResult } from "./partition-prompt.js";
-import { compareIds } from "./recognize.js";
+import { compareIds, recognizeSubstructures } from "./recognize.js";
 import {
   recognitionUnits,
   roleEvidence,
@@ -27,6 +27,9 @@ export function partitionInvariantErrors(
   const errors: string[] = [];
   const devices = document.instances.filter((i) => !isMarker(i));
   const roles = classifyNets(document, resolver);
+  const couplings = recognizeSubstructures(document, roles)
+    .structures.filter((s) => s.kind === "coupled-inductors")
+    .map((s) => s.members.flatMap((m) => m.instanceIds));
   const nets = new Map(
     devices.map((i) => [
       i.id,
@@ -54,7 +57,10 @@ export function partitionInvariantErrors(
     for (const id of reached)
       for (const other of remaining)
         if (
-          [...(nets.get(id) ?? [])].some((net) => nets.get(other)?.has(net))
+          [...(nets.get(id) ?? [])].some((net) => nets.get(other)?.has(net)) ||
+          couplings.some(
+            (members) => members.includes(id) && members.includes(other),
+          )
         ) {
           reached.push(other);
           remaining.delete(other);

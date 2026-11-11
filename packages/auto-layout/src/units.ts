@@ -172,6 +172,7 @@ const strength: Structure["kind"][] = [
   "differential-pair",
   "current-mirror",
   "cross-coupled-pair",
+  "coupled-inductors",
   "common-gate-pair",
   "matched-pair",
 ];
@@ -309,7 +310,7 @@ function pairCandidates(
   return result;
 }
 
-/** @internal R110: union connected, stage-local candidate relations. */
+/** @internal R110/R143: union stage-local relations and atomic coupled pairs. */
 export function recognitionUnits(
   document: SchematicDocument,
   resolver: SymbolResolver,
@@ -407,6 +408,12 @@ export function recognitionUnits(
   for (const candidate of candidates) {
     const members = candidate.members.filter((m) => index.has(m.id));
     const connected = unionFind(members.map((m) => m.id));
+    // Magnetic coupling and cross-driving controls are atomic across stages.
+    if (
+      candidate.kind === "coupled-inductors" ||
+      candidate.kind === "cross-coupled-pair"
+    )
+      connected.join(members.map((m) => m.id));
     for (const [n, a] of members.entries())
       for (const b of members.slice(n + 1))
         if (
@@ -561,6 +568,13 @@ export function roleEvidence(
     ),
   );
   return {
+    coupledRole: structures.find(
+      (s) =>
+        ["cross-coupled-pair", "coupled-inductors"].includes(s.kind) &&
+        members.every((id) =>
+          s.members.some((m) => m.instanceIds.includes(id)),
+        ),
+    )?.kind,
     differential,
     gateInput,
     differentialInput,
@@ -578,6 +592,8 @@ export function inferRole(
   members: string[],
 ): BlockRole {
   const e = roleEvidence(document, resolver, members);
+  if (e.coupledRole === "cross-coupled-pair") return "cross-coupled";
+  if (e.coupledRole === "coupled-inductors") return "coupled-inductors";
   if (e.differentialInput) return "input";
   if (e.differential) return "gain";
   if (e.bias && !e.interfaceNet) return "bias";
@@ -605,6 +621,8 @@ const titles: Record<BlockRole, string> = {
   gain: "Gain stage",
   output: "Output stage",
   load: "Load",
+  "cross-coupled": "Cross-coupled pair",
+  "coupled-inductors": "Coupled inductors",
   cmfb: "Common-mode feedback",
   compensation: "Compensation",
   switch: "Switch",
