@@ -26,9 +26,10 @@ export interface LayoutPartition {
   arrangement?: Record<string, { x: number; y: number }>;
 }
 export interface AutoLayoutOptions {
-  /** Experimental, internal; partitioned placement runs in quick mode only. */
+  /** Optional partition constraints for placement. */
   partition?: LayoutPartition;
   fixedInstanceIds?: ReadonlySet<string>;
+  /** Omit for bounded deterministic search; zero evaluations selects quick mode. */
   search?: {
     seed: number;
     evaluations: number;

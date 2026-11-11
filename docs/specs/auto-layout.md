@@ -158,8 +158,16 @@ AutoLayoutDiagnostic[] }`. Fixed instances retain their exact placements;
   by R11–R13; (g) transfer removed power-marker name claims by R12;
   (h) re-anchor labels by R15. Place tray instances; for placed
   instances emit rotation, mirror and movement in that order, only when
-  changed. Preserve drafting, annotation content/bindings, Net membership and
+  changed. Preserve drafting content and style, annotation content/bindings, Net membership and
   existing layout groups. Never delete instances or reset the drawing.
+  After selecting and facing the final layout, move compact, unlocked drafting
+  labels with a clear source association. Match a nearby branch dot by the
+  Net's terminal membership and unique visible branch, and attach the text
+  to an incident conductor. A nearby device caption gets an object anchor.
+  Prefer the source ink offset and check candidate seats against final symbol,
+  wire, dot, label and drafting geometry. Distant or ambiguous free text
+  stays at its authored position. Repeated layout treats captions attached to
+  parts or recognized branches as moving ink during placement.
 - **R3 — Content and limit.** Recognize NMOS, PMOS, resistors, capacitors,
   inductors (including compact), voltage/current sources, ground, VDD and
   port/filled-port markers. Other symbols, including hierarchy and multi-pin
@@ -485,7 +493,7 @@ pins }` lists, never Net ids.
   R55's unrefined comparison: R61 was removed because round 1 measured no
   meaningful quality benefit for its extra planning time.
 
-- **R66 — Offline annealing.** Optional `search` takes `seed: number`,
+- **R66 — Bounded annealing.** By default use seed 1 and at most eight additional routed evaluations for up to 40 instances (including ports and markers), or two for larger documents. This is a candidate budget, not a time limit. Explicit `search` takes `seed: number`,
   `evaluations: number`, `deadline?: number` (epoch milliseconds),
   `signal?: AbortSignal`, and
   `onProgress?: (p: { evaluations: number; best: number; current: number }) => void`.
@@ -513,7 +521,11 @@ pins }` lists, never Net ids.
   deadline checks reserve time for finishing and the routing alternative.
   After repair, R96 replans the search's final best with R95; annealing energy
   evaluations do not rip up. R97 then compacts only the R44 winner. A zero
-  evaluation budget equals quick mode.
+  evaluation budget equals quick mode (evaluator: `--quick`). Compare both
+  finalists after repair, compaction and facing. Retain quick on a score tie,
+  any increase in missing connections or floating pins, or a strictly dominated
+  wire layout at equal connectivity (crossings, bends and wire length; include
+  block intrusion for partitioned placements).
 
 - **R67 — Bounded offline span.** Use the completed quick result's bounding
   box of all instances, including markers, as the search reference. Reject
@@ -566,16 +578,24 @@ pins }` lists, never Net ids.
   (`port`, `port-filled`) and descriptor-defined net markers named as R14
   obstructions. The unchanged router throws plain errors, so resolve only its
   obstruction label (`reference ?? id`) to an unambiguous instance; do not use
-  Net names, suggested detours or coordinates from the message. A local R71
+  Net names, suggested detours or coordinates from the message. If R14 has no
+  movable blocking marker, use physically floating, unlocked ports as alternative
+  repair targets. A local R71
   port falls back to R19/R20. An edge port advances by R20 spacing along its
   edge; a power marker advances by grid steps along its rail in R6a/R12 id
   order. Choose the nearest free seat in either direction, with positive ties, whose
   ink clears other pin branch rows/columns and R43 horizontal rail spans.
   Preserve every device, fixed instance and unrelated marker placement, and
   replay the complete routing/transaction pipeline. Keep a repair only with
-  strictly fewer floating pins and a strictly lower R22 routed score, so an
+  no increase in missing connections, strictly fewer floating pins and a lower R22 routed score, so an
   unrouted Net outweighs the few crossings its route may add; try at most two
-  passes.
+  passes. If reseating a formerly floating port completes all nets but leaves
+  its signal fanout crossed, allow one further full replan outside the energy
+  budget. For same-row hosts with one declared output driver on an outer
+  column, exchange the driver column with the median host column and face
+  horizontal receiver pins toward it. Skip partitions and moves that touch
+  fixed, constrained or grouped instances. Keep the candidate only with
+  complete, safe routing, fewer crossings and a lower routed score.
   In R66, repair only the final best state and its routing-only alternative
   before R44, within R67 span bounds, with no repair work per energy evaluation.
 

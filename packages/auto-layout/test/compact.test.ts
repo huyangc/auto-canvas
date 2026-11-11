@@ -192,7 +192,9 @@ it("R97 compacts the routed finalist only for a strict score decrease and repeat
   );
   const spy = vi.spyOn(compaction, "compactPlacements");
   try {
-    const result = planAutoLayout(document, resolver);
+    const result = planAutoLayout(document, resolver, {
+      search: { seed: 1, evaluations: 0 },
+    });
     expect(spy).toHaveBeenCalledTimes(1);
     const finalist = spy.mock.calls[0]![0];
     const applied = preview(document, resolver, result.edits);
@@ -204,7 +206,9 @@ it("R97 compacts the routed finalist only for a strict score decrease and repeat
       enclosingBox(finalist, resolver).width,
     );
     expect(score(applied.document)).toBeLessThan(score(finalist));
-    const repeated = planAutoLayout(applied.document, resolver);
+    const repeated = planAutoLayout(applied.document, resolver, {
+      search: { seed: 1, evaluations: 0 },
+    });
     expect(repeated.diagnostics).toEqual([]);
     expect(
       repeated.edits.filter((e) =>
@@ -241,8 +245,14 @@ it.each([
         document,
         resolver,
         kind === "fixed"
-          ? { fixedInstanceIds: new Set(["a"]) }
-          : { partition: { blocks: [{ id: "block", members: ["a", "b"] }] } },
+          ? {
+              search: { seed: 1, evaluations: 0 },
+              fixedInstanceIds: new Set(["a"]),
+            }
+          : {
+              search: { seed: 1, evaluations: 0 },
+              partition: { blocks: [{ id: "block", members: ["a", "b"] }] },
+            },
       );
       expect(result.diagnostics).toEqual([]);
       expect(spy).not.toHaveBeenCalled();

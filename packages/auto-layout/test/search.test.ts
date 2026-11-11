@@ -1,13 +1,18 @@
 import { createHash } from "node:crypto";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { executeTransaction } from "@icm/edit-engine";
 import type { SchematicDocument } from "@icm/model";
 import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
-import { planAutoLayout, planLayoutOnce } from "../src/auto-layout.js";
+import {
+  defaultLayoutSearch,
+  planAutoLayout,
+  planLayoutOnce,
+} from "../src/auto-layout.js";
 import { enclosingBox, geometryProblem, placement } from "../src/geometry.js";
 import { emptyChoices } from "../src/layout-choices.js";
 import { routedScore } from "../src/refine.js";
 import { auditRouting } from "../src/routing-audit.js";
+import * as annealing from "../src/search.js";
 import { searchBounds } from "../src/search-bounds.js";
 import { createMoveGenerator, randomStream } from "../src/search-moves.js";
 import { lostNameClaim, terminalPartition } from "../src/transaction.js";
@@ -60,7 +65,9 @@ const score = (result: AutoLayoutResult, final: SchematicDocument) =>
 
 it("R66 keeps the byte-identical pre-search quick result", () => {
   const document = crossed();
-  const result = planAutoLayout(document, resolver);
+  const result = planAutoLayout(document, resolver, {
+    search: { seed: 1, evaluations: 0 },
+  });
   // T023 records the quick result after Base Net clearance and partial routing.
   // commit checks equivalence and safety; the previous quick result had one crossing.
   expect(
@@ -74,9 +81,31 @@ it("R66 keeps the byte-identical pre-search quick result", () => {
   ).toEqual(result);
 }, 30000);
 
+it("uses a bounded search by default and retains the zero-budget quick path", () => {
+  const document = crossed();
+  const policy = defaultLayoutSearch(document);
+  const counts: number[] = [];
+  const explicit = planAutoLayout(document, resolver, {
+    search: { ...policy, onProgress: (p) => counts.push(p.evaluations) },
+  });
+  expect(counts.at(-1)).toBeGreaterThan(0);
+  expect(counts.at(-1)).toBeLessThanOrEqual(policy.evaluations);
+  const spy = vi.spyOn(annealing, "annealLayout");
+  try {
+    expect(planAutoLayout(document, resolver)).toEqual(explicit);
+    expect(spy.mock.calls.map((call) => call[2])).toEqual([
+      { seed: 1, evaluations: 8 },
+    ]);
+  } finally {
+    spy.mockRestore();
+  }
+}, 30000);
+
 it("R66 repeats the same seed/budget and improves a known same-row swap", () => {
   const document = crossed();
-  const quick = planAutoLayout(document, resolver),
+  const quick = planAutoLayout(document, resolver, {
+      search: { seed: 1, evaluations: 0 },
+    }),
     before = commit(document, quick);
   expect(auditRouting(before, resolver).crossings).toBe(1);
   const targets = new Map(
@@ -143,7 +172,9 @@ it.each(["before", "during", "deadline"] as const)(
         },
       },
     });
-    const quick = planAutoLayout(document, resolver);
+    const quick = planAutoLayout(document, resolver, {
+      search: { seed: 1, evaluations: 0 },
+    });
     expect(score(result, commit(document, result))).toBeLessThanOrEqual(
       score(quick, commit(document, quick)),
     );
@@ -201,7 +232,9 @@ it("R66 translates recognized pairs and their tail rigidly", () => {
       },
     ],
   };
-  const quick = planAutoLayout(document, resolver),
+  const quick = planAutoLayout(document, resolver, {
+      search: { seed: 1, evaluations: 0 },
+    }),
     before = commit(document, quick);
   expect(quick.groups.some((g) => g.kind === "differential-pair")).toBe(true);
   const result = planAutoLayout(document, resolver, {
@@ -234,7 +267,9 @@ it("R66 translates recognized pairs and their tail rigidly", () => {
 
 it("R66 proposals reject overlaps, fixed units and off-grid positions before routing", () => {
   const document = crossed(),
-    quick = planAutoLayout(document, resolver),
+    quick = planAutoLayout(document, resolver, {
+      search: { seed: 1, evaluations: 0 },
+    }),
     after = commit(document, quick);
   const propose = createMoveGenerator(
     document,
@@ -286,7 +321,9 @@ it.each([1, 2, 3])(
       id: "orphan-net",
       terminals: [{ instanceId: "orphan", pinName: "0" }],
     });
-    const quick = planAutoLayout(document, resolver);
+    const quick = planAutoLayout(document, resolver, {
+      search: { seed: 1, evaluations: 0 },
+    });
     const before = commit(document, quick);
     const box = enclosingBox(before, resolver);
     const result = planAutoLayout(document, resolver, {
@@ -318,7 +355,10 @@ it("R67 canonicalizes a translated state before regenerating orphan markers", ()
     id: "orphan-net",
     terminals: [{ instanceId: "orphan", pinName: "0" }],
   });
-  const quick = commit(document, planAutoLayout(document, resolver));
+  const quick = commit(
+    document,
+    planAutoLayout(document, resolver, { search: { seed: 1, evaluations: 0 } }),
+  );
   const bounds = searchBounds(quick, resolver);
   const evaluate = (translation: number) => {
     const given = new Map(
@@ -397,7 +437,9 @@ it("R66 builds search units from the same templates as quick placement", () => {
       p(b).mirror,
     ];
   };
-  const quick = commit(planAutoLayout(d, resolver).edits);
+  const quick = commit(
+    planAutoLayout(d, resolver, { search: { seed: 1, evaluations: 0 } }).edits,
+  );
   const state = {
     placements: new Map(quick.instances.map((i) => [i.id, i.placement!])),
     sides: new Map(),

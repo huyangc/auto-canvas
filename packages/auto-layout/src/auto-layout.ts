@@ -11,6 +11,10 @@ import type { SymbolResolver } from "@icm/symbols";
 import { geometryProblem } from "./geometry.js";
 import { repairBlockers } from "./blocker-repair.js";
 import { freedAnnotations, reanchorLabels } from "./labels.js";
+import {
+  followDraftingLabels,
+  placementDrafting,
+} from "./follow-drafting-labels.js";
 import { finalizeFacing } from "./finalize-facing.js";
 import { seatLabels } from "./seat-labels.js";
 import { timePlanning } from "./timing.js";
@@ -26,7 +30,11 @@ import {
   restorePinGroups,
   terminalPartition,
 } from "./transaction.js";
-import { auditRouting, floatingPins } from "./routing-audit.js";
+import {
+  auditRouting,
+  floatingPins,
+  missingConnections,
+} from "./routing-audit.js";
 import { classifyNets } from "./net-roles.js";
 import { placeDocument } from "./place.js";
 import {
@@ -63,24 +71,31 @@ import { annealLayout } from "./search.js";
 import { compactPlacements } from "./compact.js";
 import { symmetryTopology } from "./symmetry.js";
 
+/** Additional routed evaluations; the quick planner and finalist repairs are separate. */
+export function defaultLayoutSearch(document: SchematicDocument) {
+  return { seed: 1, evaluations: document.instances.length <= 40 ? 8 : 2 };
+}
+
 export function planAutoLayout(
   document: SchematicDocument,
   resolver: SymbolResolver,
   options: AutoLayoutOptions = {},
 ): AutoLayoutResult {
+  const plan = () =>
+    timePlanning(() =>
+      followDraftingLabels(
+        document,
+        resolver,
+        planAutoLayoutMeasured(document, resolver, options),
+        options.partition,
+      ),
+    );
   if (options.partition) {
     const validated = validatePartition(document, resolver, options.partition);
     if (validated.diagnostics.some((d) => d.severity === "error"))
       return { edits: [], groups: [], diagnostics: validated.diagnostics };
     options = { ...options, partition: validated.partition };
-    let result = timePlanning(() =>
-      finalizeFacing(
-        document,
-        resolver,
-        options,
-        planAutoLayoutMeasured(document, resolver, options),
-      ),
-    );
+    let result = plan();
     const problem = result.diagnostics.find((d) => d.severity === "error");
     if (!validated.partition.arrangement && (problem || !result.edits.length)) {
       const { partition: _partition, ...fallbackOptions } = options;
@@ -114,14 +129,7 @@ export function planAutoLayout(
     }
     return result;
   }
-  return timePlanning(() =>
-    finalizeFacing(
-      document,
-      resolver,
-      options,
-      planAutoLayoutMeasured(document, resolver, options),
-    ),
-  );
+  return plan();
 }
 
 function planAutoLayoutMeasured(
@@ -367,7 +375,7 @@ function planAutoLayoutMeasured(
       selected = result;
   }
   // Reuse the selected placement and refinement choices; do not search again.
-  const rawAlternative = planLayoutOnce(
+  const alternative = planLayoutOnce(
     document,
     resolver,
     options,
@@ -375,21 +383,15 @@ function planAutoLayoutMeasured(
     selected.strategy,
     false,
   );
-  if (!options.search)
-    return finish(selected.run, rawAlternative, selected.strategy, true);
-  const alternative = rawAlternative;
-  const quick = selectRoutingAlternative(
-    selected.run,
-    alternative,
-    resolver,
-    selected.strategy,
-    selected.run.result,
-  );
-  const quickRun = quick === alternative.result ? alternative : selected.run;
+  const search = options.search ?? defaultLayoutSearch(document);
+  const quickRun =
+    routedScore(alternative, resolver) < routedScore(selected.run, resolver)
+      ? alternative
+      : selected.run;
   const best = annealLayout(
     document,
     resolver,
-    options.search,
+    search,
     fixed,
     { run: selected.run, strategy: selected.strategy },
     ranked.map(({ run, strategy }) => ({ run, strategy })),
@@ -409,18 +411,63 @@ function planAutoLayoutMeasured(
       return run;
     },
   );
-  // A zero evaluation budget retains quick mode's two finalists; annealLayout
-  // above still validates the search request and emits its progress event.
-  if (options.search.evaluations === 0)
-    return finish(selected.run, alternative, selected.strategy, true);
-  // R72/R96/R97 run only after annealing, never in the per-evaluation callback.
-  if (quickRun.final) repairBounds = searchBounds(quickRun.final, resolver);
-  return finish(
-    best.run,
-    best.alternative ?? best.run,
-    best.strategy,
-    best.run !== alternative,
+  const quickResult = finalizeFacing(
+    document,
+    resolver,
+    options,
+    finish(selected.run, alternative, selected.strategy, true),
   );
+  if (best.run === quickRun) return quickResult;
+
+  // Compare the two *finished* layouts: repair, compaction and port facing
+  // can reverse the ranking of the provisional plans used by annealing.
+  if (quickRun.final) repairBounds = searchBounds(quickRun.final, resolver);
+  const searched = finalizeFacing(
+    document,
+    resolver,
+    options,
+    finish(
+      best.run,
+      best.alternative ?? best.run,
+      best.strategy,
+      best.run !== alternative,
+    ),
+  );
+  if (
+    (refinementMetrics(searched)?.score ?? Infinity) >=
+    (refinementMetrics(quickResult)?.score ?? Infinity)
+  )
+    return quickResult;
+  const before = preview(document, resolver, quickResult.edits);
+  const after = preview(document, resolver, searched.edits);
+  if (!after.ok) return quickResult;
+  if (before.ok) {
+    const missed =
+      missingConnections(after.document, resolver) -
+      missingConnections(before.document, resolver);
+    const floating =
+      floatingPins(after.document, resolver).length -
+      floatingPins(before.document, resolver).length;
+    if (missed > 0 || floating > 0) return quickResult;
+    if (!missed && !floating) {
+      const first = auditRouting(before.document, resolver);
+      const second = auditRouting(after.document, resolver);
+      const deltas = [
+        second.crossings - first.crossings,
+        second.bends - first.bends,
+        second.wireLength - first.wireLength,
+      ];
+      if (options.partition)
+        deltas.push(
+          blockIntrusion(after.document, resolver, options.partition) -
+            blockIntrusion(before.document, resolver, options.partition),
+        );
+      // Do not trade a strictly dominated wire layout for secondary score terms.
+      if (deltas.every((d) => d >= 0) && deltas.some((d) => d > 0))
+        return quickResult;
+    }
+  }
+  return searched;
 }
 
 /** @internal One complete default/candidate plan, also used to verify refinement. */
@@ -547,7 +594,13 @@ function buildPlan(
           ),
         }
       : placeDocument(
-          { ...document, junctions: [] },
+          {
+            ...document,
+            junctions: [],
+            ...(document.drafting
+              ? { drafting: placementDrafting(document, resolver)! }
+              : {}),
+          },
           resolver,
           roles,
           groups,

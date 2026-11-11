@@ -402,7 +402,9 @@ it("R44 compares one routing-only replay of the selected refined placement", () 
   const comparison = vi.spyOn(refinement, "selectRoutingAlternative");
   const compact = vi.spyOn(compaction, "compactPlacements");
   try {
-    const result = planAutoLayout(document, resolver);
+    const result = planAutoLayout(document, resolver, {
+      search: { seed: 1, evaluations: 0 },
+    });
     expect(routes.mock.calls.filter((call) => call[5] === false)).toHaveLength(
       1,
     );
@@ -460,7 +462,9 @@ it("R63 gives the second refinement slot to the next distinct strategy", () => {
   const search = vi.spyOn(refinement, "refineLayout");
   const routes = vi.spyOn(routing, "routeDocument");
   try {
-    const result = planAutoLayout(document, resolver);
+    const result = planAutoLayout(document, resolver, {
+      search: { seed: 1, evaluations: 0 },
+    });
     expect(result.diagnostics.filter((d) => d.severity === "error")).toEqual(
       [],
     );
