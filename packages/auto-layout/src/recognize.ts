@@ -1,3 +1,4 @@
+import { couplableInductorPins } from "@icm/derived";
 import { deviceDescriptor } from "@icm/devices";
 import type { Instance, SchematicDocument } from "@icm/model";
 import {
@@ -70,6 +71,22 @@ function branches(document: SchematicDocument, roles: NetRoles): Branch[] {
       });
   }
   return [...grouped.values()];
+}
+
+/** Ignore malformed records consistently in recognition and template reconstruction. */
+function validInductorCouplings(document: SchematicDocument) {
+  return (document.inductorCouplings ?? []).filter(
+    (coupling) =>
+      coupling.members.length === 2 &&
+      coupling.members[0].instanceId !== coupling.members[1].instanceId &&
+      coupling.members.every((m) => {
+        const instance = document.instances.find((i) => i.id === m.instanceId);
+        return (
+          instance &&
+          couplableInductorPins(instance.symbolId)?.includes(m.dotPin)
+        );
+      }),
+  );
 }
 
 /** Pure, role-aware topology recognition. Layout groups only affect movement units. */
@@ -413,6 +430,15 @@ export function recognizeSubstructures(
       }
     }
   }
+  for (const coupling of validInductorCouplings(document)) {
+    structures.push({
+      kind: "coupled-inductors",
+      members: coupling.members.map((m, index) => ({
+        role: index === 0 ? "primary" : "secondary",
+        instanceIds: [m.instanceId],
+      })),
+    });
+  }
   for (const s of structures)
     s.members.sort(
       (a, b) =>
@@ -458,6 +484,7 @@ function movementUnits(
   const used = new Set(persisted),
     groups: RecognizedGroup[] = [];
   for (const kind of [
+    "coupled-inductors",
     "cross-coupled-pair",
     "differential-pair",
     "current-mirror",
@@ -502,7 +529,9 @@ function movementUnits(
       )
         continue;
       const recordedKind =
-        kind === "cross-coupled-pair" || kind === "common-gate-pair"
+        kind === "cross-coupled-pair" ||
+        kind === "common-gate-pair" ||
+        kind === "coupled-inductors"
           ? "matched-pair"
           : kind;
       const group: RecognizedGroup = {
@@ -510,6 +539,14 @@ function movementUnits(
         kind: recordedKind,
         members: members as [string, string],
       };
+      if (kind === "coupled-inductors") {
+        const coupling = validInductorCouplings(document).find((c) =>
+          c.members.every((m) => members.includes(m.instanceId)),
+        )!;
+        group.coupledDotPins = members.map(
+          (id) => coupling.members.find((m) => m.instanceId === id)!.dotPin,
+        ) as [string, string];
+      }
       const tail = s.members.find((m) => m.role === "tail");
       if (tail) group.tailInstanceId = rep(tail);
       if (reference) group.diodeInstanceId = rep(reference);
@@ -639,7 +676,9 @@ export function persistedTemplates(
       document,
       structures.filter(
         (s) =>
-          (s.kind === "cross-coupled-pair" || s.kind === "common-gate-pair"
+          (s.kind === "cross-coupled-pair" ||
+          s.kind === "common-gate-pair" ||
+          s.kind === "coupled-inductors"
             ? "matched-pair"
             : s.kind) === g.kind ||
           (g.kind === "matched-pair" &&

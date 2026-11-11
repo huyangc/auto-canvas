@@ -10,7 +10,7 @@ import type { FingerprintEntry } from "./fingerprint.js";
 import type { BlockRole } from "./types.js";
 
 /** @internal Frozen experiment prompt; bump whenever instructions change. */
-export const PROMPT_VERSION = "4";
+export const PROMPT_VERSION = "5";
 /** @internal Shared with the script's strict structured-output schema. */
 export const BLOCK_ROLES = [
   "bias",
@@ -18,6 +18,8 @@ export const BLOCK_ROLES = [
   "gain",
   "output",
   "load",
+  "cross-coupled",
+  "coupled-inductors",
   "cmfb",
   "compensation",
   "switch",
@@ -29,10 +31,13 @@ export const PARTITION_SYSTEM_PROMPT = `Partition this analog circuit into funct
 Return blocks (id, title, role, units, reason) and uncertain (unit ids).
 Roles: bias supplies operating currents/voltages; input receives signals; gain amplifies;
 output drives the external output; load is an active/passive load; cmfb controls common mode;
+cross-coupled is a regenerative pair whose devices drive each other's control pins (latch, comparator core, negative-resistance core or load);
+coupled-inductors is inductors coupled magnetically (transformer, coupled tank, balun) and listed under couplings;
 compensation stabilizes feedback; switch switches signals; logic is digital control; other is the remainder.
 Use only supplied unit ids, each in at most one block. Never split a unit.
+Keep each listed coupling inside one block.
 Units you are unsure of may be omitted from blocks and listed in uncertain.
-Each block must be one connected sub-circuit through non-rail nets, excluding MOS bulk pins.
+Each block must be one connected sub-circuit through non-rail nets or listed couplings, excluding MOS bulk pins.
 Do not collect disconnected branches merely because they share a function or device class.
 Choose small meaningful blocks with concise display titles and explain grouping in reason.
 Only identify functions and membership. Do not propose positions, a floorplan, flow, or block order.
@@ -58,6 +63,7 @@ export function describeCircuit(
     ...(i.symbolVariantId ? { symbolVariantId: i.symbolVariantId } : {}),
     ...(i.netlist ? { netlist: i.netlist } : {}),
   }));
+  electrical.inductorCouplings = document.inductorCouplings;
   electrical.nets = document.nets;
   electrical.netlist = document.netlist;
   electrical.connectivityEvidence = document.connectivityEvidence;
@@ -102,14 +108,32 @@ export function describeCircuit(
   // The legacy structure recognizer selects matched pairs by id. Give this
   // descriptive hint canonical aliases too, so it cannot leak source ordering.
   const canonicalIds = new Map(devices.map((i, n) => [`D${n + 1}`, i.id]));
+  const aliases = new Map(devices.map((i, n) => [i.id, `D${n + 1}`]));
   const structures = recognizeSubstructures(
     {
       ...electrical,
       instances: devices.map((i, n) => ({ ...i, id: `D${n + 1}` })),
+      inductorCouplings: electrical.inductorCouplings
+        ?.filter((c) => c.members.every((m) => aliases.has(m.instanceId)))
+        .map((c) => ({
+          ...c,
+          members: c.members.map((m) => ({
+            ...m,
+            instanceId: aliases.get(m.instanceId)!,
+          })) as typeof c.members,
+        })),
     },
     { ...roles, pinNet: (id, pin) => roles.pinNet(canonicalIds.get(id)!, pin) },
   ).structures;
+  const couplings = (electrical.inductorCouplings ?? [])
+    .filter((c) => c.members.every((m) => ids.has(m.instanceId)))
+    .map((c) => ({
+      members: c.members.map((m) => ids.get(m.instanceId)!).sort(compareIds),
+      k: c.k,
+    }))
+    .sort((a, b) => compareIds(JSON.stringify(a), JSON.stringify(b)));
   return {
+    ...(couplings.length ? { couplings } : {}),
     devices: devices.map((i) => ({
       id: ids.get(i.id)!,
       deviceClass: deviceDescriptor(i.symbolId)?.deviceClass ?? "unknown",
