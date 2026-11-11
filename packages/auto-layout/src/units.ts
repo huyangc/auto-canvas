@@ -14,6 +14,7 @@ import {
   compareIds,
   persistedTemplates,
   recognizeSubstructures,
+  validInductorCouplings,
 } from "./recognize.js";
 import { matchFingerprints, type FingerprintEntry } from "./fingerprint.js";
 import { findStages, parallelAttachments } from "./stages.js";
@@ -147,6 +148,20 @@ export function canonicalDevices(
       edges[to]!.push({ to: index, label: pin.name });
     }
   });
+  const deviceIndex = new Map(
+    devices.map((device, index) => [device.id, index]),
+  );
+  for (const coupling of validInductorCouplings(document)) {
+    const [a, b] = coupling.members;
+    for (const [member, other] of [
+      [a, b],
+      [b, a],
+    ] as const)
+      edges[deviceIndex.get(member.instanceId)!]!.push({
+        to: deviceIndex.get(other.instanceId)!,
+        label: JSON.stringify(["coupling", coupling.k, member.dotPin]),
+      });
+  }
   return canonicalOrder(labels, edges)
     .filter((i) => i < devices.length)
     .map((i) => devices[i]!);

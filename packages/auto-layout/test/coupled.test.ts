@@ -16,6 +16,7 @@ import {
 import { validatePartition } from "../src/partition.js";
 import { partitionInvariantErrors } from "../src/partition-reconcile.js";
 import {
+  persistedTemplates,
   recognizeStructures,
   recognizeSubstructures,
 } from "../src/recognize.js";
@@ -341,4 +342,290 @@ it("ignores malformed records before a valid coupling when reconstructing moveme
       (s) => s.kind === "coupled-inductors",
     ),
   ).toHaveLength(1);
+});
+
+function threeWindings(k = "0.8") {
+  const d = circuit({ A: "inductor", B: "inductor", C: "inductor" }, {});
+  d.instances[2]!.placement = {
+    position: { x: 500, y: 300 },
+    rotation: 270,
+    mirror: "none",
+  };
+  d.inductorCouplings = [
+    {
+      id: "K1",
+      name: "K1",
+      k: "0.9",
+      members: [
+        { instanceId: "A", dotPin: "1" },
+        { instanceId: "B", dotPin: "1" },
+      ],
+    },
+    {
+      id: "K2",
+      name: "K2",
+      k,
+      members: [
+        { instanceId: "B", dotPin: "1" },
+        { instanceId: "C", dotPin: "2" },
+      ],
+    },
+  ];
+  return d;
+}
+
+function assertThreeWindings(d: SchematicDocument, dots = ["1", "1", "2"]) {
+  const pins = pinPoints(d, resolver);
+  const points = ["A", "B", "C"].map((id, index) => {
+    const dot = pins.find(
+      (p) => p.instanceId === id && p.pinName === dots[index],
+    )!;
+    const other = pins.find(
+      (p) => p.instanceId === id && p.pinName !== dots[index],
+    )!;
+    expect(dot.point.x).toBe(other.point.x);
+    expect(dot.point.y).toBeLessThan(other.point.y);
+    expect(d.instances.find((i) => i.id === id)!.placement!.rotation).toBe(0);
+    return dot.point;
+  });
+  for (const [index, point] of points.entries()) {
+    expect(point.x).toBe(points[0]!.x + index * MEMBER_PITCH);
+    expect(point.y).toBe(points[0]!.y);
+  }
+}
+
+it.each(["template", "layered", "stages"] as const)(
+  "places and persists all three windings together in %s placement",
+  (strategy) => {
+    const d = threeWindings();
+    const roles = classifyNets(d, resolver);
+    expect(recognizeStructures(d, roles)).toEqual([
+      {
+        id: "auto-matched-pair-A",
+        kind: "matched-pair",
+        members: ["A", "B"],
+        extraMemberIds: ["C"],
+        coupledDotPins: ["1", "1", "2"],
+      },
+    ]);
+    expect(
+      recognizeSubstructures(d, roles).structures.filter(
+        (s) => s.kind === "coupled-inductors",
+      ),
+    ).toHaveLength(2);
+    const final = commit(
+      d,
+      planLayoutOnce(d, resolver, {}, emptyOverrides(), strategy).result,
+    );
+    assertThreeWindings(final);
+    expect(final.layoutGroups[0]!.objectIds).toEqual(["A", "B", "C"]);
+    final.instances.find((i) => i.id === "C")!.placement!.rotation = 270;
+    assertThreeWindings(
+      commit(
+        final,
+        planLayoutOnce(final, resolver, {}, emptyOverrides(), strategy).result,
+      ),
+    );
+  },
+);
+
+it("preserves the three-winding component in seeded search and movement proposals", () => {
+  const d = threeWindings();
+  const final = commit(
+    d,
+    planAutoLayout(d, resolver, { search: { seed: 143, evaluations: 8 } }),
+  );
+  assertThreeWindings(final);
+  for (const source of [d, final]) {
+    const move = createMoveGenerator(
+      source,
+      resolver,
+      new Set(),
+      randomStream(143),
+    );
+    let state = {
+      placements: new Map(final.instances.map((i) => [i.id, i.placement!])),
+      sides: new Map(),
+      strategy: "stages" as const,
+    };
+    let accepted = 0;
+    for (let n = 0; n < 100; n++) {
+      const next = move(state);
+      if (!next) continue;
+      accepted++;
+      assertThreeWindings({
+        ...final,
+        instances: final.instances.map((i) => ({
+          ...i,
+          placement: next.placements.get(i.id)!,
+        })),
+      });
+      state = { ...state, placements: next.placements };
+    }
+    expect(accepted).toBeGreaterThan(0);
+  }
+});
+
+it("anchors a component at its fixed extra member and refuses conflicting orientation", () => {
+  const final = commit(
+    threeWindings(),
+    planAutoLayout(threeWindings(), resolver),
+  );
+  final.instances[0]!.placement!.rotation = 270;
+  final.instances[1]!.placement!.position.y += 200;
+  const options = { fixedInstanceIds: new Set(["C"]) };
+  const next = commit(
+    final,
+    planLayoutOnce(final, resolver, options, emptyOverrides()).result,
+  );
+  assertThreeWindings(next);
+  expect(next.instances[2]!.placement).toEqual(final.instances[2]!.placement);
+  final.instances[2]!.placement!.rotation = 270;
+  const refused = planLayoutOnce(
+    final,
+    resolver,
+    options,
+    emptyOverrides(),
+  ).result;
+  expect(refused.edits).toEqual([]);
+  expect(refused.diagnostics).toContainEqual(
+    expect.objectContaining({
+      severity: "error",
+      message: expect.stringContaining(
+        "fixed placement conflicts with coupled-inductor template",
+      ),
+    }),
+  );
+});
+
+it.each([
+  { partitioned: false, search: undefined },
+  { partitioned: false, search: { seed: 143, evaluations: 8 } },
+  { partitioned: true, search: undefined },
+  { partitioned: true, search: { seed: 143, evaluations: 8 } },
+])(
+  "warns once and chooses the lowest coupling id's dot with options %j",
+  ({ partitioned, search }) => {
+    const d = threeWindings();
+    const options = {
+      ...(search ? { search } : {}),
+      ...(partitioned ? { partition: rulePartition(d, resolver) } : {}),
+    };
+    expect(planAutoLayout(d, resolver, options).diagnostics).toEqual([]);
+    d.inductorCouplings![0]!.members[1].dotPin = "2";
+    const expected = [
+      {
+        severity: "warning",
+        code: "AUTO_LAYOUT_COUPLING_DOT_CONFLICT",
+        rule: "R143",
+        message:
+          "Inductor B: conflicting dotted pins in couplings K1, K2; using pin 2 from K1",
+      },
+    ];
+    const result = planAutoLayout(d, resolver, options);
+    expect(result.diagnostics).toEqual(expected);
+    const final = commit(d, result);
+    assertThreeWindings(final, ["1", "2", "2"]);
+    expect(planAutoLayout(final, resolver, options).diagnostics).toEqual([
+      ...expected,
+      ...(partitioned
+        ? [
+            {
+              severity: "warning",
+              code: "AUTO_LAYOUT_PARTITION_FALLBACK",
+              rule: "partition",
+              message: "Partition placement produced no edits",
+            },
+          ]
+        : []),
+    ]);
+    d.inductorCouplings!.reverse();
+    d.instances.reverse();
+    const reversed = planAutoLayout(d, resolver, options);
+    expect(reversed.diagnostics).toEqual(expected);
+    assertThreeWindings(commit(d, reversed), ["1", "2", "2"]);
+  },
+);
+
+it("reports each conflicting winding separately", () => {
+  const d = threeWindings();
+  d.inductorCouplings![0]!.members[1].dotPin = "2";
+  d.inductorCouplings!.push({
+    id: "K3",
+    name: "K3",
+    k: "0.7",
+    members: [
+      { instanceId: "A", dotPin: "2" },
+      { instanceId: "C", dotPin: "2" },
+    ],
+  });
+  const result = planAutoLayout(d, resolver);
+  expect(result.diagnostics).toEqual([
+    {
+      severity: "warning",
+      code: "AUTO_LAYOUT_COUPLING_DOT_CONFLICT",
+      rule: "R143",
+      message:
+        "Inductor A: conflicting dotted pins in couplings K1, K3; using pin 1 from K1",
+    },
+    {
+      severity: "warning",
+      code: "AUTO_LAYOUT_COUPLING_DOT_CONFLICT",
+      rule: "R143",
+      message:
+        "Inductor B: conflicting dotted pins in couplings K1, K2; using pin 2 from K1",
+    },
+  ]);
+  assertThreeWindings(commit(d, result), ["1", "2", "2"]);
+});
+
+it.each(["0.8", "0.9"])(
+  "canonicalizes isolated winding payloads, units and structures with second k %s",
+  (k) => {
+    const d = threeWindings(k);
+    // Identical symbols and dotted pins: only coupling connectivity can distinguish them.
+    d.inductorCouplings![1]!.members[1].dotPin = "1";
+    const payload = describeCircuit(d, resolver, true);
+    for (const order of [
+      [2, 1, 0],
+      [1, 0, 2],
+      [1, 2, 0],
+      [2, 0, 1],
+      [0, 2, 1],
+    ]) {
+      const shuffled = { ...d, instances: order.map((n) => d.instances[n]!) };
+      const actual = describeCircuit(shuffled, resolver, true);
+      expect(actual.units).toEqual(payload.units);
+      expect(actual.structures).toEqual(payload.structures);
+      expect(JSON.stringify(actual)).toBe(JSON.stringify(payload));
+    }
+  },
+);
+
+it("reconstructs a whole component from overlapping persisted pair groups", () => {
+  const d = threeWindings();
+  d.layoutGroups = [
+    {
+      id: "old-ab",
+      kind: "matched-pair",
+      objectIds: ["A", "B"],
+      locked: false,
+    },
+    {
+      id: "old-bc",
+      kind: "matched-pair",
+      objectIds: ["B", "C"],
+      locked: false,
+    },
+  ];
+  expect(persistedTemplates(d, classifyNets(d, resolver))).toEqual([
+    {
+      id: "auto-matched-pair-A",
+      kind: "matched-pair",
+      members: ["A", "B"],
+      extraMemberIds: ["C"],
+      coupledDotPins: ["1", "1", "2"],
+    },
+  ]);
+  assertThreeWindings(commit(d, planAutoLayout(d, resolver)));
 });

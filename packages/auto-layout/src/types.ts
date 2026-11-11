@@ -52,8 +52,8 @@ export interface RecognizedGroup {
   kind: "differential-pair" | "current-mirror" | "matched-pair";
   members: [string, string];
   facing?: "inward" | "outward";
-  /** R143: polarity pins in member order; rederived from electrical coupling. */
-  coupledDotPins?: [string, string];
+  /** R143: polarity pins in member then extra-member order; rederived from electrical coupling. */
+  coupledDotPins?: string[];
   extraMemberIds?: string[];
   diodeInstanceId?: string;
   tailInstanceId?: string;

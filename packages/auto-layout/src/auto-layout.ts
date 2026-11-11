@@ -32,6 +32,7 @@ import {
   compareIds,
   recognizeStructures,
   recognizeSubstructures,
+  validInductorCouplings,
 } from "./recognize.js";
 import type {
   AutoLayoutOptions,
@@ -454,6 +455,28 @@ export function planLayoutOnce(
   return run;
 }
 
+function couplingDotWarnings(document: SchematicDocument) {
+  const members = new Map<string, { couplingId: string; pin: string }[]>();
+  for (const coupling of validInductorCouplings(document))
+    for (const member of coupling.members) {
+      const dots = members.get(member.instanceId) ?? [];
+      dots.push({ couplingId: coupling.id, pin: member.dotPin });
+      members.set(member.instanceId, dots);
+    }
+  return [...members]
+    .filter(([, dots]) => dots.some((dot) => dot.pin !== dots[0]!.pin))
+    .sort(([a], [b]) => compareIds(a, b))
+    .map(([id, dots]) => {
+      dots.sort((a, b) => compareIds(a.couplingId, b.couplingId));
+      return {
+        severity: "warning" as const,
+        code: "AUTO_LAYOUT_COUPLING_DOT_CONFLICT",
+        rule: "R143",
+        message: `Inductor ${id}: conflicting dotted pins in couplings ${dots.map((dot) => dot.couplingId).join(", ")}; using pin ${dots[0]!.pin} from ${dots[0]!.couplingId}`,
+      };
+    });
+}
+
 function buildPlan(
   document: SchematicDocument,
   resolver: SymbolResolver,
@@ -779,6 +802,7 @@ function buildPlan(
         rule: "R10",
         message,
       })),
+      ...couplingDotWarnings(document),
     ],
   };
 }
