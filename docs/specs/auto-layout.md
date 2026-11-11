@@ -747,9 +747,10 @@ pins }` lists, never Net ids.
 - **R88 — Seeded symmetry.** Detect an involution over devices and Base Nets
   from R81 differential input representatives and cross-coupled pairs, independently
   of placements and persisted layout groups. Rails map to themselves; markers
-  are excluded. Paired devices imply paired Nets at every same-named symbol pin,
-  including MOS bulk. Paired Nets imply same-symbol, family-compatible devices
-  only for mutually unique unmapped candidates at the same pin name. A self Net
+  are excluded. Paired devices imply paired Nets through their pin correspondence:
+  equal pin names, including MOS bulk, except for R142 non-polar passives.
+  Paired Nets imply same-symbol, family-compatible devices only for mutually unique
+  unmapped candidates at the same pin name, or either passive pin under R142. A self Net
   similarly pairs mutually unique devices, except on rails: rail connectivity
   never pairs devices. An unmapped device whose connected
   Nets all map to themselves and that has no unmapped identical-topology twin
@@ -901,7 +902,7 @@ pins }` lists, never Net ids.
 
 - **R130a — Partition validation and local templates.** Only recognition
   unit splits cause planner merges. Preserve the diagnostic text `L0 structure
-  split across …; merged into …` for evaluation tooling. Trim each recognized
+split across …; merged into …` for evaluation tooling. Trim each recognized
   or persisted group to each block's members, including parallel members;
   fewer than two surviving members no longer form a group. Drop tail and diode
   references outside that block. Symmetry components retain whole local pairs
@@ -977,6 +978,20 @@ pins }` lists, never Net ids.
   produce byte-identical results. The evaluation script uses a cache-only
   partitioner and `llmPartition`; for measurement compatibility its no-answer path
   still plans with the rule-only partition.
+- **R142 — Non-polar passives.** Same-symbol, family-compatible resistors,
+  capacitors and inductors with exactly two pins pair by their unordered pair of
+  Nets. Select the pin correspondence that agrees with non-self entries of the
+  current Net involution, ignoring self-mapped defaults; prefer equal pin names
+  when both orders fit or there is no non-self evidence. Seeds and all other
+  devices keep equal pin names. Use the selected correspondence for device-pair validation, Net implications and axis-twin checks.
+  A free passive with pin `p` on a non-self mapped Net `n ↔ m` finds candidates
+  with any pin `q` on `m`. Use `p ↔ q` and map the remaining pins to each other,
+  without requiring anything of the other Nets. Candidates must remain mutually
+  unique in both directions. Self-Net candidate matching retains equal pin names.
+  Every pre-existing pair retains its correspondence; only swapped passive pairs
+  are added. Passives whose Nets both map to themselves retain the axis rule, including the exclusion of identical-topology twins regardless of
+  pin order. A lone passive between two Nets that map to each other stays outside
+  the component; this rule does not recognize it as an axis device.
 
 - **Existing locks and conflicts.** Members of a locked layout group or
   constraint are treated as fixed instances under R1, because the Edit Engine
