@@ -21,6 +21,26 @@ annotates (visible in the Gallery bandgap `2adejzy693`: reference names and
 "A"/"nA" notes float above an empty band). This task makes drafting move with
 the parts it annotates.
 
+## Plan change after round 1 (Opus, 2026-11-12)
+
+- **Contract tests.** The three failing assertions encode the R10 rule this
+  task replaces. Round 2 may rewrite them as follows; no other assertion may be
+  weakened.
+  - `routing.test.ts:578`: split into two cases. (a) The rectangle that
+    overlaps the resistor in the input is owned by it: it moves with the
+    resistor, keeping its input offset, and may keep overlapping its own owner
+    as it did in the input (an owner is not a collision for its own drafting;
+    fix the implementation accordingly instead of seating it beside the
+    owner). (b) A new rectangle far from every part (no owner in reach) keeps
+    the old contract: drafting unchanged, layout translated down by the
+    minimum grid amount, the same clearance assertions.
+  - `corpus.test.ts:201` (`rc-lowpass`, `rc-highpass`): assert drafting
+    content, style, dimensions, z-order and lock state unchanged, and each
+    moved object within reach of its owner; positions may change.
+- **Timing.** The plan's p95 criterion is aggregate (current p95 / base p95 ≤
+  1.5); round 1 measured 1.40×, which passes. Keep reporting the per-case
+  ratio p95 for information.
+
 ## Context
 
 - R10 (`docs/specs/auto-layout.md:242-244`), implemented in `place.ts:500-556`:

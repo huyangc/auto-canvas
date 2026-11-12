@@ -167,6 +167,7 @@ export function crossingsByNet(
 export function auditRouting(
   document: SchematicDocument,
   resolver: SymbolResolver,
+  preservedDraftingOwners: ReadonlyMap<string, string> = new Map(),
 ) {
   const routes = document.routes.flatMap((r) => {
     const geometry = resolveRouteGeometry(document, resolver, r);
@@ -178,7 +179,10 @@ export function auditRouting(
   const boxes = visibleInstanceBounds(document, resolver);
   for (const object of draftingBounds(document, resolver)) {
     for (const box of boxes)
-      if (boxesIntersect(box.bounds, object.bounds))
+      if (
+        box.id !== preservedDraftingOwners.get(object.id) &&
+        boxesIntersect(box.bounds, object.bounds)
+      )
         draftingProblems.push(
           `Instance ${box.id} intersects drafting ${object.id}`,
         );
