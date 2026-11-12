@@ -197,7 +197,9 @@ it.each([60, 85])(
     expect(auditRouting(result.document, resolver).unsafeProblems).toEqual([]);
     expect(JSON.stringify(d)).toBe(before);
   },
-  30000,
+  // Two full plans; the final pin-contact search took the 85-device case
+  // past 30 s on CI (12 s before it). Same allowance as the held-out tests.
+  60000,
 );
 
 it("R37 keeps a grounded source driving passives out of the rail constraints", () => {
