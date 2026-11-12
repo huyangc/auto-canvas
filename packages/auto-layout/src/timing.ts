@@ -31,6 +31,13 @@ export function timePlanning(plan: () => AutoLayoutResult): AutoLayoutResult {
     return result;
   } finally {
     active = previous;
+    // A nested planning pass (R150 plans twice) reports its phases to the
+    // enclosing measurement too, so the outer result is not left at zero.
+    if (previous) {
+      previous.seating += timing.seating;
+      previous.readability += timing.readability;
+      previous.seatingCalls += timing.seatingCalls;
+    }
   }
 }
 
