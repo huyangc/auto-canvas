@@ -85,6 +85,7 @@ import {
 import { annealLayout } from "./search.js";
 import { compactPlacements, compactRows } from "./compact.js";
 import { symmetryTopology } from "./symmetry.js";
+import { searchPortSeats } from "./port-seat-search.js";
 
 /** Additional routed evaluations; the quick planner and finalist repairs are separate. */
 export function defaultLayoutSearch(document: SchematicDocument) {
@@ -96,18 +97,39 @@ export function planAutoLayout(
   resolver: SymbolResolver,
   options: AutoLayoutOptions = {},
 ): AutoLayoutResult {
+  return planAutoLayoutInternal(document, resolver, options, true);
+}
+
+function planAutoLayoutInternal(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  options: AutoLayoutOptions,
+  portSearch: boolean,
+): AutoLayoutResult {
+  // R146 compares label-finished results. Avoid applying these passes twice
+  // when the measured planner already finished its incumbent and trials.
+  const finishedLabels = new WeakSet<AutoLayoutResult>();
+  const finishLabels = (result: AutoLayoutResult) => {
+    if (finishedLabels.has(result)) return result;
+    const finished = separateLabels(
+      document,
+      resolver,
+      followDraftingLabels(document, resolver, result, options.partition),
+      options,
+    );
+    finishedLabels.add(finished);
+    return finished;
+  };
   const plan = () =>
     timePlanning(() =>
-      separateLabels(
-        document,
-        resolver,
-        followDraftingLabels(
+      finishLabels(
+        planAutoLayoutMeasured(
           document,
           resolver,
-          planAutoLayoutMeasured(document, resolver, options),
-          options.partition,
+          options,
+          portSearch,
+          finishLabels,
         ),
-        options,
       ),
     );
   if (options.partition) {
@@ -119,7 +141,12 @@ export function planAutoLayout(
     const problem = result.diagnostics.find((d) => d.severity === "error");
     if (!validated.partition.arrangement && (problem || !result.edits.length)) {
       const { partition: _partition, ...fallbackOptions } = options;
-      result = planAutoLayout(document, resolver, fallbackOptions);
+      result = planAutoLayoutInternal(
+        document,
+        resolver,
+        fallbackOptions,
+        false,
+      );
       result.diagnostics.push({
         severity: "warning",
         code: "AUTO_LAYOUT_PARTITION_FALLBACK",
@@ -156,6 +183,8 @@ function planAutoLayoutMeasured(
   document: SchematicDocument,
   resolver: SymbolResolver,
   options: AutoLayoutOptions,
+  portSearch: boolean,
+  finishLabels: (result: AutoLayoutResult) => AutoLayoutResult,
 ): AutoLayoutResult {
   const fixed = new Set(options.fixedInstanceIds);
   for (const owner of [...document.layoutGroups, ...document.constraints])
@@ -577,6 +606,58 @@ function planAutoLayoutMeasured(
     stopped,
     replan,
   );
+  if (
+    portSearch &&
+    !options.partition &&
+    options.quality !== "optimized" &&
+    search.evaluations > 0 &&
+    document.instances.length <= 40 &&
+    !stopped()
+  ) {
+    const incumbent = finishLabels(contactResult);
+    const replay = preview(document, resolver, incumbent.edits);
+    if (!replay.ok) return contactResult;
+    const initial = {
+      result: incumbent,
+      final: replay.document,
+      choices: emptyChoices(),
+    };
+    return searchPortSeats(initial, resolver, fixed, (placements) => {
+      const routeSeat = (signalTrunks: boolean) =>
+        planLayoutOnce(
+          document,
+          resolver,
+          options,
+          emptyOverrides(),
+          strategy,
+          signalTrunks,
+          undefined,
+          undefined,
+          placements,
+        );
+      // Every trial goes through the same finalist repairs, compaction, facing
+      // and labels as the incumbent before R146 compares any score or guard.
+      const finished = finishLabels(
+        rerouteCrossings(
+          document,
+          resolver,
+          finalizeFacing(
+            document,
+            resolver,
+            options,
+            finish(routeSeat(true), routeSeat(false), strategy, true),
+          ),
+          () => false,
+        ),
+      );
+      const final = preview(document, resolver, finished.edits);
+      return {
+        result: finished,
+        choices: initial.choices,
+        ...(final.ok ? { final: final.document } : {}),
+      };
+    }).result;
+  }
   if (
     options.quality !== "optimized" ||
     fixed.size ||
