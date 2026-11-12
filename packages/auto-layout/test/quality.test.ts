@@ -194,6 +194,9 @@ it.each(cases)(
     ).toBeLessThanOrEqual(routedScore(initial, resolver));
     expect(refinementMetrics(plan)!.candidates).toBeLessThanOrEqual(24);
   },
+  // Plans twice and once more without refinement; the final pin-contact
+  // search makes this exceed the 5 s default on slow CI runners.
+  15000,
 );
 
 it("R23 refuses a replay Route crossing an Instance and overlapping another Net", () => {
