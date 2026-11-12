@@ -1,8 +1,16 @@
 import { resolveRouteGeometry, visibleInstanceBounds } from "@icm/derived";
 import type { SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
-import { pinPoints } from "./geometry.js";
-import type { Placement } from "./types.js";
+import { CELL_PIN_OFFSET, pinPoints } from "./geometry.js";
+import {
+  deviceNets,
+  devicePins,
+  isMarker,
+  isSignalBlock,
+} from "./placement-connectivity.js";
+import { parallelAttachments, driverAttachments } from "./stages.js";
+import type { NetRoles } from "./net-roles.js";
+import type { Placement, RecognizedGroup } from "./types.js";
 
 const MARGIN = 20;
 const WIRE_MARGIN = 10;
@@ -73,6 +81,24 @@ export function compactPlacements(
     ]);
   const left = Math.min(...boxes.map((b) => b.bounds.x));
   const right = Math.max(...boxes.map((b) => b.bounds.x + b.bounds.width));
+  return closeGaps(
+    document,
+    "x",
+    left,
+    right,
+    occupied,
+    new Map(boxes.map((b) => [b.id, b.bounds.x])),
+  );
+}
+
+function closeGaps(
+  document: SchematicDocument,
+  axis: "x" | "y",
+  left: number,
+  right: number,
+  occupied: [number, number][],
+  offset: ReadonlyMap<string, number>,
+): Map<string, Placement> | undefined {
   const gaps: { end: number; width: number }[] = [];
   occupied.sort((a, b) => a[0] - b[0]);
   let cursor = left;
@@ -90,17 +116,99 @@ export function compactPlacements(
     document.instances.flatMap((instance) => {
       const old = instance.placement;
       if (!old) return [];
-      const x = byId.get(instance.id)?.x ?? left;
+      const coordinate = offset.get(instance.id) ?? left;
       const shift = gaps.reduce(
-        (sum, gap) => sum + (gap.end <= x ? gap.width : 0),
+        (sum, gap) => sum + (gap.end <= coordinate ? gap.width : 0),
         0,
       );
       return [
         [
           instance.id,
-          { ...old, position: { ...old.position, x: old.position.x - shift } },
+          {
+            ...old,
+            position: { ...old.position, [axis]: old.position[axis] - shift },
+          },
         ] as const,
       ];
     }),
+  );
+}
+
+/** Sweep horizontal bands. Every protected span translates as one, including
+ * overlapping spans from different groups. Wires can be rebuilt between them. */
+export function compactRows(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  rigid: readonly (readonly string[])[],
+  roles: NetRoles,
+  groups: RecognizedGroup[],
+): Map<string, Placement> | undefined {
+  const boxes = visibleInstanceBounds(document, resolver);
+  if (!boxes.length) return undefined;
+  const devices = document.instances.filter((i) => !isMarker(i));
+  const byId = new Map(document.instances.map((i) => [i.id, i]));
+  const occupied: [number, number][] = boxes.map(({ id, bounds: b }) => {
+    const center = byId.get(id)!.placement!.position.y;
+    return [
+      Math.min(center, b.y) - MARGIN,
+      Math.max(center, b.y + b.height) + MARGIN,
+    ];
+  });
+  function bind(ids: readonly string[]) {
+    const ys = ids.flatMap((id) => byId.get(id)?.placement?.position.y ?? []);
+    if (ys.length > 1) occupied.push([Math.min(...ys), Math.max(...ys)]);
+  }
+  for (const ids of rigid) bind(ids);
+  for (const c of document.constraints) bind(c.objectIds);
+  for (const c of document.inductorCouplings ?? [])
+    bind(c.members.map((m) => m.instanceId));
+  for (const { device, host } of parallelAttachments(devices, resolver, roles))
+    bind([device.id, host.id]);
+  for (const { stage, host } of driverAttachments(
+    devices,
+    resolver,
+    roles,
+    groups,
+  ))
+    bind([host.device.id, ...stage.devices.map((d) => d.id)]);
+  // A passive spanning two signal nets of an amplifier is a feedback seat.
+  const blocks = devices
+    .filter((i) => isSignalBlock(i, resolver))
+    .map((i) => ({ id: i.id, nets: new Set(deviceNets(i, resolver, roles)) }));
+  for (const i of devices.filter((i) => devicePins(i, resolver).length === 2)) {
+    const nets = new Set(deviceNets(i, resolver, roles));
+    if (nets.size !== 2 || [...nets].some((n) => roles.rails.has(n))) continue;
+    for (const b of blocks)
+      if ([...nets].every((n) => b.nets.has(n))) bind([b.id, i.id]);
+  }
+  const pins = pinPoints(document, resolver);
+  for (const p of pins) {
+    // Even a terminal outside the body must translate with the body.
+    const center = byId.get(p.instanceId)!.placement!.position.y;
+    occupied.push([Math.min(center, p.point.y), Math.max(center, p.point.y)]);
+    if (!isMarker(byId.get(p.instanceId)!)) continue;
+    const net = roles.pinNet(p.instanceId, p.pinName);
+    if (!net) continue;
+    for (const q of pins)
+      if (
+        !isMarker(byId.get(q.instanceId)!) &&
+        roles.pinNet(q.instanceId, q.pinName) === net &&
+        p.point.x === q.point.x &&
+        Math.abs(p.point.y - q.point.y) <= CELL_PIN_OFFSET
+      )
+        bind([p.instanceId, q.instanceId]);
+  }
+  const offset = new Map(
+    document.instances.flatMap((i) =>
+      i.placement ? [[i.id, i.placement.position.y] as const] : [],
+    ),
+  );
+  return closeGaps(
+    document,
+    "y",
+    Math.min(...offset.values()),
+    Math.max(...offset.values()),
+    occupied,
+    offset,
   );
 }

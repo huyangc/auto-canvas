@@ -26,6 +26,8 @@ export interface LayoutPartition {
   arrangement?: Record<string, { x: number; y: number }>;
 }
 export interface AutoLayoutOptions {
+  /** Spend an additional bounded budget optimizing pin positions and shared wire trees. */
+  quality?: "optimized";
   /** Optional partition constraints for placement. */
   partition?: LayoutPartition;
   fixedInstanceIds?: ReadonlySet<string>;

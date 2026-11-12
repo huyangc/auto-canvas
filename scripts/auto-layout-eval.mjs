@@ -69,7 +69,9 @@ import {
 const [folder, ...args] = process.argv.slice(2);
 const flags = new Map();
 for (let i = 0; i < args.length; i += 2) {
-  if (["--quick", "--fixed-human", "--anonymize"].includes(args[i])) {
+  if (
+    ["--quick", "--fixed-human", "--anonymize", "--optimized"].includes(args[i])
+  ) {
     flags.set(args[i], true);
     i--;
     continue;
@@ -90,7 +92,7 @@ for (let i = 0; i < args.length; i += 2) {
     args[i + 1] === undefined
   )
     throw new Error(
-      "Usage: auto-layout-eval.mjs <folder> [--baseline <report.json>] [--quick | --search <seconds>] [--seed <n>] [--jobs <n>] [--partition human|loadbench|llm --variant v1|v2] [--fixed-human] [--threshold <n>] [--split dev|val] [--samples k] [--anonymize] [--block-boxes on|off]",
+      "Usage: auto-layout-eval.mjs <folder> [--baseline <report.json>] [--quick | --search <seconds>] [--seed <n>] [--jobs <n>] [--partition human|loadbench|llm --variant v1|v2] [--fixed-human] [--optimized] [--threshold <n>] [--split dev|val] [--samples k] [--anonymize] [--block-boxes on|off]",
     );
   flags.set(args[i], args[i + 1]);
 }
@@ -435,6 +437,7 @@ async function evaluateFile(file) {
       measurement.evaluationBudget = budget;
       plan = planAutoLayout(document, resolver, {
         ...layoutOptions,
+        ...(flags.has("--optimized") ? { quality: "optimized" } : {}),
         search: {
           seed,
           evaluations: budget,

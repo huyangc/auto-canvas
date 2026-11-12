@@ -409,10 +409,11 @@ it("R44 compares one routing-only replay of the selected refined placement", () 
       1,
     );
     expect(
-      routes.mock.calls.slice(-3).map((call) => [call[5], call[6]]),
+      routes.mock.calls.slice(-4).map((call) => [call[5], call[6]]),
     ).toEqual([
       [false, { ripUp: false }],
-      [true, { ripUp: true }],
+      [true, { ripUp: true }], // R96 finalist
+      [true, { ripUp: true }], // R97 column trial
       [true, { ripUp: true }],
     ]);
     expect(comparison).toHaveBeenCalledTimes(1);

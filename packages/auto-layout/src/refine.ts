@@ -8,7 +8,11 @@ import {
   type LayoutOverrides,
 } from "./layout-choices.js";
 import { classifyNets } from "./net-roles.js";
-import { auditRouting, missingConnections } from "./routing-audit.js";
+import {
+  auditRouting,
+  floatingPins,
+  missingConnections,
+} from "./routing-audit.js";
 import { compareIds } from "./recognize.js";
 import type {
   AutoLayoutResult,
@@ -179,4 +183,33 @@ export function refineLayout(
   }
   measurements.set(current.result, { candidates, score });
   return current.result;
+}
+
+/** Refining an already routed drawing must pay off on the actual wire geometry. */
+export function improvesWireLayout(
+  before: LayoutRun,
+  after: LayoutRun,
+  resolver: SymbolResolver,
+) {
+  if (
+    !before.final ||
+    !after.final ||
+    !(routedScore(after, resolver) < routedScore(before, resolver))
+  )
+    return false;
+  const a = auditRouting(before.final, resolver),
+    b = auditRouting(after.final, resolver);
+  return (
+    !b.unsafeProblems.length &&
+    b.crossings <= a.crossings &&
+    b.bends <= a.bends &&
+    b.wireLength <= a.wireLength &&
+    (b.crossings < a.crossings ||
+      b.bends < a.bends ||
+      b.wireLength < a.wireLength) &&
+    missingConnections(after.final, resolver) <=
+      missingConnections(before.final, resolver) &&
+    floatingPins(after.final, resolver).length <=
+      floatingPins(before.final, resolver).length
+  );
 }

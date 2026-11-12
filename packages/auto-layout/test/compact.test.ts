@@ -3,6 +3,7 @@ import { expect, it, vi } from "vitest";
 import { createRoutePath, type SchematicDocument } from "@icm/model";
 import { visibleInstanceBounds } from "@icm/derived";
 import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
+import { classifyNets } from "../src/net-roles.js";
 import * as compaction from "../src/compact.js";
 import { planAutoLayout } from "../src/auto-layout.js";
 import {
@@ -264,3 +265,33 @@ it.each([
     }
   },
 );
+
+it("closes space between rows without splitting overlapping protected groups", () => {
+  const d = circuit(
+    {
+      first: "resistor",
+      second: "capacitor",
+      third: "resistor",
+      last: "diode",
+    },
+    {},
+  );
+  d.instances.forEach(
+    (i, k) => (i.placement = placement(50 * k, [0, 180, 360, 630][k]!)),
+  );
+  const rows = compaction.compactRows(
+    d,
+    resolver,
+    [
+      ["first", "second"],
+      ["second", "third"],
+    ],
+    classifyNets(d, resolver),
+    [],
+  )!;
+  for (const i of d.instances.slice(0, 3))
+    expect(rows.get(i.id)).toEqual(i.placement);
+  expect(rows.get("last")!.position.y).toBeGreaterThan(360);
+  expect(rows.get("last")!.position.y).toBeLessThan(630);
+  expect(rows.get("last")!.position.x).toBe(150);
+});

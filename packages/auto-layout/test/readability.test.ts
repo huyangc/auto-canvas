@@ -279,3 +279,24 @@ it("R73 keeps several displayed parameters on their own rows", () => {
   expect(second.x - first.x).toBe(0);
   expect(second.y - first.y).toBe(20);
 });
+
+it("finishes shared-owner labels in distinct seats while preserving their owner and text", () => {
+  const d = labeledPair();
+  const reference = d.annotations[0]!;
+  d.annotations.push({
+    ...reference,
+    id: "second-name",
+    content: { runs: [{ kind: "text", value: "bias" }] },
+  });
+  const previewed = preview(d, resolver, planAutoLayout(d, resolver).edits);
+  expect(previewed.ok).toBe(true);
+  if (!previewed.ok) return;
+  const drawn = previewed.document,
+    ctx = createLabelClearanceContext(drawn, resolver);
+  for (const original of [reference, d.annotations.at(-1)!]) {
+    const moved = drawn.annotations.find((a) => a.id === original.id)!;
+    expect(moved.content).toEqual(original.content);
+    expect(moved.anchor).toMatchObject({ kind: "object", objectId: "a" });
+    expect(ctx.overlapsAt(ctx.measure(moved).inkBounds, moved.id)).toEqual([]);
+  }
+});

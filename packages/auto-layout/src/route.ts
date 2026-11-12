@@ -486,6 +486,7 @@ function routeGroup(
   roles: NetRoles,
   signalTrunks: boolean,
   reservedIds: ReadonlySet<string>,
+  sharedLandings = false,
 ): GroupRouting {
   let working = document;
   let failed = false;
@@ -522,7 +523,34 @@ function routeGroup(
   );
   let failure: string | undefined;
   const unjoinedPins: TerminalRef[] = [];
-  for (const target of targets) {
+  // A physical landing shared by two same-net terminals is one routing site.
+  // Keep just one representative; never ask the tree for a zero-length edge.
+  const sites = sharedLandings
+    ? new Map(
+        points.map((p) => [
+          endpointKey({
+            kind: "terminal",
+            instanceId: p.instanceId,
+            pinName: p.pinName,
+          }),
+          JSON.stringify(p.point),
+        ]),
+      )
+    : undefined;
+  for (const raw of targets) {
+    const seen = new Set<string>();
+    const target = !sites
+      ? raw
+      : {
+          ...raw,
+          pins: raw.pins.filter((pin) => {
+            const k = endpointKey({ kind: "terminal", ...pin }),
+              site = sites.get(k) ?? k;
+            if (seen.has(site)) return false;
+            seen.add(site);
+            return true;
+          }),
+        };
     if (target.pins.length < 2 && !target.freeEnd) continue;
     let planned: SchematicEdit[];
     let previewed: SchematicDocument | undefined;
@@ -669,7 +697,7 @@ function routeGroup(
       unjoinedPins.push(...target.pins);
       if (
         target.freeEnd ||
-        (target.stub && contacts.some((pair) => pair === target.pins))
+        (target.stub && contacts.some((pair) => pair === raw.pins))
       )
         return {
           document: working,
@@ -812,7 +840,7 @@ export function routeDocument(
   roles: NetRoles,
   structures: RecognizedGroup[],
   signalTrunks = true,
-  options: { ripUp?: boolean; crossX?: boolean } = {},
+  options: { ripUp?: boolean; crossX?: boolean; sharedLandings?: boolean } = {},
   reservedIds: ReadonlySet<string> = new Set(),
 ): {
   edits: SchematicEdit[];
@@ -855,6 +883,7 @@ export function routeDocument(
       roles,
       signalTrunks,
       reservedIds,
+      options.sharedLandings,
     );
     if (options.ripUp) {
       removals.set(group, removeGroupRouting(working, routed.document));
@@ -913,6 +942,7 @@ export function routeDocument(
         roles,
         signalTrunks,
         reservedIds,
+        options.sharedLandings,
       );
       if (candidate.problem || candidate.failed) continue;
       const nextScore = routingScore(candidate.document, resolver);

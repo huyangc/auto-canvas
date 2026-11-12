@@ -1,3 +1,11 @@
+import {
+  contactGeometryProblem,
+  type contactPolicy,
+} from "./contact-placement.js";
+import { optimizePins } from "./pin-portfolio.js";
+import { searchPinContacts } from "./contact-search.js";
+import { rerouteCrossings } from "./local-reroute.js";
+import { reroutePortfolio } from "./reroute-portfolio.js";
 import { stageComponents } from "./stage-symmetry.js";
 import { blockIntrusion } from "./partition-geometry.js";
 import { partitionGroups, validatePartition } from "./partition.js";
@@ -16,6 +24,7 @@ import {
   placementDrafting,
 } from "./follow-drafting-labels.js";
 import { finalizeFacing } from "./finalize-facing.js";
+import { separateLabels } from "./separate-labels.js";
 import { seatLabels } from "./seat-labels.js";
 import { timePlanning } from "./timing.js";
 import {
@@ -56,6 +65,7 @@ import {
   type LayoutOverrides,
 } from "./layout-choices.js";
 import {
+  improvesWireLayout,
   refinementMetrics,
   refineLayout,
   routedScore,
@@ -68,7 +78,7 @@ import {
   type SearchBounds,
 } from "./search-bounds.js";
 import { annealLayout } from "./search.js";
-import { compactPlacements } from "./compact.js";
+import { compactPlacements, compactRows } from "./compact.js";
 import { symmetryTopology } from "./symmetry.js";
 
 /** Additional routed evaluations; the quick planner and finalist repairs are separate. */
@@ -83,11 +93,16 @@ export function planAutoLayout(
 ): AutoLayoutResult {
   const plan = () =>
     timePlanning(() =>
-      followDraftingLabels(
+      separateLabels(
         document,
         resolver,
-        planAutoLayoutMeasured(document, resolver, options),
-        options.partition,
+        followDraftingLabels(
+          document,
+          resolver,
+          planAutoLayoutMeasured(document, resolver, options),
+          options.partition,
+        ),
+        options,
       ),
     );
   if (options.partition) {
@@ -140,6 +155,10 @@ function planAutoLayoutMeasured(
   const fixed = new Set(options.fixedInstanceIds);
   for (const owner of [...document.layoutGroups, ...document.constraints])
     if (owner.locked) for (const id of owner.objectIds) fixed.add(id);
+  const stopped = () =>
+    !!options.search?.signal?.aborted ||
+    (options.search?.deadline !== undefined &&
+      Date.now() >= options.search.deadline);
   const runs = new Map<
     AutoLayoutResult,
     {
@@ -204,23 +223,30 @@ function planAutoLayoutMeasured(
     signalTrunks: boolean,
   ) => {
     if (
-      options.partition ||
+      (options.partition &&
+        (options.quality !== "optimized" ||
+          options.partition.arrangement ||
+          options.search?.evaluations === 0 ||
+          stopped())) ||
       fixed.size ||
       !run.final ||
       !Number.isFinite(routedScore(run, resolver))
     )
       return run;
     const roles = classifyNets(run.final, resolver);
+    const groups = recognizeStructures(
+      { ...run.final, layoutGroups: [] },
+      roles,
+    );
     const rigid = [
+      ...(options.partition?.blocks.map((block) => block.members) ?? []),
       ...run.final.layoutGroups.map((group) => group.objectIds),
-      ...recognizeStructures({ ...run.final, layoutGroups: [] }, roles).map(
-        (group) => [
-          ...group.members,
-          ...(group.extraMemberIds ?? []),
-          ...(group.tailInstanceId ? [group.tailInstanceId] : []),
-          ...(group.diodeInstanceId ? [group.diodeInstanceId] : []),
-        ],
-      ),
+      ...groups.map((group) => [
+        ...group.members,
+        ...(group.extraMemberIds ?? []),
+        ...(group.tailInstanceId ? [group.tailInstanceId] : []),
+        ...(group.diodeInstanceId ? [group.diodeInstanceId] : []),
+      ]),
       ...stageComponents(
         run.final,
         resolver,
@@ -228,24 +254,41 @@ function planAutoLayoutMeasured(
         symmetryTopology(run.final, resolver, roles).components,
       ).map((component) => [...component.pairs.flat(), ...component.axis]),
     ];
-    const exact = compactPlacements(run.final, resolver, rigid);
-    if (!exact) return run;
-    const candidate = planLayoutOnce(
-      document,
-      resolver,
-      options,
-      emptyOverrides(),
-      strategy,
-      signalTrunks,
-      undefined,
-      undefined,
-      exact,
-      true,
-    );
-    // Compaction moves columns only; the winner's side and orientation choices stand.
-    return routedScore(candidate, resolver) < routedScore(run, resolver)
-      ? { ...candidate, choices: run.choices }
-      : run;
+    const replan = (exact: ReadonlyMap<string, Placement>) =>
+      planLayoutOnce(
+        document,
+        resolver,
+        options,
+        emptyOverrides(),
+        strategy,
+        signalTrunks,
+        undefined,
+        undefined,
+        exact,
+        true,
+      );
+    const accepts = (candidate: LayoutRun) =>
+      !!candidate.final &&
+      improvesWireLayout(run, candidate, resolver) &&
+      (!options.partition ||
+        blockIntrusion(candidate.final, resolver, options.partition) <=
+          blockIntrusion(run.final!, resolver, options.partition));
+    const columns = compactPlacements(run.final, resolver, rigid);
+    if (columns) {
+      const candidate = replan(columns);
+      if (
+        options.partition
+          ? accepts(candidate)
+          : routedScore(candidate, resolver) < routedScore(run, resolver)
+      )
+        run = { ...candidate, choices: run.choices };
+    }
+    const rows = compactRows(run.final!, resolver, rigid, roles, groups);
+    if (rows) {
+      const candidate = replan(rows);
+      if (accepts(candidate)) return { ...candidate, choices: run.choices };
+    }
+    return run;
   };
   // R144 is a single optional replan of the compacted R44 winner.
   const crossCoupled = (
@@ -417,57 +460,137 @@ function planAutoLayoutMeasured(
     options,
     finish(selected.run, alternative, selected.strategy, true),
   );
-  if (best.run === quickRun) return quickResult;
 
-  // Compare the two *finished* layouts: repair, compaction and port facing
-  // can reverse the ranking of the provisional plans used by annealing.
-  if (quickRun.final) repairBounds = searchBounds(quickRun.final, resolver);
-  const searched = finalizeFacing(
+  const selectFinished = () => {
+    if (best.run === quickRun) return quickResult;
+
+    // Compare the two *finished* layouts: repair, compaction and port facing
+    // can reverse the ranking of the provisional plans used by annealing.
+    if (quickRun.final) repairBounds = searchBounds(quickRun.final, resolver);
+    const searched = finalizeFacing(
+      document,
+      resolver,
+      options,
+      finish(
+        best.run,
+        best.alternative ?? best.run,
+        best.strategy,
+        best.run !== alternative,
+      ),
+    );
+    if (
+      (refinementMetrics(searched)?.score ?? Infinity) >=
+      (refinementMetrics(quickResult)?.score ?? Infinity)
+    )
+      return quickResult;
+    const before = preview(document, resolver, quickResult.edits);
+    const after = preview(document, resolver, searched.edits);
+    if (!after.ok) return quickResult;
+    if (before.ok) {
+      const missed =
+        missingConnections(after.document, resolver) -
+        missingConnections(before.document, resolver);
+      const floating =
+        floatingPins(after.document, resolver).length -
+        floatingPins(before.document, resolver).length;
+      if (missed > 0 || floating > 0) return quickResult;
+      if (!missed && !floating) {
+        const first = auditRouting(before.document, resolver);
+        const second = auditRouting(after.document, resolver);
+        const deltas = [
+          second.crossings - first.crossings,
+          second.bends - first.bends,
+          second.wireLength - first.wireLength,
+        ];
+        if (options.partition)
+          deltas.push(
+            blockIntrusion(after.document, resolver, options.partition) -
+              blockIntrusion(before.document, resolver, options.partition),
+          );
+        // Do not trade a strictly dominated wire layout for secondary score terms.
+        if (deltas.every((d) => d >= 0) && deltas.some((d) => d > 0))
+          return quickResult;
+      }
+    }
+    return searched;
+  };
+  const baseline = selectFinished();
+  if (options.partition) {
+    // A fixed placement keeps every block and its relative floorplan intact.
+    return options.quality === "optimized" && search.evaluations > 0
+      ? rerouteCrossings(document, resolver, baseline, stopped)
+      : baseline;
+  }
+  const result =
+    search.evaluations <= 0 || stopped()
+      ? baseline
+      : reroutePortfolio(
+          document,
+          resolver,
+          baseline,
+          runs.values(),
+          fixed.size || document.instances.length > 40 ? 0 : 2,
+          stopped,
+          (run, strategy) => {
+            const trial = compact(run, strategy, true);
+            return finalizeFacing(document, resolver, options, {
+              ...trial.result,
+            });
+          },
+        );
+  if (
+    stopped() ||
+    (!search.evaluations && fixed.size !== document.instances.length)
+  )
+    return result;
+  const strategy = refinementMetrics(result)?.strategy ?? selected.strategy;
+  const replan = (
+    placements: ReadonlyMap<string, Placement>,
+    policy: ReturnType<typeof contactPolicy>,
+  ) =>
+    planLayoutOnce(
+      document,
+      resolver,
+      options,
+      emptyOverrides(),
+      strategy,
+      true,
+      undefined,
+      undefined,
+      placements,
+      true,
+      false,
+      policy,
+    );
+  const contactResult = searchPinContacts(
     document,
     resolver,
     options,
-    finish(
-      best.run,
-      best.alternative ?? best.run,
-      best.strategy,
-      best.run !== alternative,
-    ),
+    result,
+    strategy,
+    fixed.size,
+    stopped,
+    replan,
   );
   if (
-    (refinementMetrics(searched)?.score ?? Infinity) >=
-    (refinementMetrics(quickResult)?.score ?? Infinity)
+    options.quality !== "optimized" ||
+    fixed.size ||
+    document.constraints.length ||
+    document.inductorCouplings?.length ||
+    document.layoutGroups.length ||
+    document.instances.length > 40 ||
+    stopped()
   )
-    return quickResult;
-  const before = preview(document, resolver, quickResult.edits);
-  const after = preview(document, resolver, searched.edits);
-  if (!after.ok) return quickResult;
-  if (before.ok) {
-    const missed =
-      missingConnections(after.document, resolver) -
-      missingConnections(before.document, resolver);
-    const floating =
-      floatingPins(after.document, resolver).length -
-      floatingPins(before.document, resolver).length;
-    if (missed > 0 || floating > 0) return quickResult;
-    if (!missed && !floating) {
-      const first = auditRouting(before.document, resolver);
-      const second = auditRouting(after.document, resolver);
-      const deltas = [
-        second.crossings - first.crossings,
-        second.bends - first.bends,
-        second.wireLength - first.wireLength,
-      ];
-      if (options.partition)
-        deltas.push(
-          blockIntrusion(after.document, resolver, options.partition) -
-            blockIntrusion(before.document, resolver, options.partition),
-        );
-      // Do not trade a strictly dominated wire layout for secondary score terms.
-      if (deltas.every((d) => d >= 0) && deltas.some((d) => d > 0))
-        return quickResult;
-    }
-  }
-  return searched;
+    return contactResult;
+  return optimizePins(
+    document,
+    resolver,
+    contactResult,
+    strategy,
+    options.search?.seed ?? 1,
+    stopped,
+    replan,
+  );
 }
 
 /** @internal One complete default/candidate plan, also used to verify refinement. */
@@ -483,6 +606,7 @@ export function planLayoutOnce(
   exact?: ReadonlyMap<string, Placement>,
   ripUp = false,
   crossX = false,
+  contacts?: ReturnType<typeof contactPolicy>,
 ): LayoutRun {
   const run: LayoutRun = {
     result: { edits: [], groups: [], diagnostics: [] },
@@ -502,6 +626,7 @@ export function planLayoutOnce(
     exact,
     ripUp,
     crossX,
+    contacts,
   );
   return run;
 }
@@ -541,6 +666,7 @@ function buildPlan(
   exact?: ReadonlyMap<string, Placement>,
   ripUp = false,
   crossX = false,
+  contacts?: ReturnType<typeof contactPolicy>,
 ): AutoLayoutResult {
   if (document.instances.length > 120)
     return {
@@ -582,7 +708,10 @@ function buildPlan(
     : exact
       ? {
           placements: exact,
-          problem: geometryProblem(
+          problem: (contacts
+            ? (d: SchematicDocument, r: SymbolResolver) =>
+                contactGeometryProblem(d, r, contacts)
+            : geometryProblem)(
             {
               ...document,
               instances: document.instances.map((i) => ({
@@ -758,7 +887,11 @@ function buildPlan(
     roles,
     structures,
     signalTrunks,
-    { ripUp, ...(crossX ? { crossX } : {}) },
+    {
+      ripUp,
+      ...(crossX ? { crossX } : {}),
+      ...(contacts ? { sharedLandings: true } : {}),
+    },
     documentObjectIds(document),
   );
   if (routed.problem) return refuse(routed.problem);
