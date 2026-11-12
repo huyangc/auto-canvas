@@ -16,7 +16,7 @@ import * as annealing from "../src/search.js";
 import { searchBounds } from "../src/search-bounds.js";
 import { createMoveGenerator, randomStream } from "../src/search-moves.js";
 import { lostNameClaim, terminalPartition } from "../src/transaction.js";
-import type { AutoLayoutResult } from "../src/types.js";
+import type { AutoLayoutOptions, AutoLayoutResult } from "../src/types.js";
 import { classifyNets } from "../src/net-roles.js";
 import { persistedTemplates, recognizeStructures } from "../src/recognize.js";
 import { circuit } from "./document-fixture.js";
@@ -94,12 +94,25 @@ it("uses a bounded search by default and retains the zero-budget quick path", ()
   try {
     expect(planAutoLayout(document, resolver)).toEqual(explicit);
     expect(spy.mock.calls.map((call) => call[2])).toEqual([
-      { seed: 1, evaluations: 8 },
+      { seed: 1, evaluations: 24 },
     ]);
   } finally {
     spy.mockRestore();
   }
 }, 30000);
+
+it.each<AutoLayoutOptions>([
+  { quality: "optimized" },
+  { partition: { blocks: [{ id: "all", members: ["a", "b", "c", "d"] }] } },
+])("retains the eight-evaluation default for mode %j", (options) => {
+  const document = crossed();
+  const expected = planAutoLayout(document, resolver, {
+    ...options,
+    search: { seed: 1, evaluations: 8 },
+  });
+  expect(expected.edits.length).toBeGreaterThan(0);
+  expect(planAutoLayout(document, resolver, options)).toEqual(expected);
+});
 
 it("R66 repeats the same seed/budget and improves a known same-row swap", () => {
   const document = crossed();

@@ -661,7 +661,10 @@ it.each([false, true])(
       ...options,
       partition: blocks,
     });
-    const plain = planAutoLayout(d, resolver, options);
+    const plain = planAutoLayout(d, resolver, {
+      ...options,
+      search: options.search ?? { seed: 1, evaluations: 8 },
+    });
     expect(plain.edits.length).toBeGreaterThan(0);
     expect(fallback).toEqual({
       ...plain,

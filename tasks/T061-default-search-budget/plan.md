@@ -1,7 +1,7 @@
 # T061 — Raise the default annealer budget for small documents
 
 - Branch: `task/T061-default-search-budget` (stacked on `task/T060-drafting-follows-layout`, PR #55)
-- Base: `task/T060-drafting-follows-layout` at `06ec4c7`
+- Base: `task/T060-drafting-follows-layout` at `ed8d78b` (rebased from `06ec4c7` after a timing-only fix)
 - Status: approved
 
 ## Goal
@@ -13,6 +13,22 @@ human on 627 completed ≤10-part drawings: crossings 2.01, bends 1.18, wire
 largest gap. The existing R66 annealer runs only 8 routed evaluations by
 default for documents up to 40 instances
 (`packages/auto-layout/src/auto-layout.ts:92-94`).
+
+## Plan change after round 1 (Opus, 2026-11-12)
+
+Round 1 measured (dev, 439 drawings): budget 24 lowers crossings 320 → 284
+(−11%), bends 2,005 → 1,945 and wire, while median area rises 1.4234 →
+1.4381 (+1.0%). Trading 11% of crossings for 1% of median area moves the
+layout closer to the human baseline overall, so the area guard is relaxed:
+
+- Median area ratio may rise by at most 2% relative to the base on each split;
+  every other condition stays as written.
+- Set the default to the budget step 1 selects (24 on round 1's data), unless
+  val shows crossings not lower or a guard increase; report val either way.
+- Keep optimized and partitioned calls at their current budgets (round 1
+  found they share `defaultLayoutSearch`; guard them in the same file).
+- Rerun paired timing with nothing else running; if other load is present,
+  report it and repeat.
 
 ## Context
 
