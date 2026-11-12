@@ -1,6 +1,12 @@
 import type { SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import { pinSearch } from "./pin-search.js";
+import { enclosingBox } from "./geometry.js";
+import {
+  anchorPlacements,
+  spanProblem,
+  type SearchBounds,
+} from "./search-bounds.js";
 import { contactPolicy } from "./contact-placement.js";
 import { freezePinGroups } from "./route.js";
 import { preview } from "./transaction.js";
@@ -42,6 +48,7 @@ export function optimizePins(
   source: SchematicDocument,
   resolver: SymbolResolver,
   base: AutoLayoutResult,
+  bounds: SearchBounds,
   strategy: LayoutStrategy,
   seed: number,
   stopped: () => boolean,
@@ -83,16 +90,31 @@ export function optimizePins(
   }
   const seen = new Set<string>();
   for (const poses of pinSearch(replay.document, resolver, seed, stopped)) {
-    const key = JSON.stringify([...poses.values()]);
+    // pinSearch covers every instance, including markers, just like the quick box.
+    const anchored = structuredClone(poses);
+    if (
+      anchorPlacements(source, resolver, anchored, new Set(), bounds) ||
+      spanProblem(source, resolver, anchored, bounds)
+    )
+      continue;
+    const key = JSON.stringify([...anchored.values()]);
     if (seen.has(key)) continue;
     seen.add(key);
-    const trial = replan(poses, policy);
+    const trial = replan(anchored, policy);
     if (
       !trial.final ||
       trial.result.diagnostics.some(
         (d) => d.severity === "error" || d.rule === "R14",
       ) ||
       !complete(trial.final)
+    )
+      continue;
+    const box = enclosingBox(trial.final, resolver);
+    if (
+      Math.abs(box.x - bounds.anchor.x) > source.presentation.grid / 2 ||
+      Math.abs(box.y - bounds.anchor.y) > source.presentation.grid / 2 ||
+      box.width > bounds.maxWidth ||
+      box.height > bounds.maxHeight
     )
       continue;
     const m = metric(trial.final);

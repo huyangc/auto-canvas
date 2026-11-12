@@ -1157,6 +1157,15 @@ facing and a successful local reroute to replace the incumbent. The extra work i
 bounded separately from annealing evaluations and checks the search deadline and
 cancellation. This is not a global minimum-crossing guarantee.
 
+Optimized quality can also search pin placements for unpartitioned layouts of at
+most 40 instances with a positive search budget and no fixed instances, constraints,
+couplings or layout groups. Each proposal includes devices and markers, is translated
+on the Document grid to the input envelope corner (R10), and is rejected before
+routing if its width or height exceeds 1.5 times the quick layout's corresponding
+span (R67). Translated duplicates are routed only once. The routed result must also
+remain within half a grid step of the input corner on each axis and within the same
+span bounds before it can replace the incumbent.
+
 ## Contract
 
 The public planning entries are `planAutoLayout` and `planAutoLayoutWithLlm`. Edits use the existing
