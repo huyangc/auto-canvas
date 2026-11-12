@@ -85,6 +85,7 @@ import {
 import { annealLayout } from "./search.js";
 import { compactPlacements, compactRows } from "./compact.js";
 import { symmetryTopology } from "./symmetry.js";
+import { searchDeviceRelocations } from "./device-relocation-search.js";
 import { searchPortSeats } from "./port-seat-search.js";
 
 /** Additional routed evaluations; the quick planner and finalist repairs are separate. */
@@ -96,15 +97,6 @@ export function planAutoLayout(
   document: SchematicDocument,
   resolver: SymbolResolver,
   options: AutoLayoutOptions = {},
-): AutoLayoutResult {
-  return planAutoLayoutInternal(document, resolver, options, true);
-}
-
-function planAutoLayoutInternal(
-  document: SchematicDocument,
-  resolver: SymbolResolver,
-  options: AutoLayoutOptions,
-  portSearch: boolean,
 ): AutoLayoutResult {
   // R146 compares label-finished results. Avoid applying these passes twice
   // when the measured planner already finished its incumbent and trials.
@@ -123,13 +115,7 @@ function planAutoLayoutInternal(
   const plan = () =>
     timePlanning(() =>
       finishLabels(
-        planAutoLayoutMeasured(
-          document,
-          resolver,
-          options,
-          portSearch,
-          finishLabels,
-        ),
+        planAutoLayoutMeasured(document, resolver, options, finishLabels),
       ),
     );
   if (options.partition) {
@@ -141,12 +127,8 @@ function planAutoLayoutInternal(
     const problem = result.diagnostics.find((d) => d.severity === "error");
     if (!validated.partition.arrangement && (problem || !result.edits.length)) {
       const { partition: _partition, ...fallbackOptions } = options;
-      result = planAutoLayoutInternal(
-        document,
-        resolver,
-        fallbackOptions,
-        false,
-      );
+      // R134 fallback is plain planning, including R147 and R146 searches.
+      result = planAutoLayout(document, resolver, fallbackOptions);
       result.diagnostics.push({
         severity: "warning",
         code: "AUTO_LAYOUT_PARTITION_FALLBACK",
@@ -183,7 +165,6 @@ function planAutoLayoutMeasured(
   document: SchematicDocument,
   resolver: SymbolResolver,
   options: AutoLayoutOptions,
-  portSearch: boolean,
   finishLabels: (result: AutoLayoutResult) => AutoLayoutResult,
 ): AutoLayoutResult {
   const fixed = new Set(options.fixedInstanceIds);
@@ -607,10 +588,10 @@ function planAutoLayoutMeasured(
     replan,
   );
   if (
-    portSearch &&
     !options.partition &&
     options.quality !== "optimized" &&
     search.evaluations > 0 &&
+    document.instances.length > 0 &&
     document.instances.length <= 40 &&
     !stopped()
   ) {
@@ -622,47 +603,50 @@ function planAutoLayoutMeasured(
       final: replay.document,
       choices: emptyChoices(),
     };
-    return searchPortSeats(
-      initial,
-      resolver,
-      fixed,
-      (placements) => {
-        const routeSeat = (signalTrunks: boolean) =>
-          planLayoutOnce(
+    const finishPlacement = (placements: ReadonlyMap<string, Placement>) => {
+      const routeSeat = (signalTrunks: boolean) =>
+        planLayoutOnce(
+          document,
+          resolver,
+          options,
+          emptyOverrides(),
+          strategy,
+          signalTrunks,
+          undefined,
+          undefined,
+          placements,
+        );
+      // Every trial goes through the same finalist repairs, compaction, facing
+      // and labels as the incumbent before R146 compares any score or guard.
+      const finished = finishLabels(
+        rerouteCrossings(
+          document,
+          resolver,
+          finalizeFacing(
             document,
             resolver,
             options,
-            emptyOverrides(),
-            strategy,
-            signalTrunks,
-            undefined,
-            undefined,
-            placements,
-          );
-        // Every trial goes through the same finalist repairs, compaction, facing
-        // and labels as the incumbent before R146 compares any score or guard.
-        const finished = finishLabels(
-          rerouteCrossings(
-            document,
-            resolver,
-            finalizeFacing(
-              document,
-              resolver,
-              options,
-              finish(routeSeat(true), routeSeat(false), strategy, true),
-            ),
-            stopped,
+            finish(routeSeat(true), routeSeat(false), strategy, true),
           ),
-        );
-        const final = preview(document, resolver, finished.edits);
-        return {
-          result: finished,
-          choices: initial.choices,
-          ...(final.ok ? { final: final.document } : {}),
-        };
-      },
+          stopped,
+        ),
+      );
+      const final = preview(document, resolver, finished.edits);
+      return {
+        result: finished,
+        choices: initial.choices,
+        ...(final.ok ? { final: final.document } : {}),
+      };
+    };
+    const relocated = searchDeviceRelocations(
+      initial,
+      resolver,
+      fixed,
+      finishPlacement,
       stopped,
-    ).result;
+    );
+    return searchPortSeats(relocated, resolver, fixed, finishPlacement, stopped)
+      .result;
   }
   if (
     options.quality !== "optimized" ||
