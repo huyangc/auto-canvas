@@ -18,7 +18,11 @@ import type { SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import { geometryProblem } from "./geometry.js";
 import { repairBlockers } from "./blocker-repair.js";
-import { freedAnnotations, reanchorLabels } from "./labels.js";
+import {
+  freedAnnotations,
+  preserveLabelClaims,
+  reanchorLabels,
+} from "./labels.js";
 import {
   followDraftingLabels,
   placementDrafting,
@@ -30,6 +34,7 @@ import { timePlanning } from "./timing.js";
 import {
   freezePinGroups,
   routeDocument,
+  repairBulkContactRoutes,
   transferPowerClaims,
 } from "./route.js";
 import {
@@ -766,8 +771,25 @@ function buildPlan(
       },
     ],
   });
-  const edits: SchematicEdit[] = [];
-  for (const annotation of freed)
+  const edits: SchematicEdit[] = preserveLabelClaims(document, freed);
+  // Cleanup can temporarily split a device's named Net. Do not let its visual
+  // anchor select another pin's Net before the frozen groups are restored.
+  const deviceLabels = document.annotations.filter(
+    (a) =>
+      !a.locked &&
+      a.binding?.kind === "net-name" &&
+      a.anchor.kind === "object" &&
+      document.connectivityEvidence.some(
+        (e) =>
+          e.kind === "name-claim" &&
+          e.owner.kind === "net-label" &&
+          e.owner.annotationId === a.id,
+      ) &&
+      document.instances.some(
+        (i) => a.anchor.kind === "object" && i.id === a.anchor.objectId,
+      ),
+  );
+  for (const annotation of [...freed, ...deviceLabels])
     if (annotation.anchor.kind !== "free")
       edits.push({
         kind: "upsert_schematic_annotation",
@@ -800,6 +822,8 @@ function buildPlan(
       resolver,
     ),
   );
+  for (const annotation of deviceLabels)
+    edits.push({ kind: "upsert_schematic_annotation", annotation });
   const cleanupLength = edits.length;
   for (const group of groups)
     edits.push({
@@ -899,11 +923,27 @@ function buildPlan(
   if (edits.length > MAX_SCHEMATIC_EDITS_PER_TRANSACTION)
     return refuse("R10: R16 complete edit list exceeds transaction limit");
   // R15 must use committed geometry, never a stepwise preview's generated ids.
-  const replay = preview(document, resolver, edits);
+  let replay = preview(document, resolver, edits);
   if (!replay.ok)
     return refuse(
       `R10: whole-list replay rejected: ${JSON.stringify(replay.diagnostics)}`,
     );
+  const bulkRepairs = repairBulkContactRoutes(
+    document,
+    replay.document,
+    routed.document,
+    resolver,
+  );
+  if (bulkRepairs.length) {
+    edits.push(...bulkRepairs);
+    if (edits.length > MAX_SCHEMATIC_EDITS_PER_TRANSACTION)
+      return refuse("R10: R16 complete edit list exceeds transaction limit");
+    replay = preview(document, resolver, edits);
+    if (!replay.ok)
+      return refuse(
+        `R10: bulk contact repair rejected: ${JSON.stringify(replay.diagnostics)}`,
+      );
+  }
   edits.push(
     ...transferPowerClaims(document, replay.document, resolver, frozen),
   );

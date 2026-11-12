@@ -12,7 +12,11 @@ import {
   planWireBatch,
   type SchematicEdit,
 } from "@icm/edit-engine";
-import { deriveStableId, type SchematicDocument } from "@icm/model";
+import {
+  deriveStableId,
+  routeEndpoints,
+  type SchematicDocument,
+} from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import { MARKER_OFFSET, pinPoints, integerPoint } from "./geometry.js";
 import { channelPins, isMos, type NetRoles } from "./net-roles.js";
@@ -1035,6 +1039,18 @@ export function transferPowerClaims(
       !removed.has(evidence.owner.objectId)
     )
       return [];
+    // Cleanup may have moved a displayed rail name onto its surviving label.
+    // Replacing that owner again would invalidate the label's format override.
+    const current = routed.connectivityEvidence.find(
+      (e) => e.id === evidence.id,
+    );
+    if (
+      current?.kind === "name-claim" &&
+      current.owner.kind === "power-marker"
+    ) {
+      const ownerId = current.owner.objectId;
+      if (routed.annotations.some((a) => a.id === ownerId)) return [];
+    }
     const group = frozen.find((g) => g.netId === evidence.netId);
     const pin = group?.pins[0];
     const netId =
@@ -1083,4 +1099,64 @@ export function transferPowerClaims(
         ]
       : [];
   });
+}
+
+/** A transform can materialize a formerly coincident bulk contact only during
+ * whole-list replay. Replace unsafe implicit wires with checked authored ones. */
+export function repairBulkContactRoutes(
+  original: SchematicDocument,
+  replayed: SchematicDocument,
+  routed: SchematicDocument,
+  resolver: SymbolResolver,
+): SchematicEdit[] {
+  const implicit = replayed.routes.filter(
+    (route) =>
+      route.presentation === "bulk-dashed" &&
+      !routed.routes.some((r) => r.id === route.id) &&
+      auditRouting({ ...replayed, routes: [route] }, resolver).unsafeProblems
+        .length > 0,
+  );
+  if (!implicit.length) return [];
+  const removed = preview(
+    replayed,
+    resolver,
+    implicit.map((route): SchematicEdit => ({
+      kind: "remove_route_geometry",
+      routeId: route.id,
+    })),
+  );
+  if (!removed.ok) return [];
+  let working = removed.document;
+  const frozen = freezePinGroups(original, resolver, { includeBulk: true });
+  const edits: SchematicEdit[] = [];
+  for (const route of implicit) {
+    const [from, to] = routeEndpoints(route);
+    if (from?.kind !== "terminal" || to?.kind !== "terminal") return [];
+    const group = frozen.find((g) => g.pins.some((p) => samePin(p, from)));
+    if (!group) return [];
+    const wire = freshWirePlan(
+      working,
+      documentObjectIds(original),
+      "auto-layout-bulk-contact",
+      [original.id, JSON.stringify([from, to])],
+      (id) =>
+        planWireBatch(
+          working,
+          resolver,
+          {
+            id,
+            from: { kind: "endpoint", endpoint: from },
+            to: { kind: "endpoint", endpoint: to },
+          },
+          MAX_SCHEMATIC_EDITS_PER_TRANSACTION,
+          { keepClear: true, netScope: "base" },
+        ),
+    );
+    if (typeof wire === "string") return [];
+    const next = preview(working, resolver, wire.edits);
+    if (!next.ok) return [];
+    edits.push(...replayEdits(working, frozen, group, wire.edits));
+    working = next.document;
+  }
+  return edits;
 }

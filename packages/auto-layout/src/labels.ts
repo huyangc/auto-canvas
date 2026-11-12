@@ -6,7 +6,7 @@ import {
 import type { SchematicEdit } from "@icm/edit-engine";
 import type { Annotation, SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
-import { pinPoints } from "./geometry.js";
+import { integerPoint, pinPoints } from "./geometry.js";
 import type { PinGroup } from "./route.js";
 
 export function freedAnnotations(document: SchematicDocument): Annotation[] {
@@ -16,6 +16,39 @@ export function freedAnnotations(document: SchematicDocument): Annotation[] {
       a.anchor.kind === "route" ||
       (a.anchor.kind === "object" && junctions.has(a.anchor.objectId)),
   );
+}
+
+/** Keep a drawn rail's semantic name available while its anchor is removed. */
+export function preserveLabelClaims(
+  document: SchematicDocument,
+  freed: Annotation[],
+): SchematicEdit[] {
+  return document.connectivityEvidence.flatMap((evidence): SchematicEdit[] => {
+    if (
+      evidence.kind !== "name-claim" ||
+      evidence.owner.kind !== "power-marker"
+    )
+      return [];
+    const ownerId = evidence.owner.objectId;
+    const label = freed.find(
+      (a) =>
+        a.binding?.kind === "net-name" &&
+        a.binding.netId === evidence.netId &&
+        a.anchor.kind === "object" &&
+        a.anchor.objectId === ownerId,
+    );
+    return label
+      ? [
+          {
+            kind: "upsert_connectivity_evidence",
+            evidence: {
+              ...evidence,
+              owner: { kind: "power-marker", objectId: label.id },
+            },
+          },
+        ]
+      : [];
+  });
 }
 
 export function reanchorLabels(
@@ -96,10 +129,10 @@ export function reanchorLabels(
                   original.anchor.kind === "route"
                     ? original.anchor.orientation
                     : "horizontal",
-                fallbackPosition: {
+                fallbackPosition: integerPoint({
                   x: (best.segment.from.x + best.segment.to.x) / 2,
                   y: best.segment.from.y,
-                },
+                }),
               }
             : { kind: "free", position: nearest },
         },

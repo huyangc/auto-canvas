@@ -13,6 +13,7 @@ import type { Annotation, SchematicDocument } from "@icm/model";
 import { resolveInstanceSymbol, type SymbolResolver } from "@icm/symbols";
 import { compareIds } from "./recognize.js";
 import { timePhase } from "./timing.js";
+import { integerPoint } from "./geometry.js";
 
 /** R73: a bounded greedy arrangement, sharing the editor's ink and slots. */
 export function seatLabels(
@@ -49,8 +50,11 @@ function arrange(
       alignment: p.alignment,
       anchor: {
         ...a.anchor,
-        localOffset: { x: p.position.x - origin.x, y: p.position.y - origin.y },
-        fallbackPosition: p.position,
+        localOffset: integerPoint({
+          x: p.position.x - origin.x,
+          y: p.position.y - origin.y,
+        }),
+        fallbackPosition: integerPoint(p.position),
       },
     };
   };
