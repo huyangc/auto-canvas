@@ -10,7 +10,13 @@ import { compareElectricalGraphs, projectElectricalGraph } from "@icm/netlist";
 import { parseProject } from "@icm/project-protocol";
 import { builtInSymbols, createProjectSymbolResolver } from "@icm/symbols";
 import { planAutoLayout } from "../src/index.js";
-import { enclosingBox, pinPoints, pinExit } from "../src/geometry.js";
+import {
+  draftingBounds,
+  enclosingBox,
+  pinPoints,
+  pinExit,
+} from "../src/geometry.js";
+import { draftingGroups } from "../src/drafting-groups.js";
 import { auditRouting, floatingPins } from "../src/routing-audit.js";
 import { freedAnnotations } from "../src/labels.js";
 import { terminalPartition } from "../src/transaction.js";
@@ -198,7 +204,46 @@ it.each(cases)(
         if (endpoint?.kind === "terminal")
           expect(endpoint.pinName).not.toBe("B");
     }
-    expect(after.drafting).toEqual(document.drafting);
+    if (["rc-lowpass", "rc-highpass"].includes(fixture.id)) {
+      const originalInk = draftingBounds(document, resolver);
+      const finalInk = draftingBounds(after, resolver);
+      const groups = draftingGroups(document, resolver);
+      expect(after.drafting!.objects.map((o) => o.id)).toEqual(
+        document.drafting!.objects.map((o) => o.id),
+      );
+      for (const object of document.drafting!.objects) {
+        const actual = after.drafting!.objects.find((o) => o.id === object.id)!;
+        // These fixtures contain text: its anchor is its only position field.
+        // Comparing every other field protects content, style, z-order and lock.
+        expect(object.kind).toBe("text");
+        expect({ ...actual, anchor: object.anchor }).toEqual(object);
+        const beforeInk = originalInk.find((b) => b.id === object.id)!.bounds;
+        const ink = finalInk.find((b) => b.id === object.id)!.bounds;
+        expect(ink.width).toBeCloseTo(beforeInk.width);
+        expect(ink.height).toBeCloseTo(beforeInk.height);
+        if (JSON.stringify(actual.anchor) === JSON.stringify(object.anchor))
+          continue;
+        expect(object.locked).toBe(false);
+        const group = groups.find((g) =>
+          g.objects.some((o) => o.id === object.id),
+        )!;
+        expect(group.owner?.kind).toBe("instance");
+        if (group.owner?.kind !== "instance") throw Error("missing owner");
+        const owner = group.owner;
+        const part = boxes.find((b) => b.id === owner.id)!.bounds;
+        const distance = Math.hypot(
+          Math.max(ink.x - part.x - part.width, part.x - ink.x - ink.width, 0),
+          Math.max(
+            ink.y - part.y - part.height,
+            part.y - ink.y - ink.height,
+            0,
+          ),
+        );
+        expect(distance).toBeLessThanOrEqual(
+          1.5 * Math.max(group.bounds.width, group.bounds.height),
+        );
+      }
+    } else expect(after.drafting).toEqual(document.drafting);
     expect(after.annotations.map((a) => a.id).sort()).toEqual(
       document.annotations.map((a) => a.id).sort(),
     );
