@@ -16,7 +16,7 @@ import {
 } from "@icm/edit-engine";
 import type { SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
-import { geometryProblem } from "./geometry.js";
+import { enclosingBox, geometryProblem } from "./geometry.js";
 import { repairBlockers } from "./blocker-repair.js";
 import {
   freedAnnotations,
@@ -584,6 +584,7 @@ function planAutoLayoutMeasured(
     document.inductorCouplings?.length ||
     document.layoutGroups.length ||
     document.instances.length > 40 ||
+    !quickRun.final ||
     stopped()
   )
     return contactResult;
@@ -591,6 +592,10 @@ function planAutoLayoutMeasured(
     document,
     resolver,
     contactResult,
+    {
+      ...searchBounds(quickRun.final, resolver),
+      anchor: enclosingBox(document, resolver),
+    },
     strategy,
     options.search?.seed ?? 1,
     stopped,
