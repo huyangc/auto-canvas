@@ -12,7 +12,11 @@ import { isMarker } from "./placement-connectivity.js";
 import { compareIds } from "./recognize.js";
 import type { LayoutRun } from "./refine.js";
 import { crossingsByNet } from "./routing-audit.js";
-import { calibratedScore, routedGuards } from "./routed-search-score.js";
+import {
+  calibratedScore,
+  compactionRegresses,
+  routedGuards,
+} from "./routed-search-score.js";
 import type { Placement } from "./types.js";
 
 function seats(
@@ -152,6 +156,7 @@ export function searchRailSeats(
       const candidate = replan(placements),
         value = calibratedScore(candidate, resolver);
       if (!candidate.final || value >= score) continue;
+      if (compactionRegresses(current, candidate, resolver)) continue;
       const next = routedGuards(candidate.final, resolver);
       if (
         Object.entries(next).some(([key, count]) => count > (limits[key] ?? 0))

@@ -5,7 +5,11 @@ import { classifyNets } from "./net-roles.js";
 import { portSeatCandidates } from "./place-markers.js";
 import { compareIds } from "./recognize.js";
 import { routedScore, type LayoutRun } from "./refine.js";
-import { calibratedScore, routedGuards } from "./routed-search-score.js";
+import {
+  calibratedScore,
+  compactionRegresses,
+  routedGuards,
+} from "./routed-search-score.js";
 import type { Placement } from "./types.js";
 
 /** R146: one deterministic coordinate pass; replan returns a finished layout. */
@@ -70,6 +74,7 @@ export function searchPortSeats(
       const candidate = replan(trial);
       const value = calibratedScore(candidate, resolver);
       if (value >= score || !candidate.final) continue;
+      if (compactionRegresses(current, candidate, resolver)) continue;
       const counts = routedGuards(candidate.final, resolver);
       if (
         Object.entries(counts).some(
