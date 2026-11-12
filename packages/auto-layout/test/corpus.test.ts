@@ -16,6 +16,8 @@ import { freedAnnotations } from "../src/labels.js";
 import { terminalPartition } from "../src/transaction.js";
 import { devicePins, isMarker } from "../src/placement-connectivity.js";
 import { classifyNets } from "../src/net-roles.js";
+import { portSeatCandidates } from "../src/place-markers.js";
+import { facePorts } from "../src/face-ports.js";
 import cases from "./corpus-cases.json";
 const targets: Record<string, [number, number]> = {
   "five-t-ota": [0, 1],
@@ -455,35 +457,67 @@ it.each(cases)(
         (p) =>
           net !== undefined && roles.pinNet(p.instanceId, p.pinName) === net,
       );
-      if (hosts.length !== 1 || roles.rails.has(net ?? "")) continue;
-      const host = hosts[0]!,
-        instance = after.instances.find((i) => i.id === host.instanceId)!;
-      const exit = pinExit(
-        devicePins(instance, resolver).find((p) => p.name === host.pinName)!,
-        instance.placement!,
+      if (roles.rails.has(net ?? "")) continue;
+      const pose = port.placement!;
+      const edgeX = snap(
+        pose.mirror === "horizontal"
+          ? deviceBox.x + deviceBox.width + 80
+          : deviceBox.x - 80,
       );
-      if (
-        port.placement!.position.x === snap(host.point.x + exit.x * 80) &&
-        port.placement!.position.y === snap(host.point.y + exit.y * 80)
-      )
-        localPorts.add(port.id);
-    }
-    for (const port of ports.filter((p) => !localPorts.has(p.id))) {
-      const p = port.placement!;
-      if (p.rotation === 0)
-        expect(p.position.x).toBe(
-          snap(
-            p.mirror === "horizontal"
-              ? deviceBox.x + deviceBox.width + 80
-              : deviceBox.x - 80,
+      const oldEdge = pose.rotation === 0 && pose.position.x === edgeX;
+      const oldLocal =
+        hosts.length === 1 &&
+        hosts.some((host) => {
+          const instance = after.instances.find(
+            (i) => i.id === host.instanceId,
+          )!;
+          const exit = pinExit(
+            devicePins(instance, resolver).find(
+              (p) => p.name === host.pinName,
+            )!,
+            instance.placement!,
+          );
+          return (
+            pose.position.x === snap(host.point.x + exit.x * 80) &&
+            pose.position.y === snap(host.point.y + exit.y * 80)
+          );
+        });
+      if (oldLocal || !oldEdge) localPorts.add(port.id);
+      if (!oldEdge && !oldLocal) {
+        // Remove the incumbent so generation cannot accept it by definition.
+        const unseated = structuredClone(after);
+        unseated.instances.find((i) => i.id === port.id)!.placement!.position =
+          {
+            x: deviceBox.x - 10000,
+            y: deviceBox.y - 10000,
+          };
+        expect(
+          portSeatCandidates(unseated, resolver, port.id).map(
+            (p) => p.position,
           ),
-        );
-      else
-        expect(p.rotation).toBe(
-          roles.byNet.get(roles.pinNet(port.id, "P") ?? "") === "supply"
-            ? 90
-            : 270,
-        );
+        ).toContainEqual(pose.position);
+      }
+      const topology = deriveElectricalTopologyProjection(after, resolver);
+      const component = topology.endpointToPhysicalComponent.get(
+        `terminal:${port.id}:P`,
+      );
+      expect(component).toBeDefined();
+      for (const host of hosts)
+        expect(
+          topology.endpointToPhysicalComponent.get(
+            `terminal:${host.instanceId}:${host.pinName}`,
+          ),
+        ).toBe(component);
+    }
+    expect(facePorts(after, resolver, new Set())).toEqual([]);
+    for (const port of ports.filter((p) =>
+      roles.rails.has(roles.pinNet(p.id, "P") ?? ""),
+    )) {
+      expect(port.placement!.rotation).toBe(
+        roles.byNet.get(roles.pinNet(port.id, "P") ?? "") === "supply"
+          ? 90
+          : 270,
+      );
     }
     for (const side of ["left", "right", "top", "bottom"]) {
       const members = ports.filter((i) => {
