@@ -1,10 +1,7 @@
-import {
-  contactGeometryProblem,
-  type contactPolicy,
-} from "./contact-placement.js";
+import { contactGeometryProblem, contactPolicy } from "./contact-placement.js";
 import { optimizePins } from "./pin-portfolio.js";
 import { searchPinContacts } from "./contact-search.js";
-import { rerouteCrossings } from "./local-reroute.js";
+import { rerouteCrossings, rerouteRailCrossings } from "./local-reroute.js";
 import { reroutePortfolio } from "./reroute-portfolio.js";
 import { stageComponents } from "./stage-symmetry.js";
 import { blockIntrusion } from "./partition-geometry.js";
@@ -86,6 +83,7 @@ import { annealLayout } from "./search.js";
 import { compactPlacements, compactRows } from "./compact.js";
 import { symmetryTopology } from "./symmetry.js";
 import { searchDeviceRelocations } from "./device-relocation-search.js";
+import { searchRailSeats } from "./rail-seat-search.js";
 import { searchPortSeats } from "./port-seat-search.js";
 
 /** Additional routed evaluations; the quick planner and finalist repairs are separate. */
@@ -603,7 +601,10 @@ function planAutoLayoutMeasured(
       final: replay.document,
       choices: emptyChoices(),
     };
-    const finishPlacement = (placements: ReadonlyMap<string, Placement>) => {
+    const finishPlacement = (
+      placements: ReadonlyMap<string, Placement>,
+      contacts?: ReturnType<typeof contactPolicy>,
+    ) => {
       const routeSeat = (signalTrunks: boolean) =>
         planLayoutOnce(
           document,
@@ -615,6 +616,9 @@ function planAutoLayoutMeasured(
           undefined,
           undefined,
           placements,
+          false,
+          false,
+          contacts,
         );
       // Every trial goes through the same finalist repairs, compaction, facing
       // and labels as the incumbent before R146 compares any score or guard.
@@ -645,8 +649,33 @@ function planAutoLayoutMeasured(
       finishPlacement,
       stopped,
     );
-    return searchPortSeats(relocated, resolver, fixed, finishPlacement, stopped)
-      .result;
+    const seated = searchPortSeats(
+      relocated,
+      resolver,
+      fixed,
+      finishPlacement,
+      stopped,
+    );
+    // R148 retains R140's licensed contacts already present in the finalist.
+    const railContacts = contactPolicy(
+      document,
+      freezePinGroups(document, resolver),
+      true,
+    );
+    const railed = searchRailSeats(
+      seated,
+      resolver,
+      fixed,
+      (placements) => finishPlacement(placements, railContacts),
+      stopped,
+    );
+    return rerouteRailCrossings(
+      document,
+      resolver,
+      railed.result,
+      stopped,
+      finishLabels,
+    );
   }
   if (
     options.quality !== "optimized" ||
