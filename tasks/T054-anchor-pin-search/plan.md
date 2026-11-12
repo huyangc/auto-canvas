@@ -1,7 +1,7 @@
 # T054 — Anchor and bound optimized pin-search proposals
 
 - Branch: `task/T054-anchor-pin-search`
-- Base: `main` at `b7c03cd`
+- Base: `main` at `5c366ac` (reproductions and baseline measured on `b7c03cd`; T052 only shifted the `auto-layout.ts` lines cited below)
 - Status: approved (user confirmed anchor + 1.5× bound, 2026-11-12)
 
 ## Goal
@@ -17,11 +17,11 @@ twice on PR #46 (P2, deferred to this task). Default quality must not change.
 
 - `packages/auto-layout/src/pin-portfolio.ts:41-108` `optimizePins` runs only in
   optimized quality, for at most 40 instances with no fixed instance, constraint,
-  coupling or layout group (`packages/auto-layout/src/auto-layout.ts:574-593`).
+  coupling or layout group (`packages/auto-layout/src/auto-layout.ts:579-598`).
   Its loop at `pin-portfolio.ts:85-89` sends each `pinSearch` pose map straight
   to `replan`, which is `planLayoutOnce(..., exact = placements, ...)`
-  (`auto-layout.ts:546-563`).
-- The `exact` path (`auto-layout.ts:708-723`) only runs a geometry check. It
+  (`auto-layout.ts:551-568`).
+- The `exact` path (`auto-layout.ts:713-728`) only runs a geometry check. It
   skips `placeDocument`, so neither the R10 whole-layout translation
   (`packages/auto-layout/src/place.ts:471-499`, `oldBox` = input envelope or
   `searchLimit.anchor`) nor the R67 checks run.
@@ -35,8 +35,8 @@ twice on PR #46 (P2, deferred to this task). Default quality must not change.
   routing at `packages/auto-layout/src/search-moves.ts:305-309`; repair uses
   `spanProblem` at `auto-layout.ts:177`.
 - The quick reference is available in `planAutoLayoutMeasured` as
-  `quickRun.final` (`auto-layout.ts:430-433`, in scope at the `optimizePins`
-  call); `repairBounds` is built from it at `auto-layout.ts:469` but only when
+  `quickRun.final` (`auto-layout.ts:435-438`, in scope at the `optimizePins`
+  call); `repairBounds` is built from it at `auto-layout.ts:474` but only when
   the search beat quick, so do not rely on `repairBounds`.
 - `searchPinContacts` (`packages/auto-layout/src/contact-search.ts:34`) shares
   the same `replan`. It is out of scope: it moves only to establish R38 contacts
