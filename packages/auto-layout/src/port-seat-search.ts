@@ -1,42 +1,12 @@
-import { diagnoseVisualQuality, diagnoseLabelClearance } from "@icm/derived";
-import type { SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import { createPlacementEstimator } from "./estimate.js";
 import { enclosingBox, withPlacements } from "./geometry.js";
 import { classifyNets } from "./net-roles.js";
 import { portSeatCandidates } from "./place-markers.js";
 import { compareIds } from "./recognize.js";
-import { ROUTED_SCORE_WEIGHTS, routedScore, type LayoutRun } from "./refine.js";
-import {
-  auditRouting,
-  floatingPins,
-  missingConnections,
-} from "./routing-audit.js";
+import { routedScore, type LayoutRun } from "./refine.js";
+import { calibratedScore, routedGuards } from "./routed-search-score.js";
 import type { Placement } from "./types.js";
-
-// T055 dev calibration; all other R74 comparisons retain wire weight 0.1.
-function seatScore(run: LayoutRun, resolver: SymbolResolver) {
-  return (
-    routedScore(run, resolver) +
-    (run.final
-      ? (4 - ROUTED_SCORE_WEIGHTS.wireLength) *
-        auditRouting(run.final, resolver).wireLength
-      : 0)
-  );
-}
-function guards(document: SchematicDocument, resolver: SymbolResolver) {
-  const counts: Record<string, number> = {
-    floating: floatingPins(document, resolver).length,
-    missing: missingConnections(document, resolver),
-  };
-  for (const diagnostic of [
-    ...diagnoseVisualQuality(document, resolver),
-    ...diagnoseLabelClearance(document, resolver),
-  ])
-    if (diagnostic.code.startsWith("VISUAL_"))
-      counts[diagnostic.code] = (counts[diagnostic.code] ?? 0) + 1;
-  return counts;
-}
 
 /** R146: one deterministic coordinate pass; replan returns a finished layout. */
 export function searchPortSeats(
@@ -49,8 +19,8 @@ export function searchPortSeats(
   if (!initial.final || !Number.isFinite(routedScore(initial, resolver)))
     return initial;
   let current = initial;
-  let score = seatScore(current, resolver);
-  let limits = guards(initial.final, resolver);
+  let score = calibratedScore(current, resolver);
+  let limits = routedGuards(initial.final, resolver);
   const roles = classifyNets(initial.final, resolver);
   const anchor = enclosingBox(initial.final, resolver);
   const ports = initial.final.instances
@@ -98,9 +68,9 @@ export function searchPortSeats(
         }
       }
       const candidate = replan(trial);
-      const value = seatScore(candidate, resolver);
+      const value = calibratedScore(candidate, resolver);
       if (value >= score || !candidate.final) continue;
-      const counts = guards(candidate.final, resolver);
+      const counts = routedGuards(candidate.final, resolver);
       if (
         Object.entries(counts).some(
           ([key, count]) => count > (limits[key] ?? 0),
