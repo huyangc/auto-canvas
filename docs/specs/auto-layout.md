@@ -249,7 +249,8 @@ AutoLayoutDiagnostic[] }`. Fixed instances retain their exact placements;
 - **R11 — Routing set.** Before any edit, freeze pin groups per input Base Net
   with `deriveElectricalTopologyProjection`. Exclude MOS `B` pins and pins of
   instances unplaced in the result. Route frozen `target: { kind: "pins",
-pins }` lists, never Net ids.
+pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
+  component (Routes and contacts); a label-only connection never counts as joined.
 - **R12 — Power.** Each ground/VDD marker gets one straight stub to its R6a
   host pin. R43 connects every remaining non-bulk rail member through a
   horizontal trunk, including one marker host to join the marker's drawing.

@@ -5,6 +5,7 @@ import * as transaction from "../src/transaction.js";
 import * as editEngine from "@icm/edit-engine";
 import {
   deriveElectricalTopologyProjection,
+  deriveNetConnectivity,
   endpointKey,
   resolveRouteGeometry,
 } from "@icm/derived";
@@ -24,10 +25,83 @@ import {
   transformPoint,
 } from "../src/geometry.js";
 import { visibleInstanceBounds } from "@icm/derived";
-import { auditRouting, floatingPins } from "../src/routing-audit.js";
+import {
+  auditRouting,
+  floatingPins,
+  missingConnections,
+} from "../src/routing-audit.js";
 import { addMirrorLoads, circuit } from "./document-fixture.js";
 
 const resolver = new InMemorySymbolResolver(builtInSymbols);
+
+it("routes a MOS source physically despite hidden ground labels on other bulks", () => {
+  // A synthetic four-terminal MOS keeps the bulk available as an attachment
+  // candidate, matching drawings with explicit bulk symbol geometry.
+  const mos = structuredClone(resolver.resolve("nmos")!.definition);
+  delete mos.defaultVariantId;
+  const symbols = new InMemorySymbolResolver([
+    ...builtInSymbols.filter((symbol) => symbol.id !== "nmos"),
+    mos,
+  ]);
+  const document = circuit(
+    { source: "current-source", bulkA: "nmos", bulkB: "nmos", mos: "nmos" },
+    { ground: ["source.-", "bulkA.B", "bulkB.B", "mos.S"] },
+  );
+  for (const [index, instance] of document.instances.entries()) {
+    instance.placement = {
+      position: { x: index * 150, y: instance.id === "mos" ? 0 : 100 },
+      rotation: 0,
+      mirror: "none",
+    };
+    if (instance.id === "source") continue;
+    const id = `ground-${instance.id}`;
+    document.annotations.push({
+      id,
+      kind: "power-label",
+      netId: "ground",
+      binding: { kind: "net-name", netId: "ground" },
+      anchor: {
+        kind: "object",
+        objectId: instance.id,
+        localOffset: { x: 0, y: 0 },
+        fallbackPosition: instance.placement.position,
+      },
+      alignment: "start",
+      rotation: 0,
+      locked: false,
+      visible: false,
+    });
+    document.connectivityEvidence.push({
+      id: `${id}-claim`,
+      kind: "name-claim",
+      netId: "ground",
+      name: "GND",
+      scope: "global",
+      powerDomain: "ground",
+      owner: { kind: "net-label", annotationId: id },
+    });
+  }
+  expect(
+    deriveNetConnectivity(document, symbols, document.nets[0]!)
+      .components.map((component) => component.nodes.length)
+      .sort(),
+  ).toEqual([1, 3]);
+  const plan = planAutoLayout(document, symbols, {
+    fixedInstanceIds: new Set(
+      document.instances.map((instance) => instance.id),
+    ),
+  });
+  expect(
+    plan.diagnostics.filter(
+      (diagnostic) => diagnostic.code === "AUTO_LAYOUT_NET_UNROUTED",
+    ),
+  ).toEqual([]);
+  const result = preview(document, symbols, plan.edits);
+  expect(result.ok).toBe(true);
+  if (!result.ok) return;
+  expect(floatingPins(result.document, symbols)).toHaveLength(0);
+  expect(missingConnections(result.document, symbols)).toBe(0);
+});
 
 it("freezes Base Net pins without MOS bulk pins, without mutating input", () => {
   const document = circuit(

@@ -5,7 +5,9 @@ import {
 } from "@icm/model";
 import {
   buildProjectConnectivityIndex,
+  deriveElectricalTopologyProjection,
   deriveVisibleConnectivity,
+  endpointKey,
   diagnoseVisualQuality,
   resolveRouteGeometry,
   runErcChecks,
@@ -78,6 +80,93 @@ function falseContacts(
   ];
 }
 describe("route-net", () => {
+  it("routes label-joined pins physically only when requested", () => {
+    const document = createEmptyDocument("physical", "Physical components");
+    const pins = ["A", "B", "C"].map((instanceId) => ({
+      instanceId,
+      pinName: "1",
+    }));
+    document.instances = pins.map(({ instanceId }, index) => ({
+      id: instanceId,
+      symbolId: "resistor",
+      placement: {
+        position: { x: index * 150, y: 100 },
+        rotation: 0,
+        mirror: "none",
+      },
+    }));
+    document.nets = [{ id: "ground", terminals: pins }];
+    for (const instance of document.instances.slice(1)) {
+      const id = `ground-${instance.id}`;
+      document.annotations.push({
+        id,
+        kind: "power-label",
+        netId: "ground",
+        binding: { kind: "net-name", netId: "ground" },
+        anchor: {
+          kind: "object",
+          objectId: instance.id,
+          localOffset: { x: 0, y: -40 },
+          fallbackPosition: instance.placement!.position,
+        },
+        alignment: "start",
+        rotation: 0,
+        locked: false,
+        visible: false,
+      });
+      document.connectivityEvidence.push({
+        id: `${id}-claim`,
+        kind: "name-claim",
+        netId: "ground",
+        name: "GND",
+        scope: "global",
+        powerDomain: "ground",
+        owner: { kind: "net-label", annotationId: id },
+      });
+    }
+    expect(
+      deriveVisibleConnectivity(document, resolver)[0]!.components.map(
+        (component) => component.nodes.map((node) => node.key),
+      ),
+    ).toEqual([
+      [endpointKey({ kind: "terminal", ...pins[0]! })],
+      pins.slice(1).map((pin) => endpointKey({ kind: "terminal", ...pin })),
+    ]);
+    const target: RouteNetTarget = { kind: "pins", pins: [pins[0]!, pins[2]!] };
+    const visible = planRouteNet(document, resolver, { target }, 64);
+    expect(visible.unjoined ?? []).toEqual([]);
+    const visibleDocument = apply(document, visible.edits).document;
+    expect(visibleDocument.routes).toHaveLength(1);
+    const physical = (doc: SchematicDocument) => {
+      const projection = deriveElectricalTopologyProjection(doc, resolver);
+      return pins.map((pin) =>
+        projection.endpointToPhysicalComponent.get(
+          endpointKey({ kind: "terminal", ...pin }),
+        ),
+      );
+    };
+    const [a, b, c] = physical(visibleDocument);
+    expect(a).toBe(b);
+    expect(a).not.toBe(c);
+    for (const requested of [target.pins, pins]) {
+      const plan = planRouteNet(
+        document,
+        resolver,
+        {
+          target: { kind: "pins", pins: requested },
+        },
+        64,
+        { components: "physical" },
+      );
+      expect(plan.unjoined ?? []).toEqual([]);
+      const next = apply(document, plan.edits).document;
+      const [a, b, c] = physical(next);
+      expect(a).toBeDefined();
+      expect(a).toBe(c);
+      if (requested.length === 3) expect(b).toBe(a);
+      else expect(b).not.toBe(a);
+    }
+  });
   it("does not bypass an ambiguous foreign wire at a reused trunk-end pin", () => {
     const { document, target } = fixture();
     const foreign = planWireBatch(
