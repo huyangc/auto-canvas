@@ -640,6 +640,7 @@ function routeGroup(
               MAX_SCHEMATIC_EDITS_PER_TRANSACTION,
               {
                 netScope: "base",
+                components: "physical",
                 partial: true,
                 crossingCost: 20 * working.presentation.grid,
                 reservedIds,

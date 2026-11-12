@@ -1,5 +1,6 @@
 import {
   assessImportReference,
+  deriveElectricalTopologyProjection,
   deriveNetConnectivity,
   deriveNetConnectivityContext,
   endpointKey,
@@ -78,6 +79,8 @@ export function planRouteNet(
   maxEdits: number,
   options: {
     netScope?: "logical" | "base";
+    /** Physical routing ignores connections made only through labels. */
+    components?: "visible" | "physical";
     partial?: boolean;
     crossingCost?: number;
     /** Reserve identities removed by a caller before this routing preview. */
@@ -246,6 +249,10 @@ function planRouteNetOnce(
       priority: endpoint.kind === "junction" ? 0 : 1,
     });
   }
+  const topology =
+    options.components === "physical"
+      ? deriveElectricalTopologyProjection(document, resolver)
+      : undefined;
   const components: RoutingGuidanceComponent[] = [];
   const consumed = new Set<string>();
   for (const net of document.nets) {
@@ -256,25 +263,41 @@ function planRouteNetOnce(
       context,
     ).components) {
       if (!component.nodes.some((node) => keys.has(node.key))) continue;
-      for (const node of component.nodes) consumed.add(node.key);
-      const candidates = component.nodes.flatMap((node) => {
-        const connection = resolveEndpointConnection(
-          document,
-          resolver,
-          node.endpoint,
-          context,
-        );
-        return connection
-          ? [
-              {
-                ...node,
-                point: connection.gridLanding,
-                priority: node.endpoint.kind === "junction" ? 0 : 1,
-              },
-            ]
-          : [];
-      });
-      components.push({ id: component.id, netId: net.id, nodes: candidates });
+      const pieces = topology
+        ? [
+            ...Map.groupBy(
+              component.nodes,
+              (node) =>
+                topology.endpointToPhysicalComponent.get(node.key) ?? node.key,
+            ),
+          ]
+        : [[component.id, component.nodes] as const];
+      for (const [pieceId, pieceNodes] of pieces) {
+        if (!pieceNodes.some((node) => keys.has(node.key))) continue;
+        for (const node of pieceNodes) consumed.add(node.key);
+        const candidates = pieceNodes.flatMap((node) => {
+          const connection = resolveEndpointConnection(
+            document,
+            resolver,
+            node.endpoint,
+            context,
+          );
+          return connection
+            ? [
+                {
+                  ...node,
+                  point: connection.gridLanding,
+                  priority: node.endpoint.kind === "junction" ? 0 : 1,
+                },
+              ]
+            : [];
+        });
+        components.push({
+          id: pieces.length > 1 ? `${component.id}:${pieceId}` : component.id,
+          netId: net.id,
+          nodes: candidates,
+        });
+      }
     }
   }
   for (const [key, node] of nodes) {

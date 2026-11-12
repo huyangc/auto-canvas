@@ -193,6 +193,7 @@ export function rerouteCrossings(
           limit,
           {
             netScope: "base",
+            components: "physical",
             crossingCost: 100 * doc.presentation.grid,
             reservedIds: reserved,
           },
