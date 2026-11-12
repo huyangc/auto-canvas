@@ -544,7 +544,7 @@ async function evaluateFile(file) {
         ? 1_000_000_000
         : quickMode
           ? 0
-          : defaultLayoutSearch(document).evaluations;
+          : defaultLayoutSearch(document, layoutOptions).evaluations;
       measurement.searchMode = seconds
         ? "deadline"
         : quickMode

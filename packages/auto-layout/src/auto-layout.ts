@@ -13,7 +13,18 @@ import {
 } from "@icm/edit-engine";
 import type { SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
-import { enclosingBox, geometryProblem } from "./geometry.js";
+import {
+  enclosingBox,
+  geometryProblem,
+  pinPoints,
+  withPlacements,
+} from "./geometry.js";
+import {
+  deviceNets,
+  devicePins,
+  isMarker,
+  isSignalBlock,
+} from "./placement-connectivity.js";
 import { repairBlockers } from "./blocker-repair.js";
 import {
   freedAnnotations,
@@ -88,9 +99,18 @@ import { searchPortSeats } from "./port-seat-search.js";
 import { draftingGroups } from "./drafting-groups.js";
 import { followDraftingGroups } from "./follow-drafting-groups.js";
 
-/** Additional routed evaluations; the quick planner and finalist repairs are separate. */
-export function defaultLayoutSearch(document: SchematicDocument) {
-  return { seed: 1, evaluations: document.instances.length <= 40 ? 8 : 2 };
+/** Additional routed evaluations; the quick planner and finalist repairs are separate.
+ * T061: 24 for plain planning up to 40 instances; optimized and partitioned
+ * planning keep their earlier eight. */
+export function defaultLayoutSearch(
+  document: SchematicDocument,
+  options: Pick<AutoLayoutOptions, "quality" | "partition"> = {},
+) {
+  if (document.instances.length > 40) return { seed: 1, evaluations: 2 };
+  return {
+    seed: 1,
+    evaluations: options.quality === "optimized" || options.partition ? 8 : 24,
+  };
 }
 
 export function planAutoLayout(
@@ -166,7 +186,10 @@ function planWithFixedDrafting(
     if (!validated.partition.arrangement && (problem || !result.edits.length)) {
       const { partition: _partition, ...fallbackOptions } = options;
       // R134 fallback is plain planning, including R147 and R146 searches.
-      result = planAutoLayout(document, resolver, fallbackOptions);
+      result = planAutoLayout(document, resolver, {
+        ...fallbackOptions,
+        search: options.search ?? defaultLayoutSearch(document, options),
+      });
       result.diagnostics.push({
         severity: "warning",
         code: "AUTO_LAYOUT_PARTITION_FALLBACK",
@@ -479,7 +502,7 @@ function planAutoLayoutMeasured(
     selected.strategy,
     false,
   );
-  const search = options.search ?? defaultLayoutSearch(document);
+  const search = options.search ?? defaultLayoutSearch(document, options);
   const quickRun =
     routedScore(alternative, resolver) < routedScore(selected.run, resolver)
       ? alternative
@@ -722,11 +745,96 @@ function planAutoLayoutMeasured(
     if (!final.ok) return routed;
     // R149 compares gaps against the completed port/rail incumbent. Closing
     // a gap earlier can remove a later crossing-reducing port opportunity.
+    const roles = classifyNets(final.document, resolver);
+    const devices = final.document.instances.filter((i) => !isMarker(i));
+    const pins = pinPoints(
+      {
+        ...final.document,
+        instances: devices,
+      },
+      resolver,
+    );
+    const attachedPorts = final.document.instances.flatMap((port) => {
+      if (
+        fixed.has(port.id) ||
+        !["port", "port-filled"].includes(port.symbolId)
+      )
+        return [];
+      const net = roles.pinNet(port.id, "P");
+      if (!net || roles.rails.has(net)) return [];
+      const hosts = pins.filter(
+        (pin) => roles.pinNet(pin.instanceId, pin.pinName) === net,
+      );
+      if (hosts.length !== 1) return [];
+      const host = final.document.instances.find(
+        (i) => i.id === hosts[0]!.instanceId,
+      )!;
+      return [{ port, host }];
+    });
+    // Retain the feedback bands protected by compactRows as well: a passive
+    // spanning two signal nets of an amplifier keeps its vertical offset.
+    const feedbackBands = devices.flatMap((device) => {
+      if (devicePins(device, resolver).length !== 2) return [];
+      const nets = new Set(deviceNets(device, resolver, roles));
+      if (nets.size !== 2 || [...nets].some((net) => roles.rails.has(net)))
+        return [];
+      return devices
+        .filter(
+          (host) =>
+            isSignalBlock(host, resolver) &&
+            [...nets].every((net) =>
+              deviceNets(host, resolver, roles).includes(net),
+            ),
+        )
+        .map((host) => ({ device, host }));
+    });
     return searchDeviceRelocations(
       { ...railed, result: routed, final: final.document },
       resolver,
       fixed,
-      (placements) => finishPlacement(placements, railContacts),
+      (placements) => {
+        if (
+          feedbackBands.some(
+            ({ device, host }) =>
+              placements.get(device.id)!.position.y -
+                device.placement!.position.y !==
+              placements.get(host.id)!.position.y - host.placement!.position.y,
+          )
+        )
+          return { ...railed, result: routed, final: final.document };
+        const followed = new Map(placements);
+        // A gap trial translates devices after R146 has selected port seats.
+        // Retain each single-host port's offset, including trial reanchoring,
+        // before routing and comparing the finished candidate's guards.
+        for (const { port, host } of attachedPorts) {
+          const before = host.placement!;
+          const after = placements.get(host.id)!;
+          const seat = port.placement!;
+          followed.set(port.id, {
+            ...seat,
+            position: {
+              x: seat.position.x + after.position.x - before.position.x,
+              y: seat.position.y + after.position.y - before.position.y,
+            },
+          });
+        }
+        if (attachedPorts.length && !fixed.size) {
+          const anchor = enclosingBox(final.document, resolver);
+          const box = enclosingBox(
+            withPlacements(final.document, followed),
+            resolver,
+          );
+          const grid = document.presentation.grid;
+          const dx = Math.round((anchor.x - box.x) / grid) * grid;
+          const dy = Math.round((anchor.y - box.y) / grid) * grid;
+          for (const [id, pose] of followed)
+            followed.set(id, {
+              ...pose,
+              position: { x: pose.position.x + dx, y: pose.position.y + dy },
+            });
+        }
+        return finishPlacement(followed, railContacts);
+      },
       stopped,
       { phase: "gaps", budget: relocationBudget },
     ).result;
