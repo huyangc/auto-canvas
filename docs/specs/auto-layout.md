@@ -394,6 +394,8 @@ pins }` lists, never Net ids.
   to meet at the actual pin point with their bodies on opposite sides. Route
   once per shared landing; a branch may meet its peer only at its endpoint.
   Try at most four routed alternatives and keep the incumbent on regression.
+  The axial-gap search runs only up to 40 instances; each alternative is a
+  full replan, which tripled planning time on large documents.
   Locked poses can retain an already-safe contact without exploring moves.
 - **R39 — Signal trunks.** For signal Nets with at least three routable pins,
   compare the existing tree, a horizontal trunk spanning the pins at median y,

@@ -82,8 +82,11 @@ export function searchPinContacts(
         result,
       );
   }
+  // Each move is a full replan; above 40 instances (R36's limit for full
+  // refinement) the search cost 2–3x the planning time for little gain.
   if (
     fixedCount ||
+    document.instances.length > 40 ||
     result.diagnostics.some((d) => d.severity === "error") ||
     !result.edits.length
   )
