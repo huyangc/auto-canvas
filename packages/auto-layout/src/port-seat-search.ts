@@ -44,6 +44,7 @@ export function searchPortSeats(
   resolver: SymbolResolver,
   fixed: ReadonlySet<string>,
   replan: (placements: ReadonlyMap<string, Placement>) => LayoutRun,
+  stopped: () => boolean = () => false,
 ): LayoutRun {
   if (!initial.final || !Number.isFinite(routedScore(initial, resolver)))
     return initial;
@@ -83,7 +84,8 @@ export function searchPortSeats(
       .sort((a, b) => a.score - b.score)
       .slice(0, 2);
     for (const seat of seats) {
-      if (evaluations++ >= 12) return current;
+      // A caller's deadline or abort ends the search with the best finished seat.
+      if (evaluations++ >= 12 || stopped()) return current;
       const trial = structuredClone(seat.trial);
       if (!fixed.size) {
         const box = enclosingBox(withPlacements(document, trial), resolver);
