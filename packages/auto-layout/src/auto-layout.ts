@@ -85,6 +85,8 @@ import { symmetryTopology } from "./symmetry.js";
 import { searchDeviceRelocations } from "./device-relocation-search.js";
 import { searchRailSeats } from "./rail-seat-search.js";
 import { searchPortSeats } from "./port-seat-search.js";
+import { draftingGroups } from "./drafting-groups.js";
+import { followDraftingGroups } from "./follow-drafting-groups.js";
 
 /** Additional routed evaluations; the quick planner and finalist repairs are separate. */
 export function defaultLayoutSearch(document: SchematicDocument) {
@@ -92,6 +94,44 @@ export function defaultLayoutSearch(document: SchematicDocument) {
 }
 
 export function planAutoLayout(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  options: AutoLayoutOptions = {},
+): AutoLayoutResult {
+  if (
+    options.partition ||
+    options.quality === "optimized" ||
+    !document.instances.length ||
+    document.instances.length > 40 ||
+    !document.drafting?.objects.some((o) => !o.locked)
+  )
+    return planWithFixedDrafting(document, resolver, options);
+  return timePlanning(() => {
+    const base = planWithFixedDrafting(document, resolver, options);
+    if (
+      options.search?.signal?.aborted ||
+      (options.search?.deadline !== undefined &&
+        Date.now() >= options.search.deadline)
+    )
+      return base;
+    const groups = draftingGroups(document, resolver);
+    if (!groups.length) return base;
+    const moving = new Set(groups.flatMap((g) => g.objects.map((o) => o.id)));
+    const candidate = planWithFixedDrafting(
+      {
+        ...document,
+        drafting: {
+          objects: document.drafting!.objects.filter((o) => !moving.has(o.id)),
+        },
+      },
+      resolver,
+      options,
+    );
+    return followDraftingGroups(document, resolver, base, candidate, groups);
+  });
+}
+
+function planWithFixedDrafting(
   document: SchematicDocument,
   resolver: SymbolResolver,
   options: AutoLayoutOptions = {},

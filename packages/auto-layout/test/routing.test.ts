@@ -16,6 +16,7 @@ import {
 } from "@icm/edit-engine";
 import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
 import { planAutoLayout } from "../src/index.js";
+import { draftingGroups } from "../src/drafting-groups.js";
 import { freezePinGroups, routeDocument } from "../src/route.js";
 import { preview, terminalPartition } from "../src/transaction.js";
 import {
@@ -575,78 +576,137 @@ it("preserves a freed route label's offset, direction and orientation", () => {
     });
 });
 
-it("clears a drafting shape by the minimum whole-layout downward grid translation", () => {
-  const document = circuit({ r: "resistor" }, {});
-  document.instances[0]!.placement = {
-    position: { x: 0, y: 0 },
-    rotation: 0,
-    mirror: "none",
-  };
-  document.drafting = {
-    objects: [
-      {
-        id: "box",
-        zIndex: 0,
-        anchor: { kind: "free", position: { x: 0, y: 0 } },
+it.each([true, false])(
+  "preserves drafting ownership or minimum downward clearance (owned=%s)",
+  (owned) => {
+    const document = circuit({ r: "resistor" }, {});
+    document.instances[0]!.placement = {
+      position: { x: 0, y: 0 },
+      rotation: 0,
+      mirror: "none",
+    };
+    document.drafting = {
+      objects: [
+        {
+          id: "box",
+          zIndex: 0,
+          anchor: { kind: "free", position: { x: 0, y: 0 } },
+          kind: "rectangle",
+          center: { x: 0, y: 0 },
+          width: 20,
+          height: 20,
+          rotation: 0,
+          lineStyle: "solid",
+          locked: false,
+        },
+      ],
+    };
+    if (!owned) {
+      document.instances.push({
+        id: "other",
+        symbolId: "resistor",
+        placement: {
+          position: { x: 600, y: 400 },
+          rotation: 0,
+          mirror: "none",
+        },
+      });
+      document.nets = [
+        {
+          id: "wire",
+          terminals: [
+            { instanceId: "r", pinName: "2" },
+            { instanceId: "other", pinName: "1" },
+          ],
+        },
+      ];
+      document.drafting.objects[0] = {
+        ...document.drafting.objects[0]!,
         kind: "rectangle",
-        center: { x: 0, y: 0 },
-        width: 20,
-        height: 20,
+        anchor: { kind: "free", position: { x: 20, y: -60 } },
+        center: { x: 20, y: -60 },
+        width: 5,
+        height: 5,
         rotation: 0,
         lineStyle: "solid",
-        locked: false,
+      };
+    }
+    expect(draftingGroups(document, resolver)[0]!.owner).toEqual(
+      owned
+        ? expect.objectContaining({ kind: "instance", id: "r" })
+        : undefined,
+    );
+    const plan = planAutoLayout(document, resolver);
+    expect(plan.diagnostics).toEqual([]);
+    const result = executeTransaction(
+      document,
+      {
+        transactionId: "drafting",
+        documentId: document.id,
+        expectedRevision: document.revision,
+        actor: { kind: "agent", id: "test" },
+        edits: plan.edits,
       },
-    ],
-  };
-  const plan = planAutoLayout(document, resolver);
-  expect(plan.diagnostics).toEqual([]);
-  const result = executeTransaction(
-    document,
-    {
-      transactionId: "drafting",
-      documentId: document.id,
-      expectedRevision: document.revision,
-      actor: { kind: "agent", id: "test" },
-      edits: plan.edits,
-    },
-    { symbolResolver: resolver },
-  );
-  expect(result.ok, JSON.stringify(result.diagnostics)).toBe(true);
-  if (!result.ok) return;
-  const after = result.document;
-  const unblocked = { ...document, drafting: { objects: [] } };
-  const baseline = preview(
-    unblocked,
-    resolver,
-    planAutoLayout(unblocked, resolver).edits,
-  );
-  expect(baseline.ok).toBe(true);
-  if (!baseline.ok) return;
-  expect(after.drafting).toEqual(document.drafting);
-  expect(after.instances[0]!.placement!.position.x).toBe(
-    baseline.document.instances[0]!.placement!.position.x,
-  );
-  expect(after.instances[0]!.placement!.position.y).toBeGreaterThan(0);
-  expect(
-    after.instances[0]!.placement!.position.y % after.presentation.grid,
-  ).toBe(0);
-  const box = visibleInstanceBounds(after, resolver)[0]!.bounds;
-  const grown = {
-    x: box.x - 60,
-    y: box.y - 60,
-    width: box.width + 120,
-    height: box.height + 120,
-  };
-  const obstacle = draftingBounds(after, resolver)[0]!.bounds;
-  expect(boxesIntersect(grown, obstacle)).toBe(false);
-  expect(
-    boxesIntersect(
-      { ...grown, y: grown.y - after.presentation.grid },
-      obstacle,
-    ),
-  ).toBe(true);
-  expect(planAutoLayout(after, resolver).edits).toEqual([]);
-});
+      { symbolResolver: resolver },
+    );
+    expect(result.ok, JSON.stringify(result.diagnostics)).toBe(true);
+    if (!result.ok) return;
+    const after = result.document;
+    const unblocked = { ...document, drafting: { objects: [] } };
+    const baseline = preview(
+      unblocked,
+      resolver,
+      planAutoLayout(unblocked, resolver).edits,
+    );
+    expect(baseline.ok).toBe(true);
+    if (!baseline.ok) return;
+    if (owned) {
+      const oldPart = visibleInstanceBounds(document, resolver)[0]!.bounds;
+      const newPart = visibleInstanceBounds(after, resolver)[0]!.bounds;
+      const oldInk = draftingBounds(document, resolver)[0]!.bounds;
+      const newInk = draftingBounds(after, resolver)[0]!.bounds;
+      expect(newInk.x - oldInk.x).toBe(
+        Math.round(
+          newPart.x + newPart.width / 2 - oldPart.x - oldPart.width / 2,
+        ),
+      );
+      expect(newInk.y - oldInk.y).toBe(
+        Math.round(
+          newPart.y + newPart.height / 2 - oldPart.y - oldPart.height / 2,
+        ),
+      );
+      expect(boxesIntersect(oldPart, oldInk)).toBe(true);
+      expect(boxesIntersect(newPart, newInk)).toBe(true);
+      expect(after.instances).toEqual(baseline.document.instances);
+      expect(planAutoLayout(after, resolver).edits).toEqual([]);
+      return;
+    }
+    expect(after.drafting).toEqual(document.drafting);
+    expect(after.instances[0]!.placement!.position.x).toBe(
+      baseline.document.instances[0]!.placement!.position.x,
+    );
+    expect(after.instances[0]!.placement!.position.y).toBeGreaterThan(0);
+    expect(
+      after.instances[0]!.placement!.position.y % after.presentation.grid,
+    ).toBe(0);
+    const box = visibleInstanceBounds(after, resolver)[0]!.bounds;
+    const grown = {
+      x: box.x - 60,
+      y: box.y - 60,
+      width: box.width + 120,
+      height: box.height + 120,
+    };
+    const obstacle = draftingBounds(after, resolver)[0]!.bounds;
+    expect(boxesIntersect(grown, obstacle)).toBe(false);
+    expect(
+      boxesIntersect(
+        { ...grown, y: grown.y - after.presentation.grid },
+        obstacle,
+      ),
+    ).toBe(true);
+    expect(planAutoLayout(after, resolver).edits).toEqual([]);
+  },
+);
 
 it.each(["supply", "ground"] as const)(
   "R26 preserves a singleton %s claim and label on a replacement stub",

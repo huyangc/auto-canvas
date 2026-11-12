@@ -239,7 +239,10 @@ AutoLayoutDiagnostic[] }`. Fixed instances retain their exact placements;
   list with `dryRun` on the input. Require transaction acceptance and the same
   Base Net partition for every terminal, using
   `deriveElectricalTopologyProjection`. Otherwise return no edits and an R10
-  diagnostic. Drafting objects are obstacles: if placed device bounds grown
+  diagnostic. In plain planning with at most 40 instances, R150 first tries
+  moving unlocked drafting with its owners, retaining the following behavior
+  as its fallback. Locked drafting always remains an obstacle. In the fallback,
+  if placed device bounds grown
   by 60 units on every side intersect any drafting bounds, translate the
   whole layout down by grid steps until clear, never up or sideways.
   No input Route id survives.
@@ -1234,6 +1237,32 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   the same strict score improvement, crossing/bend, rigid-unit, connectivity and `VISUAL_*`
   guards, so a geometric gap may remain to protect label room. Fixed and
   locked units remain untouched. The R147 mode and size restrictions apply.
+
+- **R150 — Drafting follows layout.** Group touching or nearly touching input
+  drafting ink, including an object's drafting-anchor target. A locked member
+  freezes its entire component. Assign each movable component to the nearest
+  visible instance, route segment or junction within 1.5 times its larger ink
+  dimension. Preserve its displacement from that owner after placement; map
+  rerouted conductors by their terminal partition and nearest projected
+  geometry, including a conductor collapsed to a direct pin contact. Unowned
+  components move as one rigid block, keeping their input edge gap on the same
+  side of the circuit and their centre offset along that edge.
+  Compare the ordinary finished plan with a plan made with only fixed drafting
+  as obstacles. Seat the movable components after routing and label finishing,
+  trying a nine-by-nine grid of nearby offsets, nearest preferred offset first,
+  with pitch `max(4, Document grid)`. Reject seats intersecting devices, routes,
+  labels, junction dots or other drafting, except an object's existing overlap
+  with its own instance owner. Preserve that overlap at the preferred offset
+  (rounded to integer coordinates); it is also exempt from the candidate's
+  drafting-overlap audit. Only positions and anchors change;
+  authored content and shape are preserved. Unsupported route-following
+  rotations, missing owners, failed seats or invalid replay retain the ordinary
+  plan. Accept only when the finished R149 calibrated score, crossings, bends,
+  wire length, drafting-overlap count and every R146 routed guard do not
+  increase, and the terminal partition is unchanged. Optimized and successful
+  partition planning and documents above 40 instances retain their prior
+  behavior; partition fallback uses plain planning. Candidate cancellation is
+  checked before the additional planning pass.
 
 - **Existing locks and conflicts.** Members of a locked layout group or
   constraint are treated as fixed instances under R1, because the Edit Engine
