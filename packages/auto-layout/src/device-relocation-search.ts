@@ -1,6 +1,7 @@
 import { visibleInstanceBounds } from "@icm/derived";
 import type { SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
+import { gapClosingCandidates } from "./gap-closing.js";
 import { createPlacementEstimator } from "./estimate.js";
 import {
   enclosingBox,
@@ -14,7 +15,11 @@ import { conductingPins } from "./stages.js";
 import { isMarker } from "./placement-connectivity.js";
 import { compareIds, validInductorCouplings } from "./recognize.js";
 import type { LayoutRun } from "./refine.js";
-import { calibratedScore, routedGuards } from "./routed-search-score.js";
+import {
+  calibratedScore,
+  compactionRegresses,
+  routedGuards,
+} from "./routed-search-score.js";
 import { placementUnits } from "./search-moves.js";
 import type { Placement } from "./types.js";
 
@@ -210,13 +215,17 @@ export function relocationCandidates(
   return [...candidates.values()];
 }
 
-/** R147: one stable coordinate pass, with at most ten finished trials. */
+/** R147/R149: pin alignment, then gap closing, at most ten finished trials. */
 export function searchDeviceRelocations(
   initial: LayoutRun,
   resolver: SymbolResolver,
   fixed: ReadonlySet<string>,
   replan: (placements: ReadonlyMap<string, Placement>) => LayoutRun,
   stopped: () => boolean = () => false,
+  options: {
+    phase?: "alignment" | "gaps";
+    budget?: { remaining: number };
+  } = {},
 ): LayoutRun {
   if (!initial.final || !Number.isFinite(calibratedScore(initial, resolver)))
     return initial;
@@ -232,25 +241,41 @@ export function searchDeviceRelocations(
   let current = initial;
   let score = calibratedScore(current, resolver);
   let limits = routedGuards(initial.final, resolver);
-  let evaluations = 0;
-  for (const ids of units) {
-    if (evaluations >= 10 || stopped()) break;
+  const budget = options.budget ?? { remaining: 10 };
+  // The public pipeline defers gaps until ports and rails have finished, while
+  // sharing the original ten-trial budget with the pin-alignment pass.
+  const phases = options.phase ? [options.phase === "gaps"] : [false, true];
+  const visits = phases.flatMap((closeGaps) =>
+    units.map((ids) => ({ ids, closeGaps })),
+  );
+  for (const { ids, closeGaps } of visits) {
+    if (budget.remaining <= 0 || stopped()) break;
     const document = current.final!;
     const estimate = createPlacementEstimator(
       document.instances,
       resolver,
       classifyNets(document, resolver),
     );
-    const shortlist = relocationCandidates(document, resolver, ids)
-      .map((trial) => {
-        const cost = estimate(trial);
-        return { trial, score: cost.crossings + cost.length / 250 };
-      })
-      .sort((a, b) => a.score - b.score)
-      .slice(0, 2);
+    const rank = (candidates: Map<string, Placement>[]) =>
+      candidates
+        .map((trial) => {
+          const cost = estimate(trial);
+          return { trial, score: cost.crossings + cost.length / 250 };
+        })
+        .sort((a, b) => a.score - b.score)
+        .slice(0, 2);
+    const shortlist = rank(
+      closeGaps
+        ? gapClosingCandidates(document, resolver, ids, allUnits)
+        : relocationCandidates(document, resolver, ids),
+    );
+    const seen = new Set<string>();
     for (const { trial: proposal } of shortlist) {
-      if (evaluations >= 10 || stopped()) return current;
-      evaluations++;
+      if (budget.remaining <= 0 || stopped()) return current;
+      const key = JSON.stringify(ids.map((id) => proposal.get(id)));
+      if (seen.has(key)) continue;
+      seen.add(key);
+      budget.remaining--;
       const trial = structuredClone(proposal);
       if (!locked.size) {
         const box = enclosingBox(withPlacements(document, trial), resolver);
@@ -265,6 +290,8 @@ export function searchDeviceRelocations(
       const candidate = replan(trial);
       const value = calibratedScore(candidate, resolver);
       if (!candidate.final || value >= score) continue;
+      if (compactionRegresses(current, candidate, resolver, closeGaps))
+        continue;
       const finished = new Map(
         candidate.final.instances.map((i) => [i.id, i.placement!]),
       );

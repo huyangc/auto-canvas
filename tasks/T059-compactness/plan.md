@@ -13,6 +13,22 @@ completed ≤10-part drawings, ratios to human are crossings 2.01, bends 1.19
 Area has not moved since T056 because no search scores it. This task makes the
 searches value compactness and gives them moves that close gaps.
 
+## Plan change after round 1 (Opus, 2026-11-12)
+
+- **No trade of crossings or bends for area.** Round 1 lowered median area
+  1.558 → 1.511 but raised bends on dev and val and crossings on dev. Accept a
+  compaction-driven trial only if neither crossings nor bends increase; refit
+  the span weight on dev together with the other terms (T055's procedure) so
+  the score itself stops preferring a bend for 120 units of span.
+- **Area acceptance for this task:** median area lower on dev **and** val, with
+  total crossings and bends not above the base on either split. The 1.40 value
+  is no longer an acceptance line; report the reached value.
+- **Investigate (report only):** auto layouts' vertical margin outside the
+  instance bounds is 1.53× the human one (102,572 vs 67,116 summed), while the
+  instance bounds are 1.24× in height and 1.42× in width. Report which
+  annotation kinds (device reference labels, net labels, port labels, drafting)
+  make up the vertical margin, human vs auto, on dev.
+
 ## Context
 
 - `routed-search-score.ts:12-19`: `calibratedScore` = `routedScore` + wire at

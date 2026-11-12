@@ -642,12 +642,14 @@ function planAutoLayoutMeasured(
         ...(final.ok ? { final: final.document } : {}),
       };
     };
+    const relocationBudget = { remaining: 10 };
     const relocated = searchDeviceRelocations(
       initial,
       resolver,
       fixed,
       finishPlacement,
       stopped,
+      { phase: "alignment", budget: relocationBudget },
     );
     const seated = searchPortSeats(
       relocated,
@@ -669,13 +671,25 @@ function planAutoLayoutMeasured(
       (placements) => finishPlacement(placements, railContacts),
       stopped,
     );
-    return rerouteRailCrossings(
+    const routed = rerouteRailCrossings(
       document,
       resolver,
       railed.result,
       stopped,
       finishLabels,
     );
+    const final = preview(document, resolver, routed.edits);
+    if (!final.ok) return routed;
+    // R149 compares gaps against the completed port/rail incumbent. Closing
+    // a gap earlier can remove a later crossing-reducing port opportunity.
+    return searchDeviceRelocations(
+      { ...railed, result: routed, final: final.document },
+      resolver,
+      fixed,
+      (placements) => finishPlacement(placements, railContacts),
+      stopped,
+      { phase: "gaps", budget: relocationBudget },
+    ).result;
   }
   if (
     options.quality !== "optimized" ||

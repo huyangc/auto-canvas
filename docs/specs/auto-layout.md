@@ -1144,8 +1144,9 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   crossings, weighted 4 and 1000. Fully evaluate the best two per port, at
   most 12 trials total, with no wall-clock budget. Each trial runs the normal
   R72, R95/R96, R97, facing, local rerouting and label passes before comparison.
-  Accept only a strictly lower R74 score with wire weight 4 (T055 dev calibration); other R74 comparisons
-  retain wire weight 0.1. Reject any increase in finished floating pins,
+  Accept only a strictly lower R74 score with wire weight 4 and finished
+  visible span weight 0.5 (R149, T059 dev refit); other R74 comparisons
+  retain wire weight 0.1 and no span term. Reject any increase in finished floating pins,
   missing connections or any `VISUAL_*` count. Keep the incumbent on ties.
   Input/output convention remains a score term, not a candidate filter.
   Successful partition planning, optimized quality, zero-budget planning and
@@ -1199,6 +1200,40 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   are evaluation counts, with caller cancellation checked between trials.
   Optimized, successful partition, zero-budget and above-40-instance planning
   retain their prior behavior; R134 fallback uses plain planning's search.
+
+- **R149 — Finished compactness and gap closing.** R146, R147 and R148
+  add half the finished visible width plus height to their calibrated
+  score. T059 refits crossings, bends, wire and visible span together against
+  dev human placements, retaining the other R74 terms: crossing weight 1000,
+  bend weight 100, wire weight 4 and span weight 0.5. A 120-unit span reduction
+  is worth 60, less than one added bend. Independently of the weighted score,
+  all three searches reject any increase in finished crossings or bends when
+  the span term drives acceptance (the trial would not strictly improve T058's
+  wire-weighted score). Trials that also improve the wire-weighted score retain
+  its existing primary-metric tradeoffs.
+  Every new gap-closing trial must keep both primary metrics non-increasing,
+  even when it also improves the wire-weighted score.
+  Measure the union
+  of visible instance bounds (including ports and rail markers), pins, routed
+  centerlines, visible label room and ink, and drafting bounds. This is a
+  visible-geometry search objective; the evaluation still measures the SVG
+  view box, including its export margin.
+  Reserve the remainder of R147's ten-trial budget after its pin-alignment
+  pass. Once R146 and R148 have finished, propose a rigid unit's largest grid-aligned
+  translation toward another rigid device unit in each cardinal direction. Use swept
+  instance bounds and leave two grid lanes around every external instance,
+  including markers and ports. Standalone markers and ports constrain moves
+  but never attract a unit on their own. An occupied corridor cannot be crossed; an
+  unbounded direction produces no candidate. Keep unit orientation and all
+  internal offsets. Rank these candidates by the existing R54 estimate and
+  try at most two per unit in a second stable coordinate pass, using only the
+  remainder of R147's shared ten-trial budget. This preserves every original
+  pin-alignment trial before considering gap closures. Comparing against the
+  completed port/rail incumbent prevents an early closure from losing a later
+  crossing-reducing port opportunity. Fully finish every trial and use
+  the same strict score improvement, crossing/bend, rigid-unit, connectivity and `VISUAL_*`
+  guards, so a geometric gap may remain to protect label room. Fixed and
+  locked units remain untouched. The R147 mode and size restrictions apply.
 
 - **Existing locks and conflicts.** Members of a locked layout group or
   constraint are treated as fixed instances under R1, because the Edit Engine
