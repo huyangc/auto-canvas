@@ -1,3 +1,7 @@
+import {
+  diagnoseVisualQuality,
+  diagnoseLabelClearance,
+} from "../packages/derived/dist/index.js";
 import { stageComponents } from "../packages/auto-layout/dist/stage-symmetry.js";
 import { reconcilePartition } from "../packages/auto-layout/dist/partition-reconcile.js";
 import { partitionMetrics } from "../packages/auto-layout/dist/partition-metrics.js";
@@ -26,6 +30,7 @@ import {
   symmetryCounts,
 } from "../packages/auto-layout/dist/symmetry.js";
 import { classifyNets } from "../packages/auto-layout/dist/net-roles.js";
+import { isMarker } from "../packages/auto-layout/dist/placement-connectivity.js";
 import { partitionFromPlacement } from "../packages/auto-layout/dist/partition-from-placement.js";
 import { partitionFromLoadbench } from "../packages/auto-layout/dist/partition-from-loadbench.js";
 import {
@@ -50,7 +55,10 @@ import { terminalPartition } from "../packages/auto-layout/dist/transaction.js";
 import { enclosingBox } from "../packages/auto-layout/dist/geometry.js";
 import { readabilityCounts } from "../packages/auto-layout/dist/readability.js";
 import { planningTiming } from "../packages/auto-layout/dist/timing.js";
-import { refinementMetrics } from "../packages/auto-layout/dist/refine.js";
+import {
+  refinementMetrics,
+  routedScore,
+} from "../packages/auto-layout/dist/refine.js";
 import { executeTransaction } from "../packages/edit-engine/dist/index.js";
 import {
   compareElectricalGraphs,
@@ -152,12 +160,120 @@ const escape = (value) =>
     .replaceAll('"', "&quot;");
 const measurements = [];
 const sections = [];
+// Include zero totals, including diagnostics absent from the entire corpus.
+const visualCodes = [
+  "VISUAL_AMBIGUOUS_JUNCTION",
+  "VISUAL_CONSTRAINT_VIOLATION",
+  "VISUAL_LABEL_CLEARANCE",
+  "VISUAL_LABEL_OVERLAP",
+  "VISUAL_LABEL_OWNER_DISTANCE",
+  "VISUAL_LABEL_RUN_ON",
+  "VISUAL_OUTSIDE_PAGE",
+  "VISUAL_ROUTE_OVERLAP",
+  "VISUAL_SHORT_SEGMENT",
+  "VISUAL_SYMBOL_OVERLAP",
+  "VISUAL_TERMINAL_DEPARTURE",
+  "VISUAL_TERMINAL_ON_FOREIGN_ROUTE",
+  "VISUAL_UNPLACED_INSTANCE",
+  "VISUAL_UNRESOLVED_SYMBOL",
+  "VISUAL_WIRE_THROUGH_SYMBOL",
+];
+function visualCounts(document, resolver) {
+  const counts = Object.fromEntries(visualCodes.map((code) => [code, 0]));
+  for (const diagnostic of [
+    ...diagnoseVisualQuality(document, resolver),
+    ...diagnoseLabelClearance(document, resolver),
+  ]) {
+    if (diagnostic.code.startsWith("VISUAL_"))
+      counts[diagnostic.code] = (counts[diagnostic.code] ?? 0) + 1;
+  }
+  return counts;
+}
+const netKinds = ["rail", "port", "signal"];
+const crossingKindPairs = netKinds.flatMap((kind, index) =>
+  netKinds.slice(index).map((other) => [kind, other].sort().join("-")),
+);
+const portHostCounts = ["noHost", "singleHost", "multiHost"];
+function netBreakdown(document, resolver) {
+  const { rails } = classifyNets(document, resolver);
+  const instances = new Map(document.instances.map((i) => [i.id, i]));
+  const ports = new Map();
+  for (const net of document.nets) {
+    const terminals = net.terminals ?? [];
+    if (
+      !terminals.some((t) =>
+        ["port", "port-filled"].includes(instances.get(t.instanceId)?.symbolId),
+      )
+    )
+      continue;
+    // Count device pins, not distinct devices or port markers. Keep zero-host
+    // nets explicit so the host buckets always sum to the port-kind length.
+    const hosts = new Set(
+      terminals
+        .filter((t) => {
+          const instance = instances.get(t.instanceId);
+          return instance && !isMarker(instance);
+        })
+        .map((t) => JSON.stringify([t.instanceId, t.pinName])),
+    ).size;
+    ports.set(net.id, hosts);
+  }
+  // Rail takes precedence when a rail also has a port terminal.
+  const kind = (netId) =>
+    rails.has(netId) ? "rail" : ports.has(netId) ? "port" : "signal";
+  const routesByNet = new Map();
+  for (const route of document.routes) {
+    const routes = routesByNet.get(route.netId) ?? [];
+    routes.push(route);
+    routesByNet.set(route.netId, routes);
+  }
+  const wireLengthByNetKind = Object.fromEntries(netKinds.map((k) => [k, 0]));
+  const crossingsByKindPair = Object.fromEntries(
+    crossingKindPairs.map((k) => [k, 0]),
+  );
+  const portWireLengthByHostCount = Object.fromEntries(
+    portHostCounts.map((k) => [k, 0]),
+  );
+  const nets = [...routesByNet];
+  for (const [index, [netId, routes]] of nets.entries()) {
+    const { wireLength } = auditRouting({ ...document, routes }, resolver);
+    wireLengthByNetKind[kind(netId)] += wireLength;
+    if (kind(netId) === "port") {
+      const hosts = ports.get(netId);
+      portWireLengthByHostCount[
+        hosts === 0 ? "noHost" : hosts === 1 ? "singleHost" : "multiHost"
+      ] += wireLength;
+    }
+    for (const [otherId, otherRoutes] of nets.slice(index + 1)) {
+      // Reuse the audit's proper-crossing and point-deduplication rules across
+      // all routes of each unordered Net pair. A multi-Net intersection can
+      // contribute to multiple pairs; the primary audit counts its point once.
+      const { crossings } = auditRouting(
+        { ...document, routes: [...routes, ...otherRoutes] },
+        resolver,
+      );
+      crossingsByKindPair[[kind(netId), kind(otherId)].sort().join("-")] +=
+        crossings;
+    }
+  }
+  return {
+    wireLengthByNetKind,
+    crossingsByKindPair,
+    portWireLengthByHostCount,
+  };
+}
 const metrics = (document, resolver, components, stages) => {
   const audit = auditRouting(document, resolver);
   const bounds = buildSvgScene(document, resolver).viewBox;
   const instances = enclosingBox(document, resolver);
   return {
     ...readabilityCounts(document, resolver),
+    visual: visualCounts(document, resolver),
+    netBreakdown: netBreakdown(document, resolver),
+    legacyScore: routedScore(
+      { final: document, result: { diagnostics: [] } },
+      resolver,
+    ),
     symmetry: symmetryCounts(document, resolver, components),
     symmetryStage: symmetryCounts(document, resolver, stages),
     crossings: audit.crossings,
@@ -811,10 +927,101 @@ if (!isMainThread) {
     totals.push(total);
     console.log(JSON.stringify(total));
   }
+  const scoreboard = Object.fromEntries(
+    ["dev", "val", "all"].map((split) => {
+      const cases = measurements.filter(
+        (m) => split === "all" || m.split === split,
+      );
+      const completed = cases.filter((m) => m.status === "completed");
+      const paired = completed.filter((m) => m.human);
+      const keys = ["crossings", "bends", "wireLength"];
+      const primary = Object.fromEntries(
+        keys.map((key) => {
+          const human = paired.reduce((s, m) => s + m.human[key], 0);
+          const result = paired.reduce((s, m) => s + m.result[key], 0);
+          return [
+            key,
+            {
+              human,
+              result,
+              ratio: human ? result / human : result ? null : 1,
+            },
+          ];
+        }),
+      );
+      const guards = (items) => ({
+        visual: Object.fromEntries(
+          [
+            ...new Set([
+              ...visualCodes,
+              ...items.flatMap((m) => Object.keys(m.visual)),
+            ]),
+          ]
+            .sort()
+            .map((code) => [
+              code,
+              items.reduce((s, m) => s + (m.visual[code] ?? 0), 0),
+            ]),
+        ),
+        floatingPins: items.reduce((s, m) => s + m.floatingPins.length, 0),
+        missingConnections: items.reduce((s, m) => s + m.missingConnections, 0),
+      });
+      const breakdown = (side) =>
+        Object.fromEntries(
+          [
+            ["wireLengthByNetKind", netKinds],
+            ["crossingsByKindPair", crossingKindPairs],
+            ["portWireLengthByHostCount", portHostCounts],
+          ].map(([metric, buckets]) => [
+            metric,
+            Object.fromEntries(
+              buckets.map((bucket) => [
+                bucket,
+                paired.reduce(
+                  (sum, m) => sum + m[side].netBreakdown[metric][bucket],
+                  0,
+                ),
+              ]),
+            ),
+          ]),
+        );
+      const times = cases
+        .map((m) => m.milliseconds)
+        .filter(Number.isFinite)
+        .sort((a, b) => a - b);
+      return [
+        split,
+        {
+          documents: cases.length,
+          completed: completed.length,
+          paired: paired.length,
+          nonEquivalent: completed.filter((m) => m.equivalent !== true).length,
+          primary: {
+            ...primary,
+            medianAreaRatio: median(paired.map((m) => m.result.areaRatio)),
+          },
+          // Like primary ratios, breakdowns compare the same completed pairs.
+          netBreakdown: {
+            human: breakdown("human"),
+            result: breakdown("result"),
+          },
+          // Guard totals cover all available references/results, including unpaired cases.
+          human: guards(cases.filter((m) => m.human).map((m) => m.human)),
+          result: guards(completed.map((m) => m.result)),
+          planningMilliseconds: {
+            median: median(times),
+            p95: times[Math.max(0, Math.ceil(times.length * 0.95) - 1)] ?? null,
+          },
+        },
+      ];
+    }),
+  );
+  console.log("Scoreboard:", JSON.stringify(scoreboard, null, 2));
   writeFileSync(
     `${output}/report.json`,
     JSON.stringify(
       {
+        scoreboard,
         cases: measurements,
         totals,
         summary: {
