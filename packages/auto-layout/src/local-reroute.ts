@@ -26,13 +26,15 @@ import {
 } from "./transaction.js";
 import { emptyChoices } from "./layout-choices.js";
 import { refinementMetrics, routedScore } from "./refine.js";
+import { calibratedScore, routedGuards } from "./routed-search-score.js";
 import type { AutoLayoutResult } from "./types.js";
 
 // Candidate tracks go through the outer pins, the centre, or one grid line
 // just outside the pin envelope. The router checks every trunk and branch.
-function* trunkTracks(points: Point[], grid: number) {
+function* trunkTracks(points: Point[], grid: number, rails = false) {
   yield undefined; // minimum spanning tree, against all retained conductors
   for (const axis of ["x", "y"] as const) {
+    if (rails && axis === "x") continue;
     const across = axis === "x" ? "y" : "x",
       coords = points.map((p) => p[axis]),
       ends = points.map((p) => p[across]);
@@ -85,6 +87,28 @@ export function rerouteCrossings(
   result: AutoLayoutResult,
   stopped: () => boolean,
 ): AutoLayoutResult {
+  return rerouteNets(source, resolver, result, stopped);
+}
+
+/** R148: reconsider crossed rails against the finished signal geometry. */
+export function rerouteRailCrossings(
+  source: SchematicDocument,
+  resolver: SymbolResolver,
+  result: AutoLayoutResult,
+  stopped: () => boolean,
+  finish: (result: AutoLayoutResult) => AutoLayoutResult,
+): AutoLayoutResult {
+  return rerouteNets(source, resolver, result, stopped, finish);
+}
+
+function rerouteNets(
+  source: SchematicDocument,
+  resolver: SymbolResolver,
+  result: AutoLayoutResult,
+  stopped: () => boolean,
+  finish?: (result: AutoLayoutResult) => AutoLayoutResult,
+): AutoLayoutResult {
+  const rails = !!finish;
   const limit = MAX_SCHEMATIC_EDITS_PER_TRANSACTION;
   if (
     !result.edits.length ||
@@ -110,7 +134,11 @@ export function rerouteCrossings(
   ]);
   const partition = terminalPartition(doc, resolver);
   const score = (final: SchematicDocument) =>
-    routedScore({ result, final, choices: emptyChoices() }, resolver);
+    (rails ? calibratedScore : routedScore)(
+      { result, final, choices: emptyChoices() },
+      resolver,
+    );
+  let guards = rails ? routedGuards(doc, resolver) : undefined;
   let audit = auditRouting(doc, resolver),
     bestScore = score(doc);
   if (
@@ -122,7 +150,12 @@ export function rerouteCrossings(
   let trials = 0;
   for (const netId of keys) {
     if (trials === 3 || stopped() || !audit.crossings) break;
-    if (["ground", "supply"].includes(roles.byNet.get(netId) ?? "")) continue;
+    if (
+      rails
+        ? !roles.rails.has(netId)
+        : ["ground", "supply"].includes(roles.byNet.get(netId) ?? "")
+    )
+      continue;
     if (!remaining.has(netId) || protectedIds.has(netId)) continue;
     const group = groups.find((g) => g.netId === netId);
     if (!group || group.pins.length < 2 || group.contacts.length) continue;
@@ -173,13 +206,13 @@ export function rerouteCrossings(
     if (coords.length < 2) continue;
     let winner:
       | {
-          edits: SchematicEdit[];
+          result: AutoLayoutResult;
           final: SchematicDocument;
           score: number;
           audit: typeof audit;
         }
       | undefined;
-    for (const trunk of trunkTracks(coords, doc.presentation.grid)) {
+    for (const trunk of trunkTracks(coords, doc.presentation.grid, rails)) {
       if (stopped()) break;
       let routed;
       try {
@@ -203,7 +236,11 @@ export function rerouteCrossings(
       } // Occupied trunk or no clear path.
       const edits = [...result.edits, ...cut, ...restore, ...routed.edits];
       if (!routed.edits.length || edits.length > limit) continue;
-      const replay = preview(source, resolver, edits);
+      const candidate = finish
+        ? finish({ ...result, edits })
+        : { ...result, edits };
+      if (candidate.diagnostics.some((d) => d.severity === "error")) continue;
+      const replay = preview(source, resolver, candidate.edits);
       if (!replay.ok) continue;
       const final = replay.document,
         next = auditRouting(final, resolver);
@@ -221,19 +258,29 @@ export function rerouteCrossings(
         floatingPins(final, resolver).length
       )
         continue;
+      const counts = guards && routedGuards(final, resolver);
+      if (
+        counts &&
+        Object.entries(counts).some(
+          ([key, count]) => count > (guards![key] ?? 0),
+        )
+      )
+        continue;
       const value = score(final);
       if (
         value < (winner?.score ?? bestScore) &&
         !readabilityRegressed(doc, final, resolver)
       )
-        winner = { edits, final, score: value, audit: next };
+        winner = { result: candidate, final, score: value, audit: next };
     }
     if (winner) {
-      result.edits = winner.edits;
+      if (rails) result = winner.result;
+      else result.edits = winner.result.edits;
       doc = winner.final;
       remaining = crossingsByNet(doc, resolver);
       audit = winner.audit;
       bestScore = winner.score;
+      if (guards) guards = routedGuards(doc, resolver);
       for (const id of documentObjectIds(doc)) reserved.add(id);
       const metrics = refinementMetrics(result);
       if (metrics) metrics.score = bestScore;
