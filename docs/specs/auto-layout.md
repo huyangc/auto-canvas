@@ -1174,6 +1174,32 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   planning retain their prior behavior. R134 partition fallback uses this
   search under the same conditions as plain planning.
 
+- **R148 — Finished rail search.** After R147 and R146, in default mode with
+  a nonzero search budget and at most 40 instances, search existing one-pin
+  markers on crossed rail Nets. Keep marker count and orientation; do not use
+  device-family eligibility to choose a host. At each non-bulk device pin on
+  the rail, propose seats 40 or 80 units along the transformed pin exit and on
+  the rail's supply/ground side. Snap to the grid, reject geometry conflicts,
+  deduplicate, and rank by the shortest Manhattan branch to a rail device pin.
+  Finish the best two seats per marker, with at most eight trials overall.
+  Check the moved marker against other pins and bounds, retaining unrelated
+  legal contacts. Markers belonging to user groups or constraints, and fixed
+  markers, stay put. Preserve licensed contacts through R140's declared-pair
+  policy. Use R146's complete finishing path, calibrated score and all routed
+  guards; retain the incumbent on ties.
+  Then retry at most three crossed rail Nets against the retained signal
+  geometry, ordered by crossing count with stable Net-id ties. Compare a tree
+  and at most five horizontal trunk tracks: the rail pin envelope's low/high
+  levels, its grid-snapped centre, and one grid step outside either level.
+  Preserve direct contacts and protected or locked routing by skipping those
+  Nets. Replay and finish labels before comparing each candidate. Require a
+  strictly better calibrated score, no increase in crossings, bends or wire,
+  no lost name claim or terminal partition change, and no routing, connectivity
+  or `VISUAL_*` guard regression. Keep earlier candidates on ties. All bounds
+  are evaluation counts, with caller cancellation checked between trials.
+  Optimized, successful partition, zero-budget and above-40-instance planning
+  retain their prior behavior; R134 fallback uses plain planning's search.
+
 - **Existing locks and conflicts.** Members of a locked layout group or
   constraint are treated as fixed instances under R1, because the Edit Engine
   refuses to transform them. A recognized group whose generated id already
