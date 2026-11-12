@@ -1,4 +1,4 @@
-# T055 — Default-mode placement search toward the human baseline
+# T055 — Human-baseline scoreboard for auto-layout evaluation
 
 - Branch: `task/T055-human-baseline-search`
 - Base: `main` at `bdb5f36`
@@ -23,6 +23,34 @@ human reference; ratios are auto / human):
 | bends                         |   2,356 |   2,998 |  1.27 |         2,600 |  1.10 |
 | wire length                   | 465,224 | 772,590 |  1.66 |       793,796 |  1.71 |
 | median per-drawing area ratio |    1.00 |    1.66 |       |          1.73 |       |
+
+## Plan change after round 1 (Opus, 2026-11-12)
+
+Round 1 (see `review.md`) showed that guarded local search around the
+existing strategies changes almost nothing: 9 of 628 plans, wire −0.07%,
+crossings, bends and area unchanged, at 1.26× planning time. Opus then
+measured where the gap comes from (numbers in `review.md`): port nets carry
+about half of the excess wire and 142 of the 346 excess crossings; rail nets a
+further 139 crossings. Those become their own tasks (T056 onward).
+
+**This task is narrowed to the measurement scoreboard.** Round 2 must:
+
+1. Keep the scoreboard in `scripts/auto-layout-eval.mjs` (round 1 step 1) and
+   extend it with two breakdowns, for human and result, per split: wire length
+   by net kind (`rail` = `classifyNets(...).rails`, `port` = a Net with a
+   `port`/`port-filled` terminal, `signal` = the rest), and crossings by the
+   unordered pair of kinds of the two crossing Nets. Also report port wire
+   split by host count (1 device pin vs more).
+2. Remove every product-code change of round 1: `packages/auto-layout/**`
+   and `docs/specs/auto-layout.md` must equal `origin/main` (`bdb5f36`). The
+   calibration result (wire 4, span 4, 289/310 dev agreement) stays in the
+   report as evidence only.
+3. Default-mode plans must be byte-identical to `bdb5f36` on all 628 drawings.
+
+Acceptance for round 2 replaces the primary targets above: the commands in
+Acceptance pass, `git diff origin/main --stat` lists only
+`scripts/auto-layout-eval.mjs` and this task's files, and the scoreboard
+(including both breakdowns) is printed and stored for the default run.
 
 ## Context
 
