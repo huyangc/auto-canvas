@@ -243,6 +243,9 @@ AutoLayoutDiagnostic[] }`. Fixed instances retain their exact placements;
   by 60 units on every side intersect any drafting bounds, translate the
   whole layout down by grid steps until clear, never up or sideways.
   No input Route id survives.
+  During cleanup, temporarily free unlocked device-anchored labels that own
+  Net name claims, then restore their anchors after restoring frozen pin groups.
+  A transient split must not reassign a label's name to another pin of its device.
 - **R11 — Routing set.** Before any edit, freeze pin groups per input Base Net
   with `deriveElectricalTopologyProjection`. Exclude MOS `B` pins and pins of
   instances unplaced in the result. Route frozen `target: { kind: "pins",
@@ -257,6 +260,9 @@ pins }` lists, never Net ids.
   Re-upsert each name claim owned by a removed Route/Junction power marker
   with the same id, name, scope and powerDomain, using the frozen group's
   current Net id and its trunk Route as owner, or its longest new Route.
+  When an object-anchored bound label presents a removed power marker's claim,
+  move that claim to the surviving annotation during cleanup instead; retain
+  that owner after routing so its semantic name and RichText override stay valid.
   A singleton power Net receives the R26 stub when its claim needs a new owner;
   without a clear replacement Route, leave R10 as the guard. This preserves supply-bound
   MOS bulk membership when the old rail and its naming authority are removed.
@@ -281,6 +287,8 @@ pins }` lists, never Net ids.
   leg it stays free at the nearest pin of its Net. Preserve id, content and
   binding. If whole-list replay invalidates a preview Route/leg id, keep that
   label free instead of emitting a broken anchor.
+  Round persisted midpoint fallback coordinates to integer page units; keep
+  `t: 0.5` for the precise derived position on the leg.
 - **Marker stubs and drafting.** A marker stub is one wire between exactly
   the marker pin and its R6a host pin, planned with clearance checks, so
   markers sharing a host are never wired to each other. The router does not
@@ -387,7 +395,12 @@ pins }` lists, never Net ids.
 - **R38 — General contacts.** R25 applies to every Net. Any two non-bulk pins
   touching in the input on one frozen group receive an exact, clearance-checked
   stub unless they remain touching. Replay reconciliation has no missing
-  contact to materialize. Default search can close an axial gap between a facing
+  contact to materialize. If whole-list replay materializes an unsafe dashed
+  wire for a separated visible MOS bulk contact, replace that implicit wire
+  with a clearance-checked authored wire between the same terminals and replay
+  again. Ordinary bulk pins remain excluded from the routing set. If the
+  bounded repair cannot complete, the R10 audit still refuses the layout.
+  Default search can close an axial gap between a facing
   pair on the same explicitly declared Base Net: an input contact, or the two
   device terminals of a two-pin group. Only visible scalar endpoints qualify.
   Preserve rigid groups, reject other overlaps, and require the two symbols
@@ -619,6 +632,8 @@ pins }` lists, never Net ids.
   only anchor offsets/fallback positions and alignment; retain content, bindings,
   style, rotation and locks. Every complete candidate includes seating and
   whole-list replay before scoring.
+  Round computed fallback coordinates and local offsets to integer page units,
+  including candidates derived from odd grid sizes or fractional ink positions.
 
 - **R74 — Readability energy.** `ROUTED_SCORE_WEIGHTS` exports all R22 energy
   weights together. The unchanged `unrouted` weight of 10000 multiplies missing

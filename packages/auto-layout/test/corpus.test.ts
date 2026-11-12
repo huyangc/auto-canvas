@@ -389,11 +389,25 @@ it.each(cases)(
           transferred.owner.kind === "power-marker"
         ) {
           const objectId = transferred.owner.objectId;
-          expect(
-            after.routes.some(
-              (r) => r.id === objectId && r.netId === transferred.netId,
-            ),
-          ).toBe(true);
+          const label = document.annotations.find(
+            (a) =>
+              a.binding?.kind === "net-name" &&
+              a.binding.netId === evidence.netId &&
+              a.anchor.kind === "object" &&
+              a.anchor.objectId === owner,
+          );
+          if (label) {
+            expect(objectId).toBe(label.id);
+            expect(
+              after.annotations.find((a) => a.id === objectId)?.netId,
+            ).toBe(transferred.netId);
+          } else {
+            expect(
+              after.routes.some(
+                (r) => r.id === objectId && r.netId === transferred.netId,
+              ),
+            ).toBe(true);
+          }
         }
       }
       expect(placed("M1").position.y).toBeLessThan(placed("M3").position.y);
@@ -657,25 +671,42 @@ it.each(cases)(
     const before = projectElectricalGraph(project);
     const plan = planAutoLayout(document, resolver);
     expect(plan.diagnostics).toEqual([]);
+    const removalStart = plan.edits.findIndex(
+      (e) => e.kind === "remove_route_geometry" || e.kind === "remove_junction",
+    );
     let cleanupLength =
-      freedAnnotations(document).length +
-      document.routes.length +
-      document.junctions.length;
-    while (plan.edits[cleanupLength]?.kind === "connect_endpoints")
+      removalStart + document.routes.length + document.junctions.length;
+    while (
+      ["connect_endpoints", "upsert_schematic_annotation"].includes(
+        plan.edits[cleanupLength]?.kind ?? "",
+      )
+    )
       cleanupLength++;
     const edits = plan.edits.slice(0, cleanupLength);
-    expect(edits.map((e) => e.kind)).toEqual([
-      ...freedAnnotations(document).map(() => "upsert_schematic_annotation"),
-      ...document.routes.map(() => "remove_route_geometry"),
-      ...document.junctions.map(() => "remove_junction"),
-      ...edits
-        .slice(
-          freedAnnotations(document).length +
-            document.routes.length +
-            document.junctions.length,
-        )
-        .map(() => "connect_endpoints"),
+    expect(
+      edits.slice(
+        removalStart,
+        removalStart + document.routes.length + document.junctions.length,
+      ),
+    ).toEqual([
+      ...document.routes.map((r) => ({
+        kind: "remove_route_geometry",
+        routeId: r.id,
+      })),
+      ...document.junctions.map((j) => ({
+        kind: "remove_junction",
+        junctionId: j.id,
+      })),
     ]);
+    expect(
+      edits
+        .slice(0, removalStart)
+        .every(
+          (e) =>
+            e.kind === "upsert_schematic_annotation" ||
+            e.kind === "upsert_connectivity_evidence",
+        ),
+    ).toBe(true);
     const result = executeTransaction(
       document,
       {

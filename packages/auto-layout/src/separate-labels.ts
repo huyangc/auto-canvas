@@ -9,6 +9,7 @@ import { preview } from "./transaction.js";
 import type { AutoLayoutOptions, AutoLayoutResult } from "./types.js";
 import { refinementMetrics, routedScore } from "./refine.js";
 import { emptyChoices } from "./layout-choices.js";
+import { integerPoint } from "./geometry.js";
 
 /** Resolve residual collisions on the finished drawing. Two labels sharing an
  * owner may require different seats, including a supply name beside a reference. */
@@ -68,13 +69,15 @@ export function separateLabels(
       for (let ix = -radius; ix <= radius; ix++)
         for (let iy = -radius; iy <= radius; iy++) {
           if (Math.max(Math.abs(ix), Math.abs(iy)) !== radius) continue;
-          const x = old.position.x + ix * step,
-            y = old.position.y + iy * step;
+          const { x, y } = integerPoint({
+            x: old.position.x + ix * step,
+            y: old.position.y + iy * step,
+          });
           const candidate: Annotation = {
             ...a,
             anchor: {
               ...a.anchor,
-              localOffset: { x: x - origin.x, y: y - origin.y },
+              localOffset: integerPoint({ x: x - origin.x, y: y - origin.y }),
               fallbackPosition: { x, y },
             },
           };
