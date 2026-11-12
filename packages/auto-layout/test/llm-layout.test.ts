@@ -184,3 +184,52 @@ it("plans with the reconciled partition, appends its diagnostics and repeats byt
     JSON.stringify(await llmPartition(document, resolver, llm)),
   );
 });
+
+it("uses a shorter connected route for advisory blocks and preserves explicit blocks", async () => {
+  const chain = circuit(
+    { R0: "resistor", R1: "resistor", R2: "resistor", R3: "resistor" },
+    { n0: ["R0.2", "R1.1"], n1: ["R1.2", "R2.1"], n2: ["R2.2", "R3.1"] },
+  );
+  const partitioner: LlmPartitioner = async ({ payload }) => ({
+    blocks: payload.units.map((u) => ({
+      id: u.id,
+      title: "Section",
+      role: "other",
+      units: [u.id],
+      reason: "Series section",
+    })),
+    uncertain: [],
+  });
+  const llm = { samples: 1, partitioner };
+  const options = { quality: "optimized" as const };
+  const { partition } = await llmPartition(chain, resolver, llm);
+  const explicit = planAutoLayout(chain, resolver, {
+    ...options,
+    partition: partition!,
+  });
+  const result = await planAutoLayoutWithLlm(chain, resolver, {
+    ...options,
+    llm,
+  });
+  expect(result.diagnostics).toContainEqual(
+    expect.objectContaining({
+      code: "AUTO_LAYOUT_PARTITION_FALLBACK",
+      message: expect.stringContaining("improves routed geometry"),
+    }),
+  );
+  expect(result.edits).toEqual(planAutoLayout(chain, resolver, options).edits);
+  expect(result.edits).not.toEqual(explicit.edits);
+  expect(
+    await planAutoLayoutWithLlm(chain, resolver, {
+      ...options,
+      llm,
+      partition: partition!,
+    }),
+  ).toEqual(explicit);
+  const bounded = { ...options, search: { seed: 1, evaluations: 1 } };
+  expect(
+    await planAutoLayoutWithLlm(chain, resolver, { ...bounded, llm }),
+  ).toEqual(
+    planAutoLayout(chain, resolver, { ...bounded, partition: partition! }),
+  );
+});

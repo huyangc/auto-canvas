@@ -362,6 +362,10 @@ export function createRouteClearance(
     /** The pin in words, for a part with or without a Reference. */
     text: string;
   }[] = [];
+  // In base-net routing two face-to-face terminals may be one physical landing.
+  // Index real contacts, never snapped grid landings or logical name aliases.
+  const contactSites = new Map<string, EndpointConnection[]>();
+  const siteKey = (p: Point) => JSON.stringify([p.x, p.y]);
   const bodies: {
     instanceId: string;
     label: string;
@@ -436,6 +440,16 @@ export function createRouteClearance(
       const connection = connectionOf(endpoint);
       if (!connection) continue;
       const key = endpointKey(endpoint);
+      if (
+        own.netScope === "base" &&
+        pin.presentation.visibility !== "implicit" &&
+        !signalEndpointMembers(document, resolver, endpoint)?.length
+      ) {
+        const k = siteKey(connection.contactPoint),
+          site = contactSites.get(k) ?? [];
+        site.push(connection);
+        contactSites.set(k, site);
+      }
       pins.push({
         key,
         label: `${label}.${pin.name}`,
@@ -488,6 +502,43 @@ export function createRouteClearance(
     const endConnections = ends.map((end) =>
       end ? connectionOf(end) : undefined,
     );
+    const peerContacts = !contactSites.size
+      ? []
+      : endConnections.flatMap((c, index) => {
+          if (
+            !c ||
+            c.endpoint.kind !== "terminal" ||
+            c.endpoint.memberId ||
+            !c.outward
+          )
+            return [];
+          const net = pinNet.get(endpointKey(c.endpoint));
+          if (!ownNet(net)) return [];
+          const site = contactSites.get(siteKey(c.contactPoint));
+          if (site?.length !== 2) return [];
+          const hostId = c.endpoint.instanceId;
+          const peer = site.find(
+            (p) =>
+              p.endpoint.kind === "terminal" &&
+              p.endpoint.instanceId !== hostId,
+          );
+          if (
+            !peer ||
+            peer.endpoint.kind !== "terminal" ||
+            pinNet.get(endpointKey(peer.endpoint)) !== net ||
+            !peer.outward ||
+            peer.outward.x !== -c.outward.x ||
+            peer.outward.y !== -c.outward.y
+          )
+            return [];
+          return [
+            {
+              instanceId: peer.endpoint.instanceId,
+              point: peer.contactPoint,
+              first: index === 0,
+            },
+          ];
+        });
     const endKeys = new Set(
       ends.flatMap((end) => {
         if (!end) return [];
@@ -616,6 +667,14 @@ export function createRouteClearance(
             ? [connection.gridLanding, connection.contactPoint]
             : [],
         );
+        for (const peer of peerContacts)
+          if (
+            peer.instanceId === body.instanceId &&
+            (peer.first
+              ? index === 0 && same(a, peer.point)
+              : index === segments.length - 1 && same(b, peer.point))
+          )
+            attachments.push(peer.point);
         if (
           body.strokes.some(([c, d]) =>
             contactPoints(a, b, c, d).some(

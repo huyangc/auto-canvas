@@ -36,3 +36,17 @@ export function readabilityCounts(
     return counts;
   });
 }
+
+export function readabilityRegressed(
+  before: SchematicDocument,
+  after: SchematicDocument,
+  resolver: SymbolResolver,
+) {
+  const a = readabilityCounts(before, resolver),
+    b = readabilityCounts(after, resolver);
+  return (
+    b.labelOverlaps > a.labelOverlaps ||
+    b.labelClearance > a.labelClearance ||
+    b.terminalDepartures > a.terminalDepartures
+  );
+}

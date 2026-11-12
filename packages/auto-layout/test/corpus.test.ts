@@ -112,21 +112,58 @@ it.each(cases)(
       expect(instance.placement!.position.x % after.presentation.grid).toBe(0);
       expect(instance.placement!.position.y % after.presentation.grid).toBe(0);
     }
-    const pins = pinPoints(after, resolver).map(
-      (p) => `${p.point.x},${p.point.y}`,
-    );
-    expect(new Set(pins).size).toBe(pins.length);
+    const pins = pinPoints(after, resolver);
+    const contacting = new Set<string>();
+    const pairId = (a: string, b: string) => JSON.stringify([a, b].sort());
+    for (const [index, a] of pins.entries()) {
+      const peers = pins
+        .slice(index + 1)
+        .filter((b) => a.point.x === b.point.x && a.point.y === b.point.y);
+      expect(peers.length).toBeLessThanOrEqual(1);
+      for (const b of peers) {
+        const netsOf = (p: typeof a) =>
+          document.nets
+            .filter((n) =>
+              n.terminals.some(
+                (t) =>
+                  !t.memberId &&
+                  t.instanceId === p.instanceId &&
+                  t.pinName === p.pinName,
+              ),
+            )
+            .map((n) => n.id);
+        const originalNets = netsOf(a);
+        expect(originalNets).toHaveLength(1);
+        expect(netsOf(b)).toEqual(originalNets);
+        const exit = (p: typeof a) => {
+          const i = after.instances.find((i) => i.id === p.instanceId)!;
+          const pin = resolver
+            .resolve(i.symbolId, i.symbolVariantId)!
+            .definition.pins.find((x) => x.name === p.pinName)!;
+          expect(pin.presentation.visibility).not.toBe("implicit");
+          return pinExit(pin, i.placement!);
+        };
+        const ea = exit(a),
+          eb = exit(b);
+        expect(Math.abs(ea.x + eb.x) + Math.abs(ea.y + eb.y)).toBe(0);
+        contacting.add(pairId(a.instanceId, b.instanceId));
+      }
+    }
     const boxes = visibleInstanceBounds(after, resolver);
-    for (let i = 0; i < boxes.length; i++)
-      for (const b of boxes.slice(i + 1)) {
-        const a = boxes[i]!;
+    for (const [index, a] of boxes.entries())
+      for (const b of boxes.slice(index + 1)) {
+        const overlap = (axis: "x" | "y", size: "width" | "height") =>
+          Math.min(
+            a.bounds[axis] + a.bounds[size],
+            b.bounds[axis] + b.bounds[size],
+          ) - Math.max(a.bounds[axis], b.bounds[axis]);
+        // The one-unit hit padding can meet on both sides of a licensed landing.
         expect(
-          a.bounds.x < b.bounds.x + b.bounds.width &&
-            b.bounds.x < a.bounds.x + a.bounds.width &&
-            a.bounds.y < b.bounds.y + b.bounds.height &&
-            b.bounds.y < a.bounds.y + a.bounds.height,
-          `${a.id}/${b.id} overlap`,
-        ).toBe(false);
+          Math.min(overlap("x", "width"), overlap("y", "height")),
+          pairId(a.id, b.id),
+        ).toBeLessThanOrEqual(
+          contacting.has(pairId(a.id, b.id)) ? 2 + 1e-6 : 0,
+        );
       }
     const oldBox = enclosingBox(document, resolver);
     const resultBox = enclosingBox(after, resolver);

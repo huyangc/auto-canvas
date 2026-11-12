@@ -1,0 +1,3 @@
+# Independent gallery evaluation and label placement
+
+Branch codex/t042-unrouted-net-repair. Freeze the current optimized algorithm, executable packages and evaluator before selection. Select up to six new human-tagged projects per bucket by stable ID order independent of APR results, excluding earlier corpus IDs and equivalent topologies. Run the frozen geometry-blind benchmark, validate terminal/physical safety, list per-case violations of the 110% ceiling. Diagnose overlapping reference names on frozen drawings. Change only label placement for the follow-up, keep routed geometry fixed, compare before/after and run relevant package checks.

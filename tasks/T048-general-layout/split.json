@@ -1,0 +1,212 @@
+[
+  {
+    "id": "56a67nmqbb",
+    "bucket": "0-4",
+    "set": "train",
+    "sha256": "67dfd6cc1efe74d454671396df1198d38c81556dd61db4546e596465bd22dd8b",
+    "provenance": "Gallery Human made（社区发布，未标记 AI）"
+  },
+  {
+    "id": "7pysw4vqkv",
+    "bucket": "0-4",
+    "set": "train",
+    "sha256": "d4787000a7e21a383701e68aac9b131090ae5efa80841f47ce25f047703278ed",
+    "provenance": "Gallery Human made（社区发布，未标记 AI）"
+  },
+  {
+    "id": "a5tz83j7hp",
+    "bucket": "0-4",
+    "set": "validation",
+    "sha256": "25c2667b6c31477b2c1b6d2146ed0a9aab6fd9c14d5aeac033b53d4b7a03420f",
+    "provenance": "Gallery Human made（社区发布，未标记 AI）"
+  },
+  {
+    "id": "atrwhd4c55",
+    "bucket": "0-4",
+    "set": "train",
+    "sha256": "b74f27aa12aa04e8d9b1d53d34899e2c54e5813f61912c0017ee06d22f17e1fb",
+    "provenance": "Gallery Human made（社区发布，未标记 AI）"
+  },
+  {
+    "id": "ax88crfm22",
+    "bucket": "0-4",
+    "set": "validation",
+    "sha256": "686defd96a819b83b9e0e23d73c28522af618d09db82625ecca7bc340b4958b9",
+    "provenance": "Gallery Human made（社区发布，未标记 AI）"
+  },
+  {
+    "id": "kdnfpy92ye",
+    "bucket": "0-4",
+    "set": "train",
+    "sha256": "86ac6c1c9eb4aa3a52834cab489212ee6d1b970e81a60aeb2bfc1fc13f2f39ae",
+    "provenance": "Gallery Human made（社区发布，未标记 AI）"
+  },
+  {
+    "id": "ptbzg5vr6a",
+    "bucket": "0-4",
+    "set": "train",
+    "sha256": "fd38a2b1867f46bb613c67e8c8ec6b3a1a157a4a732294164be8558c16dbf362",
+    "provenance": "绘制方式待核实"
+  },
+  {
+    "id": "qexp89pweb",
+    "bucket": "0-4",
+    "set": "validation",
+    "sha256": "9f8dc38f42734533430c53c6749c82cda18a356950219ad9226fbb963fc54929",
+    "provenance": "Gallery Human made（社区发布，未标记 AI）"
+  },
+  {
+    "id": "w783xzjxwc",
+    "bucket": "0-4",
+    "set": "train",
+    "sha256": "2aa03eb8d9ed88079b022c8c0154e6bd6933b44715672bdc592bf4e829a823fb",
+    "provenance": "Gallery Human made（社区发布，未标记 AI）"
+  },
+  {
+    "id": "w7bdvc28hc",
+    "bucket": "0-4",
+    "set": "train",
+    "sha256": "9c503ecdfe440e5a5fad4ce69e2f484287c7112a29f2219ba2c2da8d41df5a53",
+    "provenance": "Gallery Human made（社区发布，未标记 AI）"
+  },
+  {
+    "id": "waknkwmj9v",
+    "bucket": "0-4",
+    "set": "train",
+    "sha256": "18649148f8d7585cf52fb9cc6947ec7ce691a1936acb46037f9574ed182d4ae1",
+    "provenance": "Gallery Human made（社区发布，未标记 AI）"
+  },
+  {
+    "id": "xhscvcg7m4",
+    "bucket": "0-4",
+    "set": "train",
+    "sha256": "8875d77c7de92ed25392ad352879bf121c00844e61c7592734741155560df3a6",
+    "provenance": "Gallery Human made（社区发布，未标记 AI）"
+  },
+  {
+    "id": "yqt8nafh8t",
+    "bucket": "0-4",
+    "set": "validation",
+    "sha256": "3ef797c23d3af3a25e3d6078367ff73abd57011c362e8e8e1e7ba2ad9bfebdd8",
+    "provenance": "Gallery Human made（社区发布，未标记 AI）"
+  },
+  {
+    "id": "2b6xxwhh59",
+    "bucket": "5-10",
+    "set": "validation",
+    "sha256": "4f6cf1b97c00cf7da948f7b9a8c63b3b146ebe190580cb4886794e5b84fc0ae2",
+    "provenance": "Gallery Human made（社区发布，未标记 AI）"
+  },
+  {
+    "id": "3ze5gasahn",
+    "bucket": "5-10",
+    "set": "train",
+    "sha256": "71456f5e45a30525e8402d54534e2b2dc5f6b3ddfa7a74f008b2c1f486626c8d",
+    "provenance": "Gallery Human made（社区发布，未标记 AI）"
+  },
+  {
+    "id": "4sgvvq6dnc",
+    "bucket": "5-10",
+    "set": "train",
+    "sha256": "2d8938be00811d63ced52ed198506b9aa2f8652cb8f1e89947b10721fd5d7d84",
+    "provenance": "Gallery Human made（社区发布，未标记 AI）"
+  },
+  {
+    "id": "4vtqat76zf",
+    "bucket": "5-10",
+    "set": "validation",
+    "sha256": "0158f032e9b9a769f884d73ae7df893e1862809ed4a1958e5866bee81b385dbe",
+    "provenance": "Gallery Human made（社区发布，未标记 AI）"
+  },
+  {
+    "id": "57zs7ayept",
+    "bucket": "5-10",
+    "set": "train",
+    "sha256": "921bbd83d6a12fd4a6f949c386408b791a4db5367c10b46a37c5bfe6ee57fa98",
+    "provenance": "绘制方式待核实"
+  },
+  {
+    "id": "7sxpwb4am7",
+    "bucket": "5-10",
+    "set": "train",
+    "sha256": "031361d9b68e96f202a872ee1fc8ac2eaa729d18508669091cf5396e67a3b658",
+    "provenance": "绘制方式待核实"
+  },
+  {
+    "id": "b23bz45g2q",
+    "bucket": "5-10",
+    "set": "train",
+    "sha256": "b9f7fa389ea662077a945efe78362ab4985dd8e4a3eae7689be43374d9ffa4d0",
+    "provenance": "绘制方式待核实"
+  },
+  {
+    "id": "b5cn37k3a9",
+    "bucket": "5-10",
+    "set": "validation",
+    "sha256": "041f9a7821d86ea39e8093ab4f3c9d4ea6cf53593978140c3de277dd9fa77185",
+    "provenance": "人工绘制（仓内 Gallery 快照说明明确记载）"
+  },
+  {
+    "id": "cs5yz8ppc5",
+    "bucket": "5-10",
+    "set": "train",
+    "sha256": "7f3da04800e7c304cba92e5e85463e12471543c10e648238f900a0fb0e4861c4",
+    "provenance": "Gallery Human made（社区发布，未标记 AI）"
+  },
+  {
+    "id": "etswaaj69w",
+    "bucket": "5-10",
+    "set": "validation",
+    "sha256": "cc07636a01a66dbb56e63041d2f5e92dbbf4e4b680fb800348eb86f0b53c1108",
+    "provenance": "Gallery Human made（社区发布，未标记 AI）"
+  },
+  {
+    "id": "f22q5vhdb5",
+    "bucket": "5-10",
+    "set": "train",
+    "sha256": "fd7c5a77c491a80f6e8c64f17e2b02d2aa005310f0e56a95c1929080cc37b70a",
+    "provenance": "绘制方式待核实"
+  },
+  {
+    "id": "ffp69j5mvg",
+    "bucket": "5-10",
+    "set": "train",
+    "sha256": "cc5f76928135885d9f19a9d6e9aeef331bc8e965d0217fb74b5723c4f2fbc221",
+    "provenance": "Gallery Human made（社区发布，未标记 AI）"
+  },
+  {
+    "id": "frw3b53jtz",
+    "bucket": "5-10",
+    "set": "train",
+    "sha256": "172732d22e3d7d4daf93b1411522dd51dda908fa0d191bab36f7634838b28d4f",
+    "provenance": "Gallery Human made（社区发布，未标记 AI）"
+  },
+  {
+    "id": "n39nbzrxsd",
+    "bucket": "5-10",
+    "set": "train",
+    "sha256": "65203dc19b8e748a43fab240919162bb4e2d2a8144086948acf4c8b2689df1a7",
+    "provenance": "Gallery Human made（社区发布，未标记 AI）"
+  },
+  {
+    "id": "q8hfdfgdz2",
+    "bucket": "5-10",
+    "set": "train",
+    "sha256": "11ca4d93a2fabee4c6f03c3f238eed19cd73d1f33f9cbee75d07eb4e1ed9cc9e",
+    "provenance": "Gallery Human made（社区发布，未标记 AI）"
+  },
+  {
+    "id": "westxcef83",
+    "bucket": "5-10",
+    "set": "validation",
+    "sha256": "dfb6563a2e734d28a0e59961c45acc9f2c1e414b8666c7334404826641b8c774",
+    "provenance": "Gallery Human made（社区发布，未标记 AI）"
+  },
+  {
+    "id": "yq737j7m6k",
+    "bucket": "5-10",
+    "set": "train",
+    "sha256": "bfff076a85614467b6b44358834dfd18938e548275f125f039c4dd5b58519727",
+    "provenance": "Gallery 标记为 AI"
+  }
+]

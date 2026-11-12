@@ -1,3 +1,4 @@
+import { rerouteCrossings } from "../src/local-reroute.js";
 import * as editEngine from "@icm/edit-engine";
 import { resolveRouteGeometry } from "@icm/derived";
 import { expect, it, vi } from "vitest";
@@ -336,4 +337,38 @@ it("R95 restores the exact prior result when retry planning throws", () => {
   } finally {
     retry.mockRestore();
   }
+});
+
+it("a bounded local reroute removes a crossing without moving pins or lengthening the wires", () => {
+  const doc = drawing([
+    [240, 240, 90],
+    [420, 420, 0],
+    [300, 300, 0],
+    [420, 60, 0],
+  ]);
+  const original = route(doc);
+  const baseline = {
+    edits: original.edits,
+    diagnostics: original.diagnostics,
+    groups: [],
+  };
+  expect(auditRouting(original.document, resolver).crossings).toBe(1);
+  expect(
+    rerouteCrossings(doc, resolver, { ...baseline }, () => true).edits,
+  ).toBe(baseline.edits);
+  const result = rerouteCrossings(doc, resolver, { ...baseline }, () => false);
+  const replay = preview(doc, resolver, result.edits);
+  expect(replay.ok).toBe(true);
+  if (!replay.ok) throw Error("invalid reroute transaction");
+  const a = auditRouting(original.document, resolver),
+    b = auditRouting(replay.document, resolver);
+  expect(b.crossings).toBe(0);
+  expect(b.bends).toBeLessThanOrEqual(a.bends);
+  expect(b.wireLength).toBeLessThanOrEqual(a.wireLength);
+  expect(b.unsafeProblems).toEqual([]);
+  expect(replay.document.instances).toEqual(original.document.instances);
+  expect(terminalPartition(replay.document, resolver)).toBe(
+    terminalPartition(doc, resolver),
+  );
+  expect(missingConnections(replay.document, resolver)).toBe(0);
 });

@@ -349,3 +349,43 @@ it("retains foreign Route scans when either side has a sub-unit segment", () => 
       "touches Route short of a different Net (foreign) at (100, 0) between (0, 0) and (1e-12, 0)",
     );
 });
+
+it("permits only an endpoint branch off a facing scalar Base Net contact", () => {
+  const d = createEmptyDocument("direct", "Direct");
+  d.instances = [0, 40].map((y, j) => ({
+    id: String(j),
+    symbolId: "resistor",
+    placement: { position: { x: 0, y }, rotation: 0, mirror: "none" },
+  }));
+  const a = { kind: "terminal" as const, instanceId: "0", pinName: "2" },
+    b = { instanceId: "1", pinName: "1" };
+  d.nets = [{ id: "s", terminals: [a, b] }];
+  const check = () =>
+    createRouteClearance(
+      d,
+      resolver,
+      deriveNetConnectivityContext(d, resolver),
+      { netScope: "base", logicalIds: new Set(["s"]), endpointKeys: new Set() },
+    );
+  const start = { x: 0, y: 20 },
+    side = { x: 40, y: 20 };
+  expect(check().conflict([start, side], [a, undefined])).toBeFalsy();
+  expect(check().conflict([side, start], [undefined, a])).toBeFalsy();
+  expect(
+    check().conflict([start, { x: 0, y: 40 }], [a, undefined]),
+  ).toBeTruthy();
+  expect(check().conflict([{ x: -40, y: 20 }, side], [])).toBeTruthy();
+  d.nets = [
+    { id: "s", terminals: [a] },
+    { id: "foreign", terminals: [b] },
+  ];
+  d.connectivityEvidence = d.nets.map((net) => ({
+    id: "claim-" + net.id,
+    kind: "name-claim",
+    netId: net.id,
+    name: "sig",
+    scope: "global",
+    owner: { kind: "global-declaration", sourceNetId: net.id },
+  }));
+  expect(check().conflict([start, side], [a, undefined])).toBeTruthy();
+});

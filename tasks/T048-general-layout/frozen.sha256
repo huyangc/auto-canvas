@@ -1,0 +1,8 @@
+98bf1bce799614426e25d6c75c4938dbfc8b0fe4b3bfc8746187833c474d01ac  packages/auto-layout/src/pin-search.ts
+fa1f04f439dce7d9b3b69544edc9346ec488df9fff0ced78a8557aab9a19c69e  packages/auto-layout/src/pin-portfolio.ts
+e1fd74aa40338c9bf93933477def6ff87c28c8ae037e23c2a5973ee2d4b3de9a  packages/auto-layout/src/auto-layout.ts
+adf60b15a9d14344c3b625e94da5b03cfdeca8be56328f57b114831dfe20ab41  packages/auto-layout/src/contact-placement.ts
+f4285fd9d35896245c7e7d55d7616a12fb0fb22a929c1bcc837f61700fb45b22  packages/auto-layout/src/types.ts
+cfaf2448ec50fda3d5cd08818e93d126b45f2862eb3ed2987d912e02de4294af  tasks/T048-general-layout/split.json
+78382cc2e7d0a96ff8d69e7a245347dbdc0c5fb2af9f1d630eb3dc7a24b3f491  tasks/T048-general-layout/fit.json
+5eb3b5d21c6f330abf7fe54b98bf24e18db740d7d73a6f7f6610b8de00697900  tasks/T048-general-layout/bench.mjs
