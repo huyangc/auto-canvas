@@ -520,7 +520,7 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   R55's unrefined comparison: R61 was removed because round 1 measured no
   meaningful quality benefit for its extra planning time.
 
-- **R66 — Bounded annealing.** By default use seed 1 and at most eight additional routed evaluations for up to 40 instances (including ports and markers), or two for larger documents. This is a candidate budget, not a time limit. R147 adds up to ten separately bounded device-relocation trials before R146. Explicit `search` takes `seed: number`,
+- **R66 — Bounded annealing.** By default use seed 1 and at most 24 additional routed evaluations for up to 40 instances (including ports and markers), or two for larger documents; optimized and partitioned planning keep eight for up to 40 instances (T061). This is a candidate budget, not a time limit. R147 adds up to ten separately bounded device-relocation trials before R146. Explicit `search` takes `seed: number`,
   `evaluations: number`, `deadline?: number` (epoch milliseconds),
   `signal?: AbortSignal`, and
   `onProgress?: (p: { evaluations: number; best: number; current: number }) => void`.

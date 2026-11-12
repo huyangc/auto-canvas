@@ -101,8 +101,8 @@ it.each(["chain", "ring"] as const)(
       expect(rounded).toEqual({
         x: 999,
         y: 983.63,
-        width: 202,
-        height: 12.36,
+        width: 182,
+        height: 12.74,
       });
     }
   },
