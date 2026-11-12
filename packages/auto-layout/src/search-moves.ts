@@ -43,13 +43,11 @@ export function randomStream(seed: number): () => number {
   };
 }
 
-/** R66 moves operate on topology-derived units, never on special-case ids. */
-export function createMoveGenerator(
+/** Shared topology-derived rigid units for annealing and pin relocation. */
+export function placementUnits(
   document: SchematicDocument,
   resolver: SymbolResolver,
   fixed: ReadonlySet<string>,
-  random: () => number,
-  bounds?: SearchBounds,
   partition?: LayoutPartition,
 ) {
   const devices = document.instances
@@ -137,6 +135,48 @@ export function createMoveGenerator(
   const singles = movable.filter(
     (ids) => ids.length === 1 && !grouped.has(ids[0]!),
   );
+  return {
+    devices,
+    deviceDocument,
+    roles,
+    partition,
+    groups,
+    symmetry,
+    attachments,
+    units,
+    movable,
+    singles,
+    grouped,
+    root,
+    owner,
+  };
+}
+
+/** R66 moves operate on topology-derived units, never on special-case ids. */
+export function createMoveGenerator(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  fixed: ReadonlySet<string>,
+  random: () => number,
+  bounds?: SearchBounds,
+  partition?: LayoutPartition,
+) {
+  const {
+    devices,
+    deviceDocument,
+    roles,
+    partition: resolvedPartition,
+    groups,
+    symmetry,
+    attachments,
+    units,
+    movable,
+    singles,
+    grouped,
+    root,
+    owner,
+  } = placementUnits(document, resolver, fixed, partition);
+  partition = resolvedPartition;
   const found = partition
     ? undefined
     : findStages(devices, resolver, roles, groups, symmetry);

@@ -517,7 +517,7 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   R55's unrefined comparison: R61 was removed because round 1 measured no
   meaningful quality benefit for its extra planning time.
 
-- **R66 — Bounded annealing.** By default use seed 1 and at most eight additional routed evaluations for up to 40 instances (including ports and markers), or two for larger documents. This is a candidate budget, not a time limit. Explicit `search` takes `seed: number`,
+- **R66 — Bounded annealing.** By default use seed 1 and at most eight additional routed evaluations for up to 40 instances (including ports and markers), or two for larger documents. This is a candidate budget, not a time limit. R147 adds up to ten separately bounded device-relocation trials before R146. Explicit `search` takes `seed: number`,
   `evaluations: number`, `deadline?: number` (epoch milliseconds),
   `signal?: AbortSignal`, and
   `onProgress?: (p: { evaluations: number; best: number; current: number }) => void`.
@@ -1148,8 +1148,31 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   retain wire weight 0.1. Reject any increase in finished floating pins,
   missing connections or any `VISUAL_*` count. Keep the incumbent on ties.
   Input/output convention remains a score term, not a candidate filter.
-  Partition mode, optimized quality, zero-budget planning and documents above
-  40 instances retain their prior behavior.
+  Successful partition planning, optimized quality, zero-budget planning and
+  documents above 40 instances retain their prior behavior. R134 partition
+  fallback runs plain planning, including R147 and R146.
+
+- **R147 — Routed device relocation.** In default mode, for at most 40
+  instances and a nonzero search budget, run one deterministic coordinate pass
+  over rigid device units before R146. Reuse R66's recognized structures,
+  attachments and symmetry units; join user groups, constraints, couplings and
+  already pin-aligned vertical conducting stacks. A fixed or locked member
+  freezes its entire unit. Multi-device units translate without changing their
+  relative positions or orientations; free single devices may take any quarter
+  turn or reflection.
+  For each non-rail connection to a device in another unit, align the moving
+  pin to the other pin's transformed exit, facing it at 40 or 80 units. Reject
+  off-grid poses and bounds that overlap another instance or its two-grid
+  clearance. Deduplicate poses, rank by R54 crossing estimate plus non-rail
+  Manhattan MST length divided by 250, and finish the best two per unit, with
+  at most ten trials total. This count is separate from R66's annealing and
+  R146's port-seat budgets; it has no wall-clock cutoff.
+  Use R146's complete finalist finishing path, calibrated score and guards;
+  keep ties and reject any finished rigid-unit distortion. Preserve the
+  incumbent anchor by a whole-placement grid translation when nothing is
+  fixed. Optimized, successful partition, zero-budget and above-40-instance
+  planning retain their prior behavior. R134 partition fallback uses this
+  search under the same conditions as plain planning.
 
 - **Existing locks and conflicts.** Members of a locked layout group or
   constraint are treated as fixed instances under R1, because the Edit Engine

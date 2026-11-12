@@ -14,6 +14,19 @@ remaining gap is device placement. This task adds one general kind of search
 move, **relocating a placement unit next to a pin it connects to**, and
 accepts it only by finished routed score with the T056 guards.
 
+## Plan change after round 1 (Opus, 2026-11-12)
+
+- **Partition fallback is default planning.** `partition.test.ts:666` states
+  the contract: when a partition cannot be used, the result equals plain
+  planning plus its warning. "Partition behavior unchanged" applies to plans
+  that use a partition, not to the fallback. Run both R146 (port seats) and
+  R147 (relocation) on the fallback path exactly as in plain planning, so the
+  two tests pass unchanged. This also corrects T056, which disabled R146 there.
+- **Use the timing headroom.** Round 1 measured median 1.34× and p95 1.39× of
+  the base against limits of 2× and 1.5×. Round 2 may spend the rest on R147
+  (for example a second coordinate pass or a larger trial cap), tuned on dev,
+  if it lowers dev crossings or wire without a guard increase.
+
 ## Context
 
 Measured by Opus:
