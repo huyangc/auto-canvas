@@ -23,6 +23,8 @@ import {
 } from "./geometry.js";
 import { devicePins, isMarker } from "./placement-connectivity.js";
 import {
+  emptyChoices,
+  emptyOverrides,
   type CellSide,
   type LayoutChoices,
   type LayoutOverrides,
@@ -393,6 +395,105 @@ function placeCellPins(
       placed.add(entry.i.id);
     }
   }
+}
+
+/** R146: retain the ordinary edge fallback while considering every host. */
+export function portSeatCandidates(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  portId: string,
+): Placement[] {
+  const roles = classifyNets(document, resolver);
+  const net = roles.pinNet(portId, "P");
+  const port = document.instances.find((i) => i.id === portId);
+  if (!port?.placement || !net || roles.rails.has(net)) return [];
+  const devices = {
+    ...document,
+    instances: document.instances.filter((i) => !isMarker(i)),
+  };
+  const pins = pinPoints(devices, resolver);
+  const targets = new Map(document.instances.map((i) => [i.id, i.placement!]));
+  const seats = [port.placement];
+  const grid = document.presentation.grid;
+  const snap = (n: number) => Math.round(n / grid) * grid;
+  const hosts = pins
+    .filter((p) => roles.pinNet(p.instanceId, p.pinName) === net)
+    .sort(
+      (a, b) =>
+        compareIds(a.instanceId, b.instanceId) ||
+        compareIds(a.pinName, b.pinName),
+    );
+  for (const host of hosts) {
+    const instance = devices.instances.find((i) => i.id === host.instanceId)!;
+    const pin = devicePins(instance, resolver).find(
+      (p) => p.name === host.pinName,
+    )!;
+    const exit = pinExit(pin, instance.placement!);
+    for (const distance of [20, 40, 80, 120])
+      seats.push(
+        placement(
+          snap(host.point.x + exit.x * distance),
+          snap(host.point.y + exit.y * distance),
+          exit.x > 0 ? "horizontal" : "none",
+          exit.y < 0 ? 90 : exit.y > 0 ? 270 : 0,
+        ),
+      );
+  }
+  if (hosts.length > 1) {
+    const median = (values: number[]) => {
+      const sorted = values.sort((a, b) => a - b);
+      return (
+        (sorted[Math.floor((sorted.length - 1) / 2)]! +
+          sorted[Math.floor(sorted.length / 2)]!) /
+        2
+      );
+    };
+    const centers = [
+      {
+        x: median(hosts.map((h) => h.point.x)),
+        y: median(hosts.map((h) => h.point.y)),
+      },
+    ];
+    for (let a = 0; a < hosts.length; a++)
+      for (const b of hosts.slice(a + 1))
+        centers.push({
+          x: (hosts[a]!.point.x + b.point.x) / 2,
+          y: (hosts[a]!.point.y + b.point.y) / 2,
+        });
+    for (const center of centers)
+      for (const [dx, dy, mirror, rotation] of [
+        [-40, 0, "none", 0],
+        [40, 0, "horizontal", 0],
+        [0, -40, "none", 90],
+        [0, 40, "none", 270],
+      ] as const)
+        seats.push(
+          placement(snap(center.x + dx), snap(center.y + dy), mirror, rotation),
+        );
+  }
+  placeCellPins(
+    document,
+    devices,
+    pins,
+    resolver,
+    roles,
+    targets,
+    emptyOverrides(),
+    emptyChoices(),
+    new Set([portId]),
+    new Set(document.instances.filter((i) => i.id !== portId).map((i) => i.id)),
+  );
+  seats.push(targets.get(portId)!);
+  const seen = new Set<string>();
+  return seats.filter((seat) => {
+    const key = JSON.stringify(seat);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return !geometryProblem(
+      withPlacements(document, new Map([[portId, seat]])),
+      resolver,
+    );
+  });
 }
 
 export function placeMarkers(

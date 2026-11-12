@@ -315,9 +315,11 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
 - **R19 — Cell Pin side.** Inputs and outputs use the left or right edge nearest
   their host pin, measured from the device bounds' centre. Exact ties put inputs
   left and outputs right. Supply and ground stay top and bottom.
+  R146 may replace a non-rail port's initial seat after routed comparison.
 - **R20 — Port spacing.** Keep a Cell Pin level with its host. If two on one side
   are less than 40 units apart, move the one whose Net has more pins away from
   the other; a tie moves the later id. Its wire can tap elsewhere.
+  This spacing applies to the initial edge seats and R146's edge fallback.
 - **R21 — Orientation by wire cost.** An instance without a template-fixed
   orientation chooses between `none` and `vertical` for a multi-pin block, or
   its two pin-to-pin flips for a two-pin part where R9 allows both. Minimize
@@ -595,6 +597,7 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   device, power marker or earlier port, use R19/R20. Rails and multiple-host
   ports retain R19/R20 and their edge spacing; R71 seats are excluded from
   edge spacing and side refinement.
+  R146 also considers other distances and every host of a non-rail Net.
 
 - **R72 — Blocker repair.** After a complete quick plan, collect movable ports
   (`port`, `port-filled`) and descriptor-defined net markers named as R14
@@ -882,6 +885,7 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   line with R71's orientation. If the R71 overlap check rejects it, try below.
   If both seats overlap, use unchanged R19/R20 edge seating. This rule reads
   geometry, not recognition, and honors fixed ports and forced edge reseating.
+  The chosen axis seat remains the incumbent when R146 searches alternatives.
 
 - **R94 — Symmetry across strategies and search.** In default mode use R145
   stage components; with a partition retain R88 components and the existing
@@ -1123,6 +1127,29 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   through R94 in every placement strategy, collision repair and frozen sets.
   Annealing and R97 compaction use the same stage components as rigid units.
   Partition mode and the R88 whole-component view remain unchanged.
+
+- **R146 — Routed port-seat search.** In default mode, for documents of at
+  most 40 instances and a nonzero search budget, search non-rail `port` and
+  `port-filled` instances in id order against the finished incumbent.
+  For every device pin on the port's Net, generate grid-snapped seats 20, 40, 80
+  and 120 units along its transformed exit, facing the host. For multi-host
+  Nets also generate seats 40 units outward from the coordinate median and
+  each pair midpoint, facing inward. Include the current seat and R19/R20
+  fallback with other ports held fixed; deduplicate and reject overlap and
+  coincident pins. Preserve device and rail placement relative to one another;
+  when nothing is fixed, translate all placements together to restore the
+  incumbent's top-left anchor within R1's half-grid tolerance. Fixed and locked
+  instances never move.
+  Rank alternatives by R54's non-rail Manhattan MST length and estimated
+  crossings, weighted 4 and 1000. Fully evaluate the best two per port, at
+  most 12 trials total, with no wall-clock budget. Each trial runs the normal
+  R72, R95/R96, R97, facing, local rerouting and label passes before comparison.
+  Accept only a strictly lower R74 score with wire weight 4 (T055 dev calibration); other R74 comparisons
+  retain wire weight 0.1. Reject any increase in finished floating pins,
+  missing connections or any `VISUAL_*` count. Keep the incumbent on ties.
+  Input/output convention remains a score term, not a candidate filter.
+  Partition mode, optimized quality, zero-budget planning and documents above
+  40 instances retain their prior behavior.
 
 - **Existing locks and conflicts.** Members of a locked layout group or
   constraint are treated as fixed instances under R1, because the Edit Engine

@@ -14,6 +14,22 @@ wire against the humans' 132,515, and 269 crossings involve a port Net against 1
 seats ranked by the planner's own routed score, so that ports sit where
 routing is cheapest, as humans place them.
 
+## Plan change after round 1 (Opus, 2026-11-12)
+
+- **Test contract.** `corpus.test.ts:452-488` encodes the old R71/R19 seat
+  (exactly 80 units, or the edge x). This task replaces that rule by design, so
+  round 2 may rewrite those assertions to the new contract: every port is
+  either at its previous seat or at a searched seat; it faces its host side;
+  its Net is fully connected; no overlap. Do not weaken any other assertion.
+- **Timing.** The base itself has p95 8.8-10.4 s under paired load, so the
+  absolute 10 s limit is replaced by: paired median at most 2× base and paired
+  p95 at most 1.5× base p95.
+- **Port wire weight.** R74's `wireLength: 0.1` makes a shorter port wire lose
+  to almost any bend. The port-seat comparison may use the T055 dev
+  calibration (wire 4, see `tasks/T055-human-baseline-search/report.md`) or a
+  value fitted on dev the same way; report the choice and its dev evidence.
+  Other R74 comparisons keep their weights.
+
 ## Context
 
 How ports are seated today (`packages/auto-layout/src/place-markers.ts`,
