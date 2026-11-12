@@ -622,41 +622,47 @@ function planAutoLayoutMeasured(
       final: replay.document,
       choices: emptyChoices(),
     };
-    return searchPortSeats(initial, resolver, fixed, (placements) => {
-      const routeSeat = (signalTrunks: boolean) =>
-        planLayoutOnce(
-          document,
-          resolver,
-          options,
-          emptyOverrides(),
-          strategy,
-          signalTrunks,
-          undefined,
-          undefined,
-          placements,
-        );
-      // Every trial goes through the same finalist repairs, compaction, facing
-      // and labels as the incumbent before R146 compares any score or guard.
-      const finished = finishLabels(
-        rerouteCrossings(
-          document,
-          resolver,
-          finalizeFacing(
+    return searchPortSeats(
+      initial,
+      resolver,
+      fixed,
+      (placements) => {
+        const routeSeat = (signalTrunks: boolean) =>
+          planLayoutOnce(
             document,
             resolver,
             options,
-            finish(routeSeat(true), routeSeat(false), strategy, true),
+            emptyOverrides(),
+            strategy,
+            signalTrunks,
+            undefined,
+            undefined,
+            placements,
+          );
+        // Every trial goes through the same finalist repairs, compaction, facing
+        // and labels as the incumbent before R146 compares any score or guard.
+        const finished = finishLabels(
+          rerouteCrossings(
+            document,
+            resolver,
+            finalizeFacing(
+              document,
+              resolver,
+              options,
+              finish(routeSeat(true), routeSeat(false), strategy, true),
+            ),
+            stopped,
           ),
-          () => false,
-        ),
-      );
-      const final = preview(document, resolver, finished.edits);
-      return {
-        result: finished,
-        choices: initial.choices,
-        ...(final.ok ? { final: final.document } : {}),
-      };
-    }).result;
+        );
+        const final = preview(document, resolver, finished.edits);
+        return {
+          result: finished,
+          choices: initial.choices,
+          ...(final.ok ? { final: final.document } : {}),
+        };
+      },
+      stopped,
+    ).result;
   }
   if (
     options.quality !== "optimized" ||
