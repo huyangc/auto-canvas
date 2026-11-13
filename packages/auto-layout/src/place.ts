@@ -230,6 +230,7 @@ export function placeDocument(
     key: string;
     score: (placements: ReadonlyMap<string, Placement>) => number;
   },
+  signalDirection: "compare" | "corrected" | "original" = "compare",
 ): {
   placements: Map<string, Placement>;
   draftingTranslation?: number;
@@ -265,6 +266,8 @@ export function placeDocument(
             strategy,
             undefined,
             searchLimit,
+            draftRouter,
+            signalDirection,
           );
           return { result, choices };
         };
@@ -285,6 +288,62 @@ export function placeDocument(
         const score = (d: typeof signal) =>
           d.result.problem ? Infinity : draftRouter.score(d.result.placements);
         return score(legacy) < score(signal) ? legacy : signal;
+      },
+    );
+    for (const [id, side] of selected.choices.sides)
+      choices.sides.set(id, side);
+    for (const [id, orientation] of selected.choices.orientations)
+      choices.orientations.set(id, orientation);
+    return structuredClone(selected.result);
+  }
+  if (
+    signalDirection === "compare" &&
+    draftRouter &&
+    !given &&
+    !options.partition &&
+    strategy !== "stages" &&
+    roles.instanceCount <= 40
+  ) {
+    // R57 follows R153's row-policy comparison: route drafts, then refine only
+    // the winner. Keep the corrected draft on ties, including identical drafts.
+    const selected = planningMemo(
+      document,
+      resolver,
+      `direction-drafts:${JSON.stringify([strategy, draftRouter.key, roles.signalSeries, roles.seriesLevels, roles.pitch, options.fixedInstanceIds, [...overrides.sides], [...overrides.orientations]])}`,
+      () => {
+        const draft = (direction: "corrected" | "original") => {
+          const choices = emptyChoices();
+          const result = placeDocument(
+            document,
+            resolver,
+            roles,
+            groups,
+            options,
+            overrides,
+            choices,
+            strategy,
+            undefined,
+            searchLimit,
+            undefined,
+            direction,
+          );
+          return { result, choices };
+        };
+        const corrected = draft("corrected"),
+          original = draft("original");
+        const key = (d: typeof corrected) =>
+          JSON.stringify([
+            [...d.result.placements],
+            d.result.problem,
+            d.result.draftingTranslation,
+            [...(d.result.sideRow ?? [])],
+            [...d.choices.sides],
+            [...d.choices.orientations],
+          ]);
+        if (key(corrected) === key(original)) return corrected;
+        const score = (d: typeof corrected) =>
+          d.result.problem ? Infinity : draftRouter.score(d.result.placements);
+        return score(original) < score(corrected) ? original : corrected;
       },
     );
     for (const [id, side] of selected.choices.sides)
@@ -457,9 +516,10 @@ export function placeDocument(
     );
     if (problem) return { placements: targets, problem };
   }
-  // R57: reuse the normal routed strategy comparison, without another plan.
+  // R57: reflect the corrected draft; the draft router above selects the winner.
   // Stages containing rigid groups keep their local handedness and pin columns.
   if (
+    signalDirection !== "original" &&
     !given &&
     !partition &&
     strategy !== "stages" &&

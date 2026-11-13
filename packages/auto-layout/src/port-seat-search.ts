@@ -1,6 +1,12 @@
 import { portConvention } from "./port-convention.js";
-import { auditRouting } from "./routing-audit.js";
-import { markerBlocksJoin, straightJoins } from "./straight-joins.js";
+import { visibleInstanceBounds } from "@icm/derived";
+import type { SchematicDocument } from "@icm/model";
+import { isMarker } from "./placement-connectivity.js";
+import {
+  markerBlocksJoin,
+  straightJoins,
+  symbolBlocksJoin,
+} from "./straight-joins.js";
 import { planningBudget } from "./planning-budget.js";
 import type { SymbolResolver } from "@icm/symbols";
 import { createPlacementEstimator } from "./estimate.js";
@@ -8,13 +14,25 @@ import { enclosingBox, withPlacements } from "./geometry.js";
 import { classifyNets } from "./net-roles.js";
 import { portSeatCandidates } from "./place-markers.js";
 import { compareIds } from "./recognize.js";
-import { routedScore, type LayoutRun } from "./refine.js";
+import { ROUTED_SCORE_WEIGHTS, routedScore, type LayoutRun } from "./refine.js";
 import {
   calibratedScore,
   compactionRegresses,
   routedGuards,
 } from "./routed-search-score.js";
 import type { Placement } from "./types.js";
+
+// Finishing can reseat other markers as well as the trial port. Protect every
+// device join, using the same obstruction geometry as the candidate filter.
+function blockedJoins(document: SchematicDocument, resolver: SymbolResolver) {
+  const boxes = visibleInstanceBounds(
+    { ...document, instances: document.instances.filter(isMarker) },
+    resolver,
+  );
+  return straightJoins(document, resolver).filter((join) =>
+    boxes.some(({ bounds }) => symbolBlocksJoin(bounds, join)),
+  ).length;
+}
 
 /** R146: one deterministic coordinate pass; replan returns a finished layout. */
 export function searchPortSeats(
@@ -31,6 +49,7 @@ export function searchPortSeats(
   let current = initial;
   let score = calibratedScore(current, resolver);
   let limits = routedGuards(initial.final, resolver);
+  let blocked = blockedJoins(initial.final, resolver);
   const roles = classifyNets(initial.final, resolver);
   const anchor = enclosingBox(initial.final, resolver);
   const ports = initial.final.instances
@@ -59,13 +78,17 @@ export function searchPortSeats(
       .filter((seat) => JSON.stringify(seat) !== original)
       .map((seat) => {
         const trial = new Map(placements).set(port.id, seat);
-        // R146: at equal crossings, prefer the host side before spanning length.
+        // Match the calibrated crossing/wire ratio and R74's soft convention
+        // penalty in one estimate; never put convention ahead of routed cost.
         const cost = estimate(trial);
         return {
           trial,
-          crossings: cost.crossings,
-          offConvention: Number(!conventional(port.id, seat)),
-          length: cost.length,
+          score:
+            cost.crossings +
+            cost.length / 250 +
+            (Number(!conventional(port.id, seat)) *
+              ROUTED_SCORE_WEIGHTS.offConvention) /
+              ROUTED_SCORE_WEIGHTS.crossings,
           blocked: markerBlocksJoin(
             withPlacements(document, trial),
             resolver,
@@ -74,17 +97,9 @@ export function searchPortSeats(
           ),
         };
       })
-      .sort(
-        (a, b) =>
-          a.crossings - b.crossings ||
-          a.offConvention - b.offConvention ||
-          a.length - b.length,
-      );
-    // Obstructing seats are a fallback only when no clear seat exists. Trying
-    // one first can lower the incumbent score so far that every clear seat
-    // is rejected, leaving a port on the straight device connection.
-    const clear = ranked.filter((seat) => !seat.blocked).slice(0, 2);
-    const seats = clear.length ? clear : ranked.slice(0, 1);
+      .sort((a, b) => a.score - b.score);
+    // Never spend a routed trial on a seat that obstructs a straight join.
+    const seats = ranked.filter((seat) => !seat.blocked).slice(0, 2);
     for (const seat of seats) {
       // A caller's deadline or abort ends the search with the best finished seat.
       if (evaluations++ >= limit || stopped()) return current;
@@ -101,33 +116,11 @@ export function searchPortSeats(
       }
       const candidate = replan(trial);
       const value = calibratedScore(candidate, resolver);
-      if (!candidate.final || !Number.isFinite(value)) continue;
-      const before = auditRouting(current.final!, resolver).crossings;
-      const after = auditRouting(candidate.final, resolver).crossings;
-      const oldPort = current.final!.instances.find((i) => i.id === port.id)!;
-      const newPort = candidate.final.instances.find((i) => i.id === port.id)!;
-      const conventionChange =
-        Number(
-          !portConvention(candidate.final, resolver)(
-            port.id,
-            newPort.placement!,
-          ),
-        ) -
-        Number(
-          !portConvention(current.final!, resolver)(
-            port.id,
-            oldPort.placement!,
-          ),
-        );
-      if (
-        after > before ||
-        (after === before &&
-          (conventionChange > 0 || (conventionChange === 0 && value >= score)))
-      )
-        continue;
-      if (!seat.blocked && markerBlocksJoin(candidate.final, resolver, port.id))
-        continue;
+      if (!candidate.final || value >= score) continue;
+      if (markerBlocksJoin(candidate.final, resolver, port.id)) continue;
       if (compactionRegresses(current, candidate, resolver)) continue;
+      const nextBlocked = blockedJoins(candidate.final, resolver);
+      if (nextBlocked > blocked) continue;
       const counts = routedGuards(candidate.final, resolver);
       if (
         Object.entries(counts).some(
@@ -137,6 +130,7 @@ export function searchPortSeats(
         continue;
       current = { ...candidate, choices: initial.choices };
       score = value;
+      blocked = nextBlocked;
       limits = counts;
     }
   }

@@ -161,10 +161,6 @@ function placeCellPins(
     .map((i) => {
       const net = roles.pinNet(i.id, "P");
       const role = roles.byNet.get(net ?? "") ?? "internal";
-      const direction =
-        roles.instanceCount <= 40
-          ? portDirection(document, roles, net ?? "")
-          : undefined;
       let side =
         role === "supply"
           ? "top"
@@ -209,7 +205,6 @@ function placeCellPins(
               : role === "output"
                 ? "right"
                 : "left";
-        if (direction) side = direction === "output" ? "right" : "left";
         side = overrides.sides.get(i.id) ?? side;
         choices.sides.set(i.id, side as CellSide);
       }
@@ -221,7 +216,6 @@ function placeCellPins(
         net,
         count: connected.length,
         connected,
-        direction,
         singleHost:
           !roles.rails.has(net ?? "") && connected.length === 1
             ? connected[0]
@@ -244,9 +238,7 @@ function placeCellPins(
     const seats: Placement[] = [];
     const host = entry.singleHost;
     if (host) {
-      const exit = entry.direction
-        ? { x: entry.side === "right" ? 1 : -1, y: 0 }
-        : exitAt(host);
+      const exit = exitAt(host);
       seats.push(
         placement(
           snap(host.point.x + exit.x * cellPinOffset(document)),
@@ -510,6 +502,26 @@ export function portSeatCandidates(
       ),
     );
     seats.push(targets.get(portId)!);
+  }
+  // R19/R71 seeds stay on their existing pin exits. R146 may additionally
+  // route one conventional horizontal seat beyond the outermost host, within
+  // its cap. It depends only on host geometry, so reseating can reproduce it.
+  const direction =
+    document.instances.length <= 40
+      ? portDirection(document, roles, net)
+      : undefined;
+  if (direction && hosts.length) {
+    const right = direction === "output";
+    const host = [...hosts].sort((a, b) =>
+      right ? b.point.x - a.point.x : a.point.x - b.point.x,
+    )[0]!;
+    seats.push(
+      placement(
+        snap(host.point.x + (right ? 1 : -1) * cellPinOffset(document)),
+        snap(host.point.y),
+        right ? "horizontal" : "none",
+      ),
+    );
   }
   const contacts = contactPolicy(document, freezePinGroups(document, resolver));
   const seen = new Set<string>();

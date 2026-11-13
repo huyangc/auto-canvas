@@ -8,6 +8,7 @@ import { emptyOverrides } from "../src/layout-choices.js";
 import { portSeatCandidates } from "../src/place-markers.js";
 import { searchPortSeats } from "../src/port-seat-search.js";
 import * as portSearch from "../src/port-seat-search.js";
+import { calibratedScore } from "../src/routed-search-score.js";
 import { routedScore } from "../src/refine.js";
 import { auditRouting, missingConnections } from "../src/routing-audit.js";
 import { preview, terminalPartition } from "../src/transaction.js";
@@ -84,22 +85,22 @@ function search(document: ReturnType<typeof fixture>) {
   };
 }
 
-it("R146 selects the best conventional routed seat and preserves devices", () => {
+it("R146 selects the best calibrated routed seat and preserves devices", () => {
   const document = fixture();
   const snapshot = structuredClone(document);
   const { initial, result, replan } = search(document);
   expect(result.final!.instances.find((i) => i.id === "p")!.placement).toEqual(
     placement(120, 40, "none", 270),
   );
-  expect(routedScore(result, resolver)).toBeLessThan(
-    routedScore(initial, resolver),
+  expect(calibratedScore(result, resolver)).toBeLessThan(
+    calibratedScore(initial, resolver),
   );
   for (const seat of portSeatCandidates(initial.final!, resolver, "p")) {
     const poses = new Map(
       document.instances.map((i) => [i.id, i.id === "p" ? seat : i.placement!]),
     );
-    expect(routedScore(result, resolver)).toBeLessThanOrEqual(
-      routedScore(replan(poses), resolver),
+    expect(calibratedScore(result, resolver)).toBeLessThanOrEqual(
+      calibratedScore(replan(poses), resolver),
     );
   }
   expect(result.final!.instances.filter((i) => i.id !== "p")).toEqual(
@@ -131,7 +132,7 @@ it("R146 rejects a blocked 80-unit seat and routes a shorter local seat", () => 
   expect(missingConnections(result.final!, resolver)).toBe(0);
 });
 
-it("R146 prefers the conventional edge at equal crossings despite longer wire", () => {
+it("R146 uses calibrated score instead of overriding it for convention", () => {
   const document = fixture(true);
   const { initial, result, replan, fixed } = search(document);
   expect(portSeatCandidates(document, resolver, "p")).toEqual([
@@ -140,21 +141,24 @@ it("R146 prefers the conventional edge at equal crossings despite longer wire", 
     placement(450, 0, "horizontal"),
   ]);
   expect(result.final!.instances.find((i) => i.id === "p")!.placement).toEqual(
-    placement(210, 0),
+    placement(450, 0, "horizontal"),
   );
-  const shorter = replan(
+  const longer = replan(
     new Map(
       document.instances.map((i) => [
         i.id,
-        i.id === "p" ? placement(450, 0, "horizontal") : i.placement!,
+        i.id === "p" ? placement(210, 0) : i.placement!,
       ]),
     ),
   );
   expect(auditRouting(result.final!, resolver).crossings).toBe(
-    auditRouting(shorter.final!, resolver).crossings,
+    auditRouting(longer.final!, resolver).crossings,
   );
-  expect(auditRouting(result.final!, resolver).wireLength).toBeGreaterThan(
-    auditRouting(shorter.final!, resolver).wireLength,
+  expect(auditRouting(result.final!, resolver).wireLength).toBeLessThan(
+    auditRouting(longer.final!, resolver).wireLength,
+  );
+  expect(calibratedScore(result, resolver)).toBeLessThan(
+    calibratedScore(longer, resolver),
   );
   expect(routedScore(result, resolver)).toBeLessThan(
     routedScore(initial, resolver),
@@ -260,8 +264,13 @@ it("R146 translates the whole placement to retain the anchor", () => {
   expect(offset(result)).toEqual(offset(initial));
 });
 
-it("R146 rejects a finished label-owner regression even when routed score wins", () => {
-  const { initial, result, fixed } = search(fixture());
+it("R146 rejects a finished label-owner regression even when calibrated score wins", () => {
+  const document = fixture();
+  document.instances.find((i) => i.id === "p")!.placement = placement(
+    -1000,
+    -40,
+  );
+  const { initial, result, fixed } = search(document);
   const candidate = structuredClone(result);
   candidate.final!.annotations.push({
     id: "far-label",
@@ -280,8 +289,8 @@ it("R146 rejects a finished label-owner regression even when routed score wins",
   expect(
     diagnoseLabelClearance(candidate.final!, resolver).map((d) => d.code),
   ).toContain("VISUAL_LABEL_OWNER_DISTANCE");
-  expect(routedScore(candidate, resolver)).toBeLessThan(
-    routedScore(initial, resolver),
+  expect(calibratedScore(candidate, resolver)).toBeLessThan(
+    calibratedScore(initial, resolver),
   );
   expect(searchPortSeats(initial, resolver, fixed, () => candidate)).toBe(
     initial,
@@ -322,4 +331,31 @@ it("R146 filters blocked joins before routing when clear port seats exist", () =
       markerBlocksJoin(withPlacements(initial.final!, poses), resolver, "p"),
     ).toBe(false);
   expect(markerBlocksJoin(result.final!, resolver, "p")).toBe(false);
+});
+
+it("R146 chooses the output's conventional side at equal routed geometry", () => {
+  const document = fixture();
+  document.instances = document.instances.filter((i) => i.id !== "b");
+  document.nets[0]!.terminals = document.nets[0]!.terminals.filter(
+    (t) => t.instanceId !== "b",
+  );
+  document.netlist!.terminals[0]!.direction = "output";
+  document.instances.find((i) => i.id === "p")!.placement = placement(-40, -20);
+  const { initial, result } = search(document);
+  expect(result.final!.instances.find((i) => i.id === "p")!.placement).toEqual(
+    placement(40, -20, "horizontal"),
+  );
+  const before = auditRouting(initial.final!, resolver);
+  const after = auditRouting(result.final!, resolver);
+  expect([after.crossings, after.bends, after.wireLength]).toEqual([
+    before.crossings,
+    before.bends,
+    before.wireLength,
+  ]);
+  expect(calibratedScore(result, resolver)).toBeLessThan(
+    calibratedScore(initial, resolver),
+  );
+  expect(terminalPartition(result.final!, resolver)).toBe(
+    terminalPartition(initial.final!, resolver),
+  );
 });

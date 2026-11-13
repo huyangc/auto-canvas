@@ -1,12 +1,12 @@
 import { recognizeStructures } from "../src/recognize.js";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
 import { placeDocument } from "../src/place.js";
 import { classifyNets } from "../src/net-roles.js";
 import { pinPoints, placement, withPlacements } from "../src/geometry.js";
 import { emptyChoices, emptyOverrides } from "../src/layout-choices.js";
 import { portConvention } from "../src/port-convention.js";
-import { placeMarkers } from "../src/place-markers.js";
+import { portSeatCandidates, placeMarkers } from "../src/place-markers.js";
 import { circuit } from "./document-fixture.js";
 
 const resolver = new InMemorySymbolResolver(builtInSymbols);
@@ -75,7 +75,7 @@ function portFixture() {
   return d;
 }
 
-it("seats an output right of a left-facing host and preserves fixed ports", () => {
+it("preserves the exit seed and offers an output seat right of its host", () => {
   const d = portFixture();
   const targets = new Map(
     d.instances.map((i) => [i.id, structuredClone(i.placement!)]),
@@ -94,8 +94,10 @@ it("seats an output right of a left-facing host and preserves fixed ports", () =
   const host = pinPoints(d, resolver).find(
     (p) => p.instanceId === "a" && p.pinName === "G",
   )!;
-  expect(targets.get("p")!.position.x).toBeGreaterThan(host.point.x);
-  expect(targets.get("p")!.mirror).toBe("horizontal");
+  expect(targets.get("p")!.position.x).toBeLessThan(host.point.x);
+  expect(portSeatCandidates(d, resolver, "p")).toContainEqual(
+    placement(host.point.x + 40, host.point.y, "horizontal"),
+  );
   seat(new Set(["p"]));
   expect(targets.get("p")).toEqual(d.instances[1]!.placement);
 });
@@ -114,7 +116,7 @@ it("scores convention by host position regardless of port artwork or label", () 
 });
 
 it.each([0, 90, 180, 270] as const)(
-  "seats an explicitly directed input left of a host rotated %s degrees",
+  "offers an input candidate left of a host rotated %s degrees",
   (rotation) => {
     const d = portFixture();
     d.netlist!.terminals[0]!.direction = "input";
@@ -133,10 +135,9 @@ it.each([0, 90, 180, 270] as const)(
     const host = pinPoints(d, resolver).find(
       (p) => p.instanceId === "a" && p.pinName === "G",
     )!;
-    expect(targets.get("p")!.position).toEqual({
-      x: host.point.x - 40,
-      y: host.point.y,
-    });
+    expect(portSeatCandidates(d, resolver, "p")).toContainEqual(
+      placement(host.point.x - 40, host.point.y),
+    );
   },
 );
 
@@ -192,5 +193,54 @@ it.each(["template", "layered"] as const)(
     const x = (name: string) =>
       pins.find((p) => p.instanceId === "c" && p.pinName === name)!.point.x;
     expect(x("D")).toBeLessThan(x("G"));
+  },
+);
+
+it.each(["template", "layered"] as const)(
+  "%s compares both signal directions with the draft router and favors corrected ties",
+  (strategy) => {
+    const d = circuit(
+      { a: "nmos", b: "nmos", input: "port", output: "port" },
+      {
+        input: ["a.D", "input.P"],
+        output: ["a.G", "output.P"],
+        link: ["a.S", "b.G"],
+        end: ["b.D"],
+      },
+    );
+    const roles = classifyNets(d, resolver);
+    roles.byNet.set("input", "input");
+    roles.byNet.set("output", "output");
+    const reversed = (placements: Parameters<typeof withPlacements>[1]) => {
+      const pins = pinPoints(withPlacements(d, placements), resolver);
+      return (
+        pins.find((p) => p.instanceId === "a" && p.pinName === "D")!.point.x >
+        pins.find((p) => p.instanceId === "a" && p.pinName === "G")!.point.x
+      );
+    };
+    for (const preferOriginal of [true, false]) {
+      const score = vi.fn((placements: Parameters<typeof withPlacements>[1]) =>
+        preferOriginal && !reversed(placements) ? 1000 : 0,
+      );
+      const result = placeDocument(
+        d,
+        resolver,
+        roles,
+        [],
+        {},
+        emptyOverrides(),
+        emptyChoices(),
+        strategy,
+        undefined,
+        undefined,
+        { key: String(preferOriginal), score },
+      );
+      expect(result.problem).toBeUndefined();
+      expect(score).toHaveBeenCalledTimes(2);
+      expect(new Set(score.mock.calls.map(([p]) => reversed(p)))).toEqual(
+        new Set([true, false]),
+      );
+      expect(reversed(result.placements)).toBe(preferOriginal);
+    }
   },
 );

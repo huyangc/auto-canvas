@@ -29,3 +29,24 @@ Acceptance otherwise unchanged: portOrder −25% dev and val; readability
 composite lower on dev and val; crossings and bends not higher by more than 1%;
 blocked joins and rail crossings not higher; guards; determinism; large
 documents byte-identical.
+
+## Round 2 — closed without merge (superseded by T074)
+
+Reviewed: round 2 report on 2026-11-13. Round 2 fixed the round 1 defects
+(main seeds restored, mirror chosen by routed draft score, convention as the
+R74 300-point term, `yje2n6eva2` completes, both corpus limits pass, runtime
+within +10%, large documents identical), but the outcome is net negative on
+the frozen readability composite: dev 100.03 → 101.14 (+1.1%), val 49.92 →
+50.25 (+0.7%); portOrder only −1.6% / −3%, crossings +2.6% / +3.8%.
+
+Cause: the planner's convention term (port side relative to its own host)
+is a proxy that does not match the `portOrder` metric (inputs left of outputs
+across the drawing), and the routed score weighs one crossing (1000) far
+above one convention violation (300), whereas the readability composite
+weighs them about equally. Tuning this proxy further is not useful.
+
+Decision (Opus): do not merge T073. Keep the branch; T074 builds on its
+mechanics (`signal-direction.ts`, mirrored/unmirrored draft comparison,
+conventional R146 candidates) and makes the frozen readability composite part
+of the planner's selection score, so the metric itself decides these
+trade-offs.
