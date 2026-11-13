@@ -172,10 +172,14 @@ export function repairStubLabels(
       return false;
     const roles = classifyNets(candidate.final, resolver);
     for (const port of candidate.final.instances) {
+      const before = current.final!.instances.find((i) => i.id === port.id);
       if (
         !port.placement ||
         !["port", "port-filled"].includes(port.symbolId) ||
-        roles.rails.has(roles.pinNet(port.id, "P") ?? "")
+        roles.rails.has(roles.pinNet(port.id, "P") ?? "") ||
+        // Only a port this repair moved must land on a generated seat; an
+        // unconnected or user-placed port elsewhere does not veto the repair.
+        JSON.stringify(before?.placement) === JSON.stringify(port.placement)
       )
         continue;
       if (

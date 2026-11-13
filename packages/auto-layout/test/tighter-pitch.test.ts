@@ -187,6 +187,43 @@ it("repairs a distant owner label without rerouting or weakening guards", () => 
   expect(
     repairStubLabels(initial, resolver, new Set(["a"]), replan, () => false),
   ).toBe(initial);
+  // An unconnected port elsewhere has no generated seat; it must not veto
+  // a repair that does not move it (codex review P2 on PR 63).
+  const withPort = structuredClone(document);
+  withPort.instances.push({
+    id: "far",
+    symbolId: "port",
+    placement: placement(0, 300),
+  });
+  withPort.nets.push({
+    id: "farNet",
+    terminals: [{ instanceId: "far", pinName: "P" }],
+  });
+  withPort.netlist = {
+    name: "test",
+    formalParameters: [],
+    terminals: [
+      {
+        id: "farTerminal",
+        name: "FAR",
+        netId: "farNet",
+        direction: "passive",
+        interfaceInstanceIds: ["far"],
+      },
+    ],
+  };
+  expect(
+    diagnoseLabelClearance(withPort, resolver).map((d) => d.code),
+  ).toContain("VISUAL_LABEL_OWNER_DISTANCE");
+  const portInitial = { ...initial, final: withPort };
+  const portRepaired = repairStubLabels(
+    portInitial,
+    resolver,
+    new Set(),
+    vi.fn(() => portInitial),
+    () => false,
+  );
+  expect(portRepaired.result.edits).toHaveLength(1);
 });
 
 it("repairs a sideways marker departure by seating it on the host exit", () => {
