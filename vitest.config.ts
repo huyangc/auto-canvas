@@ -6,6 +6,7 @@ const moduleTests = [
   "packages/**/*.test.{ts,tsx}",
   "scripts/**/*.test.mjs",
 ];
+const slowTests = ["**/*.slow.test.{ts,tsx,mjs}"];
 
 // Logic test files share one module registry per worker, so the symbol
 // catalog, device registry and schemas load once rather than once per file:
@@ -29,7 +30,7 @@ const isolatedTests = moduleTests
       file.endsWith(".tsx") || ownsRegistry.test(readFileSync(file, "utf8")),
   );
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   test: {
     coverage: {
       enabled: false,
@@ -39,7 +40,7 @@ export default defineConfig({
         test: {
           name: "modules",
           include: moduleTests,
-          exclude: [...configDefaults.exclude, ...isolatedTests],
+          exclude: [...configDefaults.exclude, ...isolatedTests, ...slowTests],
           isolate: false,
         },
       },
@@ -47,9 +48,13 @@ export default defineConfig({
         test: {
           name: "isolated",
           include: isolatedTests,
-          exclude: configDefaults.exclude,
+          exclude: [...configDefaults.exclude, ...slowTests],
         },
       },
+      // Opt in with test:slow; ordinary test/check/CI runs never collect these.
+      ...(mode === "slow"
+        ? [{ test: { name: "slow", include: slowTests } }]
+        : []),
     ],
   },
-});
+}));

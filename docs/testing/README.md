@@ -31,7 +31,16 @@ in the task plan before review. Record results and missing resources in the
 task report, following the [repository workflow](../workflow.md).
 
 `pnpm test:local` runs ordinary unit/module tests, including standalone tests
-that build their own dependencies. `pnpm test:e2e:local` runs browser workflows;
+that build their own dependencies. Files named `*.slow.test.ts` (also `.tsx`
+or `.mjs`) hold expensive full-search quality benchmarks and are excluded
+from the default Vitest projects, `pnpm check` and CI. `pnpm test:slow` opts
+into the `slow` project and runs only those files. For auto-layout changes,
+Opus must rerun `pnpm test:slow` locally and post its results as required PR
+review evidence. Held-out drawings retain quick-mode validity, routing safety
+and Net/terminal preservation checks in the default suite; their unchanged
+full-search checks, including the T013 crossing limits, run in the slow suite.
+
+`pnpm test:e2e:local` runs browser workflows;
 run `pnpm setup:e2e` once per machine or Playwright version when needed.
 `pnpm test:desktop-build`, `pnpm mcp:package` and `pnpm headless:package` check
 local packaging. Golden and performance scripts remain available for changes

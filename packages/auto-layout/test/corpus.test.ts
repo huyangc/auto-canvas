@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { expect, it } from "vitest";
 import {
   deriveElectricalTopologyProjection,
@@ -7,8 +6,6 @@ import {
 } from "@icm/derived";
 import { DocumentHistory, executeTransaction } from "@icm/edit-engine";
 import { compareElectricalGraphs, projectElectricalGraph } from "@icm/netlist";
-import { parseProject } from "@icm/project-protocol";
-import { builtInSymbols, createProjectSymbolResolver } from "@icm/symbols";
 import { planAutoLayout } from "../src/index.js";
 import {
   draftingBounds,
@@ -25,6 +22,9 @@ import { classifyNets } from "../src/net-roles.js";
 import { portSeatCandidates } from "../src/place-markers.js";
 import { facePorts } from "../src/face-ports.js";
 import cases from "./corpus-cases.json";
+import { createCorpusPlans } from "./corpus-plans.js";
+
+const defaultPlan = createCorpusPlans();
 const targets: Record<string, [number, number]> = {
   "five-t-ota": [0, 1],
   "fig-17-19b": [0, 2],
@@ -57,17 +57,12 @@ function expectedReanchoredAnnotations(
 it.each(cases)(
   "$id: real transactions preserve electricity and satisfy placement",
   (fixture) => {
-    const project = parseProject(readFileSync(fixture.file, "utf8"));
-    const document = project.documents.find(
-      (d) => d.id === (fixture.documentId ?? project.topDocumentId),
-    )!;
-    const resolver = createProjectSymbolResolver(project, builtInSymbols);
+    const { project, document, resolver, plan } = defaultPlan(fixture);
     const beforeGraph = projectElectricalGraph(project);
     const beforeTopology = deriveElectricalTopologyProjection(
       document,
       resolver,
     );
-    const plan = planAutoLayout(document, resolver);
     expect(plan.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
     expect(
       plan.diagnostics.filter((d) => d.code === "AUTO_LAYOUT_NET_UNROUTED"),
@@ -742,13 +737,8 @@ it.each(cases)(
 it.each(cases)(
   "$id: R2 re-anchoring and Route removal preserve terminal membership",
   (fixture) => {
-    const project = parseProject(readFileSync(fixture.file, "utf8"));
-    const document = project.documents.find(
-      (d) => d.id === (fixture.documentId ?? project.topDocumentId),
-    )!;
-    const resolver = createProjectSymbolResolver(project, builtInSymbols);
+    const { project, document, resolver, plan } = defaultPlan(fixture);
     const before = projectElectricalGraph(project);
-    const plan = planAutoLayout(document, resolver);
     expect(plan.diagnostics).toEqual([]);
     const removalStart = plan.edits.findIndex(
       (e) => e.kind === "remove_route_geometry" || e.kind === "remove_junction",

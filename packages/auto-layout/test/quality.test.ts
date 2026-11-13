@@ -27,6 +27,9 @@ import type { RecognizedGroup } from "../src/types.js";
 import { preview } from "../src/transaction.js";
 import { circuit } from "./document-fixture.js";
 import cases from "./corpus-cases.json";
+import { createCorpusPlans } from "./corpus-plans.js";
+
+const defaultPlan = createCorpusPlans();
 
 it.each([10, 20])(
   "R18 derives stack pitches and tail alignment with %i-unit local offsets",
@@ -175,13 +178,8 @@ it.each([false, true])(
 it.each(cases)(
   "$id: R22 is deterministic, bounded, and never worsens the default routed score",
   (fixture) => {
-    const project = parseProject(readFileSync(fixture.file, "utf8"));
-    const document = project.documents.find(
-      (d) => d.id === (fixture.documentId ?? project.topDocumentId),
-    )!;
-    const resolver = createProjectSymbolResolver(project, builtInSymbols);
+    const { document, resolver, plan } = defaultPlan(fixture);
     const initial = planLayoutOnce(document, resolver, {}, emptyOverrides());
-    const plan = planAutoLayout(document, resolver);
     expect(planAutoLayout(document, resolver)).toEqual(plan);
     const final = preview(document, resolver, plan.edits);
     expect(final.ok).toBe(true);
