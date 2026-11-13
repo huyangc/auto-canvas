@@ -1,4 +1,8 @@
-import { resolveVisualAnchor, visibleInstanceBounds } from "@icm/derived";
+import {
+  resolveEndpointPoint,
+  resolveVisualAnchor,
+  visibleInstanceBounds,
+} from "@icm/derived";
 import { createRoutePath, type DraftingObject, type Point } from "@icm/model";
 import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
 import { expect, it } from "vitest";
@@ -284,4 +288,131 @@ it("R150 seats a colliding note near its owner without covering a device", () =>
       boxesIntersect(p.bounds, box),
     ),
   ).toBe(false);
+});
+
+it("R150 follows a pseudo-port when routing removes its single-pin wire", () => {
+  const d = circuit({ a: "resistor" }, { input: ["a.1"] });
+  d.instances[0]!.placement = placement(600, 400);
+  d.junctions = [{ id: "end", netId: "input", position: { x: 500, y: 380 } }];
+  d.routes = [
+    createRoutePath({
+      id: "input-wire",
+      netId: "input",
+      start: { kind: "junction", junctionId: "end" },
+      end: { kind: "terminal", instanceId: "a", pinName: "1" },
+      bends: [],
+      modes: ["manual"],
+    }),
+  ];
+  d.drafting = {
+    objects: [
+      {
+        id: "port",
+        kind: "circle",
+        anchor: { kind: "free", position: { x: 495, y: 380 } },
+        center: { x: 495, y: 380 },
+        radius: 5,
+        lineStyle: "solid",
+        locked: false,
+        zIndex: 0,
+      },
+      note("caption", { x: 470, y: 380 }),
+    ],
+  };
+  expect(draftingGroups(d, resolver)).toHaveLength(1);
+  const { final, result } = apply(d);
+  const pin = resolveEndpointPoint(final, resolver, {
+    kind: "terminal",
+    instanceId: "a",
+    pinName: "1",
+  })!;
+  const groups = draftingGroups(d, resolver);
+  // The authored wire end is gone; its Net has exactly one surviving pin.
+  expect(final.routes).toEqual([]);
+  expect(
+    draftingDisplacements(d, final, resolver, groups)!.get(groups[0]!),
+  ).toEqual({
+    x: pin.x - 500,
+    y: pin.y - 380,
+  });
+  expect(point(final, "port")).not.toEqual(point(d, "port"));
+  expect(
+    Math.hypot(point(final, "port").x - pin.x, point(final, "port").y - pin.y),
+  ).toBeLessThanOrEqual(60);
+  expect(point(final, "caption")).toEqual({
+    x: point(final, "port").x - 25,
+    y: point(final, "port").y,
+  });
+  expect(draftingGroups(final, resolver)[0]!.owner).toBeDefined();
+  expect(apply(d).result).toEqual(result);
+});
+
+it("R150 follows a device note even when another group's conductor has no surviving owner", () => {
+  const d = fixture();
+  d.nets.push({ id: "orphan", terminals: [] });
+  d.junctions.push({
+    id: "orphan-end",
+    netId: "orphan",
+    position: { x: 1000, y: 1000 },
+  });
+  d.drafting = {
+    objects: [
+      note("caption", { x: 645, y: 400 }),
+      note("orphan-caption", { x: 1000, y: 990 }),
+    ],
+  };
+  expect(draftingGroups(d, resolver)[1]!.owner).toMatchObject({
+    kind: "junction",
+    net: "[]",
+  });
+  const { final, result } = apply(d);
+  expect(point(final, "caption")).not.toEqual(point(d, "caption"));
+  expect(point(final, "orphan-caption")).toEqual(point(d, "orphan-caption"));
+  expect(
+    draftingGroups(final, resolver).find((g) =>
+      g.objects.some((o) => o.id === "caption"),
+    )!.owner,
+  ).toBeDefined();
+  expect(apply(d).result).toEqual(result);
+});
+
+it("R150 keeps a touching pseudo-port on the same amplifier input after mirroring", () => {
+  const d = circuit({ amp: "opamp" }, {});
+  d.instances[0]!.placement = placement(600, 400, "vertical");
+  const endpoint = {
+    kind: "terminal" as const,
+    instanceId: "amp",
+    pinName: "IN+",
+  };
+  const oldPin = resolveEndpointPoint(d, resolver, endpoint)!;
+  const center = { x: oldPin.x - 5, y: oldPin.y };
+  d.drafting = {
+    objects: [
+      {
+        id: "port",
+        kind: "circle",
+        anchor: { kind: "free", position: center },
+        center,
+        radius: 5,
+        lineStyle: "solid",
+        locked: false,
+        zIndex: 0,
+      },
+      note("caption", { x: center.x - 25, y: center.y }),
+    ],
+  };
+  const { final } = apply(d);
+  const pin = resolveEndpointPoint(final, resolver, endpoint)!;
+  const groups = draftingGroups(d, resolver);
+  expect(
+    draftingDisplacements(d, final, resolver, groups)!.get(groups[0]!),
+  ).toEqual({ x: pin.x - oldPin.x, y: pin.y - oldPin.y });
+  const otherPin = resolveEndpointPoint(final, resolver, {
+    ...endpoint,
+    pinName: "IN-",
+  })!;
+  const port = point(final, "port");
+  expect(Math.hypot(port.x - pin.x, port.y - pin.y)).toBeLessThan(
+    Math.hypot(port.x - otherPin.x, port.y - otherPin.y),
+  );
 });

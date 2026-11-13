@@ -1,8 +1,11 @@
 import {
   deriveDocumentContactEvidence,
   endpointKey,
+  isVisibleEndpoint,
   projectPointToRouteSegment,
   resolveDocumentRoutingGeometry,
+  resolveDraftingObjectGeometry,
+  resolveEndpointPoint,
   visibleInstanceBounds,
 } from "@icm/derived";
 import type {
@@ -12,7 +15,7 @@ import type {
   SchematicDocument,
 } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
-import { draftingBounds, enclosingBox } from "./geometry.js";
+import { draftingBounds, enclosingBox, pinPoints } from "./geometry.js";
 
 const center = (b: Rect): Point => ({
   x: b.x + b.width / 2,
@@ -47,7 +50,7 @@ function netKey(document: SchematicDocument, id: string) {
   );
 }
 type Owner =
-  | { kind: "instance"; id: string; point: Point }
+  | { kind: "instance"; id: string; point: Point; pinName?: string }
   | { kind: "route" | "junction"; net: string; point: Point; reference: Point };
 export interface DraftingGroup {
   objects: DraftingObject[];
@@ -100,8 +103,12 @@ export function draftingGroups(
         bounds: envelope(indices.map((i) => ink[i]!.bounds)),
       });
   }
+  if (!groups.length) return groups;
   const parts = visibleInstanceBounds(source, resolver);
   const routing = resolveDocumentRoutingGeometry(source, resolver);
+  const pins = pinPoints(source, resolver).filter((pin) =>
+    isVisibleEndpoint(source, resolver, { kind: "terminal", ...pin }),
+  );
   const reference = center(enclosingBox(source, resolver));
   for (const group of groups) {
     const owners: { owner: Owner; distance: number }[] = parts.map((p) => ({
@@ -159,8 +166,47 @@ export function draftingGroups(
     if (
       first &&
       first.distance <= 1.5 * Math.max(group.bounds.width, group.bounds.height)
-    )
+    ) {
       group.owner = first.owner;
+      // A pseudo-port touching a pin follows that pin through mirroring or
+      // rotation, not the symbol centre. Refine only an already-owned group:
+      // this does not expand the ownership radius used by readability metrics.
+      const circles = group.objects.flatMap((object) => {
+        if (object.kind !== "circle") return [];
+        const shape = resolveDraftingObjectGeometry(
+          source,
+          resolver,
+          object,
+          routing,
+        );
+        return shape.kind === "circle" ? [shape] : [];
+      });
+      const touching = pins.filter(
+        (pin) =>
+          circles.some(
+            (circle) =>
+              Math.hypot(
+                pin.point.x - circle.center.x,
+                pin.point.y - circle.center.y,
+              ) <=
+              circle.radius + 1,
+          ) ||
+          (first.owner.kind !== "instance" &&
+            Math.hypot(
+              pin.point.x - first.owner.point.x,
+              pin.point.y - first.owner.point.y,
+            ) < 1e-6),
+      );
+      if (touching.length === 1) {
+        const pin = touching[0]!;
+        group.owner = {
+          kind: "instance",
+          id: pin.instanceId,
+          pinName: pin.pinName,
+          point: pin.point,
+        };
+      }
+    }
   }
   return groups;
 }
@@ -183,7 +229,15 @@ export function draftingDisplacements(
     if (owner.kind === "instance") {
       const part = parts.find((p) => p.id === owner.id);
       if (!part) return;
-      deltas.set(group, subtract(center(part.bounds), owner.point));
+      const point = owner.pinName
+        ? resolveEndpointPoint(final, resolver, {
+            kind: "terminal",
+            instanceId: owner.id,
+            pinName: owner.pinName,
+          })
+        : center(part.bounds);
+      if (!point) return;
+      deltas.set(group, subtract(point, owner.point));
       continue;
     }
     const nets = final.nets.filter((n) => netKey(final, n.id) === owner.net);
@@ -216,6 +270,16 @@ export function draftingDisplacements(
           )
           .map((c) => c.point),
       );
+    // A one-terminal Net needs no route after layout. Its authored wire end
+    // still denotes that pin: carry the ink to the surviving terminal rather
+    // than refusing every drafting group because the old stub disappeared.
+    if (!points.length && nets[0]!.terminals.length === 1) {
+      const point = resolveEndpointPoint(final, resolver, {
+        kind: "terminal",
+        ...nets[0]!.terminals[0]!,
+      });
+      if (point) points.push(point);
+    }
     if (!points[0]) return;
     deltas.set(group, subtract(points[0], owner.point));
   }
