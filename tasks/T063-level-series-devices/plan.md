@@ -1,7 +1,7 @@
 # T063 — Level internal series devices in R30 for every strategy
 
 - Branch: `task/T063-level-series-devices` (stacked on `task/T062-branch-columns`, PR #57)
-- Base: `task/T062-branch-columns` at `18fbac2`
+- Base: `main` at `a6ae6a0` (T056–T066 merged as PR #58; rebased from `18fbac2`)
 - Status: approved
 
 ## Goal
@@ -19,6 +19,25 @@ device below it stay in row 0 (198 devices in 122 dev drawings). T062 fixed it
 only inside a separate "branch columns" candidate, which rarely wins the
 portfolio, so crossings fell just 3%. This task moves the fix into R30 itself,
 so the template, layered and stages strategies all level such devices.
+
+## Plan change after round 1 (Opus, 2026-11-12)
+
+Round 1: crossings dev 279 → 272, val 127 → 118, verticality up, determinism
+and large documents pass; but `VISUAL_TERMINAL_DEPARTURE` 84 → 91 and
+`VISUAL_WIRE_THROUGH_SYMBOL` 20 → 22, and the T062 branch test fails.
+
+- **Per-drawing fallback.** Plan each eligible drawing with both the old and
+  the new R30 levels; keep the new result only if its finished calibrated
+  score is not higher and it adds no floating pin, missing connection or
+  `VISUAL_*` count relative to the old result; otherwise keep the old one.
+  Deterministic; timing limits unchanged (median ≤ 1.5×, aggregate p95 ≤
+  1.5× base).
+- **T062 branch test.** That assertion was written in T062 (this effort). On
+  its fixture the new levels give the same crossings and bends with shorter
+  wire (780 → 710) but fewer vertical links. It may be rewritten to assert
+  that the selected plan's crossings, bends and wire are not worse than with
+  the old levels, and that branch members keep R30's new level order; keep its
+  other assertions.
 
 ## Context
 

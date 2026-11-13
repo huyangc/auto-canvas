@@ -1,5 +1,8 @@
-import { reusePlanning } from "./planning-reuse.js";
+import { planningMemo, reusePlanning } from "./planning-reuse.js";
 import { planningBudget } from "./planning-budget.js";
+import { netLevels } from "./layered.js";
+import { inferSeriesChannels } from "./series-levels.js";
+import { selectSeriesLayout } from "./series-fallback.js";
 import { branchColumns } from "./branch-columns.js";
 import {
   calibratedScore,
@@ -132,20 +135,87 @@ export function defaultLayoutSearch(
   };
 }
 
+interface LevelOptions extends AutoLayoutOptions {
+  seriesLevels?: boolean;
+  reuseSeriesRoutes?: boolean;
+}
+
 export function planAutoLayout(
   document: SchematicDocument,
   resolver: SymbolResolver,
   options: AutoLayoutOptions = {},
 ): AutoLayoutResult {
   return reusePlanning(() =>
-    reusePreviews(() => planWithBranches(document, resolver, options, true)),
+    reusePreviews(() => planSeriesDispatch(document, resolver, options)),
+  );
+}
+
+function planSeriesDispatch(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  options: AutoLayoutOptions,
+): AutoLayoutResult {
+  if (
+    options.partition ||
+    options.quality === "optimized" ||
+    !document.instances.length ||
+    document.instances.length > 40
+  )
+    return planWithSeriesLevels(document, resolver, options, true);
+  // Comparing both level variants doubles planning; above 20 instances (the
+  // T064 search-budget threshold) keep main's levels so mid-size drawings
+  // stay within their planning time.
+  if (document.instances.length > 20)
+    return planWithSeriesLevels(document, resolver, options, false);
+  const roles = { ...classifyNets(document, resolver), seriesLevels: false };
+  const { channels } = netLevels(document.instances, resolver, roles);
+  // A stage or folded half can resolve a direction tied in the full graph.
+  // Test eligibility conservatively, before any topology is split or folded.
+  const eligible = inferSeriesChannels(
+    document.instances,
+    resolver,
+    roles,
+    channels,
+  );
+  if (!eligible) return planWithSeriesLevels(document, resolver, options, true);
+  const sharedOptions = { ...options, reuseSeriesRoutes: true };
+  return timePlanning(() => {
+    const base = planWithSeriesLevels(document, resolver, sharedOptions, false);
+    if (
+      options.search?.signal?.aborted ||
+      (options.search?.deadline !== undefined &&
+        Date.now() >= options.search.deadline)
+    )
+      return base;
+    const candidate = planWithSeriesLevels(
+      document,
+      resolver,
+      sharedOptions,
+      true,
+    );
+    return selectSeriesLayout(document, resolver, base, candidate);
+  });
+}
+
+/** @internal Complete R30 variants, also used to verify the fallback contract. */
+export function planWithSeriesLevels(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  options: AutoLayoutOptions,
+  seriesLevels: boolean,
+): AutoLayoutResult {
+  return planWithBranches(
+    document,
+    resolver,
+    { ...options, seriesLevels },
+    true,
   );
 }
 
 function planWithBranches(
   document: SchematicDocument,
   resolver: SymbolResolver,
-  options: AutoLayoutOptions,
+  options: LevelOptions,
   allowBranches: boolean,
 ): AutoLayoutResult {
   if (
@@ -304,7 +374,7 @@ function planWithBranches(
 function planWithFixedDrafting(
   document: SchematicDocument,
   resolver: SymbolResolver,
-  options: AutoLayoutOptions,
+  options: LevelOptions,
   allowBranches: boolean,
 ): AutoLayoutResult {
   // R146 compares label-finished results. Avoid applying these passes twice
@@ -389,18 +459,21 @@ function planWithFixedDrafting(
 function planAutoLayoutMeasured(
   document: SchematicDocument,
   resolver: SymbolResolver,
-  options: AutoLayoutOptions,
+  options: LevelOptions,
   finishLabels: (result: AutoLayoutResult) => AutoLayoutResult,
   allowBranches: boolean,
 ): AutoLayoutResult {
+  const newRouteCache = () =>
+    new Map<string, { result: AutoLayoutResult; final: SchematicDocument }>();
+  // The level variants have identical routing inputs once placement resolves.
+  // Share only within their public call and original document/resolver pair.
   // Preserve the explicit quick planner's tested finishing-call sequence.
   const routedPlacements =
     options.search?.evaluations === 0
       ? undefined
-      : new Map<
-          string,
-          { result: AutoLayoutResult; final: SchematicDocument }
-        >();
+      : options.reuseSeriesRoutes
+        ? planningMemo(document, resolver, "series-routes", newRouteCache)
+        : newRouteCache();
   const plan: typeof planLayoutOnce = (...args) =>
     planLayoutOnce(
       args[0],
@@ -1130,7 +1203,7 @@ function planAutoLayoutMeasured(
 export function planLayoutOnce(
   document: SchematicDocument,
   resolver: SymbolResolver,
-  options: AutoLayoutOptions,
+  options: LevelOptions,
   overrides: LayoutOverrides,
   strategy: LayoutStrategy = "template",
   signalTrunks = true,
@@ -1193,7 +1266,7 @@ function couplingDotWarnings(document: SchematicDocument) {
 function buildPlan(
   document: SchematicDocument,
   resolver: SymbolResolver,
-  options: AutoLayoutOptions,
+  options: LevelOptions,
   overrides: LayoutOverrides,
   run: LayoutRun,
   strategy: LayoutStrategy,
@@ -1222,7 +1295,10 @@ function buildPlan(
     };
   const frozen = freezePinGroups(document, resolver);
   const freed = freedAnnotations(document);
-  const roles = classifyNets(document, resolver);
+  const roles = {
+    ...classifyNets(document, resolver),
+    seriesLevels: options.seriesLevels ?? true,
+  };
   const groups = partitionGroups(
     recognizeStructures(document, roles),
     options.partition,
@@ -1592,7 +1668,8 @@ function buildPlan(
   };
   if (cache && key !== undefined) {
     // Explicit annealing budgets can be arbitrarily large; bound retention.
-    if (cache.size >= 128) cache.delete(cache.keys().next().value!);
+    if (cache.size >= (options.reuseSeriesRoutes ? 512 : 128))
+      cache.delete(cache.keys().next().value!);
     cache.set(key, { result: structuredClone(planned), final: final.document });
   }
   return withDraftingTranslation(planned, translation);
