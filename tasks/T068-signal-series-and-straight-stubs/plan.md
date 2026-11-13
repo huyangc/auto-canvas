@@ -24,6 +24,17 @@ current metrics cannot see:
 Fix both generally, and add metrics so that these kinds of defects are
 measured from now on.
 
+## Plan change after round 1 (Opus, 2026-11-13)
+
+Round 1 found that Rs came from the legacy template (Vin's + Net gets a supply
+role) and that the Rd jog is a port seated on the drain trunk, not a
+misaligned pin. Round 2 follows `review.md` round 1: signal rows as a placement
+rule without a second complete plan; keep the crossing-minimizing row order;
+input sources level with the signal part they drive; ports seated beside, not
+on, the segment between two facing pins of their Net; new `blockedJoins`
+metric. Acceptance changes: avoidable jogs lower on dev and not higher on all
+628 combined; `blockedJoins` lower on dev and val; the named Rd join straight.
+
 ## Context
 
 - R30 net levels (`docs/specs/auto-layout.md:374`, `layered.ts` `netLevels`):
