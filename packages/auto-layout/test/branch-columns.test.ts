@@ -100,7 +100,9 @@ it("routes the column portfolio deterministically and preserves terminal Nets", 
     terminalPartition(d, resolver),
   );
   expect(branchVerticality(applied.document, resolver).vertical).toBe(4);
-});
+  // Two full default plans; CI took 6.2 s against Vitest's 5 s default. Other
+  // full-planning tests carry explicit allowances (15-60 s).
+}, 30000);
 
 it("keeps a fixed branch member at its exact pose", () => {
   const d = withPlacements(
