@@ -1,8 +1,9 @@
+import { markerBlocksJoin } from "../src/straight-joins.js";
 import { expect, it, vi } from "vitest";
 import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
 import { planAutoLayout, planLayoutOnce } from "../src/auto-layout.js";
 import { diagnoseLabelClearance } from "@icm/derived";
-import { enclosingBox, placement } from "../src/geometry.js";
+import { enclosingBox, placement, withPlacements } from "../src/geometry.js";
 import { emptyOverrides } from "../src/layout-choices.js";
 import { portSeatCandidates } from "../src/place-markers.js";
 import { searchPortSeats } from "../src/port-seat-search.js";
@@ -291,4 +292,20 @@ it("R146 never trades finished connectivity for shorter wire", () => {
   expect(searchPortSeats(initial, resolver, fixed, () => disconnected)).toBe(
     initial,
   );
+});
+
+it("R146 filters blocked joins before routing when clear port seats exist", () => {
+  const document = fixture();
+  document.nets[0]!.terminals[0]!.pinName = "2";
+  document.instances[0]!.placement = placement(0, 0);
+  document.instances[1]!.placement = placement(0, 100);
+  const { initial, replan, fixed } = search(document);
+  const route = vi.fn(replan);
+  const result = searchPortSeats(initial, resolver, fixed, route);
+  expect(route).toHaveBeenCalled();
+  for (const [poses] of route.mock.calls)
+    expect(
+      markerBlocksJoin(withPlacements(initial.final!, poses), resolver, "p"),
+    ).toBe(false);
+  expect(markerBlocksJoin(result.final!, resolver, "p")).toBe(false);
 });

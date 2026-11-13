@@ -22,11 +22,30 @@ export const integerPoint = (p: Point): Point => ({
 export const transformPoint: typeof modelTransformPoint = (...args) =>
   integerPoint(modelTransformPoint(...args));
 
-export const ROW_PITCH = 120;
-export const MEMBER_PITCH = 100;
+export interface PlacementPitch {
+  row: number;
+  member: number;
+  column: number;
+}
+export const legacyPitch: Readonly<PlacementPitch> = {
+  row: 120,
+  member: 100,
+  column: 160,
+};
+const smallPitch: Readonly<PlacementPitch> = {
+  row: 100,
+  member: 80,
+  column: 120,
+};
+/** Keep the original size class through stages and folded symmetry halves. */
+export function placementPitch(roles: {
+  instanceCount: number;
+  pitch?: Readonly<PlacementPitch>;
+}): Readonly<PlacementPitch> {
+  return roles.pitch ?? (roles.instanceCount <= 40 ? smallPitch : legacyPitch);
+}
 export const cellPinOffset = (document: SchematicDocument) =>
   document.instances.length <= 40 ? 40 : 80;
-export const COLUMN_PITCH = 160;
 export const markerOffset = (document: SchematicDocument) =>
   document.instances.length <= 40 ? 20 : 40;
 export const CELL_PIN_SPACING = 40;

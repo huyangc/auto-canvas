@@ -1,4 +1,4 @@
-import { transformPoint } from "./geometry.js";
+import { transformPoint, placementPitch } from "./geometry.js";
 // T013 placement restored from 309a368 for the R36 strategy portfolio.
 import { type Instance, type SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
@@ -10,14 +10,7 @@ import {
   type NetRoles,
 } from "./net-roles.js";
 import { compareIds, facesOutward } from "./recognize.js";
-import {
-  COLUMN_PITCH,
-  MEMBER_PITCH,
-  ROW_PITCH,
-  pinPoints,
-  placement,
-  withPlacements,
-} from "./geometry.js";
+import { pinPoints, placement, withPlacements } from "./geometry.js";
 import {
   devicePins,
   isSource,
@@ -139,7 +132,7 @@ function expandTemplates(
         shared(other.members[1], g.members[1]).length,
     );
     const axis = stacked ? axes.get(stacked.id)! : nextAxis;
-    if (!stacked) nextAxis += COLUMN_PITCH * 2;
+    if (!stacked) nextAxis += placementPitch(roles).column * 2;
     axes.set(g.id, axis);
     let offset = 0;
     if (stacked) {
@@ -159,7 +152,8 @@ function expandTemplates(
         .filter((other) => axes.get(other.id) === axis)
         .map((other) => pitchOffsets.get(other.id)!),
     );
-    const pitch = MEMBER_PITCH + pitchOffsets.get(g.id)! - minimum;
+    const pitch =
+      placementPitch(roles).member + pitchOffsets.get(g.id)! - minimum;
     const row = Math.min(...g.members.map((id) => rows.get(id) ?? 0));
     g.members.forEach((id, index) => {
       rows.set(id, row);
@@ -167,7 +161,7 @@ function expandTemplates(
         id,
         placement(
           axis + (index === 0 ? -pitch : pitch) / 2,
-          row * ROW_PITCH,
+          row * placementPitch(roles).row,
           mirror(g, index),
         ),
       );
@@ -181,7 +175,8 @@ function expandTemplates(
     const row =
       rows.get(g.members[0])! + (polarity(pair.symbolId) === "p" ? -1 : 1);
     const axis = axes.get(g.id)!;
-    const target = targets.get(tail) ?? placement(0, row * ROW_PITCH);
+    const target =
+      targets.get(tail) ?? placement(0, row * placementPitch(roles).row);
     const { q } = shared(g.members[0], tail)[0] ?? {};
     const offset = q ? transformPoint(q.at, { x: 0, y: 0 }, target).x : 0;
     const tailGroup = groups.find((other) => other.members.includes(tail));
@@ -196,7 +191,7 @@ function expandTemplates(
       const member = targets.get(id) ?? target;
       rows.set(id, row);
       member.position.x += delta;
-      member.position.y = row * ROW_PITCH;
+      member.position.y = row * placementPitch(roles).row;
       targets.set(id, member);
     }
   }
@@ -233,7 +228,7 @@ function alignDrainLoads(
         ([id, p]) =>
           id !== i.id &&
           p.position.y === target.position.y &&
-          Math.abs(p.position.x - x) < MEMBER_PITCH,
+          Math.abs(p.position.x - x) < placementPitch(roles).member,
       )
     )
       target.position.x = x;
@@ -319,7 +314,7 @@ export function templatePlacement(
       }
     for (const id of blockIds) {
       targets.set(id, placed.get(id)!);
-      rows.set(id, placed.get(id)!.position.y / ROW_PITCH);
+      rows.set(id, placed.get(id)!.position.y / placementPitch(roles).row);
     }
   }
   const outside = templates.filter(
@@ -397,12 +392,12 @@ export function templatePlacement(
     while (
       [...targets.values()].some(
         (p) =>
-          p.position.y === row * ROW_PITCH &&
-          Math.abs(p.position.x - x) < MEMBER_PITCH,
+          p.position.y === row * placementPitch(roles).row &&
+          Math.abs(p.position.x - x) < placementPitch(roles).member,
       )
     )
-      x += COLUMN_PITCH;
-    targets.set(i.id, placement(x, row * ROW_PITCH));
+      x += placementPitch(roles).column;
+    targets.set(i.id, placement(x, row * placementPitch(roles).row));
   }
   const ys = [...targets.values()].map((p) => p.position.y);
   const mainY = ys.length ? (Math.min(...ys) + Math.max(...ys)) / 2 : 0;

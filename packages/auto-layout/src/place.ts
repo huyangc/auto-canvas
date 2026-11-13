@@ -19,7 +19,7 @@ import type { SymbolResolver } from "@icm/symbols";
 import { classifyNets, type NetRoles } from "./net-roles.js";
 import { compareIds, persistedTemplates } from "./recognize.js";
 import {
-  MEMBER_PITCH,
+  placementPitch,
   placement,
   transformPoint,
   boxesIntersect,
@@ -66,6 +66,7 @@ function placeCoupledInductors(
   templates: RecognizedGroup[],
   targets: Map<string, Placement>,
   fixed: ReadonlySet<string>,
+  roles: NetRoles,
 ): string | undefined {
   for (const group of templates) {
     if (!group.coupledDotPins) continue;
@@ -79,7 +80,10 @@ function placeCoupledInductors(
       // top/bottom only when the electrical dot is on the second pin.
       const at = placement(0, 0, dot.at.y > other.at.y ? "vertical" : "none");
       const pin = transformPoint(dot.at, at.position, at);
-      at.position = { x: index * MEMBER_PITCH - pin.x, y: -pin.y };
+      at.position = {
+        x: index * placementPitch(roles).member - pin.x,
+        y: -pin.y,
+      };
       return at;
     });
     const anchor = Math.max(
@@ -240,7 +244,7 @@ export function placeDocument(
     const selected = planningMemo(
       document,
       resolver,
-      `row-drafts:${JSON.stringify([draftRouter.key, roles.seriesLevels, options.fixedInstanceIds, [...overrides.sides], [...overrides.orientations]])}`,
+      `row-drafts:${JSON.stringify([draftRouter.key, roles.seriesLevels, roles.pitch, options.fixedInstanceIds, [...overrides.sides], [...overrides.orientations]])}`,
       () => {
         const draft = (signalSeries: boolean) => {
           const choices = emptyChoices();
@@ -443,6 +447,7 @@ export function placeDocument(
       templates,
       targets,
       fixed,
+      roles,
     );
     if (problem) return { placements: targets, problem };
   }

@@ -1,5 +1,6 @@
 import { planningMemo, reusePlanning } from "./planning-reuse.js";
 import { planningBudget } from "./planning-budget.js";
+import { pitchBlocked } from "./pitch-fallback.js";
 import { netLevels } from "./layered.js";
 import { inferSeriesChannels } from "./series-levels.js";
 import { selectSeriesLayout } from "./series-fallback.js";
@@ -26,6 +27,8 @@ import type { SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import {
   enclosingBox,
+  type PlacementPitch,
+  legacyPitch,
   geometryProblem,
   pinPoints,
   withPlacements,
@@ -137,6 +140,7 @@ export function defaultLayoutSearch(
 }
 
 interface LevelOptions extends AutoLayoutOptions {
+  pitch?: Readonly<PlacementPitch>;
   seriesLevels?: boolean;
   reuseSeriesRoutes?: boolean;
 }
@@ -147,14 +151,46 @@ export function planAutoLayout(
   options: AutoLayoutOptions = {},
 ): AutoLayoutResult {
   return reusePlanning(() =>
-    reusePreviews(() => planSeriesDispatch(document, resolver, options)),
+    reusePreviews(() =>
+      timePlanning(() => planPitchDispatch(document, resolver, options)),
+    ),
   );
+}
+
+/** Retry the legacy pitch only for a refusal caused by placement crowding.
+ * The existing finished-score selector protects every visual/routing guard. */
+function planPitchDispatch(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  options: AutoLayoutOptions,
+): AutoLayoutResult {
+  const sharedOptions =
+    document.instances.length <= 40
+      ? { ...options, reuseSeriesRoutes: true }
+      : options;
+  const candidate = planSeriesDispatch(document, resolver, sharedOptions);
+  if (
+    document.instances.length > 40 ||
+    !document.instances.length ||
+    options.search?.signal?.aborted ||
+    (options.search?.deadline !== undefined &&
+      Date.now() >= options.search.deadline)
+  )
+    return candidate;
+  const final = preview(document, resolver, candidate.edits);
+  if (!pitchBlocked(candidate, final.ok ? final.document : document, resolver))
+    return candidate;
+  const base = planSeriesDispatch(document, resolver, {
+    ...sharedOptions,
+    pitch: legacyPitch,
+  });
+  return selectSeriesLayout(document, resolver, base, candidate);
 }
 
 function planSeriesDispatch(
   document: SchematicDocument,
   resolver: SymbolResolver,
-  options: AutoLayoutOptions,
+  options: LevelOptions,
 ): AutoLayoutResult {
   if (
     options.partition ||
@@ -202,7 +238,7 @@ function planSeriesDispatch(
 export function planWithSeriesLevels(
   document: SchematicDocument,
   resolver: SymbolResolver,
-  options: AutoLayoutOptions,
+  options: LevelOptions,
   seriesLevels: boolean,
 ): AutoLayoutResult {
   return planWithBranches(
@@ -803,6 +839,7 @@ function planAutoLayoutMeasured(
         if (state.sideRow) run.sideRow = state.sideRow;
         return run;
       },
+      options.pitch,
     ),
   );
   const quickResult = finalizeFacing(
@@ -948,19 +985,22 @@ function planAutoLayoutMeasured(
     };
     // Finished seats are immutable within this planning call. Reuse a trial
     // reached by multiple searches, including the final label repair.
-    const finishedSeats = new Map<
-      ReturnType<typeof contactPolicy> | undefined,
-      Map<string, LayoutRun>
-    >();
+    const finishedSeats = planningMemo(
+      document,
+      resolver,
+      "finished-seats",
+      () => new Map<string, LayoutRun>(),
+    );
     const finishPlacement = (
       placements: ReadonlyMap<string, Placement>,
       contacts?: ReturnType<typeof contactPolicy>,
       translation = draftingTranslation(incumbent),
     ) => {
-      let cache = finishedSeats.get(contacts);
-      if (!cache) finishedSeats.set(contacts, (cache = new Map()));
+      const cache = finishedSeats;
       const key = JSON.stringify([
+        strategy,
         translation,
+        contacts ? [...contacts.allowed].sort(compareIds) : null,
         document.instances.map((i) => [i.id, placements.get(i.id)]),
       ]);
       const cached = cache.get(key);
@@ -1144,13 +1184,18 @@ function planAutoLayoutMeasured(
       ),
     );
     const repairLabels = (run: LayoutRun) =>
-      repairStubLabels(
-        run,
-        resolver,
-        fixed,
-        (placements) => finishPlacement(placements, railContacts),
-        stopped,
-      ).result;
+      timePhase(
+        "labelRepair",
+        () =>
+          repairStubLabels(
+            run,
+            resolver,
+            fixed,
+            (placements) => finishPlacement(placements, railContacts),
+            stopped,
+            options.pitch,
+          ).result,
+      );
     // R152: compare one complete branch-column candidate with the finished
     // incumbent. Existing modes, locks and explicit relationships keep their
     // placement contract; this candidate only enters plain bounded planning.
@@ -1323,6 +1368,7 @@ function buildPlan(
   const roles = {
     ...classifyNets(document, resolver),
     seriesLevels: options.seriesLevels ?? true,
+    ...(options.pitch ? { pitch: options.pitch } : {}),
   };
   const groups = partitionGroups(
     recognizeStructures(document, roles),

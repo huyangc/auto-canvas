@@ -70,12 +70,11 @@ export function searchPortSeats(
         };
       })
       .sort((a, b) => a.score - b.score);
-    // Establish the best obstructing fallback before testing clear seats.
-    // A clear seat cannot trade a blocked join for worse routed guards.
-    const seats = [
-      ...ranked.filter((seat) => seat.blocked).slice(0, 1),
-      ...ranked.filter((seat) => !seat.blocked).slice(0, 2),
-    ];
+    // Obstructing seats are a fallback only when no clear seat exists. Trying
+    // one first can lower the incumbent score so far that every clear seat
+    // is rejected, leaving a port on the straight device connection.
+    const clear = ranked.filter((seat) => !seat.blocked).slice(0, 2);
+    const seats = clear.length ? clear : ranked.slice(0, 1);
     for (const seat of seats) {
       // A caller's deadline or abort ends the search with the best finished seat.
       if (evaluations++ >= limit || stopped()) return current;
@@ -93,6 +92,8 @@ export function searchPortSeats(
       const candidate = replan(trial);
       const value = calibratedScore(candidate, resolver);
       if (value >= score || !candidate.final) continue;
+      if (!seat.blocked && markerBlocksJoin(candidate.final, resolver, port.id))
+        continue;
       if (compactionRegresses(current, candidate, resolver)) continue;
       const counts = routedGuards(candidate.final, resolver);
       if (

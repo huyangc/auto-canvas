@@ -1,3 +1,4 @@
+import { placementPitch } from "../src/geometry.js";
 import { expect, it } from "vitest";
 import {
   deriveElectricalTopologyProjection,
@@ -365,7 +366,10 @@ it.each(cases)(
           ),
       );
       const pitch = right!.position.x - left!.position.x;
-      if (!stacked) expect(pitch).toBe(100);
+      if (!stacked)
+        expect(pitch).toBe(
+          placementPitch({ instanceCount: document.instances.length }).member,
+        );
       else {
         const [otherLeft, otherRight] = stacked.members.map(placed);
         expect(
@@ -410,7 +414,8 @@ it.each(cases)(
           (left!.position.x + right!.position.x) / 2,
         );
         expect(placed(group.tailInstanceId).position.y).toBe(
-          left!.position.y + 120,
+          left!.position.y +
+            placementPitch({ instanceCount: document.instances.length }).row,
         );
       }
     }
@@ -702,7 +707,10 @@ it.each(cases)(
       expect(placed("P12").position.x).toBeGreaterThan(placed("X8").position.x);
       expect(placed("P13").position.x).toBeLessThan(placed("X7").position.x);
       horizontal("C10");
-      expect(placed("C10").position.y).toBe(placed("X7").position.y - 120);
+      expect(placed("C10").position.y).toBe(
+        placed("X7").position.y -
+          placementPitch({ instanceCount: document.instances.length }).row,
+      );
     }
     if (fixture.id === "common-source")
       expect(pin("RD", "2").x).toBe(pin("XM1", "D").x);

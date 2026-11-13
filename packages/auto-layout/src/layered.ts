@@ -1,5 +1,5 @@
 import { inferSeriesChannels, signalSeriesParts } from "./series-levels.js";
-import { transformPoint } from "./geometry.js";
+import { transformPoint, placementPitch } from "./geometry.js";
 import { visibleInstanceBounds } from "@icm/derived";
 import {
   reflectOrientation,
@@ -23,12 +23,7 @@ import {
   isSource,
   signalDistances,
 } from "./placement-connectivity.js";
-import {
-  MEMBER_PITCH,
-  ROW_PITCH,
-  placement,
-  withPlacements,
-} from "./geometry.js";
+import { placement, withPlacements } from "./geometry.js";
 import { symmetryTopology } from "./symmetry.js";
 import type { SymmetryComponent, Placement, RecognizedGroup } from "./types.js";
 
@@ -219,7 +214,12 @@ export function deviceRows(
     }
     placements.set(
       i.id,
-      placement(0, rowById.get(i.id)! * ROW_PITCH, "none", rotation),
+      placement(
+        0,
+        rowById.get(i.id)! * placementPitch(roles).row,
+        "none",
+        rotation,
+      ),
     );
   }
   // A passive's unrelated DC net ranks do not determine its signal row.
@@ -253,7 +253,8 @@ export function deviceRows(
     const host = neighbours[0];
     if (host) {
       rowById.set(i.id, rowById.get(host.id)!);
-      placements.get(i.id)!.position.y = rowById.get(host.id)! * ROW_PITCH;
+      placements.get(i.id)!.position.y =
+        rowById.get(host.id)! * placementPitch(roles).row;
     }
     distances.set(i.id, (distances.get(i.id) ?? Infinity) + 0.5);
   }
@@ -305,7 +306,7 @@ export function deviceRows(
     const row = Math.min(...g.members.map((id) => rowById.get(id) ?? 0));
     for (const id of g.members) {
       grouped.add(id);
-      placements.get(id)!.position.y = row * ROW_PITCH;
+      placements.get(id)!.position.y = row * placementPitch(roles).row;
     }
     nodes.push({
       id: g.id,
@@ -343,7 +344,7 @@ export function deviceRows(
       : Math.max(...(splitTail ? tailRows : [node.row, ...tailRows]));
     // The node may be a whole group (a tail that is also a mirror member).
     for (const id of node.members)
-      placements.get(id)!.position.y = node.row * ROW_PITCH;
+      placements.get(id)!.position.y = node.row * placementPitch(roles).row;
   }
   return symmetryRows(
     document,
@@ -435,11 +436,13 @@ function symmetryRows(
     for (const node of halfRows.nodes) {
       node.row = Math.min(
         ...node.members.map(
-          (id) => halfRows.placements.get(id)!.position.y / ROW_PITCH,
+          (id) =>
+            halfRows.placements.get(id)!.position.y / placementPitch(roles).row,
         ),
       );
       for (const id of node.members)
-        halfRows.placements.get(id)!.position.y = node.row * ROW_PITCH;
+        halfRows.placements.get(id)!.position.y =
+          node.row * placementPitch(roles).row;
     }
     const ordered = orderRows(halfRows, half, resolver, halfRoles, halfGroups);
     const crossIds = new Set(
@@ -539,12 +542,13 @@ function symmetryRows(
     }
     const minimum = Math.max(
       ...component.pairs.map(
-        ([left]) => placed.get(left)!.position.x + MEMBER_PITCH / 2,
+        ([left]) =>
+          placed.get(left)!.position.x + placementPitch(roles).member / 2,
       ),
       ...bounds
         .filter((b) => !axisIds.has(b.id))
         .map((b) => {
-          const row = placed.get(b.id)!.position.y / ROW_PITCH;
+          const row = placed.get(b.id)!.position.y / placementPitch(roles).row;
           return (
             b.bounds.x +
             b.bounds.width +
@@ -914,7 +918,7 @@ export function assignColumns(
       }
     const minimum = Math.min(...component.map((g) => pitch.get(g.id)!));
     for (const g of component) {
-      const width = MEMBER_PITCH + pitch.get(g.id)! - minimum;
+      const width = placementPitch(roles).member + pitch.get(g.id)! - minimum;
       if (g.members.some((id) => blocked.has(id))) continue;
       g.members.forEach((id, index) => {
         targets.get(id)!.position.x = (index === 0 ? -width : width) / 2;

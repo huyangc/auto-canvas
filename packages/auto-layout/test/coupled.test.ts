@@ -4,7 +4,7 @@ import type { SchematicDocument } from "@icm/model";
 import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
 import { expect, it } from "vitest";
 import { planAutoLayout, planLayoutOnce } from "../src/auto-layout.js";
-import { MEMBER_PITCH, pinPoints } from "../src/geometry.js";
+import { placementPitch, pinPoints } from "../src/geometry.js";
 import { emptyOverrides } from "../src/layout-choices.js";
 import { classifyNets } from "../src/net-roles.js";
 import {
@@ -105,7 +105,9 @@ function assertPair(d: SchematicDocument) {
     expect(d.instances.find((i) => i.id === id)!.placement!.rotation).toBe(0);
     return dot.point;
   });
-  expect(dots[1]!.x - dots[0]!.x).toBe(MEMBER_PITCH);
+  expect(dots[1]!.x - dots[0]!.x).toBe(
+    placementPitch({ instanceCount: d.instances.length }).member,
+  );
   expect(dots[0]!.y).toBe(dots[1]!.y);
 }
 it("recognizes magnetic coupling across isolated windings as one indivisible unit", () => {
@@ -389,7 +391,10 @@ function assertThreeWindings(d: SchematicDocument, dots = ["1", "1", "2"]) {
     return dot.point;
   });
   for (const [index, point] of points.entries()) {
-    expect(point.x).toBe(points[0]!.x + index * MEMBER_PITCH);
+    expect(point.x).toBe(
+      points[0]!.x +
+        index * placementPitch({ instanceCount: d.instances.length }).member,
+    );
     expect(point.y).toBe(points[0]!.y);
   }
 }

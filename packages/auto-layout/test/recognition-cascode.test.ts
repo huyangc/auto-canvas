@@ -10,7 +10,7 @@ import { placeDocument } from "../src/place.js";
 import { placeMarkers } from "../src/place-markers.js";
 import { emptyChoices, emptyOverrides } from "../src/layout-choices.js";
 import {
-  ROW_PITCH,
+  placementPitch,
   pinPoints,
   placement,
   withPlacements,
@@ -99,7 +99,10 @@ for (const strategy of ["template", "layered"] as const) {
       "none",
       "horizontal",
     ]);
-    expect(p.get("t1")!.position.y).toBe(p.get("a")!.position.y + ROW_PITCH);
+    expect(p.get("t1")!.position.y).toBe(
+      p.get("a")!.position.y +
+        placementPitch({ instanceCount: d.instances.length }).row,
+    );
     expect(p.get("t2")!.position.y).toBe(p.get("t1")!.position.y);
     const axis = (a: string, b: string) =>
       (p.get(a)!.position.x + p.get(b)!.position.x) / 2;

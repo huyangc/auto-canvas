@@ -182,9 +182,10 @@ it("R97 returns nothing when there are no instance bounds or no empty columns", 
 
 it("R97 compacts the routed finalist only for a strict score decrease and repeats without moves", () => {
   const document = circuit(
-    { a: "opamp", b: "opamp", c: "opamp", d: "opamp" },
+    { a: "opamp", b: "opamp", c: "opamp", d: "opamp", e: "resistor" },
     {
-      n0: ["a.IN+", "a.IN-", "b.OUT"],
+      // The branch leaves an empty column even with the tighter R154 pitch.
+      n0: ["a.IN+", "a.IN-", "b.OUT", "e.1"],
       n1: ["a.OUT", "b.IN-", "c.IN+", "c.OUT"],
       n4: ["b.IN+", "c.IN-", "d.OUT"],
       n2: ["d.IN+"],

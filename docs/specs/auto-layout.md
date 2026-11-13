@@ -206,15 +206,17 @@ AutoLayoutDiagnostic[] }`. Fixed instances retain their exact placements;
   and a 40-unit default above that. Extra markers share the last host and are nudged by grid steps. Fixed markers retain their poses.
   In default mode with a nonzero search budget, at most 40 instances and no
   supplied partition, after routing and label finishing, try the 40-unit seat
-  only for a marker named by a label-clearance or label-run-on diagnostic (including its labels).
+  only for a marker named by a label-clearance, label-run-on or label-overlap
+  diagnostic (including its labels).
   Keep the longer seat only if the named problem disappears and no routed
   guard increases, even when the finished calibrated score rises. Together
   with port label repair, cap trials at the number of diagnosed movable stubs,
-  bounded by twelve, in id/host order. Reuse identical finished seat previews.
+  bounded by twelve, in id/host order. R154 local opening shares the twelve-trial
+  cap. Reuse identical finished seat previews.
   R38 remains the authority for direct contacts; a shorter seat does not
   license coincident pins.
 - **R7 — Templates.** Group members share y and reflect about a vertical
-  axis, with 100-unit origin pitch unless R18 aligns a stack. Differential left/right mirrors are
+  axis, with the per-document member pitch (R154) unless R18 aligns a stack. Differential left/right mirrors are
   `none`/`horizontal`; tails lie on the axis one row toward the supply side:
   below n pairs and above p pairs. Mirror and
   matched left/right mirrors are `horizontal`/`none`. Place the diode side
@@ -230,13 +232,13 @@ AutoLayoutDiagnostic[] }`. Fixed instances retain their exact placements;
 - **R9 — Signal row.** A Document with no transistor channel constraint uses the
   horizontal signal-row layout: columns increase in net distance from input,
   or a grounded source's positive net when no input exists; column pitch is
-  160 units. Grounded-negative sources stand vertically in the leftmost
+  the per-document column pitch (R154). Grounded-negative sources stand vertically in the leftmost
   columns, positive up. Series two-pin elements with neither pin on power lie
   horizontally, lower-distance pin left. Shunts with one power pin stand
   vertically, in the column just right of their node's driver, below the row
   for ground or above for supply, signal pin toward the row. Multi-pin blocks
   sit on the row in distance order. A series element bridging two nets already
-  reached by earlier columns lies horizontally 120 units above the row,
+  reached by earlier columns lies horizontally one per-document row pitch above the row,
   centered between its net columns.
 - **R10 — Validity.** Origins lie on the Document grid. Only a validated R38 direct contact may
   have coincident pins or intersecting interaction padding; device interiors stay apart. With no fixed instances, translate the whole layout by
@@ -322,8 +324,8 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
 
 - **R18 — Pin-aligned stacks.** Stacked groups share vertical channel pin
   lines. Derive pitches from each pin's local `x` after orientation; the smaller
-  pitch is `MEMBER_PITCH`, the other follows, both on grid. Unstacked groups keep
-  `MEMBER_PITCH`. A tail's shared channel pin lies on the axis. PMOS above NMOS
+  pitch is the per-document member pitch (R154), the other follows, both on
+  grid. Unstacked groups keep that member pitch. A tail's shared channel pin lies on the axis. PMOS above NMOS
   sharing a drain align drain pins rather than origins. Read oriented `pin.at`;
   never encode a symbol or pin offset.
   Outside stack groups attach to R89 block channel columns as one alignment unit.
@@ -388,7 +390,7 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   BJT channels use collector above emitter for NPN and emitter above collector
   for PNP, parallel to MOS channel levels.
   R153 overrides unrelated Net levels for eligible signal-series passives.
-  Row pitch is 120 units. With no transistor channel constraint, R9 is unchanged.
+  Row pitch follows the original document size under R154. With no transistor channel constraint, R9 is unchanged.
 - **R32 — Order.** A recognized group is one node, with adjacent symmetric
   members. A vertical channel chain may stay together. Seed rows by signal
   distance; sweep barycentres down and up over Nets spanning adjacent rows,
@@ -870,7 +872,7 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   pin-centre midpoint within half a grid of the axis. A lone axis
   device centres its channel pin (D/S or C/E), otherwise its pin centre.
   Choose the smallest grid axis A giving every pair origin pitch
-  `2·(A − x_left) ≥ MEMBER_PITCH` (100 units), keeping each row's left visible
+  `2·(A − x_left) ≥ member pitch` (R154), keeping each row's left visible
   extent at least 20 units left of A and, if that row has an axis run, at least
   40 units left of the centred run's left edge. Reflect each left placement
   about the axis, including orientation, to produce its right partner.
@@ -1178,7 +1180,10 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   incumbent's top-left anchor within R1's half-grid tolerance. Fixed and locked
   instances never move.
   Rank alternatives by R54's non-rail Manhattan MST length and estimated
-  crossings, weighted 4 and 1000. Fully evaluate the best two per port, at
+  crossings, weighted 4 and 1000. Apply the straight-join seat filter before
+  shortlisting: consider obstructing seats only if no clear alternative exists,
+  and reject finishing that turns a clear seat into an obstructing one.
+  Fully evaluate the best two clear seats per port (or one blocked fallback), at
   most 12 trials total, scaled by instance count under R66, with no wall-clock budget. Each trial runs the normal
   R72, R95/R96, R97, facing, local rerouting and label passes before comparison.
   Accept only a strictly lower R74 score with wire weight 4 and finished
@@ -1202,7 +1207,11 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   pin to the other pin's transformed exit, facing it at 40 or 80 units. Reject
   off-grid poses and bounds that overlap another instance or its two-grid
   clearance. Deduplicate poses, rank by R54 crossing estimate plus non-rail
-  Manhattan MST length divided by 250, and finish the best two per unit, with
+  Manhattan MST length divided by 250, and shortlist the best two per unit.
+  On physically complete layouts, skip speculative alignment proposals with
+  no estimated crossing reduction and over 5% more estimated wire. Retain
+  their consumed budget slots so this cannot expand the later gap pass.
+  Incomplete layouts and gap proposals retain their full trials. Finish with
   at most ten trials total, scaled under R66. This count is shared with R149 and separate from R66's annealing and
   R146's port-seat budgets; it has no wall-clock cutoff.
   Use R146's complete finalist finishing path, calibrated score and guards;
@@ -1454,6 +1463,39 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   devices: a port pin on the segment must not hide its own obstruction.
   Touching the segment's cross coordinate counts; touching only its endpoints
   does not. Like the orientation counts, this metric applies at every size.
+
+- **R154 — Per-document pitch and crowded labels.** Up to 40 instances, use
+  row/member/column pitches of 100/80/120 units; above 40 keep 120/100/160.
+  Stages and folded symmetry halves inherit the original document's pitch.
+  R18 pin alignment, R89 axes and R94 rigid blocks retain their rules; seeded
+  search uses the same document's column pitch for its large translation step.
+  After routing and label finishing, extend R6a's bounded stub repair with
+  local opening for diagnosed `VISUAL_LABEL_CLEARANCE`, `VISUAL_LABEL_RUN_ON`
+  and `VISUAL_LABEL_OVERLAP`. Also repair `VISUAL_LABEL_OWNER_DISTANCE` by
+  bringing an unlocked label toward its owner, and `VISUAL_TERMINAL_DEPARTURE`
+  by seating the implicated marker on an opposing host exit. Resolve departure
+  diagnostics to terminals before rerouting, since route ids can change.
+  For implicated instances or label owners, move
+  their complete R18/R94 placement unit in stable id order by one legacy-to-new
+  member/column difference horizontally or row difference vertically, rounded
+  up to the document grid. Try away from the diagnostic first, then the
+  opposite direction. A diagnostic naming a movable marker remains owned by
+  stub extension. Share at most twelve routed trials, respect fixed/locked
+  units and cancellation, and use the complete finishing path. Accept only
+  when the targeted diagnostic disappears, no routed guard rises, and neither
+  crossings nor bends increases (`compactionRegresses`). Apply the existing
+  straight-join seat filter to the finished geometry as well: a stub extension
+  or local opening must not introduce a newly obstructing marker.
+  Small documents with coupled label groups start seating from canonical
+  slots, so a previous plan's name/value seats cannot reorder their neighbours.
+  Search retains aligned, opposing passive-load/channel pins under R33;
+  recognized R18/R94 units keep their existing movement rules.
+  Retry the legacy pitch only for an R10 refusal or a failed connection whose
+  straight segment is obstructed by a foreign pin or symbol. Missing physical
+  connections alone (including logically joined rails) do not trigger retry.
+  Use R151's finished-score/guard comparison and share resolved routing and
+  finished-placement work within the public call. This retry is based on
+  diagnostics and geometry, never circuit identity.
 
 - **Existing locks and conflicts.** Members of a locked layout group or
   constraint are treated as fixed instances under R1, because the Edit Engine

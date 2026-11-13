@@ -317,3 +317,36 @@ it("R147 stops at ten finished evaluations and retains ties", () => {
   );
   expect(route).toHaveBeenCalledTimes(10);
 });
+
+it("R147 skips alignment trials that only lengthen an already straight join", () => {
+  const document = fixture();
+  document.instances[0]!.placement = placement(0, 0, "none", 270);
+  document.instances[1]!.placement = placement(80, 0, "none", 270);
+  document.instances.push({
+    id: "c",
+    symbolId: "capacitor",
+    placement: placement(80, 200),
+  });
+  document.layoutGroups.push({
+    id: "unit",
+    kind: "custom",
+    objectIds: ["b", "c"],
+    locked: false,
+  });
+  const { initial, replan } = run(document);
+  expect(
+    relocationCandidates(initial.final!, resolver, ["b", "c"]).length,
+  ).toBeGreaterThan(0);
+  const route = vi.fn(replan);
+  expect(
+    searchDeviceRelocations(
+      initial,
+      resolver,
+      new Set(["a"]),
+      route,
+      () => false,
+      { phase: "alignment" },
+    ),
+  ).toBe(initial);
+  expect(route).not.toHaveBeenCalled();
+});

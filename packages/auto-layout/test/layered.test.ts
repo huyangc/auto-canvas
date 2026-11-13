@@ -1,3 +1,4 @@
+import { placementPitch } from "../src/geometry.js";
 import { expect, it } from "vitest";
 import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
 import { executeTransaction } from "@icm/edit-engine";
@@ -451,7 +452,7 @@ it("keeps a mirror's pitch when its member is centred under two shared pairs", (
   );
   expect(
     Math.abs(targets.get("t")!.position.x - targets.get("u")!.position.x),
-  ).toBe(100);
+  ).toBe(placementPitch(roles).member);
 });
 
 it("counts a non-MOS pin named B as a floating pin", () => {

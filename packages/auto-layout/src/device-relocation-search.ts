@@ -281,6 +281,22 @@ export function searchDeviceRelocations(
       if (seen.has(key)) continue;
       seen.add(key);
       budget.remaining--;
+      // Bound speculative alignment work on already connected layouts. A
+      // proposal with no crossing reduction and over 5% more estimated wire
+      // is outside the shortlist. Consume its budget slot so
+      // it cannot expand the later gap search. Incomplete layouts and gap
+      // moves retain their full routing trials.
+      if (!closeGaps && !limits.floating && !limits.missing) {
+        const before = estimate(
+          new Map(document.instances.map((i) => [i.id, i.placement!])),
+        );
+        const after = estimate(proposal);
+        if (
+          after.crossings >= before.crossings &&
+          after.length > before.length * 1.05
+        )
+          continue;
+      }
       const trial = structuredClone(proposal);
       if (!locked.size) {
         const box = enclosingBox(withPlacements(document, trial), resolver);

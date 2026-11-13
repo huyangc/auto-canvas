@@ -1,3 +1,4 @@
+import type { PlacementPitch } from "./geometry.js";
 import type { SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import {
@@ -6,7 +7,9 @@ import {
   type SearchState,
 } from "./search-moves.js";
 import { createPlacementEstimator } from "./estimate.js";
-import { classifyNets } from "./net-roles.js";
+import { classifyNets, isMos } from "./net-roles.js";
+import { conductingPins } from "./stages.js";
+import { pinExit, transformPoint } from "./geometry.js";
 import { routedScore, type LayoutRun } from "./refine.js";
 import {
   searchBounds,
@@ -39,6 +42,7 @@ export function annealLayout(
     signalTrunks: boolean,
     bounds: SearchBounds,
   ) => LayoutRun,
+  pitch?: Readonly<PlacementPitch>,
 ): Start & { alternative?: LayoutRun } {
   if (
     !Number.isFinite(search.seed) ||
@@ -78,6 +82,70 @@ export function annealLayout(
   const starts = [current, ...alternatives].filter(fits);
   if (!starts.length || !Number.isFinite(bestScore)) return best;
   const random = randomStream(search.seed);
+  const roles = classifyNets(quick.run.final, resolver);
+  const labelOwners = new Set<string>();
+  const coupledLabels = document.annotations.some((annotation) => {
+    if (annotation.anchor.kind !== "object") return false;
+    const owner = annotation.anchor.objectId;
+    if (labelOwners.has(owner)) return true;
+    labelOwners.add(owner);
+    return false;
+  });
+  // R33 passive loads are outside the recognized R18/R94 template units.
+  // The coupled-label reset can change search scores; retain its quick plan's
+  // aligned loads when search moves an active device. Other paths stay intact.
+  const stackPins = (
+    document.instances.length <= 40 && coupledLabels
+      ? quick.run.final.instances
+      : []
+  ).flatMap((instance) =>
+    conductingPins(instance, resolver).map((pin) => ({
+      instance,
+      pin,
+      net: roles.pinNet(instance.id, pin.name),
+      point: transformPoint(
+        pin.at,
+        instance.placement!.position,
+        instance.placement!,
+      ),
+      exit: pinExit(pin, instance.placement!),
+    })),
+  );
+  const stacks =
+    document.instances.length <= 40
+      ? stackPins.flatMap((a, index) =>
+          stackPins
+            .slice(index + 1)
+            .filter(
+              (b) =>
+                a.net &&
+                !roles.rails.has(a.net) &&
+                a.net === b.net &&
+                isMos(a.instance.symbolId) !== isMos(b.instance.symbolId) &&
+                a.instance.id !== b.instance.id &&
+                a.point.x === b.point.x &&
+                a.exit.y !== 0 &&
+                a.exit.y === -b.exit.y &&
+                (b.point.y - a.point.y) * a.exit.y > 0,
+            )
+            .map((b) => [a, b] as const),
+        )
+      : [];
+  const keepsStacks = (state: SearchState) =>
+    stacks.every(([a, b]) => {
+      const first = state.placements.get(a.instance.id)!;
+      const second = state.placements.get(b.instance.id)!;
+      const from = transformPoint(a.pin.at, first.position, first);
+      const to = transformPoint(b.pin.at, second.position, second);
+      const exit = pinExit(a.pin, first);
+      const otherExit = pinExit(b.pin, second);
+      return (
+        from.x === to.x &&
+        exit.y !== 0 &&
+        exit.y === -otherExit.y &&
+        (to.y - from.y) * exit.y > 0
+      );
+    });
   const propose = createMoveGenerator(
     document,
     resolver,
@@ -85,6 +153,7 @@ export function annealLayout(
     random,
     bounds,
     initial.run.partition,
+    pitch,
   );
   const estimate = createPlacementEstimator(
     document.instances,
@@ -119,7 +188,7 @@ export function annealLayout(
     }
     // R54 only ranks proposals; acceptance always uses a full routed score.
     const pool = Array.from({ length: 4 }, () => propose(state)).filter(
-      (p) => p !== undefined,
+      (p): p is SearchState => p !== undefined && keepsStacks(p),
     );
     const candidate = pool.sort(
       (a, b) => estimate(a.placements).score - estimate(b.placements).score,

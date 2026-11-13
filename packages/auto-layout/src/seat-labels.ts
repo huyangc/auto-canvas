@@ -193,6 +193,19 @@ function arrange(
     for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i]! - b[i]!;
     return 0;
   };
+  // A previous auto-layout may have chosen different label sides. Start the
+  // coupled-label sweep from the same slots on every replay so a name/value
+  // group cannot reorder its neighbours using the previous plan's seats.
+  // Retain the existing single-label path and above-40 geometry.
+  if (
+    document.instances.length <= 40 &&
+    [...groups.values()].some((group) => group.length > 1)
+  )
+    for (const options of candidates.values())
+      for (const annotation of options[0] ?? []) {
+        current.set(annotation.id, annotation);
+        context.accept(annotation);
+      }
   for (let pass = 0; pass < 2; pass++) {
     const conflicts = new Map(
       [...candidates.keys()].map((id) => [

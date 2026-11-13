@@ -7,7 +7,7 @@ import {
   recognizeSubstructures,
 } from "../src/recognize.js";
 import { placeDocument } from "../src/place.js";
-import { ROW_PITCH, pinPoints, withPlacements } from "../src/geometry.js";
+import { placementPitch, pinPoints, withPlacements } from "../src/geometry.js";
 import { planAutoLayout } from "../src/index.js";
 import { circuit } from "./document-fixture.js";
 import cases from "./recognition-cases.json";
@@ -206,7 +206,9 @@ it.each([
     const a = result.placements.get("a")!,
       b = result.placements.get("b")!,
       tail = result.placements.get("t")!;
-    expect(tail.position.y - a.position.y).toBe(direction * ROW_PITCH);
+    expect(tail.position.y - a.position.y).toBe(
+      direction * placementPitch({ instanceCount: d.instances.length }).row,
+    );
     expect(a.position.y).toBe(b.position.y);
     const pin = pinPoints(withPlacements(d, result.placements), resolver).find(
       (pin) => pin.instanceId === "t" && pin.pinName === (p ? "-" : "+"),
@@ -258,7 +260,9 @@ it.each(["template", "layered"] as const)(
       b = result.placements.get("b")!,
       t = result.placements.get("t")!,
       r = result.placements.get("r")!;
-    expect(t.position.y).toBe(a.position.y - ROW_PITCH);
+    expect(t.position.y).toBe(
+      a.position.y - placementPitch({ instanceCount: d.instances.length }).row,
+    );
     expect(r.position.y).toBe(t.position.y);
     expect(r.mirror).not.toBe(t.mirror);
     const pin = pinPoints(withPlacements(d, result.placements), resolver).find(
@@ -316,7 +320,9 @@ it("places a shared PMOS tail above both pairs on their median axis", () => {
   const axes = pairs.map((pair) => {
     const a = result.placements.get(pair.members[0])!,
       b = result.placements.get(pair.members[1])!;
-    expect(tail.position.y).toBe(a.position.y - ROW_PITCH);
+    expect(tail.position.y).toBe(
+      a.position.y - placementPitch({ instanceCount: d.instances.length }).row,
+    );
     return (a.position.x + b.position.x) / 2;
   });
   const pin = pinPoints(withPlacements(d, result.placements), resolver).find(
