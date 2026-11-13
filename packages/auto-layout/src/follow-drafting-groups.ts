@@ -118,6 +118,7 @@ export function followDraftingGroups(
   base: AutoLayoutResult,
   candidate: AutoLayoutResult,
   groups: DraftingGroup[],
+  finish?: (result: AutoLayoutResult) => AutoLayoutResult,
 ): AutoLayoutResult {
   if (candidate.diagnostics.some((d) => d.severity === "error")) return base;
   const before = preview(source, resolver, base.edits),
@@ -230,8 +231,14 @@ export function followDraftingGroups(
     }
     if (!seated) return base;
   }
-  const edits = [...candidate.edits, ...extra];
+  let edits = [...candidate.edits, ...extra];
   if (edits.length > MAX_SCHEMATIC_EDITS_PER_TRANSACTION) return base;
+  if (finish) {
+    candidate.edits = edits;
+    candidate = finish(candidate);
+    edits = candidate.edits;
+  }
+  if (candidate.diagnostics.some((d) => d.severity === "error")) return base;
   const replay = preview(source, resolver, edits);
   if (
     !replay.ok ||

@@ -108,8 +108,11 @@ import { searchPortSeats } from "./port-seat-search.js";
 import { draftingGroups } from "./drafting-groups.js";
 import { followDraftingGroups } from "./follow-drafting-groups.js";
 import {
+  draftingTranslation,
+  withDraftingTranslation,
   observeDraftingClearance,
   ownedDraftingNearDevices,
+  fixedDraftingBlocksReuse,
 } from "./drafting-search.js";
 
 /** Additional routed evaluations; the quick planner and finalist repairs are separate.
@@ -173,23 +176,128 @@ function planWithBranches(
       )
         return followDraftingGroups(document, resolver, base, base, groups);
     }
-    const moving = new Set(groups.flatMap((g) => g.objects.map((o) => o.id)));
-    const candidate = timePhase("drafting", () =>
-      planWithFixedDrafting(
-        {
-          ...document,
-          drafting: {
-            objects: document.drafting!.objects.filter(
-              (o) => !moving.has(o.id),
-            ),
-          },
-        },
-        resolver,
-        options,
-        allowBranches,
-      ),
+    // Undo R10 only for electrical placements and their owned drafting.
+    // Remote ink stays at its input position and remains a routing obstacle.
+    const ownedGroups = groups.filter((g) => g.owner);
+    const moving = new Set(
+      ownedGroups.flatMap((g) => g.objects.map((o) => o.id)),
     );
-    return followDraftingGroups(document, resolver, base, candidate, groups);
+    const stripped = {
+      ...document,
+      drafting: {
+        objects: document.drafting!.objects.filter((o) => !moving.has(o.id)),
+      },
+    };
+    // Recover caption anchors after routing without separating members of a
+    // rigid drawing group. A standalone caption has no relative ink to split.
+    const captions = new Set(
+      ownedGroups
+        .filter((g) => g.objects.length === 1 && g.objects[0]!.kind === "text")
+        .map((g) => g.objects[0]!.id),
+    );
+    const captionSource = {
+      ...document,
+      drafting: {
+        objects: document.drafting!.objects.filter(
+          (o) => !moving.has(o.id) || captions.has(o.id),
+        ),
+      },
+    };
+    return timePhase("drafting", () => {
+      const placed = preview(document, resolver, base.edits);
+      const shift = draftingTranslation(base);
+      const placements = new Map<string, Placement>();
+      if (placed.ok)
+        for (const instance of placed.document.instances) {
+          const pose = instance.placement;
+          if (pose)
+            placements.set(instance.id, {
+              ...pose,
+              position: { x: pose.position.x, y: pose.position.y - shift },
+            });
+        }
+      // Route the exact searched seats once; no annealer, relocation, port,
+      // rail or gap search runs on this path. Retain licensed rail contacts.
+      const candidate =
+        placements.size === document.instances.length &&
+        !base.diagnostics.some((d) => d.severity === "error")
+          ? planLayoutOnce(
+              stripped,
+              resolver,
+              options,
+              emptyOverrides(),
+              refinementMetrics(base)?.strategy,
+              true,
+              undefined,
+              undefined,
+              placements,
+              true,
+              false,
+              contactPolicy(
+                document,
+                freezePinGroups(document, resolver),
+                true,
+              ),
+            )
+          : undefined;
+      if (
+        !candidate?.final ||
+        candidate.result.diagnostics.some((d) => d.severity === "error") ||
+        (placed.ok &&
+          (missingConnections(candidate.final, resolver) >
+            missingConnections(placed.document, resolver) ||
+            floatingPins(candidate.final, resolver).length >
+              floatingPins(placed.document, resolver).length))
+      ) {
+        const fallback = timePhase("draftingFallback", () =>
+          planWithFixedDrafting(stripped, resolver, options, allowBranches),
+        );
+        return followDraftingGroups(
+          document,
+          resolver,
+          base,
+          fallback,
+          ownedGroups,
+        );
+      }
+      // Unlike owned groups, fixed ink has no alternative seat. Keep R10's
+      // clearance when its translation is still needed around that ink.
+      if (fixedDraftingBlocksReuse(candidate.final, resolver)) return base;
+      return followDraftingGroups(
+        document,
+        resolver,
+        base,
+        selectRoutingAlternative(
+          candidate,
+          candidate,
+          resolver,
+          refinementMetrics(base)?.strategy,
+          base,
+        ),
+        ownedGroups,
+        (result) =>
+          timePhase("finishing", () =>
+            separateLabels(
+              document,
+              resolver,
+              followDraftingLabels(
+                captionSource,
+                resolver,
+                rerouteCrossings(
+                  document,
+                  resolver,
+                  result,
+                  () =>
+                    !!options.search?.signal?.aborted ||
+                    (options.search?.deadline !== undefined &&
+                      Date.now() >= options.search.deadline),
+                ),
+              ),
+              options,
+            ),
+          ),
+      );
+    });
   });
 }
 
@@ -308,7 +416,17 @@ function planAutoLayoutMeasured(
       args[10],
       args[11],
       routedPlacements,
+      args[13],
     );
+  const planFrom = (
+    translation: number,
+    ...args: Parameters<typeof planLayoutOnce>
+  ) => {
+    // Exact trials inherit their source's R10 shift; annealing inherits the
+    // quick layout's shift because its bounds anchor every proposed state.
+    args[13] = translation;
+    return plan(...args);
+  };
   const fixed = new Set(options.fixedInstanceIds);
   for (const owner of [...document.layoutGroups, ...document.constraints])
     if (owner.locked) for (const id of owner.objectIds) fixed.add(id);
@@ -333,7 +451,8 @@ function planAutoLayoutMeasured(
     repairBlockers(run, resolver, fixed, (placements) =>
       repairBounds && spanProblem(document, resolver, placements, repairBounds)
         ? run
-        : plan(
+        : planFrom(
+            draftingTranslation(run.result),
             document,
             resolver,
             options,
@@ -352,7 +471,8 @@ function planAutoLayoutMeasured(
     signalTrunks: boolean,
   ) => {
     if (!run.final || !Number.isFinite(routedScore(run, resolver))) return run;
-    const candidate = plan(
+    const candidate = planFrom(
+      draftingTranslation(run.result),
       document,
       resolver,
       options,
@@ -412,7 +532,8 @@ function planAutoLayoutMeasured(
       ).map((component) => [...component.pairs.flat(), ...component.axis]),
     ];
     const replan = (exact: ReadonlyMap<string, Placement>) =>
-      plan(
+      planFrom(
+        draftingTranslation(run.result),
         document,
         resolver,
         options,
@@ -464,7 +585,8 @@ function planAutoLayoutMeasured(
       classifyNets(run.final, resolver),
     );
     if (!structures.some((s) => s.kind === "cross-coupled-pair")) return run;
-    const candidate = plan(
+    const candidate = planFrom(
+      draftingTranslation(run.result),
       document,
       resolver,
       options,
@@ -593,7 +715,8 @@ function planAutoLayoutMeasured(
       ranked.map(({ run, strategy }) => ({ run, strategy })),
       { run: quickRun, strategy: selected.strategy },
       (state, signalTrunks, bounds) => {
-        const run = plan(
+        const run = planFrom(
+          draftingTranslation(quickRun.result),
           document,
           resolver,
           options,
@@ -687,9 +810,15 @@ function planAutoLayoutMeasured(
           stopped,
           (run, strategy) => {
             const trial = compact(run, strategy, true);
-            return finalizeFacing(document, resolver, options, {
-              ...trial.result,
-            });
+            return finalizeFacing(
+              document,
+              resolver,
+              options,
+              withDraftingTranslation(
+                { ...trial.result },
+                draftingTranslation(trial.result),
+              ),
+            );
           },
         );
   if (
@@ -702,7 +831,8 @@ function planAutoLayoutMeasured(
     placements: ReadonlyMap<string, Placement>,
     policy: ReturnType<typeof contactPolicy>,
   ) =>
-    plan(
+    planFrom(
+      draftingTranslation(result),
       document,
       resolver,
       options,
@@ -745,9 +875,11 @@ function planAutoLayoutMeasured(
     const finishPlacement = (
       placements: ReadonlyMap<string, Placement>,
       contacts?: ReturnType<typeof contactPolicy>,
+      translation = draftingTranslation(incumbent),
     ) => {
       const routeSeat = (signalTrunks: boolean) =>
-        plan(
+        planFrom(
+          translation,
           document,
           resolver,
           options,
@@ -947,7 +1079,11 @@ function planAutoLayoutMeasured(
       columns,
     );
     if (placed.problem) return closed.result;
-    const candidate = finishPlacement(placed.placements);
+    const candidate = finishPlacement(
+      placed.placements,
+      undefined,
+      placed.draftingTranslation ?? 0,
+    );
     if (
       !candidate.final ||
       calibratedScore(candidate, resolver) >=
@@ -1005,6 +1141,7 @@ export function planLayoutOnce(
   crossX = false,
   contacts?: ReturnType<typeof contactPolicy>,
   cache?: Map<string, { result: AutoLayoutResult; final: SchematicDocument }>,
+  inheritedTranslation = 0,
 ): LayoutRun {
   const run: LayoutRun = {
     result: { edits: [], groups: [], diagnostics: [] },
@@ -1026,6 +1163,7 @@ export function planLayoutOnce(
     crossX,
     contacts,
     cache,
+    inheritedTranslation,
   );
   return run;
 }
@@ -1067,6 +1205,7 @@ function buildPlan(
   crossX = false,
   contacts?: ReturnType<typeof contactPolicy>,
   cache?: Map<string, { result: AutoLayoutResult; final: SchematicDocument }>,
+  inheritedTranslation = 0,
 ): AutoLayoutResult {
   if (document.instances.length > 120)
     return {
@@ -1140,6 +1279,11 @@ function buildPlan(
           given,
           bounds,
         );
+  const translation = exact
+    ? inheritedTranslation
+    : ("draftingTranslation" in result
+        ? (result.draftingTranslation ?? 0)
+        : 0) + (given && bounds ? inheritedTranslation : 0);
   if ("sideRow" in result) run.sideRow = result.sideRow;
   if (result.problem)
     return {
@@ -1168,7 +1312,7 @@ function buildPlan(
   const cached = key === undefined ? undefined : cache?.get(key);
   if (cached) {
     run.final = cached.final;
-    return structuredClone(cached.result);
+    return withDraftingTranslation(structuredClone(cached.result), translation);
   }
   const refuse = (message: string): AutoLayoutResult => ({
     edits: [],
@@ -1451,5 +1595,5 @@ function buildPlan(
     if (cache.size >= 128) cache.delete(cache.keys().next().value!);
     cache.set(key, { result: structuredClone(planned), final: final.document });
   }
-  return planned;
+  return withDraftingTranslation(planned, translation);
 }

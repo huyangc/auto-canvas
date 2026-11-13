@@ -1,3 +1,7 @@
+import {
+  draftingTranslation,
+  withDraftingTranslation,
+} from "./drafting-search.js";
 import { resolveRouteGeometry } from "@icm/derived";
 import {
   documentObjectIds,
@@ -236,9 +240,11 @@ function rerouteNets(
       } // Occupied trunk or no clear path.
       const edits = [...result.edits, ...cut, ...restore, ...routed.edits];
       if (!routed.edits.length || edits.length > limit) continue;
-      const candidate = finish
-        ? finish({ ...result, edits })
-        : { ...result, edits };
+      const routedResult = withDraftingTranslation(
+        { ...result, edits },
+        draftingTranslation(result),
+      );
+      const candidate = finish ? finish(routedResult) : routedResult;
       if (candidate.diagnostics.some((d) => d.severity === "error")) continue;
       const replay = preview(source, resolver, candidate.edits);
       if (!replay.ok) continue;

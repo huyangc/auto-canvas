@@ -6,11 +6,13 @@ type PlanningPhase =
   | "ports"
   | "rails"
   | "gaps"
+  | "draftingFallback"
   | "drafting"
   | "finishing";
 
 interface PlanningTiming {
   phases: Record<PlanningPhase, number>;
+  phaseCalls: Record<PlanningPhase, number>;
   milliseconds: number;
   seating: number;
   readability: number;
@@ -34,6 +36,17 @@ export function timePlanning(plan: () => AutoLayoutResult): AutoLayoutResult {
       rails: 0,
       gaps: 0,
       drafting: 0,
+      draftingFallback: 0,
+      finishing: 0,
+    },
+    phaseCalls: {
+      annealer: 0,
+      relocation: 0,
+      ports: 0,
+      rails: 0,
+      gaps: 0,
+      drafting: 0,
+      draftingFallback: 0,
       finishing: 0,
     },
     milliseconds: 0,
@@ -50,11 +63,13 @@ export function timePlanning(plan: () => AutoLayoutResult): AutoLayoutResult {
     return result;
   } finally {
     active = previous;
-    // A nested planning pass (R150 plans twice) reports its phases to the
+    // A nested planning pass (including R150 fallback) reports its phases to the
     // enclosing measurement too, so the outer result is not left at zero.
     if (previous) {
-      for (const phase of Object.keys(timing.phases) as PlanningPhase[])
+      for (const phase of Object.keys(timing.phases) as PlanningPhase[]) {
         previous.phases[phase] += timing.phases[phase];
+        previous.phaseCalls[phase] += timing.phaseCalls[phase];
+      }
       previous.seating += timing.seating;
       previous.readability += timing.readability;
       previous.seatingCalls += timing.seatingCalls;
@@ -73,7 +88,10 @@ export function timePhase<T>(
     if (active) {
       if (phase === "seating" || phase === "readability")
         active[phase] += performance.now() - start;
-      else active.phases[phase] += performance.now() - start;
+      else {
+        active.phases[phase] += performance.now() - start;
+        active.phaseCalls[phase]++;
+      }
       if (phase === "seating") active.seatingCalls++;
     }
   }

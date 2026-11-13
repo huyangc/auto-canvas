@@ -15,6 +15,7 @@ import {
 } from "../src/geometry.js";
 import { preview, terminalPartition } from "../src/transaction.js";
 import { planningTiming } from "../src/timing.js";
+import { draftingTranslation } from "../src/drafting-search.js";
 import { circuit } from "./document-fixture.js";
 
 const resolver = new InMemorySymbolResolver(builtInSymbols);
@@ -115,6 +116,73 @@ it("R150 retains its second pass when unowned ink causes an R10 translation", ()
   const next = apply(d).result;
   expect(planningTiming(next)!.phases.drafting).toBe(0);
   expect(apply(structuredClone(d)).result).toEqual(next);
+});
+
+it.each([
+  { x: 160, accepted: true },
+  { x: 80, accepted: false },
+])(
+  "R150 searches once and keeps the compared seats (accepted=$accepted)",
+  ({ x, accepted }) => {
+    const d = fixture();
+    d.drafting = { objects: [note("obstacle", { x, y: 0 })] };
+    const fixedInk = structuredClone(d);
+    fixedInk.drafting!.objects[0]!.locked = true;
+    const base = apply(fixedInk);
+    const shift = draftingTranslation(base.result);
+    expect(shift).toBeGreaterThan(0);
+
+    const { result, final } = apply(d);
+    expect(planningTiming(result)!.phaseCalls).toMatchObject({
+      annealer: 1,
+      relocation: 1,
+      ports: 1,
+      rails: 1,
+      gaps: 1,
+      drafting: 1,
+      draftingFallback: 0,
+    });
+    expect(final.instances.map((i) => i.placement)).toEqual(
+      base.final.instances.map((i) => ({
+        ...i.placement!,
+        position: {
+          x: i.placement!.position.x,
+          y: i.placement!.position.y - (accepted ? shift : 0),
+        },
+      })),
+    );
+    expect(apply(d).result).toEqual(result);
+  },
+);
+
+it("R150 keeps unowned and locked ink fixed when undoing R10", () => {
+  const d = fixture();
+  d.drafting = {
+    objects: [
+      note("obstacle", { x: 160, y: 0 }),
+      note("remote", { x: 1000, y: -1000 }),
+      { ...note("locked", { x: 1200, y: -1000 }), locked: true },
+    ],
+  };
+  expect(draftingGroups(d, resolver).every((g) => !g.owner)).toBe(true);
+  const fixedInk = structuredClone(d);
+  for (const object of fixedInk.drafting!.objects) object.locked = true;
+  const base = apply(fixedInk);
+  const shift = draftingTranslation(base.result);
+  expect(shift).toBeGreaterThan(0);
+  const { result, final } = apply(d);
+  expect(planningTiming(result)!.phaseCalls).toMatchObject({
+    annealer: 1,
+    drafting: 1,
+    draftingFallback: 0,
+  });
+  expect(final.instances.map((i) => i.placement!.position)).toEqual(
+    base.final.instances.map((i) => ({
+      x: i.placement!.position.x,
+      y: i.placement!.position.y - shift,
+    })),
+  );
+  expect(final.drafting).toEqual(d.drafting);
 });
 
 it("R150 keeps an arrow and touching text together beside their wire", () => {
