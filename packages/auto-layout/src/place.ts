@@ -1,4 +1,5 @@
 import { stageComponents } from "./stage-symmetry.js";
+import { recordDraftingTranslation } from "./drafting-search.js";
 import {
   partitionGroups,
   partitionSymmetry,
@@ -553,6 +554,7 @@ export function placeDocument(
           problem:
             "R10: drafting clearance cannot be achieved by translating the whole layout down",
         };
+      recordDraftingTranslation();
       for (const target of targets.values()) target.position.y += grid;
       shift += grid;
     }

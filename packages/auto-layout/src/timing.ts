@@ -1,6 +1,16 @@
 import type { AutoLayoutResult } from "./types.js";
 
+type PlanningPhase =
+  | "annealer"
+  | "relocation"
+  | "ports"
+  | "rails"
+  | "gaps"
+  | "drafting"
+  | "finishing";
+
 interface PlanningTiming {
+  phases: Record<PlanningPhase, number>;
   milliseconds: number;
   seating: number;
   readability: number;
@@ -17,6 +27,15 @@ export function planningTiming(result: AutoLayoutResult) {
 export function timePlanning(plan: () => AutoLayoutResult): AutoLayoutResult {
   const previous = active;
   const timing = {
+    phases: {
+      annealer: 0,
+      relocation: 0,
+      ports: 0,
+      rails: 0,
+      gaps: 0,
+      drafting: 0,
+      finishing: 0,
+    },
     milliseconds: 0,
     seating: 0,
     readability: 0,
@@ -34,6 +53,8 @@ export function timePlanning(plan: () => AutoLayoutResult): AutoLayoutResult {
     // A nested planning pass (R150 plans twice) reports its phases to the
     // enclosing measurement too, so the outer result is not left at zero.
     if (previous) {
+      for (const phase of Object.keys(timing.phases) as PlanningPhase[])
+        previous.phases[phase] += timing.phases[phase];
       previous.seating += timing.seating;
       previous.readability += timing.readability;
       previous.seatingCalls += timing.seatingCalls;
@@ -42,7 +63,7 @@ export function timePlanning(plan: () => AutoLayoutResult): AutoLayoutResult {
 }
 
 export function timePhase<T>(
-  phase: "seating" | "readability",
+  phase: "seating" | "readability" | PlanningPhase,
   work: () => T,
 ): T {
   const start = performance.now();
@@ -50,7 +71,9 @@ export function timePhase<T>(
     return work();
   } finally {
     if (active) {
-      active[phase] += performance.now() - start;
+      if (phase === "seating" || phase === "readability")
+        active[phase] += performance.now() - start;
+      else active.phases[phase] += performance.now() - start;
       if (phase === "seating") active.seatingCalls++;
     }
   }

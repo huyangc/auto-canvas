@@ -1,3 +1,4 @@
+import { planningBudget } from "./planning-budget.js";
 import { visibleInstanceBounds } from "@icm/derived";
 import type { SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
@@ -229,6 +230,10 @@ export function searchDeviceRelocations(
 ): LayoutRun {
   if (!initial.final || !Number.isFinite(calibratedScore(initial, resolver)))
     return initial;
+  const budget = options.budget ?? {
+    remaining: planningBudget(initial.final.instances.length, 10),
+  };
+  if (budget.remaining <= 0) return initial;
   const locked = new Set(fixed);
   for (const owner of [
     ...initial.final.layoutGroups,
@@ -241,7 +246,7 @@ export function searchDeviceRelocations(
   let current = initial;
   let score = calibratedScore(current, resolver);
   let limits = routedGuards(initial.final, resolver);
-  const budget = options.budget ?? { remaining: 10 };
+
   // The public pipeline defers gaps until ports and rails have finished, while
   // sharing the original ten-trial budget with the pin-alignment pass.
   const phases = options.phase ? [options.phase === "gaps"] : [false, true];

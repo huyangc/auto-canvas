@@ -1,3 +1,4 @@
+import { planningBudget } from "./planning-budget.js";
 import type { SymbolResolver } from "@icm/symbols";
 import { createPlacementEstimator } from "./estimate.js";
 import { enclosingBox, withPlacements } from "./geometry.js";
@@ -22,6 +23,8 @@ export function searchPortSeats(
 ): LayoutRun {
   if (!initial.final || !Number.isFinite(routedScore(initial, resolver)))
     return initial;
+  const limit = planningBudget(initial.final.instances.length, 12);
+  if (!limit) return initial;
   let current = initial;
   let score = calibratedScore(current, resolver);
   let limits = routedGuards(initial.final, resolver);
@@ -59,7 +62,7 @@ export function searchPortSeats(
       .slice(0, 2);
     for (const seat of seats) {
       // A caller's deadline or abort ends the search with the best finished seat.
-      if (evaluations++ >= 12 || stopped()) return current;
+      if (evaluations++ >= limit || stopped()) return current;
       const trial = structuredClone(seat.trial);
       if (!fixed.size) {
         const box = enclosingBox(withPlacements(document, trial), resolver);

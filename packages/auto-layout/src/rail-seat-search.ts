@@ -1,3 +1,4 @@
+import { planningBudget } from "./planning-budget.js";
 import { visibleInstanceBounds } from "@icm/derived";
 import type { SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
@@ -117,6 +118,8 @@ export function searchRailSeats(
 ): LayoutRun {
   if (!initial.final || !Number.isFinite(calibratedScore(initial, resolver)))
     return initial;
+  const limit = planningBudget(initial.final.instances.length, 8);
+  if (!limit) return initial;
   const roles = classifyNets(initial.final, resolver);
   const locked = new Set(fixed);
   for (const owner of [
@@ -148,7 +151,7 @@ export function searchRailSeats(
       .definition.pins[0]!;
     if (!counts.get(currentRoles.pinNet(marker.id, pin.name) ?? "")) continue;
     for (const { pose } of seats(document, resolver, marker.id)) {
-      if (evaluations++ >= 8 || stopped()) return current;
+      if (evaluations++ >= limit || stopped()) return current;
       const placements = new Map(
         current.final!.instances.map((i) => [i.id, i.placement!]),
       );

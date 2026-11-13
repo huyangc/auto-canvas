@@ -239,7 +239,7 @@ AutoLayoutDiagnostic[] }`. Fixed instances retain their exact placements;
   list with `dryRun` on the input. Require transaction acceptance and the same
   Base Net partition for every terminal, using
   `deriveElectricalTopologyProjection`. Otherwise return no edits and an R10
-  diagnostic. In plain planning with at most 40 instances, R150 first tries
+  diagnostic. In plain planning with at most 40 instances, R150 can try
   moving unlocked drafting with its owners, retaining the following behavior
   as its fallback. Locked drafting always remains an obstacle. In the fallback,
   if placed device bounds grown
@@ -520,7 +520,18 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   R55's unrefined comparison: R61 was removed because round 1 measured no
   meaningful quality benefit for its extra planning time.
 
-- **R66 — Bounded annealing.** By default use seed 1 and at most 24 additional routed evaluations for up to 40 instances (including ports and markers), or two for larger documents; optimized and partitioned planning keep eight for up to 40 instances (T061). This is a candidate budget, not a time limit. R147 adds up to ten separately bounded device-relocation trials before R146. Explicit `search` takes `seed: number`,
+- **R66 — Bounded annealing.** By default use seed 1 and at most 24 additional
+  routed evaluations through 30 instances (including ports and markers). For
+  31–40 instances use `max(2, floor(24 * (30 / n)^3))`, where `n` is the
+  instance count; above 40 retain two. Optimized and partitioned planning keep
+  eight through 40 instances. These are candidate budgets, not time limits.
+  R146–R149 retain their finishing-trial caps through 30 instances. For 31–40
+  instances scale each cap `b` to `floor(b * (30 / n)^3)`: R146 uses `b=12`,
+  R147/R149 share `b=10`, and R148's marker-seat search uses `b=8`.
+  For example, 40 instances permit ten annealer evaluations, four shared
+  relocation/gap trials, five port trials and three marker-seat trials. Rail
+  rerouting retains its separate cap. Explicit `search` overrides only the
+  annealer and takes `seed: number`,
   `evaluations: number`, `deadline?: number` (epoch milliseconds),
   `signal?: AbortSignal`, and
   `onProgress?: (p: { evaluations: number; best: number; current: number }) => void`.
@@ -1145,7 +1156,7 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   instances never move.
   Rank alternatives by R54's non-rail Manhattan MST length and estimated
   crossings, weighted 4 and 1000. Fully evaluate the best two per port, at
-  most 12 trials total, with no wall-clock budget. Each trial runs the normal
+  most 12 trials total, scaled by instance count under R66, with no wall-clock budget. Each trial runs the normal
   R72, R95/R96, R97, facing, local rerouting and label passes before comparison.
   Accept only a strictly lower R74 score with wire weight 4 and finished
   visible span weight 0.5 (R149, T059 dev refit); other R74 comparisons
@@ -1169,7 +1180,7 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   off-grid poses and bounds that overlap another instance or its two-grid
   clearance. Deduplicate poses, rank by R54 crossing estimate plus non-rail
   Manhattan MST length divided by 250, and finish the best two per unit, with
-  at most ten trials total. This count is separate from R66's annealing and
+  at most ten trials total, scaled under R66. This count is shared with R149 and separate from R66's annealing and
   R146's port-seat budgets; it has no wall-clock cutoff.
   Use R146's complete finalist finishing path, calibrated score and guards;
   keep ties and reject any finished rigid-unit distortion. Preserve the
@@ -1185,7 +1196,8 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   the rail, propose seats 40 or 80 units along the transformed pin exit and on
   the rail's supply/ground side. Snap to the grid, reject geometry conflicts,
   deduplicate, and rank by the shortest Manhattan branch to a rail device pin.
-  Finish the best two seats per marker, with at most eight trials overall.
+  Finish the best two seats per marker, with at most eight trials overall,
+  scaled by instance count under R66.
   Check the moved marker against other pins and bounds, retaining unrelated
   legal contacts. Markers belonging to user groups or constraints, and fixed
   markers, stay put. Preserve licensed contacts through R140's declared-pair
@@ -1221,7 +1233,7 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   centerlines, visible label room and ink, and drafting bounds. This is a
   visible-geometry search objective; the evaluation still measures the SVG
   view box, including its export margin.
-  Reserve the remainder of R147's ten-trial budget after its pin-alignment
+  Reserve the remainder of R147's size-scaled budget after its pin-alignment
   pass. Once R146 and R148 have finished, propose a rigid unit's largest grid-aligned
   translation toward another rigid device unit in each cardinal direction. Use swept
   instance bounds and leave two grid lanes around every external instance,
@@ -1230,7 +1242,7 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   unbounded direction produces no candidate. Keep unit orientation and all
   internal offsets. Rank these candidates by the existing R54 estimate and
   try at most two per unit in a second stable coordinate pass, using only the
-  remainder of R147's shared ten-trial budget. This preserves every original
+  remainder of R147's shared size-scaled budget. This preserves every original
   pin-alignment trial before considering gap closures. Comparing against the
   completed port/rail incumbent prevents an early closure from losing a later
   crossing-reducing port opportunity. Fully finish every trial and use
@@ -1248,7 +1260,18 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   components move as one rigid block, keeping their input edge gap on the same
   side of the circuit and their centre offset along that edge.
   Compare the ordinary finished plan with a plan made with only fixed drafting
-  as obstacles. Seat the movable components after routing and label finishing,
+  as obstacles. Reuse identical routed placements within each fixed-drafting
+  pass, and immutable transaction previews and audits within the public planning
+  call; discard these caches before returning. Reuse the base as the candidate
+  when its planning pass made no R10 drafting-clearance translation and no
+  owned movable group's input ink bounds intersect a finished base device's visible
+  bounds grown by 60 units on every side. Ports and rail markers are not
+  devices for this test. Conservatively retain the second pass even when only
+  a discarded base trial translated. This is a measured search-budget heuristic,
+  not an equivalence proof: drafting can affect R149 scoring and label seating
+  without those intersections. The T064 dev/val quality gate bounds that tradeoff.
+  Seat the movable
+  components after routing and label finishing,
   trying a nine-by-nine grid of nearby offsets, nearest preferred offset first,
   with pitch `max(4, Document grid)`. Reject seats intersecting devices, routes,
   labels, junction dots or other drafting, except an object's existing overlap

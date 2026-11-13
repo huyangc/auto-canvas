@@ -14,6 +14,7 @@ import {
   placement,
 } from "../src/geometry.js";
 import { preview, terminalPartition } from "../src/transaction.js";
+import { planningTiming } from "../src/timing.js";
 import { circuit } from "./document-fixture.js";
 
 const resolver = new InMemorySymbolResolver(builtInSymbols);
@@ -62,6 +63,9 @@ it("R150 moves a device note, preserves its content, and produces deterministic 
     id: "b",
   });
   const { result, final } = apply(d);
+  // The input note is near its old owner, but clear of the finished base's
+  // devices. Reusing that base must still carry the note to its new owner.
+  expect(planningTiming(result)!.phases.drafting).toBe(0);
   expect(point(final, "caption")).not.toEqual(point(d, "caption"));
   const oldPart = d.instances[1]!.placement!.position,
     newPart = final.instances[1]!.placement!.position;
@@ -90,11 +94,27 @@ it("R150 moves a title and a separate caption as one block above the circuit", (
     ],
   };
   expect(draftingGroups(d, resolver).every((g) => !g.owner)).toBe(true);
-  const { final } = apply(d);
+  const { result, final } = apply(d);
+  // R150 reuses the base plan when remote ink never triggered R10. Seating
+  // still follows the title, even though the second planner did not run.
+  expect(planningTiming(result)!.phases.drafting).toBe(0);
   expect(point(final, "title").x).not.toBe(300);
   expect(point(final, "subtitle").y - point(final, "title").y).toBe(-40);
   expect(point(final, "subtitle").x).toBe(point(final, "title").x);
   expect(point(final, "title").y).toBeLessThan(enclosingBox(final, resolver).y);
+});
+
+it("R150 retains its second pass when unowned ink causes an R10 translation", () => {
+  const d = fixture();
+  d.drafting = { objects: [note("obstacle", { x: 80, y: 0 })] };
+  expect(draftingGroups(d, resolver).every((g) => !g.owner)).toBe(true);
+  const { result } = apply(d);
+  expect(planningTiming(result)!.phases.drafting).toBeGreaterThan(0);
+  // A translated run must not leave an observation active for the next call.
+  d.drafting.objects = [note("title", { x: 300, y: -200 })];
+  const next = apply(d).result;
+  expect(planningTiming(next)!.phases.drafting).toBe(0);
+  expect(apply(structuredClone(d)).result).toEqual(next);
 });
 
 it("R150 keeps an arrow and touching text together beside their wire", () => {

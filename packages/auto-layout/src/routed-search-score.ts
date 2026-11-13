@@ -1,3 +1,4 @@
+import { planningMemo } from "./planning-reuse.js";
 import {
   createLabelClearanceContext,
   diagnoseVisualQuality,
@@ -16,6 +17,15 @@ import {
 
 /** R149: finished visible span, including ports, markers, wires and labels. */
 function visibleSpan(document: SchematicDocument, resolver: SymbolResolver) {
+  return planningMemo(document, resolver, "visibleSpan", () =>
+    computeVisibleSpan(document, resolver),
+  );
+}
+
+function computeVisibleSpan(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+) {
   const context = createLabelClearanceContext(document, resolver);
   const boxes = [
     ...visibleInstanceBounds(document, resolver).map((b) => b.bounds),
@@ -79,6 +89,15 @@ export function compactionRegresses(
   return after.crossings > before.crossings || after.bends > before.bends;
 }
 export function routedGuards(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+) {
+  return planningMemo(document, resolver, "routedGuards", () =>
+    computeRoutedGuards(document, resolver),
+  );
+}
+
+function computeRoutedGuards(
   document: SchematicDocument,
   resolver: SymbolResolver,
 ) {
