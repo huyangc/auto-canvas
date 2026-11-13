@@ -1,3 +1,4 @@
+import { inferSeriesChannels } from "./series-levels.js";
 import { transformPoint } from "./geometry.js";
 import { visibleInstanceBounds } from "@icm/derived";
 import {
@@ -88,8 +89,14 @@ export function netLevels(
       }
     }
     names = channelOverrides?.get(i.id) ?? names;
-    const nets = names.flatMap((p) => roles.pinNet(i.id, p) ?? []);
     channels.set(i.id, names);
+  }
+  if (roles.instanceCount <= 40 && roles.seriesLevels !== false)
+    inferSeriesChannels(devices, resolver, roles, channels);
+  for (const i of [...devices].sort((a, b) => compareIds(a.id, b.id))) {
+    const nets = channels
+      .get(i.id)!
+      .flatMap((p) => roles.pinNet(i.id, p) ?? []);
     if (nets.length === 2 && nets[0] !== nets[1])
       constraints.push([nets[0]!, nets[1]!]);
   }

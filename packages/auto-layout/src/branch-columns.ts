@@ -5,6 +5,7 @@ import { withPlacements } from "./geometry.js";
 import { symmetryTopology } from "./symmetry.js";
 import { stageComponents } from "./stage-symmetry.js";
 import { netLevels } from "./layered.js";
+import { inferSeriesChannels } from "./series-levels.js";
 import { classifyNets } from "./net-roles.js";
 import { isMarker } from "./placement-connectivity.js";
 import { compareIds } from "./recognize.js";
@@ -16,7 +17,9 @@ export function branchColumns(
   document: SchematicDocument,
   resolver: SymbolResolver,
 ) {
-  const roles = classifyNets(document, resolver);
+  // R152 keeps its original full-graph inference in both fallback variants.
+  // Do not infer extra directions again inside its individual stages.
+  const roles = { ...classifyNets(document, resolver), seriesLevels: false };
   if (
     ![...roles.rails.values()].includes("supply") ||
     ![...roles.rails.values()].includes("ground")
@@ -31,57 +34,8 @@ export function branchColumns(
     .filter((i) => !isMarker(i))
     .sort((a, b) => compareIds(a.id, b.id));
   const pins = new Map(devices.map((i) => [i.id, conductingPins(i, resolver)]));
-  const neighbours = new Map<string, Set<string>>();
-  for (const i of devices) {
-    const names = pins.get(i.id)!;
-    if (names.length !== 2) continue;
-    const nets = names.map((p) => roles.pinNet(i.id, p.name));
-    const [a, b] = nets;
-    if (!a || !b || a === b) continue;
-    for (const [from, to] of [
-      [a, b],
-      [b, a],
-    ] as const) {
-      if (!neighbours.has(from)) neighbours.set(from, new Set());
-      neighbours.get(from)!.add(to);
-    }
-  }
-  const distances = (rail: "supply" | "ground") => {
-    const distance = new Map(
-      [...roles.rails]
-        .filter(([, role]) => role === rail)
-        .map(([net]) => [net, 0]),
-    );
-    const queue = [...distance.keys()];
-    for (const net of queue) {
-      if (roles.rails.has(net) && roles.rails.get(net) !== rail) continue;
-      for (const next of neighbours.get(net) ?? []) {
-        if (distance.has(next)) continue;
-        distance.set(next, distance.get(net)! + 1);
-        queue.push(next);
-      }
-    }
-    return distance;
-  };
-  const supply = distances("supply"),
-    ground = distances("ground");
   const channels = netLevels(devices, resolver, roles).channels;
-  // R151: extend R30 across internal two-terminal DC devices. Distances use
-  // only R50 conducting pins; no input coordinates or circuit labels enter.
-  for (const i of devices) {
-    const pair = pins.get(i.id)!;
-    if (pair.length !== 2 || channels.get(i.id)?.length) continue;
-    const [a, b] = pair.map((p) => roles.pinNet(i.id, p.name));
-    if (!a || !b || a === b) continue;
-    const top = (supply.get(a) ?? Infinity) - (supply.get(b) ?? Infinity);
-    const bottom = (ground.get(b) ?? Infinity) - (ground.get(a) ?? Infinity);
-    const direction = Number.isNaN(top) || top === 0 ? bottom : top;
-    if (!direction || Number.isNaN(direction)) continue;
-    channels.set(
-      i.id,
-      (direction < 0 ? pair : [...pair].reverse()).map((p) => p.name),
-    );
-  }
+  inferSeriesChannels(devices, resolver, roles, channels);
   const connected = new Map<string, Set<string>>();
   for (const i of devices)
     for (const p of pins.get(i.id)!) {

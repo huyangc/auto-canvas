@@ -361,7 +361,10 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
 
 - **R30 — Net levels.** Devices constrain Nets vertically: NMOS D above S,
   PMOS S above D, and source + above -. Two-pin passives with a rail
-  pin point away from that Net; other passives add no constraint.
+  pin point away from that Net. In Documents of at most 40 instances,
+  two-pin R50 DC-conducting devices between non-rail Nets also receive the
+  R151 inferred direction; other passives add no constraint. The size bound
+  uses the original Document, including when placing one stage or folded half.
   Supply rails are forced to the top and ground rails to the bottom when present;
   neither is required. Levels are longest paths. Break cycles deterministically
   by dropping back edges in id-ordered depth-first search. Missing supply never
@@ -1303,16 +1306,33 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   behavior; partition fallback uses plain planning. Candidate cancellation is
   checked before building the additional candidate.
 
-- **R151 — Internal DC series levels.** The branch-column candidate extends
-  R30 through two-terminal R50 DC devices that have no directed channel edge
-  yet. Build an undirected graph of the R50 conducting pin pairs and measure
+- **R151 — Internal DC series levels.** R30 extends through two-terminal
+  R50 DC devices between non-rail Nets that have no directed channel edge yet
+  in Documents of at most 40 instances. This applies wherever the template,
+  layered and stages strategies calculate R30 levels. Build an undirected
+  graph of the R50 conducting pin pairs and measure
   distance from supply and from ground, stopping traversal at the opposite
   rail. Orient an internal pair away from the nearer supply; equal or missing
   supply distances use decreasing distance to ground. An unresolved tie adds
   no edge. MOS/BJT polarity and existing rail-directed edges retain their R30
   direction. R30's cycle breaking and longest-path levels then apply unchanged.
   This uses topology and device classes only, never drawing coordinates or
-  circuit names.
+  circuit names. Plain planning compares complete old-level and new-level
+  plans for each eligible Document (one containing an internal two-pin DC
+  device without an existing channel direction and with a DC path to a rail).
+  Keep the new plan only when
+  its finished calibrated score is no higher and no floating-pin,
+  missing-connection or individual `VISUAL_*` count increases; otherwise keep
+  the old plan. Both variants retain the R152 candidate's original full-graph
+  channel inference; its stage placement consumes those channels without
+  inferring again. Compare after all
+  routing, facing, labels and drafting following. Cancellation is checked
+  before the additional pass. The two variants reuse identical routed
+  placements within the same public call and Document/resolver pair, retaining
+  at most 512 entries; their search budgets and choices remain independent.
+  Optimized and partition planning retain their
+  existing pipeline with the new R30 quick placements; Documents above 40
+  instances retain their old levels and pipeline.
 
 - **R152 — Branch-column candidate.** After the ordinary R149 finalist, plain
   planning with positive search budget and at most 40 instances tries one

@@ -1,3 +1,9 @@
+import { planWithSeriesLevels } from "../src/auto-layout.js";
+import { auditRouting } from "../src/routing-audit.js";
+import { deviceRows, netLevels } from "../src/layered.js";
+import { classifyNets } from "../src/net-roles.js";
+import { placeDocument } from "../src/place.js";
+import { selectSeriesLayout } from "../src/series-fallback.js";
 import { expect, it } from "vitest";
 import { createRoutePath } from "@icm/model";
 import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
@@ -99,10 +105,35 @@ it("routes the column portfolio deterministically and preserves terminal Nets", 
   expect(terminalPartition(applied.document, resolver)).toBe(
     terminalPartition(d, resolver),
   );
-  expect(branchVerticality(applied.document, resolver).vertical).toBe(4);
-  // Two full default plans; CI took 6.2 s against Vitest's 5 s default. Other
-  // full-planning tests carry explicit allowances (15-60 s).
+  const oldPlan = planWithSeriesLevels(d, resolver, {}, false);
+  const candidate = planWithSeriesLevels(d, resolver, {}, true);
+  // Sharing routed placements must produce the same complete selection as
+  // independent searches, including diagnostics and all finishing passes.
+  expect(result).toEqual(selectSeriesLayout(d, resolver, oldPlan, candidate));
+  const old = preview(d, resolver, oldPlan.edits);
+  expect(old.ok).toBe(true);
+  if (!old.ok) return;
+  const before = auditRouting(old.document, resolver);
+  const after = auditRouting(applied.document, resolver);
+  for (const metric of ["crossings", "bends", "wireLength"] as const)
+    expect(after[metric]).toBeLessThanOrEqual(before[metric]);
+  for (let i = 0; i < 2; i++) {
+    const y = (id: string) =>
+      applied.document.instances.find((instance) => instance.id === id)!
+        .placement!.position.y;
+    expect(y(`p${i}`)).toBeLessThan(y(`r${i}`));
+    expect(y(`r${i}`)).toBeLessThan(y(`q${i}`));
+  }
+  // Full default plans; CI took 6.2 s against Vitest's 5 s default.
 }, 30000);
+
+it("keeps the complete old-level plan when series levels increase its score", () => {
+  const d = branches(1, false);
+  const old = planWithSeriesLevels(d, resolver, {}, false);
+  const candidate = planWithSeriesLevels(d, resolver, {}, true);
+  expect(candidate.edits).not.toEqual(old.edits);
+  expect(planAutoLayout(d, resolver)).toEqual(old);
+});
 
 it("keeps a fixed branch member at its exact pose", () => {
   const d = withPlacements(
@@ -201,4 +232,93 @@ it("counts continuous vertical geometry, excluding gates, rails, bends and gaps"
     vertical: 0,
     share: null,
   });
+});
+
+it.each([1, 2])(
+  "levels series resistors in %i shared-gate DC branches",
+  (count) => {
+    const d = branches(count, false);
+    const roles = classifyNets(d, resolver);
+    const levels = netLevels(d.instances, resolver, roles);
+    const rows = deviceRows(d, d.instances, resolver, roles, [], levels);
+    for (let i = 0; i < count; i++) {
+      expect(levels.channels.get(`r${i}`)).toEqual(["1", "2"]);
+      expect(levels.nets.get(`upper${i}`)).toBe(1);
+      expect(levels.nets.get(`lower${i}`)).toBe(2);
+      expect(rows.nodes.find((n) => n.id === `p${i}`)!.row).toBe(0);
+      expect(rows.nodes.find((n) => n.id === `r${i}`)!.row).toBe(1);
+      expect(rows.nodes.find((n) => n.id === `q${i}`)!.row).toBe(2);
+    }
+    expect(netLevels([...d.instances].reverse(), resolver, roles)).toEqual(
+      levels,
+    );
+  },
+);
+
+it.each(["template", "layered", "stages"] as const)(
+  "%s places the internal series device between its transistors",
+  (strategy) => {
+    const d = branches(2, false);
+    const roles = classifyNets(d, resolver);
+    const result = placeDocument(
+      d,
+      resolver,
+      roles,
+      [],
+      {},
+      undefined,
+      undefined,
+      strategy,
+    );
+    expect(result.problem).toBeUndefined();
+    const points = pinPoints(withPlacements(d, result.placements), resolver);
+    const pin = (id: string, name: string) =>
+      points.find((p) => p.instanceId === id && p.pinName === name)!.point;
+    for (let i = 0; i < 2; i++) {
+      expect(pin(`p${i}`, "D").y).toBeLessThan(pin(`r${i}`, "1").y);
+      expect(pin(`r${i}`, "2").y).toBeLessThan(pin(`q${i}`, "E").y);
+    }
+  },
+);
+
+it("leaves a resistor loop without rail direction unconstrained and deterministic", () => {
+  const d = circuit(
+    { a: "resistor", b: "resistor", c: "resistor" },
+    { ab: ["a.2", "b.1"], bc: ["b.2", "c.1"], ca: ["c.2", "a.1"] },
+  );
+  const levels = netLevels(d.instances, resolver, classifyNets(d, resolver));
+  expect(levels.edges).toEqual([]);
+  expect([...levels.channels.values()]).toEqual([[], [], []]);
+  const reversed = {
+    ...d,
+    instances: [...d.instances].reverse(),
+    nets: [...d.nets].reverse(),
+  };
+  expect(
+    netLevels(reversed.instances, resolver, classifyNets(reversed, resolver)),
+  ).toEqual(levels);
+});
+
+it("does not infer a DC edge across a capacitor", () => {
+  const d = branches(1, false);
+  d.instances.find((i) => i.id === "r0")!.symbolId = "capacitor";
+  expect(
+    netLevels(d.instances, resolver, classifyNets(d, resolver)).channels.get(
+      "r0",
+    ),
+  ).toEqual([]);
+});
+
+it("retains old levels for a small stage from a document above 40 instances", () => {
+  const d = branches(1, false);
+  const stage = [...d.instances];
+  while (d.instances.length <= 40)
+    d.instances.push({
+      id: `extra${d.instances.length}`,
+      symbolId: "resistor",
+      placement: null,
+    });
+  const levels = netLevels(stage, resolver, classifyNets(d, resolver));
+  expect(levels.channels.get("r0")).toEqual([]);
+  expect(levels.nets.get("lower0")).toBe(0);
 });

@@ -69,6 +69,10 @@ export function isMosBulk(symbolId: string, pinName: string): boolean {
 }
 
 export interface NetRoles {
+  /** Original document size, retained when folding symmetry or placing a stage. */
+  instanceCount: number;
+  /** Internal R30 comparison policy; inherited by stages and folded halves. */
+  seriesLevels?: boolean;
   byNet: Map<string, NetRole>;
   /** R37: explicit power intent or the R12 multi-channel supply test. */
   rails: Map<string, "supply" | "ground">;
@@ -159,5 +163,5 @@ export function classifyNets(
       .flatMap((i) => ["D", "S"].filter((p) => pinNet(i.id, p) === net));
     if (channels.length >= 2) rails.set(net, role);
   }
-  return { byNet, rails, pinNet };
+  return { byNet, rails, pinNet, instanceCount: document.instances.length };
 }
