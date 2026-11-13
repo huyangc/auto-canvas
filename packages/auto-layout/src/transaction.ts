@@ -4,6 +4,23 @@ import type { SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import type { PinGroup } from "./route.js";
 
+// These snapshots are read-only inside planning. Scope reuse to one synchronous
+// public call, so edits to a caller's document or resolver can never stale it.
+type Preview = ReturnType<typeof executeTransaction>;
+let previews:
+  | WeakMap<SchematicDocument, WeakMap<SymbolResolver, Map<string, Preview>>>
+  | undefined;
+
+export function reusePreviews<T>(work: () => T): T {
+  const previous = previews;
+  previews = new WeakMap();
+  try {
+    return work();
+  } finally {
+    previews = previous;
+  }
+}
+
 /** Validate with the same transaction boundary the caller will commit. */
 export function preview(
   document: SchematicDocument,
@@ -11,7 +28,13 @@ export function preview(
   edits: SchematicEdit[],
 ) {
   if (!edits.length) return { ok: true as const, document, diagnostics: [] };
-  return executeTransaction(
+  const key = previews && JSON.stringify(edits);
+  const cached =
+    key === undefined
+      ? undefined
+      : previews?.get(document)?.get(resolver)?.get(key);
+  if (cached) return cached;
+  const result = executeTransaction(
     document,
     {
       transactionId: "auto-layout-preview",
@@ -23,6 +46,18 @@ export function preview(
     },
     { symbolResolver: resolver },
   );
+  if (previews && key !== undefined) {
+    const resolvers =
+      previews.get(document) ??
+      new WeakMap<SymbolResolver, Map<string, Preview>>();
+    const entries = resolvers.get(resolver) ?? new Map<string, Preview>();
+    // Bound retention for the original document, the most common replay base.
+    if (entries.size >= 256) entries.delete(entries.keys().next().value!);
+    entries.set(key, result);
+    resolvers.set(resolver, entries);
+    previews.set(document, resolvers);
+  }
+  return result;
 }
 
 /** Compare partitions, including singleton pins, independently of renamed ids. */

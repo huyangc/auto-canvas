@@ -13,6 +13,26 @@ waits 46 s for a 30-instance drawing that took 6 s before. This task brings
 planning time back down with general budget and reuse changes, keeping the
 layout-quality gains, and makes CI pass **without raising any test timeout**.
 
+## Plan change after round 1 (Opus, 2026-11-12)
+
+Round 1 (safe reuse, conservative size-scaled budgets) kept every plan
+byte-identical and cut deadtime 46.5 → 7.8 s, but ltc3452 18.5 s,
+two-inverters 1.57 s and common-source 1.36 s miss their targets, and the
+R150 second pass (half the time where unlocked drafting exists) remains,
+because Codex correctly found no condition that proves both passes equal.
+
+- **R150 skip by measurement, not proof.** Skip the drafting-free candidate
+  when the base plan was not moved by R10's drafting clearance and no owned
+  drafting group's input bounds intersect any device bound grown by 60 units.
+  Plans may then differ from the base; accept the change if the ≤10-part
+  evaluation stays within +1% on crossings, bends, wire and median area on dev
+  and on val, with no guard above the T062 base, and if R150's own tests pass.
+  Report how many drawings skip and how many plans change.
+- Keep round 1's reuse and budgets. Further size-scaled budget cuts are allowed
+  under the same quality gate.
+- Targets and test timeouts unchanged. If a target remains out of reach,
+  report the per-phase profile of what is left.
+
 ## Context
 
 Single-process planning time of `planAutoLayout(document, resolver)` on this

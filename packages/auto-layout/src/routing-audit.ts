@@ -1,3 +1,4 @@
+import { planningMemo } from "./planning-reuse.js";
 import {
   deriveElectricalTopologyProjection,
   endpointKey,
@@ -11,6 +12,15 @@ import { isMosBulk } from "./net-roles.js";
 
 /** Enumerate the same non-bulk symbol pins for both connectivity measures. */
 function connectionPins(document: SchematicDocument, resolver: SymbolResolver) {
+  return planningMemo(document, resolver, "connectionPins", () =>
+    computeConnectionPins(document, resolver),
+  );
+}
+
+function computeConnectionPins(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+) {
   const topology = deriveElectricalTopologyProjection(document, resolver);
   return document.instances.flatMap((instance) =>
     (
@@ -165,6 +175,18 @@ export function crossingsByNet(
 
 /** Committed-result audit shared by corpus tests and the review artifact. */
 export function auditRouting(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  preservedDraftingOwners: ReadonlyMap<string, string> = new Map(),
+) {
+  if (preservedDraftingOwners.size)
+    return computeAuditRouting(document, resolver, preservedDraftingOwners);
+  return planningMemo(document, resolver, "auditRouting", () =>
+    computeAuditRouting(document, resolver, preservedDraftingOwners),
+  );
+}
+
+function computeAuditRouting(
   document: SchematicDocument,
   resolver: SymbolResolver,
   preservedDraftingOwners: ReadonlyMap<string, string> = new Map(),

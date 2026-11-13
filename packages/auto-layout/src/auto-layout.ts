@@ -1,3 +1,5 @@
+import { reusePlanning } from "./planning-reuse.js";
+import { planningBudget } from "./planning-budget.js";
 import { branchColumns } from "./branch-columns.js";
 import {
   calibratedScore,
@@ -44,7 +46,7 @@ import {
 import { finalizeFacing } from "./finalize-facing.js";
 import { separateLabels } from "./separate-labels.js";
 import { seatLabels } from "./seat-labels.js";
-import { timePlanning } from "./timing.js";
+import { timePhase, timePlanning } from "./timing.js";
 import {
   freezePinGroups,
   routeDocument,
@@ -54,6 +56,7 @@ import {
 import {
   lostNameClaim,
   preview,
+  reusePreviews,
   restoreBulkPins,
   restorePinGroups,
   terminalPartition,
@@ -104,10 +107,14 @@ import { searchRailSeats } from "./rail-seat-search.js";
 import { searchPortSeats } from "./port-seat-search.js";
 import { draftingGroups } from "./drafting-groups.js";
 import { followDraftingGroups } from "./follow-drafting-groups.js";
+import {
+  observeDraftingClearance,
+  ownedDraftingNearDevices,
+} from "./drafting-search.js";
 
 /** Additional routed evaluations; the quick planner and finalist repairs are separate.
- * T061: 24 for plain planning up to 40 instances; optimized and partitioned
- * planning keep their earlier eight. */
+ * Plain planning retains 24 through 30 instances, then scales by size.
+ * Optimized, partitioned and above-40 planning retain their earlier budgets. */
 export function defaultLayoutSearch(
   document: SchematicDocument,
   options: Pick<AutoLayoutOptions, "quality" | "partition"> = {},
@@ -115,7 +122,10 @@ export function defaultLayoutSearch(
   if (document.instances.length > 40) return { seed: 1, evaluations: 2 };
   return {
     seed: 1,
-    evaluations: options.quality === "optimized" || options.partition ? 8 : 24,
+    evaluations:
+      options.quality === "optimized" || options.partition
+        ? 8
+        : Math.max(2, planningBudget(document.instances.length, 24)),
   };
 }
 
@@ -124,7 +134,9 @@ export function planAutoLayout(
   resolver: SymbolResolver,
   options: AutoLayoutOptions = {},
 ): AutoLayoutResult {
-  return planWithBranches(document, resolver, options, true);
+  return reusePlanning(() =>
+    reusePreviews(() => planWithBranches(document, resolver, options, true)),
+  );
 }
 
 function planWithBranches(
@@ -142,11 +154,8 @@ function planWithBranches(
   )
     return planWithFixedDrafting(document, resolver, options, allowBranches);
   return timePlanning(() => {
-    const base = planWithFixedDrafting(
-      document,
-      resolver,
-      options,
-      allowBranches,
+    const { result: base, observation } = observeDraftingClearance(() =>
+      planWithFixedDrafting(document, resolver, options, allowBranches),
     );
     if (
       options.search?.signal?.aborted ||
@@ -156,17 +165,29 @@ function planWithBranches(
       return base;
     const groups = draftingGroups(document, resolver);
     if (!groups.length) return base;
+    if (!observation.moved) {
+      const placed = preview(document, resolver, base.edits);
+      if (
+        placed.ok &&
+        !ownedDraftingNearDevices(placed.document, resolver, groups)
+      )
+        return followDraftingGroups(document, resolver, base, base, groups);
+    }
     const moving = new Set(groups.flatMap((g) => g.objects.map((o) => o.id)));
-    const candidate = planWithFixedDrafting(
-      {
-        ...document,
-        drafting: {
-          objects: document.drafting!.objects.filter((o) => !moving.has(o.id)),
+    const candidate = timePhase("drafting", () =>
+      planWithFixedDrafting(
+        {
+          ...document,
+          drafting: {
+            objects: document.drafting!.objects.filter(
+              (o) => !moving.has(o.id),
+            ),
+          },
         },
-      },
-      resolver,
-      options,
-      allowBranches,
+        resolver,
+        options,
+        allowBranches,
+      ),
     );
     return followDraftingGroups(document, resolver, base, candidate, groups);
   });
@@ -183,11 +204,13 @@ function planWithFixedDrafting(
   const finishedLabels = new WeakSet<AutoLayoutResult>();
   const finishLabels = (result: AutoLayoutResult) => {
     if (finishedLabels.has(result)) return result;
-    const finished = separateLabels(
-      document,
-      resolver,
-      followDraftingLabels(document, resolver, result, options.partition),
-      options,
+    const finished = timePhase("finishing", () =>
+      separateLabels(
+        document,
+        resolver,
+        followDraftingLabels(document, resolver, result, options.partition),
+        options,
+      ),
     );
     finishedLabels.add(finished);
     return finished;
@@ -262,6 +285,30 @@ function planAutoLayoutMeasured(
   finishLabels: (result: AutoLayoutResult) => AutoLayoutResult,
   allowBranches: boolean,
 ): AutoLayoutResult {
+  // Preserve the explicit quick planner's tested finishing-call sequence.
+  const routedPlacements =
+    options.search?.evaluations === 0
+      ? undefined
+      : new Map<
+          string,
+          { result: AutoLayoutResult; final: SchematicDocument }
+        >();
+  const plan: typeof planLayoutOnce = (...args) =>
+    planLayoutOnce(
+      args[0],
+      args[1],
+      args[2],
+      args[3],
+      args[4],
+      args[5],
+      args[6],
+      args[7],
+      args[8],
+      args[9],
+      args[10],
+      args[11],
+      routedPlacements,
+    );
   const fixed = new Set(options.fixedInstanceIds);
   for (const owner of [...document.layoutGroups, ...document.constraints])
     if (owner.locked) for (const id of owner.objectIds) fixed.add(id);
@@ -286,7 +333,7 @@ function planAutoLayoutMeasured(
     repairBlockers(run, resolver, fixed, (placements) =>
       repairBounds && spanProblem(document, resolver, placements, repairBounds)
         ? run
-        : planLayoutOnce(
+        : plan(
             document,
             resolver,
             options,
@@ -305,7 +352,7 @@ function planAutoLayoutMeasured(
     signalTrunks: boolean,
   ) => {
     if (!run.final || !Number.isFinite(routedScore(run, resolver))) return run;
-    const candidate = planLayoutOnce(
+    const candidate = plan(
       document,
       resolver,
       options,
@@ -365,7 +412,7 @@ function planAutoLayoutMeasured(
       ).map((component) => [...component.pairs.flat(), ...component.axis]),
     ];
     const replan = (exact: ReadonlyMap<string, Placement>) =>
-      planLayoutOnce(
+      plan(
         document,
         resolver,
         options,
@@ -417,7 +464,7 @@ function planAutoLayoutMeasured(
       classifyNets(run.final, resolver),
     );
     if (!structures.some((s) => s.kind === "cross-coupled-pair")) return run;
-    const candidate = planLayoutOnce(
+    const candidate = plan(
       document,
       resolver,
       options,
@@ -445,39 +492,34 @@ function planAutoLayoutMeasured(
     strategy: LayoutStrategy,
     signalTrunks: boolean,
     refined = run.result,
-  ) => {
-    const current = ripUpFinalist(
-      repair(run, strategy, signalTrunks),
-      strategy,
-      signalTrunks,
-    );
-    const other = repair(alternative, strategy, false);
-    const otherWins =
-      routedScore(other, resolver) < routedScore(current, resolver);
-    return selectRoutingAlternative(
-      otherWins
-        ? current
-        : crossCoupled(
-            compact(current, strategy, signalTrunks),
-            strategy,
-            signalTrunks,
-          ),
-      otherWins
-        ? crossCoupled(compact(other, strategy, false), strategy, false)
-        : other,
-      resolver,
-      strategy,
-      refined,
-    );
-  };
+  ) =>
+    timePhase("finishing", () => {
+      const current = ripUpFinalist(
+        repair(run, strategy, signalTrunks),
+        strategy,
+        signalTrunks,
+      );
+      const other = repair(alternative, strategy, false);
+      const otherWins =
+        routedScore(other, resolver) < routedScore(current, resolver);
+      return selectRoutingAlternative(
+        otherWins
+          ? current
+          : crossCoupled(
+              compact(current, strategy, signalTrunks),
+              strategy,
+              signalTrunks,
+            ),
+        otherWins
+          ? crossCoupled(compact(other, strategy, false), strategy, false)
+          : other,
+        resolver,
+        strategy,
+        refined,
+      );
+    });
   const route = (strategy: LayoutStrategy, overrides: LayoutOverrides) => {
-    const run = planLayoutOnce(
-      document,
-      resolver,
-      options,
-      overrides,
-      strategy,
-    );
+    const run = plan(document, resolver, options, overrides, strategy);
     runs.set(run.result, { run, overrides, strategy });
     return run;
   };
@@ -528,7 +570,7 @@ function planAutoLayoutMeasured(
       selected = result;
   }
   // Reuse the selected placement and refinement choices; do not search again.
-  const alternative = planLayoutOnce(
+  const alternative = plan(
     document,
     resolver,
     options,
@@ -541,28 +583,30 @@ function planAutoLayoutMeasured(
     routedScore(alternative, resolver) < routedScore(selected.run, resolver)
       ? alternative
       : selected.run;
-  const best = annealLayout(
-    document,
-    resolver,
-    search,
-    fixed,
-    { run: selected.run, strategy: selected.strategy },
-    ranked.map(({ run, strategy }) => ({ run, strategy })),
-    { run: quickRun, strategy: selected.strategy },
-    (state, signalTrunks, bounds) => {
-      const run = planLayoutOnce(
-        document,
-        resolver,
-        options,
-        { sides: state.sides, orientations: state.placements },
-        state.strategy,
-        signalTrunks,
-        state.placements,
-        bounds,
-      );
-      if (state.sideRow) run.sideRow = state.sideRow;
-      return run;
-    },
+  const best = timePhase("annealer", () =>
+    annealLayout(
+      document,
+      resolver,
+      search,
+      fixed,
+      { run: selected.run, strategy: selected.strategy },
+      ranked.map(({ run, strategy }) => ({ run, strategy })),
+      { run: quickRun, strategy: selected.strategy },
+      (state, signalTrunks, bounds) => {
+        const run = plan(
+          document,
+          resolver,
+          options,
+          { sides: state.sides, orientations: state.placements },
+          state.strategy,
+          signalTrunks,
+          state.placements,
+          bounds,
+        );
+        if (state.sideRow) run.sideRow = state.sideRow;
+        return run;
+      },
+    ),
   );
   const quickResult = finalizeFacing(
     document,
@@ -658,7 +702,7 @@ function planAutoLayoutMeasured(
     placements: ReadonlyMap<string, Placement>,
     policy: ReturnType<typeof contactPolicy>,
   ) =>
-    planLayoutOnce(
+    plan(
       document,
       resolver,
       options,
@@ -703,7 +747,7 @@ function planAutoLayoutMeasured(
       contacts?: ReturnType<typeof contactPolicy>,
     ) => {
       const routeSeat = (signalTrunks: boolean) =>
-        planLayoutOnce(
+        plan(
           document,
           resolver,
           options,
@@ -739,21 +783,21 @@ function planAutoLayoutMeasured(
         ...(final.ok ? { final: final.document } : {}),
       };
     };
-    const relocationBudget = { remaining: 10 };
-    const relocated = searchDeviceRelocations(
-      initial,
-      resolver,
-      fixed,
-      finishPlacement,
-      stopped,
-      { phase: "alignment", budget: relocationBudget },
+    const relocationBudget = {
+      remaining: planningBudget(document.instances.length, 10),
+    };
+    const relocated = timePhase("relocation", () =>
+      searchDeviceRelocations(
+        initial,
+        resolver,
+        fixed,
+        finishPlacement,
+        stopped,
+        { phase: "alignment", budget: relocationBudget },
+      ),
     );
-    const seated = searchPortSeats(
-      relocated,
-      resolver,
-      fixed,
-      finishPlacement,
-      stopped,
+    const seated = timePhase("ports", () =>
+      searchPortSeats(relocated, resolver, fixed, finishPlacement, stopped),
     );
     // R148 retains R140's licensed contacts already present in the finalist.
     const railContacts = contactPolicy(
@@ -761,12 +805,14 @@ function planAutoLayoutMeasured(
       freezePinGroups(document, resolver),
       true,
     );
-    const railed = searchRailSeats(
-      seated,
-      resolver,
-      fixed,
-      (placements) => finishPlacement(placements, railContacts),
-      stopped,
+    const railed = timePhase("rails", () =>
+      searchRailSeats(
+        seated,
+        resolver,
+        fixed,
+        (placements) => finishPlacement(placements, railContacts),
+        stopped,
+      ),
     );
     const routed = rerouteRailCrossings(
       document,
@@ -822,55 +868,58 @@ function planAutoLayoutMeasured(
         )
         .map((host) => ({ device, host }));
     });
-    const closed = searchDeviceRelocations(
-      { ...railed, result: routed, final: final.document },
-      resolver,
-      fixed,
-      (placements) => {
-        if (
-          feedbackBands.some(
-            ({ device, host }) =>
-              placements.get(device.id)!.position.y -
-                device.placement!.position.y !==
-              placements.get(host.id)!.position.y - host.placement!.position.y,
+    const closed = timePhase("gaps", () =>
+      searchDeviceRelocations(
+        { ...railed, result: routed, final: final.document },
+        resolver,
+        fixed,
+        (placements) => {
+          if (
+            feedbackBands.some(
+              ({ device, host }) =>
+                placements.get(device.id)!.position.y -
+                  device.placement!.position.y !==
+                placements.get(host.id)!.position.y -
+                  host.placement!.position.y,
+            )
           )
-        )
-          return { ...railed, result: routed, final: final.document };
-        const followed = new Map(placements);
-        // A gap trial translates devices after R146 has selected port seats.
-        // Retain each single-host port's offset, including trial reanchoring,
-        // before routing and comparing the finished candidate's guards.
-        for (const { port, host } of attachedPorts) {
-          const before = host.placement!;
-          const after = placements.get(host.id)!;
-          const seat = port.placement!;
-          followed.set(port.id, {
-            ...seat,
-            position: {
-              x: seat.position.x + after.position.x - before.position.x,
-              y: seat.position.y + after.position.y - before.position.y,
-            },
-          });
-        }
-        if (attachedPorts.length && !fixed.size) {
-          const anchor = enclosingBox(final.document, resolver);
-          const box = enclosingBox(
-            withPlacements(final.document, followed),
-            resolver,
-          );
-          const grid = document.presentation.grid;
-          const dx = Math.round((anchor.x - box.x) / grid) * grid;
-          const dy = Math.round((anchor.y - box.y) / grid) * grid;
-          for (const [id, pose] of followed)
-            followed.set(id, {
-              ...pose,
-              position: { x: pose.position.x + dx, y: pose.position.y + dy },
+            return { ...railed, result: routed, final: final.document };
+          const followed = new Map(placements);
+          // A gap trial translates devices after R146 has selected port seats.
+          // Retain each single-host port's offset, including trial reanchoring,
+          // before routing and comparing the finished candidate's guards.
+          for (const { port, host } of attachedPorts) {
+            const before = host.placement!;
+            const after = placements.get(host.id)!;
+            const seat = port.placement!;
+            followed.set(port.id, {
+              ...seat,
+              position: {
+                x: seat.position.x + after.position.x - before.position.x,
+                y: seat.position.y + after.position.y - before.position.y,
+              },
             });
-        }
-        return finishPlacement(followed, railContacts);
-      },
-      stopped,
-      { phase: "gaps", budget: relocationBudget },
+          }
+          if (attachedPorts.length && !fixed.size) {
+            const anchor = enclosingBox(final.document, resolver);
+            const box = enclosingBox(
+              withPlacements(final.document, followed),
+              resolver,
+            );
+            const grid = document.presentation.grid;
+            const dx = Math.round((anchor.x - box.x) / grid) * grid;
+            const dy = Math.round((anchor.y - box.y) / grid) * grid;
+            for (const [id, pose] of followed)
+              followed.set(id, {
+                ...pose,
+                position: { x: pose.position.x + dx, y: pose.position.y + dy },
+              });
+          }
+          return finishPlacement(followed, railContacts);
+        },
+        stopped,
+        { phase: "gaps", budget: relocationBudget },
+      ),
     );
     // R152: compare one complete branch-column candidate with the finished
     // incumbent. Existing modes, locks and explicit relationships keep their
@@ -955,6 +1004,7 @@ export function planLayoutOnce(
   ripUp = false,
   crossX = false,
   contacts?: ReturnType<typeof contactPolicy>,
+  cache?: Map<string, { result: AutoLayoutResult; final: SchematicDocument }>,
 ): LayoutRun {
   const run: LayoutRun = {
     result: { edits: [], groups: [], diagnostics: [] },
@@ -975,6 +1025,7 @@ export function planLayoutOnce(
     ripUp,
     crossX,
     contacts,
+    cache,
   );
   return run;
 }
@@ -1015,6 +1066,7 @@ function buildPlan(
   ripUp = false,
   crossX = false,
   contacts?: ReturnType<typeof contactPolicy>,
+  cache?: Map<string, { result: AutoLayoutResult; final: SchematicDocument }>,
 ): AutoLayoutResult {
   if (document.instances.length > 120)
     return {
@@ -1102,6 +1154,22 @@ function buildPlan(
         },
       ],
     };
+  // Once placement is resolved, strategy/overrides no longer affect routing.
+  // Choices and side-row membership remain those of this particular caller.
+  const key =
+    cache &&
+    JSON.stringify([
+      [...result.placements].sort(([a], [b]) => compareIds(a, b)),
+      signalTrunks,
+      ripUp,
+      crossX,
+      !!contacts,
+    ]);
+  const cached = key === undefined ? undefined : cache?.get(key);
+  if (cached) {
+    run.final = cached.final;
+    return structuredClone(cached.result);
+  }
   const refuse = (message: string): AutoLayoutResult => ({
     edits: [],
     groups,
@@ -1363,7 +1431,7 @@ function buildPlan(
       ];
     },
   );
-  return {
+  const planned: AutoLayoutResult = {
     edits,
     groups,
     diagnostics: [
@@ -1378,4 +1446,10 @@ function buildPlan(
       ...couplingDotWarnings(document),
     ],
   };
+  if (cache && key !== undefined) {
+    // Explicit annealing budgets can be arbitrarily large; bound retention.
+    if (cache.size >= 128) cache.delete(cache.keys().next().value!);
+    cache.set(key, { result: structuredClone(planned), final: final.document });
+  }
+  return planned;
 }
