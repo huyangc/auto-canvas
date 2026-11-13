@@ -1,3 +1,5 @@
+import { planningMemo } from "./planning-reuse.js";
+import { signalSeriesParts } from "./series-levels.js";
 import { stageComponents } from "./stage-symmetry.js";
 import { recordDraftingTranslation } from "./drafting-search.js";
 import {
@@ -214,12 +216,61 @@ export function placeDocument(
   strategy: LayoutStrategy = "template",
   given?: ReadonlyMap<string, Placement>,
   searchLimit?: SearchBounds,
+  draftRouter?: {
+    key: string;
+    score: (placements: ReadonlyMap<string, Placement>) => number;
+  },
 ): {
   placements: Map<string, Placement>;
   draftingTranslation?: number;
   problem?: string;
   sideRow?: ReadonlySet<string>;
 } {
+  if (
+    strategy === "layered" &&
+    draftRouter &&
+    !given &&
+    !options.partition &&
+    roles.instanceCount <= 40 &&
+    roles.signalSeries === undefined &&
+    signalSeriesParts(document.instances, resolver, roles).size
+  ) {
+    // Only the row policy differs. Compare routed placement drafts before the
+    // single strategy refinement/annealing/finishing pipeline starts.
+    const selected = planningMemo(
+      document,
+      resolver,
+      `row-drafts:${JSON.stringify([draftRouter.key, roles.seriesLevels, options.fixedInstanceIds, [...overrides.sides], [...overrides.orientations]])}`,
+      () => {
+        const draft = (signalSeries: boolean) => {
+          const choices = emptyChoices();
+          const result = placeDocument(
+            document,
+            resolver,
+            { ...roles, signalSeries },
+            groups,
+            options,
+            overrides,
+            choices,
+            strategy,
+            undefined,
+            searchLimit,
+          );
+          if (result.problem) return { result, choices, score: Infinity };
+          const score = draftRouter.score(result.placements);
+          return { result, choices, score };
+        };
+        const signal = draft(true),
+          legacy = draft(false);
+        return legacy.score < signal.score ? legacy : signal;
+      },
+    );
+    for (const [id, side] of selected.choices.sides)
+      choices.sides.set(id, side);
+    for (const [id, orientation] of selected.choices.orientations)
+      choices.orientations.set(id, orientation);
+    return structuredClone(selected.result);
+  }
   let targets = new Map<string, Placement>();
   let sideRow: ReadonlySet<string> | undefined;
   const devices = document.instances
@@ -341,25 +392,27 @@ export function placeDocument(
       symmetry.length > 0) &&
     levels.edges.length
   ) {
-    const rows = deviceRows(
-      document,
-      devices,
-      resolver,
-      roles,
-      templates,
-      levels,
-      topology,
-    );
-    const ordered = orderRows(rows, devices, resolver, roles, templates);
-    targets = assignColumns(
-      document,
-      devices,
-      resolver,
-      roles,
-      templates,
-      ordered,
-      rows,
-    );
+    const rowDraft = (policy: NetRoles) => {
+      const rows = deviceRows(
+        document,
+        devices,
+        resolver,
+        policy,
+        templates,
+        levels,
+        topology,
+      );
+      return assignColumns(
+        document,
+        devices,
+        resolver,
+        policy,
+        templates,
+        orderRows(rows, devices, resolver, policy, templates),
+        rows,
+      );
+    };
+    targets = rowDraft(roles);
   } else {
     placeFallback(
       devices,

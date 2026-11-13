@@ -1,3 +1,4 @@
+import { markerBlocksJoin, straightJoins } from "./straight-joins.js";
 import { planningBudget } from "./planning-budget.js";
 import type { SymbolResolver } from "@icm/symbols";
 import { createPlacementEstimator } from "./estimate.js";
@@ -50,16 +51,31 @@ export function searchPortSeats(
       document.instances.map((i) => [i.id, i.placement!]),
     );
     const original = JSON.stringify(placements.get(port.id));
-    const seats = portSeatCandidates(document, resolver, port.id)
+    const joins = straightJoins(document, resolver);
+    const ranked = portSeatCandidates(document, resolver, port.id, true)
       .filter((seat) => JSON.stringify(seat) !== original)
       .map((seat) => {
         const trial = new Map(placements).set(port.id, seat);
         // Match the calibrated routed crossing/wire ratio in the shortlist.
         const cost = estimate(trial);
-        return { trial, score: cost.crossings + cost.length / 250 };
+        return {
+          trial,
+          score: cost.crossings + cost.length / 250,
+          blocked: markerBlocksJoin(
+            withPlacements(document, trial),
+            resolver,
+            port.id,
+            joins,
+          ),
+        };
       })
-      .sort((a, b) => a.score - b.score)
-      .slice(0, 2);
+      .sort((a, b) => a.score - b.score);
+    // Establish the best obstructing fallback before testing clear seats.
+    // A clear seat cannot trade a blocked join for worse routed guards.
+    const seats = [
+      ...ranked.filter((seat) => seat.blocked).slice(0, 1),
+      ...ranked.filter((seat) => !seat.blocked).slice(0, 2),
+    ];
     for (const seat of seats) {
       // A caller's deadline or abort ends the search with the best finished seat.
       if (evaluations++ >= limit || stopped()) return current;

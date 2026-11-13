@@ -3,6 +3,7 @@ import {
   diagnoseLabelClearance,
 } from "../packages/derived/dist/index.js";
 import { branchVerticality } from "../packages/auto-layout/dist/branch-verticality.js";
+import { signalPathMetrics } from "../packages/auto-layout/dist/signal-path-metrics.js";
 import { stageComponents } from "../packages/auto-layout/dist/stage-symmetry.js";
 import { reconcilePartition } from "../packages/auto-layout/dist/partition-reconcile.js";
 import { partitionMetrics } from "../packages/auto-layout/dist/partition-metrics.js";
@@ -269,6 +270,7 @@ const metrics = (document, resolver, components, stages) => {
   const instances = enclosingBox(document, resolver);
   return {
     ...readabilityCounts(document, resolver),
+    ...signalPathMetrics(document, resolver),
     visual: visualCounts(document, resolver),
     netBreakdown: netBreakdown(document, resolver),
     branchVerticality: branchVerticality(document, resolver),
@@ -936,7 +938,15 @@ if (!isMainThread) {
       );
       const completed = cases.filter((m) => m.status === "completed");
       const paired = completed.filter((m) => m.human);
-      const keys = ["crossings", "bends", "wireLength"];
+      const keys = [
+        "crossings",
+        "bends",
+        "wireLength",
+        "avoidableJogs",
+        "blockedJoins",
+        "signalSeriesVertical",
+        "signalSeriesHorizontal",
+      ];
       const primary = Object.fromEntries(
         keys.map((key) => {
           const human = paired.reduce((s, m) => s + m.human[key], 0);
