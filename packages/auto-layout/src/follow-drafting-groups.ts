@@ -1,5 +1,6 @@
 import {
   createLabelClearanceContext,
+  isVisibleEndpoint,
   resolveAnchorTargetPosition,
   resolveDocumentRoutingGeometry,
   resolveVisualAnchor,
@@ -19,11 +20,21 @@ import type {
 import type { SymbolResolver } from "@icm/symbols";
 import {
   draftingDisplacements,
+  draftingGroups,
   type DraftingGroup,
 } from "./drafting-groups.js";
-import { boxesIntersect, draftingBounds, integerPoint } from "./geometry.js";
+import {
+  boxesIntersect,
+  draftingBounds,
+  integerPoint,
+  pinPoints,
+} from "./geometry.js";
 import { emptyChoices } from "./layout-choices.js";
-import { refinementMetrics, routedScore } from "./refine.js";
+import {
+  refinementMetrics,
+  routedScore,
+  selectRoutingAlternative,
+} from "./refine.js";
 import { calibratedScore, routedGuards } from "./routed-search-score.js";
 import { auditRouting } from "./routing-audit.js";
 import { preview, terminalPartition } from "./transaction.js";
@@ -110,8 +121,10 @@ function movedObject(
     : translateDraftingObject(prepared, delta, source.presentation.grid);
 }
 
-/** Seat rigid components against the finished electrical ink. A failure keeps
- * the whole original R10 plan, rather than leaving half an annotation behind. */
+/** Keep each touching component rigid. If the joint candidate fails, valid
+ * components can still follow the ordinary routed plan; every other group is
+ * retained as an obstacle. No electrical placement or route changes on this
+ * fallback, and each accepted move must pass the routing and visual guards. */
 export function followDraftingGroups(
   source: SchematicDocument,
   resolver: SymbolResolver,
@@ -120,17 +133,65 @@ export function followDraftingGroups(
   groups: DraftingGroup[],
   finish?: (result: AutoLayoutResult) => AutoLayoutResult,
 ): AutoLayoutResult {
-  if (candidate.diagnostics.some((d) => d.severity === "error")) return base;
+  const seated = seatDraftingGroups(
+    source,
+    resolver,
+    base,
+    candidate,
+    groups,
+    finish,
+  );
+  if (seated) return seated;
+  let result = base;
+  const free = groups.filter((g) => !g.owner);
+  const batches = [
+    ...groups.filter((g) => g.owner).map((g) => [g]),
+    ...(free.length ? [free] : []),
+  ];
+  for (const batch of batches)
+    result =
+      seatDraftingGroups(
+        source,
+        resolver,
+        result,
+        result,
+        batch,
+        undefined,
+        true,
+      ) ?? result;
+  return result;
+}
+
+function seatDraftingGroups(
+  source: SchematicDocument,
+  resolver: SymbolResolver,
+  base: AutoLayoutResult,
+  candidate: AutoLayoutResult,
+  groups: DraftingGroup[],
+  finish?: (result: AutoLayoutResult) => AutoLayoutResult,
+  followingOnly = false,
+): AutoLayoutResult | undefined {
+  if (candidate.diagnostics.some((d) => d.severity === "error")) return;
   const before = preview(source, resolver, base.edits),
     placed = preview(source, resolver, candidate.edits);
-  if (!before.ok || !placed.ok) return base;
+  if (!before.ok || !placed.ok) return;
   const deltas = draftingDisplacements(
     source,
     placed.document,
     resolver,
     groups,
   );
-  if (!deltas) return base;
+  if (!deltas) return;
+  const pins = groups.some(
+    (g) => g.owner?.kind === "instance" && g.owner.pinName,
+  )
+    ? pinPoints(placed.document, resolver).filter((pin) =>
+        isVisibleEndpoint(placed.document, resolver, {
+          kind: "terminal",
+          ...pin,
+        }),
+      )
+    : [];
   const moving = new Set(groups.flatMap((g) => g.objects.map((o) => o.id)));
   // Preserve authored overlap with an instance owner, but never license a
   // newly introduced overlap or a collision with another device or its labels.
@@ -171,6 +232,29 @@ export function followDraftingGroups(
     offsets.sort((a, b) => Math.hypot(a.x, a.y) - Math.hypot(b.x, b.y));
     let seated = false;
     for (const offset of offsets) {
+      // Clearance must not move a pin annotation across to another pin. Keep
+      // the translated input contact closest to its own pin (or shared contact).
+      if (
+        batch.some((group) => {
+          const owner = group.owner;
+          if (owner?.kind !== "instance" || !owner.pinName) return false;
+          const delta = deltas.get(group)!;
+          const contact = {
+            x: owner.point.x + delta.x + offset.x,
+            y: owner.point.y + delta.y + offset.y,
+          };
+          return pins.some(
+            (pin) =>
+              Math.hypot(
+                pin.point.x - owner.point.x - delta.x,
+                pin.point.y - owner.point.y - delta.y,
+              ) > 1e-6 &&
+              Math.hypot(pin.point.x - contact.x, pin.point.y - contact.y) <=
+                Math.hypot(offset.x, offset.y),
+          );
+        })
+      )
+        continue;
       const objects: DraftingObject[] = [];
       for (const group of batch)
         for (const object of group.objects) {
@@ -186,7 +270,7 @@ export function followDraftingGroups(
             working,
             resolver,
           );
-          if (!moved) return base;
+          if (!moved) return;
           objects.push(moved);
         }
       const trial = {
@@ -229,28 +313,40 @@ export function followDraftingGroups(
       seated = true;
       break;
     }
-    if (!seated) return base;
+    if (!seated) return;
   }
   let edits = [...candidate.edits, ...extra];
-  if (edits.length > MAX_SCHEMATIC_EDITS_PER_TRANSACTION) return base;
+  if (edits.length > MAX_SCHEMATIC_EDITS_PER_TRANSACTION) return;
   if (finish) {
-    candidate.edits = edits;
-    candidate = finish(candidate);
+    // Finishing may mutate its result. A rejected trial must not rewrite base.
+    const trial = {
+      result: { ...structuredClone(candidate), edits },
+      final: working,
+      choices: emptyChoices(),
+    };
+    candidate = finish(
+      selectRoutingAlternative(
+        trial,
+        trial,
+        resolver,
+        refinementMetrics(candidate)?.strategy,
+        candidate,
+      ),
+    );
     edits = candidate.edits;
   }
-  if (candidate.diagnostics.some((d) => d.severity === "error")) return base;
+  if (candidate.diagnostics.some((d) => d.severity === "error")) return;
   const replay = preview(source, resolver, edits);
   if (
     !replay.ok ||
     terminalPartition(source, resolver) !==
       terminalPartition(replay.document, resolver)
   )
-    return base;
+    return;
   const final = replay.document;
   const limits = routedGuards(before.document, resolver),
     counts = routedGuards(final, resolver);
-  if (Object.entries(counts).some(([k, v]) => v > (limits[k] ?? 0)))
-    return base;
+  if (Object.entries(counts).some(([k, v]) => v > (limits[k] ?? 0))) return;
   const oldAudit = auditRouting(before.document, resolver),
     audit = auditRouting(final, resolver, ownerOverlaps);
   if (
@@ -259,7 +355,7 @@ export function followDraftingGroups(
     audit.wireLength > oldAudit.wireLength ||
     audit.draftingProblems.length > oldAudit.draftingProblems.length
   )
-    return base;
+    return;
   const result = candidate;
   const run = { result, final, choices: emptyChoices() };
   const reference = {
@@ -267,8 +363,15 @@ export function followDraftingGroups(
     final: before.document,
     choices: emptyChoices(),
   };
-  if (calibratedScore(run, resolver) > calibratedScore(reference, resolver))
-    return base;
+  if (calibratedScore(run, resolver) > calibratedScore(reference, resolver)) {
+    // On unchanged electrical ink, attaching a stranded group takes priority
+    // over visible-span compaction. All routing and visual guards above still
+    // apply. A remote unowned block cannot win by merely changing its span.
+    if (!followingOnly || !groups.every((g) => g.owner)) return;
+    const unowned = (document: SchematicDocument) =>
+      draftingGroups(document, resolver).filter((g) => !g.owner).length;
+    if (unowned(final) >= unowned(before.document)) return;
+  }
   result.edits = edits;
   result.diagnostics = result.diagnostics.filter(
     (d) => d.code !== "AUTO_LAYOUT_DRAFTING_OVERLAP",

@@ -1279,7 +1279,23 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   visible instance, route segment or junction within 1.5 times its larger ink
   dimension. Preserve its displacement from that owner after placement; map
   rerouted conductors by their terminal partition and nearest projected
-  geometry, including a conductor collapsed to a direct pin contact. When
+  geometry, including a conductor collapsed to a direct pin contact.
+  T072: refine an already-owned group to a unique visible terminal when its
+  input circle touches that terminal (within one unit of its radius) or its
+  conductor contact coincides with it; preserve that pin identity through
+  mirroring and rotation, and reject clearance offsets that put the translated
+  contact at least as close to a different visible pin. If a matched Net has
+  exactly one terminal and its routed conductor has disappeared, map the
+  owner to that surviving terminal; never invent a destination for an empty
+  or ambiguous terminal partition. If the jointly seated candidate fails, try
+  each owned touching component independently against the ordinary finished
+  plan in input group order, keeping all other drafting as obstacles; missing
+  owners, unsupported rotations and failed seats leave that whole component
+  fixed, and unowned components stay one rigid batch. Each accepted batch
+  preserves the terminal partition and cannot increase crossings, bends, wire,
+  drafting overlaps or any R146 routed guard; it changes drafting only. An
+  owned batch may raise the R149 calibrated score only when it reduces the
+  final number of unowned drafting groups. When
   seating directly on the base without an additional candidate, unowned
   components move as one rigid block, keeping their input edge gap on the same
   side of the circuit and their centre offset along that edge.

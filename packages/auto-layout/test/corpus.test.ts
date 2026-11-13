@@ -199,7 +199,7 @@ it.each(cases)(
         if (endpoint?.kind === "terminal")
           expect(endpoint.pinName).not.toBe("B");
     }
-    if (["rc-lowpass", "rc-highpass"].includes(fixture.id)) {
+    if (["rc-lowpass", "rc-highpass", "common-source"].includes(fixture.id)) {
       const originalInk = draftingBounds(document, resolver);
       const finalInk = draftingBounds(after, resolver);
       const groups = draftingGroups(document, resolver);
@@ -236,6 +236,21 @@ it.each(cases)(
         );
         expect(distance).toBeLessThanOrEqual(
           1.5 * Math.max(group.bounds.width, group.bounds.height),
+        );
+      }
+      if (fixture.id === "common-source") {
+        // Independent following can seat two notes; the blocked third note
+        // remains fixed rather than cancelling those valid movements.
+        for (const id of ["description-0", "description-1"])
+          expect(
+            after.drafting!.objects.find((o) => o.id === id)!.anchor,
+          ).not.toEqual(
+            document.drafting!.objects.find((o) => o.id === id)!.anchor,
+          );
+        expect(
+          after.drafting!.objects.find((o) => o.id === "description-2"),
+        ).toEqual(
+          document.drafting!.objects.find((o) => o.id === "description-2"),
         );
       }
     } else expect(after.drafting).toEqual(document.drafting);
