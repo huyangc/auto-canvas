@@ -216,6 +216,7 @@ export function placeDocument(
   searchLimit?: SearchBounds,
 ): {
   placements: Map<string, Placement>;
+  draftingTranslation?: number;
   problem?: string;
   sideRow?: ReadonlySet<string>;
 } {
@@ -516,6 +517,7 @@ export function placeDocument(
   const bounds = visibleInstanceBounds(initial, resolver).filter((b) =>
     deviceIds.has(b.id),
   );
+  let draftingTranslation = 0;
   if (obstacles.length && bounds.length) {
     const grid = document.presentation.grid;
     const maxShift = Math.max(
@@ -558,6 +560,7 @@ export function placeDocument(
       for (const target of targets.values()) target.position.y += grid;
       shift += grid;
     }
+    draftingTranslation = shift;
   }
   const result = withPlacements(document, targets);
   if (given) {
@@ -665,5 +668,9 @@ export function placeDocument(
   if (span) return { placements: targets, problem: span };
   const problem = geometryProblem(result, resolver);
   if (problem) return { placements: targets, problem };
-  return { placements: targets, ...(sideRow ? { sideRow } : {}) };
+  return {
+    placements: targets,
+    draftingTranslation,
+    ...(sideRow ? { sideRow } : {}),
+  };
 }

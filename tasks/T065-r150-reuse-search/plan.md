@@ -16,6 +16,18 @@ candidate from the already searched base plan instead, so the searches run
 once. Work valid whichever product option the user picks for the speed/
 quality trade (pending), because it removes duplicated work.
 
+## Plan change after round 1 (Opus, 2026-11-12)
+
+- **Unowned drafting must not move.** T060's contract keeps unowned (remote)
+  and locked drafting at their input positions. Round 1's reuse candidate moves
+  a remote caption that the full-search path left in place; the drafting-label
+  test that catches this is correct and must pass unchanged. When the R10
+  shift is undone, translate only devices, ports, markers, routes and owned
+  drafting; leave unowned drafting where the input had it.
+- **Accepted exception.** Dev `VISUAL_TERMINAL_DEPARTURE` 67 → 68, caused by
+  `57zs7ayept` keeping its searched base instead of a second full search's
+  placement, is accepted for this task. No other guard may rise.
+
 ## Context
 
 - R150 (`planAutoLayout` wrapper in `auto-layout.ts`; `drafting-groups.ts`,

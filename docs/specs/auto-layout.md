@@ -1256,22 +1256,38 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   visible instance, route segment or junction within 1.5 times its larger ink
   dimension. Preserve its displacement from that owner after placement; map
   rerouted conductors by their terminal partition and nearest projected
-  geometry, including a conductor collapsed to a direct pin contact. Unowned
+  geometry, including a conductor collapsed to a direct pin contact. When
+  seating directly on the base without an additional candidate, unowned
   components move as one rigid block, keeping their input edge gap on the same
   side of the circuit and their centre offset along that edge.
-  Compare the ordinary finished plan with a plan made with only fixed drafting
-  as obstacles. Reuse identical routed placements within each fixed-drafting
+  Compare the ordinary finished plan with a candidate routed with fixed and
+  unowned drafting as obstacles. Build that candidate from the base's final device,
+  port and marker placements, subtracting the recorded R10 whole-layout
+  translation. Carry that translation through selected search and finishing
+  trials; do not infer it from the final envelope. Keep every searched seat,
+  rotation and mirror. Route those exact placements once, move and seat the
+  owned drafting groups, then finish local rerouting, fixed drafting and standalone
+  captions, and label separation once. Unowned and locked drafting stays at its
+  input positions when undoing R10. Recover standalone caption anchors after
+  routing; multi-object groups retain their rigid seating.
+  Retain the base if fixed ink blocks the candidate's 60-unit device clearance;
+  that ink has no alternative seat.
+  The annealer, R147, R146, rail-seat and R149 searches run only on the base.
+  Fall back to a full drafting-free plan only if the reused placements fail
+  geometry, replay or routing checks (including increased floating pins or
+  missing connections). A worse finished score or guard retains the base
+  without another search. Reuse identical routed placements within each fixed-drafting
   pass, and immutable transaction previews and audits within the public planning
   call; discard these caches before returning. Reuse the base as the candidate
   when its planning pass made no R10 drafting-clearance translation and no
   owned movable group's input ink bounds intersect a finished base device's visible
   bounds grown by 60 units on every side. Ports and rail markers are not
-  devices for this test. Conservatively retain the second pass even when only
-  a discarded base trial translated. This is a measured search-budget heuristic,
+  devices for this test. Conservatively build the exact-placement candidate even
+  when only a discarded base trial translated. This is a measured search-budget heuristic,
   not an equivalence proof: drafting can affect R149 scoring and label seating
-  without those intersections. The T064 dev/val quality gate bounds that tradeoff.
+  without those intersections. The dev/val quality gate bounds that tradeoff.
   Seat the movable
-  components after routing and label finishing,
+  components against the routed electrical ink,
   trying a nine-by-nine grid of nearby offsets, nearest preferred offset first,
   with pitch `max(4, Document grid)`. Reject seats intersecting devices, routes,
   labels, junction dots or other drafting, except an object's existing overlap
@@ -1285,7 +1301,7 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   increase, and the terminal partition is unchanged. Optimized and successful
   partition planning and documents above 40 instances retain their prior
   behavior; partition fallback uses plain planning. Candidate cancellation is
-  checked before the additional planning pass.
+  checked before building the additional candidate.
 
 - **R151 — Internal DC series levels.** The branch-column candidate extends
   R30 through two-terminal R50 DC devices that have no directed channel edge
