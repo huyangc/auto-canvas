@@ -2,6 +2,7 @@ import {
   diagnoseVisualQuality,
   diagnoseLabelClearance,
 } from "../packages/derived/dist/index.js";
+import { branchVerticality } from "../packages/auto-layout/dist/branch-verticality.js";
 import { stageComponents } from "../packages/auto-layout/dist/stage-symmetry.js";
 import { reconcilePartition } from "../packages/auto-layout/dist/partition-reconcile.js";
 import { partitionMetrics } from "../packages/auto-layout/dist/partition-metrics.js";
@@ -270,6 +271,7 @@ const metrics = (document, resolver, components, stages) => {
     ...readabilityCounts(document, resolver),
     visual: visualCounts(document, resolver),
     netBreakdown: netBreakdown(document, resolver),
+    branchVerticality: branchVerticality(document, resolver),
     legacyScore: routedScore(
       { final: document, result: { diagnostics: [] } },
       resolver,
@@ -985,6 +987,21 @@ if (!isMainThread) {
             ),
           ]),
         );
+      const verticality = (side) => {
+        const connections = paired.reduce(
+          (sum, m) => sum + m[side].branchVerticality.connections,
+          0,
+        );
+        const vertical = paired.reduce(
+          (sum, m) => sum + m[side].branchVerticality.vertical,
+          0,
+        );
+        return {
+          connections,
+          vertical,
+          share: connections ? vertical / connections : null,
+        };
+      };
       const times = cases
         .map((m) => m.milliseconds)
         .filter(Number.isFinite)
@@ -999,6 +1016,10 @@ if (!isMainThread) {
           primary: {
             ...primary,
             medianAreaRatio: median(paired.map((m) => m.result.areaRatio)),
+          },
+          branchVerticality: {
+            human: verticality("human"),
+            result: verticality("result"),
           },
           // Like primary ratios, breakdowns compare the same completed pairs.
           netBreakdown: {

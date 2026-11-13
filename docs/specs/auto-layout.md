@@ -1264,6 +1264,46 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   behavior; partition fallback uses plain planning. Candidate cancellation is
   checked before the additional planning pass.
 
+- **R151 — Internal DC series levels.** The branch-column candidate extends
+  R30 through two-terminal R50 DC devices that have no directed channel edge
+  yet. Build an undirected graph of the R50 conducting pin pairs and measure
+  distance from supply and from ground, stopping traversal at the opposite
+  rail. Orient an internal pair away from the nearer supply; equal or missing
+  supply distances use decreasing distance to ground. An unresolved tie adds
+  no edge. MOS/BJT polarity and existing rail-directed edges retain their R30
+  direction. R30's cycle breaking and longest-path levels then apply unchanged.
+  This uses topology and device classes only, never drawing coordinates or
+  circuit names.
+
+- **R152 — Branch-column candidate.** After the ordinary R149 finalist, plain
+  planning with positive search budget and at most 40 instances tries one
+  additional placement when supply and ground rails exist and a non-rail Net
+  joins DC pins of distinct devices.
+  Preserve R89/R94 protected symmetry by declining documents containing such
+  blocks. Use R50 stages without recognized-pair merging, R151 levels,
+  R31–R33 local placement and R52–R59 stage composition. Thus a control Net
+  does not merge independent branches or force unequal-depth devices into
+  one row. Compact empty device columns and rows before seating markers and
+  ports, then run the existing finalist repair, routing alternatives,
+  compaction, facing and label finishing. Compare the complete candidate to
+  the complete incumbent using `calibratedScore`; require strict improvement
+  and no increase in any `routedGuards` count or in crossings/bends (the R149
+  compaction guard). Refused or blocked placements
+  retain the incumbent. Fixed instances, authored layout groups, constraints,
+  inductor couplings, optimized/partition modes (including partition fallback),
+  and documents above 40 instances do not enter this candidate. Cancellation
+  is checked before the extra trial. Existing search budgets are unchanged.
+
+  Evaluation reports **branch verticality** for human and result on each split:
+  among unordered pairs of distinct devices' R50 DC pins on a non-rail Net,
+  count those connected by one continuous straight vertical wire segment.
+  Touching collinear route pieces count as one geometric segment; aligned pins
+  with a gap, coincident pins without a segment, bends, gates/bases and rail
+  connections do not count as vertical. Missing placements remain in the
+  denominator. Split shares divide summed vertical counts by summed eligible
+  connection counts on the same completed human/result pairs; an empty
+  denominator is `null`.
+
 - **Existing locks and conflicts.** Members of a locked layout group or
   constraint are treated as fixed instances under R1, because the Edit Engine
   refuses to transform them. A recognized group whose generated id already

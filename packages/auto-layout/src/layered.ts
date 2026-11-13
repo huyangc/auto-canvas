@@ -61,6 +61,7 @@ export function netLevels(
   devices: Instance[],
   resolver: SymbolResolver,
   roles: NetRoles,
+  channelOverrides?: ReadonlyMap<string, string[]>,
 ): Levels {
   const channels = new Map<string, string[]>();
   const constraints: Edge[] = [];
@@ -86,6 +87,7 @@ export function netLevels(
             : [other.name, power.name];
       }
     }
+    names = channelOverrides?.get(i.id) ?? names;
     const nets = names.flatMap((p) => roles.pinNet(i.id, p) ?? []);
     channels.set(i.id, names);
     if (nets.length === 2 && nets[0] !== nets[1])
