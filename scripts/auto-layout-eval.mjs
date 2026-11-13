@@ -1,4 +1,13 @@
 import {
+  readabilityMetrics,
+  readabilityScore,
+} from "../packages/auto-layout/dist/readability-metrics.js";
+import { summarizeReadability } from "./readability-fit.mjs";
+import {
+  readabilityWeights,
+  readabilityCalibration,
+} from "../packages/auto-layout/dist/readability-weights.js";
+import {
   diagnoseVisualQuality,
   diagnoseLabelClearance,
 } from "../packages/derived/dist/index.js";
@@ -268,7 +277,10 @@ const metrics = (document, resolver, components, stages) => {
   const audit = auditRouting(document, resolver);
   const bounds = buildSvgScene(document, resolver).viewBox;
   const instances = enclosingBox(document, resolver);
+  const readability = readabilityMetrics(document, resolver);
   return {
+    readabilityMetrics: readability,
+    readabilityScore: readabilityScore(readability),
     ...readabilityCounts(document, resolver),
     ...signalPathMetrics(document, resolver),
     visual: visualCounts(document, resolver),
@@ -627,6 +639,7 @@ async function evaluateFile(file) {
           before?.status === "completed" &&
           Object.entries(before.result).every(
             ([key, value]) =>
+              ["readabilityMetrics", "readabilityScore"].includes(key) ||
               JSON.stringify(measurement.result[key]) === JSON.stringify(value),
           ) &&
           (!before.planHash || before.planHash === measurement.planHash);
@@ -931,6 +944,11 @@ if (!isMainThread) {
     totals.push(total);
     console.log(JSON.stringify(total));
   }
+  const readability = summarizeReadability(
+    measurements,
+    readabilityWeights,
+    readabilityScore,
+  );
   const scoreboard = Object.fromEntries(
     ["dev", "val", "all"].map((split) => {
       const cases = measurements.filter(
@@ -1019,6 +1037,7 @@ if (!isMainThread) {
       return [
         split,
         {
+          readability: readability.splits[split],
           documents: cases.length,
           completed: completed.length,
           paired: paired.length,
@@ -1053,6 +1072,10 @@ if (!isMainThread) {
     JSON.stringify(
       {
         scoreboard,
+        readabilityModel: {
+          ...readabilityCalibration,
+          weights: readabilityWeights,
+        },
         cases: measurements,
         totals,
         summary: {

@@ -18,3 +18,16 @@ metrics, runtime unchanged.
 Acceptance unchanged, plus: planner hashes unchanged; composite computed with
 the committed weights reproduces the round 1 dev/val pairwise accuracies
 within ±1 point when the weights are fitted on the same report.
+
+## Round 2 — accepted
+
+Reviewed: round 2 report and diff on 2026-11-13. Frozen weights in the
+generated `readability-weights.ts` (fitted on the `eb72cb1` dev split, header
+names commit, report hash and command); `readabilityScore` uses them; the
+evaluator reports per-metric targets for the 11 weighted metrics and the
+composite. Opus reran build, typecheck, lint (0 errors), format, the 15
+focused tests and `readability-fit.mjs` (exit 0). Codex's full evaluation:
+628/628 planner hashes unchanged, round 1 scores reproduced exactly, runtime
++0.31% on the uncontended repeat (the first run overlapped T069's evaluation).
+Targets on main: 1/11 metrics within 1.2× on dev, 4/11 on val; composite not
+within target on either split.
