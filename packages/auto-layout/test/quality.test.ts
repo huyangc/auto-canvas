@@ -471,10 +471,16 @@ it("R63 gives the second refinement slot to the next distinct strategy", () => {
       [],
     );
     expect(search).toHaveBeenCalledTimes(2);
-    expect(search.mock.calls.map((call) => call[4]!.result.edits)).toEqual([
-      initial[0]!.result.edits,
-      initial[2]!.result.edits,
-    ]);
+    // The two slots go to the two distinct portfolios, in routed-score order;
+    // which of them ranks first depends on the strategies' current drafts.
+    const refined = search.mock.calls.map((call) => call[4]!.result.edits);
+    expect(refined).toHaveLength(2);
+    expect(refined).toEqual(
+      expect.arrayContaining([
+        initial[0]!.result.edits,
+        initial[2]!.result.edits,
+      ]),
+    );
     const scores = search.mock.calls.map((call) => {
       expect(call[4]!.final).toBeDefined();
       return routedScore(call[4]!, resolver);
@@ -486,15 +492,16 @@ it("R63 gives the second refinement slot to the next distinct strategy", () => {
       expect(count).toBeLessThanOrEqual(14);
       candidates += count;
     }
-    expect(routes).toHaveBeenCalledTimes(5 + candidates + 1);
+    // R153 adds layered row drafts and stage variants to the draft routes;
+    // the finished plan still ends with a plain and a rip-up finishing route.
+    expect(routes).toHaveBeenCalledTimes(5 + candidates + 2);
     expect(
-      routes.mock.calls.slice(0, 3).every((call) => call[5] === true),
+      routes.mock.calls.slice(0, 5).every((call) => call[5] === true),
     ).toBe(true);
     expect(
-      routes.mock.calls.slice(-3).map((call) => [call[5], call[6]]),
+      routes.mock.calls.slice(-2).map((call) => [call[5], call[6]]),
     ).toEqual([
       [false, { ripUp: false }],
-      [true, { ripUp: true }],
       [true, { ripUp: true }],
     ]);
   } finally {

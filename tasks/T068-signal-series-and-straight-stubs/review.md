@@ -44,3 +44,37 @@ Acceptance unchanged from the plan change after round 1. If a gate still
 fails after this round, report per-drawing causes; Opus decides with the user.
 
 Acceptance rerun: not rerun for round 2; changes requested.
+
+## Round 3 — awaiting the user's decision (with an Opus review fix)
+
+Reviewed: round 3 report and `git diff` on 2026-11-13; acceptance and the
+full evaluation rerun by Opus (all seven commands exit 0; 8052 local and 14
+slow tests pass; the 628 per-case results are identical to Codex's
+`tmp/t068-r3/result.json`). Opus review fix: `quality.test.ts` R63 now checks
+that the two refinement slots go to the two distinct portfolios in either
+score order, and counts the extra R153 draft routes; the assertion pinned the
+old order and route count, not the R63 contract.
+
+Against main `05050fd` (baseline remeasured with the final metric
+definitions):
+
+| Metric               | Dev             | Val             |
+| -------------------- | --------------- | --------------- |
+| Crossings            | 276 → 279       | 153 → 153       |
+| Bends                | 1808 → 1751     | 764 → 737       |
+| Wire                 | 429855 → 428455 | 192716 → 191616 |
+| Median area / human  | 1.284 → 1.274   | 1.240 → 1.226   |
+| Avoidable jogs       | 22 → 22         | 2 → 2           |
+| Blocked joins        | 40 → 9          | 15 → 10         |
+| Upright signal parts | 39 → 28         | 17 → 12         |
+
+Guards: 628/628, none non-equivalent, floating 6, missing 16, no `VISUAL_*`
+total above main; determinism and the six large documents byte-identical.
+Both named drawings have the requested geometry.
+
+Gates missed: dev crossings +1.087% (limit 1%: +3 crossings net, from
+`5nrdf75rpd`, `czmmfvytar`, `en97w8v92y`, `fteqwehmtf`, `p3af2sg23j`);
+avoidable jogs not lower on dev; `common-source-ac` +20.8% median
+(about +150 ms). Opus recommends accepting: bends −3%, the blocked-join and
+upright-part defects fall sharply, and the renders of the crossing cases are
+trade-offs rather than defects. Decision is the user's.

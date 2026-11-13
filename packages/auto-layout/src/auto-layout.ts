@@ -1363,13 +1363,13 @@ function buildPlan(
           ),
         }
       : placeDocument(
-          {
+          planningMemo(document, resolver, "placement-input", () => ({
             ...document,
             junctions: [],
             ...(document.drafting
               ? { drafting: placementDrafting(document, resolver)! }
               : {}),
-          },
+          })),
           resolver,
           roles,
           groups,
@@ -1379,6 +1379,28 @@ function buildPlan(
           strategy,
           given,
           bounds,
+          {
+            key: JSON.stringify([signalTrunks, ripUp, crossX, !!contacts]),
+            score: (placements) =>
+              routedScore(
+                planLayoutOnce(
+                  document,
+                  resolver,
+                  options,
+                  overrides,
+                  strategy,
+                  signalTrunks,
+                  undefined,
+                  undefined,
+                  placements,
+                  ripUp,
+                  crossX,
+                  contacts,
+                  cache,
+                ),
+                resolver,
+              ),
+          },
         );
   const translation = exact
     ? inheritedTranslation

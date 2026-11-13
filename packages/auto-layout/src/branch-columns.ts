@@ -19,7 +19,10 @@ export function branchColumns(
 ) {
   // R152 keeps its original full-graph inference in both fallback variants.
   // Do not infer extra directions again inside its individual stages.
-  const roles = { ...classifyNets(document, resolver), seriesLevels: false };
+  const roles = {
+    ...classifyNets(document, resolver),
+    seriesLevels: false,
+  };
   if (
     ![...roles.rails.values()].includes("supply") ||
     ![...roles.rails.values()].includes("ground")

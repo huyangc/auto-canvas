@@ -1,3 +1,4 @@
+import { signalSeriesParts } from "./series-levels.js";
 import { conductingPairs, conductingPins } from "./dc-connectivity.js";
 export { conductingPins } from "./dc-connectivity.js";
 import { deviceDescriptor } from "@icm/devices";
@@ -20,7 +21,11 @@ import {
 } from "./geometry.js";
 import { assignColumns, deviceRows, netLevels, orderRows } from "./layered.js";
 import { isMosBulk, type NetRoles } from "./net-roles.js";
-import { devicePins, signalDistances } from "./placement-connectivity.js";
+import {
+  devicePins,
+  isSource,
+  signalDistances,
+} from "./placement-connectivity.js";
 import { compareIds } from "./recognize.js";
 import { symmetryTopology } from "./symmetry.js";
 import { partitionFloorplan } from "./partition-floorplan.js";
@@ -516,6 +521,11 @@ export function placeStages(
     }) as [string, string],
   }));
   if (!stages.length) return { placements: new Map() };
+  const series =
+    roles.instanceCount <= 40
+      ? signalSeriesParts(document.instances, resolver, roles)
+      : new Set<string>();
+  const stageRoles = { ...roles, signalSeriesIds: series };
   const distances = signalDistances(document, devices, resolver, roles).devices;
   const blocks = stages.map((stage) => {
     const ownGroups = groups.filter((g) =>
@@ -526,7 +536,7 @@ export function placeStages(
       localDocument,
       stage.devices,
       resolver,
-      roles,
+      stageRoles,
       ownGroups,
       netLevels(stage.devices, resolver, roles, channelOverrides),
       {
@@ -650,6 +660,29 @@ export function placeStages(
         ];
       }),
     );
+    if (isSource(part.device) && series.has(part.host.device.id)) {
+      // An input source is a signal driver, not a rail shunt below its host.
+      p.position = {
+        x: snap(host.x - 60 - local.x),
+        y: snap(host.y - local.y),
+      };
+      while (
+        occupied.some((b) =>
+          boxesIntersect(
+            { ...box, x: box.x + p.position.x, y: box.y + p.position.y },
+            b,
+          ),
+        )
+      )
+        p.position.x -= grid;
+      block.placements.set(part.device.id, p);
+      block.devices.push(part.device);
+      // Extend the local block to include the driver without negative extents.
+      const shift = ceil(Math.max(0, -box.x - p.position.x));
+      for (const pose of block.placements.values()) pose.position.x += shift;
+      block.width += shift;
+      continue;
+    }
     const localRail = transformPoint(railPin.at, { x: 0, y: 0 }, p);
     const minX = ceil(-box.x);
     const maxX = ceil(block.width + 40 - box.x);
@@ -822,6 +855,20 @@ export function placeStages(
   let best = compose(),
     score = estimate(best).score;
   const tryOrder = (candidate: typeof order) => {
+    if (
+      candidate.some(
+        (b, index) =>
+          b.devices.some((i) => series.has(i.id)) &&
+          candidate
+            .slice(0, index)
+            .some(
+              (earlier) =>
+                earlier.distance > b.distance &&
+                Number.isFinite(earlier.distance),
+            ),
+      )
+    )
+      return false;
     const previous = order;
     order = candidate;
     const targets = compose(),
@@ -863,7 +910,9 @@ export function placeStages(
         candidate.splice(to, 0, block);
         changed = tryOrder(candidate) || changed;
       }
-    for (const b of blocks.filter((b) => b.canMirror)) {
+    for (const b of blocks.filter(
+      (b) => b.canMirror && !b.devices.some((i) => series.has(i.id)),
+    )) {
       if (mirrored.has(b.id)) mirrored.delete(b.id);
       else mirrored.add(b.id);
       const targets = compose(),
@@ -922,6 +971,37 @@ export function placeStages(
       else mirrored.add(b.id);
     }
     best = compose();
+  }
+  // R153: stage mirroring must preserve left-to-right series signal flow.
+  // Correct only uniformly reversed, freely mirrorable stages; rigid groups
+  // retain their own convention. The corrected draft enters normal scoring.
+  if (roles.instanceCount <= 40) {
+    const signal = signalDistances(document, devices, resolver, roles);
+    const series = signalSeriesParts(document.instances, resolver, roles);
+    let changed = false;
+    for (const block of blocks.filter((b) => b.canMirror)) {
+      const directions = block.devices
+        .filter((i) => series.has(i.id))
+        .flatMap((i) => {
+          const [a, b] = devicePins(i, resolver);
+          const da =
+            signal.nets.get(roles.pinNet(i.id, a!.name) ?? "") ?? Infinity;
+          const db =
+            signal.nets.get(roles.pinNet(i.id, b!.name) ?? "") ?? Infinity;
+          if (da === db) return [];
+          const pose = best.get(i.id)!;
+          const dx =
+            transformPoint(b!.at, pose.position, pose).x -
+            transformPoint(a!.at, pose.position, pose).x;
+          return dx ? [dx * (da < db ? 1 : -1)] : [];
+        });
+      if (directions.length && directions.every((d) => d < 0)) {
+        if (mirrored.has(block.id)) mirrored.delete(block.id);
+        else mirrored.add(block.id);
+        changed = true;
+      }
+    }
+    if (changed) best = compose();
   }
   return { placements: best, ...(twoRows ? { sideRow: sideCandidates } : {}) };
 }

@@ -387,6 +387,7 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   pull order and columns. Multi-pin blocks occupy their output Net's row.
   BJT channels use collector above emitter for NPN and emitter above collector
   for PNP, parallel to MOS channel levels.
+  R153 overrides unrelated Net levels for eligible signal-series passives.
   Row pitch is 120 units. With no transistor channel constraint, R9 is unchanged.
 - **R32 — Order.** A recognized group is one node, with adjacent symmetric
   members. A vertical channel chain may stay together. Seed rows by signal
@@ -1381,6 +1382,62 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   denominator. Split shares divide summed vertical counts by summed eligible
   connection counts on the same completed human/result pairs; an empty
   denominator is `null`.
+
+- **R153 — Signal-series rows and evaluation.** Every layered row build for
+  at most 40 instances (including markers) gives a resistor, capacitor or
+  inductor with exactly two pins on distinct non-rail Nets and no R151 inferred
+  DC direction a horizontal signal-row placement. Its Nets must reach different
+  devices (or a device and source/port). Exclude bridges around one device when
+  both Nets touch that device and either side has no other non-passive device/source host;
+  other passive bridges and interface ports do not establish a distinct device.
+  Placement and metrics use the same definition. Prefer the row of a
+  connected gate/base or block input, then another connected non-series,
+  non-source device by signal distance and id. With no such neighbour, retain
+  the ordinary row. Orient its nearer signal Net left; distance ties retain
+  pin order. Seed the crossing-minimizing row order with its ordering distance
+  halfway after that nearer Net; preserve the chosen crossing-minimizing order.
+  Templates and symmetry blocks retain their geometry. An independent input
+  source with one rail pin inherits the row of its connected signal part and
+  aligns its other pin with that part's pin when symbol geometry allows.
+  Stages retain full-document eligibility, place input sources beside their
+  driven signal parts, and keep series flow left to right before scoring.
+  The layered strategy compares signal-row and legacy-row drafts by routed
+  score before its normal refinement. This rule is independent of R151
+  DC-level selection and adds no complete-plan comparison.
+  Existing strategy competition uses finished score and guards;
+  the above-40 pipeline is unchanged.
+
+  In small drawings, R146 port seats and rail-seat search candidates avoid
+  the open straight segments between adjacent facing device pins, including
+  Nets with more than two pins. R71 retains its ordinary starting seat;
+  finished seat searches move it only when score improves without raising
+  routed guards, retaining an obstructing seat if alternatives regress.
+  A local port can sit beside the segment's midpoint, with its stub branching
+  from the trunk. Fixed seats remain fixed.
+
+  The evaluator reports four additional summed primary metrics for human and
+  result on the same completed pairs, separately for dev, val and all:
+  `signalSeriesVertical` and `signalSeriesHorizontal` count the above topology
+  class by the world-space axis between its two placed pins, independent of
+  planning size, strategy or group membership. Unplaced parts are omitted.
+  `avoidableJogs` counts each bent Net with exactly two symbol pins once,
+  including marker pins. Both pins must be placed, on different instances,
+  with opposite exits. Translating either part perpendicular to the exit by
+  zero or one grid pitch must align the pins into a positive-length forward
+  segment, without overlapping another instance's visible bounds or crossing
+  another instance's bounds along that segment. At least one resolved route
+  on that Net must contain a non-collinear turn. This is a cheap geometric
+  opportunity metric: other wires, locks, labels and rerouting the moved
+  part's other Nets are not predicted. Multi-pin Nets, including two devices
+  plus a port, are outside this metric.
+  `blockedJoins` counts each adjacent facing pair of device pins on a Net
+  whose open straight segment intersects the visible bounds of any marker or
+  port, once regardless of the number of blockers. The pins must have opposing
+  exits and the same cross coordinate, with no other device pin of that Net
+  strictly between them. Marker/port terminals are seats, not intermediate
+  devices: a port pin on the segment must not hide its own obstruction.
+  Touching the segment's cross coordinate counts; touching only its endpoints
+  does not. Like the orientation counts, this metric applies at every size.
 
 - **Existing locks and conflicts.** Members of a locked layout group or
   constraint are treated as fixed instances under R1, because the Edit Engine

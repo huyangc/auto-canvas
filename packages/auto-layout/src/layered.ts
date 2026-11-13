@@ -1,4 +1,4 @@
-import { inferSeriesChannels } from "./series-levels.js";
+import { inferSeriesChannels, signalSeriesParts } from "./series-levels.js";
 import { transformPoint } from "./geometry.js";
 import { visibleInstanceBounds } from "@icm/derived";
 import {
@@ -19,6 +19,7 @@ import { compareIds, facesOutward } from "./recognize.js";
 import {
   deviceNets,
   devicePins,
+  isMarker,
   isSource,
   signalDistances,
 } from "./placement-connectivity.js";
@@ -148,7 +149,25 @@ export function deviceRows(
   topology = symmetryTopology(document, resolver, roles),
 ): Rows {
   const placements = new Map<string, Placement>();
-  const distances = signalDistances(document, devices, resolver, roles).devices;
+  const signal = signalDistances(document, devices, resolver, roles);
+  const distances = new Map(signal.devices);
+  const signalParts =
+    roles.instanceCount <= 40 && roles.signalSeries !== false
+      ? new Set(
+          roles.signalSeriesIds ??
+            signalSeriesParts(document.instances, resolver, roles),
+        )
+      : new Set<string>();
+  for (const g of groups)
+    for (const id of [
+      ...g.members,
+      ...(g.extraMemberIds ?? []),
+      ...(g.tailInstanceId ? [g.tailInstanceId] : []),
+    ])
+      signalParts.delete(id);
+  for (const component of topology.components)
+    for (const id of [...component.pairs.flat(), ...component.axis])
+      signalParts.delete(id);
   const rowById = new Map<string, number>();
   for (const i of devices) {
     const pins = devicePins(i, resolver);
@@ -173,7 +192,12 @@ export function deviceRows(
       const ranks = pins.map(
         (p) => levels.nets.get(roles.pinNet(i.id, p.name) ?? "") ?? 0,
       );
-      const vertical = isSource(i) || ranks[0] !== ranks[1];
+      const vertical =
+        !signalParts.has(i.id) && (isSource(i) || ranks[0] !== ranks[1]);
+      const forward =
+        !signalParts.has(i.id) ||
+        (signal.nets.get(roles.pinNet(i.id, a.name) ?? "") ?? Infinity) <=
+          (signal.nets.get(roles.pinNet(i.id, b.name) ?? "") ?? Infinity);
       rotation =
         ([0, 90, 180, 270] as const).find((r) => {
           const p = transformPoint(
@@ -190,13 +214,90 @@ export function deviceRows(
             ? p.x === q.x &&
                 p.y < q.y ===
                   (isSource(i) ? a.name === "+" : ranks[0]! < ranks[1]!)
-            : p.y === q.y && p.x < q.x;
+            : p.y === q.y && p.x < q.x === forward;
         }) ?? 0;
     }
     placements.set(
       i.id,
       placement(0, rowById.get(i.id)! * ROW_PITCH, "none", rotation),
     );
+  }
+  // A passive's unrelated DC net ranks do not determine its signal row.
+  // Prefer an input-pin neighbour, then another non-series signal device.
+  for (const i of [...devices].sort((a, b) => compareIds(a.id, b.id))) {
+    if (!signalParts.has(i.id)) continue;
+    const nets = new Set(deviceNets(i, resolver, roles));
+    const neighbours = devices.filter(
+      (j) =>
+        j.id !== i.id &&
+        !signalParts.has(j.id) &&
+        !isSource(j) &&
+        !isMarker(j) &&
+        devicePins(j, resolver).some((p) =>
+          nets.has(roles.pinNet(j.id, p.name) ?? ""),
+        ),
+    );
+    const input = (j: Instance) =>
+      devicePins(j, resolver).some(
+        (p) =>
+          (p.role.includes("input") ||
+            p.name === channelPins(j.symbolId)?.gate) &&
+          nets.has(roles.pinNet(j.id, p.name) ?? ""),
+      );
+    neighbours.sort(
+      (a, b) =>
+        Number(input(b)) - Number(input(a)) ||
+        (distances.get(a.id) ?? Infinity) - (distances.get(b.id) ?? Infinity) ||
+        compareIds(a.id, b.id),
+    );
+    const host = neighbours[0];
+    if (host) {
+      rowById.set(i.id, rowById.get(host.id)!);
+      placements.get(i.id)!.position.y = rowById.get(host.id)! * ROW_PITCH;
+    }
+    distances.set(i.id, (distances.get(i.id) ?? Infinity) + 0.5);
+  }
+  // Input sources share the driven signal row; align the actual signal pin,
+  // not the source centre, while leaving rigid groups and symmetry untouched.
+  const rigid = new Set([
+    ...groups.flatMap((g) => [
+      ...g.members,
+      ...(g.extraMemberIds ?? []),
+      ...(g.tailInstanceId ? [g.tailInstanceId] : []),
+    ]),
+    ...topology.components.flatMap((c) => [...c.pairs.flat(), ...c.axis]),
+  ]);
+  for (const source of devices) {
+    if (!isSource(source) || rigid.has(source.id)) continue;
+    const pins = devicePins(source, resolver);
+    if (pins.length !== 2) continue;
+    const signalPin = pins.find((p) => {
+      const net = roles.pinNet(source.id, p.name);
+      return net && !roles.rails.has(net);
+    });
+    if (
+      !signalPin ||
+      !pins.some((p) => roles.rails.has(roles.pinNet(source.id, p.name) ?? ""))
+    )
+      continue;
+    const net = roles.pinNet(source.id, signalPin.name);
+    const host = [...devices]
+      .sort((a, b) => compareIds(a.id, b.id))
+      .find(
+        (i) =>
+          signalParts.has(i.id) &&
+          deviceNets(i, resolver, roles).includes(net!),
+      );
+    if (!host) continue;
+    const hostPin = devicePins(host, resolver).find(
+      (p) => roles.pinNet(host.id, p.name) === net,
+    )!;
+    const pose = placements.get(source.id)!;
+    const hostPose = placements.get(host.id)!;
+    const offset = transformPoint(signalPin.at, { x: 0, y: 0 }, pose);
+    pose.position.y =
+      transformPoint(hostPin.at, hostPose.position, hostPose).y - offset.y;
+    rowById.set(source.id, rowById.get(host.id)!);
   }
   const nodes: RowNode[] = [];
   const grouped = new Set<string>();
@@ -291,6 +392,7 @@ function symmetryRows(
       }
     const halfRoles: NetRoles = {
       ...roles,
+      signalSeries: false,
       pinNet: (id, name) => {
         const net = roles.pinNet(id, name);
         return net ? (folded.get(net) ?? net) : undefined;

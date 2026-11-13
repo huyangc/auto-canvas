@@ -1,3 +1,4 @@
+import { straightJoins, symbolBlocksJoin } from "./straight-joins.js";
 import { planningBudget } from "./planning-budget.js";
 import { visibleInstanceBounds } from "@icm/derived";
 import type { SchematicDocument } from "@icm/model";
@@ -33,6 +34,7 @@ function seats(
   const net = roles.pinNet(markerId, markerPin.name)!;
   const local = transformPoint(markerPin.at, { x: 0, y: 0 }, marker.placement!);
   const pins = pinPoints(document, resolver);
+  const joins = straightJoins(document, resolver);
   const obstacles = visibleInstanceBounds(document, resolver).filter(
     (b) => b.id !== markerId,
   );
@@ -83,6 +85,7 @@ function seats(
         // the finished drawing must not veto every seat before routing.
         if (
           !bounds ||
+          joins.some((join) => symbolBlocksJoin(bounds, join)) ||
           obstacles.some(
             ({ bounds: b }) =>
               bounds.x < b.x + b.width &&

@@ -73,6 +73,10 @@ export interface NetRoles {
   instanceCount: number;
   /** Internal R30 comparison policy; inherited by stages and folded halves. */
   seriesLevels?: boolean;
+  /** R153: compare signal-row placement with the legacy level-only rows. */
+  signalSeries?: boolean;
+  /** Full-document eligibility retained while building individual stages. */
+  signalSeriesIds?: ReadonlySet<string>;
   byNet: Map<string, NetRole>;
   /** R37: explicit power intent or the R12 multi-channel supply test. */
   rails: Map<string, "supply" | "ground">;

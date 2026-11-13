@@ -1,3 +1,4 @@
+import { markerBlocksJoin, straightJoins } from "./straight-joins.js";
 import { contactGeometryProblem, contactPolicy } from "./contact-placement.js";
 import { freezePinGroups } from "./route.js";
 import { visibleSymbolInkBounds } from "@icm/derived";
@@ -406,6 +407,7 @@ export function portSeatCandidates(
   document: SchematicDocument,
   resolver: SymbolResolver,
   portId: string,
+  allowBlocked = false,
 ): Placement[] {
   const roles = classifyNets(document, resolver);
   const net = roles.pinNet(portId, "P");
@@ -418,6 +420,8 @@ export function portSeatCandidates(
   const pins = pinPoints(devices, resolver);
   const targets = new Map(document.instances.map((i) => [i.id, i.placement!]));
   const seats = [port.placement];
+  const joins =
+    document.instances.length <= 40 ? straightJoins(document, resolver) : [];
   const grid = document.presentation.grid;
   const snap = (n: number) => Math.round(n / grid) * grid;
   const hosts = pins
@@ -503,10 +507,10 @@ export function portSeatCandidates(
     const key = JSON.stringify(seat);
     if (seen.has(key)) return false;
     seen.add(key);
-    return !contactGeometryProblem(
-      withPlacements(document, new Map([[portId, seat]])),
-      resolver,
-      contacts,
+    const candidate = withPlacements(document, new Map([[portId, seat]]));
+    return (
+      (allowBlocked || !markerBlocksJoin(candidate, resolver, portId, joins)) &&
+      !contactGeometryProblem(candidate, resolver, contacts)
     );
   });
 }
