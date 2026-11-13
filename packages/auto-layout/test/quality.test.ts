@@ -492,11 +492,12 @@ it("R63 gives the second refinement slot to the next distinct strategy", () => {
       expect(count).toBeLessThanOrEqual(14);
       candidates += count;
     }
-    // R153 adds layered row drafts and stage variants to the draft routes;
-    // the finished plan still ends with a plain and a rip-up finishing route.
-    expect(routes).toHaveBeenCalledTimes(5 + candidates + 2);
+    // R153's row-policy comparison routes nothing when both policies place
+    // identically (this passive-only fallback); the finished plan ends with a
+    // plain and a rip-up finishing route.
+    expect(routes).toHaveBeenCalledTimes(3 + candidates + 2);
     expect(
-      routes.mock.calls.slice(0, 5).every((call) => call[5] === true),
+      routes.mock.calls.slice(0, 3).every((call) => call[5] === true),
     ).toBe(true);
     expect(
       routes.mock.calls.slice(-2).map((call) => [call[5], call[6]]),

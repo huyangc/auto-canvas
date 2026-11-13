@@ -256,13 +256,25 @@ export function placeDocument(
             undefined,
             searchLimit,
           );
-          if (result.problem) return { result, choices, score: Infinity };
-          const score = draftRouter.score(result.placements);
-          return { result, choices, score };
+          return { result, choices };
         };
         const signal = draft(true),
           legacy = draft(false);
-        return legacy.score < signal.score ? legacy : signal;
+        // Fallback placement ignores the row policy: identical drafts need no
+        // routing (quick mode has no routing reuse).
+        const key = (d: typeof signal) =>
+          JSON.stringify([
+            [...d.result.placements],
+            d.result.problem,
+            d.result.draftingTranslation,
+            [...(d.result.sideRow ?? [])],
+            [...d.choices.sides],
+            [...d.choices.orientations],
+          ]);
+        if (key(signal) === key(legacy)) return signal;
+        const score = (d: typeof signal) =>
+          d.result.problem ? Infinity : draftRouter.score(d.result.placements);
+        return score(legacy) < score(signal) ? legacy : signal;
       },
     );
     for (const [id, side] of selected.choices.sides)
