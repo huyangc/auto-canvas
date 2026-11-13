@@ -1,3 +1,9 @@
+import { branchColumns } from "./branch-columns.js";
+import {
+  calibratedScore,
+  compactionRegresses,
+  routedGuards,
+} from "./routed-search-score.js";
 import { contactGeometryProblem, contactPolicy } from "./contact-placement.js";
 import { optimizePins } from "./pin-portfolio.js";
 import { searchPinContacts } from "./contact-search.js";
@@ -118,6 +124,15 @@ export function planAutoLayout(
   resolver: SymbolResolver,
   options: AutoLayoutOptions = {},
 ): AutoLayoutResult {
+  return planWithBranches(document, resolver, options, true);
+}
+
+function planWithBranches(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  options: AutoLayoutOptions,
+  allowBranches: boolean,
+): AutoLayoutResult {
   if (
     options.partition ||
     options.quality === "optimized" ||
@@ -125,9 +140,14 @@ export function planAutoLayout(
     document.instances.length > 40 ||
     !document.drafting?.objects.some((o) => !o.locked)
   )
-    return planWithFixedDrafting(document, resolver, options);
+    return planWithFixedDrafting(document, resolver, options, allowBranches);
   return timePlanning(() => {
-    const base = planWithFixedDrafting(document, resolver, options);
+    const base = planWithFixedDrafting(
+      document,
+      resolver,
+      options,
+      allowBranches,
+    );
     if (
       options.search?.signal?.aborted ||
       (options.search?.deadline !== undefined &&
@@ -146,6 +166,7 @@ export function planAutoLayout(
       },
       resolver,
       options,
+      allowBranches,
     );
     return followDraftingGroups(document, resolver, base, candidate, groups);
   });
@@ -154,7 +175,8 @@ export function planAutoLayout(
 function planWithFixedDrafting(
   document: SchematicDocument,
   resolver: SymbolResolver,
-  options: AutoLayoutOptions = {},
+  options: AutoLayoutOptions,
+  allowBranches: boolean,
 ): AutoLayoutResult {
   // R146 compares label-finished results. Avoid applying these passes twice
   // when the measured planner already finished its incumbent and trials.
@@ -173,7 +195,13 @@ function planWithFixedDrafting(
   const plan = () =>
     timePlanning(() =>
       finishLabels(
-        planAutoLayoutMeasured(document, resolver, options, finishLabels),
+        planAutoLayoutMeasured(
+          document,
+          resolver,
+          options,
+          finishLabels,
+          allowBranches,
+        ),
       ),
     );
   if (options.partition) {
@@ -186,10 +214,15 @@ function planWithFixedDrafting(
     if (!validated.partition.arrangement && (problem || !result.edits.length)) {
       const { partition: _partition, ...fallbackOptions } = options;
       // R134 fallback is plain planning, including R147 and R146 searches.
-      result = planAutoLayout(document, resolver, {
-        ...fallbackOptions,
-        search: options.search ?? defaultLayoutSearch(document, options),
-      });
+      result = planWithBranches(
+        document,
+        resolver,
+        {
+          ...fallbackOptions,
+          search: options.search ?? defaultLayoutSearch(document, options),
+        },
+        false,
+      );
       result.diagnostics.push({
         severity: "warning",
         code: "AUTO_LAYOUT_PARTITION_FALLBACK",
@@ -227,6 +260,7 @@ function planAutoLayoutMeasured(
   resolver: SymbolResolver,
   options: AutoLayoutOptions,
   finishLabels: (result: AutoLayoutResult) => AutoLayoutResult,
+  allowBranches: boolean,
 ): AutoLayoutResult {
   const fixed = new Set(options.fixedInstanceIds);
   for (const owner of [...document.layoutGroups, ...document.constraints])
@@ -788,7 +822,7 @@ function planAutoLayoutMeasured(
         )
         .map((host) => ({ device, host }));
     });
-    return searchDeviceRelocations(
+    const closed = searchDeviceRelocations(
       { ...railed, result: routed, final: final.document },
       resolver,
       fixed,
@@ -837,7 +871,49 @@ function planAutoLayoutMeasured(
       },
       stopped,
       { phase: "gaps", budget: relocationBudget },
-    ).result;
+    );
+    // R152: compare one complete branch-column candidate with the finished
+    // incumbent. Existing modes, locks and explicit relationships keep their
+    // placement contract; this candidate only enters plain bounded planning.
+    if (
+      !allowBranches ||
+      fixed.size ||
+      document.constraints.length ||
+      document.layoutGroups.length ||
+      document.inductorCouplings?.length ||
+      stopped()
+    )
+      return closed.result;
+    const columns = branchColumns(document, resolver);
+    if (!columns || !closed.final) return closed.result;
+    const placed = placeDocument(
+      document,
+      resolver,
+      classifyNets(document, resolver),
+      [],
+      options,
+      emptyOverrides(),
+      emptyChoices(),
+      "stages",
+      columns,
+    );
+    if (placed.problem) return closed.result;
+    const candidate = finishPlacement(placed.placements);
+    if (
+      !candidate.final ||
+      calibratedScore(candidate, resolver) >=
+        calibratedScore(closed, resolver) ||
+      compactionRegresses(closed, candidate, resolver, true)
+    )
+      return closed.result;
+    const limits = routedGuards(closed.final, resolver);
+    if (
+      Object.entries(routedGuards(candidate.final, resolver)).some(
+        ([key, count]) => count > (limits[key] ?? 0),
+      )
+    )
+      return closed.result;
+    return candidate.result;
   }
   if (
     options.quality !== "optimized" ||
