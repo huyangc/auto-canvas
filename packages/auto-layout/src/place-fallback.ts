@@ -1,14 +1,8 @@
-import { transformPoint } from "./geometry.js";
+import { transformPoint, placementPitch } from "./geometry.js";
 import { type Instance, type SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import { isMos, type NetRoles } from "./net-roles.js";
-import {
-  COLUMN_PITCH,
-  placement,
-  ROW_PITCH,
-  pinPoints,
-  withPlacements,
-} from "./geometry.js";
+import { placement, pinPoints, withPlacements } from "./geometry.js";
 import {
   deviceNets,
   devicePins,
@@ -32,7 +26,7 @@ function placeSources(
   resolver: SymbolResolver,
 ) {
   sources.forEach((i, index) => {
-    const x = (index - sources.length) * COLUMN_PITCH;
+    const x = (index - sources.length) * placementPitch(roles).column;
     const positive = devicePins(i, resolver).find((p) => p.name === "+")!;
     targets.set(i.id, placement(x, mainY - positive.at.y));
     const net = roles.pinNet(i.id, "+");
@@ -114,16 +108,16 @@ function placeShunts(
     );
     let x =
       (netColumns.get(roles.pinNet(i.id, signal.name) ?? "") ?? 0) +
-      COLUMN_PITCH;
+      placementPitch(roles).column;
     const y = mainY - offset.y;
     while (
       [...targets.values()].some(
         (p) =>
-          Math.abs(p.position.x - x) < COLUMN_PITCH &&
-          Math.abs(p.position.y - y) < ROW_PITCH,
+          Math.abs(p.position.x - x) < placementPitch(roles).column &&
+          Math.abs(p.position.y - y) < placementPitch(roles).row,
       )
     )
-      x += COLUMN_PITCH;
+      x += placementPitch(roles).column;
     targets.set(i.id, placement(x - offset.x, y, "none", rotation));
   }
 }
@@ -147,7 +141,14 @@ function placeBridges(
       grid;
     targets.set(
       i.id,
-      placeSeries(i, x, mainY - ROW_PITCH, resolver, roles, distances),
+      placeSeries(
+        i,
+        x,
+        mainY - placementPitch(roles).row,
+        resolver,
+        roles,
+        distances,
+      ),
     );
   }
 }
@@ -179,7 +180,9 @@ export function placeFallback(
   const bridges: Instance[] = [];
   let x = Math.max(
     0,
-    ...[...targets.values()].map((p) => p.position.x + COLUMN_PITCH),
+    ...[...targets.values()].map(
+      (p) => p.position.x + placementPitch(roles).column,
+    ),
   );
   const ordered = remaining
     .filter((i) => !targets.has(i.id))
@@ -217,7 +220,7 @@ export function placeFallback(
       if (n && (!netColumns.has(n) || pin.role.includes("output")))
         netColumns.set(n, x);
     }
-    x += COLUMN_PITCH;
+    x += placementPitch(roles).column;
   }
   placeShunts(shunts, targets, netColumns, mainY, resolver, roles, distances);
   placeBridges(

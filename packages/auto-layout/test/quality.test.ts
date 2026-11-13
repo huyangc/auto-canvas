@@ -412,10 +412,10 @@ it("R44 compares one routing-only replay of the selected refined placement", () 
     expect(
       routes.mock.calls.slice(-4).map((call) => [call[5], call[6]]),
     ).toEqual([
+      [true, { ripUp: false }], // selected refinement
       [false, { ripUp: false }],
       [true, { ripUp: true }], // R96 finalist
-      [true, { ripUp: true }], // R97 column trial
-      [true, { ripUp: true }],
+      [true, { ripUp: true }], // R97 trial; tight pitch leaves no empty column
     ]);
     expect(comparison).toHaveBeenCalledTimes(1);
     const [selected, alternative] = comparison.mock.calls[0]!;
@@ -612,7 +612,7 @@ it("R63 gives a refused distinct candidate the second refinement slot", () => {
   // R71 now reserves a fixed port's seat, so this placement leaves only one
   // valid distinct strategy; a refused one must take the second slot. Repair of
   // a refused candidate is covered by the corpus two-inverters replan test.
-  document.instances.find((i) => i.id === "a")!.placement = placement(-180, 0);
+  document.instances.find((i) => i.id === "a")!.placement = placement(-140, 0);
   const options = { fixedInstanceIds: new Set(["a"]) };
   const initial = (["template", "layered", "stages"] as const).map((s) =>
     planLayoutOnce(document, resolver, options, emptyOverrides(), s),
@@ -635,7 +635,7 @@ it("R63 gives a refused distinct candidate the second refinement slot", () => {
     if (committed.ok)
       expect(
         committed.document.instances.find((i) => i.id === "a")!.placement,
-      ).toEqual(placement(-180, 0));
+      ).toEqual(placement(-140, 0));
     expect(planAutoLayout(document, resolver, options)).toEqual(result);
   } finally {
     search.mockRestore();

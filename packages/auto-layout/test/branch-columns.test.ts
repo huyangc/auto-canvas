@@ -1,5 +1,6 @@
 import { planWithSeriesLevels } from "../src/auto-layout.js";
-import { auditRouting } from "../src/routing-audit.js";
+import { calibratedScore } from "../src/routed-search-score.js";
+import { emptyChoices } from "../src/layout-choices.js";
 import { deviceRows, netLevels } from "../src/layered.js";
 import { classifyNets } from "../src/net-roles.js";
 import { placeDocument } from "../src/place.js";
@@ -113,10 +114,17 @@ it("routes the column portfolio deterministically and preserves terminal Nets", 
   const old = preview(d, resolver, oldPlan.edits);
   expect(old.ok).toBe(true);
   if (!old.ok) return;
-  const before = auditRouting(old.document, resolver);
-  const after = auditRouting(applied.document, resolver);
-  for (const metric of ["crossings", "bends", "wireLength"] as const)
-    expect(after[metric]).toBeLessThanOrEqual(before[metric]);
+  expect(
+    calibratedScore(
+      { result, final: applied.document, choices: emptyChoices() },
+      resolver,
+    ),
+  ).toBeLessThanOrEqual(
+    calibratedScore(
+      { result: oldPlan, final: old.document, choices: emptyChoices() },
+      resolver,
+    ),
+  );
   for (let i = 0; i < 2; i++) {
     const y = (id: string) =>
       applied.document.instances.find((instance) => instance.id === id)!
@@ -129,10 +137,31 @@ it("routes the column portfolio deterministically and preserves terminal Nets", 
 
 it("keeps the complete old-level plan when series levels increase its score", () => {
   const d = branches(1, false);
-  const old = planWithSeriesLevels(d, resolver, {}, false);
-  const candidate = planWithSeriesLevels(d, resolver, {}, true);
+  // Fix the lower transistor so series rows produce a worse finished plan,
+  // even after terminal-departure repair.
+  d.instances.find((i) => i.id === "q0")!.placement = placement(100, 100);
+  const options = { fixedInstanceIds: new Set(["q0"]) };
+  const old = planWithSeriesLevels(d, resolver, options, false);
+  const candidate = planWithSeriesLevels(d, resolver, options, true);
   expect(candidate.edits).not.toEqual(old.edits);
-  expect(planAutoLayout(d, resolver)).toEqual(old);
+  const before = preview(d, resolver, old.edits);
+  const after = preview(d, resolver, candidate.edits);
+  expect(before.ok && after.ok).toBe(true);
+  if (!before.ok || !after.ok) return;
+  expect(
+    calibratedScore(
+      { result: candidate, final: after.document, choices: emptyChoices() },
+      resolver,
+    ),
+  ).toBeGreaterThan(
+    calibratedScore(
+      { result: old, final: before.document, choices: emptyChoices() },
+      resolver,
+    ),
+  );
+  const selected = selectSeriesLayout(d, resolver, old, candidate);
+  expect(selected).toEqual(old);
+  expect(planAutoLayout(d, resolver, options)).toEqual(selected);
 });
 
 it("keeps a fixed branch member at its exact pose", () => {

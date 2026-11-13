@@ -1,3 +1,4 @@
+import { placementPitch } from "../src/geometry.js";
 import { expect, it } from "vitest";
 import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
 import { classifyNets } from "../src/net-roles.js";
@@ -476,10 +477,18 @@ it("unfolds a half circuit whose long Nets cross empty rows", async () => {
     levels,
   );
   expect(rows.nodes.every((n) => n.members.length > 0)).toBe(true);
-  expect(rows.placements.get("a")!.position.y).toBe(480);
-  expect(rows.placements.get("b")!.position.y).toBe(480);
-  expect(rows.placements.get("c")!.position.y).toBe(240);
-  expect(rows.placements.get("d")!.position.y).toBe(240);
+  expect(rows.placements.get("a")!.position.y).toBe(
+    4 * placementPitch(roles).row,
+  );
+  expect(rows.placements.get("b")!.position.y).toBe(
+    4 * placementPitch(roles).row,
+  );
+  expect(rows.placements.get("c")!.position.y).toBe(
+    2 * placementPitch(roles).row,
+  );
+  expect(rows.placements.get("d")!.position.y).toBe(
+    2 * placementPitch(roles).row,
+  );
 });
 
 it("centres a run of axis devices without splitting the mirrored pairs", async () => {

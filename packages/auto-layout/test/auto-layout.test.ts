@@ -64,15 +64,25 @@ it("snaps the envelope translation while preserving grid and input purity", () =
   expect(JSON.stringify(document)).toBe(before);
 });
 it("rejects a template collision with a fixed instance without partial edits", () => {
-  const document = circuit({ a: "capacitor", b: "capacitor" }, {});
+  const document = circuit(
+    { a: "capacitor", b: "capacitor", c: "capacitor" },
+    {},
+  );
   document.instances[0]!.placement = {
-    // R9 now places the other capacitor in the second horizontal column.
+    // Block the second column at both the tight and fallback pitches.
+    position: { x: 120, y: 0 },
+    rotation: 0,
+    mirror: "none",
+  };
+  document.instances[2]!.placement = {
     position: { x: 160, y: 0 },
     rotation: 0,
     mirror: "none",
   };
   expect(
-    planAutoLayout(document, resolver, { fixedInstanceIds: new Set(["a"]) }),
+    planAutoLayout(document, resolver, {
+      fixedInstanceIds: new Set(["a", "c"]),
+    }),
   ).toMatchObject({
     edits: [],
     diagnostics: [{ code: "AUTO_LAYOUT_RULE_UNSATISFIED", rule: "R10" }],

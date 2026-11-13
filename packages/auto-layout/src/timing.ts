@@ -8,7 +8,8 @@ type PlanningPhase =
   | "gaps"
   | "draftingFallback"
   | "drafting"
-  | "finishing";
+  | "finishing"
+  | "labelRepair";
 
 interface PlanningTiming {
   phases: Record<PlanningPhase, number>;
@@ -38,6 +39,7 @@ export function timePlanning(plan: () => AutoLayoutResult): AutoLayoutResult {
       drafting: 0,
       draftingFallback: 0,
       finishing: 0,
+      labelRepair: 0,
     },
     phaseCalls: {
       annealer: 0,
@@ -48,6 +50,7 @@ export function timePlanning(plan: () => AutoLayoutResult): AutoLayoutResult {
       drafting: 0,
       draftingFallback: 0,
       finishing: 0,
+      labelRepair: 0,
     },
     milliseconds: 0,
     seating: 0,

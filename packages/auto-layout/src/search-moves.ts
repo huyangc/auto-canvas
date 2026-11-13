@@ -7,7 +7,12 @@ import {
 } from "./partition.js";
 import { reflectOrientation, type SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
-import { COLUMN_PITCH, geometryProblem, withPlacements } from "./geometry.js";
+import {
+  geometryProblem,
+  withPlacements,
+  placementPitch,
+  type PlacementPitch,
+} from "./geometry.js";
 import {
   anchorPlacements,
   spanProblem,
@@ -160,6 +165,7 @@ export function createMoveGenerator(
   random: () => number,
   bounds?: SearchBounds,
   partition?: LayoutPartition,
+  pitch?: Readonly<PlacementPitch>,
 ) {
   const {
     devices,
@@ -176,6 +182,7 @@ export function createMoveGenerator(
     root,
     owner,
   } = placementUnits(document, resolver, fixed, partition);
+  if (pitch) roles.pitch = pitch;
   partition = resolvedPartition;
   const found = partition
     ? undefined
@@ -242,7 +249,9 @@ export function createMoveGenerator(
       const ids = pick(movable);
       if (!ids) return;
       const step =
-        (random() < 0.5 ? grid : Math.ceil(COLUMN_PITCH / grid) * grid) *
+        (random() < 0.5
+          ? grid
+          : Math.ceil(placementPitch(roles).column / grid) * grid) *
         (random() < 0.5 ? -1 : 1);
       if (random() < 0.75) shift(next, ids, step);
       else shift(next, ids, 0, step);
@@ -303,7 +312,9 @@ export function createMoveGenerator(
         shift(
           next,
           first,
-          (random() < 0.5 ? -1 : 1) * Math.ceil(COLUMN_PITCH / grid) * grid,
+          (random() < 0.5 ? -1 : 1) *
+            Math.ceil(placementPitch(roles).column / grid) *
+            grid,
         );
       } else {
         // Slot-preserving swaps and reversals translate whole stage blocks.

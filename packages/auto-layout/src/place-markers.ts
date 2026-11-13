@@ -408,6 +408,7 @@ export function portSeatCandidates(
   resolver: SymbolResolver,
   portId: string,
   allowBlocked = false,
+  includeCurrent = true,
 ): Placement[] {
   const roles = classifyNets(document, resolver);
   const net = roles.pinNet(portId, "P");
@@ -419,7 +420,7 @@ export function portSeatCandidates(
   };
   const pins = pinPoints(devices, resolver);
   const targets = new Map(document.instances.map((i) => [i.id, i.placement!]));
-  const seats = [port.placement];
+  const seats = includeCurrent ? [port.placement] : [];
   const joins =
     document.instances.length <= 40 ? straightJoins(document, resolver) : [];
   const grid = document.presentation.grid;
