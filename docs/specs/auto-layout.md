@@ -201,9 +201,18 @@ AutoLayoutDiagnostic[] }`. Fixed instances retain their exact placements;
   prefer the host pin they touch in the input (R25), then pair the remaining
   markers with unused hosts sorted by device id, then x. Use one channel or
   two-pin-device terminal per host device: its lowest pin for ground, highest
-  for VDD; never a MOS bulk pin. The marker pin sits at the host x, 40 units
-  below for ground or above for VDD. Extra markers share the last host and
-  are nudged by grid steps.
+  for VDD; never a MOS bulk pin. The marker pin sits at the host x, below for
+  ground or above for VDD, with a 20-unit default stub up to 40 instances
+  and a 40-unit default above that. Extra markers share the last host and are nudged by grid steps. Fixed markers retain their poses.
+  In default mode with a nonzero search budget, at most 40 instances and no
+  supplied partition, after routing and label finishing, try the 40-unit seat
+  only for a marker named by a label-clearance or label-run-on diagnostic (including its labels).
+  Keep the longer seat only if the named problem disappears and no routed
+  guard increases, even when the finished calibrated score rises. Together
+  with port label repair, cap trials at the number of diagnosed movable stubs,
+  bounded by twelve, in id/host order. Reuse identical finished seat previews.
+  R38 remains the authority for direct contacts; a shorter seat does not
+  license coincident pins.
 - **R7 — Templates.** Group members share y and reflect about a vertical
   axis, with 100-unit origin pitch unless R18 aligns a stack. Differential left/right mirrors are
   `none`/`horizontal`; tails lie on the axis one row toward the supply side:
@@ -255,7 +264,10 @@ AutoLayoutDiagnostic[] }`. Fixed instances retain their exact placements;
 pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   component (Routes and contacts); a label-only connection never counts as joined.
 - **R12 — Power.** Each ground/VDD marker gets one straight stub to its R6a
-  host pin. R43 connects every remaining non-bulk rail member through a
+  host pin at the selected distance; an accepted R38 contact needs no stub.
+  Singleton power stubs and R43 trunk offsets use the same document-size
+  marker default.
+  R43 connects every remaining non-bulk rail member through a
   horizontal trunk, including one marker host to join the marker's drawing.
   If the trunk is refused or incomplete, compare a plain tree under R86.
   A supply or ground Cell Pin joins its Net through a trunk, with the Cell Pin on it.
@@ -608,12 +620,16 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   placement. A device overlap or fixed member leaves the stage in place.
 
 - **R71 — Single-host ports.** A non-rail Cell Pin Net that reaches exactly
-  one device pin gets a local seat, 80 units along that pin's transformed exit
-  direction. Face the port toward the host; the existing port-label renderer
-  keeps text upright. Reserve local seats in id order. If a seat overlaps a
-  device, power marker or earlier port, use R19/R20. Rails and multiple-host
-  ports retain R19/R20 and their edge spacing; R71 seats are excluded from
-  edge spacing and side refinement.
+  one device pin gets a local seat along that pin's transformed exit direction.
+  Use a 40-unit default seat up to 40 instances and 80 units above that,
+  with clear artwork. Face the port toward the host;
+  the port-label renderer keeps text upright. Reserve local seats in id order.
+  If the seat is blocked, use R19/R20. Multiple-host ports retain R93 and
+  R19/R20 with the same document-size edge offset. Rail ports retain R62 clearance.
+  Local seats are excluded from edge spacing and side refinement. Fixed ports
+  remain occupied and never move; touching ports require R38 validation.
+  After routing and label finishing, a diagnosed short port stub can extend
+  to 80 units under R6a's shared bounded label repair and guard checks.
   R146 also considers other distances and every host of a non-rail Net.
 
 - **R72 — Blocker repair.** After a complete quick plan, collect movable ports
@@ -1148,12 +1164,15 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
 - **R146 — Routed port-seat search.** In default mode, for documents of at
   most 40 instances and a nonzero search budget, search non-rail `port` and
   `port-filled` instances in id order against the finished incumbent.
+  Start from the short R71 defaults, then retain the finished-layout search
+  and R148 rail search.
   For every device pin on the port's Net, generate grid-snapped seats 20, 40, 80
   and 120 units along its transformed exit, facing the host. For multi-host
   Nets also generate seats 40 units outward from the coordinate median and
   each pair midpoint, facing inward. Include the current seat and R19/R20
-  fallback with other ports held fixed; deduplicate and reject overlap and
-  coincident pins. Preserve device and rail placement relative to one another;
+  fallback on both sides with other ports held fixed; deduplicate and reject
+  overlap and unlicensed coincident pins, preserving validated R38 contacts.
+  Preserve device and rail placement relative to one another;
   when nothing is fixed, translate all placements together to restore the
   incumbent's top-left anchor within R1's half-grid tolerance. Fixed and locked
   instances never move.
@@ -1196,7 +1215,7 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   a nonzero search budget and at most 40 instances, search existing one-pin
   markers on crossed rail Nets. Keep marker count and orientation; do not use
   device-family eligibility to choose a host. At each non-bulk device pin on
-  the rail, propose seats 40 or 80 units along the transformed pin exit and on
+  the rail, propose seats 20 or 40 units along the transformed pin exit and on
   the rail's supply/ground side. Snap to the grid, reject geometry conflicts,
   deduplicate, and rank by the shortest Manhattan branch to a rail device pin.
   Finish the best two seats per marker, with at most eight trials overall,

@@ -1,3 +1,5 @@
+import { contactGeometryProblem, contactPolicy } from "./contact-placement.js";
+import { freezePinGroups } from "./route.js";
 import { visibleSymbolInkBounds } from "@icm/derived";
 import { deviceDescriptor } from "@icm/devices";
 import type { Instance, SchematicDocument } from "@icm/model";
@@ -10,11 +12,11 @@ import {
 } from "./net-roles.js";
 import { compareIds } from "./recognize.js";
 import {
-  CELL_PIN_OFFSET,
+  cellPinOffset,
   CELL_PIN_SPACING,
   enclosingBox,
   geometryProblem,
-  MARKER_OFFSET,
+  markerOffset,
   pinPoints,
   pinExit,
   placement,
@@ -118,7 +120,9 @@ function placePowerMarkers(
       i.id,
       placement(
         host.x - local.x + index * grid,
-        host.y + (ground ? MARKER_OFFSET : -MARKER_OFFSET) - local.y,
+        host.y +
+          (ground ? markerOffset(document) : -markerOffset(document)) -
+          local.y,
       ),
     );
     if (index > 0 || !assigned)
@@ -235,8 +239,8 @@ function placeCellPins(
       const exit = exitAt(host);
       seats.push(
         placement(
-          snap(host.point.x + exit.x * CELL_PIN_OFFSET),
-          snap(host.point.y + exit.y * CELL_PIN_OFFSET),
+          snap(host.point.x + exit.x * cellPinOffset(document)),
+          snap(host.point.y + exit.y * cellPinOffset(document)),
           exit.x > 0 ? "horizontal" : "none",
           exit.y < 0 ? 90 : exit.y > 0 ? 270 : 0,
         ),
@@ -266,7 +270,7 @@ function placeCellPins(
         b.y === 0
       ) {
         const x = snap((left.point.x + right.point.x) / 2),
-          offset = snap(CELL_PIN_OFFSET / 2);
+          offset = snap(cellPinOffset(document) / 2);
         seats.push(
           placement(x, snap(left.point.y - offset), "none", 90),
           placement(x, snap(left.point.y + offset), "none", 270),
@@ -334,7 +338,7 @@ function placeCellPins(
         ? entry.coordinate
         : snap(
             box.x -
-              CELL_PIN_OFFSET -
+              cellPinOffset(document) -
               (railPins.length - 1 - rank) * CELL_PIN_SPACING,
           );
       // R62: duplicate rail Cell Pins must not sit on the same trunk level.
@@ -344,16 +348,16 @@ function placeCellPins(
       const x = entry.vertical
         ? snap(
             side === "right"
-              ? box.x + box.width + CELL_PIN_OFFSET
-              : box.x - CELL_PIN_OFFSET,
+              ? box.x + box.width + cellPinOffset(document)
+              : box.x - cellPinOffset(document),
           )
         : along;
       const y = entry.vertical
         ? along
         : snap(
             side === "top"
-              ? box.y - CELL_PIN_OFFSET - outward
-              : box.y + box.height + CELL_PIN_OFFSET + outward,
+              ? box.y - cellPinOffset(document) - outward
+              : box.y + box.height + cellPinOffset(document) + outward,
           );
       targets.set(
         entry.i.id,
@@ -429,7 +433,12 @@ export function portSeatCandidates(
       (p) => p.name === host.pinName,
     )!;
     const exit = pinExit(pin, instance.placement!);
-    for (const distance of [20, 40, 80, 120])
+    for (const distance of [
+      cellPinOffset(document) / 2,
+      cellPinOffset(document),
+      cellPinOffset(document) * 2,
+      cellPinOffset(document) * 3,
+    ])
       seats.push(
         placement(
           snap(host.point.x + exit.x * distance),
@@ -471,27 +480,33 @@ export function portSeatCandidates(
           placement(snap(center.x + dx), snap(center.y + dy), mirror, rotation),
         );
   }
-  placeCellPins(
-    document,
-    devices,
-    pins,
-    resolver,
-    roles,
-    targets,
-    emptyOverrides(),
-    emptyChoices(),
-    new Set([portId]),
-    new Set(document.instances.filter((i) => i.id !== portId).map((i) => i.id)),
-  );
-  seats.push(targets.get(portId)!);
+  for (const side of ["left", "right"] as const) {
+    placeCellPins(
+      document,
+      devices,
+      pins,
+      resolver,
+      roles,
+      targets,
+      { ...emptyOverrides(), sides: new Map([[portId, side]]) },
+      emptyChoices(),
+      new Set([portId]),
+      new Set(
+        document.instances.filter((i) => i.id !== portId).map((i) => i.id),
+      ),
+    );
+    seats.push(targets.get(portId)!);
+  }
+  const contacts = contactPolicy(document, freezePinGroups(document, resolver));
   const seen = new Set<string>();
   return seats.filter((seat) => {
     const key = JSON.stringify(seat);
     if (seen.has(key)) return false;
     seen.add(key);
-    return !geometryProblem(
+    return !contactGeometryProblem(
       withPlacements(document, new Map([[portId, seat]])),
       resolver,
+      contacts,
     );
   });
 }
@@ -619,8 +634,8 @@ export function nextMarkerPlacements(
       outside && members.every((p) => p.point.y === level)
         ? level
         : ground
-          ? Math.max(...rows) + MARKER_OFFSET / 2
-          : Math.min(...rows) - MARKER_OFFSET / 2;
+          ? Math.max(...rows) + markerOffset(document) / 2
+          : Math.min(...rows) - markerOffset(document) / 2;
     const levels = new Set([
       y,
       ...members
@@ -661,8 +676,9 @@ export function nextMarkerPlacements(
       port &&
       host &&
       exit &&
-      old.position.x === snap(host.point.x + exit.x * CELL_PIN_OFFSET) &&
-      old.position.y === snap(host.point.y + exit.y * CELL_PIN_OFFSET);
+      old.position.x ===
+        snap(host.point.x + exit.x * cellPinOffset(document)) &&
+      old.position.y === snap(host.point.y + exit.y * cellPinOffset(document));
     if (port && !local) targets.set(i.id, structuredClone(old));
     const target = targets.get(i.id)!;
     const axis =

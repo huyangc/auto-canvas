@@ -232,7 +232,7 @@ it("R148 moves the trunk to avoid a lower-row supply drop crossing a signal", ()
   expect(auditRouting(original.document, resolver)).toMatchObject({
     crossings: 1,
     bends: 1,
-    wireLength: 1300,
+    wireLength: 1270,
   });
   const railSegments = original.document.routes
     .filter((r) => r.netId === "supply")

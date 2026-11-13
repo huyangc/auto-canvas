@@ -29,6 +29,57 @@ Visual totals main → 20/40: `VISUAL_LABEL_CLEARANCE` 129 → 136,
 `VISUAL_TERMINAL_DEPARTURE` 66 → 34. So shorter stubs help every primary metric
 but crowd some labels. This task shortens stubs where the labels still fit.
 
+## Plan change after round 1 (Opus, 2026-11-13)
+
+Round 1's per-seat pre-checks kept only about half of the experiment's gain
+(dev wire −4.7% vs −8.8%, area −8.2% vs −11.7%) and raised bends, because
+mixing short and long stubs adds jogs and the pre-checks cannot see later
+routing and label finishing. Round 2 changes approach:
+
+- **Short defaults everywhere.** Marker offset 20 (R6a/R12) and single-host
+  port offset 40 (R71); R146 and the rail search generate candidates around
+  the new defaults. Touching remains only through validated R38 contacts.
+- **Post-hoc label repair only.** After routing and label finishing, for each
+  marker or port that a `VISUAL_LABEL_CLEARANCE`/`VISUAL_LABEL_RUN_ON`
+  diagnostic names (or whose label it names), try its longer seat; keep it if
+  that diagnostic disappears and the finished calibrated score is not higher.
+  Bounded, deterministic.
+- **Defects to fix (not test rewrites):** repeated layout of `rc-lowpass` /
+  `rc-highpass` must be stable again (no `mirror_instance`/`move_instance`
+  on a second run); every final port seat must be a member of
+  `portSeatCandidates` (corpus line 538).
+- **Authorized test rewrites (old geometry only):** `attachments.test.ts`
+  R71 seat distances, `quality.test.ts` R25 marker y, `corpus.test.ts`
+  ground-host +40 checks (line 636), `recognition-cascode.test.ts` origins:
+  update to the new defaults. `blocker-repair.test.ts`: move fixture parts so
+  each fixture still produces its intended initial obstruction under the new
+  defaults; keep every repair assertion.
+- Runtime: held-out times within +10% of main (round 1: ltc3452 +21.8%).
+
+## Plan change after round 2 (Opus, 2026-11-13)
+
+Round 2 (short defaults + bounded post-hoc repair) reaches dev wire −8.3%,
+area −11.6%, and on val drawings completed in both runs wire −6.4%, crossings
+−6.4%, but bends +1.8%, label run-on 30 → 49, label clearance 179 → 191, one
+terminal-on-foreign-route; ltc3452 +20.4%; large documents changed. Round 3
+(final Codex round):
+
+- **Large documents unchanged.** Use the short defaults only for documents up
+  to 40 instances; above that keep 40/80, so the six large plans are
+  byte-identical again.
+- **Repair acceptance.** Accept a longer seat when the targeted label
+  diagnostic for that marker/port disappears and no other guard rises,
+  regardless of the calibrated score (labels are guards; wire is not). Raise
+  the trial cap from 4 to the number of diagnosed stubs, bounded by 12.
+- **Runtime.** Held-out `ltc3452` within +10% of main; reuse finished previews
+  across repair trials where possible.
+- **Authorized rewrites (old geometry only):** `routing.test.ts:789` (stub
+  ±40 → new default), `port-seat-search.test.ts:136` (candidate set now also
+  contains the short edges), `rail-crossings.test.ts:232` (initial trunk
+  wire 1300 → new value; keep the crossings/bends checks).
+- **Acceptance** otherwise as before. If bends or a label total still rise
+  after this, report the per-drawing causes; Opus will decide with the user.
+
 ## Context
 
 - Constants: `packages/auto-layout/src/geometry.ts:27-29`

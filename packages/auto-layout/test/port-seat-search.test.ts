@@ -130,17 +130,24 @@ it("R146 rejects a blocked 80-unit seat and routes a shorter local seat", () => 
   expect(missingConnections(result.final!, resolver)).toBe(0);
 });
 
-it("R146 retains the edge when every local candidate is obstructed", () => {
+it("R146 uses the shorter edge when every local candidate is obstructed", () => {
   const document = fixture(true);
   const { initial, result, replan, fixed } = search(document);
   expect(portSeatCandidates(document, resolver, "p")).toEqual([
     placement(490, 0, "horizontal"),
+    placement(210, 0),
+    placement(450, 0, "horizontal"),
   ]);
-  expect(result).toBe(initial);
+  expect(result.final!.instances.find((i) => i.id === "p")!.placement).toEqual(
+    placement(450, 0, "horizontal"),
+  );
+  expect(routedScore(result, resolver)).toBeLessThan(
+    routedScore(initial, resolver),
+  );
   expect(missingConnections(result.final!, resolver)).toBe(0);
   const route = vi.fn(replan);
-  expect(searchPortSeats(initial, resolver, fixed, route)).toBe(initial);
-  expect(route).not.toHaveBeenCalled();
+  expect(searchPortSeats(initial, resolver, fixed, route)).toEqual(result);
+  expect(route).toHaveBeenCalledTimes(2);
 });
 
 it("R146 keeps the current seat on a routed-score tie", () => {

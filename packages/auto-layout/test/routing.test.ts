@@ -788,7 +788,7 @@ it.each(["supply", "ground"] as const)(
     expect(segments).toHaveLength(1);
     expect(segments[0]!.to).toEqual({
       x: segments[0]!.from.x,
-      y: segments[0]!.from.y + (role === "supply" ? -40 : 40),
+      y: segments[0]!.from.y + (role === "supply" ? -20 : 20),
     });
     expect(
       after.annotations.find((a) => a.id === "supply-label")!.anchor,

@@ -179,7 +179,7 @@ it.each([false, true])(
     );
     const targets = new Map([
       ["host", placement(400, 0)],
-      ["other", placement(blocked ? 300 : 0, 0)],
+      ["other", placement(blocked ? 340 : 0, 0)],
     ]);
     placeMarkers(
       d,
@@ -192,8 +192,8 @@ it.each([false, true])(
     const pin = pins(d, targets),
       host = pin("host", "G"),
       port = pin("input", "P");
-    if (blocked) expect(port.x).toBeGreaterThan(host.x + 80);
-    else expect(port).toEqual({ x: host.x - 80, y: host.y });
+    if (blocked) expect(port.x).toBeGreaterThan(host.x + 40);
+    else expect(port).toEqual({ x: host.x - 40, y: host.y });
     expect(targets.get("input")!.rotation).toBe(0);
     expect(
       geometryProblem(withPlacements(d, targets), resolver),
@@ -289,10 +289,10 @@ it.each([0, 90, 180, 270] as const)(
       gate = point("host", "G"),
       port = point("input", "P");
     const delta = [
-      { x: -80, y: 0 },
-      { x: 0, y: -80 },
-      { x: 80, y: 0 },
-      { x: 0, y: 80 },
+      { x: -40, y: 0 },
+      { x: 0, y: -40 },
+      { x: 40, y: 0 },
+      { x: 0, y: 40 },
     ][rotation / 90]!;
     expect(port).toEqual({ x: gate.x + delta.x, y: gate.y + delta.y });
     expect(

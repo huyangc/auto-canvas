@@ -107,6 +107,7 @@ import { compactPlacements, compactRows } from "./compact.js";
 import { symmetryTopology } from "./symmetry.js";
 import { searchDeviceRelocations } from "./device-relocation-search.js";
 import { searchRailSeats } from "./rail-seat-search.js";
+import { repairStubLabels } from "./stub-seat.js";
 import { searchPortSeats } from "./port-seat-search.js";
 import { draftingGroups } from "./drafting-groups.js";
 import { followDraftingGroups } from "./follow-drafting-groups.js";
@@ -945,11 +946,25 @@ function planAutoLayoutMeasured(
       final: replay.document,
       choices: emptyChoices(),
     };
+    // Finished seats are immutable within this planning call. Reuse a trial
+    // reached by multiple searches, including the final label repair.
+    const finishedSeats = new Map<
+      ReturnType<typeof contactPolicy> | undefined,
+      Map<string, LayoutRun>
+    >();
     const finishPlacement = (
       placements: ReadonlyMap<string, Placement>,
       contacts?: ReturnType<typeof contactPolicy>,
       translation = draftingTranslation(incumbent),
     ) => {
+      let cache = finishedSeats.get(contacts);
+      if (!cache) finishedSeats.set(contacts, (cache = new Map()));
+      const key = JSON.stringify([
+        translation,
+        document.instances.map((i) => [i.id, placements.get(i.id)]),
+      ]);
+      const cached = cache.get(key);
+      if (cached) return cached;
       const routeSeat = (signalTrunks: boolean) =>
         planFrom(
           translation,
@@ -982,11 +997,13 @@ function planAutoLayoutMeasured(
         ),
       );
       const final = preview(document, resolver, finished.edits);
-      return {
+      const run = {
         result: finished,
         choices: initial.choices,
         ...(final.ok ? { final: final.document } : {}),
       };
+      cache.set(key, run);
+      return run;
     };
     const relocationBudget = {
       remaining: planningBudget(document.instances.length, 10),
@@ -1126,6 +1143,14 @@ function planAutoLayoutMeasured(
         { phase: "gaps", budget: relocationBudget },
       ),
     );
+    const repairLabels = (run: LayoutRun) =>
+      repairStubLabels(
+        run,
+        resolver,
+        fixed,
+        (placements) => finishPlacement(placements, railContacts),
+        stopped,
+      ).result;
     // R152: compare one complete branch-column candidate with the finished
     // incumbent. Existing modes, locks and explicit relationships keep their
     // placement contract; this candidate only enters plain bounded planning.
@@ -1137,9 +1162,9 @@ function planAutoLayoutMeasured(
       document.inductorCouplings?.length ||
       stopped()
     )
-      return closed.result;
+      return repairLabels(closed);
     const columns = branchColumns(document, resolver);
-    if (!columns || !closed.final) return closed.result;
+    if (!columns || !closed.final) return repairLabels(closed);
     const placed = placeDocument(
       document,
       resolver,
@@ -1151,7 +1176,7 @@ function planAutoLayoutMeasured(
       "stages",
       columns,
     );
-    if (placed.problem) return closed.result;
+    if (placed.problem) return repairLabels(closed);
     const candidate = finishPlacement(
       placed.placements,
       undefined,
@@ -1163,15 +1188,15 @@ function planAutoLayoutMeasured(
         calibratedScore(closed, resolver) ||
       compactionRegresses(closed, candidate, resolver, true)
     )
-      return closed.result;
+      return repairLabels(closed);
     const limits = routedGuards(closed.final, resolver);
     if (
       Object.entries(routedGuards(candidate.final, resolver)).some(
         ([key, count]) => count > (limits[key] ?? 0),
       )
     )
-      return closed.result;
-    return candidate.result;
+      return repairLabels(closed);
+    return repairLabels(candidate);
   }
   if (
     options.quality !== "optimized" ||

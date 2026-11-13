@@ -1,3 +1,4 @@
+import { planningMemo } from "./planning-reuse.js";
 import {
   deriveElectricalTopologyProjection,
   endpointKey,
@@ -9,7 +10,7 @@ import {
   MAX_SCHEMATIC_EDITS_PER_TRANSACTION,
   documentObjectIds,
   planRouteNet,
-  planWireBatch,
+  planWireBatch as planWireBatchOnce,
   type SchematicEdit,
 } from "@icm/edit-engine";
 import {
@@ -18,7 +19,7 @@ import {
   type SchematicDocument,
 } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
-import { MARKER_OFFSET, pinPoints, integerPoint } from "./geometry.js";
+import { markerOffset, pinPoints, integerPoint } from "./geometry.js";
 import { channelPins, isMos, type NetRoles } from "./net-roles.js";
 import { powerHosts } from "./place-markers.js";
 import { isMarker } from "./placement-connectivity.js";
@@ -37,6 +38,21 @@ import {
   type TerminalRef,
 } from "./pin-contacts.js";
 import type { AutoLayoutDiagnostic, RecognizedGroup } from "./types.js";
+
+// Stub routes share the same immutable trial snapshots as net routes.
+const planWireBatch: typeof planWireBatchOnce = (
+  document,
+  resolver,
+  input,
+  limit,
+  options,
+) =>
+  planningMemo(
+    document,
+    resolver,
+    `wire-batch:${JSON.stringify([input, limit, options])}`,
+    () => planWireBatchOnce(document, resolver, input, limit, options),
+  );
 
 /** Reserve the whole wire-id family before authoring stubs or fallback labels. */
 function freshWirePlan(
@@ -227,7 +243,9 @@ function powerTargets(
               x: pin.point.x,
               y:
                 pin.point.y +
-                (role === "ground" ? MARKER_OFFSET : -MARKER_OFFSET),
+                (role === "ground"
+                  ? markerOffset(document)
+                  : -markerOffset(document)),
             },
           },
         ]
@@ -258,8 +276,8 @@ function powerTargets(
   const y =
     cellPoint?.y ??
     (role === "ground"
-      ? Math.max(...channel.map((p) => p.point.y)) + MARKER_OFFSET
-      : Math.min(...channel.map((p) => p.point.y)) - MARKER_OFFSET);
+      ? Math.max(...channel.map((p) => p.point.y)) + markerOffset(document)
+      : Math.min(...channel.map((p) => p.point.y)) - markerOffset(document));
   let left = Math.min(...points.map((p) => p.point.x));
   let right = Math.max(...points.map((p) => p.point.x));
   if (left === right) {
@@ -316,11 +334,11 @@ function railTrunk(
   const ys = (rows.length ? rows : outerPins.length ? outerPins : points).map(
     (p) => p.point.y,
   );
-  // Keep the trunk between the outer pins and their 40-unit marker stubs.
+  // Keep the trunk between the outer pins and their default marker stubs.
   const y =
     role === "ground"
-      ? Math.max(...ys) + MARKER_OFFSET / 2
-      : Math.min(...ys) - MARKER_OFFSET / 2;
+      ? Math.max(...ys) + markerOffset(document) / 2
+      : Math.min(...ys) - markerOffset(document) / 2;
   let left = Math.min(...points.map((p) => p.point.x));
   let right = Math.max(...points.map((p) => p.point.x));
   if (left === right) {
@@ -630,22 +648,41 @@ function routeGroup(
         let reason: unknown;
         for (const trunk of trunks) {
           try {
-            const candidate = planRouteNet(
+            // Routing alternatives and repair trials can revisit the same
+            // immutable snapshot. Keep the validated net plan within this
+            // public planning call, keyed by every varying routing input.
+            const request = {
+              target: { kind: "pins" as const, pins: target.pins },
+              ...(trunk ? { trunk } : {}),
+            };
+            const routed = planningMemo(
               working,
               resolver,
-              {
-                target: { kind: "pins", pins: target.pins },
-                ...(trunk ? { trunk } : {}),
-              },
-              MAX_SCHEMATIC_EDITS_PER_TRANSACTION,
-              {
-                netScope: "base",
-                components: "physical",
-                partial: true,
-                crossingCost: 20 * working.presentation.grid,
-                reservedIds,
+              `route-net:${JSON.stringify([request, [...reservedIds]])}`,
+              () => {
+                try {
+                  return {
+                    plan: planRouteNet(
+                      working,
+                      resolver,
+                      request,
+                      MAX_SCHEMATIC_EDITS_PER_TRANSACTION,
+                      {
+                        netScope: "base",
+                        components: "physical",
+                        partial: true,
+                        crossingCost: 20 * working.presentation.grid,
+                        reservedIds,
+                      },
+                    ),
+                  };
+                } catch (error) {
+                  return { error };
+                }
               },
             );
+            if ("error" in routed) throw routed.error;
+            const candidate = routed.plan;
             if (
               trunks.length === 1 ||
               (target.trunk && trunk && !candidate.unjoined?.length)
