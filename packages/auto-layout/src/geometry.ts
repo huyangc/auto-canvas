@@ -24,9 +24,11 @@ export const transformPoint: typeof modelTransformPoint = (...args) =>
 
 export const ROW_PITCH = 120;
 export const MEMBER_PITCH = 100;
-export const CELL_PIN_OFFSET = 80;
+export const cellPinOffset = (document: SchematicDocument) =>
+  document.instances.length <= 40 ? 40 : 80;
 export const COLUMN_PITCH = 160;
-export const MARKER_OFFSET = 40;
+export const markerOffset = (document: SchematicDocument) =>
+  document.instances.length <= 40 ? 20 : 40;
 export const CELL_PIN_SPACING = 40;
 
 export const placement = (

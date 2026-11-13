@@ -1,7 +1,7 @@
 import { resolveRouteGeometry, visibleInstanceBounds } from "@icm/derived";
 import type { SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
-import { CELL_PIN_OFFSET, pinPoints } from "./geometry.js";
+import { cellPinOffset, pinPoints } from "./geometry.js";
 import {
   deviceNets,
   devicePins,
@@ -194,7 +194,7 @@ export function compactRows(
         !isMarker(byId.get(q.instanceId)!) &&
         roles.pinNet(q.instanceId, q.pinName) === net &&
         p.point.x === q.point.x &&
-        Math.abs(p.point.y - q.point.y) <= CELL_PIN_OFFSET
+        Math.abs(p.point.y - q.point.y) <= cellPinOffset(document)
       )
         bind([p.instanceId, q.instanceId]);
   }

@@ -1,8 +1,13 @@
 import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
+import * as editEngine from "@icm/edit-engine";
 import { defaultLayoutSearch, planAutoLayout } from "../src/auto-layout.js";
 import { planningBudget } from "../src/planning-budget.js";
-import { preview } from "../src/transaction.js";
+import { preview, reusePreviews } from "../src/transaction.js";
+import { reusePlanning } from "../src/planning-reuse.js";
+import { freezePinGroups, routeDocument } from "../src/route.js";
+import { classifyNets } from "../src/net-roles.js";
+import { placement } from "../src/geometry.js";
 import { circuit } from "./document-fixture.js";
 
 const resolver = new InMemorySymbolResolver(builtInSymbols);
@@ -48,3 +53,42 @@ it("does not reuse previews or audits after the caller edits its document", () =
   const final = preview(document, resolver, result.edits);
   expect(final.ok && final.document.instances[0]!.symbolId).toBe("capacitor");
 });
+
+it.each(["planRouteNet", "planWireBatch"] as const)(
+  "reuses %s across trials only within one planning call",
+  (planner) => {
+    const document =
+      planner === "planRouteNet"
+        ? fixture()
+        : circuit({ a: "resistor", b: "ground" }, { ground: ["a.2", "b.0"] });
+    document.instances[0]!.placement = placement(0, 0);
+    document.instances[1]!.placement = placement(200, 0);
+    const route = vi.spyOn(editEngine, planner);
+    const run = () =>
+      routeDocument(
+        document,
+        resolver,
+        freezePinGroups(document, resolver),
+        classifyNets(document, resolver),
+        [],
+      );
+    try {
+      const first = reusePlanning(() =>
+        reusePreviews(() => {
+          const a = run();
+          expect(a.problem).toBeUndefined();
+          const calls = route.mock.calls.length;
+          expect(calls).toBeGreaterThan(0);
+          expect(run()).toEqual(a);
+          expect(route).toHaveBeenCalledTimes(calls);
+          return a;
+        }),
+      );
+      const calls = route.mock.calls.length;
+      expect(reusePlanning(() => reusePreviews(run))).toEqual(first);
+      expect(route.mock.calls.length).toBeGreaterThan(calls);
+    } finally {
+      route.mockRestore();
+    }
+  },
+);

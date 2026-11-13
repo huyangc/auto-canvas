@@ -10,7 +10,6 @@ import { placeDocument } from "../src/place.js";
 import { placeMarkers } from "../src/place-markers.js";
 import { emptyChoices, emptyOverrides } from "../src/layout-choices.js";
 import {
-  CELL_PIN_OFFSET,
   ROW_PITCH,
   pinPoints,
   placement,
@@ -57,7 +56,7 @@ for (const strategy of ["template", "layered"] as const) {
     expect(pin("d", "S").x).toBe(pin("b", "D").x);
     expect(p.get("bias-port")!.position).toEqual({
       x: (pin("c", "G").x + pin("d", "G").x) / 2,
-      y: pin("c", "G").y - CELL_PIN_OFFSET / 2,
+      y: pin("c", "G").y - 40 / 2,
     });
   });
   it(`${strategy}: centers outward split tails one row below the pair`, () => {
@@ -114,7 +113,7 @@ for (const strategy of ["template", "layered"] as const) {
         (p) => p.instanceId === id && p.pinName === "G",
       )!.point;
       expect(p.get(port)!.position).toEqual({
-        x: gate.x + sign * CELL_PIN_OFFSET,
+        x: gate.x + sign * 40,
         y: gate.y,
       });
     }
@@ -152,10 +151,8 @@ it.each(["above", "below", "blocked", "outward"] as const)(
     const x = (gates[0]!.point.x + gates[1]!.point.x) / 2;
     if (mode === "below" || mode === "blocked") {
       for (const [id, offset] of [
-        ["block-above", -CELL_PIN_OFFSET / 2],
-        ...(mode === "blocked"
-          ? [["block-below", CELL_PIN_OFFSET / 2] as const]
-          : []),
+        ["block-above", -40 / 2],
+        ...(mode === "blocked" ? [["block-below", 40 / 2] as const] : []),
       ] as const) {
         d.instances.push({ id, symbolId: "resistor", placement: null });
         targets.set(id, placement(x, y + offset));
@@ -176,7 +173,7 @@ it.each(["above", "below", "blocked", "outward"] as const)(
       expect(choices.sides.has("port")).toBe(false);
       expect(targets.get("port")!.position).toEqual({
         x,
-        y: y + ((mode === "above" ? -1 : 1) * CELL_PIN_OFFSET) / 2,
+        y: y + ((mode === "above" ? -1 : 1) * 40) / 2,
       });
       expect(targets.get("port")!.rotation).toBe(mode === "above" ? 90 : 270);
     }

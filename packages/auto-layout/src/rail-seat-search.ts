@@ -3,6 +3,7 @@ import { visibleInstanceBounds } from "@icm/derived";
 import type { SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import {
+  markerOffset,
   pinExit,
   pinPoints,
   transformPoint,
@@ -56,7 +57,10 @@ function seats(
       outward,
       { x: 0, y: roles.rails.get(net) === "ground" ? 1 : -1 },
     ])
-      for (const distance of [40, 80]) {
+      for (const distance of [
+        markerOffset(document),
+        markerOffset(document) * 2,
+      ]) {
         const pose: Placement = {
           ...marker.placement!,
           position: {

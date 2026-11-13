@@ -50,12 +50,12 @@ function blockedPort(otherX = -240) {
   ]);
   for (const i of d.instances) i.placement = positions.get(i.id) ?? null;
   enclose(d, [
-    ["trapped", placement(10, 100)],
-    ["far", placement(300, 40)],
-    ["left", placement(-10, 80)],
-    ["right", placement(30, 80)],
-    ["roofLeft", placement(-20, 50, "none", 90)],
-    ["roofRight", placement(40, 50, "none", 90)],
+    ["trapped", placement(50, 100)],
+    ["far", placement(340, 40)],
+    ["left", placement(30, 80)],
+    ["right", placement(70, 80)],
+    ["roofLeft", placement(20, 50, "none", 90)],
+    ["roofRight", placement(80, 20, "none", 90)],
   ]);
   if (otherX > 0) {
     d.instances.find((i) => i.id === "far")!.placement = placement(100, -100);
@@ -90,11 +90,11 @@ function blockedGround() {
   d.instances[0]!.placement = placement(0, 0);
   d.instances[1]!.placement = placement(240, 80);
   enclose(d, [
-    ["trapped", placement(-20, 70, "none", 90)],
-    ["far", placement(40, 70, "none", 270)],
-    ["left", placement(-20, 50, "none", 90)],
-    ["right", placement(-20, 90, "none", 90)],
-    ["columnWall", placement(10, 110)],
+    ["trapped", placement(-20, 50, "none", 90)],
+    ["far", placement(40, 50, "none", 270)],
+    ["left", placement(-20, 30, "none", 90)],
+    ["right", placement(-20, 70, "none", 90)],
+    ["columnWall", placement(10, 90)],
   ]);
   return d;
 }
@@ -329,7 +329,7 @@ it("R72 repairs the final search state, including a zero-budget search, determin
 
 it("R72 clears a marker drawing from a horizontal rail trunk", () => {
   const d = blockedGround();
-  d.instances[1]!.placement = placement(240, 40);
+  d.instances[1]!.placement = placement(240, 20);
   const options = { fixedInstanceIds: new Set(["a", "b"]) };
   const initial = planLayoutOnce(d, resolver, options, emptyOverrides());
   expect(initial.result.diagnostics.some((d) => d.rule === "R14")).toBe(true);

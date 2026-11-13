@@ -363,7 +363,7 @@ it("R25 keeps a marker with its touching host before id-order pairing", () => {
     points.find((p) => p.instanceId === id && p.pinName === name)!.point;
   expect(pin("g", "0")).toEqual({
     x: pin("z", "-").x,
-    y: pin("z", "-").y + 40,
+    y: pin("z", "-").y + 20,
   });
 });
 
