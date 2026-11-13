@@ -17,6 +17,14 @@ involve a rail Net are 97 vs 18 in the human drawings, about 40% of the whole
 crossing excess, spread over 61 drawings. Matching humans on those alone would
 take crossings from 1.83× to about 1.51× of human.
 
+## Plan change after round 1 (Opus, 2026-11-13)
+
+See `review.md` round 1: diagnose every crossed rail Net, per-pin and
+per-device marker candidates, markers for rails that carry an existing
+power-domain name claim but no marker instance (existing name only), rule
+R155, runtime gate +20% median. `scripts/auto-layout-review.mjs` is added to
+the owned paths (equivalence predicate only).
+
 ## Context
 
 - Power markers: `isMarker` (`placement-connectivity.ts:5`; symbols `ground`,

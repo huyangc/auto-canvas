@@ -56,6 +56,20 @@ export function refinementMetrics(result: AutoLayoutResult) {
   return measurements.get(result);
 }
 
+/** Preserve search accounting when a finished calibrated-score pass wins. */
+export function retainRefinementMetrics(
+  selected: LayoutRun,
+  previous: AutoLayoutResult,
+  resolver: SymbolResolver,
+) {
+  const prior = measurements.get(previous);
+  measurements.set(selected.result, {
+    ...prior,
+    candidates: prior?.candidates ?? 0,
+    score: routedScore(selected, resolver),
+  });
+}
+
 /** R44: compare one routing-only alternative, retaining refinement evidence. */
 export function selectRoutingAlternative(
   current: LayoutRun,

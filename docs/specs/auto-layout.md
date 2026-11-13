@@ -248,8 +248,11 @@ AutoLayoutDiagnostic[] }`. Fixed instances retain their exact placements;
   step of the old corner. A direct contact separated by placement is drawn
   by R11–R13 like any other connection. Before returning, replay the complete
   list with `dryRun` on the input. Require transaction acceptance and the same
-  Base Net partition for every terminal, using
-  `deriveElectricalTopologyProjection`. Otherwise return no edits and an R10
+  Base Net partition for every original terminal, using
+  `deriveElectricalTopologyProjection`. R155 may add ground/supply terminals
+  only to a Net with the same existing marker symbol and explicit name, or an
+  existing power-marker-owned name claim authorizing its ground/supply domain.
+  Otherwise return no edits and an R10
   diagnostic. In plain planning with at most 40 instances, R150 can try
   moving unlocked drafting with its owners, retaining the following behavior
   as its fallback. Locked drafting always remains an obstacle. In the fallback,
@@ -272,6 +275,8 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   R43 connects every remaining non-bulk rail member through a
   horizontal trunk, including one marker host to join the marker's drawing.
   If the trunk is refused or incomplete, compare a plain tree under R86.
+  After finishing, R155 may replace a crossed trunk with named local marker
+  trees on documents of at most 40 instances.
   A supply or ground Cell Pin joins its Net through a trunk, with the Cell Pin on it.
   A grounded source driving a passive chain has a supply role under R4 but is
   routed as a signal, so it gets no trunk.
@@ -296,7 +301,9 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   component pins; a completely failed Net lists all its target pins. For an already
   named Net, add one `net-label` per unconnected pin group, on a short stub
   from one pin, bound to the existing Net name. An unnamed Net receives no
-  labels: never invent a name that would change the netlist.
+  labels: never invent a name that would change the netlist. R155's additional
+  ground/supply markers are a separate successful-layout optimization; they
+  also require an existing explicit name and marker of the same symbol.
 - **R15 — Labels.** After routing, each freed net/power label moves to its Net's
   longest horizontal leg with a route anchor at `t: 0.5`. Preserve the original
   route anchor's `normalOffset`, `direction` and `orientation`; otherwise use
@@ -451,7 +458,8 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   Pins with their own marker keep their stubs. All remaining rail pins join
   one horizontal trunk above the device rows for supply or below them for
   ground, together with one marker host. This applies to both strategies and
-  every rail size; never add an instance. A refused or incomplete trunk gets a
+  every rail size. Only R155 may add marker instances and replace this trunk
+  with local trees. A refused or incomplete trunk gets a
   tree fallback under R86. Remaining failures produce R14 warnings naming
   the affected pins. A floating pin is the sole non-bulk pin in its physical
   component while its Base Net has other non-bulk pins.
@@ -1223,7 +1231,8 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
 
 - **R148 — Finished rail search.** After R147 and R146, in default mode with
   a nonzero search budget and at most 40 instances, search existing one-pin
-  markers on crossed rail Nets. Keep marker count and orientation; do not use
+  markers on crossed rail Nets. This search keeps marker count and orientation;
+  R155 may add markers afterwards. Do not use
   device-family eligibility to choose a host. At each non-bulk device pin on
   the rail, propose seats 20 or 40 units along the transformed pin exit and on
   the rail's supply/ground side. Snap to the grid, reject geometry conflicts,
@@ -1496,6 +1505,46 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   Use R151's finished-score/guard comparison and share resolved routing and
   finished-placement work within the public call. This retry is based on
   diagnostics and geometry, never circuit identity.
+
+- **R155 — Local rail markers.** After all placement, routing, label and
+  drafting finishing, consider crossed rail Nets in decreasing crossing count
+  with Net-id ties, for documents with at most 40 instances. Require an existing
+  `ground`/`vdd-port` with an explicit name claim, or an existing power-marker-owned
+  name claim with domain `ground`/`vdd` (the model's supply domain). Never infer
+  or invent a name. A claim-only rail may receive the corresponding symbol.
+  Generate a per-pin candidate by removing crossed edges from the rail tree:
+  pins outside the existing markers' remaining components receive local markers;
+  the other pins retain a shared trunk. Also generate one marker per device,
+  joining its non-bulk rail pins in one short tree. Reuse existing markers in
+  nearest-host/id order before adding copies; never exceed 40 total instances.
+  Share at most eight finished trials per document. Give both partitions a
+  trial before considering a second seat preference; with more than two crossed
+  rails retain only the first preference to share the budget across rails.
+  Seat on the pin's exit and rail side using up to 28 cheap geometric seats,
+  considering symbol, label and foreign-wire clearance. Preserve the vertical
+  approach to a power marker, with grid-aligned bends. Bound each local tree
+  by four marker offsets per host pin; the retained trunk is exempt.
+  Keep device poses, fixed/locked markers, user groups, locked routes and
+  protected annotation/drafting owners. Move eligible power labels off removed
+  routes onto the local marker; retain their identities, bindings and claims.
+  Copy marker symbol/variant/style and named labels. Every added marker gets
+  explicit endpoint membership and a claim with the existing name, scope and
+  domain. Supply copies without an authored label receive a bound net-name label.
+  Seat unlocked labels after routing. Compare complete transaction replays by
+  the calibrated finished score, requiring fewer total crossings, no unsafe
+  routing or increased routed guard, and no increase in T070's frozen readability
+  composite. Ties retain the incumbent. Bends and wire length are evaluated by
+  the score and the corpus acceptance gates. Cancellation and the transaction
+  edit cap apply. All additions are `add_instance` edits in the layout transaction,
+  hence one Undo. Reuse prevents marker growth on a re-run.
+  Equivalence preserves every original terminal partition. Added one-pin markers
+  must match an original marker's symbol/variant and claim, or the original
+  partition's power claim and corresponding default symbol. Each added marker's
+  own claim must preserve name, scope and domain on that same partition.
+  Strict fixed-terminal callers retain their behavior. Named same-symbol marker
+  components count as complete local rail trees for the small-document
+  missing-connection guard; unmarked components still require wires and floating
+  pins still use physical components. Documents above 40 retain prior behavior.
 
 - **Existing locks and conflicts.** Members of a locked layout group or
   constraint are treated as fixed instances under R1, because the Edit Engine

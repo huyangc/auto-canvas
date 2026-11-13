@@ -5,7 +5,7 @@ import {
   floatingPins,
 } from "../packages/auto-layout/dist/routing-audit.js";
 import { refinementMetrics } from "../packages/auto-layout/dist/refine.js";
-import { terminalPartition } from "../packages/auto-layout/dist/transaction.js";
+import { equivalentTerminals } from "../packages/auto-layout/dist/transaction.js";
 import {
   compareElectricalGraphs,
   projectElectricalGraph,
@@ -142,12 +142,11 @@ for (const fixture of [...cases, ...heldOut]) {
       ),
     });
     const equivalent =
-      beforeGraph.status === "ready"
-        ? afterGraph.status === "ready" &&
+      equivalentTerminals(document, after, resolver) &&
+      (beforeGraph.status !== "ready" ||
+        (afterGraph.status === "ready" &&
           compareElectricalGraphs(beforeGraph.graph, afterGraph.graph) ===
-            "equal"
-        : terminalPartition(document, resolver) ===
-          terminalPartition(after, resolver);
+            "equal"));
     const problems = [
       ...audit.unsafeProblems,
       ...(!equivalent ? ["Electrical equivalence failed"] : []),

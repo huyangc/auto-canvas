@@ -8,6 +8,7 @@ import {
 import { routeEndpoints, type Point, type SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import { boxesIntersect, draftingBounds } from "./geometry.js";
+import { isPowerMarker, railMarkerClaim } from "./rail-marker-identity.js";
 import { isMosBulk } from "./net-roles.js";
 
 /** Enumerate the same non-bulk symbol pins for both connectivity measures. */
@@ -46,11 +47,53 @@ export function missingConnections(
   resolver: SymbolResolver,
 ): number {
   const components = new Map<string, Set<string>>();
-  for (const pin of connectionPins(document, resolver)) {
+  const pins = connectionPins(document, resolver);
+  for (const pin of pins) {
     if (!pin.netId) continue;
     const group = components.get(pin.netId) ?? new Set<string>();
     group.add(pin.component);
     components.set(pin.netId, group);
+  }
+  // Complete physical trees cannot benefit from marker-name resolution.
+  // Likewise, one marked component cannot bridge to an unmarked component.
+  const candidates = new Map<string, typeof pins>();
+  if (document.instances.length <= 40) {
+    const markers = new Set(
+      document.instances
+        .filter((i) => isPowerMarker(i.symbolId))
+        .map((i) => i.id),
+    );
+    for (const pin of pins) {
+      if (
+        !pin.netId ||
+        (components.get(pin.netId)?.size ?? 0) < 2 ||
+        !markers.has(pin.instanceId)
+      )
+        continue;
+      const group = candidates.get(pin.netId) ?? [];
+      group.push(pin);
+      candidates.set(pin.netId, group);
+    }
+  }
+  // T071: named marker components are complete local rail trees. Unmarked
+  // components still need drawn joins; floatingPins remains purely physical.
+  for (const [netId, markers] of candidates) {
+    if (new Set(markers.map((p) => p.component)).size < 2) continue;
+    const claim = railMarkerClaim(document, netId);
+    if (!claim) continue;
+    const marked = new Map<string, string>();
+    for (const pin of markers) {
+      const instance = document.instances.find((i) => i.id === pin.instanceId)!;
+      marked.set(pin.component, `${netId}:${instance.symbolId}:${claim.name}`);
+    }
+    components.set(
+      netId,
+      new Set(
+        [...components.get(netId)!].map(
+          (component) => marked.get(component) ?? component,
+        ),
+      ),
+    );
   }
   return [...components.values()].reduce(
     (sum, group) => sum + Math.max(0, group.size - 1),

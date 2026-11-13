@@ -55,7 +55,8 @@ function spanningLength(points: Point[]): number {
   return length;
 }
 
-/** Evaluation only; no reference drawing, planner state, ids or titles as inputs.
+/** Reference-free measurements, also used by T071's frozen composite guard.
+ * No reference drawing, planner state, ids or titles as inputs.
  * Counts are accompanied by exposure denominators; area and detour are masses.
  * Two grid pitches = rounded-up median positive projection gap in dev humans.
  */
