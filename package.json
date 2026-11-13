@@ -81,6 +81,7 @@
     "visual:golden:check": "pnpm build && node scripts/visual-golden.mjs --check",
     "test": "vitest run",
     "test:local": "vitest run --maxWorkers=2",
+    "test:slow": "vitest run --mode slow --project slow --maxWorkers=2",
     "test:e2e": "playwright test",
     "test:e2e:local": "pnpm --filter \"@icm/editor^...\" --filter \"@icm/mcp-server...\" --if-present build && playwright test",
     "build:e2e": "node scripts/build-e2e-editor.mjs",
