@@ -2,6 +2,11 @@ import { deriveElectricalTopologyProjection, endpointKey } from "@icm/derived";
 import { executeTransaction, type SchematicEdit } from "@icm/edit-engine";
 import type { SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
+import {
+  claimedMarkerSymbol,
+  isPowerMarker,
+  railMarkerClaim,
+} from "./rail-marker-identity.js";
 import type { PinGroup } from "./route.js";
 
 // These snapshots are read-only inside planning. Scope reuse to one synchronous
@@ -76,6 +81,107 @@ export function terminalPartition(
     nets.set(net, members);
   }
   return JSON.stringify([...nets.values()].map((pins) => pins.sort()).sort());
+}
+
+/** Preserve the original partition and admit only same-name rail duplicates.
+ * Keep terminalPartition's strict signature for callers comparing fixed sets. */
+export function equivalentTerminals(
+  before: SchematicDocument,
+  after: SchematicDocument,
+  resolver: SymbolResolver,
+): boolean {
+  const a = deriveElectricalTopologyProjection(before, resolver);
+  const b = deriveElectricalTopologyProjection(after, resolver);
+  const originals = new Set(before.instances.map((i) => i.id));
+  const keys = before.instances.flatMap((i) => {
+    const kept = after.instances.find((j) => j.id === i.id);
+    if (
+      !kept ||
+      kept.symbolId !== i.symbolId ||
+      kept.symbolVariantId !== i.symbolVariantId
+    )
+      return [""];
+    return (
+      resolver.resolve(i.symbolId, i.symbolVariantId)?.definition.pins ?? []
+    ).map((pin) =>
+      endpointKey({ kind: "terminal", instanceId: i.id, pinName: pin.name }),
+    );
+  });
+  if (keys.includes("")) return false;
+  const partition = (projection: typeof a) => {
+    const groups = new Map<string, string[]>();
+    for (const key of keys) {
+      const net = projection.endpointToBaseNet.get(key) ?? key;
+      const group = groups.get(net) ?? [];
+      group.push(key);
+      groups.set(net, group);
+    }
+    return JSON.stringify([...groups.values()].map((g) => g.sort()).sort());
+  };
+  if (partition(a) !== partition(b)) return false;
+  for (const added of after.instances.filter((i) => !originals.has(i.id))) {
+    if (!isPowerMarker(added.symbolId)) return false;
+    const pins = resolver.resolve(added.symbolId, added.symbolVariantId)
+      ?.definition.pins;
+    if (pins?.length !== 1) return false;
+    const net = b.endpointToBaseNet.get(
+      endpointKey({
+        kind: "terminal",
+        instanceId: added.id,
+        pinName: pins[0]!.name,
+      }),
+    );
+    if (!net) return false;
+    const claim = after.connectivityEvidence.find(
+      (e) =>
+        e.kind === "name-claim" &&
+        e.owner.kind === "power-marker" &&
+        e.owner.objectId === added.id,
+    );
+    if (
+      !claim ||
+      claim.kind !== "name-claim" ||
+      claim.netId !== net ||
+      railMarkerClaim(after, net)?.name !== claim.name
+    )
+      return false;
+    const originalNets = new Set(
+      keys
+        .filter((key) => b.endpointToBaseNet.get(key) === net)
+        .flatMap((key) => a.endpointToBaseNet.get(key) ?? []),
+    );
+    const authorized = before.connectivityEvidence.some((oldClaim) => {
+      if (
+        oldClaim.kind !== "name-claim" ||
+        !originalNets.has(oldClaim.netId) ||
+        oldClaim.name !== claim.name ||
+        oldClaim.scope !== claim.scope ||
+        oldClaim.powerDomain !== claim.powerDomain
+      )
+        return false;
+      if (
+        claimedMarkerSymbol(oldClaim) === added.symbolId &&
+        added.symbolVariantId === undefined
+      )
+        return true;
+      if (railMarkerClaim(before, oldClaim.netId)?.name !== claim.name)
+        return false;
+      return before.instances.some(
+        (marker) =>
+          marker.symbolId === added.symbolId &&
+          marker.symbolVariantId === added.symbolVariantId &&
+          a.endpointToBaseNet.get(
+            endpointKey({
+              kind: "terminal",
+              instanceId: marker.id,
+              pinName: pins[0]!.name,
+            }),
+          ) === oldClaim.netId,
+      );
+    });
+    if (!authorized) return false;
+  }
+  return true;
 }
 
 /** R2(c2): reconnect cleanup fragments without adding rendered geometry. */

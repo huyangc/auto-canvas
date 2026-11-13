@@ -1,3 +1,4 @@
+import { localRailMarkers } from "./local-rail-markers.js";
 import { planningMemo, reusePlanning } from "./planning-reuse.js";
 import { planningBudget } from "./planning-budget.js";
 import { pitchBlocked } from "./pitch-fallback.js";
@@ -152,7 +153,12 @@ export function planAutoLayout(
 ): AutoLayoutResult {
   return reusePlanning(() =>
     reusePreviews(() =>
-      timePlanning(() => planPitchDispatch(document, resolver, options)),
+      timePlanning(() => {
+        const initial = planPitchDispatch(document, resolver, options);
+        return timePhase("localRails", () =>
+          localRailMarkers(document, resolver, initial, options),
+        );
+      }),
     ),
   );
 }

@@ -62,7 +62,7 @@ import {
   floatingPins,
   missingConnections,
 } from "../packages/auto-layout/dist/routing-audit.js";
-import { terminalPartition } from "../packages/auto-layout/dist/transaction.js";
+import { equivalentTerminals } from "../packages/auto-layout/dist/transaction.js";
 import { enclosingBox } from "../packages/auto-layout/dist/geometry.js";
 import { readabilityCounts } from "../packages/auto-layout/dist/readability.js";
 import { planningTiming } from "../packages/auto-layout/dist/timing.js";
@@ -674,9 +674,33 @@ async function evaluateFile(file) {
           d.id === document.id ? after : d,
         ),
       });
+      measurement.railMarkers = [
+        ...classifyNets(document, resolver).rails.keys(),
+      ].map((netId) => {
+        const originalNet = document.nets.find((n) => n.id === netId);
+        const anchor = originalNet?.terminals[0];
+        const resultNet =
+          anchor &&
+          classifyNets(after, resolver).pinNet(
+            anchor.instanceId,
+            anchor.pinName,
+          );
+        const count = (doc, net) => {
+          const roles = classifyNets(doc, resolver);
+          return doc.instances.filter(
+            (i) =>
+              ["ground", "vdd-port"].includes(i.symbolId) &&
+              roles.pinNet(i.id, i.symbolId === "ground" ? "0" : "P") === net,
+          ).length;
+        };
+        return {
+          netId,
+          human: count(document, netId),
+          result: resultNet ? count(after, resultNet) : 0,
+        };
+      });
       measurement.equivalent =
-        terminalPartition(document, resolver) ===
-          terminalPartition(after, resolver) &&
+        equivalentTerminals(document, after, resolver) &&
         (beforeGraph.status !== "ready" ||
           (afterGraph.status === "ready" &&
             compareElectricalGraphs(beforeGraph.graph, afterGraph.graph) ===
