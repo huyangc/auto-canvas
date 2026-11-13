@@ -447,6 +447,7 @@ export function placeStages(
   topology = symmetryTopology(document, resolver, roles),
   partition?: LayoutPartition,
   allowSideRow = true,
+  channelOverrides?: ReadonlyMap<string, string[]>,
 ): { placements: Map<string, Placement>; sideRow?: ReadonlySet<string> } {
   const symmetry = topology.components;
   const symmetryIds = new Set(
@@ -565,7 +566,7 @@ export function placeStages(
       resolver,
       roles,
       ownGroups,
-      netLevels(stage.devices, resolver, roles),
+      netLevels(stage.devices, resolver, roles, channelOverrides),
       {
         components: symmetry.filter((c) =>
           stage.devices.some((i) => i.id === c.pairs[0]![0]),
