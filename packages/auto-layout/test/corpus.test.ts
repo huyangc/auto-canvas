@@ -240,19 +240,32 @@ it.each(cases)(
         );
       }
       if (fixture.id === "common-source") {
-        // Independent following can seat two notes; the blocked third note
-        // remains fixed rather than cancelling those valid movements.
-        for (const id of ["description-0", "description-1"])
+        // Every owned note ends next to its owner, moved or already in place.
+        // At the T069 pitch the note T072 had to leave fixed also gets a seat.
+        for (const id of ["description-0", "description-1", "description-2"]) {
+          const group = groups.find((g) => g.objects.some((o) => o.id === id))!;
+          expect(group.owner?.kind).toBe("instance");
+          if (group.owner?.kind !== "instance") throw Error("missing owner");
+          const ownerId = group.owner.id;
+          const part = boxes.find((b) => b.id === ownerId)!.bounds;
+          const ink = finalInk.find((b) => b.id === id)!.bounds;
           expect(
-            after.drafting!.objects.find((o) => o.id === id)!.anchor,
-          ).not.toEqual(
-            document.drafting!.objects.find((o) => o.id === id)!.anchor,
+            Math.hypot(
+              Math.max(
+                ink.x - part.x - part.width,
+                part.x - ink.x - ink.width,
+                0,
+              ),
+              Math.max(
+                ink.y - part.y - part.height,
+                part.y - ink.y - ink.height,
+                0,
+              ),
+            ),
+          ).toBeLessThanOrEqual(
+            1.5 * Math.max(group.bounds.width, group.bounds.height),
           );
-        expect(
-          after.drafting!.objects.find((o) => o.id === "description-2"),
-        ).toEqual(
-          document.drafting!.objects.find((o) => o.id === "description-2"),
-        );
+        }
       }
     } else expect(after.drafting).toEqual(document.drafting);
     expect(after.annotations.map((a) => a.id).sort()).toEqual(
