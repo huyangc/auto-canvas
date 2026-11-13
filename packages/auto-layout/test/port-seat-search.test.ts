@@ -84,12 +84,12 @@ function search(document: ReturnType<typeof fixture>) {
   };
 }
 
-it("R146 selects the best routed seat at the second host and preserves devices", () => {
+it("R146 selects the best conventional routed seat and preserves devices", () => {
   const document = fixture();
   const snapshot = structuredClone(document);
   const { initial, result, replan } = search(document);
   expect(result.final!.instances.find((i) => i.id === "p")!.placement).toEqual(
-    placement(240, -20, "none", 90),
+    placement(120, 40, "none", 270),
   );
   expect(routedScore(result, resolver)).toBeLessThan(
     routedScore(initial, resolver),
@@ -131,7 +131,7 @@ it("R146 rejects a blocked 80-unit seat and routes a shorter local seat", () => 
   expect(missingConnections(result.final!, resolver)).toBe(0);
 });
 
-it("R146 uses the shorter edge when every local candidate is obstructed", () => {
+it("R146 prefers the conventional edge at equal crossings despite longer wire", () => {
   const document = fixture(true);
   const { initial, result, replan, fixed } = search(document);
   expect(portSeatCandidates(document, resolver, "p")).toEqual([
@@ -140,7 +140,21 @@ it("R146 uses the shorter edge when every local candidate is obstructed", () => 
     placement(450, 0, "horizontal"),
   ]);
   expect(result.final!.instances.find((i) => i.id === "p")!.placement).toEqual(
-    placement(450, 0, "horizontal"),
+    placement(210, 0),
+  );
+  const shorter = replan(
+    new Map(
+      document.instances.map((i) => [
+        i.id,
+        i.id === "p" ? placement(450, 0, "horizontal") : i.placement!,
+      ]),
+    ),
+  );
+  expect(auditRouting(result.final!, resolver).crossings).toBe(
+    auditRouting(shorter.final!, resolver).crossings,
+  );
+  expect(auditRouting(result.final!, resolver).wireLength).toBeGreaterThan(
+    auditRouting(shorter.final!, resolver).wireLength,
   );
   expect(routedScore(result, resolver)).toBeLessThan(
     routedScore(initial, resolver),

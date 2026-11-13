@@ -1,3 +1,4 @@
+import { reversedSignalHosts } from "./signal-direction.js";
 import { planningMemo } from "./planning-reuse.js";
 import { signalSeriesParts } from "./series-levels.js";
 import { stageComponents } from "./stage-symmetry.js";
@@ -14,7 +15,11 @@ import {
   type SearchBounds,
 } from "./search-bounds.js";
 import { visibleInstanceBounds } from "@icm/derived";
-import { type Instance, type SchematicDocument } from "@icm/model";
+import {
+  reflectOrientation,
+  type Instance,
+  type SchematicDocument,
+} from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import { classifyNets, type NetRoles } from "./net-roles.js";
 import { compareIds, persistedTemplates } from "./recognize.js";
@@ -46,6 +51,7 @@ import {
   placeParallelAttachments,
   placeDriverAttachments,
   placeStages,
+  findStages,
 } from "./stages.js";
 import { templatePlacement } from "./template-placement.js";
 import { symmetryTopology } from "./symmetry.js";
@@ -450,6 +456,46 @@ export function placeDocument(
       roles,
     );
     if (problem) return { placements: targets, problem };
+  }
+  // R57: reuse the normal routed strategy comparison, without another plan.
+  // Stages containing rigid groups keep their local handedness and pin columns.
+  if (
+    !given &&
+    !partition &&
+    strategy !== "stages" &&
+    roles.instanceCount <= 40 &&
+    !devices.some((i) => fixed.has(i.id)) &&
+    reversedSignalHosts(document, devices, resolver, roles, targets)
+  ) {
+    const rigid = findStages(
+      devices,
+      resolver,
+      roles,
+      templates,
+      symmetry,
+    ).stages.filter((stage) =>
+      stage.devices.some(
+        (i) =>
+          symmetryIds.has(i.id) ||
+          templates.some((g) =>
+            [...g.members, ...(g.extraMemberIds ?? [])].includes(i.id),
+          ),
+      ),
+    );
+    const shifts = new Map<string, number>();
+    for (const stage of rigid) {
+      const xs = stage.devices.map((i) => targets.get(i.id)!.position.x);
+      const shift = -Math.min(...xs) - Math.max(...xs);
+      for (const i of stage.devices) shifts.set(i.id, shift);
+    }
+    for (const [id, pose] of targets) {
+      const shift = shifts.get(id);
+      if (shift !== undefined) pose.position.x += shift;
+      else {
+        pose.position.x = -pose.position.x;
+        Object.assign(pose, reflectOrientation(pose, "left-right"));
+      }
+    }
   }
   const coupledIds = templates
     .filter((g) => g.coupledDotPins)

@@ -1,3 +1,4 @@
+import { portConvention } from "./port-convention.js";
 import { blockIntrusion } from "./partition-geometry.js";
 import { readabilityCounts } from "./readability.js";
 import type { SchematicDocument } from "@icm/model";
@@ -90,9 +91,14 @@ export function routedScore(run: LayoutRun, resolver: SymbolResolver): number {
   const audit = auditRouting(run.final, resolver);
   const unrouted = missingConnections(run.final, resolver);
   const roles = classifyNets(run.final, resolver);
+  const conventional =
+    run.final.instances.length <= 40
+      ? portConvention(run.final, resolver, roles)
+      : undefined;
   const offConvention = run.final.instances.filter((i) => {
     if (!["port", "port-filled"].includes(i.symbolId) || !i.placement)
       return false;
+    if (conventional) return !conventional(i.id, i.placement);
     const role = roles.byNet.get(roles.pinNet(i.id, "P") ?? "");
     const right = i.placement.mirror === "horizontal";
     return (role === "input" && right) || (role === "output" && !right);

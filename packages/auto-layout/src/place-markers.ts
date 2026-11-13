@@ -1,3 +1,4 @@
+import { portDirection } from "./port-convention.js";
 import { markerBlocksJoin, straightJoins } from "./straight-joins.js";
 import { contactGeometryProblem, contactPolicy } from "./contact-placement.js";
 import { freezePinGroups } from "./route.js";
@@ -160,6 +161,10 @@ function placeCellPins(
     .map((i) => {
       const net = roles.pinNet(i.id, "P");
       const role = roles.byNet.get(net ?? "") ?? "internal";
+      const direction =
+        roles.instanceCount <= 40
+          ? portDirection(document, roles, net ?? "")
+          : undefined;
       let side =
         role === "supply"
           ? "top"
@@ -204,6 +209,7 @@ function placeCellPins(
               : role === "output"
                 ? "right"
                 : "left";
+        if (direction) side = direction === "output" ? "right" : "left";
         side = overrides.sides.get(i.id) ?? side;
         choices.sides.set(i.id, side as CellSide);
       }
@@ -215,6 +221,7 @@ function placeCellPins(
         net,
         count: connected.length,
         connected,
+        direction,
         singleHost:
           !roles.rails.has(net ?? "") && connected.length === 1
             ? connected[0]
@@ -237,7 +244,9 @@ function placeCellPins(
     const seats: Placement[] = [];
     const host = entry.singleHost;
     if (host) {
-      const exit = exitAt(host);
+      const exit = entry.direction
+        ? { x: entry.side === "right" ? 1 : -1, y: 0 }
+        : exitAt(host);
       seats.push(
         placement(
           snap(host.point.x + exit.x * cellPinOffset(document)),

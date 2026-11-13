@@ -1,3 +1,4 @@
+import { reversedSignalHosts } from "./signal-direction.js";
 import { signalSeriesParts } from "./series-levels.js";
 import { conductingPairs, conductingPins } from "./dc-connectivity.js";
 export { conductingPins } from "./dc-connectivity.js";
@@ -926,45 +927,9 @@ export function placeStages(
     }
     if (!changed) break;
   }
-  // R57: Cell Pin roles identify interface Nets; compare their device hosts,
-  // before marker placement. No interface on either side leaves R53 unchanged.
-  const hostMean = (side: "input" | "output") => {
-    const nets = new Set(
-      document.instances
-        .filter((i) => ["port", "port-filled"].includes(i.symbolId))
-        .flatMap((i) => {
-          const net = roles.pinNet(i.id, "P");
-          const role = roles.byNet.get(net ?? "");
-          // R4's `input` needs a gate on the Net. An input reached through a
-          // series resistor is `internal`, but is still the input side.
-          const onSide =
-            side === "output"
-              ? role === "output"
-              : role === "input" || role === "internal";
-          return net && onSide ? [net] : [];
-        }),
-    );
-    const xs = devices.flatMap((i) =>
-      devicePins(i, resolver)
-        .filter(
-          (p) =>
-            !isMosBulk(i.symbolId, p.name) &&
-            nets.has(roles.pinNet(i.id, p.name) ?? ""),
-        )
-        .map(
-          (p) =>
-            transformPoint(p.at, best.get(i.id)!.position, best.get(i.id)!).x,
-        ),
-    );
-    if (!xs.length && partition) {
-      for (const b of partition.blocks.filter((b) => b.role === side))
-        for (const id of b.members) xs.push(best.get(id)!.position.x);
-    }
-    return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : undefined;
-  };
-  const inputX = hostMean("input"),
-    outputX = hostMean("output");
-  if (inputX !== undefined && outputX !== undefined && inputX > outputX) {
+  if (
+    reversedSignalHosts(document, devices, resolver, roles, best, partition)
+  ) {
     order.reverse();
     for (const b of blocks.filter((b) => b.canMirror)) {
       if (mirrored.has(b.id)) mirrored.delete(b.id);
