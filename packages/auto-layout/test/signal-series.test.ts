@@ -69,7 +69,8 @@ it("finishes a deterministic horizontal Vin-to-gate series resistor with Cgs/Cgd
   expect(pin("rs", "1").x).toBeLessThan(pin("rs", "2").x);
   expect(pin("vin", "+").x).toBeLessThan(pin("rs", "1").x);
   expect(pin("rs", "2").x).toBeLessThan(pin("m", "G").x);
-});
+  // Two full default plans; under load this passed 5 s (as branch-columns did).
+}, 30000);
 it("counts only bent two-pin joins recoverable within one grid pitch", () => {
   const d = circuit({ a: "resistor", b: "resistor" }, { join: ["a.2", "b.1"] });
   d.instances[0]!.placement = placement(0, 0);
