@@ -11,8 +11,15 @@ import { placement } from "../src/geometry.js";
 import { circuit } from "./document-fixture.js";
 
 const resolver = new InMemorySymbolResolver(builtInSymbols);
-const measure = (d: SchematicDocument) =>
-  readabilityMetrics(structuredClone(d), resolver);
+const measure = (d: SchematicDocument) => {
+  const full = readabilityMetrics(structuredClone(d), resolver);
+  const weighted = readabilityMetrics(structuredClone(d), resolver, "weighted");
+  for (const key of Object.keys(readabilityWeights) as (keyof typeof full)[])
+    if (readabilityWeights[key].weight !== 0)
+      expect(weighted[key], key).toEqual(full[key]);
+  expect(readabilityScore(weighted)).toBe(readabilityScore(full));
+  return full;
+};
 function placed(
   symbols: Record<string, string>,
   nets: Record<string, string[]>,
