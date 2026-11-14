@@ -61,6 +61,14 @@ export function refinementMetrics(result: AutoLayoutResult) {
   return measurements.get(result);
 }
 
+/** Copy mutable finishing input without losing its refinement accounting. */
+export function copyRefinedResult(result: AutoLayoutResult): AutoLayoutResult {
+  const copy = structuredClone(result);
+  const metrics = measurements.get(result);
+  if (metrics) measurements.set(copy, { ...metrics });
+  return copy;
+}
+
 /** Preserve search accounting when a finished calibrated-score pass wins. */
 export function retainRefinementMetrics(
   selected: LayoutRun,

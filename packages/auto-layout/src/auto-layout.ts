@@ -1,3 +1,8 @@
+import {
+  selectFinishedLayout,
+  shouldFinishRunner,
+  type FinalistPass,
+} from "./finished-selection.js";
 import { improvesReadability } from "./readability-selection.js";
 import { localRailMarkers } from "./local-rail-markers.js";
 import { planningMemo, reusePlanning } from "./planning-reuse.js";
@@ -97,6 +102,7 @@ import {
 import {
   improvesWireLayout,
   compareRuns,
+  copyRefinedResult,
   refinementMetrics,
   refineLayout,
   routedScore,
@@ -146,6 +152,7 @@ interface LevelOptions extends AutoLayoutOptions {
   pitch?: Readonly<PlacementPitch>;
   seriesLevels?: boolean;
   reuseSeriesRoutes?: boolean;
+  finalists?: FinalistPass;
 }
 
 export function planAutoLayout(
@@ -156,9 +163,44 @@ export function planAutoLayout(
   return reusePlanning(() =>
     reusePreviews(() =>
       timePlanning(() => {
-        const initial = planPitchDispatch(document, resolver, options);
-        return timePhase("localRails", () =>
-          localRailMarkers(document, resolver, initial, options),
+        const finalists: FinalistPass | undefined =
+          document.instances.length > 0 &&
+          document.instances.length <= 40 &&
+          (options.search?.evaluations ??
+            defaultLayoutSearch(document, options).evaluations) > 0
+            ? { alternate: false, available: false, pending: new WeakMap() }
+            : undefined;
+        const finish = () => {
+          const initial = planPitchDispatch(document, resolver, {
+            ...options,
+            ...(finalists ? { finalists } : {}),
+          });
+          return timePhase("localRails", () =>
+            localRailMarkers(document, resolver, initial, options),
+          );
+        };
+        const base = finish();
+        if (
+          !finalists?.available ||
+          options.search?.signal?.aborted ||
+          (options.search?.deadline !== undefined &&
+            Date.now() >= options.search.deadline)
+        )
+          return base;
+        finalists.alternate = true;
+        const candidate = finish();
+        if (
+          options.search?.signal?.aborted ||
+          (options.search?.deadline !== undefined &&
+            Date.now() >= options.search.deadline)
+        )
+          return base;
+        return selectFinishedLayout(
+          document,
+          resolver,
+          base,
+          candidate,
+          options.partition,
         );
       }),
     ),
@@ -170,7 +212,7 @@ export function planAutoLayout(
 function planPitchDispatch(
   document: SchematicDocument,
   resolver: SymbolResolver,
-  options: AutoLayoutOptions,
+  options: LevelOptions,
 ): AutoLayoutResult {
   const sharedOptions =
     document.instances.length <= 40
@@ -283,7 +325,13 @@ function planWithBranches(
       return base;
     const groups = draftingGroups(document, resolver);
     if (!groups.length) return base;
-    if (!observation.moved) {
+    const baseMoved = planningMemo(
+      document,
+      resolver,
+      `finalist-drafting-moved:${JSON.stringify([options.seriesLevels, options.pitch])}`,
+      () => observation.moved,
+    );
+    if (!observation.moved && !(options.finalists?.alternate && baseMoved)) {
       const placed = preview(document, resolver, base.edits);
       if (
         placed.ok &&
@@ -297,12 +345,17 @@ function planWithBranches(
     const moving = new Set(
       ownedGroups.flatMap((g) => g.objects.map((o) => o.id)),
     );
-    const stripped = {
-      ...document,
-      drafting: {
-        objects: document.drafting!.objects.filter((o) => !moving.has(o.id)),
-      },
-    };
+    const stripped = planningMemo(
+      document,
+      resolver,
+      "finalist-drafting-source",
+      () => ({
+        ...document,
+        drafting: {
+          objects: document.drafting!.objects.filter((o) => !moving.has(o.id)),
+        },
+      }),
+    );
     // Recover caption anchors after routing without separating members of a
     // rigid drawing group. A standalone caption has no relative ink to split.
     const captions = new Set(
@@ -515,6 +568,20 @@ function planAutoLayoutMeasured(
   finishLabels: (result: AutoLayoutResult) => AutoLayoutResult,
   allowBranches: boolean,
 ): AutoLayoutResult {
+  const finalistKey = JSON.stringify([
+    options.seriesLevels,
+    options.pitch,
+    options.partition,
+    options.quality,
+    allowBranches,
+  ]);
+  const deferred = options.finalists?.pending.get(document)?.get(finalistKey);
+  if (options.finalists?.alternate && deferred) return deferred();
+  const copyResult = (result: AutoLayoutResult) =>
+    withDraftingTranslation(
+      copyRefinedResult(result),
+      draftingTranslation(result),
+    );
   const newRouteCache = () =>
     new Map<string, { result: AutoLayoutResult; final: SchematicDocument }>();
   // The level variants have identical routing inputs once placement resolves.
@@ -794,6 +861,7 @@ function planAutoLayoutMeasured(
         );
       return compareRuns(a.run, b.run, resolver);
     });
+  const refinedFinalists: typeof ranked = [];
   let selected = ranked[0]!;
   for (const candidate of ranked.slice(
     0,
@@ -807,494 +875,538 @@ function planAutoLayoutMeasured(
       candidate.run,
     );
     const result = runs.get(refined)!;
+    refinedFinalists.push(result);
     if (
       candidate === ranked[0] ||
       compareRuns(result.run, selected.run, resolver) < 0
     )
       selected = result;
   }
-  // Reuse the selected placement and refinement choices; do not search again.
-  const alternative = plan(
-    document,
-    resolver,
-    options,
-    selected.overrides,
-    selected.strategy,
-    false,
-  );
-  const search = options.search ?? defaultLayoutSearch(document, options);
-  const quickRun =
-    compareRuns(alternative, selected.run, resolver) < 0
-      ? alternative
-      : selected.run;
-  const best = timePhase("annealer", () =>
-    annealLayout(
-      document,
-      resolver,
-      search,
-      fixed,
-      { run: selected.run, strategy: selected.strategy },
-      ranked.map(({ run, strategy }) => ({ run, strategy })),
-      { run: quickRun, strategy: selected.strategy },
-      (state, signalTrunks, bounds) => {
-        const run = planFrom(
-          draftingTranslation(quickRun.result),
-          document,
-          resolver,
-          options,
-          { sides: state.sides, orientations: state.placements },
-          state.strategy,
-          signalTrunks,
-          state.placements,
-          bounds,
-        );
-        if (state.sideRow) run.sideRow = state.sideRow;
-        return run;
-      },
-      options.pitch,
-    ),
-  );
-  const quickResult = finalizeFacing(
-    document,
-    resolver,
-    options,
-    finish(selected.run, alternative, selected.strategy, true),
-  );
-
-  const selectFinished = () => {
-    if (best.run === quickRun) return quickResult;
-
-    // Compare the two *finished* layouts: repair, compaction and port facing
-    // can reverse the ranking of the provisional plans used by annealing.
-    if (quickRun.final) repairBounds = searchBounds(quickRun.final, resolver);
-    const searched = finalizeFacing(
+  // Snapshot the other refined run before facing/rerouting mutates results.
+  // The existing winner (including its annealed fallback) is finished first.
+  const runner = refinedFinalists
+    .filter(
+      (candidate) =>
+        candidate !== selected &&
+        candidate.run.final &&
+        Number.isFinite(routedScore(candidate.run, resolver)) &&
+        !floatingPins(candidate.run.final, resolver).length &&
+        !missingConnections(candidate.run.final, resolver) &&
+        shouldFinishRunner(selected.run, candidate.run, resolver),
+    )
+    .sort((a, b) => compareRuns(a.run, b.run, resolver))[0];
+  const alternateFinalist = runner && {
+    ...runner,
+    run: { ...runner.run, result: copyResult(runner.run.result) },
+  };
+  const finishFinalist = (
+    selected: (typeof ranked)[number],
+    searchFinalist: boolean,
+  ): AutoLayoutResult => {
+    repairBounds = undefined;
+    // Reuse the selected placement and refinement choices; do not search again.
+    const alternative = plan(
       document,
       resolver,
       options,
-      finish(
-        best.run,
-        best.alternative ?? best.run,
-        best.strategy,
-        best.run !== alternative,
-      ),
+      selected.overrides,
+      selected.strategy,
+      false,
     );
-    const before = preview(document, resolver, quickResult.edits);
-    const after = preview(document, resolver, searched.edits);
-    if (!after.ok) return quickResult;
-    if (before.ok) {
-      if (
-        compareRuns(
-          {
-            result: searched,
-            final: after.document,
-            choices: emptyChoices(),
-            ...(options.partition ? { partition: options.partition } : {}),
-          },
-          {
-            result: quickResult,
-            final: before.document,
-            choices: emptyChoices(),
-            ...(options.partition ? { partition: options.partition } : {}),
-          },
-          resolver,
-        ) >= 0
-      )
-        return quickResult;
-      const missed =
-        missingConnections(after.document, resolver) -
-        missingConnections(before.document, resolver);
-      const floating =
-        floatingPins(after.document, resolver).length -
-        floatingPins(before.document, resolver).length;
-      if (missed > 0 || floating > 0) return quickResult;
-      if (!missed && !floating) {
-        const first = auditRouting(before.document, resolver);
-        const second = auditRouting(after.document, resolver);
-        const deltas = [
-          second.crossings - first.crossings,
-          second.bends - first.bends,
-          second.wireLength - first.wireLength,
-        ];
-        if (options.partition)
-          deltas.push(
-            blockIntrusion(after.document, resolver, options.partition) -
-              blockIntrusion(before.document, resolver, options.partition),
-          );
-        // Do not trade a strictly dominated wire layout for secondary score terms.
+    const search = options.search ?? defaultLayoutSearch(document, options);
+    const quickRun =
+      compareRuns(alternative, selected.run, resolver) < 0
+        ? alternative
+        : selected.run;
+    const best = !searchFinalist
+      ? { run: quickRun, strategy: selected.strategy }
+      : timePhase("annealer", () =>
+          annealLayout(
+            document,
+            resolver,
+            search,
+            fixed,
+            { run: selected.run, strategy: selected.strategy },
+            ranked.map(({ run, strategy }) => ({ run, strategy })),
+            { run: quickRun, strategy: selected.strategy },
+            (state, signalTrunks, bounds) => {
+              const run = planFrom(
+                draftingTranslation(quickRun.result),
+                document,
+                resolver,
+                options,
+                { sides: state.sides, orientations: state.placements },
+                state.strategy,
+                signalTrunks,
+                state.placements,
+                bounds,
+              );
+              if (state.sideRow) run.sideRow = state.sideRow;
+              return run;
+            },
+            options.pitch,
+          ),
+        );
+    const quickResult = finalizeFacing(
+      document,
+      resolver,
+      options,
+      finish(selected.run, alternative, selected.strategy, true),
+    );
+
+    const selectFinished = () => {
+      if (best.run === quickRun) return quickResult;
+
+      // Compare the two *finished* layouts: repair, compaction and port facing
+      // can reverse the ranking of the provisional plans used by annealing.
+      if (quickRun.final) repairBounds = searchBounds(quickRun.final, resolver);
+      const searched = finalizeFacing(
+        document,
+        resolver,
+        options,
+        finish(
+          best.run,
+          best.alternative ?? best.run,
+          best.strategy,
+          best.run !== alternative,
+        ),
+      );
+      const before = preview(document, resolver, quickResult.edits);
+      const after = preview(document, resolver, searched.edits);
+      if (!after.ok) return quickResult;
+      if (before.ok) {
         if (
-          !improvesReadability(before.document, after.document, resolver) &&
-          deltas.every((d) => d >= 0) &&
-          deltas.some((d) => d > 0)
+          compareRuns(
+            {
+              result: searched,
+              final: after.document,
+              choices: emptyChoices(),
+              ...(options.partition ? { partition: options.partition } : {}),
+            },
+            {
+              result: quickResult,
+              final: before.document,
+              choices: emptyChoices(),
+              ...(options.partition ? { partition: options.partition } : {}),
+            },
+            resolver,
+          ) >= 0
         )
           return quickResult;
-      }
-    }
-    return searched;
-  };
-  const baseline = selectFinished();
-  if (options.partition) {
-    // A fixed placement keeps every block and its relative floorplan intact.
-    return options.quality === "optimized" && search.evaluations > 0
-      ? rerouteCrossings(document, resolver, baseline, stopped)
-      : baseline;
-  }
-  const result =
-    search.evaluations <= 0 || stopped()
-      ? baseline
-      : reroutePortfolio(
-          document,
-          resolver,
-          baseline,
-          runs.values(),
-          fixed.size || document.instances.length > 40 ? 0 : 2,
-          stopped,
-          (run, strategy) => {
-            const trial = compact(run, strategy, true);
-            return finalizeFacing(
-              document,
-              resolver,
-              options,
-              withDraftingTranslation(
-                { ...trial.result },
-                draftingTranslation(trial.result),
-              ),
+        const missed =
+          missingConnections(after.document, resolver) -
+          missingConnections(before.document, resolver);
+        const floating =
+          floatingPins(after.document, resolver).length -
+          floatingPins(before.document, resolver).length;
+        if (missed > 0 || floating > 0) return quickResult;
+        if (!missed && !floating) {
+          const first = auditRouting(before.document, resolver);
+          const second = auditRouting(after.document, resolver);
+          const deltas = [
+            second.crossings - first.crossings,
+            second.bends - first.bends,
+            second.wireLength - first.wireLength,
+          ];
+          if (options.partition)
+            deltas.push(
+              blockIntrusion(after.document, resolver, options.partition) -
+                blockIntrusion(before.document, resolver, options.partition),
             );
-          },
-        );
-  if (
-    stopped() ||
-    (!search.evaluations && fixed.size !== document.instances.length)
-  )
-    return result;
-  const strategy = refinementMetrics(result)?.strategy ?? selected.strategy;
-  const replan = (
-    placements: ReadonlyMap<string, Placement>,
-    policy: ReturnType<typeof contactPolicy>,
-  ) =>
-    planFrom(
-      draftingTranslation(result),
+          // Do not trade a strictly dominated wire layout for secondary score terms.
+          if (
+            !improvesReadability(before.document, after.document, resolver) &&
+            deltas.every((d) => d >= 0) &&
+            deltas.some((d) => d > 0)
+          )
+            return quickResult;
+        }
+      }
+      return searched;
+    };
+    const baseline = selectFinished();
+    if (options.partition) {
+      // A fixed placement keeps every block and its relative floorplan intact.
+      return options.quality === "optimized" && search.evaluations > 0
+        ? rerouteCrossings(document, resolver, baseline, stopped)
+        : baseline;
+    }
+    const result =
+      search.evaluations <= 0 || stopped()
+        ? baseline
+        : reroutePortfolio(
+            document,
+            resolver,
+            baseline,
+            runs.values(),
+            fixed.size || document.instances.length > 40 ? 0 : 2,
+            stopped,
+            (run, strategy) => {
+              const trial = compact(run, strategy, true);
+              return finalizeFacing(
+                document,
+                resolver,
+                options,
+                withDraftingTranslation(
+                  { ...trial.result },
+                  draftingTranslation(trial.result),
+                ),
+              );
+            },
+          );
+    if (
+      stopped() ||
+      (!search.evaluations && fixed.size !== document.instances.length)
+    )
+      return result;
+    const strategy = refinementMetrics(result)?.strategy ?? selected.strategy;
+    const replan = (
+      placements: ReadonlyMap<string, Placement>,
+      policy: ReturnType<typeof contactPolicy>,
+    ) =>
+      planFrom(
+        draftingTranslation(result),
+        document,
+        resolver,
+        options,
+        emptyOverrides(),
+        strategy,
+        true,
+        undefined,
+        undefined,
+        placements,
+        true,
+        false,
+        policy,
+      );
+    const contactResult = searchPinContacts(
       document,
       resolver,
       options,
-      emptyOverrides(),
+      result,
       strategy,
-      true,
-      undefined,
-      undefined,
-      placements,
-      true,
-      false,
-      policy,
+      fixed.size,
+      stopped,
+      replan,
     );
-  const contactResult = searchPinContacts(
-    document,
-    resolver,
-    options,
-    result,
-    strategy,
-    fixed.size,
-    stopped,
-    replan,
-  );
-  if (
-    !options.partition &&
-    options.quality !== "optimized" &&
-    search.evaluations > 0 &&
-    document.instances.length > 0 &&
-    document.instances.length <= 40 &&
-    !stopped()
-  ) {
-    const incumbent = finishLabels(contactResult);
-    const replay = preview(document, resolver, incumbent.edits);
-    if (!replay.ok) return contactResult;
-    const initial = {
-      result: incumbent,
-      final: replay.document,
-      choices: emptyChoices(),
-    };
-    // Finished seats are immutable within this planning call. Reuse a trial
-    // reached by multiple searches, including the final label repair.
-    const finishedSeats = planningMemo(
-      document,
-      resolver,
-      "finished-seats",
-      () => new Map<string, LayoutRun>(),
-    );
-    const finishPlacement = (
-      placements: ReadonlyMap<string, Placement>,
-      contacts?: ReturnType<typeof contactPolicy>,
-      translation = draftingTranslation(incumbent),
-    ) => {
-      const cache = finishedSeats;
-      const key = JSON.stringify([
-        strategy,
-        translation,
-        contacts ? [...contacts.allowed].sort(compareIds) : null,
-        document.instances.map((i) => [i.id, placements.get(i.id)]),
-      ]);
-      const cached = cache.get(key);
-      if (cached) return cached;
-      const routeSeat = (signalTrunks: boolean) =>
-        planFrom(
-          translation,
-          document,
-          resolver,
-          options,
-          emptyOverrides(),
+    if (
+      !options.partition &&
+      options.quality !== "optimized" &&
+      search.evaluations > 0 &&
+      document.instances.length > 0 &&
+      document.instances.length <= 40 &&
+      !stopped()
+    ) {
+      const incumbent = finishLabels(contactResult);
+      const replay = preview(document, resolver, incumbent.edits);
+      if (!replay.ok) return contactResult;
+      const initial = {
+        result: incumbent,
+        final: replay.document,
+        choices: emptyChoices(),
+      };
+      // Finished seats are immutable within this planning call. Reuse a trial
+      // reached by multiple searches, including the final label repair.
+      const finishedSeats = planningMemo(
+        document,
+        resolver,
+        "finished-seats",
+        () => new Map<string, LayoutRun>(),
+      );
+      const finishPlacement = (
+        placements: ReadonlyMap<string, Placement>,
+        contacts?: ReturnType<typeof contactPolicy>,
+        translation = draftingTranslation(incumbent),
+      ) => {
+        const cache = finishedSeats;
+        const key = JSON.stringify([
           strategy,
-          signalTrunks,
-          undefined,
-          undefined,
-          placements,
-          false,
-          false,
-          contacts,
-        );
-      // Every trial goes through the same finalist repairs, compaction, facing
-      // and labels as the incumbent before R146 compares any score or guard.
-      const finished = finishLabels(
-        rerouteCrossings(
-          document,
-          resolver,
-          finalizeFacing(
+          translation,
+          contacts ? [...contacts.allowed].sort(compareIds) : null,
+          document.instances.map((i) => [i.id, placements.get(i.id)]),
+        ]);
+        const cached = cache.get(key);
+        if (cached) return cached;
+        const routeSeat = (signalTrunks: boolean) =>
+          planFrom(
+            translation,
             document,
             resolver,
             options,
-            finish(routeSeat(true), routeSeat(false), strategy, true),
+            emptyOverrides(),
+            strategy,
+            signalTrunks,
+            undefined,
+            undefined,
+            placements,
+            false,
+            false,
+            contacts,
+          );
+        // Every trial goes through the same finalist repairs, compaction, facing
+        // and labels as the incumbent before R146 compares any score or guard.
+        const finished = finishLabels(
+          rerouteCrossings(
+            document,
+            resolver,
+            finalizeFacing(
+              document,
+              resolver,
+              options,
+              finish(routeSeat(true), routeSeat(false), strategy, true),
+            ),
+            stopped,
           ),
+        );
+        const final = preview(document, resolver, finished.edits);
+        const run = {
+          result: finished,
+          choices: initial.choices,
+          ...(final.ok ? { final: final.document } : {}),
+        };
+        cache.set(key, run);
+        return run;
+      };
+      const relocationBudget = {
+        remaining: planningBudget(document.instances.length, 10),
+      };
+      const relocated = timePhase("relocation", () =>
+        searchDeviceRelocations(
+          initial,
+          resolver,
+          fixed,
+          finishPlacement,
+          stopped,
+          { phase: "alignment", budget: relocationBudget },
+        ),
+      );
+      const seated = timePhase("ports", () =>
+        searchPortSeats(relocated, resolver, fixed, finishPlacement, stopped),
+      );
+      // R148 retains R140's licensed contacts already present in the finalist.
+      const railContacts = contactPolicy(
+        document,
+        freezePinGroups(document, resolver),
+        true,
+      );
+      const railed = timePhase("rails", () =>
+        searchRailSeats(
+          seated,
+          resolver,
+          fixed,
+          (placements) => finishPlacement(placements, railContacts),
           stopped,
         ),
       );
-      const final = preview(document, resolver, finished.edits);
-      const run = {
-        result: finished,
-        choices: initial.choices,
-        ...(final.ok ? { final: final.document } : {}),
-      };
-      cache.set(key, run);
-      return run;
-    };
-    const relocationBudget = {
-      remaining: planningBudget(document.instances.length, 10),
-    };
-    const relocated = timePhase("relocation", () =>
-      searchDeviceRelocations(
-        initial,
+      const routed = rerouteRailCrossings(
+        document,
         resolver,
-        fixed,
-        finishPlacement,
+        railed.result,
         stopped,
-        { phase: "alignment", budget: relocationBudget },
-      ),
-    );
-    const seated = timePhase("ports", () =>
-      searchPortSeats(relocated, resolver, fixed, finishPlacement, stopped),
-    );
-    // R148 retains R140's licensed contacts already present in the finalist.
-    const railContacts = contactPolicy(
-      document,
-      freezePinGroups(document, resolver),
-      true,
-    );
-    const railed = timePhase("rails", () =>
-      searchRailSeats(
-        seated,
-        resolver,
-        fixed,
-        (placements) => finishPlacement(placements, railContacts),
-        stopped,
-      ),
-    );
-    const routed = rerouteRailCrossings(
-      document,
-      resolver,
-      railed.result,
-      stopped,
-      finishLabels,
-    );
-    const final = preview(document, resolver, routed.edits);
-    if (!final.ok) return routed;
-    // R149 compares gaps against the completed port/rail incumbent. Closing
-    // a gap earlier can remove a later crossing-reducing port opportunity.
-    const roles = classifyNets(final.document, resolver);
-    const devices = final.document.instances.filter((i) => !isMarker(i));
-    const pins = pinPoints(
-      {
-        ...final.document,
-        instances: devices,
-      },
-      resolver,
-    );
-    const attachedPorts = final.document.instances.flatMap((port) => {
-      if (
-        fixed.has(port.id) ||
-        !["port", "port-filled"].includes(port.symbolId)
-      )
-        return [];
-      const net = roles.pinNet(port.id, "P");
-      if (!net || roles.rails.has(net)) return [];
-      const hosts = pins.filter(
-        (pin) => roles.pinNet(pin.instanceId, pin.pinName) === net,
+        finishLabels,
       );
-      if (hosts.length !== 1) return [];
-      const host = final.document.instances.find(
-        (i) => i.id === hosts[0]!.instanceId,
-      )!;
-      return [{ port, host }];
-    });
-    // Retain the feedback bands protected by compactRows as well: a passive
-    // spanning two signal nets of an amplifier keeps its vertical offset.
-    const feedbackBands = devices.flatMap((device) => {
-      if (devicePins(device, resolver).length !== 2) return [];
-      const nets = new Set(deviceNets(device, resolver, roles));
-      if (nets.size !== 2 || [...nets].some((net) => roles.rails.has(net)))
-        return [];
-      return devices
-        .filter(
-          (host) =>
-            isSignalBlock(host, resolver) &&
-            [...nets].every((net) =>
-              deviceNets(host, resolver, roles).includes(net),
-            ),
-        )
-        .map((host) => ({ device, host }));
-    });
-    const closed = timePhase("gaps", () =>
-      searchDeviceRelocations(
-        { ...railed, result: routed, final: final.document },
-        resolver,
-        fixed,
-        (placements) => {
-          if (
-            feedbackBands.some(
-              ({ device, host }) =>
-                placements.get(device.id)!.position.y -
-                  device.placement!.position.y !==
-                placements.get(host.id)!.position.y -
-                  host.placement!.position.y,
-            )
-          )
-            return { ...railed, result: routed, final: final.document };
-          const followed = new Map(placements);
-          // A gap trial translates devices after R146 has selected port seats.
-          // Retain each single-host port's offset, including trial reanchoring,
-          // before routing and comparing the finished candidate's guards.
-          for (const { port, host } of attachedPorts) {
-            const before = host.placement!;
-            const after = placements.get(host.id)!;
-            const seat = port.placement!;
-            followed.set(port.id, {
-              ...seat,
-              position: {
-                x: seat.position.x + after.position.x - before.position.x,
-                y: seat.position.y + after.position.y - before.position.y,
-              },
-            });
-          }
-          if (attachedPorts.length && !fixed.size) {
-            const anchor = enclosingBox(final.document, resolver);
-            const box = enclosingBox(
-              withPlacements(final.document, followed),
-              resolver,
-            );
-            const grid = document.presentation.grid;
-            const dx = Math.round((anchor.x - box.x) / grid) * grid;
-            const dy = Math.round((anchor.y - box.y) / grid) * grid;
-            for (const [id, pose] of followed)
-              followed.set(id, {
-                ...pose,
-                position: { x: pose.position.x + dx, y: pose.position.y + dy },
-              });
-          }
-          return finishPlacement(followed, railContacts);
+      const final = preview(document, resolver, routed.edits);
+      if (!final.ok) return routed;
+      // R149 compares gaps against the completed port/rail incumbent. Closing
+      // a gap earlier can remove a later crossing-reducing port opportunity.
+      const roles = classifyNets(final.document, resolver);
+      const devices = final.document.instances.filter((i) => !isMarker(i));
+      const pins = pinPoints(
+        {
+          ...final.document,
+          instances: devices,
         },
-        stopped,
-        { phase: "gaps", budget: relocationBudget },
-      ),
-    );
-    const repairLabels = (run: LayoutRun) =>
-      timePhase(
-        "labelRepair",
-        () =>
-          repairStubLabels(
-            run,
-            resolver,
-            fixed,
-            (placements) => finishPlacement(placements, railContacts),
-            stopped,
-            options.pitch,
-          ).result,
+        resolver,
       );
-    // R152: compare one complete branch-column candidate with the finished
-    // incumbent. Existing modes, locks and explicit relationships keep their
-    // placement contract; this candidate only enters plain bounded planning.
+      const attachedPorts = final.document.instances.flatMap((port) => {
+        if (
+          fixed.has(port.id) ||
+          !["port", "port-filled"].includes(port.symbolId)
+        )
+          return [];
+        const net = roles.pinNet(port.id, "P");
+        if (!net || roles.rails.has(net)) return [];
+        const hosts = pins.filter(
+          (pin) => roles.pinNet(pin.instanceId, pin.pinName) === net,
+        );
+        if (hosts.length !== 1) return [];
+        const host = final.document.instances.find(
+          (i) => i.id === hosts[0]!.instanceId,
+        )!;
+        return [{ port, host }];
+      });
+      // Retain the feedback bands protected by compactRows as well: a passive
+      // spanning two signal nets of an amplifier keeps its vertical offset.
+      const feedbackBands = devices.flatMap((device) => {
+        if (devicePins(device, resolver).length !== 2) return [];
+        const nets = new Set(deviceNets(device, resolver, roles));
+        if (nets.size !== 2 || [...nets].some((net) => roles.rails.has(net)))
+          return [];
+        return devices
+          .filter(
+            (host) =>
+              isSignalBlock(host, resolver) &&
+              [...nets].every((net) =>
+                deviceNets(host, resolver, roles).includes(net),
+              ),
+          )
+          .map((host) => ({ device, host }));
+      });
+      const closed = timePhase("gaps", () =>
+        searchDeviceRelocations(
+          { ...railed, result: routed, final: final.document },
+          resolver,
+          fixed,
+          (placements) => {
+            if (
+              feedbackBands.some(
+                ({ device, host }) =>
+                  placements.get(device.id)!.position.y -
+                    device.placement!.position.y !==
+                  placements.get(host.id)!.position.y -
+                    host.placement!.position.y,
+              )
+            )
+              return { ...railed, result: routed, final: final.document };
+            const followed = new Map(placements);
+            // A gap trial translates devices after R146 has selected port seats.
+            // Retain each single-host port's offset, including trial reanchoring,
+            // before routing and comparing the finished candidate's guards.
+            for (const { port, host } of attachedPorts) {
+              const before = host.placement!;
+              const after = placements.get(host.id)!;
+              const seat = port.placement!;
+              followed.set(port.id, {
+                ...seat,
+                position: {
+                  x: seat.position.x + after.position.x - before.position.x,
+                  y: seat.position.y + after.position.y - before.position.y,
+                },
+              });
+            }
+            if (attachedPorts.length && !fixed.size) {
+              const anchor = enclosingBox(final.document, resolver);
+              const box = enclosingBox(
+                withPlacements(final.document, followed),
+                resolver,
+              );
+              const grid = document.presentation.grid;
+              const dx = Math.round((anchor.x - box.x) / grid) * grid;
+              const dy = Math.round((anchor.y - box.y) / grid) * grid;
+              for (const [id, pose] of followed)
+                followed.set(id, {
+                  ...pose,
+                  position: {
+                    x: pose.position.x + dx,
+                    y: pose.position.y + dy,
+                  },
+                });
+            }
+            return finishPlacement(followed, railContacts);
+          },
+          stopped,
+          { phase: "gaps", budget: relocationBudget },
+        ),
+      );
+      const repairLabels = (run: LayoutRun) =>
+        timePhase(
+          "labelRepair",
+          () =>
+            repairStubLabels(
+              run,
+              resolver,
+              fixed,
+              (placements) => finishPlacement(placements, railContacts),
+              stopped,
+              options.pitch,
+            ).result,
+        );
+      // R152: compare one complete branch-column candidate with the finished
+      // incumbent. Existing modes, locks and explicit relationships keep their
+      // placement contract; this candidate only enters plain bounded planning.
+      if (
+        !allowBranches ||
+        fixed.size ||
+        document.constraints.length ||
+        document.layoutGroups.length ||
+        document.inductorCouplings?.length ||
+        stopped()
+      )
+        return repairLabels(closed);
+      const columns = branchColumns(document, resolver);
+      if (!columns || !closed.final) return repairLabels(closed);
+      const placed = placeDocument(
+        document,
+        resolver,
+        classifyNets(document, resolver),
+        [],
+        options,
+        emptyOverrides(),
+        emptyChoices(),
+        "stages",
+        columns,
+      );
+      if (placed.problem) return repairLabels(closed);
+      const candidate = finishPlacement(
+        placed.placements,
+        undefined,
+        placed.draftingTranslation ?? 0,
+      );
+      if (
+        !candidate.final ||
+        compareRuns(candidate, closed, resolver, calibratedScore) >= 0 ||
+        compactionRegresses(closed, candidate, resolver, true)
+      )
+        return repairLabels(closed);
+      const limits = routedGuards(closed.final, resolver);
+      if (
+        Object.entries(routedGuards(candidate.final, resolver)).some(
+          ([key, count]) => count > (limits[key] ?? 0),
+        )
+      )
+        return repairLabels(closed);
+      return repairLabels(candidate);
+    }
     if (
-      !allowBranches ||
+      options.quality !== "optimized" ||
       fixed.size ||
       document.constraints.length ||
-      document.layoutGroups.length ||
       document.inductorCouplings?.length ||
+      document.layoutGroups.length ||
+      document.instances.length > 40 ||
+      !quickRun.final ||
       stopped()
     )
-      return repairLabels(closed);
-    const columns = branchColumns(document, resolver);
-    if (!columns || !closed.final) return repairLabels(closed);
-    const placed = placeDocument(
+      return contactResult;
+    return optimizePins(
       document,
       resolver,
-      classifyNets(document, resolver),
-      [],
-      options,
-      emptyOverrides(),
-      emptyChoices(),
-      "stages",
-      columns,
+      contactResult,
+      {
+        ...searchBounds(quickRun.final, resolver),
+        anchor: enclosingBox(document, resolver),
+      },
+      strategy,
+      options.search?.seed ?? 1,
+      stopped,
+      replan,
     );
-    if (placed.problem) return repairLabels(closed);
-    const candidate = finishPlacement(
-      placed.placements,
-      undefined,
-      placed.draftingTranslation ?? 0,
+  };
+  const base = finishFinalist(selected, true);
+  if (options.finalists && !options.finalists.alternate) {
+    let pending = options.finalists.pending.get(document);
+    if (!pending)
+      options.finalists.pending.set(document, (pending = new Map()));
+    const snapshot = copyResult(base);
+    options.finalists.available ||= !!alternateFinalist;
+    pending.set(
+      finalistKey,
+      alternateFinalist
+        ? () => finishFinalist(alternateFinalist, false)
+        : () => copyResult(snapshot),
     );
-    if (
-      !candidate.final ||
-      compareRuns(candidate, closed, resolver, calibratedScore) >= 0 ||
-      compactionRegresses(closed, candidate, resolver, true)
-    )
-      return repairLabels(closed);
-    const limits = routedGuards(closed.final, resolver);
-    if (
-      Object.entries(routedGuards(candidate.final, resolver)).some(
-        ([key, count]) => count > (limits[key] ?? 0),
-      )
-    )
-      return repairLabels(closed);
-    return repairLabels(candidate);
   }
-  if (
-    options.quality !== "optimized" ||
-    fixed.size ||
-    document.constraints.length ||
-    document.inductorCouplings?.length ||
-    document.layoutGroups.length ||
-    document.instances.length > 40 ||
-    !quickRun.final ||
-    stopped()
-  )
-    return contactResult;
-  return optimizePins(
-    document,
-    resolver,
-    contactResult,
-    {
-      ...searchBounds(quickRun.final, resolver),
-      anchor: enclosingBox(document, resolver),
-    },
-    strategy,
-    options.search?.seed ?? 1,
-    stopped,
-    replan,
-  );
+  return base;
 }
 
 /** @internal One complete default/candidate plan, also used to verify refinement. */
