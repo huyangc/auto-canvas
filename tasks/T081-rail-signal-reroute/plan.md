@@ -2,7 +2,7 @@
 
 - Branch: `task/T081-rail-signal-reroute`
 - Base: `main` at `8cdec30`
-- Status: approved
+- Status: closed — not merged (round 1: no dev change; gate-row reroutes add ordinary crossings)
 
 ## Goal
 

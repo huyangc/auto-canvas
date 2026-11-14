@@ -216,6 +216,52 @@ export function crossingsByNet(
   return new Map([...points].map(([id, crossings]) => [id, crossings.size]));
 }
 
+/** Finished signal retries count points per rail/signal pair, as the frozen
+ * rail metric does. Retain each crossed rail's geometry for outside tracks. */
+export function signalRailCrossings(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  rails: ReadonlyMap<string, unknown>,
+): Map<string, { count: number; railPoints: Point[] }> {
+  const geometry = document.routes.flatMap((route) => {
+    const resolved = resolveRouteGeometry(document, resolver, route);
+    return resolved
+      ? [{ netId: route.netId, segments: resolved.segments }]
+      : [];
+  });
+  const signals = new Map<string, Map<string, Set<string>>>();
+  for (const signal of geometry) {
+    if (rails.has(signal.netId)) continue;
+    for (const rail of geometry) {
+      if (!rails.has(rail.netId)) continue;
+      for (const a of signal.segments)
+        for (const b of rail.segments) {
+          const point = properCrossing(a.from, a.to, b.from, b.to);
+          if (!point) continue;
+          let pairs = signals.get(signal.netId);
+          if (!pairs) signals.set(signal.netId, (pairs = new Map()));
+          let points = pairs.get(rail.netId);
+          if (!points) pairs.set(rail.netId, (points = new Set()));
+          points.add(point);
+        }
+    }
+  }
+  return new Map(
+    [...signals].map(([netId, pairs]) => [
+      netId,
+      {
+        count: [...pairs.values()].reduce(
+          (sum, points) => sum + points.size,
+          0,
+        ),
+        railPoints: geometry
+          .filter((route) => pairs.has(route.netId))
+          .flatMap((route) => route.segments.flatMap((s) => [s.from, s.to])),
+      },
+    ]),
+  );
+}
+
 /** Committed-result audit shared by corpus tests and the review artifact. */
 export function auditRouting(
   document: SchematicDocument,

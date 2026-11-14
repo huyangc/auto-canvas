@@ -21,6 +21,7 @@ import {
   crossingsByNet,
   floatingPins,
   missingConnections,
+  signalRailCrossings,
 } from "./routing-audit.js";
 import {
   lostNameClaim,
@@ -36,7 +37,12 @@ import type { AutoLayoutResult } from "./types.js";
 
 // Candidate tracks go through the outer pins, the centre, or one grid line
 // just outside the pin envelope. The router checks every trunk and branch.
-function* trunkTracks(points: Point[], grid: number, rails = false) {
+function* trunkTracks(
+  points: Point[],
+  grid: number,
+  rails = false,
+  railPoints: Point[] = [],
+) {
   yield undefined; // minimum spanning tree, against all retained conductors
   for (const axis of ["x", "y"] as const) {
     if (rails && axis === "x") continue;
@@ -55,6 +61,17 @@ function* trunkTracks(points: Point[], grid: number, rails = false) {
       low - grid,
       high + grid,
     ]);
+    // A gate row can be trapped between source drops and a supply trunk.
+    // Add at most one track per axis beyond the crossed rails, away from pins.
+    if (railPoints.length) {
+      const railLow = Math.min(...railPoints.map((p) => p[axis])),
+        railHigh = Math.max(...railPoints.map((p) => p[axis]));
+      tracks.add(
+        low + high >= railLow + railHigh
+          ? Math.floor(railLow / grid) * grid - grid
+          : Math.ceil(railHigh / grid) * grid + grid,
+      );
+    }
     for (const track of tracks)
       yield axis === "x"
         ? { start: { x: track, y: start }, end: { x: track, y: end } }
@@ -95,7 +112,7 @@ export function rerouteCrossings(
   return rerouteNets(source, resolver, result, stopped);
 }
 
-/** R148: reconsider crossed rails against the finished signal geometry. */
+/** R148: reconsider rails, then signals crossing the retained rail geometry. */
 export function rerouteRailCrossings(
   source: SchematicDocument,
   resolver: SymbolResolver,
@@ -103,7 +120,10 @@ export function rerouteRailCrossings(
   stopped: () => boolean,
   finish: (result: AutoLayoutResult) => AutoLayoutResult,
 ): AutoLayoutResult {
-  return rerouteNets(source, resolver, result, stopped, finish);
+  const railed = rerouteNets(source, resolver, result, stopped, finish);
+  return source.instances.length <= 40
+    ? rerouteNets(source, resolver, railed, stopped, finish, true)
+    : railed;
 }
 
 function rerouteNets(
@@ -112,8 +132,9 @@ function rerouteNets(
   result: AutoLayoutResult,
   stopped: () => boolean,
   finish?: (result: AutoLayoutResult) => AutoLayoutResult,
+  railSignals = false,
 ): AutoLayoutResult {
-  const rails = !!finish;
+  const rails = !!finish && !railSignals;
   const limit = MAX_SCHEMATIC_EDITS_PER_TRANSACTION;
   if (
     !result.edits.length ||
@@ -126,11 +147,19 @@ function rerouteNets(
   let doc = initial.document;
   const counts = crossingsByNet(doc, resolver);
   if (!counts.size) return result;
-  let remaining = counts;
-  const keys = [...counts.keys()].sort(
-    (a, b) => counts.get(b)! - counts.get(a)! || compareIds(a, b),
-  );
   const roles = classifyNets(doc, resolver);
+  let crossedRails = railSignals
+    ? signalRailCrossings(doc, resolver, roles.rails)
+    : undefined;
+  let remaining = counts;
+  const keys = [...(crossedRails ?? counts).keys()].sort(
+    (a, b) =>
+      (crossedRails
+        ? crossedRails.get(b)!.count - crossedRails.get(a)!.count
+        : 0) ||
+      counts.get(b)! - counts.get(a)! ||
+      compareIds(a, b),
+  );
   const groups = freezePinGroups(doc, resolver);
   const protectedIds = protectedObjects(doc);
   const reserved = new Set([
@@ -139,11 +168,11 @@ function rerouteNets(
   ]);
   const partition = terminalPartition(doc, resolver);
   const score = (final: SchematicDocument) =>
-    (rails ? calibratedScore : routedScore)(
+    (finish ? calibratedScore : routedScore)(
       { result, final, choices: emptyChoices() },
       resolver,
     );
-  let guards = rails ? routedGuards(doc, resolver) : undefined;
+  let guards = finish ? routedGuards(doc, resolver) : undefined;
   let audit = auditRouting(doc, resolver),
     bestScore = score(doc);
   if (
@@ -155,13 +184,21 @@ function rerouteNets(
   let trials = 0;
   for (const netId of keys) {
     if (trials === 3 || stopped() || !audit.crossings) break;
+    // crossedRails already excludes rails. A control voltage source may have
+    // the legacy supply role without belonging to the rail set.
     if (
       rails
         ? !roles.rails.has(netId)
-        : ["ground", "supply"].includes(roles.byNet.get(netId) ?? "")
+        : !railSignals &&
+          ["ground", "supply"].includes(roles.byNet.get(netId) ?? "")
     )
       continue;
-    if (!remaining.has(netId) || protectedIds.has(netId)) continue;
+    if (
+      !remaining.has(netId) ||
+      (crossedRails && !crossedRails.has(netId)) ||
+      protectedIds.has(netId)
+    )
+      continue;
     const group = groups.find((g) => g.netId === netId);
     if (!group || group.pins.length < 2 || group.contacts.length) continue;
     const routes = doc.routes.filter((r) => r.netId === netId),
@@ -217,7 +254,12 @@ function rerouteNets(
           audit: typeof audit;
         }
       | undefined;
-    for (const trunk of trunkTracks(coords, doc.presentation.grid, rails)) {
+    for (const trunk of trunkTracks(
+      coords,
+      doc.presentation.grid,
+      rails,
+      crossedRails?.get(netId)?.railPoints,
+    )) {
       if (stopped()) break;
       let routed;
       try {
@@ -282,10 +324,12 @@ function rerouteNets(
         winner = { result: candidate, final, score: value, audit: next };
     }
     if (winner) {
-      if (rails) result = winner.result;
+      if (finish) result = winner.result;
       else result.edits = winner.result.edits;
       doc = winner.final;
       remaining = crossingsByNet(doc, resolver);
+      if (crossedRails)
+        crossedRails = signalRailCrossings(doc, resolver, roles.rails);
       audit = winner.audit;
       bestScore = winner.score;
       if (guards) guards = routedGuards(doc, resolver);
