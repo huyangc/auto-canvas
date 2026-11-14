@@ -31,6 +31,7 @@ import {
 import { emptyChoices } from "./layout-choices.js";
 import { refinementMetrics, routedScore } from "./refine.js";
 import { calibratedScore, routedGuards } from "./routed-search-score.js";
+import { improvesReadability } from "./readability-selection.js";
 import type { AutoLayoutResult } from "./types.js";
 
 // Candidate tracks go through the outer pins, the centre, or one grid line
@@ -251,12 +252,13 @@ function rerouteNets(
       const final = replay.document,
         next = auditRouting(final, resolver);
       if (
-        next.crossings > audit.crossings ||
-        next.bends > audit.bends ||
-        next.wireLength > audit.wireLength ||
-        (next.crossings === audit.crossings &&
-          next.bends === audit.bends &&
-          next.wireLength === audit.wireLength) ||
+        (!improvesReadability(doc, final, resolver) &&
+          (next.crossings > audit.crossings ||
+            next.bends > audit.bends ||
+            next.wireLength > audit.wireLength ||
+            (next.crossings === audit.crossings &&
+              next.bends === audit.bends &&
+              next.wireLength === audit.wireLength))) ||
         next.unsafeProblems.length ||
         terminalPartition(final, resolver) !== partition ||
         lostNameClaim(doc, final) ||

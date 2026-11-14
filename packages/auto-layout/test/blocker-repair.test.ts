@@ -239,59 +239,71 @@ it("R72 keeps a repair that routes a Net even when it adds a crossing", () => {
   );
 });
 
-it("R72 rejects a repair whose routed score is not lower", () => {
-  const d = blockedPort(240),
-    fixedInstanceIds = new Set(["a", "b", "host", "rail"]);
-  const initial = planLayoutOnce(
-    d,
-    resolver,
-    { fixedInstanceIds },
-    emptyOverrides(),
-  );
-  let attempts = 0;
-  const selected = repairBlockers(
-    initial,
-    resolver,
-    new Set(fixedInstanceIds),
-    (placements) => {
-      attempts++;
-      const candidate = planLayoutOnce(
-        d,
-        resolver,
-        { fixedInstanceIds },
-        emptyOverrides(),
-        "template",
-        true,
-        undefined,
-        undefined,
-        placements,
-      );
-      // Keep the improved connectivity, but add a costly detour that the
-      // audit measures. Rejection must come from score, not floating pins.
-      expect(candidate.final).toBeDefined();
-      const final = structuredClone(candidate.final!);
-      const route = final.routes[0]!;
-      final.routes[0] = createRoutePath({
-        id: route.id,
-        netId: route.netId,
-        start: route.start,
-        end: routeEnd(route),
-        bends: [{ x: 100000, y: 0 }],
-        modes: ["manual", "manual"],
-      });
-      const expensive = { ...candidate, final };
-      expect(floatingPins(final, resolver).length).toBeLessThan(
-        floatingPins(initial.final!, resolver).length,
-      );
-      expect(routedScore(expensive, resolver)).toBeGreaterThan(
-        routedScore(initial, resolver),
-      );
-      return expensive;
-    },
-  );
-  expect(attempts).toBe(1);
-  expect(selected).toBe(initial);
-});
+it.each(["improved", "equal"] as const)(
+  "R72 compares %s completeness before a higher soft score",
+  (completeness) => {
+    const d = blockedPort(240),
+      fixedInstanceIds = new Set(["a", "b", "host", "rail"]);
+    const initial = planLayoutOnce(
+      d,
+      resolver,
+      { fixedInstanceIds },
+      emptyOverrides(),
+    );
+    let attempts = 0;
+    let repaired: ReturnType<typeof planLayoutOnce> | undefined;
+    const selected = repairBlockers(
+      initial,
+      resolver,
+      new Set(fixedInstanceIds),
+      (placements) => {
+        attempts++;
+        const candidate = planLayoutOnce(
+          d,
+          resolver,
+          { fixedInstanceIds },
+          emptyOverrides(),
+          "template",
+          true,
+          undefined,
+          undefined,
+          placements,
+        );
+        // The same expensive detour must win only when physical completeness
+        // improves; a soft-score regression at equal completeness still loses.
+        expect(candidate.final).toBeDefined();
+        const final = structuredClone(
+          completeness === "improved" ? candidate.final! : initial.final!,
+        );
+        const route = final.routes[0]!;
+        final.routes[0] = createRoutePath({
+          id: route.id,
+          netId: route.netId,
+          start: route.start,
+          end: routeEnd(route),
+          bends: [{ x: 100000, y: 0 }],
+          modes: ["manual", "manual"],
+        });
+        const expensive = { ...candidate, final };
+        const before =
+          floatingPins(initial.final!, resolver).length +
+          missingConnections(initial.final!, resolver);
+        const after =
+          floatingPins(final, resolver).length +
+          missingConnections(final, resolver);
+        if (completeness === "improved") expect(after).toBeLessThan(before);
+        else expect(after).toBe(before);
+        expect(routedScore(expensive, resolver)).toBeGreaterThan(
+          routedScore(initial, resolver),
+        );
+        repaired = expensive;
+        return expensive;
+      },
+    );
+    expect(attempts).toBe(1);
+    expect(selected).toBe(completeness === "improved" ? repaired : initial);
+  },
+);
 
 it("R72 respects fixed blocker ids and resolves ids with punctuation", () => {
   const d = blockedGround();

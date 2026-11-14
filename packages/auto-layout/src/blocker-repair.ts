@@ -3,7 +3,8 @@ import type { SymbolResolver } from "@icm/symbols";
 import { centerRepairedFanout } from "./fanout-repair.js";
 import { devicePins } from "./placement-connectivity.js";
 import { nextMarkerPlacements } from "./place-markers.js";
-import { routedScore, type LayoutRun } from "./refine.js";
+import { compareRuns, type LayoutRun } from "./refine.js";
+import { improvesReadability } from "./readability-selection.js";
 import {
   auditRouting,
   floatingPins,
@@ -11,7 +12,7 @@ import {
 } from "./routing-audit.js";
 import type { Placement } from "./types.js";
 
-/** R72: two connectivity attempts, then at most one crossing-reduction trial. */
+/** R72: two connectivity attempts, then at most one routed-quality trial. */
 export function repairBlockers(
   initial: LayoutRun,
   resolver: SymbolResolver,
@@ -92,14 +93,14 @@ export function repairBlockers(
       candidate.result.diagnostics.some((d) => d.severity === "error")
     )
       break;
-    // Judge a repair by the same routed score as refinement and search: an
-    // unrouted Net outweighs the few crossings its new route may add.
+    // Require connectivity progress, then compare the same finished objective
+    // used by refinement and search, including frozen readability.
     if (
       floatingPins(candidate.final, resolver).length >=
         floatingPins(current.final, resolver).length ||
       missingConnections(candidate.final, resolver) >
         missingConnections(current.final, resolver) ||
-      routedScore(candidate, resolver) >= routedScore(current, resolver)
+      compareRuns(candidate, current, resolver) >= 0
     )
       break;
     for (const { instanceId } of floatingPins(current.final, resolver))
@@ -134,8 +135,9 @@ export function repairBlockers(
     return current;
   const after = auditRouting(candidate.final, resolver);
   return !after.unsafeProblems.length &&
-    after.crossings < before.crossings &&
-    routedScore(candidate, resolver) < routedScore(current, resolver)
+    (after.crossings < before.crossings ||
+      improvesReadability(current.final, candidate.final, resolver)) &&
+    compareRuns(candidate, current, resolver) < 0
     ? candidate
     : current;
 }

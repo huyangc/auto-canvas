@@ -1,3 +1,4 @@
+import { compareRuns } from "./refine.js";
 import type { SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import { emptyChoices } from "./layout-choices.js";
@@ -24,8 +25,12 @@ export function selectSeriesLayout(
     choices: emptyChoices(),
   });
   if (
-    calibratedScore(run(candidate, after.document), resolver) >
-    calibratedScore(run(base, before.document), resolver)
+    compareRuns(
+      run(candidate, after.document),
+      run(base, before.document),
+      resolver,
+      calibratedScore,
+    ) > 0
   )
     return base;
   const limits = routedGuards(before.document, resolver);

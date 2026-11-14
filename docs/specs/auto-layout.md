@@ -349,13 +349,19 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   its two pin-to-pin flips for a two-pin part where R9 allows both. Minimize
   half-perimeter wire length across its Nets given other placements; ties keep
   the first option. Make two passes in id order.
-- **R22 — Refinement by routed cost.** Score each complete final preview as
+- **R22 — Refinement by routed and readability cost.** Score each complete final preview as
   `unrouted × 10000 + crossings × 1000 + offConvention × 300 + bends × 100 + wireLength / 10 + labelOverlaps × 400 + labelClearance × 150 + terminalDepartures × 200`,
-  with named weights. `unrouted` counts missing physical connections: for each
+  with named weights, plus R74's frozen readability term through 40 instances.
+  Through 40 instances, compare floating pins plus missing physical connections
+  lexicographically before this soft score: a larger total cannot win, regardless
+  of readability weight. Equal totals use the score; differences below 1e-9
+  score units are ties to avoid rotated-geometry roundoff changing the winner
+  when a constant drafting cost is added. `unrouted` counts missing physical connections: for each
   Base Net, the number of physical components among non-bulk symbol pins minus
-  one, summed (R86). Count input Cell Pins on the right edge and output Cell
-  Pins on the left edge as `offConvention`, so a port leaves its conventional
-  side only when that saves a crossing. Signal flow stays left to right. In id order, try flipping one left/right Cell Pin side or one
+  one, summed (R86). Through 40 instances, remove the position-based
+  `offConvention` proxy; the frozen composite measures global input/output
+  port order. Above 40 instances retain the legacy facing penalty of 300.
+  In id order, try flipping one left/right Cell Pin side or one
   R21 orientation. Replan fully, discard candidates with error diagnostics,
   accept the best strictly improving move, and repeat for at most two passes
   and 24 evaluated candidates total. Fixed instances never move. If all
@@ -466,7 +472,7 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
 - **R44 — Routing alternative.** After R36 selects a plan, replan its placement
   and refinement choices once with R39 disabled, without another refinement.
   R96 replans the selected finalist with R95 after R72 repair. Keep the lower
-  R22 routed score, retaining the selected plan on a tie. R97 then compacts
+  R22 completeness-first comparison including the frozen readability term, retaining the selected plan on a tie. R97 then compacts
   only the R44 winner.
 
 - **R50 — Stages.** A stage is a connected component of devices joined on a
@@ -501,7 +507,11 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
 - **R57 — Signal direction.** After R53, compare the mean x coordinates of
   input and output Cell Pins' host pins. If inputs lie to the right of outputs,
   reverse the stage order and mirror each stage where group handedness permits.
-  With no input or no output hosts, keep the order.
+  With no input or no output hosts, keep the order. This remains the stages
+  strategy's existing correction. T074 removes the T073 template/layered
+  mirrored-draft comparison and correction after a dev-only ablation improved
+  the frozen composite. Template/layered drafts retain their original direction;
+  complete strategy/refinement candidates still use R22's readability term.
 - **R58 — Refine the top two.** Route each eligible strategy once without
   refinement and rank by R22's routed score. Up to 40 instances, refine the top
   two independently, reusing their initial routed plans, with at most 14
@@ -689,7 +699,16 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   `VISUAL_LABEL_OVERLAP` (clustered), `VISUAL_LABEL_CLEARANCE`, and
   `VISUAL_TERMINAL_DEPARTURE` on the final seated preview, with starting weights
   400, 150, and 200 respectively. Cache counts per immutable preview and resolver.
-  These starting values await preference calibration in T022. Evaluation reports
+  Through 40 instances add `READABILITY_SELECTION_WEIGHT` times the frozen
+  T070 `readabilityScore(readabilityMetrics(final, resolver))`, with selection
+  weight 30000, the dev minimum satisfying all round-2 development guards. The selection weight is evaluated on dev only; metric definitions, scales and fitted weights
+  remain frozen. Memoize the composite per immutable final document and resolver
+  within one public planning call; no corpus state enters the score. Apply it
+  to complete strategy, refinement, routed annealing, routing alternative,
+  compaction, device/port/rail seat, drafting, local-rail and repair comparisons.
+  Unrouted placement estimators do not measure it. Above 40 instances the term
+  is zero and the prior scoring and guard behavior remains in effect.
+  Evaluation reports
   the three counts for both human and automatic drawings and dev/val totals.
   Review-only timing records cumulative seating and readability scoring time
   across complete candidates, without changing deterministic output.
@@ -1187,18 +1206,29 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   when nothing is fixed, translate all placements together to restore the
   incumbent's top-left anchor within R1's half-grid tolerance. Fixed and locked
   instances never move.
+  Append the T073 conventional horizontal seat beyond the outermost directed
+  host after existing candidates, preserving estimate ties and the trial cap.
   Rank alternatives by R54's non-rail Manhattan MST length and estimated
-  crossings, weighted 4 and 1000. Apply the straight-join seat filter before
+  crossings, weighted 4 and 1000. Do not add the removed host-position
+  convention proxy to the shortlist estimate. Apply the straight-join seat filter before
   shortlisting: consider obstructing seats only if no clear alternative exists,
   and reject finishing that turns a clear seat into an obstructing one.
   Fully evaluate the best two clear seats per port (or one blocked fallback), at
   most 12 trials total, scaled by instance count under R66, with no wall-clock budget. Each trial runs the normal
   R72, R95/R96, R97, facing, local rerouting and label passes before comparison.
-  Accept only a strictly lower R74 score with wire weight 4 and finished
-  visible span weight 0.5 (R149, T059 dev refit); other R74 comparisons
+  Regenerate seats from the finished geometry without the incumbent seat:
+  the trial port and every port already selected in this pass must still occupy
+  a generated position after compaction or other finalist repairs.
+  Compare physical completeness first as in R22; at equal completeness accept
+  only a strictly lower R74 score with wire weight 4 and finished visible span
+  weight 0.5 (R149, T059 dev refit). Other R74 comparisons
   retain wire weight 0.1 and no span term. Reject any increase in finished floating pins,
-  missing connections or any `VISUAL_*` count. Keep the incumbent on ties.
-  Input/output convention remains a score term, not a candidate filter.
+  missing connections or any `VISUAL_*` count except the zero-readability-weight
+  label clearance and label owner distance. T074 corpus totals must stay at or
+  below main except label clearance and the accepted owner-distance increase of one.
+  Label clearance is reported but is no longer a corpus gate. Keep the incumbent on ties.
+  Global input/output order enters the frozen readability term after routing;
+  host-side convention is a candidate option, not a score proxy or filter.
   Successful partition planning, optimized quality, zero-budget planning and
   documents above 40 instances retain their prior behavior. R134 partition
   fallback runs plain planning, including R147 and R146.
@@ -1222,7 +1252,8 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   Incomplete layouts and gap proposals retain their full trials. Finish with
   at most ten trials total, scaled under R66. This count is shared with R149 and separate from R66's annealing and
   R146's port-seat budgets; it has no wall-clock cutoff.
-  Use R146's complete finalist finishing path, calibrated score and guards;
+  Use R146's complete finalist finishing path, readability-augmented calibrated
+  score and guards;
   keep ties and reject any finished rigid-unit distortion. Preserve the
   incumbent anchor by a whole-placement grid translation when nothing is
   fixed. Optimized, successful partition, zero-budget and above-40-instance
@@ -1242,7 +1273,8 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   Check the moved marker against other pins and bounds, retaining unrelated
   legal contacts. Markers belonging to user groups or constraints, and fixed
   markers, stay put. Preserve licensed contacts through R140's declared-pair
-  policy. Use R146's complete finishing path, calibrated score and all routed
+  policy. Use R146's complete finishing path, readability-augmented calibrated
+  score and all routed
   guards; retain the incumbent on ties.
   Then retry at most three crossed rail Nets against the retained signal
   geometry, ordered by crossing count with stable Net-id ties. Compare a tree
@@ -1250,8 +1282,9 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   levels, its grid-snapped centre, and one grid step outside either level.
   Preserve direct contacts and protected or locked routing by skipping those
   Nets. Replay and finish labels before comparing each candidate. Require a
-  strictly better calibrated score, no increase in crossings, bends or wire,
-  no lost name claim or terminal partition change, and no routing, connectivity
+  strictly better calibrated score. Crossings, bends and wire may increase
+  only with a strictly lower frozen readability composite. Require no lost name
+  claim or terminal partition change, and no routing, connectivity
   or `VISUAL_*` guard regression. Keep earlier candidates on ties. All bounds
   are evaluation counts, with caller cancellation checked between trials.
   Optimized, successful partition, zero-budget and above-40-instance planning
@@ -1262,13 +1295,19 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   score. T059 refits crossings, bends, wire and visible span together against
   dev human placements, retaining the other R74 terms: crossing weight 1000,
   bend weight 100, wire weight 4 and span weight 0.5. A 120-unit span reduction
-  is worth 60, less than one added bend. Independently of the weighted score,
+  is worth 60, less than one added bend. Add R74's frozen readability term.
+  A strict improvement in physical completeness takes priority over soft
+  crossing/bend vetoes. At equal completeness, a strict decrease in the frozen
+  composite also overrides these vetoes, including gap moves; all hard routed
+  guards still apply.
+  Otherwise, independently of the weighted score,
   all three searches reject any increase in finished crossings or bends when
   the span term drives acceptance (the trial would not strictly improve T058's
   wire-weighted score). Trials that also improve the wire-weighted score retain
   its existing primary-metric tradeoffs.
-  Every new gap-closing trial must keep both primary metrics non-increasing,
-  even when it also improves the wire-weighted score.
+  Without a strict readability improvement, every new gap-closing trial must
+  keep both primary metrics non-increasing, even when it also improves the
+  wire-weighted score.
   Measure the union
   of visible instance bounds (including ports and rail markers), pins, routed
   centerlines, visible label room and ink, and drafting bounds. This is a
@@ -1310,8 +1349,9 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   plan in input group order, keeping all other drafting as obstacles; missing
   owners, unsupported rotations and failed seats leave that whole component
   fixed, and unowned components stay one rigid batch. Each accepted batch
-  preserves the terminal partition and cannot increase crossings, bends, wire,
-  drafting overlaps or any R146 routed guard; it changes drafting only. An
+  preserves the terminal partition and cannot increase drafting overlaps or
+  any R146 routed guard. Crossings, bends and wire may increase only when the
+  frozen readability composite strictly decreases; it changes drafting only. An
   owned batch may raise the R149 calibrated score only when it reduces the
   final number of unowned drafting groups. When
   seating directly on the base without an additional candidate, unowned
@@ -1324,7 +1364,10 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   trials; do not infer it from the final envelope. Keep every searched seat,
   rotation and mirror. Route those exact placements once, move and seat the
   owned drafting groups, then finish local rerouting, fixed drafting and standalone
-  captions, and label separation once. Unowned and locked drafting stays at its
+  captions, and label separation once. Independent drafting fallback batches also
+  recover standalone caption anchors after moving the ink, before replay and
+  guards; they retain refinement accounting and never split multi-object groups.
+  Unowned and locked drafting stays at its
   input positions when undoing R10. Recover standalone caption anchors after
   routing; multi-object groups retain their rigid seating.
   Retain the base if fixed ink blocks the candidate's 60-unit device clearance;
@@ -1353,9 +1396,10 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   drafting-overlap audit. Only positions and anchors change;
   authored content and shape are preserved. Unsupported route-following
   rotations, missing owners, failed seats or invalid replay retain the ordinary
-  plan. Accept only when the finished R149 calibrated score, crossings, bends,
-  wire length, drafting-overlap count and every R146 routed guard do not
-  increase, and the terminal partition is unchanged. Optimized and successful
+  plan. Accept only when the finished R149 calibrated score, drafting-overlap
+  count and every R146 routed guard do not increase, and the terminal partition
+  is unchanged. Crossings, bends and wire length must also not increase unless
+  the frozen readability composite strictly decreases. Optimized and successful
   partition planning and documents above 40 instances retain their prior
   behavior; partition fallback uses plain planning. Candidate cancellation is
   checked before building the additional candidate.
@@ -1531,9 +1575,9 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   explicit endpoint membership and a claim with the existing name, scope and
   domain. Supply copies without an authored label receive a bound net-name label.
   Seat unlocked labels after routing. Compare complete transaction replays by
-  the calibrated finished score, requiring fewer total crossings, no unsafe
-  routing or increased routed guard, and no increase in T070's frozen readability
-  composite. Ties retain the incumbent. Bends and wire length are evaluated by
+  the readability-augmented calibrated finished score, requiring fewer total
+  crossings or a strictly lower frozen composite, no unsafe routing or increased
+  routed guard, and no increase in T070's frozen readability composite. Ties retain the incumbent. Bends and wire length are evaluated by
   the score and the corpus acceptance gates. Cancellation and the transaction
   edit cap apply. All additions are `add_instance` edits in the layout transaction,
   hence one Undo. Reuse prevents marker growth on a re-run.

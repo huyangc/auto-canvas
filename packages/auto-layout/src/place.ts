@@ -14,7 +14,7 @@ import {
   type SearchBounds,
 } from "./search-bounds.js";
 import { visibleInstanceBounds } from "@icm/derived";
-import { type Instance, type SchematicDocument } from "@icm/model";
+import type { Instance, SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import { classifyNets, type NetRoles } from "./net-roles.js";
 import { compareIds, persistedTemplates } from "./recognize.js";
@@ -222,7 +222,10 @@ export function placeDocument(
   searchLimit?: SearchBounds,
   draftRouter?: {
     key: string;
-    score: (placements: ReadonlyMap<string, Placement>) => number;
+    compare: (
+      a: ReadonlyMap<string, Placement>,
+      b: ReadonlyMap<string, Placement>,
+    ) => number;
   },
 ): {
   placements: Map<string, Placement>;
@@ -259,6 +262,7 @@ export function placeDocument(
             strategy,
             undefined,
             searchLimit,
+            draftRouter,
           );
           return { result, choices };
         };
@@ -276,9 +280,14 @@ export function placeDocument(
             [...d.choices.orientations],
           ]);
         if (key(signal) === key(legacy)) return signal;
-        const score = (d: typeof signal) =>
-          d.result.problem ? Infinity : draftRouter.score(d.result.placements);
-        return score(legacy) < score(signal) ? legacy : signal;
+        if (legacy.result.problem) return signal;
+        if (signal.result.problem) return legacy;
+        return draftRouter.compare(
+          legacy.result.placements,
+          signal.result.placements,
+        ) < 0
+          ? legacy
+          : signal;
       },
     );
     for (const [id, side] of selected.choices.sides)

@@ -1,3 +1,4 @@
+import { readabilityTerm } from "../src/readability-selection.js";
 import { expect, it } from "vitest";
 import {
   createLabelClearanceContext,
@@ -197,7 +198,11 @@ it("R74 prefers no label overlap with identical wiring", () => {
       },
       resolver,
     );
-  expect(score(poor) - score(good)).toBe(ROUTED_SCORE_WEIGHTS.labelOverlaps);
+  expect(score(poor) - score(good)).toBe(
+    ROUTED_SCORE_WEIGHTS.labelOverlaps +
+      readabilityTerm(poor, resolver) -
+      readabilityTerm(good, resolver),
+  );
 });
 it("quick mode remains deterministic and its seated transactions replay", () => {
   const before = labeledPair(true),

@@ -102,7 +102,7 @@ it.each(["chain", "ring"] as const)(
         x: 999,
         y: 983.63,
         width: 182,
-        height: 12.74,
+        height: 12.36,
       });
     }
   },

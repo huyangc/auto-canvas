@@ -1,4 +1,5 @@
 import { planningMemo } from "./planning-reuse.js";
+import { improvesReadability } from "./readability-selection.js";
 import {
   createLabelClearanceContext,
   diagnoseVisualQuality,
@@ -7,7 +8,12 @@ import {
 } from "@icm/derived";
 import type { SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
-import { ROUTED_SCORE_WEIGHTS, routedScore, type LayoutRun } from "./refine.js";
+import {
+  compareCompleteness,
+  ROUTED_SCORE_WEIGHTS,
+  routedScore,
+  type LayoutRun,
+} from "./refine.js";
 import { draftingBounds, pinPoints } from "./geometry.js";
 import {
   auditRouting,
@@ -52,7 +58,7 @@ function computeVisibleSpan(
   );
 }
 
-// T058's wire-driven objective remains the reference for existing choices.
+// T058's wire-driven objective, augmented by the shared readability term.
 function wireScore(run: LayoutRun, resolver: SymbolResolver) {
   return (
     routedScore(run, resolver) +
@@ -72,7 +78,7 @@ export function calibratedScore(run: LayoutRun, resolver: SymbolResolver) {
   );
 }
 
-/** R149: protect primary metrics when compactness drives a new choice.
+/** R149: protect primary metrics unless frozen readability improves.
  * Existing wire-driven choices retain their T058 comparison; every new gap
  * move is a compaction trial, even if it also improves the wire objective. */
 export function compactionRegresses(
@@ -82,6 +88,10 @@ export function compactionRegresses(
   gapMove = false,
 ) {
   if (!current.final || !candidate.final) return true;
+  const completeness = compareCompleteness(candidate, current, resolver);
+  if (completeness) return completeness > 0;
+  if (improvesReadability(current.final, candidate.final, resolver))
+    return false;
   if (!gapMove && wireScore(candidate, resolver) < wireScore(current, resolver))
     return false;
   const before = auditRouting(current.final, resolver);
@@ -109,7 +119,15 @@ function computeRoutedGuards(
     ...diagnoseVisualQuality(document, resolver),
     ...diagnoseLabelClearance(document, resolver),
   ])
-    if (diagnostic.code.startsWith("VISUAL_"))
+    if (
+      diagnostic.code.startsWith("VISUAL_") &&
+      !(
+        document.instances.length <= 40 &&
+        ["VISUAL_LABEL_CLEARANCE", "VISUAL_LABEL_OWNER_DISTANCE"].includes(
+          diagnostic.code,
+        )
+      )
+    )
       counts[diagnostic.code] = (counts[diagnostic.code] ?? 0) + 1;
   return counts;
 }

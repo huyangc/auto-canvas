@@ -185,6 +185,15 @@ it("R144 rejects a higher-scoring finishing candidate and accepts a tie", () => 
       }
       return Number.isFinite(original(run, r)) ? 1000 : Infinity;
     });
+  // The shared comparator owns score lookup now. Keep this instrumentation
+  // at that boundary so the existing rejection/tie assertions still exercise
+  // the injected routed scores, with physical completeness checked first.
+  const compare = scoring.compareRuns;
+  const comparison = vi
+    .spyOn(scoring, "compareRuns")
+    .mockImplementation((a, b, r, objective) =>
+      compare(a, b, r, objective ?? scoring.routedScore),
+    );
   const calls = vi.spyOn(routing, "routeDocument");
   try {
     const rejected = planAutoLayout(document, resolver);
@@ -211,6 +220,7 @@ it("R144 rejects a higher-scoring finishing candidate and accepts a tie", () => 
       JSON.stringify(accepted.edits),
     );
   } finally {
+    comparison.mockRestore();
     score.mockRestore();
     calls.mockRestore();
   }

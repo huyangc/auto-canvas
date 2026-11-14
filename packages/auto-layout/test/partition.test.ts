@@ -156,7 +156,7 @@ it("follows a V2 arrangement, separates crowded blocks, and keeps every member i
   ).toBe(false);
   expect(replay(sample(), partition).plan.edits).toEqual(plan.edits);
   expect(createHash("sha256").update(JSON.stringify(plan)).digest("hex")).toBe(
-    "ede37f28382e78842b866abf22712d51cc28d467b633acbe138a679616f22dd3",
+    "4c227341fb473f10a85c1d4023ea7ac8f40463b565a86d6a96192340e7c21529",
   );
 });
 it("clusters only through non-rail Nets and uses enclosing drafting rectangles", () => {
