@@ -698,6 +698,26 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   violation of the incumbent, with half the incumbent's relocation, port-seat
   and rail-seat trial budgets (at least one each); the finished comparator
   decides.
+- **R158 — Drafting owner recovery (T082).** After the finished winner is
+  chosen, in plain planning with a nonzero search budget and 1–40 instances,
+  recover drafting ownership that R16 and R150 lost. First, a routed
+  conductor on a Net with no terminal (no device pin, port or marker) is
+  carried rigidly by R150's terminal-less displacement (the nearest visible
+  source instance), with its bends and junctions, under fresh R98 ids;
+  bus-member routes and contact-anchored or member junctions are not carried.
+  It must touch no symbol, pin, junction, conductor or drafting ink, must not
+  join a terminal Net, and must keep the terminal partition. Each carried Net
+  is accepted on its own. Movable drafting anchored to it is re-anchored by
+  explicit drafting edits to the new ids; locked drafting never moves. Then
+  an owned drafting group whose R150 seat failed or left its owner's radius
+  searches seats around its owner on both sides (grid steps up to ±40),
+  accepting only a seat that keeps the same owner; groups merged with locked
+  ink stay fixed. Every accepted change keeps R150's batch acceptance
+  (terminal partition, no new drafting overlap, no R146 guard regression,
+  crossings / bends / wire only with a strictly lower frozen composite) and
+  never raises the frozen composite. Cancellation is checked per Net, group
+  and offset; clearance-passing seat trials are capped at 128 per group and
+  512 per document, scaled by `finishingTrialBudget`.
 
 - **R71 — Single-host ports.** A non-rail Cell Pin Net that reaches exactly
   one device pin gets a local seat along that pin's transformed exit direction.
