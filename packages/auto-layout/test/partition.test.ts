@@ -1,4 +1,4 @@
-import { planLayoutOnce } from "../src/auto-layout.js";
+import { planLayoutOnce, planWithSeriesLevels } from "../src/auto-layout.js";
 import { emptyOverrides } from "../src/layout-choices.js";
 import {
   refinementMetrics,
@@ -661,23 +661,26 @@ it.each([false, true])(
       ...options,
       partition: blocks,
     });
-    const plain = planAutoLayout(d, resolver, {
-      ...options,
-      search: options.search ?? { seed: 1, evaluations: 8 },
+    // The complete fallback may now select another refined finalist. Compare
+    // against the previous full pipeline with the same seed, budget and locks.
+    const legacy = planWithSeriesLevels(
+      d,
+      resolver,
+      {
+        ...options,
+        partition: blocks,
+      },
+      true,
+    );
+    expect(legacy.edits.length).toBeGreaterThan(0);
+    expect(fallback.diagnostics).toEqual(legacy.diagnostics);
+    expect(fallback.diagnostics).toContainEqual({
+      severity: "warning",
+      code: "AUTO_LAYOUT_PARTITION_FALLBACK",
+      rule: "partition",
+      message: refused.result.diagnostics[0]!.message,
     });
-    expect(plain.edits.length).toBeGreaterThan(0);
-    expect(fallback).toEqual({
-      ...plain,
-      diagnostics: [
-        ...plain.diagnostics,
-        {
-          severity: "warning",
-          code: "AUTO_LAYOUT_PARTITION_FALLBACK",
-          rule: "partition",
-          message: refused.result.diagnostics[0]!.message,
-        },
-      ],
-    });
+    expect(fallback).toEqual(legacy);
     const final = executeTransaction(
       d,
       {

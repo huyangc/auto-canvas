@@ -126,7 +126,7 @@ it.each([
   { x: 160, accepted: true },
   { x: 80, accepted: false },
 ])(
-  "R150 searches once and keeps the compared seats (accepted=$accepted)",
+  "R150 searches once, finishes each finalist, and keeps the compared seats (accepted=$accepted)",
   ({ x, accepted }) => {
     const d = fixture();
     d.drafting = { objects: [note("obstacle", { x, y: 0 })] };
@@ -139,11 +139,11 @@ it.each([
     const { result, final } = apply(d);
     expect(planningTiming(result)!.phaseCalls).toMatchObject({
       annealer: 1,
-      relocation: 1,
-      ports: 1,
-      rails: 1,
-      gaps: 1,
-      drafting: 1,
+      relocation: 2,
+      ports: 2,
+      rails: 2,
+      gaps: 2,
+      drafting: 2,
       draftingFallback: 0,
     });
     expect(final.instances.map((i) => i.placement)).toEqual(
@@ -177,7 +177,7 @@ it("R150 keeps unowned and locked ink fixed when undoing R10", () => {
   const { result, final } = apply(d);
   expect(planningTiming(result)!.phaseCalls).toMatchObject({
     annealer: 1,
-    drafting: 1,
+    drafting: 2,
     draftingFallback: 0,
   });
   expect(final.instances.map((i) => i.placement!.position)).toEqual(
@@ -395,7 +395,7 @@ it("R150 leaves a locked note and its touching box unchanged", () => {
 
 it("R150 seats a colliding note near its owner without covering a device", () => {
   const d = fixture();
-  d.drafting = { objects: [note("caption", { x: 645, y: 400 })] };
+  d.drafting = { objects: [note("caption", { x: 555, y: 400 })] };
   const { final } = apply(d);
   const groups = draftingGroups(d, resolver);
   const delta = draftingDisplacements(d, final, resolver, groups)!.get(

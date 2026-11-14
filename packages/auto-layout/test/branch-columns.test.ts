@@ -1,3 +1,4 @@
+import { selectFinishedLayout } from "../src/finished-selection.js";
 import { planWithSeriesLevels } from "../src/auto-layout.js";
 import { calibratedScore } from "../src/routed-search-score.js";
 import { emptyChoices } from "../src/layout-choices.js";
@@ -161,7 +162,14 @@ it("keeps the complete old-level plan when series levels increase its score", ()
   );
   const selected = selectSeriesLayout(d, resolver, old, candidate);
   expect(selected).toEqual(old);
-  expect(planAutoLayout(d, resolver, options)).toEqual(selected);
+  const finished = planAutoLayout(d, resolver, options);
+  // The provisional margin skips this runner-up, preserving the established
+  // old-level result as well as its finished-selection guards.
+  expect(selectFinishedLayout(d, resolver, selected, finished)).toEqual(
+    finished,
+  );
+  expect(finished).toEqual(selected);
+  expect(planAutoLayout(d, resolver, options)).toEqual(finished);
 });
 
 it("keeps a fixed branch member at its exact pose", () => {

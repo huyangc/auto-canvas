@@ -512,13 +512,36 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   mirrored-draft comparison and correction after a dev-only ablation improved
   the frozen composite. Template/layered drafts retain their original direction;
   complete strategy/refinement candidates still use R22's readability term.
-- **R58 — Refine the top two.** Route each eligible strategy once without
-  refinement and rank by R22's routed score. Up to 40 instances, refine the top
-  two independently, reusing their initial routed plans, with at most 14
-  candidates each. Keep the lower refined score; ties retain the higher-ranked
-  strategy. Above 40 instances, keep R55's unrefined comparison. R44 runs once
-  on the winner. After R72 repair, R96 replans the selected finalist with R95,
-  then R97 compacts the R44 winner, without adding refinement candidates.
+- **R58 — Finish the top two.** Route each eligible strategy once without
+  refinement and rank by R22's completeness-first routed score. Up to 40
+  instances, refine the top two independently, reusing their initial routed
+  plans, with at most 14 candidates each. The lower refined score (ties retain
+  the higher-ranked strategy) remains the starting point for R66's annealer.
+  Preserve that existing finished result as the fallback. Also finish the other
+  distinct, physically complete refined finalist, without repeating refinement
+  or annealing. K is two; an incomplete runner-up or one with identical
+  instance placements adds no search, even if its routed edits differ. For
+  equally complete finalists, skip the runner-up when its provisional R22
+  score exceeds the winner's by more than min(55% of the winner's score,
+  12,500). This dev-calibrated margin bounds extra finishing work; improved
+  completeness takes precedence over the score margin.
+  Each finalist retains the existing finishing budgets and order: R72 repair,
+  R96 rip-up, R44 routing comparison, R97 compaction, cross-coupled routing,
+  facing, crossing reroutes and contacts, R147 relocation, R146 ports, R148
+  rails, R149 gaps, branch columns and stub-label repair, label/drafting
+  finishing, and finally R155 local rails. Quality modes retain their existing
+  eligibility rules for each pass. Share per-call routing and finished-seat
+  caches, but copy mutable finalist results and reset per-finalist budgets.
+  Compare only after the outer pitch/series/drafting passes and local rails
+  have completed, using R22's shared comparator; ties keep the fallback.
+  Accept the other finalist only if its frozen readability composite, floating
+  and missing counts, and every visual diagnostic except label clearance do
+  not increase. A weighted readability metric with zero violations in the
+  fallback must remain zero: a percentage allowance cannot admit a new kind
+  of violation from a zero baseline. Cancellation/deadlines retain the completed fallback. Explicit
+  zero-evaluation quick planning and above-40 planning retain their previous
+  selection and finishing sequence. Above 40, R55's unrefined comparison and
+  single-winner R44/R96/R97 behavior remain unchanged.
 - **R59 — Attached parts.** A single-device stage with one non-rail Net and a
   rail pin (a shunt capacitor, load or bias resistor) takes no separate column.
   Place it next to its Net's host pin in the host stage's span, below for ground
@@ -552,7 +575,7 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   through 40 instances, reusing their initial routes. If fewer than two valid
   distinct candidates exist, a refused candidate may fill the second slot; if
   all are refused, refinement may repair the first candidate. Retain R58's
-  ranking ties and R44's single routing alternative. Above 40 instances keep
+  ranking ties and R44's single routing alternative per finalist. Above 40 instances keep
   R55's unrefined comparison: R61 was removed because round 1 measured no
   meaningful quality benefit for its extra planning time.
 
@@ -985,7 +1008,8 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   selected placement once with exact placements and R95 enabled; the R44
   alternative stays a plain replan. Replace the selected finalist only if its
   R22 routed score strictly decreases, then compare them with R44 as before.
-  Apply the same procedure to offline search's final best. Initial strategy
+  Apply the same procedure to offline search's final best and, through 40
+  instances, R58's other complete refined finalist. Initial strategy
   ranking, R58 refinement candidates and annealing evaluations never run R95; finalist
   replans do not count as refinement candidates.
 
@@ -1604,6 +1628,12 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   Edit Engine would reject or that would overwrite user intent.
 
 ### Bounded finishing after column compaction
+
+R58 runs these finishing steps independently for each retained finalist through
+40 instances, with the existing per-finalist caps and shared per-call caches.
+The final selection waits until label/drafting finishing and R155 local rails
+are complete; it always retains the previous fully finished choice as fallback.
+Above 40 instances, the single-winner sequence is unchanged.
 
 After the R97 column trial, the planner also evaluates closing empty horizontal bands.
 It reserves symbol ink plus clearance, pin-to-body spans, recognized and authored groups,
