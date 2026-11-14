@@ -16,7 +16,7 @@ import { routedGuards } from "./routed-search-score.js";
 import { preview } from "./transaction.js";
 import type { AutoLayoutResult, LayoutPartition } from "./types.js";
 
-type FinalistKind = "runner" | "localLoop" | "attachment";
+type FinalistKind = "runner" | "localLoop" | "attachment" | "flank";
 
 /** Per-call continuations finish additional placements without repeating
  * ranking, refinement or annealing. Outer drafting and rail passes still run. */
@@ -130,14 +130,12 @@ export function movesReadabilityParticipant(
   );
 }
 
-/** Preserve T078's runner slot; new variants share one additional slot, with
- * stable registration order on provisional ties. */
+/** Keep established finalists in order; the flank variant finishes last. */
 export function rankedFinalists(pass: FinalistPass, resolver: SymbolResolver) {
-  // T079 review: the runner-up (T078) and the local-loop variant (T077) keep
-  // their main behavior; the attachment variant is the one new extra finalist.
+  // Each variant retains its own admission gate and finishing budget.
   void resolver;
-  return (["runner", "localLoop", "attachment"] as const).filter((kind) =>
-    pass.available.has(kind),
+  return (["runner", "localLoop", "attachment", "flank"] as const).filter(
+    (kind) => pass.available.has(kind),
   );
 }
 

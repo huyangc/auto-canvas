@@ -1,3 +1,4 @@
+import { stageFlanks } from "./stage-flank.js";
 import { nodeAttachments } from "./attachment-seat.js";
 import { localLoopAmplifiers } from "./local-loop-amplifier.js";
 import {
@@ -159,6 +160,7 @@ interface LevelOptions extends AutoLayoutOptions {
   finalists?: FinalistPass;
   localLoopDraft?: boolean;
   attachmentDraft?: boolean;
+  flankDraft?: boolean;
 }
 
 /** T079: the attachment variant is finished only for small documents. */
@@ -954,18 +956,43 @@ function planAutoLayoutMeasured(
           run: { ...attachmentRun, result: copyResult(attachmentRun.result) },
         }
       : undefined;
+  const flankRun =
+    options.finalists &&
+    !options.finalists.alternate &&
+    // R158 shares the attachment variant's size and finishing-budget limits.
+    document.instances.length <= ATTACHMENT_VARIANT_MAX_INSTANCES &&
+    !options.partition &&
+    stageFlanks(document, resolver, classifyNets(document, resolver)).length
+      ? plan(
+          document,
+          resolver,
+          { ...options, flankDraft: true },
+          selected.overrides,
+          selected.strategy,
+        )
+      : undefined;
+  const flankFinalist =
+    flankRun &&
+    shouldFinishRunner(selected.run, flankRun, resolver) &&
+    movesReadabilityParticipant(selected.run, flankRun, resolver)
+      ? {
+          ...selected,
+          run: { ...flankRun, result: copyResult(flankRun.result) },
+        }
+      : undefined;
   const finishFinalist = (
     selected: (typeof ranked)[number],
     searchFinalist: boolean,
     localLoopDraft = false,
     attachmentDraft = false,
+    flankDraft = false,
   ): AutoLayoutResult => {
     repairBounds = undefined;
     // Reuse the selected placement and refinement choices; do not search again.
     const alternative = plan(
       document,
       resolver,
-      { ...options, localLoopDraft, attachmentDraft },
+      { ...options, localLoopDraft, attachmentDraft, flankDraft },
       selected.overrides,
       selected.strategy,
       false,
@@ -1224,7 +1251,7 @@ function planAutoLayoutMeasured(
         cache.set(key, run);
         return run;
       };
-      const reducedBudget = attachmentDraft;
+      const reducedBudget = attachmentDraft || flankDraft;
       const relocationBudget = {
         remaining: finishingTrialBudget(
           document.instances.length,
@@ -1480,6 +1507,7 @@ function planAutoLayoutMeasured(
       ["runner", alternateFinalist],
       ["localLoop", localFinalist],
       ["attachment", attachmentFinalist],
+      ["flank", flankFinalist],
     ] as const) {
       if (!candidate) continue;
       const previous = options.finalists.available.get(kind);
@@ -1492,6 +1520,9 @@ function planAutoLayoutMeasured(
         : () => copyResult(snapshot),
       attachment: attachmentFinalist
         ? () => finishFinalist(attachmentFinalist, false, false, true)
+        : () => copyResult(snapshot),
+      flank: flankFinalist
+        ? () => finishFinalist(flankFinalist, false, false, false, true)
         : () => copyResult(snapshot),
       localLoop: localFinalist
         ? () => finishFinalist(localFinalist, false, true)
@@ -1681,6 +1712,7 @@ function buildPlan(
           },
           options.localLoopDraft,
           options.attachmentDraft,
+          options.flankDraft,
         );
   const translation = exact
     ? inheritedTranslation

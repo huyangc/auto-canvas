@@ -1,3 +1,4 @@
+import { placeStageFlanks } from "./stage-flank.js";
 import { seatNodeAttachments } from "./attachment-seat.js";
 import { placeLocalLoopAmplifiers } from "./local-loop-amplifier.js";
 import { planningMemo } from "./planning-reuse.js";
@@ -231,6 +232,7 @@ export function placeDocument(
   },
   localLoopDraft?: boolean,
   attachmentDraft?: boolean,
+  flankDraft?: boolean,
 ): {
   placements: Map<string, Placement>;
   draftingTranslation?: number;
@@ -251,7 +253,7 @@ export function placeDocument(
     const selected = planningMemo(
       document,
       resolver,
-      `row-drafts:${JSON.stringify([draftRouter.key, localLoopDraft, attachmentDraft, roles.seriesLevels, roles.pitch, options.fixedInstanceIds, [...overrides.sides], [...overrides.orientations]])}`,
+      `row-drafts:${JSON.stringify([draftRouter.key, localLoopDraft, attachmentDraft, flankDraft, roles.seriesLevels, roles.pitch, options.fixedInstanceIds, [...overrides.sides], [...overrides.orientations]])}`,
       () => {
         const draft = (signalSeries: boolean) => {
           const choices = emptyChoices();
@@ -269,6 +271,7 @@ export function placeDocument(
             draftRouter,
             localLoopDraft,
             attachmentDraft,
+            flankDraft,
           );
           return { result, choices };
         };
@@ -473,6 +476,8 @@ export function placeDocument(
     const old = document.instances.find((i) => i.id === id)?.placement;
     if (old) targets.set(id, structuredClone(old));
   }
+  if (!given && flankDraft && !partition)
+    placeStageFlanks(document, resolver, roles, targets, templates, fixed);
   const deviceCollision = resolveCollisions(
     { ...document, instances: devices },
     resolver,

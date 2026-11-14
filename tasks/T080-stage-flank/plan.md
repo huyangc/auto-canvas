@@ -2,7 +2,7 @@
 
 - Branch: `task/T080-stage-flank`
 - Base: `main` at `8cdec30`
-- Status: approved
+- Status: closed — not merged (round 2: flank candidate never wins finished selection; see report)
 
 ## Goal
 

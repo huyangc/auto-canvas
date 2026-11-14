@@ -43,3 +43,15 @@ total not above main except label clearance; six large documents
 byte-identical and deterministic; held-out medians within +20%. All
 acceptance commands in the plan. Review page human | main | T080 for the four
 flank drawings, the ten whose composite falls most, and the 25 samples.
+
+## Round 2 — Opus, 2026-11-14
+
+Verdict: **closed, not merged.** The flank finalist is built correctly and is
+safe (628/628 byte-identical to main, large documents identical, held-out
+≤ +3.9%), but it never wins finished selection: on `6qg2h7weje` crossings fall
+5 → 4 while port order rises 0 → 4 and area grows (composite 0.569 → 0.906).
+Only four corpus drawings qualify, so even a successful port-coordination
+round would move dev by at most about 0.5 composite units, against the 3.4
+still needed. Code that never changes a plan is not worth carrying; the work
+stays on this branch for reference. Remaining effort goes to larger excess
+sources (rail crossings, unowned drafting, area, other crossing causes).
