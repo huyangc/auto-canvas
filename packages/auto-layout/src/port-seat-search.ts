@@ -40,10 +40,12 @@ export function searchPortSeats(
   fixed: ReadonlySet<string>,
   replan: (placements: ReadonlyMap<string, Placement>) => LayoutRun,
   stopped: () => boolean = () => false,
+  trialLimit?: number,
 ): LayoutRun {
   if (!initial.final || !Number.isFinite(routedScore(initial, resolver)))
     return initial;
-  const limit = planningBudget(initial.final.instances.length, 12);
+  const limit =
+    trialLimit ?? planningBudget(initial.final.instances.length, 12);
   if (!limit) return initial;
   let current = initial;
   let limits = routedGuards(initial.final, resolver);

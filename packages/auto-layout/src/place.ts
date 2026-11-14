@@ -1,3 +1,4 @@
+import { seatNodeAttachments } from "./attachment-seat.js";
 import { placeLocalLoopAmplifiers } from "./local-loop-amplifier.js";
 import { planningMemo } from "./planning-reuse.js";
 import { signalSeriesParts } from "./series-levels.js";
@@ -229,6 +230,7 @@ export function placeDocument(
     ) => number;
   },
   localLoopDraft?: boolean,
+  attachmentDraft?: boolean,
 ): {
   placements: Map<string, Placement>;
   draftingTranslation?: number;
@@ -249,7 +251,7 @@ export function placeDocument(
     const selected = planningMemo(
       document,
       resolver,
-      `row-drafts:${JSON.stringify([draftRouter.key, localLoopDraft, roles.seriesLevels, roles.pitch, options.fixedInstanceIds, [...overrides.sides], [...overrides.orientations]])}`,
+      `row-drafts:${JSON.stringify([draftRouter.key, localLoopDraft, attachmentDraft, roles.seriesLevels, roles.pitch, options.fixedInstanceIds, [...overrides.sides], [...overrides.orientations]])}`,
       () => {
         const draft = (signalSeries: boolean) => {
           const choices = emptyChoices();
@@ -266,6 +268,7 @@ export function placeDocument(
             searchLimit,
             draftRouter,
             localLoopDraft,
+            attachmentDraft,
           );
           return { result, choices };
         };
@@ -557,6 +560,32 @@ export function placeDocument(
             ...(g.tailInstanceId ? [g.tailInstanceId] : []),
           ]),
           ...document.layoutGroups.flatMap((g) => g.objectIds),
+        ]),
+        { ...document, instances: devices },
+      );
+  // Explicit floorplans retain their existing member-placement contract.
+  if (!given && attachmentDraft && !partition?.arrangement)
+    for (const local of partitionDocuments(
+      { ...document, instances: devices },
+      partition,
+    ))
+      seatNodeAttachments(
+        local,
+        resolver,
+        roles,
+        targets,
+        new Set([
+          ...fixed,
+          ...symmetryIds,
+          ...templates.flatMap((g) => [
+            ...g.members,
+            ...(g.extraMemberIds ?? []),
+            ...(g.tailInstanceId ? [g.tailInstanceId] : []),
+          ]),
+          ...document.layoutGroups.flatMap((g) => g.objectIds),
+          ...document.constraints
+            .filter((c) => c.kind === "symmetric")
+            .flatMap((c) => c.objectIds),
         ]),
         { ...document, instances: devices },
       );
