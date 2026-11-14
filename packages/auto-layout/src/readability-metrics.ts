@@ -25,6 +25,9 @@ import { auditRouting } from "./routing-audit.js";
 import { signalPathMetrics } from "./signal-path-metrics.js";
 import { symmetryCounts, symmetryTopology } from "./symmetry.js";
 
+// Fixed document units keep area comparable across drawings with different editor grids.
+const READABILITY_AREA_UNIT = 10;
+
 interface Measurement {
   violations: number;
   opportunities: number;
@@ -103,7 +106,11 @@ export function readabilityMetrics(
     blockedJoins: measurement(),
     detour: measurement(),
     wireThroughSymbols: measurement(),
-    area: measurement((bounds.width * bounds.height) / (pitch * pitch), 1),
+    area: measurement(
+      (bounds.width * bounds.height) /
+        (READABILITY_AREA_UNIT * READABILITY_AREA_UNIT),
+      1,
+    ),
     narrowBands: measurement(),
     signalSeriesVertical: measurement(),
     labelOverlaps: measurement(),
