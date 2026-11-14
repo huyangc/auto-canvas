@@ -17,7 +17,7 @@ export function readabilityTerm(
   return (
     READABILITY_SELECTION_WEIGHT *
     planningMemo(document, resolver, "selection-readability", () =>
-      readabilityScore(readabilityMetrics(document, resolver)),
+      readabilityScore(readabilityMetrics(document, resolver, "weighted")),
     )
   );
 }

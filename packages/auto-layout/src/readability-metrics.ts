@@ -17,6 +17,7 @@ import {
   isSource,
   signalDistances,
 } from "./placement-connectivity.js";
+import { railCrossingMetrics } from "./readability-rail-crossings.js";
 import { readabilityWeights } from "./readability-weights.js";
 import { readabilityCounts } from "./readability.js";
 import { recognizeStructures } from "./recognize.js";
@@ -58,12 +59,16 @@ function spanningLength(points: Point[]): number {
 /** Reference-free measurements, also used by T071's frozen composite guard.
  * No reference drawing, planner state, ids or titles as inputs.
  * Counts are accompanied by exposure denominators; area and detour are masses.
+ * Internal weighted mode leaves zero-weight diagnostic entries at zero.
+ * The default remains the complete evaluator measurement.
  * Two grid pitches = rounded-up median positive projection gap in dev humans.
  */
 export function readabilityMetrics(
   document: SchematicDocument,
   resolver: SymbolResolver,
+  mode: "all" | "weighted" = "all",
 ) {
+  const full = mode === "all";
   const roles = classifyNets(document, resolver);
   const devices = document.instances.filter((i) => !isMarker(i) && i.placement);
   const byId = new Map(document.instances.map((i) => [i.id, i]));
@@ -71,12 +76,14 @@ export function readabilityMetrics(
   const pin = (id: string, name: string) =>
     pins.find((p) => p.instanceId === id && p.pinName === name)?.point;
   const centres = new Map(devices.map((i) => [i.id, i.placement!.position]));
-  const boxes = visibleInstanceBounds(document, resolver);
+  const boxes = full ? visibleInstanceBounds(document, resolver) : [];
   const bounds = enclosingBox(document, resolver);
   const pitch = document.presentation.grid;
   const span = Math.max(pitch, bounds.width + bounds.height);
   const signal = signalDistances(document, devices, resolver, roles);
-  const channels = netLevels(devices, resolver, roles).channels;
+  const channels = full
+    ? netLevels(devices, resolver, roles).channels
+    : undefined;
   const metrics = {
     backwardFlow: measurement(),
     portOrder: measurement(),
@@ -116,64 +123,70 @@ export function readabilityMetrics(
     if (!netPins.has(net)) netPins.set(net, []);
     netPins.get(net)!.push(p);
   }
-  for (const [net, terminals] of netPins) {
-    const owners = [...new Set(terminals.map((p) => p.instanceId))].filter(
-      (id) => centres.has(id),
-    );
-    if (!signal.isPower(net))
-      for (let i = 0; i < owners.length; i++)
-        for (const b of owners.slice(i + 1)) {
-          const a = owners[i]!;
-          const da = signal.devices.get(a)!,
-            db = signal.devices.get(b)!;
-          if (!Number.isFinite(da) || !Number.isFinite(db) || da === db)
+  if (full)
+    for (const [net, terminals] of netPins) {
+      const owners = [...new Set(terminals.map((p) => p.instanceId))].filter(
+        (id) => centres.has(id),
+      );
+      if (!signal.isPower(net))
+        for (let i = 0; i < owners.length; i++)
+          for (const b of owners.slice(i + 1)) {
+            const a = owners[i]!;
+            const da = signal.devices.get(a)!,
+              db = signal.devices.get(b)!;
+            if (!Number.isFinite(da) || !Number.isFinite(db) || da === db)
+              continue;
+            count(
+              "backwardFlow",
+              (centres.get(b)!.x - centres.get(a)!.x) * (db - da) < 0,
+            );
+          }
+      // Only conducting device pairs joined bottom-to-top have a DC order.
+      for (const a of owners)
+        for (const b of owners) {
+          if (a === b) continue;
+          const ca = channels?.get(a),
+            cb = channels?.get(b);
+          if (ca?.length !== 2 || cb?.length !== 2) continue;
+          if (
+            !conductingPins(byId.get(a)!, resolver).some(
+              (p) => p.name === ca[1],
+            ) ||
+            !conductingPins(byId.get(b)!, resolver).some(
+              (p) => p.name === cb[0],
+            )
+          )
             continue;
-          count(
-            "backwardFlow",
-            (centres.get(b)!.x - centres.get(a)!.x) * (db - da) < 0,
-          );
+          if (
+            roles.pinNet(a, ca[1]!) === net &&
+            roles.pinNet(b, cb[0]!) === net
+          )
+            count("potentialOrder", centres.get(a)!.y > centres.get(b)!.y);
         }
-    // Only conducting device pairs joined bottom-to-top have a DC order.
-    for (const a of owners)
-      for (const b of owners) {
-        if (a === b) continue;
-        const ca = channels.get(a),
-          cb = channels.get(b);
-        if (ca?.length !== 2 || cb?.length !== 2) continue;
-        if (
-          !conductingPins(byId.get(a)!, resolver).some(
-            (p) => p.name === ca[1],
-          ) ||
-          !conductingPins(byId.get(b)!, resolver).some((p) => p.name === cb[0])
-        )
-          continue;
-        if (roles.pinNet(a, ca[1]!) === net && roles.pinNet(b, cb[0]!) === net)
-          count("potentialOrder", centres.get(a)!.y > centres.get(b)!.y);
-      }
-    const rail = roles.rails.get(net);
-    if (rail)
-      for (const marker of terminals.filter((p) =>
-        isMarker(byId.get(p.instanceId)!),
-      )) {
-        // A multi-host marker is compared to the nearest host pin, not all branches.
-        const host = terminals
-          .filter((p) => !isMarker(byId.get(p.instanceId)!))
-          .sort(
-            (a, b) =>
-              distance(marker.point, a.point) -
-                distance(marker.point, b.point) ||
-              a.instanceId.localeCompare(b.instanceId) ||
-              a.pinName.localeCompare(b.pinName),
-          )[0];
-        if (host)
-          count(
-            "railMarkerOrder",
-            rail === "supply"
-              ? marker.point.y > host.point.y
-              : marker.point.y < host.point.y,
-          );
-      }
-  }
+      const rail = roles.rails.get(net);
+      if (rail)
+        for (const marker of terminals.filter((p) =>
+          isMarker(byId.get(p.instanceId)!),
+        )) {
+          // A multi-host marker is compared to the nearest host pin, not all branches.
+          const host = terminals
+            .filter((p) => !isMarker(byId.get(p.instanceId)!))
+            .sort(
+              (a, b) =>
+                distance(marker.point, a.point) -
+                  distance(marker.point, b.point) ||
+                a.instanceId.localeCompare(b.instanceId) ||
+                a.pinName.localeCompare(b.pinName),
+            )[0];
+          if (host)
+            count(
+              "railMarkerOrder",
+              rail === "supply"
+                ? marker.point.y > host.point.y
+                : marker.point.y < host.point.y,
+            );
+        }
+    }
   const ports = (role: "input" | "output") =>
     document.instances.filter(
       (i) =>
@@ -197,7 +210,7 @@ export function readabilityMetrics(
   for (const i of devices) {
     const channel = channelPins(i.symbolId),
       direction = polarity(i.symbolId);
-    if (channel && direction && channels.get(i.id)?.length === 2) {
+    if (full && channel && direction && channels?.get(i.id)?.length === 2) {
       const source = devicePins(i, resolver).find(
         (p) => p.name === channel.source,
       );
@@ -237,45 +250,47 @@ export function readabilityMetrics(
           Math.max(4, span / pitch / 4),
       );
   }
-  const symmetry = symmetryCounts(
-    document,
-    resolver,
-    symmetryTopology(document, resolver, roles).components,
-  );
-  metrics.symmetryMirror = measurement(
-    symmetry.pairs - symmetry.mirrored,
-    symmetry.pairs,
-  );
-  metrics.symmetryLevel = measurement(
-    symmetry.pairs - symmetry.level,
-    symmetry.pairs,
-  );
-  metrics.symmetryOrientation = measurement(
-    symmetry.pairs - symmetry.orientationMirrored,
-    symmetry.pairs,
-  );
-  for (const group of recognizeStructures(document, roles)) {
-    const members = new Set([
-      ...group.members,
-      ...(group.extraMemberIds ?? []),
-      ...(group.tailInstanceId ? [group.tailInstanceId] : []),
-    ]);
-    const own = boxes.filter((b) => members.has(b.id));
-    if (own.length < 2) continue;
-    const x = Math.min(...own.map((b) => b.bounds.x)),
-      y = Math.min(...own.map((b) => b.bounds.y));
-    const right = Math.max(...own.map((b) => b.bounds.x + b.bounds.width)),
-      bottom = Math.max(...own.map((b) => b.bounds.y + b.bounds.height));
-    for (const other of boxes.filter(
-      (b) => !members.has(b.id) && !isMarker(byId.get(b.id)!),
-    ))
-      count(
-        "structureIntrusion",
-        other.bounds.x >= x &&
-          other.bounds.y >= y &&
-          other.bounds.x + other.bounds.width <= right &&
-          other.bounds.y + other.bounds.height <= bottom,
-      );
+  if (full) {
+    const symmetry = symmetryCounts(
+      document,
+      resolver,
+      symmetryTopology(document, resolver, roles).components,
+    );
+    metrics.symmetryMirror = measurement(
+      symmetry.pairs - symmetry.mirrored,
+      symmetry.pairs,
+    );
+    metrics.symmetryLevel = measurement(
+      symmetry.pairs - symmetry.level,
+      symmetry.pairs,
+    );
+    metrics.symmetryOrientation = measurement(
+      symmetry.pairs - symmetry.orientationMirrored,
+      symmetry.pairs,
+    );
+    for (const group of recognizeStructures(document, roles)) {
+      const members = new Set([
+        ...group.members,
+        ...(group.extraMemberIds ?? []),
+        ...(group.tailInstanceId ? [group.tailInstanceId] : []),
+      ]);
+      const own = boxes.filter((b) => members.has(b.id));
+      if (own.length < 2) continue;
+      const x = Math.min(...own.map((b) => b.bounds.x)),
+        y = Math.min(...own.map((b) => b.bounds.y));
+      const right = Math.max(...own.map((b) => b.bounds.x + b.bounds.width)),
+        bottom = Math.max(...own.map((b) => b.bounds.y + b.bounds.height));
+      for (const other of boxes.filter(
+        (b) => !members.has(b.id) && !isMarker(byId.get(b.id)!),
+      ))
+        count(
+          "structureIntrusion",
+          other.bounds.x >= x &&
+            other.bounds.y >= y &&
+            other.bounds.x + other.bounds.width <= right &&
+            other.bounds.y + other.bounds.height <= bottom,
+        );
+    }
   }
   const audit = auditRouting(document, resolver);
   const paths = document.routes.map((route) => ({
@@ -290,37 +305,25 @@ export function readabilityMetrics(
     audit.crossings,
     (segments * Math.max(0, segments - 1)) / 2,
   );
-  metrics.bends = measurement(
-    audit.bends,
-    paths.reduce((sum, p) => sum + Math.max(0, p.points.length - 2), 0),
-  );
-  const routedNets = [...new Set(paths.map((p) => p.netId))].sort();
-  for (let i = 0; i < routedNets.length; i++)
-    for (const other of routedNets.slice(i + 1)) {
-      const net = routedNets[i]!;
-      if (!roles.rails.has(net) && !roles.rails.has(other)) continue;
-      metrics.railCrossings.opportunities++;
-      metrics.railCrossings.violations += auditRouting(
-        {
-          ...document,
-          routes: document.routes.filter(
-            (r) => r.netId === net || r.netId === other,
-          ),
-        },
+  if (full)
+    metrics.bends = measurement(
+      audit.bends,
+      paths.reduce((sum, p) => sum + Math.max(0, p.points.length - 2), 0),
+    );
+  metrics.railCrossings = railCrossingMetrics(document, resolver, roles.rails);
+  const routedNets = full ? [...new Set(paths.map((p) => p.netId))].sort() : [];
+  if (full)
+    for (const net of routedNets) {
+      const points = (netPins.get(net) ?? []).map((p) => p.point);
+      const minimum = spanningLength(points);
+      if (!minimum) continue;
+      const length = auditRouting(
+        { ...document, routes: document.routes.filter((r) => r.netId === net) },
         resolver,
-      ).crossings;
+      ).wireLength;
+      metrics.detour.opportunities++;
+      metrics.detour.violations += Math.max(0, length / minimum - 1);
     }
-  for (const net of routedNets) {
-    const points = (netPins.get(net) ?? []).map((p) => p.point);
-    const minimum = spanningLength(points);
-    if (!minimum) continue;
-    const length = auditRouting(
-      { ...document, routes: document.routes.filter((r) => r.netId === net) },
-      resolver,
-    ).wireLength;
-    metrics.detour.opportunities++;
-    metrics.detour.violations += Math.max(0, length / minimum - 1);
-  }
   const path = signalPathMetrics(document, resolver);
   metrics.avoidableJogs = measurement(
     path.avoidableJogs,
@@ -333,22 +336,34 @@ export function readabilityMetrics(
       0,
     ),
   );
-  metrics.signalSeriesVertical = measurement(
-    path.signalSeriesVertical,
-    path.signalSeriesVertical + path.signalSeriesHorizontal,
-  );
+  if (full)
+    metrics.signalSeriesVertical = measurement(
+      path.signalSeriesVertical,
+      path.signalSeriesVertical + path.signalSeriesHorizontal,
+    );
   const visual = diagnoseVisualQuality(document, resolver);
-  metrics.wireThroughSymbols = measurement(
-    visual.filter((d) => d.code === "VISUAL_WIRE_THROUGH_SYMBOL").length,
-    segments * boxes.length,
-  );
-  metrics.labelOwnerDistance = measurement(
-    diagnoseLabelClearance(document, resolver).filter(
-      (d) => d.code === "VISUAL_LABEL_OWNER_DISTANCE",
-    ).length,
-    document.annotations.length,
-  );
-  const labels = readabilityCounts(document, resolver);
+  if (full) {
+    metrics.wireThroughSymbols = measurement(
+      visual.filter((d) => d.code === "VISUAL_WIRE_THROUGH_SYMBOL").length,
+      segments * boxes.length,
+    );
+    metrics.labelOwnerDistance = measurement(
+      diagnoseLabelClearance(document, resolver).filter(
+        (d) => d.code === "VISUAL_LABEL_OWNER_DISTANCE",
+      ).length,
+      document.annotations.length,
+    );
+  }
+  const labels = full
+    ? readabilityCounts(document, resolver)
+    : {
+        labelOverlaps: visual.filter((d) => d.code === "VISUAL_LABEL_OVERLAP")
+          .length,
+        terminalDepartures: visual.filter(
+          (d) => d.code === "VISUAL_TERMINAL_DEPARTURE",
+        ).length,
+        labelClearance: 0,
+      };
   metrics.labelOverlaps = measurement(
     labels.labelOverlaps,
     (document.annotations.length *
@@ -364,18 +379,19 @@ export function readabilityMetrics(
     pins.length,
   );
   // Empty full-span strips between connected components of projected symbol ink.
-  for (const axis of ["x", "y"] as const) {
-    const size = axis === "x" ? "width" : "height";
-    const intervals = boxes
-      .map(({ bounds: b }) => [b[axis], b[axis] + b[size]] as const)
-      .sort((a, b) => a[0] - b[0]);
-    let end = -Infinity;
-    for (const [lo, hi] of intervals) {
-      if (end !== -Infinity && lo > end)
-        count("narrowBands", lo - end < 2 * pitch);
-      end = Math.max(end, hi);
+  if (full)
+    for (const axis of ["x", "y"] as const) {
+      const size = axis === "x" ? "width" : "height";
+      const intervals = boxes
+        .map(({ bounds: b }) => [b[axis], b[axis] + b[size]] as const)
+        .sort((a, b) => a[0] - b[0]);
+      let end = -Infinity;
+      for (const [lo, hi] of intervals) {
+        if (end !== -Infinity && lo > end)
+          count("narrowBands", lo - end < 2 * pitch);
+        end = Math.max(end, hi);
+      }
     }
-  }
   const groups = document.drafting?.objects.length
     ? draftingGroups(document, resolver)
     : [];
