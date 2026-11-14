@@ -194,10 +194,14 @@ export function planAutoLayout(
           options.search?.signal?.aborted ||
           (options.search?.deadline !== undefined &&
             Date.now() >= options.search.deadline);
-        if (!finalists)
-          return stopped()
+        const recover = () =>
+          !finalists ||
+          options.partition ||
+          options.quality === "optimized" ||
+          stopped()
             ? best
-            : recoverDraftingOwners(document, resolver, best);
+            : recoverDraftingOwners(document, resolver, best, stopped);
+        if (!finalists) return recover();
         for (const kind of rankedFinalists(finalists, resolver)) {
           if (!finalists.available.has(kind) || stopped()) continue;
           finalists.alternate = kind;
@@ -211,9 +215,7 @@ export function planAutoLayout(
             options.partition,
           );
         }
-        return stopped()
-          ? best
-          : recoverDraftingOwners(document, resolver, best);
+        return recover();
       }),
     ),
   );

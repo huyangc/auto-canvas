@@ -7,9 +7,16 @@ import {
 } from "@icm/derived";
 import {
   MAX_SCHEMATIC_EDITS_PER_TRANSACTION,
+  documentObjectIds,
   type SchematicEdit,
 } from "@icm/edit-engine";
-import type { Point, Rect, SchematicDocument } from "@icm/model";
+import {
+  deriveStableId,
+  type Point,
+  type Rect,
+  type SchematicDocument,
+  type VisualAnchor,
+} from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import {
   draftingDisplacements,
@@ -24,6 +31,7 @@ import {
   pinPoints,
 } from "./geometry.js";
 import { emptyChoices } from "./layout-choices.js";
+import { finishingTrialBudget } from "./planning-budget.js";
 import { planningMemo } from "./planning-reuse.js";
 import { readabilityMetrics, readabilityScore } from "./readability-metrics.js";
 import { retainRefinementMetrics } from "./refine.js";
@@ -78,23 +86,40 @@ function carryWires(
   source: SchematicDocument,
   base: SchematicDocument,
   resolver: SymbolResolver,
+  stopped: () => boolean,
 ): SchematicEdit[] {
   const sourceParts = visibleInstanceBounds(source, resolver),
     parts = visibleInstanceBounds(base, resolver);
   const routing = resolveDocumentRoutingGeometry(source, resolver);
-  const movable = new Set(
-    draftingGroups(source, resolver).flatMap((g) => g.objects.map((o) => o.id)),
-  );
-  const frozen = draftingBounds(base, resolver).filter(
-    (b) => !movable.has(b.id),
-  );
+  const groups = draftingGroups(source, resolver);
+  const partition = terminalPartition(base, resolver);
+  const occupied = new Set([
+    ...documentObjectIds(source),
+    ...documentObjectIds(base),
+  ]);
+  const fresh = (kind: string, original: string) => {
+    for (let salt = 0; salt <= occupied.size; salt++) {
+      const id = deriveStableId(
+        `auto-layout-carried-${kind}`,
+        original,
+        String(salt),
+      );
+      if (!occupied.has(id)) {
+        occupied.add(id);
+        return id;
+      }
+    }
+    throw new Error("Carried conductor identity space exhausted");
+  };
   let working = base;
   const edits: SchematicEdit[] = [];
   // Shared junctions require one rigid displacement for the entire terminal-free Net.
   for (const net of source.nets.filter((n) => !n.terminals.length)) {
+    if (stopped()) break;
     const routes = source.routes.filter((r) => r.netId === net.id);
     if (
       !routes.length ||
+      routes.some((r) => r.members?.length) ||
       routes.some((r) => working.routes.some((next) => next.id === r.id))
     )
       continue;
@@ -126,43 +151,110 @@ function carryWires(
     if (
       junctions.some(
         (j) =>
-          j.members?.length || working.junctions.some((n) => n.id === j.id),
+          j.contactAnchor ||
+          j.members?.length ||
+          working.junctions.some((n) => n.id === j.id),
       )
     )
       continue;
+    const ids = new Map<string, string>();
+    for (const j of junctions) ids.set(j.id, fresh("junction", j.id));
+    for (const r of routes) {
+      ids.set(r.id, fresh("route", r.id));
+      for (const leg of r.legs) {
+        ids.set(leg.id, fresh("leg", leg.id));
+        if (leg.to.kind === "bend")
+          ids.set(leg.to.bendId, fresh("bend", leg.to.bendId));
+      }
+    }
+    const endpoint = <T extends { kind: string; junctionId?: string }>(
+      e: T,
+    ): T =>
+      e.kind === "junction" ? { ...e, junctionId: ids.get(e.junctionId!)! } : e;
     const moved = routes.map((r) => ({
       ...r,
+      id: ids.get(r.id)!,
+      start: endpoint(r.start),
       legs: r.legs.map((leg) => ({
         ...leg,
+        id: ids.get(leg.id)!,
         to:
           leg.to.kind === "bend"
-            ? { ...leg.to, position: shift(leg.to.position) }
-            : leg.to,
+            ? {
+                ...leg.to,
+                bendId: ids.get(leg.to.bendId)!,
+                position: shift(leg.to.position),
+              }
+            : { ...leg.to, endpoint: endpoint(leg.to.endpoint) },
       })),
     }));
     const extra: SchematicEdit[] = [
       ...junctions.map(({ id, ...j }) => ({
         ...j,
         kind: "add_junction" as const,
-        junctionId: id,
+        junctionId: ids.get(id)!,
         position: shift(j.position),
         createNet: true,
       })),
       ...moved.map((route) => ({ kind: "set_route_path" as const, route })),
     ];
+    // Explicit anchor edits are limited to movable components. Locked anchors
+    // retain their missing-target fallback; fresh ids cannot reactivate them.
+    const anchor = (a: VisualAnchor): VisualAnchor => {
+      if (a.kind === "route" && ids.has(a.routeId))
+        return {
+          ...a,
+          routeId: ids.get(a.routeId)!,
+          legId: ids.get(a.legId)!,
+          fallbackPosition: shift(a.fallbackPosition),
+        };
+      if (a.kind === "object" && ids.has(a.objectId))
+        return {
+          ...a,
+          objectId: ids.get(a.objectId)!,
+          fallbackPosition: shift(a.fallbackPosition),
+        };
+      return a;
+    };
+    for (const group of groups) {
+      if (stopped()) return edits;
+      for (const object of group.objects) {
+        const current = working.drafting?.objects.find(
+          (o) => o.id === object.id,
+        );
+        if (!current) continue;
+        let changed = false;
+        const replace = (a: VisualAnchor, existing: VisualAnchor) => {
+          const next = anchor(a);
+          if (next === a) return existing;
+          changed = true;
+          return next;
+        };
+        let updated = {
+          ...current,
+          anchor: replace(object.anchor, current.anchor),
+        };
+        if (object.kind === "arrow" && updated.kind === "arrow")
+          updated = {
+            ...updated,
+            from: replace(object.from, updated.from),
+            to: replace(object.to, updated.to),
+          };
+        if (
+          (object.kind === "leader" || object.kind === "callout") &&
+          (updated.kind === "leader" || updated.kind === "callout")
+        )
+          updated = {
+            ...updated,
+            target: replace(object.target, updated.target),
+          };
+        if (changed)
+          extra.push({ kind: "upsert_drafting_object", object: updated });
+      }
+    }
     const replay = preview(working, resolver, extra);
     if (!replay.ok) continue;
     const ink = draftingBounds(replay.document, resolver);
-    // Reintroducing a route id also reactivates route anchors. It must not
-    // move a locked component merely because no drafting edit was emitted.
-    if (
-      frozen.some(
-        (b) =>
-          JSON.stringify(ink.find((n) => n.id === b.id)?.bounds) !==
-          JSON.stringify(b.bounds),
-      )
-    )
-      continue;
     // An id surviving cleanup can now name a terminal Net. Partition equality
     // alone would not detect an isolated wire being added to that logical Net.
     if (
@@ -206,11 +298,8 @@ function carryWires(
       )
     )
       continue;
-    if (
-      terminalPartition(base, resolver) !==
-      terminalPartition(replay.document, resolver)
-    )
-      continue;
+    if (partition !== terminalPartition(replay.document, resolver)) continue;
+    if (stopped() || !acceptable(working, replay.document, resolver)) continue;
     working = replay.document;
     edits.push(...extra);
   }
@@ -223,8 +312,9 @@ function sameOwner(source: DraftingGroup, next: DraftingGroup): boolean {
   if (!a || !b) return false;
   if (a.kind === "instance") return b.kind === "instance" && a.id === b.id;
   if (b.kind === "instance")
-    return (JSON.parse(a.net) as string[]).some((t) =>
-      t.startsWith(`terminal:${b.id}:`),
+    return (
+      (JSON.parse(a.net) as string[]).length === 1 &&
+      (JSON.parse(a.net) as string[])[0]!.startsWith(`terminal:${b.id}:`)
     );
   return a.net === "[]" ? a.netId === b.netId : a.net === b.net;
 }
@@ -287,6 +377,8 @@ function reseat(
   final: SchematicDocument,
   resolver: SymbolResolver,
   group: DraftingGroup,
+  stopped: () => boolean,
+  budget: { remaining: number },
 ): SchematicEdit[] {
   const delta = draftingDisplacements(source, final, resolver, [group])?.get(
     group,
@@ -379,7 +471,10 @@ function reseat(
       ),
   ];
   const radius = 1.5 * Math.max(group.bounds.width, group.bounds.height);
+  let remaining = finishingTrialBudget(source.instances.length, 128, false);
+  const partition = terminalPartition(final, resolver);
   for (const offset of offsets) {
+    if (stopped() || remaining <= 0 || budget.remaining <= 0) break;
     if (
       pins.some(
         (p) =>
@@ -441,6 +536,8 @@ function reseat(
       )
     )
       continue;
+    remaining--;
+    budget.remaining--;
     const next = draftingGroups(trial, resolver, ids).find((g) =>
       g.objects.some((o) => ids.has(o.id)),
     );
@@ -453,8 +550,7 @@ function reseat(
     const replay = preview(final, resolver, edits);
     if (
       replay.ok &&
-      terminalPartition(final, resolver) ===
-        terminalPartition(replay.document, resolver) &&
+      partition === terminalPartition(replay.document, resolver) &&
       acceptable(final, replay.document, resolver)
     )
       return edits;
@@ -468,10 +564,11 @@ export function recoverDraftingOwners(
   source: SchematicDocument,
   resolver: SymbolResolver,
   base: AutoLayoutResult,
+  stopped: () => boolean = () => false,
 ): AutoLayoutResult {
+  if (stopped()) return base;
   if (base.diagnostics.some((d) => d.severity === "error")) return base;
-  // Keep R150's existing small-document seating budget. Conductors can still
-  // survive a large-document cleanup without introducing a new ink search.
+  // The caller applies R150's plain, nonzero-budget, small-document gate.
   const groups =
     source.instances.length <= 40 ? draftingGroups(source, resolver) : [];
   const hasFreeWire = source.routes.some((r) =>
@@ -481,22 +578,36 @@ export function recoverDraftingOwners(
   const before = preview(source, resolver, base.edits);
   if (!before.ok) return base;
   const extra = hasFreeWire
-    ? carryWires(source, before.document, resolver)
+    ? carryWires(source, before.document, resolver, stopped)
     : [];
   let replay = preview(before.document, resolver, extra);
   if (!replay.ok) return base;
+  const budget = {
+    remaining: finishingTrialBudget(source.instances.length, 512, false),
+  };
+  let currentGroups = draftingGroups(replay.document, resolver);
   for (const group of groups.filter((g) => g.owner)) {
-    const next = draftingGroups(replay.document, resolver).find((g) =>
+    if (stopped()) return base;
+    const next = currentGroups.find((g) =>
       g.objects.some((o) => o.id === group.objects[0]!.id),
     );
-    if (next?.owner) continue;
-    const edits = reseat(source, replay.document, resolver, group);
+    if (!next || next.owner) continue;
+    const edits = reseat(
+      source,
+      replay.document,
+      resolver,
+      group,
+      stopped,
+      budget,
+    );
     if (!edits.length) continue;
     extra.push(...edits);
     replay = preview(before.document, resolver, extra);
     if (!replay.ok) return base;
+    currentGroups = draftingGroups(replay.document, resolver);
   }
   if (
+    stopped() ||
     !extra.length ||
     base.edits.length + extra.length > MAX_SCHEMATIC_EDITS_PER_TRANSACTION
   )
