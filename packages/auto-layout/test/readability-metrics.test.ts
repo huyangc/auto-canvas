@@ -7,7 +7,7 @@ import {
   readabilityScore,
 } from "../src/readability-metrics.js";
 import { readabilityWeights } from "../src/readability-weights.js";
-import { placement } from "../src/geometry.js";
+import { enclosingBox, placement } from "../src/geometry.js";
 import { circuit } from "./document-fixture.js";
 
 const resolver = new InMemorySymbolResolver(builtInSymbols);
@@ -162,14 +162,30 @@ it("measures control adjacency from output and gate roles", () => {
   move(d, "m", 500, 0);
   expect(measure(d).controlSeparation.violations).toBe(1);
 });
-it("counts narrow projection gaps and reports area in square grid pitches", () => {
+it("counts narrow projection gaps", () => {
   const d = placed({ a: "resistor", b: "resistor" }, {});
   move(d, "b", 200, 0);
   expect(measure(d).narrowBands.violations).toBe(0);
-  const large = measure(d).area.violations;
   move(d, "b", 20, 0);
   expect(measure(d).narrowBands.violations).toBeGreaterThan(0);
-  expect(measure(d).area.violations).toBeLessThan(large);
+});
+it("reports area in fixed 10-unit squares independently of the editor grid", () => {
+  const d = placed({ a: "resistor", b: "resistor" }, {});
+  move(d, "b", 200, 0);
+  const bounds = enclosingBox(d, resolver);
+  const large = {
+    violations: (bounds.width * bounds.height) / 100,
+    opportunities: 1,
+  };
+  for (const grid of [1, 10]) {
+    d.presentation.grid = grid;
+    expect(measure(d).area).toEqual(large);
+  }
+  move(d, "b", 20, 0);
+  const small = measure(d).area;
+  expect(small.violations).toBeLessThan(large.violations);
+  d.presentation.grid = 1;
+  expect(measure(d).area).toEqual(small);
 });
 it("measures avoidable jogs, bends, detour and terminal departures on resolved routes", () => {
   const d = placed({ a: "resistor", b: "resistor" }, { n: ["a.2", "b.1"] });
