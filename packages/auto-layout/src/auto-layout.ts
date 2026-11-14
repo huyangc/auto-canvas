@@ -377,7 +377,14 @@ function planWithBranches(
       }
       // Unlike owned groups, fixed ink has no alternative seat. Keep R10's
       // clearance when its translation is still needed around that ink.
-      if (fixedDraftingBlocksReuse(candidate.final, resolver)) return base;
+      if (fixedDraftingBlocksReuse(candidate.final, resolver))
+        return followDraftingGroups(
+          document,
+          resolver,
+          base,
+          base,
+          ownedGroups,
+        );
       return followDraftingGroups(
         document,
         resolver,
