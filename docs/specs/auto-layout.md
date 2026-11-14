@@ -1343,8 +1343,12 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   mirroring and rotation, and reject clearance offsets that put the translated
   contact at least as close to a different visible pin. If a matched Net has
   exactly one terminal and its routed conductor has disappeared, map the
-  owner to that surviving terminal; never invent a destination for an empty
-  or ambiguous terminal partition. If the jointly seated candidate fails, try
+  owner to that surviving terminal. For an owner on a terminal-less Net, use
+  the displacement of the nearest visible source instance by bounds distance,
+  breaking ties by instance id; refuse if that instance has no visible final
+  bounds. This displacement fallback does not change inferred ownership or
+  the readability metric. Never guess an ambiguous nonempty terminal
+  partition. If the jointly seated candidate fails, try
   each owned touching component independently against the ordinary finished
   plan in input group order, keeping all other drafting as obstacles; missing
   owners, unsupported rotations and failed seats leave that whole component
@@ -1370,8 +1374,10 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   Unowned and locked drafting stays at its
   input positions when undoing R10. Recover standalone caption anchors after
   routing; multi-object groups retain their rigid seating.
-  Retain the base if fixed ink blocks the candidate's 60-unit device clearance;
-  that ink has no alternative seat.
+  Retain the base placements and R10 translation if fixed ink blocks the
+  candidate's 60-unit device clearance; that ink has no alternative seat.
+  Still move and seat owned groups on that base under the same guards,
+  keeping fixed and unowned ink at their input positions.
   The annealer, R147, R146, rail-seat and R149 searches run only on the base.
   Fall back to a full drafting-free plan only if the reused placements fail
   geometry, replay or routing checks (including increased floating pins or

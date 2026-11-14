@@ -189,6 +189,142 @@ it("R150 keeps unowned and locked ink fixed when undoing R10", () => {
   expect(final.drafting).toEqual(d.drafting);
 });
 
+it("R150 follows an owned caption while fixed ink keeps the R10 base placements", () => {
+  const d = fixture();
+  d.drafting = {
+    objects: [
+      note("obstacle", { x: 80, y: 0 }),
+      note("caption", { x: 645, y: 400 }),
+      {
+        id: "box",
+        kind: "rectangle",
+        anchor: { kind: "free", position: { x: 645, y: 394 } },
+        center: { x: 645, y: 394 },
+        width: 60,
+        height: 30,
+        rotation: 0,
+        lineStyle: "solid",
+        locked: false,
+        zIndex: 0,
+      },
+      { ...note("locked", { x: 1000, y: -1000 }), locked: true },
+    ],
+  };
+  const fixedInk = structuredClone(d);
+  for (const object of fixedInk.drafting!.objects) object.locked = true;
+  const base = apply(fixedInk);
+  expect(draftingTranslation(base.result)).toBeGreaterThan(0);
+  const { result, final } = apply(d);
+  expect(final.instances).toEqual(base.final.instances);
+  expect(final.routes).toEqual(base.final.routes);
+  expect(final.junctions).toEqual(base.final.junctions);
+  expect(point(final, "caption")).not.toEqual(point(d, "caption"));
+  expect(point(final, "box")).toEqual({
+    x: point(final, "caption").x,
+    y: point(final, "caption").y - 6,
+  });
+  for (const id of ["obstacle", "locked"])
+    expect(final.drafting!.objects.find((o) => o.id === id)).toEqual(
+      d.drafting.objects.find((o) => o.id === id),
+    );
+  expect(apply(d).result).toEqual(result);
+});
+
+function pinlessFixture() {
+  const d = fixture();
+  d.nets.push({ id: "pinless", terminals: [] });
+  d.junctions = [
+    { id: "start", netId: "pinless", position: { x: 645, y: 360 } },
+    { id: "end", netId: "pinless", position: { x: 645, y: 440 } },
+  ];
+  d.routes = [
+    createRoutePath({
+      id: "pinless-wire",
+      netId: "pinless",
+      start: { kind: "junction", junctionId: "start" },
+      end: { kind: "junction", junctionId: "end" },
+      bends: [],
+      modes: ["manual"],
+    }),
+  ];
+  d.drafting = { objects: [note("caption", { x: 645, y: 400 })] };
+  return d;
+}
+
+it("R150 follows the nearest source device when a pinless wire disappears", () => {
+  const d = pinlessFixture();
+  const groups = draftingGroups(d, resolver);
+  expect(groups[0]!.owner).toMatchObject({ kind: "route", net: "[]" });
+  const original = structuredClone(d);
+  const { result, final } = apply(d);
+  expect(final.nets.some((n) => n.id === "pinless")).toBe(false);
+  const oldPart = visibleInstanceBounds(d, resolver).find((p) => p.id === "b")!;
+  const newPart = visibleInstanceBounds(final, resolver).find(
+    (p) => p.id === "b",
+  )!;
+  expect(
+    draftingDisplacements(d, final, resolver, groups)!.get(groups[0]!),
+  ).toEqual({
+    x:
+      newPart.bounds.x +
+      newPart.bounds.width / 2 -
+      oldPart.bounds.x -
+      oldPart.bounds.width / 2,
+    y:
+      newPart.bounds.y +
+      newPart.bounds.height / 2 -
+      oldPart.bounds.y -
+      oldPart.bounds.height / 2,
+  });
+  expect(point(final, "caption")).not.toEqual(point(d, "caption"));
+  expect(draftingGroups(final, resolver)[0]!.owner).toBeDefined();
+  expect(groups[0]!.owner).toMatchObject({ kind: "route", net: "[]" });
+  expect(apply(d).result).toEqual(result);
+  expect(d).toEqual(original);
+});
+
+it("R150 breaks equidistant pinless fallback ties by id, not source order", () => {
+  const d = pinlessFixture();
+  d.instances[0]!.placement = placement(690, 400);
+  const groups = draftingGroups(d, resolver);
+  const final = structuredClone(d);
+  final.instances[0]!.placement = placement(790, 600);
+  final.instances[1]!.placement = placement(400, 400);
+  const displacement = () => draftingDisplacements(d, final, resolver, groups);
+  expect(displacement()!.get(groups[0]!)).toEqual({ x: 100, y: 200 });
+  d.instances.reverse();
+  expect(displacement()!.get(groups[0]!)).toEqual({ x: 100, y: 200 });
+  final.instances[0]!.placement = null;
+  expect(displacement()).toBeUndefined();
+  d.instances = [];
+  expect(displacement()).toBeUndefined();
+});
+
+it.each(["object", "layoutGroup", "constraint"])(
+  "R150 leaves a pinless caption fixed under a %s lock",
+  (lock) => {
+    const d = pinlessFixture();
+    d.drafting!.objects.push(note("touching", { x: 645, y: 400 }));
+    if (lock === "object") d.drafting!.objects[0]!.locked = true;
+    else if (lock === "layoutGroup")
+      d.layoutGroups.push({
+        id: "lock",
+        kind: "custom",
+        objectIds: ["caption"],
+        locked: true,
+      });
+    else
+      d.constraints.push({
+        id: "lock",
+        kind: "align-x",
+        objectIds: ["caption", "touching"],
+        locked: true,
+      });
+    expect(draftingGroups(d, resolver)).toEqual([]);
+    expect(apply(d).final.drafting).toEqual(d.drafting);
+  },
+);
+
 it("R150 keeps an arrow and touching text together beside their wire", () => {
   const d = fixture();
   d.instances[0]!.placement = placement(0, 0, "none", 90);
@@ -347,7 +483,7 @@ it("R150 follows a pseudo-port when routing removes its single-pin wire", () => 
   expect(apply(d).result).toEqual(result);
 });
 
-it("R150 follows a device note even when another group's conductor has no surviving owner", () => {
+it("R150 follows a device note alongside a pinless junction's caption", () => {
   const d = fixture();
   d.nets.push({ id: "orphan", terminals: [] });
   d.junctions.push({
@@ -367,7 +503,10 @@ it("R150 follows a device note even when another group's conductor has no surviv
   });
   const { final, result } = apply(d);
   expect(point(final, "caption")).not.toEqual(point(d, "caption"));
-  expect(point(final, "orphan-caption")).toEqual(point(d, "orphan-caption"));
+  expect(point(final, "orphan-caption")).toEqual({
+    x: 1000 + final.instances[1]!.placement!.position.x - 600,
+    y: 990 + final.instances[1]!.placement!.position.y - 400,
+  });
   expect(
     draftingGroups(final, resolver).find((g) =>
       g.objects.some((o) => o.id === "caption"),

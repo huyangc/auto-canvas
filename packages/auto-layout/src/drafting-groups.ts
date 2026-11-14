@@ -221,6 +221,7 @@ export function draftingDisplacements(
   const oldBox = enclosingBox(source, resolver),
     nextBox = enclosingBox(final, resolver);
   const parts = visibleInstanceBounds(final, resolver);
+  const sourceParts = visibleInstanceBounds(source, resolver);
   const routing = resolveDocumentRoutingGeometry(final, resolver);
   const deltas = new Map<DraftingGroup, Point>();
   for (const group of groups) {
@@ -240,8 +241,21 @@ export function draftingDisplacements(
       deltas.set(group, subtract(point, owner.point));
       continue;
     }
+    if (owner.net === "[]") {
+      // Routing can drop a terminal-less conductor. Follow the nearest source
+      // instance geometrically without changing the group's inferred owner.
+      const nearest = sourceParts.toSorted(
+        (a, b) =>
+          distance(group.bounds, a.bounds) - distance(group.bounds, b.bounds) ||
+          a.id.localeCompare(b.id),
+      )[0];
+      const part = nearest && parts.find((p) => p.id === nearest.id);
+      if (!nearest || !part) return;
+      deltas.set(group, subtract(center(part.bounds), center(nearest.bounds)));
+      continue;
+    }
     const nets = final.nets.filter((n) => netKey(final, n.id) === owner.net);
-    if (nets.length !== 1 || owner.net === "[]") return;
+    if (nets.length !== 1) return;
     const shift = subtract(center(nextBox), owner.reference);
     const expected = { x: owner.point.x + shift.x, y: owner.point.y + shift.y };
     const points =
