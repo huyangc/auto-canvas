@@ -1,6 +1,7 @@
 import { diagnoseLabelClearance } from "@icm/derived";
 import type { SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
+import { planningMemo } from "./planning-reuse.js";
 import { emptyChoices } from "./layout-choices.js";
 import { readabilityTerm } from "./readability-selection.js";
 import { readabilityMetrics } from "./readability-metrics.js";
@@ -15,13 +16,13 @@ import { routedGuards } from "./routed-search-score.js";
 import { preview } from "./transaction.js";
 import type { AutoLayoutResult, LayoutPartition } from "./types.js";
 
-type FinalistKind = "runner" | "localLoop";
+type FinalistKind = "runner" | "localLoop" | "attachment";
 
 /** Per-call continuations finish additional placements without repeating
  * ranking, refinement or annealing. Outer drafting and rail passes still run. */
 export interface FinalistPass {
   alternate: FinalistKind | false;
-  available: Set<FinalistKind>;
+  available: Map<FinalistKind, LayoutRun>;
   pending: WeakMap<
     SchematicDocument,
     Map<string, Record<FinalistKind, () => AutoLayoutResult>>
@@ -29,7 +30,8 @@ export interface FinalistPass {
 }
 
 /** Spend an extra finishing budget only on a distinct, competitive placement.
- * Calibrated on dev: retain at least 80% of the unrestricted composite gain. */
+ * Retain the original per-candidate margin; participation and the shared
+ * per-plan budget are checked separately. */
 export function shouldFinishRunner(
   base: LayoutRun,
   candidate: LayoutRun,
@@ -62,6 +64,81 @@ export function shouldFinishRunner(
   const score = routedScore(base, resolver);
   const margin = Math.min(12500, 0.55 * score);
   return routedScore(candidate, resolver) <= score + margin;
+}
+
+/** Attribute existing weighted penalties to moved devices and their incident
+ * routes by measuring the incumbent with those participants omitted. This is
+ * an admission probe only, never a candidate layout or an electrical edit.
+ * Area admits boundary devices, not every device in a nonempty drawing. */
+export function movesReadabilityParticipant(
+  base: LayoutRun,
+  candidate: LayoutRun,
+  resolver: SymbolResolver,
+): boolean {
+  if (!base.final || !candidate.final) return false;
+  const placements = new Map(
+    candidate.final.instances.map((i) => [i.id, i.placement]),
+  );
+  const moved = new Set(
+    base.final.instances
+      .filter((i) => {
+        const a = i.placement,
+          b = placements.get(i.id);
+        return (
+          a &&
+          b &&
+          (a.position.x !== b.position.x ||
+            a.position.y !== b.position.y ||
+            a.rotation !== b.rotation ||
+            a.mirror !== b.mirror)
+        );
+      })
+      .map((i) => i.id),
+  );
+  if (!moved.size) return false;
+  const document = base.final;
+  return planningMemo(
+    document,
+    resolver,
+    `finalist-participants:${JSON.stringify([...moved].sort())}`,
+    () => {
+      const incident = new Set(
+        document.nets
+          .filter((net) => net.terminals.some((t) => moved.has(t.instanceId)))
+          .map((net) => net.id),
+      );
+      const before = planningMemo(document, resolver, "finalist-metrics", () =>
+        readabilityMetrics(document, resolver, "weighted"),
+      );
+      const after = readabilityMetrics(
+        {
+          ...document,
+          instances: document.instances.filter((i) => !moved.has(i.id)),
+          routes: document.routes.filter((route) => !incident.has(route.netId)),
+        },
+        resolver,
+        "weighted",
+      );
+      return (
+        Object.keys(readabilityWeights) as (keyof typeof readabilityWeights)[]
+      ).some(
+        (key) =>
+          readabilityWeights[key].weight > 0 &&
+          before[key].violations > after[key].violations,
+      );
+    },
+  );
+}
+
+/** Preserve T078's runner slot; new variants share one additional slot, with
+ * stable registration order on provisional ties. */
+export function rankedFinalists(pass: FinalistPass, resolver: SymbolResolver) {
+  // T079 review: the runner-up (T078) and the local-loop variant (T077) keep
+  // their main behavior; the attachment variant is the one new extra finalist.
+  void resolver;
+  return (["runner", "localLoop", "attachment"] as const).filter((kind) =>
+    pass.available.has(kind),
+  );
 }
 
 /** Compare only fully finished layouts; ties retain the established result. */

@@ -122,11 +122,15 @@ it("returns the finished runner-up when finishing reverses the provisional ranki
       return shouldFinish(base, candidate, symbols);
     });
   const choose = vi.spyOn(selection, "selectFinishedLayout");
+  const participation = vi
+    .spyOn(selection, "movesReadabilityParticipant")
+    .mockReturnValue(false);
   try {
     const result = planAutoLayout(source, resolver);
     expect(provisional).toHaveLength(1);
     expect(provisional[0]).toBeLessThan(0);
     expect(choose).toHaveBeenCalledTimes(1);
+    expect(participation).not.toHaveBeenCalled();
     const [, , base, candidate] = choose.mock.calls[0]!;
     const before = preview(source, resolver, base.edits);
     const after = preview(source, resolver, candidate.edits);
@@ -143,6 +147,7 @@ it("returns the finished runner-up when finishing reverses the provisional ranki
   } finally {
     gate.mockRestore();
     choose.mockRestore();
+    participation.mockRestore();
   }
 });
 
@@ -189,4 +194,128 @@ it("caps extra finishing for high-score runs even inside the relative margin", (
   expect(second - first).toBeGreaterThan(12500);
   expect(second).toBeLessThan(first * 1.55);
   expect(selection.shouldFinishRunner(base, candidate, resolver)).toBe(false);
+});
+
+it("finishes the runner and local-loop finalists as on main, then the attachment variant", () => {
+  const cheap = run(route([]));
+  const expensive = run(detour);
+  const pass: selection.FinalistPass = {
+    alternate: false,
+    available: new Map([
+      ["attachment", structuredClone(cheap)],
+      ["localLoop", cheap],
+      ["runner", expensive],
+    ]),
+    pending: new WeakMap(),
+  };
+  // Fixed order regardless of provisional scores or insertion order.
+  expect(selection.rankedFinalists(pass, resolver)).toEqual([
+    "runner",
+    "localLoop",
+    "attachment",
+  ]);
+  pass.available.set("localLoop", expensive);
+  expect(selection.rankedFinalists(pass, resolver)).toEqual([
+    "runner",
+    "localLoop",
+    "attachment",
+  ]);
+  pass.available.delete("runner");
+  expect(selection.rankedFinalists(pass, resolver)).toEqual([
+    "localLoop",
+    "attachment",
+  ]);
+  pass.available.delete("localLoop");
+  expect(selection.rankedFinalists(pass, resolver)).toEqual(["attachment"]);
+  pass.available.clear();
+  expect(selection.rankedFinalists(pass, resolver)).toEqual([]);
+});
+
+it("skips an unrelated interior move but admits a boundary participant in area", () => {
+  const source = circuit(
+    { a: "resistor", b: "resistor", interior: "resistor" },
+    {},
+  );
+  source.instances[0]!.placement = placement(0, 0);
+  source.instances[1]!.placement = placement(400, 400);
+  source.instances[2]!.placement = placement(200, 200);
+  const base = { ...run(route()), final: source };
+  const candidate = structuredClone(base);
+  candidate.final.instances[2]!.placement = placement(210, 200);
+  expect(selection.movesReadabilityParticipant(base, candidate, resolver)).toBe(
+    false,
+  );
+  candidate.final.instances[0]!.placement = placement(10, 0);
+  expect(selection.movesReadabilityParticipant(base, candidate, resolver)).toBe(
+    true,
+  );
+});
+
+it("admits an interior source participating in a weighted polarity violation", () => {
+  const source = circuit(
+    { a: "resistor", b: "resistor", source: "voltage-source" },
+    {},
+  );
+  source.instances[0]!.placement = placement(0, 0);
+  source.instances[1]!.placement = placement(400, 400);
+  source.instances[2]!.placement = placement(200, 200, "none", 180);
+  const base = { ...run(route()), final: source };
+  const candidate = structuredClone(base);
+  candidate.final.instances[2]!.placement = placement(210, 200, "none", 180);
+  expect(selection.movesReadabilityParticipant(base, candidate, resolver)).toBe(
+    true,
+  );
+  expect(
+    selection.movesReadabilityParticipant(
+      base,
+      structuredClone(base),
+      resolver,
+    ),
+  ).toBe(false);
+});
+
+it("admits a moved interior device whose net participates in a crossing", () => {
+  const source = circuit(
+    {
+      a: "resistor",
+      b: "resistor",
+      c: "resistor",
+      d: "resistor",
+      lo: "resistor",
+      hi: "resistor",
+    },
+    { horizontal: ["a.1", "b.1"], vertical: ["c.1", "d.1"] },
+  );
+  const positions = [
+    [-100, 0],
+    [100, 0],
+    [0, -100],
+    [0, 100],
+    [-500, -500],
+    [500, 500],
+  ];
+  source.instances.forEach((i, index) => {
+    const [x, y] = positions[index]!;
+    i.placement = placement(x!, y!);
+  });
+  source.routes = source.nets.map((net) =>
+    createRoutePath({
+      id: net.id + "-route",
+      netId: net.id,
+      start: { kind: "terminal", ...net.terminals[0]! },
+      end: { kind: "terminal", ...net.terminals[1]! },
+      bends: [],
+      modes: ["manual"],
+    }),
+  );
+  const base = { ...run(route()), final: source };
+  const candidate = structuredClone(base);
+  candidate.final.instances[0]!.placement = placement(-110, 0);
+  expect(selection.movesReadabilityParticipant(base, candidate, resolver)).toBe(
+    true,
+  );
+  source.routes = [];
+  expect(selection.movesReadabilityParticipant(base, candidate, resolver)).toBe(
+    false,
+  );
 });

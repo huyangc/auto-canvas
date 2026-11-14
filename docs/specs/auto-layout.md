@@ -683,6 +683,22 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   the finished selection (T078, same margin rule and comparator), so a variant
   that finishes worse is never returned. Large documents are unchanged.
 
+- **R157 — Node attachments (T079).** In a document of at most 24 instances,
+  two-pin parts and single-device stages whose non-rail connections reach one
+  host node, or bridge two nodes of one host, form an attachment placement
+  variant (connectivity and pin roles only): each is seated beside the served
+  pin on its exit side, oriented along the pin, at the nearest free grid seat
+  with body clearance; a bridge part sits between its host nodes; rail pins
+  face their rail side. Fixed, template, symmetry-block, layout-group members
+  and explicit partition arrangements are not moved; a blocked seat keeps the
+  old placement. The variant is an additional finished finalist, after the
+  T078 runner-up and the R156 local-loop finalist (which keep their own slots,
+  full budgets and gates). It is finished only when it is distinct, within
+  the T078 margin, and moves a device that takes part in a weighted readability
+  violation of the incumbent, with half the incumbent's relocation, port-seat
+  and rail-seat trial budgets (at least one each); the finished comparator
+  decides.
+
 - **R71 — Single-host ports.** A non-rail Cell Pin Net that reaches exactly
   one device pin gets a local seat along that pin's transformed exit direction.
   Use a 40-unit default seat up to 40 instances and 80 units above that,

@@ -123,10 +123,11 @@ export function searchRailSeats(
   fixed: ReadonlySet<string>,
   replan: (placements: ReadonlyMap<string, Placement>) => LayoutRun,
   stopped: () => boolean,
+  trialLimit?: number,
 ): LayoutRun {
   if (!initial.final || !Number.isFinite(calibratedScore(initial, resolver)))
     return initial;
-  const limit = planningBudget(initial.final.instances.length, 8);
+  const limit = trialLimit ?? planningBudget(initial.final.instances.length, 8);
   if (!limit) return initial;
   const roles = classifyNets(initial.final, resolver);
   const locked = new Set(fixed);

@@ -1,4 +1,8 @@
+import * as attachments from "../src/attachment-seat.js";
 import * as selection from "../src/finished-selection.js";
+import * as relocations from "../src/device-relocation-search.js";
+import * as ports from "../src/port-seat-search.js";
+import * as rails from "../src/rail-seat-search.js";
 import * as loops from "../src/local-loop-amplifier.js";
 import { preview } from "../src/transaction.js";
 import {
@@ -555,6 +559,10 @@ it.each([true, false])(
   "rejects a separately finished local-loop variant that loses the shared comparison (cascode=%s)",
   (cascode) => {
     const { d } = regulator(cascode);
+    // Isolate this finalist: the attachment finalist has its own comparison test.
+    const attachment = vi
+      .spyOn(attachments, "nodeAttachments")
+      .mockReturnValue([]);
     const recognize = vi
       .spyOn(loops, "localLoopAmplifiers")
       .mockReturnValue([]);
@@ -579,6 +587,50 @@ it.each([true, false])(
       expect(score(result)).toBeLessThanOrEqual(score(baseline));
     } finally {
       choose.mockRestore();
+      attachment.mockRestore();
     }
   },
 );
+
+it("finishes runner and local-loop finalists at full budget and the attachment variant at half budget", () => {
+  const { d } = regulator();
+  const rank = vi.spyOn(selection, "rankedFinalists");
+  const choose = vi.spyOn(selection, "selectFinishedLayout");
+  const portSearch = vi.spyOn(ports, "searchPortSeats");
+  const railSearch = vi.spyOn(rails, "searchRailSeats");
+  const relocationLimits: number[] = [];
+  const relocate = relocations.searchDeviceRelocations;
+  const relocationSearch = vi
+    .spyOn(relocations, "searchDeviceRelocations")
+    .mockImplementation((...args) => {
+      if (args[5]?.phase === "alignment")
+        relocationLimits.push(args[5].budget!.remaining);
+      return relocate(...args);
+    });
+  try {
+    const result = planAutoLayout(d, resolver);
+    expect(rank).toHaveBeenCalledTimes(1);
+    expect(rank.mock.calls[0]![0].available.size).toBeGreaterThan(1);
+    // Incumbent, runner and local loop keep main's full budgets; only the
+    // T079 attachment variant is finished at half budget.
+    expect(rank.mock.results[0]!.value).toEqual([
+      "runner",
+      "localLoop",
+      "attachment",
+    ]);
+    expect(choose).toHaveBeenCalledTimes(3);
+    expect(relocationLimits).toEqual([10, 10, 10, 5]);
+    expect(portSearch.mock.calls.map((call) => call[5])).toEqual([
+      12, 12, 12, 6,
+    ]);
+    expect(railSearch.mock.calls.map((call) => call[5])).toEqual([8, 8, 8, 4]);
+    expect(result.diagnostics.some((d) => d.severity === "error")).toBe(false);
+    expect(planAutoLayout(d, resolver)).toEqual(result);
+  } finally {
+    rank.mockRestore();
+    choose.mockRestore();
+    portSearch.mockRestore();
+    railSearch.mockRestore();
+    relocationSearch.mockRestore();
+  }
+});

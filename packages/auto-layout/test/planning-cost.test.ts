@@ -2,7 +2,10 @@ import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
 import { expect, it, vi } from "vitest";
 import * as editEngine from "@icm/edit-engine";
 import { defaultLayoutSearch, planAutoLayout } from "../src/auto-layout.js";
-import { planningBudget } from "../src/planning-budget.js";
+import {
+  finishingTrialBudget,
+  planningBudget,
+} from "../src/planning-budget.js";
 import { preview, reusePreviews } from "../src/transaction.js";
 import { reusePlanning } from "../src/planning-reuse.js";
 import { freezePinGroups, routeDocument } from "../src/route.js";
@@ -41,6 +44,25 @@ it.each([
       ports,
       rails,
     ]);
+  },
+);
+
+it.each([
+  [10, 5, 6, 4],
+  [30, 5, 6, 4],
+  [31, 4, 5, 3],
+  [34, 3, 4, 2],
+  [40, 2, 2, 1],
+  [100, 1, 1, 1],
+])(
+  "halves variant finishing trials at %i instances with a floor of one",
+  (count, ...limits) => {
+    expect(
+      [10, 12, 8].map((cap) => finishingTrialBudget(count!, cap, true)),
+    ).toEqual(limits);
+    expect(
+      [10, 12, 8].map((cap) => finishingTrialBudget(count!, cap, false)),
+    ).toEqual([10, 12, 8].map((cap) => planningBudget(count!, cap)));
   },
 );
 

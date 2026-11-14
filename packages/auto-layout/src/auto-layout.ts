@@ -1,13 +1,16 @@
+import { nodeAttachments } from "./attachment-seat.js";
 import { localLoopAmplifiers } from "./local-loop-amplifier.js";
 import {
   selectFinishedLayout,
+  movesReadabilityParticipant,
+  rankedFinalists,
   shouldFinishRunner,
   type FinalistPass,
 } from "./finished-selection.js";
 import { improvesReadability } from "./readability-selection.js";
 import { localRailMarkers } from "./local-rail-markers.js";
 import { planningMemo, reusePlanning } from "./planning-reuse.js";
-import { planningBudget } from "./planning-budget.js";
+import { finishingTrialBudget, planningBudget } from "./planning-budget.js";
 import { pitchBlocked } from "./pitch-fallback.js";
 import { netLevels } from "./layered.js";
 import { inferSeriesChannels } from "./series-levels.js";
@@ -155,7 +158,11 @@ interface LevelOptions extends AutoLayoutOptions {
   reuseSeriesRoutes?: boolean;
   finalists?: FinalistPass;
   localLoopDraft?: boolean;
+  attachmentDraft?: boolean;
 }
+
+/** T079: the attachment variant is finished only for small documents. */
+const ATTACHMENT_VARIANT_MAX_INSTANCES = 24;
 
 export function planAutoLayout(
   document: SchematicDocument,
@@ -170,7 +177,7 @@ export function planAutoLayout(
           document.instances.length <= 40 &&
           (options.search?.evaluations ??
             defaultLayoutSearch(document, options).evaluations) > 0
-            ? { alternate: false, available: new Set(), pending: new WeakMap() }
+            ? { alternate: false, available: new Map(), pending: new WeakMap() }
             : undefined;
         const finish = () => {
           const initial = planPitchDispatch(document, resolver, {
@@ -187,7 +194,7 @@ export function planAutoLayout(
           (options.search?.deadline !== undefined &&
             Date.now() >= options.search.deadline);
         if (!finalists) return best;
-        for (const kind of ["runner", "localLoop"] as const) {
+        for (const kind of rankedFinalists(finalists, resolver)) {
           if (!finalists.available.has(kind) || stopped()) continue;
           finalists.alternate = kind;
           const candidate = finish();
@@ -922,17 +929,43 @@ function planAutoLayoutMeasured(
           run: { ...localRun, result: copyResult(localRun.result) },
         }
       : undefined;
+  const attachmentRun =
+    options.finalists &&
+    !options.finalists.alternate &&
+    // T079 review: an extra finishing pass costs a full finishing pipeline;
+    // the corpus gains come from small drawings (≤ 24 instances), while a
+    // 30-instance held-out case paid +79%. Larger documents skip the variant.
+    document.instances.length <= ATTACHMENT_VARIANT_MAX_INSTANCES &&
+    nodeAttachments(document, resolver, classifyNets(document, resolver)).length
+      ? plan(
+          document,
+          resolver,
+          { ...options, attachmentDraft: true },
+          selected.overrides,
+          selected.strategy,
+        )
+      : undefined;
+  const attachmentFinalist =
+    attachmentRun &&
+    shouldFinishRunner(selected.run, attachmentRun, resolver) &&
+    movesReadabilityParticipant(selected.run, attachmentRun, resolver)
+      ? {
+          ...selected,
+          run: { ...attachmentRun, result: copyResult(attachmentRun.result) },
+        }
+      : undefined;
   const finishFinalist = (
     selected: (typeof ranked)[number],
     searchFinalist: boolean,
     localLoopDraft = false,
+    attachmentDraft = false,
   ): AutoLayoutResult => {
     repairBounds = undefined;
     // Reuse the selected placement and refinement choices; do not search again.
     const alternative = plan(
       document,
       resolver,
-      { ...options, localLoopDraft },
+      { ...options, localLoopDraft, attachmentDraft },
       selected.overrides,
       selected.strategy,
       false,
@@ -1191,8 +1224,13 @@ function planAutoLayoutMeasured(
         cache.set(key, run);
         return run;
       };
+      const reducedBudget = attachmentDraft;
       const relocationBudget = {
-        remaining: planningBudget(document.instances.length, 10),
+        remaining: finishingTrialBudget(
+          document.instances.length,
+          10,
+          reducedBudget,
+        ),
       };
       const relocated = timePhase("relocation", () =>
         searchDeviceRelocations(
@@ -1205,7 +1243,18 @@ function planAutoLayoutMeasured(
         ),
       );
       const seated = timePhase("ports", () =>
-        searchPortSeats(relocated, resolver, fixed, finishPlacement, stopped),
+        searchPortSeats(
+          relocated,
+          resolver,
+          fixed,
+          finishPlacement,
+          stopped,
+          finishingTrialBudget(
+            relocated.final!.instances.length,
+            12,
+            reducedBudget,
+          ),
+        ),
       );
       // R148 retains R140's licensed contacts already present in the finalist.
       const railContacts = contactPolicy(
@@ -1220,6 +1269,11 @@ function planAutoLayoutMeasured(
           fixed,
           (placements) => finishPlacement(placements, railContacts),
           stopped,
+          finishingTrialBudget(
+            seated.final!.instances.length,
+            8,
+            reducedBudget,
+          ),
         ),
       );
       const routed = rerouteRailCrossings(
@@ -1422,11 +1476,22 @@ function planAutoLayoutMeasured(
     if (!pending)
       options.finalists.pending.set(document, (pending = new Map()));
     const snapshot = copyResult(base);
-    if (alternateFinalist) options.finalists.available.add("runner");
-    if (localFinalist) options.finalists.available.add("localLoop");
+    for (const [kind, candidate] of [
+      ["runner", alternateFinalist],
+      ["localLoop", localFinalist],
+      ["attachment", attachmentFinalist],
+    ] as const) {
+      if (!candidate) continue;
+      const previous = options.finalists.available.get(kind);
+      if (!previous || compareRuns(candidate.run, previous, resolver) < 0)
+        options.finalists.available.set(kind, candidate.run);
+    }
     pending.set(finalistKey, {
       runner: alternateFinalist
         ? () => finishFinalist(alternateFinalist, false)
+        : () => copyResult(snapshot),
+      attachment: attachmentFinalist
+        ? () => finishFinalist(attachmentFinalist, false, false, true)
         : () => copyResult(snapshot),
       localLoop: localFinalist
         ? () => finishFinalist(localFinalist, false, true)
@@ -1615,6 +1680,7 @@ function buildPlan(
             },
           },
           options.localLoopDraft,
+          options.attachmentDraft,
         );
   const translation = exact
     ? inheritedTranslation
