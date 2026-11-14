@@ -1,12 +1,20 @@
 import {
   resolveDocumentRoutingGeometry,
   resolveVisualAnchor,
+  visibleInstanceBounds,
 } from "@icm/derived";
-import { createRoutePath, type DraftingObject, type Point } from "@icm/model";
+import {
+  createRoutePath,
+  deriveStableId,
+  type DraftingObject,
+  type Point,
+} from "@icm/model";
 import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
 import { expect, it } from "vitest";
+import { documentObjectIds } from "@icm/edit-engine";
+import { recoverDraftingOwners } from "../src/recover-drafting-owners.js";
 import { draftingGroups } from "../src/drafting-groups.js";
-import { placement } from "../src/geometry.js";
+import { pinPoints, placement } from "../src/geometry.js";
 import { planAutoLayout } from "../src/index.js";
 import {
   equivalentTerminals,
@@ -72,7 +80,19 @@ it("keeps a block diagram's isolated bent conductor and caption without joining 
   ];
   const before = structuredClone(d);
   const { plan, final } = apply(d);
-  expect(final.routes.some((r) => r.id === "conductor")).toBe(true);
+  const carried = final.routes.find((r) =>
+    final.nets.some((n) => n.id === r.netId && !n.terminals.length),
+  )!;
+  expect(carried).toBeDefined();
+  const inputIds = documentObjectIds(d);
+  for (const id of documentObjectIds({
+    ...final,
+    instances: [],
+    nets: [],
+    drafting: { objects: [] },
+    annotations: [],
+  }))
+    expect(inputIds.has(id)).toBe(false);
   const owner = draftingGroups(final, resolver).find((g) =>
     g.objects.some((o) => o.id === "caption"),
   )!.owner;
@@ -81,7 +101,7 @@ it("keeps a block diagram's isolated bent conductor and caption without joining 
     "conductor",
   )!.centerline;
   const moved = resolveDocumentRoutingGeometry(final, resolver).routes.get(
-    "conductor",
+    carried.id,
   )!.centerline;
   const delta = {
     x: moved[0]!.x - original[0]!.x,
@@ -96,26 +116,46 @@ it("keeps a block diagram's isolated bent conductor and caption without joining 
 });
 
 it("drops a terminal-free conductor whose translated segment crosses a symbol", () => {
-  const { final } = apply(fixture(true));
-  expect(final.routes.some((r) => r.id === "conductor")).toBe(false);
+  const d = fixture(true);
+  const { final } = apply(d);
+  const sourcePart = visibleInstanceBounds(d, resolver).find(
+    (p) => p.id === "b",
+  )!.bounds;
+  const targetPart = visibleInstanceBounds(final, resolver).find(
+    (p) => p.id === "b",
+  )!.bounds;
+  const x = d.junctions[0]!.position.x + targetPart.x - sourcePart.x;
+  const y = d.junctions[0]!.position.y + targetPart.y - sourcePart.y;
+  // The required rigid translation crosses b's body; rejection is geometric.
+  expect(x).toBeGreaterThanOrEqual(targetPart.x);
+  expect(x).toBeLessThanOrEqual(targetPart.x + targetPart.width);
+  expect(y).toBeLessThan(targetPart.y + targetPart.height);
+  expect(y + 60).toBeGreaterThan(targetPart.y);
+  expect(
+    final.routes.some((r) =>
+      final.nets.some((n) => n.id === r.netId && !n.terminals.length),
+    ),
+  ).toBe(false);
 });
 
-it("reseats a stranded instance caption beside its original owner", () => {
+it("reseats a small caption left outside its owner radius by ordinary R150", () => {
   const d = fixture();
   d.routes = [];
   d.junctions = [];
-  d.drafting = { objects: [note("caption", { x: 640, y: 400 })] };
-  const original = draftingGroups(d, resolver)[0]!.owner;
-  expect(original).toMatchObject({ kind: "instance", id: "b" });
+  const caption = note("caption", { x: 605, y: 365 });
+  if (caption.kind === "text")
+    caption.content = { runs: [{ kind: "text", value: "x" }] };
+  d.drafting = { objects: [caption] };
+  expect(draftingGroups(d, resolver)[0]!.owner).toMatchObject({
+    kind: "instance",
+    id: "b",
+  });
+  // Verified against main 8cdec30: this exact synthetic caption ends unowned.
   const { final } = apply(d);
   expect(draftingGroups(final, resolver)[0]!.owner).toMatchObject({
     kind: "instance",
     id: "b",
   });
-  expect(
-    resolveVisualAnchor(final, resolver, final.drafting!.objects[0]!.anchor)
-      .position,
-  ).not.toEqual({ x: 640, y: 400 });
 });
 
 it("continues beyond a blocked local seat and keeps the stranded caption's owner", async () => {
@@ -180,9 +220,14 @@ it("continues beyond a blocked local seat and keeps the stranded caption's owner
     terminalPartition(d, resolver),
   );
   expect(recoverDraftingOwners(d, resolver, base)).toEqual(result);
+  let checks = 0;
+  expect(recoverDraftingOwners(d, resolver, base, () => ++checks >= 20)).toBe(
+    base,
+  );
+  expect(checks).toBeGreaterThanOrEqual(20);
 });
 
-it("does not reactivate a route anchor that would move locked drafting", () => {
+it("keeps locked drafting fixed without reusing its missing route id", () => {
   const d = fixture();
   const locked = {
     ...note("fixed-route-caption", { x: 770, y: 392 }),
@@ -206,6 +251,11 @@ it("does not reactivate a route anchor that would move locked drafting", () => {
   expect(
     resolveVisualAnchor(final, resolver, retained.anchor).position,
   ).toEqual(at);
+  expect(
+    final.routes.some((r) =>
+      final.nets.some((n) => n.id === r.netId && !n.terminals.length),
+    ),
+  ).toBe(true);
   expect(final.routes.some((r) => r.id === "conductor")).toBe(false);
 });
 
@@ -225,4 +275,236 @@ it("scoped ownership includes unselected touching ink and its locks", () => {
   expect(groups[0]!.owner).toMatchObject({ kind: "instance", id: "a" });
   d.drafting.objects[1]!.locked = true;
   expect(draftingGroups(d, resolver, selected)).toEqual([]);
+});
+
+it.each(["route", "junction"] as const)(
+  "explicitly reanchors movable drafting to fresh carried %s ids",
+  (kind) => {
+    const d = fixture();
+    d.drafting!.objects[0]!.anchor =
+      kind === "junction"
+        ? {
+            kind: "object",
+            objectId: "start",
+            localOffset: { x: 50, y: 40 },
+            fallbackPosition: { x: 850, y: 420 },
+          }
+        : {
+            kind: "route",
+            routeId: "conductor",
+            legId: d.routes[0]!.legs[1]!.id,
+            t: 0.6,
+            normalOffset: -20,
+            direction: "forward",
+            orientation: "horizontal",
+            fallbackPosition: { x: 848, y: 420 },
+          };
+    const { plan, final } = apply(d);
+    const carried = final.routes.find((r) =>
+      final.nets.some((n) => n.id === r.netId && !n.terminals.length),
+    )!;
+    expect(carried).toBeDefined();
+    expect(plan.edits).toContainEqual(
+      expect.objectContaining({
+        kind: "upsert_drafting_object",
+        object: expect.objectContaining({
+          id: "caption",
+          anchor: expect.objectContaining(
+            kind === "route"
+              ? {
+                  kind: "route",
+                  routeId: carried.id,
+                  legId: carried.legs[1]!.id,
+                }
+              : {
+                  kind: "object",
+                  objectId: deriveStableId(
+                    "auto-layout-carried-junction",
+                    "start",
+                    "0",
+                  ),
+                },
+          ),
+        }),
+      }),
+    );
+    expect(draftingGroups(final, resolver)[0]!.owner).toMatchObject({
+      net: "[]",
+    });
+  },
+);
+
+it.each([
+  { search: { seed: 1, evaluations: 0 } },
+  { quality: "optimized" as const },
+  { partition: { blocks: [] } },
+])(
+  "does not recover free conductors outside plain nonzero-budget planning: %j",
+  (options) => {
+    const d = fixture();
+    const plan = planAutoLayout(d, resolver, options);
+    const final = preview(d, resolver, plan.edits);
+    if (!final.ok) throw Error(JSON.stringify(final.diagnostics));
+    expect(
+      final.document.routes.some((r) =>
+        final.document.nets.some(
+          (n) => n.id === r.netId && !n.terminals.length,
+        ),
+      ),
+    ).toBe(false);
+  },
+);
+
+it("returns the ordinary result when cancelled inside conductor recovery", () => {
+  const d = fixture();
+  const base = planAutoLayout(d, resolver, {
+    search: { seed: 1, evaluations: 0 },
+  });
+  let checks = 0;
+  expect(recoverDraftingOwners(d, resolver, base, () => ++checks >= 3)).toBe(
+    base,
+  );
+  expect(checks).toBeGreaterThanOrEqual(3);
+});
+
+it.each(["pin", "junction", "wire"] as const)(
+  "rejects a carried conductor touching a terminal-Net %s",
+  (contact) => {
+    const d = fixture();
+    // The ordinary result keeps b fixed, so the carried segment would be
+    // x=800, y=380..440. Author the terminal conductor across that segment.
+    const base = {
+      edits: [
+        { kind: "remove_route_geometry" as const, routeId: "conductor" },
+        ...d.junctions.map((j) => ({
+          kind: "remove_junction" as const,
+          junctionId: j.id,
+        })),
+      ] as import("@icm/edit-engine").SchematicEdit[],
+      groups: [],
+      diagnostics: [],
+    };
+    if (contact === "pin") {
+      const pin = pinPoints(d, resolver).find(
+        (p) => p.instanceId === "a" && p.pinName === "2",
+      )!;
+      base.edits.push({
+        kind: "move_instance",
+        instanceId: "a",
+        position: {
+          x: 800 - pin.point.x,
+          y: 400 + 380 - pin.point.y,
+        },
+      });
+    } else {
+      const point = { x: contact === "junction" ? 800 : 820, y: 410 };
+      base.edits.push({
+        kind: "add_junction",
+        junctionId: "terminal-end",
+        netId: "signal",
+        position: point,
+      });
+      base.edits.push({
+        kind: "set_route_path",
+        route: createRoutePath({
+          id: "terminal-wire",
+          netId: "signal",
+          start: { kind: "terminal", instanceId: "a", pinName: "2" },
+          end: { kind: "junction", junctionId: "terminal-end" },
+          bends: [{ x: 780, y: 410 }],
+          modes: ["manual", "manual"],
+        }),
+      });
+    }
+    const placed = preview(d, resolver, base.edits);
+    if (!placed.ok) throw Error(JSON.stringify(placed.diagnostics));
+    if (contact === "pin") {
+      expect(pinPoints(placed.document, resolver)).toContainEqual(
+        expect.objectContaining({
+          instanceId: "a",
+          pinName: "2",
+          point: { x: 800, y: 380 },
+        }),
+      );
+    } else {
+      const terminalRoute = placed.document.routes.find(
+        (r) => r.id === "terminal-wire",
+      )!;
+      expect(
+        placed.document.nets.find((n) => n.id === terminalRoute.netId)!
+          .terminals.length,
+      ).toBeGreaterThan(0);
+      const segments = resolveDocumentRoutingGeometry(
+        placed.document,
+        resolver,
+      ).routes.get(terminalRoute.id)!.segments;
+      expect(segments).toContainEqual(
+        expect.objectContaining({
+          from: { x: 780, y: 410 },
+          to: { x: contact === "junction" ? 800 : 820, y: 410 },
+        }),
+      );
+    }
+    expect(recoverDraftingOwners(d, resolver, base)).toEqual(base);
+  },
+);
+
+it("salts carried identities against removed input object ids", () => {
+  const d = fixture();
+  const reserved = deriveStableId(
+    "auto-layout-carried-route",
+    "conductor",
+    "0",
+  );
+  d.drafting!.objects.push({
+    ...note(reserved, { x: -2000, y: -2000 }),
+    locked: true,
+  });
+  const { final } = apply(d);
+  const carried = final.routes.find((r) =>
+    final.nets.some((n) => n.id === r.netId && !n.terminals.length),
+  )!;
+  expect(carried).toBeDefined();
+  expect(carried.id).not.toBe(reserved);
+  expect(documentObjectIds(d).has(carried.id)).toBe(false);
+});
+
+it("keeps an improving carried Net when another isolated Net fails scoring", () => {
+  const d = fixture();
+  d.nets.unshift({ id: "unhelpful", terminals: [] });
+  d.junctions.push(
+    {
+      id: "unhelpful-start",
+      netId: "unhelpful",
+      position: { x: 1200, y: 600 },
+    },
+    { id: "unhelpful-end", netId: "unhelpful", position: { x: 1300, y: 600 } },
+  );
+  d.routes.push(
+    createRoutePath({
+      id: "unhelpful-route",
+      netId: "unhelpful",
+      start: { kind: "junction", junctionId: "unhelpful-start" },
+      end: { kind: "junction", junctionId: "unhelpful-end" },
+      bends: [],
+      modes: ["manual"],
+    }),
+  );
+  const { final } = apply(d);
+  expect(
+    final.routes.some(
+      (r) =>
+        r.id ===
+        deriveStableId("auto-layout-carried-route", "unhelpful-route", "0"),
+    ),
+  ).toBe(false);
+  expect(
+    final.routes.some(
+      (r) =>
+        r.id === deriveStableId("auto-layout-carried-route", "conductor", "0"),
+    ),
+  ).toBe(true);
+  expect(draftingGroups(final, resolver)[0]!.owner).toMatchObject({
+    net: "[]",
+  });
 });
