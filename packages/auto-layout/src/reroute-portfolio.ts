@@ -12,8 +12,8 @@ import {
   floatingPins,
 } from "./routing-audit.js";
 import {
+  compareRuns,
   refinementMetrics,
-  routedScore,
   selectRoutingAlternative,
   improvesWireLayout,
   type LayoutRun,
@@ -71,8 +71,7 @@ export function reroutePortfolio(
       seen.add(key);
       return auditRouting(c.run.final, resolver).crossings > 0;
     })
-    .map((c) => ({ ...c, score: routedScore(c.run, resolver) }))
-    .sort((a, b) => a.score - b.score)
+    .sort((a, b) => compareRuns(a.run, b.run, resolver))
     .slice(0, limit);
   let bestRun: LayoutRun = incumbent;
   let bestStrategy = refinementMetrics(winner)?.strategy;

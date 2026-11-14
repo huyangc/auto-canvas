@@ -4,7 +4,11 @@ import type { SymbolResolver } from "@icm/symbols";
 import { facePorts } from "./face-ports.js";
 import { seatLabels } from "./seat-labels.js";
 import { emptyChoices } from "./layout-choices.js";
-import { refinementMetrics, routedScore } from "./refine.js";
+import {
+  compareCompleteness,
+  refinementMetrics,
+  routedScore,
+} from "./refine.js";
 import { auditRouting } from "./routing-audit.js";
 import { lostNameClaim, preview, terminalPartition } from "./transaction.js";
 import type { AutoLayoutOptions, AutoLayoutResult } from "./types.js";
@@ -46,7 +50,12 @@ export function finalizeFacing(
     terminalPartition(document, resolver) !==
       terminalPartition(final.document, resolver) ||
     lostNameClaim(document, final.document) ||
-    auditRouting(final.document, resolver).unsafeProblems.length
+    auditRouting(final.document, resolver).unsafeProblems.length ||
+    compareCompleteness(
+      { result, final: final.document, choices: emptyChoices() },
+      { result, final: original.document, choices: emptyChoices() },
+      resolver,
+    ) > 0
   )
     return result;
   result.edits = edits;

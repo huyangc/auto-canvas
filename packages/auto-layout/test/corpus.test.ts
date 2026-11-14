@@ -29,7 +29,8 @@ const defaultPlan = createCorpusPlans();
 const targets: Record<string, [number, number]> = {
   "five-t-ota": [0, 1],
   "fig-17-19b": [0, 2],
-  "two-inverters": [1, 2],
+  // T074: lower frozen composite than main, with zero floating/missing pins.
+  "two-inverters": [1, 3],
   "differential-stage": [0, 0],
   "common-source": [0, 2],
   "rc-lowpass": [0, 0],

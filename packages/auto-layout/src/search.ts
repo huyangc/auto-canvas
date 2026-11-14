@@ -10,7 +10,12 @@ import { createPlacementEstimator } from "./estimate.js";
 import { classifyNets, isMos } from "./net-roles.js";
 import { conductingPins } from "./stages.js";
 import { pinExit, transformPoint } from "./geometry.js";
-import { routedScore, type LayoutRun } from "./refine.js";
+import {
+  compareRuns,
+  compareCompleteness,
+  routedScore,
+  type LayoutRun,
+} from "./refine.js";
 import {
   searchBounds,
   spanProblem,
@@ -222,12 +227,16 @@ export function annealLayout(
         ),
       );
       const heat = temperature * 0.001 ** progress;
-      if (delta <= 0 || random() < Math.exp(-delta / heat)) {
+      if (
+        compareCompleteness(run, current.run, resolver) < 0 ||
+        (compareCompleteness(run, current.run, resolver) === 0 &&
+          (delta <= 0 || random() < Math.exp(-delta / heat)))
+      ) {
         current = { run, strategy: candidate.strategy };
         state = stateOf(current);
         score = value;
       }
-      if (value < bestScore) {
+      if (compareRuns(run, best.run, resolver) < 0) {
         best = { run, strategy: candidate.strategy };
         bestScore = value;
       }
@@ -245,7 +254,8 @@ export function annealLayout(
   const alternative = evaluate(stateOf(best), false, bounds);
   evaluations++;
   const alternativeScore = routedScore(alternative, resolver);
-  if (alternativeScore < bestScore) bestScore = alternativeScore;
+  if (compareRuns(alternative, best.run, resolver) < 0)
+    bestScore = alternativeScore;
   notify();
   return { ...best, alternative };
 }

@@ -1,3 +1,5 @@
+import { readabilityTerm } from "../src/readability-selection.js";
+import { readabilityCounts } from "../src/readability.js";
 import { expect, it } from "vitest";
 import { visibleInstanceBounds } from "@icm/derived";
 import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
@@ -107,7 +109,7 @@ it("R149 leaves a fixed unit unchanged even when its gap can close", () => {
   expect(result).toBe(initial);
 });
 
-it("R149 rejects a gap closure that crowds a locked label", () => {
+it("R149 can compact past zero-weight label clearance without moving a locked label", () => {
   const document = fixture("x");
   document.annotations.push({
     id: "label",
@@ -127,7 +129,21 @@ it("R149 rejects a gap closure that crowds a locked label", () => {
   expect(
     gapClosingCandidates(initial.final!, resolver, ["b"], [["a"], ["b"]]),
   ).toHaveLength(1);
-  expect(result).toBe(initial);
+  expect(result).not.toBe(initial);
+  expect(result.final!.annotations).toEqual(initial.final!.annotations);
+  expect(result.final!.instances[0]).toEqual(initial.final!.instances[0]);
+  expect(
+    readabilityCounts(result.final!, resolver).labelClearance,
+  ).toBeGreaterThan(readabilityCounts(initial.final!, resolver).labelClearance);
+  expect(readabilityTerm(result.final!, resolver)).toBeLessThan(
+    readabilityTerm(initial.final!, resolver),
+  );
+  expect(calibratedScore(result, resolver)).toBeLessThan(
+    calibratedScore(initial, resolver),
+  );
+  expect(routedGuards(result.final!, resolver)).toEqual(
+    routedGuards(initial.final!, resolver),
+  );
 });
 
 it("R149 scores finished label extents beyond the instance envelope", () => {
@@ -164,7 +180,7 @@ it("R149 does not move a sole device unit toward standalone markers", () => {
 });
 
 it.each(["crossings", "bends"] as const)(
-  "R149 rejects a shorter finished gap trial that increases %s",
+  "R149 judges a gap trial with added %s by frozen readability",
   (metric) => {
     const document = fixture("x");
     document.instances[1]!.placement = placement(4000, 0);
@@ -235,24 +251,42 @@ it.each(["crossings", "bends"] as const)(
     );
     for (const [key, count] of Object.entries(counts))
       if (key !== metric) expect(count).toBeLessThanOrEqual(limits[key] ?? 0);
-    expect(calibratedScore(after, resolver)).toBeLessThan(
-      calibratedScore(before, resolver),
-    );
-    if (metric === "bends") {
+    const oldScore = (run: typeof before) =>
+      calibratedScore(run, resolver) - readabilityTerm(run.final!, resolver);
+    expect(oldScore(after)).toBeLessThan(oldScore(before));
+    if (metric === "crossings") {
+      expect(readabilityTerm(after.final!, resolver)).toBeGreaterThan(
+        readabilityTerm(before.final!, resolver),
+      );
+      expect(calibratedScore(after, resolver)).toBeGreaterThan(
+        calibratedScore(before, resolver),
+      );
+    } else {
+      expect(readabilityTerm(after.final!, resolver)).toBeLessThan(
+        readabilityTerm(before.final!, resolver),
+      );
+      expect(calibratedScore(after, resolver)).toBeLessThan(
+        calibratedScore(before, resolver),
+      );
       const oneRow = structuredClone(after);
       oneRow.final!.instances[1]!.placement = placement(3880, 0);
-      // The fitted objective itself cannot buy a bend for one 120-unit row.
-      expect(calibratedScore(oneRow, resolver)).toBeGreaterThan(
+      // The frozen area gain can now pay for a bend at a 120-unit closure.
+      expect(calibratedScore(oneRow, resolver)).toBeLessThan(
         calibratedScore(before, resolver),
       );
     }
     let trials = 0;
-    expect(
-      searchDeviceRelocations(before, resolver, new Set(["a"]), () => {
+    const selected = searchDeviceRelocations(
+      before,
+      resolver,
+      new Set(["a"]),
+      () => {
         trials++;
         return after;
-      }),
-    ).toBe(before);
+      },
+    );
+    if (metric === "crossings") expect(selected).toBe(before);
+    else expect(selected.final).toBe(after.final);
     expect(trials).toBeGreaterThan(0);
   },
 );

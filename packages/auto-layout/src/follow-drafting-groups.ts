@@ -1,3 +1,4 @@
+import { followDraftingLabels } from "./follow-drafting-labels.js";
 import {
   createLabelClearanceContext,
   isVisibleEndpoint,
@@ -31,11 +32,14 @@ import {
 } from "./geometry.js";
 import { emptyChoices } from "./layout-choices.js";
 import {
+  compareRuns,
   refinementMetrics,
+  retainRefinementMetrics,
   routedScore,
   selectRoutingAlternative,
 } from "./refine.js";
 import { calibratedScore, routedGuards } from "./routed-search-score.js";
+import { improvesReadability } from "./readability-selection.js";
 import { auditRouting } from "./routing-audit.js";
 import { preview, terminalPartition } from "./transaction.js";
 import type { AutoLayoutResult } from "./types.js";
@@ -335,6 +339,21 @@ function seatDraftingGroups(
     );
     edits = candidate.edits;
   }
+  if (followingOnly) {
+    // R150 may overwrite a caption recovered by the base's finishing pass.
+    // Recover only standalone captions; never split a rigid drawing group.
+    const captions = groups.flatMap((group) =>
+      group.objects.length === 1 && group.objects[0]!.kind === "text"
+        ? group.objects
+        : [],
+    );
+    candidate = followDraftingLabels(
+      { ...source, drafting: { objects: captions } },
+      resolver,
+      { ...structuredClone(candidate), edits },
+    );
+    edits = candidate.edits;
+  }
   if (candidate.diagnostics.some((d) => d.severity === "error")) return;
   const replay = preview(source, resolver, edits);
   if (
@@ -350,9 +369,10 @@ function seatDraftingGroups(
   const oldAudit = auditRouting(before.document, resolver),
     audit = auditRouting(final, resolver, ownerOverlaps);
   if (
-    audit.crossings > oldAudit.crossings ||
-    audit.bends > oldAudit.bends ||
-    audit.wireLength > oldAudit.wireLength ||
+    (!improvesReadability(before.document, final, resolver) &&
+      (audit.crossings > oldAudit.crossings ||
+        audit.bends > oldAudit.bends ||
+        audit.wireLength > oldAudit.wireLength)) ||
     audit.draftingProblems.length > oldAudit.draftingProblems.length
   )
     return;
@@ -363,7 +383,7 @@ function seatDraftingGroups(
     final: before.document,
     choices: emptyChoices(),
   };
-  if (calibratedScore(run, resolver) > calibratedScore(reference, resolver)) {
+  if (compareRuns(run, reference, resolver, calibratedScore) > 0) {
     // On unchanged electrical ink, attaching a stranded group takes priority
     // over visible-span compaction. All routing and visual guards above still
     // apply. A remote unowned block cannot win by merely changing its span.
@@ -383,7 +403,10 @@ function seatDraftingGroups(
       rule: "R10",
       message,
     });
-  const metrics = refinementMetrics(result);
-  if (metrics) metrics.score = routedScore(run, resolver);
+  if (followingOnly) retainRefinementMetrics(run, base, resolver);
+  else {
+    const metrics = refinementMetrics(result);
+    if (metrics) metrics.score = routedScore(run, resolver);
+  }
   return result;
 }

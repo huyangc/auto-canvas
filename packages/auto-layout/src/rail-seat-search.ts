@@ -1,3 +1,4 @@
+import { compareRuns } from "./refine.js";
 import { straightJoins, symbolBlocksJoin } from "./straight-joins.js";
 import { planningBudget } from "./planning-budget.js";
 import { visibleInstanceBounds } from "@icm/derived";
@@ -146,8 +147,7 @@ export function searchRailSeats(
       );
     })
     .sort((a, b) => compareIds(a.id, b.id));
-  let current = initial,
-    score = calibratedScore(initial, resolver);
+  let current = initial;
   let limits = routedGuards(initial.final, resolver),
     evaluations = 0;
   for (const marker of markers) {
@@ -163,9 +163,12 @@ export function searchRailSeats(
         current.final!.instances.map((i) => [i.id, i.placement!]),
       );
       placements.set(marker.id, pose);
-      const candidate = replan(placements),
-        value = calibratedScore(candidate, resolver);
-      if (!candidate.final || value >= score) continue;
+      const candidate = replan(placements);
+      if (
+        !candidate.final ||
+        compareRuns(candidate, current, resolver, calibratedScore) >= 0
+      )
+        continue;
       if (compactionRegresses(current, candidate, resolver)) continue;
       const next = routedGuards(candidate.final, resolver);
       if (
@@ -173,7 +176,6 @@ export function searchRailSeats(
       )
         continue;
       current = { ...candidate, choices: initial.choices };
-      score = value;
       limits = next;
     }
   }

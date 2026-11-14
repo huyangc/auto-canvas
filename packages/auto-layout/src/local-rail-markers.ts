@@ -1,3 +1,4 @@
+import { compareRuns } from "./refine.js";
 import { MAX_SCHEMATIC_EDITS_PER_TRANSACTION } from "@icm/edit-engine";
 import type { Instance, SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
@@ -247,13 +248,24 @@ export function localRailMarkers(
           readabilityMetrics(final.document, resolver),
         );
         const failures: Record<string, unknown> = {};
-        if (audit.crossings >= before.crossings)
+        if (
+          audit.crossings >= before.crossings &&
+          candidateReadability >= readability
+        )
           failures.crossings = [before.crossings, audit.crossings];
         if (audit.unsafeProblems.length) failures.unsafe = audit.unsafeProblems;
         for (const [key, count] of Object.entries(guards))
           if (count > (limits[key] ?? 0))
             failures[key] = [limits[key] ?? 0, count];
-        if (candidateScore >= score) failures.score = [score, candidateScore];
+        if (
+          compareRuns(
+            run(final.document, candidate),
+            run(document, result),
+            resolver,
+            calibratedScore,
+          ) >= 0
+        )
+          failures.score = [score, candidateScore];
         if (candidateReadability > readability)
           failures.readability = [readability, candidateReadability];
         if (Object.keys(failures).length) {
@@ -265,7 +277,15 @@ export function localRailMarkers(
           crossings: [before.crossings, audit.crossings],
           score: candidateScore,
         });
-        if (!best || candidateScore < best.score)
+        if (
+          !best ||
+          compareRuns(
+            run(final.document, candidate),
+            run(best.document, best.result),
+            resolver,
+            calibratedScore,
+          ) < 0
+        )
           best = {
             document: final.document,
             result: candidate,

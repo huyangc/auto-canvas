@@ -400,7 +400,17 @@ it("R44 compares one routing-only replay of the selected refined placement", () 
   const document = project.documents.find((d) => d.id === fixture.documentId)!;
   const resolver = createProjectSymbolResolver(project, builtInSymbols);
   const routes = vi.spyOn(routing, "routeDocument");
-  const comparison = vi.spyOn(refinement, "selectRoutingAlternative");
+  const select = refinement.selectRoutingAlternative;
+  let routingWinner: ReturnType<typeof select> | undefined;
+  const comparison = vi
+    .spyOn(refinement, "selectRoutingAlternative")
+    .mockImplementation((...args) => {
+      const winner = select(...args);
+      // Later facing and label finishing mutate the winner. Assert the R44
+      // minimum at its own boundary, before those subsequent improvements.
+      routingWinner = structuredClone(winner);
+      return winner;
+    });
   const compact = vi.spyOn(compaction, "compactPlacements");
   try {
     const result = planAutoLayout(document, resolver, {
@@ -410,12 +420,13 @@ it("R44 compares one routing-only replay of the selected refined placement", () 
       1,
     );
     expect(
-      routes.mock.calls.slice(-4).map((call) => [call[5], call[6]]),
+      routes.mock.calls.slice(-5).map((call) => [call[5], call[6]]),
     ).toEqual([
       [true, { ripUp: false }], // selected refinement
       [false, { ripUp: false }],
       [true, { ripUp: true }], // R96 finalist
-      [true, { ripUp: true }], // R97 trial; tight pitch leaves no empty column
+      [true, { ripUp: true }], // R97 column trial
+      [true, { ripUp: true }], // R97 row trial under the readability objective
     ]);
     expect(comparison).toHaveBeenCalledTimes(1);
     const [selected, alternative] = comparison.mock.calls[0]!;
@@ -428,8 +439,15 @@ it("R44 compares one routing-only replay of the selected refined placement", () 
     const committed = preview(document, resolver, result.edits);
     expect(committed.ok).toBe(true);
     if (!committed.ok) return;
+    const routingPreview = preview(document, resolver, routingWinner!.edits);
+    expect(routingPreview.ok).toBe(true);
+    if (!routingPreview.ok) return;
     const score = routedScore(
-      { result, choices: emptyChoices(), final: committed.document },
+      {
+        result: routingWinner!,
+        choices: emptyChoices(),
+        final: routingPreview.document,
+      },
       resolver,
     );
     expect(score).toBe(

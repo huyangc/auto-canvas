@@ -1,3 +1,4 @@
+import { improvesReadability } from "./readability-selection.js";
 import { localRailMarkers } from "./local-rail-markers.js";
 import { planningMemo, reusePlanning } from "./planning-reuse.js";
 import { planningBudget } from "./planning-budget.js";
@@ -95,6 +96,7 @@ import {
 } from "./layout-choices.js";
 import {
   improvesWireLayout,
+  compareRuns,
   refinementMetrics,
   refineLayout,
   routedScore,
@@ -605,9 +607,7 @@ function planAutoLayoutMeasured(
       ),
       true,
     );
-    return routedScore(candidate, resolver) < routedScore(run, resolver)
-      ? candidate
-      : run;
+    return compareRuns(candidate, run, resolver) < 0 ? candidate : run;
   };
   // R97 compacts only the R44 winner, outside all candidate evaluations.
   const compact = (
@@ -673,7 +673,7 @@ function planAutoLayoutMeasured(
       if (
         options.partition
           ? accepts(candidate)
-          : routedScore(candidate, resolver) < routedScore(run, resolver)
+          : compareRuns(candidate, run, resolver) < 0
       )
         run = { ...candidate, choices: run.choices };
     }
@@ -720,7 +720,7 @@ function planAutoLayoutMeasured(
       true,
       true,
     );
-    return routedScore(candidate, resolver) <= routedScore(run, resolver)
+    return compareRuns(candidate, run, resolver) <= 0
       ? { ...candidate, choices: run.choices }
       : run;
   };
@@ -738,8 +738,7 @@ function planAutoLayoutMeasured(
         signalTrunks,
       );
       const other = repair(alternative, strategy, false);
-      const otherWins =
-        routedScore(other, resolver) < routedScore(current, resolver);
+      const otherWins = compareRuns(other, current, resolver) < 0;
       return selectRoutingAlternative(
         otherWins
           ? current
@@ -786,7 +785,7 @@ function planAutoLayoutMeasured(
         return (
           Number(b.strategy === "layered") - Number(a.strategy === "layered")
         );
-      return first - second;
+      return compareRuns(a.run, b.run, resolver);
     });
   let selected = ranked[0]!;
   for (const candidate of ranked.slice(
@@ -803,7 +802,7 @@ function planAutoLayoutMeasured(
     const result = runs.get(refined)!;
     if (
       candidate === ranked[0] ||
-      routedScore(result.run, resolver) < routedScore(selected.run, resolver)
+      compareRuns(result.run, selected.run, resolver) < 0
     )
       selected = result;
   }
@@ -818,7 +817,7 @@ function planAutoLayoutMeasured(
   );
   const search = options.search ?? defaultLayoutSearch(document, options);
   const quickRun =
-    routedScore(alternative, resolver) < routedScore(selected.run, resolver)
+    compareRuns(alternative, selected.run, resolver) < 0
       ? alternative
       : selected.run;
   const best = timePhase("annealer", () =>
@@ -872,15 +871,28 @@ function planAutoLayoutMeasured(
         best.run !== alternative,
       ),
     );
-    if (
-      (refinementMetrics(searched)?.score ?? Infinity) >=
-      (refinementMetrics(quickResult)?.score ?? Infinity)
-    )
-      return quickResult;
     const before = preview(document, resolver, quickResult.edits);
     const after = preview(document, resolver, searched.edits);
     if (!after.ok) return quickResult;
     if (before.ok) {
+      if (
+        compareRuns(
+          {
+            result: searched,
+            final: after.document,
+            choices: emptyChoices(),
+            ...(options.partition ? { partition: options.partition } : {}),
+          },
+          {
+            result: quickResult,
+            final: before.document,
+            choices: emptyChoices(),
+            ...(options.partition ? { partition: options.partition } : {}),
+          },
+          resolver,
+        ) >= 0
+      )
+        return quickResult;
       const missed =
         missingConnections(after.document, resolver) -
         missingConnections(before.document, resolver);
@@ -902,7 +914,11 @@ function planAutoLayoutMeasured(
               blockIntrusion(before.document, resolver, options.partition),
           );
         // Do not trade a strictly dominated wire layout for secondary score terms.
-        if (deltas.every((d) => d >= 0) && deltas.some((d) => d > 0))
+        if (
+          !improvesReadability(before.document, after.document, resolver) &&
+          deltas.every((d) => d >= 0) &&
+          deltas.some((d) => d > 0)
+        )
           return quickResult;
       }
     }
@@ -1235,8 +1251,7 @@ function planAutoLayoutMeasured(
     );
     if (
       !candidate.final ||
-      calibratedScore(candidate, resolver) >=
-        calibratedScore(closed, resolver) ||
+      compareRuns(candidate, closed, resolver, calibratedScore) >= 0 ||
       compactionRegresses(closed, candidate, resolver, true)
     )
       return repairLabels(closed);
@@ -1433,8 +1448,8 @@ function buildPlan(
           bounds,
           {
             key: JSON.stringify([signalTrunks, ripUp, crossX, !!contacts]),
-            score: (placements) =>
-              routedScore(
+            compare: (a, b) => {
+              const route = (placements: ReadonlyMap<string, Placement>) =>
                 planLayoutOnce(
                   document,
                   resolver,
@@ -1449,9 +1464,9 @@ function buildPlan(
                   crossX,
                   contacts,
                   cache,
-                ),
-                resolver,
-              ),
+                );
+              return compareRuns(route(a), route(b), resolver);
+            },
           },
         );
   const translation = exact

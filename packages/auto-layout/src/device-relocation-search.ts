@@ -1,3 +1,4 @@
+import { compareRuns } from "./refine.js";
 import { planningBudget } from "./planning-budget.js";
 import { visibleInstanceBounds } from "@icm/derived";
 import type { SchematicDocument } from "@icm/model";
@@ -244,7 +245,6 @@ export function searchDeviceRelocations(
   const units = allUnits.filter((ids) => !ids.some((id) => locked.has(id)));
   const anchor = enclosingBox(initial.final, resolver);
   let current = initial;
-  let score = calibratedScore(current, resolver);
   let limits = routedGuards(initial.final, resolver);
 
   // The public pipeline defers gaps until ports and rails have finished, while
@@ -309,8 +309,11 @@ export function searchDeviceRelocations(
         }
       }
       const candidate = replan(trial);
-      const value = calibratedScore(candidate, resolver);
-      if (!candidate.final || value >= score) continue;
+      if (
+        !candidate.final ||
+        compareRuns(candidate, current, resolver, calibratedScore) >= 0
+      )
+        continue;
       if (compactionRegresses(current, candidate, resolver, closeGaps))
         continue;
       const finished = new Map(
@@ -348,7 +351,6 @@ export function searchDeviceRelocations(
       )
         continue;
       current = { ...candidate, choices: initial.choices };
-      score = value;
       limits = counts;
     }
   }
