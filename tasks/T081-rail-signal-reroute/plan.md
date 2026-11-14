@@ -54,10 +54,11 @@ Expected gain (estimate): dev 1.0–1.5, val 0.3–0.5 composite units.
   `python3 tmp/per-case-excess.py <report> railCrossings dev 20`.
   Large documents and held-out timing: `tmp/t080-harness/` (`large-input/`,
   `verify-large.mjs`, `timing.mjs` — fix their worktree path `W`, output
-  paths and baseline import). Build the baseline yourself before changing
-  code: copy this worktree's `packages/auto-layout/dist` after a clean
-  `pnpm build` to `/tmp/t081-baseline/dist` (T080 needed a local
-  module-resolution link for `@icm/*`; see its report).
+  paths and baseline import). Opus installed dependencies and built main
+  `8cdec30`; that build is at `/tmp/t081-baseline/dist` (`index.js`,
+  `timing.js`). T080 needed a local module-resolution link for `@icm/*` to
+  import it; see `tasks/T080-stage-flank/report.md` on branch
+  `task/T080-stage-flank` if needed.
 
 ## Scope
 
