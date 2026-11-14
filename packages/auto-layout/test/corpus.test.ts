@@ -766,7 +766,8 @@ it.each(cases)(
       ),
     ).toEqual([]);
   },
-  30000,
+  // T074's readability selection adds ~1.5x on two-inverters (CI passed 30 s).
+  60000,
 );
 
 // Commit the planner's first phases independently to isolate route removal

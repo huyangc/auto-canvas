@@ -193,8 +193,9 @@ it.each(cases)(
     expect(refinementMetrics(plan)!.candidates).toBeLessThanOrEqual(24);
   },
   // Plans twice and once more without refinement; the final pin-contact
-  // search makes this exceed the 5 s default on slow CI runners.
-  15000,
+  // search makes this exceed the 5 s default on slow CI runners. T074's
+  // readability selection adds ~1.5x on two-inverters (CI passed 15 s).
+  30000,
 );
 
 it("R23 refuses a replay Route crossing an Instance and overlapping another Net", () => {
