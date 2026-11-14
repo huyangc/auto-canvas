@@ -51,7 +51,13 @@ function netKey(document: SchematicDocument, id: string) {
 }
 type Owner =
   | { kind: "instance"; id: string; point: Point; pinName?: string }
-  | { kind: "route" | "junction"; net: string; point: Point; reference: Point };
+  | {
+      kind: "route" | "junction";
+      net: string;
+      netId: string;
+      point: Point;
+      reference: Point;
+    };
 export interface DraftingGroup {
   objects: DraftingObject[];
   bounds: Rect;
@@ -59,15 +65,18 @@ export interface DraftingGroup {
 }
 
 /** R150: connected ink components, followed by nearest geometric ownership.
- * Locks freeze the entire touching component, so a box cannot leave its note. */
+ * Locks freeze the entire touching component, so a box cannot leave its note.
+ * A selection limits returned components, never the ink used for grouping or
+ * locks. Seat searches need ownership only for the component being moved. */
 export function draftingGroups(
   source: SchematicDocument,
   resolver: SymbolResolver,
+  selection?: ReadonlySet<string>,
 ): DraftingGroup[] {
   const objects = source.drafting?.objects ?? [];
   const ink = draftingBounds(source, resolver);
   const remaining = new Set(objects.map((_, i) => i));
-  const groups: DraftingGroup[] = [];
+  let groups: DraftingGroup[] = [];
   while (remaining.size) {
     const indices = [remaining.values().next().value!];
     remaining.delete(indices[0]!);
@@ -103,7 +112,14 @@ export function draftingGroups(
         bounds: envelope(indices.map((i) => ink[i]!.bounds)),
       });
   }
+  if (selection)
+    groups = groups.filter((g) => g.objects.some((o) => selection.has(o.id)));
   if (!groups.length) return groups;
+  const keys = new Map<string, string>();
+  const key = (id: string) => {
+    if (!keys.has(id)) keys.set(id, netKey(source, id));
+    return keys.get(id)!;
+  };
   const parts = visibleInstanceBounds(source, resolver);
   const routing = resolveDocumentRoutingGeometry(source, resolver);
   const pins = pinPoints(source, resolver).filter((pin) =>
@@ -119,7 +135,8 @@ export function draftingGroups(
       owners.push({
         owner: {
           kind: "junction",
-          net: netKey(source, junction.netId),
+          net: key(junction.netId),
+          netId: junction.netId,
           point: junction.position,
           reference,
         },
@@ -154,7 +171,8 @@ export function draftingGroups(
           owners.push({
             owner: {
               kind: "route",
-              net: netKey(source, route.netId),
+              net: key(route.netId),
+              netId: route.netId,
               point: hits[0].point,
               reference,
             },

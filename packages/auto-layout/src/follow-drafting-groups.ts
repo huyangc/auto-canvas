@@ -44,7 +44,7 @@ import { auditRouting } from "./routing-audit.js";
 import { preview, terminalPartition } from "./transaction.js";
 import type { AutoLayoutResult } from "./types.js";
 
-function movedObject(
+export function movedObject(
   object: DraftingObject,
   delta: Point,
   group: DraftingGroup,
