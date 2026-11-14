@@ -127,6 +127,7 @@ import { repairStubLabels } from "./stub-seat.js";
 import { searchPortSeats } from "./port-seat-search.js";
 import { draftingGroups } from "./drafting-groups.js";
 import { followDraftingGroups } from "./follow-drafting-groups.js";
+import { recoverDraftingOwners } from "./recover-drafting-owners.js";
 import {
   draftingTranslation,
   withDraftingTranslation,
@@ -193,7 +194,10 @@ export function planAutoLayout(
           options.search?.signal?.aborted ||
           (options.search?.deadline !== undefined &&
             Date.now() >= options.search.deadline);
-        if (!finalists) return best;
+        if (!finalists)
+          return stopped()
+            ? best
+            : recoverDraftingOwners(document, resolver, best);
         for (const kind of rankedFinalists(finalists, resolver)) {
           if (!finalists.available.has(kind) || stopped()) continue;
           finalists.alternate = kind;
@@ -207,7 +211,9 @@ export function planAutoLayout(
             options.partition,
           );
         }
-        return best;
+        return stopped()
+          ? best
+          : recoverDraftingOwners(document, resolver, best);
       }),
     ),
   );
