@@ -663,6 +663,26 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   stage. Apply the same finishing rule in template, layered and stages
   placement. A device overlap or fixed member leaves the stage in place.
 
+- **R156 — Local-loop amplifier attachment (T077).** In a document of at most
+  40 instances, a multi-pin signal block with one output and at least one input
+  forms a local-loop placement variant when its non-rail output Net reaches one
+  or more gate/base/control receivers, directly or through at most one two-pin
+  passive (direct receivers take precedence over passive output loads; an
+  indirect path must identify one unambiguous control Net), and at least one
+  input senses a non-rail conducting terminal of a receiver or of a device in
+  its rail-cut DC branch. Recognition uses only connectivity, pin roles and
+  device class (R50 conducting pairs; never through control terminals,
+  capacitor feedback or rails). Seat the block on the receiver group's
+  control-pin side, output facing the gate line, anchored on the nearest
+  receiver gate and clear of the whole receiver bank, with the optional series
+  passive between output and gate moving as one unit; keep R70's 60-unit
+  clearance and the grid; choose the input reflection nearest the sensed
+  terminals. Fixed, template, symmetry-block and layout-group members are not
+  moved; a protected member or a collision keeps the old placement. The
+  variant never replaces a strategy's draft: it is an additional finalist in
+  the finished selection (T078, same margin rule and comparator), so a variant
+  that finishes worse is never returned. Large documents are unchanged.
+
 - **R71 — Single-host ports.** A non-rail Cell Pin Net that reaches exactly
   one device pin gets a local seat along that pin's transformed exit direction.
   Use a 40-unit default seat up to 40 instances and 80 units above that,

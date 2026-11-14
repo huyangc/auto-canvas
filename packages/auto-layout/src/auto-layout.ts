@@ -1,3 +1,4 @@
+import { localLoopAmplifiers } from "./local-loop-amplifier.js";
 import {
   selectFinishedLayout,
   shouldFinishRunner,
@@ -153,6 +154,7 @@ interface LevelOptions extends AutoLayoutOptions {
   seriesLevels?: boolean;
   reuseSeriesRoutes?: boolean;
   finalists?: FinalistPass;
+  localLoopDraft?: boolean;
 }
 
 export function planAutoLayout(
@@ -168,7 +170,7 @@ export function planAutoLayout(
           document.instances.length <= 40 &&
           (options.search?.evaluations ??
             defaultLayoutSearch(document, options).evaluations) > 0
-            ? { alternate: false, available: false, pending: new WeakMap() }
+            ? { alternate: false, available: new Set(), pending: new WeakMap() }
             : undefined;
         const finish = () => {
           const initial = planPitchDispatch(document, resolver, {
@@ -179,29 +181,26 @@ export function planAutoLayout(
             localRailMarkers(document, resolver, initial, options),
           );
         };
-        const base = finish();
-        if (
-          !finalists?.available ||
+        let best = finish();
+        const stopped = () =>
           options.search?.signal?.aborted ||
           (options.search?.deadline !== undefined &&
-            Date.now() >= options.search.deadline)
-        )
-          return base;
-        finalists.alternate = true;
-        const candidate = finish();
-        if (
-          options.search?.signal?.aborted ||
-          (options.search?.deadline !== undefined &&
-            Date.now() >= options.search.deadline)
-        )
-          return base;
-        return selectFinishedLayout(
-          document,
-          resolver,
-          base,
-          candidate,
-          options.partition,
-        );
+            Date.now() >= options.search.deadline);
+        if (!finalists) return best;
+        for (const kind of ["runner", "localLoop"] as const) {
+          if (!finalists.available.has(kind) || stopped()) continue;
+          finalists.alternate = kind;
+          const candidate = finish();
+          if (stopped()) return best;
+          best = selectFinishedLayout(
+            document,
+            resolver,
+            best,
+            candidate,
+            options.partition,
+          );
+        }
+        return best;
       }),
     ),
   );
@@ -576,7 +575,8 @@ function planAutoLayoutMeasured(
     allowBranches,
   ]);
   const deferred = options.finalists?.pending.get(document)?.get(finalistKey);
-  if (options.finalists?.alternate && deferred) return deferred();
+  if (options.finalists?.alternate && deferred)
+    return deferred[options.finalists.alternate]();
   const copyResult = (result: AutoLayoutResult) =>
     withDraftingTranslation(
       copyRefinedResult(result),
@@ -899,16 +899,40 @@ function planAutoLayoutMeasured(
     ...runner,
     run: { ...runner.run, result: copyResult(runner.run.result) },
   };
+  // The local-loop placement never participates in provisional strategy
+  // selection. Keep it alongside T078's incumbent and runner-up, and apply
+  // the same distinct-placement/completeness/score-margin gate.
+  const localRun =
+    options.finalists &&
+    !options.finalists.alternate &&
+    localLoopAmplifiers(document, resolver, classifyNets(document, resolver))
+      .length
+      ? plan(
+          document,
+          resolver,
+          { ...options, localLoopDraft: true },
+          selected.overrides,
+          selected.strategy,
+        )
+      : undefined;
+  const localFinalist =
+    localRun && shouldFinishRunner(selected.run, localRun, resolver)
+      ? {
+          ...selected,
+          run: { ...localRun, result: copyResult(localRun.result) },
+        }
+      : undefined;
   const finishFinalist = (
     selected: (typeof ranked)[number],
     searchFinalist: boolean,
+    localLoopDraft = false,
   ): AutoLayoutResult => {
     repairBounds = undefined;
     // Reuse the selected placement and refinement choices; do not search again.
     const alternative = plan(
       document,
       resolver,
-      options,
+      { ...options, localLoopDraft },
       selected.overrides,
       selected.strategy,
       false,
@@ -1398,13 +1422,16 @@ function planAutoLayoutMeasured(
     if (!pending)
       options.finalists.pending.set(document, (pending = new Map()));
     const snapshot = copyResult(base);
-    options.finalists.available ||= !!alternateFinalist;
-    pending.set(
-      finalistKey,
-      alternateFinalist
+    if (alternateFinalist) options.finalists.available.add("runner");
+    if (localFinalist) options.finalists.available.add("localLoop");
+    pending.set(finalistKey, {
+      runner: alternateFinalist
         ? () => finishFinalist(alternateFinalist, false)
         : () => copyResult(snapshot),
-    );
+      localLoop: localFinalist
+        ? () => finishFinalist(localFinalist, false, true)
+        : () => copyResult(snapshot),
+    });
   }
   return base;
 }
@@ -1587,6 +1614,7 @@ function buildPlan(
               return compareRuns(route(a), route(b), resolver);
             },
           },
+          options.localLoopDraft,
         );
   const translation = exact
     ? inheritedTranslation

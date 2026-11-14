@@ -15,15 +15,20 @@ import { routedGuards } from "./routed-search-score.js";
 import { preview } from "./transaction.js";
 import type { AutoLayoutResult, LayoutPartition } from "./types.js";
 
-/** Per-call continuations resume the other refined finalist without repeating
+type FinalistKind = "runner" | "localLoop";
+
+/** Per-call continuations finish additional placements without repeating
  * ranking, refinement or annealing. Outer drafting and rail passes still run. */
 export interface FinalistPass {
-  alternate: boolean;
-  available: boolean;
-  pending: WeakMap<SchematicDocument, Map<string, () => AutoLayoutResult>>;
+  alternate: FinalistKind | false;
+  available: Set<FinalistKind>;
+  pending: WeakMap<
+    SchematicDocument,
+    Map<string, Record<FinalistKind, () => AutoLayoutResult>>
+  >;
 }
 
-/** Spend a second finishing budget only on a distinct, competitive placement.
+/** Spend an extra finishing budget only on a distinct, competitive placement.
  * Calibrated on dev: retain at least 80% of the unrestricted composite gain. */
 export function shouldFinishRunner(
   base: LayoutRun,

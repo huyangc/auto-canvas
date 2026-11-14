@@ -1,3 +1,4 @@
+import { placeLocalLoopAmplifiers } from "./local-loop-amplifier.js";
 import { planningMemo } from "./planning-reuse.js";
 import { signalSeriesParts } from "./series-levels.js";
 import { stageComponents } from "./stage-symmetry.js";
@@ -227,6 +228,7 @@ export function placeDocument(
       b: ReadonlyMap<string, Placement>,
     ) => number;
   },
+  localLoopDraft?: boolean,
 ): {
   placements: Map<string, Placement>;
   draftingTranslation?: number;
@@ -247,7 +249,7 @@ export function placeDocument(
     const selected = planningMemo(
       document,
       resolver,
-      `row-drafts:${JSON.stringify([draftRouter.key, roles.seriesLevels, roles.pitch, options.fixedInstanceIds, [...overrides.sides], [...overrides.orientations]])}`,
+      `row-drafts:${JSON.stringify([draftRouter.key, localLoopDraft, roles.seriesLevels, roles.pitch, options.fixedInstanceIds, [...overrides.sides], [...overrides.orientations]])}`,
       () => {
         const draft = (signalSeries: boolean) => {
           const choices = emptyChoices();
@@ -263,6 +265,7 @@ export function placeDocument(
             undefined,
             searchLimit,
             draftRouter,
+            localLoopDraft,
           );
           return { result, choices };
         };
@@ -534,6 +537,28 @@ export function placeDocument(
         templates,
         targets,
         new Set([...fixed, ...symmetryIds, ...coupledIds]),
+      );
+  if (!given && localLoopDraft)
+    for (const local of partitionDocuments(
+      { ...document, instances: devices },
+      partition,
+    ))
+      placeLocalLoopAmplifiers(
+        local,
+        resolver,
+        roles,
+        targets,
+        new Set([
+          ...fixed,
+          ...symmetryIds,
+          ...templates.flatMap((g) => [
+            ...g.members,
+            ...(g.extraMemberIds ?? []),
+            ...(g.tailInstanceId ? [g.tailInstanceId] : []),
+          ]),
+          ...document.layoutGroups.flatMap((g) => g.objectIds),
+        ]),
+        { ...document, instances: devices },
       );
   placeMarkers(document, resolver, roles, targets, overrides, choices, fixed);
   for (const id of fixed) {
