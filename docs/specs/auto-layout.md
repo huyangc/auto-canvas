@@ -735,6 +735,18 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   explicit floorplans are excluded. The variant is an additional finished
   finalist after `attachment` (fixed order), admitted by the T078 margin rule
   and decided by the finished comparator, so a worse variant is never returned.
+- **R160 — Local two-pin parts outside their transistor (T085).** In documents
+  that run the finished-finalist pass (at most 40 instances), a paired two-pin
+  part of an R89 / R145 symmetric component is a local part when its pins are
+  all connected and every non-rail Net it touches is a drain, gate or source
+  Net of exactly one transistor of the same half, that transistor is not
+  cross-coupled with its partner, and both partners' hosts are themselves a
+  mirrored pair. A half-order variant sorts such parts to the outer end of
+  each half row (away from the axis), keeping cross-coupled members and axis
+  devices at the inner end and every other node in its R89 order; mirroring
+  and the rigid block are unchanged. It is an additional finished finalist
+  after `gateRow` (fixed order), admitted by the T078 margin rule and decided
+  by the finished comparator.
 
 - **R71 — Single-host ports.** A non-rail Cell Pin Net that reaches exactly
   one device pin gets a local seat along that pin's transformed exit direction.

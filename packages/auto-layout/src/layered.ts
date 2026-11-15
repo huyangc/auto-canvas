@@ -1,3 +1,4 @@
+import { symmetricHalfParts } from "./symmetric-half-order.js";
 import { inferSeriesChannels, signalSeriesParts } from "./series-levels.js";
 import { transformPoint, placementPitch } from "./geometry.js";
 import { visibleInstanceBounds } from "@icm/derived";
@@ -371,6 +372,9 @@ function symmetryRows(
   netMap: ReadonlyMap<string, string>,
 ): Rows {
   const blocks: string[][] = [];
+  const outer = roles.symmetricHalfOrder
+    ? symmetricHalfParts(document, resolver, roles, components)
+    : new Set<string>();
   for (const component of components) {
     const ids = [...component.pairs.flat(), ...component.axis];
     if (!ids.every((id) => rows.placements.has(id))) continue;
@@ -466,7 +470,15 @@ function symmetryRows(
         : node.members.some((id) => crossIds.has(id))
           ? 1
           : 0;
-    for (const row of ordered) row.sort((a, b) => axisOrder(a) - axisOrder(b));
+    for (const row of ordered)
+      row.sort(
+        (a, b) =>
+          axisOrder(a) - axisOrder(b) ||
+          (axisOrder(a)
+            ? 0
+            : Number(b.members.every((id) => outer.has(id))) -
+              Number(a.members.every((id) => outer.has(id)))),
+      );
     const placed = assignColumns(
       halfDocument,
       half,

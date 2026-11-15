@@ -72,6 +72,8 @@ export function isMosBulk(symbolId: string, pinName: string): boolean {
 export interface NetRoles {
   /** Original document size, retained when folding symmetry or placing a stage. */
   instanceCount: number;
+  /** Finished finalist: place local two-pin loads outside their half. */
+  symmetricHalfOrder?: boolean;
   /** Internal finished-plan comparison can retain the legacy pitch. */
   pitch?: Readonly<PlacementPitch>;
   /** Internal R30 comparison policy; inherited by stages and folded halves. */
