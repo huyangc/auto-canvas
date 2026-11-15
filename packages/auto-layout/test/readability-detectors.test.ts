@@ -10,6 +10,29 @@ import { circuit } from "./document-fixture.js";
 const resolver = new InMemorySymbolResolver(builtInSymbols);
 const measure = (d: ReturnType<typeof circuit>) =>
   readabilityMetrics(d, resolver);
+function splitByLabel(
+  d: ReturnType<typeof circuit>,
+  netId: string,
+  instanceId: string,
+) {
+  const net = d.nets.find((n) => n.id === netId)!;
+  const splitId = `${netId}-split`;
+  d.nets.push({
+    id: splitId,
+    terminals: net.terminals.filter((t) => t.instanceId === instanceId),
+  });
+  net.terminals = net.terminals.filter((t) => t.instanceId !== instanceId);
+  for (const id of [netId, splitId])
+    d.connectivityEvidence.push({
+      id: `claim-${id}`,
+      kind: "name-claim",
+      netId: id,
+      name: netId,
+      scope: "local",
+      owner: { kind: "net-label", annotationId: `label-${id}` },
+    });
+  return splitId;
+}
 function feedback() {
   const d = circuit(
     {
@@ -108,6 +131,54 @@ it("does not infer flow across rails or ambiguous input/output Nets", () => {
   );
   for (const i of short.instances) i.placement = placement(0, 0);
   expect(measure(short).signalDirection.opportunities).toBe(2);
+});
+it("preserves feedback flow counts when input and output Nets are split by labels", () => {
+  const d = feedback();
+  d.instances.find((i) => i.id === "output")!.placement = placement(-300, 0);
+  const joined = measure(d).signalDirection;
+  expect(joined).toEqual({ opportunities: 3, violations: 1 });
+  splitByLabel(d, "input", "input");
+  expect(measure(d).signalDirection).toEqual(joined);
+  splitByLabel(d, "output", "output");
+  expect(measure(d).signalDirection).toEqual(joined);
+});
+it("preserves degenerated symmetry pairs across label-connected Base Nets", () => {
+  const d = differential();
+  const joined = measure(d).netlistSymmetry;
+  expect(joined).toEqual({ opportunities: 3, violations: 0 });
+  splitByLabel(d, "sa", "a");
+  splitByLabel(d, "tail", "r");
+  splitByLabel(d, "supply", "l");
+  expect(measure(d).netlistSymmetry).toEqual(joined);
+  d.instances.find((i) => i.id === "s")!.placement = placement(200, 150);
+  expect(measure(d).netlistSymmetry).toEqual({
+    opportunities: 3,
+    violations: 1,
+  });
+});
+it("normalizes explicit interface directions from nonrepresentative Base Nets", () => {
+  const d = circuit(
+    { input: "port", output: "port", r: "resistor" },
+    { input: ["input.P", "r.1"], output: ["output.P", "r.2"] },
+  );
+  for (const i of d.instances)
+    i.placement = placement(i.id === "output" ? -100 : 0, 0);
+  d.netlist = {
+    name: "test",
+    formalParameters: [],
+    terminals: (["input", "output"] as const).map((direction) => ({
+      id: direction,
+      name: direction,
+      netId: direction,
+      direction,
+      interfaceInstanceIds: [direction],
+    })),
+  };
+  const joined = measure(d).signalDirection;
+  expect(joined).toEqual({ opportunities: 1, violations: 1 });
+  for (const terminal of d.netlist.terminals)
+    terminal.netId = splitByLabel(d, terminal.netId, terminal.id);
+  expect(measure(d).signalDirection).toEqual(joined);
 });
 it("finds degenerated transistor pairs and reversed passive pin correspondence", () => {
   const d = differential();

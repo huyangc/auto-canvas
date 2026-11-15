@@ -13,10 +13,14 @@ export function readabilityNetlist(
   resolver: SymbolResolver,
 ) {
   const projection = deriveElectricalTopologyProjection(document, resolver);
-  const pinNet = (instanceId: string, pinName: string) =>
-    projection.endpointToBaseNet.get(
+  const logicalNet = (baseNet: string) =>
+    projection.logicalNetByBaseNet.get(baseNet);
+  const pinNet = (instanceId: string, pinName: string) => {
+    const baseNet = projection.endpointToBaseNet.get(
       endpointKey({ kind: "terminal", instanceId, pinName }),
     );
+    return baseNet === undefined ? undefined : logicalNet(baseNet);
+  };
   const rails = new Set<string>();
   const devices = document.instances.map((instance) => {
     const pins = [...devicePins(instance, resolver)]
@@ -45,5 +49,5 @@ export function readabilityNetlist(
       { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 },
     ]),
   );
-  return { devices, rails, centres };
+  return { devices, rails, centres, logicalNet };
 }

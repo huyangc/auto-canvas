@@ -9,7 +9,10 @@ export function signalDirection(
   document: SchematicDocument,
   resolver: SymbolResolver,
 ) {
-  const { devices, rails, centres } = readabilityNetlist(document, resolver);
+  const { devices, rails, centres, logicalNet } = readabilityNetlist(
+    document,
+    resolver,
+  );
   const inputs = new Set<string>(),
     outputs = new Set<string>();
   const result = { violations: 0, opportunities: 0 };
@@ -50,7 +53,7 @@ export function signalDirection(
   const portRole = (net: string) => {
     const explicit = document.netlist?.terminals.find(
       (t) =>
-        t.netId === net &&
+        logicalNet(t.netId) === net &&
         (t.direction === "input" || t.direction === "output"),
     )?.direction;
     if (explicit) return explicit;
