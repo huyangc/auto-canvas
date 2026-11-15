@@ -24,6 +24,8 @@ import {
   isSource,
   signalDistances,
 } from "./placement-connectivity.js";
+import { signalDirection } from "./readability-signal-direction.js";
+import { netlistSymmetry } from "./readability-netlist-symmetry.js";
 import { railCrossingMetrics } from "./readability-rail-crossings.js";
 import { readabilityWeights } from "./readability-selection-weights.js";
 import { readabilityCounts } from "./readability.js";
@@ -272,6 +274,8 @@ export function readabilityMetrics(
       ? netLevels(devices, resolver, roles).channels
       : undefined;
   const metrics = {
+    signalDirection: full ? signalDirection(document, resolver) : measurement(),
+    netlistSymmetry: full ? netlistSymmetry(document, resolver) : measurement(),
     backwardFlow: measurement(),
     portOrder: measurement(),
     potentialOrder: measurement(),
