@@ -619,6 +619,14 @@ it("excludes a T junction and labeled ends", () => {
   segment(d, "a", { x: 0, y: 0 }, { x: 0, y: -40 });
   expect(measure(d).collinearAbutment.violations).toBe(0);
   d.routes.pop();
+  d.connectivityEvidence.push({
+    id: "label-name",
+    kind: "name-claim",
+    netId: "a",
+    name: "A",
+    scope: "local",
+    owner: { kind: "net-label", annotationId: "label" },
+  });
   d.annotations.push({
     id: "label",
     kind: "net-label",
@@ -636,6 +644,14 @@ it.each(["object", "route"] as const)(
   (kind) => {
     const d = circuit({}, { a: [], b: [] });
     facingBends(d, 40);
+    d.connectivityEvidence.push({
+      id: "label-name",
+      kind: "name-claim",
+      netId: "a",
+      name: "A",
+      scope: "local",
+      owner: { kind: "net-label", annotationId: "label" },
+    });
     d.junctions.push({
       id: "label-anchor",
       netId: "a",
@@ -668,6 +684,60 @@ it.each(["object", "route"] as const)(
       locked: false,
     });
     expect(measure(d).collinearAbutment.violations).toBe(0);
+  },
+);
+
+it("resolves an imported route marker's Net from its anchored route", () => {
+  const d = circuit({}, { a: [], b: [] });
+  facingBends(d, 40);
+  expect(measure(d).collinearAbutment.violations).toBe(1);
+  // rnl-import emits current markers with a route anchor and no Net binding.
+  d.annotations.push({
+    id: "current-marker",
+    kind: "route-marker",
+    markerKind: "current",
+    content: { runs: [{ kind: "text", value: "I" }] },
+    anchor: {
+      kind: "route",
+      routeId: d.routes[0]!.id,
+      legId: d.routes[0]!.legs[0]!.id,
+      t: 1,
+      normalOffset: 10,
+      direction: "forward",
+      orientation: "follow",
+      fallbackPosition: { x: 0, y: 0 },
+    },
+    alignment: "middle",
+    rotation: 0,
+    locked: false,
+  });
+  expect(measure(d).collinearAbutment.violations).toBe(0);
+  d.annotations[0]!.visible = false;
+  expect(measure(d).collinearAbutment.violations).toBe(1);
+});
+
+it.each(["net-label", "power-label"] as const)(
+  "ignores hidden and unrendered %s attachments",
+  (kind) => {
+    const d = circuit({}, { a: [], b: [] });
+    facingBends(d, 40);
+    const annotation = {
+      id: "label",
+      kind,
+      netId: "a",
+      content: { runs: [{ kind: "text" as const, value: "A" }] },
+      anchor: { kind: "free" as const, position: { x: 0, y: 0 } },
+      alignment: "start" as const,
+      rotation: 0 as const,
+      locked: false,
+      visible: false,
+    };
+    d.annotations.push(annotation);
+    expect(measure(d).collinearAbutment.violations).toBe(1);
+    annotation.visible = true;
+    expect(measure(d).collinearAbutment.violations).toBe(0);
+    annotation.content.runs[0]!.value = " ";
+    expect(measure(d).collinearAbutment.violations).toBe(1);
   },
 );
 
