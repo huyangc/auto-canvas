@@ -1,6 +1,7 @@
 import {
   diagnoseLabelClearance,
   diagnoseVisualQuality,
+  isSchematicAnnotationVisible,
   resolveRouteGeometry,
   resolveVisualAnchor,
   visibleInstanceBounds,
@@ -97,12 +98,26 @@ function collinearAbutments(
   for (const annotation of document.annotations) {
     if (!["net-label", "power-label", "route-marker"].includes(annotation.kind))
       continue;
+    if (
+      !isSchematicAnnotationVisible(
+        document,
+        annotation,
+        undefined,
+        undefined,
+        resolver,
+      )
+    )
+      continue;
+    const anchor = annotation.anchor;
     const net =
       annotation.binding?.kind === "net-name"
         ? annotation.binding.netId
-        : annotation.netId;
+        : (annotation.netId ??
+          (anchor.kind === "route"
+            ? document.routes.find((route) => route.id === anchor.routeId)
+                ?.netId
+            : undefined));
     // A label identifies its attachment even when text is offset from the wire.
-    const anchor = annotation.anchor;
     const attachment =
       anchor.kind === "object"
         ? { ...anchor, localOffset: { x: 0, y: 0 } }
