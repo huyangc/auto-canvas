@@ -1,3 +1,4 @@
+import { symmetricHalfParts } from "./symmetric-half-order.js";
 import { amplifierGateRows } from "./amp-gate-row.js";
 import { nodeAttachments } from "./attachment-seat.js";
 import { localLoopAmplifiers } from "./local-loop-amplifier.js";
@@ -162,6 +163,7 @@ interface LevelOptions extends AutoLayoutOptions {
   localLoopDraft?: boolean;
   attachmentDraft?: boolean;
   gateRowDraft?: boolean;
+  symmetricHalfOrder?: boolean;
 }
 
 /** T079: the attachment variant is finished only for small documents. */
@@ -984,19 +986,47 @@ function planAutoLayoutMeasured(
           run: { ...attachmentRun, result: copyResult(attachmentRun.result) },
         }
       : undefined;
+  const halfOrderRun =
+    options.finalists &&
+    !options.finalists.alternate &&
+    !options.partition?.arrangement &&
+    symmetricHalfParts(document, resolver, classifyNets(document, resolver))
+      .size
+      ? plan(
+          document,
+          resolver,
+          { ...options, symmetricHalfOrder: true },
+          selected.overrides,
+          selected.strategy,
+        )
+      : undefined;
+  const halfOrderFinalist =
+    halfOrderRun && shouldFinishRunner(selected.run, halfOrderRun, resolver)
+      ? {
+          ...selected,
+          run: { ...halfOrderRun, result: copyResult(halfOrderRun.result) },
+        }
+      : undefined;
   const finishFinalist = (
     selected: (typeof ranked)[number],
     searchFinalist: boolean,
     localLoopDraft = false,
     attachmentDraft = false,
     gateRowDraft = false,
+    symmetricHalfOrder = false,
   ): AutoLayoutResult => {
     repairBounds = undefined;
     // Reuse the selected placement and refinement choices; do not search again.
     const alternative = plan(
       document,
       resolver,
-      { ...options, localLoopDraft, attachmentDraft, gateRowDraft },
+      {
+        ...options,
+        localLoopDraft,
+        attachmentDraft,
+        gateRowDraft,
+        symmetricHalfOrder,
+      },
       selected.overrides,
       selected.strategy,
       false,
@@ -1512,6 +1542,7 @@ function planAutoLayoutMeasured(
       ["localLoop", localFinalist],
       ["attachment", attachmentFinalist],
       ["gateRow", gateRowFinalist],
+      ["halfOrder", halfOrderFinalist],
     ] as const) {
       if (!candidate) continue;
       const previous = options.finalists.available.get(kind);
@@ -1519,6 +1550,10 @@ function planAutoLayoutMeasured(
         options.finalists.available.set(kind, candidate.run);
     }
     pending.set(finalistKey, {
+      halfOrder: halfOrderFinalist
+        ? () =>
+            finishFinalist(halfOrderFinalist, false, false, false, false, true)
+        : () => copyResult(snapshot),
       gateRow: gateRowFinalist
         ? () => finishFinalist(gateRowFinalist, false, false, false, true)
         : () => copyResult(snapshot),
@@ -1635,6 +1670,7 @@ function buildPlan(
   const roles = {
     ...classifyNets(document, resolver),
     seriesLevels: options.seriesLevels ?? true,
+    symmetricHalfOrder: options.symmetricHalfOrder ?? false,
     ...(options.pitch ? { pitch: options.pitch } : {}),
   };
   const groups = partitionGroups(

@@ -196,12 +196,13 @@ it("caps extra finishing for high-score runs even inside the relative margin", (
   expect(selection.shouldFinishRunner(base, candidate, resolver)).toBe(false);
 });
 
-it("finishes the runner and local-loop finalists as on main, then attachment and gate-row variants", () => {
+it("finishes the runner and local-loop finalists as on main, then attachment, gate-row and half-order variants", () => {
   const cheap = run(route([]));
   const expensive = run(detour);
   const pass: selection.FinalistPass = {
     alternate: false,
     available: new Map([
+      ["halfOrder", structuredClone(cheap)],
       ["gateRow", structuredClone(cheap)],
       ["attachment", structuredClone(cheap)],
       ["localLoop", cheap],
@@ -215,6 +216,7 @@ it("finishes the runner and local-loop finalists as on main, then attachment and
     "localLoop",
     "attachment",
     "gateRow",
+    "halfOrder",
   ]);
   pass.available.set("localLoop", expensive);
   expect(selection.rankedFinalists(pass, resolver)).toEqual([
@@ -222,17 +224,20 @@ it("finishes the runner and local-loop finalists as on main, then attachment and
     "localLoop",
     "attachment",
     "gateRow",
+    "halfOrder",
   ]);
   pass.available.delete("runner");
   expect(selection.rankedFinalists(pass, resolver)).toEqual([
     "localLoop",
     "attachment",
     "gateRow",
+    "halfOrder",
   ]);
   pass.available.delete("localLoop");
   expect(selection.rankedFinalists(pass, resolver)).toEqual([
     "attachment",
     "gateRow",
+    "halfOrder",
   ]);
   pass.available.clear();
   expect(selection.rankedFinalists(pass, resolver)).toEqual([]);

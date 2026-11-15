@@ -253,7 +253,7 @@ export function placeDocument(
     const selected = planningMemo(
       document,
       resolver,
-      `row-drafts:${JSON.stringify([draftRouter.key, localLoopDraft, attachmentDraft, gateRowDraft, roles.seriesLevels, roles.pitch, options.fixedInstanceIds, [...overrides.sides], [...overrides.orientations]])}`,
+      `row-drafts:${JSON.stringify([draftRouter.key, localLoopDraft, attachmentDraft, gateRowDraft, roles.symmetricHalfOrder, roles.seriesLevels, roles.pitch, options.fixedInstanceIds, [...overrides.sides], [...overrides.orientations]])}`,
       () => {
         const draft = (signalSeries: boolean) => {
           const choices = emptyChoices();

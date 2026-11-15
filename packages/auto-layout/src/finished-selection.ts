@@ -16,7 +16,8 @@ import { routedGuards } from "./routed-search-score.js";
 import { preview } from "./transaction.js";
 import type { AutoLayoutResult, LayoutPartition } from "./types.js";
 
-type FinalistKind = "runner" | "localLoop" | "attachment" | "gateRow";
+type FinalistKind =
+  "runner" | "localLoop" | "attachment" | "gateRow" | "halfOrder";
 
 /** Per-call continuations finish additional placements without repeating
  * ranking, refinement or annealing. Outer drafting and rail passes still run. */
@@ -133,9 +134,9 @@ export function movesReadabilityParticipant(
 /** Finish admitted variants in fixed order, each with its own bounded budget. */
 export function rankedFinalists(pass: FinalistPass, resolver: SymbolResolver) {
   void resolver;
-  return (["runner", "localLoop", "attachment", "gateRow"] as const).filter(
-    (kind) => pass.available.has(kind),
-  );
+  return (
+    ["runner", "localLoop", "attachment", "gateRow", "halfOrder"] as const
+  ).filter((kind) => pass.available.has(kind));
 }
 
 /** Compare only fully finished layouts; ties retain the established result. */

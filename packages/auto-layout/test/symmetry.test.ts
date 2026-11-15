@@ -688,7 +688,7 @@ const passiveFixture = (symbolId: string, leftPin = "1", rightPin = "2") =>
   );
 
 it.each(["resistor", "capacitor", "inductor"])(
-  "pairs swapped %s pins and places both partners mirrored inside the block",
+  "pairs swapped %s pins and keeps both partners mirrored near their own transistor",
   async (symbolId) => {
     const { planAutoLayout } = await import("../src/index.js");
     const { executeTransaction } = await import("@icm/edit-engine");
@@ -750,21 +750,31 @@ it.each(["resistor", "capacitor", "inductor"])(
     );
     const bounds = visibleInstanceBounds(placed, resolver);
     const hosts = bounds.filter((b) => ["a", "b", "t"].includes(b.id));
-    for (const { bounds: b } of bounds.filter((b) =>
+    const memberPitch = placementPitch(classifyNets(d, resolver)).member;
+    for (const { id, bounds: b } of bounds.filter((b) =>
       b.id.startsWith("passive-"),
     )) {
-      expect(b.x).toBeGreaterThanOrEqual(
-        Math.min(...hosts.map((h) => h.bounds.x)),
+      // Near its own transistor: the horizontal edge gap is at most one
+      // member pitch (inside or just outside the block, never a far corner).
+      const own = id === "passive-left" ? "a" : "b";
+      const host = hosts.find((h) => h.id === own)!.bounds;
+      const gap = Math.max(
+        0,
+        host.x - (b.x + b.width),
+        b.x - (host.x + host.width),
       );
-      expect(b.x + b.width).toBeLessThanOrEqual(
-        Math.max(...hosts.map((h) => h.bounds.x + h.bounds.width)),
-      );
+      expect(gap).toBeLessThanOrEqual(memberPitch);
       expect(b.y).toBeGreaterThanOrEqual(
         Math.min(...hosts.map((h) => h.bounds.y)),
       );
       expect(b.y + b.height).toBeLessThanOrEqual(
         Math.max(...hosts.map((h) => h.bounds.y + h.bounds.height)),
       );
+      const passive = centre(id);
+      const distance = (host: string) =>
+        Math.hypot(passive.x - centre(host).x, passive.y - centre(host).y);
+      const other = own === "a" ? "b" : "a";
+      expect(distance(own)).toBeLessThan(distance(other));
     }
     d.instances.reverse();
     d.nets.reverse();
