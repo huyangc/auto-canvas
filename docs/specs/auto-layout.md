@@ -708,7 +708,10 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   It must touch no symbol, pin, junction, conductor or drafting ink, must not
   join a terminal Net, and must keep the terminal partition. Each carried Net
   is accepted on its own. Movable drafting anchored to it is re-anchored by
-  explicit drafting edits to the new ids; locked drafting never moves. Then
+  explicit drafting edits to the new ids, with anchor parameters recomputed so
+  every member keeps its current (R150-seated) position and the component stays
+  rigid; an anchor that cannot represent that position keeps its seated anchor.
+  Locked drafting never moves. Then
   an owned drafting group whose R150 seat failed or left its owner's radius
   searches seats around its owner on both sides (grid steps up to ±40),
   accepting only a seat that keeps the same owner; groups merged with locked

@@ -508,3 +508,97 @@ it("keeps an improving carried Net when another isolated Net fails scoring", () 
     net: "[]",
   });
 });
+
+it.each(["junction", "horizontal route", "vertical route"] as const)(
+  "preserves the clearance seat of touching captions anchored to a %s",
+  (kind) => {
+    const d = fixture();
+    d.drafting!.objects[0]!.anchor = {
+      kind: "object",
+      objectId: "start",
+      localOffset: { x: 50, y: 40 },
+      fallbackPosition: { x: 850, y: 420 },
+    };
+    if (kind !== "junction")
+      d.drafting!.objects[0]!.anchor = {
+        kind: "route",
+        routeId: "conductor",
+        legId: d.routes[0]!.legs[kind === "horizontal route" ? 1 : 0]!.id,
+        t: kind === "horizontal route" ? 0.625 : 2 / 3,
+        normalOffset: kind === "horizontal route" ? -20 : -50,
+        direction: "forward",
+        orientation: "horizontal",
+        fallbackPosition: { x: 850, y: 420 },
+      };
+    d.drafting!.objects.push(note("peer", { x: 880, y: 420 }), {
+      ...note("obstacle", { x: 308, y: 394 }),
+      locked: true,
+    });
+    expect(draftingGroups(d, resolver)[0]!.objects.map((o) => o.id)).toEqual([
+      "caption",
+      "peer",
+    ]);
+    const { final } = apply(d);
+    const captions = final
+      .drafting!.objects.slice(0, 2)
+      .map((o) => resolveVisualAnchor(final, resolver, o.anchor).position);
+    // R150 seats both captions ten units below their owner's rigid translation.
+    // Reattaching the first caption must keep that clearance offset.
+    expect(captions).toEqual([
+      { x: 310, y: 420 },
+      { x: 340, y: 420 },
+    ]);
+    const restored = final.drafting!.objects[0]!.anchor;
+    expect(restored.kind).toBe(kind === "junction" ? "object" : "route");
+    expect(resolveVisualAnchor(final, resolver, restored).resolved).toBe(true);
+    expect(final.drafting!.objects[2]).toEqual(d.drafting!.objects[2]);
+    expect(
+      final.routes.some((r) =>
+        final.nets.some((n) => n.id === r.netId && !n.terminals.length),
+      ),
+    ).toBe(true);
+  },
+);
+
+it("keeps a mixed-anchor arrow rigid at its clearance seat", () => {
+  const d = fixture();
+  const from = {
+    kind: "route" as const,
+    routeId: "conductor",
+    legId: d.routes[0]!.legs[1]!.id,
+    t: 0.625,
+    normalOffset: -20,
+    direction: "forward" as const,
+    orientation: "horizontal" as const,
+    fallbackPosition: { x: 850, y: 420 },
+  };
+  d.drafting!.objects.push(
+    note("peer", { x: 880, y: 420 }),
+    {
+      id: "pointer",
+      kind: "arrow",
+      locked: false,
+      zIndex: 0,
+      anchor: from,
+      from,
+      to: { kind: "free", position: { x: 880, y: 420 } },
+    },
+    { ...note("obstacle", { x: 308, y: 394 }), locked: true },
+  );
+  const { final } = apply(d);
+  const arrow = final.drafting!.objects.find((o) => o.id === "pointer")!;
+  if (arrow.kind !== "arrow") throw Error("missing arrow");
+  expect(resolveVisualAnchor(final, resolver, arrow.from).position).toEqual({
+    x: 310,
+    y: 420,
+  });
+  expect(resolveVisualAnchor(final, resolver, arrow.to).position).toEqual({
+    x: 340,
+    y: 420,
+  });
+  expect(resolveVisualAnchor(final, resolver, arrow.anchor).position).toEqual({
+    x: 310,
+    y: 420,
+  });
+  expect(arrow.from.kind).toBe("route");
+});

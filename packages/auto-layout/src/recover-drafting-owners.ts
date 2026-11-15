@@ -3,6 +3,7 @@ import {
   diagnoseLabelClearance,
   endpointKey,
   resolveDocumentRoutingGeometry,
+  resolveVisualAnchor,
   visibleInstanceBounds,
 } from "@icm/derived";
 import {
@@ -200,21 +201,53 @@ function carryWires(
     ];
     // Explicit anchor edits are limited to movable components. Locked anchors
     // retain their missing-target fallback; fresh ids cannot reactivate them.
-    const anchor = (a: VisualAnchor): VisualAnchor => {
-      if (a.kind === "route" && ids.has(a.routeId))
+    const anchor = (a: VisualAnchor, existing: VisualAnchor): VisualAnchor => {
+      const current = resolveVisualAnchor(working, resolver, existing);
+      const position = current.position;
+      if (a.kind === "route" && ids.has(a.routeId)) {
+        const segment = routing.routes
+          .get(a.routeId)
+          ?.segments.find((s) => s.address.legId === a.legId);
+        if (!segment) return existing;
+        const from = shift(segment.from),
+          to = shift(segment.to);
+        const dx = to.x - from.x,
+          dy = to.y - from.y;
+        const length = Math.hypot(dx, dy);
+        const x = position.x - from.x,
+          y = position.y - from.y;
+        const t = (x * dx + y * dy) / (length * length);
+        // A seat beyond the leg or with a different orientation cannot be
+        // represented by this route anchor. Keep its already-seated anchor.
+        if (
+          !length ||
+          t < 0 ||
+          t > 1 ||
+          resolveVisualAnchor(source, resolver, a, routing).rotation !==
+            current.rotation
+        )
+          return existing;
         return {
           ...a,
           routeId: ids.get(a.routeId)!,
           legId: ids.get(a.legId)!,
-          fallbackPosition: shift(a.fallbackPosition),
+          t,
+          normalOffset: (-x * dy + y * dx) / length,
+          fallbackPosition: position,
         };
-      if (a.kind === "object" && ids.has(a.objectId))
+      }
+      if (a.kind === "object" && ids.has(a.objectId)) {
+        const junction = junctions.find((j) => j.id === a.objectId);
+        if (!junction) return existing;
+        const origin = shift(junction.position);
         return {
           ...a,
           objectId: ids.get(a.objectId)!,
-          fallbackPosition: shift(a.fallbackPosition),
+          localOffset: { x: position.x - origin.x, y: position.y - origin.y },
+          fallbackPosition: position,
         };
-      return a;
+      }
+      return existing;
     };
     for (const group of groups) {
       if (stopped()) return edits;
@@ -225,8 +258,8 @@ function carryWires(
         if (!current) continue;
         let changed = false;
         const replace = (a: VisualAnchor, existing: VisualAnchor) => {
-          const next = anchor(a);
-          if (next === a) return existing;
+          const next = anchor(a, existing);
+          if (next === existing) return existing;
           changed = true;
           return next;
         };
@@ -255,25 +288,6 @@ function carryWires(
     const replay = preview(working, resolver, extra);
     if (!replay.ok) continue;
     const ink = draftingBounds(replay.document, resolver);
-    // R150 moves a touching component as one rigid unit. Re-anchoring only
-    // its conductor-anchored members must not split or stretch it: every
-    // member keeps one common translation and its size.
-    const prior = draftingBounds(working, resolver);
-    const rigid = groups.every((group) => {
-      const deltas = new Set(
-        group.objects.map((o) => {
-          const a = prior.find((b) => b.id === o.id)?.bounds,
-            b = ink.find((n) => n.id === o.id)?.bounds;
-          return a && b
-            ? [b.x - a.x, b.y - a.y, b.width - a.width, b.height - a.height]
-                .map((v) => Math.round(v * 1e6) / 1e6)
-                .join(",")
-            : "missing";
-        }),
-      );
-      return deltas.size === 1 && !deltas.has("missing");
-    });
-    if (!rigid) continue;
     // An id surviving cleanup can now name a terminal Net. Partition equality
     // alone would not detect an isolated wire being added to that logical Net.
     if (
