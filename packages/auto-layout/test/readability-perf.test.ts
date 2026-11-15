@@ -67,7 +67,9 @@ it.each([...corpus, ...heldOut])(
     const weighted = reusePlanning(() =>
       readabilityMetrics(document, resolver, "weighted"),
     );
-    for (const key of Object.keys(readabilityWeights) as (keyof typeof full)[])
+    for (const key of Object.keys(
+      readabilityWeights,
+    ) as (keyof typeof readabilityWeights)[])
       if (readabilityWeights[key].weight !== 0)
         expect(weighted[key], key).toEqual(full[key]);
     expect(readabilityScore(weighted)).toBe(readabilityScore(full));

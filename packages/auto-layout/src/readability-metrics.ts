@@ -59,6 +59,66 @@ function spanningLength(points: Point[]): number {
   return length;
 }
 
+/** Different-Net, end-to-end segments can read as one conductor across a short
+ * empty gap. Group by axis and line; overlapping ink is not an abutment.
+ * Symbol ink bounds interrupt the gap, including a device joining two Nets.
+ */
+function collinearAbutments(
+  paths: { netId: string; points: readonly Point[] }[],
+  boxes: ReturnType<typeof visibleInstanceBounds>,
+  pitch: number,
+): Measurement {
+  const lines = new Map<string, { netId: string; lo: number; hi: number }[]>();
+  for (const path of paths)
+    for (let i = 1; i < path.points.length; i++) {
+      const a = path.points[i - 1]!,
+        b = path.points[i]!;
+      if (a.x === b.x && a.y === b.y) continue;
+      const horizontal = a.y === b.y;
+      if (!horizontal && a.x !== b.x) continue;
+      const axis = horizontal ? "x" : "y";
+      const line = horizontal ? a.y : a.x;
+      const key = `${axis}:${line}`;
+      const segments = lines.get(key) ?? [];
+      segments.push({
+        netId: path.netId,
+        lo: Math.min(a[axis], b[axis]),
+        hi: Math.max(a[axis], b[axis]),
+      });
+      lines.set(key, segments);
+    }
+  const result = measurement();
+  for (const [key, segments] of lines) {
+    const horizontal = key.startsWith("x:");
+    const line = Number(key.slice(2));
+    for (let i = 0; i < segments.length; i++)
+      for (let j = i + 1; j < segments.length; j++) {
+        const a = segments[i]!,
+          b = segments[j]!;
+        if (a.netId === b.netId) continue;
+        result.opportunities++;
+        const lo = Math.min(a.hi, b.hi),
+          hi = Math.max(a.lo, b.lo);
+        if (hi < lo || hi - lo > 2 * pitch) continue;
+        const interrupted = boxes.some(({ bounds: box }) => {
+          const across = horizontal ? box.y : box.x;
+          const depth = horizontal ? box.height : box.width;
+          const start = horizontal ? box.x : box.y;
+          const length = horizontal ? box.width : box.height;
+          return (
+            line >= across &&
+            line <= across + depth &&
+            (hi === lo
+              ? start < lo && start + length > hi
+              : start < hi && start + length > lo)
+          );
+        });
+        if (!interrupted) result.violations++;
+      }
+  }
+  return result;
+}
+
 /** Reference-free measurements, also used by T071's frozen composite guard.
  * No reference drawing, planner state, ids or titles as inputs.
  * Counts are accompanied by exposure denominators; area and detour are masses.
@@ -72,6 +132,15 @@ export function readabilityMetrics(
   mode: "all" | "weighted" = "all",
 ) {
   const full = mode === "all";
+  const enabled = (key: string) =>
+    full ||
+    ((readabilityWeights as Readonly<Record<string, { weight: number }>>)[key]
+      ?.weight ?? 0) > 0;
+  const symmetryEnabled = [
+    "symmetryMirror",
+    "symmetryLevel",
+    "symmetryOrientation",
+  ].some(enabled);
   const roles = classifyNets(document, resolver);
   const devices = document.instances.filter((i) => !isMarker(i) && i.placement);
   const byId = new Map(document.instances.map((i) => [i.id, i]));
@@ -79,14 +148,22 @@ export function readabilityMetrics(
   const pin = (id: string, name: string) =>
     pins.find((p) => p.instanceId === id && p.pinName === name)?.point;
   const centres = new Map(devices.map((i) => [i.id, i.placement!.position]));
-  const boxes = full ? visibleInstanceBounds(document, resolver) : [];
+  const boxes = [
+    "collinearAbutment",
+    "structureIntrusion",
+    "wireThroughSymbols",
+    "narrowBands",
+  ].some(enabled)
+    ? visibleInstanceBounds(document, resolver)
+    : [];
   const bounds = enclosingBox(document, resolver);
   const pitch = document.presentation.grid;
   const span = Math.max(pitch, bounds.width + bounds.height);
   const signal = signalDistances(document, devices, resolver, roles);
-  const channels = full
-    ? netLevels(devices, resolver, roles).channels
-    : undefined;
+  const channels =
+    enabled("potentialOrder") || enabled("transistorOrientation")
+      ? netLevels(devices, resolver, roles).channels
+      : undefined;
   const metrics = {
     backwardFlow: measurement(),
     portOrder: measurement(),
@@ -101,6 +178,7 @@ export function readabilityMetrics(
     controlSeparation: measurement(),
     crossings: measurement(),
     railCrossings: measurement(),
+    collinearAbutment: measurement(),
     bends: measurement(),
     avoidableJogs: measurement(),
     blockedJoins: measurement(),
@@ -130,7 +208,7 @@ export function readabilityMetrics(
     if (!netPins.has(net)) netPins.set(net, []);
     netPins.get(net)!.push(p);
   }
-  if (full)
+  if (["backwardFlow", "potentialOrder", "railMarkerOrder"].some(enabled))
     for (const [net, terminals] of netPins) {
       const owners = [...new Set(terminals.map((p) => p.instanceId))].filter(
         (id) => centres.has(id),
@@ -217,7 +295,12 @@ export function readabilityMetrics(
   for (const i of devices) {
     const channel = channelPins(i.symbolId),
       direction = polarity(i.symbolId);
-    if (full && channel && direction && channels?.get(i.id)?.length === 2) {
+    if (
+      enabled("transistorOrientation") &&
+      channel &&
+      direction &&
+      channels?.get(i.id)?.length === 2
+    ) {
       const source = devicePins(i, resolver).find(
         (p) => p.name === channel.source,
       );
@@ -257,7 +340,7 @@ export function readabilityMetrics(
           Math.max(4, span / pitch / 4),
       );
   }
-  if (full) {
+  if (symmetryEnabled) {
     const symmetry = symmetryCounts(
       document,
       resolver,
@@ -275,6 +358,8 @@ export function readabilityMetrics(
       symmetry.pairs - symmetry.orientationMirrored,
       symmetry.pairs,
     );
+  }
+  if (enabled("structureIntrusion")) {
     for (const group of recognizeStructures(document, roles)) {
       const members = new Set([
         ...group.members,
@@ -312,14 +397,18 @@ export function readabilityMetrics(
     audit.crossings,
     (segments * Math.max(0, segments - 1)) / 2,
   );
-  if (full)
+  if (enabled("bends"))
     metrics.bends = measurement(
       audit.bends,
       paths.reduce((sum, p) => sum + Math.max(0, p.points.length - 2), 0),
     );
   metrics.railCrossings = railCrossingMetrics(document, resolver, roles.rails);
-  const routedNets = full ? [...new Set(paths.map((p) => p.netId))].sort() : [];
-  if (full)
+  if (enabled("collinearAbutment"))
+    metrics.collinearAbutment = collinearAbutments(paths, boxes, pitch);
+  const routedNets = enabled("detour")
+    ? [...new Set(paths.map((p) => p.netId))].sort()
+    : [];
+  if (enabled("detour"))
     for (const net of routedNets) {
       const points = (netPins.get(net) ?? []).map((p) => p.point);
       const minimum = spanningLength(points);
@@ -343,17 +432,19 @@ export function readabilityMetrics(
       0,
     ),
   );
-  if (full)
+  if (enabled("signalSeriesVertical"))
     metrics.signalSeriesVertical = measurement(
       path.signalSeriesVertical,
       path.signalSeriesVertical + path.signalSeriesHorizontal,
     );
   const visual = diagnoseVisualQuality(document, resolver);
-  if (full) {
+  if (enabled("wireThroughSymbols")) {
     metrics.wireThroughSymbols = measurement(
       visual.filter((d) => d.code === "VISUAL_WIRE_THROUGH_SYMBOL").length,
       segments * boxes.length,
     );
+  }
+  if (enabled("labelOwnerDistance")) {
     metrics.labelOwnerDistance = measurement(
       diagnoseLabelClearance(document, resolver).filter(
         (d) => d.code === "VISUAL_LABEL_OWNER_DISTANCE",
@@ -361,7 +452,7 @@ export function readabilityMetrics(
       document.annotations.length,
     );
   }
-  const labels = full
+  const labels = enabled("labelClearance")
     ? readabilityCounts(document, resolver)
     : {
         labelOverlaps: visual.filter((d) => d.code === "VISUAL_LABEL_OVERLAP")
@@ -386,7 +477,7 @@ export function readabilityMetrics(
     pins.length,
   );
   // Empty full-span strips between connected components of projected symbol ink.
-  if (full)
+  if (enabled("narrowBands"))
     for (const axis of ["x", "y"] as const) {
       const size = axis === "x" ? "width" : "height";
       const intervals = boxes
