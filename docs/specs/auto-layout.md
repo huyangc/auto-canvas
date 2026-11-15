@@ -834,6 +834,21 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   wire ends facing on one line within one member pitch where both facing ends
   are a pin entry or a two-way bend (not a branch, an open stub or a marked
   end).
+  T087: full evaluation also measures `signalDirection` and `netlistSymmetry`,
+  neither depending on planner recognition nor changing selection weights.
+  `signalDirection` derives input → output precedence from resolved pin roles
+  and infers unset interface directions through passive connectivity
+  (stopping at rails and directed-pin Nets); opportunities are placed
+  input/output port pairs and device input/output pin pairs, and an output
+  left of its input violates. `netlistSymmetry` validates a nontrivial
+  connectivity-graph involution containing a transistor pair (same symbol and
+  model, pin roles kept, reversible passive ends, rails and self-mapped Nets
+  fixed), with a deterministic search of at most 10,000 candidate
+  assignments and 256 devices per component (an incomplete search contributes
+  nothing); each placed swapped pair is an opportunity and violates if its
+  visible centres differ in y by more than one grid or are not reflected
+  within one grid about the component's median pair-midpoint axis. Its fitted
+  evaluation weight is currently zero (reported only).
 
   After quick/search selection, a movable non-rail port with one routed departure faces that
   wire, keeping the terminal's world position fixed. Keep the old orientation
