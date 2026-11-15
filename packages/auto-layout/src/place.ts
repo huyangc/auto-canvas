@@ -1,3 +1,4 @@
+import { placeAmplifierBetweenBranches } from "./amp-gate-row.js";
 import { seatNodeAttachments } from "./attachment-seat.js";
 import { placeLocalLoopAmplifiers } from "./local-loop-amplifier.js";
 import { planningMemo } from "./planning-reuse.js";
@@ -231,6 +232,7 @@ export function placeDocument(
   },
   localLoopDraft?: boolean,
   attachmentDraft?: boolean,
+  gateRowDraft?: boolean,
 ): {
   placements: Map<string, Placement>;
   draftingTranslation?: number;
@@ -251,7 +253,7 @@ export function placeDocument(
     const selected = planningMemo(
       document,
       resolver,
-      `row-drafts:${JSON.stringify([draftRouter.key, localLoopDraft, attachmentDraft, roles.seriesLevels, roles.pitch, options.fixedInstanceIds, [...overrides.sides], [...overrides.orientations]])}`,
+      `row-drafts:${JSON.stringify([draftRouter.key, localLoopDraft, attachmentDraft, gateRowDraft, roles.seriesLevels, roles.pitch, options.fixedInstanceIds, [...overrides.sides], [...overrides.orientations]])}`,
       () => {
         const draft = (signalSeries: boolean) => {
           const choices = emptyChoices();
@@ -269,6 +271,7 @@ export function placeDocument(
             draftRouter,
             localLoopDraft,
             attachmentDraft,
+            gateRowDraft,
           );
           return { result, choices };
         };
@@ -554,6 +557,32 @@ export function placeDocument(
         new Set([
           ...fixed,
           ...symmetryIds,
+          ...templates.flatMap((g) => [
+            ...g.members,
+            ...(g.extraMemberIds ?? []),
+            ...(g.tailInstanceId ? [g.tailInstanceId] : []),
+          ]),
+          ...document.layoutGroups.flatMap((g) => g.objectIds),
+        ]),
+        { ...document, instances: devices },
+      );
+  if (!given && gateRowDraft && !partition?.arrangement)
+    for (const local of partitionDocuments(
+      { ...document, instances: devices },
+      partition,
+    ))
+      placeAmplifierBetweenBranches(
+        local,
+        resolver,
+        roles,
+        targets,
+        new Set([
+          ...fixed,
+          ...symmetryIds,
+          ...coupledIds,
+          ...document.constraints
+            .filter((c) => c.kind === "symmetric")
+            .flatMap((c) => c.objectIds),
           ...templates.flatMap((g) => [
             ...g.members,
             ...(g.extraMemberIds ?? []),

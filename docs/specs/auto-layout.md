@@ -721,6 +721,20 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   never raises the frozen composite. Cancellation is checked per Net, group
   and offset; clearance-passing seat trials are capped at 128 per group and
   512 per document, scaled by `finishingTrialBudget`.
+- **R159 — Amplifier between its sensed branches (T084).** In documents that
+  run the finished-finalist pass (at most 40 instances), an R156 amplifier
+  without a series passive whose output drives the gate/base line of at least
+  two MOS or BJT receivers, and whose two inputs directly sense conducting
+  terminals of two distinct receivers in a straight row, forms a gate-row
+  variant: the amplifier's output pin is seated midway between the two sensed
+  receivers' control pins, 40 units toward their sensed terminals (grid
+  snapped), its exit facing the gate line; among rotations and mirrors with no
+  geometry conflict, take the one with the shortest Manhattan distance from
+  each input pin to the terminal it senses. Only the amplifier moves; receivers, fixed,
+  template, symmetry-block, coupled and layout-group members stay put, and
+  explicit floorplans are excluded. The variant is an additional finished
+  finalist after `attachment` (fixed order), admitted by the T078 margin rule
+  and decided by the finished comparator, so a worse variant is never returned.
 
 - **R71 — Single-host ports.** A non-rail Cell Pin Net that reaches exactly
   one device pin gets a local seat along that pin's transformed exit direction.

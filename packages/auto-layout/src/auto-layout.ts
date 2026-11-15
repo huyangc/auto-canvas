@@ -1,3 +1,4 @@
+import { amplifierGateRows } from "./amp-gate-row.js";
 import { nodeAttachments } from "./attachment-seat.js";
 import { localLoopAmplifiers } from "./local-loop-amplifier.js";
 import {
@@ -160,6 +161,7 @@ interface LevelOptions extends AutoLayoutOptions {
   finalists?: FinalistPass;
   localLoopDraft?: boolean;
   attachmentDraft?: boolean;
+  gateRowDraft?: boolean;
 }
 
 /** T079: the attachment variant is finished only for small documents. */
@@ -937,6 +939,26 @@ function planAutoLayoutMeasured(
           run: { ...localRun, result: copyResult(localRun.result) },
         }
       : undefined;
+  const gateRowRun =
+    options.finalists &&
+    !options.finalists.alternate &&
+    amplifierGateRows(document, resolver, classifyNets(document, resolver))
+      .length
+      ? plan(
+          document,
+          resolver,
+          { ...options, gateRowDraft: true },
+          selected.overrides,
+          selected.strategy,
+        )
+      : undefined;
+  const gateRowFinalist =
+    gateRowRun && shouldFinishRunner(selected.run, gateRowRun, resolver)
+      ? {
+          ...selected,
+          run: { ...gateRowRun, result: copyResult(gateRowRun.result) },
+        }
+      : undefined;
   const attachmentRun =
     options.finalists &&
     !options.finalists.alternate &&
@@ -967,13 +989,14 @@ function planAutoLayoutMeasured(
     searchFinalist: boolean,
     localLoopDraft = false,
     attachmentDraft = false,
+    gateRowDraft = false,
   ): AutoLayoutResult => {
     repairBounds = undefined;
     // Reuse the selected placement and refinement choices; do not search again.
     const alternative = plan(
       document,
       resolver,
-      { ...options, localLoopDraft, attachmentDraft },
+      { ...options, localLoopDraft, attachmentDraft, gateRowDraft },
       selected.overrides,
       selected.strategy,
       false,
@@ -1488,6 +1511,7 @@ function planAutoLayoutMeasured(
       ["runner", alternateFinalist],
       ["localLoop", localFinalist],
       ["attachment", attachmentFinalist],
+      ["gateRow", gateRowFinalist],
     ] as const) {
       if (!candidate) continue;
       const previous = options.finalists.available.get(kind);
@@ -1495,6 +1519,9 @@ function planAutoLayoutMeasured(
         options.finalists.available.set(kind, candidate.run);
     }
     pending.set(finalistKey, {
+      gateRow: gateRowFinalist
+        ? () => finishFinalist(gateRowFinalist, false, false, false, true)
+        : () => copyResult(snapshot),
       runner: alternateFinalist
         ? () => finishFinalist(alternateFinalist, false)
         : () => copyResult(snapshot),
@@ -1689,6 +1716,7 @@ function buildPlan(
           },
           options.localLoopDraft,
           options.attachmentDraft,
+          options.gateRowDraft,
         );
   const translation = exact
     ? inheritedTranslation

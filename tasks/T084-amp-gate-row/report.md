@@ -1,46 +1,179 @@
-# T084 report — round 1
+# T084 report — round 2
 
 ## Summary
 
-The step 2 prototype **failed the continuation gate**. On the three selected
-high-crossing dev drawings, the selected layouts removed **1 crossing and 2 rail
-crossings**, versus the required **4 crossings or 3 rail crossings**, with no
-selected composite increase. The plan explicitly permits a negative result.
-The prototype and investigation instrumentation were removed; this report is
-the only retained change. No production implementation or new rule is proposed.
+Restored and generalized the approved prototype as a fourth finished finalist,
+after runner, local-loop and attachment. It recognizes a direct amplifier-driven
+MOS gate/BJT base bank with two distinct directly sensed conducting branches,
+and seats only the unprotected amplifier between them, facing the rigid row.
+The existing T078 admission and finished comparator decide whether it wins.
+
+All acceptance commands pass. The full corpus has 2 improved, 0 worse and
+626 identical plans, with 628/628 electrical equivalence and no guard regression.
+Dev composite improves 53.315154 → 52.880308; val is unchanged. The 52.68
+target remains unmet. All seven held-out timing medians are within
++20% (worst +2.13%); all six large-document plans are byte-identical to main.
 
 ## Steps
 
-| Step | Status  | Notes                                                                                                                                                                 |
-| ---- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1    | done    | Replanned all 15 drawings, reproduced all baseline plan hashes, identified every crossing and human arrangement, and traced R156 admission and finished comparisons.  |
-| 2    | done    | Tried the dominant arrangement on `2adejzy693`, `3cr8ap2k4c`, and `54a79nkqef` as a separate finished finalist. Gate failed; stopped as instructed.                   |
-| 3    | blocked | Not authorized to continue after the failed gate. No generalized production rule retained.                                                                            |
-| 4    | blocked | No production implementation to test after the gate. Existing tests were not edited, weakened, or removed.                                                            |
-| 5    | partial | Full 628-case acceptance evaluation requested below; the conditional human/main/T084 review page and top-ten/25-sample review were not pursued after the gate failed. |
+| Step | Status | Notes                                                                                                                                                                                                                                                                                                                 |
+| ---- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1    | done   | Retained the round 1 inventory of all 25 crossings and three human arrangements below.                                                                                                                                                                                                                                |
+| 2    | done   | Restored the saved prototype; review accepts its 1 crossing + 2 rail-crossing reduction as passing the gate's composite intent.                                                                                                                                                                                       |
+| 3    | done   | General electrical recognition, fixed finalist order, ≤40 instances, independent bounded finishing budget; protected amplifiers and explicit floorplans are excluded. Receiver placements remain rigid.                                                                                                               |
+| 4    | done   | Synthetic tests cover routed crossing reduction, unchanged receiver placements, MOS/BJT recognition, missing feedback, one receiver, same-branch ambiguity, protection, collisions across partitions, floorplans, given placements, worse finished layout rejection, fixed finalist order and deterministic planning. |
+| 5    | done   | Evaluated all 628, replayed and visually reviewed 47 drawings, verified six large documents and seven isolated held-out timing cases. The 52.68 target remains unmet.                                                                                                                                                 |
 
 ## Review findings addressed
 
-Round 1; no `review.md` exists.
+- **Must-fix #1:** restored the prototype from `tmp/t084-proto`, removed all
+  investigation hooks, and implemented steps 3–5. Recognition is independent
+  of instance/net names and initial coordinates. The seat uses coordinates only
+  after recognition. R89/R94 members, coupled members, explicit symmetric
+  constraints, layout groups, templates and fixed members are protected;
+  receiver rows are never moved by this variant.
+- **Should-fix #2:** evaluated the same arrangement on all six requested
+  sensed-drain examples; per-drawing results follow. No second arrangement added.
 
 ## Acceptance results
 
-Validation is against the restored, unchanged production sources. Logs are in
-`/tmp/t084-*.log`; evaluation artifacts are in `tmp/auto-layout-eval/`.
+Logs: `/tmp/t084-r2-*.log`. Full report:
+[`tmp/t084-round2/report.json`](../../tmp/t084-round2/report.json).
 
 ```text
-pnpm build → 0; all workspace builds completed (existing bundle-size warning).
+pnpm build → 0; all workspace builds passed (existing bundle-size warning).
 pnpm typecheck → 0.
-pnpm lint → 0; oxlint: 2067 files, 0 errors, 3467 warnings.
-pnpm format:check → pending.
-pnpm test:local → pending.
-pnpm test:slow → pending.
-node scripts/auto-layout-eval.mjs tmp/le10-input --jobs 12 → pending.
+pnpm lint → 0; 2069 files, 0 errors, 3467 warnings.
+pnpm format:check → 0; all matched files use Prettier style.
+pnpm test:local → 0 with local-service access; 799 files passed, 3 skipped;
+                  8225 tests passed, 117 skipped (103.11 s).
+pnpm test:slow → 0; 2 files, 8 tests passed.
+node scripts/auto-layout-eval.mjs tmp/le10-input --jobs 12 → 0; 628 completed.
 ```
 
-Corpus comparison and additional guard evidence: pending.
+Focused synthetic/selection tests: **24/24 passed** in two files.
+The initial sandbox local suite had 18 failed files, 781 passed, 3 skipped;
+61 failed tests, 8131 passed, 150 skipped, and two local-listen errors.
+The complete suite passed after rerunning with local-service access.
+Its initial detailed errors are preserved in `/tmp/t084-r2-test-local.log`.
+
+### Corpus and guards
+
+- Dev composite **53.315154 → 52.880308** (−0.434846), human 43.899768,
+  ratio **1.204569×**. Lower than main, but **0.200308 above the 52.68 target**;
+  the overall 20% readability goal remains unmet.
+- Val composite unchanged at **27.469133**, human 23.595474, ratio **1.164170×**.
+- **2 improved / 0 worse / 626 equal** per-drawing composites.
+- **628/628 equivalent**. Floating/missing totals unchanged at **6 / 4**.
+- **No `VISUAL_*` total increased**, including label clearance.
+- All **six large documents** are byte-identical to main and deterministic
+  across independent repeated calls: 50, 50, 51, 103, 70 and 94 instances.
+  Evidence: [`large.json`](../../tmp/t084-round2/large.json).
+- All **seven held-out timing medians pass** the +20% limit; worst **+2.13%**.
+  Each baseline/current implementation was warmed once, then run three times
+  in alternating order with all other task workloads stopped. All seven current
+  and baseline plan hashes are deterministic and identical. Evidence:
+  [`timing.json`](../../tmp/t084-round2/timing.json).
+
+### All 15 investigated drawings
+
+| Drawing      | Main crossings / rail | T084 crossings / rail | Main composite | T084 composite | Plan hash unchanged |
+| ------------ | --------------------- | --------------------- | -------------- | -------------- | ------------------- |
+| `2adejzy693` | 3 / 2                 | 2 / 0                 | 0.800925       | 0.404022       | no                  |
+| `3cr8ap2k4c` | 2 / 2                 | 2 / 2                 | 0.734830       | 0.734830       | yes                 |
+| `54a79nkqef` | 2 / 1                 | 2 / 1                 | 0.468597       | 0.468597       | yes                 |
+| `7d93gjqbw8` | 2 / 1                 | 2 / 1                 | 0.511056       | 0.511056       | yes                 |
+| `ecyqst76jd` | 2 / 1                 | 2 / 1                 | 0.502493       | 0.464550       | no                  |
+| `x7evbngj49` | 2 / 1                 | 2 / 1                 | 0.530071       | 0.530071       | yes                 |
+| `7aevq3rx4z` | 2 / 0                 | 2 / 0                 | 0.284147       | 0.284147       | yes                 |
+| `d2bpftaqyq` | 2 / 0                 | 2 / 0                 | 0.276184       | 0.276184       | yes                 |
+| `gh3gcb5h3a` | 2 / 0                 | 2 / 0                 | 0.335690       | 0.335690       | yes                 |
+| `ray97q5c2j` | 1 / 1                 | 1 / 1                 | 0.450641       | 0.450641       | yes                 |
+| `rryf923yjz` | 1 / 1                 | 1 / 1                 | 0.356246       | 0.356246       | yes                 |
+| `2jhdk32et5` | 1 / 0                 | 1 / 0                 | 0.195018       | 0.195018       | yes                 |
+| `6qd8k68e2t` | 1 / 0                 | 1 / 0                 | 0.123339       | 0.123339       | yes                 |
+| `vhg3q4gax7` | 1 / 0                 | 1 / 0                 | 0.168757       | 0.168757       | yes                 |
+| `wkcb83t9pg` | 1 / 0                 | 1 / 0                 | 0.282646       | 0.282646       | yes                 |
+
+The same arrangement removes neither gate × sensed-drain crossing in
+`7aevq3rx4z`, nor the gate × sensed-drain crossings in `d2bpftaqyq`,
+`gh3gcb5h3a`, `2jhdk32et5`, `6qd8k68e2t`, or `vhg3q4gax7`: all six selected
+plans are byte-identical to main, so their precise crossing identities remain
+those recorded in the inventory below. This addresses review finding #2.
+
+`2adejzy693` retains the prototype's 1 total/2 rail-crossing reduction and gains
+0.396902 composite. `ecyqst76jd` gains 0.037943 without a crossing reduction:
+area falls 1748.709 → 800.354 and terminal-departure violations fall 1 → 0.
+Crossing identities after finishing are also recorded in
+`tmp/t084-round2/dumps/`: `2adejzy693` has two G × F+ crossings at (310,470)
+and (260,500), with neither rail stub crossing remaining; `ecyqst76jd` now
+has G × F+ at (510,510) and F+ × a rail stub at (370,560).
+
+Other metrics can trade off under the existing comparator: its detour metric
+rises 0.177 → 2.329, while the total frozen composite improves. No comparator
+or weight was changed.
+
+### Review page and determinism
+
+[Human | main 8c37219 | T084 review page](../../tmp/t084-round2/review.html):
+**47 unique drawings**, comprising all 15 named examples, the ten largest
+composite falls (two improvements plus eight unchanged ties), and the original
+25 samples. All 47 independently replayed hashes match the corpus report;
+changed baseline drawings were separately replanned and their hashes verified.
+
+Inspected all 12 rendered sheets (`review-1.png` through `review-12.png`).
+`2adejzy693` loses both rail crossings but still has two signal crossings;
+`ecyqst76jd` becomes more compact but retains two crossings and a detached Y
+annotation. The other 45 reviewed drawings retain main's geometry. No horizontal
+overflow: content and viewport both 1800px. Browser rendering used installed
+Chrome with local process access; no dependency or browser installation.
+Evidence: [`review-verification.json`](../../tmp/t084-round2/review-verification.json)
+and [`review-layout.json`](../../tmp/t084-round2/review-layout.json).
+
+```text
+node tmp/t084-round2/verify-large.mjs → 0; 6/6 identical and deterministic.
+node tmp/t084-round2/dump.mjs <15 IDs> → 0; per-crossing geometry recorded.
+node tmp/t084-round2/review.mjs → 0; 47 replay hashes verified.
+node tmp/t084-round2/render.mjs → 0 with installed Chrome/local process access.
+node tmp/t084-round2/timing.mjs → 0; 7/7 timing and determinism checks pass.
+```
+
+### Isolated held-out timing
+
+| Case               | Main median (ms) | T084 median (ms) | Change |
+| ------------------ | ---------------- | ---------------- | ------ |
+| `fd-two-stage`     | 1581.2           | 1614.9           | +2.14% |
+| `common-source-ac` | 1016.0           | 1007.9           | -0.80% |
+| `skew`             | 1761.4           | 1764.8           | +0.19% |
+| `deadtime`         | 9964.2           | 10011.1          | +0.47% |
+| `ota-sky130`       | 677.5            | 681.8            | +0.64% |
+| `widlar`           | 5354.6           | 5278.8           | -1.42% |
+| `ltc3452`          | 14056.9          | 14083.5          | +0.19% |
 
 ## Investigation results
+
+### Round 2 implementation
+
+`amplifierGateRows` narrows the existing local-loop recognition to a direct
+output-to-gate/base bank of at least two MOS/BJT devices, with exactly two
+non-rail conducting terminals sensed by distinct amplifier inputs on distinct
+receivers. Indirect/passive chains and ambiguous sensed banks are excluded.
+This topology check also avoids drafting a gate-row variant for unrelated
+single-transistor feedback loops.
+
+For an aligned sensed pair, the amplifier output is snapped to the midpoint,
+40 coordinate units toward the sensed-terminal side; its output faces the row.
+The stable rotation/reflection order and minimum input-to-sensed-pin Manhattan
+distance choose the seat. Whole-document collision checking includes obstacles
+outside the local partition. Every non-amplifier target stays unchanged.
+
+The existing ≤40-instance finalist bound applies. Each admitted gate-row
+continuation gets its own standard finishing trial budget, without repeating
+strategy search or annealing. The unchanged comparator enforces completeness,
+composite, zero-baseline weighted violations and visual/routing guards.
+Quick mode and larger documents do not admit the variant.
+
+### Round 1 investigation (retained evidence)
 
 ### Method and evidence
 
@@ -199,23 +332,20 @@ order and budgets. No metrics, weights or comparator rules changed.
 | `54a79nkqef` | 2 / 1                | 2 / 1                              | 0.468597       | 0.468597           | First path +39434.837 routed-score delta exceeds 12500 margin; second path has identical placements. No distinct finalist finished. |
 | Total        | 7 / 5                | 6 / 3                              | —              | —                  | Net removal: **1 total crossing, 2 rail crossings**.                                                                                |
 
-The accepted layout's gain on one drawing is insufficient to pass the explicit
-gate. The rejected second candidate shows that seating the amplifier between
-branches does not itself make the routed/finished outcome better. The third
-case cannot provide a competitive distinct draft with this placement. No second
-arrangement, extra tuning round or generalized implementation was attempted after
-this failure.
+The round 1 count-only gate interpretation is superseded by the review: this
+passes the intended composite gate (about 4.4 ordinary-crossing equivalents).
 
 ## Deviations and open questions
 
-- Stopped after step 2 exactly as the plan's gate requires. The production code
-  was restored byte-for-byte; no tests, dependencies, lockfile, plan or review
-  changed, and no commit or branch operation was performed.
-- No spec text is proposed because no production behavior is retained.
-- A follow-up plan would need evidence for a broader rigid-row/branch-order
-  move, or a different amplifier seat, while preserving safe routing. The
-  experiment does not justify weakening T078 or copying human wire-through-symbol
-  geometry.
-- Conditional production tests and the three-column review page were not
-  created after the failed gate. The full listed acceptance commands are still
-  run and recorded above.
+- The review explicitly authorizes continuation on the prototype's composite
+  gain despite the original count wording. No metrics, weights or comparator
+  rules were changed.
+- The readability target remains unmet by 0.200308 composite units. The six
+  additional sensed-drain cases show no selected improvement from this same
+  arrangement; no second arrangement was introduced.
+- No dependency changes, provider API calls, commits or branch changes.
+- Proposed spec addition: for documents of at most 40 instances, after existing
+  finalists, offer one direct amplifier gate/base-row finalist between two
+  distinct directly sensed conducting branches. Keep receivers and protected
+  units rigid, exclude explicit floorplans, use a separate bounded finishing
+  budget, and accept only through T078's existing admission and final guards.
