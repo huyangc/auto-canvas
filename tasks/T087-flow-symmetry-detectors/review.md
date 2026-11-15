@@ -19,3 +19,19 @@ the human drawings, so the metric does not separate human from result;
 the gain on dev is larger, and tuning against val is not allowed. The
 symmetry metric stays as a reported, unweighted metric so a future regression
 is visible. All three flagged drawings still score worse than human.
+
+## Round 2 request — Opus, 2026-11-15
+
+The codex PR review of `99362d7`
+(https://github.com/huyangc/auto-canvas/pull/77#issuecomment-6897106490)
+found a real defect:
+
+| #   | Severity | Area | Finding | Required change |
+| --- | -------- | ---- | ------- | --------------- |
+| 1   | must-fix | metric | `readability-netlist.ts:16-19`: `endpointToBaseNet` keeps label-connected Base Nets separate, so ports or devices joined through matching Net labels look disconnected. Splitting an amplifier input into two label-connected Base Nets changes `signalDirection` from 3 opportunities / 1 violation to 2 / 0 with identical electrical connectivity; symmetry detection fragments the same way (`CODING_STANDARDS.md:8-9`). | Map Base Nets through `projection.logicalNetByBaseNet` (and normalise explicit interface Net references the same way) in both detectors. Add tests: the split-by-label amplifier gives the same `signalDirection` counts as the joined one; a label-joined degenerated pair still forms its symmetric pairs. |
+
+Then remeasure both pooled layout sets, regenerate the evaluation weights
+with the same command, and update the report (weights, discrimination dev /
+val for both layout sets, flagged drawings, coverage counts, new baseline).
+Selection weights and plans must stay byte-identical to main. Rerun all
+acceptance commands.
