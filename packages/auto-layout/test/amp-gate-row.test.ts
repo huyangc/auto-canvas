@@ -238,7 +238,8 @@ it("finishes the gate-row variant through the shared comparator and repeats dete
       readabilityMetrics(applied.document, resolver, "weighted"),
     );
   }
-});
+  // Two complete plans with every finished finalist: 8.4 s on a CI runner.
+}, 30000);
 
 it("does not move members of an explicit floorplan or a given placement", () => {
   const { d, targets } = gateRow();
