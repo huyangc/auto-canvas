@@ -21,3 +21,25 @@ and three robustness gaps.
 
 Gates as in the plan; rerun the corpus, large documents and held-out timing
 (alone). Write the proposed spec text in the report reflecting fresh ids.
+
+## Round 2 — Opus, 2026-11-14
+
+Verdict: **one more round (small).** Round 2 fixed every round 1 finding.
+Rebased on main `8387e36` (T083), Opus reran everything: build, typecheck,
+lint, format, `test:local` (8208), `test:slow` (8), full evaluation — dev
+1.2385 → 1.2145×, val 1.1865 → 1.1642×, six better, none worse, 628/628
+equivalent. CI is green.
+
+The codex PR review of `d1b883a`
+(https://github.com/huyangc/auto-canvas/pull/73#issuecomment-6883414008)
+raised one P2:
+
+| #   | Severity | Area | Finding | Required change |
+| --- | -------- | ---- | ------- | --------------- |
+| 1   | must-fix | drafting | `recover-drafting-owners.ts` re-anchoring (~L201-250): when R150 seated a touching group with a clearance offset, restoring the source conductor anchor drops that offset only for conductor-anchored members; free members keep theirs, so the group is split (the reviewer's probe: two initially aligned captions, an 8-unit seating offset, result separated by 8) and mixed-anchor arrows can stretch. R150 moves a component as one rigid unit. | First write a test that **fails on `d1b883a`** reproducing the probe. Opus tried and failed to reproduce it with a direct `recoverDraftingOwners` call on a hand-made seated base (the carried conductor may already be present in `planAutoLayout`'s output), so build the case through the real planner path. Then fix: either re-anchor with an anchor that resolves to the member's **current** position on the new conductor (preferred: keeps the conductor and the seat), or translate the whole component together; as a last resort reject the carry. The working tree holds an unverified Opus guard (after `const ink = draftingBounds(replay…)`: reject the carry unless every member of each group moves by one common translation and keeps its size); keep it only if your test shows it is needed. |
+
+Gates: all acceptance commands; corpus vs `tmp/main-8387e36-report.json`
+(main after T083): composite not higher on dev or val than this branch's
+current 53.315 / 27.469 by more than 0.05, no drawing worse than main,
+628/628 equivalent; large documents identical. Timing only if the change
+touches more than the re-anchoring path.

@@ -255,6 +255,25 @@ function carryWires(
     const replay = preview(working, resolver, extra);
     if (!replay.ok) continue;
     const ink = draftingBounds(replay.document, resolver);
+    // R150 moves a touching component as one rigid unit. Re-anchoring only
+    // its conductor-anchored members must not split or stretch it: every
+    // member keeps one common translation and its size.
+    const prior = draftingBounds(working, resolver);
+    const rigid = groups.every((group) => {
+      const deltas = new Set(
+        group.objects.map((o) => {
+          const a = prior.find((b) => b.id === o.id)?.bounds,
+            b = ink.find((n) => n.id === o.id)?.bounds;
+          return a && b
+            ? [b.x - a.x, b.y - a.y, b.width - a.width, b.height - a.height]
+                .map((v) => Math.round(v * 1e6) / 1e6)
+                .join(",")
+            : "missing";
+        }),
+      );
+      return deltas.size === 1 && !deltas.has("missing");
+    });
+    if (!rigid) continue;
     // An id surviving cleanup can now name a terminal Net. Partition equality
     // alone would not detect an isolated wire being added to that logical Net.
     if (
