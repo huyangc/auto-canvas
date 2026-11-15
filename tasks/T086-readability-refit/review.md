@@ -28,3 +28,22 @@ regression there.
 The two detection gaps the round found (feedback amplifier with no
 backward-flow / port-order opportunity; degenerated differential pair with no
 symmetry pair) are a follow-up task, not this round.
+
+## Round 2 — Opus, 2026-11-15
+
+Verdict: **one last small round.** Round 2 met every gate; Opus reran
+everything (8245 tests, 628/628 plan hashes identical to main, dev 1.1911× /
+val 1.2052×). The codex PR review of `3844055`
+(https://github.com/huyangc/auto-canvas/pull/76#issuecomment-6894532141)
+found two real defects in `collinearAbutment`'s marked-end detection:
+
+| #   | Severity | Area | Finding | Required change |
+| --- | -------- | ---- | ------- | --------------- |
+| 1   | must-fix | metric | `readability-metrics.ts:100-103`: route markers produced by `packages/rnl/src/rnl-import.ts` carry a route anchor but no `netId` or net-name binding, so they are skipped and a marked facing end is still penalised. | Resolve the owning Net of a route marker from its anchored route; add a test using that producer's format (a facing-bend fixture drops to zero once such a marker sits on an end). |
+| 2   | must-fix | metric | `readability-metrics.ts:97-99`: an annotation with `visible: false` still marks an end, suppressing a violation although nothing is drawn. | Skip hidden annotations (and any drafting that is not rendered) before collecting marked attachments; add a test. |
+
+Then remeasure both pooled layout sets with the fixed metric, regenerate the
+evaluation weights with the same command, and update the report's
+discrimination table, the three flagged drawings and the new goal baseline.
+Selection weights and plans must stay byte-identical to main. Rerun all
+acceptance commands.
