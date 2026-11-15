@@ -14,7 +14,9 @@ const resolver = new InMemorySymbolResolver(builtInSymbols);
 const measure = (d: SchematicDocument) => {
   const full = readabilityMetrics(structuredClone(d), resolver);
   const weighted = readabilityMetrics(structuredClone(d), resolver, "weighted");
-  for (const key of Object.keys(readabilityWeights) as (keyof typeof full)[])
+  for (const key of Object.keys(
+    readabilityWeights,
+  ) as (keyof typeof readabilityWeights)[])
     if (readabilityWeights[key].weight !== 0)
       expect(weighted[key], key).toEqual(full[key]);
   expect(readabilityScore(weighted)).toBe(readabilityScore(full));
@@ -431,7 +433,7 @@ it("scores with fixed weights, ignores diagnostic penalties and keeps scales whe
   expect(readabilityScore(metrics)).toBe(0);
   metrics.crossings.violations = 1;
   const oneCrossing = readabilityScore(metrics);
-  expect(oneCrossing).toBeCloseTo(0.10852563607446113, 12);
+  expect(oneCrossing).toBeCloseTo(0.13377676865391394, 12);
   metrics.crossings.violations = 2;
   expect(readabilityScore(metrics)).toBeCloseTo(2 * oneCrossing, 12);
   metrics.crossings.opportunities = 10000;
@@ -517,3 +519,81 @@ it("reports frozen targets at the small-count and 20% boundaries even without de
     humanBetter: null,
   });
 });
+
+function segment(
+  d: SchematicDocument,
+  netId: string,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+) {
+  const id = `segment-${d.routes.length}`;
+  d.junctions.push(
+    { id: `${id}-a`, netId, position: from },
+    { id: `${id}-b`, netId, position: to },
+  );
+  d.routes.push(
+    createRoutePath({
+      id,
+      netId,
+      start: { kind: "junction", junctionId: `${id}-a` },
+      end: { kind: "junction", junctionId: `${id}-b` },
+      bends: [],
+      modes: ["manual"],
+    }),
+  );
+}
+
+it.each([false, true])(
+  "counts short different-Net abutment on either axis (vertical=%s)",
+  (vertical) => {
+    const point = (along: number) =>
+      vertical ? { x: 200, y: along } : { x: along, y: 200 };
+    for (const gap of [0, 10, 20, 21, 40]) {
+      const d = circuit({}, { supply: [], tail: [] });
+      d.presentation.grid = 10;
+      segment(d, "supply", point(0), point(100));
+      segment(d, "tail", point(100 + gap), point(200));
+      expect(measure(d).collinearAbutment).toEqual({
+        violations: gap <= 20 ? 1 : 0,
+        opportunities: 1,
+      });
+      d.routes.reverse();
+      expect(measure(d).collinearAbutment.violations).toBe(gap <= 20 ? 1 : 0);
+    }
+  },
+);
+
+it("excludes same-Net continuations, perpendicular crossings, overlapping ink and zero-length segments", () => {
+  const d = circuit({}, { a: [], b: [] });
+  segment(d, "a", { x: 0, y: 0 }, { x: 100, y: 0 });
+  segment(d, "a", { x: 100, y: 0 }, { x: 200, y: 0 });
+  segment(d, "b", { x: 50, y: -100 }, { x: 50, y: 100 });
+  segment(d, "b", { x: 20, y: 0 }, { x: 50, y: 0 });
+  segment(d, "b", { x: 100, y: 0 }, { x: 100, y: 0 });
+  expect(measure(d).collinearAbutment).toEqual({
+    violations: 0,
+    opportunities: 2,
+  });
+});
+
+it.each([false, true])(
+  "does not count a symbol interrupting the gap (vertical=%s)",
+  (vertical) => {
+    const d = placed({ r: "resistor" }, { a: [], b: [] });
+    d.presentation.grid = 100;
+    move(d, "r", 0, 0, vertical ? 0 : 90);
+    const point = (along: number) =>
+      vertical ? { x: 0, y: along } : { x: along, y: 0 };
+    segment(d, "a", point(-100), point(-30));
+    segment(d, "b", point(30), point(100));
+    expect(measure(d).collinearAbutment).toEqual({
+      violations: 0,
+      opportunities: 1,
+    });
+    move(d, "r", 300, 300);
+    expect(measure(d).collinearAbutment).toEqual({
+      violations: 1,
+      opportunities: 1,
+    });
+  },
+);
