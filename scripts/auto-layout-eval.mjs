@@ -8,6 +8,10 @@ import {
   readabilityCalibration,
 } from "../packages/auto-layout/dist/readability-weights.js";
 import {
+  readabilityWeights as selectionWeights,
+  readabilityCalibration as selectionCalibration,
+} from "../packages/auto-layout/dist/readability-selection-weights.js";
+import {
   diagnoseVisualQuality,
   diagnoseLabelClearance,
 } from "../packages/derived/dist/index.js";
@@ -28,7 +32,8 @@ import {
   readFileSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { performance } from "node:perf_hooks";
 import {
   isMainThread,
@@ -53,9 +58,9 @@ import {
   partitionBounds,
 } from "../packages/auto-layout/dist/partition-geometry.js";
 import {
-  defaultLayoutSearch,
+  defaultLayoutSearch as currentDefaultLayoutSearch,
   llmPartition,
-  planAutoLayout,
+  planAutoLayout as currentPlanAutoLayout,
 } from "../packages/auto-layout/dist/index.js";
 import {
   auditRouting,
@@ -100,6 +105,7 @@ for (let i = 0; i < args.length; i += 2) {
       "--samples",
       "--block-boxes",
       "--baseline",
+      "--baseline-planner",
       "--search",
       "--seed",
       "--jobs",
@@ -111,7 +117,7 @@ for (let i = 0; i < args.length; i += 2) {
     args[i + 1] === undefined
   )
     throw new Error(
-      "Usage: auto-layout-eval.mjs <folder> [--baseline <report.json>] [--quick | --search <seconds>] [--seed <n>] [--jobs <n>] [--partition human|loadbench|llm --variant v1|v2] [--fixed-human] [--optimized] [--threshold <n>] [--split dev|val] [--samples k] [--anonymize] [--block-boxes on|off]",
+      "Usage: auto-layout-eval.mjs <folder> [--baseline <report.json>] [--baseline-planner <built-index.js>] [--quick | --search <seconds>] [--seed <n>] [--jobs <n>] [--partition human|loadbench|llm --variant v1|v2] [--fixed-human] [--optimized] [--threshold <n>] [--split dev|val] [--samples k] [--anonymize] [--block-boxes on|off]",
     );
   flags.set(args[i], args[i + 1]);
 }
@@ -155,6 +161,13 @@ if (partitionSource === "llm" && variant === "v2")
   throw new Error("LLM partitions have no floorplan; use v1");
 if (partitionSource === "loadbench" && variant === "v2")
   throw new Error("LOADBench has no oracle arrangement; use v1");
+// Historical planners produce layouts; all measurements still use today's code.
+const { planAutoLayout, defaultLayoutSearch } = flags.has("--baseline-planner")
+  ? await import(pathToFileURL(resolve(flags.get("--baseline-planner"))).href)
+  : {
+      planAutoLayout: currentPlanAutoLayout,
+      defaultLayoutSearch: currentDefaultLayoutSearch,
+    };
 const baseline = flags.has("--baseline")
   ? JSON.parse(readFileSync(flags.get("--baseline"), "utf8"))
   : undefined;
@@ -280,7 +293,7 @@ const metrics = (document, resolver, components, stages) => {
   const readability = readabilityMetrics(document, resolver);
   return {
     readabilityMetrics: readability,
-    readabilityScore: readabilityScore(readability),
+    readabilityScore: readabilityScore(readability, readabilityWeights),
     ...readabilityCounts(document, resolver),
     ...signalPathMetrics(document, resolver),
     visual: visualCounts(document, resolver),
@@ -971,7 +984,7 @@ if (!isMainThread) {
   const readability = summarizeReadability(
     measurements,
     readabilityWeights,
-    readabilityScore,
+    (metrics) => readabilityScore(metrics, readabilityWeights),
   );
   const scoreboard = Object.fromEntries(
     ["dev", "val", "all"].map((split) => {
@@ -1096,6 +1109,13 @@ if (!isMainThread) {
     JSON.stringify(
       {
         scoreboard,
+        // A supplied historical planner has its own selection policy.
+        selectionReadabilityModel: flags.has("--baseline-planner")
+          ? null
+          : {
+              ...selectionCalibration,
+              weights: selectionWeights,
+            },
         readabilityModel: {
           ...readabilityCalibration,
           weights: readabilityWeights,

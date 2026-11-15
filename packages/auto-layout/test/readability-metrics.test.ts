@@ -6,7 +6,7 @@ import {
   readabilityMetrics,
   readabilityScore,
 } from "../src/readability-metrics.js";
-import { readabilityWeights } from "../src/readability-weights.js";
+import { readabilityWeights } from "../src/readability-selection-weights.js";
 import { enclosingBox, placement } from "../src/geometry.js";
 import { circuit } from "./document-fixture.js";
 
@@ -433,7 +433,7 @@ it("scores with fixed weights, ignores diagnostic penalties and keeps scales whe
   expect(readabilityScore(metrics)).toBe(0);
   metrics.crossings.violations = 1;
   const oneCrossing = readabilityScore(metrics);
-  expect(oneCrossing).toBeCloseTo(0.13377676865391394, 12);
+  expect(oneCrossing).toBeCloseTo(0.10852563607446113, 12);
   metrics.crossings.violations = 2;
   expect(readabilityScore(metrics)).toBeCloseTo(2 * oneCrossing, 12);
   metrics.crossings.opportunities = 10000;
@@ -525,6 +525,7 @@ function segment(
   netId: string,
   from: { x: number; y: number },
   to: { x: number; y: number },
+  bends: { x: number; y: number }[] = [],
 ) {
   const id = `segment-${d.routes.length}`;
   d.junctions.push(
@@ -537,63 +538,225 @@ function segment(
       netId,
       start: { kind: "junction", junctionId: `${id}-a` },
       end: { kind: "junction", junctionId: `${id}-b` },
-      bends: [],
-      modes: ["manual"],
+      bends,
+      modes: Array.from({ length: bends.length + 1 }, () => "manual" as const),
     }),
   );
 }
 
+function facingBends(d: SchematicDocument, gap: number, vertical = false) {
+  const p = (along: number, across = 0) =>
+    vertical ? { x: across, y: along } : { x: along, y: across };
+  segment(d, "a", p(-100), p(0, 40), [p(0)]);
+  segment(d, "b", p(gap, 40), p(gap + 100), [p(gap)]);
+}
+
 it.each([false, true])(
-  "counts short different-Net abutment on either axis (vertical=%s)",
+  "counts facing bends through one member pitch on either axis (vertical=%s)",
   (vertical) => {
-    const point = (along: number) =>
-      vertical ? { x: 200, y: along } : { x: along, y: 200 };
-    for (const gap of [0, 10, 20, 21, 40]) {
-      const d = circuit({}, { supply: [], tail: [] });
-      d.presentation.grid = 10;
-      segment(d, "supply", point(0), point(100));
-      segment(d, "tail", point(100 + gap), point(200));
-      expect(measure(d).collinearAbutment).toEqual({
-        violations: gap <= 20 ? 1 : 0,
-        opportunities: 1,
-      });
+    for (const gap of [0, 10, 20, 40, 80, 81]) {
+      const d = circuit({}, { a: [], b: [] });
+      facingBends(d, gap, vertical);
+      expect(measure(d).collinearAbutment.violations).toBe(gap <= 80 ? 1 : 0);
       d.routes.reverse();
-      expect(measure(d).collinearAbutment.violations).toBe(gap <= 20 ? 1 : 0);
+      expect(measure(d).collinearAbutment.violations).toBe(gap <= 80 ? 1 : 0);
     }
   },
 );
 
-it("excludes same-Net continuations, perpendicular crossings, overlapping ink and zero-length segments", () => {
+it("uses the original document size for the member pitch", () => {
+  const d = circuit({}, { a: [], b: [] });
+  facingBends(d, 100);
+  expect(measure(d).collinearAbutment.violations).toBe(0);
+  for (let n = 0; n < 41; n++)
+    d.instances.push({ id: `r${n}`, symbolId: "resistor", placement: null });
+  expect(measure(d).collinearAbutment.violations).toBe(1);
+});
+
+it("counts parallel resistor pin entries across the flagged four-grid gap", () => {
+  const d = placed(
+    { left: "resistor", right: "resistor" },
+    { a: ["left.1"], b: ["right.1"] },
+  );
+  move(d, "left", 0, 20);
+  move(d, "right", 40, 20);
+  for (const [id, net, x, outside] of [
+    ["left", "a", 0, -80],
+    ["right", "b", 40, 120],
+  ] as const) {
+    d.junctions.push({ id: net, netId: net, position: { x: outside, y: 0 } });
+    d.routes.push(
+      createRoutePath({
+        id: net,
+        netId: net,
+        start: { kind: "junction", junctionId: net },
+        end: { kind: "terminal", instanceId: id, pinName: "1" },
+        bends: [],
+        modes: ["manual"],
+      }),
+    );
+    expect(d.instances.find((i) => i.id === id)!.placement!.position.x).toBe(x);
+  }
+  expect(measure(d).collinearAbutment.violations).toBe(1);
+});
+
+it("excludes open stubs, same-Net continuations, perpendicular crossings, overlaps and degenerate segments", () => {
   const d = circuit({}, { a: [], b: [] });
   segment(d, "a", { x: 0, y: 0 }, { x: 100, y: 0 });
+  segment(d, "b", { x: 120, y: 0 }, { x: 200, y: 0 });
+  expect(measure(d).collinearAbutment.violations).toBe(0);
   segment(d, "a", { x: 100, y: 0 }, { x: 200, y: 0 });
   segment(d, "b", { x: 50, y: -100 }, { x: 50, y: 100 });
   segment(d, "b", { x: 20, y: 0 }, { x: 50, y: 0 });
   segment(d, "b", { x: 100, y: 0 }, { x: 100, y: 0 });
-  expect(measure(d).collinearAbutment).toEqual({
-    violations: 0,
-    opportunities: 2,
-  });
+  expect(measure(d).collinearAbutment.violations).toBe(0);
 });
 
-it.each([false, true])(
-  "does not count a symbol interrupting the gap (vertical=%s)",
-  (vertical) => {
-    const d = placed({ r: "resistor" }, { a: [], b: [] });
-    d.presentation.grid = 100;
-    move(d, "r", 0, 0, vertical ? 0 : 90);
-    const point = (along: number) =>
-      vertical ? { x: 0, y: along } : { x: along, y: 0 };
-    segment(d, "a", point(-100), point(-30));
-    segment(d, "b", point(30), point(100));
-    expect(measure(d).collinearAbutment).toEqual({
-      violations: 0,
-      opportunities: 1,
+it("excludes a T junction and labeled ends", () => {
+  const d = circuit({}, { a: [], b: [] });
+  facingBends(d, 40);
+  expect(measure(d).collinearAbutment.violations).toBe(1);
+  segment(d, "a", { x: 0, y: 0 }, { x: 0, y: -40 });
+  expect(measure(d).collinearAbutment.violations).toBe(0);
+  d.routes.pop();
+  d.annotations.push({
+    id: "label",
+    kind: "net-label",
+    binding: { kind: "net-name", netId: "a" },
+    anchor: { kind: "free", position: { x: 0, y: 0 } },
+    alignment: "start",
+    rotation: 0,
+    locked: false,
+  });
+  expect(measure(d).collinearAbutment.violations).toBe(0);
+});
+
+it.each(["object", "route"] as const)(
+  "excludes %s labels offset from a facing end",
+  (kind) => {
+    const d = circuit({}, { a: [], b: [] });
+    facingBends(d, 40);
+    d.junctions.push({
+      id: "label-anchor",
+      netId: "a",
+      position: { x: 0, y: 0 },
     });
-    move(d, "r", 300, 300);
-    expect(measure(d).collinearAbutment).toEqual({
-      violations: 1,
-      opportunities: 1,
+    d.annotations.push({
+      id: "label",
+      kind: "net-label",
+      binding: { kind: "net-name", netId: "a" },
+      anchor:
+        kind === "object"
+          ? {
+              kind: "object",
+              objectId: "label-anchor",
+              localOffset: { x: 10, y: 10 },
+              fallbackPosition: { x: 10, y: 10 },
+            }
+          : {
+              kind: "route",
+              routeId: d.routes[0]!.id,
+              legId: d.routes[0]!.legs[0]!.id,
+              t: 1,
+              normalOffset: 10,
+              direction: "forward",
+              orientation: "follow",
+              fallbackPosition: { x: 0, y: 10 },
+            },
+      alignment: "start",
+      rotation: 0,
+      locked: false,
     });
+    expect(measure(d).collinearAbutment.violations).toBe(0);
   },
 );
+
+it.each(["ground", "port", "vdd-port"])(
+  "excludes an end marked by %s",
+  (symbol) => {
+    const d = placed(
+      { marker: symbol },
+      { a: [`marker.${symbol === "ground" ? "0" : "P"}`], b: [] },
+    );
+    move(d, "marker", 0, 0);
+    facingBends(d, 40);
+    d.routes.push(
+      createRoutePath({
+        id: "marker-route",
+        netId: "a",
+        start: {
+          kind: "terminal",
+          instanceId: "marker",
+          pinName: symbol === "ground" ? "0" : "P",
+        },
+        end: { kind: "junction", junctionId: "segment-0-b" },
+        bends: [],
+        modes: ["manual"],
+      }),
+    );
+    expect(measure(d).collinearAbutment.violations).toBe(0);
+  },
+);
+
+it.each([false, true])(
+  "does not count an intervening symbol body (vertical=%s)",
+  (vertical) => {
+    const d = placed({ r: "resistor" }, { a: [], b: [] });
+    facingBends(d, 80, vertical);
+    move(d, "r", vertical ? 0 : 40, vertical ? 40 : 0, vertical ? 0 : 90);
+    expect(measure(d).collinearAbutment.violations).toBe(0);
+    move(d, "r", 300, 300);
+    expect(measure(d).collinearAbutment.violations).toBe(1);
+  },
+);
+
+it("keeps selection scoring separate from explicit evaluation weights", () => {
+  const metrics = measure(circuit({}, {}));
+  for (const m of Object.values(metrics)) m.violations = 0;
+  metrics.bends.violations = 2;
+  expect(readabilityScore(metrics)).toBe(0);
+  expect(readabilityScore(metrics, { bends: { weight: 0.5, scale: 2 } })).toBe(
+    0.5,
+  );
+});
+
+it("pools repeated drawing IDs across source reports and excludes both validation sets from fitting", () => {
+  const output = execFileSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `
+    import {mkdtempSync,writeFileSync,rmSync} from 'node:fs';
+    import {tmpdir} from 'node:os';
+    import {join} from 'node:path';
+    import {execFileSync} from 'node:child_process';
+    import {fitReadability} from './scripts/readability-fit.mjs';
+    const dir=mkdtempSync(join(tmpdir(),'readability-pool-'));
+    const side=(a,b)=>({readabilityMetrics:{a:{violations:a,opportunities:1},b:{violations:b,opportunities:1}}});
+    const row=(split,h,r)=>({id:split+'-same-drawing',split,status:'completed',human:side(...h),result:side(...r)});
+    const current=[row('dev',[0,1],[2,0]),row('val',[0,0],[1000,0])];
+    const historical=[row('dev',[0,0],[1,3]),row('val',[0,0],[0,1000])];
+    const files=[join(dir,'current.json'),join(dir,'historical.json')];
+    const run=()=>{
+      [current,historical].forEach((cases,i)=>writeFileSync(files[i],JSON.stringify({cases})));
+      return JSON.parse(execFileSync(process.execPath,['scripts/readability-fit.mjs',files[0],'--pool',files[1]],{encoding:'utf8'}));
+    };
+    try {
+      const pooled=run();current[1].result=side(0,9000);historical[1].result=side(9000,0);
+      console.log(JSON.stringify({pooled,changed:run(),direct:fitReadability([...current,...historical])}));
+    } finally {rmSync(dir,{recursive:true,force:true});}
+  `,
+    ],
+    { encoding: "utf8" },
+  );
+  const { pooled, changed, direct } = JSON.parse(output);
+  expect(pooled.fit.trainingPairs).toBe(2);
+  expect(pooled.fit).toEqual(changed.fit);
+  expect(pooled.fit).toEqual(direct.fit);
+  expect(pooled.fit.weights.a.scale).toBeCloseTo(Math.sqrt(2.5));
+  expect(pooled.fit.weights.b.scale).toBeCloseTo(Math.sqrt(5));
+  expect(pooled.fit.weights.a.weight).toBeGreaterThan(0);
+  expect(pooled.fit.weights.b.weight).toBeGreaterThan(0);
+  expect(Object.keys(pooled.scores)).toHaveLength(4);
+});
