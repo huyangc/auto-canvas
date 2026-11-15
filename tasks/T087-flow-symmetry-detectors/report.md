@@ -1,43 +1,49 @@
-# T087 report — round 1
+# T087 report — round 2
 
 ## Summary
 
-Added independent, netlist-based `signalDirection` and `netlistSymmetry` measurements to full readability evaluation. Existing flow/symmetry metrics and selection weights are unchanged. Synthetic tests exercise feedback flow, source-degenerated differential symmetry, incompatible models, rails, passive pin permutations, common-axis tolerance, deterministic input ordering, and the search size bound.
+Fixed label-connected Base Nets being treated as separate electrical Nets by both readability detectors. The shared netlist helper now maps terminal Base Nets through `projection.logicalNetByBaseNet`; explicit interface Net references use the same normalization. Added three synthetic regression tests for split feedback flow, label-joined degenerated symmetry, and explicit directions on nonrepresentative Base Nets.
 
-**Partial: the prescribed pooled fit fails the main-layout validation discrimination gate (67.72% versus 68.25%).** Dev discrimination improves to 69.48%. The new detectors expose both flagged defects, but the fit assigns `netlistSymmetry` zero weight, so that defect remains diagnostic-only. No validation-driven tuning or manual weights were applied.
+Both pooled layout sets were remeasured and evaluation weights regenerated. Coefficients and composite scores are unchanged from round 1; `netlistSymmetry` normalization changes from 0.4091771842 to 0.6535342849. Symmetry coverage rises from 85 to 116 human drawings. The main-layout validation discrimination remains 67.72% versus T086's 68.25%, the one-pair gate deviation explicitly accepted by Opus in `review.md` round 1. No validation-driven tuning was applied.
 
 ## Steps
 
-| Step                  | Status  | Notes                                                                                                                                                                                   |
-| --------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1. Investigate        | done    | Both recognition gaps reproduced; baseline coverage counted over all 628 human drawings.                                                                                                |
-| 2. Signal direction   | done    | Pin-role direction, passive traversal with directed-Net boundaries, explicit interface direction, visible port centres and transformed amplifier pins.                                  |
-| 3. Netlist symmetry   | done    | Complete bounded involution with strict symbol/model matching and fixed rails, independent of R88.                                                                                      |
-| 4. Synthetic tests    | done    | Nine tests in `packages/auto-layout/test/readability-detectors.test.ts`.                                                                                                                |
-| 5. Refit and validate | partial | Both sets remeasured and the evaluation file regenerated from 878 dev pairs. Main val discrimination misses the acceptance threshold by one pair; final invariance/check results below. |
+| Step                  | Status | Notes                                                                                                                                                  |
+| --------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1. Investigate        | done   | Both recognition gaps reproduced; baseline coverage counted over all 628 human drawings.                                                               |
+| 2. Signal direction   | done   | Pin-role direction, passive traversal with directed-Net boundaries, explicit interface direction, visible port centres and transformed amplifier pins. |
+| 3. Netlist symmetry   | done   | Complete bounded involution with strict symbol/model matching and fixed rails, independent of R88.                                                     |
+| 4. Synthetic tests    | done   | Twelve tests in `packages/auto-layout/test/readability-detectors.test.ts`.                                                                             |
+| 5. Refit and validate | done   | Both sets freshly remeasured and evaluation weights regenerated from 878 dev pairs. The previously accepted one-pair main val deviation is unchanged.  |
 
 ## Review findings addressed
 
-Round 1; no `review.md` exists.
+**Must-fix #1 addressed.** `readability-netlist.ts` now converts terminal Base Nets into logical Net representatives before either detector builds its graph, including rail identity. `readability-signal-direction.ts` normalizes explicit interface `netId` references through the same projection before matching.
+
+Before the fix, `pnpm exec vitest run packages/auto-layout/test/readability-detectors.test.ts` exited 1: split feedback dropped from 3 opportunities / 1 violation to 2 / 0, and label-joined differential symmetry dropped from 3 opportunities to 0. After the fix, all 46 tests across the detector and metrics suites pass. The explicit-interface regression uses nonrepresentative Base Net references and passive-only connectivity so inference cannot hide a missing explicit direction. The symmetry regression splits a source, the tail and a supply connection, checks all three pairs, and then detects a deliberately displaced resistor.
+
+The review supplied the specific cause and required correction; the failing synthetic reproductions confirmed it, so broad hypothesis generation and instrumentation were unnecessary. No debug instrumentation was added.
 
 ## Acceptance results
 
-Logs and evaluation artifacts are under `tmp/t087/`.
+All round 2 logs and evaluation artifacts are under `tmp/t087-round2/`. Commands were rerun for round 2; the full local suite had local PostgreSQL access and ran separately from evaluations.
 
 ```text
 pnpm build → 0; all packages built (existing Vite chunk-size advisory); build-final.log
 pnpm typecheck → 0; tsc --noEmit; typecheck-final.log
 pnpm lint → 0; 2076 files, 0 errors, 3500 warnings; lint-final.log
 pnpm format:check → 0; All matched files use Prettier code style!; format-check-final.log
-pnpm test:local → 0; 801 files passed / 3 skipped, 8257 tests passed / 117 skipped; 111.14 s; test-local-final.log
-pnpm test:slow → 0; 2 files, 8 tests passed; 41.30 s; test-slow-final.log
+pnpm test:local → 0; 801 files passed / 3 skipped, 8260 tests passed / 117 skipped; 97.64 s; test-local.log
+pnpm test:slow → 0; 2 files, 8 tests passed; 41.29 s; test-slow.log
 node scripts/auto-layout-eval.mjs tmp/le10-input --jobs 12 → 0; 628 completed, 628 equivalent; current-eval.log
-pnpm exec vitest run packages/auto-layout/test/readability-detectors.test.ts packages/auto-layout/test/readability-metrics.test.ts → 0; 2 files, 43 tests passed; readability-tests.log
-node tmp/t087/verify-large.mjs → 0; 6/6 identical and deterministic; large.log / large.json
-node tmp/t087/timing.mjs → 0; 7/7 identical and deterministic, median deltas within noise; timing.log / timing.json
+pnpm exec vitest run packages/auto-layout/test/readability-detectors.test.ts packages/auto-layout/test/readability-metrics.test.ts → 0; 2 files, 46 tests passed; readability-tests.log
+node scripts/auto-layout-eval.mjs tmp/le10-input --jobs 12 --baseline-planner /tmp/t086-baseline/dist/index.js → 0; 628 completed, 628 equivalent; main-eval.log
+node scripts/auto-layout-eval.mjs tmp/le10-input --jobs 12 --baseline-planner /tmp/t086-eb72cb1/packages/auto-layout/dist/index.js → 0; 628 completed, 628 equivalent; historical-eval.log
+node scripts/readability-fit.mjs tmp/t087-round2/main-report.json --source-commit 17372217c5cd175d0e7cfe3c95ae11ac27187245 --pool tmp/t087-round2/historical-report.json --source-commit eb72cb1f11ea2cb083d9d10c5525a03b6bba2a59 --write → 0; 878 dev pairs; fit.json
+python3 tmp/t087-round2/verify-reports.py → 0; main/current/historical hashes, equivalence, unchanged old metrics and current/main metric agreement all 628/628; verification.log
+node tmp/t087-round2/verify-large.mjs → 0; 6/6 identical and deterministic; large.log / large.json
+node tmp/t087-round2/timing.mjs → 0; 7/7 identical and deterministic, median deltas within noise; timing.log / timing.json
 ```
-
-Earlier attempts are retained: the sandboxed local suite hit `connect EPERM ::1:5432` / `127.0.0.1:5432` and was interrupted; a focused server test confirmed the access failure. The first service-enabled full-suite attempt overlapped heavy evaluations, hit approximately five-second test limits in component-library, component-catalog and branch-columns tests, and was interrupted (130) to rerun after those evaluations. No timeout or assertion was weakened. The final service-enabled launch initially hit an automatic approval-review timeout, then succeeded on the permitted retry. One exploratory baseline evaluation was interrupted after the power-pin rail handling correction and restarted from scratch; only completed corrected runs were used for the fit.
 
 ## Investigation results
 
@@ -62,7 +68,7 @@ From `tmp/main-a2120ab-report.json`, all 628 cases:
 
 ### Detector semantics and bounds
 
-`readability-netlist.ts` uses the authoritative electrical topology projection and resolved pin roles. Ground, power and supply-role pins identify fixed rail Nets. It does not inspect displayed names, labels, titles, planner structures or layout groups. IDs only identify vertices and break deterministic search ties; geometry is used only to measure the selected topology.
+`readability-netlist.ts` uses the authoritative electrical topology projection and resolved pin roles. Terminal and explicit interface Base Net IDs are normalized to logical Net representatives, so matching scoped Net labels preserve electrical connectivity in both detectors. Ground, power and supply-role pins identify fixed rail Nets. It does not interpret displayed names, labels, titles, planner structures or layout groups itself; label-based electrical equivalence comes from the authoritative projection. IDs only identify vertices and break deterministic search ties; geometry is used only to measure the selected topology.
 
 `signalDirection` counts every placed input/output pin pair on a device having both roles. It also counts input/output port pairs, using explicit interface directions when available, otherwise walking two-pin passive devices until reaching directed-pin Nets. Traversal stops at those Nets, so passive feedback beyond the amplifier input does not relabel the external input as an output. Rails stop traversal; conflicting input/output reachability remains unclassified. Port comparisons use visible symbol centres; device pin comparisons use transformed pin positions. An output strictly left of its input violates; equal x does not.
 
@@ -74,12 +80,12 @@ Each placed swapped pair is one opportunity. Its visible centres must be level w
 
 ### New coverage and flagged detector counts
 
-All pre-existing metric counts match the original main report exactly on every human/result pair. The new detector adds coverage on 104 of the 250 previously unmeasured flow drawings, and 20 of the 499 previously unmeasured symmetry drawings. The existing metrics remain available alongside these conservative new measurements.
+All pre-existing metric counts match the original main report exactly on every human/result pair. The new detector adds coverage on 104 of the 250 previously unmeasured flow drawings, and 32 of the 499 previously unmeasured symmetry drawings. The existing metrics remain available alongside these conservative new measurements. Relative to round 1, logical connectivity changes symmetry counts on 43 drawings and flow opportunity counts on one drawing; 31 more human drawings now have symmetry opportunities (116 versus 85), including 12 more with none in the old symmetry metrics (32 versus 20).
 
 | New metric        | Human drawings with opportunities | Opportunities, human / main | Violations, human / main |
 | ----------------- | --------------------------------: | --------------------------: | -----------------------: |
-| `signalDirection` |                         187 / 628 |                   741 / 741 |                  71 / 81 |
-| `netlistSymmetry` |                          85 / 628 |                   211 / 211 |                  52 / 29 |
+| `signalDirection` |                         187 / 628 |                   742 / 742 |                  71 / 81 |
+| `netlistSymmetry` |                         116 / 628 |                   323 / 323 |                  91 / 81 |
 
 | Drawing    | Metric            | Human violations / opportunities | Main violations / opportunities |
 | ---------- | ----------------- | -------------------------------: | ------------------------------: |
@@ -94,13 +100,13 @@ The existing T086 procedure was used without changes to fitting iterations, regu
 
 ```bash
 node scripts/auto-layout-eval.mjs tmp/le10-input --jobs 12 --baseline-planner /tmp/t086-baseline/dist/index.js
-# preserved as tmp/t087/main-report.json
+# preserved as tmp/t087-round2/main-report.json
 node scripts/auto-layout-eval.mjs tmp/le10-input --jobs 12 --baseline-planner /tmp/t086-eb72cb1/packages/auto-layout/dist/index.js
-# preserved as tmp/t087/historical-report.json
-node scripts/readability-fit.mjs tmp/t087/main-report.json --source-commit 17372217c5cd175d0e7cfe3c95ae11ac27187245 --pool tmp/t087/historical-report.json --source-commit eb72cb1f11ea2cb083d9d10c5525a03b6bba2a59 --write
+# preserved as tmp/t087-round2/historical-report.json
+node scripts/readability-fit.mjs tmp/t087-round2/main-report.json --source-commit 17372217c5cd175d0e7cfe3c95ae11ac27187245 --pool tmp/t087-round2/historical-report.json --source-commit eb72cb1f11ea2cb083d9d10c5525a03b6bba2a59 --write
 ```
 
-Generated provenance records both report SHA-256 checksums and the actual frozen-build commit 1737221. After validation, the generator was rerun to correct the initial logical-main label a2120ab to the supplied build’s actual SHA; all coefficients and scales were asserted exactly unchanged. The current evaluator report retains its as-run logical-main provenance label; its numeric model is identical to the final generated model. `tmp/t087/fit.json` contains the fit; `tmp/t087/analysis.json` independently rescores each layout set under both weight sets.
+Generated provenance records both freshly measured report SHA-256 checksums and the actual frozen-build commit 1737221. `tmp/t087-round2/fit.json` contains the fit; `tmp/t087-round2/analysis.json` independently rescores each layout set under both T086 and regenerated T087 weight sets. All coefficients and all other scales match round 1 exactly; only the zero-weight `netlistSymmetry` scale and report provenance change.
 
 | Layouts    | Weights | Dev human-better | Val human-better | Dev result / human | Val result / human |
 | ---------- | ------- | ---------------: | ---------------: | -----------------: | -----------------: |
@@ -109,7 +115,7 @@ Generated provenance records both report SHA-256 checksums and the actual frozen
 | historical | T086    |         85.1936% |         82.5397% |           1.658697 |           1.581717 |
 | historical | T087    |         85.4214% |         82.5397% |           1.655193 |           1.583518 |
 
-The candidate new goal baseline is **dev 1.1954× / val 1.2023× human**. It is not an accepted replacement baseline because main validation discrimination falls from 129/189 to 128/189 (dev rises from 301/439 to 305/439). Validation flips are `9267mkznwd` and `caafz7vv6j` losing human-better status, and `hdag4x8jrw` gaining it. These are reporting observations only; no detector or fit was adjusted in response.
+The new goal baseline is **dev 1.1954× / val 1.2023× human**, unchanged from round 1. Main validation discrimination is 128/189 versus T086’s 129/189 (dev rises from 301/439 to 305/439). Opus explicitly accepted this one-pair gate deviation in the round 1 review; the round 2 refit introduces no further deviation. Validation flips are `9267mkznwd` and `caafz7vv6j` losing human-better status, and `hdag4x8jrw` gaining it. These are reporting observations only; no detector or fit was adjusted in response.
 
 ### Generated weights
 
@@ -130,7 +136,7 @@ The score uses `weight × violations / scale`; zero weights remain reported diag
 | labelOverlaps         |  0.04057686828 | 0.1967850949 |
 | labelOwnerDistance    |              0 | 0.4188062001 |
 | narrowBands           |              0 |  2.639933388 |
-| netlistSymmetry       |              0 | 0.4091771842 |
+| netlistSymmetry       |              0 | 0.6535342849 |
 | portOrder             |  0.02308996572 | 0.9850823538 |
 | potentialOrder        |              0 | 0.3357919955 |
 | railCrossings         |  0.06844497339 | 0.4295465639 |
@@ -147,7 +153,7 @@ The score uses `weight × violations / scale`; zero weights remain reported diag
 | unownedDrafting       |   0.3158481645 |  1.285985436 |
 | wireThroughSymbols    |              0 |  1.329103008 |
 
-`signalDirection` receives positive weight (0.0688084); `netlistSymmetry` receives zero. Across main drawings the latter has 52 human versus 29 result violations, so exposing the targeted asymmetry does not guarantee a positive coefficient under the prescribed aggregate nonnegative fit. Its zero coefficient is an unresolved limitation of the intended composite goal, not a missing detector result.
+`signalDirection` receives positive weight (0.0688084); `netlistSymmetry` receives zero. Across main drawings the latter has 91 human versus 81 result violations, so exposing the targeted asymmetry does not guarantee a positive coefficient under the prescribed aggregate nonnegative fit. Its zero coefficient remains a documented limitation of the composite goal, accepted in round 1; symmetry remains a reported diagnostic metric.
 
 ### Three flagged drawings, both layout sets
 
@@ -164,9 +170,9 @@ All three flagged results remain worse than human under the generated evaluation
 
 ### Planner invariance and large documents
 
-Both the fresh baseline and final current-planner measurement have **628/628 plan hashes identical** to `tmp/main-a2120ab-report.json`, with **628/628 electrical equivalence**. Current and remeasured-main per-case readability measurements and independently rescored aggregates agree exactly. Selection weights are byte-identical to a2120ab. Isolated held-out timing is reported below.
+Both the fresh baseline and final current-planner measurement have **628/628 plan hashes identical** to `tmp/main-a2120ab-report.json`, with **628/628 electrical equivalence**. Current and remeasured-main per-case readability measurements and independently rescored aggregates agree exactly. The historical remeasurement also has 628/628 hashes identical to its round 1 report and 628/628 electrical equivalence. Selection weights are byte-identical to a2120ab. Isolated held-out timing is reported below.
 
-The six large documents were each planned with the supplied main build, current code and a current repeat (`node tmp/t087/verify-large.mjs`). All plan JSON is byte-identical to main and deterministic on repeat; no error diagnostics were emitted.
+The six large documents were each planned with the supplied main build, current code and a current repeat (`node tmp/t087-round2/verify-large.mjs`). All plan JSON is byte-identical to main and deterministic on repeat; no error diagnostics were emitted.
 
 | Drawing    | Instances | Byte-identical to main | Deterministic repeat |
 | ---------- | --------: | ---------------------- | -------------------- |
@@ -179,23 +185,23 @@ The six large documents were each planned with the supplied main build, current 
 
 ### Held-out timing
 
-Run alone after evaluations and tests, using `node tmp/t087/timing.mjs`: both planners warmed once per fixture; three measured samples each, alternating order. All seven fixtures have identical main/current hashes and deterministic repeats.
+Run alone after evaluations and tests, using `node tmp/t087-round2/timing.mjs`: both planners warmed once per fixture; three measured samples each, alternating order. All seven fixtures have identical main/current hashes and deterministic repeats.
 
 | Fixture          | Main median ms | Current median ms | Change |
 | ---------------- | -------------: | ----------------: | -----: |
-| fd-two-stage     |         1753.9 |            1764.1 | +0.58% |
-| common-source-ac |         1046.1 |            1065.5 | +1.85% |
-| skew             |         1782.7 |            1792.1 | +0.53% |
-| deadtime         |        10037.7 |           10070.9 | +0.33% |
-| ota-sky130       |          695.6 |             690.2 | -0.78% |
-| widlar           |         5370.3 |            5395.1 | +0.46% |
-| ltc3452          |        13831.2 |           14051.9 | +1.60% |
+| fd-two-stage     |         1776.3 |            1761.9 | -0.81% |
+| common-source-ac |         1059.8 |            1049.5 | -0.98% |
+| skew             |         1826.5 |            1824.8 | -0.09% |
+| deadtime         |        10000.1 |           10109.9 | +1.10% |
+| ota-sky130       |          696.0 |             691.6 | -0.63% |
+| widlar           |         5386.2 |            5414.1 | +0.52% |
+| ltc3452          |        13968.6 |           14074.0 | +0.75% |
 
-Median changes are within −0.78% to +1.85%, consistent with noise. The timing and planner-invariance gates pass. Raw samples and hashes are in `tmp/t087/timing.json`.
+Median changes range from -0.98% to +1.10%, consistent with noise. The timing and planner-invariance gates pass. Raw samples and hashes are in `tmp/t087-round2/timing.json`.
 
 ## Deviations and open questions
 
-- **Unmet gate:** main validation discrimination is below T086. Per the task workflow, the implementation stops short of claiming acceptance; changing the fit objective or forcing a positive symmetry coefficient would require a revised plan. The generated candidate weights are left reviewable.
+- **Previously accepted gate deviation:** main validation discrimination remains 67.72% versus T086’s 68.25% (one pair out of 189). Opus accepted this in round 1; round 2 leaves discrimination unchanged. No fit-objective changes, validation tuning or forced symmetry coefficient were introduced.
 - No planner placement/routing/selection code, R88 recognition, dependencies, lockfile, plan or review was changed. No provider API calls, commits or branch operations were performed.
 - The existing fit/evaluator scripts discover metric keys automatically, so they need no source changes.
 - Exact involution is conservative: asymmetric graph components and exhausted searches can have no opportunity even if a human could recognize a local partial symmetry. Passive paths reaching conflicting directed roles remain ambiguous.
@@ -203,6 +209,6 @@ Median changes are within −0.78% to +1.85%, consistent with noise. The timing 
 
 ### Proposed spec text
 
-> Full readability evaluation additionally reports `signalDirection` and `netlistSymmetry`. Neither changes planner selection weights. Signal direction derives input/output precedence from resolved pin roles and infers unset interface directions through passive connectivity, stopping at rails or directed-pin Nets. Opportunities are placed input/output port pairs and device input/output pin pairs; an output left of its input violates.
+> Full readability evaluation additionally reports `signalDirection` and `netlistSymmetry`. Neither changes planner selection weights. Both detectors normalize Base Nets to the authoritative logical Net projection, including explicit interface references, so label-connected parts remain electrically connected. Signal direction derives input/output precedence from resolved pin roles and infers unset interface directions through passive connectivity, stopping at rails or directed-pin Nets. Opportunities are placed input/output port pairs and device input/output pin pairs; an output left of its input violates.
 >
 > Netlist symmetry is independent of planner recognition. It validates a nontrivial connectivity-graph involution containing a transistor pair, preserving device symbol/model identity and pin roles, with reversible passive endpoints and fixed rail/self-mapped Nets. Search is deterministic and limited to 10,000 candidate assignments and 256 devices per non-rail-connected component; incomplete searches contribute no opportunities. Each placed swapped pair is an opportunity, and violates if its visible centres differ in y by more than one grid or fail reflection within one grid about the component's median pair-midpoint axis. Evaluation weights are generated by the dev-only pooled procedure; validation cases remain reporting-only.
