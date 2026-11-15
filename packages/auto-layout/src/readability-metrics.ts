@@ -2,13 +2,19 @@ import {
   diagnoseLabelClearance,
   diagnoseVisualQuality,
   resolveRouteGeometry,
+  resolveVisualAnchor,
   visibleInstanceBounds,
 } from "@icm/derived";
-import type { Point, SchematicDocument } from "@icm/model";
+import { routeEnd, type Point, type SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import { draftingGroups } from "./drafting-groups.js";
 import { conductingPins } from "./dc-connectivity.js";
-import { enclosingBox, pinExit, pinPoints } from "./geometry.js";
+import {
+  enclosingBox,
+  pinExit,
+  pinPoints,
+  placementPitch,
+} from "./geometry.js";
 import { netLevels } from "./layered.js";
 import { channelPins, classifyNets, polarity } from "./net-roles.js";
 import {
@@ -18,7 +24,7 @@ import {
   signalDistances,
 } from "./placement-connectivity.js";
 import { railCrossingMetrics } from "./readability-rail-crossings.js";
-import { readabilityWeights } from "./readability-weights.js";
+import { readabilityWeights } from "./readability-selection-weights.js";
 import { readabilityCounts } from "./readability.js";
 import { recognizeStructures } from "./recognize.js";
 import { auditRouting } from "./routing-audit.js";
@@ -59,16 +65,67 @@ function spanningLength(points: Point[]): number {
   return length;
 }
 
-/** Different-Net, end-to-end segments can read as one conductor across a short
- * empty gap. Group by axis and line; overlapping ink is not an abutment.
- * Symbol ink bounds interrupt the gap, including a device joining two Nets.
+/** Facing pin entries or two-way bends of different Nets can read as one wire.
+ * Open stubs, branch junctions, markers and labeled ends provide different cues.
+ * Keep same-line segment pairs as opportunities; only qualifying ends violate.
  */
 function collinearAbutments(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
   paths: { netId: string; points: readonly Point[] }[],
   boxes: ReturnType<typeof visibleInstanceBounds>,
-  pitch: number,
+  maxGap: number,
 ): Measurement {
-  const lines = new Map<string, { netId: string; lo: number; hi: number }[]>();
+  const pointKey = (net: string, p: Point) => JSON.stringify([net, p.x, p.y]);
+  const pins = new Set<string>();
+  const marked = new Set<string>();
+  for (const [index, route] of document.routes.entries()) {
+    const points = paths[index]!.points;
+    if (!points.length) continue;
+    for (const [endpoint, point] of [
+      [route.start, points[0]!],
+      [routeEnd(route), points.at(-1)!],
+    ] as const) {
+      if (endpoint.kind !== "terminal") continue;
+      const instance = document.instances.find(
+        (i) => i.id === endpoint.instanceId,
+      );
+      if (instance)
+        (isMarker(instance) ? marked : pins).add(pointKey(route.netId, point));
+    }
+  }
+  for (const annotation of document.annotations) {
+    if (!["net-label", "power-label", "route-marker"].includes(annotation.kind))
+      continue;
+    const net =
+      annotation.binding?.kind === "net-name"
+        ? annotation.binding.netId
+        : annotation.netId;
+    // A label identifies its attachment even when text is offset from the wire.
+    const anchor = annotation.anchor;
+    const attachment =
+      anchor.kind === "object"
+        ? { ...anchor, localOffset: { x: 0, y: 0 } }
+        : anchor.kind === "route"
+          ? { ...anchor, normalOffset: 0 }
+          : anchor;
+    if (net)
+      marked.add(
+        pointKey(
+          net,
+          resolveVisualAnchor(document, resolver, attachment).position,
+        ),
+      );
+  }
+  type Segment = {
+    netId: string;
+    axis: "x" | "y";
+    line: number;
+    lo: number;
+    hi: number;
+  };
+  const lines = new Map<string, Segment[]>();
+  const segments: Segment[] = [];
   for (const path of paths)
     for (let i = 1; i < path.points.length; i++) {
       const a = path.points[i - 1]!,
@@ -79,50 +136,85 @@ function collinearAbutments(
       const axis = horizontal ? "x" : "y";
       const line = horizontal ? a.y : a.x;
       const key = `${axis}:${line}`;
-      const segments = lines.get(key) ?? [];
-      segments.push({
+      const segment: Segment = {
         netId: path.netId,
+        axis,
+        line,
         lo: Math.min(a[axis], b[axis]),
         hi: Math.max(a[axis], b[axis]),
-      });
-      lines.set(key, segments);
+      };
+      segments.push(segment);
+      const group = lines.get(key) ?? [];
+      group.push(segment);
+      lines.set(key, group);
     }
+  const facing = (s: Segment, along: number) => {
+    const point =
+      s.axis === "x" ? { x: along, y: s.line } : { x: s.line, y: along };
+    const key = pointKey(s.netId, point);
+    if (marked.has(key)) return false;
+    const directions = new Set<string>();
+    for (const other of segments) {
+      if (
+        other.netId !== s.netId ||
+        point[other.axis === "x" ? "y" : "x"] !== other.line
+      )
+        continue;
+      const at = point[other.axis];
+      if (at < other.lo || at > other.hi) continue;
+      if (at > other.lo) directions.add(`${other.axis}-`);
+      if (at < other.hi) directions.add(`${other.axis}+`);
+    }
+    // A continuing wire does not end facing the gap.
+    const intoGap = `${s.axis}${along === s.hi ? "+" : "-"}`;
+    if (directions.has(intoGap)) return false;
+    return (
+      pins.has(key) ||
+      (directions.size === 2 && [...directions].some((d) => d[0] !== s.axis))
+    );
+  };
   const result = measurement();
-  for (const [key, segments] of lines) {
-    const horizontal = key.startsWith("x:");
-    const line = Number(key.slice(2));
-    for (let i = 0; i < segments.length; i++)
-      for (let j = i + 1; j < segments.length; j++) {
-        const a = segments[i]!,
-          b = segments[j]!;
+  for (const group of lines.values())
+    for (let i = 0; i < group.length; i++)
+      for (let j = i + 1; j < group.length; j++) {
+        const a = group[i]!,
+          b = group[j]!;
         if (a.netId === b.netId) continue;
         result.opportunities++;
-        const lo = Math.min(a.hi, b.hi),
-          hi = Math.max(a.lo, b.lo);
-        if (hi < lo || hi - lo > 2 * pitch) continue;
+        const [left, right] = a.lo < b.lo ? [a, b] : [b, a];
+        const lo = left.hi,
+          hi = right.lo;
+        if (
+          hi < lo ||
+          hi - lo > maxGap ||
+          !facing(left, lo) ||
+          !facing(right, hi)
+        )
+          continue;
+        const horizontal = a.axis === "x";
+        // Match visual.ts's 1.5-unit wire-through inset: stroke caps at a pin
+        // entry are not an intervening symbol body (e.g. parallel resistor pins).
         const interrupted = boxes.some(({ bounds: box }) => {
-          const across = horizontal ? box.y : box.x;
-          const depth = horizontal ? box.height : box.width;
-          const start = horizontal ? box.x : box.y;
-          const length = horizontal ? box.width : box.height;
+          const across = (horizontal ? box.y : box.x) + 1.5;
+          const depth = Math.max(0, (horizontal ? box.height : box.width) - 3);
+          const start = (horizontal ? box.x : box.y) + 1.5;
+          const length = Math.max(0, (horizontal ? box.width : box.height) - 3);
           return (
-            line >= across &&
-            line <= across + depth &&
-            (hi === lo
-              ? start < lo && start + length > hi
-              : start < hi && start + length > lo)
+            a.line > across &&
+            a.line < across + depth &&
+            start < hi &&
+            start + length > lo
           );
         });
         if (!interrupted) result.violations++;
       }
-  }
   return result;
 }
 
 /** Reference-free measurements, also used by T071's frozen composite guard.
  * No reference drawing, planner state, ids or titles as inputs.
  * Counts are accompanied by exposure denominators; area and detour are masses.
- * Internal weighted mode leaves zero-weight diagnostic entries at zero.
+ * Internal weighted mode uses selection weights, leaving diagnostics at zero.
  * The default remains the complete evaluator measurement.
  * Two grid pitches = rounded-up median positive projection gap in dev humans.
  */
@@ -404,7 +496,13 @@ export function readabilityMetrics(
     );
   metrics.railCrossings = railCrossingMetrics(document, resolver, roles.rails);
   if (enabled("collinearAbutment"))
-    metrics.collinearAbutment = collinearAbutments(paths, boxes, pitch);
+    metrics.collinearAbutment = collinearAbutments(
+      document,
+      resolver,
+      paths,
+      boxes,
+      placementPitch(roles).member,
+    );
   const routedNets = enabled("detour")
     ? [...new Set(paths.map((p) => p.netId))].sort()
     : [];
@@ -500,17 +598,22 @@ export function readabilityMetrics(
   return metrics;
 }
 
-/** Fixed dev-calibrated penalty, independent of other evaluated drawings. */
+/** Frozen selection penalty by default; evaluation supplies its separate weights. */
 export function readabilityScore(
   metrics: ReturnType<typeof readabilityMetrics>,
+  weights: Readonly<
+    Partial<
+      Record<
+        keyof ReturnType<typeof readabilityMetrics>,
+        { weight: number; scale: number }
+      >
+    >
+  > = readabilityWeights,
 ): number {
-  return (
-    Object.keys(readabilityWeights) as (keyof typeof readabilityWeights)[]
-  ).reduce(
+  return (Object.keys(weights) as (keyof typeof metrics)[]).reduce(
     (sum, key) =>
       sum +
-      (readabilityWeights[key].weight * metrics[key].violations) /
-        readabilityWeights[key].scale,
+      (weights[key]!.weight * metrics[key].violations) / weights[key]!.scale,
     0,
   );
 }

@@ -20,7 +20,7 @@ import {
 } from "../src/readability-metrics.js";
 import { railCrossingMetrics } from "../src/readability-rail-crossings.js";
 import { readabilityTerm } from "../src/readability-selection.js";
-import { readabilityWeights } from "../src/readability-weights.js";
+import { readabilityWeights } from "../src/readability-selection-weights.js";
 import { auditRouting } from "../src/routing-audit.js";
 import { circuit } from "./document-fixture.js";
 import corpus from "./corpus-cases.json";

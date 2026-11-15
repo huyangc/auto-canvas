@@ -5,7 +5,7 @@ import { planningMemo } from "./planning-reuse.js";
 import { emptyChoices } from "./layout-choices.js";
 import { readabilityTerm } from "./readability-selection.js";
 import { readabilityMetrics } from "./readability-metrics.js";
-import { readabilityWeights } from "./readability-weights.js";
+import { readabilityWeights } from "./readability-selection-weights.js";
 import {
   compareCompleteness,
   compareRuns,
