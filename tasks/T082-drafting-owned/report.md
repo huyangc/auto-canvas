@@ -1,65 +1,56 @@
-# T082 report — round 2
+# T082 report — round 3
 
 ## Summary
 
-Corrected conductor recovery to allocate fresh Route, leg, bend, and Junction
-IDs with R98 reservation and deterministic salting. Movable route/junction
-anchors receive explicit drafting edits; locked anchors are never reactivated.
-Recovery now runs only for plain, nonzero-budget planning with 1–40 instances,
-checks cancellation per Net/group/offset, and bounds clearance-passing seat
-trials with `finishingTrialBudget` (128 per group, 512 per document before size
-scaling). Each carried Net is scored independently before keeping it.
+Preserve R150's current clearance seat when explicitly re-anchoring movable
+drafting to fresh carried conductor IDs. Junction anchors recompute their
+local offset; route anchors recompute their along-segment fraction and normal
+offset. Fallback positions match the current seat. A route anchor that cannot
+represent the current position or orientation keeps its existing seated anchor.
+This keeps touching captions aligned and mixed-anchor arrows rigid.
 
-**All round 1 gains survive.** Dev composite remains 59.827427297 versus main's
-61.058969146; val remains 33.047677117 versus 33.575480766. Unowned groups remain
-22 versus 29 on dev and 8 versus 11 on val. Seven drawings improve and none
-regresses; 628/628 remain equivalent. Only `qj62dz4qvm` has a different plan hash
-from round 1: one useful conductor is retained with fresh IDs, rather than the
-previous three restorations. Its composite and four recovered groups are unchanged.
+All 628 corpus plan hashes and scores exactly match the pre-round-3 branch.
+Against main `8387e36`, dev composite is 54.370761083 → 53.315153784 and
+val is 27.996936455 → 27.469132806; six drawings improve and none regresses.
+All 628 remain equivalent and all six large documents are byte-identical.
+
+Removed the provisional Opus rejection guard: the regression shows that it
+prevents splitting by dropping a legal conductor, while position-preserving
+re-anchoring retains both the conductor and the seat without the guard.
 
 ## Steps
 
-| Step                         | Status | Notes                                                                                                                                                                                                                                                                                                             |
-| ---------------------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1. Investigation gate        | done   | Preserved round 1's investigation of all 21 baseline-unowned groups in the ten named drawings. Its six-dev-group gate remains satisfied by the final round 2 results.                                                                                                                                             |
-| 2. Carry terminal-free wires | done   | Fresh IDs and explicit movable anchors; connectivity-only eligibility; skip bus-member routes and contact-anchored/member junctions; collision and terminal-partition guards; independent per-Net acceptance.                                                                                                     |
-| 3. Reseat stranded groups    | done   | Same owner-centered search, with cancellation and scaled trial caps. Restrict collapsed-conductor fallback to singleton terminal Nets; skip groups merged with locked ink; cache grouping per replay.                                                                                                             |
-| 4. Synthetic tests           | done   | 17 targeted tests pass, including ID freshness/salting, route and junction anchor edits, locked anchors, symbol and terminal pin/junction/wire contact, independent Net acceptance, aborts within carrying and offset search, optimized/partition/zero-budget gates, determinism, and a baseline-failing caption. |
-| 5. Corpus and review         | done   | All 628 evaluated, 38 visual comparisons inspected, six large documents identical and deterministic, all seven isolated timing medians within +20%.                                                                                                                                                               |
+| Step                         | Status | Notes                                                                                                                                                                 |
+| ---------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1. Investigation gate        | done   | Prior-round per-group evidence retained below. Round 3 reproduced the latest finding through the real planner before changing implementation.                         |
+| 2. Carry terminal-free wires | done   | Re-anchoring preserves current geometry; existing eligibility, fresh IDs, collision checks and per-Net acceptance remain intact.                                      |
+| 3. Reseat stranded groups    | done   | Existing bounded owner search is unchanged; its current seat survives re-anchoring.                                                                                   |
+| 4. Synthetic tests           | done   | Four new real-planner regressions: junction, horizontal/vertical route anchors, and an arrow with mixed endpoint anchors. All fail on d1b883a and pass with this fix. |
+| 5. Corpus and review         | done   | All 628 evaluated; 38 visual comparisons reviewed; six large documents identical and deterministic.                                                                   |
 
 ## Review findings addressed
 
-1. **Must-fix: identity contract.** `documentObjectIds(source)` and the ordinary
-   final document reserve all IDs, including removed children. Every carried
-   Route, leg, bend, and Junction gets a salted `deriveStableId`; endpoint and
-   movable visual-anchor references are rewritten explicitly. Locked objects
-   are excluded through movable-component grouping. Removed the old frozen-ink
-   comparison whose only purpose was to guard accidental ID reactivation.
-   All of round 1's composite and unowned-drafting gain survives.
-2. **Must-fix: cancellation/runtime.** Pass the planner's `stopped` predicate
-   into recovery; check it per Net, group, and offset. Stop after at most 128
-   clearance-passing seat trials per group and 512 per document, each scaled
-   through `finishingTrialBudget(instances, limit, false)`. Cancellation retains
-   the ordinary result. Tests cancel inside both carrying and seat search.
-3. **Must-fix: gating.** The final recovery call now requires the same nonzero
-   search/instance eligibility as the finishing pass, and excludes optimized
-   and partitioned planning. Tests cover all three excluded modes. Default
-   corpus metrics equal round 1 for every drawing.
-4. **Should-fix: acceptance/cost.** Score and guard each carried Net separately;
-   rejected Nets no longer poison successful Nets or subsequent reseating.
-   Hoist the ordinary terminal partition out of the Net loop and the seat
-   partition out of the offset loop. A synthetic two-Net test protects this.
-5. **Should-fix: tests.** Collision tests assert the intersecting symbol bounds
-   or exact terminal-Net pin/junction/wire contact geometry before asserting
-   rejection. The prior ordinary caption test is replaced by a smaller caption
-   that is unowned on `/tmp/t081-baseline/dist` and owned here (synthetic text at
-   `(605, 365)`). Both snapshots and the reproducer are in
-   `tmp/t082-round2/stranded-caption.json` and `find-caption.mjs`. Added the
-   abort, mode-gate, fresh-ID, salted-ID, and anchor regressions described above.
-6. **Nit: edge cases.** Skip contact-anchored junctions and bus-member routes;
-   singleton-only instance fallback; leave missing current groups (including
-   groups merged with locked ink) alone; calculate `draftingGroups` once per
-   accepted replay instead of once per source-owned group.
+**Round 2 must-fix #1 — rigid drafting groups during re-anchoring.** The fixture
+has two touching captions at `(850,420)` and `(880,420)` beside an isolated
+bent conductor, plus locked ink at `(308,394)`. Through `planAutoLayout`, R150
+seats the captions at `(310,420)` and `(340,420)`: ten units below the owner's
+rigid translation. On `d1b883a`, conductor recovery resets only the anchored
+caption to `(310,410)`. The arrow variant similarly stretches one endpoint.
+
+The first regression was written and run against the exact `d1b883a` recovery
+source before the fix. HEAD differs from that commit only in the provisional
+guard and review text. The narrowed planner test fails with the observed
+10-unit split; the completed four-case regression also fails all four cases.
+No fake seated base or mocked planner is used. With the provisional guard,
+the caption alignment passes but the required retained-conductor assertion
+fails. With the fix and without that guard, all 21 focused tests pass.
+
+The cause is restoring the source anchor's old offsets after R150 has chosen
+a different clearance seat. Rebinding now measures each current resolved
+position relative to the carried junction or route leg. The same operation
+covers an object's main anchor, arrow endpoints, and leader/callout targets.
+Already-seated anchors are retained when the original route leg cannot encode
+the seat or would change its orientation. Locked drafting remains untouched.
 
 ## Acceptance results
 
@@ -69,100 +60,91 @@ pnpm typecheck → 0.
 pnpm lint → 0; 2067 files, 0 errors, 3467 warnings.
 pnpm format:check → 0; all matched files use Prettier code style.
 pnpm test:local → 0; 798 files passed, 3 skipped;
-  8206 tests passed, 117 skipped (8323), 107.67 seconds.
-pnpm test:slow → 0; 2 files, 8 tests passed, 49.41 seconds.
-node scripts/auto-layout-eval.mjs tmp/le10-input --jobs 12 → 0; 628/628 equivalent.
+  8212 tests passed, 117 skipped (8329), 172.34 seconds.
+pnpm test:slow → 0; 2 files, 8 tests passed, 81.23 seconds.
 pnpm exec vitest run packages/auto-layout/test/recover-drafting-owners.test.ts
-  → 0; 17 tests passed.
-node tmp/t082-round2/verify-large.mjs → 0; 6/6 identical and deterministic.
-node tmp/t082-round2/review.mjs → 0; 38 independent plan hashes verified.
-node tmp/t082-round2/render.mjs → 0; 38 sections, 1800px content/viewport.
+  → 0; 21 tests passed.
 ```
 
-`test:local` ran with local-service access for PostgreSQL and loopback listeners.
-All seven required acceptance commands exited zero. The initial held-out timing
-criterion failed for one case; its evidence and targeted repeat are below.
-During implementation, focused
-tests caught an incorrect bend/endpoint field mapping and missing test search
-seeds; these were corrected before the final build and corpus run. Typecheck
-also caught those mistakes. No tests were weakened or deleted.
-Logs are `/tmp/t082-r2-{build,typecheck,lint,format,test-local,test-slow,eval,focused,large,review,render,timing}.log`.
+`test:local` ran with approved local-service access for PostgreSQL and loopback
+listeners. Logs use `/tmp/t082-r3-{build,typecheck,lint,format,test-local,test-slow,focused}.log`.
 
-### Corpus and deterministic replay
+Red/green evidence: `/tmp/t082-r3-red.log` is the first pre-fix planner failure;
+`/tmp/t082-r3-red-all.log` records all four new regressions failing against
+`d1b883a`; `/tmp/t082-r3-guard.log` records the provisional guard rejecting the
+conductor. No test was weakened or deleted.
 
-| Measure              | Dev: main → round 2         | Val: main → round 2         |
+`node tmp/t082-round3/verify-large.mjs` → 0. All six documents (50, 50,
+51, 103, 70, and 94 instances) are byte-identical to main `8387e36` and a
+second current run. Baseline source was exported with `git archive` to
+`/tmp/t082-r3-main-8387e36` and compiled with the installed toolchain, without
+switching branches or installing dependencies. Evidence:
+[`large.json`](../../tmp/t082-round3/large.json), `/tmp/t082-r3-large.log`.
+
+### Corpus against main 8387e36
+
+```text
+node scripts/auto-layout-eval.mjs tmp/le10-input --jobs 12 → 0;
+  628/628 equivalent, no per-drawing composite or guard regressions.
+python3 tmp/t082-round3/compare.py → 0.
+```
+
+| Measure              | Dev: main → round 3         | Val: main → round 3         |
 | -------------------- | --------------------------- | --------------------------- |
-| Frozen composite sum | 61.058969146 → 59.827427297 | 33.575480766 → 33.047677117 |
-| Composite / human    | 1.270882× → 1.245249×       | 1.244033× → 1.224477×       |
-| Unowned drafting     | 29 → 22                     | 11 → 8                      |
+| Frozen composite sum | 54.370761083 → 53.315153784 | 27.996936455 → 27.469132806 |
+| Composite / human    | 1.238520× → 1.214475×       | 1.186538× → 1.164170×       |
+| Unowned drafting     | 28 → 22                     | 11 → 8                      |
 | Floating pins        | 6 → 6                       | 0 → 0                       |
 | Missing connections  | 4 → 4                       | 0 → 0                       |
 
-Seven composites improve, 621 are unchanged, and none increases. Every drawing's
-composite equals its round 1 value. All `VISUAL_*` totals are unchanged, including
-zero-weight label clearance; per-drawing guards also do not regress. Dev gain is
-1.231541848 composite units and val gain is 0.527803649. Full comparison:
-[`summary.json`](../../tmp/t082-round2/summary.json); complete evaluation:
-[`report.json`](../../tmp/t082-round2/report.json).
+Six drawings improve, 622 are unchanged, and none is worse than main. All
+`VISUAL_*` totals, including zero-weight label clearance, are unchanged; no
+per-drawing guard regresses. Dev and val sums exactly equal the prior branch's
+53.315153784 / 27.469132806, comfortably within the allowed +0.05. All 628
+plan hashes also equal the pre-round-3 evaluation. Evidence:
+[`report.json`](../../tmp/t082-round3/report.json),
+[`summary.json`](../../tmp/t082-round3/summary.json),
+[`previous-report.json`](../../tmp/t082-round3/previous-report.json), and
+`/tmp/t082-r3-{eval,summary}.log`.
 
-627/628 plan hashes equal round 1; the block diagram changes because of fresh
-IDs and independently rejected unnecessary conductors. All 38 independent
-review replays match this round's corpus hashes. All six large documents
-(50, 50, 51, 103, 70, and 94 instances) are byte-identical to main and to a
-second current run; evidence: [`large.json`](../../tmp/t082-round2/large.json).
+### Visual review and deterministic replay
 
-### Held-out timing
+```text
+node tmp/t082-round3/review.mjs → 0; 38 independent plan hashes verified.
+node tmp/t082-round3/render.mjs → 0; 38 sections, 1800px content/viewport.
+```
 
-The timing harness ran alone, after tests, corpus evaluation, large-document
-checks, and visual rendering had finished. It warmed both implementations,
-then measured three runs each in alternating order.
+[Human | main 8387e36 | round 3 review page](../../tmp/t082-round3/review.html)
+contains all ten named drawings, the ten largest composite reductions (six
+improvements plus four unchanged ties), and the original 25 samples: 38 unique
+drawings. All ten rendered sheets were inspected. The page has no horizontal
+overflow. Recovered labels/arrows remain beside their owners in `dr4e8zhyjg`,
+`nfa75tcbqf`, `mbpnznx3p5`, `m9knq7tpsz`, and `vkafsqxh8n`; collision-rejected
+examples and sampled layouts retain main's geometry. The block diagram still
+has fragmented signal flow and eight unowned groups despite its improvement.
+The complete corpus is unchanged by this round's fix; the synthetic planner
+regressions exercise the corrected mixed-anchor behavior.
 
-The initial run passed six cases but failed `ltc3452`: 14891.7 → 22087.4 ms
-(1.483×). Both implementations had large timing variation across unchanged
-planning phases: baseline samples were 25157.7/14891.7/14668.4 ms and current
-samples were 24648.8/22087.4/14106.3 ms. Their last pair already favored current.
-This suggested runtime variability, so only this failed case was rerun with
-the same warmup and alternating three-sample procedure, without code changes.
-The initial failure is preserved in `timing-initial.json`; its repeat is in
-`timing-ltc3452-repeat.json`. The table uses the initial six passes and that
-independent repeat, with per-row provenance in `timing.json`.
-
-| Case               | Main median (ms) | Round 2 median (ms) | Ratio  |
-| ------------------ | ---------------- | ------------------- | ------ |
-| `fd-two-stage`     | 1835.4           | 1856.1              | 1.011× |
-| `common-source-ac` | 1195.3           | 1245.8              | 1.042× |
-| `skew`             | 1936.9           | 2020.7              | 1.043× |
-| `deadtime`         | 17726.0          | 17556.2             | 0.990× |
-| `ota-sky130`       | 1222.0           | 1215.0              | 0.994× |
-| `widlar`           | 9902.2           | 9898.7              | 1.000× |
-| `ltc3452`          | 14023.3          | 14428.4             | 1.029× |
-
-All seven are deterministic and byte-identical to main; all medians are within
-+20%. Maximum ratio: 1.043×. Samples, hashes, and phase timings:
-[`timing.json`](../../tmp/t082-round2/timing.json).
-
-`node tmp/t082-round2/timing.mjs` → 0; initially 6/7 timing gates pass.
-`node tmp/t082-round2/timing-ltc3452-repeat.mjs` → 0; repeated failed case passes.
-
-### Visual review
-
-[Human | main 8cdec30 | round 2 review page](../../tmp/t082-round2/review.html)
-contains all ten investigated drawings, the ten largest reductions (seven
-improvements plus three unchanged ties), and the original 25 samples: 38 unique
-drawings. All ten rendered sheets were inspected. There is no horizontal page
-overflow at 1800px.
-
-Recovered captions/arrows are closer to their owners in `dr4e8zhyjg`,
-`nfa75tcbqf`, `mbpnznx3p5`, `m9knq7tpsz`, `vkafsqxh8n`, and `rxdzz3wdry`.
-Collision-rejected examples and fixed samples retain main's layout. The block
-diagram has one surviving free conductor and two reseated large ink groups;
-its eight remaining unowned groups and fragmented layout are still visible.
-The metric improvement is not full reconstruction of its human signal flow.
+All 38 review replays independently match the corpus plan hashes. Evidence:
+[`review-verification.json`](../../tmp/t082-round3/review-verification.json),
+[`review-layout.json`](../../tmp/t082-round3/review-layout.json),
+`review-1.png` through `review-10.png`, and `/tmp/t082-r3-{review,render}.log`.
 
 ## Investigation results
 
-The round 1 gate and per-group investigation below remain the design evidence.
-Round 2 reruns the final corpus after the contract and runtime corrections.
+### Round 3 reproduction
+
+The public planner reproducer above isolates the source-anchor reset from
+R150 seating and later owner search: restoring source offsets reintroduces the
+split, the provisional carry rejection avoids it by losing the conductor, and
+rebinding at the current positions preserves both. Horizontal-route coverage
+exercises normal-offset adjustment; vertical-route coverage exercises the
+along-leg fraction. The arrow case verifies both endpoints and the main anchor.
+
+### Prior-round design gate (historical main 8cdec30)
+
+The following original investigation is retained as the design gate evidence;
+round 3 acceptance uses main `8387e36`, as required by the latest review.
 
 The input protocol resolves `qj62dz4qvm` into 74 routes, including 49 routes on
 23 terminal-free Nets; this is more than the plan's approximate wire count.
@@ -224,59 +206,25 @@ are in [the block-diagram investigation](../../tmp/t082-round1/t082-qj62dz4qvm-i
 | Note ID with one further `copy-1`; 1              | Route on `net-ui-175`; wire removed and caption followed the instance.                                                                                  | Yes: restoring `net-ui-175` preserves ownership at the existing caption seat.                                                                                       |
 | Note ID ending `copy-1-copy-1-copy-1-3-copy-1`; 1 | Already unowned in source.                                                                                                                              | Not eligible; remains unowned.                                                                                                                                      |
 
-### Proposed R150 addition for Opus
+### Proposed R158 clarification for Opus
 
-After selecting the ordinary finished plan, recover source conductors only in
-plain planning with a nonzero search budget and 1–40 instances. A candidate Net
-has no terminals; skip routes with bus members and junctions with terminal
-members or contact anchors. Translate all its routes, bends, and junctions
-rigidly by the displacement of the nearest visible source instance, measuring
-bounds distance from the wire envelope and breaking ties by instance ID.
-
-Allocate fresh Route, leg, bend, and Junction IDs using deterministic salting
-against every source and ordinary-result object ID, including removed input
-objects, and reserve every allocation during the pass. Rewrite conductor
-endpoint references. Explicitly re-anchor movable drafting from the old
-conductor to the newly allocated IDs, preserving its authored anchor offsets
-and translated fallback positions. Never edit or reactivate locked drafting.
-
-Reject any conductor collision with symbol bounds, pins, existing junctions,
-conductors, or drafting ink, and any replay assigning the conductor to a
-terminal Net. Accept each Net independently under the frozen composite,
-calibrated-score, routing, and visual guards; preserve the terminal partition.
-A rejected Net does not invalidate previously accepted recoveries.
-
-For movable source-owned groups still unowned, try the original local offsets
-and then both sides of the projected owner through ±40 grid steps. Require
-ownership within the unchanged radius; preserve instance identity or the
-terminal partition of an electrical owner. Distinguish terminal-free owners
-by source Net identity. Only a singleton conductor may fall back to its
-surviving terminal instance. Keep complete touching groups rigid and leave
-groups merged with locked ink alone.
-
-Check abort/deadline per Net, group, and offset. Limit clearance-passing seat
-trials to `finishingTrialBudget(instanceCount, 128, false)` per group and
-`finishingTrialBudget(instanceCount, 512, false)` per document. Cancellation
-returns the ordinary result; exhausting a trial allowance retains accepted
-work and stops the corresponding search.
-
-Replay each accepted batch and the complete result. Preserve terminal
-partitions, all R146 guards, label-owner-distance counts, and drafting overlap
-limits. Never increase the frozen composite. Crossings, bends, and wire length
-may increase only with a strictly lower composite; a calibrated-score increase
-must reduce unowned groups. Keep the ordinary result if complete replay fails.
+When explicitly re-anchoring movable drafting to a carried conductor's fresh
+IDs, preserve each anchor's current resolved position and orientation after
+R150 seating. Compute a junction's local offset, or a route leg's fraction and
+normal offset, from that current seat, and store the same position as its
+fallback. If the new route anchor cannot represent that seat or orientation,
+retain the existing seated anchor. Apply this rule to primary anchors and
+arrow/leader/callout endpoint or target anchors, so conductor recovery neither
+splits touching components nor stretches their members. Locked drafting stays
+unchanged. All existing R158 acceptance and identity rules remain in force.
 
 ## Deviations and open questions
 
-- No out-of-scope product changes were needed. Scratch evaluation, baseline,
-  review, and timing artifacts live under `tmp/t082-round2` and `/tmp`.
-- Per-Net acceptance now drops `net-ui-76` and `net-ui-268` in the block diagram;
-  its surviving `net-ui-175` conductor plus reseating retain all four recovered
-  groups and the exact round 1 composite improvement. The diagram still has
-  eight unowned groups and remains visually fragmented.
-- The broader within-20%-of-human goal remains unmet: dev is 1.245249× human
-  and val is 1.224477×. This task preserves the bounded improvement without
-  drawing-specific rules or changes to frozen metrics, weights, or radius.
-- No plan/review, dependencies, lockfile, generated source, or frozen metrics
-  were edited. No LLM provider API was called. No commit, push, merge, rebase,
-  or branch switch was performed.
+- Latest review supersedes the plan's old corpus baseline with `8387e36` and
+  waives timing for a change confined to re-anchoring. No timing run was made.
+- Dev remains above the broader 1.20× human goal at 1.214475×; val is within
+  it at 1.164170×. The block diagram still has eight unowned groups.
+- Only the owned implementation, tests, and this report are changed. Scratch
+  evidence is under `tmp/t082-round3` and `/tmp/t082-r3-*`.
+- No plan/review, dependencies, lockfile, generated source, or frozen metric
+  edits; no LLM API calls, commits, pushes, merges, rebases, or branch switches.
