@@ -138,6 +138,43 @@ particular, normalization by drawing span can hide control separation in a
 very large drawing, topology inference can abstain, and free drafting ownership
 is approximate. Inspect single metrics alongside the learned composite.
 
+## Visible integrity
+
+`scripts/visible-integrity.mjs` reports visible connection defects that the
+routing audit (`missingConnections`, `floatingPins`, `unsafeProblems`) does not
+see. The evaluator stores `visibleIntegrity` on the human and result sides; the
+quick reference has none. Its `erc` groups the product ERC findings
+(`diagnoseProject`, the Document placed in its own Project) of three codes,
+each finding with its object ids: `danglingWires` (`ERC_DANGLING_WIRE`: Route,
+Junction, Net), `unconnectedPins` (`ERC_UNCONNECTED_PIN`) and
+`touchingNotConnected` (`ERC_TOUCHING_NOT_CONNECTED`: a pin drawn on another
+Net's wire or pin).
+
+`labelOwnership` lists visible Net labels that read as naming another Net. A
+label's Net is the Logical Net of its bound Base Net (Base Nets joined by a
+matching name are one). Its rendered ink box is measured against every resolved
+wire segment and every visible pin that sits on a Net; a segment crossing or
+touching the box, or a pin inside it, is at distance 0. A label is flagged
+when no wire or pin of its own Logical Net comes within one grid of the box, or
+when a wire or pin of another Logical Net is strictly closer than its own
+nearest one. The flag's reason is `foreign-closer` when that nearer foreign wire
+or pin is itself within one grid (the label stands on another Net), and
+`own-far` otherwise (the label stands apart from its Net); it also records both
+distances, the nearest foreign object and the label box.
+
+Per case, `integrity.introduced` holds what the result shows and its source did
+not: for each Net, the dangling wire ends beyond the source's count on that Net,
+unconnected pins (by instance, pin and member) the source did not report, and
+flagged labels (by annotation id) the source did not flag.
+`integrity.sourceDefects` lists the source's touching-not-connected pins: the
+drawing looks connected where its netlist is not, which layout preserves, so
+they are input defects and not regressions. Each split total has
+`visibleIntegrity` with introduced counts, cases introducing each kind, source
+defects and the raw human/result counts; the per-case table's `integrity`
+column reads introduced dangling ends / unconnected pins / label flags. An
+introduced dangling wire or unconnected pin fails the run like an unsafe
+problem; label ownership is reported only until it is calibrated.
+
 ## Evidence and reproduction
 
 The round 2 task report records acceptance commands, fitted accuracies,
