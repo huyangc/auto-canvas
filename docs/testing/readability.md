@@ -151,7 +151,9 @@ judges netlist membership plus NoConnect marks, not drawn wires) and
 `touchingNotConnected` (`ERC_TOUCHING_NOT_CONNECTED`: a pin drawn on another
 Net's wire or pin).
 
-`labelOwnership` lists visible Net labels that read as naming another Net. A
+`labelOwnership` lists visible Net labels that read as naming another Net (the
+measure lives in `packages/auto-layout/src/label-ownership.ts`; the planner's
+R15a step seats Net labels by the same definition). A
 label's Net is the Logical Net of its bound Base Net (Base Nets joined by a
 matching name are one). Its rendered ink box is measured against every resolved
 wire segment and every visible pin that sits on a Net; a segment crossing or
