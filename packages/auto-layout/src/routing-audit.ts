@@ -2,6 +2,7 @@ import { planningMemo } from "./planning-reuse.js";
 import {
   deriveElectricalTopologyProjection,
   endpointKey,
+  isVisibleEndpoint,
   resolveRouteGeometry,
   visibleInstanceBounds,
 } from "@icm/derived";
@@ -28,7 +29,15 @@ function computeConnectionPins(
       resolver.resolve(instance.symbolId, instance.symbolVariantId)?.definition
         .pins ?? []
     )
-      .filter((pin) => !isMosBulk(instance.symbolId, pin.name))
+      .filter(
+        (pin) =>
+          !isMosBulk(instance.symbolId, pin.name) &&
+          isVisibleEndpoint(document, resolver, {
+            kind: "terminal",
+            instanceId: instance.id,
+            pinName: pin.name,
+          }),
+      )
       .map((pin) => {
         const ref = { instanceId: instance.id, pinName: pin.name };
         const key = endpointKey({ kind: "terminal", ...ref });

@@ -22,6 +22,13 @@ export function readabilityNetlist(
     return baseNet === undefined ? undefined : logicalNet(baseNet);
   };
   const rails = new Set<string>();
+  // Explicit electrical declarations survive removal of a redundant marker.
+  // Normalize the declared Base Net just like terminal connectivity.
+  for (const claim of projection.nameClaimsByOwner.values()) {
+    if (claim.powerDomain !== "ground" && claim.powerDomain !== "vdd") continue;
+    const net = logicalNet(claim.netId);
+    if (net !== undefined) rails.add(net);
+  }
   const devices = document.instances.map((instance) => {
     const pins = [...devicePins(instance, resolver)]
       .sort((a, b) => a.name.localeCompare(b.name))
