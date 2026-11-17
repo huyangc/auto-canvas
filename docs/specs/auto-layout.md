@@ -336,13 +336,18 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   label free instead of emitting a broken anchor.
   Round persisted midpoint fallback coordinates to integer page units; keep
   `t: 0.5` for the precise derived position on the leg.
-- **R15a — Net labels follow their Net.** Once the plan is selected and
-  finished (after R155 local rails, drafting-owner recovery and R162 body
-  leads), judge every visible, unlocked free or route-anchored `net-label`
-  on the final drawing by the label-ownership measure (`label-ownership.ts`,
-  shared with the evaluation's visible-integrity report): it reads as its
-  Net's when a wire or pin of its Logical Net comes within one grid of its ink
-  box and no other Net's wire or pin is strictly closer. A label that reads as
+- **R15a — Net and power labels follow their Net.** Once the plan is
+  selected and finished (after R155 local rails, drafting-owner recovery and
+  R162 body leads), judge every visible, unlocked free or route-anchored
+  `net-label`, and every such `power-label` (text naming a rail drawn without
+  a power symbol; a power label on a power marker is the symbol's caption and
+  is not judged), on the final drawing by the label-ownership measure
+  (`label-ownership.ts`, shared with the evaluation's visible-integrity
+  report): it reads as its Net's when a wire or pin of its Logical Net comes
+  within one grid of its ink box (two grids for a power label, whose text a
+  rail's end conventionally has a grid clear of it) and no other Net's wire or
+  pin is strictly closer. A power label's own Net is the rail Net its claim
+  names (its `netId`). A label that reads as
   its Net's keeps its place, and so does one whose source drawing already
   misreads (an R14 label the planner added has no source and is judged on the
   result), one a layout group or constraint lists in `objectIds`, and a bus
@@ -353,18 +358,27 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   ERC reads it. A Net drawn in pieces joined only by name needs its label on
   each piece, so the label may only move to a seat that names the same piece:
   the piece the source label names, found in the result by the pins it joins
-  (an R14 label: the piece it names on the result). Any other label moves to
-  the best clear seat on that piece by its own Base Net (its Logical Net when
-  the Base Net has none): route anchors at `t` 0.5, 0.25, 0.75, 0.1, 0.9 and
-  every grid step (at most 24) along every leg of at least one grid, on either
+  (an R14 label: the piece it names on the result). When the layout splits
+  that piece and the label names one of the result pieces now, it stays on
+  that one. Any other label moves to
+  the best clear seat on that piece: route anchors at `t` 0.5, 0.25, 0.75, 0.1, 0.9 and
+  every grid step (at most 24) along every leg of at least one grid of its
+  Base Net's wires on that piece (another Base Net joined by name is another
+  piece), on either
   side, in the reading directions of its rotation (0 or 270; other rotations
-  keep their place), and free seats beside, over or under each of its pins
-  within one grid. A seat is rejected when it names another piece, fails the
+  keep their place), and free seats beside, over or under each of its pins on
+  that piece within one grid. An upright power label beside a horizontal leg
+  takes its offsets from its own measured ink: the same clearance over or
+  under the wire as a Net label's ink over it. A seat is rejected when it
+  names another piece, fails the
   ownership measure, or its ink meets another label, free text or a part's
   symbol; and a seat with a wire drawn across its text (the clearance
   model's `struck` wires) is rejected when the label's current place has
   none. Among the rest prefer, in order, fewer wires drawn across the text;
-  fewer other labels within one grid; a seat of the same kind as in the
+  fewer other labels within one grid; for a power label, the outer side of
+  its rail (above a supply rail, below a ground rail as its claim's
+  `powerDomain` says; a seat by a vertical leg has no outer side); a seat of
+  the same kind as in the
   source (by a pin when the source label's nearest own feature is a pin, by a
   wire otherwise); the least distance from the final position of the pin of
   the source label's piece nearest its ink, or, without a source label or
@@ -375,7 +389,16 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   selected layout. It is skipped for a plan with errors and after a stopped
   search (aborted signal or passed deadline); it stops adding seats at the
   transaction edit limit, and when the final replay of the plan with its
-  seats fails, the plan is returned unchanged.
+  seats fails, the plan is returned unchanged. A seat is judged on the
+  finished drawing but written into the plan's edits, where the engine reads
+  its leg on the Routes as the edits draw them and only at the transaction's
+  end rejoins each Net's Routes at their junctions, keeping the label at the
+  conductor point it read; rejoining can give a leg id to another segment or
+  the leg to another Route id. A route seat is therefore written against the
+  drawn Route (the source's, redrawn by `set_route_path`; one another edit
+  makes, such as a split half, as the finished drawing has it) and leg of its
+  Net
+  that holds its point; a route seat no drawn leg holds is not taken.
 - **Marker stubs and drafting.** A marker stub is one wire between exactly
   the marker pin and its R6a host pin, planned with clearance checks, so
   markers sharing a host are never wired to each other. The router does not

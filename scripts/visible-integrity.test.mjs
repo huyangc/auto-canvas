@@ -371,3 +371,51 @@ void test("counts a Net joined by a matching label name as the label's own", () 
     [],
   );
 });
+
+/** clean() with VOUT turned into a power label: text naming the top rail. */
+function powered() {
+  const drawing = clean();
+  drawing.document.annotations[0].kind = "power-label";
+  drawing.document.connectivityEvidence[0] = {
+    id: "claim-vout",
+    kind: "name-claim",
+    netId: "top",
+    name: "VOUT",
+    owner: { kind: "power-marker", objectId: "vout" },
+    powerDomain: "vdd",
+    scope: "local",
+  };
+  return drawing;
+}
+
+void test("flags a power label seated over a foreign wire", () => {
+  const source = powered();
+  const result = powered();
+  result.document.annotations[0].anchor.position = { x: 40, y: 17 };
+  const before = visibleIntegrity(source.document, resolver, source.project);
+  const after = visibleIntegrity(result.document, resolver, result.project);
+  assert.deepEqual(before.labelOwnership, []);
+  assert.equal(after.labelOwnership.length, 1);
+  assert.equal(after.labelOwnership[0].annotationId, "vout");
+  assert.equal(after.labelOwnership[0].reason, "foreign-closer");
+  assert.equal(after.labelOwnership[0].foreignNetId, "bottom");
+  assert.deepEqual(
+    compareVisibleIntegrity(before, after).introduced.labelOwnership.map(
+      (flag) => flag.annotationId,
+    ),
+    ["vout"],
+  );
+});
+
+void test("lets a power label stand up to two grids from its rail", () => {
+  const { project, document } = powered();
+  // About 15 units above the top wire: too far for a Net label.
+  document.annotations[0].anchor.position = { x: 40, y: -36 };
+  assert.deepEqual(
+    visibleIntegrity(document, resolver, project).labelOwnership,
+    [],
+  );
+  document.annotations[0].anchor.position = { x: 40, y: -60 };
+  const [flag] = visibleIntegrity(document, resolver, project).labelOwnership;
+  assert.equal(flag.reason, "own-far");
+});
