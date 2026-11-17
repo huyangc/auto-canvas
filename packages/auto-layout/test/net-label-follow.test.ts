@@ -490,6 +490,10 @@ function combedPieces(crossed: boolean): SchematicDocument {
   return document;
 }
 
+// Either `onPiece` or the Route-start filter alone keeps B's wire seats out
+// here; "leaves a label where it is when the piece it names has no seat"
+// pins `onPiece` alone, "does not seat a label by another Base Net joined to
+// its own by name" the Route-start filter alone.
 it("takes a pin seat on its own piece over a wire seat on another", () => {
   const source = combedPieces(false);
   namedPieces(source);

@@ -156,7 +156,9 @@ another Net (the measure lives in
 `packages/auto-layout/src/label-ownership.ts`; the planner's R15a step seats
 both by the same definition). Since T126 the list, and so every count of label
 flags, includes power labels: text naming a rail drawn without a power symbol.
-A power label on a power marker is the symbol's caption and is not measured. A
+A power label anchored to a ground or `vdd-port` marker, or to an instance
+owning a `power-marker` name claim on the label's Net, is that marker's caption
+and is not measured. A
 label's Net is the Logical Net of its bound Base Net (Base Nets joined by a
 matching name are one). Its rendered ink box is measured against every resolved
 wire segment and every visible pin that sits on a Net; a segment crossing or
