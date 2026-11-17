@@ -7,6 +7,7 @@ import {
   compareVisibleIntegrity,
   visibleIntegrity,
 } from "./visible-integrity.mjs";
+import { markerCounts } from "./netlist-input.mjs";
 import {
   readabilityWeights,
   readabilityCalibration,
@@ -117,11 +118,13 @@ for (let i = 0; i < args.length; i += 2) {
       "--variant",
       "--threshold",
       "--split",
+      "--reference",
+      "--out",
     ].includes(args[i]) ||
     args[i + 1] === undefined
   )
     throw new Error(
-      "Usage: auto-layout-eval.mjs <folder> [--baseline <report.json>] [--baseline-planner <built-index.js>] [--quick | --search <seconds>] [--seed <n>] [--jobs <n>] [--partition human|loadbench|llm --variant v1|v2] [--fixed-human] [--optimized] [--threshold <n>] [--split dev|val] [--samples k] [--anonymize] [--block-boxes on|off]",
+      "Usage: auto-layout-eval.mjs <folder> [--baseline <report.json>] [--baseline-planner <built-index.js>] [--quick | --search <seconds>] [--seed <n>] [--jobs <n>] [--partition human|loadbench|llm --variant v1|v2] [--fixed-human] [--optimized] [--threshold <n>] [--split dev|val] [--samples k] [--anonymize] [--block-boxes on|off] [--reference <folder>] [--out <dir>]",
     );
   flags.set(args[i], args[i + 1]);
 }
@@ -145,6 +148,9 @@ const samples = Number(flags.get("--samples") ?? 3);
 const anonymize = flags.has("--anonymize");
 const blockBoxes = flags.get("--block-boxes") ?? "on";
 const fixedHuman = flags.has("--fixed-human");
+// Netlist input (T128): <folder>/<id>.json is planned and checked, the
+// drawing <reference>/<id>.json is the human reference.
+const referenceFolder = flags.get("--reference");
 if (
   !Number.isSafeInteger(samples) ||
   samples < 0 ||
@@ -156,10 +162,11 @@ if (
   (flags.has("--variant") && !partitionSource) ||
   (fixedHuman && (partitionSource || seconds)) ||
   !(threshold > 0 && Number.isFinite(threshold)) ||
-  (flags.has("--split") && !["dev", "val"].includes(flags.get("--split")))
+  (flags.has("--split") && !["dev", "val"].includes(flags.get("--split"))) ||
+  (referenceFolder && (partitionSource || fixedHuman))
 )
   throw new Error(
-    "Invalid partition, variant, threshold, split or quick-mode combination",
+    "Invalid partition, variant, threshold, split, reference or quick-mode combination",
   );
 if (partitionSource === "llm" && variant === "v2")
   throw new Error("LLM partitions have no floorplan; use v1");
@@ -176,9 +183,10 @@ const baseline = flags.has("--baseline")
   ? JSON.parse(readFileSync(flags.get("--baseline"), "utf8"))
   : undefined;
 const output =
-  partitionSource || fixedHuman
+  flags.get("--out") ??
+  (partitionSource || fixedHuman
     ? `tmp/auto-layout-eval/${fixedHuman ? "v3" : `${variant}-${partitionSource}-${threshold}${partitionSource === "llm" ? `-samples-${samples}${anonymize ? "-anon" : ""}` : ""}`}`
-    : "tmp/auto-layout-eval";
+    : "tmp/auto-layout-eval");
 mkdirSync(output, { recursive: true });
 const escape = (value) =>
   String(value)
@@ -222,7 +230,8 @@ const crossingKindPairs = netKinds.flatMap((kind, index) =>
   netKinds.slice(index).map((other) => [kind, other].sort().join("-")),
 );
 const portHostCounts = ["noHost", "singleHost", "multiHost"];
-function netBreakdown(document, resolver) {
+// Each Net's kind (rail, port or signal) and each port Net's host pin count.
+function netKindOf(document, resolver) {
   const { rails } = classifyNets(document, resolver);
   const instances = new Map(document.instances.map((i) => [i.id, i]));
   const ports = new Map();
@@ -249,6 +258,10 @@ function netBreakdown(document, resolver) {
   // Rail takes precedence when a rail also has a port terminal.
   const kind = (netId) =>
     rails.has(netId) ? "rail" : ports.has(netId) ? "port" : "signal";
+  return { kind, ports };
+}
+function netBreakdown(document, resolver) {
+  const { kind, ports } = netKindOf(document, resolver);
   const routesByNet = new Map();
   for (const route of document.routes) {
     const routes = routesByNet.get(route.netId) ?? [];
@@ -290,6 +303,28 @@ function netBreakdown(document, resolver) {
     portWireLengthByHostCount,
   };
 }
+// Bends per Net kind (the netBreakdown kind rule), crossings with a rail Net
+// on at least one side, and the rail symbols, ports and labels drawn.
+function netKindDetail(document, resolver) {
+  const { kind } = netKindOf(document, resolver);
+  const audit = (keep) =>
+    auditRouting(
+      {
+        ...document,
+        routes: document.routes.filter((r) => keep(kind(r.netId))),
+      },
+      resolver,
+    );
+  return {
+    bendsByNetKind: Object.fromEntries(
+      netKinds.map((k) => [k, audit((other) => other === k).bends]),
+    ),
+    railCrossings:
+      auditRouting(document, resolver).crossings -
+      audit((k) => k !== "rail").crossings,
+    presentation: markerCounts(document),
+  };
+}
 // `project`, when given, adds the visible-connection findings: the source
 // drawing and the layout result need them, the quick reference does not.
 const metrics = (document, resolver, components, stages, project) => {
@@ -304,6 +339,7 @@ const metrics = (document, resolver, components, stages, project) => {
     ...signalPathMetrics(document, resolver),
     visual: visualCounts(document, resolver),
     netBreakdown: netBreakdown(document, resolver),
+    netKindDetail: netKindDetail(document, resolver),
     branchVerticality: branchVerticality(document, resolver),
     legacyScore: routedScore(
       { final: document, result: { diagnostics: [] } },
@@ -407,6 +443,29 @@ function blockMetrics(document, resolver, partition, human) {
     arrangementRelations: relations,
   };
 }
+// A Document with the symmetry groups the human-side metrics read.
+function measuredSide(project) {
+  const document = project.documents.find(
+    (d) => d.id === project.topDocumentId,
+  );
+  if (!document) throw new Error("Top Document missing");
+  const resolver = createProjectSymbolResolver(project, builtInSymbols);
+  const roles = classifyNets(document, resolver);
+  const components = detectSymmetry(document, resolver, roles);
+  const stages = stageComponents(document, resolver, roles, components);
+  return { project, document, resolver, components, stages };
+}
+// Ground and supply markers on a Document's rail Nets, per rail role.
+function railMarkerRoles(document, resolver) {
+  const { rails, pinNet } = classifyNets(document, resolver);
+  const counts = { ground: 0, supply: 0 };
+  for (const i of document.instances) {
+    if (!["ground", "vdd-port"].includes(i.symbolId)) continue;
+    const role = rails.get(pinNet(i.id, i.symbolId === "ground" ? "0" : "P"));
+    if (role) counts[role]++;
+  }
+  return counts;
+}
 async function evaluateFile(file) {
   let section = "";
   const id = file.slice(0, -5);
@@ -426,16 +485,24 @@ async function evaluateFile(file) {
     diagnostics: [],
   };
   try {
-    const project = parseProject(readFileSync(join(folder, file), "utf8"));
-    const document = project.documents.find(
-      (d) => d.id === project.topDocumentId,
+    const input = measuredSide(
+      parseProject(readFileSync(join(folder, file), "utf8")),
     );
-    if (!document) throw new Error("Top Document missing");
-    const resolver = createProjectSymbolResolver(project, builtInSymbols);
-    const roles = classifyNets(document, resolver);
-    const components = detectSymmetry(document, resolver, roles);
-    const stages = stageComponents(document, resolver, roles, components);
+    const { project, document, resolver, components, stages } = input;
     measurement.instances = document.instances.length;
+    // Netlist input: the drawing it was converted from is the human side.
+    const human = referenceFolder
+      ? measuredSide(
+          parseProject(readFileSync(join(referenceFolder, file), "utf8")),
+        )
+      : input;
+    if (referenceFolder) {
+      measurement.reference = { folder: referenceFolder, id };
+      const meta = join(folder, `${id}.meta.json`);
+      measurement.conversion = existsSync(meta)
+        ? JSON.parse(readFileSync(meta, "utf8"))
+        : null;
+    }
     // Oracle extraction is required only for partitioned runs. Default and
     // search evaluations proceed without block metrics when it fails, for
     // example on a document with unplaced devices.
@@ -451,6 +518,9 @@ async function evaluateFile(file) {
     // never report them as a human drawing or measure arrangement against them.
     const hasHuman = !loadbenchReference;
     try {
+      // Imported shelf positions are not a person's placement.
+      if (referenceFolder)
+        throw new Error("Netlist input has no drawn placement to partition");
       const oracle = loadbenchReference
         ? partitionFromLoadbench(document, readFileSync(loadbenchXml, "utf8"))
         : partitionFromPlacement(document, resolver, threshold);
@@ -512,12 +582,18 @@ async function evaluateFile(file) {
     measurement.hasHuman = hasHuman;
     measurement.human = hasHuman
       ? {
-          ...metrics(document, resolver, components, stages, project),
+          ...metrics(
+            human.document,
+            human.resolver,
+            human.components,
+            human.stages,
+            human.project,
+          ),
           ...blockMetrics(
-            document,
-            resolver,
+            human.document,
+            human.resolver,
             partition,
-            hasHuman ? document : null,
+            hasHuman ? human.document : null,
           ),
           equivalent: true,
           milliseconds: 0,
@@ -643,8 +719,9 @@ async function evaluateFile(file) {
         ...blockMetrics(after, resolver, partition, hasHuman ? document : null),
       };
       // An imported LOADBench drawing is still the source the result keeps.
+      // Integrity compares the result with its input, never the reference.
       measurement.integrity = compareVisibleIntegrity(
-        measurement.human?.visibleIntegrity ??
+        (referenceFolder ? undefined : measurement.human?.visibleIntegrity) ??
           visibleIntegrity(document, resolver, project),
         measurement.result.visibleIntegrity,
       );
@@ -727,6 +804,11 @@ async function evaluateFile(file) {
           result: resultNet ? count(after, resultNet) : 0,
         };
       });
+      if (referenceFolder)
+        measurement.railMarkersReference = railMarkerRoles(
+          human.document,
+          human.resolver,
+        );
       measurement.equivalent =
         equivalentTerminals(document, after, resolver) &&
         (beforeGraph.status !== "ready" ||
@@ -734,11 +816,11 @@ async function evaluateFile(file) {
             compareElectricalGraphs(beforeGraph.graph, afterGraph.graph) ===
               "equal"));
     }
-    const render = (d) => {
-      const box = buildSvgScene(d, resolver).viewBox;
+    const render = (d, symbols = resolver) => {
+      const box = buildSvgScene(d, symbols).viewBox;
       const x = Math.floor(box.x),
         y = Math.floor(box.y);
-      const svg = renderDocumentSvg(d, resolver, {
+      const svg = renderDocumentSvg(d, symbols, {
         bounds: {
           x,
           y,
@@ -748,7 +830,7 @@ async function evaluateFile(file) {
       });
       // No overlay when the oracle was unavailable, as blockMetrics does.
       if (!partition || blockBoxes === "off") return svg;
-      const overlays = partitionBounds(d, resolver, partition)
+      const overlays = partitionBounds(d, symbols, partition)
         .filter((b) => Number.isFinite(b.x))
         .map((b) => {
           const block = partition.blocks.find((block) => block.id === b.id);
@@ -761,7 +843,7 @@ async function evaluateFile(file) {
         .join("");
       return svg.replace("</svg>", `${overlays}</svg>`);
     };
-    const humanSvg = hasHuman ? render(document) : "",
+    const humanSvg = hasHuman ? render(human.document, human.resolver) : "",
       resultSvg = render(after);
     if (hasHuman) writeFileSync(`${output}/${id}-human.svg`, humanSvg);
     writeFileSync(`${output}/${id}-result.svg`, resultSvg);
@@ -1201,6 +1283,9 @@ if (!isMainThread) {
           weights: readabilityWeights,
         },
         cases: measurements,
+        ...(referenceFolder
+          ? { netlistInput: { folder, reference: referenceFolder } }
+          : {}),
         totals,
         summary: {
           completed: measurements.filter((m) => m.result).length,
