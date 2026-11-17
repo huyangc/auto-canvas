@@ -36,6 +36,7 @@ import {
 import {
   assignRailHosts,
   touchingPins,
+  type RailHost,
   type TerminalRef,
 } from "./pin-contacts.js";
 import type { Placement } from "./types.js";
@@ -205,10 +206,7 @@ function placePowerMarkers(
     ...i,
     placement: targets.get(i.id) ?? i.placement,
   }));
-  const assignments = new Map<
-    string,
-    { host: PinPoint; extra: boolean } | undefined
-  >();
+  const assignments = new Map<string, RailHost | undefined>();
   for (const symbol of ["ground", "vdd-port"]) {
     const nets = new Set(
       markers
@@ -255,7 +253,8 @@ function placePowerMarkers(
     const pair = assignments.get(i.id);
     if (pair?.extra) {
       // T127: an extra host keeps its marker only on a free seat; otherwise
-      // the marker is parked as an unhosted one and R43 joins it.
+      // the marker shares the last channel host as R6a, or without one is
+      // parked as an unhosted one and R43 joins it.
       const host = pair.host;
       const instance = posed.find((d) => d.id === host.instanceId)!;
       const seat = extraHostSeats(
@@ -279,7 +278,7 @@ function placePowerMarkers(
         continue;
       }
     }
-    const assigned = pair && !pair.extra ? pair.host : undefined;
+    const assigned = pair?.extra ? pair.fallback : pair?.host;
     const key = assigned
       ? `${assigned.instanceId}:${assigned.pinName}`
       : i.symbolId;

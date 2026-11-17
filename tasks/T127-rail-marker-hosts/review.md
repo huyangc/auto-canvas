@@ -41,3 +41,38 @@ Corpus against `main` at `af3a8e7`: 612 completed and equivalent, the same 16
 refused, none threw; no introduced dangling wires, unconnected pins or touching
 pins; the 508 cases whose rail partners are only MOS or two-pin parts keep
 their plan hash.
+
+## Round 2 — changes requested (independent PR review of 89b80a6)
+
+The Opus PR review approved with one P2 and three P3 findings. Fix on this
+branch (now rebased on `main` `c26e267`, round 1 committed):
+
+| #   | Severity   | Where                                                                                                       | Finding                                                                                                                                                                                                                                           | Expected fix                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| --- | ---------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | must-fix   | `place-markers.ts` (seat fallback near :282), `pin-contacts.ts` `assignRailHosts`, `route.ts` stub decision | A surplus marker that is handed a spare extra host whose seats are all blocked becomes unhosted (placed from the origin, trunk-joined), although on main it shared the last channel host and got a stub. Regression against main for that subset. | When no extra-host seat is clear and a channel or two-pin host exists, fall back to main's behaviour (share the last channel host); placement and the routing stub decision must agree. Test: one MOS host, two markers on the Net, an extra host whose seats are all blocked → the second marker sits beside the channel host with a stub, as on main. First report how many corpus markers and cases take this path on the current head (quick plans are enough). |
+| 2   | should-fix | `packages/auto-layout/test/rail-marker-hosts.test.ts`                                                       | No test for a rotated or mirrored extra host, nor for several markers mixing channel and extra hosts (where placement and routing must pair identically).                                                                                         | Add both.                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| 3   | note       | seats                                                                                                       | Lead corridor, labels, drafting and frames are not checked for a seat; a failed extra-host stub does not return the marker to the trunk; fixed markers take part in the pairing with a phantom seat.                                              | follow-up, not this round                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+
+Acceptance for round 2: all plan checks; full corpus against
+`tmp/inputs/main-c26e267-report.json`: no `threw`, the same 16 refused, no
+introduced integrity defects; list plans that changed relative to the round-1
+head report (`tmp/inputs/t127-r1-report.json`) and say why; totals not worse
+than round 1.
+
+## Round 2 result — accepted
+
+Findings 1 and 2 fixed. `assignRailHosts` returns the channel host a marker
+would have shared on main as `fallback`; placement and the routing stub decision
+both use it when no extra-host seat is clear. Tests added: blocked extra-host
+seats with a channel host present (identical to a `main` build's placement and
+routes), four rotated or mirrored host poses, and three markers mixing channel
+and extra hosts.
+
+Census on the round-1 head: no corpus marker takes the fallback path (1214
+channel-hosted, 162 seated at an extra host, 2 unseated on a Net without a
+channel host, 33 without any host), so the corpus is unchanged by this round:
+628 plan hashes equal the round-1 report.
+
+Acceptance rerun by the reviewer: `pnpm typecheck` 0, `pnpm lint` 0 errors,
+`pnpm format:check` 0, `pnpm docs:check` 0, `pnpm test:local` 0 (808 files,
+8320 passed, 117 skipped), `pnpm test:slow` 0 (8 passed).

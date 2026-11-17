@@ -215,21 +215,22 @@ function powerTargets(
     const targets: RoutingTarget[] = markers.flatMap((marker, index) => {
       const pair = assigned[index];
       const point = points.find((p) => samePin(p, marker));
-      // T127: an extra host joins by stub only while the marker is seated.
-      const host =
-        pair &&
-        (!pair.extra ||
-          (point &&
-            extraHostSeated(document, resolver, point, pair.host, ground)))
+      // T127: an extra host joins by stub only while the marker is seated;
+      // otherwise the marker shares the last channel host, if any, as R6a.
+      const seated =
+        pair?.extra &&
+        point &&
+        extraHostSeated(document, resolver, point, pair.host, ground);
+      const host = !pair
+        ? undefined
+        : !pair.extra || seated
           ? pair.host
-          : undefined;
+          : pair.fallback;
       if (!host) return [];
       const ref = { instanceId: host.instanceId, pinName: host.pinName };
       // An extra host's stub leaves along the pin's exit, then turns to
       // approach the marker vertically: plan it from the host pin.
-      return [
-        { pins: pair?.extra ? [ref, marker] : [marker, ref], stub: true },
-      ];
+      return [{ pins: seated ? [ref, marker] : [marker, ref], stub: true }];
     });
     const remaining = group.pins.filter(
       (pin) =>

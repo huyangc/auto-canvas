@@ -45,17 +45,25 @@ export function touchingPins(
   );
 }
 
+export interface RailHost {
+  host: PinPoint;
+  extra: boolean;
+  /** The channel host an unseated extra-host marker shares instead. */
+  fallback?: PinPoint;
+}
+
 /** R25: reserve touched hosts first; pair remaining markers in id order.
  * R6a/T127: a marker that would otherwise share a channel host or have none
  * takes an unused extra host, each at most once. `extra` marks such a host:
- * it holds only if the marker reaches its seat. */
+ * it holds only if the marker reaches its seat; otherwise the marker falls
+ * back to sharing the last channel host, as without extra hosts. */
 export function assignRailHosts(
   markers: TerminalRef[],
   hosts: PinPoint[],
   extras: PinPoint[],
   devicePoints: PinPoint[],
   contacts: PinContact[],
-): Array<{ host: PinPoint; extra: boolean } | undefined> {
+): Array<RailHost | undefined> {
   const assigned = markers.map((marker) => {
     const contact = contacts.find(
       (pair) =>
@@ -73,8 +81,11 @@ export function assignRailHosts(
     const channel = host ?? unused.shift();
     if (channel) return { host: channel, extra: false };
     const extra = spare.shift();
-    if (extra) return { host: extra, extra: true };
     const last = hosts.at(-1);
+    if (extra)
+      return last
+        ? { host: extra, extra: true, fallback: last }
+        : { host: extra, extra: true };
     return last && { host: last, extra: false };
   });
 }

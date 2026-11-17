@@ -213,9 +213,9 @@ AutoLayoutDiagnostic[] }`. Fixed instances retain their exact placements;
   a sideways pin's marker one or two offsets out along the exit and one or
   two offsets toward the rail, nearest first, so one bend joins them. Take
   the first seat clear of devices and placed markers; with none, the marker
-  is placed as an unhosted one. Remaining markers share the last channel host
-  and are nudged by grid steps; without one they are unhosted, placed from
-  the origin by grid steps.
+  is treated as a remaining marker. Remaining markers share the last channel
+  host and are nudged by grid steps; without one they are unhosted, placed
+  from the origin by grid steps.
   Fixed markers retain their poses.
   In default mode with a nonzero search budget, at most 40 instances and no
   supplied partition, after routing and label finishing, try the 40-unit seat
@@ -286,8 +286,10 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   An R6a extra host gets the stub only while the marker sits on one of its
   seat shapes in the routed geometry (straight on a facing exit, or out along
   a sideways exit and toward the rail, each leg at most two marker offsets);
-  otherwise the marker is a remaining member under R43. Plan that stub from
-  the host pin, so it leaves along the pin's exit and turns once.
+  otherwise the marker takes the stub to the last channel host it shares
+  under R6a, or without one is a remaining member under R43. Plan a seated
+  extra host's stub from the host pin, so it leaves along the pin's exit and
+  turns once.
   Singleton power stubs and R43 trunk offsets use the same document-size
   marker default.
   R43 connects every remaining non-bulk rail member through a
