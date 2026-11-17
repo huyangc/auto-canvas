@@ -899,7 +899,12 @@ if (!isMainThread) {
       ? items.reduce((s, m) => s + m.floatingPins.length, 0)
       : null,
   });
-  const integrityKeys = ["danglingWires", "unconnectedPins", "labelOwnership"];
+  const integrityKeys = [
+    "danglingWires",
+    "unconnectedPins",
+    "touchingNotConnected",
+    "labelOwnership",
+  ];
   const integrityTotals = (cases) => {
     const side = (items) =>
       items.length
@@ -1003,7 +1008,8 @@ if (!isMainThread) {
         largestSpanRatio: m.largestSpanRatio,
         equivalent: m.equivalent,
         unsafe: m.result?.unsafeProblems.length ?? "—",
-        // Introduced dangling wires / unconnected pins / label-ownership flags.
+        // Introduced dangling wires / unconnected pins / touching-not-connected
+        // pins / label-ownership flags.
         integrity: m.integrity
           ? integrityKeys
               .map((key) => m.integrity.introduced[key].length)
@@ -1227,6 +1233,7 @@ if (!isMainThread) {
             // Label ownership is reported only until it is calibrated.
             m.integrity.introduced.danglingWires.length ||
             m.integrity.introduced.unconnectedPins.length ||
+            m.integrity.introduced.touchingNotConnected.length ||
             m.result.floatingPins.some(
               (pin) =>
                 !m.diagnostics.some(

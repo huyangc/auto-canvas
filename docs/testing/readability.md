@@ -146,7 +146,8 @@ see. The evaluator stores `visibleIntegrity` on the human and result sides; the
 quick reference has none. Its `erc` groups the product ERC findings
 (`diagnoseProject`, the Document placed in its own Project) of three codes,
 each finding with its object ids: `danglingWires` (`ERC_DANGLING_WIRE`: Route,
-Junction, Net), `unconnectedPins` (`ERC_UNCONNECTED_PIN`) and
+Junction, Net), `unconnectedPins` (`ERC_UNCONNECTED_PIN`; it
+judges netlist membership plus NoConnect marks, not drawn wires) and
 `touchingNotConnected` (`ERC_TOUCHING_NOT_CONNECTED`: a pin drawn on another
 Net's wire or pin).
 
@@ -163,16 +164,22 @@ or pin is itself within one grid (the label stands on another Net), and
 distances, the nearest foreign object and the label box.
 
 Per case, `integrity.introduced` holds what the result shows and its source did
-not: for each Net, the dangling wire ends beyond the source's count on that Net,
-unconnected pins (by instance, pin and member) the source did not report, and
-flagged labels (by annotation id) the source did not flag.
+not. A dangling wire end counts as carried only when its Route is one the
+planner carries over from the source (Route id prefix `auto-layout-carried-`,
+R158) and the source has an open end on that Net; every other open end is
+introduced, since the planner regenerates Route and Junction ids. Also
+introduced are unconnected pins (by instance, pin and member) the source did not
+report, every touching-not-connected finding in the result (the planner
+re-routes everything, so any is its own) and flagged labels (by annotation id)
+the source did not flag.
 `integrity.sourceDefects` lists the source's touching-not-connected pins: the
 drawing looks connected where its netlist is not, which layout preserves, so
 they are input defects and not regressions. Each split total has
 `visibleIntegrity` with introduced counts, cases introducing each kind, source
 defects and the raw human/result counts; the per-case table's `integrity`
-column reads introduced dangling ends / unconnected pins / label flags. An
-introduced dangling wire or unconnected pin fails the run like an unsafe
+column reads introduced dangling ends / unconnected pins /
+touching-not-connected pins / label flags. An introduced dangling wire,
+unconnected pin or touching-not-connected pin fails the run like an unsafe
 problem; label ownership is reported only until it is calibrated.
 
 ## Evidence and reproduction
