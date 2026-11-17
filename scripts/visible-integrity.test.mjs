@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { test } from "vitest";
 
 import {
   createEmptyProject,
@@ -12,12 +13,6 @@ import {
   compareVisibleIntegrity,
   visibleIntegrity,
 } from "./visible-integrity.mjs";
-
-// One file for both runners: `node --test` runs it alone, and `pnpm test`
-// collects scripts/**/*.test.mjs under Vitest, whose `test` it then uses.
-const { test } = process.env.VITEST
-  ? await import("vitest")
-  : await import("node:test");
 
 const resolver = new InMemorySymbolResolver(builtInSymbols);
 
@@ -103,6 +98,7 @@ void test("finds nothing in a clean drawing", () => {
     introduced: {
       danglingWires: [],
       unconnectedPins: [],
+      touchingNotConnected: [],
       labelOwnership: [],
     },
     sourceDefects: [],
@@ -163,6 +159,76 @@ void test("reports an open 20-unit wire the source does not have as introduced",
     { routeId: "stub", junctionId: "J2", netId: "bottom" },
   ]);
   assert.deepEqual(introduced.unconnectedPins, []);
+});
+
+/** `clean()` plus a 20-unit open stub on the bottom Net, with the given Route id. */
+function withStub(routeId, junctionPrefix) {
+  const drawing = clean();
+  drawing.document.junctions.push(
+    { id: `${junctionPrefix}1`, netId: "bottom", position: { x: 200, y: 20 } },
+    { id: `${junctionPrefix}2`, netId: "bottom", position: { x: 220, y: 20 } },
+  );
+  drawing.document.routes.push(
+    wire(
+      routeId,
+      "bottom",
+      { kind: "junction", junctionId: `${junctionPrefix}1` },
+      { kind: "junction", junctionId: `${junctionPrefix}2` },
+    ),
+  );
+  return drawing;
+}
+
+const compareDrawings = (source, result) =>
+  compareVisibleIntegrity(
+    visibleIntegrity(source.document, resolver, source.project),
+    visibleIntegrity(result.document, resolver, result.project),
+  );
+
+void test("does not report an open end of a carried Route on a Net the source had one on", () => {
+  const source = withStub("stub", "J");
+  const result = withStub("auto-layout-carried-route-1", "K");
+  assert.equal(
+    visibleIntegrity(result.document, resolver, result.project).erc
+      .danglingWires.length,
+    2,
+  );
+  assert.deepEqual(
+    compareDrawings(source, result).introduced.danglingWires,
+    [],
+  );
+});
+
+void test("reports a new open end on a Net where the source also had one", () => {
+  const source = withStub("stub", "J");
+  const result = withStub("fresh-stub", "K");
+  assert.deepEqual(
+    compareDrawings(source, result).introduced.danglingWires.map(
+      (item) => item.routeId,
+    ),
+    ["fresh-stub", "fresh-stub"],
+  );
+});
+
+void test("reports an open end of a carried Route on a Net the source had none on", () => {
+  const result = withStub("auto-layout-carried-route-1", "K");
+  assert.equal(
+    compareDrawings(clean(), result).introduced.danglingWires.length,
+    2,
+  );
+});
+
+void test("reports a pin the result draws on another Net's wire as introduced", () => {
+  const result = clean();
+  result.document.instances.push(resistor("R3", 50, -40));
+  const { introduced, sourceDefects } = compareDrawings(clean(), result);
+  assert.deepEqual(
+    introduced.touchingNotConnected.map(
+      (item) => `${item.instanceId}.${item.pinName}`,
+    ),
+    ["R3.2"],
+  );
+  assert.deepEqual(sourceDefects, []);
 });
 
 void test("reports a pin the result leaves open as introduced", () => {

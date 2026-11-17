@@ -30,3 +30,25 @@ node scripts/auto-layout-eval.mjs <628 cases>  → 1 (expected, finding 1); 628 
 Corpus: introduced dangling wires 6 cases (dev 4, val 2); introduced
 unconnected pins 0; source defects 32 cases (dev 20, val 12); `5hjsy2g863`
 VOUT label flagged; `pfakspv4kx` listed as a source defect, nothing introduced.
+
+## Round 2 — changes requested (independent PR review of 97bb793)
+
+The Opus PR review approved with two P2 and three P3 findings; the reviewer
+accepts all of them. Fix on this branch:
+
+| # | Severity | Where | Finding | Expected fix |
+| --- | --- | --- | --- | --- |
+| 1 | must-fix | `scripts/visible-integrity.mjs` `compareVisibleIntegrity` | The per-Net count allowance hides new open ends on any Net where the source already had one (309 of 628 sources have open ends); the id tie-break never fires because the planner regenerates Route and Junction ids. | A result open end is carried only when its Route is one the planner carries over from the source (Route id prefix `auto-layout-carried-`, R158) and the source has an open end on that Net; every other result open end is introduced. Tests pin both sides: a carried stub is not introduced; a new stub on a Net where the source also had an open end is introduced. Expected on the corpus: 12 introduced ends in the same 6 cases. |
+| 2 | must-fix | `scripts/visible-integrity.mjs`, `scripts/auto-layout-eval.mjs` | The result's `touchingNotConnected` findings are computed and dropped. | `introduced.touchingNotConnected` = every such finding in the result (the planner re-routes everything, so any is planner-made); include it in totals, the table column and the exit condition. Test: a result with a pin on another Net's pin or wire is reported. Corpus today: 0. |
+| 3 | should-fix | `docs/testing/readability.md` | `unconnectedPins` judges netlist membership (plus NoConnects), not drawn wires. | Say so in the paragraph; describe finding 1 and 2 as implemented. |
+| 4 | should-fix | `scripts/visible-integrity.mjs` `ercFindings` | `diagnoseProject` runs every domain. | Pass `{ domains: ["erc"] }` if the option exists with that meaning; confirm findings are identical on the tests. |
+| 5 | note | `scripts/visible-integrity.test.mjs` | Dual `node:test` / vitest runner switch is a one-off convention. | Make it a plain vitest file like the other `scripts/*.test.mjs`; acceptance command becomes `pnpm vitest run scripts/visible-integrity.test.mjs`. |
+
+## Round 2 result — accepted
+
+All five findings fixed. Reviewer rerun: `pnpm typecheck` 0, `pnpm lint` 0
+errors, `pnpm format:check` 0, `pnpm docs:check` 0,
+`pnpm vitest run scripts/visible-integrity.test.mjs` 13 passed. Corpus (628
+cases, report read by the reviewer): 628 completed, 628 plan hashes equal main;
+introduced dangling wires 12 ends, 2 in each of the six cases; `qj62dz4qvm`
+none; introduced touching-not-connected 0; introduced unconnected pins 0.

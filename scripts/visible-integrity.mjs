@@ -4,6 +4,7 @@
 // Document and its symbol resolver; the evaluation compares a layout result
 // with its own source drawing.
 import {
+  buildProjectConnectivityIndex,
   createLabelClearanceContext,
   diagnoseProject,
   resolveDocumentLogicalNets,
@@ -52,9 +53,12 @@ function ercFindings(document, resolver, project) {
   const keyOf = Object.fromEntries(
     Object.entries(ercCodes).map(([key, code]) => [code, key]),
   );
+  const whole = projectFor(document, project);
   for (const diagnostic of diagnoseProject(
-    projectFor(document, project),
+    whole,
     resolver,
+    buildProjectConnectivityIndex(whole, resolver),
+    { domains: ["erc"] },
   )) {
     const key = keyOf[diagnostic.code];
     if (!key || diagnostic.primary?.documentId !== document.id) continue;
@@ -265,52 +269,41 @@ export function visibleIntegrity(document, resolver, project) {
 const pinKey = (item) =>
   [item.instanceId, item.pinName, item.memberId ?? ""].join("\u0000");
 
+/** Routes the planner carries over from the source keep this id prefix (R158). */
+const carriedRoutePrefix = "auto-layout-carried-";
+
 /**
- * What a layout result shows wrong that its source did not: open wire ends on
- * a Net beyond the source's count for that Net, open pins the source had
- * connected, and flagged labels the source did not flag. Pins the source
- * draws on another Net's wire are listed as source defects: input data, not
- * a planner regression.
+ * What a layout result shows wrong that its source did not. An open wire end
+ * is carried, not introduced, only when its Route is one the planner carries
+ * over from the source (id prefix `auto-layout-carried-`) and the source has
+ * an open end on that Net; every other open end is introduced, because the
+ * planner regenerates Route and Junction ids. Open pins the source had
+ * connected, every pin drawn on another Net's wire or pin (the planner
+ * re-routes everything, so any is its own), and flagged labels the source did
+ * not flag are introduced too. Pins the source draws on another Net's wire
+ * are listed as source defects: input data, not a planner regression.
  */
 export function compareVisibleIntegrity(source, result) {
-  const sourceDangling = new Map();
-  for (const item of source.erc.danglingWires)
-    sourceDangling.set(item.netId, [
-      ...(sourceDangling.get(item.netId) ?? []),
-      item,
-    ]);
-  const resultDangling = new Map();
-  for (const item of result.erc.danglingWires)
-    resultDangling.set(item.netId, [
-      ...(resultDangling.get(item.netId) ?? []),
-      item,
-    ]);
-  const danglingWires = [...resultDangling].flatMap(([netId, items]) => {
-    const before = sourceDangling.get(netId) ?? [];
-    const excess = items.length - before.length;
-    if (excess <= 0) return [];
-    // Prefer ends the source does not have by Route and Junction id.
-    const known = new Set(
-      before.map((b) => `${b.routeId}\u0000${b.junctionId}`),
-    );
-    return [...items]
-      .sort(
-        (a, b) =>
-          known.has(`${a.routeId}\u0000${a.junctionId}`) -
-          known.has(`${b.routeId}\u0000${b.junctionId}`),
-      )
-      .slice(0, excess);
-  });
+  const sourceOpenNets = new Set(
+    source.erc.danglingWires.map((item) => item.netId),
+  );
   const sourceOpen = new Set(source.erc.unconnectedPins.map(pinKey));
   const sourceLabels = new Set(
     source.labelOwnership.map((l) => l.annotationId),
   );
   return {
     introduced: {
-      danglingWires,
+      danglingWires: result.erc.danglingWires.filter(
+        (item) =>
+          !(
+            String(item.routeId).startsWith(carriedRoutePrefix) &&
+            sourceOpenNets.has(item.netId)
+          ),
+      ),
       unconnectedPins: result.erc.unconnectedPins.filter(
         (item) => !sourceOpen.has(pinKey(item)),
       ),
+      touchingNotConnected: result.erc.touchingNotConnected,
       labelOwnership: result.labelOwnership.filter(
         (label) => !sourceLabels.has(label.annotationId),
       ),
