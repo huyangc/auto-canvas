@@ -340,8 +340,9 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   selected and finished (after R155 local rails, drafting-owner recovery and
   R162 body leads), judge every visible, unlocked free or route-anchored
   `net-label`, and every such `power-label` (text naming a rail drawn without
-  a power symbol; a power label on a power marker is the symbol's caption and
-  is not judged), on the final drawing by the label-ownership measure
+  a power symbol; a power label anchored to a ground or `vdd-port` marker, or
+  to an instance owning a `power-marker` name claim on the label's Net, is
+  that marker's caption and is not judged), on the final drawing by the label-ownership measure
   (`label-ownership.ts`, shared with the evaluation's visible-integrity
   report): it reads as its Net's when a wire or pin of its Logical Net comes
   within one grid of its ink box (two grids for a power label, whose text a
@@ -398,7 +399,12 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   drawn Route (the source's, redrawn by `set_route_path`; one another edit
   makes, such as a split half, as the finished drawing has it) and leg of its
   Net
-  that holds its point; a route seat no drawn leg holds is not taken.
+  that holds its point; a route seat no drawn leg holds is not taken. The engine stores each drawn
+  Route normalised (collinear and zero-length legs merged), which this does
+  not follow; so after the final replay every written label is measured on
+  the replayed drawing, and if any label's Route leg does not resolve or its
+  ink box lies more than half a unit from where it was judged, the plan is
+  returned unchanged, as for a failed replay.
 - **Marker stubs and drafting.** A marker stub is one wire between exactly
   the marker pin and its R6a host pin, planned with clearance checks, so
   markers sharing a host are never wired to each other. The router does not

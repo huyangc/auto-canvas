@@ -5,6 +5,7 @@ import {
 } from "@icm/derived";
 import type { Annotation, Point, Rect, SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
+import { isPowerMarker } from "./rail-marker-identity.js";
 import { compareIds } from "./recognize.js";
 
 const epsilon = 1e-6;
@@ -124,19 +125,39 @@ export function createLabelOwnership(
   const logicalId = (netId: string) =>
     logical.byBaseNetId.get(netId)?.id ?? netId;
   const grid = document.presentation.grid;
-  const instanceIds = new Set(document.instances.map((i) => i.id));
+  const markers = new Set(
+    document.instances
+      .filter((i) => isPowerMarker(i.symbolId))
+      .map((i) => i.id),
+  );
+  /**
+   * Whether `annotation` is a power marker's caption: anchored to a power
+   * marker symbol, or to an instance owning a power-marker name claim on
+   * the label's Net (the evidence the edit engine renames such a caption by).
+   * The symbol, not the text, names the rail.
+   */
+  const caption = (annotation: Annotation) => {
+    const anchor = annotation.anchor;
+    if (anchor.kind !== "object") return false;
+    return (
+      markers.has(anchor.objectId) ||
+      document.connectivityEvidence.some(
+        (e) =>
+          e.kind === "name-claim" &&
+          e.owner.kind === "power-marker" &&
+          e.owner.objectId === anchor.objectId &&
+          e.netId === annotation.netId &&
+          document.instances.some((i) => i.id === anchor.objectId),
+      )
+    );
+  };
   /**
    * Whether the measure reads `annotation`: a Net label, or a power label
-   * drawn as text by its rail. A power label on a power marker is the
-   * symbol's caption; the symbol, not the text, names the rail.
+   * drawn as text by its rail rather than as a power marker's caption.
    */
   const reads = (annotation: Annotation) =>
     annotation.kind === "net-label" ||
-    (annotation.kind === "power-label" &&
-      !(
-        annotation.anchor.kind === "object" &&
-        instanceIds.has(annotation.anchor.objectId)
-      ));
+    (annotation.kind === "power-label" && !caption(annotation));
   const features: Feature[] = [];
   for (const geometry of context.routing.routes.values())
     for (const segment of geometry.segments)
@@ -277,7 +298,7 @@ export function createLabelOwnership(
  * another Logical Net is strictly closer to the box than its own nearest
  * one. The reason reads `foreign-closer` when that other Net's wire or pin is
  * itself within one grid (the label stands on it), `own-far` otherwise. A
- * power label on a power marker is the symbol's caption and is not read.
+ * power marker's caption (see `reads`) is not read.
  */
 export function labelOwnership(
   document: SchematicDocument,

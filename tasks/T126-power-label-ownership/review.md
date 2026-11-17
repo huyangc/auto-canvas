@@ -87,3 +87,29 @@ The Opus PR review approved with one P2 and three P3 findings
 Acceptance for round 3: all plan checks; full corpus against
 `tmp/t126-r2-report.json`: every plan hash equal (say why if not), statuses and
 integrity counts unchanged.
+
+## Round 3 result — accepted
+
+1. Postcondition added after the final replay: every written label is measured
+   on the replayed document; a missing label, an unresolved Route leg or an ink
+   box more than half a unit from the judged one returns the plan unchanged.
+   Two tests from the collinear-bend scenario (a `t` read on another segment; a
+   leg the stored Route lacks); both fail with the check skipped.
+2. Caption rule: a power label is a caption when it is anchored to a `ground`
+   or `vdd-port` marker, or to an instance owning a `power-marker` name claim on
+   the label's Net. The review's literal rule (claim only) was not applied: 237
+   of the 241 `vdd-port` captions in the corpus sources carry no such claim and
+   would be read as rail text. Test: a resistor-anchored power label on a
+   foreign wire is flagged, and is not read once the resistor owns the claim.
+3. No new test needed: removing only the Route-start filter fails "does not
+   seat a label by another Base Net joined to its own by name", removing only
+   `onPiece` fails "leaves a label where it is when the piece it names has no
+   seat" (checked by mutation). A comment on the comb test names both.
+4. Stale comment removed.
+
+Reviewer rerun on the round-3 code: typecheck 0, lint 0 errors, format:check
+0, docs:check 0, `pnpm test:local` 0 (808 files, 8320 passed, 117 skipped), `pnpm test:slow` 0
+(the 2 slow files, 8 passed; the run also picked up the same two files from
+an untracked review scratch copy under `tmp/`). Corpus (implementer's run after the last source edit, read by
+the reviewer) against the round-2 report: all 628 plan hashes equal, 612
+completed and 16 refused; the postcondition does not fire on the corpus.

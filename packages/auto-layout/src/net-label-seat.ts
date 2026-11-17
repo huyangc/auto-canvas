@@ -211,7 +211,6 @@ export function followNetLabels(
   const sourceTopology = deriveElectricalTopologyProjection(source, resolver);
   const topology = deriveElectricalTopologyProjection(final, resolver);
   const sourceById = new Map(source.annotations.map((a) => [a.id, a]));
-  /** Each accepted seat with its ink box and the check it passed. */
   // The engine reads an upserted label's leg on the Routes as the edits draw
   // them, and only at the transaction's end rejoins each Net's Routes at
   // their junctions, keeping the label at the conductor point it read
@@ -259,6 +258,8 @@ export function followNetLabels(
     return undefined;
   };
   const edits: SchematicEdit[] = [];
+  /** The ink box each written label was judged at. */
+  const judgedAt = new Map<string, Rect>();
   for (const label of pending) {
     if (
       result.edits.length + edits.length >=
@@ -317,12 +318,43 @@ export function followNetLabels(
     );
     if (!seat) continue;
     context.accept(seat.judged);
+    judgedAt.set(seat.judged.id, context.measure(seat.judged).inkBounds);
     edits.push(upsert(seat.written));
   }
   if (!edits.length) return result;
   const all = [...result.edits, ...edits];
   const finished = preview(source, resolver, all);
   if (!finished.ok) return result;
+  // Every written label must be drawn where it was judged. The engine stores
+  // each drawn Route normalised (collinear and zero-length legs merged, leg
+  // ids handed out by bends), which `write` does not follow, so a seat can
+  // name a leg the stored Route lacks or a `t` it reads elsewhere. Then the
+  // plan is returned unchanged, as for a failed replay. Half a unit allows
+  // for floating-point drift and stays under the one-unit pitch the engine
+  // rounds anchor positions to; a stray is at least that.
+  const replayed = createLabelClearanceContext(finished.document, resolver);
+  for (const [id, box] of judgedAt) {
+    const label = finished.document.annotations.find((a) => a.id === id);
+    if (!label) return result;
+    const anchor = label.anchor;
+    if (
+      anchor.kind === "route" &&
+      !replayed.routing.routes
+        .get(anchor.routeId)
+        ?.segments.some((s) => s.address.legId === anchor.legId)
+    )
+      return result;
+    const ink = replayed.measure(label).inkBounds;
+    if (
+      Math.max(
+        Math.abs(ink.x - box.x),
+        Math.abs(ink.y - box.y),
+        Math.abs(ink.width - box.width),
+        Math.abs(ink.height - box.height),
+      ) > 0.5
+    )
+      return result;
+  }
   result.edits = all;
   const metrics = refinementMetrics(result);
   if (metrics)

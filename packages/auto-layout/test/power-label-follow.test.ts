@@ -348,3 +348,99 @@ it("writes a seat against the leg the plan draws, not the rejoined one", () => {
     annotation: { anchor: { routeId: "w", legId: "w-across" } },
   });
 });
+
+/**
+ * rail(100) with its name a grid past the rail's end; the layout moves the
+ * rail to y 300 and redraws it as `nw`, r1.1 to r2.1 with a collinear bend at
+ * x `bend`. The engine stores `nw` normalised: one leg, with one leg id.
+ */
+function collinearBend(bend: number) {
+  const source = rail(100);
+  powerLabel(source, { kind: "free", position: { x: 310, y: 105 } });
+  const target = rail(300);
+  const layout: AutoLayoutResult = {
+    edits: [
+      { kind: "remove_route_geometry", routeId: "w-vdd" },
+      { kind: "remove_route_geometry", routeId: "w-sig" },
+      ...target.instances.map((i) => ({
+        kind: "move_instance" as const,
+        instanceId: i.id,
+        position: i.placement!.position,
+      })),
+      {
+        kind: "set_route_path",
+        route: {
+          id: "nw",
+          netId: "vdd",
+          start: { kind: "terminal", instanceId: "r1", pinName: "1" },
+          legs: [
+            {
+              id: "nw-a",
+              mode: "manual",
+              to: {
+                kind: "bend",
+                bendId: "nw-b1",
+                position: { x: bend, y: 300 },
+              },
+            },
+            {
+              id: "nw-b",
+              mode: "manual",
+              to: {
+                kind: "endpoint",
+                endpoint: { kind: "terminal", instanceId: "r2", pinName: "1" },
+              },
+            },
+          ],
+        },
+      },
+      { kind: "set_route_path", route: target.routes[1]! },
+    ],
+    groups: [],
+    diagnostics: [],
+  };
+  const stayed = preview(source, resolver, layout.edits);
+  expect(stayed.ok && labelOwnership(stayed.document, resolver)).toMatchObject([
+    { annotationId: "supply", reason: "own-far" },
+  ]);
+  return { source, layout };
+}
+
+for (const [bend, how] of [
+  [290, "reads its t on another segment"],
+  [120, "names a leg the stored Route lacks"],
+] as const)
+  it(`leaves the plan unchanged when a written seat ${how}`, () => {
+    const { source, layout } = collinearBend(bend);
+    const edits = structuredClone(layout.edits);
+    // No label may be drawn elsewhere than it was judged: the step returns
+    // the plan as it was.
+    expect(follow(source, layout).added).toEqual([]);
+    expect(layout.edits).toEqual(edits);
+  });
+
+it("reads a power label anchored to a part that is not a power marker", () => {
+  // Rail along y 100, another Net's wire one grid above it.
+  const document = rail(100, 90);
+  // Anchored to resistor r1, its text over the other Net's wire.
+  powerLabel(document, {
+    kind: "object",
+    objectId: "r1",
+    localOffset: { x: 50, y: -30 },
+    fallbackPosition: { x: 150, y: 90 },
+  });
+  expect(labelOwnership(document, resolver)).toMatchObject([
+    { annotationId: "supply", reason: "foreign-closer", foreignNetId: "sig" },
+  ]);
+  // Once r1 owns the rail's power-marker claim, the text is its caption.
+  document.connectivityEvidence.push({
+    id: "claim-r1",
+    kind: "name-claim",
+    name: "VDD",
+    netId: "vdd",
+    scope: "local",
+    owner: { kind: "power-marker", objectId: "r1" },
+    powerDomain: "vdd",
+  });
+  expect(labelOwnership(document, resolver)).toEqual([]);
+});
