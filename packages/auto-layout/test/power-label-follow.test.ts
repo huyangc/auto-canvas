@@ -432,6 +432,20 @@ it("reads a power label anchored to a part that is not a power marker", () => {
   expect(labelOwnership(document, resolver)).toMatchObject([
     { annotationId: "supply", reason: "foreign-closer", foreignNetId: "sig" },
   ]);
+  // A claim r1 owns on another Net does not make the text its caption.
+  document.connectivityEvidence.push({
+    id: "claim-r1-sig",
+    kind: "name-claim",
+    name: "VSIG",
+    netId: "sig",
+    scope: "local",
+    owner: { kind: "power-marker", objectId: "r1" },
+    powerDomain: "vdd",
+  });
+  expect(labelOwnership(document, resolver)).toMatchObject([
+    { annotationId: "supply", reason: "foreign-closer", foreignNetId: "sig" },
+  ]);
+  document.connectivityEvidence.pop();
   // Once r1 owns the rail's power-marker claim, the text is its caption.
   document.connectivityEvidence.push({
     id: "claim-r1",
