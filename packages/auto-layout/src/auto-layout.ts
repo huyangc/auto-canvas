@@ -36,7 +36,12 @@ import {
   documentObjectIds,
   type SchematicEdit,
 } from "@icm/edit-engine";
-import type { SchematicDocument } from "@icm/model";
+import {
+  createLabelClearanceContext,
+  deriveElectricalTopologyProjection,
+  endpointKey,
+} from "@icm/derived";
+import { routeEndpoints, type SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import {
   enclosingBox,
@@ -70,6 +75,7 @@ import {
   freezePinGroups,
   routeDocument,
   repairBulkContactRoutes,
+  routeVisibleBulkConnections,
   transferPowerClaims,
 } from "./route.js";
 import {
@@ -85,7 +91,8 @@ import {
   floatingPins,
   missingConnections,
 } from "./routing-audit.js";
-import { classifyNets } from "./net-roles.js";
+import { classifyNets, isMos } from "./net-roles.js";
+import { samePin } from "./pin-contacts.js";
 import { placeDocument } from "./place.js";
 import {
   compareIds,
@@ -174,6 +181,19 @@ export function planAutoLayout(
   resolver: SymbolResolver,
   options: AutoLayoutOptions = {},
 ): AutoLayoutResult {
+  return drawSourceBodies(
+    document,
+    resolver,
+    options,
+    planSelectedLayout(document, resolver, options),
+  );
+}
+
+function planSelectedLayout(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  options: AutoLayoutOptions,
+): AutoLayoutResult {
   return reusePlanning(() =>
     reusePreviews(() =>
       timePlanning(() => {
@@ -223,6 +243,131 @@ export function planAutoLayout(
       }),
     ),
   );
+}
+
+/** R162: the MOS instances whose B pin ends a Route in the source drawing. */
+function sourceBodyLeads(document: SchematicDocument): Set<string> {
+  const mos = new Set(
+    document.instances.filter((i) => isMos(i.symbolId)).map((i) => i.id),
+  );
+  return new Set(
+    document.routes.flatMap((route) =>
+      routeEndpoints(route).flatMap((end) =>
+        end?.kind === "terminal" &&
+        end.pinName === "B" &&
+        mos.has(end.instanceId)
+          ? [end.instanceId]
+          : [],
+      ),
+    ),
+  );
+}
+
+/** R162: on the selected layout only, draw again the body leads the source
+ * draws, reseat (R73) the instance labels the new leads strike, and report
+ * every such body left unjoined under R14. Planning and ranking never see the
+ * leads, so placement equals the body-free plan. */
+function drawSourceBodies(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  options: AutoLayoutOptions,
+  result: AutoLayoutResult,
+): AutoLayoutResult {
+  const bodies = sourceBodyLeads(document);
+  if (!bodies.size || result.diagnostics.some((d) => d.severity === "error"))
+    return result;
+  const selected = preview(document, resolver, result.edits);
+  if (!selected.ok) return result;
+  const accept = (edits: SchematicEdit[]) => {
+    if (edits.length > MAX_SCHEMATIC_EDITS_PER_TRANSACTION) return undefined;
+    const replay = preview(document, resolver, edits);
+    return replay.ok &&
+      terminalPartition(document, resolver) ===
+        terminalPartition(replay.document, resolver) &&
+      !lostNameClaim(document, replay.document) &&
+      !auditRouting(replay.document, resolver).unsafeProblems.length
+      ? replay.document
+      : undefined;
+  };
+  let edits = result.edits;
+  let final = selected.document;
+  const leads = routeVisibleBulkConnections(
+    document,
+    selected.document,
+    resolver,
+    bodies,
+  );
+  const drawn = leads.edits.length
+    ? accept([...result.edits, ...leads.edits])
+    : undefined;
+  if (drawn) {
+    edits = [...result.edits, ...leads.edits];
+    final = drawn;
+    const fresh = new Set(
+      drawn.routes
+        .filter((r) => !selected.document.routes.some((o) => o.id === r.id))
+        .map((r) => r.id),
+    );
+    const fixed = new Set(options.fixedInstanceIds);
+    for (const owner of [...document.layoutGroups, ...document.constraints])
+      if (owner.locked) for (const id of owner.objectIds) fixed.add(id);
+    const context = createLabelClearanceContext(drawn, resolver);
+    const struck = new Set(
+      context.visible.flatMap((a) =>
+        a.anchor.kind === "object" &&
+        !fixed.has(a.anchor.objectId) &&
+        context.findingsAt(a).struck.some((id) => fresh.has(id))
+          ? [a.anchor.objectId]
+          : [],
+      ),
+    );
+    if (struck.size) {
+      const seated = [...edits, ...seatLabels(drawn, resolver, struck)];
+      const reseated = accept(seated);
+      if (reseated) {
+        edits = seated;
+        final = reseated;
+      }
+    }
+  }
+  const frozen = freezePinGroups(document, resolver, { includeBulk: true });
+  const topology = deriveElectricalTopologyProjection(final, resolver);
+  const component = (pin: { instanceId: string; pinName: string }) =>
+    topology.endpointToPhysicalComponent.get(
+      endpointKey({ kind: "terminal", ...pin }),
+    );
+  const isBody = (pin: { instanceId: string; pinName: string }) =>
+    pin.pinName === "B" &&
+    isMos(
+      document.instances.find((i) => i.id === pin.instanceId)?.symbolId ?? "",
+    );
+  const report = new Map<string, string[]>();
+  for (const id of [...bodies].sort(compareIds)) {
+    const pin = { instanceId: id, pinName: "B" };
+    const group = frozen.find((g) => g.pins.some((p) => samePin(p, pin)));
+    const peers = group?.pins.filter((p) => !samePin(p, pin)) ?? [];
+    const ordinary = peers.filter((p) => !isBody(p));
+    const targets = ordinary.length ? ordinary : peers;
+    if (!group || targets.some((p) => component(p) === component(pin)))
+      continue;
+    if (!targets.length) continue;
+    report.set(group.netId, [...(report.get(group.netId) ?? []), `${id}.B`]);
+  }
+  if (edits === result.edits && !report.size) return result;
+  // Keep the result object: timing and refinement accounting stay attached.
+  result.edits = edits;
+  result.diagnostics = [
+    ...result.diagnostics,
+    ...[...report]
+      .sort(([a], [b]) => compareIds(a, b))
+      .map(([netId, pins]) => ({
+        severity: "warning" as const,
+        code: "AUTO_LAYOUT_NET_UNROUTED",
+        rule: "R14",
+        message: `Net ${netId}: visible body connection could not be routed safely; pins: ${pins.join(", ")}`,
+      })),
+  ];
+  return result;
 }
 
 /** Retry the legacy pitch only for a refusal caused by placement crowding.

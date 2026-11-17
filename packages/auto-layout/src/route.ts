@@ -1196,3 +1196,154 @@ export function repairBulkContactRoutes(
   }
   return edits;
 }
+
+/** R162: wire each listed MOS body (instance ids whose B lead the source
+ * draws) again on the given layout, after ordinary routing. Each body not
+ * already joined to its frozen group gets one clearance-checked wire to the
+ * best of at most four same-group ordinary terminals (own source first, then
+ * nearest; other bodies of the group only when every ordinary target fails),
+ * by crossings, bends and length. Wired bodies are listed in `routed`; one
+ * with no safe wire is listed in `unrouted` and left without a lead. */
+export function routeVisibleBulkConnections(
+  original: SchematicDocument,
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  bodies: ReadonlySet<string>,
+): {
+  document: SchematicDocument;
+  edits: SchematicEdit[];
+  routed: { pin: TerminalRef; netId: string }[];
+  unrouted: { pin: TerminalRef; netId: string }[];
+} {
+  let working = document;
+  const edits: SchematicEdit[] = [];
+  const routed: { pin: TerminalRef; netId: string }[] = [];
+  const unrouted: { pin: TerminalRef; netId: string }[] = [];
+  const frozen = freezePinGroups(original, resolver, { includeBulk: true });
+  const required = original.instances.filter(
+    (i) => isMos(i.symbolId) && bodies.has(i.id),
+  );
+  for (const instance of required) {
+    const from = {
+      kind: "terminal" as const,
+      instanceId: instance.id,
+      pinName: "B",
+    };
+    const group = frozen.find((g) => g.pins.some((p) => samePin(p, from)));
+    if (!group) continue;
+    const topology = deriveElectricalTopologyProjection(working, resolver);
+    const physical = (pin: TerminalRef) =>
+      topology.endpointToPhysicalComponent.get(
+        endpointKey({ kind: "terminal", ...pin }),
+      );
+    const peers = group.pins.filter((p) => !samePin(p, from));
+    const ordinary = peers.filter(
+      (p) =>
+        p.pinName !== "B" ||
+        !isMos(original.instances.find((i) => i.id === p.instanceId)!.symbolId),
+    );
+    const others = ordinary.length ? ordinary : peers;
+    if (!others.length || others.some((p) => physical(p) === physical(from)))
+      continue;
+    const points = pinPoints(working, resolver);
+    const point = (p: TerminalRef) => points.find((q) => samePin(p, q))?.point;
+    const start = point(from);
+    if (!start) {
+      unrouted.push({ pin: from, netId: group.netId });
+      continue;
+    }
+    // Preserve local B-S ties rather than drawing a remote same-Net detour.
+    const ownSource = (p: TerminalRef) =>
+      p.instanceId === instance.id && p.pinName === "S";
+    const distance = (p: TerminalRef) =>
+      Math.abs(point(p)!.x - start.x) + Math.abs(point(p)!.y - start.y);
+    // Another body of the group is a fallback target when every ordinary
+    // terminal is blocked on the fixed layout.
+    const tiers = [
+      others,
+      peers.filter((p) => !others.some((q) => samePin(p, q))),
+    ];
+    let best:
+      | { document: SchematicDocument; edits: SchematicEdit[]; cost: number[] }
+      | undefined;
+    for (const tier of tiers) {
+      if (best) break;
+      const targets = tier
+        .filter((p) => point(p))
+        .sort(
+          (a, b) =>
+            Number(ownSource(b)) - Number(ownSource(a)) ||
+            distance(a) - distance(b) ||
+            compareIds(
+              endpointKey({ kind: "terminal", ...a }),
+              endpointKey({ kind: "terminal", ...b }),
+            ),
+        );
+      for (const target of targets.slice(0, 4)) {
+        const wire = freshWirePlan(
+          working,
+          documentObjectIds(original),
+          "auto-layout-visible-bulk",
+          [
+            original.id,
+            instance.id,
+            endpointKey({ kind: "terminal", ...target }),
+          ],
+          (id) =>
+            planWireBatch(
+              working,
+              resolver,
+              {
+                id,
+                from: { kind: "endpoint", endpoint: from },
+                to: {
+                  kind: "endpoint",
+                  endpoint: { kind: "terminal", ...target },
+                },
+              },
+              MAX_SCHEMATIC_EDITS_PER_TRANSACTION,
+              { keepClear: true, netScope: "base" },
+            ),
+        );
+        if (typeof wire === "string") continue;
+        const next = preview(working, resolver, wire.edits);
+        if (!next.ok) continue;
+        const audit = auditRouting(next.document, resolver);
+        if (audit.unsafeProblems.length) continue;
+        const projection = deriveElectricalTopologyProjection(
+          next.document,
+          resolver,
+        );
+        if (
+          projection.endpointToPhysicalComponent.get(endpointKey(from)) !==
+          projection.endpointToPhysicalComponent.get(
+            endpointKey({ kind: "terminal", ...target }),
+          )
+        )
+          continue;
+        const cost = [audit.crossings, audit.bends, audit.wireLength];
+        const different = best
+          ? cost.findIndex((v, i) => v !== best!.cost[i])
+          : -1;
+        if (
+          !best ||
+          (different >= 0 && cost[different]! < best.cost[different]!)
+        )
+          best = {
+            document: next.document,
+            edits: replayEdits(working, frozen, group, wire.edits),
+            cost,
+          };
+        if (ownSource(target)) break;
+      }
+    }
+    if (!best) {
+      unrouted.push({ pin: from, netId: group.netId });
+      continue;
+    }
+    edits.push(...best.edits);
+    working = best.document;
+    routed.push({ pin: from, netId: group.netId });
+  }
+  return { document: working, edits, routed, unrouted };
+}

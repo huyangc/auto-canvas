@@ -6,6 +6,7 @@ import {
   visibleInstanceBounds,
 } from "@icm/derived";
 import { DocumentHistory, executeTransaction } from "@icm/edit-engine";
+import { routeEndpoints } from "@icm/model";
 import { compareElectricalGraphs, projectElectricalGraph } from "@icm/netlist";
 import { planAutoLayout } from "../src/index.js";
 import {
@@ -32,7 +33,8 @@ const targets: Record<string, [number, number]> = {
   // T074: lower frozen composite than main, with zero floating/missing pins.
   "two-inverters": [1, 3],
   "differential-stage": [0, 0],
-  "common-source": [0, 2],
+  // Explicit body wiring was previously deleted; its safe lead adds one bend.
+  "common-source": [0, 3],
   "rc-lowpass": [0, 0],
   "rc-highpass": [0, 0],
   rlc: [0, 0],
@@ -198,8 +200,18 @@ it.each(cases)(
         route.start,
         end.kind === "endpoint" ? end.endpoint : null,
       ])
-        if (endpoint?.kind === "terminal")
-          expect(endpoint.pinName).not.toBe("B");
+        // R162: only a body the source draws a lead to gets one.
+        if (endpoint?.kind === "terminal" && endpoint.pinName === "B")
+          expect(
+            document.routes.some((r) =>
+              routeEndpoints(r).some(
+                (e) =>
+                  e?.kind === "terminal" &&
+                  e.instanceId === endpoint.instanceId &&
+                  e.pinName === "B",
+              ),
+            ),
+          ).toBe(true);
     }
     if (["rc-lowpass", "rc-highpass", "common-source"].includes(fixture.id)) {
       const originalInk = draftingBounds(document, resolver);
