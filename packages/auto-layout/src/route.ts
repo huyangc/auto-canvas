@@ -278,18 +278,7 @@ function powerTargets(
     (role === "ground"
       ? Math.max(...channel.map((p) => p.point.y)) + markerOffset(document)
       : Math.min(...channel.map((p) => p.point.y)) - markerOffset(document));
-  let left = Math.min(...points.map((p) => p.point.x));
-  let right = Math.max(...points.map((p) => p.point.x));
-  if (left === right) {
-    left -= document.presentation.grid;
-    right += document.presentation.grid;
-  }
-  return [
-    {
-      pins: group.pins,
-      trunk: { start: { x: left, y }, end: { x: right, y } },
-    },
-  ];
+  return horizontalTrunk(group.pins, points, y);
 }
 
 function railTrunk(
@@ -339,13 +328,22 @@ function railTrunk(
     role === "ground"
       ? Math.max(...ys) + markerOffset(document) / 2
       : Math.min(...ys) - markerOffset(document) / 2;
-  let left = Math.min(...points.map((p) => p.point.x));
-  let right = Math.max(...points.map((p) => p.point.x));
-  if (left === right) {
-    left -= document.presentation.grid;
-    right += document.presentation.grid;
-  }
-  return [{ pins, trunk: { start: { x: left, y }, end: { x: right, y } } }];
+  return horizontalTrunk(pins, points, y);
+}
+
+/** A horizontal trunk spans its pins' columns. Pins sharing one column have no
+ * span to share: a trunk widened around them would be tapped only at its
+ * centre and leave both of its ends open, so join them with the plain tree. */
+function horizontalTrunk(
+  pins: TerminalRef[],
+  points: ReturnType<typeof pinPoints>,
+  y: number,
+): RoutingTarget[] {
+  const left = Math.min(...points.map((p) => p.point.x));
+  const right = Math.max(...points.map((p) => p.point.x));
+  return left === right
+    ? [{ pins }]
+    : [{ pins, trunk: { start: { x: left, y }, end: { x: right, y } } }];
 }
 
 function signalPriority(
