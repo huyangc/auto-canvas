@@ -202,7 +202,12 @@ netlist: the top Document is exported with `createDesignNetlistExport`
 The two editor steps live in `apps/editor`; `scripts/lib/import-display-bundle.mjs`
 builds them into `tmp/netlist-input/.bundle/` with every `@icm/*` import left
 to the built `packages/*/dist`, so conversion and evaluation run the same
-package code. Nothing in this path changes the planner.
+package code. Nothing in this path changes the planner. One editor step is
+left out: on install the editor materialises MOS bulk connections
+(`materializeRazaviProjectBulkConnections`,
+`apps/editor/src/document/use-project-file-lifecycle.ts`). The drawing-input
+evaluation does not apply it to the corpus either, so both inputs keep the
+bulk implicit.
 
 Two forms are reported, because the planner knows different things in each:
 
@@ -252,11 +257,26 @@ area, mean aspect and long-narrow layouts (aspect ≥ 2, and ≥ 2 with ≥ 1.5 
 the human's), with netlist-against-drawing better/equal/worse counts; wire,
 bends and crossings by Net kind and crossings involving a rail; symmetry and
 signal-direction totals; the same totals by what the conversion lost (more
-than one ground marker, a supply marker, label-joined Nets, hidden pins made
-explicit, pin contacts, none of these); and every case failing an exit
-criterion, classified as a hidden supply or control pin made explicit or
-other. A drawing report written before `netKindDetail` existed has no
-per-kind bends or rail crossings; those totals are `null`.
+than one ground marker, a supply marker, label-joined Nets, pins netted only
+in the import, pin contacts, none of these) and by the conversion's
+electrical-graph and re-export verdicts; and every case failing an exit
+criterion, classified as a hidden supply or control pin made explicit (every
+pin concerned is one the import nets and the drawing does not) or other. The
+paired table and the per-kind totals are printed twice: over all pairs, and
+over the pairs whose import the electrical-graph check calls the same circuit
+as the drawing (`electricalGraphEqual`), since a `different` or `uncheckable`
+import may not be the drawn circuit. "Drawing completed, netlist not" splits
+into cases that never converted and converted cases the planner did not
+complete. A drawing report written before `netKindDetail` existed has no
+per-kind bends (`null`); its crossings involving a rail are the rail entries
+of `netBreakdown.crossingsByKindPair`.
+
+Symmetry and signal-direction totals have different denominators per side.
+`symmetry` and `symmetryStage` count the pairs and stages detected on the
+Document a side was planned from (the drawing for the human side and for
+drawing input, the netlist-input Document for netlist input);
+`signalDirection` and `netlistSymmetry` are detected on each measured
+Document itself. Compare each side's violations with its own opportunities.
 
 Not comparable between the inputs, and so not reported as a difference:
 

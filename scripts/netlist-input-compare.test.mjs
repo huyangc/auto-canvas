@@ -77,8 +77,10 @@ const noIntegrity = {
     labelOwnership: [],
   },
 };
-const conversion = (source = {}) => ({
+const conversion = (source = {}, electricalGraph = "equal") => ({
   stage: "converted",
+  electricalGraph,
+  reexport: "identical",
   pinsNettedOnlyInImport: ["x1.VDD"],
   source: {
     ground: 2,
@@ -129,6 +131,9 @@ const drawingReport = {
       result: null,
       diagnostics: [],
     },
+    // Completed on drawing input; never converted, and refused on netlist input.
+    completed("not-converted", {}, {}),
+    completed("netlist-refused", {}, {}),
   ],
 };
 // Netlist cases in another order; one the drawing refused.
@@ -139,7 +144,7 @@ const netlistReport = {
       valA,
       { crossings: 1, bends: 4, wire: 80 },
       { crossings: 3, bends: 2, wire: 90 },
-      { conversion: conversion() },
+      { conversion: conversion({}, "different") },
     ),
     completed(
       devB,
@@ -159,6 +164,14 @@ const netlistReport = {
       { bends: 9 },
       { conversion: conversion() },
     ),
+    {
+      id: "netlist-refused",
+      status: "refused",
+      human: side({}),
+      result: null,
+      diagnostics: [],
+      conversion: conversion(),
+    },
   ],
 };
 const metas = [
@@ -195,6 +208,22 @@ test("pairs cases by file id and totals each side per split", () => {
   const all = splits.all.paired;
   assert.equal(all.pairs, 3);
   assert.equal(all.netlistCompletedDrawingNot, 1);
+  assert.deepEqual(all.drawingCompletedNetlistNot, {
+    notConverted: 1,
+    convertedNotCompleted: 1,
+  });
+  // The same totals restricted to an equal electrical graph: valA drops out.
+  assert.equal(all.electricalGraphEqual.pairs, 2);
+  assert.deepEqual(
+    {
+      ...all.electricalGraphEqual.table.crossings,
+      netlistVsDrawing: undefined,
+    },
+    { human: 1, drawing: 2, netlist: 1, netlistVsDrawing: undefined },
+  );
+  assert.equal(all.electricalGraphEqual.byNetKind.netlist.railCrossings, 1);
+  assert.equal(all.conversion["electrical graph different"].cases, 1);
+  assert.equal(all.conversion["re-export identical"].cases, 3);
   // Human from the drawing report, drawing input, netlist input.
   assert.deepEqual(
     { ...all.table.crossings, netlistVsDrawing: undefined },
@@ -288,5 +317,32 @@ test("a floating pin without an R14 warning fails, classified by the conversion"
   assert.deepEqual(
     failingCriteria({ ...floating, equivalent: false })[0].criterion,
     "not-equivalent",
+  );
+});
+
+test("crossings involving a rail come from netBreakdown without netKindDetail", () => {
+  const old = structuredClone(drawingReport);
+  for (const m of old.cases) {
+    if (m.human) delete m.human.netKindDetail;
+    if (m.result) delete m.result.netKindDetail;
+  }
+  const { byNetKind } = compareReports(netlistReport, old, metas).splits.all
+    .paired;
+  assert.equal(byNetKind.drawing.railCrossings, 3);
+  assert.equal(byNetKind.human.railCrossings, 2);
+  assert.equal(byNetKind.drawing.bends.rail, null);
+});
+
+test("a case unequal to the baseline fails, completed or refused", () => {
+  const changed = { ...completed(devA, {}, {}), baselineEqual: false };
+  assert.deepEqual(
+    failingCriteria(changed).map((f) => f.criterion),
+    ["baseline-differs"],
+  );
+  assert.deepEqual(
+    failingCriteria({ id: devA, status: "refused", baselineEqual: false }).map(
+      (f) => f.criterion,
+    ),
+    ["baseline-differs"],
   );
 });

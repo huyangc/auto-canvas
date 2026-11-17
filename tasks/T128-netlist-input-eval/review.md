@@ -79,3 +79,34 @@ Acceptance for round 2: the plan's checks; drawing mode still equal to the
 baseline in every case; conversions byte-identical to round 1 (checksum);
 netlist evaluations with every plan hash equal to round 1's reports
 (`tmp/t128-netlist-vss-report.json`, `tmp/t128-netlist-global-report.json`).
+
+## Round 2 result — accepted
+
+All nine findings fixed; `scripts/auto-layout-eval.mjs` is unchanged, so no
+planned result can differ.
+
+1. The paired table and per-kind line are printed and stored a second time
+   for pairs whose import has an equal electrical graph; electrical-graph and
+   re-export verdict groups join the breakdown. On those pairs the netlist
+   gap remains: global form, 420 pairs — crossings 147 (human) / 203 (drawing
+   input) / 247 (netlist input), bends 1392 / 1432 / 1572, rail wire 64k /
+   63k / 127k; VSS form, 442 pairs — crossings 185 / 229 / 297, bends 1567 /
+   1639 / 1960, rail wire 64k / 64k / 134k.
+2. `failingCriteria` reports `baseline-differs`.
+3. "Drawing completed, netlist not" counts every drawing-completed case: 105
+   not converted, 0 converted and not completed.
+4. The group label reads "pins netted only in the import". The failure-class
+   name "hidden supply or control pin made explicit" stays, as the plan names
+   it; the doc says what it covers.
+5. Crossings involving a rail fall back to `netBreakdown` for older reports.
+6. The doc names the omitted MOS bulk materialisation and the differing
+   denominators.
+7. The bundle is built in a scratch directory and renamed into place.
+8. New `scripts/auto-layout-eval-reference.test.mjs` runs the evaluation as a
+   child process on a two-project folder.
+9. `netKindDetail` costs about 1.3 ms per drawing.
+
+Reviewer rerun: typecheck, lint (0 errors), format:check, docs:check 0; the
+four script test files 0 (27 passed); `pnpm test:local` 0 (812 files, 8344
+passed, 117 skipped); `pnpm test:slow` 0 (2 files, 8 passed); both conversions
+byte-identical to round 1; both comparisons 0.
