@@ -136,6 +136,7 @@ import { repairStubLabels } from "./stub-seat.js";
 import { searchPortSeats } from "./port-seat-search.js";
 import { draftingGroups } from "./drafting-groups.js";
 import { preserveDraftingInterfaces } from "./drafting-interface.js";
+import { followNetLabels } from "./net-label-seat.js";
 import { followDraftingGroups } from "./follow-drafting-groups.js";
 import { recoverDraftingOwners } from "./recover-drafting-owners.js";
 import {
@@ -185,17 +186,22 @@ export function planAutoLayout(
   return reusePlanning(() =>
     reusePreviews(() =>
       timePlanning(() =>
-        // R162 draws the source's body leads on the selected plan; R161 then
-        // checks the plan actually returned, on every exit including a
-        // stopped search.
+        // R162 draws the source's body leads on the selected plan and R15a
+        // seats Net labels on that finished drawing; R161 then checks the
+        // plan actually returned, on every exit including a stopped search.
         preserveDraftingInterfaces(
           document,
           resolver,
-          drawSourceBodies(
+          followNetLabels(
             document,
             resolver,
+            drawSourceBodies(
+              document,
+              resolver,
+              options,
+              selectFinalLayout(document, resolver, options),
+            ),
             options,
-            selectFinalLayout(document, resolver, options),
           ),
         ),
       ),
