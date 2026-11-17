@@ -97,3 +97,15 @@ Reviewer rerun: build, typecheck, lint (0 errors), format:check, docs:check 0;
 `pnpm test:local` 0 (810 files, 8349 passed, 117 skipped); `pnpm test:slow` 0
 (the 2 slow files, 8 passed; untracked scratch copies under `tmp/` were picked
 up as well); evaluation 0 with all 628 plan hashes equal to round 1.
+
+## Round 2 follow-up — second PR review
+
+The Opus review of `2d3ffac` approved with two P3 findings, fixed by the
+reviewer: a throw from `placeFeedbackRows` is contained at its single call in
+`placeDocument` and becomes a refused candidate (`R163: draft failed`), so the
+other strategies still plan the document (test: the draft made to throw; it
+fails without the containment); the rule text cites R63 for refused drafts and
+says exactly which parts' control Nets do not link them into a row. The
+review's probes (29 synthetic documents) found no throw, and no corpus case
+threw, so no plan can change. Rerun after the fix: typecheck, lint (0 errors),
+format:check, docs:check 0; `pnpm vitest run packages/auto-layout` 0.

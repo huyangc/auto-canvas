@@ -437,6 +437,30 @@ describe("R163 feedback-row draft", () => {
     completes(d);
   });
 
+  it("plans with the other strategies when the draft cannot be built", () => {
+    const d = stage(
+      { a: "opamp", r1: "resistor", r2: "resistor" },
+      {
+        vin: ["r1.1"],
+        x: ["r1.2", "r2.1", "a.IN-"],
+        out: ["r2.2", "a.OUT"],
+        gnd: ["a.IN+"],
+      },
+    );
+    const failing = vi
+      .spyOn(rows, "placeFeedbackRows")
+      .mockImplementation(() => {
+        throw new Error("draft failed");
+      });
+    try {
+      const plan = completes(d);
+      expect(failing).toHaveBeenCalled();
+      expect(refinementMetrics(plan)?.strategy).not.toBe("feedback-rows");
+    } finally {
+      failing.mockRestore();
+    }
+  });
+
   it("places a two-pin part whose pins share one Net", () => {
     const d = stage(
       { a: "opamp", r1: "resistor", r2: "resistor", short: "resistor" },
