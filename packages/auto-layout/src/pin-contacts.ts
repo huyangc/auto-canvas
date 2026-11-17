@@ -45,13 +45,17 @@ export function touchingPins(
   );
 }
 
-/** R25: reserve touched hosts first; pair remaining markers in id order. */
-export function assignPowerHosts(
+/** R25: reserve touched hosts first; pair remaining markers in id order.
+ * R6a/T127: a marker that would otherwise share a channel host or have none
+ * takes an unused extra host, each at most once. `extra` marks such a host:
+ * it holds only if the marker reaches its seat. */
+export function assignRailHosts(
   markers: TerminalRef[],
   hosts: PinPoint[],
+  extras: PinPoint[],
   devicePoints: PinPoint[],
   contacts: PinContact[],
-): Array<PinPoint | undefined> {
+): Array<{ host: PinPoint; extra: boolean } | undefined> {
   const assigned = markers.map((marker) => {
     const contact = contacts.find(
       (pair) =>
@@ -62,6 +66,15 @@ export function assignPowerHosts(
       contact && devicePoints.find((h) => contact.some((p) => samePin(h, p)))
     );
   });
-  const unused = hosts.filter((h) => !assigned.some((p) => p && samePin(p, h)));
-  return assigned.map((host) => host ?? unused.shift() ?? hosts.at(-1));
+  const free = (h: PinPoint) => !assigned.some((p) => p && samePin(p, h));
+  const unused = hosts.filter(free);
+  const spare = extras.filter(free);
+  return assigned.map((host) => {
+    const channel = host ?? unused.shift();
+    if (channel) return { host: channel, extra: false };
+    const extra = spare.shift();
+    if (extra) return { host: extra, extra: true };
+    const last = hosts.at(-1);
+    return last && { host: last, extra: false };
+  });
 }

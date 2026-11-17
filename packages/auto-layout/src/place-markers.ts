@@ -33,7 +33,11 @@ import {
   type LayoutChoices,
   type LayoutOverrides,
 } from "./layout-choices.js";
-import { assignPowerHosts, touchingPins } from "./pin-contacts.js";
+import {
+  assignRailHosts,
+  touchingPins,
+  type TerminalRef,
+} from "./pin-contacts.js";
 import type { Placement } from "./types.js";
 
 type PinPoint = ReturnType<typeof pinPoints>[number];
@@ -66,6 +70,126 @@ export function powerHosts(
     );
 }
 
+/** R6a/T127: the side of a pin's exit relative to its rail marker. */
+function railExit(
+  instance: Instance,
+  pinName: string,
+  resolver: SymbolResolver,
+  ground: boolean,
+): "toward" | "sideways" | "away" | undefined {
+  const resolved = resolver.resolve(
+    instance.symbolId,
+    instance.symbolVariantId,
+  );
+  const pin = resolved?.definition.pins.find((p) => p.name === pinName);
+  if (
+    !pin ||
+    !instance.placement ||
+    resolved?.variant?.hiddenPinNames.includes(pinName)
+  )
+    return undefined;
+  const exit = pinExit(pin, instance.placement);
+  const rail = ground ? 1 : -1;
+  return exit.y === rail ? "toward" : exit.y === -rail ? "away" : "sideways";
+}
+
+/** R6a/T127: a non-MOS device without a two-pin host offers one visible
+ * rail pin whose exit faces the rail or leaves sideways. A MOS gate on a rail
+ * stays unhosted: bias markers keep their R43 join beside the gate row. */
+export function extraRailHosts(
+  pins: PinPoint[],
+  devices: Instance[],
+  resolver: SymbolResolver,
+  ground: boolean,
+): PinPoint[] {
+  const rank = { toward: 0, sideways: 1 } as const;
+  return devices
+    .filter(
+      (i) =>
+        !isMos(i.symbolId) &&
+        devicePins(i, resolver).length !== 2 &&
+        deviceDescriptor(i.symbolId)?.deviceClass !== "net-marker",
+    )
+    .flatMap((i) => {
+      const candidates = pins.flatMap((p) => {
+        if (p.instanceId !== i.id) return [];
+        const exit = railExit(i, p.pinName, resolver, ground);
+        return exit === "toward" || exit === "sideways"
+          ? [{ p, rank: rank[exit] }]
+          : [];
+      });
+      candidates.sort(
+        (a, b) =>
+          a.rank - b.rank ||
+          (ground ? b.p.point.y - a.p.point.y : a.p.point.y - b.p.point.y) ||
+          a.p.point.x - b.p.point.x ||
+          compareIds(a.p.pinName, b.p.pinName),
+      );
+      return candidates.slice(0, 1).map((c) => c.p);
+    })
+    .sort(
+      (a, b) => compareIds(a.instanceId, b.instanceId) || a.point.x - b.point.x,
+    );
+}
+
+/** R6a/T127: marker pin offsets from an extra host, nearest first: one
+ * straight lead for a pin facing the rail, one bend for a sideways pin. */
+function extraHostSeats(
+  document: SchematicDocument,
+  instance: Instance,
+  pinName: string,
+  resolver: SymbolResolver,
+  ground: boolean,
+): Array<{ x: number; y: number }> {
+  const offset = markerOffset(document);
+  const rail = ground ? 1 : -1;
+  const side = railExit(instance, pinName, resolver, ground);
+  if (side === "toward")
+    return [
+      { x: 0, y: rail * offset },
+      { x: 0, y: rail * 2 * offset },
+    ];
+  if (side !== "sideways") return [];
+  const pin = devicePins(instance, resolver).find((p) => p.name === pinName)!;
+  const out = pinExit(pin, instance.placement!).x;
+  const legs = [
+    [1, 1],
+    [2, 1],
+    [1, 2],
+    [2, 2],
+  ] as const;
+  return legs.map(([along, down]) => ({
+    x: out * along * offset,
+    y: rail * down * offset,
+  }));
+}
+
+/** R12/T127: an extra host holds only while its marker sits at one of its
+ * seats' shapes: straight below/above a rail-facing pin, or one bend out of
+ * a sideways pin, each leg at most two marker offsets long. */
+export function extraHostSeated(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  marker: PinPoint,
+  host: PinPoint,
+  ground: boolean,
+): boolean {
+  const instance = document.instances.find((i) => i.id === host.instanceId);
+  if (!instance) return false;
+  const side = railExit(instance, host.pinName, resolver, ground);
+  const limit = 2 * markerOffset(document);
+  const dx = marker.point.x - host.point.x;
+  const down = (marker.point.y - host.point.y) * (ground ? 1 : -1);
+  if (down <= 0 || down > limit) return false;
+  if (side === "toward") return dx === 0;
+  if (side !== "sideways") return false;
+  const pin = devicePins(instance, resolver).find(
+    (p) => p.name === host.pinName,
+  )!;
+  const along = dx * pinExit(pin, instance.placement!).x;
+  return along > 0 && along <= limit;
+}
+
 function placePowerMarkers(
   document: SchematicDocument,
   markers: Instance[],
@@ -77,7 +201,14 @@ function placePowerMarkers(
 ) {
   const grid = document.presentation.grid;
   const contacts = touchingPins(document, resolver);
-  const assignments = new Map<string, PinPoint | undefined>();
+  const posed = devices.map((i) => ({
+    ...i,
+    placement: targets.get(i.id) ?? i.placement,
+  }));
+  const assignments = new Map<
+    string,
+    { host: PinPoint; extra: boolean } | undefined
+  >();
   for (const symbol of ["ground", "vdd-port"]) {
     const nets = new Set(
       markers
@@ -94,12 +225,14 @@ function placePowerMarkers(
         (p) =>
           net !== undefined && roles.pinNet(p.instanceId, p.pinName) === net,
       );
-      const hosts = assignPowerHosts(
-        members.map((i) => ({
+      const ground = symbol === "ground";
+      const hosts = assignRailHosts(
+        members.map((i): TerminalRef => ({
           instanceId: i.id,
-          pinName: symbol === "ground" ? "0" : "P",
+          pinName: ground ? "0" : "P",
         })),
-        powerHosts(connected, devices, resolver, symbol === "ground"),
+        powerHosts(connected, devices, resolver, ground),
+        extraRailHosts(connected, posed, resolver, ground),
         connected,
         contacts,
       );
@@ -108,16 +241,51 @@ function placePowerMarkers(
   }
   const used = new Map<string, number>();
   const placed: Instance[] = [];
+  const free = (i: Instance) =>
+    !geometryProblem(
+      withPlacements(
+        { ...document, instances: [...devices, ...placed, i] },
+        targets,
+      ),
+      resolver,
+    );
   for (const i of markers) {
     const ground = i.symbolId === "ground";
-    const assigned = assignments.get(i.id);
+    const local = devicePins(i, resolver)[0]?.at ?? { x: 0, y: 0 };
+    const pair = assignments.get(i.id);
+    if (pair?.extra) {
+      // T127: an extra host keeps its marker only on a free seat; otherwise
+      // the marker is parked as an unhosted one and R43 joins it.
+      const host = pair.host;
+      const instance = posed.find((d) => d.id === host.instanceId)!;
+      const seat = extraHostSeats(
+        document,
+        instance,
+        host.pinName,
+        resolver,
+        ground,
+      ).find((offset) => {
+        targets.set(
+          i.id,
+          placement(
+            host.point.x + offset.x - local.x,
+            host.point.y + offset.y - local.y,
+          ),
+        );
+        return free(i);
+      });
+      if (seat) {
+        placed.push(i);
+        continue;
+      }
+    }
+    const assigned = pair && !pair.extra ? pair.host : undefined;
     const key = assigned
       ? `${assigned.instanceId}:${assigned.pinName}`
       : i.symbolId;
     const index = used.get(key) ?? 0;
     used.set(key, index + 1);
     const host = assigned?.point ?? { x: 0, y: 0 };
-    const local = devicePins(i, resolver)[0]?.at ?? { x: 0, y: 0 };
     targets.set(
       i.id,
       placement(
@@ -129,11 +297,7 @@ function placePowerMarkers(
     );
     if (index > 0 || !assigned)
       for (let attempt = 0; attempt < 200; attempt++) {
-        const candidate = withPlacements(
-          { ...document, instances: [...devices, ...placed, i] },
-          targets,
-        );
-        if (!geometryProblem(candidate, resolver)) break;
+        if (free(i)) break;
         targets.get(i.id)!.position.x += grid;
       }
     placed.push(i);
