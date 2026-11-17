@@ -43,6 +43,7 @@ import {
   type LayoutOverrides,
 } from "./layout-choices.js";
 import { placeFallback, orientByWireCost } from "./place-fallback.js";
+import { feedbackRowCircuit, placeFeedbackRows } from "./feedback-rows.js";
 import { netLevels, deviceRows, orderRows, assignColumns } from "./layered.js";
 import {
   parallelAttachments,
@@ -307,6 +308,8 @@ export function placeDocument(
   }
   let targets = new Map<string, Placement>();
   let sideRow: ReadonlySet<string> | undefined;
+  // R163 orients every part of its draft; R21 leaves those orientations alone.
+  let oriented: ReadonlySet<string> = new Set();
   const devices = document.instances
     .filter((i) => !isMarker(i))
     .sort((a, b) => compareIds(a.id, b.id));
@@ -402,6 +405,13 @@ export function placeDocument(
     );
     if (result.problem) return result;
     targets = result.placements;
+  } else if (strategy === "feedback-rows") {
+    // R163: offered only for its recognized subset (see auto-layout.ts).
+    const circuit = feedbackRowCircuit(document, resolver, roles);
+    if (!circuit)
+      return { placements: targets, problem: "R163: no block feedback part" };
+    targets = placeFeedbackRows(document, resolver, roles, circuit);
+    oriented = new Set(targets.keys());
   } else if (strategy === "stages") {
     ({ placements: targets, sideRow } = placeStages(
       document,
@@ -517,7 +527,13 @@ export function placeDocument(
     roles,
     targets,
     templates,
-    new Set([...fixed, ...attachmentIds, ...symmetryIds, ...coupledIds]),
+    new Set([
+      ...fixed,
+      ...attachmentIds,
+      ...symmetryIds,
+      ...coupledIds,
+      ...oriented,
+    ]),
     overrides,
     choices,
   );

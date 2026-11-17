@@ -12,7 +12,11 @@ import { classifyNets } from "../src/net-roles.js";
 import { placeDocument } from "../src/place.js";
 import { emptyChoices, emptyOverrides } from "../src/layout-choices.js";
 import { placeMarkers } from "../src/place-markers.js";
-import { createMoveGenerator, randomStream } from "../src/search-moves.js";
+import {
+  createMoveGenerator,
+  randomStream,
+  type SearchState,
+} from "../src/search-moves.js";
 import {
   parallelAttachments,
   placeParallelAttachments,
@@ -217,7 +221,11 @@ it.each(["template", "layered", "stages"] as const)(
       strategy,
     );
     expect(placed.problem).toBeUndefined();
-    let state = { placements: placed.placements, sides: new Map(), strategy };
+    let state: SearchState = {
+      placements: placed.placements,
+      sides: new Map(),
+      strategy,
+    };
     const move = createMoveGenerator(d, resolver, new Set(), randomStream(1));
     const offset = () => {
       const a = state.placements.get("diode")!,
