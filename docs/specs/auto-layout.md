@@ -757,8 +757,10 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   such body not already joined to its frozen group is wired with one
   clearance-checked wire to the best of at most four same-group ordinary
   terminals (its own source first, then nearest; other bodies of the group
-  only when every ordinary target fails), compared by crossings, bends and
-  wire length. The edits are appended and the whole list is replayed,
+  it is not already joined to, only when every ordinary target fails). A
+  routable own source wins outright; other targets are compared by crossings,
+  bends and wire length. Every redrawn lead is a dashed body lead, also where
+  the input drew it solid. The edits are appended and the whole list is replayed,
   partition-, name-claim- and safety-checked; then R73 reseats the instance
   labels the new leads strike, kept only if the same replay checks pass. A
   listed body still not joined to its group is reported as one

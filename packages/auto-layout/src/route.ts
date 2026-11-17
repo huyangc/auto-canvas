@@ -1258,10 +1258,15 @@ export function routeVisibleBulkConnections(
     const distance = (p: TerminalRef) =>
       Math.abs(point(p)!.x - start.x) + Math.abs(point(p)!.y - start.y);
     // Another body of the group is a fallback target when every ordinary
-    // terminal is blocked on the fixed layout.
+    // terminal is blocked on the fixed layout. A body this one is already
+    // joined to (it took this body as its own fallback) is no target: a
+    // second lead between the two would only draw a loop.
     const tiers = [
       others,
-      peers.filter((p) => !others.some((q) => samePin(p, q))),
+      peers.filter(
+        (p) =>
+          !others.some((q) => samePin(p, q)) && physical(p) !== physical(from),
+      ),
     ];
     let best:
       | { document: SchematicDocument; edits: SchematicEdit[]; cost: number[] }
