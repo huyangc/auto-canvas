@@ -410,7 +410,13 @@ export function placeDocument(
     const circuit = feedbackRowCircuit(document, resolver, roles);
     if (!circuit)
       return { placements: targets, problem: "R163: no block feedback part" };
-    targets = placeFeedbackRows(document, resolver, roles, circuit);
+    // The draft is one optional candidate: if it cannot be built it is
+    // refused (R63), and the other strategies still plan the Document.
+    try {
+      targets = placeFeedbackRows(document, resolver, roles, circuit);
+    } catch {
+      return { placements: targets, problem: "R163: draft failed" };
+    }
     // A draft that misses a device is refused, not offered half-placed.
     if (devices.some((i) => !targets.has(i.id)))
       return {

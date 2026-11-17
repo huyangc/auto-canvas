@@ -887,9 +887,10 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   geometry only. Signal distance runs forward from input terminals, else
   undriven interface Nets, source outputs and open leads, else block inputs no
   block drives, through blocks from input to output only and never through
-  feedback parts. A part's conducting terminals are its non-control pins; a
-  control Net never links a part into a row, and a part whose conducting pins
-  share one Net links nothing. Each independent
+  feedback parts. A part with exactly two pins that are not control inputs
+  conducts between those two: its control Net never links it into a row, and
+  when both share one Net it links nothing. Any other part links all its
+  signal Nets. Each independent
   circuit gets its own band, top to bottom by signal distance. In a band,
   blocks are placed by signal distance; the chain to a block's fed-back input
   (a single-output block is mirrored vertically when, unmirrored, the input pin
@@ -905,8 +906,9 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   one block stack outward. Remaining forward parts are branches in rows below
   the Net they leave, continued until they rejoin a placed Net; a part joining
   two placed Nets is a bridge in a row above them. Rows keep the lane their
-  wires span clear of other parts. A draft that leaves a device unplaced is
-  refused under R163 like any refused strategy. Markers,
+  wires span clear of other parts. A draft that cannot be built or
+  leaves a device unplaced is a refused candidate (R63); the other strategies
+  still plan the document. Markers,
   ports and labels are seated by the existing rules (R19, R71, R146).
 
 - **R71 — Single-host ports.** A non-rail Cell Pin Net that reaches exactly
