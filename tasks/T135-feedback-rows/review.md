@@ -45,3 +45,21 @@ Blind review (46 changed non-sealed cases, `main` against this task, shuffled
 and unlabelled, judged against the original by two reviewer subagents
 calibrated on the owner's verdicts; 45 judgeable): acceptable 14 → 29; 19
 gained, 4 lost.
+
+## Round 2 — changes requested (independent PR review of 9439765)
+
+The Opus PR review approved with six P3 findings
+(https://github.com/huyangc/auto-canvas/pull/88). Fix on this branch, with no
+plan hash changing:
+
+| #   | Severity   | Where                                      | Finding                                                                                                                                                                                                                                                           | Expected fix                                                                                                                                   |
+| --- | ---------- | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | should-fix | `docs/specs/auto-layout.md` R163, R22, R55 | The draft's devices are all taken out of R21, so the draft has no orientation choices and R22 offers it only Cell Pin side flips; R163 says it is refined exactly like the other drafts. R55 still says three strategies.                                         | Say so in R163 and R22; cross-reference R163 from R55. No behaviour change in this round.                                                      |
+| 2   | should-fix | `feedback-rows.ts:733`, R163               | The code mirrors the block when the fed-back input pin lies below the output pin; the rule says "so that pin is the upper input".                                                                                                                                 | Make the rule text say what the code does.                                                                                                     |
+| 3   | should-fix | `feedback-rows.ts` `forwardDistances`      | Root tiers no corpus case uses: the `signalDistances` tier ran in 14 cases and gave no root in any; the "reference branch" pass is reached by none. The port test `symbolId.startsWith("port")` differs from the `["port", "port-filled"]` test in the same file. | Remove the tiers that produce nothing, or give each a synthetic test that needs it; use one port test. Every corpus plan hash must stay equal. |
+| 4   | should-fix | `feedback-rows.test.ts`                    | The not-offered cases do not assert the plan equals today's; no tests for a multi-part chain (the four-part limit, refusal at five), two blocks feeding each other, a block with two output Nets, determinism.                                                    | Add them.                                                                                                                                      |
+| 5   | note       | `feedback-rows.ts` `placeBand`             | One function of about 670 lines with some thirty closures over shared mutable state; a second signal distance beside `signalDistances`; 54 non-null assertions.                                                                                                   | follow-up task: split recognition, distances and row geometry into units with explicit state                                                   |
+| 6   | note       | `auto-layout.ts` `feedbackRowsEligible`    | `classifyNets` runs before the MOS/BJT early exit; about 0.4 ms per document.                                                                                                                                                                                     | test for MOS/BJT first                                                                                                                         |
+
+Acceptance for round 2: the plan's checks; all 628 plan hashes equal to round 1
+(`tmp/t135-report.json`).
