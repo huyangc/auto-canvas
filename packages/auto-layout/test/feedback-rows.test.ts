@@ -22,9 +22,12 @@ function withoutDraft<T>(run: () => T): T {
   }
 }
 
-/** Plan with the default search; the result must apply and keep terminals. */
+/** Quick mode: every strategy's draft is built and routed, without search. */
+const quick = { search: { seed: 1, evaluations: 0 } };
+
+/** Plan in quick mode; the result must apply and keep terminals. */
 function completes(d: SchematicDocument) {
-  const plan = planAutoLayout(d, resolver);
+  const plan = planAutoLayout(d, resolver, quick);
   expect(plan.diagnostics.filter((x) => x.severity === "error")).toEqual([]);
   const after = preview(d, resolver, plan.edits);
   expect(after.ok).toBe(true);
@@ -283,9 +286,9 @@ describe("R163 feedback-row draft", () => {
     } finally {
       placed.mockRestore();
     }
-    // The full plan equals the plan with the R163 draft disabled.
-    expect(JSON.stringify(planAutoLayout(d, resolver))).toBe(
-      JSON.stringify(withoutDraft(() => planAutoLayout(d, resolver))),
+    // The plan equals the plan with the R163 draft disabled.
+    expect(JSON.stringify(planAutoLayout(d, resolver, quick))).toBe(
+      JSON.stringify(withoutDraft(() => planAutoLayout(d, resolver, quick))),
     );
   });
 
@@ -410,8 +413,8 @@ describe("R163 feedback-row draft", () => {
         gnd: ["a.IN+"],
       },
     );
-    expect(JSON.stringify(planAutoLayout(d, resolver))).toBe(
-      JSON.stringify(planAutoLayout(structuredClone(d), resolver)),
+    expect(JSON.stringify(planAutoLayout(d, resolver, quick))).toBe(
+      JSON.stringify(planAutoLayout(structuredClone(d), resolver, quick)),
     );
   });
 
