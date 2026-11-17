@@ -40,6 +40,14 @@ export interface NetlistPresentation {
   diagnostics: AutoLayoutDiagnostic[];
 }
 
+/**
+ * Whether a Cell Pin's name is the one the design export ranks as the supply
+ * (exactly `VDD`, any case) and the MOS bulk default reads as one (folded).
+ * A padded name passes only one of the two, so both are required.
+ */
+const namedVdd = (name: string) =>
+  name.toUpperCase() === "VDD" && foldNetName(name) === "vdd";
+
 const warning = (code: string, message: string): AutoLayoutDiagnostic => ({
   severity: "warning",
   code,
@@ -214,7 +222,7 @@ export function netlistPresentation(
     return terminal.interfaceInstanceIds.length === 1 &&
       instance?.symbolId === "port" &&
       roles.byNet.get(terminal.netId) === "supply" &&
-      foldNetName(terminal.name) === foldNetName("VDD") &&
+      namedVdd(terminal.name) &&
       !document.connectivityEvidence.some(
         (e) => e.kind === "name-claim" && e.netId === terminal.netId,
       ) &&
@@ -303,7 +311,7 @@ export function presentationChange(
   // only that Pin may gain the supply symbol and its domain.
   const vddPins = new Set(
     (before.netlist?.terminals ?? []).flatMap((t) =>
-      foldNetName(t.name) === foldNetName("VDD") ? t.interfaceInstanceIds : [],
+      namedVdd(t.name) ? t.interfaceInstanceIds : [],
     ),
   );
   const keys: string[] = [];

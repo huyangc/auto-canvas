@@ -384,6 +384,22 @@ describe("R163 gate refusals", () => {
     );
   });
 
+  it("refuses a supply symbol on a Cell Pin whose name only folds to VDD", () => {
+    // The export ranks ports by the exact name; a padded one is not VDD there.
+    const before = amplifier();
+    nodeZero(before, "gnd");
+    before.nets.push({ id: "padded", terminals: [] });
+    cellPin(before, "VDD ", "padded");
+    const after = structuredClone(before);
+    const pin = after.instances.find(
+      (i) => i.symbolId === "port" && i.id.includes("VDD "),
+    )!;
+    pin.symbolId = "vdd-port";
+    expect(presentationChange(before, after, resolver)).toBe(
+      `instance ${pin.id} changed symbol`,
+    );
+  });
+
   it("refuses a supply symbol whose pins differ from the port's", () => {
     const port = resolver.resolve("port")!;
     const changed = {
@@ -545,7 +561,9 @@ describe("R163 planning fallbacks", () => {
       document: large,
     });
     const plan = planAutoLayout(source, resolver, options);
-    expect(dropped(plan)).toHaveLength(1);
+    expect(dropped(plan).map((d) => d.message)).toEqual([
+      "R163: rail symbols dropped: the presented Document was refused",
+    ]);
     expect(plan.edits).toEqual(plainPlan(source).edits);
   });
 
