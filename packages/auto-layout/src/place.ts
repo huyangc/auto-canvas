@@ -411,6 +411,12 @@ export function placeDocument(
     if (!circuit)
       return { placements: targets, problem: "R163: no block feedback part" };
     targets = placeFeedbackRows(document, resolver, roles, circuit);
+    // A draft that misses a device is refused, not offered half-placed.
+    if (devices.some((i) => !targets.has(i.id)))
+      return {
+        placements: targets,
+        problem: "R163: draft left a device unplaced",
+      };
     oriented = new Set(targets.keys());
   } else if (strategy === "stages") {
     ({ placements: targets, sideRow } = placeStages(

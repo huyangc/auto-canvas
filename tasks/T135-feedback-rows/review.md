@@ -63,3 +63,37 @@ plan hash changing:
 
 Acceptance for round 2: the plan's checks; all 628 plan hashes equal to round 1
 (`tmp/t135-report.json`).
+
+The repository's automatic codex review of the PR added one finding to this
+round:
+
+| #   | Severity | Where                        | Finding                                                                                                                                                                                                                           | Expected fix                                                                                                                                                                               |
+| --- | -------- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 7   | must-fix | `feedback-rows.ts` (far pin) | An eligible circuit with a controlled switch whose two conducting terminals share a Net makes the draft throw, which aborts planning although another strategy could succeed: the control Net was taken as a conducting terminal. | A control Net never links a part into a row; a part whose conducting pins share a Net links nothing; a draft that cannot place every device is refused, not thrown. Tests for both shapes. |
+
+## Round 2 result — accepted
+
+1. R163 and R22 say the draft's devices are outside R21 and that R22 offers
+   the draft side flips only; R55 cross-references R163.
+2. R163 says the block is mirrored when, unmirrored, the input pin of its
+   first feedback chain lies below its output pin.
+3. `forwardDistances`: the `signalDistances` root tier and the "reference
+   branch" pass are removed (no corpus case used either); the undriven-block-input
+   tier supplies the roots in the 14 cases without a port or source and stays.
+   One port test.
+4. Fifteen tests: the not-offered cases assert the plan equals the plan with
+   the draft disabled; a four-part chain is drawn and a five-part chain is not
+   recognised; two blocks feeding each other; a block with two output Nets;
+   determinism.
+5. Not in this round: splitting `placeBand` (follow-up task). The implementer
+   notes that the rest of `placeBand` is not proven free of throws.
+6. The transistor test runs before `classifyNets`.
+7. Reproduced on the round-1 code (`TypeError`), fixed as requested, with a
+   test for the reported topology and one for a two-pin part with both pins on
+   one Net. A draft that leaves a device unplaced returns the problem
+   `R163: draft left a device unplaced` and is refused like any strategy.
+
+Reviewer rerun: build, typecheck, lint (0 errors), format:check, docs:check 0;
+`pnpm test:local` 0 (810 files, 8349 passed, 117 skipped); `pnpm test:slow` 0
+(the 2 slow files, 8 passed; untracked scratch copies under `tmp/` were picked
+up as well); evaluation 0 with all 628 plan hashes equal to round 1.

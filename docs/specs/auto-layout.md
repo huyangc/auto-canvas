@@ -453,7 +453,8 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   `offConvention` proxy; the frozen composite measures global input/output
   port order. Above 40 instances retain the legacy facing penalty of 300.
   In id order, try flipping one left/right Cell Pin side or one
-  R21 orientation. Replan fully, discard candidates with error diagnostics,
+  R21 orientation (R163's draft has none; it gets side flips only). Replan
+  fully, discard candidates with error diagnostics,
   accept the best strictly improving move, and repeat for at most two passes
   and 24 evaluated candidates total. Fixed instances never move. If all
   candidates fail, retain the default. Identical inputs give identical results.
@@ -592,7 +593,8 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   enough for thousands of calls on 120 instances.
 - **R55 — Stage portfolio.** Stages join R36 as a third strategy at every size.
   Up to 40 instances, compare all three strategies by real routing. Above 40,
-  compare stages and layered by real routing without refinement. Keep the lower routed score,
+  compare stages and layered by real routing without refinement (R163 adds a
+  fourth draft for its subset). Keep the lower routed score,
   retaining the earlier strategy on ties. Run R44 once on the winner. This
   supersedes R34, R36 and R42's strategy and large-document refinement budgets.
 - **R57 — Signal direction.** After R53, compare the mean x coordinates of
@@ -879,14 +881,19 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   input Nets, each inner Net reaching exactly two device pins and no port.
   For the subset only, the portfolio gains a fourth draft, `feedback-rows`,
   after `stages` in R63 order; it is routed, deduplicated, ranked, refined,
-  searched, finished and selected exactly like the other drafts, and no other
-  document plans differently. The draft reads connectivity and symbol
+  searched, finished and selected like the other drafts, and no other
+  document plans differently. Its devices are outside R21, so the draft has
+  no orientation choices and R22 offers it Cell Pin side flips only. The draft reads connectivity and symbol
   geometry only. Signal distance runs forward from input terminals, else
-  undriven interface Nets, source outputs and open leads, through blocks from
-  input to output only and never through feedback parts. Each independent
+  undriven interface Nets, source outputs and open leads, else block inputs no
+  block drives, through blocks from input to output only and never through
+  feedback parts. A part's conducting terminals are its non-control pins; a
+  control Net never links a part into a row, and a part whose conducting pins
+  share one Net links nothing. Each independent
   circuit gets its own band, top to bottom by signal distance. In a band,
   blocks are placed by signal distance; the chain to a block's fed-back input
-  (a single-output block is mirrored so that pin is the upper input) forms the
+  (a single-output block is mirrored vertically when, unmirrored, the input pin
+  of its first feedback chain lies below its output pin) forms the
   main row by the shortest series path from its entry Net, input leads and
   sources at the left, the block next, its output continuing right. A shunt
   (two terminals, one on a rail) hangs vertically below its node (above for a
@@ -898,7 +905,8 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   one block stack outward. Remaining forward parts are branches in rows below
   the Net they leave, continued until they rejoin a placed Net; a part joining
   two placed Nets is a bridge in a row above them. Rows keep the lane their
-  wires span clear of other parts. R21 keeps the draft's orientations; markers,
+  wires span clear of other parts. A draft that leaves a device unplaced is
+  refused under R163 like any refused strategy. Markers,
   ports and labels are seated by the existing rules (R19, R71, R146).
 
 - **R71 — Single-host ports.** A non-rail Cell Pin Net that reaches exactly
