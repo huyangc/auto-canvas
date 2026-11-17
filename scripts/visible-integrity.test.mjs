@@ -231,6 +231,58 @@ void test("reports a pin the result draws on another Net's wire as introduced", 
   assert.deepEqual(sourceDefects, []);
 });
 
+const findings = (erc) => ({
+  erc: {
+    danglingWires: [],
+    unconnectedPins: [],
+    touchingNotConnected: [],
+    ...erc,
+  },
+  labelOwnership: [],
+});
+
+void test("keeps a pin pair the source already draws touching out of introduced", () => {
+  const pair = {
+    instanceId: "R1",
+    pinName: "2",
+    otherInstanceId: "R2",
+    otherPinName: "1",
+  };
+  const swapped = {
+    instanceId: "R2",
+    pinName: "1",
+    otherInstanceId: "R1",
+    otherPinName: "2",
+  };
+  const onWire = { instanceId: "R1", pinName: "2", netId: "top" };
+  const source = findings({ touchingNotConnected: [pair, onWire] });
+  const result = findings({ touchingNotConnected: [swapped, onWire] });
+  const compared = compareVisibleIntegrity(source, result);
+  // Fixed instances keep their pin pair; a pin on a wire is always re-routed.
+  assert.deepEqual(compared.introduced.touchingNotConnected, [onWire]);
+  assert.deepEqual(compared.sourceDefects, [pair, onWire]);
+  assert.deepEqual(
+    compareVisibleIntegrity(findings({}), result).introduced
+      .touchingNotConnected,
+    [swapped, onWire],
+  );
+});
+
+void test("excuses carried open ends only up to the source's count on that Net", () => {
+  const end = (routeId, junctionId) => ({ routeId, junctionId, netId: "n" });
+  const source = findings({ danglingWires: [end("stub", "J1")] });
+  const result = findings({
+    danglingWires: [
+      end("auto-layout-carried-route-1", "K1"),
+      end("auto-layout-carried-route-1", "K2"),
+    ],
+  });
+  assert.deepEqual(
+    compareVisibleIntegrity(source, result).introduced.danglingWires,
+    [end("auto-layout-carried-route-1", "K2")],
+  );
+});
+
 void test("reports a pin the result leaves open as introduced", () => {
   const source = clean();
   const result = clean();

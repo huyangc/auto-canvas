@@ -52,3 +52,19 @@ errors, `pnpm format:check` 0, `pnpm docs:check` 0,
 cases, report read by the reviewer): 628 completed, 628 plan hashes equal main;
 introduced dangling wires 12 ends, 2 in each of the six cases; `qj62dz4qvm`
 none; introduced touching-not-connected 0; introduced unconnected pins 0.
+
+## Round 3 — PR review of b3cb1b2, fixed by the reviewer
+
+The second Opus PR review approved with one P2 and two P3 findings. They are
+few-line fixes, made by the reviewer:
+
+- P2: a pin-on-pin finding the source already reports for the same unordered
+  pin pair is not introduced (fixed or locked instances keep it); pin-on-wire
+  findings stay introduced.
+- P3: carried open ends are excused only up to the source's count on that Net.
+- P3: the plan's acceptance command is now the vitest command.
+
+Rerun: `pnpm vitest run scripts/visible-integrity.test.mjs` 15 passed,
+`pnpm lint` 0 errors, `pnpm format:check` 0, `pnpm docs:check` 0. The saved
+corpus report re-derived with the new comparison: 12 introduced open ends in
+the same six cases, 0 introduced touching pins, 0 introduced unconnected pins.
