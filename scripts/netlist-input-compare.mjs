@@ -496,6 +496,7 @@ export function compareReports(
                 pairs: equal.length,
                 table: pairedTable(equal),
                 byNetKind: byNetKind(equal),
+                readability: readabilityTotals(equal),
               },
             },
             failures: failures(cases, instancesById),
@@ -556,6 +557,10 @@ export function formatComparison(comparison) {
       `-- pairs whose import has an equal electrical graph: ${p.electricalGraphEqual.pairs}`,
     );
     table(p.electricalGraphEqual);
+    line(
+      "readability (equal electrical graph):",
+      JSON.stringify(p.electricalGraphEqual.readability),
+    );
     line("readability:", JSON.stringify(p.readability));
     for (const [group, g] of Object.entries(p.conversion))
       line(
