@@ -21,7 +21,11 @@ import {
 import type { SymbolResolver } from "@icm/symbols";
 import { markerOffset, pinPoints, integerPoint } from "./geometry.js";
 import { channelPins, isMos, type NetRoles } from "./net-roles.js";
-import { powerHosts } from "./place-markers.js";
+import {
+  extraHostSeated,
+  extraRailHosts,
+  powerHosts,
+} from "./place-markers.js";
 import { isMarker } from "./placement-connectivity.js";
 import { compareIds, recognizeSubstructures } from "./recognize.js";
 import {
@@ -31,7 +35,7 @@ import {
 } from "./routing-audit.js";
 import { preview, restorePinGroups } from "./transaction.js";
 import {
-  assignPowerHosts,
+  assignRailHosts,
   samePin,
   touchingPins,
   type PinContact,
@@ -200,26 +204,32 @@ function powerTargets(
     .filter((i) => !isMarker(i))
     .sort((a, b) => compareIds(a.id, b.id));
   if (markers.length) {
-    const hosts = powerHosts(points, devices, resolver, role === "ground");
-    const assigned = assignPowerHosts(
+    const ground = role === "ground";
+    const assigned = assignRailHosts(
       markers,
-      hosts,
+      powerHosts(points, devices, resolver, ground),
+      extraRailHosts(points, devices, resolver, ground),
       points.filter((p) => !isMarker(instances.get(p.instanceId)!)),
       group.contacts,
     );
     const targets: RoutingTarget[] = markers.flatMap((marker, index) => {
-      const host = assigned[index];
-      return host
-        ? [
-            {
-              pins: [
-                marker,
-                { instanceId: host.instanceId, pinName: host.pinName },
-              ],
-              stub: true as const,
-            },
-          ]
-        : [];
+      const pair = assigned[index];
+      const point = points.find((p) => samePin(p, marker));
+      // T127: an extra host joins by stub only while the marker is seated.
+      const host =
+        pair &&
+        (!pair.extra ||
+          (point &&
+            extraHostSeated(document, resolver, point, pair.host, ground)))
+          ? pair.host
+          : undefined;
+      if (!host) return [];
+      const ref = { instanceId: host.instanceId, pinName: host.pinName };
+      // An extra host's stub leaves along the pin's exit, then turns to
+      // approach the marker vertically: plan it from the host pin.
+      return [
+        { pins: pair?.extra ? [ref, marker] : [marker, ref], stub: true },
+      ];
     });
     const remaining = group.pins.filter(
       (pin) =>
@@ -227,7 +237,9 @@ function powerTargets(
     );
     if (remaining.length) {
       // Include one stub's host so the trunk shares the marker's drawing.
-      const host = targets[0]?.pins[1];
+      const host = targets[0]?.pins.find(
+        (pin) => !markers.some((marker) => samePin(marker, pin)),
+      );
       const pins = host ? [...remaining, host] : remaining;
       targets.unshift(...railTrunk(document, resolver, pins, role));
     }

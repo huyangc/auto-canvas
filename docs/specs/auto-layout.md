@@ -203,7 +203,20 @@ AutoLayoutDiagnostic[] }`. Fixed instances retain their exact placements;
   two-pin-device terminal per host device: its lowest pin for ground, highest
   for VDD; never a MOS bulk pin. The marker pin sits at the host x, below for
   ground or above for VDD, with a 20-unit default stub up to 40 instances
-  and a 40-unit default above that. Extra markers share the last host and are nudged by grid steps. Fixed markers retain their poses.
+  and a 40-unit default above that. A marker left without such a host, or
+  that would share one, next takes an unused extra host (T127): one visible
+  pin of each non-MOS, non-two-pin device on the Net (BJT, op-amp, block),
+  sorted by device id then x, preferring a pin whose exit faces the rail,
+  then the lowest pin for ground or highest for VDD. A pin whose exit faces
+  away from the rail never hosts, and a MOS gate keeps its R43 join. Seat a
+  facing pin's marker straight on its exit at one or two marker offsets; seat
+  a sideways pin's marker one or two offsets out along the exit and one or
+  two offsets toward the rail, nearest first, so one bend joins them. Take
+  the first seat clear of devices and placed markers; with none, the marker
+  is placed as an unhosted one. Remaining markers share the last channel host
+  and are nudged by grid steps; without one they are unhosted, placed from
+  the origin by grid steps.
+  Fixed markers retain their poses.
   In default mode with a nonzero search budget, at most 40 instances and no
   supplied partition, after routing and label finishing, try the 40-unit seat
   only for a marker named by a label-clearance, label-run-on or label-overlap
@@ -270,6 +283,11 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   component (Routes and contacts); a label-only connection never counts as joined.
 - **R12 — Power.** Each ground/VDD marker gets one straight stub to its R6a
   host pin at the selected distance; an accepted R38 contact needs no stub.
+  An R6a extra host gets the stub only while the marker sits on one of its
+  seat shapes in the routed geometry (straight on a facing exit, or out along
+  a sideways exit and toward the rail, each leg at most two marker offsets);
+  otherwise the marker is a remaining member under R43. Plan that stub from
+  the host pin, so it leaves along the pin's exit and turns once.
   Singleton power stubs and R43 trunk offsets use the same document-size
   marker default.
   R43 connects every remaining non-bulk rail member through a

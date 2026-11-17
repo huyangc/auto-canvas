@@ -139,8 +139,10 @@ it("routes the column portfolio deterministically and preserves terminal Nets", 
 it("keeps the complete old-level plan when series levels increase its score", () => {
   const d = branches(1, false);
   // Fix the lower transistor so series rows produce a worse finished plan,
-  // even after terminal-departure repair.
-  d.instances.find((i) => i.id === "q0")!.placement = placement(100, 100);
+  // even after terminal-departure repair. T127 seats the ground marker at the
+  // pnp collector, so the pose must make series rows worse by themselves,
+  // not through a parked marker's long rail wire.
+  d.instances.find((i) => i.id === "q0")!.placement = placement(100, 0);
   const options = { fixedInstanceIds: new Set(["q0"]) };
   const old = planWithSeriesLevels(d, resolver, options, false);
   const candidate = planWithSeriesLevels(d, resolver, options, true);
