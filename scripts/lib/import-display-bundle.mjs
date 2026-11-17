@@ -60,15 +60,18 @@ export async function bundleImportDisplay(
   mkdirSync(outDir, { recursive: true });
   const scratch = mkdtempSync(resolve(outDir, "build-"));
   try {
-    await buildInto(scratch, manifest);
+    await buildInto(scratch);
+    // The bundle first, the manifest last: a reader that sees the new bundle
+    // beside the old manifest at worst rebuilds once more.
     renameSync(resolve(scratch, "import-display.mjs"), bundle);
+    renameSync(resolve(scratch, "sources.json"), manifest);
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
   return bundle;
 }
 
-async function buildInto(outDir, manifest) {
+async function buildInto(outDir) {
   const output = await build({
     root,
     configFile: false,
@@ -119,7 +122,8 @@ async function buildInto(outDir, manifest) {
   ].sort();
   if (!files.length)
     throw new Error("The import step bundle lists no editor source files");
-  const listed = resolve(outDir, "sources.json");
-  writeFileSync(listed, `${JSON.stringify(files, null, 2)}\n`);
-  renameSync(listed, manifest);
+  writeFileSync(
+    resolve(outDir, "sources.json"),
+    `${JSON.stringify(files, null, 2)}\n`,
+  );
 }

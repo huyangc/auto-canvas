@@ -110,3 +110,12 @@ Reviewer rerun: typecheck, lint (0 errors), format:check, docs:check 0; the
 four script test files 0 (27 passed); `pnpm test:local` 0 (812 files, 8344
 passed, 117 skipped); `pnpm test:slow` 0 (2 files, 8 passed); both conversions
 byte-identical to round 1; both comparisons 0.
+
+## Round 2 follow-up — second PR review
+
+The Opus review of `557d104` approved with three P3 findings, fixed by the
+reviewer: the bundle is renamed into place before its manifest; the
+equal-electrical-graph subset also carries the symmetry and signal-direction
+totals; the `--reference` test removes its temporary folder. Rerun after the
+fix: typecheck, lint (0 errors), format:check, docs:check 0; the four script
+test files 0 (27 passed); the VSS conversion byte-identical to round 1.
