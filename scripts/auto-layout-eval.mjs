@@ -4,6 +4,10 @@ import {
 } from "../packages/auto-layout/dist/readability-metrics.js";
 import { summarizeReadability } from "./readability-fit.mjs";
 import {
+  compareVisibleIntegrity,
+  visibleIntegrity,
+} from "./visible-integrity.mjs";
+import {
   readabilityWeights,
   readabilityCalibration,
 } from "../packages/auto-layout/dist/readability-weights.js";
@@ -286,7 +290,9 @@ function netBreakdown(document, resolver) {
     portWireLengthByHostCount,
   };
 }
-const metrics = (document, resolver, components, stages) => {
+// `project`, when given, adds the visible-connection findings: the source
+// drawing and the layout result need them, the quick reference does not.
+const metrics = (document, resolver, components, stages, project) => {
   const audit = auditRouting(document, resolver);
   const bounds = buildSvgScene(document, resolver).viewBox;
   const instances = enclosingBox(document, resolver);
@@ -315,6 +321,9 @@ const metrics = (document, resolver, components, stages) => {
     unsafeProblems: audit.unsafeProblems,
     floatingPins: floatingPins(document, resolver),
     missingConnections: missingConnections(document, resolver),
+    ...(project
+      ? { visibleIntegrity: visibleIntegrity(document, resolver, project) }
+      : {}),
   };
 };
 const median = (values) => {
@@ -503,7 +512,7 @@ async function evaluateFile(file) {
     measurement.hasHuman = hasHuman;
     measurement.human = hasHuman
       ? {
-          ...metrics(document, resolver, components, stages),
+          ...metrics(document, resolver, components, stages, project),
           ...blockMetrics(
             document,
             resolver,
@@ -621,7 +630,7 @@ async function evaluateFile(file) {
     }
     if (completed) {
       measurement.result = {
-        ...metrics(after, resolver, components, stages),
+        ...metrics(after, resolver, components, stages, project),
         ...(partitionSource
           ? {
               blockSymmetry: symmetryCounts(
@@ -633,6 +642,12 @@ async function evaluateFile(file) {
           : {}),
         ...blockMetrics(after, resolver, partition, hasHuman ? document : null),
       };
+      // An imported LOADBench drawing is still the source the result keeps.
+      measurement.integrity = compareVisibleIntegrity(
+        measurement.human?.visibleIntegrity ??
+          visibleIntegrity(document, resolver, project),
+        measurement.result.visibleIntegrity,
+      );
       measurement.result.areaRatio =
         hasHuman &&
         measurement.human.layoutWidth * measurement.human.layoutHeight
@@ -884,6 +899,58 @@ if (!isMainThread) {
       ? items.reduce((s, m) => s + m.floatingPins.length, 0)
       : null,
   });
+  const integrityKeys = ["danglingWires", "unconnectedPins", "labelOwnership"];
+  const integrityTotals = (cases) => {
+    const side = (items) =>
+      items.length
+        ? {
+            ...Object.fromEntries(
+              ["danglingWires", "unconnectedPins", "touchingNotConnected"].map(
+                (key) => [
+                  key,
+                  items.reduce((s, v) => s + v.erc[key].length, 0),
+                ],
+              ),
+            ),
+            labelOwnership: items.reduce(
+              (s, v) => s + v.labelOwnership.length,
+              0,
+            ),
+          }
+        : null;
+    const compared = cases.filter((m) => m.integrity);
+    return {
+      introduced: Object.fromEntries(
+        integrityKeys.map((key) => [
+          key,
+          compared.reduce((s, m) => s + m.integrity.introduced[key].length, 0),
+        ]),
+      ),
+      casesIntroducing: Object.fromEntries(
+        integrityKeys.map((key) => [
+          key,
+          compared.filter((m) => m.integrity.introduced[key].length).length,
+        ]),
+      ),
+      sourceDefects: compared.reduce(
+        (s, m) => s + m.integrity.sourceDefects.length,
+        0,
+      ),
+      casesWithSourceDefects: compared.filter(
+        (m) => m.integrity.sourceDefects.length,
+      ).length,
+      human: side(
+        cases.flatMap((m) =>
+          m.human?.visibleIntegrity ? [m.human.visibleIntegrity] : [],
+        ),
+      ),
+      result: side(
+        cases.flatMap((m) =>
+          m.result?.visibleIntegrity ? [m.result.visibleIntegrity] : [],
+        ),
+      ),
+    };
+  };
   for (const split of ["dev", "val"]) {
     const cases = measurements.filter((m) => m.split === split);
     console.log(
@@ -936,6 +1003,12 @@ if (!isMainThread) {
         largestSpanRatio: m.largestSpanRatio,
         equivalent: m.equivalent,
         unsafe: m.result?.unsafeProblems.length ?? "—",
+        // Introduced dangling wires / unconnected pins / label-ownership flags.
+        integrity: m.integrity
+          ? integrityKeys
+              .map((key) => m.integrity.introduced[key].length)
+              .join("/")
+          : "—",
         reason:
           m.error ??
           m.diagnostics
@@ -977,6 +1050,7 @@ if (!isMainThread) {
       largestHeightRatio: largestRatio(cases, "heightRatio"),
       largestInstanceWidthRatio: largestRatio(cases, "instanceWidthRatio"),
       largestInstanceHeightRatio: largestRatio(cases, "instanceHeightRatio"),
+      visibleIntegrity: integrityTotals(cases),
     };
     totals.push(total);
     console.log(JSON.stringify(total));
@@ -1150,6 +1224,9 @@ if (!isMainThread) {
         (m.status === "completed" &&
           (!m.equivalent ||
             m.result.unsafeProblems.length ||
+            // Label ownership is reported only until it is calibrated.
+            m.integrity.introduced.danglingWires.length ||
+            m.integrity.introduced.unconnectedPins.length ||
             m.result.floatingPins.some(
               (pin) =>
                 !m.diagnostics.some(
