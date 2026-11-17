@@ -192,6 +192,86 @@ touching-not-connected pins / label flags. An introduced dangling wire,
 unconnected pin or touching-not-connected pin fails the run like an unsafe
 problem; label ownership is reported only until it is calibrated.
 
+## Netlist input
+
+Automatic layout must also work from a netlist alone. `scripts/netlist-input.mjs`
+turns each corpus drawing into the Project the editor would open from its
+netlist: the top Document is exported with `createDesignNetlistExport`
+(SPICE), imported with `importSpiceSources` after the editor's
+`prepareImportSources`, and given the editor's `withImportedInstanceDisplays`.
+The two editor steps live in `apps/editor`; `scripts/lib/import-display-bundle.mjs`
+builds them into `tmp/netlist-input/.bundle/` with every `@icm/*` import left
+to the built `packages/*/dist`, so conversion and evaluation run the same
+package code. Nothing in this path changes the planner.
+
+Two forms are reported, because the planner knows different things in each:
+
+- `vss`: ground is a pin of the top subcircuit (`groundPin: "pin"`, the
+  design export's default). This is what the product's own design export
+  gives back; ground comes back as a `VSS` port and is a rail only by its name.
+- `global`: ground stays SPICE node 0 (`groundPin: "global"`), as a deck
+  states it; the import gives it a `global-declaration` ground claim.
+
+```bash
+node scripts/netlist-input.mjs tmp/inputs/le10-input --form vss --jobs 6
+node scripts/netlist-input.mjs tmp/inputs/le10-input --form global --jobs 6
+node scripts/auto-layout-eval.mjs tmp/netlist-input/vss --reference tmp/inputs/le10-input --out tmp/auto-layout-eval/netlist-vss --jobs 6
+node scripts/netlist-input-compare.mjs tmp/auto-layout-eval/netlist-vss/report.json tmp/auto-layout-eval/report.json
+```
+
+The conversion writes, per case, `<id>.meta.json` (stage `converted`,
+`export-blocked`, `import-failed` or `threw`; error codes and first message;
+the re-export verdict `identical`, `same-cards`, `differs` or `blocked`; the
+electrical-graph verdict of source against import; pins the import nets that
+the drawing does not, by device name and pin; added and lost Cell terminal
+names; presentation counts of source and import) and, when it converts,
+`<id>.sp` and `<id>.json`. Output is sorted and has no timestamps: two runs
+give the same bytes whatever the job count.
+
+With `--reference <folder>`, the evaluator plans and checks `<id>.json` of the
+input folder and takes `<folder>/<id>.json` as the human drawing: `human`
+metrics, with their symmetry components and stages, come from the reference;
+equivalence, `integrity` (its baseline is the input's `visibleIntegrity`) and
+the quick run stay on the input. Devices are paired by file id only, since
+device ids differ. The partition oracle is unavailable, so there are no block
+or arrangement metrics. Each case stores `reference`, the conversion meta as
+`conversion`, and `railMarkersReference` (the reference's ground and supply
+markers on rail Nets); the report names both folders in `netlistInput`.
+`--out <dir>` sets the output folder. Exit criteria are those of a drawing
+run. Every run, drawing input included, stores `netKindDetail` on each side:
+bends per Net kind (the `netBreakdown` kind rule: rail, port, signal),
+crossings with a rail Net on at least one side, and the ground and supply
+symbols, ports, Net labels and power labels drawn.
+
+`scripts/netlist-input-compare.mjs` pairs a netlist-input report with a
+drawing-input report by file id and writes `compare.json` beside the netlist
+report. Per split (dev, val, all) it reports conversion coverage by stage and
+code; planner status, equivalence, floating and missing pins and warning
+codes; human / drawing input / netlist input totals of crossings, bends, wire,
+area, mean aspect and long-narrow layouts (aspect ≥ 2, and ≥ 2 with ≥ 1.5 ×
+the human's), with netlist-against-drawing better/equal/worse counts; wire,
+bends and crossings by Net kind and crossings involving a rail; symmetry and
+signal-direction totals; the same totals by what the conversion lost (more
+than one ground marker, a supply marker, label-joined Nets, hidden pins made
+explicit, pin contacts, none of these); and every case failing an exit
+criterion, classified as a hidden supply or control pin made explicit or
+other. A drawing report written before `netKindDetail` existed has no
+per-kind bends or rail crossings; those totals are `null`.
+
+Not comparable between the inputs, and so not reported as a difference:
+
+| Metric                      | Reason                                                                    |
+| --------------------------- | ------------------------------------------------------------------------- |
+| Label overlap and clearance | The import carries the default instance labels, not the drawing's labels. |
+| Label ownership             | The import draws no Net or power labels.                                  |
+| Drafting                    | Drafting objects do not survive a netlist.                                |
+| `railMarkers`               | The import has no rail markers; see `railMarkersReference`.               |
+| `sourceDefects`             | Measured on the netlist-input Document, not the drawing.                  |
+| Refusal status              | A drawing refusal (for example R161 drafting frames) has no counterpart.  |
+
+These are measurements, not an acceptability score: whether a netlist-input
+layout is acceptable is judged by blind review.
+
 ## Evidence and reproduction
 
 The round 2 task report records acceptance commands, fitted accuracies,
