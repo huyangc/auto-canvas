@@ -7,7 +7,10 @@
 import {
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
+  renameSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -44,7 +47,9 @@ function stale(bundle, manifest) {
 /**
  * Builds the import step into `<outDir>/import-display.mjs` unless it is up to
  * date, and returns that path. `<outDir>/sources.json` lists the app source
- * files the bundle contains.
+ * files the bundle contains. Each build writes into a directory of its own
+ * and renames its files into place, so two processes rebuilding at once never
+ * leave a half-written bundle.
  */
 export async function bundleImportDisplay(
   outDir = resolve(root, "tmp/netlist-input/.bundle"),
@@ -53,6 +58,17 @@ export async function bundleImportDisplay(
   const manifest = resolve(outDir, "sources.json");
   if (!stale(bundle, manifest)) return bundle;
   mkdirSync(outDir, { recursive: true });
+  const scratch = mkdtempSync(resolve(outDir, "build-"));
+  try {
+    await buildInto(scratch, manifest);
+    renameSync(resolve(scratch, "import-display.mjs"), bundle);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+  return bundle;
+}
+
+async function buildInto(outDir, manifest) {
   const output = await build({
     root,
     configFile: false,
@@ -103,6 +119,7 @@ export async function bundleImportDisplay(
   ].sort();
   if (!files.length)
     throw new Error("The import step bundle lists no editor source files");
-  writeFileSync(manifest, `${JSON.stringify(files, null, 2)}\n`);
-  return bundle;
+  const listed = resolve(outDir, "sources.json");
+  writeFileSync(listed, `${JSON.stringify(files, null, 2)}\n`);
+  renameSync(listed, manifest);
 }

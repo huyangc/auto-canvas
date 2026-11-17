@@ -79,8 +79,11 @@ const deviceKey = (instance, pinName) =>
  */
 export function failingCriteria(m) {
   if (m.status === "threw") return [{ criterion: "threw", pins: [] }];
-  if (m.status !== "completed") return [];
-  const failures = [];
+  const failures =
+    m.baselineEqual === false
+      ? [{ criterion: "baseline-differs", pins: [] }]
+      : [];
+  if (m.status !== "completed") return failures;
   if (!m.equivalent) failures.push({ criterion: "not-equivalent", pins: [] });
   if (m.result.unsafeProblems.length)
     failures.push({ criterion: "unsafe-routing", pins: [] });
@@ -147,8 +150,9 @@ const coverage = (metas) => ({
         .length,
       groundNamedTerminal: converted.filter((m) => m.import.groundTerminals)
         .length,
-      hiddenPinsExplicit: converted.filter((m) => m.import.hiddenPinsExplicit)
-        .length,
+      pinsNettedOnlyInImport: converted.filter(
+        (m) => m.import.hiddenPinsExplicit,
+      ).length,
     };
   })(),
 });
@@ -247,6 +251,16 @@ const detailTotal = (pairs, side, value) =>
   pairs.every((p) => sides(p)[side].netKindDetail)
     ? sum(pairs, (p) => value(sides(p)[side].netKindDetail))
     : null;
+// Crossings involving a rail Net; without netKindDetail, the rail entries of
+// netBreakdown's per-kind-pair crossings.
+const railCrossings = (m) =>
+  m.netKindDetail?.railCrossings ??
+  sum(
+    Object.entries(m.netBreakdown.crossingsByKindPair).filter(([pair]) =>
+      pair.split("-").includes("rail"),
+    ),
+    ([, count]) => count,
+  );
 
 const byNetKind = (pairs) =>
   Object.fromEntries(
@@ -279,7 +293,7 @@ const byNetKind = (pairs) =>
             ),
           ]),
         ),
-        railCrossings: detailTotal(pairs, side, (d) => d.railCrossings),
+        railCrossings: sum(pairs, (p) => railCrossings(sides(p)[side])),
       },
     ]),
   );
@@ -324,8 +338,25 @@ const CONVERSION_GROUPS = {
   "drawing has more than one ground marker": (c) => c.source.ground > 1,
   "drawing has a supply marker": (c) => c.source.supply > 0,
   "drawing has label-joined Nets": (c) => c.source.labelJoinedNets > 0,
-  "hidden pins made explicit": (c) => c.import.hiddenPinsExplicit > 0,
+  "pins netted only in the import": (c) => c.import.hiddenPinsExplicit > 0,
   "drawing has pin contacts": (c) => c.source.pinContacts > 0,
+};
+
+// The conversion's own verdicts, so a total can be read without the cases
+// whose import is another circuit or could not be checked.
+const VERDICT_GROUPS = {
+  ...Object.fromEntries(
+    ["equal", "different", "unknown", "uncheckable"].map((verdict) => [
+      `electrical graph ${verdict}`,
+      (c) => c.electricalGraph === verdict,
+    ]),
+  ),
+  ...Object.fromEntries(
+    ["identical", "same-cards", "differs", "blocked"].map((verdict) => [
+      `re-export ${verdict}`,
+      (c) => c.reexport === verdict,
+    ]),
+  ),
 };
 
 const conversionBreakdown = (pairs) => {
@@ -333,6 +364,7 @@ const conversionBreakdown = (pairs) => {
     ...CONVERSION_GROUPS,
     "none of these": (c) =>
       Object.values(CONVERSION_GROUPS).every((test) => !test(c)),
+    ...VERDICT_GROUPS,
   };
   return Object.fromEntries(
     Object.entries(groups).map(([name, test]) => {
@@ -409,6 +441,7 @@ export function compareReports(
 ) {
   const drawing = new Map(drawingReport.cases.map((m) => [m.id, m]));
   const netlistCases = netlistReport.cases;
+  const netlistById = new Map(netlistCases.map((m) => [m.id, m]));
   const pairs = netlistCases
     .filter((m) => m.status === "completed" && m.result)
     .flatMap((m) => {
@@ -422,7 +455,17 @@ export function compareReports(
     splits: Object.fromEntries(
       SPLITS.map((split) => {
         const own = pairs.filter(inSplit(split));
+        const equal = own.filter(
+          (p) => p.netlist.conversion?.electricalGraph === "equal",
+        );
         const cases = netlistCases.filter(inSplit(split));
+        const unmatched = drawingReport.cases
+          .filter(inSplit(split))
+          .filter(
+            (d) =>
+              d.status === "completed" &&
+              netlistById.get(d.id)?.status !== "completed",
+          );
         return [
           split,
           {
@@ -430,15 +473,14 @@ export function compareReports(
             planner: planner(cases),
             paired: {
               pairs: own.length,
-              drawingCompletedNetlistNot: drawingReport.cases
-                .filter(inSplit(split))
-                .filter(
-                  (d) =>
-                    d.status === "completed" &&
-                    cases.some(
-                      (m) => m.id === d.id && m.status !== "completed",
-                    ),
+              // A case that never converted has no netlist evaluation at all.
+              drawingCompletedNetlistNot: {
+                notConverted: unmatched.filter((d) => !netlistById.has(d.id))
+                  .length,
+                convertedNotCompleted: unmatched.filter((d) =>
+                  netlistById.has(d.id),
                 ).length,
+              },
               netlistCompletedDrawingNot: cases.filter(
                 (m) =>
                   m.status === "completed" &&
@@ -448,6 +490,13 @@ export function compareReports(
               byNetKind: byNetKind(own),
               readability: readabilityTotals(own),
               conversion: conversionBreakdown(own),
+              // Only pairs whose import the electrical-graph check calls the
+              // same circuit as the drawing.
+              electricalGraphEqual: {
+                pairs: equal.length,
+                table: pairedTable(equal),
+                byNetKind: byNetKind(equal),
+              },
             },
             failures: failures(cases, instancesById),
           },
@@ -469,14 +518,8 @@ const number = (value) =>
 export function formatComparison(comparison) {
   const lines = [];
   const line = (...parts) => lines.push(parts.join(" "));
-  for (const [split, s] of Object.entries(comparison.splits)) {
-    line(`== ${split}`);
-    line("coverage:", JSON.stringify(s.coverage));
-    line("planner:", JSON.stringify(s.planner));
-    const p = s.paired;
-    line(
-      `pairs ${p.pairs}; drawing completed, netlist not: ${p.drawingCompletedNetlistNot}; netlist completed, drawing not: ${p.netlistCompletedDrawingNot}`,
-    );
+  // The paired table and the per-kind totals of one set of pairs.
+  const table = ({ table: rows, byNetKind: kinds }) => {
     line(
       "metric".padEnd(18),
       "human".padStart(12),
@@ -484,7 +527,7 @@ export function formatComparison(comparison) {
       "netlist-in".padStart(12),
       "netlist vs drawing b/e/w".padStart(26),
     );
-    for (const [name, row] of Object.entries(p.table))
+    for (const [name, row] of Object.entries(rows))
       line(
         name.padEnd(18),
         number(row.human).padStart(12),
@@ -495,10 +538,24 @@ export function formatComparison(comparison) {
           : ""
         ).padStart(26),
       );
-    for (const [side, kinds] of Object.entries(p.byNetKind))
+    for (const [side, kind] of Object.entries(kinds))
       line(
-        `${side}: wire rail/port/signal ${NET_KINDS.map((k) => number(kinds.wire[k])).join("/")}; bends ${NET_KINDS.map((k) => number(kinds.bends[k])).join("/")}; crossings involving a rail ${number(kinds.railCrossings)}; crossings by kind pair ${JSON.stringify(kinds.crossingsByKindPair)}`,
+        `${side}: wire rail/port/signal ${NET_KINDS.map((k) => number(kind.wire[k])).join("/")}; bends ${NET_KINDS.map((k) => number(kind.bends[k])).join("/")}; crossings involving a rail ${number(kind.railCrossings)}; crossings by kind pair ${JSON.stringify(kind.crossingsByKindPair)}`,
       );
+  };
+  for (const [split, s] of Object.entries(comparison.splits)) {
+    line(`== ${split}`);
+    line("coverage:", JSON.stringify(s.coverage));
+    line("planner:", JSON.stringify(s.planner));
+    const p = s.paired;
+    line(
+      `pairs ${p.pairs}; drawing completed, netlist not: ${p.drawingCompletedNetlistNot.notConverted} not converted, ${p.drawingCompletedNetlistNot.convertedNotCompleted} converted, not completed; netlist completed, drawing not: ${p.netlistCompletedDrawingNot}`,
+    );
+    table(p);
+    line(
+      `-- pairs whose import has an equal electrical graph: ${p.electricalGraphEqual.pairs}`,
+    );
+    table(p.electricalGraphEqual);
     line("readability:", JSON.stringify(p.readability));
     for (const [group, g] of Object.entries(p.conversion))
       line(
