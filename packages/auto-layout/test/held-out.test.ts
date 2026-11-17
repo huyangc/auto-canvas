@@ -25,9 +25,11 @@ it.each(cases)(
     });
     expect(refinementMetrics(plan)?.candidates ?? 0).toBeLessThanOrEqual(24);
     const errors = plan.diagnostics.filter((d) => d.severity === "error");
-    // R161: a drawing whose functional frames would lose their drawn
-    // interfaces is refused with that single error and no edits.
+    // R161: `skew` has a functional frame whose drawn interfaces layout would
+    // detach, so it is refused with that single error and no edits. Every
+    // other fixture must still plan and commit.
     if (
+      fixture.id === "skew" &&
       errors.length === 1 &&
       errors[0]!.code === "AUTO_LAYOUT_DRAFTING_INTERFACE_UNSUPPORTED"
     ) {

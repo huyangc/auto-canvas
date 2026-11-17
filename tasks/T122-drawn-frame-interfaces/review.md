@@ -85,3 +85,15 @@ exactly one diagnostic each, 44 plan hashes equal to main.
 Known effect on evaluation totals: the 16 refused cases leave the paired
 totals, so headline ratios move without any layout changing (dev composite
 1.195 → 1.229). Comparisons across this change must use the same case set.
+
+## Round 4 — PR review of 8c07ad1, fixed by the reviewer
+
+The Opus PR review approved with one P2 and four P3 findings. P2 (few lines,
+fixed by the reviewer): the refusal branch in both held-out tests is gated on
+the `skew` fixture, so another fixture being refused fails the test instead of
+passing with fewer checks. P3s (check the source frame before previewing;
+untested rotated or moved frames; label-split Nets; R141 warnings appended on
+the LLM entry) are left as follow-ups.
+
+Rerun: `held-out.test.ts` 7 passed, `pnpm test:slow` 8 passed, `pnpm typecheck`
+0, `pnpm lint` 0 errors.
