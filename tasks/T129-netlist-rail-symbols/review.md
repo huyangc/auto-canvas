@@ -115,3 +115,14 @@ Reviewer rerun: build, typecheck, lint (0 errors), format:check, docs:check 0;
 (2 files, 8 passed); drawing mode equal to the base in all 612 completed
 cases; both netlist evaluations 0 with every plan hash equal to round 1, 515
 equivalent, no integrity defect, no gate drop.
+
+## Round 2 follow-up — second PR review
+
+The Opus review of `22f3ee9` approved with two P3 findings, fixed by the
+reviewer: the gate and the candidate filter require the Cell Pin's name to be
+`VDD` both by the export's own test (exact, any case) and folded, so a padded
+name no longer passes (test added; it fails with the folded test alone); the
+refusal fallback's test asserts its message. No corpus Cell Pin folds to `vdd`
+without being exactly `VDD`, so no plan can change. Rerun after the fix:
+typecheck, lint (0 errors), format:check, docs:check 0; `pnpm vitest run
+packages/auto-layout` 0.
