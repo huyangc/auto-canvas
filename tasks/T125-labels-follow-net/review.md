@@ -60,3 +60,32 @@ remaining one with its reason), crossings/bends/wire identical in every case,
 plan hashes change only in cases that had a flag, no per-case label clearance or
 overlap increase left unexplained, joined-only-in-data ERC not above the base in
 any case, the 16 frame cases still refused.
+
+## Round 2 result — accepted
+
+All seven findings fixed; two were applied more strictly than written and the
+reviewer accepts both: a seat is tied to the piece by ERC's own label-binding
+rule (so the check agrees with what `ERC_NET_JOINED_ONLY_IN_DATA` counts), and
+a label clear of wires is never moved onto one (a struck seat is allowed only
+when the current place is struck too).
+
+Acceptance rerun by the reviewer:
+
+```text
+pnpm typecheck    → 0
+pnpm lint         → 0 errors
+pnpm format:check → 0
+pnpm docs:check   → 0
+pnpm test:local   → 0 (807 files, 8306 passed, 117 skipped)
+pnpm test:slow    → 0 (2 files, 8 passed)
+node scripts/auto-layout-eval.mjs <628 cases> → 0 (by the implementer; report read by the reviewer)
+```
+
+Corpus against `main` (`af3a8e7`): 612 completed, the same 16 refused, none
+threw; introduced label-ownership flags 72 (38 cases) → 7 (6 cases); 38 plan
+hashes changed, all cases that had a flag; crossings, bends and wire identical
+in every case; no case with higher label clearance or overlaps (totals
+clearance 270 → 253, overlaps 3 → 2); `ERC_NET_JOINED_ONLY_IN_DATA` 0 on main
+and 0 on the result in every case (7 in the source drawings). The 7 remaining
+flags have no acceptable seat on their own piece (single-pin pieces beside a
+foreign stub; crowded nodes; `frw3b53jtz` IN kept clear of wires).
