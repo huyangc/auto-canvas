@@ -1,4 +1,5 @@
 import { expect, it } from "vitest";
+import { SchematicDocumentSchema } from "@icm/model";
 import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
 import {
   readabilityMetrics,
@@ -10,6 +11,70 @@ import { circuit } from "./document-fixture.js";
 const resolver = new InMemorySymbolResolver(builtInSymbols);
 const measure = (d: ReturnType<typeof circuit>) =>
   readabilityMetrics(d, resolver);
+
+it.each([
+  ["ground", "ground", "0"],
+  ["vdd", "vdd-port", "P"],
+] as const)(
+  "keeps explicit %s rails out of signal flow without a marker",
+  (domain, symbol, pin) => {
+    const d = circuit(
+      { a: "opamp", p: "port", q: "port", marker: symbol },
+      {
+        input: ["a.IN-"],
+        rail: ["a.IN+", "p.P", `marker.${pin}`],
+        output: ["a.OUT", "q.P"],
+      },
+    );
+    for (const i of d.instances)
+      i.placement = placement(i.id === "p" ? 200 : i.id === "q" ? 100 : 0, 0);
+    d.connectivityEvidence.push(
+      {
+        id: "rail-source",
+        kind: "spice-source",
+        netId: "rail",
+        sourceNetId: "rail-source",
+      },
+      {
+        id: "rail-claim",
+        kind: "name-claim",
+        netId: "rail",
+        name: "rail",
+        scope: "global",
+        powerDomain: domain,
+        owner: { kind: "global-declaration", sourceNetId: "rail-source" },
+      },
+    );
+    d.netlist = {
+      name: "test",
+      formalParameters: [],
+      terminals: [
+        {
+          id: "p",
+          name: "rail",
+          netId: "rail",
+          direction: "inout",
+          interfaceInstanceIds: ["p"],
+        },
+        {
+          id: "q",
+          name: "result",
+          netId: "output",
+          direction: "inout",
+          interfaceInstanceIds: ["q"],
+        },
+      ],
+    };
+    const persisted = () =>
+      SchematicDocumentSchema.parse(JSON.parse(JSON.stringify(d)));
+    const withMarker = measure(persisted()).signalDirection;
+    expect(withMarker).toEqual({ violations: 0, opportunities: 2 });
+    d.instances = d.instances.filter((i) => i.id !== "marker");
+    const rail = d.nets.find((n) => n.id === "rail")!;
+    rail.terminals = rail.terminals.filter((t) => t.instanceId !== "marker");
+    expect(measure(persisted()).signalDirection).toEqual(withMarker);
+  },
+);
 function splitByLabel(
   d: ReturnType<typeof circuit>,
   netId: string,

@@ -838,7 +838,8 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   neither depending on planner recognition nor changing selection weights.
   `signalDirection` derives input → output precedence from resolved pin roles
   and infers unset interface directions through passive connectivity
-  (stopping at rails and directed-pin Nets); opportunities are placed
+  (stopping at rails, including Nets with an explicit ground/vdd name claim,
+  and directed-pin Nets); opportunities are placed
   input/output port pairs and device input/output pin pairs, and an output
   left of its input violates. `netlistSymmetry` validates a nontrivial
   connectivity-graph involution containing a transistor pair (same symbol and
@@ -978,7 +979,8 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   candidate on ties; preview and audit only when comparing alternatives.
   Draw the winner, report remaining pins under R14, and label disconnected
   components of named Nets. `missingConnections` sums physical component
-  counts minus one for each Base Net, using all symbol pins except MOS bulk.
+  counts minus one for each Base Net, using all visible symbol pins except MOS
+  bulk (pins hidden by the selected symbol variant's artwork are not audited).
   R22's existing `unrouted` weight applies to that count in every ranking and
   search. Default Edit Engine calls remain all-or-nothing.
 

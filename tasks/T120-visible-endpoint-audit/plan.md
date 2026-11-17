@@ -76,7 +76,9 @@ pnpm vitest run packages/auto-layout   # 0 failures
 node scripts/auto-layout-eval.mjs /Users/huzhifeng/workspace/auto-canvas/.claude/worktrees/t087-flow-symmetry-detectors/tmp/le10-input --jobs 6
 ```
 
-- All 628 `planHash` values equal those in
+- Plan hashes equal those in the report below, except cases whose false
+  missing connections changed the R22 ranking (review round 1: only
+  `s75dft4ssy`); every such case is listed and looked at. Reference:
   `/Users/huzhifeng/workspace/auto-canvas/.claude/worktrees/t087-flow-symmetry-detectors/tmp/auto-layout-eval/report.json`.
 - `ne46whs3fw` and `s75dft4ssy`: `result.missingConnections` 2 → 0; list every
   other case whose `missingConnections`, `floatingPins`, `signalDirection` or
