@@ -661,7 +661,8 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
 
 - **R63 — Distinct, repairable portfolio.** Compare valid initial edit lists
   exactly, keeping the first equal list in `template`, `layered`, `stages`
-  order before ranking by the existing routed score. A refused run returns no
+  (then R163's `feedback-rows` for its subset) order before ranking by the
+  existing routed score. A refused run returns no
   edits, so refused runs are never treated as duplicates. Refine at most two distinct strategies
   through 40 instances, reusing their initial routes. If fewer than two valid
   distinct candidates exist, a refused candidate may fill the second slot; if
@@ -870,6 +871,35 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   `AUTO_LAYOUT_NET_UNROUTED` R14 warning per Net
   (`Net <id>: visible body connection could not be routed safely; pins: ...`).
   The R86/R43 audits keep excluding MOS bulk pins.
+- **R163 — Feedback-row draft (T135).** A document of at most 40 instances,
+  without a partition, fixed instance or locked owner, is in the subset when
+  it has no MOS or BJT and a directed block (a pin with an input role and one
+  with an output role, not hierarchical) has a feedback chain: one to four
+  two-pin non-block parts in series from the block's output Net to one of its
+  input Nets, each inner Net reaching exactly two device pins and no port.
+  For the subset only, the portfolio gains a fourth draft, `feedback-rows`,
+  after `stages` in R63 order; it is routed, deduplicated, ranked, refined,
+  searched, finished and selected exactly like the other drafts, and no other
+  document plans differently. The draft reads connectivity and symbol
+  geometry only. Signal distance runs forward from input terminals, else
+  undriven interface Nets, source outputs and open leads, through blocks from
+  input to output only and never through feedback parts. Each independent
+  circuit gets its own band, top to bottom by signal distance. In a band,
+  blocks are placed by signal distance; the chain to a block's fed-back input
+  (a single-output block is mirrored so that pin is the upper input) forms the
+  main row by the shortest series path from its entry Net, input leads and
+  sources at the left, the block next, its output continuing right. A shunt
+  (two terminals, one on a rail) hangs vertically below its node (above for a
+  supply), in a column reserved beside the node. Chains to the block's other
+  inputs take rows of their own beside the block, away from the main row
+  (the second half of a differential block below). Each feedback chain lies
+  horizontally in a row above the block, below when it feeds the lower input
+  pin, centred between the input and output pin columns; several chains of
+  one block stack outward. Remaining forward parts are branches in rows below
+  the Net they leave, continued until they rejoin a placed Net; a part joining
+  two placed Nets is a bridge in a row above them. Rows keep the lane their
+  wires span clear of other parts. R21 keeps the draft's orientations; markers,
+  ports and labels are seated by the existing rules (R19, R71, R146).
 
 - **R71 — Single-host ports.** A non-rail Cell Pin Net that reaches exactly
   one device pin gets a local seat along that pin's transformed exit direction.

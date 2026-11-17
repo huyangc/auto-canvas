@@ -2,7 +2,8 @@ import type { Instance } from "@icm/model";
 import type { SchematicEdit } from "@icm/edit-engine";
 
 export type Placement = NonNullable<Instance["placement"]>;
-export type LayoutStrategy = "template" | "layered" | "stages";
+export type LayoutStrategy =
+  "template" | "layered" | "stages" | "feedback-rows";
 export type NetRole = "supply" | "ground" | "input" | "output" | "internal";
 /** Experimental block semantics, independent of the partition's source. */
 export type BlockRole =

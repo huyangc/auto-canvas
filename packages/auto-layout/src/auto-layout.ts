@@ -1,3 +1,4 @@
+import { feedbackRowCircuit } from "./feedback-rows.js";
 import { symmetricHalfParts } from "./symmetric-half-order.js";
 import { amplifierGateRows } from "./amp-gate-row.js";
 import { nodeAttachments } from "./attachment-seat.js";
@@ -1016,7 +1017,17 @@ function planAutoLayoutMeasured(
   // ranking. A refused distinct run can still be repaired by refinement.
   // Valid ties prefer earlier strategies; all-refused ties prefer layered
   // when it survives deduplication.
-  const ranked = (["template", "layered", "stages"] as const)
+  const ranked = (
+    [
+      "template",
+      "layered",
+      "stages",
+      // R163: one more draft, last in R63 order, for its subset only.
+      ...(feedbackRowsEligible(document, resolver, options, fixed)
+        ? (["feedback-rows"] as const)
+        : []),
+    ] as const
+  )
     .filter(
       (strategy) => document.instances.length <= 40 || strategy !== "template",
     )
@@ -1728,6 +1739,28 @@ function planAutoLayoutMeasured(
     });
   }
   return base;
+}
+
+/**
+ * R163: the feedback-row draft joins the portfolio only for small, unpinned,
+ * unpartitioned Documents with no MOS or BJT and a block feedback part.
+ */
+function feedbackRowsEligible(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  options: LevelOptions,
+  fixed: ReadonlySet<string>,
+): boolean {
+  return (
+    document.instances.length <= 40 &&
+    !options.partition &&
+    !fixed.size &&
+    ![...document.layoutGroups, ...document.constraints].some(
+      (owner) => owner.locked,
+    ) &&
+    feedbackRowCircuit(document, resolver, classifyNets(document, resolver)) !==
+      undefined
+  );
 }
 
 /** @internal One complete default/candidate plan, also used to verify refinement. */

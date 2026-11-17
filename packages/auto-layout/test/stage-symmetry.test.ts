@@ -7,7 +7,11 @@ import { pinPoints, withPlacements } from "../src/geometry.js";
 import { classifyNets } from "../src/net-roles.js";
 import { placeDocument } from "../src/place.js";
 import { recognizeStructures } from "../src/recognize.js";
-import { createMoveGenerator, randomStream } from "../src/search-moves.js";
+import {
+  createMoveGenerator,
+  randomStream,
+  type SearchState,
+} from "../src/search-moves.js";
 import { stageComponents } from "../src/stage-symmetry.js";
 import { detectSymmetry, symmetryCounts } from "../src/symmetry.js";
 import { terminalPartition } from "../src/transaction.js";
@@ -281,7 +285,11 @@ it.each(["template", "stages", "layered"] as const)(
       new Set(),
       randomStream(41),
     );
-    let current = { placements: result.placements, sides: new Map(), strategy };
+    let current: SearchState = {
+      placements: result.placements,
+      sides: new Map(),
+      strategy,
+    };
     let independent = false;
     for (let n = 0; n < 128; n++) {
       const next = move(current);
