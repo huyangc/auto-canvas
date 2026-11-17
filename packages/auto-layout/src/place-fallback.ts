@@ -2,6 +2,7 @@ import { transformPoint, placementPitch } from "./geometry.js";
 import { type Instance, type SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import { isMos, type NetRoles } from "./net-roles.js";
+import { outputFacesLeft } from "./directed-blocks.js";
 import { placement, pinPoints, withPlacements } from "./geometry.js";
 import {
   deviceNets,
@@ -283,8 +284,11 @@ export function orientByWireCost(
       position: { ...current.position },
       mirror: "none" as const,
     };
+    if (roles.rightFacing?.has(i.id) && outputFacesLeft(i, first, resolver))
+      first.rotation = ((first.rotation + 180) % 360) as Placement["rotation"];
+    // R164: a free directed block reflects only top-bottom.
     const second =
-      pins.length > 2
+      pins.length > 2 || roles.rightFacing?.has(i.id)
         ? { ...first, mirror: "vertical" as const }
         : {
             ...first,

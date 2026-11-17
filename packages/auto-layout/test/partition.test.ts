@@ -329,8 +329,10 @@ const stagePartition: LayoutPartition = {
 it.each([false, true])(
   "R130 removes V1 crossings and selects the side row only when useful: %s",
   (sideRow) => {
+    // R164 would keep the bias op-amp b (on no block cycle) unmirrored; this
+    // test isolates R130's floorplan, so it treats every block as exempt.
     const d = stageFixture(sideRow),
-      roles = classifyNets(d, resolver);
+      roles = { ...classifyNets(d, resolver), rightFacing: new Set<string>() };
     const staged = placeStages(
       d,
       d.instances,

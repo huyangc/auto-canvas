@@ -914,6 +914,51 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   still plan the document. Markers,
   ports and labels are seated by the existing rules (R19, R71, R146).
 
+- **R164 — Directed blocks face right (T134).** A directed block is a
+  non-marker symbol whose definition has a pin with an `input` role
+  (`input`, `non-inverting-input`, `inverting-input`) and a pin with an
+  `output` role (`output`, `output-complement`); hierarchical ports carry no
+  direction (`directed-blocks.ts`). Directed blocks are linked from each
+  output pin's Net to every other directed block with an input pin on that
+  Net; a block in a strongly connected component of two or more blocks is on
+  a block cycle (latches, rings) and keeps today's behaviour. Every other
+  directed block is free, and `classifyNets` records the free ones over the
+  whole document. The convention is enforced where candidates are generated,
+  with no selection or evaluation weight: no R66 single-device move reflects a
+  free block left-right (it reflects top-bottom instead, drawing the same
+  random numbers); two-pin layered row placement and R21 turn it by 180
+  degrees or reflect it top-bottom, never facing its output left; R147
+  relocations, R72 fanout turns, R156 local-loop amplifiers, R159 amplifier
+  seats and R157 attachment seats skip poses that face its output left. A
+  mirror of a whole stage (R53, R57, R153) or of a stage block (the R66
+  block-mirror move) reflects the free blocks in it too and then turns each
+  back to face right in place: reflected left-right again and shifted to keep
+  its visible box centre, snapped to the grid. A stage stays unmirrorable when
+  a free block in it hosts an attached part or a device in it hosts an
+  attached free block, since righting would leave the part behind. A free block is against the flow when more
+  than half of the other pins on its non-rail input Nets lie right of it (the
+  mean x of its own pins); parts that also touch one of its output Nets are
+  feedback and do not count, nor do MOS bulk pins. In a document without MOS
+  or BJT devices (transistor drawings keep their own left-right conventions)
+  and outside partition mode, R57 without a port on a side takes that side
+  from the free blocks: their output pins mark the output side, the counted
+  pins on their input Nets the input side; and a draft without fixed
+  instances is replaced by its whole-draft mirror (free blocks righted in
+  place) when that draws fewer blocks against the flow. Explicit input
+  evidence outranks this inference: on the input side the positive terminal
+  of a grounded source on a signal root (R32's start) is used before the
+  blocks, and the whole-draft mirror is vetoed when it would put any signal
+  root's input right of what it drives (a source's positive pin right of the
+  mean of the root Net's other pins; without a source, those pins' mean right
+  of the devices' centre, the edge R19 would seat the input port on). A veto,
+  not a count summed with the blocks, so no number of righted blocks can buy
+  a reversed input. No R66 move may draw more blocks
+  against the flow than its starting state. A non-rail Cell Pin whose Net a free block's output pin drives is
+  hosted by that pin (the first driver by id) and seats on the right whatever
+  the R19 side choice, so search cannot flip its side, and R146 discards every
+  seat at or left of that block's centre. Fixed instances keep their pose; a
+  document without directed blocks plans exactly as before.
+
 - **R165 — Netlist presentation (T129).** With `presentation: "netlist"` the
   input carries only its netlist, so before R1–R162 the planner decides the
   rail symbols from the Document alone (no geometry), plans the Document those

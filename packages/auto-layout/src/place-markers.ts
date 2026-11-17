@@ -2,7 +2,7 @@ import { portDirection } from "./port-convention.js";
 import { markerBlocksJoin, straightJoins } from "./straight-joins.js";
 import { contactGeometryProblem, contactPolicy } from "./contact-placement.js";
 import { freezePinGroups } from "./route.js";
-import { visibleSymbolInkBounds } from "@icm/derived";
+import { visibleInstanceBounds, visibleSymbolInkBounds } from "@icm/derived";
 import { deviceDescriptor } from "@icm/devices";
 import type { Instance, SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
@@ -26,6 +26,7 @@ import {
   withPlacements,
 } from "./geometry.js";
 import { devicePins, isMarker } from "./placement-connectivity.js";
+import { drivingOutput } from "./directed-blocks.js";
 import {
   emptyChoices,
   emptyOverrides,
@@ -371,11 +372,31 @@ function placeCellPins(
           compareIds(a.instanceId, b.instanceId) ||
           compareIds(a.pinName, b.pinName),
       );
+      // R164: a free directed block's output pin hosts the ports of its Net,
+      // which seat on its right whatever the side choice.
+      const driver = roles.rails.has(net ?? "")
+        ? undefined
+        : drivingOutput(
+            deviceDocument,
+            resolver,
+            roles,
+            net,
+            roles.rightFacing ?? new Set(),
+          );
+      const driven = driver
+        ? connected.findIndex(
+            (p) =>
+              p.instanceId === driver.instance.id &&
+              p.pinName === driver.pin.name,
+          )
+        : -1;
+      if (driven > 0) connected.unshift(...connected.splice(driven, 1));
       const host = connected[0]?.point ?? {
         x: box.x + box.width / 2,
         y: box.y + box.height / 2,
       };
-      if (side === "left" || side === "right") {
+      if (driven >= 0) side = "right";
+      else if (side === "left" || side === "right") {
         const centre = box.x + box.width / 2;
         side =
           host.x < centre
@@ -704,11 +725,33 @@ export function portSeatCandidates(
     );
   }
   const contacts = contactPolicy(document, freezePinGroups(document, resolver));
+  // R164: a port of a free directed block's output Net stays on its right.
+  const driver = drivingOutput(
+    devices,
+    resolver,
+    roles,
+    net,
+    roles.rightFacing ?? new Set(),
+  );
+  const driverBox =
+    driver &&
+    visibleInstanceBounds(
+      { ...devices, instances: [driver.instance] },
+      resolver,
+    )[0]?.bounds;
+  const portPin = devicePins(port, resolver)[0];
   const seen = new Set<string>();
   return seats.filter((seat) => {
     const key = JSON.stringify(seat);
     if (seen.has(key)) return false;
     seen.add(key);
+    if (
+      driverBox &&
+      portPin &&
+      transformPoint(portPin.at, seat.position, seat).x <=
+        driverBox.x + driverBox.width / 2
+    )
+      return false;
     const candidate = withPlacements(document, new Map([[portId, seat]]));
     return (
       (allowBlocked || !markerBlocksJoin(candidate, resolver, portId, joins)) &&

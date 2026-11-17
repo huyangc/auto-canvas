@@ -3,6 +3,7 @@ import {
   readabilityScore,
 } from "../packages/auto-layout/dist/readability-metrics.js";
 import { summarizeReadability } from "./readability-fit.mjs";
+import { blockDirection } from "./lib/block-direction.mjs";
 import {
   compareVisibleIntegrity,
   visibleIntegrity,
@@ -366,6 +367,8 @@ const metrics = (document, resolver, components, stages, project) => {
     unsafeProblems: audit.unsafeProblems,
     floatingPins: floatingPins(document, resolver),
     missingConnections: missingConnections(document, resolver),
+    // Report-only R164 counts; no selection or evaluation weight reads them.
+    blockDirection: blockDirection(document, resolver),
     ...(project
       ? { visibleIntegrity: visibleIntegrity(document, resolver, project) }
       : {}),
@@ -1031,6 +1034,13 @@ if (!isMainThread) {
     floatingPins: items.every((m) => Array.isArray(m.floatingPins))
       ? items.reduce((s, m) => s + m.floatingPins.length, 0)
       : null,
+    // Cases with at least one R164 finding, per kind.
+    blockDirection: Object.fromEntries(
+      ["outputFacesLeft", "outputPortLeft", "againstFlow"].map((key) => [
+        key,
+        items.filter((m) => m.blockDirection?.[key]).length,
+      ]),
+    ),
   });
   const integrityKeys = [
     "danglingWires",

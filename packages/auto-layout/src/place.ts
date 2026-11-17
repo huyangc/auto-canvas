@@ -17,9 +17,18 @@ import {
   type SearchBounds,
 } from "./search-bounds.js";
 import { visibleInstanceBounds } from "@icm/derived";
-import type { Instance, SchematicDocument } from "@icm/model";
+import {
+  reflectOrientation,
+  type Instance,
+  type SchematicDocument,
+} from "@icm/model";
+import {
+  againstFlowCounter,
+  inputsOnRight,
+  rightedInPlace,
+} from "./directed-blocks.js";
 import type { SymbolResolver } from "@icm/symbols";
-import { classifyNets, type NetRoles } from "./net-roles.js";
+import { channelPins, classifyNets, type NetRoles } from "./net-roles.js";
 import { compareIds, persistedTemplates } from "./recognize.js";
 import {
   placementPitch,
@@ -490,6 +499,56 @@ export function placeDocument(
       roles,
     );
     if (problem) return { placements: targets, problem };
+  }
+  // R164: a draft whose rows run against its free directed blocks is
+  // mirrored as a whole, and those blocks are turned back to face right in
+  // place, when that draws fewer of them against the flow.
+  // Transistors keep their own left-right conventions (gate sides, pairs,
+  // amplifier gate rows), so only drafts without channel devices mirror.
+  if (
+    !given &&
+    !partition &&
+    !fixed.size &&
+    roles.rightFacing?.size &&
+    !devices.some((i) => channelPins(i.symbolId))
+  ) {
+    const against = againstFlowCounter(
+      devices,
+      resolver,
+      roles,
+      roles.rightFacing,
+    );
+    const now = against(targets);
+    if (now) {
+      const xs = [...targets.values()].map((p) => p.position.x);
+      const axis = Math.min(...xs) + Math.max(...xs);
+      const grid = document.presentation.grid;
+      const mirrored = new Map<string, Placement>();
+      for (const [id, p] of targets) {
+        const q: Placement = {
+          ...p,
+          ...reflectOrientation(p, "left-right"),
+          position: { x: axis - p.position.x, y: p.position.y },
+        };
+        const device = roles.rightFacing.has(id)
+          ? devices.find((i) => i.id === id)
+          : undefined;
+        mirrored.set(
+          id,
+          device ? rightedInPlace(device, q, resolver, grid) : q,
+        );
+      }
+      // Explicit input evidence outranks block inference: the mirror may not
+      // move an input port or source right of what it drives.
+      const before = inputsOnRight(document, devices, resolver, roles, targets);
+      if (
+        against(mirrored) < now &&
+        [...inputsOnRight(document, devices, resolver, roles, mirrored)].every(
+          (net) => before.has(net),
+        )
+      )
+        targets = mirrored;
+    }
   }
   const coupledIds = templates
     .filter((g) => g.coupledDotPins)

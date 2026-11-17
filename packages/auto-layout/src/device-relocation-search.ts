@@ -13,6 +13,7 @@ import {
   withPlacements,
 } from "./geometry.js";
 import { classifyNets } from "./net-roles.js";
+import { outputFacesLeft } from "./directed-blocks.js";
 import { conductingPins } from "./stages.js";
 import { isMarker } from "./placement-connectivity.js";
 import { compareIds, validInductorCouplings } from "./recognize.js";
@@ -141,9 +142,14 @@ export function relocationCandidates(
           : [
               current,
               ...([0, 90, 180, 270] as const).flatMap((rotation) =>
-                (["none", "horizontal"] as const).map((mirror) =>
-                  placement(0, 0, mirror, rotation),
-                ),
+                (["none", "horizontal"] as const).flatMap((mirror) => {
+                  const pose = placement(0, 0, mirror, rotation);
+                  // R164: a free directed block keeps its output right.
+                  return roles.rightFacing?.has(instance.id) &&
+                    outputFacesLeft(instance, pose, resolver)
+                    ? []
+                    : [pose];
+                }),
               ),
             ];
       for (const other of terminals.filter((t) => !members.has(t.instanceId))) {

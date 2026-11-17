@@ -10,6 +10,7 @@ import {
 } from "./geometry.js";
 import { localLoopAmplifiers } from "./local-loop-amplifier.js";
 import type { NetRoles } from "./net-roles.js";
+import { outputFacesLeft } from "./directed-blocks.js";
 import { devicePins } from "./placement-connectivity.js";
 import type { Placement } from "./types.js";
 
@@ -104,6 +105,12 @@ export function placeAmplifierBetweenBranches(
         };
         const exit = pinExit(loop.output, placement);
         if (exit.x !== -direction.x || exit.y !== -direction.y) continue;
+        // R164: a free directed block keeps its output right.
+        if (
+          roles.rightFacing?.has(loop.device.id) &&
+          outputFacesLeft(loop.device, placement, resolver)
+        )
+          continue;
         const pin = transformPoint(
           loop.output.at,
           placement.position,
