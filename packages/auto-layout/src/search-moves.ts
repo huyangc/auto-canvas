@@ -6,6 +6,11 @@ import {
   placementPartition,
 } from "./partition.js";
 import { reflectOrientation, type SchematicDocument } from "@icm/model";
+import {
+  againstFlowCounter,
+  rightedInPlace,
+  rightFacingBlocks,
+} from "./directed-blocks.js";
 import type { SymbolResolver } from "@icm/symbols";
 import {
   geometryProblem,
@@ -203,6 +208,8 @@ export function createMoveGenerator(
     }
     blocks.push([...expanded].sort(compareIds));
   }
+  const rightFacing = rightFacingBlocks(devices, resolver, roles, fixed);
+  const against = againstFlowCounter(devices, resolver, roles, rightFacing);
   const pick = <T>(items: readonly T[]): T | undefined =>
     items[Math.floor(random() * items.length)];
   const grid = document.presentation.grid;
@@ -259,9 +266,14 @@ export function createMoveGenerator(
       const ids = pick(singles);
       if (!ids) return;
       const p = next.placements.get(ids[0]!)!;
+      const direction = random() < 0.5 ? "left-right" : "top-bottom";
+      // R164: a right-facing directed block only reflects top-bottom.
       Object.assign(
         p,
-        reflectOrientation(p, random() < 0.5 ? "left-right" : "top-bottom"),
+        reflectOrientation(
+          p,
+          rightFacing.has(ids[0]!) ? "top-bottom" : direction,
+        ),
       );
     } else if (kind === 3) {
       const id = pick([...current.sides.keys()].filter((id) => !fixed.has(id)));
@@ -307,6 +319,17 @@ export function createMoveGenerator(
           const p = next.placements.get(id)!;
           p.position.x = axis - p.position.x;
           Object.assign(p, reflectOrientation(p, "left-right"));
+          // R164: a free directed block is re-righted in place.
+          if (rightFacing.has(id))
+            next.placements.set(
+              id,
+              rightedInPlace(
+                devices.find((i) => i.id === id)!,
+                p,
+                resolver,
+                grid,
+              ),
+            );
         }
       } else if (kind === 4) {
         shift(
@@ -353,6 +376,8 @@ export function createMoveGenerator(
       geometryProblem(withPlacements(deviceDocument, next.placements), resolver)
     )
       return;
+    // R164: no move draws more free directed blocks against the flow.
+    if (against(next.placements) > against(current.placements)) return;
     if (
       bounds &&
       (anchorPlacements(document, resolver, next.placements, fixed, bounds) ||

@@ -11,6 +11,7 @@ import {
   withPlacements,
 } from "./geometry.js";
 import { isMosBulk, type NetRoles } from "./net-roles.js";
+import { outputFacesLeft } from "./directed-blocks.js";
 import { devicePins, isMarker } from "./placement-connectivity.js";
 import { compareIds } from "./recognize.js";
 import { findStages } from "./stages.js";
@@ -177,6 +178,12 @@ export function seatNodeAttachments(
       ] as const) {
         const at: Placement = { position: { x: 0, y: 0 }, rotation, mirror };
         if (rails.some(({ pin, y }) => pinExit(pin, at).y !== y)) continue;
+        // R164: a free directed block keeps its output right.
+        if (
+          roles.rightFacing?.has(device.id) &&
+          outputFacesLeft(device, at, resolver)
+        )
+          continue;
         const local = connections.map(({ pin }) =>
           transformPoint(pin.at, at.position, at),
         );

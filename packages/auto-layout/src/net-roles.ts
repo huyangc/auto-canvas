@@ -2,6 +2,7 @@ import { deviceDescriptor } from "@icm/devices";
 import { deriveElectricalTopologyProjection, endpointKey } from "@icm/derived";
 import type { Instance, SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
+import { rightFacingBlocks } from "./directed-blocks.js";
 import type { PlacementPitch } from "./geometry.js";
 import type { NetRole } from "./types.js";
 
@@ -86,6 +87,8 @@ export interface NetRoles {
   /** R37: explicit power intent or the R12 multi-channel supply test. */
   rails: Map<string, "supply" | "ground">;
   pinNet: (instanceId: string, pinName: string) => string | undefined;
+  /** R164: full-document directed blocks that are on no block cycle. */
+  rightFacing?: ReadonlySet<string>;
 }
 
 export function classifyNets(
@@ -172,5 +175,11 @@ export function classifyNets(
       .flatMap((i) => ["D", "S"].filter((p) => pinNet(i.id, p) === net));
     if (channels.length >= 2) rails.set(net, role);
   }
-  return { byNet, rails, pinNet, instanceCount: document.instances.length };
+  return {
+    byNet,
+    rails,
+    pinNet,
+    instanceCount: document.instances.length,
+    rightFacing: rightFacingBlocks(document.instances, resolver, { pinNet }),
+  };
 }

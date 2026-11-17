@@ -10,6 +10,7 @@ import {
   withPlacements,
 } from "./geometry.js";
 import type { NetRoles } from "./net-roles.js";
+import { outputFacesLeft } from "./directed-blocks.js";
 import { devicePins, isMarker } from "./placement-connectivity.js";
 import { compareIds } from "./recognize.js";
 import type { Placement } from "./types.js";
@@ -249,6 +250,12 @@ export function placeLocalLoopAmplifiers(
         const p: Placement = { position: { x: 0, y: 0 }, rotation, mirror };
         const facing = pinExit(pin, p);
         if (facing.x !== -exit.x || facing.y !== -exit.y) continue;
+        // R164: a free directed block keeps its output right.
+        if (
+          roles.rightFacing?.has(device.id) &&
+          outputFacesLeft(device, p, resolver)
+        )
+          continue;
         const output = transformPoint(pin.at, p.position, p);
         const bounds = visibleInstanceBounds(
           { ...document, instances: [{ ...device, placement: p }] },

@@ -2,6 +2,7 @@ import type { SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import { pinExit } from "./geometry.js";
 import { classifyNets } from "./net-roles.js";
+import { outputFacesLeft } from "./directed-blocks.js";
 import { devicePins, isMarker } from "./placement-connectivity.js";
 import { compareIds } from "./recognize.js";
 import { crossingsByNet } from "./routing-audit.js";
@@ -67,7 +68,16 @@ export function centerRepairedFanout(
         host !== driver &&
         (p.rotation === 0 || p.rotation === 180) &&
         (mirror === "none" || mirror === "horizontal") &&
-        (median - x) * pinExit(host.pin, p).x < 0
+        (median - x) * pinExit(host.pin, p).x < 0 &&
+        // R164: never turn a free directed block's output to the left.
+        !(
+          roles.rightFacing?.has(i.id) &&
+          outputFacesLeft(
+            i,
+            { ...p, mirror: mirror === "none" ? "horizontal" : "none" },
+            resolver,
+          )
+        )
       )
         mirror = mirror === "none" ? "horizontal" : "none";
       if ((x !== p.position.x || mirror !== p.mirror) && protectedIds.has(i.id))

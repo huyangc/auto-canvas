@@ -1,4 +1,5 @@
 import { reversedSignalHosts } from "./signal-direction.js";
+import { rightedInPlace } from "./directed-blocks.js";
 import { signalSeriesParts } from "./series-levels.js";
 import { conductingPairs, conductingPins } from "./dc-connectivity.js";
 export { conductingPins } from "./dc-connectivity.js";
@@ -583,8 +584,21 @@ export function placeStages(
       top,
       bottom,
       rails,
+      // R164: a free directed block is re-righted in place after a mirror;
+      // one that hosts an attached part would leave the part behind.
       canMirror:
-        !ownGroups.length && !stage.devices.some((i) => symmetryIds.has(i.id)),
+        !ownGroups.length &&
+        !stage.devices.some(
+          (i) =>
+            symmetryIds.has(i.id) ||
+            (roles.rightFacing?.has(i.id) &&
+              attached.some((a) => a.host.device.id === i.id)) ||
+            attached.some(
+              (a) =>
+                a.host.device.id === i.id &&
+                roles.rightFacing?.has(a.device.id),
+            ),
+        ),
       distance: Math.min(
         ...stage.devices.map((i) => distances.get(i.id) ?? Infinity),
       ),
@@ -804,14 +818,23 @@ export function placeStages(
       if (twoRows) x = rowX[row]!;
       for (const [id, p] of b.placements) {
         const flip = mirrored.has(b.id);
-        targets.set(id, {
+        const target: Placement = {
           ...p,
           ...(flip ? reflectOrientation(p, "left-right") : {}),
           position: {
             x: x + (flip ? b.width - p.position.x : p.position.x),
             y: p.position.y + row * rowPitch,
           },
-        });
+        };
+        // R164: a mirrored stage keeps its free directed blocks facing right.
+        const device =
+          flip && roles.rightFacing?.has(id)
+            ? b.devices.find((i) => i.id === id)
+            : undefined;
+        targets.set(
+          id,
+          device ? rightedInPlace(device, target, resolver, grid) : target,
+        );
       }
       x += b.width;
       // A bridge occupies the first gap between its owners even when another
@@ -855,6 +878,12 @@ export function placeStages(
   };
   let best = compose(),
     score = estimate(best).score;
+  const better = (targets: Map<string, Placement>, next: number) => {
+    if (next >= score) return false;
+    best = targets;
+    score = next;
+    return true;
+  };
   const tryOrder = (candidate: typeof order) => {
     if (
       candidate.some(
@@ -874,11 +903,7 @@ export function placeStages(
     order = candidate;
     const targets = compose(),
       next = estimate(targets).score;
-    if (next < score) {
-      best = targets;
-      score = next;
-      return true;
-    }
+    if (better(targets, next)) return true;
     order = previous;
     return false;
   };
@@ -892,11 +917,8 @@ export function placeStages(
       twoRows = !twoRows;
       const targets = compose(),
         next = estimate(targets).score;
-      if (next < score) {
-        best = targets;
-        score = next;
-        changed = true;
-      } else twoRows = !twoRows;
+      if (better(targets, next)) changed = true;
+      else twoRows = !twoRows;
     }
     for (let i = 1; i < order.length; i++) {
       const candidate = [...order];
@@ -918,11 +940,8 @@ export function placeStages(
       else mirrored.add(b.id);
       const targets = compose(),
         next = estimate(targets).score;
-      if (next < score) {
-        best = targets;
-        score = next;
-        changed = true;
-      } else if (mirrored.has(b.id)) mirrored.delete(b.id);
+      if (better(targets, next)) changed = true;
+      else if (mirrored.has(b.id)) mirrored.delete(b.id);
       else mirrored.add(b.id);
     }
     if (!changed) break;

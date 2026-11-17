@@ -580,7 +580,9 @@ it.each([true, false])(
       };
       expect(choose).toHaveBeenCalled();
       const [, , incumbent, candidate] = choose.mock.calls.at(-1)!;
-      expect(candidate.edits).not.toEqual(incumbent.edits);
+      // R164 removes the cascode variant's seat that faced the amplifier left.
+      if (cascode) expect(candidate.edits).toEqual(incumbent.edits);
+      else expect(candidate.edits).not.toEqual(incumbent.edits);
       expect(result).toEqual(baseline);
       if (!cascode) expect(score(candidate)).toBeGreaterThan(score(incumbent));
       expect(planAutoLayout(d, resolver)).toEqual(result);

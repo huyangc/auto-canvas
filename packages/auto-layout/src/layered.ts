@@ -2,6 +2,7 @@ import { symmetricHalfParts } from "./symmetric-half-order.js";
 import { inferSeriesChannels, signalSeriesParts } from "./series-levels.js";
 import { transformPoint, placementPitch } from "./geometry.js";
 import { visibleInstanceBounds } from "@icm/derived";
+import { outputFacesLeft } from "./directed-blocks.js";
 import {
   reflectOrientation,
   type Instance,
@@ -212,6 +213,12 @@ export function deviceRows(
                   (isSource(i) ? a.name === "+" : ranks[0]! < ranks[1]!)
             : p.y === q.y && p.x < q.x === forward;
         }) ?? 0;
+      // R164: a free directed two-pin block never leaves to the left.
+      if (
+        roles.rightFacing?.has(i.id) &&
+        outputFacesLeft(i, { rotation, mirror: "none" }, resolver)
+      )
+        rotation = ((rotation + 180) % 360) as Placement["rotation"];
     }
     placements.set(
       i.id,
