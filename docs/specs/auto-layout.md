@@ -180,7 +180,8 @@ AutoLayoutDiagnostic[] }`. Fixed instances retain their exact placements;
   or voltage-source positive net reaching a MOS gate but no drain is input;
   a Cell Pin reaching a MOS drain or an output name makes an output. Other
   nets are internal. A grounded-negative voltage source supplies its positive
-  net unless that net is input.
+  net unless that net is input. On netlist input R163 uses the supply role to decide
+  a supply symbol.
 - **R5 — Recognition.** Recognize logical transistor branches (R80) by
   connectivity. D/G/S below also mean C/B/E for BJTs. A mirror reference has
   D=G and D≠S; include every compatible output with the same G/S and D≠G,
@@ -216,7 +217,8 @@ AutoLayoutDiagnostic[] }`. Fixed instances retain their exact placements;
   is treated as a remaining marker. Remaining markers share the last channel
   host and are nudged by grid steps; without one they are unhosted, placed
   from the origin by grid steps.
-  Fixed markers retain their poses.
+  Fixed markers retain their poses. R163's netlist-input markers arrive
+  unplaced, one per hostable device, and take hosts by these rules.
   In default mode with a nonzero search budget, at most 40 instances and no
   supplied partition, after routing and label finishing, try the 40-unit seat
   only for a marker named by a label-clearance, label-run-on or label-overlap
@@ -557,7 +559,8 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   one horizontal trunk above the device rows for supply or below them for
   ground, together with one marker host. This applies to both strategies and
   every rail size. Only R155 may add marker instances and replace this trunk
-  with local trees. A refused or incomplete trunk gets a
+  with local trees; R163 adds ground markers before planning, on netlist input
+  only. A refused or incomplete trunk gets a
   tree fallback under R86. Remaining failures produce R14 warnings naming
   the affected pins. A floating pin is the sole non-bulk pin in its physical
   component while its Base Net has other non-bulk pins.
@@ -910,6 +913,46 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   leaves a device unplaced is a refused candidate (R63); the other strategies
   still plan the document. Markers,
   ports and labels are seated by the existing rules (R19, R71, R146).
+
+- **R163 — Netlist presentation (T129).** With `presentation: "netlist"` the
+  input carries only its netlist, so before R1–R162 the planner decides the
+  rail symbols from the Document alone (no geometry), plans the Document those
+  edits produce with the unchanged pipeline, and returns the presentation
+  edits followed by the plan's edits as one transaction. Without the option
+  this rule is not entered.
+  Ground Nets are the Nets with a ground claim (node `0`). A Ground marker
+  exports only as global node `0`, so a Net named otherwise (a `VSS` Cell
+  Pin's Net without node 0) would be renamed and, under a node-0 export,
+  printed as `0`: such a Net gets no ground symbol. A Ground
+  Net without a `ground` marker gets one `ground` marker per device with a
+  pin R6a can host (a MOS source or drain, a two-pin part's pin, or a T127
+  extra host whose exit does not leave away from the rail at the device's
+  pose, its default one when unplaced), in the tray, with explicit membership
+  of that Base Net and a power-marker-owned claim of global node `0` with the
+  ground domain: the only name a Ground marker exports. The markers stay on
+  the one Base Net; R6a seats each at its own host and R12 gives it a stub, so
+  each is its own routed piece, while pins R6a cannot host (MOS gates, pins
+  leaving away from the rail) and Cell Pins stay on the R43 trunk as today. A
+  Ground Net holding a Cell Pin with only one such device gets no marker: the
+  Cell Pin is wired to that host anyway. A Cell Pin named `VDD` (any case) whose interface instance is a `port`,
+  whose Net R4 classifies as supply and carries no name claim becomes a
+  `vdd-port` (`set_instance_symbol`) when it is the Document's only such Cell
+  Pin and its Net has none. The symbol gives the Net the supply domain; the
+  design export already ranks a `VDD` Cell Pin as the supply, while any other
+  name (`AVDD`, `vdd!`) would move in the exported Cell pins, so it keeps its
+  port; several candidates also keep theirs, with an
+  `AUTO_LAYOUT_NETLIST_SUPPLY_AMBIGUOUS` warning. A rail that already has its power symbol is left alone.
+  The edits are replayed with `dryRun`; they are kept only if the transaction
+  is accepted and every original terminal keeps its Base Net and Logical Net
+  partition, every Net keeps its name and scope and its domain (except a
+  `vdd-port` Cell Pin's Net, which gains the supply domain), Cell terminals and evidence are unchanged, every MOS body
+  resolves as before, the only symbol change is `port` to `vdd-port` on a Cell
+  Pin, and each added instance is such a ground marker. Otherwise, or when the
+  markers would pass R3's 120 instances or the combined list the transaction
+  edit limit, the Document is planned without them and an
+  `AUTO_LAYOUT_NETLIST_PRESENTATION_DROPPED` (or `_SKIPPED`) R163 warning says
+  why. R10's partition check applies to the presented Document. The
+  evaluation checks the electrical graph and the re-exported netlist text.
 
 - **R71 — Single-host ports.** A non-rail Cell Pin Net that reaches exactly
   one device pin gets a local seat along that pin's transformed exit direction.

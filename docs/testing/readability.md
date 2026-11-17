@@ -289,6 +289,23 @@ Not comparable between the inputs, and so not reported as a difference:
 | `sourceDefects`             | Measured on the netlist-input Document, not the drawing.                  |
 | Refusal status              | A drawing refusal (for example R161 drafting frames) has no counterpart.  |
 
+With `--presentation netlist` the evaluator passes `presentation: "netlist"`
+to the planner (auto-layout R163), so the planner decides ground and supply
+symbols before it plans:
+
+```bash
+node scripts/auto-layout-eval.mjs tmp/netlist-input/vss --reference tmp/inputs/le10-input --presentation netlist --out tmp/auto-layout-eval/netlist-vss --jobs 6
+node scripts/auto-layout-eval.mjs tmp/netlist-input/global --reference tmp/inputs/le10-input --presentation netlist --out tmp/auto-layout-eval/netlist-global --jobs 6
+```
+
+Each case then stores `presentation`: the ground markers and supply symbols
+the pre-pass added, the gate's verdict (`change`, `null` when kept), its
+warning codes, and `reexport`, whether the planned Document exports the same
+netlist text as the input in the conversion's form (`identical`, `differs` or
+`blocked`). `equivalent` checks the presentation against the input with the
+R163 gate and the plan against the presented Document with R10's partition
+check, plus the electrical graph as before.
+
 These are measurements, not an acceptability score: whether a netlist-input
 layout is acceptable is judged by blind review.
 
