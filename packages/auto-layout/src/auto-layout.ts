@@ -1,4 +1,4 @@
-import { feedbackRowCircuit } from "./feedback-rows.js";
+import { feedbackRowCircuit, hasTransistor } from "./feedback-rows.js";
 import { symmetricHalfParts } from "./symmetric-half-order.js";
 import { amplifierGateRows } from "./amp-gate-row.js";
 import { nodeAttachments } from "./attachment-seat.js";
@@ -1758,6 +1758,8 @@ function feedbackRowsEligible(
     ![...document.layoutGroups, ...document.constraints].some(
       (owner) => owner.locked,
     ) &&
+    // The transistor test needs no Net roles, so it runs first.
+    !hasTransistor(document) &&
     feedbackRowCircuit(document, resolver, classifyNets(document, resolver)) !==
       undefined
   );

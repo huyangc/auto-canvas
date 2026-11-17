@@ -7,9 +7,30 @@ import { geometryProblem, pinPoints, withPlacements } from "../src/geometry.js";
 import { classifyNets } from "../src/net-roles.js";
 import { planAutoLayout } from "../src/index.js";
 import { refinementMetrics } from "../src/refine.js";
+import { equivalentTerminals, preview } from "../src/transaction.js";
 import { circuit } from "./document-fixture.js";
 
 const resolver = new InMemorySymbolResolver(builtInSymbols);
+
+/** Plan with R163 recognition switched off, as on main. */
+function withoutDraft<T>(run: () => T): T {
+  const off = vi.spyOn(rows, "feedbackRowCircuit").mockReturnValue(undefined);
+  try {
+    return run();
+  } finally {
+    off.mockRestore();
+  }
+}
+
+/** Plan with the default search; the result must apply and keep terminals. */
+function completes(d: SchematicDocument) {
+  const plan = planAutoLayout(d, resolver);
+  expect(plan.diagnostics.filter((x) => x.severity === "error")).toEqual([]);
+  const after = preview(d, resolver, plan.edits);
+  expect(after.ok).toBe(true);
+  expect(equivalentTerminals(d, after.document!, resolver)).toBe(true);
+  return plan;
+}
 
 function draft(d: SchematicDocument) {
   const roles = classifyNets(d, resolver);
@@ -262,6 +283,10 @@ describe("R163 feedback-row draft", () => {
     } finally {
       placed.mockRestore();
     }
+    // The full plan equals the plan with the R163 draft disabled.
+    expect(JSON.stringify(planAutoLayout(d, resolver))).toBe(
+      JSON.stringify(withoutDraft(() => planAutoLayout(d, resolver))),
+    );
   });
 
   it("offers the draft as a fourth strategy for its subset", () => {
@@ -286,5 +311,143 @@ describe("R163 feedback-row draft", () => {
     } finally {
       placed.mockRestore();
     }
+  });
+  it("recognizes a feedback chain of up to four parts, not five", () => {
+    const chain = (n: number) => {
+      const symbols: Record<string, string> = { a: "opamp", r: "resistor" };
+      const nets: Record<string, string[]> = {
+        vin: ["r.1"],
+        x: ["r.2", "a.IN-", "f1.1"],
+        out: ["a.OUT", `f${n}.2`],
+        gnd: ["a.IN+"],
+      };
+      for (let k = 1; k <= n; k++) {
+        symbols[`f${k}`] = k % 2 ? "resistor" : "capacitor";
+        if (k < n) nets[`m${k}`] = [`f${k}.2`, `f${k + 1}.1`];
+      }
+      return stage(symbols, nets);
+    };
+    const { found, above } = draft(chain(4));
+    expect(found.chains.map((c) => c.parts)).toEqual([
+      ["f1", "f2", "f3", "f4"],
+    ]);
+    for (const id of ["f1", "f2", "f3", "f4"])
+      expect(above(id, "a")).toBe(true);
+    const five = chain(5);
+    expect(
+      rows.feedbackRowCircuit(five, resolver, classifyNets(five, resolver)),
+    ).toBeUndefined();
+  });
+
+  it("places two blocks that feed each other", () => {
+    const d = stage(
+      {
+        a: "opamp",
+        b: "opamp",
+        r1: "resistor",
+        r2: "resistor",
+        r3: "resistor",
+      },
+      {
+        vin: ["r1.1"],
+        x: ["r1.2", "r2.1", "a.IN-"],
+        y: ["a.OUT", "r2.2", "r3.1"],
+        z: ["r3.2", "b.IN-"],
+        out: ["b.OUT", "a.IN+"],
+        gnd: ["b.IN+"],
+      },
+    );
+    const { found, box } = draft(d);
+    expect(found.chains.map((c) => c.block)).toEqual(["a"]);
+    expect(box.get("a")!.x).toBeLessThan(box.get("b")!.x);
+    completes(d);
+  });
+
+  it("follows one output of a block with two output Nets", () => {
+    const d = withPorts(
+      circuit(
+        {
+          a: "opamp-differential",
+          r1: "resistor",
+          r2: "resistor",
+          c: "capacitor",
+          pn: "port",
+          pp: "port",
+          on: "port",
+          op: "port",
+        },
+        {
+          vinn: ["r1.1", "pn.P"],
+          vinp: ["r2.1", "pp.P"],
+          x: ["r1.2", "c.1", "a.IN-"],
+          y: ["r2.2", "a.IN+"],
+          outp: ["c.2", "a.OUT+", "op.P"],
+          outn: ["a.OUT-", "on.P"],
+        },
+      ),
+      [
+        ["pn", "vinn", "input"],
+        ["pp", "vinp", "input"],
+        ["on", "outn", "output"],
+        ["op", "outp", "output"],
+      ],
+    );
+    const { found, above } = draft(d);
+    expect(found.chains).toEqual([
+      { block: "a", output: "outp", input: "x", parts: ["c"] },
+    ]);
+    expect(above("c", "a")).toBe(true);
+    completes(d);
+  });
+
+  it("plans the same document identically twice", () => {
+    const d = stage(
+      { a: "opamp", r: "resistor", c: "capacitor", s: "closed-switch" },
+      {
+        vin: ["r.1"],
+        x: ["r.2", "c.1", "s.1", "a.IN-"],
+        out: ["c.2", "s.2", "a.OUT"],
+        gnd: ["a.IN+"],
+      },
+    );
+    expect(JSON.stringify(planAutoLayout(d, resolver))).toBe(
+      JSON.stringify(planAutoLayout(structuredClone(d), resolver)),
+    );
+  });
+
+  it("never treats a control Net as a conducting terminal", () => {
+    // A shorted switch (P and N on one Net) drives another switch's control.
+    const d = stage(
+      {
+        a: "opamp",
+        r1: "resistor",
+        r2: "resistor",
+        s1: "externally-controlled-switch",
+        s2: "externally-controlled-switch",
+      },
+      {
+        vin: ["r1.1", "s1.CTRL"],
+        x: ["r1.2", "r2.1", "a.IN-", "s2.P"],
+        out: ["r2.2", "a.OUT", "s2.N"],
+        c: ["s1.P", "s1.N", "s2.CTRL"],
+        gnd: ["a.IN+"],
+      },
+    );
+    draft(d);
+    completes(d);
+  });
+
+  it("places a two-pin part whose pins share one Net", () => {
+    const d = stage(
+      { a: "opamp", r1: "resistor", r2: "resistor", short: "resistor" },
+      {
+        vin: ["r1.1"],
+        x: ["r1.2", "r2.1", "a.IN-", "short.1", "short.2"],
+        out: ["r2.2", "a.OUT"],
+        gnd: ["a.IN+"],
+      },
+    );
+    draft(d);
+    completes(d);
   });
 });

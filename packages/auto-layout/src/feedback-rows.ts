@@ -9,7 +9,6 @@ import {
   isMarker,
   isSignalBlock,
   isSource,
-  signalDistances,
 } from "./placement-connectivity.js";
 import { portDirection } from "./port-convention.js";
 import { compareIds } from "./recognize.js";
@@ -50,6 +49,8 @@ const SEARCH = 40;
 const BAND_GAP = 80;
 /** Pin roles that steer a part instead of conducting through it. */
 const CONTROL_ROLES = ["input", "control", "clock"];
+/** Interface port symbols (R71). */
+const PORTS = ["port", "port-filled"];
 /** Prefix of the pseudo Net naming an unconnected terminal. */
 const OPEN = "\u0000open:";
 
@@ -64,6 +65,12 @@ const isBlock = (i: Instance, resolver: SymbolResolver) => {
   );
 };
 
+/** R163 excludes any document with a MOS or BJT. */
+export const hasTransistor = (document: SchematicDocument) =>
+  document.instances.some((i) =>
+    ["mos", "bjt"].includes(deviceDescriptor(i.symbolId)?.deviceClass ?? ""),
+  );
+
 /**
  * R163 recognition from connectivity only: no MOS or BJT, and a directed
  * block whose output Net reaches one of its input Nets through two-pin parts
@@ -77,12 +84,7 @@ export function feedbackRowCircuit(
   const devices = document.instances
     .filter((i) => !isMarker(i))
     .sort((a, b) => compareIds(a.id, b.id));
-  if (
-    devices.some((i) =>
-      ["mos", "bjt"].includes(deviceDescriptor(i.symbolId)?.deviceClass ?? ""),
-    )
-  )
-    return undefined;
+  if (hasTransistor(document)) return undefined;
   const power = (net: string | undefined) =>
     net !== undefined &&
     (roles.rails.has(net) ||
@@ -95,7 +97,7 @@ export function feedbackRowCircuit(
       const n = net(i, p);
       if (!n) continue;
       if (isMarker(i)) {
-        if (i.symbolId.startsWith("port")) portNets.add(n);
+        if (PORTS.includes(i.symbolId)) portNets.add(n);
         continue;
       }
       pinCount.set(n, (pinCount.get(n) ?? 0) + 1);
@@ -175,7 +177,7 @@ function forwardDistances(
   // Otherwise an interface Net no block drives, or a source's driven terminal.
   if (!roots.size) {
     const markers = document.instances
-      .filter((i) => ["port", "port-filled"].includes(i.symbolId))
+      .filter((i) => PORTS.includes(i.symbolId))
       .flatMap((i) => roles.pinNet(i.id, "P") ?? []);
     // An open lead: a Net reaching one pin of a non-block part only.
     const reach = new Map<string, number>();
@@ -204,14 +206,7 @@ function forwardDistances(
       ),
     );
   }
-  if (!roots.size) {
-    const planner = signalDistances(document, devices, resolver, roles);
-    roots = new Set(
-      [...planner.nets]
-        .filter(([n, d]) => d === 0 && !power(n))
-        .map(([n]) => n),
-    );
-  }
+  // Otherwise the block inputs no block drives.
   if (!roots.size)
     roots = new Set(
       circuit.blocks
@@ -237,23 +232,6 @@ function forwardDistances(
     if (!known.length) continue;
     const d = Math.min(...known.map((n) => nets.get(n)!));
     for (const n of ins) if (!nets.has(n)) nets.set(n, d);
-  }
-  // A part reached from no input (a reference branch) precedes what it feeds.
-  for (let pass = 0; pass < devices.length; pass++) {
-    let changed = false;
-    for (const i of devices) {
-      if (feedback.has(i.id) || blockIds.has(i.id)) continue;
-      const ns = pinsOf(i, () => true);
-      const known = ns.filter((n) => nets.has(n));
-      if (!known.length || known.length === ns.length) continue;
-      const d = Math.min(...known.map((n) => nets.get(n)!));
-      for (const n of ns)
-        if (!nets.has(n)) {
-          nets.set(n, d - 1);
-          changed = true;
-        }
-    }
-    if (!changed) break;
   }
   return nets;
 }
@@ -379,17 +357,25 @@ function placeBand(
   /** A terminal's Net; an unconnected one is an open end of its own. */
   const termNet = (i: Instance, p: Pin) =>
     netOf(i, p) ?? `${OPEN}${i.id}/${p.name}`;
+  /**
+   * The distinct Nets a part conducts between. A part with two conducting
+   * terminals never counts its control Nets, so a shorted switch (both
+   * terminals on one Net) links nothing; other parts use all signal Nets.
+   */
   const seriesNets = (i: Instance) => {
     const ends = series(i);
-    const nets = ends
-      ? ends.flatMap((p) => {
+    if (!ends) return signalNets(i);
+    const nets = [
+      ...new Set(
+        ends.flatMap((p) => {
           const n = termNet(i, p);
           return power(n) ? [] : [n];
-        })
-      : [];
-    return nets.length === 2 && nets[0] !== nets[1] && signalNets(i).length
+        }),
+      ),
+    ];
+    return nets.length === 2 && signalNets(i).length
       ? nets
-      : signalNets(i);
+      : nets.filter((n) => !n.startsWith(OPEN));
   };
   const deviceDistance = (i: Instance) =>
     Math.min(
@@ -949,7 +935,7 @@ function placeBand(
         placeInRow(i, from, cursor, mainY);
         cursor = right(i) + GAP;
       }
-      const far = series(i)!.find((p) => termNet(i, p) !== from)!;
+      const far = series(i)!.find((p) => termNet(i, p) === other)!;
       if (!complete && netOf(i, far)) {
         branchEnds.add(netOf(i, far)!);
         anchor.set(netOf(i, far)!, worldPin(i, far.name));
