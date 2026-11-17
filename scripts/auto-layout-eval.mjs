@@ -73,6 +73,10 @@ import {
   missingConnections,
 } from "../packages/auto-layout/dist/routing-audit.js";
 import { equivalentTerminals } from "../packages/auto-layout/dist/transaction.js";
+import {
+  netlistPresentation,
+  presentationChange,
+} from "../packages/auto-layout/dist/netlist-presentation.js";
 import { enclosingBox } from "../packages/auto-layout/dist/geometry.js";
 import { readabilityCounts } from "../packages/auto-layout/dist/readability.js";
 import { planningTiming } from "../packages/auto-layout/dist/timing.js";
@@ -83,6 +87,7 @@ import {
 import { executeTransaction } from "../packages/edit-engine/dist/index.js";
 import {
   compareElectricalGraphs,
+  createDesignNetlistExport,
   projectElectricalGraph,
 } from "../packages/netlist/dist/index.js";
 import { parseProject } from "../packages/project-protocol/dist/index.js";
@@ -120,11 +125,12 @@ for (let i = 0; i < args.length; i += 2) {
       "--split",
       "--reference",
       "--out",
+      "--presentation",
     ].includes(args[i]) ||
     args[i + 1] === undefined
   )
     throw new Error(
-      "Usage: auto-layout-eval.mjs <folder> [--baseline <report.json>] [--baseline-planner <built-index.js>] [--quick | --search <seconds>] [--seed <n>] [--jobs <n>] [--partition human|loadbench|llm --variant v1|v2] [--fixed-human] [--optimized] [--threshold <n>] [--split dev|val] [--samples k] [--anonymize] [--block-boxes on|off] [--reference <folder>] [--out <dir>]",
+      "Usage: auto-layout-eval.mjs <folder> [--baseline <report.json>] [--baseline-planner <built-index.js>] [--quick | --search <seconds>] [--seed <n>] [--jobs <n>] [--partition human|loadbench|llm --variant v1|v2] [--fixed-human] [--optimized] [--threshold <n>] [--split dev|val] [--samples k] [--anonymize] [--block-boxes on|off] [--reference <folder>] [--out <dir>] [--presentation netlist]",
     );
   flags.set(args[i], args[i + 1]);
 }
@@ -151,6 +157,8 @@ const fixedHuman = flags.has("--fixed-human");
 // Netlist input (T128): <folder>/<id>.json is planned and checked, the
 // drawing <reference>/<id>.json is the human reference.
 const referenceFolder = flags.get("--reference");
+// R163: the planner decides the rail symbols a netlist does not carry.
+const presentation = flags.get("--presentation");
 if (
   !Number.isSafeInteger(samples) ||
   samples < 0 ||
@@ -163,7 +171,8 @@ if (
   (fixedHuman && (partitionSource || seconds)) ||
   !(threshold > 0 && Number.isFinite(threshold)) ||
   (flags.has("--split") && !["dev", "val"].includes(flags.get("--split"))) ||
-  (referenceFolder && (partitionSource || fixedHuman))
+  (referenceFolder && (partitionSource || fixedHuman)) ||
+  (presentation !== undefined && presentation !== "netlist")
 )
   throw new Error(
     "Invalid partition, variant, threshold, split, reference or quick-mode combination",
@@ -618,6 +627,7 @@ async function evaluateFile(file) {
     // no baseline file was supplied. Keep this reference run outside timing.
     const quickPlan = planAutoLayout(document, resolver, {
       search: { seed, evaluations: 0 },
+      ...(presentation ? { presentation } : {}),
     });
     const quickTransaction = apply(quickPlan);
     measurement.quick =
@@ -668,6 +678,7 @@ async function evaluateFile(file) {
       plan = planAutoLayout(document, resolver, {
         ...layoutOptions,
         ...(flags.has("--optimized") ? { quality: "optimized" } : {}),
+        ...(presentation ? { presentation } : {}),
         search: {
           seed,
           evaluations: budget,
@@ -809,8 +820,48 @@ async function evaluateFile(file) {
           human.document,
           human.resolver,
         );
+      // R163: the rail symbols are checked against the input, the layout
+      // against the Document they produce.
+      const presented = presentation
+        ? netlistPresentation(document, resolver)
+        : undefined;
+      if (presented) {
+        measurement.presentation = {
+          grounds: presented.grounds,
+          supplies: presented.supplies,
+          change:
+            presentationChange(document, presented.document, resolver) ?? null,
+          diagnostics: presented.diagnostics.map((d) => d.code),
+        };
+        const form = measurement.conversion?.form;
+        if (form) {
+          const options = {
+            format: "spice",
+            groundPin: form === "vss" ? "pin" : "global",
+          };
+          const was = createDesignNetlistExport(project, options);
+          const is = createDesignNetlistExport(
+            {
+              ...project,
+              documents: project.documents.map((d) =>
+                d.id === document.id ? after : d,
+              ),
+            },
+            options,
+          );
+          measurement.presentation.reexport =
+            was.status !== "ready" || is.status !== "ready"
+              ? "blocked"
+              : was.file.text === is.file.text
+                ? "identical"
+                : "differs";
+        }
+      }
       measurement.equivalent =
-        equivalentTerminals(document, after, resolver) &&
+        (presented
+          ? measurement.presentation.change === null &&
+            equivalentTerminals(presented.document, after, resolver)
+          : equivalentTerminals(document, after, resolver)) &&
         (beforeGraph.status !== "ready" ||
           (afterGraph.status === "ready" &&
             compareElectricalGraphs(beforeGraph.graph, afterGraph.graph) ===

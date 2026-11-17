@@ -12,6 +12,7 @@ import {
 } from "./finished-selection.js";
 import { improvesReadability } from "./readability-selection.js";
 import { localRailMarkers } from "./local-rail-markers.js";
+import { netlistPresentation } from "./netlist-presentation.js";
 import { planningMemo, reusePlanning } from "./planning-reuse.js";
 import { finishingTrialBudget, planningBudget } from "./planning-budget.js";
 import { pitchBlocked } from "./pitch-fallback.js";
@@ -183,6 +184,53 @@ export function planAutoLayout(
   document: SchematicDocument,
   resolver: SymbolResolver,
   options: AutoLayoutOptions = {},
+): AutoLayoutResult {
+  if (options.presentation === "netlist")
+    return planNetlistPresentation(document, resolver, options);
+  return planDocument(document, resolver, options);
+}
+
+/** R163: plan the Document with its rail symbols, as one transaction. */
+function planNetlistPresentation(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  options: AutoLayoutOptions,
+): AutoLayoutResult {
+  const { presentation: _, ...rest } = options;
+  const presented = netlistPresentation(document, resolver);
+  const plain = () => {
+    const result = planDocument(document, resolver, rest);
+    result.diagnostics.push(...presented.diagnostics);
+    return result;
+  };
+  if (!presented.edits.length) return plain();
+  const result = planDocument(presented.document, resolver, rest);
+  if (
+    result.diagnostics.some((d) => d.severity === "error") ||
+    !result.edits.length
+  ) {
+    result.diagnostics.push(...presented.diagnostics);
+    return result;
+  }
+  const edits = [...presented.edits, ...result.edits];
+  if (edits.length > MAX_SCHEMATIC_EDITS_PER_TRANSACTION) {
+    presented.diagnostics.push({
+      severity: "warning",
+      code: "AUTO_LAYOUT_NETLIST_PRESENTATION_DROPPED",
+      rule: "R163",
+      message: "R163: rail symbols dropped: transaction edit limit",
+    });
+    return plain();
+  }
+  result.edits = edits;
+  result.diagnostics.push(...presented.diagnostics);
+  return result;
+}
+
+function planDocument(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  options: AutoLayoutOptions,
 ): AutoLayoutResult {
   return reusePlanning(() =>
     reusePreviews(() =>
