@@ -275,6 +275,8 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   R43 connects every remaining non-bulk rail member through a
   horizontal trunk, including one marker host to join the marker's drawing.
   If the trunk is refused or incomplete, compare a plain tree under R86.
+  Members that all share one column have no span for a horizontal trunk and
+  join by the plain tree alone; never widen a trunk past its outermost members.
   After finishing, R155 may replace a crossed trunk with named local marker
   trees on documents of at most 40 instances.
   A supply or ground Cell Pin joins its Net through a trunk, with the Cell Pin on it.
