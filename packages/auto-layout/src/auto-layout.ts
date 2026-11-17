@@ -135,6 +135,7 @@ import { searchRailSeats } from "./rail-seat-search.js";
 import { repairStubLabels } from "./stub-seat.js";
 import { searchPortSeats } from "./port-seat-search.js";
 import { draftingGroups } from "./drafting-groups.js";
+import { preserveDraftingInterfaces } from "./drafting-interface.js";
 import { followDraftingGroups } from "./follow-drafting-groups.js";
 import { recoverDraftingOwners } from "./recover-drafting-owners.js";
 import {
@@ -181,68 +182,75 @@ export function planAutoLayout(
   resolver: SymbolResolver,
   options: AutoLayoutOptions = {},
 ): AutoLayoutResult {
-  return drawSourceBodies(
-    document,
-    resolver,
-    options,
-    planSelectedLayout(document, resolver, options),
+  return reusePlanning(() =>
+    reusePreviews(() =>
+      timePlanning(() =>
+        // R162 draws the source's body leads on the selected plan; R161 then
+        // checks the plan actually returned, on every exit including a
+        // stopped search.
+        preserveDraftingInterfaces(
+          document,
+          resolver,
+          drawSourceBodies(
+            document,
+            resolver,
+            options,
+            selectFinalLayout(document, resolver, options),
+          ),
+        ),
+      ),
+    ),
   );
 }
 
-function planSelectedLayout(
+function selectFinalLayout(
   document: SchematicDocument,
   resolver: SymbolResolver,
   options: AutoLayoutOptions,
 ): AutoLayoutResult {
-  return reusePlanning(() =>
-    reusePreviews(() =>
-      timePlanning(() => {
-        const finalists: FinalistPass | undefined =
-          document.instances.length > 0 &&
-          document.instances.length <= 40 &&
-          (options.search?.evaluations ??
-            defaultLayoutSearch(document, options).evaluations) > 0
-            ? { alternate: false, available: new Map(), pending: new WeakMap() }
-            : undefined;
-        const finish = () => {
-          const initial = planPitchDispatch(document, resolver, {
-            ...options,
-            ...(finalists ? { finalists } : {}),
-          });
-          return timePhase("localRails", () =>
-            localRailMarkers(document, resolver, initial, options),
-          );
-        };
-        let best = finish();
-        const stopped = () =>
-          options.search?.signal?.aborted ||
-          (options.search?.deadline !== undefined &&
-            Date.now() >= options.search.deadline);
-        const recover = () =>
-          !finalists ||
-          options.partition ||
-          options.quality === "optimized" ||
-          stopped()
-            ? best
-            : recoverDraftingOwners(document, resolver, best, stopped);
-        if (!finalists) return recover();
-        for (const kind of rankedFinalists(finalists, resolver)) {
-          if (!finalists.available.has(kind) || stopped()) continue;
-          finalists.alternate = kind;
-          const candidate = finish();
-          if (stopped()) return best;
-          best = selectFinishedLayout(
-            document,
-            resolver,
-            best,
-            candidate,
-            options.partition,
-          );
-        }
-        return recover();
-      }),
-    ),
-  );
+  const finalists: FinalistPass | undefined =
+    document.instances.length > 0 &&
+    document.instances.length <= 40 &&
+    (options.search?.evaluations ??
+      defaultLayoutSearch(document, options).evaluations) > 0
+      ? { alternate: false, available: new Map(), pending: new WeakMap() }
+      : undefined;
+  const finish = () => {
+    const initial = planPitchDispatch(document, resolver, {
+      ...options,
+      ...(finalists ? { finalists } : {}),
+    });
+    return timePhase("localRails", () =>
+      localRailMarkers(document, resolver, initial, options),
+    );
+  };
+  let best = finish();
+  const stopped = () =>
+    options.search?.signal?.aborted ||
+    (options.search?.deadline !== undefined &&
+      Date.now() >= options.search.deadline);
+  const recover = () =>
+    !finalists ||
+    options.partition ||
+    options.quality === "optimized" ||
+    stopped()
+      ? best
+      : recoverDraftingOwners(document, resolver, best, stopped);
+  if (!finalists) return recover();
+  for (const kind of rankedFinalists(finalists, resolver)) {
+    if (!finalists.available.has(kind) || stopped()) continue;
+    finalists.alternate = kind;
+    const candidate = finish();
+    if (stopped()) return best;
+    best = selectFinishedLayout(
+      document,
+      resolver,
+      best,
+      candidate,
+      options.partition,
+    );
+  }
+  return recover();
 }
 
 /** R162: the MOS instances whose B pin ends a Route in the source drawing. */
