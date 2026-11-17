@@ -749,6 +749,22 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   and the rigid block are unchanged. It is an additional finished finalist
   after `gateRow` (fixed order), admitted by the T078 margin rule and decided
   by the finished comparator.
+- **R162 — Source body leads (T121).** A MOS body whose B pin ends a Route
+  in the input drawing (dashed or solid) gets a lead again; a body the input
+  shows without a lead stays without one, whatever its body Net. Planning,
+  ranking and every finishing pass are unchanged, so device placement equals
+  the plan without leads. On the selected result only, each
+  such body not already joined to its frozen group is wired with one
+  clearance-checked wire to the best of at most four same-group ordinary
+  terminals (its own source first, then nearest; other bodies of the group
+  only when every ordinary target fails), compared by crossings, bends and
+  wire length. The edits are appended and the whole list is replayed,
+  partition-, name-claim- and safety-checked; then R73 reseats the instance
+  labels the new leads strike, kept only if the same replay checks pass. A
+  listed body still not joined to its group is reported as one
+  `AUTO_LAYOUT_NET_UNROUTED` R14 warning per Net
+  (`Net <id>: visible body connection could not be routed safely; pins: ...`).
+  The R86/R43 audits keep excluding MOS bulk pins.
 
 - **R71 — Single-host ports.** A non-rail Cell Pin Net that reaches exactly
   one device pin gets a local seat along that pin's transformed exit direction.
