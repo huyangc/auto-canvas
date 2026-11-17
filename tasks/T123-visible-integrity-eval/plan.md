@@ -43,7 +43,7 @@ Three defect families, all observed on the 628-case corpus:
   `packages/derived/src/diagnostics/erc.ts` (`reportDanglingWires` :1361,
   `reportPinsTouchingAnotherNet` :1444-1455, `ERC_UNCONNECTED_PIN` :647, :759).
   All are warnings, `gateEligible: false`, never run by the eval today.
-- A working prototype of the census (read it, do not import it): 
+- A working prototype of the census (read it, do not import it):
   `/Users/huzhifeng/workspace/auto-canvas/.claude/worktrees/priceless-pascal-a9479c/tmp/handoff/stubs/detect.mjs`,
   `erc.mjs`, `erc-dangling.mjs`. Its results: ERC_UNCONNECTED_PIN 109 in sources
   and 109 in results; ERC_TOUCHING_NOT_CONNECTED 44 / 0; 60 ERC_DANGLING_WIRE in
@@ -74,7 +74,7 @@ readability metrics and weights, fixtures copied from corpus drawings.
 
 1. `visibleIntegrity(document, resolver)` returns
    `{ erc: { danglingWires, unconnectedPins, touchingNotConnected } (counts +
-   object ids), labelOwnership: [...] }`.
+object ids), labelOwnership: [...] }`.
    - ERC: run `diagnoseProject` on a one-document project the eval already
      builds (see how the eval resolves symbols) and group the three codes.
    - Label ownership: for each net label bound to a Net, measure the distance
@@ -96,7 +96,7 @@ readability metrics and weights, fixtures copied from corpus drawings.
    20-unit wire → introduced; a label seated over a foreign wire → flagged; a
    label seated on its own wire → not flagged; a clean document → all zero.
 5. Investigate and report: run the eval on the corpus, list cases per family
-   with counts (dev/val), and check by rendering: the 6 dangling cases, 
+   with counts (dev/val), and check by rendering: the 6 dangling cases,
    `pfakspv4kx`, `5hjsy2g863`, and 5 random clean cases. Say whether the 36
    frame-route danglings look intentional, and the false-positive rate of label
    ownership on 10 random flagged labels (look at each).
@@ -106,7 +106,7 @@ readability metrics and weights, fixtures copied from corpus drawings.
 ```bash
 export pnpm_config_verify_deps_before_run=false npm_config_verify_deps_before_run=false
 pnpm build && pnpm typecheck && pnpm lint && pnpm format:check   # all 0
-node --test scripts/visible-integrity.test.mjs                    # 0 failures
+pnpm vitest run scripts/visible-integrity.test.mjs               # 0 failures
 node scripts/auto-layout-eval.mjs /Users/huzhifeng/workspace/auto-canvas/.claude/worktrees/t087-flow-symmetry-detectors/tmp/le10-input --jobs 6
 ```
 

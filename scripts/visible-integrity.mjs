@@ -269,23 +269,40 @@ export function visibleIntegrity(document, resolver, project) {
 const pinKey = (item) =>
   [item.instanceId, item.pinName, item.memberId ?? ""].join("\u0000");
 
+/** The unordered pin pair of a pin-on-pin finding; undefined for pin-on-wire. */
+const pinPairKey = (item) =>
+  item.otherInstanceId === undefined
+    ? undefined
+    : [
+        `${item.instanceId}\u0000${item.pinName}`,
+        `${item.otherInstanceId}\u0000${item.otherPinName}`,
+      ]
+        .sort()
+        .join("\u0001");
+
 /** Routes the planner carries over from the source keep this id prefix (R158). */
 const carriedRoutePrefix = "auto-layout-carried-";
 
 /**
  * What a layout result shows wrong that its source did not. An open wire end
  * is carried, not introduced, only when its Route is one the planner carries
- * over from the source (id prefix `auto-layout-carried-`) and the source has
- * an open end on that Net; every other open end is introduced, because the
- * planner regenerates Route and Junction ids. Open pins the source had
- * connected, every pin drawn on another Net's wire or pin (the planner
- * re-routes everything, so any is its own), and flagged labels the source did
- * not flag are introduced too. Pins the source draws on another Net's wire
- * are listed as source defects: input data, not a planner regression.
+ * over from the source (id prefix `auto-layout-carried-`), and only up to the
+ * number of open ends the source has on that Net; every other open end is
+ * introduced, because the planner regenerates Route and Junction ids. Open
+ * pins the source had connected and flagged labels the source did not flag
+ * are introduced too. A pin drawn on another Net's wire is introduced (every
+ * wire is re-routed); a pin on another Net's pin is introduced unless the
+ * source reports the same pin pair, which fixed or locked instances keep.
+ * Pins the source draws on another Net are listed as source defects: input
+ * data, not a planner regression.
  */
 export function compareVisibleIntegrity(source, result) {
-  const sourceOpenNets = new Set(
-    source.erc.danglingWires.map((item) => item.netId),
+  const sourceOpenEnds = new Map();
+  for (const item of source.erc.danglingWires)
+    sourceOpenEnds.set(item.netId, (sourceOpenEnds.get(item.netId) ?? 0) + 1);
+  const excused = new Map();
+  const sourcePinPairs = new Set(
+    source.erc.touchingNotConnected.map(pinPairKey).filter(Boolean),
   );
   const sourceOpen = new Set(source.erc.unconnectedPins.map(pinKey));
   const sourceLabels = new Set(
@@ -293,17 +310,19 @@ export function compareVisibleIntegrity(source, result) {
   );
   return {
     introduced: {
-      danglingWires: result.erc.danglingWires.filter(
-        (item) =>
-          !(
-            String(item.routeId).startsWith(carriedRoutePrefix) &&
-            sourceOpenNets.has(item.netId)
-          ),
-      ),
+      danglingWires: result.erc.danglingWires.filter((item) => {
+        if (!String(item.routeId).startsWith(carriedRoutePrefix)) return true;
+        const used = excused.get(item.netId) ?? 0;
+        if (used >= (sourceOpenEnds.get(item.netId) ?? 0)) return true;
+        excused.set(item.netId, used + 1);
+        return false;
+      }),
       unconnectedPins: result.erc.unconnectedPins.filter(
         (item) => !sourceOpen.has(pinKey(item)),
       ),
-      touchingNotConnected: result.erc.touchingNotConnected,
+      touchingNotConnected: result.erc.touchingNotConnected.filter(
+        (item) => !sourcePinPairs.has(pinPairKey(item)),
+      ),
       labelOwnership: result.labelOwnership.filter(
         (label) => !sourceLabels.has(label.annotationId),
       ),

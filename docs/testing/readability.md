@@ -166,12 +166,13 @@ distances, the nearest foreign object and the label box.
 Per case, `integrity.introduced` holds what the result shows and its source did
 not. A dangling wire end counts as carried only when its Route is one the
 planner carries over from the source (Route id prefix `auto-layout-carried-`,
-R158) and the source has an open end on that Net; every other open end is
-introduced, since the planner regenerates Route and Junction ids. Also
-introduced are unconnected pins (by instance, pin and member) the source did not
-report, every touching-not-connected finding in the result (the planner
-re-routes everything, so any is its own) and flagged labels (by annotation id)
-the source did not flag.
+R158), and only up to the number of open ends the source has on that Net; every
+other open end is introduced, since the planner regenerates Route and Junction
+ids. Also introduced are unconnected pins (by instance, pin and member) the
+source did not report, flagged labels (by annotation id) the source did not
+flag, and touching-not-connected findings: a pin on another Net's wire always
+(every wire is re-routed), a pin on another Net's pin unless the source reports
+the same pin pair, which fixed or locked instances keep.
 `integrity.sourceDefects` lists the source's touching-not-connected pins: the
 drawing looks connected where its netlist is not, which layout preserves, so
 they are input defects and not regressions. Each split total has
