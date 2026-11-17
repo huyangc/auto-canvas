@@ -151,16 +151,21 @@ judges netlist membership plus NoConnect marks, not drawn wires) and
 `touchingNotConnected` (`ERC_TOUCHING_NOT_CONNECTED`: a pin drawn on another
 Net's wire or pin).
 
-`labelOwnership` lists visible Net labels that read as naming another Net (the
-measure lives in `packages/auto-layout/src/label-ownership.ts`; the planner's
-R15a step seats Net labels by the same definition). A
+`labelOwnership` lists visible Net labels and power labels that read as naming
+another Net (the measure lives in
+`packages/auto-layout/src/label-ownership.ts`; the planner's R15a step seats
+both by the same definition). Since T126 the list, and so every count of label
+flags, includes power labels: text naming a rail drawn without a power symbol.
+A power label on a power marker is the symbol's caption and is not measured. A
 label's Net is the Logical Net of its bound Base Net (Base Nets joined by a
 matching name are one). Its rendered ink box is measured against every resolved
 wire segment and every visible pin that sits on a Net; a segment crossing or
 touching the box, or a pin inside it, is at distance 0. A label is flagged
-when no wire or pin of its own Logical Net comes within one grid of the box, or
-when a wire or pin of another Logical Net is strictly closer than its own
-nearest one. The flag's reason is `foreign-closer` when that nearer foreign wire
+when no wire or pin of its own Logical Net comes within one grid of the box
+(two grids for a power label: a rail's name is drawn a grid clear of the
+rail's end, 1.17 grid from its wire in 169 of the corpus's 212 marker-less
+power labels), or when a wire or pin of another Logical Net is strictly closer
+than its own nearest one. The flag's reason is `foreign-closer` when that nearer foreign wire
 or pin is itself within one grid (the label stands on another Net), and
 `own-far` otherwise (the label stands apart from its Net); it also records both
 distances, the nearest foreign object and the label box.

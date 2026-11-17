@@ -2,6 +2,8 @@ import {
   createLabelClearanceContext,
   deriveElectricalTopologyProjection,
   endpointKey,
+  NET_LABEL_INK_ABOVE_WIRE,
+  netLabelSideOffset,
   netLabelBaselineAboveWire,
   netLabelCapHeight,
   netLabelLook,
@@ -9,10 +11,18 @@ import {
   resolveDocumentStyleProfile,
   resolveNetLabelBinding,
   resolveRouteAttachment,
+  resolveRouteGeometry,
   type ElectricalTopologyProjection,
   type NetLabelDirection,
 } from "@icm/derived";
-import type { Annotation, Point, Rect, SchematicDocument } from "@icm/model";
+import type {
+  Annotation,
+  Point,
+  Rect,
+  RouteBranch,
+  RouteEndpoint,
+  SchematicDocument,
+} from "@icm/model";
 import {
   MAX_SCHEMATIC_EDITS_PER_TRANSACTION,
   type SchematicEdit,
@@ -50,6 +60,52 @@ const pointBoxDistance = (point: Point, box: Rect) =>
     Math.max(0, box.y - point.y, point.y - box.y - box.height),
   );
 
+const upsert = (annotation: Annotation): SchematicEdit => ({
+  kind: "upsert_schematic_annotation",
+  annotation,
+});
+
+/**
+ * Each Route as the plan's edits leave it before the transaction ends: the
+ * source's Routes, redrawn by `set_route_path` and removed by
+ * `remove_route_geometry`. A Route another edit makes, such as the halves of
+ * a split, is taken as `final` has it.
+ */
+function drawnRoutes(
+  source: SchematicDocument,
+  edits: SchematicEdit[],
+  final: SchematicDocument,
+) {
+  const routes = new Map(source.routes.map((r) => [r.id, r]));
+  for (const edit of edits)
+    if (edit.kind === "set_route_path") routes.set(edit.route.id, edit.route);
+    else if (edit.kind === "remove_route_geometry") routes.delete(edit.routeId);
+    else if (edit.kind === "add_junction" && edit.split)
+      routes.delete(edit.split.routeId);
+  for (const route of final.routes)
+    if (!routes.has(route.id)) routes.set(route.id, route);
+  return routes;
+}
+
+const pointSegmentDistance = (point: Point, from: Point, to: Point) => {
+  const dx = to.x - from.x,
+    dy = to.y - from.y;
+  const length = dx * dx + dy * dy;
+  const t = length
+    ? Math.max(
+        0,
+        Math.min(
+          1,
+          ((point.x - from.x) * dx + (point.y - from.y) * dy) / length,
+        ),
+      )
+    : 0;
+  return {
+    t,
+    distance: Math.hypot(point.x - from.x - t * dx, point.y - from.y - t * dy),
+  };
+};
+
 const lexicographicLess = (a: number[], b: number[]) => {
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i]! < b[i]!;
   return false;
@@ -79,16 +135,26 @@ const terminalsOf = (topology: ElectricalTopologyProjection, piece: string) =>
     .filter(([key, owner]) => owner === piece && key.startsWith("terminal:"))
     .map(([key]) => key);
 
+/** Whether `label` names a ground rail: below the rail is its outer side. */
+const namesGround = (document: SchematicDocument, label: Annotation) =>
+  document.connectivityEvidence.some(
+    (e) =>
+      e.kind === "name-claim" &&
+      e.owner.kind === "power-marker" &&
+      e.owner.objectId === label.id &&
+      e.powerDomain === "ground",
+  );
+
 /**
- * R15a: Net labels follow their Net, on the finished layout. An unlocked
- * free or wire-anchored Net label that the finished drawing shows apart from
- * its Net, or nearer another Net, moves to a clear seat by a wire or pin of
- * the drawn piece of its Net it names. A label keeps its place when it
- * already reads as its Net's, when its source drawing did not read so
- * either, when a layout group or constraint holds it, or when it is a bus
- * selector. The step runs once on the selected plan, after every placement,
- * routing and rail-marker step, so it moves text only: wires and parts stay
- * as selected.
+ * R15a: Net and power labels follow their Net, on the finished layout. An
+ * unlocked free or wire-anchored Net label, or a power label drawn as text
+ * by its rail, that the finished drawing shows apart from its Net, or
+ * nearer another Net, moves to a clear seat by a wire or pin of the drawn
+ * piece of its Net it names. A label keeps its place when it already reads
+ * as its Net's, when its source drawing did not read so either, when a
+ * layout group or constraint holds it, or when it is a bus selector. The
+ * step runs once on the selected plan, after every placement, routing and
+ * rail-marker step, so it moves text only: wires and parts stay as selected.
  */
 export function followNetLabels(
   source: SchematicDocument,
@@ -99,11 +165,14 @@ export function followNetLabels(
   if (
     !result.edits.length ||
     !(
-      source.annotations.some((a) => a.kind === "net-label") ||
+      source.annotations.some(
+        (a) => a.kind === "net-label" || a.kind === "power-label",
+      ) ||
       result.edits.some(
         (e) =>
           e.kind === "upsert_schematic_annotation" &&
-          e.annotation.kind === "net-label",
+          (e.annotation.kind === "net-label" ||
+            e.annotation.kind === "power-label"),
       )
     ) ||
     result.diagnostics.some((d) => d.severity === "error") ||
@@ -125,7 +194,7 @@ export function followNetLabels(
   const pending = context.visible
     .filter(
       (a) =>
-        a.kind === "net-label" &&
+        ownership.reads(a) &&
         !a.locked &&
         !held.has(a.id) &&
         // A bus selector stays on the branch Route it selects from.
@@ -142,6 +211,53 @@ export function followNetLabels(
   const sourceTopology = deriveElectricalTopologyProjection(source, resolver);
   const topology = deriveElectricalTopologyProjection(final, resolver);
   const sourceById = new Map(source.annotations.map((a) => [a.id, a]));
+  /** Each accepted seat with its ink box and the check it passed. */
+  // The engine reads an upserted label's leg on the Routes as the edits draw
+  // them, and only at the transaction's end rejoins each Net's Routes at
+  // their junctions, keeping the label at the conductor point it read
+  // (edit-engine conductor-topology.ts). Rejoining can hand a leg id to
+  // another segment, so a seat judged on the finished drawing is written
+  // against the drawn leg that holds its point.
+  const drawn = drawnRoutes(source, result.edits, final);
+  const centerlines = new Map<string, readonly Point[] | undefined>();
+  const centerline = (route: RouteBranch) => {
+    if (!centerlines.has(route.id))
+      centerlines.set(
+        route.id,
+        resolveRouteGeometry(final, resolver, route)?.centerline,
+      );
+    return centerlines.get(route.id);
+  };
+  const write = (seat: Annotation): Annotation | undefined => {
+    const anchor = seat.anchor;
+    if (anchor.kind !== "route") return seat;
+    const judged = context.routing.routes.get(anchor.routeId);
+    const leg = judged?.segments.find((s) => s.address.legId === anchor.legId);
+    if (!judged || !leg) return undefined;
+    const point = {
+      x: leg.from.x + (leg.to.x - leg.from.x) * anchor.t,
+      y: leg.from.y + (leg.to.y - leg.from.y) * anchor.t,
+    };
+    // The drawn Route of its Net through that point; rejoining may have
+    // given the finished Route another id.
+    for (const route of drawn.values()) {
+      if (route.netId !== judged.netId) continue;
+      const points = centerline(route);
+      if (!points) continue;
+      for (const [i, leg] of route.legs.entries()) {
+        const from = points[i],
+          to = points[i + 1];
+        if (!from || !to) break;
+        const { t, distance } = pointSegmentDistance(point, from, to);
+        if (distance < 1e-6 && t > 0 && t < 1)
+          return {
+            ...seat,
+            anchor: { ...anchor, routeId: route.id, legId: leg.id, t },
+          };
+      }
+    }
+    return undefined;
+  };
   const edits: SchematicEdit[] = [];
   for (const label of pending) {
     if (
@@ -156,7 +272,7 @@ export function followNetLabels(
     // The drawn piece the label names: in the source, the piece it is drawn
     // on; found in the result by the pins it joins. A Net drawn in pieces
     // joined by name needs its label on each piece.
-    const pieces = new Set<string>();
+    let pieces = new Set<string>();
     const named = original
       ? pieceOf(source, resolver, sourceTopology, original)
       : undefined;
@@ -173,8 +289,19 @@ export function followNetLabels(
       if (piece) pieces.add(piece);
     }
     if (!pieces.size) continue;
+    // When the layout splits that piece, the label stays on the result piece
+    // it names now: leaving it would leave that piece unnamed.
+    const current = pieceOf(final, resolver, topology, label, context.routing);
+    if (current !== undefined && pieces.has(current))
+      pieces = new Set([current]);
     const onPiece = (seat: Annotation) => {
       const piece = pieceOf(final, resolver, topology, seat, context.routing);
+      return piece !== undefined && pieces.has(piece);
+    };
+    const endOnPiece = (endpoint: RouteEndpoint) => {
+      const piece = topology.endpointToPhysicalComponent.get(
+        endpointKey(endpoint),
+      );
       return piece !== undefined && pieces.has(piece);
     };
     const seat = seatOnNet(
@@ -184,11 +311,13 @@ export function followNetLabels(
       original,
       label,
       onPiece,
+      endOnPiece,
+      write,
       original ? pins : undefined,
     );
     if (!seat) continue;
-    context.accept(seat);
-    edits.push({ kind: "upsert_schematic_annotation", annotation: seat });
+    context.accept(seat.judged);
+    edits.push(upsert(seat.written));
   }
   if (!edits.length) return result;
   const all = [...result.edits, ...edits];
@@ -211,8 +340,9 @@ export function followNetLabels(
 
 /**
  * The best clear seat for `label` by a wire or pin of its own Net on
- * `final`, if any, among seats `onPiece` accepts. `pins` are the terminal
- * keys of the source piece the label names.
+ * `final`, if any, among seats `onPiece` accepts, beside pins
+ * and wires whose ends `endOnPiece` accepts, as judged and as `write` puts it in the plan's
+ * edits. `pins` are the terminal keys of the source piece the label names.
  */
 function seatOnNet(
   final: SchematicDocument,
@@ -221,8 +351,10 @@ function seatOnNet(
   original: Annotation | undefined,
   label: Annotation,
   onPiece: (seat: Annotation) => boolean,
+  endOnPiece: (endpoint: RouteEndpoint) => boolean,
+  write: (seat: Annotation) => Annotation | undefined,
   pins?: ReadonlySet<string>,
-): Annotation | undefined {
+): { judged: Annotation; written: Annotation } | undefined {
   const netId = ownership.netOf(label);
   const rotation = label.rotation ?? 0;
   if (!netId || (rotation !== 0 && rotation !== 270)) return undefined;
@@ -262,6 +394,20 @@ function seatOnNet(
     scale,
   );
   const cap = netLabelCapHeight(profile, scale);
+  // A power label is set in its own type, larger than a Net label's: over
+  // or under a horizontal wire its baseline stands where its own ink keeps
+  // a Net label's clearance from the wire.
+  const ink =
+    label.kind === "power-label" && rotation === 0
+      ? context.measure({
+          ...label,
+          anchor: { kind: "free", position: { x: 0, y: 0 } },
+        }).inkBounds
+      : undefined;
+  const rowOffsets = ink && {
+    over: Math.ceil(NET_LABEL_INK_ABOVE_WIRE + ink.y + ink.height),
+    under: Math.ceil(NET_LABEL_INK_ABOVE_WIRE - ink.y),
+  };
   const own = ownership.logicalId(netId);
   const instances = new Set(final.instances.map((i) => i.id));
   const routes = new Set(final.routes.map((r) => r.id));
@@ -270,9 +416,18 @@ function seatOnNet(
   const clear = !context
     .findingsAt(label, context.measure(label).inkBounds)
     .struck.some((id) => routes.has(id));
-  let best: { cost: number[]; seat: Annotation } | undefined;
+  // A power label names its rail from the rail's outer side: above a
+  // supply rail, below a ground rail.
+  const outward =
+    label.kind !== "power-label" ? 0 : namesGround(final, label) ? 1 : -1;
+  /** Whether `box` stands on the inner side of a rail at height `y`. */
+  const inner = (box: Rect, y: number | undefined) =>
+    outward !== 0 &&
+    (y === undefined || (box.y + box.height / 2 - y) * outward <= 0);
+  let best:
+    { cost: number[]; seat: Annotation; written: Annotation } | undefined;
   let order = 0;
-  const consider = (seat: Annotation) => {
+  const consider = (seat: Annotation, railY?: number) => {
     if (!onPiece(seat)) return;
     const box = context.measure(seat).inkBounds;
     if (ownership.flagAt(seat, box)) return;
@@ -289,11 +444,15 @@ function seatOnNet(
       across,
       // Text a grid from other text reads as one line with it.
       context.labelsWithin(box, seat.id, ownership.grid).length,
+      Number(inner(box, railY)),
       Number((seat.anchor.kind === "free") !== byPin),
       Math.round(pointBoxDistance(home, box)),
       order++,
     ];
-    if (!best || lexicographicLess(cost, best.cost)) best = { cost, seat };
+    // A seat the plan's edits cannot name where it was judged is no seat.
+    const written = write(seat);
+    if (written && (!best || lexicographicLess(cost, best.cost)))
+      best = { cost, seat, written };
   };
   // The label's own Base Net first: a name shared by several Base Nets
   // still marks the pins its own Net joins.
@@ -301,9 +460,15 @@ function seatOnNet(
     compareIds(a.routeId, b.routeId),
   );
   const base = all.filter((g) => g.netId === netId);
-  const geometries = base.length
-    ? base
-    : all.filter((g) => ownership.logicalId(g.netId) === own);
+  // Only wires of the piece it names: another Base Net joined by name is
+  // another piece, and a name drawn there names that piece.
+  const starts = new Map(final.routes.map((r) => [r.id, r.start]));
+  const geometries = (
+    base.length ? base : all.filter((g) => ownership.logicalId(g.netId) === own)
+  ).filter((g) => {
+    const start = starts.get(g.routeId);
+    return start !== undefined && endOnPiece(start);
+  });
   for (const geometry of geometries)
     for (const segment of geometry.segments) {
       const length = Math.hypot(
@@ -321,35 +486,57 @@ function seatOnNet(
             baseline,
           );
           if (look.rotation !== rotation) continue;
+          const railRow =
+            rowOffsets !== undefined &&
+            segment.from.y === segment.to.y &&
+            look.rotation === 0;
           for (const side of [1, -1]) {
+            const normalOffset = railRow
+              ? side > 0
+                ? netLabelSideOffset(segment.from, segment.to, rowOffsets.over)
+                : -netLabelSideOffset(
+                    segment.from,
+                    segment.to,
+                    rowOffsets.under,
+                  )
+              : side * look.normalOffset;
             const attachment = {
               routeId: geometry.routeId,
               legId: segment.address.legId,
               t,
-              normalOffset: side * look.normalOffset,
+              normalOffset,
               direction: "forward" as const,
               orientation: "horizontal" as const,
             };
             const resolved = resolveRouteAttachment(geometry, attachment);
             if (!resolved) continue;
-            consider({
-              ...label,
-              alignment: look.alignment,
-              anchor: {
-                kind: "route",
-                ...attachment,
-                fallbackPosition: integerPoint(resolved.labelPoint),
+            consider(
+              {
+                ...label,
+                alignment: look.alignment,
+                anchor: {
+                  kind: "route",
+                  ...attachment,
+                  fallbackPosition: integerPoint(resolved.labelPoint),
+                },
               },
-            });
+              // A vertical leg has no outer side.
+              segment.from.y === segment.to.y ? segment.from.y : undefined,
+            );
           }
         }
     }
-  // Beside a pin of its Net: a Net drawn without wires (pins joined by name
-  // or abutting) has no other seat, and a label drawn at a pin stays there.
-  // Text stands beside the pin across its row, or centred over or under
-  // it, up to a grid from it.
+  // Beside a pin of the piece it names: a Net drawn without wires (pins
+  // joined by name or abutting) has no other seat, and a label drawn at a
+  // pin stays there. Text stands beside the pin across its row, or centred
+  // over or under it, up to a grid from it.
   const box = context.measure(label).inkBounds;
   const near = ownership.ownPins(netId, box);
+  // Pins of another Base Net joined by name are another piece: a label
+  // there names that piece, so its Logical Net's pins pass the same filter.
+  const seatPins = (
+    near.length ? near : ownership.ownPins(netId, box, true)
+  ).filter((pin) => endOnPiece({ kind: "terminal", ...pin.terminal }));
   const half = ownership.grid / 2;
   const spots: Array<[number, number, Annotation["alignment"]]> = [];
   for (const reach of [half, ownership.grid])
@@ -362,22 +549,25 @@ function seatOnNet(
     ownership.grid + cap,
   ])
     spots.push([0, level, "middle"]);
-  for (const pin of near.length ? near : ownership.ownPins(netId, box, true))
+  for (const pin of seatPins)
     for (const [along, level, alignment] of spots) {
       // Upright text runs along x; text turned to 270 runs up along y.
       const offset =
         rotation === 0 ? { x: along, y: level } : { x: level, y: -along };
-      consider({
-        ...label,
-        alignment,
-        anchor: {
-          kind: "free",
-          position: integerPoint({
-            x: pin.point.x + offset.x,
-            y: pin.point.y + offset.y,
-          }),
+      consider(
+        {
+          ...label,
+          alignment,
+          anchor: {
+            kind: "free",
+            position: integerPoint({
+              x: pin.point.x + offset.x,
+              y: pin.point.y + offset.y,
+            }),
+          },
         },
-      });
+        pin.point.y,
+      );
     }
-  return best?.seat;
+  return best && { judged: best.seat, written: best.written };
 }

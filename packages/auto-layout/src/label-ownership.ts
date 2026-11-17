@@ -9,7 +9,15 @@ import { compareIds } from "./recognize.js";
 
 const epsilon = 1e-6;
 
-/** A visible Net label that reads as naming another Net, or no Net. */
+/**
+ * How far, in grid squares, a power label may stand from its rail: a rail's
+ * name is drawn a grid clear of the rail's end (169 of the corpus's 212
+ * marker-less power labels sit 1.17 grid from their wire), where a Net label
+ * sits on its wire.
+ */
+const POWER_LABEL_REACH = 2;
+
+/** A visible Net or power label that reads as naming another Net, or no Net. */
 export interface LabelOwnershipFlag {
   annotationId: string;
   netId: string;
@@ -104,8 +112,8 @@ type Context = ReturnType<typeof createLabelClearanceContext>;
  * The label-ownership read model of one Document (docs/testing/readability.md,
  * "Visible integrity"): every resolved wire segment and every visible pin on
  * a Net, each Net taken as its Logical Net (Base Nets joined by a matching
- * name are one). The planner seats Net labels with it and the evaluation
- * reports with it, so both read a label's Net the same way.
+ * name are one). The planner seats Net and power labels with it and the
+ * evaluation reports with it, so both read a label's Net the same way.
  */
 export function createLabelOwnership(
   document: SchematicDocument,
@@ -116,6 +124,19 @@ export function createLabelOwnership(
   const logicalId = (netId: string) =>
     logical.byBaseNetId.get(netId)?.id ?? netId;
   const grid = document.presentation.grid;
+  const instanceIds = new Set(document.instances.map((i) => i.id));
+  /**
+   * Whether the measure reads `annotation`: a Net label, or a power label
+   * drawn as text by its rail. A power label on a power marker is the
+   * symbol's caption; the symbol, not the text, names the rail.
+   */
+  const reads = (annotation: Annotation) =>
+    annotation.kind === "net-label" ||
+    (annotation.kind === "power-label" &&
+      !(
+        annotation.anchor.kind === "object" &&
+        instanceIds.has(annotation.anchor.objectId)
+      ));
   const features: Feature[] = [];
   for (const geometry of context.routing.routes.values())
     for (const segment of geometry.segments)
@@ -158,7 +179,7 @@ export function createLabelOwnership(
       });
     }
   }
-  /** The Base Net a Net label names, if any. */
+  /** The Base Net a Net or power label names, if any. */
   const netOf = (annotation: Annotation) =>
     annotation.binding?.kind === "net-name"
       ? annotation.binding.netId
@@ -184,12 +205,14 @@ export function createLabelOwnership(
     box: Rect = context.measure(annotation).inkBounds,
   ): LabelOwnershipFlag | undefined => {
     const netId = netOf(annotation);
-    if (annotation.kind !== "net-label" || !netId) return undefined;
+    if (!reads(annotation) || !netId) return undefined;
     const { own, foreign } = nearest(netId, box);
     const ownDistance = own?.distance ?? Infinity;
     const foreignCloser =
       foreign !== undefined && foreign.distance < ownDistance - epsilon;
-    if (ownDistance <= grid + epsilon && !foreignCloser) return undefined;
+    const reach =
+      annotation.kind === "power-label" ? POWER_LABEL_REACH * grid : grid;
+    if (ownDistance <= reach + epsilon && !foreignCloser) return undefined;
     return {
       annotationId: annotation.id,
       netId,
@@ -238,6 +261,7 @@ export function createLabelOwnership(
     context,
     grid,
     logicalId,
+    reads,
     netOf,
     flagAt,
     ownPins,
@@ -247,18 +271,24 @@ export function createLabelOwnership(
 }
 
 /**
- * Visible Net labels whose drawn text reads as naming another Net. A label is
- * flagged when no wire or pin of its own Logical Net comes within one grid of
- * its ink box, or when a wire or pin of another Logical Net is strictly
- * closer to the box than its own nearest one. The reason reads
- * `foreign-closer` when that other Net's wire or pin is itself within one
- * grid (the label stands on it), `own-far` otherwise.
+ * Visible Net and power labels whose drawn text reads as naming another Net.
+ * A label is flagged when no wire or pin of its own Logical Net comes within
+ * one grid of its ink box (two for a power label), or when a wire or pin of
+ * another Logical Net is strictly closer to the box than its own nearest
+ * one. The reason reads `foreign-closer` when that other Net's wire or pin is
+ * itself within one grid (the label stands on it), `own-far` otherwise. A
+ * power label on a power marker is the symbol's caption and is not read.
  */
 export function labelOwnership(
   document: SchematicDocument,
   resolver: SymbolResolver,
 ): LabelOwnershipFlag[] {
-  if (!document.annotations.some((a) => a.kind === "net-label")) return [];
+  if (
+    !document.annotations.some(
+      (a) => a.kind === "net-label" || a.kind === "power-label",
+    )
+  )
+    return [];
   const ownership = createLabelOwnership(document, resolver);
   return ownership.context.visible.flatMap((annotation) => {
     const flag = ownership.flagAt(annotation);

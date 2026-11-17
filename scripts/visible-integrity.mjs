@@ -1,13 +1,14 @@
 // Visible connection defects the routing audit cannot see: what the product's
 // ERC reports about open wire ends, open pins and pins drawn on another Net's
-// wire, and Net labels that read as naming another Net. Pure functions over a
-// Document and its symbol resolver; the evaluation compares a layout result
-// with its own source drawing.
+// wire, and Net and power labels that read as naming another Net. Pure
+// functions over a Document and its symbol resolver; the evaluation compares a
+// layout result with its own source drawing.
 import {
   buildProjectConnectivityIndex,
   diagnoseProject,
 } from "../packages/derived/dist/index.js";
-// The planner seats Net labels by the same ownership measure (T125).
+// The planner seats Net and power labels by the same ownership measure (T125,
+// T126).
 import { labelOwnership } from "../packages/auto-layout/dist/label-ownership.js";
 
 const ercCodes = {

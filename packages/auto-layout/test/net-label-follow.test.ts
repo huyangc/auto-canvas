@@ -375,6 +375,145 @@ it("leaves a label where it is when the piece it names has no seat", () => {
   expect(follow(source, layout).added).toEqual([]);
 });
 
+it("seats a label only beside pins of the piece it names", () => {
+  // Net `output` also has q.1, a piece of its own without a wire.
+  const withLonePin = (outY: number) => {
+    const document = combed(outY);
+    document.instances.push({ id: "q", symbolId: "resistor", placement: null });
+    document.nets
+      .find((n) => n.id === "output")!
+      .terminals.push({ instanceId: "q", pinName: "1" });
+    place(document, "q", 800, 80);
+    return document;
+  };
+  const source = withLonePin(60);
+  named(
+    source,
+    netLabel("vbias", "output", { kind: "free", position: { x: 300, y: 52 } }),
+  );
+  expect(labelOwnership(source, resolver)).toEqual([]);
+  // Every seat by the output wire or its pins has a comb wire across it. A
+  // seat by q.1 binds to the output wire, the Net's only wire, yet a reader
+  // sees the name at q, which has no wire.
+  const layout = layoutEdits(source, withLonePin(260));
+  const stayed = preview(source, resolver, layout.edits);
+  expect(stayed.ok && labelOwnership(stayed.document, resolver)).toMatchObject([
+    { annotationId: "vbias", reason: "own-far" },
+  ]);
+  expect(follow(source, layout).added).toEqual([]);
+});
+
+/**
+ * Net `out` along y 140: a.2 by a bend to b.1, b.1 to c.1, c.1 to d.1. With
+ * `split` the layout drops the b–c wire and moves c and d down to y 400.
+ */
+function chain(split: boolean): SchematicDocument {
+  const document = circuit(
+    { a: "resistor", b: "resistor", c: "resistor", d: "resistor" },
+    { out: ["a.2", "b.1", "c.1", "d.1"] },
+  );
+  const y = split ? 400 : 140;
+  place(document, "a", 100, 100);
+  place(document, "b", 200, 160);
+  place(document, "c", 300, y + 20);
+  place(document, "d", 400, y + 20);
+  document.routes.push(
+    wire(document, "w1", "out", ["a", "2"], ["b", "1"]),
+    ...(split ? [] : [wire(document, "w2", "out", ["b", "1"], ["c", "1"])]),
+    wire(document, "w3", "out", ["c", "1"], ["d", "1"]),
+  );
+  return document;
+}
+
+it("keeps a label on the piece it names now when the layout splits its piece", () => {
+  const source = chain(false);
+  // Drawn by c.1, above the c–d wire.
+  named(
+    source,
+    netLabel("vout", "out", { kind: "free", position: { x: 310, y: 132 } }),
+  );
+  expect(labelOwnership(source, resolver)).toEqual([]);
+  // After the split the label still names the a–b piece, the nearer one.
+  const layout = layoutEdits(source, chain(true));
+  layout.edits.push({ kind: "remove_route_geometry", routeId: "w2" });
+  const stayed = preview(source, resolver, layout.edits);
+  expect(stayed.ok && labelOwnership(stayed.document, resolver)).toMatchObject([
+    { annotationId: "vout", reason: "own-far" },
+  ]);
+  const { added, final } = follow(source, layout);
+  expect(added).toHaveLength(1);
+  // Not on the c–d piece, though c.1 is where it was drawn: that would leave
+  // the a–b piece it names unnamed.
+  expect(final.annotations[0]!.anchor).toMatchObject({
+    kind: "route",
+    routeId: "w1",
+  });
+  expect(labelOwnership(final, resolver)).toEqual([]);
+});
+
+/**
+ * twoPieces(140), and a comb of Net `comb` wires every 20 units from x 110
+ * to 490: far below in the source; with `crossed`, piece A runs straight
+ * along y 400 from r.2 to o.1 and the comb crosses it from y 380 to 420.
+ */
+function combedPieces(crossed: boolean): SchematicDocument {
+  const teeth = Array.from({ length: 20 }, (_, i) => 110 + 20 * i);
+  const document = twoPieces(140);
+  for (const [i] of teeth.entries())
+    document.instances.push(
+      { id: `c${i}`, symbolId: "resistor", placement: null },
+      { id: `d${i}`, symbolId: "resistor", placement: null },
+    );
+  document.nets.push({
+    id: "comb",
+    terminals: teeth.flatMap((_, i) => [
+      { instanceId: `c${i}`, pinName: "2" },
+      { instanceId: `d${i}`, pinName: "1" },
+    ]),
+  });
+  const top = crossed ? 380 : 600;
+  teeth.forEach((x, i) => {
+    place(document, `c${i}`, x, top - 20);
+    place(document, `d${i}`, x, top + 60);
+  });
+  if (crossed) {
+    place(document, "r", 100, 380);
+    place(document, "o", 500, 420);
+  }
+  document.routes = [
+    wire(document, "w-a", "out", ["r", "2"], ["o", "1"]),
+    wire(document, "w-b", "out", ["p", "2"], ["q", "1"]),
+    ...teeth.map((_, i) =>
+      wire(document, `w-c${i}`, "comb", [`c${i}`, "2"], [`d${i}`, "1"]),
+    ),
+  ];
+  return document;
+}
+
+it("takes a pin seat on its own piece over a wire seat on another", () => {
+  const source = combedPieces(false);
+  namedPieces(source);
+  expect(labelOwnership(source, resolver)).toEqual([]);
+  // Every seat by A's wire has a comb wire across its text; only the ends
+  // of A, beyond the comb, have room. Drawn by a wire, the label would
+  // rather take a seat by a wire, and B's wire has clear ones.
+  const layout = layoutEdits(source, combedPieces(true));
+  const stayed = preview(source, resolver, layout.edits);
+  expect(stayed.ok && labelOwnership(stayed.document, resolver)).toMatchObject([
+    { annotationId: "va", reason: "own-far" },
+  ]);
+  const { added, final } = follow(source, layout);
+  expect(added).toHaveLength(1);
+  const va = final.annotations.find((a) => a.id === "va")!;
+  expect(va.anchor.kind).toBe("free");
+  expect(labelOwnership(final, resolver)).toEqual([]);
+  // Beside r.2 or o.1, not over piece B's wire along y 40.
+  const ink = createLabelOwnership(final, resolver).context.measure(
+    va,
+  ).inkBounds;
+  expect(ink.y).toBeGreaterThan(350);
+});
+
 it("does not move a Net label a layout group or constraint holds", () => {
   const source = divider(140);
   named(
@@ -628,4 +767,60 @@ it("orders pins at equal distance by code-point id order", () => {
       .ownPins("out", box)
       .map((p) => p.id),
   ).toEqual(["B.1", "a.1"]);
+});
+
+/**
+ * Base Net `x` holds only m.B, a pin the symbol hides; Base Net `x2`, joined
+ * to it by the name X, runs from s.1 to t.1 along `y`.
+ */
+function hiddenBase(y: number): SchematicDocument {
+  const document = circuit(
+    { m: "nmos", s: "resistor", t: "resistor" },
+    { x: ["m.B"], x2: ["s.1", "t.1"] },
+  );
+  place(document, "m", 100, 100);
+  place(document, "s", 300, y + 20);
+  place(document, "t", 400, y + 20);
+  document.routes.push(wire(document, "w-x2", "x2", ["s", "1"], ["t", "1"]));
+  return document;
+}
+
+it("does not seat a label by another Base Net joined to its own by name", () => {
+  const source = hiddenBase(140);
+  // X's label on x2's wire names x2; the label for x stands just above it.
+  named(
+    source,
+    netLabel("x2-label", "x2", {
+      kind: "route",
+      routeId: "w-x2",
+      legId: "w-x2-leg",
+      t: 0.75,
+      normalOffset: -10,
+      direction: "forward",
+      orientation: "horizontal",
+      fallbackPosition: { x: 375, y: 130 },
+    }),
+  );
+  named(
+    source,
+    netLabel("x-label", "x", { kind: "free", position: { x: 310, y: 132 } }),
+  );
+  for (const claim of source.connectivityEvidence)
+    if (claim.kind === "name-claim") claim.name = "X";
+  expect(labelOwnership(source, resolver)).toEqual([]);
+  // The layout moves x2 down; x has nothing drawn to stand by.
+  const layout = layoutEdits(source, hiddenBase(400));
+  const stayed = preview(source, resolver, layout.edits);
+  expect(
+    stayed.ok &&
+      labelOwnership(stayed.document, resolver).map((f) => f.annotationId),
+  ).toContain("x-label");
+  // A seat by x2's wire or pins would show the name on x2, not on x.
+  expect(
+    follow(source, layout).added.filter(
+      (e) =>
+        e.kind === "upsert_schematic_annotation" &&
+        e.annotation.id === "x-label",
+    ),
+  ).toEqual([]);
 });
