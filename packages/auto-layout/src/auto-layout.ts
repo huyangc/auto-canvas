@@ -198,30 +198,28 @@ function planNetlistPresentation(
 ): AutoLayoutResult {
   const { presentation: _, ...rest } = options;
   const presented = netlistPresentation(document, resolver);
-  const plain = () => {
+  const plain = (reason?: string) => {
     const result = planDocument(document, resolver, rest);
     result.diagnostics.push(...presented.diagnostics);
+    if (reason)
+      result.diagnostics.push({
+        severity: "warning",
+        code: "AUTO_LAYOUT_NETLIST_PRESENTATION_DROPPED",
+        rule: "R163",
+        message: `R163: rail symbols dropped: ${reason}`,
+      });
     return result;
   };
   if (!presented.edits.length) return plain();
   const result = planDocument(presented.document, resolver, rest);
-  if (
-    result.diagnostics.some((d) => d.severity === "error") ||
-    !result.edits.length
-  ) {
-    result.diagnostics.push(...presented.diagnostics);
-    return result;
-  }
+  // A presentation the planner cannot use is planned without the symbols.
+  if (result.diagnostics.some((d) => d.severity === "error"))
+    return plain("the presented Document was refused");
+  if (!result.edits.length)
+    return plain("the presented Document planned no edits");
   const edits = [...presented.edits, ...result.edits];
-  if (edits.length > MAX_SCHEMATIC_EDITS_PER_TRANSACTION) {
-    presented.diagnostics.push({
-      severity: "warning",
-      code: "AUTO_LAYOUT_NETLIST_PRESENTATION_DROPPED",
-      rule: "R163",
-      message: "R163: rail symbols dropped: transaction edit limit",
-    });
-    return plain();
-  }
+  if (edits.length > MAX_SCHEMATIC_EDITS_PER_TRANSACTION)
+    return plain("transaction edit limit");
   result.edits = edits;
   result.diagnostics.push(...presented.diagnostics);
   return result;
