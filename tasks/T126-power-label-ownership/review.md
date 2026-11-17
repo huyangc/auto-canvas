@@ -113,3 +113,22 @@ Reviewer rerun on the round-3 code: typecheck 0, lint 0 errors, format:check
 an untracked review scratch copy under `tmp/`). Corpus (implementer's run after the last source edit, read by
 the reviewer) against the round-2 report: all 628 plan hashes equal, 612
 completed and 16 refused; the postcondition does not fire on the corpus.
+
+## Round 3 follow-up — second PR review and rebase
+
+The Opus review of `79da53a` approved with two P3 findings, both fixed by the
+reviewer: the tolerance comment gave a wrong reason (now: half a unit allows
+for floating-point drift; a smaller stray cannot change how the label reads);
+the caption test now also asserts that a claim the anchor instance owns on
+another Net leaves the text read (fails with the Net condition removed).
+
+Rebased onto `main` at `987b31d` (T127 merged), no conflicts. Reviewer rerun on
+the combined code: build, typecheck, lint (0 errors), format:check, docs:check
+0; `pnpm test:local` 0 (809 files, 8334 passed, 117 skipped); `pnpm test:slow`
+0 (the 2 slow files, 8 passed; untracked review scratch copies under `tmp/`
+were picked up as well); corpus evaluation 0. Against `main` at `987b31d`: 612
+completed and equivalent, the same 16 refused, none threw; no introduced
+dangling wires, unconnected pins or touching pins; 15 plan hashes change, wire,
+crossings and bends identical in every case; introduced ownership flags 10 =
+the 6 Net-label flags `main` has plus 4 power-label flags; label clearance 234
+→ 226, overlaps 2 → 2, neither higher in any case.

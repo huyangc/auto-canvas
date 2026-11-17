@@ -330,8 +330,8 @@ export function followNetLabels(
   // ids handed out by bends), which `write` does not follow, so a seat can
   // name a leg the stored Route lacks or a `t` it reads elsewhere. Then the
   // plan is returned unchanged, as for a failed replay. Half a unit allows
-  // for floating-point drift and stays under the one-unit pitch the engine
-  // rounds anchor positions to; a stray is at least that.
+  // for floating-point drift; a smaller stray cannot change how the label
+  // reads.
   const replayed = createLabelClearanceContext(finished.document, resolver);
   for (const [id, box] of judgedAt) {
     const label = finished.document.annotations.find((a) => a.id === id);
