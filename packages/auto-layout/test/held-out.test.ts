@@ -25,6 +25,16 @@ it.each(cases)(
     });
     expect(refinementMetrics(plan)?.candidates ?? 0).toBeLessThanOrEqual(24);
     const errors = plan.diagnostics.filter((d) => d.severity === "error");
+    // R161: a drawing whose functional frames would lose their drawn
+    // interfaces is refused with that single error and no edits.
+    if (
+      errors.length === 1 &&
+      errors[0]!.code === "AUTO_LAYOUT_DRAFTING_INTERFACE_UNSUPPORTED"
+    ) {
+      expect(plan.edits).toEqual([]);
+      expect(plan.diagnostics).toEqual(errors);
+      return;
+    }
     expect(errors).toEqual([]);
     const result = executeTransaction(
       document,

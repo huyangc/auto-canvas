@@ -749,6 +749,20 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   and the rigid block are unchanged. It is an additional finished finalist
   after `gateRow` (fixed order), admitted by the T078 margin rule and decided
   by the finished comparator.
+- **R161 — Drawn frame interfaces (T122).** A drawn rectangle is a functional
+  frame when open wire ends (a junction touched by exactly one Route) of at
+  least two distinct terminal Nets lie on its edges; two Nets on the same edge
+  are two contacts. On every exit of `planAutoLayout`, including a stopped
+  search, the selected plan is checked: a contact is detached when no route end
+  of the same Net remains at the contact's place on the frame after the plan
+  (a frame the plan removes detaches all its contacts). If any contact is
+  detached, the plan is refused and the source stays unchanged: no edits, no
+  groups and exactly one error `AUTO_LAYOUT_DRAFTING_INTERFACE_UNSUPPORTED`
+  naming the frames, whether or not the source itself is complete and safe.
+  Documents without rectangles, frames touched by one Net and plans that keep
+  every contact get the selected plan as it is. Placement does not know about
+  frames yet; wiring lost contacts again and frame-aware placement are future
+  work.
 - **R162 — Source body leads (T121).** A MOS body whose B pin ends a Route
   in the input drawing (dashed or solid) gets a lead again; a body the input
   shows without a lead stays without one, whatever its body Net. Planning,
