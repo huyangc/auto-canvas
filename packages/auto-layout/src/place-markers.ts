@@ -43,6 +43,32 @@ import type { Placement } from "./types.js";
 
 type PinPoint = ReturnType<typeof pinPoints>[number];
 
+/** R6a, pose-independent: a channel host pin is a MOS source or drain, or
+ * either pin of a two-pin device. */
+export function channelHostPin(
+  instance: Instance,
+  pinName: string,
+  resolver: SymbolResolver,
+): boolean {
+  return isMos(instance.symbolId)
+    ? ["D", "S"].includes(pinName)
+    : devicePins(instance, resolver).length === 2;
+}
+
+/** R6a/T127, pose-independent: a device without a channel host (neither MOS
+ * nor two-pin, nor a marker) offers one extra host pin; which one, and
+ * whether any, depends on its pose (`extraRailHosts`). */
+export function offersExtraHost(
+  instance: Instance,
+  resolver: SymbolResolver,
+): boolean {
+  return (
+    !isMos(instance.symbolId) &&
+    devicePins(instance, resolver).length !== 2 &&
+    deviceDescriptor(instance.symbolId)?.deviceClass !== "net-marker"
+  );
+}
+
 export function powerHosts(
   pins: PinPoint[],
   devices: Instance[],
@@ -52,11 +78,7 @@ export function powerHosts(
   return devices
     .flatMap((i) => {
       const candidates = pins.filter(
-        (p) =>
-          p.instanceId === i.id &&
-          (isMos(i.symbolId)
-            ? ["D", "S"].includes(p.pinName)
-            : devicePins(i, resolver).length === 2),
+        (p) => p.instanceId === i.id && channelHostPin(i, p.pinName, resolver),
       );
       candidates.sort(
         (a, b) =>
@@ -105,12 +127,7 @@ export function extraRailHosts(
 ): PinPoint[] {
   const rank = { toward: 0, sideways: 1 } as const;
   return devices
-    .filter(
-      (i) =>
-        !isMos(i.symbolId) &&
-        devicePins(i, resolver).length !== 2 &&
-        deviceDescriptor(i.symbolId)?.deviceClass !== "net-marker",
-    )
+    .filter((i) => offersExtraHost(i, resolver))
     .flatMap((i) => {
       const candidates = pins.flatMap((p) => {
         if (p.instanceId !== i.id) return [];

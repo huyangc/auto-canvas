@@ -920,7 +920,8 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   edits produce with the unchanged pipeline, and returns the presentation
   edits followed by the plan's edits as one transaction. Without the option
   this rule is not entered.
-  Ground Nets are the Nets with a ground claim (node `0`). A Ground marker
+  Ground Nets are the Nets with a name claim of `0`, global, in the ground
+  domain (node `0`); no other ground claim qualifies. A Ground marker
   exports only as global node `0`, so a Net named otherwise (a `VSS` Cell
   Pin's Net without node 0) would be renamed and, under a node-0 export,
   printed as `0`: such a Net gets no ground symbol. A Ground
@@ -934,7 +935,12 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   each is its own routed piece, while pins R6a cannot host (MOS gates, pins
   leaving away from the rail) and Cell Pins stay on the R43 trunk as today. A
   Ground Net holding a Cell Pin with only one such device gets no marker: the
-  Cell Pin is wired to that host anyway. A Cell Pin named `VDD` (any case) whose interface instance is a `port`,
+  Cell Pin is wired to that host anyway. The host test is R6a's own (`channelHostPin`,
+  `offersExtraHost`); the extra host's exit is read before planning, at the
+  device's input or default pose, while R6a reads it at the planned pose, and
+  the planner may turn a channel host so that its grounded pin leaves away
+  from the rail. Such a marker takes R6a's fallback or a turned-back stub; on
+  the T129 corpus none was left unhosted; 25 of 1012 markers in 18 `global`-form Documents and 1 of 69 in one `vss`-form Document ended on a turned-back stub, all on channel hosts. R163 does not change orientation choice. A Cell Pin named `VDD` (any case) whose interface instance is a `port`,
   whose Net R4 classifies as supply and carries no name claim becomes a
   `vdd-port` (`set_instance_symbol`) when it is the Document's only such Cell
   Pin and its Net has none. The symbol gives the Net the supply domain; the
@@ -944,12 +950,14 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   `AUTO_LAYOUT_NETLIST_SUPPLY_AMBIGUOUS` warning. A rail that already has its power symbol is left alone.
   The edits are replayed with `dryRun`; they are kept only if the transaction
   is accepted and every original terminal keeps its Base Net and Logical Net
-  partition, every Net keeps its name and scope and its domain (except a
-  `vdd-port` Cell Pin's Net, which gains the supply domain), Cell terminals and evidence are unchanged, every MOS body
-  resolves as before, the only symbol change is `port` to `vdd-port` on a Cell
-  Pin, and each added instance is such a ground marker. Otherwise, or when the
-  markers would pass R3's 120 instances or the combined list the transaction
-  edit limit, the Document is planned without them and an
+  partition, every Net keeps its name, scope, conflicts and domain (except a
+  `vdd-port` Cell Pin's Net, which gains the supply domain), Cell terminals,
+  evidence and MOS bulk defaults are unchanged, every MOS body resolves as
+  before, the only symbol change is `port` to `vdd-port` on a Cell Pin whose
+  folded name is `vdd`, and each added instance is such a ground marker.
+  Otherwise, or when the markers would pass R3's 120 instances, or the
+  presented Document plans to a refusal or to no edits, or the combined list
+  passes the transaction edit limit, the Document is planned without them and an
   `AUTO_LAYOUT_NETLIST_PRESENTATION_DROPPED` (or `_SKIPPED`) R163 warning says
   why. R10's partition check applies to the presented Document. The
   evaluation checks the electrical graph and the re-exported netlist text.

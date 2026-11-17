@@ -87,3 +87,31 @@ Acceptance for round 2: the plan's checks; drawing mode equal to the base in
 every case; both netlist evaluations with every plan hash equal to round 1
 (`tmp/t129-global-report.json`, `tmp/t129-vss-report.json`) unless finding 3
 changes hosts, in which case list the changed plans and the totals.
+
+## Round 2 result — accepted
+
+1. The gate accepts `port` → `vdd-port` only on the interface instance of a
+   Cell Pin whose folded name is `vdd`, and compares each Logical Net's
+   conflicts and the Document's MOS bulk defaults.
+2. A refused presented Document, one that plans no edits, or one past the
+   edit limit is planned again without the rail symbols, with the
+   `AUTO_LAYOUT_NETLIST_PRESENTATION_DROPPED` warning naming the reason. (The
+   repository's automatic codex review of the PR raised the same point.)
+3. `channelHostPin` and `offersExtraHost` are exported from `place-markers.ts`
+   and used by `powerHosts`, `extraRailHosts` and `groundHost`. Measured on
+   the round-1 results: no ground marker ends unhosted; 25 of 1012 (18
+   documents, node-0 form) and 1 of 69 (VSS form) are turned back, all on
+   channel hosts whose device the planner oriented with the grounded pin
+   pointing up (current source 9, capacitor 5, NMOS 5, resistor 4, PMOS 2).
+   None is on an extra host. That is orientation choice in placement, shared
+   with drawing input and outside this task; the limit is stated in the rule.
+4. Thirty tests, one per gate refusal and per fallback. The "transaction
+   rejected" drop has no fixture any more: a claim that is not node 0 is
+   filtered before replay.
+5. Ground Nets are filtered on a claim named `0`, global, as the rule says.
+
+Reviewer rerun: build, typecheck, lint (0 errors), format:check, docs:check 0;
+`pnpm test:local` 0 (813 files, 8374 passed, 117 skipped); `pnpm test:slow` 0
+(2 files, 8 passed); drawing mode equal to the base in all 612 completed
+cases; both netlist evaluations 0 with every plan hash equal to round 1, 515
+equivalent, no integrity defect, no gate drop.

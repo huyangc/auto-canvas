@@ -12,11 +12,13 @@ import {
 } from "@icm/edit-engine";
 import {
   deriveStableId,
+  foldNetName,
   type Instance,
   type SchematicDocument,
 } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import { pinExit } from "./geometry.js";
+import { channelHostPin, offersExtraHost } from "./place-markers.js";
 import { classifyNets, isMos } from "./net-roles.js";
 import { devicePins, isMarker } from "./placement-connectivity.js";
 import { compareIds } from "./recognize.js";
@@ -45,24 +47,32 @@ const warning = (code: string, message: string): AutoLayoutDiagnostic => ({
   message,
 });
 
-/** R163: the Ground Nets the pre-pass draws, by Base Net id: Nets already
- * claimed as ground. A ground marker names its Net node 0, so a Net named
- * otherwise (a `VSS` Cell Pin's Net without node 0) would be renamed: under
- * a node-0 export its Cell Pin would print as `0`. */
+/** R163: the Ground Nets the pre-pass draws, by Base Net id: Nets with a
+ * claim of global node 0 in the ground domain. A ground marker names its Net
+ * node 0, so a Net named otherwise (a `VSS` Cell Pin's Net without node 0)
+ * would be renamed: under a node-0 export its Cell Pin would print as `0`. */
 function groundNets(document: SchematicDocument): string[] {
   return [
     ...new Set(
       document.connectivityEvidence.flatMap((e) =>
-        e.kind === "name-claim" && e.powerDomain === "ground" ? [e.netId] : [],
+        e.kind === "name-claim" &&
+        e.name === GROUND_CLAIM.name &&
+        e.scope === GROUND_CLAIM.scope &&
+        e.powerDomain === GROUND_CLAIM.powerDomain
+          ? [e.netId]
+          : [],
       ),
     ),
   ].sort(compareIds);
 }
 
-/** Whether a visible pin can host a ground marker under R6a: a MOS source or
- * drain, a two-pin device's pin, or a T127 extra host whose exit does not
- * leave away from the rail at the device's pose (its default one when the
- * import left it in the tray). */
+/** A visible pin that can host a ground marker under R6a: a channel host
+ * (MOS source before drain, a two-pin device's pin), or for a device that
+ * offers a T127 extra host, a pin whose exit does not leave away from the rail
+ * at the device's pose (its default one when the import left it in the tray).
+ * R6a reads the extra host again at the planned pose: a device the planner
+ * turns so that its only grounded pin leaves away from the rail leaves its
+ * marker to R6a's fallback. */
 function groundHost(
   instance: Instance,
   pins: string[],
@@ -74,9 +84,10 @@ function groundHost(
   );
   const hidden = new Set(resolved?.variant?.hiddenPinNames ?? []);
   const visible = pins.filter((p) => !hidden.has(p)).sort(compareIds);
-  if (isMos(instance.symbolId))
-    return visible.find((p) => p === "S") ?? visible.find((p) => p === "D");
-  if (devicePins(instance, resolver).length === 2) return visible[0];
+  const channel = visible.filter((p) => channelHostPin(instance, p, resolver));
+  if (channel.length)
+    return isMos(instance.symbolId) && channel.includes("S") ? "S" : channel[0];
+  if (!offersExtraHost(instance, resolver)) return undefined;
   const pose = instance.placement ?? {
     position: { x: 0, y: 0 },
     rotation: 0 as const,
@@ -203,7 +214,7 @@ export function netlistPresentation(
     return terminal.interfaceInstanceIds.length === 1 &&
       instance?.symbolId === "port" &&
       roles.byNet.get(terminal.netId) === "supply" &&
-      terminal.name.toUpperCase() === "VDD" &&
+      foldNetName(terminal.name) === foldNetName("VDD") &&
       !document.connectivityEvidence.some(
         (e) => e.kind === "name-claim" && e.netId === terminal.netId,
       ) &&
@@ -288,8 +299,12 @@ export function presentationChange(
   const b = deriveElectricalTopologyProjection(after, resolver);
   const la = resolveDocumentLogicalNets(before);
   const lb = resolveDocumentLogicalNets(after);
-  const interfaces = new Set(
-    (before.netlist?.terminals ?? []).flatMap((t) => t.interfaceInstanceIds),
+  // The design export already ranks a Cell Pin named VDD as the supply, so
+  // only that Pin may gain the supply symbol and its domain.
+  const vddPins = new Set(
+    (before.netlist?.terminals ?? []).flatMap((t) =>
+      foldNetName(t.name) === foldNetName("VDD") ? t.interfaceInstanceIds : [],
+    ),
   );
   const keys: string[] = [];
   for (const instance of before.instances) {
@@ -301,7 +316,7 @@ export function presentationChange(
         !(
           instance.symbolId === "port" &&
           kept.symbolId === "vdd-port" &&
-          interfaces.has(instance.id)
+          vddPins.has(instance.id)
         ))
     )
       return `instance ${instance.id} changed symbol`;
@@ -362,7 +377,11 @@ export function presentationChange(
         ))
     )
       return `Net ${net.id} renamed`;
+    if (canonical(was?.conflicts ?? []) !== canonical(is?.conflicts ?? []))
+      return `Net ${net.id} conflicts changed`;
   }
+  if (canonical(before.mosBulkDefaults) !== canonical(after.mosBulkDefaults))
+    return "MOS bulk defaults changed";
   if (
     canonical(before.netlist?.terminals ?? []) !==
     canonical(after.netlist?.terminals ?? [])

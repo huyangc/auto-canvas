@@ -2,8 +2,9 @@ import { deriveElectricalTopologyProjection, endpointKey } from "@icm/derived";
 import { executeTransaction } from "@icm/edit-engine";
 import type { SchematicDocument } from "@icm/model";
 import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { planAutoLayout } from "../src/auto-layout.js";
+import * as presentationModule from "../src/netlist-presentation.js";
 import {
   netlistPresentation,
   presentationChange,
@@ -244,11 +245,8 @@ describe("R163 netlist presentation", () => {
     );
   });
 
-  it("drops the edits when the replay would join two Nets", () => {
+  it("draws no ground symbol on a ground claim that is not node 0", () => {
     const source = amplifier();
-    nodeZero(source, "tail");
-    // A second ground Net under another global name: node 0's claim would
-    // join it to `tail`.
     source.connectivityEvidence.push(
       {
         id: "source-gnd",
@@ -266,12 +264,7 @@ describe("R163 netlist presentation", () => {
         owner: { kind: "global-declaration", sourceNetId: "gnd" },
       },
     );
-    const result = netlistPresentation(source, resolver);
-    expect(result.edits).toEqual([]);
-    expect(result.document).toBe(source);
-    expect(result.diagnostics.map((d) => d.code)).toEqual([
-      "AUTO_LAYOUT_NETLIST_PRESENTATION_DROPPED",
-    ]);
+    expect(netlistPresentation(source, resolver).grounds).toBe(0);
   });
 
   it("skips a Document above the R3 limit with a warning", () => {
@@ -349,5 +342,238 @@ describe("R163 netlist presentation", () => {
         }),
       ),
     ).toBe(JSON.stringify(planAutoLayout(source, resolver, options)));
+  });
+});
+
+describe("R163 gate refusals", () => {
+  /** A node-0 amplifier with a VDD Cell Pin, and a copy to hand-edit. */
+  const pair = () => {
+    const before = amplifier();
+    nodeZero(before, "gnd");
+    before.nets.push({ id: "vdd", terminals: [] });
+    cellPin(before, "VDD", "vdd");
+    return { before, after: structuredClone(before) };
+  };
+  const change = (edit: (after: SchematicDocument) => void) => {
+    const { before, after } = pair();
+    edit(after);
+    return presentationChange(before, after, resolver);
+  };
+
+  it("accepts the unchanged Document", () => {
+    expect(change(() => {})).toBe(undefined);
+  });
+
+  it("refuses a changed symbol", () => {
+    expect(
+      change((d) => {
+        d.instances.find((i) => i.id === "r1")!.symbolId = "capacitor";
+      }),
+    ).toBe("instance r1 changed symbol");
+  });
+
+  it("refuses a supply symbol on a Cell Pin not named VDD", () => {
+    const before = amplifier();
+    nodeZero(before, "gnd");
+    before.nets.push({ id: "avdd", terminals: [] });
+    cellPin(before, "AVDD", "avdd");
+    const after = structuredClone(before);
+    after.instances.find((i) => i.id === "pin-AVDD")!.symbolId = "vdd-port";
+    expect(presentationChange(before, after, resolver)).toBe(
+      "instance pin-AVDD changed symbol",
+    );
+  });
+
+  it("refuses a supply symbol whose pins differ from the port's", () => {
+    const port = resolver.resolve("port")!;
+    const changed = {
+      resolve: (symbolId: string, variantId?: string) => {
+        const resolved = resolver.resolve(symbolId, variantId);
+        return symbolId === "vdd-port" && resolved
+          ? {
+              ...resolved,
+              definition: {
+                ...resolved.definition,
+                pins: [
+                  ...port.definition.pins,
+                  { ...port.definition.pins[0]!, name: "Q" },
+                ],
+              },
+            }
+          : resolved;
+      },
+    } as unknown as typeof resolver;
+    const { before, after } = pair();
+    after.instances.find((i) => i.id === "pin-VDD")!.symbolId = "vdd-port";
+    expect(presentationChange(before, after, changed)).toBe(
+      "instance pin-VDD changed pins",
+    );
+  });
+
+  it("refuses a Net whose scope changes", () => {
+    expect(
+      change((d) => {
+        const claim = d.connectivityEvidence.find((e) => e.id === "claim-gnd");
+        if (claim?.kind === "name-claim") claim.scope = "local";
+      }),
+    ).toBe("Net gnd renamed");
+  });
+
+  it("refuses a Net whose domain changes", () => {
+    expect(
+      change((d) => {
+        const claim = d.connectivityEvidence.find((e) => e.id === "claim-gnd");
+        if (claim?.kind === "name-claim") claim.powerDomain = "vdd";
+      }),
+    ).toBe("Net gnd renamed");
+  });
+
+  it("refuses a Net that gains a conflict", () => {
+    // Node 0 already declared under a second name: the Net has no single
+    // name, so only its conflicts can show a further change.
+    const { before } = pair();
+    before.connectivityEvidence.push({
+      id: "claim-agnd",
+      kind: "name-claim",
+      netId: "gnd",
+      name: "AGND",
+      scope: "global",
+      powerDomain: "ground",
+      owner: { kind: "global-declaration", sourceNetId: "gnd" },
+    });
+    const after = structuredClone(before);
+    after.netlist!.terminals.push({
+      id: "terminal-vss",
+      name: "VSS",
+      netId: "gnd",
+      direction: "passive",
+      interfaceInstanceIds: [],
+    });
+    expect(presentationChange(before, after, resolver)).toBe(
+      "Net gnd conflicts changed",
+    );
+  });
+
+  it("refuses changed MOS bulk defaults", () => {
+    expect(
+      change((d) => {
+        d.mosBulkDefaults = { nmosNetId: "gnd" };
+      }),
+    ).toBe("MOS bulk defaults changed");
+  });
+
+  it("refuses changed Cell terminals", () => {
+    expect(
+      change((d) => {
+        d.netlist!.terminals[0]!.direction = "input";
+      }),
+    ).toBe("Cell terminals changed");
+  });
+
+  it("refuses changed evidence", () => {
+    expect(
+      change((d) => {
+        d.connectivityEvidence = d.connectivityEvidence.filter(
+          (e) => e.id !== "source-gnd",
+        );
+      }),
+    ).toBe("evidence source-gnd changed");
+  });
+
+  it("refuses a MOS body that resolves differently", () => {
+    expect(
+      change((d) => {
+        d.noConnects.push({
+          id: "nc",
+          endpoint: { kind: "terminal", instanceId: "m1", pinName: "B" },
+        });
+      }),
+    ).toBe("MOS body m1 resolves differently");
+  });
+
+  it("refuses an added instance that is not a node-0 ground marker", () => {
+    expect(
+      change((d) => {
+        d.instances.push({ id: "x", symbolId: "resistor", placement: null });
+      }),
+    ).toBe("added instance x is not a ground marker of node 0");
+  });
+
+  it("refuses evidence the presentation does not add", () => {
+    expect(
+      change((d) => {
+        d.connectivityEvidence.push({
+          id: "hint",
+          kind: "net-name-hint",
+          netId: "out",
+          sourceName: "out",
+          origin: "spice-import",
+        });
+      }),
+    ).toBe("unexpected evidence added");
+  });
+});
+
+describe("R163 planning fallbacks", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+  const options = {
+    search: { seed: 1, evaluations: 0 },
+    presentation: "netlist" as const,
+  };
+  const plainPlan = (source: SchematicDocument) =>
+    planAutoLayout(source, resolver, { search: { seed: 1, evaluations: 0 } });
+  const dropped = (plan: ReturnType<typeof planAutoLayout>) =>
+    plan.diagnostics.filter(
+      (d) => d.code === "AUTO_LAYOUT_NETLIST_PRESENTATION_DROPPED",
+    );
+
+  it("plans without the symbols when the presented Document is refused", () => {
+    const source = amplifier();
+    nodeZero(source, "gnd");
+    const presented = netlistPresentation(source, resolver);
+    const large = structuredClone(presented.document);
+    for (let i = 0; i < 121; i++)
+      large.instances.push({
+        id: `x${i}`,
+        symbolId: "resistor",
+        placement: null,
+      });
+    vi.spyOn(presentationModule, "netlistPresentation").mockReturnValue({
+      ...presented,
+      document: large,
+    });
+    const plan = planAutoLayout(source, resolver, options);
+    expect(dropped(plan)).toHaveLength(1);
+    expect(plan.edits).toEqual(plainPlan(source).edits);
+  });
+
+  it("plans without the symbols when the presented Document plans no edits", () => {
+    const source = amplifier();
+    nodeZero(source, "gnd");
+    const presented = netlistPresentation(source, resolver);
+    vi.spyOn(presentationModule, "netlistPresentation").mockReturnValue({
+      ...presented,
+      document: circuit({}, {}),
+    });
+    const plan = planAutoLayout(source, resolver, options);
+    expect(dropped(plan)).toHaveLength(1);
+    expect(plan.edits).toEqual(plainPlan(source).edits);
+  });
+
+  it("plans without the symbols past the transaction edit limit", () => {
+    const source = amplifier();
+    nodeZero(source, "gnd");
+    const presented = netlistPresentation(source, resolver);
+    vi.spyOn(presentationModule, "netlistPresentation").mockReturnValue({
+      ...presented,
+      edits: Array.from({ length: 1024 }, () => presented.edits[0]!),
+    });
+    const plan = planAutoLayout(source, resolver, options);
+    expect(dropped(plan).map((d) => d.message)).toEqual([
+      "R163: rail symbols dropped: transaction edit limit",
+    ]);
+    expect(plan.edits).toEqual(plainPlan(source).edits);
   });
 });
