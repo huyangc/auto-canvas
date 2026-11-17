@@ -109,3 +109,10 @@ says exactly which parts' control Nets do not link them into a row. The
 review's probes (29 synthetic documents) found no throw, and no corpus case
 threw, so no plan can change. Rerun after the fix: typecheck, lint (0 errors),
 format:check, docs:check 0; `pnpm vitest run packages/auto-layout` 0.
+
+CI on `f67708f` failed in `pnpm test:local`: "never treats a control Net as a
+conducting terminal" timed out at 5 s on the runner (1.6 s locally). The
+edge-shape tests planned with the default search; they now plan in quick mode,
+where every strategy's draft is still built and routed (the file runs in about
+2 s locally instead of 9 s). The containment test still fails without the
+`try`/`catch`.
