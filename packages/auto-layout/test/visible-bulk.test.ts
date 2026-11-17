@@ -378,6 +378,16 @@ it("reports a visible body it cannot draw on the fixed layout under R14", () => 
   // Moving the obstruction lets the same fixed layout draw the body.
   const clear = fixed(blockedBodies(300));
   expect(clear.diagnostics).toEqual([]);
+  // One lead joins the two bodies; the second body never draws one back.
+  expect(
+    clear.edits.filter(
+      (e) =>
+        e.kind === "set_route_path" &&
+        routeEndpoints(e.route).some(
+          (end) => end?.kind === "terminal" && end.pinName === "B",
+        ),
+    ),
+  ).toHaveLength(1);
   expect(
     clear.edits.some(
       (e) =>
