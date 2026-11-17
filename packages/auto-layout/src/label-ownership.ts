@@ -5,6 +5,7 @@ import {
 } from "@icm/derived";
 import type { Annotation, Point, Rect, SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
+import { compareIds } from "./recognize.js";
 
 const epsilon = 1e-6;
 
@@ -27,8 +28,9 @@ interface Feature {
   netId: string;
   kind: "wire" | "pin";
   id: string;
-  /** The pin's point; a wire's features have none. */
+  /** The pin's point and terminal; a wire's features have none. */
   point?: Point;
+  pin?: { instanceId: string; pinName: string };
   distance: (box: Rect) => number;
 }
 
@@ -151,6 +153,7 @@ export function createLabelOwnership(
         kind: "pin",
         id: `${instance.id}.${pin.name}`,
         point,
+        pin: { instanceId: instance.id, pinName: pin.name },
         distance: (box) => pointBoxDistance(point, box),
       });
     }
@@ -217,8 +220,13 @@ export function createLabelOwnership(
         (f) =>
           f.kind === "pin" && (logical ? f.net === own : f.netId === netId),
       )
-      .map((f) => ({ id: f.id, point: f.point!, distance: f.distance(box) }))
-      .sort((a, b) => a.distance - b.distance || a.id.localeCompare(b.id));
+      .map((f) => ({
+        id: f.id,
+        point: f.point!,
+        terminal: f.pin!,
+        distance: f.distance(box),
+      }))
+      .sort((a, b) => a.distance - b.distance || compareIds(a.id, b.id));
   };
   /** Each pin's point by `instance.pin` id. */
   const pinPoint = (id: string) =>
