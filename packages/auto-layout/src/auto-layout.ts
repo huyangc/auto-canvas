@@ -44,7 +44,11 @@ import {
   deriveElectricalTopologyProjection,
   endpointKey,
 } from "@icm/derived";
-import { routeEndpoints, type SchematicDocument } from "@icm/model";
+import {
+  routeEndpoints,
+  type Instance,
+  type SchematicDocument,
+} from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import {
   enclosingBox,
@@ -52,6 +56,7 @@ import {
   legacyPitch,
   geometryProblem,
   pinPoints,
+  placementPitch,
   withPlacements,
 } from "./geometry.js";
 import {
@@ -94,7 +99,8 @@ import {
   floatingPins,
   missingConnections,
 } from "./routing-audit.js";
-import { classifyNets, isMos } from "./net-roles.js";
+import { classifyNets, isMos, type NetRoles } from "./net-roles.js";
+import { directedPins } from "./directed-blocks.js";
 import { samePin } from "./pin-contacts.js";
 import { placeDocument } from "./place.js";
 import {
@@ -1622,12 +1628,35 @@ function planAutoLayoutMeasured(
           reducedBudget,
         ),
       };
+      // R148 retains R140's licensed contacts already present in the finalist.
+      // R147's alignment trials keep them as well (T140); the gaps replan
+      // below adds its own port and anchor handling to the same policy.
+      const railContacts = contactPolicy(
+        document,
+        freezePinGroups(document, resolver),
+        true,
+      );
+      const licensedReplan = (placements: ReadonlyMap<string, Placement>) =>
+        finishPlacement(placements, railContacts);
+      // R147 keeps a feedback part that lies in its row beside its block. A
+      // declined trial hands back the alignment incumbent, which never
+      // compares strictly better than the current run.
+      const leavesFeedbackRow = feedbackRowGuard(
+        initial.final,
+        resolver,
+        placementPitch({
+          instanceCount: document.instances.length,
+          ...(options.pitch ? { pitch: options.pitch } : {}),
+        }).row,
+      );
+      const alignmentReplan = (placements: ReadonlyMap<string, Placement>) =>
+        leavesFeedbackRow(placements) ? initial : licensedReplan(placements);
       const relocated = timePhase("relocation", () =>
         searchDeviceRelocations(
           initial,
           resolver,
           fixed,
-          finishPlacement,
+          alignmentReplan,
           stopped,
           { phase: "alignment", budget: relocationBudget },
         ),
@@ -1646,18 +1675,12 @@ function planAutoLayoutMeasured(
           ),
         ),
       );
-      // R148 retains R140's licensed contacts already present in the finalist.
-      const railContacts = contactPolicy(
-        document,
-        freezePinGroups(document, resolver),
-        true,
-      );
       const railed = timePhase("rails", () =>
         searchRailSeats(
           seated,
           resolver,
           fixed,
-          (placements) => finishPlacement(placements, railContacts),
+          licensedReplan,
           stopped,
           finishingTrialBudget(
             seated.final!.instances.length,
@@ -1705,21 +1728,7 @@ function planAutoLayoutMeasured(
       });
       // Retain the feedback bands protected by compactRows as well: a passive
       // spanning two signal nets of an amplifier keeps its vertical offset.
-      const feedbackBands = devices.flatMap((device) => {
-        if (devicePins(device, resolver).length !== 2) return [];
-        const nets = new Set(deviceNets(device, resolver, roles));
-        if (nets.size !== 2 || [...nets].some((net) => roles.rails.has(net)))
-          return [];
-        return devices
-          .filter(
-            (host) =>
-              isSignalBlock(host, resolver) &&
-              [...nets].every((net) =>
-                deviceNets(host, resolver, roles).includes(net),
-              ),
-          )
-          .map((host) => ({ device, host }));
-      });
+      const feedbackBands = feedbackPairs(devices, resolver, roles);
       const gapIncumbent = { ...railed, result: routed, final: final.document };
       const gapReplan = (placements: ReadonlyMap<string, Placement>) => {
         if (
@@ -1934,6 +1943,69 @@ function feedbackRowsEligible(
     feedbackRowCircuit(document, resolver, classifyNets(document, resolver)) !==
       undefined
   );
+}
+
+/** Two-pin parts spanning two non-rail Nets that are both Nets of one signal
+ * block: the feedback seats compactRows protects and R149 keeps level. */
+function feedbackPairs(
+  devices: readonly Instance[],
+  resolver: SymbolResolver,
+  roles: NetRoles,
+) {
+  return devices.flatMap((device) => {
+    if (devicePins(device, resolver).length !== 2) return [];
+    const nets = new Set(deviceNets(device, resolver, roles));
+    if (nets.size !== 2 || [...nets].some((net) => roles.rails.has(net)))
+      return [];
+    return devices
+      .filter(
+        (host) =>
+          isSignalBlock(host, resolver) &&
+          [...nets].every((net) =>
+            deviceNets(host, resolver, roles).includes(net),
+          ),
+      )
+      .map((host) => ({ device, host }));
+  });
+}
+
+/** @internal Exported for regression tests. R147: a feedback part that is
+ * not a directed block lies in band when it is horizontal (both pins level)
+ * and exactly one placement row above or below its host. Returns whether a
+ * trial takes a pair that is in band on `reference` out of band or to the
+ * other side; pairs not in band on `reference` block nothing. */
+export function feedbackRowGuard(
+  reference: SchematicDocument,
+  resolver: SymbolResolver,
+  row: number,
+) {
+  const roles = classifyNets(reference, resolver);
+  const pairs = feedbackPairs(
+    reference.instances.filter((i) => !isMarker(i)),
+    resolver,
+    roles,
+  ).filter(({ device }) => !directedPins(device, resolver).outputs.length);
+  const side = (document: SchematicDocument, device: string, host: string) => {
+    const pins = pinPoints(document, resolver).filter(
+      (p) => p.instanceId === device,
+    );
+    if (pins.length !== 2 || pins[0]!.point.y !== pins[1]!.point.y) return 0;
+    const pose = (id: string) =>
+      document.instances.find((i) => i.id === id)!.placement!.position.y;
+    const offset = pose(device) - pose(host);
+    return offset === -row ? -1 : offset === row ? 1 : 0;
+  };
+  const held = pairs.flatMap(({ device, host }) => {
+    const was = side(reference, device.id, host.id);
+    return was ? [{ device: device.id, host: host.id, was }] : [];
+  });
+  return (placements: ReadonlyMap<string, Placement>) => {
+    if (!held.length) return false;
+    const trial = withPlacements(reference, placements);
+    return held.some(
+      ({ device, host, was }) => side(trial, device, host) !== was,
+    );
+  };
 }
 
 /** @internal One complete default/candidate plan, also used to verify refinement. */

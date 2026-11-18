@@ -11,6 +11,7 @@ import {
   rightFacingBlocks,
 } from "../src/directed-blocks.js";
 import { pinPoints } from "../src/geometry.js";
+import { preview } from "../src/transaction.js";
 import { classifyNets } from "../src/net-roles.js";
 import { portSeatCandidates } from "../src/place-markers.js";
 import { isMarker } from "../src/placement-connectivity.js";
@@ -364,7 +365,7 @@ describe("R164 directed blocks", () => {
       )
       .digest("hex");
 
-  it("leaves a source-driven passive chain without an input port to R167 alone", () => {
+  it("R164 does not turn a source-driven passive chain without an input port", () => {
     const d = circuit(
       {
         V1: "voltage-source",
@@ -453,9 +454,30 @@ describe("R164 directed blocks", () => {
       rotation: 0,
       mirror: "horizontal",
     };
-    expect(planHash(d, ["X1"])).toBe(
-      "266a6d041a46c058e9542684aa5fcee5657f7d2f3ddfb5b09187ab51fe58d5e7",
-    );
+    const fixedX1 = structuredClone(instance(d, "X1").placement);
+    const plan = planAutoLayout(d, resolver, {
+      search: { seed: 1, evaluations: defaultLayoutSearch(d, {}).evaluations },
+      fixedInstanceIds: new Set(["X1"]),
+    });
+    const after = preview(d, resolver, plan.edits);
+    expect(after.ok).toBe(true);
+    if (!after.ok) return;
+    // The fixed block keeps its pose, and R164 does not seat its output port:
+    // the seat is not right of the block's centre, as R164's filter demands.
+    expect(instance(after.document, "X1").placement).toEqual(fixedX1);
+    const box = visibleInstanceBounds(
+      { ...after.document, instances: [instance(after.document, "X1")] },
+      resolver,
+    )[0]!.bounds;
+    const port = pinPoints(after.document, resolver).find(
+      (p) => p.instanceId === "out",
+    )!.point;
+    expect(port.x).toBeLessThanOrEqual(box.x + box.width / 2);
+    // On main at 0b93996 the plan was 266a6d04…; R147 now leaves the
+    // feedback part R2 in its row above X1, and `out` is seated on that row.
+    expect(
+      createHash("sha256").update(JSON.stringify(plan)).digest("hex"),
+    ).toBe("49c47cbb68a8368f2c999403909dfa5c6d3920907dfe9ada37456987410c69fe");
   });
 
   it("classifies a chain of 10 000 blocks", () => {
