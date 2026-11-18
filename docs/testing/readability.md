@@ -156,6 +156,20 @@ come from `classifyNets`. None of the three counts has a selection or
 evaluation weight; the first two count blocks on a block cycle too, since human
 drawings face latch and ring blocks left.
 
+### Stack columns (report-only)
+
+Each drawing's `stackColumns` counts R166's stacks (two devices carrying the
+only two conduction terminals on a non-rail Net, at least one a transistor)
+and the ones the drawing breaks: `stacks`, `broken` and the device-pair keys
+`brokenKeys`. A stack is kept when its two pins lie on one line along their
+exits (2-unit tolerance) and face each other with no device body between
+them. Each split's `stackColumns` sums `stacks` and the broken counts of the
+`human` and `result` drawings over the completed pairs, and `plannerOnly`
+counts the stacks the result breaks while the human drawing keeps them
+(`null` with `--reference`, whose drawing names its devices differently). These
+counts take no part in the composite, targets or acceptance gates
+(`scripts/lib/stack-columns.mjs`).
+
 ## Visible integrity
 
 `scripts/visible-integrity.mjs` reports visible connection defects that the

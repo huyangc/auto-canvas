@@ -19,6 +19,11 @@ import { lostNameClaim, terminalPartition } from "../src/transaction.js";
 import type { AutoLayoutOptions, AutoLayoutResult } from "../src/types.js";
 import { classifyNets } from "../src/net-roles.js";
 import { persistedTemplates, recognizeStructures } from "../src/recognize.js";
+import {
+  contactGeometryProblem,
+  contactPolicy,
+} from "../src/contact-placement.js";
+import { freezePinGroups } from "../src/route.js";
 import { circuit } from "./document-fixture.js";
 
 const resolver = new InMemorySymbolResolver(builtInSymbols);
@@ -57,7 +62,15 @@ function commit(document: SchematicDocument, result: AutoLayoutResult) {
   expect(auditRouting(transaction.document, resolver).unsafeProblems).toEqual(
     [],
   );
-  expect(geometryProblem(transaction.document, resolver)).toBeUndefined();
+  // R38 may close the axial gap of a facing two-device pair (R166 can align
+  // one); any other coincident pin or overlap is still a geometry problem.
+  expect(
+    contactGeometryProblem(
+      transaction.document,
+      resolver,
+      contactPolicy(document, freezePinGroups(document, resolver)),
+    ),
+  ).toBeUndefined();
   return transaction.document;
 }
 const score = (result: AutoLayoutResult, final: SchematicDocument) =>

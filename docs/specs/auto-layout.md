@@ -667,7 +667,7 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
 - **R63 — Distinct, repairable portfolio.** Compare valid initial edit lists
   exactly, keeping the first equal list in `template`, `layered`, `stages`
   (then R163's `feedback-rows` for its subset) order before ranking by the
-  existing routed score. A refused run returns no
+  existing routed score; R166 adds stack-aligned candidates. A refused run returns no
   edits, so refused runs are never treated as duplicates. Refine at most two distinct strategies
   through 40 instances, reusing their initial routes. If fewer than two valid
   distinct candidates exist, a refused candidate may fill the second slot; if
@@ -1016,6 +1016,54 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   `AUTO_LAYOUT_NETLIST_PRESENTATION_DROPPED` (or `_SKIPPED`) R165 warning says
   why. R10's partition check applies to the presented Document. The
   evaluation checks the electrical graph and the re-exported netlist text.
+
+- **R166 — Stack-aligned candidates (T136).** A stack is two devices that
+  carry the only two conduction terminals (a MOS drain or source, a BJT
+  collector or emitter, either pin of a two-pin part other than a capacitor)
+  on a non-rail Net, at least one of them a transistor. It holds when the two
+  pins lie on one line along their exits and face each other. For each of the
+  `template`, `layered` and `stages` drafts of a Document with a stack and no
+  explicit floorplan, R63 also routes the same draft with its broken stacks
+  aligned (`<strategy>+stack`): after attachments and before markers, each
+  stack that does not hold, or has a device body between its pins, is aligned
+  by moving one member sideways (across the stack axis) so that its pin lands
+  on the other's exit line, on the side it already lies on. Never moved: fixed
+  and locked devices, R94 symmetry members, recognized template members,
+  extra members and tails, coupled inductors, R69 attachments and their hosts,
+  layout-group and symmetric-constraint members, members of an exactly-two
+  mirror pair (same gate Net and source, different drains) or differential
+  pair (same non-rail source Net, different gates and drains) of one
+  polarity, and both members of a stack that already holds or was aligned
+  earlier in the pass. Arbitrary choices, each kept because corpus drafts use
+  it (counted over the 1113 `+stack` drafts of the 371 corpus Documents with a
+  stack; 327 drafts in 200 Documents align something): transistor-transistor
+  stacks before transistor-load stacks (changes 11 drafts), then Net id
+  order; the two-pin member moves before a transistor (71 drafts), then the
+  lower id (25); a two-pin mover may take any of the eight orientations and a
+  transistor only the reflection that keeps both channel exits, moving its
+  gate to the other side (11 drafts), and no orientation an R22 override
+  fixed or of an R164 directed block kept facing right (which may only
+  shift); the cheapest pose wins, a turned pose costing 40 units of shift
+  (71 drafts; turning at all, 34); a free shunt capacitor whose body blocks
+  the slot steps sideways by the nearest of up to four grid steps that neither
+  overlaps nor blocks (53 drafts; more than four steps would serve two drafts
+  of one Document). A move is rejected when the mover overlaps a device, a
+  body remains between the pins, R10's geometry check fails or a stack that
+  held breaks or is obstructed; the stack is then skipped. A candidate joins
+  the portfolio only when it is valid and its edit list differs from every
+  original draft's and earlier candidate's; one that cannot be built or
+  refuses is not offered. Candidates rank right after their own draft (ties
+  keep the original). When none of them ranks among the drafts R63 refines,
+  or refinement of those does not select one, the originals are ranked,
+  refined, searched, finished and selected exactly as without R166: the
+  annealer's alternative starts and the crossing-reroute portfolio contain no
+  candidate. When refinement selects a candidate, the candidates stay in the
+  portfolio for the annealer's alternative starts and the reroute portfolio,
+  and a search that starts from it never accepts a proposal that breaks one of
+  the stacks its draft aligned while that stack holds (a stack already broken
+  does not block a move). The original drafts and R66's existing stack guard
+  are unchanged. Evaluation reports the stacks present and broken as
+  `stackColumns` (report-only).
 
 - **R71 — Single-host ports.** A non-rail Cell Pin Net that reaches exactly
   one device pin gets a local seat along that pin's transformed exit direction.
