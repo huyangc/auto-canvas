@@ -55,57 +55,71 @@ export function rightFacingBlocks(
     .map((i) => ({ i, ...directedPins(i, resolver) }))
     .filter((b) => b.outputs.length);
   if (!blocks.length) return new Set();
-  const nets = (id: string, pins: SymbolPin[]) =>
-    new Set(pins.flatMap((p) => roles.pinNet(id, p.name) ?? []));
-  const inputs = new Map(blocks.map((b) => [b.i.id, nets(b.i.id, b.inputs)]));
-  const next = new Map(
-    blocks.map((b) => {
-      const out = nets(b.i.id, b.outputs);
-      return [
-        b.i.id,
-        blocks
-          .filter(
-            (o) =>
-              o.i.id !== b.i.id &&
-              [...inputs.get(o.i.id)!].some((n) => out.has(n)),
-          )
-          .map((o) => o.i.id),
-      ];
-    }),
-  );
-  // Tarjan's strongly connected components; a component of two or more
-  // blocks is a directed block cycle.
-  const index = new Map<string, number>(),
-    low = new Map<string, number>(),
-    stack: string[] = [],
-    onStack = new Set<string>(),
-    cyclic = new Set<string>();
+  // Index each Net to the blocks that read it through an input pin, so the
+  // block graph costs one pass over the pins.
+  const readers = new Map<string, number[]>();
+  blocks.forEach((b, at) => {
+    for (const p of b.inputs) {
+      const net = roles.pinNet(b.i.id, p.name);
+      if (!net) continue;
+      const list = readers.get(net) ?? [];
+      if (list.at(-1) !== at) list.push(at);
+      readers.set(net, list);
+    }
+  });
+  const next = blocks.map((b, at) => {
+    const to = new Set<number>();
+    for (const p of b.outputs) {
+      const net = roles.pinNet(b.i.id, p.name);
+      for (const r of (net && readers.get(net)) || []) if (r !== at) to.add(r);
+    }
+    return [...to];
+  });
+  // Iterative Tarjan: a strongly connected component of two or more blocks
+  // is a directed block cycle.
+  const index = new Array<number>(blocks.length).fill(-1),
+    low = new Array<number>(blocks.length).fill(0),
+    onStack = new Array<boolean>(blocks.length).fill(false),
+    stack: number[] = [],
+    cyclic = new Set<number>();
   let counter = 0;
-  const visit = (id: string) => {
-    index.set(id, counter);
-    low.set(id, counter++);
-    stack.push(id);
-    onStack.add(id);
-    for (const to of next.get(id)!) {
-      if (!index.has(to)) {
-        visit(to);
-        low.set(id, Math.min(low.get(id)!, low.get(to)!));
-      } else if (onStack.has(to))
-        low.set(id, Math.min(low.get(id)!, index.get(to)!));
+  for (let root = 0; root < blocks.length; root++) {
+    if (index[root] !== -1) continue;
+    const frames: { v: number; edge: number }[] = [{ v: root, edge: 0 }];
+    index[root] = low[root] = counter++;
+    stack.push(root);
+    onStack[root] = true;
+    while (frames.length) {
+      const frame = frames.at(-1)!;
+      const { v } = frame;
+      if (frame.edge < next[v]!.length) {
+        const w = next[v]![frame.edge++]!;
+        if (index[w] === -1) {
+          index[w] = low[w] = counter++;
+          stack.push(w);
+          onStack[w] = true;
+          frames.push({ v: w, edge: 0 });
+        } else if (onStack[w]) low[v] = Math.min(low[v]!, index[w]!);
+        continue;
+      }
+      frames.pop();
+      const parent = frames.at(-1);
+      if (parent) low[parent.v] = Math.min(low[parent.v]!, low[v]!);
+      if (low[v] !== index[v]) continue;
+      const component: number[] = [];
+      for (;;) {
+        const top = stack.pop()!;
+        onStack[top] = false;
+        component.push(top);
+        if (top === v) break;
+      }
+      if (component.length > 1) for (const c of component) cyclic.add(c);
     }
-    if (low.get(id) !== index.get(id)) return;
-    const component: string[] = [];
-    for (;;) {
-      const top = stack.pop()!;
-      onStack.delete(top);
-      component.push(top);
-      if (top === id) break;
-    }
-    if (component.length > 1) for (const c of component) cyclic.add(c);
-  };
-  for (const b of blocks) if (!index.has(b.i.id)) visit(b.i.id);
+  }
   return new Set(
-    blocks.map((b) => b.i.id).filter((id) => !cyclic.has(id) && !fixed.has(id)),
+    blocks
+      .filter((b, at) => !cyclic.has(at) && !fixed.has(b.i.id))
+      .map((b) => b.i.id),
   );
 }
 
@@ -135,8 +149,13 @@ export function drivingOutput(
   for (const instance of [...document.instances]
     .filter((i) => blocks.has(i.id))
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))) {
+    // An output that leaves to the left does not host: a block fixed or
+    // locked facing left keeps the ordinary seats.
     const pin = directedPins(instance, resolver).outputs.find(
-      (p) => roles.pinNet(instance.id, p.name) === net,
+      (p) =>
+        roles.pinNet(instance.id, p.name) === net &&
+        !!instance.placement &&
+        pinExit(p, instance.placement).x >= 0,
     );
     if (pin) return { instance, pin };
   }

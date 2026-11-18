@@ -335,4 +335,147 @@ describe("R164 directed blocks", () => {
     expect(centreX(result, "V2")).toBeLessThan(centreX(result, "X1"));
     expect(portX(result, "out")).toBeGreaterThan(centreX(result, "X1"));
   });
+
+  // Reference hashes were recorded with the T135 branch build (f67708f),
+  // which has none of R164's mechanisms; round 4 planned both differently.
+  const planHash = (d: SchematicDocument, fixed: string[] = []) =>
+    createHash("sha256")
+      .update(
+        JSON.stringify(
+          planAutoLayout(
+            d,
+            resolver,
+            fixed.length
+              ? {
+                  search: {
+                    seed: 1,
+                    evaluations: defaultLayoutSearch(d, {}).evaluations,
+                  },
+                  fixedInstanceIds: new Set(fixed),
+                }
+              : {
+                  search: {
+                    seed: 1,
+                    evaluations: defaultLayoutSearch(d, {}).evaluations,
+                  },
+                },
+          ),
+        ),
+      )
+      .digest("hex");
+
+  it("plans a source-driven passive chain without an input port as before", () => {
+    const d = circuit(
+      {
+        V1: "voltage-source",
+        R1: "resistor",
+        C1: "capacitor",
+        L1: "inductor",
+        C2: "capacitor",
+        R2: "resistor",
+        G1: "ground",
+        G2: "ground",
+        G3: "ground",
+        G4: "ground",
+        out: "port",
+      },
+      {
+        n1: ["V1.+", "R1.1"],
+        g1: ["V1.-", "G1.0"],
+        n2: ["R1.2", "C1.1", "L1.1"],
+        g2: ["C1.2", "G2.0"],
+        vout: ["L1.2", "C2.1", "R2.1", "out.P"],
+        g3: ["C2.2", "G3.0"],
+        g4: ["R2.2", "G4.0"],
+      },
+    );
+    d.netlist = {
+      name: "test",
+      formalParameters: [],
+      terminals: [
+        {
+          id: "t-out",
+          name: "out",
+          netId: "vout",
+          direction: "output",
+          interfaceInstanceIds: ["out"],
+        },
+      ],
+    };
+    expect(planHash(d)).toBe(
+      "b75ab10369b832fe34a18f572726748e61d55a46064da39433265cf98f4e789f",
+    );
+  });
+
+  it("seats a fixed left-facing block's output port as before", () => {
+    const d = circuit(
+      {
+        R1: "resistor",
+        R2: "resistor",
+        X1: "opamp",
+        G1: "ground",
+        in: "port",
+        out: "port",
+      },
+      {
+        vin: ["in.P", "R1.1"],
+        m: ["R1.2", "R2.1", "X1.IN-"],
+        vout: ["R2.2", "X1.OUT", "out.P"],
+        ref: ["G1.0", "X1.IN+"],
+      },
+    );
+    d.netlist = {
+      name: "test",
+      formalParameters: [],
+      terminals: [
+        {
+          id: "t-in",
+          name: "in",
+          netId: "vin",
+          direction: "input",
+          interfaceInstanceIds: ["in"],
+        },
+        {
+          id: "t-out",
+          name: "out",
+          netId: "vout",
+          direction: "output",
+          interfaceInstanceIds: ["out"],
+        },
+      ],
+    };
+    instance(d, "X1").placement = {
+      position: { x: 200, y: 100 },
+      rotation: 0,
+      mirror: "horizontal",
+    };
+    expect(planHash(d, ["X1"])).toBe(
+      "266a6d041a46c058e9542684aa5fcee5657f7d2f3ddfb5b09187ab51fe58d5e7",
+    );
+  });
+
+  it("classifies a chain of 10 000 blocks", () => {
+    const n = 10_000;
+    const d = circuit(
+      Object.fromEntries(
+        Array.from({ length: n }, (_, k) => [`X${k}`, "inverter"]),
+      ),
+      Object.fromEntries(
+        Array.from({ length: n - 1 }, (_, k) => [
+          `n${k}`,
+          [`X${k}.Y`, `X${k + 1}.A`],
+        ]),
+      ),
+    );
+    expect(classifyNets(d, resolver).rightFacing!.size).toBe(n);
+    // Closing the chain makes every block part of one cycle.
+    d.nets.push({
+      id: "loop",
+      terminals: [
+        { instanceId: `X${n - 1}`, pinName: "Y" },
+        { instanceId: "X0", pinName: "A" },
+      ],
+    });
+    expect(classifyNets(d, resolver).rightFacing!.size).toBe(0);
+  });
 });

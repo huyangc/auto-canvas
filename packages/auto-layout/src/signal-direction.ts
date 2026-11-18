@@ -63,7 +63,13 @@ export function reversedSignalHosts(
     // R164: explicit input evidence outranks block inference. Without a port
     // on the input side, an input source (a grounded source's positive
     // terminal on a signal root) marks it.
-    if (!xs.length && !partition && !channelDevices && side === "input") {
+    if (
+      !xs.length &&
+      !partition &&
+      !channelDevices &&
+      roles.rightFacing?.size &&
+      side === "input"
+    ) {
       const roots = new Set(
         [...signalDistances(document, devices, resolver, roles).nets]
           .filter(([, d]) => d === 0)

@@ -180,6 +180,17 @@ export function classifyNets(
     rails,
     pinNet,
     instanceCount: document.instances.length,
-    rightFacing: rightFacingBlocks(document.instances, resolver, { pinNet }),
+    // Locked instances keep their pose; callers exempt their fixed ids.
+    rightFacing: rightFacingBlocks(
+      document.instances,
+      resolver,
+      { pinNet },
+      new Set(
+        [
+          ...(document.layoutGroups ?? []),
+          ...(document.constraints ?? []),
+        ].flatMap((o) => (o.locked ? o.objectIds : [])),
+      ),
+    ),
   };
 }

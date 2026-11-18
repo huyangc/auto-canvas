@@ -555,7 +555,10 @@ it("clears a horizontal receiver bank while aligning with its nearest gate", () 
   expect(gates.every((p) => p.y === output.y)).toBe(true);
 });
 
-it.each([true, false])(
+// With R164 the cascode regulator's local-loop variant equals the incumbent
+// (R156 offers no seat that would face the amplifier left), so only the
+// non-cascode row has a variant to reject.
+it.each([false])(
   "rejects a separately finished local-loop variant that loses the shared comparison (cascode=%s)",
   (cascode) => {
     const { d } = regulator(cascode);
@@ -580,11 +583,9 @@ it.each([true, false])(
       };
       expect(choose).toHaveBeenCalled();
       const [, , incumbent, candidate] = choose.mock.calls.at(-1)!;
-      // R164 removes the cascode variant's seat that faced the amplifier left.
-      if (cascode) expect(candidate.edits).toEqual(incumbent.edits);
-      else expect(candidate.edits).not.toEqual(incumbent.edits);
+      expect(candidate.edits).not.toEqual(incumbent.edits);
       expect(result).toEqual(baseline);
-      if (!cascode) expect(score(candidate)).toBeGreaterThan(score(incumbent));
+      expect(score(candidate)).toBeGreaterThan(score(incumbent));
       expect(planAutoLayout(d, resolver)).toEqual(result);
       expect(score(result)).toBeLessThanOrEqual(score(baseline));
     } finally {

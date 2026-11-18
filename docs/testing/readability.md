@@ -146,14 +146,15 @@ pins of directed blocks (an input-role and an output-role pin) that leave to
 the left, and `outputPortLeft` counts their output pins whose Net carries
 ports that all lie left of the block's visible centre. Pins and ports join
 through the drawing's own Net terminals. Split totals count the cases with at
-least one finding of each kind. `againstFlow` counts free directed blocks (on
-no block cycle, R164) whose outputs all leave to the right while more than half
-of the other pins on their non-rail input Nets lie right of the block's visible
-centre; pins of parts that also touch one of the block's output Nets are
-feedback and are ignored, as are MOS bulk pins, and Nets come from
-`classifyNets`. None of the three counts has a selection or evaluation weight;
-the first two count blocks on a block cycle too, since human drawings face
-latch and ring blocks left.
+least one finding of each kind. `againstFlow` is the planner's own R164
+counter (`againstFlowCounter`) applied to the drawing: free directed blocks (on
+no block cycle) whose outputs all leave to the right while more than half of
+the other device pins on their non-rail input Nets lie right of the mean x of
+the block's pins. Pins of parts that also touch one of the block's output Nets
+are feedback and are ignored, as are markers, ports and MOS bulk pins; Nets
+come from `classifyNets`. None of the three counts has a selection or
+evaluation weight; the first two count blocks on a block cycle too, since human
+drawings face latch and ring blocks left.
 
 ## Visible integrity
 
