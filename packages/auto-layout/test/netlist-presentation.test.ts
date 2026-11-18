@@ -81,7 +81,7 @@ const replay = (document: SchematicDocument, edits: unknown[]) =>
     { symbolResolver: resolver },
   );
 
-describe("R163 netlist presentation", () => {
+describe("R165 netlist presentation", () => {
   it("gives each grounded device on node 0 its own ground marker", () => {
     const source = amplifier();
     nodeZero(source, "gnd");
@@ -345,7 +345,7 @@ describe("R163 netlist presentation", () => {
   });
 });
 
-describe("R163 gate refusals", () => {
+describe("R165 gate refusals", () => {
   /** A node-0 amplifier with a VDD Cell Pin, and a copy to hand-edit. */
   const pair = () => {
     const before = amplifier();
@@ -530,7 +530,7 @@ describe("R163 gate refusals", () => {
   });
 });
 
-describe("R163 planning fallbacks", () => {
+describe("R165 planning fallbacks", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -562,7 +562,7 @@ describe("R163 planning fallbacks", () => {
     });
     const plan = planAutoLayout(source, resolver, options);
     expect(dropped(plan).map((d) => d.message)).toEqual([
-      "R163: rail symbols dropped: the presented Document was refused",
+      "R165: rail symbols dropped: the presented Document was refused",
     ]);
     expect(plan.edits).toEqual(plainPlan(source).edits);
   });
@@ -590,7 +590,7 @@ describe("R163 planning fallbacks", () => {
     });
     const plan = planAutoLayout(source, resolver, options);
     expect(dropped(plan).map((d) => d.message)).toEqual([
-      "R163: rail symbols dropped: transaction edit limit",
+      "R165: rail symbols dropped: transaction edit limit",
     ]);
     expect(plan.edits).toEqual(plainPlan(source).edits);
   });

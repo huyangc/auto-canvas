@@ -157,7 +157,7 @@ const fixedHuman = flags.has("--fixed-human");
 // Netlist input (T128): <folder>/<id>.json is planned and checked, the
 // drawing <reference>/<id>.json is the human reference.
 const referenceFolder = flags.get("--reference");
-// R163: the planner decides the rail symbols a netlist does not carry.
+// R165: the planner decides the rail symbols a netlist does not carry.
 const presentation = flags.get("--presentation");
 if (
   !Number.isSafeInteger(samples) ||
@@ -820,7 +820,7 @@ async function evaluateFile(file) {
           human.document,
           human.resolver,
         );
-      // R163: the rail symbols are checked against the input, the layout
+      // R165: the rail symbols are checked against the input, the layout
       // against the Document they produce.
       const presented = presentation
         ? netlistPresentation(document, resolver)
