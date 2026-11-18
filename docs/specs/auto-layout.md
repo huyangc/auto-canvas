@@ -1111,8 +1111,8 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
 
   The choices are empirical. Counts are on main 347082f with R167: moves
   accepted in all finalist chains of the 79 corpus drawing cases whose plan
-  R167 changes (79 cases with a move, 145 moves). Step at most 20: on the
-  corpus the planner drew 445 such jogs and humans 93, while in the T137
+  R167 changes (79 cases with a move, 145 moves). Step at most 20: before R167, on
+  `main` at `65075a0`, the planner drew 445 such jogs and humans 93, while in the T137
   pre-test humans drew more steps of 30 and up than the planner; the 145
   moves are 61 of 10 units and 84 of 20. Rigid units of two or more members:
   18 moves in 13 cases. Progress: 124 moves in 74 cases by fewer jogs, 12 in
@@ -1130,7 +1130,10 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   20 on a moved pin (added new worse cases and lost part of a
   reviewer-confirmed gain). Because the pass runs in every finalist chain, a
   straightened chain can win finalist selection, so a document whose selected
-  plan had no jog can still plan differently.
+  plan had no jog can still plan differently. Z before L, the carried markers,
+  the 40-unit wire allowance and the 20-unit extent allowance were set in the
+  experiment on `65075a0`; their case counts were not recounted for the
+  shipped rule.
 
 - **R168 — Convention-solved draft (T138).** A Document is in the subset when
   it has at most 40 instances and 12 devices (no corpus Document has more than
@@ -1858,7 +1861,13 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   at most ten trials total, scaled under R66. This count is shared with R149 and separate from R66's annealing and
   R146's port-seat budgets; it has no wall-clock cutoff.
   Use R146's complete finalist finishing path, readability-augmented calibrated
-  score and guards;
+  score and guards; replan each trial with R148's licensed contacts (R140's
+  declared-pair policy), so a contact already drawn in the finalist does not
+  refuse the trial while an unlicensed coincident pin still does;
+  decline a trial that takes a feedback part out of its row: a two-pin part
+  that is not a directed block, across two non-rail Nets of one signal block,
+  lies in its row when it is horizontal and exactly one placement row above or
+  below that block, and such a part stays in its row on the same side;
   keep ties and reject any finished rigid-unit distortion. Preserve the
   incumbent anchor by a whole-placement grid translation when nothing is
   fixed. Optimized, successful partition, zero-budget and above-40-instance

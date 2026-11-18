@@ -62,7 +62,7 @@ docs:check 0; `pnpm test:local` 0 (819 files, 8473 passed, 117 skipped);
 | A case without a jog keeps its plan hash                | Not remeasured here. On `65075a0`, 7 such plans changed, all finalist switches (explained in the implementer report)                  | not met      |
 | Crossings, bends not higher                             | 316 → 316; 2134 → 2048                                                                                                                | met          |
 | Label overlaps, label clearance not higher              | 3 → 3; 217 → 212; label-ownership flags 12 → 10                                                                                       | met          |
-| Long-narrow not higher                                  | Not remeasured here (85 → 85 on `65075a0`, before the guards)                                                                         | not measured |
+| Long-narrow not higher                                  | 73 → 73 (aspect ≥ 2, measured in round 2)                                                                                             | met          |
 | Planner-only jogs, dev and val                          | 311 left on this tree; `main` has no jog key to compare. On `65075a0`, before the guards: 432 → 290                                   | not measured |
 | Worse cases at most 31                                  | 11 of 79 changed by the plan's full definition (crossings, bends, wire +40, an extent +20), 2 of them restricted; measured in round 2 | met          |
 | The experiment's 6 gained cases keep their jogs removed | On `65075a0`: 4 of 6; the other two had no jog on that base                                                                           | not measured |
@@ -82,14 +82,15 @@ Blind reviews:
 - Which of the two (ORIGINAL beside the two automatic drawings, sides assigned
   at random; not calibrated against the owner's labels). Before the row guard,
   98 cases: new 38, earlier 28, same 32. On the final tree, 79 changed cases:
-  67 have both drawings unchanged from judged pairs and carry their verdicts,
-  12 were judged afresh by one reviewer, 9 of the 79 are restricted and not
-  judged: new 32, earlier 14, same 24 (clear preferences 7 to 4; "clear" is
+  67 are byte-identical to pairs judged earlier (before the rebase onto R168,
+  most of them before the row guard was added, eight after it), 9 of those 67
+  are restricted and have no verdict, so 58 verdicts carry over; 12 were judged
+  afresh by one reviewer; 70 verdicts in total: new 32, earlier 14, same 24 (clear preferences 7 to 4; "clear" is
   the reviewer's own strength label, slight or clear, given with each
   preference). This evidence supports the change but does not decide it: 67
-  of the 79 verdicts carry over from pairs judged before the rebase onto R168
-  where both drawings are byte-identical, 12 were judged afresh by one
-  reviewer, and the method is not calibrated against the owner. The decisive
+  of the 79 pairs are byte-identical to pairs judged earlier, 9 of those 67 are
+  restricted and have no verdict, so 58 verdicts carry over; 12 were judged
+  afresh; 70 verdicts in total; and the method is not calibrated against the owner. The decisive
   facts are no introduced defect, fewer bends and no relation broken.
 
 Measured on the way and not in this change: giving R147's alignment-phase
@@ -159,7 +160,8 @@ reports' strategies and metrics (not from the drawings):
 - qmcytns39z: same convention draft; one bend more, outline smaller on both
   axes, wire −80.
 
-One restricted case ranks third by size (a strategy switch).
+Ranked by the largest growth of one extent; qmcytns39z is listed for its extra
+bend. One restricted case would rank fifth by that measure (+58).
 
 Long-narrow (aspect of the layout box at least 2, the measure of
 `scripts/netlist-input-compare.mjs`; the drawing report has none of its own)
