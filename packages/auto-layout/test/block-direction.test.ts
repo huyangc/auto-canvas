@@ -364,7 +364,7 @@ describe("R164 directed blocks", () => {
       )
       .digest("hex");
 
-  it("plans a source-driven passive chain without an input port as before", () => {
+  it("leaves a source-driven passive chain without an input port to R167 alone", () => {
     const d = circuit(
       {
         V1: "voltage-source",
@@ -402,8 +402,10 @@ describe("R164 directed blocks", () => {
         },
       ],
     };
-    // R164 leaves this plan alone (b75ab103… on main at 65075a0). R167 then
-    // straightens its two pin jogs, at V1.+ and C1.1.
+    // R164 does not turn this chain (b75ab103… on main at 65075a0, before
+    // R167); R167 then straightens its two pin jogs, at V1.+ and C1.1. The pin
+    // is this branch's plan, so it guards the R164 regression of bca09fb, not
+    // equality with main.
     expect(planHash(d)).toBe(
       "477fddfc8404e2a6b2764aaab11250517352a9b9f84e7031e6d2542b94261143",
     );

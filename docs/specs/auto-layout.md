@@ -1086,9 +1086,10 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   On the current incumbent, jogs are taken Z before L, then smaller step, then
   by instance and pin id. The trial translates the subject's R147 rigid unit,
   with the one-pin markers all of whose wires end on that unit, by exactly the
-  step. A unit with a fixed or locked member is skipped, an off-grid step is
-  skipped, and so is a trial in which a moved body would overlap another body
-  (no clearance is required). Each unit and step is tried once. When nothing is
+  step. A unit with a fixed or locked member is skipped, and so is one that
+  would carry a fixed or locked marker (leaving the marker behind would only
+  make a new jog at it); an off-grid step is skipped, and so is a trial in
+  which a moved body would overlap another body (no clearance is required). Each unit and step is tried once. When nothing is
   fixed or locked the whole placement keeps the incumbent's anchor, as in R147.
   Every trial is finished through R149's replan, and a trial that replan
   declines (it hands back an earlier run) is rejected. A finished trial is
@@ -1108,26 +1109,29 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   not change. A document with no pin jog in any finalist chain plans as
   before.
 
-  The choices are empirical. Counts are moves accepted in all finalist chains
-  over T137's 302 tuning cases (145 cases with a move, 298 moves). Step at most
-  20: on the corpus the planner drew 445 such jogs and humans 93, while in the
-  T137 pre-test humans drew more steps of 30 and up than the planner; 295 moves
-  are 10 or 20 units (grid-1 documents supply the other three). Z before L: 219
-  Z moves in 118 cases, 79 L moves in 60. Rigid units of two or more devices: 64
-  moves in 43 cases. Carried markers: without carrying them 46 of the 302 cases
-  plan differently and 28 more jogs remain. Wire allowance: 25 moves in 19
-  cases add wire. Extent allowance: 58 moves in 44 cases grow an extent.
-  Progress: 250 moves in 133 cases by fewer jogs, 25 in 21 by fewer corners
-  only, 23 in 18 by score only. The trial cap was never reached (at most seven
-  trials in a pass). A limit on width plus height was measured and dropped: it
-  never was the only reason to reject a trial. Checks on transistor stacks,
-  gate levels, pairs and shunts were measured and are not part of the rule: a
-  gate-level check alone left the worse-case count and crossings unchanged and
-  kept more bends. Rejecting a move that leaves a new perpendicular step above
-  20 on a moved pin was also measured and is not part of the rule: it added new
-  worse cases and lost part of a reviewer-confirmed gain. Because the pass runs
-  in every finalist chain, a straightened chain can win finalist selection, so
-  a document whose selected plan had no jog can still plan differently.
+  The choices are empirical. Counts are on main 347082f with R167: moves
+  accepted in all finalist chains of the 79 corpus drawing cases whose plan
+  R167 changes (79 cases with a move, 145 moves). Step at most 20: on the
+  corpus the planner drew 445 such jogs and humans 93, while in the T137
+  pre-test humans drew more steps of 30 and up than the planner; the 145
+  moves are 61 of 10 units and 84 of 20. Rigid units of two or more members:
+  18 moves in 13 cases. Progress: 124 moves in 74 cases by fewer jogs, 12 in
+  10 by fewer corners only, 9 in 7 by score only. The trial cap was never
+  reached (at most seven trials in a pass). The stack and level conditions
+  came from review of the changed drawings: without the stack condition a
+  current source or resistor was shifted off its transistor's drain line, and
+  without the level condition a transistor was lifted out of the row it
+  shared with other transistors, which a blind pairwise review named as the
+  main reason to prefer the drawing without R167. Measured and not part of
+  the rule: a limit on width plus height (never the only reason to reject a
+  trial); a gate-level check (left the worse-case count and crossings
+  unchanged and kept more bends); checks on differential and mirror pairs and
+  on shunt parts; rejecting a move that leaves a new perpendicular step above
+  20 on a moved pin (added new worse cases and lost part of a
+  reviewer-confirmed gain). Because the pass runs in every finalist chain, a
+  straightened chain can win finalist selection, so a document whose selected
+  plan had no jog can still plan differently.
+
 - **R168 — Convention-solved draft (T138).** A Document is in the subset when
   it has at most 40 instances and 12 devices (no corpus Document has more than
   10, so neither limit removes one), at least one MOS or BJT, no partition,
