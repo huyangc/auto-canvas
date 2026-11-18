@@ -10,7 +10,7 @@ import {
   rightedInPlace,
   rightFacingBlocks,
 } from "../src/directed-blocks.js";
-import { pinPoints } from "../src/geometry.js";
+import { pinPoints, placementPitch } from "../src/geometry.js";
 import { preview } from "../src/transaction.js";
 import { classifyNets } from "../src/net-roles.js";
 import { portSeatCandidates } from "../src/place-markers.js";
@@ -412,7 +412,8 @@ describe("R164 directed blocks", () => {
     );
   });
 
-  it("seats a fixed left-facing block's output port as before", () => {
+  /** Inverting amplifier around a fixed op-amp X1 whose output faces left. */
+  const fixedLeftFacing = () => {
     const d = circuit(
       {
         R1: "resistor",
@@ -454,31 +455,57 @@ describe("R164 directed blocks", () => {
       rotation: 0,
       mirror: "horizontal",
     };
-    const fixedX1 = structuredClone(instance(d, "X1").placement);
+    return d;
+  };
+  const planFixedLeftFacing = (d: SchematicDocument) => {
     const plan = planAutoLayout(d, resolver, {
       search: { seed: 1, evaluations: defaultLayoutSearch(d, {}).evaluations },
       fixedInstanceIds: new Set(["X1"]),
     });
     const after = preview(d, resolver, plan.edits);
     expect(after.ok).toBe(true);
-    if (!after.ok) return;
-    // The fixed block keeps its pose, and R164 does not seat its output port:
-    // the seat is not right of the block's centre, as R164's filter demands.
-    expect(instance(after.document, "X1").placement).toEqual(fixedX1);
+    return { plan, after: after.ok ? after.document : d };
+  };
+  const pinAt = (d: SchematicDocument, id: string, pin: string) =>
+    pinPoints(d, resolver).find(
+      (p) => p.instanceId === id && p.pinName === pin,
+    )!.point;
+
+  it("keeps a fixed left-facing block's output port off R164's seat", () => {
+    const d = fixedLeftFacing();
+    const fixedX1 = structuredClone(instance(d, "X1").placement);
+    const { plan, after } = planFixedLeftFacing(d);
+    // The fixed block keeps its pose, and R164 does not seat its output
+    // port: the seat is not right of the block's centre, as R164's filter
+    // demands, but above X1's output on the feedback row of R2.
+    expect(instance(after, "X1").placement).toEqual(fixedX1);
     const box = visibleInstanceBounds(
-      { ...after.document, instances: [instance(after.document, "X1")] },
+      { ...after, instances: [instance(after, "X1")] },
       resolver,
     )[0]!.bounds;
-    const port = pinPoints(after.document, resolver).find(
-      (p) => p.instanceId === "out",
-    )!.point;
+    const port = pinAt(after, "out", "P");
     expect(port.x).toBeLessThanOrEqual(box.x + box.width / 2);
+    expect(port.x).toBe(pinAt(after, "X1", "OUT").x);
+    expect(port.y).toBe(pinAt(after, "R2", "2").y);
     // On main at 0b93996 the plan was 266a6d04…; R147 now leaves the
     // feedback part R2 in its row above X1, and `out` is seated on that row.
     expect(
       createHash("sha256").update(JSON.stringify(plan)).digest("hex"),
     ).toBe("49c47cbb68a8368f2c999403909dfa5c6d3920907dfe9ada37456987410c69fe");
-  });
+  }, 60_000);
+
+  it("keeps a fixed block's feedback part in its row through R147", () => {
+    // R2 lies horizontal one placement row above X1 when R147 starts; the
+    // alignment guard keeps it there instead of pulling it level with X1.
+    const d = fixedLeftFacing();
+    const { after } = planFixedLeftFacing(d);
+    const row = placementPitch({ instanceCount: d.instances.length }).row;
+    expect(
+      instance(after, "R2").placement!.position.y -
+        instance(after, "X1").placement!.position.y,
+    ).toBe(-row);
+    expect(pinAt(after, "R2", "1").y).toBe(pinAt(after, "R2", "2").y);
+  }, 60_000);
 
   it("classifies a chain of 10 000 blocks", () => {
     const n = 10_000;
