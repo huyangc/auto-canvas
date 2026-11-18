@@ -189,6 +189,7 @@ export function repairStubLabels(
           port.id,
           false,
           false,
+          fixed,
         ).some(
           (seat) =>
             seat.position.x === port.placement!.position.x &&

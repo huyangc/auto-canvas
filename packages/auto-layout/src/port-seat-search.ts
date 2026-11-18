@@ -74,7 +74,14 @@ export function searchPortSeats(
     );
     const original = JSON.stringify(placements.get(port.id));
     const joins = straightJoins(document, resolver);
-    const ranked = portSeatCandidates(document, resolver, port.id, true)
+    const ranked = portSeatCandidates(
+      document,
+      resolver,
+      port.id,
+      true,
+      true,
+      fixed,
+    )
       .filter((seat) => JSON.stringify(seat) !== original)
       .map((seat) => {
         const trial = new Map(placements).set(port.id, seat);
@@ -130,6 +137,7 @@ export function searchPortSeats(
             id,
             false,
             false,
+            fixed,
           ).some(
             (seat) =>
               seat.position.x === pose?.position.x &&
