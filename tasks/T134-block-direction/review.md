@@ -221,3 +221,17 @@ equivalent, no introduced dangling wire, unconnected pin or touching pin,
 re-export identical wherever the input exports, no gate drop. Against `main`,
 73 (node 0) and 67 (VSS) netlist plans change; on them crossings 25 → 29 and
 18 → 17, bends 401 → 385 and 256 → 259.
+
+## Round 6 — changes requested (second PR review, of a189f57)
+
+The Opus re-review approved: the P1 and the cycle-detection P2 are closed, the
+fixed/locked P2 is closed for locked blocks and for fixed blocks facing left.
+One residual and one test gap:
+
+| #   | Severity   | Where                                                                                               | Finding                                                                                                                                                                                                                                                                                                                         | Expected fix                                                                                                                                                                                                                                |
+| --- | ---------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | must-fix   | `place-markers.ts:729-735` (`portSeatCandidates`), `port-seat-search.ts:77/127`, `stub-seat.ts:186` | A block fixed through `fixedInstanceIds` and facing RIGHT is still treated as free by the R146 port-seat filter: `portSeatCandidates` calls `classifyNets`, which cannot know the caller's fixed ids. Inverting amplifier with the op-amp fixed at (300,200) unmirrored: `main` seats `out` at (270,0), this branch at (330,0). | Pass the fixed ids into `portSeatCandidates` from `searchPortSeats` and from the stub-seat repair and leave them out of the set handed to `drivingOutput`. Pinned-hash test with the fixed op-amp facing right, beside the facing-left one. |
+| 2   | should-fix | `block-direction-generators.test.ts:128`                                                            | The R147 relocation test passes with the guard removed: its fixture never offers a left-facing pose.                                                                                                                                                                                                                            | A fixture where an unguarded relocation does face the block left (for example its input part on its right and its feedback part on its left), asserted both ways.                                                                           |
+
+Acceptance for round 6: the plan's checks; all 628 corpus plan hashes equal to
+round 5 (the corpus fixes no instance).
