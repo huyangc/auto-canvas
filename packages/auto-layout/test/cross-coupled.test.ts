@@ -203,8 +203,10 @@ it("R144 rejects a higher-scoring finishing candidate and accepts a tie", () => 
     if (!before.ok) throw new Error("Rejected candidate lost valid layout");
     expect(diagonals(before.document)).toEqual([]);
     expect(calls.mock.calls.filter((call) => call[6]?.crossX)).toHaveLength(1);
-    expect(calls.mock.calls.at(-1)![6]).toEqual({ ripUp: true, crossX: true });
-    const exact = calls.mock.calls.at(-1)![0];
+    // R167 trials may route after R144, so find its call by its option.
+    const crossed = calls.mock.calls.find((call) => call[6]?.crossX)!;
+    expect(crossed[6]).toEqual({ ripUp: true, crossX: true });
+    const exact = crossed[0];
     expect(exact.instances.map((i) => i.placement)).toEqual(
       before.document.instances.map((i) => i.placement),
     );
