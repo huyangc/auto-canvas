@@ -1767,17 +1767,20 @@ function planAutoLayoutMeasured(
         }
         return finishPlacement(followed, railContacts);
       };
+      const gapClosed = timePhase("gaps", () =>
+        searchDeviceRelocations(
+          gapIncumbent,
+          resolver,
+          fixed,
+          gapReplan,
+          stopped,
+          { phase: "gaps", budget: relocationBudget },
+        ),
+      );
       // R167 straightens pin jogs on the gap-closed incumbent, before R152.
-      const closed = timePhase("gaps", () =>
+      const closed = timePhase("pinJogs", () =>
         straightenPinJogs(
-          searchDeviceRelocations(
-            gapIncumbent,
-            resolver,
-            fixed,
-            gapReplan,
-            stopped,
-            { phase: "gaps", budget: relocationBudget },
-          ),
+          gapClosed,
           resolver,
           fixed,
           gapReplan,

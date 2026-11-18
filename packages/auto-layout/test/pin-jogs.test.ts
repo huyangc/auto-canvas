@@ -347,25 +347,41 @@ describe("R167 pin jogs", () => {
     expect(position(result.final!, "M")).toEqual({ x: 200, y: 110 });
   });
 
-  it("never moves a fixed part or a locked group", () => {
+  it("never moves a fixed part", () => {
     const fixed = new Set(["a", "b"]);
     const held = start(twoPin(), fixed);
     expect(straightenPinJogs(held.initial, resolver, fixed, held.replan)).toBe(
       held.initial,
     );
+  });
 
-    const document = twoPin();
-    document.layoutGroups.push({
+  it("does not try a unit with a locked member", () => {
+    // The replan is built without the lock, so it would honour the move: the
+    // pass itself must skip b.
+    const locked = twoPin();
+    locked.layoutGroups.push({
       id: "lock",
       kind: "custom",
       objectIds: ["b"],
       locked: true,
     });
     const free = new Set(["a"]);
-    const locked = start(document, free);
-    expect(
-      straightenPinJogs(locked.initial, resolver, free, locked.replan),
-    ).toBe(locked.initial);
+    const { initial } = start(locked, free);
+    const unlocked = replanner(twoPin(), free);
+    expect(straightenPinJogs(initial, resolver, free, unlocked)).toBe(initial);
+  });
+
+  it("does not carry a fixed marker", () => {
+    const document = circuit(
+      { a: "resistor", b: "resistor", g: "ground" },
+      { s: ["a.2", "b.1"], r: ["b.2", "g.0"] },
+    );
+    place(document, { a: [0, 0], b: [20, 120], g: [20, 180] });
+    const fixed = new Set(["a", "g"]);
+    const { initial, replan } = start(document, fixed);
+    const result = straightenPinJogs(initial, resolver, fixed, replan);
+    expect(position(result.final!, "g")).toEqual({ x: 20, y: 180 });
+    expect(position(result.final!, "b")).toEqual({ x: 20, y: 120 });
   });
 
   it("stops when asked and is deterministic", () => {

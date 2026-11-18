@@ -330,17 +330,23 @@ function carriedMarkers(
 }
 
 /** The unit (and its carried markers) translated by `step`, or undefined when
- * a moved body would overlap another instance's body. */
+ * a carried marker is fixed or locked or a moved body would overlap another
+ * instance's body. */
 function translatedUnit(
   document: SchematicDocument,
   resolver: SymbolResolver,
   unit: readonly string[],
   step: Point,
+  locked: ReadonlySet<string>,
 ): Map<string, Placement> | undefined {
   const grid = document.presentation.grid;
   if (step.x % grid || step.y % grid) return undefined;
   const moved = new Set(unit);
-  for (const id of carriedMarkers(document, moved)) moved.add(id);
+  for (const id of carriedMarkers(document, moved)) {
+    // Leaving the marker behind would only make a new jog at it.
+    if (locked.has(id)) return undefined;
+    moved.add(id);
+  }
   const trial = new Map(
     document.instances.map((i) => [i.id, structuredClone(i.placement!)]),
   );
@@ -430,7 +436,7 @@ export function straightenPinJogs(
       const key = JSON.stringify([unit, jog.step]);
       if (tried.has(key)) continue;
       tried.add(key);
-      proposal = translatedUnit(document, resolver, unit, jog.step);
+      proposal = translatedUnit(document, resolver, unit, jog.step, locked);
       if (proposal) break;
     }
     if (!proposal) break;
