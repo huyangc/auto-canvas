@@ -26,7 +26,10 @@ import {
 import { placementUnits } from "./search-moves.js";
 import type { Placement } from "./types.js";
 
-function relocationUnits(
+/** R147 rigid units: recognized structures, attachments, symmetry units and
+ * markers, joined by aligned conducting stacks, user groups, constraints and
+ * couplings. Only units with a device are returned. */
+export function relocationUnits(
   document: SchematicDocument,
   resolver: SymbolResolver,
 ) {
@@ -223,6 +226,33 @@ export function relocationCandidates(
   return [...candidates.values()];
 }
 
+/** True when finishing moved or turned the members of a rigid unit apart. */
+export function splitsRigidUnit(
+  document: SchematicDocument,
+  finished: SchematicDocument,
+  units: readonly (readonly string[])[],
+): boolean {
+  const poses = new Map(finished.instances.map((i) => [i.id, i.placement!]));
+  return units.some((members) => {
+    if (members.length < 2) return false;
+    const first = members[0]!;
+    const before = document.instances.find((i) => i.id === first)!.placement!;
+    const after = poses.get(first)!;
+    const dx = after.position.x - before.position.x;
+    const dy = after.position.y - before.position.y;
+    return members.some((id) => {
+      const old = document.instances.find((i) => i.id === id)!.placement!;
+      const next = poses.get(id)!;
+      return (
+        next.rotation !== old.rotation ||
+        next.mirror !== old.mirror ||
+        next.position.x - old.position.x !== dx ||
+        next.position.y - old.position.y !== dy
+      );
+    });
+  });
+}
+
 /** R147/R149: pin alignment, then gap closing, at most ten finished trials. */
 export function searchDeviceRelocations(
   initial: LayoutRun,
@@ -322,33 +352,8 @@ export function searchDeviceRelocations(
         continue;
       if (compactionRegresses(current, candidate, resolver, closeGaps))
         continue;
-      const finished = new Map(
-        candidate.final.instances.map((i) => [i.id, i.placement!]),
-      );
       // Finishing may compact columns, but must never split a rigid unit.
-      if (
-        allUnits.some((members) => {
-          if (members.length < 2) return false;
-          const first = members[0]!;
-          const before = document.instances.find(
-            (i) => i.id === first,
-          )!.placement!;
-          const after = finished.get(first)!;
-          const dx = after.position.x - before.position.x;
-          const dy = after.position.y - before.position.y;
-          return members.some((id) => {
-            const old = document.instances.find((i) => i.id === id)!.placement!;
-            const next = finished.get(id)!;
-            return (
-              next.rotation !== old.rotation ||
-              next.mirror !== old.mirror ||
-              next.position.x - old.position.x !== dx ||
-              next.position.y - old.position.y !== dy
-            );
-          });
-        })
-      )
-        continue;
+      if (splitsRigidUnit(document, candidate.final, allUnits)) continue;
       const counts = routedGuards(candidate.final, resolver);
       if (
         Object.entries(counts).some(

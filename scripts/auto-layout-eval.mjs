@@ -4,6 +4,7 @@ import {
 } from "../packages/auto-layout/dist/readability-metrics.js";
 import { summarizeReadability } from "./readability-fit.mjs";
 import { blockDirection } from "./lib/block-direction.mjs";
+import { pinJogCounts, plannerOnlyPinJogs } from "./lib/pin-jogs.mjs";
 import {
   compareVisibleIntegrity,
   visibleIntegrity,
@@ -373,6 +374,8 @@ const metrics = (document, resolver, components, stages, project) => {
     missingConnections: missingConnections(document, resolver),
     // Report-only R164 counts; no selection or evaluation weight reads them.
     blockDirection: blockDirection(document, resolver),
+    // Report-only R167 counts, likewise unweighted.
+    pinJogs: pinJogCounts(document, resolver),
     ...(project
       ? { visibleIntegrity: visibleIntegrity(document, resolver, project) }
       : {}),
@@ -744,6 +747,11 @@ async function evaluateFile(file) {
           : {}),
         ...blockMetrics(after, resolver, partition, hasHuman ? document : null),
       };
+      if (measurement.human?.pinJogs)
+        measurement.result.pinJogs.plannerOnly = plannerOnlyPinJogs(
+          measurement.result.pinJogs,
+          measurement.human.pinJogs,
+        );
       // An imported LOADBench drawing is still the source the result keeps.
       // Integrity compares the result with its input, never the reference.
       measurement.integrity = compareVisibleIntegrity(
@@ -1051,6 +1059,13 @@ if (!isMainThread) {
       ["outputFacesLeft", "outputPortLeft", "againstFlow"].map((key) => [
         key,
         items.filter((m) => m.blockDirection?.[key]).length,
+      ]),
+    ),
+    // R167 pin jogs; `plannerOnly` exists on results with a human drawing.
+    pinJogs: Object.fromEntries(
+      ["count", "gate", "twoPin", "plannerOnly"].map((key) => [
+        key,
+        items.reduce((s, m) => s + (m.pinJogs?.[key] ?? 0), 0),
       ]),
     ),
   });

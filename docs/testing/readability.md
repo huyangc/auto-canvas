@@ -171,6 +171,19 @@ counts the stacks the result breaks while the human drawing keeps them
 counts take no part in the composite, targets or acceptance gates
 (`scripts/lib/stack-columns.mjs`).
 
+### Pin jogs (report-only)
+
+Each human, quick and result metric set has `pinJogs`
+(`scripts/lib/pin-jogs.mjs`, R167): the wires on the drawing that leave a
+transistor gate or base on a non-rail Net, or a pin of a two-pin part, take a
+perpendicular step of at most two grid steps and then go on in the exit
+direction (`z`) or end on a junction (`l`). `gate` and `twoPin` split the count
+by subject, `tipDeparture` counts jogs whose wire leaves the pin tip sideways,
+and `pins` lists the pins. On a result with a human drawing, `plannerOnly`
+counts the listed jogs on pins where the human drawing has none. Split totals
+sum `count`, `gate`, `twoPin` and `plannerOnly`. None of these has a selection
+or evaluation weight.
+
 ### Convention-solved draft (report-only)
 
 Each case's `conventionDraft` has two fields. `eligible` says whether the

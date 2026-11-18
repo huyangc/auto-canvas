@@ -309,6 +309,8 @@ describe("R166 candidates", () => {
     // A topology fixture (not a simulated circuit): Net d joins m2's drain
     // and r1, a stack whose aligned draft ranks among the refined drafts but
     // loses refinement to an original.
+    // If a planner change makes the candidate selected, find another fixture;
+    // do not loosen the assertions.
     const d = circuit(
       {
         m1: "nmos",
@@ -360,6 +362,8 @@ describe("R166 candidates", () => {
     // sha256 of JSON.stringify(planAutoLayout(..., quick)) from a clean build
     // of main 65075a0 (git archive of packages/auto-layout, tsc); rcDivider's
     // from a clean build of 36b51ef, whose src equals main's before R168.
+    // When a later task legitimately changes these plans, re-pin from the
+    // then-current main and update the test name.
     const hash = (d: SchematicDocument) =>
       createHash("sha256")
         .update(JSON.stringify(planAutoLayout(d, resolver, quick)))

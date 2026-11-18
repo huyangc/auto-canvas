@@ -78,7 +78,7 @@ Open after this task:
 ## Round 2 — changes requested (PR review of aabdd1a)
 
 The full review text is in the PR. Fixes were made by the implementer
-subagent and are uncommitted.
+subagent and were committed in round 2.
 
 | #   | Pri | Finding                                                                  | Resolution                                                                                                                                                                                  |
 | --- | --- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -110,9 +110,10 @@ subagent and are uncommitted.
   | aabdd1a | 21        | 215   |
   | X       | 21        | 217   |
 
-- The verdict file counts 17 gained (not 16) and 8 lost. Under X all 17
-  gained and all 8 lost keep the draft. X loses 0 gained cases, which is at
-  most 2, so X is adopted.
+- Among the 84 judgeable cases the verdict file counts 16 gained and 8 lost;
+  a 17th "gained" entry is one of the two cases the reviewers could not judge
+  (defective original). Under X all 17 and all 8 lost keep the draft. X loses
+  0 gained cases, which is at most 2, so X is adopted.
 - X can change only plans in which the draft was selected: the 100 changed
   cases plus 4 whose plan already equalled main's. So no other corpus plan
   moves.
@@ -173,7 +174,9 @@ crossings c and bends b, main → aabdd1a):
   instrumentation in round 1 showed, for bbr8qbcane and dr4e8zhyjg, that the
   draft was selected in the planning call the plan came from. The annealer or
   finishing then ended from another start (layered, or a result without
-  metrics). The other 3 were not instrumented.
+  metrics). The other 3 (fv87gdk257, nmb7jqwgz3, sf6e58mmjb) were not
+  instrumented, so the claim is unverified for them; the PR reviewer's random
+  probes found no counter-example.
 
 Reviewer check of round 2: build, typecheck, lint, format:check, docs:check 0;
 `pnpm test:local` 0 (818 files, 8452 passed, 117 skipped); `pnpm test:slow` 0
@@ -186,3 +189,22 @@ return to `main`'s plan (drawing: gfym3hxbpn, vcfdca5hqp, judged
 needs-improvement before and after), so the blind review of round 1 stands:
 of 84 judged cases 26 → 34 acceptable, 16 gained, 8 lost, none of them among
 the two.
+
+### Round 2 acceptance
+
+Against `main` (`8144011`), from the reviewer check above. Planning time,
+long-narrow, the 20 judged gains and renders were not measured on the round-2
+head; the round-1 values above stand, and exactly two plans differ in each
+mode.
+
+| Plan acceptance line                                 | Result on the round-2 head                                                       | State        |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------- | ------------ |
+| No threw; same 16 refused; equivalent; no defects    | every completed case equivalent; introduced dangling / unconnected / touching 0  | met          |
+| A case that is not eligible keeps its hash           | 98 changed; X changes only plans in which the draft was selected                 | met          |
+| Crossings and bends lower                            | 340 → 316; 2301 → 2134                                                           | met          |
+| Label overlaps, long-narrow not higher               | label overlaps 3 → 3; long-narrow not measured on the round-2 head               | not measured |
+| Cases worse on crossings or bends, listed            | 10 listed above                                                                  | met          |
+| Judged gains of the experiment (20)                  | not measured on the round-2 head (round-1 values above; two plans differ)        | not measured |
+| Planning time, median at most ×1.25                  | not measured on the round-2 head (round-1 values above; two plans differ)        | not measured |
+| Netlist (node 0): 515 equivalent, no defect, no drop | 515 completed and equivalent; 95 changed; crossings 345 → 326; bends 2217 → 2077 | met          |
+| Renders of the first 16 changed cases                | not measured on the round-2 head (round-1 values above; two plans differ)        | not measured |

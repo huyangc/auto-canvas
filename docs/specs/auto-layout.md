@@ -624,7 +624,7 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   Each finalist retains the existing finishing budgets and order: R72 repair,
   R96 rip-up, R44 routing comparison, R97 compaction, cross-coupled routing,
   facing, crossing reroutes and contacts, R147 relocation, R146 ports, R148
-  rails, R149 gaps, branch columns and stub-label repair, label/drafting
+  rails, R149 gaps, R167 pin jogs, branch columns and stub-label repair, label/drafting
   finishing, and finally R155 local rails. Quality modes retain their existing
   eligibility rules for each pass. Share per-call routing and finished-seat
   caches, but copy mutable finalist results and reset per-finalist budgets.
@@ -684,7 +684,8 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   eight through 40 instances. These are candidate budgets, not time limits.
   R146–R149 retain their finishing-trial caps through 30 instances. For 31–40
   instances scale each cap `b` to `floor(b * (30 / n)^3)`: R146 uses `b=12`,
-  R147/R149 share `b=10`, and R148's marker-seat search uses `b=8`.
+  R147/R149 share `b=10`, R148's marker-seat search uses `b=8`, and R167 uses
+  its own `b=8`.
   For example, 40 instances permit ten annealer evaluations, four shared
   relocation/gap trials, five port trials and three marker-seat trials. Rail
   rerouting retains its separate cap. Explicit `search` overrides only the
@@ -1069,6 +1070,64 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   are unchanged. Evaluation reports the stacks present and broken as
   `stackColumns` (report-only).
 
+- **R167 — Straighten pin jogs (T137).** In the planning that runs R149 (default
+  mode, a nonzero search budget, at most 40 instances), every finalist chain
+  runs one pass right after R149's gap visits and before R152.
+  A **pin jog** is judged on the drawing's own routed wires. Its subject pin is
+  a MOS gate or BJT base on a non-rail Net that reaches a non-bulk pin of
+  another instance, or either pin of a two-pin non-transistor part. From the
+  pin the wire runs along the pin's exit (a leg of length zero when it leaves
+  the pin tip sideways), steps perpendicular by at most 20 units, and then
+  either goes on in the exit direction (Z) or ends on a junction (L). Moving
+  the part by that step straightens the wire. `auditRouting` does not count a
+  sideways departure from a pin tip as a bend, so the routed score barely sees
+  these jogs; R147 proposes only poses that face another pin at 40 or 80 units,
+  never this step.
+  On the current incumbent, jogs are taken Z before L, then smaller step, then
+  by instance and pin id. The trial translates the subject's R147 rigid unit,
+  with the one-pin markers all of whose wires end on that unit, by exactly the
+  step. A unit with a fixed or locked member is skipped, an off-grid step is
+  skipped, and so is a trial in which a moved body would overlap another body
+  (no clearance is required). Each unit and step is tried once. When nothing is
+  fixed or locked the whole placement keeps the incumbent's anchor, as in R147.
+  Every trial is finished through R149's replan, and a trial that replan
+  declines (it hands back an earlier run) is rejected. A finished trial is
+  accepted only if physical completeness is not worse, no rigid unit is split,
+  no `routedGuards` count rises, no R166 stack that holds on the incumbent
+  breaks (one already broken does not block a move), no two transistors drawn
+  level stop being level (the same channel axis, and reference points at most
+  2 units apart across it; pairs already off level do not block a move), and
+  crossings, counted bends, **visible corners** (route bends plus sideways
+  pin-tip departures), pin jogs, label overlaps and label clearance findings
+  do not rise; wire may grow by at most 40 units and the routed width and
+  height by at most 20 each. It must also
+  make progress: fewer pin jogs, fewer visible corners, or a strictly lower
+  calibrated score. After an accepted move the jogs are detected again. The
+  pass has its own budget of eight finished trials, scaled under R66 (three at
+  40 instances); it is separate from R147/R149's. The score and its weights do
+  not change. A document with no pin jog in any finalist chain plans as
+  before.
+
+  The choices are empirical. Counts are moves accepted in all finalist chains
+  over T137's 302 tuning cases (145 cases with a move, 298 moves). Step at most
+  20: on the corpus the planner drew 445 such jogs and humans 93, while in the
+  T137 pre-test humans drew more steps of 30 and up than the planner; 295 moves
+  are 10 or 20 units (grid-1 documents supply the other three). Z before L: 219
+  Z moves in 118 cases, 79 L moves in 60. Rigid units of two or more devices: 64
+  moves in 43 cases. Carried markers: without carrying them 46 of the 302 cases
+  plan differently and 28 more jogs remain. Wire allowance: 25 moves in 19
+  cases add wire. Extent allowance: 58 moves in 44 cases grow an extent.
+  Progress: 250 moves in 133 cases by fewer jogs, 25 in 21 by fewer corners
+  only, 23 in 18 by score only. The trial cap was never reached (at most seven
+  trials in a pass). A limit on width plus height was measured and dropped: it
+  never was the only reason to reject a trial. Checks on transistor stacks,
+  gate levels, pairs and shunts were measured and are not part of the rule: a
+  gate-level check alone left the worse-case count and crossings unchanged and
+  kept more bends. Rejecting a move that leaves a new perpendicular step above
+  20 on a moved pin was also measured and is not part of the rule: it added new
+  worse cases and lost part of a reviewer-confirmed gain. Because the pass runs
+  in every finalist chain, a straightened chain can win finalist selection, so
+  a document whose selected plan had no jog can still plan differently.
 - **R168 — Convention-solved draft (T138).** A Document is in the subset when
   it has at most 40 instances and 12 devices (no corpus Document has more than
   10, so neither limit removes one), at least one MOS or BJT, no partition,

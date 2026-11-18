@@ -134,6 +134,7 @@ import { annealLayout } from "./search.js";
 import { compactPlacements, compactRows } from "./compact.js";
 import { symmetryTopology } from "./symmetry.js";
 import { searchDeviceRelocations } from "./device-relocation-search.js";
+import { straightenPinJogs } from "./pin-jogs.js";
 import { searchRailSeats } from "./rail-seat-search.js";
 import { repairStubLabels } from "./stub-seat.js";
 import { searchPortSeats } from "./port-seat-search.js";
@@ -1719,60 +1720,69 @@ function planAutoLayoutMeasured(
           )
           .map((host) => ({ device, host }));
       });
+      const gapIncumbent = { ...railed, result: routed, final: final.document };
+      const gapReplan = (placements: ReadonlyMap<string, Placement>) => {
+        if (
+          feedbackBands.some(
+            ({ device, host }) =>
+              placements.get(device.id)!.position.y -
+                device.placement!.position.y !==
+              placements.get(host.id)!.position.y - host.placement!.position.y,
+          )
+        )
+          return gapIncumbent;
+        const followed = new Map(placements);
+        // A gap trial translates devices after R146 has selected port seats.
+        // Retain each single-host port's offset, including trial reanchoring,
+        // before routing and comparing the finished candidate's guards.
+        for (const { port, host } of attachedPorts) {
+          const before = host.placement!;
+          const after = placements.get(host.id)!;
+          const seat = port.placement!;
+          followed.set(port.id, {
+            ...seat,
+            position: {
+              x: seat.position.x + after.position.x - before.position.x,
+              y: seat.position.y + after.position.y - before.position.y,
+            },
+          });
+        }
+        if (attachedPorts.length && !fixed.size) {
+          const anchor = enclosingBox(final.document, resolver);
+          const box = enclosingBox(
+            withPlacements(final.document, followed),
+            resolver,
+          );
+          const grid = document.presentation.grid;
+          const dx = Math.round((anchor.x - box.x) / grid) * grid;
+          const dy = Math.round((anchor.y - box.y) / grid) * grid;
+          for (const [id, pose] of followed)
+            followed.set(id, {
+              ...pose,
+              position: {
+                x: pose.position.x + dx,
+                y: pose.position.y + dy,
+              },
+            });
+        }
+        return finishPlacement(followed, railContacts);
+      };
+      // R167 straightens pin jogs on the gap-closed incumbent, before R152.
       const closed = timePhase("gaps", () =>
-        searchDeviceRelocations(
-          { ...railed, result: routed, final: final.document },
+        straightenPinJogs(
+          searchDeviceRelocations(
+            gapIncumbent,
+            resolver,
+            fixed,
+            gapReplan,
+            stopped,
+            { phase: "gaps", budget: relocationBudget },
+          ),
           resolver,
           fixed,
-          (placements) => {
-            if (
-              feedbackBands.some(
-                ({ device, host }) =>
-                  placements.get(device.id)!.position.y -
-                    device.placement!.position.y !==
-                  placements.get(host.id)!.position.y -
-                    host.placement!.position.y,
-              )
-            )
-              return { ...railed, result: routed, final: final.document };
-            const followed = new Map(placements);
-            // A gap trial translates devices after R146 has selected port seats.
-            // Retain each single-host port's offset, including trial reanchoring,
-            // before routing and comparing the finished candidate's guards.
-            for (const { port, host } of attachedPorts) {
-              const before = host.placement!;
-              const after = placements.get(host.id)!;
-              const seat = port.placement!;
-              followed.set(port.id, {
-                ...seat,
-                position: {
-                  x: seat.position.x + after.position.x - before.position.x,
-                  y: seat.position.y + after.position.y - before.position.y,
-                },
-              });
-            }
-            if (attachedPorts.length && !fixed.size) {
-              const anchor = enclosingBox(final.document, resolver);
-              const box = enclosingBox(
-                withPlacements(final.document, followed),
-                resolver,
-              );
-              const grid = document.presentation.grid;
-              const dx = Math.round((anchor.x - box.x) / grid) * grid;
-              const dy = Math.round((anchor.y - box.y) / grid) * grid;
-              for (const [id, pose] of followed)
-                followed.set(id, {
-                  ...pose,
-                  position: {
-                    x: pose.position.x + dx,
-                    y: pose.position.y + dy,
-                  },
-                });
-            }
-            return finishPlacement(followed, railContacts);
-          },
+          gapReplan,
           stopped,
-          { phase: "gaps", budget: relocationBudget },
+          gapIncumbent,
         ),
       );
       const repairLabels = (run: LayoutRun) =>

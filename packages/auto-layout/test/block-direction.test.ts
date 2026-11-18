@@ -402,8 +402,10 @@ describe("R164 directed blocks", () => {
         },
       ],
     };
+    // R164 leaves this plan alone (b75ab103… on main at 65075a0). R167 then
+    // straightens its two pin jogs, at V1.+ and C1.1.
     expect(planHash(d)).toBe(
-      "b75ab10369b832fe34a18f572726748e61d55a46064da39433265cf98f4e789f",
+      "477fddfc8404e2a6b2764aaab11250517352a9b9f84e7031e6d2542b94261143",
     );
   });
 
