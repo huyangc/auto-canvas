@@ -666,19 +666,34 @@ it.each(cases)(
     }
     if (["rlc", "common-source"].includes(fixture.id)) {
       const hosts = new Set<string>();
+      const input = pinPoints(document, resolver);
       for (const ground of after.instances.filter(
         (i) => i.symbolId === "ground",
       )) {
         const point = pin(ground.id, "0");
         const net = roles.pinNet(ground.id, "0");
+        // 0 only for an R38 contact kept from the input: a marker whose pin
+        // already coincides with a pin of its Net there needs no stub (R6a,
+        // R12).
+        const given = input.find(
+          (p) => p.instanceId === ground.id && p.pinName === "0",
+        )?.point;
+        const contact =
+          !!given &&
+          input.some(
+            (p) =>
+              p.instanceId !== ground.id &&
+              roles.pinNet(p.instanceId, p.pinName) === net &&
+              p.point.x === given.x &&
+              p.point.y === given.y,
+          );
         const host = allPins.find(
           (p) =>
             p.instanceId !== ground.id &&
             p.pinName !== "B" &&
             roles.pinNet(p.instanceId, p.pinName) === net &&
             p.point.x === point.x &&
-            // 0: an R38 contact kept from the input needs no stub (R6a, R12).
-            [0, 20, 40].includes(point.y - p.point.y),
+            [...(contact ? [0] : []), 20, 40].includes(point.y - p.point.y),
         );
         expect(host, ground.id).toBeDefined();
         expect(hosts.has(host!.instanceId)).toBe(false);

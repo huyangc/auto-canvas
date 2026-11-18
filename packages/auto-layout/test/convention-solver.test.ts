@@ -438,4 +438,111 @@ describe("R168 convention-solved draft", () => {
       polish.mockRestore();
     }
   }, 60_000);
+
+  it("keeps a Document with a hierarchical symbol out", () => {
+    // A two-port subcircuit symbol: its pins are hierarchical ports only.
+    const resistor = builtInSymbols.find((d) => d.id === "resistor")!;
+    const library = new InMemorySymbolResolver(
+      [
+        {
+          ...structuredClone(resistor),
+          id: "sub-block",
+          name: "Sub block",
+          pins: resistor.pins.map((p) => ({
+            ...structuredClone(p),
+            role: "hierarchical-port",
+          })),
+        },
+      ],
+      resolver,
+    );
+    const d = twoStage();
+    expect(conventionDraftEligible(d, library, {})).toBe(true);
+    d.instances.push({ id: "x1", symbolId: "sub-block", placement: null });
+    d.nets
+      .find((n) => n.id === "out")!
+      .terminals.push({ instanceId: "x1", pinName: "1" });
+    d.nets
+      .find((n) => n.id === "gnd")!
+      .terminals.push({ instanceId: "x1", pinName: "2" });
+    expect(conventionDraftEligible(d, library, {})).toBe(false);
+  });
+
+  it("keeps a Document above 40 instances out, whatever its device count", () => {
+    const d = twoStage();
+    const grounds = (count: number) => {
+      for (let k = 0; k < count; k++) {
+        d.instances.push({ id: `gx${k}`, symbolId: "ground", placement: null });
+        d.nets
+          .find((n) => n.id === "gnd")!
+          .terminals.push({ instanceId: `gx${k}`, pinName: "0" });
+      }
+    };
+    // Four devices; markers fill the Document up to the limit.
+    grounds(40 - d.instances.length);
+    expect(d.instances).toHaveLength(40);
+    expect(conventionDraftEligible(d, resolver, {})).toBe(true);
+    grounds(1);
+    expect(conventionDraftEligible(d, resolver, {})).toBe(false);
+  });
+
+  it("refuses the draft for a transistor symbol without an upright pose", () => {
+    // An nmos whose source is not under its drain in any pose.
+    const nmos = builtInSymbols.find((d) => d.id === "nmos")!;
+    const library = new InMemorySymbolResolver(
+      [
+        {
+          ...structuredClone(nmos),
+          pins: nmos.pins.map((p) =>
+            p.name === "S"
+              ? { ...structuredClone(p), at: { x: 20, y: 20 } }
+              : structuredClone(p),
+          ),
+        },
+      ],
+      resolver,
+    );
+    const d = twoStage();
+    expect(solver.solveConventionDraft(d, library).problem).toMatch(/no pose/);
+    const plan = planAutoLayout(d, library, quick);
+    expect(plan.diagnostics.filter((x) => x.severity === "error")).toEqual([]);
+    expect(refinementMetrics(plan)?.strategy).not.toBe("convention");
+  });
+
+  it("selects the draft only when it beats the refined choice made without it", () => {
+    // The draft ranks second, so it takes the refinement slot of layered,
+    // whose refined run is better than the draft's.
+    const d = withPorts(
+      circuit(
+        {
+          m1: "nmos",
+          r1: "resistor",
+          r2: "resistor",
+          r3: "resistor",
+          v: "vdd-port",
+          g: "ground",
+        },
+        {
+          vdd: ["v.P"],
+          gnd: ["g.0", "m1.S", "r1.2"],
+          in: ["m1.G"],
+          out: ["r2.1", "r3.2"],
+          a: ["r3.1"],
+          b: ["m1.D", "r1.1", "r2.2"],
+        },
+      ),
+    );
+    const solve = vi.spyOn(solver, "solveConventionDraft");
+    try {
+      const plan = planAutoLayout(d, resolver, quick);
+      expect(solve).toHaveBeenCalled();
+      expect(refinementMetrics(plan)?.strategy).toBe("layered");
+      // Hash recorded with the T136 planner (36b51ef) before R168 existed.
+      expect(hash(plan)).toBe(
+        "be5323cb3d0a45c689c7c7c10953b5a5fe20c29bc3e296cc1881c3aae308d625",
+      );
+    } finally {
+      solve.mockRestore();
+    }
+  });
 });

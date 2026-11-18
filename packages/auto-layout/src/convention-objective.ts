@@ -137,7 +137,8 @@ function devicePoses(
         polarity(instance.symbolId) === "p" ? [source, drain] : [drain, source];
       return up.y < down.y;
     }).filter(distinct);
-    if (!orientations.length) orientations = [ORIENTATIONS[0]!];
+    // A transistor symbol without an upright pose gets none: the solver
+    // refuses the draft rather than draw it inverted.
   } else if (pins.length === 2)
     orientations = ORIENTATIONS.filter((o) => o.mirror === "none");
   else orientations = ORIENTATIONS.filter(distinct);

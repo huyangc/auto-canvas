@@ -1138,12 +1138,17 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   - Offer: the draft joins only when it is valid and its edit list differs
     from every original and R166 candidate; a solver failure, a draft that
     misses a device or a refused run is not offered. It ranks within the
-    portfolio R166 left (ties keep the earlier draft). When it does not rank
-    among the drafts R63 refines, or refinement does not select it, planning
-    continues exactly as without R168: the annealer's alternative starts and
-    the crossing-reroute portfolio contain none of its runs. When refinement
-    selects it, that portfolio, the draft included, replaces the other.
-    Evaluation reports `conventionDraft` (report-only).
+    portfolio R166 left (ties keep the earlier draft), so it can take a
+    refinement slot from an original. It is selected only when refinement
+    selects it and its refined run also compares better than the refined
+    choice planning makes without it. Otherwise planning continues exactly
+    as without R168: the annealer's alternative starts and the
+    crossing-reroute portfolio contain none of its runs. When it is selected,
+    that portfolio, the draft included, replaces the other. The comparison
+    with the refined choice made without the draft (T138 round 2) returned 2
+    of the 100 changed corpus plans to main's; both were judged needs-improvement
+    before and after.
+    Evaluation reports `conventionDraft` (`eligible`, `selected`; report-only).
 
 - **R71 — Single-host ports.** A non-rail Cell Pin Net that reaches exactly
   one device pin gets a local seat along that pin's transformed exit direction.
