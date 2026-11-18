@@ -205,3 +205,19 @@ Reviewer rerun: build, typecheck, lint (0 errors), format:check, docs:check 0;
 (2 files, 8 passed); evaluation 0 with all 628 plan hashes equal to round 4.
 The repository's automatic codex review raised the same three findings as
 round 5's first three rows.
+
+## Rebase onto `main` at `2b2cf7c` (T128, T135 and T129 merged)
+
+The branch is rebased onto `main`; the one conflict (three new rules at the
+end of the specification) is resolved in rule order R163, R164, R165. One
+sentence of R165 is corrected on the way (PR 87's last review: the pre-pass
+runs "before the other rules", not "before R1–R162"). Reviewer run on the
+rebased branch — the first time this task runs with netlist presentation:
+build, typecheck, lint (0 errors), format:check, docs:check 0; `pnpm
+test:local` 0 (816 files, 8410 passed, 117 skipped); `pnpm test:slow` 0 (2
+files, 8 passed); drawing mode equal to round 5 in all 612 completed cases;
+both netlist evaluations with `--presentation netlist` 0 — 515 completed and
+equivalent, no introduced dangling wire, unconnected pin or touching pin,
+re-export identical wherever the input exports, no gate drop. Against `main`,
+73 (node 0) and 67 (VSS) netlist plans change; on them crossings 25 → 29 and
+18 → 17, bends 401 → 385 and 256 → 259.

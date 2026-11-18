@@ -970,7 +970,7 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   document without directed blocks plans exactly as before.
 
 - **R165 — Netlist presentation (T129).** With `presentation: "netlist"` the
-  input carries only its netlist, so before R1–R162 the planner decides the
+  input carries only its netlist, so before the other rules the planner decides the
   rail symbols from the Document alone (no geometry), plans the Document those
   edits produce with the unchanged pipeline, and returns the presentation
   edits followed by the plan's edits as one transaction. Without the option
