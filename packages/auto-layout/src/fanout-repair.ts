@@ -69,8 +69,10 @@ export function centerRepairedFanout(
         (p.rotation === 0 || p.rotation === 180) &&
         (mirror === "none" || mirror === "horizontal") &&
         (median - x) * pinExit(host.pin, p).x < 0 &&
-        // R164: never turn a free directed block's output to the left.
+        // R164: never turn a free directed block's output to the left; a
+        // protected block keeps today's path (the turn aborts the repair).
         !(
+          !protectedIds.has(i.id) &&
           roles.rightFacing?.has(i.id) &&
           outputFacesLeft(
             i,

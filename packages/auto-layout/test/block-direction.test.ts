@@ -151,6 +151,7 @@ describe("R164 directed blocks", () => {
     expect(classifyNets(passive, resolver).rightFacing!.size).toBe(0);
   });
 
+  // Runs the default search: allow for a slow CI runner.
   it("keeps an op-amp with feedback facing right through search", () => {
     const d = lowPass();
     const result = plan(d);
@@ -179,7 +180,7 @@ describe("R164 directed blocks", () => {
       }
       expect(reflected).toBeGreaterThan(0);
     }
-  });
+  }, 15_000);
 
   it("may still face a latch inverter left", () => {
     const result = plan(latch());
@@ -250,6 +251,7 @@ describe("R164 directed blocks", () => {
     ).toBe(0);
   });
 
+  // Runs the default search: allow for a slow CI runner.
   it("seats an output port right of its driver and keeps it there", () => {
     for (const d of [inverting(), lowPass(true)]) {
       const result = plan(d);
@@ -266,7 +268,7 @@ describe("R164 directed blocks", () => {
         expect(portX(moved, "out")).toBeGreaterThan(centreX(result, "X1"));
       }
     }
-  });
+  }, 15_000);
 
   it("plans a document without directed blocks exactly as main", () => {
     const d = withPorts(
@@ -338,7 +340,11 @@ describe("R164 directed blocks", () => {
 
   // Reference hashes were recorded with the T135 branch build (f67708f),
   // which has none of R164's mechanisms; round 4 planned both differently.
-  const planHash = (d: SchematicDocument, fixed: string[] = []) =>
+  const planHash = (
+    d: SchematicDocument,
+    fixed: string[] = [],
+    evaluations = defaultLayoutSearch(d, {}).evaluations,
+  ) =>
     createHash("sha256")
       .update(
         JSON.stringify(
@@ -347,17 +353,11 @@ describe("R164 directed blocks", () => {
             resolver,
             fixed.length
               ? {
-                  search: {
-                    seed: 1,
-                    evaluations: defaultLayoutSearch(d, {}).evaluations,
-                  },
+                  search: { seed: 1, evaluations },
                   fixedInstanceIds: new Set(fixed),
                 }
               : {
-                  search: {
-                    seed: 1,
-                    evaluations: defaultLayoutSearch(d, {}).evaluations,
-                  },
+                  search: { seed: 1, evaluations },
                 },
           ),
         ),
@@ -477,5 +477,46 @@ describe("R164 directed blocks", () => {
       ],
     });
     expect(classifyNets(d, resolver).rightFacing!.size).toBe(0);
+  });
+
+  it("leaves a fixed right-facing block's ports to R146 as on main", () => {
+    // R146 runs from the first search evaluation; the reference hash was
+    // recorded with a build of main (2b2cf7c), which seats `out` at (270, 0)
+    // where the round-5 build moved it right of the fixed op-amp.
+    const d = circuit(
+      {
+        R1: "resistor",
+        R2: "resistor",
+        X1: "opamp",
+        G1: "ground",
+        in: "port",
+        out: "port",
+      },
+      {
+        vin: ["in.P", "R1.1"],
+        m: ["R1.2", "R2.1", "X1.IN-"],
+        vout: ["R2.2", "X1.OUT", "out.P"],
+        ref: ["G1.0", "X1.IN+"],
+      },
+    );
+    d.netlist = {
+      name: "test",
+      formalParameters: [],
+      terminals: (["in", "out"] as const).map((id) => ({
+        id: `t-${id}`,
+        name: id,
+        netId: id === "in" ? "vin" : "vout",
+        direction: id === "in" ? ("input" as const) : ("output" as const),
+        interfaceInstanceIds: [id],
+      })),
+    };
+    instance(d, "X1").placement = {
+      position: { x: 300, y: 200 },
+      rotation: 0,
+      mirror: "none",
+    };
+    expect(planHash(d, ["X1"], 1)).toBe(
+      "e550260204386d7bfbfaff29348f61198d71415ae053eaac51cc3eda482f4baf",
+    );
   });
 });

@@ -44,6 +44,25 @@ import type { Placement } from "./types.js";
 
 type PinPoint = ReturnType<typeof pinPoints>[number];
 
+/**
+ * R164: `classifyNets` cannot know the caller's fixed ids; a fixed block keeps
+ * its pose, so it hosts no port and filters no seat.
+ */
+function withoutFixedBlocks(
+  roles: NetRoles,
+  fixed: ReadonlySet<string>,
+): NetRoles {
+  return roles.rightFacing &&
+    [...fixed].some((id) => roles.rightFacing!.has(id))
+    ? {
+        ...roles,
+        rightFacing: new Set(
+          [...roles.rightFacing].filter((id) => !fixed.has(id)),
+        ),
+      }
+    : roles;
+}
+
 /** R6a, pose-independent: a channel host pin is a MOS source or drain, or
  * either pin of a two-pin device. */
 export function channelHostPin(
@@ -611,8 +630,9 @@ export function portSeatCandidates(
   portId: string,
   allowBlocked = false,
   includeCurrent = true,
+  fixed: ReadonlySet<string> = new Set(),
 ): Placement[] {
-  const roles = classifyNets(document, resolver);
+  const roles = withoutFixedBlocks(classifyNets(document, resolver), fixed);
   const net = roles.pinNet(portId, "P");
   const port = document.instances.find((i) => i.id === portId);
   if (!port?.placement || !net || roles.rails.has(net)) return [];
@@ -820,7 +840,7 @@ export function nextMarkerPlacements(
   const targets = new Map(
     document.instances.map((i) => [i.id, structuredClone(i.placement!)]),
   );
-  const roles = classifyNets(document, resolver);
+  const roles = withoutFixedBlocks(classifyNets(document, resolver), fixed);
   const devices = document.instances.filter(
     (i) =>
       !isMarker(i) &&

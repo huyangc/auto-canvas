@@ -235,3 +235,23 @@ One residual and one test gap:
 
 Acceptance for round 6: the plan's checks; all 628 corpus plan hashes equal to
 round 5 (the corpus fixes no instance).
+
+### Round 6 result
+
+1. `portSeatCandidates` takes the caller's fixed ids (`searchPortSeats` and the
+   stub-seat repair pass them) and leaves fixed blocks out of the right-facing
+   set, as does `nextMarkerPlacements`; the fanout repair's left-turn guard
+   skips protected blocks. New test: the inverting amplifier with the op-amp
+   fixed at (300,200) facing right plans to the hash recorded with `main`
+   (`2b2cf7c`).
+2. The R147 test's fixture now offers a left-facing pose: no such candidate
+   with the guard, at least one with the guard emptied.
+
+Two tests that run the default search carry a 15 s timeout (PR 88's CI
+lesson).
+
+Reviewer rerun: build, typecheck, lint, format:check, docs:check 0; `pnpm
+test:local` 0 (816 files, 8411 passed, 117 skipped); `pnpm test:slow` 0 (2
+files, 8 passed); drawing evaluation 0 with all 628 plan hashes equal to
+round 5; netlist evaluation (node 0, `--presentation netlist`) 0 with all 515
+plan hashes equal to round 5, none non-equivalent.

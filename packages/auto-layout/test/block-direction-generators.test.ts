@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { SchematicDocument } from "@icm/model";
 import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
 import { placeAmplifierBetweenBranches } from "../src/amp-gate-row.js";
@@ -11,6 +11,7 @@ import {
 import { placement } from "../src/geometry.js";
 import { emptyChoices, emptyOverrides } from "../src/layout-choices.js";
 import { placeLocalLoopAmplifiers } from "../src/local-loop-amplifier.js";
+import * as netRoles from "../src/net-roles.js";
 import { classifyNets, type NetRoles } from "../src/net-roles.js";
 import { placeDocument } from "../src/place.js";
 import { orientByWireCost } from "../src/place-fallback.js";
@@ -126,27 +127,42 @@ describe("R164 generator guards", () => {
   });
 
   it("R147 relocation offers no left-facing pose of a free block", () => {
+    // The input part sits right of the op-amp and the feedback part left of
+    // it, so a pin-facing relocation would turn the op-amp around.
     const d = circuit(
       { R1: "resistor", X1: "opamp", G1: "ground", R2: "resistor" },
       {
         a: ["R1.2", "X1.IN-"],
-        b: ["X1.OUT", "R2.1"],
+        b: ["X1.OUT", "R2.2"],
         g: ["X1.IN+", "G1.0"],
         c: ["R1.1"],
-        e: ["R2.2"],
+        e: ["R2.1"],
       },
     );
     const at: Record<string, Placement> = {
-      R1: placement(0, 0),
+      R1: placement(500, 0, "none", 90),
       X1: placement(200, 0),
-      G1: placement(100, 200),
-      R2: placement(400, 0),
+      G1: placement(200, 300),
+      R2: placement(-200, 0),
     };
     d.instances = d.instances.map((i) => ({ ...i, placement: at[i.id]! }));
-    const candidates = relocationCandidates(d, resolver, ["X1"]);
-    expect(candidates.length).toBeGreaterThan(0);
-    for (const c of candidates)
-      expect(faces(d, "X1", c.get("X1")!)).toBe(false);
+    const leftPoses = () =>
+      relocationCandidates(d, resolver, ["X1"]).filter((c) =>
+        faces(d, "X1", c.get("X1")!),
+      ).length;
+    expect(relocationCandidates(d, resolver, ["X1"]).length).toBeGreaterThan(0);
+    expect(leftPoses()).toBe(0);
+    const classify = netRoles.classifyNets;
+    const spy = vi
+      .spyOn(netRoles, "classifyNets")
+      .mockImplementation((document, symbols) =>
+        unguarded(classify(document, symbols)),
+      );
+    try {
+      expect(leftPoses()).toBeGreaterThan(0);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("layered two-pin rows never face a free inverter left", () => {
