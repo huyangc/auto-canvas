@@ -358,28 +358,30 @@ describe("R166 candidates", () => {
 
   it("plans no-stack Documents exactly as main at 65075a0", () => {
     // sha256 of JSON.stringify(planAutoLayout(..., quick)) from a clean build
-    // of main 65075a0 (git archive of packages/auto-layout, tsc).
+    // of main 65075a0 (git archive of packages/auto-layout, tsc); rcDivider's
+    // from a clean build of 36b51ef, whose src equals main's before R168.
     const hash = (d: SchematicDocument) =>
       createHash("sha256")
         .update(JSON.stringify(planAutoLayout(d, resolver, quick)))
         .digest("hex");
-    // Two loads on one drain, and an inverter output with a load: three
-    // conduction terminals on the Net, so no stack.
-    const twoLoads = circuit(
+    // A divider with a filter capacitor: no transistor, so R168 never offers
+    // its draft and this plan stays R166's alone.
+    const rcDivider = circuit(
       {
-        m1: "nmos",
         r1: "resistor",
         r2: "resistor",
+        c1: "capacitor",
         v: "vdd-port",
         g: "ground",
       },
       {
-        vdd: ["v.P", "r1.1", "r2.1"],
-        out: ["r1.2", "r2.2", "m1.D"],
-        gnd: ["m1.S", "g.0"],
-        in: ["m1.G"],
+        vdd: ["v.P", "r1.1"],
+        out: ["r1.2", "r2.1", "c1.1"],
+        gnd: ["r2.2", "c1.2", "g.0"],
       },
     );
+    // An inverter output with a load: three conduction terminals on the Net,
+    // so no stack.
     const inverter = circuit(
       { m1: "nmos", m2: "pmos", r1: "resistor", v: "vdd-port", g: "ground" },
       {
@@ -389,8 +391,8 @@ describe("R166 candidates", () => {
         in: ["m1.G", "m2.G"],
       },
     );
-    expect(hash(twoLoads)).toBe(
-      "ef16a0e78757c48790c15d4711bb4297f823d437b6496492cfb120667754d374",
+    expect(hash(rcDivider)).toBe(
+      "fa1810b4b368df12cd0b3044c7351f1c4de2fa1b5db20df54408e0b030c4ae27",
     );
     expect(hash(inverter)).toBe(
       "c4332af3b35e50574d5027f2e97384221f7700b40a62884f24ae219d3cb58117",

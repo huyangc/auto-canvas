@@ -2,12 +2,14 @@ import type { Instance } from "@icm/model";
 import type { SchematicEdit } from "@icm/edit-engine";
 
 export type Placement = NonNullable<Instance["placement"]>;
-/** R63's drafts; R166 adds a stack-aligned candidate of the first three. */
+/** R63's drafts; R166 adds a stack-aligned candidate of the first three and
+ * R168 a convention-solved draft. */
 export type LayoutStrategy =
   | "template"
   | "layered"
   | "stages"
   | "feedback-rows"
+  | "convention"
   | "template+stack"
   | "layered+stack"
   | "stages+stack";

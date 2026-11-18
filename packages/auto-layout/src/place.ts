@@ -65,6 +65,7 @@ import { symmetryTopology } from "./symmetry.js";
 import { isMos } from "./net-roles.js";
 import { placeMarkers } from "./place-markers.js";
 import { alignStacks, draftStrategy, isStackStrategy } from "./stack-snap.js";
+import { solveConventionDraft } from "./convention-solver.js";
 import type {
   AutoLayoutOptions,
   LayoutStrategy,
@@ -443,6 +444,33 @@ export function placeDocument(
         placements: targets,
         problem: "R163: draft left a device unplaced",
       };
+    oriented = new Set(targets.keys());
+  } else if (strategy === "convention") {
+    // R168: offered only for its recognized subset (see auto-layout.ts), and
+    // solved once per planning call. A draft that cannot be built is
+    // refused (R63); the other strategies still plan the Document.
+    const draft = planningMemo<{
+      placements?: Map<string, Placement>;
+      problem?: string;
+    }>(document, resolver, "convention-draft", () => {
+      try {
+        return solveConventionDraft(document, resolver);
+      } catch {
+        return { problem: "R168: draft failed" };
+      }
+    });
+    if (!draft.placements)
+      return {
+        placements: targets,
+        problem: draft.problem ?? "R168: draft failed",
+      };
+    if (devices.some((i) => !draft.placements!.has(i.id)))
+      return {
+        placements: targets,
+        problem: "R168: draft left a device unplaced",
+      };
+    targets = structuredClone(draft.placements);
+    // R168 chose every pose; R21 leaves them alone.
     oriented = new Set(targets.keys());
   } else if (draftStrategy(strategy) === "stages") {
     ({ placements: targets, sideRow } = placeStages(
