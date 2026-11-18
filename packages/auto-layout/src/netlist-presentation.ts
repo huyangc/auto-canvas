@@ -24,7 +24,7 @@ import { devicePins, isMarker } from "./placement-connectivity.js";
 import { compareIds } from "./recognize.js";
 import type { AutoLayoutDiagnostic } from "./types.js";
 
-/** R163: SPICE node 0, the only name a Ground marker may carry. */
+/** R165: SPICE node 0, the only name a Ground marker may carry. */
 const GROUND_CLAIM = { name: "0", scope: "global", powerDomain: "ground" };
 const MAX_INSTANCES = 120;
 
@@ -51,11 +51,11 @@ const namedVdd = (name: string) =>
 const warning = (code: string, message: string): AutoLayoutDiagnostic => ({
   severity: "warning",
   code,
-  rule: "R163",
+  rule: "R165",
   message,
 });
 
-/** R163: the Ground Nets the pre-pass draws, by Base Net id: Nets with a
+/** R165: the Ground Nets the pre-pass draws, by Base Net id: Nets with a
  * claim of global node 0 in the ground domain. A ground marker names its Net
  * node 0, so a Net named otherwise (a `VSS` Cell Pin's Net without node 0)
  * would be renamed: under a node-0 export its Cell Pin would print as `0`. */
@@ -108,7 +108,7 @@ function groundHost(
 }
 
 /**
- * R163: rail symbols for a Document that carries only its netlist. One
+ * R165: rail symbols for a Document that carries only its netlist. One
  * `ground` marker per device with an R6a host pin on each Ground Net that has
  * none, each with node 0's claim, on the same Base Net, so R6a/R12 seat each
  * at its own pin; a supply Cell Pin drawn as a `port` becomes a `vdd-port`.
@@ -129,7 +129,7 @@ export function netlistPresentation(
     return none([
       warning(
         "AUTO_LAYOUT_NETLIST_PRESENTATION_SKIPPED",
-        `R163: rail symbols skipped above the R3 limit of ${MAX_INSTANCES} instances`,
+        `R165: rail symbols skipped above the R3 limit of ${MAX_INSTANCES} instances`,
       ),
     ]);
   const projection = deriveElectricalTopologyProjection(document, resolver);
@@ -238,7 +238,7 @@ export function netlistPresentation(
     diagnostics.push(
       warning(
         "AUTO_LAYOUT_NETLIST_SUPPLY_AMBIGUOUS",
-        `R163: ${supplyPins.length} supply Cell Pins keep their ports`,
+        `R165: ${supplyPins.length} supply Cell Pins keep their ports`,
       ),
     );
   const [supplyPin] = supplyPins;
@@ -255,7 +255,7 @@ export function netlistPresentation(
       ...diagnostics,
       warning(
         "AUTO_LAYOUT_NETLIST_PRESENTATION_SKIPPED",
-        `R163: ${groundCount} ground symbols would exceed the R3 limit of ${MAX_INSTANCES} instances`,
+        `R165: ${groundCount} ground symbols would exceed the R3 limit of ${MAX_INSTANCES} instances`,
       ),
     ]);
   const replay = executeTransaction(
@@ -278,7 +278,7 @@ export function netlistPresentation(
       ...diagnostics,
       warning(
         "AUTO_LAYOUT_NETLIST_PRESENTATION_DROPPED",
-        `R163: rail symbols dropped: ${failure}`,
+        `R165: rail symbols dropped: ${failure}`,
       ),
     ]);
   return {
@@ -291,7 +291,7 @@ export function netlistPresentation(
 }
 
 /**
- * R163 gate: what the presentation edits may change, and nothing else. Every
+ * R165 gate: what the presentation edits may change, and nothing else. Every
  * original terminal keeps its Base Net and Logical Net partition, Cell
  * terminals and name claims stay, MOS bodies resolve as before, the only
  * symbol change is `port` to `vdd-port` on a Cell Pin, and every added

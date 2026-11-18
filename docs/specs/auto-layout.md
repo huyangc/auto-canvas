@@ -180,7 +180,7 @@ AutoLayoutDiagnostic[] }`. Fixed instances retain their exact placements;
   or voltage-source positive net reaching a MOS gate but no drain is input;
   a Cell Pin reaching a MOS drain or an output name makes an output. Other
   nets are internal. A grounded-negative voltage source supplies its positive
-  net unless that net is input. On netlist input R163 uses the supply role to decide
+  net unless that net is input. On netlist input R165 uses the supply role to decide
   a supply symbol.
 - **R5 — Recognition.** Recognize logical transistor branches (R80) by
   connectivity. D/G/S below also mean C/B/E for BJTs. A mirror reference has
@@ -217,7 +217,7 @@ AutoLayoutDiagnostic[] }`. Fixed instances retain their exact placements;
   is treated as a remaining marker. Remaining markers share the last channel
   host and are nudged by grid steps; without one they are unhosted, placed
   from the origin by grid steps.
-  Fixed markers retain their poses. R163's netlist-input markers arrive
+  Fixed markers retain their poses. R165's netlist-input markers arrive
   unplaced, one per hostable device, and take hosts by these rules.
   In default mode with a nonzero search budget, at most 40 instances and no
   supplied partition, after routing and label finishing, try the 40-unit seat
@@ -559,7 +559,7 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   one horizontal trunk above the device rows for supply or below them for
   ground, together with one marker host. This applies to both strategies and
   every rail size. Only R155 may add marker instances and replace this trunk
-  with local trees; R163 adds ground markers before planning, on netlist input
+  with local trees; R165 adds ground markers before planning, on netlist input
   only. A refused or incomplete trunk gets a
   tree fallback under R86. Remaining failures produce R14 warnings naming
   the affected pins. A floating pin is the sole non-bulk pin in its physical
@@ -914,7 +914,7 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   still plan the document. Markers,
   ports and labels are seated by the existing rules (R19, R71, R146).
 
-- **R163 — Netlist presentation (T129).** With `presentation: "netlist"` the
+- **R165 — Netlist presentation (T129).** With `presentation: "netlist"` the
   input carries only its netlist, so before R1–R162 the planner decides the
   rail symbols from the Document alone (no geometry), plans the Document those
   edits produce with the unchanged pipeline, and returns the presentation
@@ -940,7 +940,7 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   device's input or default pose, while R6a reads it at the planned pose, and
   the planner may turn a channel host so that its grounded pin leaves away
   from the rail. Such a marker takes R6a's fallback or a turned-back stub; on
-  the T129 corpus none was left unhosted; 25 of 1012 markers in 18 `global`-form Documents and 1 of 69 in one `vss`-form Document ended on a turned-back stub, all on channel hosts. R163 does not change orientation choice. A Cell Pin named `VDD` (any case) whose interface instance is a `port`,
+  the T129 corpus none was left unhosted; 25 of 1012 markers in 18 `global`-form Documents and 1 of 69 in one `vss`-form Document ended on a turned-back stub, all on channel hosts. R165 does not change orientation choice. A Cell Pin named `VDD` (any case) whose interface instance is a `port`,
   whose Net R4 classifies as supply and carries no name claim becomes a
   `vdd-port` (`set_instance_symbol`) when it is the Document's only such Cell
   Pin and its Net has none. The symbol gives the Net the supply domain; the
@@ -958,7 +958,7 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   Otherwise, or when the markers would pass R3's 120 instances, or the
   presented Document plans to a refusal or to no edits, or the combined list
   passes the transaction edit limit, the Document is planned without them and an
-  `AUTO_LAYOUT_NETLIST_PRESENTATION_DROPPED` (or `_SKIPPED`) R163 warning says
+  `AUTO_LAYOUT_NETLIST_PRESENTATION_DROPPED` (or `_SKIPPED`) R165 warning says
   why. R10's partition check applies to the presented Document. The
   evaluation checks the electrical graph and the re-exported netlist text.
 

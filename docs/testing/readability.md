@@ -290,7 +290,7 @@ Not comparable between the inputs, and so not reported as a difference:
 | Refusal status              | A drawing refusal (for example R161 drafting frames) has no counterpart.  |
 
 With `--presentation netlist` the evaluator passes `presentation: "netlist"`
-to the planner (auto-layout R163), so the planner decides ground and supply
+to the planner (auto-layout R165), so the planner decides ground and supply
 symbols before it plans:
 
 ```bash
@@ -303,7 +303,7 @@ the pre-pass added, the gate's verdict (`change`, `null` when kept), its
 warning codes, and `reexport`, whether the planned Document exports the same
 netlist text as the input in the conversion's form (`identical`, `differs` or
 `blocked`). `equivalent` checks the presentation against the input with the
-R163 gate and the plan against the presented Document with R10's partition
+R165 gate and the plan against the presented Document with R10's partition
 check, plus the electrical graph as before.
 
 These are measurements, not an acceptability score: whether a netlist-input

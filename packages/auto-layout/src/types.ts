@@ -32,7 +32,7 @@ export interface AutoLayoutOptions {
   /** Optional partition constraints for placement. */
   partition?: LayoutPartition;
   fixedInstanceIds?: ReadonlySet<string>;
-  /** R163: the input carries only its netlist; decide its rail symbols first. */
+  /** R165: the input carries only its netlist; decide its rail symbols first. */
   presentation?: "netlist";
   /** Omit for bounded deterministic search; zero evaluations selects quick mode. */
   search?: {

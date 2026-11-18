@@ -34,7 +34,7 @@ Step-1 findings that changed the plan, accepted:
 | 1   | note     | acceptance, total bends | Node-0 form: total bends 2272 → 2297 (dev 1713 → 1706, val 559 → 591), against the plan's "not higher". Rail bends fall by 30; port and signal bends rise as placement changes with the markers. Accepted on the blind review below (16 cases gained, none lost).                                                        | none; watch in the following tasks |
 | 2   | note     | equivalence             | `equivalentTerminals(input, presented)` is false by construction (added markers, a changed symbol). The presentation edits are guarded by `presentationChange` (Base and Logical Net partitions, each Net's name, scope and domain, Cell terminals, evidence, MOS body resolution) and, in the evaluation, by re-export. | independent review to weigh        |
 | 3   | note     | renders                 | A marker beside an upward-facing pin with a turned-back wire (`wyabv9t3jz`, `jkw9pk932h`); switch and logic circuits drawn as long strips.                                                                                                                                                                               | follow-up                          |
-| 4   | note     | rule number             | The rule is numbered R163 here; a parallel drawing-path task also uses R163.                                                                                                                                                                                                                                             | the later delivery renumbers       |
+| 4   | note     | rule number             | The rule is numbered R165 here; a parallel drawing-path task also uses R165.                                                                                                                                                                                                                                             | the later delivery renumbers       |
 
 Acceptance rerun by the reviewer:
 
@@ -81,7 +81,7 @@ The Opus PR review approved with one P2 and four P3 findings
 | 2   | should-fix | `auto-layout.ts` `planNetlistPresentation`     | When the presented Document plans to a refusal or to no edits, it is returned as is: no retry without the rail symbols (the rule says a failed presentation is planned without them), and no diagnostic.                                                                                                                           | Fall back to the plain plan with the `AUTO_LAYOUT_NETLIST_PRESENTATION_DROPPED` warning in both branches. Tests.                                                                                                                                                                                                        |
 | 3   | should-fix | `netlist-presentation.ts` `groundHost`         | A second copy of the R6a/T127 host predicate, read at the pre-plan pose while R6a reads it at the planned pose: a device the planner rotates so that its only grounded pin leaves away from the rail keeps a marker with no host (possibly the turned-back stubs of `wyabv9t3jz`, `jkw9pk932h`).                                   | One shared predicate exported from `place-markers.ts` for the pose-independent part. For the pose-dependent part: measure how many markers of the corpus results end unhosted or on a turned-back stub; say what the count is and whether a general fix exists at this stage. If not, state the limit in the rule text. |
 | 4   | should-fix | `netlist-presentation.test.ts`                 | Gate refusal branches not pinned: changed symbol, changed pins, Net renamed (scope or domain), Cell terminals changed, evidence changed, MOS body resolves differently, added instance not a node-0 ground marker, unexpected evidence, the edit-limit fallback, the planner-refusal fallback.                                     | One short test per branch, by `presentationChange` on a hand-edited document where that is enough.                                                                                                                                                                                                                      |
-| 5   | should-fix | `docs/specs/auto-layout.md` R163               | The rule says ground Nets are those with a node-`0` ground claim; the code takes every ground-domain claim and lets the gate refuse a non-`0` one.                                                                                                                                                                                 | Filter on name `0`, global, in the code, as the rule says.                                                                                                                                                                                                                                                              |
+| 5   | should-fix | `docs/specs/auto-layout.md` R165               | The rule says ground Nets are those with a node-`0` ground claim; the code takes every ground-domain claim and lets the gate refuse a non-`0` one.                                                                                                                                                                                 | Filter on name `0`, global, in the code, as the rule says.                                                                                                                                                                                                                                                              |
 
 Acceptance for round 2: the plan's checks; drawing mode equal to the base in
 every case; both netlist evaluations with every plan hash equal to round 1
@@ -126,3 +126,18 @@ refusal fallback's test asserts its message. No corpus Cell Pin folds to `vdd`
 without being exactly `VDD`, so no plan can change. Rerun after the fix:
 typecheck, lint (0 errors), format:check, docs:check 0; `pnpm vitest run
 packages/auto-layout` 0.
+
+## Rebase onto `main` at `72d80a7` (T128 and T135 merged)
+
+The branch is rebased onto `main` without conflicts. T135 took rule number
+R163 on `main`, so this task's rule is renumbered R165 (R164 is reserved for
+T134); the rule's text is unchanged. Reviewer run on the rebased branch — the
+first time this task and T135 run together: build, typecheck, lint (0
+errors), format:check, docs:check 0; `pnpm test:local` 0 (814 files, 8391
+passed, 117 skipped); `pnpm test:slow` 0 (the 2 slow files, 8 passed; scratch
+copies under `tmp/` were picked up as well); drawing mode equal to `main` in
+all 612 completed cases; both netlist evaluations 0 — 515 completed and
+equivalent, no introduced dangling wire, unconnected pin or touching pin,
+re-export identical wherever the input exports, no gate drop. Against round 2
+on the old base, 36 (node 0) and 39 (VSS) netlist plans change: the documents
+T135 gives a feedback-row draft.

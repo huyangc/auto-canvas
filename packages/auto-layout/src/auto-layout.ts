@@ -190,7 +190,7 @@ export function planAutoLayout(
   return planDocument(document, resolver, options);
 }
 
-/** R163: plan the Document with its rail symbols, as one transaction. */
+/** R165: plan the Document with its rail symbols, as one transaction. */
 function planNetlistPresentation(
   document: SchematicDocument,
   resolver: SymbolResolver,
@@ -205,8 +205,8 @@ function planNetlistPresentation(
       result.diagnostics.push({
         severity: "warning",
         code: "AUTO_LAYOUT_NETLIST_PRESENTATION_DROPPED",
-        rule: "R163",
-        message: `R163: rail symbols dropped: ${reason}`,
+        rule: "R165",
+        message: `R165: rail symbols dropped: ${reason}`,
       });
     return result;
   };
