@@ -40,7 +40,11 @@ const crossed = () =>
       n3: ["d.IN-"],
     },
   );
-function commit(document: SchematicDocument, result: AutoLayoutResult) {
+function commit(
+  document: SchematicDocument,
+  result: AutoLayoutResult,
+  contacts = false,
+) {
   expect(result.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
   const transaction = executeTransaction(
     document,
@@ -62,14 +66,16 @@ function commit(document: SchematicDocument, result: AutoLayoutResult) {
   expect(auditRouting(transaction.document, resolver).unsafeProblems).toEqual(
     [],
   );
-  // R38 may close the axial gap of a facing two-device pair (R166 can align
-  // one); any other coincident pin or overlap is still a geometry problem.
+  // With `contacts`, R38 may close the axial gap of a facing two-device pair
+  // (R166 can align one); any other coincident pin or overlap still fails.
   expect(
-    contactGeometryProblem(
-      transaction.document,
-      resolver,
-      contactPolicy(document, freezePinGroups(document, resolver)),
-    ),
+    contacts
+      ? contactGeometryProblem(
+          transaction.document,
+          resolver,
+          contactPolicy(document, freezePinGroups(document, resolver)),
+        )
+      : geometryProblem(transaction.document, resolver),
   ).toBeUndefined();
   return transaction.document;
 }
@@ -266,7 +272,7 @@ it("R66 translates recognized pairs and their tail rigidly", () => {
   const result = planAutoLayout(document, resolver, {
       search: { seed: 3, evaluations: 32 },
     }),
-    after = commit(document, result);
+    after = commit(document, result, true);
   for (const group of quick.groups) {
     const ids = [
       ...group.members,
