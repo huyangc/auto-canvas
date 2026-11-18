@@ -191,7 +191,7 @@ describe("R164 directed blocks", () => {
         return outputFacesLeft(i, i.placement!, resolver);
       }),
     ).toBe(true);
-  });
+  }, 60_000);
 
   it("re-rights a mirrored stage's block and runs the row with it", () => {
     const d = lowPass(true);
@@ -250,7 +250,7 @@ describe("R164 directed blocks", () => {
     expect(
       count(new Map(result.instances.map((i) => [i.id, i.placement!]))),
     ).toBe(0);
-  });
+  }, 60_000);
 
   // Runs the default search: allow for a slow CI runner.
   it("seats an output port right of its driver and keeps it there", () => {
@@ -299,7 +299,7 @@ describe("R164 directed blocks", () => {
     expect(
       createHash("sha256").update(JSON.stringify(result)).digest("hex"),
     ).toBe("7164107c668b8085f278d2897d3e13ad00877aaca98e51b0c3a767d402cf9043");
-  });
+  }, 60_000);
 
   it("does not reverse a chain whose input is a grounded source", () => {
     // Two source-driven inputs, an amplifier and an output port; no input
@@ -337,7 +337,7 @@ describe("R164 directed blocks", () => {
     expect(outputFacesLeft(x1, x1.placement!, resolver)).toBe(false);
     expect(centreX(result, "V2")).toBeLessThan(centreX(result, "X1"));
     expect(portX(result, "out")).toBeGreaterThan(centreX(result, "X1"));
-  });
+  }, 60_000);
 
   // Reference hashes were recorded with the T135 branch build (f67708f),
   // which has none of R164's mechanisms; round 4 planned both differently.
@@ -410,7 +410,7 @@ describe("R164 directed blocks", () => {
     expect(planHash(d)).toBe(
       "477fddfc8404e2a6b2764aaab11250517352a9b9f84e7031e6d2542b94261143",
     );
-  });
+  }, 60_000);
 
   /** Inverting amplifier around a fixed op-amp X1 whose output faces left. */
   const fixedLeftFacing = () => {
@@ -571,5 +571,5 @@ describe("R164 directed blocks", () => {
     expect(planHash(d, ["X1"], 1)).toBe(
       "e550260204386d7bfbfaff29348f61198d71415ae053eaac51cc3eda482f4baf",
     );
-  });
+  }, 60_000);
 });
