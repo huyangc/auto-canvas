@@ -25,6 +25,7 @@ import { branchVerticality } from "../packages/auto-layout/dist/branch-verticali
 import { stackColumns } from "./lib/stack-columns.mjs";
 import { signalPathMetrics } from "../packages/auto-layout/dist/signal-path-metrics.js";
 import { stageComponents } from "../packages/auto-layout/dist/stage-symmetry.js";
+import { conventionDraftEligible } from "../packages/auto-layout/dist/convention-relations.js";
 import { reconcilePartition } from "../packages/auto-layout/dist/partition-reconcile.js";
 import { partitionMetrics } from "../packages/auto-layout/dist/partition-metrics.js";
 import {
@@ -707,6 +708,12 @@ async function evaluateFile(file) {
     measurement.timing = planningTiming(plan);
     measurement.strategy = refinementMetrics(plan)?.strategy ?? null;
     measurement.candidates = refinementMetrics(plan)?.candidates ?? 0;
+    // Report only (R168): whether the convention-solved draft was offered to
+    // this Document and whether the plan comes from it.
+    measurement.conventionDraft = {
+      offered: conventionDraftEligible(document, resolver, layoutOptions),
+      selected: measurement.strategy === "convention",
+    };
     measurement.partitionFallback = plan.diagnostics.some(
       (d) => d.code === "AUTO_LAYOUT_PARTITION_FALLBACK",
     );

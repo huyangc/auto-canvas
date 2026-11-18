@@ -677,7 +677,8 @@ it.each(cases)(
             p.pinName !== "B" &&
             roles.pinNet(p.instanceId, p.pinName) === net &&
             p.point.x === point.x &&
-            [20, 40].includes(point.y - p.point.y),
+            // 0: an R38 contact kept from the input needs no stub (R6a, R12).
+            [0, 20, 40].includes(point.y - p.point.y),
         );
         expect(host, ground.id).toBeDefined();
         expect(hosts.has(host!.instanceId)).toBe(false);

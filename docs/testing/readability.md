@@ -171,6 +171,16 @@ counts the stacks the result breaks while the human drawing keeps them
 counts take no part in the composite, targets or acceptance gates
 (`scripts/lib/stack-columns.mjs`).
 
+### Convention-solved draft (report-only)
+
+Each case's `conventionDraft` says whether R168 offered its convention-solved
+draft to the Document (`offered`: the Document is in R168's subset) and
+whether the plan comes from that draft (`selected`: the plan's recorded
+strategy is `convention`). A plan whose portfolio came from the draft but
+whose search or finishing ended from another draft's start reports
+`selected: false`. Neither field takes part in the composite, targets or
+acceptance gates.
+
 ## Visible integrity
 
 `scripts/visible-integrity.mjs` reports visible connection defects that the

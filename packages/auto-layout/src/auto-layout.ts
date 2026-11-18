@@ -1,4 +1,5 @@
 import { feedbackRowCircuit, hasTransistor } from "./feedback-rows.js";
+import { conventionDraftEligible } from "./convention-relations.js";
 import { symmetricHalfParts } from "./symmetric-half-order.js";
 import { amplifierGateRows } from "./amp-gate-row.js";
 import { nodeAttachments } from "./attachment-seat.js";
@@ -1184,13 +1185,38 @@ function planAutoLayoutMeasured(
     all && all.slice(0, refinedCount).some((c) => isStackStrategy(c.strategy))
       ? select(all)
       : undefined;
+  const chosen =
+    withStacks && isStackStrategy(withStacks.selected.strategy)
+      ? withStacks
+      : select(ranked);
+  // R168: the convention-solved draft, when it is valid and new, ranks within
+  // the portfolio chosen above. Like R166 it replaces that portfolio only when
+  // refinement selects it; otherwise planning continues exactly as without it.
+  const solved = (() => {
+    if (!conventionDraftEligible(document, resolver, options)) return undefined;
+    try {
+      const candidate = runs.get(route("convention", emptyOverrides()).result)!;
+      // A draft that cannot be built is not offered.
+      return Number.isFinite(routedScore(candidate.run, resolver)) &&
+        ![...originals, ...aligned].some(
+          (other) => edits(other) === edits(candidate),
+        )
+        ? candidate
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  })();
+  const withDraft = solved && rank([...chosen.portfolio, solved]);
+  const withSolved =
+    withDraft && withDraft.slice(0, refinedCount).includes(solved)
+      ? select(withDraft)
+      : undefined;
   const {
     portfolio,
     selected,
     refined: refinedFinalists,
-  } = withStacks && isStackStrategy(withStacks.selected.strategy)
-    ? withStacks
-    : select(ranked);
+  } = withSolved?.selected.strategy === "convention" ? withSolved : chosen;
   // Snapshot the other refined run before facing/rerouting mutates results.
   // The existing winner (including its annealed fallback) is finished first.
   const runner = refinedFinalists
@@ -1447,7 +1473,11 @@ function planAutoLayoutMeasured(
             resolver,
             baseline,
             [...runs.values()].filter(
-              (run) => portfolio !== ranked || !isStackStrategy(run.strategy),
+              (run) =>
+                (chosen.portfolio !== ranked ||
+                  !isStackStrategy(run.strategy)) &&
+                (portfolio !== chosen.portfolio ||
+                  run.strategy !== "convention"),
             ),
             fixed.size || document.instances.length > 40 ? 0 : 2,
             stopped,
