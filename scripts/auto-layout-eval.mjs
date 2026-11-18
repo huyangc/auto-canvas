@@ -708,10 +708,12 @@ async function evaluateFile(file) {
     measurement.timing = planningTiming(plan);
     measurement.strategy = refinementMetrics(plan)?.strategy ?? null;
     measurement.candidates = refinementMetrics(plan)?.candidates ?? 0;
-    // Report only (R168): whether the convention-solved draft was offered to
-    // this Document and whether the plan comes from it.
+    // Report only (R168): whether the Document is in the convention-solved
+    // draft's subset, and whether the plan's final recorded strategy is that
+    // draft (a plan that came through the draft's portfolio and ended from
+    // another start reports false).
     measurement.conventionDraft = {
-      offered: conventionDraftEligible(document, resolver, layoutOptions),
+      eligible: conventionDraftEligible(document, resolver, layoutOptions),
       selected: measurement.strategy === "convention",
     };
     measurement.partitionFallback = plan.diagnostics.some(

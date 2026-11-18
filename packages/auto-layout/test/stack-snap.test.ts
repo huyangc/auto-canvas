@@ -365,7 +365,8 @@ describe("R166 candidates", () => {
         .update(JSON.stringify(planAutoLayout(d, resolver, quick)))
         .digest("hex");
     // A divider with a filter capacitor: no transistor, so R168 never offers
-    // its draft and this plan stays R166's alone.
+    // its draft and this plan stays R166's alone. It replaced `twoLoads`,
+    // which has a transistor: R168 offers and selects its draft there.
     const rcDivider = circuit(
       {
         r1: "resistor",
@@ -381,7 +382,9 @@ describe("R166 candidates", () => {
       },
     );
     // An inverter output with a load: three conduction terminals on the Net,
-    // so no stack.
+    // so no stack. It also covers R168's offered-but-not-selected path (the
+    // draft is refined and loses); if a later R168 change makes the draft win
+    // here, replace this shape with a transistor-free one.
     const inverter = circuit(
       { m1: "nmos", m2: "pmos", r1: "resistor", v: "vdd-port", g: "ground" },
       {

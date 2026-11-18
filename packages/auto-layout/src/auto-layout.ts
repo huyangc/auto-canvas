@@ -1190,8 +1190,11 @@ function planAutoLayoutMeasured(
       ? withStacks
       : select(ranked);
   // R168: the convention-solved draft, when it is valid and new, ranks within
-  // the portfolio chosen above. Like R166 it replaces that portfolio only when
-  // refinement selects it; otherwise planning continues exactly as without it.
+  // the portfolio chosen above. It replaces that portfolio only when
+  // refinement selects it and its refined run also beats the refined choice
+  // made without it (the draft may take a refinement slot from an original,
+  // so it must win against that choice too); otherwise planning continues
+  // exactly as without it. Both refinements are memoised.
   const solved = (() => {
     if (!conventionDraftEligible(document, resolver, options)) return undefined;
     try {
@@ -1216,7 +1219,10 @@ function planAutoLayoutMeasured(
     portfolio,
     selected,
     refined: refinedFinalists,
-  } = withSolved?.selected.strategy === "convention" ? withSolved : chosen;
+  } = withSolved?.selected.strategy === "convention" &&
+  compareRuns(withSolved.selected.run, chosen.selected.run, resolver) < 0
+    ? withSolved
+    : chosen;
   // Snapshot the other refined run before facing/rerouting mutates results.
   // The existing winner (including its annealed fallback) is finished first.
   const runner = refinedFinalists
