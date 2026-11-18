@@ -142,6 +142,13 @@ import { followNetLabels } from "./net-label-seat.js";
 import { followDraftingGroups } from "./follow-drafting-groups.js";
 import { recoverDraftingOwners } from "./recover-drafting-owners.js";
 import {
+  alignedStacks,
+  draftStrategy,
+  isStackStrategy,
+  stackPairs,
+  stackStrategy,
+} from "./stack-snap.js";
+import {
   draftingTranslation,
   withDraftingTranslation,
   observeDraftingClearance,
@@ -851,14 +858,12 @@ function planAutoLayoutMeasured(
     !!options.search?.signal?.aborted ||
     (options.search?.deadline !== undefined &&
       Date.now() >= options.search.deadline);
-  const runs = new Map<
-    AutoLayoutResult,
-    {
-      run: LayoutRun;
-      overrides: LayoutOverrides;
-      strategy: LayoutStrategy;
-    }
-  >();
+  type Candidate = {
+    run: LayoutRun;
+    overrides: LayoutOverrides;
+    strategy: LayoutStrategy;
+  };
+  const runs = new Map<AutoLayoutResult, Candidate>();
   let repairBounds: SearchBounds | undefined;
   const repair = (
     run: LayoutRun,
@@ -1063,7 +1068,7 @@ function planAutoLayoutMeasured(
   // ranking. A refused distinct run can still be repaired by refinement.
   // Valid ties prefer earlier strategies; all-refused ties prefer layered
   // when it survives deduplication.
-  const ranked = (
+  const drafts = (
     [
       "template",
       "layered",
@@ -1073,21 +1078,11 @@ function planAutoLayoutMeasured(
         ? (["feedback-rows"] as const)
         : []),
     ] as const
-  )
-    .filter(
-      (strategy) => document.instances.length <= 40 || strategy !== "template",
-    )
-    .map((strategy) => runs.get(route(strategy, emptyOverrides()).result)!)
-    .filter((candidate, index, candidates) => {
-      // A refused run has no edits, so refused runs are never duplicates:
-      // each strategy's refinement may repair its refusal differently.
-      if (!Number.isFinite(routedScore(candidate.run, resolver))) return true;
-      const edits = JSON.stringify(candidate.run.result.edits);
-      return !candidates
-        .slice(0, index)
-        .some((earlier) => JSON.stringify(earlier.run.result.edits) === edits);
-    })
-    .sort((a, b) => {
+  ).filter(
+    (strategy) => document.instances.length <= 40 || strategy !== "template",
+  );
+  const rank = (candidates: Candidate[]) =>
+    candidates.sort((a, b) => {
       const first = routedScore(a.run, resolver);
       const second = routedScore(b.run, resolver);
       if (!Number.isFinite(first) && !Number.isFinite(second))
@@ -1096,27 +1091,106 @@ function planAutoLayoutMeasured(
         );
       return compareRuns(a.run, b.run, resolver);
     });
-  const refinedFinalists: typeof ranked = [];
-  let selected = ranked[0]!;
-  for (const candidate of ranked.slice(
-    0,
-    document.instances.length <= 40 ? 2 : 1,
-  )) {
-    const refined = refineLayout(
-      (overrides) => route(candidate.strategy, overrides),
+  const originals = drafts.map((strategy) =>
+    runs.get(route(strategy, emptyOverrides()).result)!,
+  );
+  const edits = (candidate: Candidate) =>
+    JSON.stringify(candidate.run.result.edits);
+  const ranked = rank(
+    originals.filter((candidate, index, candidates) => {
+      // A refused run has no edits, so refused runs are never duplicates:
+      // each strategy's refinement may repair its refusal differently.
+      if (!Number.isFinite(routedScore(candidate.run, resolver))) return true;
+      return !candidates
+        .slice(0, index)
+        .some((earlier) => edits(earlier) === edits(candidate));
+    }),
+  );
+  const refinedCount = document.instances.length <= 40 ? 2 : 1;
+  const refinements = new Map<Candidate, Candidate>();
+  const refine = (candidate: Candidate) => {
+    let result = refinements.get(candidate);
+    if (!result) {
+      const refined = refineLayout(
+        (overrides) => route(candidate.strategy, overrides),
+        resolver,
+        fixed,
+        document.instances.length,
+        candidate.run,
+      );
+      refinements.set(candidate, (result = runs.get(refined)!));
+    }
+    return result;
+  };
+  const select = (portfolio: Candidate[]) => {
+    const refined: Candidate[] = [];
+    let selected = portfolio[0]!;
+    for (const candidate of portfolio.slice(0, refinedCount)) {
+      const result = refine(candidate);
+      refined.push(result);
+      if (
+        candidate === portfolio[0] ||
+        compareRuns(result.run, selected.run, resolver) < 0
+      )
+        selected = result;
+    }
+    return { portfolio, selected, refined };
+  };
+  // R166: each draft's stack-aligned candidate, when it is valid and new,
+  // ranks right after its original. It replaces the original portfolio only
+  // when refinement selects it; otherwise planning continues exactly as
+  // without it.
+  const aligned =
+    options.partition?.arrangement ||
+    !stackPairs(
+      document.instances.filter((i) => !isMarker(i)),
       resolver,
-      fixed,
-      document.instances.length,
-      candidate.run,
+      classifyNets(document, resolver),
+    ).length
+      ? []
+      : drafts
+          .flatMap((strategy) => {
+            if (strategy === "feedback-rows") return [];
+            try {
+              const candidate = runs.get(
+                route(stackStrategy(strategy), emptyOverrides()).result,
+              )!;
+              // A candidate that cannot be built is not offered.
+              return Number.isFinite(routedScore(candidate.run, resolver))
+                ? [candidate]
+                : [];
+            } catch {
+              return [];
+            }
+          })
+          .filter(
+            (candidate, index, candidates) =>
+              ![...originals, ...candidates.slice(0, index)].some(
+                (other) => edits(other) === edits(candidate),
+              ),
+          );
+  const all =
+    aligned.length &&
+    rank(
+      originals.flatMap((original) => [
+        ...(ranked.includes(original) ? [original] : []),
+        ...aligned.filter(
+          (candidate) =>
+            draftStrategy(candidate.strategy) === original.strategy,
+        ),
+      ]),
     );
-    const result = runs.get(refined)!;
-    refinedFinalists.push(result);
-    if (
-      candidate === ranked[0] ||
-      compareRuns(result.run, selected.run, resolver) < 0
-    )
-      selected = result;
-  }
+  const withStacks =
+    all && all.slice(0, refinedCount).some((c) => isStackStrategy(c.strategy))
+      ? select(all)
+      : undefined;
+  const {
+    portfolio,
+    selected,
+    refined: refinedFinalists,
+  } = withStacks && isStackStrategy(withStacks.selected.strategy)
+    ? withStacks
+    : select(ranked);
   // Snapshot the other refined run before facing/rerouting mutates results.
   // The existing winner (including its annealed fallback) is finished first.
   const runner = refinedFinalists
@@ -1261,7 +1335,7 @@ function planAutoLayoutMeasured(
             search,
             fixed,
             { run: selected.run, strategy: selected.strategy },
-            ranked.map(({ run, strategy }) => ({ run, strategy })),
+            portfolio.map(({ run, strategy }) => ({ run, strategy })),
             { run: quickRun, strategy: selected.strategy },
             (state, signalTrunks, bounds) => {
               const run = planFrom(
@@ -1372,7 +1446,9 @@ function planAutoLayoutMeasured(
             document,
             resolver,
             baseline,
-            runs.values(),
+            [...runs.values()].filter(
+              (run) => portfolio !== ranked || !isStackStrategy(run.strategy),
+            ),
             fixed.size || document.instances.length > 40 ? 0 : 2,
             stopped,
             (run, strategy) => {
@@ -2000,6 +2076,8 @@ function buildPlan(
         ? (result.draftingTranslation ?? 0)
         : 0) + (given && bounds ? inheritedTranslation : 0);
   if ("sideRow" in result) run.sideRow = result.sideRow;
+  if ("alignedStacks" in result && result.alignedStacks?.length)
+    alignedStacks.set(run, result.alignedStacks);
   if (result.problem)
     return {
       edits: [],

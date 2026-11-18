@@ -2,8 +2,15 @@ import type { Instance } from "@icm/model";
 import type { SchematicEdit } from "@icm/edit-engine";
 
 export type Placement = NonNullable<Instance["placement"]>;
+/** R63's drafts; R166 adds a stack-aligned candidate of the first three. */
 export type LayoutStrategy =
-  "template" | "layered" | "stages" | "feedback-rows";
+  | "template"
+  | "layered"
+  | "stages"
+  | "feedback-rows"
+  | "template+stack"
+  | "layered+stack"
+  | "stages+stack";
 export type NetRole = "supply" | "ground" | "input" | "output" | "internal";
 /** Experimental block semantics, independent of the partition's source. */
 export type BlockRole =

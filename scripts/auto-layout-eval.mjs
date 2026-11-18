@@ -22,6 +22,7 @@ import {
   diagnoseLabelClearance,
 } from "../packages/derived/dist/index.js";
 import { branchVerticality } from "../packages/auto-layout/dist/branch-verticality.js";
+import { stackColumns } from "./lib/stack-columns.mjs";
 import { signalPathMetrics } from "../packages/auto-layout/dist/signal-path-metrics.js";
 import { stageComponents } from "../packages/auto-layout/dist/stage-symmetry.js";
 import { reconcilePartition } from "../packages/auto-layout/dist/partition-reconcile.js";
@@ -351,6 +352,8 @@ const metrics = (document, resolver, components, stages, project) => {
     netBreakdown: netBreakdown(document, resolver),
     netKindDetail: netKindDetail(document, resolver),
     branchVerticality: branchVerticality(document, resolver),
+    // Report-only (R166): branch stacks present and broken in this drawing.
+    stackColumns: stackColumns(document, resolver),
     legacyScore: routedScore(
       { final: document, result: { diagnostics: [] } },
       resolver,
@@ -1309,6 +1312,30 @@ if (!isMainThread) {
           branchVerticality: {
             human: verticality("human"),
             result: verticality("result"),
+          },
+          // Report-only (R166): stacks broken by the result and kept by the
+          // human drawing ("planner-only"), over the same completed pairs.
+          stackColumns: {
+            stacks: paired.reduce(
+              (s, m) => s + m.result.stackColumns.stacks,
+              0,
+            ),
+            human: paired.reduce((s, m) => s + m.human.stackColumns.broken, 0),
+            result: paired.reduce(
+              (s, m) => s + m.result.stackColumns.broken,
+              0,
+            ),
+            // A reference drawing names its devices differently.
+            plannerOnly: referenceFolder
+              ? null
+              : paired.reduce((s, m) => {
+                  const kept = new Set(m.human.stackColumns.brokenKeys);
+                  return (
+                    s +
+                    m.result.stackColumns.brokenKeys.filter((k) => !kept.has(k))
+                      .length
+                  );
+                }, 0),
           },
           // Like primary ratios, breakdowns compare the same completed pairs.
           netBreakdown: {

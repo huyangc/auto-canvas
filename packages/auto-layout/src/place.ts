@@ -64,6 +64,7 @@ import { templatePlacement } from "./template-placement.js";
 import { symmetryTopology } from "./symmetry.js";
 import { isMos } from "./net-roles.js";
 import { placeMarkers } from "./place-markers.js";
+import { alignStacks, draftStrategy, isStackStrategy } from "./stack-snap.js";
 import type {
   AutoLayoutOptions,
   LayoutStrategy,
@@ -248,9 +249,11 @@ export function placeDocument(
   draftingTranslation?: number;
   problem?: string;
   sideRow?: ReadonlySet<string>;
+  /** R166: the stacks a stack-aligned draft aligned. */
+  alignedStacks?: readonly string[];
 } {
   if (
-    strategy === "layered" &&
+    draftStrategy(strategy) === "layered" &&
     draftRouter &&
     !given &&
     !options.partition &&
@@ -263,7 +266,7 @@ export function placeDocument(
     const selected = planningMemo(
       document,
       resolver,
-      `row-drafts:${JSON.stringify([draftRouter.key, localLoopDraft, attachmentDraft, gateRowDraft, roles.symmetricHalfOrder, roles.seriesLevels, roles.pitch, options.fixedInstanceIds, [...overrides.sides], [...overrides.orientations]])}`,
+      `row-drafts:${JSON.stringify([draftRouter.key, strategy, localLoopDraft, attachmentDraft, gateRowDraft, roles.symmetricHalfOrder, roles.seriesLevels, roles.pitch, options.fixedInstanceIds, [...overrides.sides], [...overrides.orientations]])}`,
       () => {
         const draft = (signalSeries: boolean) => {
           const choices = emptyChoices();
@@ -409,9 +412,9 @@ export function placeDocument(
       partition,
       // The estimator can prefer a side row that costs more after routing.
       // Keep a single-row candidate in the normal routed strategy comparison.
-      strategy !== "layered",
+      draftStrategy(strategy) !== "layered",
     ));
-  } else if (strategy === "template") {
+  } else if (draftStrategy(strategy) === "template") {
     const result = templatePlacement(
       document,
       devices,
@@ -441,7 +444,7 @@ export function placeDocument(
         problem: "R163: draft left a device unplaced",
       };
     oriented = new Set(targets.keys());
-  } else if (strategy === "stages") {
+  } else if (draftStrategy(strategy) === "stages") {
     ({ placements: targets, sideRow } = placeStages(
       document,
       devices,
@@ -713,6 +716,38 @@ export function placeDocument(
         ]),
         { ...document, instances: devices },
       );
+  // R166: the stack-aligned candidate of this draft; never a placement given
+  // to the planner or an explicit floorplan.
+  let aligned: string[] | undefined;
+  if (isStackStrategy(strategy) && !given && !partition?.arrangement)
+    try {
+      aligned = alignStacks(
+        document,
+        devices,
+        resolver,
+        roles,
+        targets,
+        new Set([
+          ...fixed,
+          ...symmetryIds,
+          ...coupledIds,
+          ...attachmentIds,
+          ...templates.flatMap((g) => [
+            ...g.members,
+            ...(g.extraMemberIds ?? []),
+            ...(g.tailInstanceId ? [g.tailInstanceId] : []),
+          ]),
+          ...document.layoutGroups.flatMap((g) => g.objectIds),
+          ...document.constraints
+            .filter((c) => c.kind === "symmetric")
+            .flatMap((c) => c.objectIds),
+        ]),
+        overrides,
+      );
+    } catch {
+      // A candidate that cannot be built is not offered (R63).
+      return { placements: targets, problem: "R166: stack alignment failed" };
+    }
   placeMarkers(document, resolver, roles, targets, overrides, choices, fixed);
   for (const id of fixed) {
     const old = document.instances.find((i) => i.id === id)?.placement;
@@ -929,5 +964,6 @@ export function placeDocument(
     placements: targets,
     draftingTranslation,
     ...(sideRow ? { sideRow } : {}),
+    ...(aligned ? { alignedStacks: aligned } : {}),
   };
 }

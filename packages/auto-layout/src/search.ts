@@ -22,6 +22,13 @@ import {
   type SearchBounds,
 } from "./search-bounds.js";
 import type { AutoLayoutOptions, LayoutStrategy } from "./types.js";
+import {
+  alignedStacks,
+  draftStrategy,
+  isStackStrategy,
+  keepsAlignedStacks,
+} from "./stack-snap.js";
+import { isMarker } from "./placement-connectivity.js";
 
 type Start = { run: LayoutRun; strategy: LayoutStrategy };
 const stateOf = ({ run, strategy }: Start): SearchState => ({
@@ -151,7 +158,7 @@ export function annealLayout(
         (to.y - from.y) * exit.y > 0
       );
     });
-  const propose = createMoveGenerator(
+  const generate = createMoveGenerator(
     document,
     resolver,
     fixed,
@@ -160,6 +167,25 @@ export function annealLayout(
     initial.run.partition,
     pitch,
   );
+  // R166: a stack-aligned state moves like its original strategy's states.
+  const propose = (state: SearchState) => {
+    if (!isStackStrategy(state.strategy)) return generate(state);
+    const next = generate({
+      ...state,
+      strategy: draftStrategy(state.strategy),
+    });
+    return next && { ...next, strategy: state.strategy };
+  };
+  // R166: a search started from a stack-aligned draft keeps its columns.
+  const keepsAligned = isStackStrategy(initial.strategy)
+    ? keepsAlignedStacks(
+        document.instances.filter((i) => !isMarker(i)),
+        resolver,
+        // The Nets of the planned Document, as the draft named them.
+        classifyNets(document, resolver),
+        alignedStacks.get(initial.run),
+      )
+    : () => true;
   const estimate = createPlacementEstimator(
     document.instances,
     resolver,
@@ -193,7 +219,10 @@ export function annealLayout(
     }
     // R54 only ranks proposals; acceptance always uses a full routed score.
     const pool = Array.from({ length: 4 }, () => propose(state)).filter(
-      (p): p is SearchState => p !== undefined && keepsStacks(p),
+      (p): p is SearchState =>
+        p !== undefined &&
+        keepsStacks(p) &&
+        keepsAligned(state.placements, p.placements),
     );
     const candidate = pool.sort(
       (a, b) => estimate(a.placements).score - estimate(b.placements).score,
