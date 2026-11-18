@@ -357,6 +357,14 @@ export function placeDocument(
   const fixed = new Set(options.fixedInstanceIds);
   for (const owner of [...document.layoutGroups, ...document.constraints])
     if (owner.locked) for (const id of owner.objectIds) fixed.add(id);
+  // R164: a fixed block keeps its pose, so no generator treats it as free.
+  if (roles.rightFacing && [...fixed].some((id) => roles.rightFacing!.has(id)))
+    roles = {
+      ...roles,
+      rightFacing: new Set(
+        [...roles.rightFacing].filter((id) => !fixed.has(id)),
+      ),
+    };
   const levels = netLevels(devices, resolver, roles);
   if (given) {
     const invalid = [...given].some(([id, p]) => {

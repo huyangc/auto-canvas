@@ -169,3 +169,39 @@ Acceptance for round 5: the plan's checks; all 628 corpus plan hashes equal to
 round 4 (`tmp/t134-final-report.json`) unless finding 2 or 8 changes one (list
 and explain); the reviewer's two probe shapes (ladder, divider) plan as on the
 branch without this task.
+
+## Round 5 result — accepted
+
+1. The grounded-source input side for R57 requires a free directed block
+   (`signal-direction.ts`); every other round-3/4 mechanism was checked for the
+   same hole and already had the condition. Pinned test: an output-port ladder
+   driven by a grounded source plans to the hash recorded from the branch
+   without this task (round 4 planned it differently).
+2. Locked instances are left out of `rightFacing` in `classifyNets`;
+   `placeDocument` removes the caller's fixed ids before any generator reads
+   it; the port rule hosts only on an output that does not leave left, which
+   covers finishing passes that do not know the fixed set. Pinned test: an
+   inverting amplifier with its op-amp fixed facing left plans to the recorded
+   hash.
+3. Cycle detection indexes Nets to their reading blocks and finds strongly
+   connected components iteratively. `classifyNets` on a chain of 10 000
+   inverters: 66 ms (57 ms without this task; round 4 threw). Test: the chain
+   classifies, and closing it makes every block cyclic.
+4. The cascode row of the local-loop test is dropped; the rule text says R156
+   offers no variant when its only seat would face the amplifier left.
+5. New `block-direction-generators.test.ts`: R159 seats, R156 seats, R21
+   options and layered two-pin rows (each also shown to face left with the
+   guard emptied), R147 poses, the search's against-the-flow rejection,
+   `inputsOnRight` with a port, the MOS/BJT fence. Not pinned on their own:
+   fanout turns (R72) and R157 attachment seats.
+6. – 7. Rule text: the mirror is vetoed only when a root's input moves to the
+   right; only `input`-role pins are cycle edges.
+7. The report's `againstFlow` calls the planner's own counter. Report-only
+   counts change with the definition: results against the flow 23 → 33, human
+   drawings 9 → 21; no plan changes.
+
+Reviewer rerun: build, typecheck, lint (0 errors), format:check, docs:check 0;
+`pnpm test:local` 0 (812 files, 8369 passed, 117 skipped); `pnpm test:slow` 0
+(2 files, 8 passed); evaluation 0 with all 628 plan hashes equal to round 4.
+The repository's automatic codex review raised the same three findings as
+round 5's first three rows.

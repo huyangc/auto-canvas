@@ -919,17 +919,22 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   (`input`, `non-inverting-input`, `inverting-input`) and a pin with an
   `output` role (`output`, `output-complement`); hierarchical ports carry no
   direction (`directed-blocks.ts`). Directed blocks are linked from each
-  output pin's Net to every other directed block with an input pin on that
-  Net; a block in a strongly connected component of two or more blocks is on
-  a block cycle (latches, rings) and keeps today's behaviour. Every other
-  directed block is free, and `classifyNets` records the free ones over the
-  whole document. The convention is enforced where candidates are generated,
+  output pin's Net to every other directed block with an `input`-role pin on
+  that Net; `clock`, `reset` and other pins are not edges, so a loop closed
+  only through a clock or reset pin leaves its blocks free. A block in a
+  strongly connected component of two or more blocks (found iteratively, with
+  Nets indexed to the blocks that read them) is on a block cycle (latches,
+  rings) and keeps today's behaviour. Every other directed block is free;
+  `classifyNets` records the free ones over the whole document, leaving out
+  instances in locked layout groups or constraints, and planning also leaves
+  out the caller's fixed instances. The convention is enforced where candidates are generated,
   with no selection or evaluation weight: no R66 single-device move reflects a
   free block left-right (it reflects top-bottom instead, drawing the same
   random numbers); two-pin layered row placement and R21 turn it by 180
   degrees or reflect it top-bottom, never facing its output left; R147
   relocations, R72 fanout turns, R156 local-loop amplifiers, R159 amplifier
-  seats and R157 attachment seats skip poses that face its output left. A
+  seats and R157 attachment seats skip poses that face its output left (so
+  R156 offers no variant when its only seat would face the amplifier left). A
   mirror of a whole stage (R53, R57, R153) or of a stage block (the R66
   block-mirror move) reflects the free blocks in it too and then turns each
   back to face right in place: reflected left-right again and shifted to keep
@@ -947,14 +952,19 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   place) when that draws fewer blocks against the flow. Explicit input
   evidence outranks this inference: on the input side the positive terminal
   of a grounded source on a signal root (R32's start) is used before the
-  blocks, and the whole-draft mirror is vetoed when it would put any signal
-  root's input right of what it drives (a source's positive pin right of the
+  blocks (only in a document with a free block), and the whole-draft mirror is
+  vetoed when it would move a signal root's input from beside to right of
+  what it drives (a source's positive pin right of the
   mean of the root Net's other pins; without a source, those pins' mean right
   of the devices' centre, the edge R19 would seat the input port on). A veto,
   not a count summed with the blocks, so no number of righted blocks can buy
-  a reversed input. No R66 move may draw more blocks
+  a reversed input; a root already on the right does not veto. A document
+  without a free block reaches none of these mechanisms. No R66 move may draw
+  more blocks
   against the flow than its starting state. A non-rail Cell Pin whose Net a free block's output pin drives is
-  hosted by that pin (the first driver by id) and seats on the right whatever
+  hosted by that pin (the first driver by id whose output does not leave to
+  the left, so a fixed block facing left hosts nothing) and seats on the right
+  whatever
   the R19 side choice, so search cannot flip its side, and R146 discards every
   seat at or left of that block's centre. Fixed instances keep their pose; a
   document without directed blocks plans exactly as before.

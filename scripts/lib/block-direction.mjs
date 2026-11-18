@@ -4,11 +4,11 @@ import {
   pinPoints,
 } from "../../packages/auto-layout/dist/geometry.js";
 import { isMarker } from "../../packages/auto-layout/dist/placement-connectivity.js";
+import { classifyNets } from "../../packages/auto-layout/dist/net-roles.js";
 import {
-  classifyNets,
-  isMosBulk,
-} from "../../packages/auto-layout/dist/net-roles.js";
-import { rightFacingBlocks } from "../../packages/auto-layout/dist/directed-blocks.js";
+  againstFlowCounter,
+  rightFacingBlocks,
+} from "../../packages/auto-layout/dist/directed-blocks.js";
 
 const PORTS = new Set(["port", "port-filled"]);
 
@@ -71,56 +71,27 @@ export function blockDirection(document, resolver) {
   return {
     outputFacesLeft,
     outputPortLeft,
-    againstFlow: againstFlow(document, resolver, points, bounds, definition),
+    againstFlow: againstFlow(document, resolver),
   };
 }
 
 /**
- * Free directed blocks (on no block cycle) whose outputs all leave to the
- * right while more than half of the other pins on their non-rail input Nets
- * lie right of the block's visible centre. Pins of parts that also touch one
- * of the block's output Nets are feedback and are ignored, as are MOS bulks.
- * Nets come from `classifyNets` (label-connected).
+ * R164's planner counter (`againstFlowCounter`) on the drawing's own
+ * placements: free directed blocks (on no block cycle) whose outputs all
+ * leave to the right while more than half of the other device pins on their
+ * non-rail input Nets lie right of the mean x of the block's pins. Parts that
+ * also touch one of the block's output Nets are feedback; markers, ports and
+ * MOS bulk pins do not count. Nets come from `classifyNets`.
  */
-function againstFlow(document, resolver, points, bounds, definition) {
+function againstFlow(document, resolver) {
   const roles = classifyNets(document, resolver);
-  const free = rightFacingBlocks(document.instances, resolver, roles);
-  const net = (id, pin) => roles.pinNet(id, pin);
-  let count = 0;
-  for (const i of document.instances) {
-    if (!free.has(i.id) || !i.placement) continue;
-    const pins = (definition(i)?.pins ?? []).filter(
-      (p) => !p.role.includes("hierarchical"),
-    );
-    const outputs = pins.filter((p) => p.role.includes("output"));
-    if (outputs.some((p) => pinExit(p, i.placement).x <= 0)) continue;
-    const box = bounds.get(i.id);
-    if (!box) continue;
-    const nets = (list) =>
-      new Set(
-        list.flatMap((p) => {
-          const n = net(i.id, p.name);
-          return n && !roles.rails.has(n) ? [n] : [];
-        }),
-      );
-    const inNets = nets(pins.filter((p) => p.role.includes("input")));
-    const outNets = nets(outputs);
-    const xs = [];
-    for (const j of document.instances) {
-      if (j.id === i.id) continue;
-      const own = (definition(j)?.pins ?? []).filter(
-        (p) => !isMosBulk(j.symbolId, p.name),
-      );
-      if (own.some((p) => outNets.has(net(j.id, p.name)))) continue;
-      for (const p of own)
-        if (inNets.has(net(j.id, p.name))) {
-          const point = points.get(`${j.id}\u0000${p.name}`);
-          if (point) xs.push(point.x);
-        }
-    }
-    const centre = box.x + box.width / 2;
-    if (xs.length && xs.filter((x) => x > centre).length > xs.length / 2)
-      count++;
-  }
-  return count;
+  const devices = document.instances.filter((i) => !isMarker(i));
+  return againstFlowCounter(
+    devices,
+    resolver,
+    roles,
+    rightFacingBlocks(document.instances, resolver, roles),
+  )(
+    new Map(devices.flatMap((i) => (i.placement ? [[i.id, i.placement]] : []))),
+  );
 }
