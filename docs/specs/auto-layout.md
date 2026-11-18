@@ -1061,7 +1061,10 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   portfolio for the annealer's alternative starts and the reroute portfolio,
   and a search that starts from it never accepts a proposal that breaks one of
   the stacks its draft aligned while that stack holds (a stack already broken
-  does not block a move). The original drafts and R66's existing stack guard
+  does not block a move). The guard checks each proposal before it is
+  routed, against the stacks that search's start draft aligned, also after a
+  restart from another start; a routed run that comes back with a column
+  broken is not guarded for that column from then on. The original drafts and R66's existing stack guard
   are unchanged. Evaluation reports the stacks present and broken as
   `stackColumns` (report-only).
 

@@ -163,8 +163,9 @@ only two conduction terminals on a non-rail Net, at least one a transistor)
 and the ones the drawing breaks: `stacks`, `broken` and the device-pair keys
 `brokenKeys`. A stack is kept when its two pins lie on one line along their
 exits (2-unit tolerance) and face each other with no device body between
-them. Each split's `stackColumns` sums `stacks` and the broken counts of the
-`human` and `result` drawings over the completed pairs, and `plannerOnly`
+them. Each split's `stackColumns` sums `stacks` (counted on the result
+drawing) and the broken counts of the `human` and `result` drawings over the
+completed pairs, and `plannerOnly`
 counts the stacks the result breaks while the human drawing keeps them
 (`null` with `--reference`, whose drawing names its devices differently). These
 counts take no part in the composite, targets or acceptance gates

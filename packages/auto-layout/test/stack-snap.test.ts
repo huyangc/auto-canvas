@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import type { SchematicDocument } from "@icm/model";
 import { InMemorySymbolResolver, builtInSymbols } from "@icm/symbols";
@@ -5,6 +6,8 @@ import { planAutoLayout } from "../src/index.js";
 import { planLayoutOnce } from "../src/auto-layout.js";
 import { emptyChoices, emptyOverrides } from "../src/layout-choices.js";
 import { classifyNets } from "../src/net-roles.js";
+import * as place from "../src/place.js";
+import * as portfolio from "../src/reroute-portfolio.js";
 import { placeDocument } from "../src/place.js";
 import { isMarker } from "../src/placement-connectivity.js";
 import { recognizeStructures } from "../src/recognize.js";
@@ -302,6 +305,98 @@ describe("R166 candidates", () => {
     }
   });
 
+  it("plans exactly as without R166 when an offered candidate is not selected", () => {
+    // A topology fixture (not a simulated circuit): Net d joins m2's drain
+    // and r1, a stack whose aligned draft ranks among the refined drafts but
+    // loses refinement to an original.
+    const d = circuit(
+      {
+        m1: "nmos",
+        m2: "nmos",
+        m3: "nmos",
+        r1: "resistor",
+        v: "vdd-port",
+        g: "ground",
+      },
+      {
+        vdd: ["v.P", "m1.S", "m2.S"],
+        gnd: ["g.0", "m1.D", "m2.G"],
+        c: ["m1.G"],
+        d: ["m2.D", "r1.2"],
+        b: ["m3.D", "m3.G", "m3.S", "r1.1"],
+      },
+    );
+    const options = { search: { seed: 1, evaluations: 8 } };
+    const off = vi.spyOn(snap, "stackPairs").mockReturnValue([]);
+    let without: string;
+    try {
+      without = JSON.stringify(planAutoLayout(d, resolver, options));
+    } finally {
+      off.mockRestore();
+    }
+    const placed = vi.spyOn(place, "placeDocument");
+    const reroute = vi.spyOn(portfolio, "reroutePortfolio");
+    try {
+      const plan = planAutoLayout(d, resolver, options);
+      // The candidate was built, yet the output is main's.
+      expect(
+        placed.mock.calls.some((call) => call[7] === "layered+stack"),
+      ).toBe(true);
+      expect(refinementMetrics(plan)?.strategy).not.toMatch(/\+stack$/);
+      expect(JSON.stringify(plan)).toBe(without);
+      // Neither the search nor the crossing reroutes saw a candidate's run.
+      expect(reroute).toHaveBeenCalled();
+      for (const call of reroute.mock.calls)
+        expect(
+          [...call[3]].filter((run) => snap.isStackStrategy(run.strategy)),
+        ).toEqual([]);
+    } finally {
+      reroute.mockRestore();
+      placed.mockRestore();
+    }
+  }, 30_000);
+
+  it("plans no-stack Documents exactly as main at 65075a0", () => {
+    // sha256 of JSON.stringify(planAutoLayout(..., quick)) from a clean build
+    // of main 65075a0 (git archive of packages/auto-layout, tsc).
+    const hash = (d: SchematicDocument) =>
+      createHash("sha256")
+        .update(JSON.stringify(planAutoLayout(d, resolver, quick)))
+        .digest("hex");
+    // Two loads on one drain, and an inverter output with a load: three
+    // conduction terminals on the Net, so no stack.
+    const twoLoads = circuit(
+      {
+        m1: "nmos",
+        r1: "resistor",
+        r2: "resistor",
+        v: "vdd-port",
+        g: "ground",
+      },
+      {
+        vdd: ["v.P", "r1.1", "r2.1"],
+        out: ["r1.2", "r2.2", "m1.D"],
+        gnd: ["m1.S", "g.0"],
+        in: ["m1.G"],
+      },
+    );
+    const inverter = circuit(
+      { m1: "nmos", m2: "pmos", r1: "resistor", v: "vdd-port", g: "ground" },
+      {
+        vdd: ["v.P", "m2.S"],
+        out: ["m1.D", "m2.D", "r1.1"],
+        gnd: ["m1.S", "g.0", "r1.2"],
+        in: ["m1.G", "m2.G"],
+      },
+    );
+    expect(hash(twoLoads)).toBe(
+      "ef16a0e78757c48790c15d4711bb4297f823d437b6496492cfb120667754d374",
+    );
+    expect(hash(inverter)).toBe(
+      "c4332af3b35e50574d5027f2e97384221f7700b40a62884f24ae219d3cb58117",
+    );
+  });
+
   it("routes no candidate for a Document without a stack", () => {
     const d = circuit(
       { r1: "resistor", r2: "resistor", v: "vdd-port", g: "ground" },
@@ -376,6 +471,53 @@ describe("R166 candidates", () => {
     for (const id of members) expect(aligned.get(id)).toEqual(original.get(id));
   });
 
+  it("never moves a fixed instance; with both members fixed, offers nothing", () => {
+    const d = selfBiased();
+    const draft = planLayoutOnce(d, resolver, {}, emptyOverrides());
+    const input = preview(d, resolver, draft.result.edits).document!;
+    const pose = (document: SchematicDocument, id: string) =>
+      document.instances.find((i) => i.id === id)!.placement;
+    const one = planAutoLayout(input, resolver, {
+      ...quick,
+      fixedInstanceIds: new Set(["m1"]),
+    });
+    const after = preview(input, resolver, one.edits);
+    expect(after.ok).toBe(true);
+    expect(pose(after.document!, "m1")).toEqual(pose(input, "m1"));
+    const both = { ...quick, fixedInstanceIds: new Set(["m1", "r2"]) };
+    const off = vi.spyOn(snap, "stackPairs").mockReturnValue([]);
+    let without: string;
+    try {
+      without = JSON.stringify(planAutoLayout(input, resolver, both));
+    } finally {
+      off.mockRestore();
+    }
+    expect(JSON.stringify(planAutoLayout(input, resolver, both))).toBe(without);
+  });
+
+  it("offers no candidate under an explicit floorplan", () => {
+    const d = selfBiased();
+    const partition = {
+      blocks: [
+        {
+          id: "all",
+          members: d.instances.filter((i) => !isMarker(i)).map((i) => i.id),
+        },
+      ],
+      arrangement: { all: { x: 0, y: 0 } },
+    };
+    const spy = vi.spyOn(snap, "alignStacks");
+    try {
+      const plan = planAutoLayout(d, resolver, { ...quick, partition });
+      expect(plan.diagnostics.filter((x) => x.severity === "error")).toEqual(
+        [],
+      );
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("plans the same Document identically twice", () => {
     const d = selfBiased();
     expect(JSON.stringify(planAutoLayout(d, resolver, quick))).toBe(
@@ -399,21 +541,37 @@ describe("R166 search guard", () => {
     expect(keeps(broken, broken)).toBe(true);
   });
 
-  it("guards the aligned columns when the search starts from that draft", () => {
+  it("never evaluates a proposal that breaks the aligned column", () => {
     const d = selfBiased();
+    const [stack] = snap.stackPairs(
+      d.instances.filter((i) => !isMarker(i)),
+      resolver,
+      classifyNets(d, resolver),
+    );
     const guard = vi.spyOn(snap, "keepsAlignedStacks");
+    const placed = vi.spyOn(place, "placeDocument");
     try {
       const plan = planAutoLayout(d, resolver, {
-        search: { seed: 1, evaluations: 4 },
+        search: { seed: 1, evaluations: 8 },
       });
       expect(plan.diagnostics.filter((x) => x.severity === "error")).toEqual(
         [],
       );
+      expect(refinementMetrics(plan)?.strategy).toBe("template+stack");
       expect(guard.mock.calls.map((call) => call[3])).toContainEqual(["a"]);
+      // Annealer evaluations re-place a given state inside the search bounds.
+      const proposals = placed.mock.calls
+        .filter((call) => call[8] && call[9])
+        .map((call) => call[8]!);
+      expect(proposals.length).toBeGreaterThan(0);
+      // Without the guard, 8 of these 16 proposals break Net a's column.
+      for (const proposal of proposals)
+        expect(snap.stackHolds(stack!, proposal)).toBe(true);
     } finally {
+      placed.mockRestore();
       guard.mockRestore();
     }
-  });
+  }, 30_000);
 
   it("guards only the columns the start draft aligned", () => {
     const keeps = snap.keepsAlignedStacks(devices, resolver, roles, []);
