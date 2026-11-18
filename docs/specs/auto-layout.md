@@ -1862,12 +1862,18 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   R146's port-seat budgets; it has no wall-clock cutoff.
   Use R146's complete finalist finishing path, readability-augmented calibrated
   score and guards; replan each trial with R148's licensed contacts (R140's
-  declared-pair policy), so a contact already drawn in the finalist does not
-  refuse the trial while an unlicensed coincident pin still does;
-  decline a trial that takes a feedback part out of its row: a two-pin part
-  that is not a directed block, across two non-rail Nets of one signal block,
-  lies in its row when it is horizontal and exactly one placement row above or
-  below that block, and such a part stays in its row on the same side;
+  declared-pair policy: any two pins declared on one Net may abut, drawn or
+  not), so a contact in the finalist does not refuse the trial while a
+  coincidence across Nets or with an undeclared pin still does. R147's
+  candidates keep two grid steps of clearance and so cannot create a new
+  contact. Decline a trial that takes a feedback part out of its row: a
+  two-pin part that is not a directed block, across two non-rail Nets of one
+  signal block, lies in its row when it is horizontal and exactly one
+  placement row above or below that block, and such a part stays in its row
+  on the same side. The guard reads the trial's proposed placements before
+  the replan, against the alignment-phase incumbent, on placement origins;
+  compactRows binds the same pair while finishing. It applies to every
+  document, also one without any pin contact;
   keep ties and reject any finished rigid-unit distortion. Preserve the
   incumbent anchor by a whole-placement grid translation when nothing is
   fixed. Optimized, successful partition, zero-budget and above-40-instance
