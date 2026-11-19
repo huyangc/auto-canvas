@@ -1554,6 +1554,16 @@ function planAutoLayoutMeasured(
       const before = preview(document, resolver, quickResult.edits);
       const after = preview(document, resolver, searched.edits);
       if (!after.ok) return quickResult;
+      // T141: integrity outranks the score here too. `compareCompleteness`
+      // above 40 instances declines to rank, so without this the cheaper
+      // quick result would win over a clean searched one and the outer gate
+      // would then refuse a plan that could have been delivered.
+      if (
+        before.ok &&
+        !connectionsIntact(before.document, resolver) &&
+        connectionsIntact(after.document, resolver)
+      )
+        return searched;
       if (before.ok) {
         if (
           compareRuns(
