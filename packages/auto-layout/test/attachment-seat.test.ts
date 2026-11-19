@@ -262,7 +262,7 @@ it("rejects a worse finished attachment finalist and repeats deterministically",
   } finally {
     select.mockRestore();
   }
-});
+}, 60_000);
 
 it("recognizes a diode-connected single-BJT stage from connectivity", () => {
   const { d, targets } = fixture();

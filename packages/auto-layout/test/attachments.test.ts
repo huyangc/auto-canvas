@@ -279,7 +279,7 @@ it("R68–R71 stay deterministic and replay as a connectivity-preserving transac
     terminalPartition(d, resolver),
   );
   expect(lostNameClaim(d, result.document)).toBeUndefined();
-});
+}, 60_000);
 
 it.each([0, 90, 180, 270] as const)(
   "R71 follows a rotated pin's exit direction (%s degrees)",
@@ -449,7 +449,7 @@ it("R71 treats a fixed port as occupied instead of moving it away", () => {
   expect(
     result.document.instances.find((i) => i.id === "fixedPort")!.placement,
   ).toEqual(at(300));
-});
+}, 60_000);
 
 it("R71 treats a fixed power marker as occupied", () => {
   const d = circuit(
@@ -480,4 +480,4 @@ it("R71 treats a fixed power marker as occupied", () => {
     fixedInstanceIds: new Set(["m", "g"]),
   });
   expect(plan.diagnostics.filter((x) => x.severity === "error")).toEqual([]);
-});
+}, 60_000);

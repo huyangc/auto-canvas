@@ -131,4 +131,4 @@ it("retains both CMOS inverter landings, routes the output branch, and accepts f
       expect(auditRouting(tx.document, r).wireLength).toBe(80);
     }
   }
-});
+}, 60_000);

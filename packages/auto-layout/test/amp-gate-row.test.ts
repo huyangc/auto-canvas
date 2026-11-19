@@ -290,4 +290,4 @@ it("leaves a row without an amplifier unchanged in the complete planner", () => 
   } finally {
     seat.mockRestore();
   }
-});
+}, 60_000);

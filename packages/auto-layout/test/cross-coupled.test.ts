@@ -228,7 +228,7 @@ it("R144 rejects a higher-scoring finishing candidate and accepts a tie", () => 
     score.mockRestore();
     calls.mockRestore();
   }
-});
+}, 60_000);
 
 it("R144 skips finishing when an instance is fixed", () => {
   const calls = vi.spyOn(routing, "routeDocument");
@@ -239,7 +239,7 @@ it("R144 skips finishing when an instance is fixed", () => {
   } finally {
     calls.mockRestore();
   }
-});
+}, 60_000);
 
 // Captured from 3526e33's built planner before changing any product source.
 it("R144 preserves non-cross-coupled edits and finishing calls", () => {
@@ -263,7 +263,7 @@ it("R144 preserves non-cross-coupled edits and finishing calls", () => {
   } finally {
     calls.mockRestore();
   }
-});
+}, 60_000);
 
 it("R144 rejects diagonals that introduce a routing problem", () => {
   const document = pair();

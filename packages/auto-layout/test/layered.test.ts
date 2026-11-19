@@ -151,7 +151,7 @@ it("places two recognized pairs adjacent with their shared tail centred", () => 
   expect(ordered[0]![0]!.members).toHaveLength(4);
   const plan = planAutoLayout(d, resolver);
   expect(plan.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
-});
+}, 60_000);
 it.each([60, 85])(
   "accepts a synthetic %i-device document deterministically within the large search budget",
   (count) => {

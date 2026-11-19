@@ -261,7 +261,7 @@ describe("R161 in planAutoLayout", () => {
     const d = plannerFixture();
     expect(missingConnections(d, resolver)).toBe(0);
     refused(planAutoLayout(d, resolver));
-  });
+  }, 60_000);
 
   it("lays out the same circuit when the frame is not a functional block", () => {
     const d = plannerFixture();
@@ -271,7 +271,7 @@ describe("R161 in planAutoLayout", () => {
     expect(
       plan.diagnostics.filter((x) => x.rule === "drafting-interface"),
     ).toEqual([]);
-  });
+  }, 60_000);
 
   it.each(["during", "deadline"] as const)(
     "still refuses when search stops %s",

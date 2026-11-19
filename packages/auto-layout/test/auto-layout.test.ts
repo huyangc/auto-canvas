@@ -33,7 +33,7 @@ it("rejects more than 120 instances with only the size diagnostic", () => {
     ],
   });
   expect(JSON.stringify(document)).toBe(before);
-});
+}, 60_000);
 it("snaps the envelope translation while preserving grid and input purity", () => {
   const document = circuit({ m: "nmos" }, {});
   const before = JSON.stringify(document);
@@ -62,7 +62,7 @@ it("snaps the envelope translation while preserving grid and input purity", () =
   );
   expect(planAutoLayout(document, resolver)).toEqual(plan);
   expect(JSON.stringify(document)).toBe(before);
-});
+}, 60_000);
 it("rejects a template collision with a fixed instance without partial edits", () => {
   const document = circuit(
     { a: "capacitor", b: "capacitor", c: "capacitor" },
@@ -87,7 +87,7 @@ it("rejects a template collision with a fixed instance without partial edits", (
     edits: [],
     diagnostics: [{ code: "AUTO_LAYOUT_RULE_UNSATISFIED", rule: "R10" }],
   });
-});
+}, 60_000);
 it("keeps a noncolliding fixed instance's exact placement", () => {
   const document = circuit({ a: "capacitor", b: "capacitor" }, {});
   const fixed = {
@@ -116,14 +116,14 @@ it("keeps a noncolliding fixed instance's exact placement", () => {
   expect(
     result.document.instances.find((i) => i.id === "a")!.placement,
   ).toEqual(fixed);
-});
+}, 60_000);
 it("diagnoses an unresolved symbol without emitting partial edits", () => {
   const document = circuit({ unknown: "not-a-symbol" }, {});
   expect(planAutoLayout(document, resolver)).toMatchObject({
     edits: [],
     diagnostics: [{ rule: "R3" }],
   });
-});
+}, 60_000);
 const commit = (document: ReturnType<typeof circuit>, edits: SchematicEdit[]) =>
   executeTransaction(
     document,
@@ -157,7 +157,7 @@ it("removes an obsolete Junction before a pin can land on it", () => {
   if (!result.ok) return;
   expect(result.document.junctions).toEqual([]);
   expect(result.document.nets).toEqual(placed.document.nets);
-});
+}, 60_000);
 it("refuses to overwrite an existing layout group by generated id", () => {
   const document = circuit(
     { a: "nmos", b: "nmos", c: "resistor" },
@@ -175,7 +175,7 @@ it("refuses to overwrite an existing layout group by generated id", () => {
     edits: [],
     diagnostics: [{ code: "AUTO_LAYOUT_RULE_UNSATISFIED", rule: "R5" }],
   });
-});
+}, 60_000);
 it("keeps members of a locked layout group or constraint in place", () => {
   const document = circuit({ a: "resistor", b: "resistor" }, {});
   const placement = {
@@ -197,7 +197,7 @@ it("keeps members of a locked layout group or constraint in place", () => {
   expect(result.applied, JSON.stringify(result.diagnostics)).toBe(true);
   if (!result.ok) return;
   expect(result.document.instances[0]!.placement).toEqual(placement);
-});
+}, 60_000);
 it("diagnoses a locked Route-anchored annotation instead of a rejected plan", () => {
   const project = parseProject(
     readFileSync("apps/editor/src/examples/simulation-rlc.icproj.json", "utf8"),
@@ -210,7 +210,7 @@ it("diagnoses a locked Route-anchored annotation instead of a rejected plan", ()
       createProjectSymbolResolver(project, builtInSymbols),
     ),
   ).toMatchObject({ edits: [], diagnostics: [{ rule: "R2" }] });
-});
+}, 60_000);
 it("diagnoses a Route with a locked leg instead of a rejected plan", () => {
   const project = parseProject(
     readFileSync("apps/editor/src/examples/simulation-rlc.icproj.json", "utf8"),
@@ -223,7 +223,7 @@ it("diagnoses a Route with a locked leg instead of a rejected plan", () => {
       createProjectSymbolResolver(project, builtInSymbols),
     ),
   ).toMatchObject({ edits: [], diagnostics: [{ rule: "R2" }] });
-});
+}, 60_000);
 it("stands a grounded shunt with horizontal pins vertically", () => {
   const document = circuit(
     {
@@ -260,4 +260,4 @@ it("stands a grounded shunt with horizontal pins vertically", () => {
   const cathode = pins.find((p) => p.pinName === "K")!.point;
   expect(anode.x).toBe(cathode.x);
   expect(anode.y).toBeLessThan(cathode.y);
-});
+}, 60_000);

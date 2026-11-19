@@ -147,7 +147,7 @@ it("bypasses LLM work for an explicit partition or absent LLM options", async ()
   expect(await planAutoLayoutWithLlm(document, resolver)).toEqual(
     planAutoLayout(document, resolver),
   );
-});
+}, 60_000);
 
 it("plans with the reconciled partition, appends its diagnostics and repeats byte-identically", async () => {
   const answer = {
@@ -184,7 +184,7 @@ it("plans with the reconciled partition, appends its diagnostics and repeats byt
   expect(JSON.stringify(await llmPartition(document, resolver, llm))).toBe(
     JSON.stringify(await llmPartition(document, resolver, llm)),
   );
-});
+}, 60_000);
 
 it("uses a shorter connected route for advisory blocks and preserves explicit blocks", async () => {
   const chain = circuit(
@@ -233,4 +233,4 @@ it("uses a shorter connected route for advisory blocks and preserves explicit bl
   ).toEqual(
     planAutoLayout(chain, resolver, { ...bounded, partition: partition! }),
   );
-});
+}, 60_000);

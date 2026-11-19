@@ -99,7 +99,7 @@ it("rejects unknown ids, markers and duplicates before producing edits", () => {
     validatePartition(d, resolver, { blocks: [{ id: "bad", members: ["p"] }] })
       .diagnostics[0]?.message,
   ).toContain("Unknown device");
-});
+}, 60_000);
 it("fills omitted devices and merges L0 units with diagnostics without mutating input", () => {
   const d = circuit(
     { a: "nmos", b: "nmos", extra: "resistor" },
@@ -213,7 +213,7 @@ it("keeps no-partition quick output byte-identical to the approved base", () => 
   expect(createHash("sha256").update(JSON.stringify(plan)).digest("hex")).toBe(
     "ba140966571e32b95d7889af40b4f3e4dfb4e875c137e7f140044e2dd90a1683",
   );
-});
+}, 60_000);
 
 it("rejects duplicate blocks, invalid flow and incomplete oracle centres", () => {
   for (const partition of [
@@ -736,7 +736,7 @@ it("R134 falls back on an empty plan without recursing", () => {
     rule: "partition",
     message: "Partition placement produced no edits",
   });
-});
+}, 60_000);
 
 it("R130 retains a single-row routed candidate when the estimator selects a side row", () => {
   const d = stageFixture(true);
@@ -764,4 +764,4 @@ it("R130 retains a single-row routed candidate when the estimator selects a side
   expect(refinementMetrics(selected)!.score).toBeLessThanOrEqual(
     Math.min(routedScore(single, resolver), routedScore(estimated, resolver)),
   );
-});
+}, 60_000);

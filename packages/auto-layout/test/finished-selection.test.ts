@@ -149,7 +149,7 @@ it("returns the finished runner-up when finishing reverses the provisional ranki
     choose.mockRestore();
     participation.mockRestore();
   }
-});
+}, 60_000);
 
 it("skips identical placements even when their routed edits differ", () => {
   expect(

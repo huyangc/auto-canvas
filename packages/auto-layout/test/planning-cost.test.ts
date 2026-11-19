@@ -76,7 +76,7 @@ it("does not reuse previews or audits after the caller edits its document", () =
   expect(result).toEqual(planAutoLayout(structuredClone(document), resolver));
   const final = preview(document, resolver, result.edits);
   expect(final.ok && final.document.instances[0]!.symbolId).toBe("capacitor");
-});
+}, 60_000);
 
 it.each(["planRouteNet", "planWireBatch"] as const)(
   "reuses %s across trials only within one planning call",

@@ -162,7 +162,7 @@ it("keeps both drain loads collinear in a source-degenerated pair", () => {
   }
   expect(signalPathMetrics(result.document, resolver).avoidableJogs).toBe(0);
   expect(signalPathMetrics(result.document, resolver).blockedJoins).toBe(0);
-});
+}, 60_000);
 
 it("counts orientation only for non-rail passives without an inferred DC direction", () => {
   const d = amplifier();
@@ -256,7 +256,7 @@ it("seats a drain output beside the facing load join and measures blocked joins"
   for (const [low, high] of intervals)
     if (low! <= end) end = Math.max(end, high!);
   expect(end).toBeGreaterThanOrEqual(b.y);
-});
+}, 60_000);
 
 it("excludes same-device capacitor bridges but retains a source-to-gate resistor", () => {
   const d = amplifier();

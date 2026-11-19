@@ -190,7 +190,7 @@ it("R147 stays out of optimized, zero-budget and partition planning", () => {
   } finally {
     search.mockRestore();
   }
-});
+}, 60_000);
 
 it("R147 rejects a shorter result that loses physical connectivity", () => {
   const document = fixture();

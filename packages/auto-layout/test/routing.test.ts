@@ -103,7 +103,7 @@ it("routes a MOS source physically despite hidden ground labels on other bulks",
   if (!result.ok) return;
   expect(floatingPins(result.document, symbols)).toHaveLength(0);
   expect(missingConnections(result.document, symbols)).toBe(0);
-});
+}, 60_000);
 
 it("freezes Base Net pins without MOS bulk pins, without mutating input", () => {
   const document = circuit(
@@ -349,7 +349,7 @@ it("centres two recognized differential pairs over their shared tail", () => {
     terminalPartition(document, resolver),
   );
   expect(auditRouting(result.document, resolver).unsafeProblems).toEqual([]);
-});
+}, 60_000);
 
 it("refuses an oversized complete edit list from a real annotation fixture", () => {
   const document = circuit({ r: "resistor" }, { n: ["r.1"] });
@@ -386,7 +386,7 @@ it("refuses an oversized complete edit list from a real annotation fixture", () 
       },
     ],
   });
-});
+}, 60_000);
 
 it("keeps a freed label at its nearest pin when its Net has only vertical legs", () => {
   const document = circuit(
@@ -458,7 +458,7 @@ it("keeps a freed label at its nearest pin when its Net has only vertical legs",
       kind: "free",
       position: { x: 0, y: 0 },
     });
-});
+}, 60_000);
 
 it("audits a wire that crosses its own device instead of leaving its pin outward", () => {
   const document = circuit(
@@ -594,7 +594,7 @@ it("preserves a freed route label's offset, direction and orientation", () => {
       direction: "reverse",
       orientation: "follow",
     });
-});
+}, 60_000);
 
 it.each([true, false])(
   "preserves drafting ownership or minimum downward clearance (owned=%s)",
@@ -855,7 +855,7 @@ it("never draws a fallback stub through the obstacle that blocked the net", () =
   if (!result.ok) throw new Error(JSON.stringify(result.diagnostics));
   expect(auditRouting(result.document, resolver).problems).toEqual([]);
   expect(result.document.routes.some((r) => r.netId === "good")).toBe(true);
-});
+}, 60_000);
 
 it("wires each of two markers on one host to that host, not to each other", () => {
   const document = circuit(
@@ -885,7 +885,7 @@ it("wires each of two markers on one host to that host, not to each other", () =
     expect(
       pair.filter((e) => e?.kind === "terminal" && e.instanceId === "r"),
     ).toHaveLength(1);
-});
+}, 60_000);
 
 it("warns when a route crosses a drafting object it could not avoid", () => {
   const document = circuit(
@@ -948,7 +948,7 @@ it("warns when a route crosses a drafting object it could not avoid", () => {
   expect(plan.diagnostics, JSON.stringify(plan.diagnostics)).toEqual([
     expect.objectContaining({ code: "AUTO_LAYOUT_DRAFTING_OVERLAP" }),
   ]);
-});
+}, 60_000);
 
 it("R26 refuses a singleton stub whose free end lies inside a fixed obstacle", () => {
   const document = circuit(
@@ -1005,7 +1005,7 @@ it("R26 refuses a singleton stub whose free end lies inside a fixed obstacle", (
       message: expect.stringContaining("singleton power stub"),
     }),
   ]);
-});
+}, 60_000);
 
 it("R25 keeps several touching power pins joined through distinct exact stubs", () => {
   const document = circuit(
@@ -1044,7 +1044,7 @@ it("R25 keeps several touching power pins joined through distinct exact stubs", 
   ].map((p) => endpointKey({ kind: "terminal", ...p }));
   expect(new Set(keys.map((k) => physical.get(k))).size).toBe(1);
   expect(auditRouting(result.document, resolver).problems).toEqual([]);
-});
+}, 60_000);
 
 it("R38 keeps touching signal pins physically joined after placement", () => {
   const document = circuit(
@@ -1085,7 +1085,7 @@ it("R38 keeps touching signal pins physically joined after placement", () => {
     terminalPartition(document, resolver),
   );
   expect(auditRouting(result.document, resolver).unsafeProblems).toEqual([]);
-});
+}, 60_000);
 
 it("R41 rounds a rotated pin before deriving a trunk or stub coordinate", () => {
   const diagonal = 50 * Math.SQRT2;

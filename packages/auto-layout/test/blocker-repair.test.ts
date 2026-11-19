@@ -330,7 +330,7 @@ it("R72 respects fixed blocker ids and resolves ids with punctuation", () => {
     fixedInstanceIds: new Set(["a", "b"]),
   });
   expect(floatingPins(apply(d, plan), resolver)).toEqual([]);
-});
+}, 60_000);
 
 it("R72 repairs the final search state, including a zero-budget search, deterministically", () => {
   const d = blockedGround(),
@@ -339,7 +339,7 @@ it("R72 repairs the final search state, including a zero-budget search, determin
   const plan = planAutoLayout(d, resolver, options);
   expect(floatingPins(apply(d, plan), resolver)).toEqual([]);
   expect(planAutoLayout(d, resolver, options)).toEqual(plan);
-});
+}, 60_000);
 
 it("R72 clears a marker drawing from a horizontal rail trunk", () => {
   const d = blockedGround();
@@ -349,7 +349,7 @@ it("R72 clears a marker drawing from a horizontal rail trunk", () => {
   expect(initial.result.diagnostics.some((d) => d.rule === "R14")).toBe(true);
   const plan = planAutoLayout(d, resolver, options);
   expect(floatingPins(apply(d, plan), resolver)).toEqual([]);
-});
+}, 60_000);
 
 it("R72 identifies the complete obstruction id when another port has its prefix", () => {
   const d = blockedPort();

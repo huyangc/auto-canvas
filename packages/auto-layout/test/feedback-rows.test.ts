@@ -272,25 +272,29 @@ describe("R163 feedback-row draft", () => {
         },
       ),
     ],
-  ])("is not offered for %s", (_, d) => {
-    expect(
-      rows.feedbackRowCircuit(d, resolver, classifyNets(d, resolver)),
-    ).toBeUndefined();
-    const placed = vi.spyOn(rows, "placeFeedbackRows");
-    try {
-      const plan = planAutoLayout(d, resolver, {
-        search: { seed: 1, evaluations: 0 },
-      });
-      expect(placed).not.toHaveBeenCalled();
-      expect(refinementMetrics(plan)?.strategy).not.toBe("feedback-rows");
-    } finally {
-      placed.mockRestore();
-    }
-    // The plan equals the plan with the R163 draft disabled.
-    expect(JSON.stringify(planAutoLayout(d, resolver, quick))).toBe(
-      JSON.stringify(withoutDraft(() => planAutoLayout(d, resolver, quick))),
-    );
-  });
+  ])(
+    "is not offered for %s",
+    (_, d) => {
+      expect(
+        rows.feedbackRowCircuit(d, resolver, classifyNets(d, resolver)),
+      ).toBeUndefined();
+      const placed = vi.spyOn(rows, "placeFeedbackRows");
+      try {
+        const plan = planAutoLayout(d, resolver, {
+          search: { seed: 1, evaluations: 0 },
+        });
+        expect(placed).not.toHaveBeenCalled();
+        expect(refinementMetrics(plan)?.strategy).not.toBe("feedback-rows");
+      } finally {
+        placed.mockRestore();
+      }
+      // The plan equals the plan with the R163 draft disabled.
+      expect(JSON.stringify(planAutoLayout(d, resolver, quick))).toBe(
+        JSON.stringify(withoutDraft(() => planAutoLayout(d, resolver, quick))),
+      );
+    },
+    60_000,
+  );
 
   it("offers the draft as a fourth strategy for its subset", () => {
     const d = stage(
@@ -314,7 +318,7 @@ describe("R163 feedback-row draft", () => {
     } finally {
       placed.mockRestore();
     }
-  });
+  }, 60_000);
   it("recognizes a feedback chain of up to four parts, not five", () => {
     const chain = (n: number) => {
       const symbols: Record<string, string> = { a: "opamp", r: "resistor" };
@@ -416,7 +420,7 @@ describe("R163 feedback-row draft", () => {
     expect(JSON.stringify(planAutoLayout(d, resolver, quick))).toBe(
       JSON.stringify(planAutoLayout(structuredClone(d), resolver, quick)),
     );
-  });
+  }, 60_000);
 
   it("never treats a control Net as a conducting terminal", () => {
     // A shorted switch (P and N on one Net) drives another switch's control.

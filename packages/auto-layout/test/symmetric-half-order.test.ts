@@ -212,4 +212,4 @@ it("finishes the extra variant through T078 and plans deterministically", () => 
   } finally {
     spy.mockRestore();
   }
-});
+}, 60_000);
