@@ -110,6 +110,25 @@ export function missingConnections(
   );
 }
 
+/** R14a: the Nets `missingConnections` counts, named, so a refusal message can
+ * point at them. Same component rule, so the two never disagree. */
+export function unconnectedNetIds(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+): string[] {
+  const components = new Map<string, Set<string>>();
+  for (const pin of connectionPins(document, resolver)) {
+    if (!pin.netId) continue;
+    const group = components.get(pin.netId) ?? new Set<string>();
+    group.add(pin.component);
+    components.set(pin.netId, group);
+  }
+  return [...components]
+    .filter(([, group]) => group.size > 1)
+    .map(([netId]) => netId)
+    .sort();
+}
+
 /** R43: logical membership alone does not draw a connection to another pin. */
 export function floatingPins(
   document: SchematicDocument,

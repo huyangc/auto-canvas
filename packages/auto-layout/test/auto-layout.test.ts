@@ -235,6 +235,20 @@ it("stands a grounded shunt with horizontal pins vertically", () => {
     },
     { a: ["v.+", "r.1"], k: ["r.2", "d.A"], z: ["v.-", "d.K", "g1.0", "g2.0"] },
   );
+  // Two ground markers on one un-named Net are two physical components of one
+  // Base Net, so the finished plan has one unconnected Net (measured on main:
+  // missing 1, floating 0 — the markers are not floating, they are split).
+  // T141 refuses to deliver that. The claim names the Net, as a real drawing
+  // does, and the plan is clean again.
+  document.connectivityEvidence.push({
+    id: "z-claim",
+    kind: "name-claim",
+    name: "0",
+    netId: "z",
+    scope: "global",
+    powerDomain: "ground",
+    owner: { kind: "power-marker", objectId: "g1" },
+  });
   const plan = planAutoLayout(document, resolver);
   expect(plan.diagnostics).toEqual([]);
   const result = commit(document, plan.edits);

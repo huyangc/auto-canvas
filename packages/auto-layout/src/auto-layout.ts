@@ -98,6 +98,7 @@ import {
   auditRouting,
   floatingPins,
   missingConnections,
+  unconnectedNetIds,
 } from "./routing-audit.js";
 import { classifyNets, isMos, type NetRoles } from "./net-roles.js";
 import { directedPins } from "./directed-blocks.js";
@@ -195,14 +196,126 @@ interface LevelOptions extends AutoLayoutOptions {
 /** T079: the attachment variant is finished only for small documents. */
 const ATTACHMENT_VARIANT_MAX_INSTANCES = 24;
 
+/** R10 (T141): the drawing rejoined every Net's physical components and left
+ * no pin floating. A finished plan that fails this is a defect, not a score. */
+export function connectionsIntact(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+): boolean {
+  return (
+    missingConnections(document, resolver) === 0 &&
+    floatingPins(document, resolver).length === 0
+  );
+}
+
+/** The Document a finished result would deliver, when its edits replay. */
+function finishedDocument(
+  source: SchematicDocument,
+  resolver: SymbolResolver,
+  result: AutoLayoutResult,
+): SchematicDocument | undefined {
+  if (result.diagnostics.some((d) => d.severity === "error")) return undefined;
+  const replay = preview(source, resolver, result.edits);
+  return replay.ok ? replay.document : undefined;
+}
+
+function intactFinished(
+  source: SchematicDocument,
+  resolver: SymbolResolver,
+  result: AutoLayoutResult,
+): boolean {
+  const document = finishedDocument(source, resolver, result);
+  return !!document && connectionsIntact(document, resolver);
+}
+
+/** R10 (T141): an intact finished plan wins over a defective one whatever the
+ * scores say. Two intact plans are left to the caller's own ranking. */
+export function preferIntact(
+  source: SchematicDocument,
+  resolver: SymbolResolver,
+  chosen: AutoLayoutResult,
+  alternative: AutoLayoutResult | undefined,
+): AutoLayoutResult {
+  if (!alternative || alternative === chosen) return chosen;
+  if (intactFinished(source, resolver, chosen)) return chosen;
+  return intactFinished(source, resolver, alternative) ? alternative : chosen;
+}
+
+/** R10 (T141): a reroute may not drop a connection its incumbent drew. */
+export function keepIntactReroute(
+  source: SchematicDocument,
+  resolver: SymbolResolver,
+  before: AutoLayoutResult,
+  after: AutoLayoutResult,
+): AutoLayoutResult {
+  if (after === before) return after;
+  // A defective incumbent protects nothing; the final gate decides.
+  if (!intactFinished(source, resolver, before)) return after;
+  return intactFinished(source, resolver, after) ? after : before;
+}
+
+/** R10 (T141): nobody ships a pin the router never connected. A plan whose
+ * finished Document still has an undrawn connection is refused, and the
+ * unrouted warnings stay on the refusal so the cause reads. */
+function refuseUnconnected(
+  source: SchematicDocument,
+  resolver: SymbolResolver,
+  result: AutoLayoutResult,
+): AutoLayoutResult {
+  const document = finishedDocument(source, resolver, result);
+  if (!document || connectionsIntact(document, resolver)) return result;
+  const missing = missingConnections(document, resolver);
+  const pins = [
+    ...new Set(
+      floatingPins(document, resolver).map(
+        (p) => `${p.instanceId}.${p.pinName}`,
+      ),
+    ),
+  ].sort(compareIds);
+  // A Net split into components that each look routed produces no floating
+  // pin, so name the Nets themselves — otherwise the message says only
+  // "1 unconnected Net" and a user cannot act on it.
+  const splitNets = unconnectedNetIds(document, resolver);
+  const detail = [
+    ...(missing
+      ? [
+          `${missing} unconnected Net${missing === 1 ? "" : "s"}${
+            splitNets.length ? `: ${splitNets.join(", ")}` : ""
+          }`,
+        ]
+      : []),
+    ...(pins.length ? [`floating pins: ${pins.join(", ")}`] : []),
+  ].join("; ");
+  return {
+    edits: [],
+    groups: result.groups,
+    diagnostics: [
+      {
+        severity: "error",
+        code: "AUTO_LAYOUT_CONNECTION_REFUSED",
+        rule: "R10",
+        message: `R10: the finished layout leaves connections undrawn (${detail}); a plan is not delivered with an unconnected pin.`,
+      },
+      ...result.diagnostics.filter((d) => d.severity !== "error"),
+    ],
+  };
+}
+
 export function planAutoLayout(
   document: SchematicDocument,
   resolver: SymbolResolver,
   options: AutoLayoutOptions = {},
 ): AutoLayoutResult {
-  if (options.presentation === "netlist")
-    return planNetlistPresentation(document, resolver, options);
-  return planDocument(document, resolver, options);
+  // T141: these edits are the ones a caller commits, so the connection gate
+  // is measured on the document they actually deliver. R165 prepends its rail
+  // symbols here, after the finishing pipeline has chosen its plan.
+  return refuseUnconnected(
+    document,
+    resolver,
+    options.presentation === "netlist"
+      ? planNetlistPresentation(document, resolver, options)
+      : planDocument(document, resolver, options),
+  );
 }
 
 /** R165: plan the Document with its rail symbols, as one transaction. */
@@ -303,19 +416,30 @@ function selectFinalLayout(
     options.quality === "optimized" ||
     stopped()
       ? best
-      : recoverDraftingOwners(document, resolver, best, stopped);
+      : // T141: a repaired drawing never trades an intact plan for a broken one.
+        preferIntact(
+          document,
+          resolver,
+          recoverDraftingOwners(document, resolver, best, stopped),
+          best,
+        );
   if (!finalists) return recover();
   for (const kind of rankedFinalists(finalists, resolver)) {
     if (!finalists.available.has(kind) || stopped()) continue;
     finalists.alternate = kind;
     const candidate = finish();
     if (stopped()) return best;
-    best = selectFinishedLayout(
+    best = preferIntact(
       document,
       resolver,
-      best,
+      selectFinishedLayout(
+        document,
+        resolver,
+        best,
+        candidate,
+        options.partition,
+      ),
       candidate,
-      options.partition,
     );
   }
   return recover();
@@ -697,14 +821,19 @@ function planWithBranches(
               followDraftingLabels(
                 captionSource,
                 resolver,
-                rerouteCrossings(
+                keepIntactReroute(
                   document,
                   resolver,
                   result,
-                  () =>
-                    !!options.search?.signal?.aborted ||
-                    (options.search?.deadline !== undefined &&
-                      Date.now() >= options.search.deadline),
+                  rerouteCrossings(
+                    document,
+                    resolver,
+                    result,
+                    () =>
+                      !!options.search?.signal?.aborted ||
+                      (options.search?.deadline !== undefined &&
+                        Date.now() >= options.search.deadline),
+                  ),
                 ),
               ),
               options,
@@ -1471,41 +1600,58 @@ function planAutoLayoutMeasured(
       }
       return searched;
     };
-    const baseline = selectFinished();
+    // T141: the search's finished candidate wins only when it keeps every
+    // connection the quicker finished candidate already drew.
+    const baseline = preferIntact(
+      document,
+      resolver,
+      selectFinished(),
+      quickResult,
+    );
     if (options.partition) {
       // A fixed placement keeps every block and its relative floorplan intact.
       return options.quality === "optimized" && search.evaluations > 0
-        ? rerouteCrossings(document, resolver, baseline, stopped)
+        ? keepIntactReroute(
+            document,
+            resolver,
+            baseline,
+            rerouteCrossings(document, resolver, baseline, stopped),
+          )
         : baseline;
     }
     const result =
       search.evaluations <= 0 || stopped()
         ? baseline
-        : reroutePortfolio(
+        : keepIntactReroute(
             document,
             resolver,
             baseline,
-            [...runs.values()].filter(
-              (run) =>
-                (chosen.portfolio !== ranked ||
-                  !isStackStrategy(run.strategy)) &&
-                (portfolio !== chosen.portfolio ||
-                  run.strategy !== "convention"),
+            reroutePortfolio(
+              document,
+              resolver,
+              baseline,
+              [...runs.values()].filter(
+                (run) =>
+                  (chosen.portfolio !== ranked ||
+                    !isStackStrategy(run.strategy)) &&
+                  (portfolio !== chosen.portfolio ||
+                    run.strategy !== "convention"),
+              ),
+              fixed.size || document.instances.length > 40 ? 0 : 2,
+              stopped,
+              (run, strategy) => {
+                const trial = compact(run, strategy, true);
+                return finalizeFacing(
+                  document,
+                  resolver,
+                  options,
+                  withDraftingTranslation(
+                    { ...trial.result },
+                    draftingTranslation(trial.result),
+                  ),
+                );
+              },
             ),
-            fixed.size || document.instances.length > 40 ? 0 : 2,
-            stopped,
-            (run, strategy) => {
-              const trial = compact(run, strategy, true);
-              return finalizeFacing(
-                document,
-                resolver,
-                options,
-                withDraftingTranslation(
-                  { ...trial.result },
-                  draftingTranslation(trial.result),
-                ),
-              );
-            },
           );
     if (
       stopped() ||
@@ -1532,15 +1678,20 @@ function planAutoLayoutMeasured(
         false,
         policy,
       );
-    const contactResult = searchPinContacts(
+    const contactResult = preferIntact(
       document,
       resolver,
-      options,
+      searchPinContacts(
+        document,
+        resolver,
+        options,
+        result,
+        strategy,
+        fixed.size,
+        stopped,
+        replan,
+      ),
       result,
-      strategy,
-      fixed.size,
-      stopped,
-      replan,
     );
     if (
       !options.partition &&
@@ -1689,12 +1840,17 @@ function planAutoLayoutMeasured(
           ),
         ),
       );
-      const routed = rerouteRailCrossings(
+      const routed = keepIntactReroute(
         document,
         resolver,
         railed.result,
-        stopped,
-        finishLabels,
+        rerouteRailCrossings(
+          document,
+          resolver,
+          railed.result,
+          stopped,
+          finishLabels,
+        ),
       );
       const final = preview(document, resolver, routed.edits);
       if (!final.ok) return routed;
