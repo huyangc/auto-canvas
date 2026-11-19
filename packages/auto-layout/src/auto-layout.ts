@@ -1557,9 +1557,13 @@ function planAutoLayoutMeasured(
       // T141: integrity outranks the score here too. `compareCompleteness`
       // above 40 instances declines to rank, so without this the cheaper
       // quick result would win over a clean searched one and the outer gate
-      // would then refuse a plan that could have been delivered.
+      // would then refuse a plan that could have been delivered. A searched
+      // result that failed the finishing pipeline carries no edits, and
+      // `preview` then replays as the *input* document — so judge its own
+      // diagnostics first, or an intact input would be read as a clean plan.
       if (
         before.ok &&
+        !searched.diagnostics.some((d) => d.severity === "error") &&
         !connectionsIntact(before.document, resolver) &&
         connectionsIntact(after.document, resolver)
       )
