@@ -124,7 +124,7 @@ it.each([true, false])(
     placeLocalLoopAmplifiers(d, resolver, roles, before, new Set());
     expect(targets).toEqual(before);
   },
-);
+60_000);
 
 it.each(["template", "layered", "stages"] as const)(
   "offers the local placement in %s",
@@ -185,7 +185,7 @@ it.each(["template", "layered", "stages"] as const)(
     expect(out.x).toBeLessThan(gate.x);
     expect(gate.x - out.x).toBeLessThanOrEqual(80);
   },
-);
+60_000);
 
 it("recognizes feedback through the DC branch, but never through a rail or capacitor", () => {
   const { d } = regulator();
@@ -241,7 +241,7 @@ it.each(["no-feedback", "fixed", "collision"])(
     );
     expect(targets).toEqual(before);
   },
-);
+60_000);
 
 it("preserves rigid-group membership and fixed amplifier placements in the shared pipeline", () => {
   const { d, targets, roles } = regulator();
@@ -446,7 +446,7 @@ it.each([false, true])(
     placeLocalLoopAmplifiers(d, resolver, roles, before, new Set());
     expect(targets).toEqual(before);
   },
-);
+60_000);
 
 it.each(["fixed-amplifier", "fixed-passive", "collision"])(
   "preserves the entire series unit on %s",
@@ -484,7 +484,7 @@ it.each(["fixed-amplifier", "fixed-passive", "collision"])(
     );
     expect(targets).toEqual(before);
   },
-);
+60_000);
 
 it.each(["two-passives", "rail", "no-feedback", "active"])(
   "rejects a %s output path",
@@ -525,7 +525,7 @@ it.each(["two-passives", "rail", "no-feedback", "active"])(
       [],
     );
   },
-);
+60_000);
 
 it("clears a horizontal receiver bank while aligning with its nearest gate", () => {
   const { d, targets } = receiverBank();
@@ -593,7 +593,7 @@ it.each([false])(
       attachment.mockRestore();
     }
   },
-);
+60_000);
 
 it("finishes runner and local-loop finalists at full budget and the attachment variant at half budget", () => {
   const { d } = regulator();

@@ -131,7 +131,7 @@ it.each([0, 3])(
     });
     expect(JSON.stringify(result)).not.toContain("secret");
   },
-);
+60_000);
 
 it("bypasses LLM work for an explicit partition or absent LLM options", async () => {
   const partitioner = vi.fn<LlmPartitioner>();

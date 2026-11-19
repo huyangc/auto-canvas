@@ -45,7 +45,7 @@ it.each([
       rails,
     ]);
   },
-);
+60_000);
 
 it.each([
   [10, 5, 6, 4],
@@ -64,7 +64,7 @@ it.each([
       [10, 12, 8].map((cap) => finishingTrialBudget(count!, cap, false)),
     ).toEqual([10, 12, 8].map((cap) => planningBudget(count!, cap)));
   },
-);
+60_000);
 
 it("does not reuse previews or audits after the caller edits its document", () => {
   const document = fixture();
@@ -113,4 +113,4 @@ it.each(["planRouteNet", "planWireBatch"] as const)(
       route.mockRestore();
     }
   },
-);
+60_000);

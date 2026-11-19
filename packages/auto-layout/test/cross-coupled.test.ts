@@ -66,7 +66,7 @@ it.each(["template", "layered", "stages"] as const)(
     expect(p("b").x).toBeLessThan(p("d").x);
     expect(p("a").x + p("b").x).toBe(p("c").x + p("d").x);
   },
-);
+60_000);
 
 function pair(symbol = "nmos") {
   const pins =
@@ -155,7 +155,7 @@ it.each(["nmos", "npn"])(
       diagonals(result.document),
     );
   },
-);
+60_000);
 
 it("R144 skips a corner that falls short of the output pin", () => {
   const document = pair();

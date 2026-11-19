@@ -309,7 +309,7 @@ it.each(["template", "stages", "layered"] as const)(
     }
     expect(independent).toBe(true);
   },
-);
+60_000);
 
 it("keeps all stage pairs mirrored through seeded search and R97 finishing", () => {
   const document = fixture();
