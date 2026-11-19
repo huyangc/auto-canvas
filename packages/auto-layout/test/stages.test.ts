@@ -448,7 +448,8 @@ it.each(["ground", "supply"] as const)(
       span(before) + d.presentation.grid,
     );
   },
-60_000);
+  60_000,
+);
 
 it.each(["ground", "supply"] as const)(
   "R59 keeps the rail escape of each attached shunt clear toward %s",
@@ -492,7 +493,8 @@ it.each(["ground", "supply"] as const)(
     }
     expect(geometryProblem(placed, resolver)).toBeUndefined();
   },
-60_000);
+  60_000,
+);
 
 it("R60 keeps series switches out of channel stages", () => {
   const d = withRails(

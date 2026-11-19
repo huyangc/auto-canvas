@@ -96,7 +96,8 @@ it.each(["capacitor", "resistor"])(
     seatNodeAttachments(d, resolver, roles, old, new Set(["load"]));
     expect(targets).toEqual(old);
   },
-60_000);
+  60_000,
+);
 
 it("places a bridge between the two nodes of one host", () => {
   const d = circuit(
@@ -228,7 +229,8 @@ it.each(["fixed", "template", "group", "symmetry"])(
     expect(next.placements.get("part")).toEqual(base.placements.get("part"));
     expect(next.placements.get("load")).toEqual(base.placements.get("load"));
   },
-60_000);
+  60_000,
+);
 
 it("rejects a worse finished attachment finalist and repeats deterministically", () => {
   const { d } = fixture();

@@ -97,7 +97,8 @@ it.each(["template", "layered", "stages"] as const)(
     expect(pin("diode", "A").x).toBeGreaterThan(pin("mos", "D").x);
     expect(pin("diode", "A").x - pin("mos", "D").x).toBeLessThanOrEqual(100);
   },
-60_000);
+  60_000,
+);
 
 it("R69 breaks multiple-host ties by id and uses device descriptors", () => {
   const d = circuit(
@@ -137,7 +138,8 @@ it.each(["template", "layered", "stages"] as const)(
     expect(pin("driver", "D").x).toBeLessThan(pin("host", "G").x);
     expect(pin("host", "G").x - pin("driver", "D").x).toBeLessThanOrEqual(100);
   },
-60_000);
+  60_000,
+);
 
 it("R70 leaves a blocked driver untouched and rejects multiple receivers", () => {
   const d = driver();
@@ -203,7 +205,8 @@ it.each([false, true])(
       geometryProblem(withPlacements(d, targets), resolver),
     ).toBeUndefined();
   },
-60_000);
+  60_000,
+);
 
 it.each(["template", "layered", "stages"] as const)(
   "R66 never splits a parallel unit in %s",
@@ -249,7 +252,8 @@ it.each(["template", "layered", "stages"] as const)(
     }
     expect(accepted).toBeGreaterThan(5);
   },
-60_000);
+  60_000,
+);
 
 it("R68–R71 stay deterministic and replay as a connectivity-preserving transaction", () => {
   const d = driver(),
@@ -307,7 +311,8 @@ it.each([0, 90, 180, 270] as const)(
       geometryProblem(withPlacements(d, targets), resolver),
     ).toBeUndefined();
   },
-60_000);
+  60_000,
+);
 
 it("R69 seats a free attachment beside a fixed host without moving it", () => {
   const d = parallel();

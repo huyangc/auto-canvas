@@ -290,7 +290,8 @@ it.each([true, false])(
     expect(history.document.routes).toEqual(document.routes);
     expect(history.canUndo).toBe(false);
   },
-60_000);
+  60_000,
+);
 
 it("centres two recognized differential pairs over their shared tail", () => {
   const document = circuit(
@@ -706,7 +707,8 @@ it.each([true, false])(
     ).toBe(true);
     expect(planAutoLayout(after, resolver).edits).toEqual([]);
   },
-60_000);
+  60_000,
+);
 
 it.each(["supply", "ground"] as const)(
   "R26 preserves a singleton %s claim and label on a replacement stub",
@@ -798,7 +800,8 @@ it.each(["supply", "ground"] as const)(
     });
     expect(auditRouting(after, resolver).problems).toEqual([]);
   },
-60_000);
+  60_000,
+);
 
 it("never draws a fallback stub through the obstacle that blocked the net", () => {
   const document = obstructedTrunk(true, [800, 270]);
@@ -1293,7 +1296,8 @@ it.each(["ground", "supply"] as const)(
       ).toBe(1);
     }
   },
-60_000);
+  60_000,
+);
 
 it("counts singleton physical pins despite a wire stub, excluding bulk and true singleton Nets", () => {
   const document = circuit(

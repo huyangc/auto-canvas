@@ -86,4 +86,5 @@ it.each([
     expect(after.junctions).toEqual([]);
     expect(after.routes).toHaveLength(1);
   },
-60_000);
+  60_000,
+);

@@ -87,7 +87,8 @@ it.each([false, true])(
     expect(document).toEqual(snapshot);
     expect(run(document).result).toEqual(result);
   },
-60_000);
+  60_000,
+);
 
 it("R147 rejects a pose blocked by another unit", () => {
   const document = fixture();
@@ -174,7 +175,8 @@ it.each(["fixed", "group", "constraint"] as const)(
         document.instances.map((i) => i.placement),
       );
   },
-60_000);
+  60_000,
+);
 
 it("R147 stays out of optimized, zero-budget and partition planning", () => {
   const search = vi.spyOn(relocation, "searchDeviceRelocations");

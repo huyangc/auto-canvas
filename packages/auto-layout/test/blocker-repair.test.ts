@@ -188,7 +188,8 @@ it.each(["port", "ground"])(
     expect(planAutoLayout(d, resolver, options)).toEqual(plan);
     expect(d).toEqual(snapshot);
   },
-60_000);
+  60_000,
+);
 
 it("R72 keeps a repair that routes a Net even when it adds a crossing", () => {
   const d = blockedPort(240),
@@ -303,7 +304,8 @@ it.each(["improved", "equal"] as const)(
     expect(attempts).toBe(1);
     expect(selected).toBe(completeness === "improved" ? repaired : initial);
   },
-60_000);
+  60_000,
+);
 
 it("R72 respects fixed blocker ids and resolves ids with punctuation", () => {
   const d = blockedGround();

@@ -157,7 +157,8 @@ it.each([
     );
     expect(apply(d).result).toEqual(result);
   },
-60_000);
+  60_000,
+);
 
 it("R150 keeps unowned and locked ink fixed when undoing R10", () => {
   const d = fixture();
@@ -323,7 +324,8 @@ it.each(["object", "layoutGroup", "constraint"])(
     expect(draftingGroups(d, resolver)).toEqual([]);
     expect(apply(d).final.drafting).toEqual(d.drafting);
   },
-60_000);
+  60_000,
+);
 
 it("R150 keeps an arrow and touching text together beside their wire", () => {
   const d = fixture();

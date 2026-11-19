@@ -285,7 +285,8 @@ it.each(["layered", "stages", "template"] as const)(
       geometryProblem(withPlacements(d, result.placements), resolver),
     ).toBeUndefined();
   },
-60_000);
+  60_000,
+);
 for (const variant of ["cross-linked", "mirrored"] as const)
   it.each(["layered", "stages", "template"] as const)(
     `keeps ${variant} blocks rigid across rows in %s`,
@@ -665,7 +666,8 @@ it.each([false, true])(
     d.nets.reverse();
     expect(topology().components).toEqual(result.components);
   },
-60_000);
+  60_000,
+);
 
 const passiveFixture = (symbolId: string, leftPin = "1", rightPin = "2") =>
   circuit(
@@ -787,7 +789,8 @@ it.each(["resistor", "capacitor", "inductor"])(
       };
     expect(detect(d)).toEqual(components);
   },
-60_000);
+  60_000,
+);
 
 it("leaves an unpaired resistor and a resistor across mirrored Nets outside", () => {
   const d = passiveFixture("resistor");
@@ -975,7 +978,8 @@ it.each(["layered", "stages", "template"] as const)(
     expect(gap).toBeGreaterThanOrEqual(40);
     expect(gap).toBeLessThan(40 + d.presentation.grid);
   },
-60_000);
+  60_000,
+);
 
 it.each(["layered", "stages", "template"] as const)(
   "keeps 40 units between an axis device and the pairs in its row in %s",
@@ -1028,4 +1032,5 @@ it.each(["layered", "stages", "template"] as const)(
     }
     expect(checked).toBeGreaterThan(0);
   },
-60_000);
+  60_000,
+);
