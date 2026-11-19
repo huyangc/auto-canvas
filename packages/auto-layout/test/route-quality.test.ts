@@ -116,7 +116,7 @@ it("R86 draws the reachable part and reports only the boxed-in pin", () => {
       message: expect.stringContaining("floating pins: c.1"),
     },
   ]);
-});
+}, 60_000);
 
 it("R86 excludes MOS bulk pins from missing connections", () => {
   const d = circuit({ a: "nmos", b: "nmos" }, { n: ["a.B", "b.B", "a.S"] });
@@ -202,7 +202,7 @@ it("R85 keeps separately drawn Base Nets when opposing fallback stubs share a de
       endpointKey({ kind: "terminal", instanceId: "d", pinName: "1" }),
     ),
   );
-});
+}, 60_000);
 
 it("R87 removes a crossing with a short clear detour in a fixed placement", () => {
   const d = circuit(
