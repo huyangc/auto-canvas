@@ -92,9 +92,11 @@ it("R66 keeps the byte-identical pre-search quick result", () => {
   expect(
     auditRouting(commit(document, result), resolver).crossings,
   ).toBeLessThanOrEqual(1);
+  // R169: the record moved because the quick plan no longer reflects op-amp
+  // `b` (it was rot 0 + vertical, its inputs swapped); crossings are still 1.
   expect(
     createHash("sha256").update(JSON.stringify(result)).digest("hex"),
-  ).toBe("14dbaf27c09841f867c996680d1a51d6c9a03f186bc71ee0358bb5a45ad955da");
+  ).toBe("dc17a18f26ea539151b06e4ff15d70e8035736374d01c5ced01674f60603fe29");
   expect(
     planAutoLayout(document, resolver, { search: { seed: 3, evaluations: 0 } }),
   ).toEqual(result);

@@ -748,7 +748,9 @@ it.each(cases)(
       vertical(shunt!, "1", "2");
     }
     if (fixture.id === "two-stage-symbolic") {
-      expect(pin("X7", "IN+").y).toBeLessThan(pin("X7", "IN-").y);
+      // R169: the op-amp keeps its symbol's own input order (IN- above IN+),
+      // where the planner used to reflect it to save wire.
+      expect(pin("X7", "IN-").y).toBeLessThan(pin("X7", "IN+").y);
       expect(placed("X7").position.x).toBeLessThan(placed("X8").position.x);
       expect(placed("X7").position.y).toBe(placed("X8").position.y);
       expect(placed("P12").position.x).toBeGreaterThan(placed("X8").position.x);

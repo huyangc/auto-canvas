@@ -104,6 +104,7 @@ import { classifyNets, isMos, type NetRoles } from "./net-roles.js";
 import { directedPins } from "./directed-blocks.js";
 import { samePin } from "./pin-contacts.js";
 import { placeDocument } from "./place.js";
+import { enforceOrder } from "./polarity-order.js";
 import {
   compareIds,
   recognizeStructures,
@@ -2386,6 +2387,42 @@ function buildPlan(
         },
       ],
     };
+  // R169: the emit choke. The placement map every path hands to the edit
+  // writer — a draft, a supplied `given`, or the `exact` seats a relocation
+  // replan carries — passes here, and a block whose pose reverses its
+  // symbol's input order is put back in order, keeping its output exit
+  // direction. This one site is what fixes all 37 reversing cases; the
+  // producer sites stay untouched. A fixed or locked instance keeps its pose:
+  // that one is the user's, not the planner's.
+  const owned = new Set(options.fixedInstanceIds ?? []);
+  for (const owner of [...document.layoutGroups, ...document.constraints])
+    if (owner.locked) for (const id of owner.objectIds) owned.add(id);
+  const reordered = new Map(result.placements);
+  const moved = enforceOrder(
+    document.instances.filter((i) => !owned.has(i.id)),
+    resolver,
+    reordered,
+  );
+  // The choke runs after the only geometry check in the pipeline, and for a
+  // symbol whose `+`/`-` art is not mirror-symmetric about its origin a pose
+  // change can move the ink. Keep the rewrite only when the geometry the
+  // earlier stage approved still holds; the built-in catalog always passes.
+  const chokeProblem =
+    moved &&
+    (contacts
+      ? (d: SchematicDocument, r: SymbolResolver) =>
+          contactGeometryProblem(d, r, contacts)
+      : geometryProblem)(
+      {
+        ...document,
+        instances: document.instances.map((i) => ({
+          ...i,
+          placement: reordered.get(i.id) ?? i.placement,
+        })),
+      },
+      resolver,
+    );
+  if (moved && !chokeProblem) result.placements = reordered;
   // Once placement is resolved, strategy/overrides no longer affect routing.
   // Choices and side-row membership remain those of this particular caller.
   const key =
