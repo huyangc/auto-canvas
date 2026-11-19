@@ -65,12 +65,18 @@ keep this task's diff at the emit point.
 ## Acceptance results
 
 ```text
-pnpm --filter @icm/auto-layout test → exit 0
+npx vitest run packages/auto-layout/test → exit 0
   Test Files  75 passed (75)
-  Tests       1110 passed (1110)
+  Tests       1111 passed (1111), 0 skipped
 pnpm typecheck → exit 0 (tsc -p tsconfig.check.json --noEmit, no output)
 pnpm format:check → exit 0 (All matched files use Prettier code style!)
+pnpm lint → exit 0 (oxlint, 0 errors)
+pnpm test:slow → exit 0 (2 files, 8 tests, 55.5 s)
 ```
+
+Note: `packages/auto-layout/package.json` has only a `build` script, so
+`pnpm --filter @icm/auto-layout test` matches nothing and exits 0 with no
+output — it is not a test run. Use the `npx vitest` command above.
 
 Corpus, 628 cases, before = `fcd8fc4`, after = this branch:
 
