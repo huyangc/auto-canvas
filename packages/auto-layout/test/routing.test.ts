@@ -231,7 +231,7 @@ it.each([true, false])(
         severity: "error",
         code: "AUTO_LAYOUT_CONNECTION_REFUSED",
         rule: "R10",
-        message: expect.stringContaining("unconnected Net"),
+        message: expect.stringContaining("undrawn connection"),
       },
     ]);
     const plan = planWithSeriesLevels(

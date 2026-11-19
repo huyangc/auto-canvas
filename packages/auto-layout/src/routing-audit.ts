@@ -50,11 +50,13 @@ function computeConnectionPins(
   );
 }
 
-/** R86: connections still needed to join each Base Net's physical components. */
-export function missingConnections(
+/** R86: each Base Net's physical components, after T071's marker-name merge.
+ * `missingConnections` and R14a's message both derive from this one map, so a
+ * count and the names it is paired with can never disagree. */
+function netComponents(
   document: SchematicDocument,
   resolver: SymbolResolver,
-): number {
+): Map<string, Set<string>> {
   const components = new Map<string, Set<string>>();
   const pins = connectionPins(document, resolver);
   for (const pin of pins) {
@@ -104,29 +106,32 @@ export function missingConnections(
       ),
     );
   }
-  return [...components.values()].reduce(
+  return components;
+}
+
+/** R86: connections still needed to join each Base Net's physical components. */
+export function missingConnections(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+): number {
+  return [...netComponents(document, resolver).values()].reduce(
     (sum, group) => sum + Math.max(0, group.size - 1),
     0,
   );
 }
 
-/** R14a: the Nets `missingConnections` counts, named, so a refusal message can
- * point at them. Same component rule, so the two never disagree. */
-export function unconnectedNetIds(
+/** R14a: the split Nets, with the connection count each contributes, so a
+ * refusal message can name them and still state a number that matches. */
+export function unconnectedNets(
   document: SchematicDocument,
   resolver: SymbolResolver,
-): string[] {
-  const components = new Map<string, Set<string>>();
-  for (const pin of connectionPins(document, resolver)) {
-    if (!pin.netId) continue;
-    const group = components.get(pin.netId) ?? new Set<string>();
-    group.add(pin.component);
-    components.set(pin.netId, group);
-  }
-  return [...components]
-    .filter(([, group]) => group.size > 1)
-    .map(([netId]) => netId)
-    .sort();
+): { netId: string; count: number }[] {
+  return [...netComponents(document, resolver)]
+    .flatMap(([netId, group]) => {
+      const count = Math.max(0, group.size - 1);
+      return count ? [{ netId, count }] : [];
+    })
+    .sort((a, b) => (a.netId < b.netId ? -1 : a.netId > b.netId ? 1 : 0));
 }
 
 /** R43: logical membership alone does not draw a connection to another pin. */

@@ -98,7 +98,7 @@ import {
   auditRouting,
   floatingPins,
   missingConnections,
-  unconnectedNetIds,
+  unconnectedNets,
 } from "./routing-audit.js";
 import { classifyNets, isMos, type NetRoles } from "./net-roles.js";
 import { directedPins } from "./directed-blocks.js";
@@ -274,14 +274,18 @@ function refuseUnconnected(
   ].sort(compareIds);
   // A Net split into components that each look routed produces no floating
   // pin, so name the Nets themselves — otherwise the message says only
-  // "1 unconnected Net" and a user cannot act on it.
-  const splitNets = unconnectedNetIds(document, resolver);
+  // "1 unconnected Net" and a user cannot act on it. The names and the count
+  // come from the same derivation `missingConnections` uses, so they agree.
+  const splitNets = unconnectedNets(document, resolver);
   const detail = [
-    ...(missing
+    ...(splitNets.length
       ? [
-          `${missing} unconnected Net${missing === 1 ? "" : "s"}${
-            splitNets.length ? `: ${splitNets.join(", ")}` : ""
-          }`,
+          `${missing} undrawn connection${missing === 1 ? "" : "s"}: ` +
+            splitNets
+              .map(({ netId, count }) =>
+                count === 1 ? netId : `${netId} (${count})`,
+              )
+              .join(", "),
         ]
       : []),
     ...(pins.length ? [`floating pins: ${pins.join(", ")}`] : []),

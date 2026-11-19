@@ -148,7 +148,7 @@ describe("T141 connection acceptance", () => {
         code: "AUTO_LAYOUT_CONNECTION_REFUSED",
         rule: "R10",
         message: expect.stringMatching(
-          /^R10: the finished layout leaves connections undrawn \(1 unconnected Net: n; floating pins: c\.1\)/u,
+          /^R10: the finished layout leaves connections undrawn \(1 undrawn connection: n; floating pins: c\.1\)/u,
         ),
       },
     ]);
@@ -189,7 +189,7 @@ describe("T141 connection acceptance", () => {
       rule: "R10",
     });
     // The message names the split Net even though no pin floats.
-    expect(errors[0]!.message).toMatch(/1 unconnected Net: z/u);
+    expect(errors[0]!.message).toMatch(/1 undrawn connection: z/u);
     expect(errors[0]!.message).not.toMatch(/floating pins/u);
     expect(plan.edits).toEqual([]);
   }, 60_000);
