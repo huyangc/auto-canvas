@@ -2,7 +2,7 @@ import { expect, it } from "vitest";
 import { deriveElectricalTopologyProjection, endpointKey } from "@icm/derived";
 import { executeTransaction } from "@icm/edit-engine";
 import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
-import { planAutoLayout } from "../src/auto-layout.js";
+import { planAutoLayout, planWithSeriesLevels } from "../src/auto-layout.js";
 import { placement } from "../src/geometry.js";
 import { emptyChoices } from "../src/layout-choices.js";
 import { routedScore } from "../src/refine.js";
@@ -40,11 +40,23 @@ function boxed() {
   });
   return d;
 }
+/**
+ * R86/R85 are finishing rules; T141's delivery gate is asserted separately.
+ *
+ * The inner call is deliberate **only** for the fixtures whose finished plan
+ * carries a defect (R86 boxed, R85): the public entry refuses those, so the
+ * finishing rule could not be observed otherwise, and each of those two tests
+ * asserts the refusal separately. The fixtures whose plan is clean (R86 tree,
+ * R87) go through `planAutoLayout`, so the public delivery path stays covered.
+ */
 function commit(
   d: ReturnType<typeof circuit>,
   fixed = new Set(d.instances.map((i) => i.id)),
+  inner = true,
 ) {
-  const plan = planAutoLayout(d, resolver, { fixedInstanceIds: fixed });
+  const plan = inner
+    ? planWithSeriesLevels(d, resolver, { fixedInstanceIds: fixed }, true)
+    : planAutoLayout(d, resolver, { fixedInstanceIds: fixed });
   expect(plan.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
   const result = executeTransaction(
     d,
@@ -91,6 +103,19 @@ it("R86 draws the reachable part and reports only the boxed-in pin", () => {
   const open = boxed();
   open.instances = open.instances.slice(0, 3);
   expect(missingConnections(commit(open).after, resolver)).toBe(0);
+  // T141: this finished plan leaves c.1 floating, so it is not delivered.
+  expect(
+    planAutoLayout(d, resolver, {
+      fixedInstanceIds: new Set(d.instances.map((i) => i.id)),
+    }).diagnostics.filter((d) => d.severity === "error"),
+  ).toEqual([
+    {
+      severity: "error",
+      code: "AUTO_LAYOUT_CONNECTION_REFUSED",
+      rule: "R10",
+      message: expect.stringContaining("floating pins: c.1"),
+    },
+  ]);
 });
 
 it("R86 excludes MOS bulk pins from missing connections", () => {
@@ -111,7 +136,7 @@ it("R86 falls back to a tree when the ground trunk is blocked", () => {
   d.instances[0]!.placement = placement(0, 0);
   d.instances[1]!.placement = placement(240, 80);
   d.instances[2]!.placement = placement(10, 70);
-  const { plan, after } = commit(d);
+  const { plan, after } = commit(d, undefined, false);
   expect(plan.diagnostics.filter((d) => d.rule === "R14")).toEqual([]);
   expect(floatingPins(after, resolver)).toEqual([]);
 });
@@ -160,6 +185,12 @@ it("R85 keeps separately drawn Base Nets when opposing fallback stubs share a de
     });
   }
   const { plan, after } = commit(d);
+  // T141: the two Nets stay unjoined, so the finished plan is not delivered.
+  expect(
+    planAutoLayout(d, resolver, {
+      fixedInstanceIds: new Set(d.instances.map((i) => i.id)),
+    }).diagnostics.filter((d) => d.severity === "error")[0],
+  ).toMatchObject({ code: "AUTO_LAYOUT_CONNECTION_REFUSED", rule: "R10" });
   expect(plan.diagnostics.filter((d) => d.rule === "R14")).toHaveLength(2);
   expect(after.routes.some((r) => r.id.includes("stub"))).toBe(true);
   expect(
@@ -187,7 +218,7 @@ it("R87 removes a crossing with a short clear detour in a fixed placement", () =
   d.instances.forEach((i, n) => {
     i.placement = positions[n]!;
   });
-  const { after } = commit(d);
+  const { after } = commit(d, undefined, false);
   expect(floatingPins(after, resolver)).toEqual([]);
   expect(auditRouting(after, resolver).crossings).toBe(0);
 });

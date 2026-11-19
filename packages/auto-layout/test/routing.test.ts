@@ -16,6 +16,7 @@ import {
 } from "@icm/edit-engine";
 import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
 import { planAutoLayout } from "../src/index.js";
+import { planWithSeriesLevels } from "../src/auto-layout.js";
 import { draftingGroups } from "../src/drafting-groups.js";
 import { freezePinGroups, routeDocument } from "../src/route.js";
 import { preview, terminalPartition } from "../src/transaction.js";
@@ -218,9 +219,27 @@ it.each([true, false])(
   "keeps other routes and electrical membership when a %s named supply trunk fails",
   (named) => {
     const document = obstructedTrunk(named);
-    const plan = planAutoLayout(document, resolver, {
-      fixedInstanceIds: new Set(document.instances.map((i) => i.id)),
-    });
+    const fixed = new Set(document.instances.map((i) => i.id));
+    // T141: the trapped pin cannot be routed, so the delivered plan is refused;
+    // the R14 fallback is still exactly as R14 specifies.
+    expect(
+      planAutoLayout(document, resolver, {
+        fixedInstanceIds: fixed,
+      }).diagnostics.filter((d) => d.severity === "error"),
+    ).toEqual([
+      {
+        severity: "error",
+        code: "AUTO_LAYOUT_CONNECTION_REFUSED",
+        rule: "R10",
+        message: expect.stringContaining("unconnected Net"),
+      },
+    ]);
+    const plan = planWithSeriesLevels(
+      document,
+      resolver,
+      { fixedInstanceIds: fixed },
+      true,
+    );
     expect(plan.diagnostics).toEqual([
       {
         severity: "warning",
@@ -802,9 +821,20 @@ it.each(["supply", "ground"] as const)(
 
 it("never draws a fallback stub through the obstacle that blocked the net", () => {
   const document = obstructedTrunk(true, [800, 270]);
-  const plan = planAutoLayout(document, resolver, {
-    fixedInstanceIds: new Set(document.instances.map((i) => i.id)),
-  });
+  // T141: the trapped pin cannot be routed, so the public entry refuses.
+  expect(
+    planAutoLayout(document, resolver, {
+      fixedInstanceIds: new Set(document.instances.map((i) => i.id)),
+    }).diagnostics.filter((d) => d.severity === "error")[0],
+  ).toMatchObject({ code: "AUTO_LAYOUT_CONNECTION_REFUSED", rule: "R10" });
+  const plan = planWithSeriesLevels(
+    document,
+    resolver,
+    {
+      fixedInstanceIds: new Set(document.instances.map((i) => i.id)),
+    },
+    true,
+  );
   expect(plan.diagnostics.map((d) => d.code)).toContain(
     "AUTO_LAYOUT_NET_UNROUTED",
   );

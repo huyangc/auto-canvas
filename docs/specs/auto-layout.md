@@ -328,6 +328,15 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   labels: never invent a name that would change the netlist. R155's additional
   ground/supply markers are a separate successful-layout optimization; they
   also require an existing explicit name and marker of the same symbol.
+- **R14a — Delivery gate.** A finished plan is delivered only when
+  `missingConnections === 0` and `floatingPins.length === 0` on the Document the
+  edits produce. When a clean finished candidate exists it wins over a defective
+  one whatever the score says; when none does, the plan returns no edits and one
+  `AUTO_LAYOUT_CONNECTION_REFUSED` error (rule R10) naming the unconnected Nets
+  and floating pins, with the R14 `AUTO_LAYOUT_NET_UNROUTED` warnings kept on
+  the same result so the router's reason stays legible. The gate is on the
+  output, not the input: an input drawing that already carries an undrawn Net
+  may still plan and be delivered when the planner draws it.
 - **R15 — Labels.** After routing, each freed net/power label moves to its Net's
   longest horizontal leg with a route anchor at `t: 0.5`. Preserve the original
   route anchor's `normalOffset`, `direction` and `orientation`; otherwise use
@@ -421,6 +430,9 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   `MAX_SCHEMATIC_EDITS_PER_TRANSACTION` returns no edits and an R10 diagnostic.
 - **R17 — Diagnostics.** Every diagnostic has severity `error` or `warning`.
   Only an error means no edits. All diagnostics predating R14 are errors.
+  R14a's `AUTO_LAYOUT_CONNECTION_REFUSED` is an error of that kind: a caller
+  that reads an empty edit list as "nothing changed" sees the drawing
+  untouched, and the error says why.
 
 - **R18 — Pin-aligned stacks.** Stacked groups share vertical channel pin
   lines. Derive pitches from each pin's local `x` after orientation; the smaller
@@ -2275,7 +2287,8 @@ No file format or connectivity edit is introduced.
 Known limits: pairs whose halves sit in blocks without a shared conducting Net
 keep block-local symmetry only. Supply trunks are ordinary wires, without thick power-rail
 presentation. The bounded router can still leave components unreachable under
-R14, but draws reachable components and tries a tree for refused rail trunks.
+R14 inside a candidate, but a finished plan that still has one is not
+delivered: R10's delivery gate (below) refuses it.
 Crossing cost chooses among bounded candidates. R95 revisits crossed signal
 Nets once on the selected finalist, keeping strictly better routing; it does
 not guarantee a globally crossing-free drawing. The remaining crossing gap
