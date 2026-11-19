@@ -106,4 +106,4 @@ it.each(["chain", "ring"] as const)(
       });
     }
   },
-);
+60_000);

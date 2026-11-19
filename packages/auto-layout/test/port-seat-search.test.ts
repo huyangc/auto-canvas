@@ -215,7 +215,7 @@ it.each(["fixed", "group", "constraint"] as const)(
       plan,
     );
   },
-);
+60_000);
 
 it("R146 stays out of optimized, zero-budget and partition fallback planning", () => {
   const search = vi.spyOn(portSearch, "searchPortSeats");

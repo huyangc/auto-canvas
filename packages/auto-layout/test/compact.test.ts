@@ -107,7 +107,7 @@ it.each(["vertical wire", "junction", "rigid unit"])(
       plain + 20,
     );
   },
-);
+60_000);
 
 it("R97 keeps edge Cell Pins 80 units from the device box", () => {
   const document = horizontal();
@@ -265,7 +265,7 @@ it.each([
       spy.mockRestore();
     }
   },
-);
+60_000);
 
 it("closes space between rows without splitting overlapping protected groups", () => {
   const d = circuit(

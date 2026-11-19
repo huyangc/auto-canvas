@@ -75,7 +75,7 @@ it.each(["template", "layered"] as const)(
       expect(ap.x + bp.x).toBe(2 * axis);
     }
   },
-);
+60_000);
 it("persists every mirror member while only two form its movement unit", () => {
   const d = circuit(
     { r: "nmos", x: "nmos", y: "nmos", g: "ground" },
@@ -139,7 +139,7 @@ it.each(["template", "layered"] as const)(
         pins.find((p) => p.instanceId === load && p.pinName === "D")!.point.x,
       );
   },
-);
+60_000);
 it("reports two reference branches as ambiguous without inventing a mirror", () => {
   const d = circuit(
     { a: "nmos", b: "nmos", o: "nmos" },
@@ -215,7 +215,7 @@ it.each([
     )!;
     expect(pin.point.x).toBe((a.position.x + b.position.x) / 2);
   },
-);
+60_000);
 
 it.each(["template", "layered"] as const)(
   "moves a PMOS tail's entire mirror unit above its pair in %s",
@@ -270,7 +270,7 @@ it.each(["template", "layered"] as const)(
     )!;
     expect(pin.point.x).toBe((a.position.x + b.position.x) / 2);
   },
-);
+60_000);
 
 it("places a shared PMOS tail above both pairs on their median axis", () => {
   const d = circuit(

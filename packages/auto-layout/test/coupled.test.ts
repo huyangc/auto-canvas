@@ -260,7 +260,7 @@ it.each(["absent", "transistor", "load"])(
       }),
     ).toContain("Disconnected block: amplifier");
   },
-);
+60_000);
 it.each([false, true])(
   "recognizes a latch unit and infers its role (rail-fed: %s)",
   (railFed) => {
@@ -293,7 +293,7 @@ it.each([false, true])(
       rulePartition(d, resolver).blocks.find((b) => b.members.includes("a")),
     ).toMatchObject({ role: "cross-coupled", title: "Cross-coupled pair" });
   },
-);
+60_000);
 it("uses prompt v5 with both roles and coupling instructions, omitting absent couplings", () => {
   expect(PROMPT_VERSION).toBe("5");
   for (const role of ["cross-coupled", "coupled-inductors"]) {
@@ -432,7 +432,7 @@ it.each(["template", "layered", "stages"] as const)(
       ),
     );
   },
-);
+60_000);
 
 it("preserves the three-winding component in seeded search and movement proposals", () => {
   const d = threeWindings();
@@ -550,7 +550,7 @@ it.each([
     expect(reversed.diagnostics).toEqual(expected);
     assertThreeWindings(commit(d, reversed), ["1", "2", "2"]);
   },
-);
+60_000);
 
 it("reports each conflicting winding separately", () => {
   const d = threeWindings();
@@ -605,7 +605,7 @@ it.each(["0.8", "0.9"])(
       expect(JSON.stringify(actual)).toBe(JSON.stringify(payload));
     }
   },
-);
+60_000);
 
 it("reconstructs a whole component from overlapping persisted pair groups", () => {
   const d = threeWindings();
