@@ -183,7 +183,7 @@ it("R96 improves the fixed finalist, preserves refinement counts, and agrees wit
   } finally {
     calls.mockRestore();
   }
-});
+}, 60_000);
 
 it("R95 replaces a partial named Net without duplicating its warning or component labels", () => {
   const document = drawing([

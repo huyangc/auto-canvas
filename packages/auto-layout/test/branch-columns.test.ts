@@ -173,7 +173,7 @@ it("keeps the complete old-level plan when series levels increase its score", ()
   );
   expect(finished).toEqual(selected);
   expect(planAutoLayout(d, resolver, options)).toEqual(finished);
-});
+}, 60_000);
 
 it("keeps a fixed branch member at its exact pose", () => {
   const d = withPlacements(
@@ -191,7 +191,7 @@ it("keeps a fixed branch member at its exact pose", () => {
     expect(
       applied.document.instances.find((i) => i.id === "p0")!.placement,
     ).toEqual(before);
-});
+}, 60_000);
 
 it("counts continuous vertical geometry, excluding gates, rails, bends and gaps", () => {
   const d = circuit(

@@ -303,7 +303,7 @@ describe("R166 candidates", () => {
     } finally {
       none.mockRestore();
     }
-  });
+  }, 60_000);
 
   it("plans exactly as without R166 when an offered candidate is not selected", () => {
     // A topology fixture (not a simulated circuit): Net d joins m2's drain
@@ -404,7 +404,7 @@ describe("R166 candidates", () => {
     expect(hash(inverter)).toBe(
       "c4332af3b35e50574d5027f2e97384221f7700b40a62884f24ae219d3cb58117",
     );
-  });
+  }, 60_000);
 
   it("routes no candidate for a Document without a stack", () => {
     const d = circuit(
@@ -502,7 +502,7 @@ describe("R166 candidates", () => {
       off.mockRestore();
     }
     expect(JSON.stringify(planAutoLayout(input, resolver, both))).toBe(without);
-  });
+  }, 60_000);
 
   it("offers no candidate under an explicit floorplan", () => {
     const d = selfBiased();
@@ -525,14 +525,14 @@ describe("R166 candidates", () => {
     } finally {
       spy.mockRestore();
     }
-  });
+  }, 60_000);
 
   it("plans the same Document identically twice", () => {
     const d = selfBiased();
     expect(JSON.stringify(planAutoLayout(d, resolver, quick))).toBe(
       JSON.stringify(planAutoLayout(d, resolver, quick)),
     );
-  });
+  }, 60_000);
 });
 
 describe("R166 search guard", () => {

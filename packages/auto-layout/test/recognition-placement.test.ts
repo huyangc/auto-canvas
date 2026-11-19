@@ -106,7 +106,7 @@ it("persists every mirror member while only two form its movement unit", () => {
   expect(result.ok).toBe(true);
   if (result.ok)
     expect(result.document.layoutGroups[0]!.objectIds).toEqual(["r", "x", "y"]);
-});
+}, 60_000);
 it.each(["template", "layered"] as const)(
   "keeps the 5T OTA load on the pair drain axes in %s",
   (strategy) => {

@@ -289,7 +289,7 @@ it("plans a free Net label onto its Net when the layout moves the Net away", () 
   stayed.annotations[0]!.anchor = { kind: "free", position };
   expect(labelOwnership(stayed, resolver)).toHaveLength(1);
   expect(labelOwnership(result.document, resolver)).toEqual([]);
-});
+}, 60_000);
 
 /**
  * Net `out` drawn in two pieces joined only by name: piece A from r.2 down

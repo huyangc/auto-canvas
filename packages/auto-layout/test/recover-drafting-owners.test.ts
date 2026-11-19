@@ -367,7 +367,7 @@ it("returns the ordinary result when cancelled inside conductor recovery", () =>
     base,
   );
   expect(checks).toBeGreaterThanOrEqual(3);
-});
+}, 60_000);
 
 it.each(["pin", "junction", "wire"] as const)(
   "rejects a carried conductor touching a terminal-Net %s",

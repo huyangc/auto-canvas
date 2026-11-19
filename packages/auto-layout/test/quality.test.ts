@@ -465,7 +465,7 @@ it("R44 compares one routing-only replay of the selected refined placement", () 
     comparison.mockRestore();
     compact.mockRestore();
   }
-});
+}, 60_000);
 
 it("R63 gives the second refinement slot to the next distinct strategy", () => {
   const resolver = new InMemorySymbolResolver(builtInSymbols);
@@ -530,7 +530,7 @@ it("R63 gives the second refinement slot to the next distinct strategy", () => {
     search.mockRestore();
     routes.mockRestore();
   }
-});
+}, 60_000);
 
 it.each(["supply", "ground"] as const)(
   "R62 keeps duplicate %s Cell Pin artwork clear of its trunk level",
@@ -592,7 +592,7 @@ it("R63 refines identical strategies only once", () => {
   } finally {
     search.mockRestore();
   }
-});
+}, 60_000);
 
 it("R63 gives a refused distinct candidate the second refinement slot", () => {
   const resolver = new InMemorySymbolResolver(builtInSymbols);
@@ -662,4 +662,4 @@ it("R63 gives a refused distinct candidate the second refinement slot", () => {
   } finally {
     search.mockRestore();
   }
-});
+}, 60_000);

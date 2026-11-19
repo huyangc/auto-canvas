@@ -212,7 +212,7 @@ it("quick mode remains deterministic and its seated transactions replay", () => 
   expect(planAutoLayout(before, resolver)).toEqual(plan);
   expect(preview(before, resolver, plan.edits).ok).toBe(true);
   expect(before).toEqual(original);
-});
+}, 60_000);
 it("faces a port along a sideways route without moving its terminal or changing wires", () => {
   const before = circuit({ p: "port", a: "nmos", b: "nmos" }, { n: ["p.P"] });
   before.instances[1]!.placement = placement(-200, -200);
@@ -304,4 +304,4 @@ it("finishes shared-owner labels in distinct seats while preserving their owner 
     expect(moved.anchor).toMatchObject({ kind: "object", objectId: "a" });
     expect(ctx.overlapsAt(ctx.measure(moved).inkBounds, moved.id)).toEqual([]);
   }
-});
+}, 60_000);

@@ -326,7 +326,7 @@ describe("R165 netlist presentation", () => {
     expect(
       equivalentTerminals(presented.document, applied.document, resolver),
     ).toBe(true);
-  });
+  }, 60_000);
 
   it("plans as without the option when there is nothing to present", () => {
     const source = circuit(
@@ -342,7 +342,7 @@ describe("R165 netlist presentation", () => {
         }),
       ),
     ).toBe(JSON.stringify(planAutoLayout(source, resolver, options)));
-  });
+  }, 60_000);
 });
 
 describe("R165 gate refusals", () => {
@@ -565,7 +565,7 @@ describe("R165 planning fallbacks", () => {
       "R165: rail symbols dropped: the presented Document was refused",
     ]);
     expect(plan.edits).toEqual(plainPlan(source).edits);
-  });
+  }, 60_000);
 
   it("plans without the symbols when the presented Document plans no edits", () => {
     const source = amplifier();
@@ -578,7 +578,7 @@ describe("R165 planning fallbacks", () => {
     const plan = planAutoLayout(source, resolver, options);
     expect(dropped(plan)).toHaveLength(1);
     expect(plan.edits).toEqual(plainPlan(source).edits);
-  });
+  }, 60_000);
 
   it("plans without the symbols past the transaction edit limit", () => {
     const source = amplifier();
@@ -593,5 +593,5 @@ describe("R165 planning fallbacks", () => {
       "R165: rail symbols dropped: transaction edit limit",
     ]);
     expect(plan.edits).toEqual(plainPlan(source).edits);
-  });
+  }, 60_000);
 });

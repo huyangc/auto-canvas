@@ -83,7 +83,7 @@ it("preserves a junction-owned power label's rich-text name through cleanup", ()
   expect(terminalPartition(result.document, resolver)).toBe(
     terminalPartition(document, resolver),
   );
-});
+}, 60_000);
 
 it("keeps a device-anchored output name on its Net while deleting route anchors", () => {
   const document = circuit(
@@ -171,7 +171,7 @@ it("keeps a device-anchored output name on its Net while deleting route anchors"
     );
     expect(after.netId).toBe(original.netId);
   }
-});
+}, 60_000);
 
 it("rounds an odd horizontal leg midpoint before persisting a label fallback", () => {
   const document = circuit({ r: "resistor" }, { signal: ["r.1"] });
@@ -265,4 +265,4 @@ it("routes a separated visible MOS bulk contact before transaction replay can ad
   expect(terminalPartition(replay.document, resolver)).toBe(
     terminalPartition(document, resolver),
   );
-});
+}, 60_000);

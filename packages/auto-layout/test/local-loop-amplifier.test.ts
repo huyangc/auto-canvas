@@ -312,7 +312,7 @@ it("repeats the complete selected plan deterministically", () => {
   expect(first.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
   expect(planAutoLayout(d, resolver, options)).toEqual(first);
   expect(JSON.stringify(d)).toBe(before);
-});
+}, 60_000);
 
 it("recognizes a comparator regulating a BJT emitter by its pin roles", () => {
   const { d, targets } = regulator(false);

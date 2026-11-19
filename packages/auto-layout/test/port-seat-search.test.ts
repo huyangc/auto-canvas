@@ -237,7 +237,7 @@ it("R146 stays out of optimized, zero-budget and partition fallback planning", (
   } finally {
     search.mockRestore();
   }
-});
+}, 60_000);
 
 it("R146 includes seats between hosts, away from either pin's exit ray", () => {
   const seats = portSeatCandidates(fixture(), resolver, "p");

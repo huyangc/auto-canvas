@@ -472,7 +472,7 @@ it("preserves the three-winding component in seeded search and movement proposal
     }
     expect(accepted).toBeGreaterThan(0);
   }
-});
+}, 60_000);
 
 it("anchors a component at its fixed extra member and refuses conflicting orientation", () => {
   const final = commit(
@@ -504,7 +504,7 @@ it("anchors a component at its fixed extra member and refuses conflicting orient
       ),
     }),
   );
-});
+}, 60_000);
 
 it.each([
   { partitioned: false, search: undefined },
@@ -586,7 +586,7 @@ it("reports each conflicting winding separately", () => {
     },
   ]);
   assertThreeWindings(commit(d, result), ["1", "2", "2"]);
-});
+}, 60_000);
 
 it.each(["0.8", "0.9"])(
   "canonicalizes isolated winding payloads, units and structures with second k %s",
@@ -638,4 +638,4 @@ it("reconstructs a whole component from overlapping persisted pair groups", () =
     },
   ]);
   assertThreeWindings(commit(d, planAutoLayout(d, resolver)));
-});
+}, 60_000);

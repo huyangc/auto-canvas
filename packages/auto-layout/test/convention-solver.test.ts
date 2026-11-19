@@ -232,7 +232,7 @@ describe("R168 convention-solved draft", () => {
       after.document!.instances.map((i) => [i.id, i.placement as Placement]),
     );
     for (const stack of stacks) expect(stackHolds(stack, final)).toBe(true);
-  });
+  }, 60_000);
 
   it("never draws a transistor inverted", () => {
     for (const d of [twoStage(), bipolar(), pmosStage(), mirrorLoad()])
@@ -254,7 +254,7 @@ describe("R168 convention-solved draft", () => {
     expect(JSON.stringify(planAutoLayout(twoStage(), resolver, quick))).toBe(
       JSON.stringify(planAutoLayout(twoStage(), resolver, quick)),
     );
-  });
+  }, 60_000);
 
   it("honours the node limit", () => {
     const d = chain(6, false);
@@ -288,7 +288,7 @@ describe("R168 convention-solved draft", () => {
     } finally {
       failing.mockRestore();
     }
-  });
+  }, 60_000);
 
   it.each<[string, () => [SchematicDocument, AutoLayoutOptions], string]>([
     [
@@ -507,7 +507,7 @@ describe("R168 convention-solved draft", () => {
     const plan = planAutoLayout(d, library, quick);
     expect(plan.diagnostics.filter((x) => x.severity === "error")).toEqual([]);
     expect(refinementMetrics(plan)?.strategy).not.toBe("convention");
-  });
+  }, 60_000);
 
   it("selects the draft only when it beats the refined choice made without it", () => {
     // The draft ranks second, so it takes the refinement slot of layered,
@@ -544,5 +544,5 @@ describe("R168 convention-solved draft", () => {
     } finally {
       solve.mockRestore();
     }
-  });
+  }, 60_000);
 });

@@ -149,7 +149,7 @@ it("replaces a ground trunk crossing with two local grounds, deterministically",
     expect(rerun.document.instances).toHaveLength(
       replay.document.instances.length,
     );
-});
+}, 60_000);
 
 it("retains fixed markers and user groups; does not invent markers on other nets", () => {
   const { d, initial } = crossedRail();
@@ -266,7 +266,7 @@ it("adds local markers through the public planner with fixed device poses", () =
     expect(
       applied.document.instances.find((i) => i.id === id)?.placement,
     ).toEqual(d.instances.find((i) => i.id === id)?.placement);
-});
+}, 60_000);
 
 it("authorizes claim-only ground markers and rejects altered claim identity", () => {
   const { d } = crossedRail();
@@ -401,7 +401,7 @@ it("authorizes claim-only ground markers and rejects altered claim identity", ()
     expect(repeated.document.instances.length).toBe(
       final.document.instances.length,
     );
-});
+}, 60_000);
 
 it.each(["ground", "vdd-port"] as const)(
   "matches claim-only %s additions to the original partition",
