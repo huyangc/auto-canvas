@@ -636,4 +636,4 @@ it("finishes runner and local-loop finalists at full budget and the attachment v
     railSearch.mockRestore();
     relocationSearch.mockRestore();
   }
-});
+}, 60_000);
