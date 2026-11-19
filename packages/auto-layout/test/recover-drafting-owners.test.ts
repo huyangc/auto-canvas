@@ -332,7 +332,8 @@ it.each(["route", "junction"] as const)(
       net: "[]",
     });
   },
-60_000);
+  60_000,
+);
 
 it.each([
   { search: { seed: 1, evaluations: 0 } },
@@ -353,7 +354,8 @@ it.each([
       ),
     ).toBe(false);
   },
-60_000);
+  60_000,
+);
 
 it("returns the ordinary result when cancelled inside conductor recovery", () => {
   const d = fixture();
@@ -447,7 +449,8 @@ it.each(["pin", "junction", "wire"] as const)(
     }
     expect(recoverDraftingOwners(d, resolver, base)).toEqual(base);
   },
-60_000);
+  60_000,
+);
 
 it("salts carried identities against removed input object ids", () => {
   const d = fixture();
@@ -558,7 +561,8 @@ it.each(["junction", "horizontal route", "vertical route"] as const)(
       ),
     ).toBe(true);
   },
-60_000);
+  60_000,
+);
 
 it("keeps a mixed-anchor arrow rigid at its clearance seat", () => {
   const d = fixture();

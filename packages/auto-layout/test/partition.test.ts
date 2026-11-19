@@ -371,7 +371,8 @@ it.each([false, true])(
       ).placements,
     ).toEqual(targets);
   },
-60_000);
+  60_000,
+);
 
 it("R130a retains recognition-unit partitions and trims greedy/persisted groups and symmetry", () => {
   const d = circuit(
@@ -721,7 +722,8 @@ it.each([false, true])(
       ),
     ).toBe(false);
   },
-60_000);
+  60_000,
+);
 
 it("R134 falls back on an empty plan without recursing", () => {
   const result = planAutoLayout(circuit({}, {}), resolver, {

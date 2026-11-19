@@ -94,7 +94,8 @@ it.each([
       ),
     ).toEqual(targets);
   },
-60_000);
+  60_000,
+);
 
 it("routes the column portfolio deterministically and preserves terminal Nets", () => {
   const d = branches(2, false);
@@ -292,7 +293,8 @@ it.each([1, 2])(
       levels,
     );
   },
-60_000);
+  60_000,
+);
 
 it.each(["template", "layered", "stages"] as const)(
   "%s places the internal series device between its transistors",
@@ -318,7 +320,8 @@ it.each(["template", "layered", "stages"] as const)(
       expect(pin(`r${i}`, "2").y).toBeLessThan(pin(`q${i}`, "E").y);
     }
   },
-60_000);
+  60_000,
+);
 
 it("leaves a resistor loop without rail direction unconstrained and deterministic", () => {
   const d = circuit(

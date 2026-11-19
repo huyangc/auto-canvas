@@ -94,7 +94,8 @@ it.each([10, 20])(
         2,
     );
   },
-60_000);
+  60_000,
+);
 
 it("R19 uses the role convention for a host exactly at the bounds centre", () => {
   const definitions = builtInSymbols.map((d) =>
@@ -173,7 +174,8 @@ it.each([false, true])(
       enclosingBox(withPlacements(devices, targets), resolver).x,
     );
   },
-60_000);
+  60_000,
+);
 
 it.each(cases)(
   "$id: R22 is deterministic, bounded, and never worsens the default routed score",
@@ -565,7 +567,8 @@ it.each(["supply", "ground"] as const)(
     for (let n = 1; n < railPins.length; n++)
       expect((railPins[n]!.y - railPins[0]!.y) * direction).toBeGreaterThan(20);
   },
-60_000);
+  60_000,
+);
 
 it("R63 refines identical strategies only once", () => {
   const resolver = new InMemorySymbolResolver(builtInSymbols);

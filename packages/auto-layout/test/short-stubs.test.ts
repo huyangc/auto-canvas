@@ -110,7 +110,8 @@ it.each(["ground", "vdd-port", "port", "port-filled"])(
     expect(seats(d)).toEqual(result);
     expect(d).toEqual(before);
   },
-60_000);
+  60_000,
+);
 
 it.each(["ground", "port"])(
   "repairs a finished %s label conflict with a longer stub",
@@ -221,7 +222,8 @@ it.each(["ground", "port"])(
       ),
     ).toBe(initial);
   },
-60_000);
+  60_000,
+);
 
 it.each(["ground", "port"])(
   "preserves a locked %s and electrical connectivity through public planning",
@@ -248,7 +250,8 @@ it.each(["ground", "port"])(
     expect(auditRouting(result.document, resolver).unsafeProblems).toEqual([]);
     expect(planAutoLayout(d, resolver)).toEqual(plan);
   },
-60_000);
+  60_000,
+);
 
 it.each(["ground", "port"])(
   "only accepts a touching %s through R38",
@@ -275,7 +278,8 @@ it.each(["ground", "port"])(
     expect(missingConnections(result.document, resolver)).toBe(0);
     expect(auditRouting(result.document, resolver).unsafeProblems).toEqual([]);
   },
-60_000);
+  60_000,
+);
 
 it.each([40, 41])(
   "selects stub defaults at the %i-instance boundary",
@@ -293,7 +297,8 @@ it.each([40, 41])(
       );
     }
   },
-60_000);
+  60_000,
+);
 
 it.each([5, 13])("bounds repair trials for %i diagnosed stubs", (count) => {
   const d = circuit({}, {});

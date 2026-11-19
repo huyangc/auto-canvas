@@ -87,7 +87,8 @@ it.each([
       topology.endpointToPhysicalComponent.get(`terminal:marker:${pinName}`),
     );
   },
-60_000);
+  60_000,
+);
 
 function crossedRail() {
   const d = circuit(
@@ -465,4 +466,5 @@ it.each(["ground", "vdd-port"] as const)(
     wrong.connectivityEvidence = [];
     expect(equivalentTerminals(wrong, final.document, resolver)).toBe(false);
   },
-60_000);
+  60_000,
+);

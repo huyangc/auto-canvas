@@ -103,4 +103,5 @@ it.each([1, 10])(
       resolveVisualAnchor(again.document, resolver, nextAnchor).resolved,
     ).toBe(true);
   },
-60_000);
+  60_000,
+);

@@ -123,7 +123,8 @@ it.each([false, true])(
       JSON.stringify(plan.edits),
     );
   },
-60_000);
+  60_000,
+);
 
 it("R140 reports supplied-block intrusion even when the joined block has none", () => {
   // Series devices separate recognition units while extending the same R88 axis.
