@@ -127,6 +127,7 @@ import {
   improvesWireLayout,
   compareRuns,
   copyRefinedResult,
+  finishedSelectionScore,
   refinementMetrics,
   refineLayout,
   routedScore,
@@ -1570,6 +1571,8 @@ function planAutoLayoutMeasured(
       )
         return searched;
       if (before.ok) {
+        // T143: the two finalists are chosen between here, so the CHAIN term
+        // belongs to this one comparison and nowhere else.
         if (
           compareRuns(
             {
@@ -1585,6 +1588,7 @@ function planAutoLayoutMeasured(
               ...(options.partition ? { partition: options.partition } : {}),
             },
             resolver,
+            finishedSelectionScore,
           ) >= 0
         )
           return quickResult;

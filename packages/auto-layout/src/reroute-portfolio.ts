@@ -13,6 +13,7 @@ import {
 } from "./routing-audit.js";
 import {
   compareRuns,
+  finishedSelectionScore,
   refinementMetrics,
   selectRoutingAlternative,
   improvesWireLayout,
@@ -84,8 +85,15 @@ export function reroutePortfolio(
     const after = preview(document, resolver, result.edits);
     if (!after.ok) continue;
     const candidate = { ...run, result, final: after.document };
+    // T143: this is one of the two places a finished plan is chosen between
+    // alternatives, so it charges the same CHAIN term `selectFinished` does.
+    // The study behind the task found every one of this site's 49 CHAIN
+    // breaks came from an alternate finalist replacing the incumbent, never
+    // from the reroute itself: an alternate that gives up a column must not
+    // win on one bend's worth of wire.
     if (
       improvesWireLayout(bestRun, candidate, resolver) &&
+      compareRuns(candidate, bestRun, resolver, finishedSelectionScore) < 0 &&
       !readabilityRegressed(bestRun.final!, after.document, resolver)
     ) {
       bestRun = candidate;

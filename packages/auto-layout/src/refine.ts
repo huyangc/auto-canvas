@@ -1,4 +1,5 @@
 import { planningMemo } from "./planning-reuse.js";
+import { chainColumnCount } from "./chain-columns.js";
 import {
   improvesReadability,
   readabilityTerm,
@@ -36,6 +37,9 @@ export const ROUTED_SCORE_WEIGHTS = {
   labelOverlaps: 400,
   labelClearance: 150,
   terminalDepartures: 200,
+  /** T143: one bend. Only `finishedSelectionScore` charges it; `routedScore`
+   * itself is unchanged so the annealer's objective stays what it was. */
+  chainColumns: 100,
 } as const;
 const MAX_PASSES = 2;
 const MAX_CANDIDATES = 14;
@@ -193,6 +197,39 @@ export function compareRuns(
     ? 0
     : difference;
 }
+
+/**
+ * T143: the score a *finished* plan is chosen by. `routedScore` plus one bend
+ * of credit per CHAIN column the plan draws as a column (owner comment #38:
+ * "在两个器件中间，如果有一根线连出去，当前总是把这个结构给折掉").
+ *
+ * It is a separate function on purpose. The annealer, refinement and every
+ * finishing pass keep scoring with `routedScore`, so their objective is
+ * unchanged; only the places that choose between two *finished* plans pass
+ * this one. The weight is one bend (100): the study behind the task found the
+ * decision it has to overturn is a bend's worth in the median case, and that a
+ * larger weight starts paying for a column with a crossing, which the owner
+ * never asked for.
+ *
+ * The term is a count of the columns a plan *holds*, never of the ones it
+ * broke relative to another plan: a plan that drew fewer Nets altogether would
+ * otherwise win by having fewer columns to lose.
+ */
+export function withChainColumns(
+  score: (run: LayoutRun, resolver: SymbolResolver) => number,
+): (run: LayoutRun, resolver: SymbolResolver) => number {
+  return (run, resolver) => {
+    const value = score(run, resolver);
+    if (!run.final || !Number.isFinite(value)) return value;
+    return (
+      value -
+      chainColumnCount(run.final, resolver) * ROUTED_SCORE_WEIGHTS.chainColumns
+    );
+  };
+}
+
+/** T143: the finished-plan score of a plain routed layout. */
+export const finishedSelectionScore = withChainColumns(routedScore);
 
 /** Bounded deterministic coordinate descent; every candidate is a full replay. */
 export function refineLayout(
