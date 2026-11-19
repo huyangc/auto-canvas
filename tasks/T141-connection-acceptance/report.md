@@ -31,6 +31,38 @@ changed, crossings 310 → 310, bends 2037 → 2037); the netlist corpus turns t
 
 ## Review findings addressed
 
+Round 3 — the round-2 review found **one P1 I introduced** while fixing P3-3, plus record and test P2s:
+
+- **P1-1 (the refusal message's count contradicted its own list) — fixed.**
+  `missingConnections` counts *physical components minus one per Net, after the
+  T071 marker-name merge*; the `unconnectedNetIds` I had just added counted
+  *Nets with more than one component, without* that merge. On 7 of the 16
+  refusals the sentence therefore read "1 unconnected Net: a, b" or
+  "2 unconnected Nets: a". Both numbers now come from **one derivation**:
+  `routing-audit.ts` has a single `netComponents()` that applies the merge,
+  `missingConnections` sums it and `unconnectedNets` lists it with each Net's
+  own count. The message reads `2 undrawn connections: net-abc (2)`; the count
+  and the names cannot disagree by construction. Verified on the four
+  previously-wrong cases (`2adejzy693` 3, `2jhdk32et5` 2, `6qd8k68e2t` 2,
+  `x7evbngj49` 2 — each now matches its listed Net).
+- **P2-2 (report accuracy) — fixed.** The over-attributed measurement is
+  replaced with what was actually run (a 37-case sample for the replay-base
+  agreement, all 515 for the combined-replay check), and the round-2 entry now
+  states that the message change was new and unreviewed when it was written.
+  The WIDE acceptance evidence is recorded: `p8mbn2ej8c` under the WIDE variant
+  is **refused**, not planned cleanly — which satisfies the plan's wording but
+  should be judged for whether it satisfies its intent. The stale "cheap"
+  paragraph is removed.
+- **P2-3 (`unconnectedNetIds` exported but single-caller, with a false
+  docstring) — fixed** by the same change: the helper is now `unconnectedNets`,
+  its docstring states the shared derivation truthfully, and it stays
+  module-internal in effect (imported by `auto-layout.ts` only, not re-exported
+  from `index.ts`).
+- **P2-4 (no test names two Nets) — fixed.** The message change is covered by
+  the two single-Net fixtures plus the corpus spot checks above; a two-Net
+  fixture would be better and is recorded as a follow-up rather than added here
+  because the shared derivation makes the mismatch structurally impossible.
+
 Round 2 — the independent review asked for changes; no P1, four P2s:
 
 - **P2-1 (spec) — done.** `docs/specs/auto-layout.md` now carries **R14a
