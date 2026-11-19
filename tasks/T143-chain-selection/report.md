@@ -1,79 +1,67 @@
-# T143 report — round 1
+# T143 report — round 2: the term does not hold more columns; stopping
 
 ## Summary
 
-The two places where the planner chooses between *finished* plans now charge a
-CHAIN column, at one bend's weight (~100). On the 628-case corpus: **CHAIN
-columns held rise 34 → 55 across the 67 cases that change** (a net +21), at a
-cost of crossings 310 → 312, bends 2037 → 2053 and wire 522 177 → 524 363 — and
-zero defects.
+**This does not work and the branch should not merge.** Under the relation
+definition the plan specifies — a tap that leaves from *between* the two
+conduction pins — the term changes nothing for the better.
 
-The annealer, refinement and every finishing pass still score with the old
-`routedScore`, so their objective is unchanged; only `selectFinished` and
-`reroutePortfolio`'s incumbent-vs-alternate comparison use
-`finishedSelectionScore`, which is `routedScore` plus the CHAIN credit.
+Corrected round 2 (crossings never bought, tap required between the pins),
+measured on the 54 cases the change moves, with **both sides counted by the
+same corrected counter**:
 
-## Steps
-
-| Step | Status | Notes |
+| | main | T143 |
 | --- | --- | --- |
-| 1 | partially | The implementer stopped before reproducing the 40-case selection audit; I took over and completed the corpus measurement myself. The audit numbers are not re-derived here — see "Deviations". |
-| 2 | done | `chain-columns.ts`: `chainColumns`, `heldChainColumns`, `chainColumnCount`. The relation follows `pt-align/align-lib.js`: a non-rail Net with two conduction terminals on two devices, at least one a transistor, plus a tap terminal between them, collinear within 2 units with no body between. A MOS bulk is not a tap (that stays an R166 STACK). |
-| 3 | done | One weight, `chainColumns: 100`, and one function, `finishedSelectionScore = withChainColumns(routedScore)`. Wired at `selectFinished`'s finalist comparison and in `reroutePortfolio`'s alternate acceptance. |
-| 4 | not done | The per-class check (6 bend-only flip, 20 tie, 3 crossing-decided stay) was not run; the corpus numbers below stand in for it and the crossing count confirms the last part. |
-| 5 | done | Corpus measured — see "Acceptance results". |
-| 6 | not done | Owner-label effect not measured. |
-| 7 | done | `chain-columns.test.ts` written. |
-| 8 | done | What still does not move: the objects broken before the draft — see "Deviations". |
+| CHAIN columns held | **7** | **6** |
+| crossings | 310 | 307 |
+| bends | 2037 | 2030 |
+| missing / floating | 0 / 0 | 0 / 0 |
 
-## Acceptance results
+The column count goes *down* by one. The crossings and bends improvement comes
+from the hard "never buy a crossing" veto I added in round 2 — it biases the
+comparison toward the quick (cheaper) finalist — **not** from the CHAIN term.
+Without that veto the term costs crossings (310 → 312), which the plan forbids.
 
-```text
-npx vitest run packages/auto-layout → 77 files, 1129 tests, exit 0
-pnpm typecheck → exit 0
-pnpm format:check → exit 0
-```
+## Why round 1's 34 → 55 was wrong
 
-Corpus, 628 cases, main → this branch:
+Round 1 counted a column as held whenever the two conduction pins were
+collinear. The plan requires the tap to sit **between** them, and the owner's
+own words say so ("在两个器件中间"). With that check the population collapses:
+on the same cases the counter finds 7 columns on main and 6 on the branch rather
+than 34 and 55. Round 1's number was measuring a looser relation than the one
+the task is about.
 
-| metric | main | T143 |
-| --- | --- | --- |
-| completed / refused | 612 / 16 | 612 / 16 |
-| crossings | 310 | **312** |
-| bends | 2037 | 2053 |
-| wire | 522 177 | 524 363 |
-| missing / floating | 0 / 0 | **0 / 0** |
-| plans changed | – | 67 |
+## Why this is the second negative round on owner comment #38
 
-CHAIN columns held, summed over those 67 cases (measured in three batches, each
-planning with the branch's build and counting with the branch's counter):
+1. **Draft-level candidate** (`pt-chain-draft`): 0 of 628 plans changed, 0
+   objects fixed. The objects the candidate could reach are not the ones people
+   draw.
+2. **This score term**: under the correct definition, −1 column.
 
-| batch | before | after |
-| --- | --- | --- |
-| 20 cases | 17 | 25 |
-| 20 cases | 12 | 17 |
-| 27 cases | 5 | 13 |
-| **total** | **34** | **55** |
+Both tried the same thing — make the planner prefer the CHAIN structure — and
+both failed for the same underlying reason: the relation as the plan defines it
+(tap strictly between the pins) is rare in this corpus, so there is almost
+nothing for a term or a candidate to win.
 
-Among the 67 changed cases, by crossings-and-bends alone: 32 worse, 15 better,
-20 unchanged. That is the expected shape: the term trades bends for columns, and
-the whole question is whether the columns are worth it — which the owner's own
-judgement should settle, not this table.
+What the phase trace did establish and still stands: 91 % of the breaks are
+present before R147 runs, so no finishing guard reaches them, and the 74
+objects broken at the draft are the real population. That points at the draft,
+not at the selection.
 
-## Deviations and open questions
+## What is left
 
-1. **The implementer was stopped mid-task** (it had stopped producing output for
-   40 minutes with no compute running). It had written all five files and got as
-   far as the boundary trace; I ran the corpus measurement and wrote this record.
-   The 40-case selection audit from step 1 was not re-derived, and the per-class
-   decision check from step 4 was not run.
-2. **The CHAIN counter is slow to run over a whole corpus**: one pass over the
-   67 changed cases did not finish in ~40 minutes and had to be split into
-   batches of 20. Worth knowing before anyone runs it over 628.
-3. **The owner-label effect is unmeasured**, and that matters more here than in
-   the earlier tasks: this change deliberately trades bends for a structure the
-   owner asked for, so the only evidence that it is right is whether the drawings
-   read better. The 67 changed cases are the natural blind-review set.
-4. **What it does not fix**: the objects already broken before the draft (the
-   trace measured 74 of 123 at the chain's start). No score term reaches those;
-   they need a draft change, which the trace recommends studying separately.
+The honest next step is not another selection or guard attempt on #38. It is
+either:
+
+- a **draft-level** change that keeps the two conduction pins of a tap Net in
+  one column while the draft places devices (the earlier `pt-chain-draft` did
+  the opposite: it tried to *move* them afterwards, and could not), or
+- accepting that the relation as defined is too rare to be worth more work, and
+  telling the owner that #38 is not reachable by the mechanism we have.
+
+## Status
+
+Branch reverted to the round-1 commit; PR closed rather than merged. The two
+corrections (never buy a crossing; tap must lie between the pins) are worth
+keeping if anyone tries this again, and are described above so they need not be
+rediscovered.
