@@ -1,11 +1,7 @@
 // One Auto Layout run at a time: plan in a worker, then apply the result as
 // one revision-fenced transaction, or discard it. Framework-free; the React
 // hook owns one session per editor.
-import {
-  defaultLayoutSearch,
-  type AutoLayoutDiagnostic,
-  type AutoLayoutResult,
-} from "@icm/auto-layout";
+import type { AutoLayoutDiagnostic, AutoLayoutResult } from "@icm/auto-layout";
 import type { EditTransactionResult, SchematicEdit } from "@icm/edit-engine";
 import type { CircuitProject, SchematicDocument } from "@icm/model";
 
@@ -64,8 +60,7 @@ export const AUTO_LAYOUT_STALE_MESSAGE =
   "The drawing changed while Auto Layout was planning; nothing was applied.";
 export const AUTO_LAYOUT_CANCELLED_MESSAGE =
   "Auto Layout cancelled; the drawing is unchanged.";
-const AUTO_LAYOUT_UNCHANGED_MESSAGE =
-  "Already laid out; nothing changed";
+const AUTO_LAYOUT_UNCHANGED_MESSAGE = "Already laid out; nothing changed";
 
 /** The one-line reason a refused plan left the drawing alone. */
 function refusalReason(error: AutoLayoutDiagnostic): string {
@@ -189,7 +184,6 @@ export function createAutoLayoutSession(options: AutoLayoutSessionOptions) {
       revision: target.document.revision,
     };
     run = { ...fence, worker };
-    const search = defaultLayoutSearch(target.document);
     worker.onmessage = ({ data }) => {
       // A message from an ended run (cancelled, superseded) changes nothing.
       if (run?.runId !== runId || data.runId !== runId) return;
@@ -222,8 +216,9 @@ export function createAutoLayoutSession(options: AutoLayoutSessionOptions) {
     update({
       running: true,
       progress: {
+        // The worker computes the budget; it arrives with the first progress.
         evaluations: 0,
-        budget: search.evaluations,
+        budget: 0,
         startedAt: now(),
       },
       report: null,
@@ -234,7 +229,6 @@ export function createAutoLayoutSession(options: AutoLayoutSessionOptions) {
       runId,
       project: target.project,
       documentId: target.document.id,
-      search,
     });
     return true;
   };

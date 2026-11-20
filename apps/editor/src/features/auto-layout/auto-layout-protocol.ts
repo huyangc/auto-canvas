@@ -20,7 +20,11 @@ export interface AutoLayoutWorkerRequest {
   runId: number;
   project: CircuitProject;
   documentId: string;
-  search: AutoLayoutSearchBudget;
+  /**
+   * Omitted: the planner's default bounded search for this Document, computed
+   * in the worker so the editor's main bundle imports planner types only.
+   */
+  search?: AutoLayoutSearchBudget;
 }
 
 export type AutoLayoutWorkerMessage =

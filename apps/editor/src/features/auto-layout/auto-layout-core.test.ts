@@ -1,4 +1,4 @@
-import { planAutoLayout } from "@icm/auto-layout";
+import { defaultLayoutSearch, planAutoLayout } from "@icm/auto-layout";
 import { parseProjectSnapshot } from "@icm/model";
 import { builtInSymbols, createProjectSymbolResolver } from "@icm/symbols";
 import { describe, expect, it } from "vitest";
@@ -72,6 +72,34 @@ describe("runAutoLayout", () => {
       expect(message.evaluations).toBeLessThanOrEqual(budget);
     }
     expect(messages.at(-1)?.type).toBe("result");
+  }, 60_000);
+
+  it("searches with the planner's default budget when none is posted", () => {
+    // The smallest search budget among the examples (step-1 measurement).
+    const project = example("current-mirror-loaded-differential-pair");
+    const document = project.documents.find(
+      (item) => item.id === project.topDocumentId,
+    )!;
+    const budget = defaultLayoutSearch(document).evaluations;
+    const messages = run({
+      type: "plan",
+      runId: 4,
+      project,
+      documentId: project.topDocumentId,
+    });
+    const progress = messages.filter((m) => m.type === "progress");
+    expect(progress.length).toBeGreaterThan(0);
+    for (const message of progress) expect(message.budget).toBe(budget);
+    const result = messages.at(-1);
+    if (result?.type !== "result") throw new Error("expected a result");
+    expect(JSON.stringify(result.result)).toBe(
+      JSON.stringify(
+        planAutoLayout(
+          document,
+          createProjectSymbolResolver(project, builtInSymbols),
+        ),
+      ),
+    );
   }, 60_000);
 
   it("fails when the Document is not in the Project", () => {

@@ -1,4 +1,3 @@
-import { defaultLayoutSearch } from "@icm/auto-layout";
 import {
   createEmptyProject,
   parseProjectSnapshot,
@@ -106,15 +105,15 @@ function example(id: string) {
 }
 
 describe("Auto Layout session", () => {
-  it("posts the Document with the planner's default budget", () => {
+  it("posts the Document and leaves the default budget to the worker", () => {
     const { controller, start, workers, session } = harness();
     expect(start()).toBe(true);
     expect(session.state.running).toBe(true);
     expect(workers[0]!.request).toMatchObject({
       type: "plan",
       documentId: controller.document.id,
-      search: defaultLayoutSearch(controller.document),
     });
+    expect(workers[0]!.request).not.toHaveProperty("search");
     expect(workers[0]!.request!.project).toEqual(controller.project);
   });
 
