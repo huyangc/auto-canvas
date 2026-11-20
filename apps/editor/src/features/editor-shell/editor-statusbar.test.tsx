@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
-import { EditorStatusbar } from "./editor-statusbar";
+import { EditorStatusbar, type AutoLayoutChip } from "./editor-statusbar";
 
 describe("editor statusbar", () => {
   it("renders the active wire options and recovery state", () => {
@@ -273,5 +273,85 @@ describe("editor statusbar", () => {
     expect(markup).toContain('data-testid="statusbar-issues"');
     expect(markup).toContain('data-severity="none"');
     expect(markup).toContain("No issues");
+  });
+
+  function statusbarWithAutoLayout(chip: Partial<AutoLayoutChip>) {
+    return renderToStaticMarkup(
+      <EditorStatusbar
+        status="Ready"
+        tool="pointer"
+        vddRailMode={false}
+        pendingSymbolId={null}
+        wireOptionsOpen={false}
+        wireRoutingMode="orthogonal"
+        wireCornerOrder="auto"
+        recoveryLabel={null}
+        zoomPercent={100}
+        shortcutHintsVisible={false}
+        onToggleShortcutHints={vi.fn()}
+        gridVisible
+        onToggleGrid={vi.fn()}
+        selectionFilterSummary={null}
+        onOpenSelectionFilter={vi.fn()}
+        autoLayout={{
+          running: false,
+          elapsedSeconds: 0,
+          progress: null,
+          report: null,
+          onCancel: vi.fn(),
+          onDetails: vi.fn(),
+          ...chip,
+        }}
+        onToggleWireOptions={vi.fn()}
+        onWireRoutingModeChange={vi.fn()}
+        onWireCornerOrderChange={vi.fn()}
+        onZoomOut={vi.fn()}
+        onZoomIn={vi.fn()}
+        onFitView={vi.fn()}
+      />,
+    );
+  }
+
+  it("shows a planning Auto Layout run with its elapsed time and Cancel", () => {
+    const quick = statusbarWithAutoLayout({
+      running: true,
+      elapsedSeconds: 12,
+      progress: { evaluations: 0, budget: 24 },
+    });
+    expect(quick).toContain('data-testid="auto-layout-status"');
+    expect(quick).toContain("Auto Layout… 12 s");
+    expect(quick).not.toContain("evaluation");
+    expect(quick).toContain('data-testid="auto-layout-cancel"');
+    expect(quick).not.toContain('data-testid="auto-layout-details"');
+    // The annealer's count shows only once it reports one.
+    expect(
+      statusbarWithAutoLayout({
+        running: true,
+        elapsedSeconds: 3,
+        progress: { evaluations: 3, budget: 24 },
+      }),
+    ).toContain("Auto Layout… 3 s · evaluation 3/24");
+  });
+
+  it("offers Details for a refused or warned Auto Layout run", () => {
+    const refused = statusbarWithAutoLayout({
+      report: [
+        { severity: "error" },
+        { severity: "warning" },
+        { severity: "warning" },
+      ],
+    });
+    expect(refused).toContain("Auto Layout: refused");
+    expect(refused).toContain('data-testid="auto-layout-details"');
+    expect(refused).not.toContain('data-testid="auto-layout-cancel"');
+    expect(
+      statusbarWithAutoLayout({
+        report: [{ severity: "warning" }, { severity: "warning" }],
+      }),
+    ).toContain("Auto Layout: 2 warnings");
+    // Nothing to say: no chip.
+    expect(statusbarWithAutoLayout({})).not.toContain(
+      'data-testid="auto-layout-status"',
+    );
   });
 });

@@ -18,6 +18,7 @@
     "@codemirror/view": "6.43.11",
     "@fontsource-variable/google-sans-code": "^5.3.0",
     "@icm/agent-adapter": "workspace:*",
+    "@icm/auto-layout": "workspace:*",
     "@icm/component-library": "workspace:*",
     "@icm/derived": "workspace:*",
     "@icm/devices": "workspace:*",

@@ -1,6 +1,8 @@
 import { createEmptyProject, createSimulationFolder } from "@icm/model";
 import { describe, expect, it, vi } from "vitest";
 
+import { EditorDocumentController } from "../document/document-controller";
+import { createLibraryExampleProject } from "../examples/library-examples";
 import type { InteractionMode } from "../interaction/interaction-state";
 import {
   createEditorTransactionCommands,
@@ -14,6 +16,7 @@ function dependencies() {
     document: project.documents[0]!,
     dispatchProjectTransaction: vi.fn(),
     transactDocument: vi.fn(),
+    dispatchTransaction: vi.fn(),
     getCurrentInteractionKind: vi.fn((): InteractionMode => "idle"),
     cancelAllTransientInteraction: vi.fn(),
     setStatus: vi.fn(),
@@ -154,6 +157,101 @@ describe("editor transaction commands", () => {
     expect(input.cancelAllTransientInteraction).toHaveBeenCalledOnce();
     expect(input.setStatus).toHaveBeenCalledWith(
       "INTERNAL_ERROR: wrapper failed — operation cancelled; circuit unchanged",
+    );
+  });
+});
+
+describe("revision-fenced Document commits", () => {
+  /** The real controller behind the commands, as App wires them. */
+  function controlled(kind: InteractionMode = "idle") {
+    const controller = new EditorDocumentController(
+      createLibraryExampleProject("two-stage-op-amp")!,
+    );
+    const input = {
+      dispatchProjectTransaction: vi.fn(),
+      transactDocument: vi.fn(),
+      dispatchTransaction: vi.fn(
+        (request: Parameters<typeof controller.dispatchTransaction>[0]) =>
+          controller.dispatchTransaction(request),
+      ),
+      getCurrentInteractionKind: vi.fn((): InteractionMode => kind),
+      cancelAllTransientInteraction: vi.fn(),
+      setStatus: vi.fn(),
+    };
+    const commands = () =>
+      createEditorTransactionCommands({
+        ...input,
+        project: controller.project,
+        document: controller.document,
+      });
+    const instance = controller.document.instances[0]!;
+    const move = [
+      {
+        kind: "move_instance" as const,
+        instanceId: instance.id,
+        position: {
+          x: instance.placement!.position.x + 20,
+          y: instance.placement!.position.y,
+        },
+      },
+    ];
+    return { controller, input, commands, move };
+  }
+
+  it("commits once at the revision the edits were planned against", () => {
+    const { controller, input, commands, move } = controlled();
+    const revision = controller.document.revision;
+
+    const result = commands().transactAtRevision(revision, move, "plan-1");
+
+    expect(result).toMatchObject({ ok: true, applied: true });
+    expect(input.dispatchTransaction).toHaveBeenCalledOnce();
+    expect(input.dispatchTransaction).toHaveBeenCalledWith({
+      transactionId: "plan-1",
+      documentId: controller.document.id,
+      expectedRevision: revision,
+      expectedStructureRevision: controller.project.structureRevision,
+      actor: { kind: "human", id: "human-local" },
+      edits: move,
+    });
+    expect(controller.document.revision).toBe(revision + 1);
+    expect(controller.canUndo).toBe(true);
+    expect(input.setStatus).toHaveBeenLastCalledWith(
+      `Committed revision ${revision + 1}`,
+    );
+  });
+
+  it("refuses edits planned against an older revision", () => {
+    const { controller, input, commands, move } = controlled();
+    const planned = controller.document.revision;
+    // Someone else commits first, through the ordinary write path.
+    controller.transact([{ ...move[0]!, position: { x: 0, y: 0 } }]);
+    const live = controller.document.revision;
+    expect(live).toBeGreaterThan(planned);
+    const before = JSON.stringify(controller.document);
+
+    const result = commands().transactAtRevision(planned, move, "plan-2");
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "STALE_REVISION" },
+    });
+    expect(controller.document.revision).toBe(live);
+    expect(JSON.stringify(controller.document)).toBe(before);
+    expect(input.setStatus).toHaveBeenLastCalledWith(
+      `The drawing changed since revision ${planned}; nothing was applied`,
+    );
+  });
+
+  it("cancels a transient tool the commit lands under, as transact does", () => {
+    const { controller, input, commands, move } = controlled("copy-placement");
+    const revision = controller.document.revision;
+
+    commands().transactAtRevision(revision, move, "plan-3");
+
+    expect(input.cancelAllTransientInteraction).toHaveBeenCalledOnce();
+    expect(input.setStatus).toHaveBeenLastCalledWith(
+      `Committed revision ${revision + 1}; active tool cancelled because the circuit changed`,
     );
   });
 });

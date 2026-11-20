@@ -16,7 +16,10 @@ import type { CircuitProject, SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 
 import type { InteractionMode } from "../interaction/interaction-state";
-import type { EditorContactEvidence } from "../document/document-controller";
+import type {
+  EditorContactEvidence,
+  EditorTransactionRequest,
+} from "../document/document-controller";
 
 interface TransactionOptions {
   completesWireSession?: boolean;
@@ -47,6 +50,10 @@ export interface EditorTransactionCommandDependencies {
   transactDocument: (
     edits: readonly SchematicEdit[],
     evidence?: EditorContactEvidence,
+  ) => EditTransactionResult;
+  /** The controller's write path for a caller-built, revision-fenced envelope. */
+  dispatchTransaction: (
+    request: EditorTransactionRequest,
   ) => EditTransactionResult;
   getCurrentInteractionKind: () => InteractionMode;
   cancelAllTransientInteraction: () => void;
@@ -90,6 +97,7 @@ export function createEditorTransactionCommands({
   contactEvidence,
   dispatchProjectTransaction,
   transactDocument,
+  dispatchTransaction,
   getCurrentInteractionKind,
   cancelAllTransientInteraction,
   setStatus,
@@ -141,18 +149,17 @@ export function createEditorTransactionCommands({
     );
   };
 
-  const transact = (
-    edits: SchematicEdit[],
+  /**
+   * Run one Document commit and give it the editor's status and the rule
+   * that an unrelated commit cancels a transient tool.
+   */
+  const commitDocument = (
+    run: () => EditTransactionResult,
     options: TransactionOptions = {},
   ): EditTransactionResult => {
     let result: EditTransactionResult;
     try {
-      result = transactDocument(
-        edits,
-        contactEvidence && resolver
-          ? { document, resolver, evidence: contactEvidence }
-          : undefined,
-      );
+      result = run();
     } catch (error) {
       cancelAllTransientInteraction();
       const message =
@@ -189,6 +196,49 @@ export function createEditorTransactionCommands({
           : `Committed revision ${result.revision}; active tool cancelled because the circuit changed`,
       );
     }
+    return result;
+  };
+
+  const transact = (
+    edits: SchematicEdit[],
+    options: TransactionOptions = {},
+  ): EditTransactionResult =>
+    commitDocument(
+      () =>
+        transactDocument(
+          edits,
+          contactEvidence && resolver
+            ? { document, resolver, evidence: contactEvidence }
+            : undefined,
+        ),
+      options,
+    );
+
+  /**
+   * Commit edits planned against an earlier revision of this Document. Unlike
+   * {@link transact}, which stamps the current revision, the caller's revision
+   * is the fence: if the Document changed since, the Edit Engine refuses with
+   * STALE_REVISION and nothing is applied.
+   */
+  const transactAtRevision = (
+    expectedRevision: number,
+    edits: SchematicEdit[],
+    transactionId: string,
+  ): EditTransactionResult => {
+    const result = commitDocument(() =>
+      dispatchTransaction({
+        transactionId,
+        documentId: document.id,
+        expectedRevision,
+        expectedStructureRevision: project.structureRevision,
+        actor: { kind: "human", id: "human-local" },
+        edits,
+      }),
+    );
+    if (!result.ok && result.error.code === "STALE_REVISION")
+      setStatus(
+        `The drawing changed since revision ${expectedRevision}; nothing was applied`,
+      );
     return result;
   };
 
@@ -244,6 +294,7 @@ export function createEditorTransactionCommands({
     commitStructure,
     transactStructure,
     transact,
+    transactAtRevision,
     gateConnectivity,
     transactConnectivity,
   };

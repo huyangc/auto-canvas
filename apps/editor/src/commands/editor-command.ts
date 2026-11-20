@@ -35,7 +35,10 @@ export type EditorCommandRequest =
   | { id: "properties.open" }
   | { id: "properties.close" }
   | { id: "view.pan"; direction: "left" | "right" | "up" | "down" }
-  | { id: "view.fit" };
+  | { id: "view.fit" }
+  /** Plan the whole active Document in a worker and apply it as one step. */
+  | { id: "layout.auto" }
+  | { id: "layout.auto-cancel" };
 
 export interface EditorCommandState {
   enabled: boolean;
@@ -67,6 +70,10 @@ export interface EditorCommandContext {
   hasActiveNetHighlight: boolean;
   /** A verb (rotate/copy/move/delete) is armed, waiting for a target click. */
   hasArmedVerb: boolean;
+  /** An Auto Layout run is planning. */
+  autoLayoutRunning: boolean;
+  /** The Document has a part to lay out and no modal editor owns the canvas. */
+  hasLayoutTarget: boolean;
 }
 
 export interface EditorCommandOperations {
@@ -107,6 +114,8 @@ export interface EditorCommandOperations {
   closeProperties(): void;
   panView(direction: "left" | "right" | "up" | "down"): void;
   fitView(): void;
+  startAutoLayout(): void;
+  cancelAutoLayout(): void;
   report(message: string): void;
 }
 
@@ -280,6 +289,18 @@ export function createEditorCommandRouter(
           : disabled("Select an object before opening Properties");
       case "properties.close":
         return enabled(context.propertiesOpen);
+      case "layout.auto":
+        if (context.autoLayoutRunning)
+          return disabled("Auto Layout is already running");
+        if (context.interactionMode !== "idle" || context.canvasDragActive)
+          return disabled("Finish or cancel the active tool first");
+        return context.hasLayoutTarget
+          ? enabled()
+          : disabled("Nothing to lay out");
+      case "layout.auto-cancel":
+        return context.autoLayoutRunning
+          ? enabled(true)
+          : disabled("Auto Layout is not running");
     }
   };
 
@@ -434,6 +455,12 @@ export function createEditorCommandRouter(
         break;
       case "view.pan":
         options.operations.panView(request.direction);
+        break;
+      case "layout.auto":
+        options.operations.startAutoLayout();
+        break;
+      case "layout.auto-cancel":
+        options.operations.cancelAutoLayout();
         break;
     }
     return { status: "executed" };
