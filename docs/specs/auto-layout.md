@@ -7,7 +7,8 @@ Primary owner: `packages/auto-layout`
 This contract defines pure structure recognition, template placement and bounded routing for one
 Schematic Document. It consumes the existing [model](schematic-model.md),
 [connectivity](connectivity-and-routing.md) and [typed edits](edit-engine.md).
-Locks and the UI entry are **T014, not yet specified**.
+The editor entry is specified in [editor-interaction.md](editor-interaction.md#automatic-layout)
+(T014); locks are a later task.
 
 ## Experimental internal block partition
 
@@ -143,7 +144,7 @@ visible in completion counts. No offline test asserts real recognition targets.
   `{ edits: SchematicEdit[], groups: RecognizedGroup[], diagnostics:
 AutoLayoutDiagnostic[] }`. Fixed instances retain their exact placements;
   a collision with the template returns no edits and an R10 diagnostic.
-  Obstacle-aware placement belongs to T014. Identical inputs produce byte-identical serialized edits. Break
+  Obstacle-aware placement belongs to the locks task. Identical inputs produce byte-identical serialized edits. Break
   ties by instance id in code-unit order. Quick mode uses neither randomness nor
   time. With `search`, the same seed and evaluation budget produce byte-identical
   edits; only a deadline or cancellation that truncates the run may change the

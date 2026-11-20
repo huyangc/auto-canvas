@@ -91,11 +91,6 @@ export default {
       entry: ["src/main.ts!", "scripts/*.mjs!"],
       project: ["src/**/*.ts!", "scripts/**/*.mjs!"],
     },
-    "packages/auto-layout": {
-      // Public result types gain product consumers in T014; remove then.
-      includeEntryExports: false,
-      project: ["src/**/*.{ts,tsx}!", ...testSupport],
-    },
     "packages/*": {
       includeEntryExports: true,
       project: ["src/**/*.{ts,tsx}!", ...testSupport],

@@ -505,7 +505,8 @@
 }
 
 /* The Agent session's final minute: the one action that keeps it, in view. */
-.statusbar-agent-expiring {
+.statusbar-agent-expiring,
+.statusbar-auto-layout {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
@@ -519,7 +520,8 @@
   line-height: var(--icm-line-tight);
 }
 
-.statusbar-agent-expiring button {
+.statusbar-agent-expiring button,
+.statusbar-auto-layout button {
   padding: 1px 8px;
   border-radius: 999px;
   font: inherit;

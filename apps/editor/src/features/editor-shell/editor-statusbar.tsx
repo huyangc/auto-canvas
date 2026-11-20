@@ -85,6 +85,32 @@ function issuesBadge(issues: {
   };
 }
 
+/** What the Auto Layout chip shows: a planning run, or the last run's report. */
+export interface AutoLayoutChip {
+  running: boolean;
+  elapsedSeconds: number;
+  progress: { evaluations: number; budget: number } | null;
+  /** The last run's diagnostics, while they await a Details look. */
+  report: readonly { severity: "error" | "warning" }[] | null;
+  onCancel: () => void;
+  onDetails: () => void;
+}
+
+function autoLayoutChipLabel(chip: AutoLayoutChip): string | null {
+  if (chip.running) {
+    const evaluation =
+      chip.progress && chip.progress.budget > 0 && chip.progress.evaluations > 0
+        ? ` · evaluation ${chip.progress.evaluations}/${chip.progress.budget}`
+        : "";
+    return `Auto Layout… ${chip.elapsedSeconds} s${evaluation}`;
+  }
+  if (!chip.report) return null;
+  if (chip.report.some((d) => d.severity === "error"))
+    return "Auto Layout: refused";
+  const warnings = chip.report.length;
+  return `Auto Layout: ${warnings} warning${warnings === 1 ? "" : "s"}`;
+}
+
 export function EditorStatusbar({
   externalLinksEnabled = true,
   status,
@@ -101,6 +127,7 @@ export function EditorStatusbar({
   issues,
   selectionFilterSummary,
   agentExpiring = null,
+  autoLayout = null,
   onOpenSelectionFilter,
   onToggleWireOptions,
   onWireRoutingModeChange,
@@ -128,6 +155,8 @@ export function EditorStatusbar({
   selectionFilterSummary: string | null;
   /** The Agent session's final minute, with the one action that keeps it. */
   agentExpiring?: { onKeep: () => void } | null;
+  /** A planning Auto Layout run (with Cancel) or its report (with Details). */
+  autoLayout?: AutoLayoutChip | null;
   issues?: {
     errorCount: number;
     warningCount: number;
@@ -166,6 +195,33 @@ export function EditorStatusbar({
               >
                 Keep connected
               </button>
+            </span>
+          ) : null}
+          {autoLayout && autoLayoutChipLabel(autoLayout) ? (
+            <span
+              className="statusbar-auto-layout"
+              role="status"
+              data-testid="auto-layout-status"
+            >
+              {autoLayoutChipLabel(autoLayout)}
+              {autoLayout.running ? (
+                <button
+                  type="button"
+                  data-testid="auto-layout-cancel"
+                  onClick={autoLayout.onCancel}
+                >
+                  Cancel
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  data-testid="auto-layout-details"
+                  aria-haspopup="dialog"
+                  onClick={autoLayout.onDetails}
+                >
+                  Details
+                </button>
+              )}
             </span>
           ) : null}
           {/* Selecting is the resting state: only another tool is news. */}

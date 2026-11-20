@@ -243,6 +243,8 @@ import {
 import { EditorDialogs } from "./editor-dialogs";
 import { EditorComponentEditor } from "./editor-component-editor";
 import { useEditorCommandRouter } from "./use-editor-command-router";
+import { useAutoLayout } from "../features/auto-layout/use-auto-layout";
+import { AutoLayoutReport } from "../features/auto-layout/auto-layout-report";
 import { useEditorShortcuts } from "./use-editor-shortcuts";
 import { EditorCanvasContextMenu, EditorMenuBar } from "./editor-menus";
 import {
@@ -686,6 +688,7 @@ function WorkspaceEditor({
     commitProjectStructure,
     dispatchProjectTransaction,
     transact: transactDocument,
+    dispatchTransaction,
     activateSession: activateDocumentSession,
     controller: editorDocumentController,
     projectSessionId,
@@ -1240,20 +1243,26 @@ function WorkspaceEditor({
     request: CellInterfaceConfirmation;
     snapshot: typeof project;
   } | null>(null);
-  const { commitStructure, transact, gateConnectivity, transactConnectivity } =
-    createEditorTransactionCommands({
-      project,
-      document,
-      resolver,
-      ...(documentContactEvidence
-        ? { contactEvidence: documentContactEvidence }
-        : {}),
-      dispatchProjectTransaction,
-      transactDocument,
-      getCurrentInteractionKind: () => getCurrentInteractionState().kind,
-      cancelAllTransientInteraction,
-      setStatus,
-    });
+  const {
+    commitStructure,
+    transact,
+    transactAtRevision,
+    gateConnectivity,
+    transactConnectivity,
+  } = createEditorTransactionCommands({
+    project,
+    document,
+    resolver,
+    ...(documentContactEvidence
+      ? { contactEvidence: documentContactEvidence }
+      : {}),
+    dispatchProjectTransaction,
+    transactDocument,
+    dispatchTransaction,
+    getCurrentInteractionKind: () => getCurrentInteractionState().kind,
+    cancelAllTransientInteraction,
+    setStatus,
+  });
   const {
     createCell,
     renameCell,
@@ -4167,7 +4176,24 @@ function WorkspaceEditor({
     report: setStatus,
     onChunkLoadFailure: setChunkLoadFailure,
   });
+  const autoLayout = useAutoLayout({
+    project,
+    document,
+    projectSessionId,
+    controller: editorDocumentController,
+    transactAtRevision,
+    setStatus,
+    clearEditorSelection,
+    fitView,
+  });
   const editorCommands = useEditorCommandRouter({
+    autoLayoutRunning: autoLayout.running,
+    hasLayoutTarget:
+      document.instances.length > 0 &&
+      !componentEditor &&
+      !interfaceConfirmation,
+    startAutoLayout: autoLayout.start,
+    cancelAutoLayout: autoLayout.cancel,
     setStatus,
     selectionOpen,
     setSearchOpen,
@@ -7010,6 +7036,14 @@ function WorkspaceEditor({
             ? { onKeep: agentSession.keepConnected }
             : null
         }
+        autoLayout={{
+          running: autoLayout.running,
+          elapsedSeconds: autoLayout.elapsedSeconds,
+          progress: autoLayout.progress,
+          report: autoLayout.report,
+          onCancel: () => editorCommands.execute({ id: "layout.auto-cancel" }),
+          onDetails: autoLayout.openDetails,
+        }}
         zoomPercent={zoomPercent}
         shortcutHintsVisible={shortcutHintsVisible}
         onToggleShortcutHints={() =>
@@ -7041,6 +7075,12 @@ function WorkspaceEditor({
         onZoomIn={() => zoomViewAtCenter(0.84)}
         onFitView={() => editorCommands.execute({ id: "view.fit" })}
       />
+      {autoLayout.detailsOpen && autoLayout.report ? (
+        <AutoLayoutReport
+          diagnostics={autoLayout.report}
+          onClose={autoLayout.clearReport}
+        />
+      ) : null}
     </main>
   );
 }

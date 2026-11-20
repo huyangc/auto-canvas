@@ -138,6 +138,9 @@ importers:
       "@icm/agent-adapter":
         specifier: workspace:*
         version: link:../../packages/agent-adapter
+      "@icm/auto-layout":
+        specifier: workspace:*
+        version: link:../../packages/auto-layout
       "@icm/component-library":
         specifier: workspace:*
         version: link:../../packages/component-library

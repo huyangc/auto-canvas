@@ -519,6 +519,14 @@ export function EditorMenuBar({
       }}
       onOpenNetlistPreflight={() => setNetlistPreflightOpen(true)}
       onExportNetlist={(format) => void exportDesignNetlist(format)}
+      autoLayout={(() => {
+        const state = editorCommands.state({ id: "layout.auto" });
+        return {
+          enabled: state.enabled,
+          reason: state.reason,
+          execute: () => editorCommands.execute({ id: "layout.auto" }),
+        };
+      })()}
       agentAction={
         publicAgentUiEnabled && agentSession
           ? {

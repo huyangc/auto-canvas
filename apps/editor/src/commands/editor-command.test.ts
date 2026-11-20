@@ -26,6 +26,8 @@ function fixture(overrides: Partial<EditorCommandContext> = {}) {
     hasClearableDraftingSelection: false,
     hasActiveNetHighlight: false,
     hasArmedVerb: false,
+    autoLayoutRunning: false,
+    hasLayoutTarget: true,
     ...overrides,
   };
   const operations: EditorCommandOperations = {
@@ -64,6 +66,8 @@ function fixture(overrides: Partial<EditorCommandContext> = {}) {
     closeProperties: vi.fn(),
     panView: vi.fn(),
     fitView: vi.fn(),
+    startAutoLayout: vi.fn(),
+    cancelAutoLayout: vi.fn(),
     report: vi.fn(),
   };
   return {
@@ -300,5 +304,64 @@ describe("editor command router", () => {
     router.execute({ id: "editor.cancel" });
     expect(operations.disarmVerb).toHaveBeenCalled();
     expect(operations.cancelPassive).not.toHaveBeenCalled();
+  });
+
+  describe("Auto Layout", () => {
+    it("starts from an idle editor with something to lay out", () => {
+      const { router, operations } = fixture();
+      expect(router.state({ id: "layout.auto" })).toEqual({
+        enabled: true,
+        active: false,
+      });
+      expect(router.execute({ id: "layout.auto" })).toEqual({
+        status: "executed",
+      });
+      expect(operations.startAutoLayout).toHaveBeenCalledOnce();
+      // Cancel only exists while a run plans.
+      expect(router.state({ id: "layout.auto-cancel" }).enabled).toBe(false);
+    });
+
+    it.each([
+      [
+        "while a run is planning",
+        { autoLayoutRunning: true, interactionMode: "wire" as const },
+        "Auto Layout is already running",
+      ],
+      [
+        "while a tool is active",
+        { interactionMode: "wire" as const, hasLayoutTarget: false },
+        "Finish or cancel the active tool first",
+      ],
+      [
+        "during a canvas drag",
+        { canvasDragActive: true },
+        "Finish or cancel the active tool first",
+      ],
+      [
+        "without a Document to lay out",
+        { hasLayoutTarget: false },
+        "Nothing to lay out",
+      ],
+    ])("is refused %s", (_, overrides, reason) => {
+      const { router, operations } = fixture(overrides);
+      expect(router.state({ id: "layout.auto" })).toEqual({
+        enabled: false,
+        active: false,
+        reason,
+      });
+      expect(router.execute({ id: "layout.auto" })).toEqual({
+        status: "rejected",
+        message: reason,
+      });
+      expect(operations.startAutoLayout).not.toHaveBeenCalled();
+      expect(operations.report).toHaveBeenCalledWith(reason);
+    });
+
+    it("cancels a planning run", () => {
+      const { router, operations } = fixture({ autoLayoutRunning: true });
+      expect(router.state({ id: "layout.auto-cancel" }).enabled).toBe(true);
+      router.execute({ id: "layout.auto-cancel" });
+      expect(operations.cancelAutoLayout).toHaveBeenCalledOnce();
+    });
   });
 });

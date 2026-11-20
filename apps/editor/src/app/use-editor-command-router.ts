@@ -104,6 +104,10 @@ export function useEditorCommandRouter({
   mirrorPendingCopy,
   paintSnapGuides,
   visualClipboard,
+  autoLayoutRunning,
+  hasLayoutTarget,
+  startAutoLayout,
+  cancelAutoLayout,
 }: {
   setStatus: Dispatch<SetStateAction<string>>;
   selectionOpen: EditorPanels["selectionOpen"];
@@ -160,6 +164,11 @@ export function useEditorCommandRouter({
   mirrorPendingCopy: (direction: ScreenFlip) => void;
   paintSnapGuides: (guides: readonly SnapGuideLine[]) => void;
   visualClipboard: ReturnType<typeof useVisualClipboard>;
+  autoLayoutRunning: boolean;
+  /** A part to lay out, with no component editor or interface confirmation open. */
+  hasLayoutTarget: boolean;
+  startAutoLayout: () => void;
+  cancelAutoLayout: () => void;
 }) {
   // `canBeginKeyboardSelectionMove` runs `planSelectionMove`, a full move
   // plan, and the command router asks for enablement on every render — from
@@ -196,6 +205,8 @@ export function useEditorCommandRouter({
         selectedDrafting?.kind === "circle",
       hasActiveNetHighlight: highlightedNetOrigin !== null,
       hasArmedVerb: armedVerb !== null,
+      autoLayoutRunning,
+      hasLayoutTarget,
     }),
     operations: {
       cancelCanvasDrag: () => {
@@ -299,6 +310,8 @@ export function useEditorCommandRouter({
       closeProperties,
       panView,
       fitView,
+      startAutoLayout,
+      cancelAutoLayout,
       report: setStatus,
     },
   });

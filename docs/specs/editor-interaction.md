@@ -430,6 +430,30 @@ one undo, reporting the exact affected count (also in dry run).
   replaces the Project. Same-site product links go through this guard without a
   second native prompt.
 
+## Automatic layout
+
+- **Entry and scope.** Circuit → Layout → **Auto Layout** (command `layout.auto`,
+  no shortcut) plans the whole open Cell with the
+  [auto-layout planner](auto-layout.md) at its default bounded search. Selection,
+  locks and other Cells are ignored. It is unavailable while a run plans, while
+  a tool, drag, component editor or interface confirmation is active, and on a
+  Cell with no Instance; the menu item's tooltip gives the reason.
+- **Off the main thread.** Each run plans in its own module Web Worker on a copy
+  of the Project; without Web Workers the command refuses. The editor stays
+  editable. The status chip shows elapsed seconds (plus "evaluation n/N" while
+  the search reports) and **Cancel**, which terminates the worker
+  (`layout.auto-cancel`); nothing is applied.
+- **Apply or discard.** A result is applied only if the Project session,
+  `structureRevision`, open Cell and Document revision are those the run
+  started from; otherwise it is discarded and the status says the drawing
+  changed. The plan commits as one human transaction fenced at the starting
+  revision, so one Undo restores the drawing; a plan that changes nothing
+  reports "Already laid out". After a commit the selection clears and the view
+  fits the drawing.
+- **Refusals and warnings.** A planner error leaves the drawing unchanged with a
+  one-line reason; the chip's **Details** lists every diagnostic (severity, code,
+  the planner's own message). Warnings on a delivered plan use the same chip.
+
 ## Agent semantic control
 
 API 3.0 may advertise `semanticControl`: select a locator, highlight a Net,
