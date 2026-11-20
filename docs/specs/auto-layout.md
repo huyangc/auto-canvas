@@ -1031,6 +1031,9 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   `AUTO_LAYOUT_NETLIST_PRESENTATION_DROPPED` (or `_SKIPPED`) R165 warning says
   why. R10's partition check applies to the presented Document. The
   evaluation checks the electrical graph and the re-exported netlist text.
+  The editor asks for this presentation on a netlist-only Cell (an
+  `importReference` and no routes), after a SPICE import and from the Auto
+  Layout command ([Automatic layout](editor-interaction.md#automatic-layout)).
 
 - **R166 — Stack-aligned candidates (T136).** A stack is two devices that
   carry the only two conduction terminals (a MOS drain or source, a BJT

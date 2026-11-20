@@ -1,5 +1,12 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { clickCommand, copyNetlistText } from "./editor-fixtures.js";
+
+/** Wait for the Auto Layout that follows a SPICE import (T147) to finish. */
+const importLaidOut = (page: Page) =>
+  expect(page.getByTestId("status")).toContainText(
+    /· (Auto Layout (applied|left|cancelled|failed|could)|Already laid out|The (drawing|Project) changed)/u,
+    { timeout: 60_000 },
+  );
 
 test("bulk edits instance JSON in the sidebar with atomic undo and live netlist updates", async ({
   page,
@@ -10,6 +17,7 @@ test("bulk edits instance JSON in the sidebar with atomic undo and live netlist 
     mimeType: "text/plain",
     buffer: Buffer.from("\n.subckt top a b\nR1 a b 1k\nR2 b a 2k\n.ends top\n"),
   });
+  await importLaidOut(page);
   await clickCommand(page, "Netlist", "Edit Device Data…");
   const panel = page.getByRole("region", {
     name: "Instance code",

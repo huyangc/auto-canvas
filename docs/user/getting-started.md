@@ -15,8 +15,11 @@ Cell is `dut`; nothing needs to be opened first.
 To start from a netlist, choose **File → Import SPICE / SCS…** and select one
 `.cir`, `.sp`, `.spi` or `.scs` entry plus its local include files.
 **Import Cadence SPICE (`!` globals)…** also treats net names ending in `!` as
-global Nets. Imported parts start in the **Placement Tray** so you decide the
-layout.
+global Nets. The imported devices appear on a shelf, then **Auto Layout**
+draws every imported Cell by itself (the status bar shows its progress and
+**Cancel**); one **Undo** returns every Cell to the shelf. A netlist with
+several subcircuits draws each as its own Cell, and Import Review says so:
+check each Cell, since those drawings can be rougher.
 
 ## The editor
 

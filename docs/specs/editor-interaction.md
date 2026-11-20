@@ -72,7 +72,8 @@ rendering and recovery.
 ### Drawn and unplaced Instances
 
 - A schematic is what it shows: import lays devices on a deterministic shelf and
-  opening a Project draws hidden legacy Instances with default projections.
+  opening a Project draws hidden legacy Instances with default projections. A
+  SPICE import is then laid out (see [Automatic layout](#automatic-layout)).
 - The **Placement Tray** lists Instances still without placement (older
   sessions, Agent `unplace`/`reset-placement`), counted by
   `ERC_INSTANCE_NOT_DRAWN`; items can be dragged, cursor-placed or **Place
@@ -453,6 +454,14 @@ one undo, reporting the exact affected count (also in dry run).
 - **Refusals and warnings.** A planner error leaves the drawing unchanged with a
   one-line reason; the chip's **Details** lists every diagnostic (severity, code,
   the planner's own message). Warnings on a delivered plan use the same chip.
+- **After a SPICE import.** File → Import → SPICE / SCS… and Cadence SPICE
+  start a run on every imported Cell with a part, top Cell first. A Cell still
+  netlist-only (an `importReference` and no routes) is planned with R165's
+  netlist presentation, by this run and by the menu command alike. The fence is
+  per Document: opening another Cell is allowed, a Cell edited meanwhile is
+  skipped and named. Every delivered plan commits as one Undo step; a refused
+  Cell keeps its shelf with its reason. Several subcircuits get a notice in
+  Import Review; every status starts with the import's headline.
 
 ## Agent semantic control
 
