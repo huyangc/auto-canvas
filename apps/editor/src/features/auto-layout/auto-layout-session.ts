@@ -2,9 +2,10 @@
 // one revision-fenced transaction, or discard it. Framework-free; the React
 // hook owns one session per editor.
 import type { AutoLayoutDiagnostic, AutoLayoutResult } from "@icm/auto-layout";
-import type { EditTransactionResult, SchematicEdit } from "@icm/edit-engine";
+import type { EditTransactionResult } from "@icm/edit-engine";
 import type { CircuitProject, SchematicDocument } from "@icm/model";
 
+import type { FencedDocumentTransaction } from "../../app/editor-transaction-commands";
 import type {
   AutoLayoutWorkerMessage,
   AutoLayoutWorkerRequest,
@@ -44,10 +45,9 @@ export interface AutoLayoutSessionOptions {
   createWorker: () => AutoLayoutWorker | null;
   /** The editor's live fence values, read when a result arrives. */
   live: () => AutoLayoutFence;
+  /** The fenced write; it targets the run's Document, not the open one. */
   transactAtRevision: (
-    expectedRevision: number,
-    edits: SchematicEdit[],
-    transactionId: string,
+    request: FencedDocumentTransaction,
   ) => EditTransactionResult;
   setStatus: (status: string) => void;
   onChange: (state: AutoLayoutSessionState) => void;
@@ -58,6 +58,7 @@ export interface AutoLayoutSessionOptions {
 
 export const AUTO_LAYOUT_STALE_MESSAGE =
   "The drawing changed while Auto Layout was planning; nothing was applied.";
+export const AUTO_LAYOUT_PLANNING_MESSAGE = "Auto Layout is planning…";
 export const AUTO_LAYOUT_CANCELLED_MESSAGE =
   "Auto Layout cancelled; the drawing is unchanged.";
 const AUTO_LAYOUT_UNCHANGED_MESSAGE = "Already laid out; nothing changed";
@@ -143,13 +144,21 @@ export function createAutoLayoutSession(options: AutoLayoutSessionOptions) {
       return;
     }
     stop();
-    const committed = options.transactAtRevision(
-      fence.revision,
-      result.edits,
-      `auto-layout-${fence.runId}`,
-    );
-    update({ running: false, progress: null, report });
-    // A refused commit keeps the write path's own status (its code and reason).
+    const committed = options.transactAtRevision({
+      documentId: fence.documentId,
+      expectedRevision: fence.revision,
+      edits: result.edits,
+      transactionId: `auto-layout-${fence.runId}`,
+      // The same words as the discard above, whichever check notices first.
+      staleStatus: AUTO_LAYOUT_STALE_MESSAGE,
+    });
+    // A refused commit applied nothing: no warnings chip for a plan that did
+    // not land. The write path's own status already names the refusal.
+    update({
+      running: false,
+      progress: null,
+      report: committed.ok ? report : null,
+    });
     if (!committed.ok) return;
     if (!committed.applied) {
       options.setStatus(`${AUTO_LAYOUT_UNCHANGED_MESSAGE}${withWarnings}`);
@@ -223,7 +232,7 @@ export function createAutoLayoutSession(options: AutoLayoutSessionOptions) {
       },
       report: null,
     });
-    options.setStatus("Auto Layout is planning…");
+    options.setStatus(AUTO_LAYOUT_PLANNING_MESSAGE);
     worker.postMessage({
       type: "plan",
       runId,

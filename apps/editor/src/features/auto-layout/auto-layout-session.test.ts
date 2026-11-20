@@ -19,6 +19,7 @@ import {
   AUTO_LAYOUT_CANCELLED_MESSAGE,
   AUTO_LAYOUT_STALE_MESSAGE,
   createAutoLayoutSession,
+  type AutoLayoutSessionOptions,
   type AutoLayoutWorker,
 } from "./auto-layout-session";
 
@@ -53,7 +54,14 @@ class FakeWorker implements AutoLayoutWorker {
   }
 }
 
-function harness(project: CircuitProject = example("two-stage-op-amp")) {
+function harness(
+  project: CircuitProject = example("two-stage-op-amp"),
+  options: {
+    /** The Document the write commands were bound to (a stale render's). */
+    boundDocument?: (controller: EditorDocumentController) => SchematicDocument;
+    transactAtRevision?: AutoLayoutSessionOptions["transactAtRevision"];
+  } = {},
+) {
   const controller = new EditorDocumentController(project);
   const workers: FakeWorker[] = [];
   const setStatus = vi.fn<(status: string) => void>();
@@ -71,18 +79,20 @@ function harness(project: CircuitProject = example("two-stage-op-amp")) {
       revision: controller.document.revision,
     }),
     // As App wires it: commands bound to the editor's current Document.
-    transactAtRevision: (revision, edits, id) =>
-      createEditorTransactionCommands({
-        project: controller.project,
-        document: controller.document,
-        dispatchProjectTransaction: vi.fn(),
-        transactDocument: vi.fn(),
-        dispatchTransaction: (request) =>
-          controller.dispatchTransaction(request),
-        getCurrentInteractionKind: () => "idle",
-        cancelAllTransientInteraction: vi.fn(),
-        setStatus,
-      }).transactAtRevision(revision, edits, id),
+    transactAtRevision:
+      options.transactAtRevision ??
+      ((request) =>
+        createEditorTransactionCommands({
+          project: controller.project,
+          document: options.boundDocument?.(controller) ?? controller.document,
+          dispatchProjectTransaction: vi.fn(),
+          transactDocument: vi.fn(),
+          dispatchTransaction: (request) =>
+            controller.dispatchTransaction(request),
+          getCurrentInteractionKind: () => "idle",
+          cancelAllTransientInteraction: vi.fn(),
+          setStatus,
+        }).transactAtRevision(request)),
     setStatus,
     onChange: vi.fn(),
     onApplied,
@@ -293,4 +303,127 @@ describe("Auto Layout session", () => {
     ).toBe(false);
     expect(setStatus).toHaveBeenCalledWith("Auto Layout needs Web Workers");
   });
+
+  it("writes the plan to the fenced Document even through stale commands", () => {
+    // A second Cell with the same instance ids and revision number: commands
+    // bound to it (a render that had not caught up) must not receive the plan.
+    const source = example("two-stage-op-amp");
+    const top = source.documents.find((d) => d.id === source.topDocumentId)!;
+    const twin = structuredClone(top);
+    twin.id = "copy";
+    twin.name = "Copy";
+    if (twin.netlist) twin.netlist.name = "Copy";
+    const project = { ...source, documents: [...source.documents, twin] };
+    const { controller, start, workers } = harness(project, {
+      boundDocument: (c) => c.project.documents.find((d) => d.id === "copy")!,
+    });
+    const find = (id: string) =>
+      controller.project.documents.find((d) => d.id === id)!;
+    const copy = JSON.stringify(find("copy"));
+    const before = find(top.id);
+    expect(find("copy").revision).toBe(before.revision);
+    start();
+    workers[0]!.finish();
+    expect(find(top.id).revision).toBe(before.revision + 1);
+    expect(withoutRevision(find(top.id))).not.toBe(withoutRevision(before));
+    expect(JSON.stringify(find("copy"))).toBe(copy);
+  }, 60_000);
+
+  it("says nothing changed when the commit applies nothing", () => {
+    const transactAtRevision = vi.fn<
+      AutoLayoutSessionOptions["transactAtRevision"]
+    >((request) => ({
+      ok: true,
+      applied: false,
+      revision: request.expectedRevision,
+      proposedRevision: request.expectedRevision,
+      document: undefined as unknown as SchematicDocument,
+      diff: {
+        documentId: request.documentId,
+        fromRevision: request.expectedRevision,
+        toRevision: request.expectedRevision,
+        editKinds: [],
+        changedObjectIds: [],
+      },
+      diagnostics: [],
+    }));
+    const { start, workers, setStatus, onApplied, session } = harness(
+      undefined,
+      { transactAtRevision },
+    );
+    start();
+    workers[0]!.finish();
+    expect(transactAtRevision).toHaveBeenCalledOnce();
+    expect(onApplied).not.toHaveBeenCalled();
+    expect(session.state.running).toBe(false);
+    expect(setStatus).toHaveBeenLastCalledWith(
+      "Already laid out; nothing changed",
+    );
+  }, 60_000);
+
+  it("drops the warnings chip when the commit is refused", () => {
+    const transactAtRevision = vi.fn<
+      AutoLayoutSessionOptions["transactAtRevision"]
+    >((request) => ({
+      ok: false,
+      applied: false,
+      revision: request.expectedRevision,
+      document: undefined as unknown as SchematicDocument,
+      error: { code: "EDIT_PRECONDITION", message: "refused" },
+      diagnostics: [],
+    }));
+    const { start, workers, session, onApplied } = harness(undefined, {
+      transactAtRevision,
+    });
+    start();
+    // A planner result with a warning, as the worker would post it.
+    workers[0]!.onmessage?.({
+      data: {
+        type: "result",
+        runId: 1,
+        milliseconds: 1,
+        result: {
+          edits: [{ kind: "noop" }],
+          groups: [],
+          diagnostics: [
+            {
+              severity: "warning",
+              code: "AUTO_LAYOUT_NET_UNROUTED",
+              rule: "R10",
+              message: "R10: net left unrouted",
+            },
+          ],
+        },
+      },
+    });
+    expect(transactAtRevision).toHaveBeenCalledOnce();
+    expect(onApplied).not.toHaveBeenCalled();
+    expect(session.state).toMatchObject({ running: false, report: null });
+  });
+
+  it("uses one wording for a stale plan, whichever check finds it", () => {
+    const stale = vi.fn<AutoLayoutSessionOptions["transactAtRevision"]>();
+    const { controller, start, workers, setStatus } = harness(undefined, {
+      // The write path's own fence catches it: the session's check passed.
+      transactAtRevision: (request) => {
+        stale(request);
+        setStatus(request.staleStatus);
+        return {
+          ok: false,
+          applied: false,
+          revision: request.expectedRevision + 1,
+          document: controller.document,
+          error: { code: "STALE_REVISION", message: "stale" },
+          diagnostics: [],
+        };
+      },
+    });
+    start();
+    workers[0]!.finish();
+    expect(stale.mock.calls[0]![0]).toMatchObject({
+      documentId: controller.document.id,
+      staleStatus: AUTO_LAYOUT_STALE_MESSAGE,
+    });
+    expect(setStatus).toHaveBeenLastCalledWith(AUTO_LAYOUT_STALE_MESSAGE);
+  }, 60_000);
 });

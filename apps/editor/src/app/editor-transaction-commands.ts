@@ -30,6 +30,16 @@ interface ConnectivityTransactionOptions extends TransactionOptions {
   expectedElectricalEffect?: ExpectedElectricalEffect;
 }
 
+/** Edits planned against one Document at one revision. */
+export interface FencedDocumentTransaction {
+  documentId: string;
+  expectedRevision: number;
+  edits: SchematicEdit[];
+  transactionId: string;
+  /** The one status a person reads when the Document moved on meanwhile. */
+  staleStatus: string;
+}
+
 export interface EditorTransactionCommandDependencies {
   project: CircuitProject;
   document: SchematicDocument;
@@ -215,20 +225,23 @@ export function createEditorTransactionCommands({
     );
 
   /**
-   * Commit edits planned against an earlier revision of this Document. Unlike
-   * {@link transact}, which stamps the current revision, the caller's revision
-   * is the fence: if the Document changed since, the Edit Engine refuses with
-   * STALE_REVISION and nothing is applied.
+   * Commit edits planned against an earlier revision of one Document. Unlike
+   * {@link transact}, which stamps the open Document's current revision, the
+   * caller names the Document and revision it planned against: if that
+   * Document changed since, the Edit Engine refuses with STALE_REVISION,
+   * nothing is applied, and the status reads the caller's `staleStatus`.
    */
-  const transactAtRevision = (
-    expectedRevision: number,
-    edits: SchematicEdit[],
-    transactionId: string,
-  ): EditTransactionResult => {
+  const transactAtRevision = ({
+    documentId,
+    expectedRevision,
+    edits,
+    transactionId,
+    staleStatus,
+  }: FencedDocumentTransaction): EditTransactionResult => {
     const result = commitDocument(() =>
       dispatchTransaction({
         transactionId,
-        documentId: document.id,
+        documentId,
         expectedRevision,
         expectedStructureRevision: project.structureRevision,
         actor: { kind: "human", id: "human-local" },
@@ -236,9 +249,7 @@ export function createEditorTransactionCommands({
       }),
     );
     if (!result.ok && result.error.code === "STALE_REVISION")
-      setStatus(
-        `The drawing changed since revision ${expectedRevision}; nothing was applied`,
-      );
+      setStatus(staleStatus);
     return result;
   };
 

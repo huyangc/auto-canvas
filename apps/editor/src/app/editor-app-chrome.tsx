@@ -1,5 +1,9 @@
 import { appUrl } from "../lib/app-url";
 import {
+  AutoLayoutMenuSection,
+  type AutoLayoutMenuActions,
+} from "../features/auto-layout/auto-layout-menu-section";
+import {
   type ReactNode,
   type ComponentProps,
   type MouseEvent,
@@ -75,8 +79,8 @@ export interface EditorAppChromeProps {
   onOpenNetlistConfiguration: () => void;
   netlistFormat: "spice" | "spectre";
   onExportNetlist: (format: "spice" | "spectre") => void;
-  /** Circuit → Layout → Auto Layout, with the reason when it is unavailable. */
-  autoLayout: CommandAction & { reason?: string | undefined };
+  /** Circuit → Layout: Auto Layout (with its reason when unavailable) and Cancel. */
+  autoLayout: AutoLayoutMenuActions;
   agentAction: { label: string; execute: () => void } | null;
   drawingToolbar: ComponentProps<typeof DrawingToolbar>;
   hierarchyToolbar: ComponentProps<typeof HierarchyToolbar>;
@@ -324,24 +328,7 @@ export function EditorAppChrome({
                   Review Netlist Issues…
                 </button>
               </div>
-              <div className="command-section" role="group" aria-label="Layout">
-                <span className="command-section-title" aria-hidden="true">
-                  Layout
-                </span>
-                <button
-                  type="button"
-                  data-testid="auto-layout-command"
-                  disabled={!autoLayout.enabled}
-                  title={
-                    autoLayout.enabled
-                      ? "Lay out the open Cell automatically (one Undo step)"
-                      : autoLayout.reason
-                  }
-                  onClick={autoLayout.execute}
-                >
-                  Auto Layout
-                </button>
-              </div>
+              <AutoLayoutMenuSection {...autoLayout} />
             </div>
           </details>
         </div>

@@ -1,13 +1,22 @@
 // The editor's one Auto Layout session, bound to React: state for the menu
 // and status chip, a ticking elapsed time, and the selection/view reset after
 // an applied plan.
-import { useEffect, useRef, useState } from "react";
-import type { EditTransactionResult, SchematicEdit } from "@icm/edit-engine";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
+import type { EditTransactionResult } from "@icm/edit-engine";
 import type { CircuitProject, SchematicDocument } from "@icm/model";
 
+import type { FencedDocumentTransaction } from "../../app/editor-transaction-commands";
 import type { EditorDocumentController } from "../../document/document-controller";
 
 import {
+  AUTO_LAYOUT_CANCELLED_MESSAGE,
+  AUTO_LAYOUT_PLANNING_MESSAGE,
   createAutoLayoutSession,
   type AutoLayoutFence,
   type AutoLayoutSession,
@@ -33,11 +42,9 @@ export interface AutoLayoutEditorBinding {
     "projectSessionId" | "project" | "activeDocumentId" | "document"
   >;
   transactAtRevision: (
-    expectedRevision: number,
-    edits: SchematicEdit[],
-    transactionId: string,
+    request: FencedDocumentTransaction,
   ) => EditTransactionResult;
-  setStatus: (status: string) => void;
+  setStatus: Dispatch<SetStateAction<string>>;
   clearEditorSelection: () => void;
   fitView: (options?: { announce?: boolean }) => void;
   createWorker?: () => AutoLayoutWorker | null;
@@ -69,8 +76,8 @@ export function useAutoLayout(binding: AutoLayoutEditorBinding) {
         revision: controller.document.revision,
       };
     },
-    transactAtRevision: (revision, edits, id) =>
-      bindingRef.current.transactAtRevision(revision, edits, id),
+    transactAtRevision: (request) =>
+      bindingRef.current.transactAtRevision(request),
     setStatus: (status) => bindingRef.current.setStatus(status),
     onChange: setState,
     onApplied: () => {
@@ -96,8 +103,17 @@ export function useAutoLayout(binding: AutoLayoutEditorBinding) {
   // unmounting the editor does too.
   useEffect(
     () => () => {
+      const wasRunning = session.state.running;
       session.dispose();
       session.clearReport();
+      // Opening or switching usually writes its own status; only a status
+      // that still says the run is planning would now be false.
+      if (wasRunning)
+        bindingRef.current.setStatus((status) =>
+          status === AUTO_LAYOUT_PLANNING_MESSAGE
+            ? AUTO_LAYOUT_CANCELLED_MESSAGE
+            : status,
+        );
     },
     [binding.projectSessionId, session],
   );
