@@ -11,12 +11,12 @@ import { EditorDocumentController } from "../../document/document-controller";
 import { createLibraryExampleProject } from "../../examples/library-examples";
 import { runAutoLayout } from "./auto-layout-core";
 import {
-  importNetlistProject,
   NETLIST_A,
   NETLIST_THREE_CELLS,
   refusedFrameProject,
   resistorChainNetlist,
 } from "./auto-layout-fixture.test-support";
+import { importNetlistProject } from "./netlist-import.test-support";
 import type {
   AutoLayoutWorkerMessage,
   AutoLayoutWorkerRequest,

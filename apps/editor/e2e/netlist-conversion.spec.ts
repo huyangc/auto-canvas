@@ -1,5 +1,12 @@
 import { copyNetlistText, expectStatus } from "./editor-fixtures.js";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+
+/** Wait for the Auto Layout that follows a SPICE import (T147) to finish. */
+const importLaidOut = (page: Page) =>
+  expect(page.getByTestId("status")).toContainText(
+    /· (Auto Layout (applied|left|cancelled|failed|could)|Already laid out|The (drawing|Project) changed)/u,
+    { timeout: 60_000 },
+  );
 
 test("imports SCS and local includes, copies SPICE, and retains the circuit after unsupported input", async ({
   page,
@@ -22,6 +29,7 @@ test("imports SCS and local includes, copies SPICE, and retains the circuit afte
     },
   ]);
   await expectStatus(page, "Imported 2 Documents");
+  await importLaidOut(page);
   const text = await copyNetlistText(page);
   expect(text).toMatch(/\.subckt top z a/iu);
   expect(text).toMatch(/X1 z a leaf scale=2/iu);

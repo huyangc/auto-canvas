@@ -1,18 +1,12 @@
-// Auto Layout test Projects, all written here, none copied from a drawing
-// corpus: a Project the planner refuses (R161), and hand-written netlists
-// imported through the editor's own import step.
+// Auto Layout test inputs, all written here, none copied from a drawing
+// corpus: a Project the planner refuses (R161), and hand-written netlists.
+// Plain data only, so browser specs can import it too.
 import {
   createEmptyProject,
   createRoutePath,
   type CircuitProject,
   type SchematicDocument,
 } from "@icm/model";
-import { importSpiceSources } from "@icm/spice";
-
-import { EditorDocumentController } from "../../document/document-controller";
-import { materializeRazaviProjectBulkConnections } from "../../presentation/razavi-presentation";
-import { withImportedInstanceDisplays } from "../instance-display/imported-instance-displays";
-import { prepareImportSources } from "../netlist-export/convert-import-sources";
 
 /** One Cell with node 0 and a VDD pin. */
 export const NETLIST_A = `* netlist A: one Cell, node 0 and a VDD pin
@@ -89,36 +83,6 @@ export function resistorChainNetlist(count = 121, stage = false): string {
     ".model nmos nmos",
     "",
   ].join("\n");
-}
-
-/**
- * The Project the editor installs after File → Import → SPICE: the import
- * step's three calls (editor-file-commands.ts), the entry transform
- * (replaceActiveProject) and the controller's own parse.
- */
-export async function importNetlistProject(
-  text: string,
-  path = "netlist.sp",
-): Promise<CircuitProject> {
-  const inputs = [{ path, bytes: new TextEncoder().encode(text) }];
-  const prepared = prepareImportSources(inputs);
-  const result = await importSpiceSources(
-    prepared.inputs,
-    path,
-    {},
-    {
-      namingProfile: "native",
-      originalSources: inputs,
-      builtInBodies: prepared.builtInBodies,
-    },
-  );
-  const errors = result.diagnostics.filter((d) => d.severity === "error");
-  if (!result.project || !result.successful || errors.length > 0)
-    throw new Error(`Import failed: ${JSON.stringify(errors)}`);
-  const installed = materializeRazaviProjectBulkConnections(
-    withImportedInstanceDisplays(result.project),
-  ).project;
-  return new EditorDocumentController(installed).project;
 }
 
 type Placement = NonNullable<

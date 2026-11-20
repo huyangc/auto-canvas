@@ -2,10 +2,8 @@ import { parseProject } from "@icm/project-protocol";
 import { describe, expect, it } from "vitest";
 
 import { EditorDocumentController } from "../../document/document-controller";
-import {
-  importNetlistProject,
-  NETLIST_A,
-} from "./auto-layout-fixture.test-support";
+import { NETLIST_A } from "./auto-layout-fixture.test-support";
+import { importNetlistProject } from "./netlist-import.test-support";
 import { multiCellNotice, netlistOnly } from "./netlist-layout";
 
 describe("netlistOnly", () => {

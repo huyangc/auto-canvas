@@ -110,6 +110,16 @@ export function SelectionInspectorDetails({
         <dt>Status</dt>
         <dd aria-live="polite">{snapshot.status}</dd>
       </dl>
+      {/* The historical report below is hidden by the dock's styles; the
+          notice is for the person, so it stands outside it. */}
+      {importReport?.cellCount !== undefined && importReport.cellCount > 1 ? (
+        <p
+          className="import-multi-cell-notice"
+          data-testid="import-multi-cell-notice"
+        >
+          {multiCellNotice(importReport.cellCount)}
+        </p>
+      ) : null}
       <section aria-label="SPICE import report" className="diagnostics">
         <h2>SPICE Import Report</h2>
         <p data-testid="import-report-lifecycle">
@@ -117,11 +127,6 @@ export function SelectionInspectorDetails({
           {importReport?.entryPath ?? "the current source"}; they are not
           current ERC results.
         </p>
-        {importReport?.cellCount !== undefined && importReport.cellCount > 1 ? (
-          <p data-testid="import-multi-cell-notice">
-            {multiCellNotice(importReport.cellCount)}
-          </p>
-        ) : null}
         {!importReport || importReport.diagnostics.length === 0 ? (
           <p>No import messages</p>
         ) : null}

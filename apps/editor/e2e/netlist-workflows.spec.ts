@@ -111,6 +111,13 @@ const checkReport = (page: Page) =>
 const netlistAlert = (page: Page) =>
   page.getByRole("region", { name: "Live netlist" }).getByRole("alert");
 
+/** Wait for the Auto Layout that follows a SPICE import (T147) to finish. */
+const importLaidOut = (page: Page) =>
+  expect(page.getByTestId("status")).toContainText(
+    /· (Auto Layout (applied|left|cancelled|failed|could)|Already laid out|The (drawing|Project) changed)/u,
+    { timeout: 60_000 },
+  );
+
 test("keeps rejected SPICE import diagnostics in a historical report", async ({
   page,
 }) => {
@@ -170,6 +177,7 @@ X2 OUT IN EXT_MASTER l=1u nf=4
   });
 
   await expectStatus(page, "Imported 2 Documents");
+  await importLaidOut(page);
   await showNetlistPanel(page);
   await expect(page.getByTestId("netlist-issues")).toContainText(
     "Legacy declaration EXT_MASTER has no Project-owned implementation",
@@ -825,6 +833,7 @@ test("keeps the netlist live and selectable when clipboard access fails", async 
     mimeType: "text/plain",
     buffer: Buffer.from("\n.subckt live a b\nR1 a b 2k\n.ends live\n"),
   });
+  await importLaidOut(page);
   await expect(
     page.getByRole("region", { name: "Import Review", exact: true }),
   ).toBeVisible();
