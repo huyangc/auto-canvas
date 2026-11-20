@@ -16,10 +16,12 @@ import type { EditorDocumentController } from "../../document/document-controlle
 import type { FencedDocumentTransaction } from "./auto-layout-protocol";
 import {
   createAutoLayoutSession,
+  type AutoLayoutAbandonedRun,
   type AutoLayoutFence,
   type AutoLayoutImportCell,
   type AutoLayoutSession,
   type AutoLayoutSessionState,
+  type AutoLayoutStepResult,
   type AutoLayoutWorker,
 } from "./auto-layout-session";
 import { netlistOnly } from "./netlist-layout";
@@ -47,7 +49,7 @@ export interface AutoLayoutEditorBinding {
   /** Several fenced writes as one undo step (an import run's layout). */
   transactStepAtRevisions?: (
     requests: readonly FencedDocumentTransaction[],
-  ) => { kept: boolean; results: EditTransactionResult[] };
+  ) => AutoLayoutStepResult;
   setStatus: Dispatch<SetStateAction<string>>;
   clearEditorSelection: () => void;
   fitView: (options?: { announce?: boolean }) => void;
@@ -56,6 +58,8 @@ export interface AutoLayoutEditorBinding {
 
 /** An import run recorded inside the import, started after its render. */
 interface ImportRequest {
+  /** The controller the import installed into. */
+  owner: unknown;
   projectSessionId: string;
   structureRevision: number;
   cells: AutoLayoutImportCell[];
@@ -78,6 +82,9 @@ export function useAutoLayout(binding: AutoLayoutEditorBinding) {
   const [now, setNow] = useState(() => Date.now());
   // Fit after the committed Document has rendered, so its bounds are current.
   const [fitRequest, setFitRequest] = useState(0);
+  // An import run left by a tab switch, by the tab's controller, shown again
+  // when that tab is back.
+  const abandonedRef = useRef(new WeakMap<object, AutoLayoutAbandonedRun>());
   const sessionRef = useRef<AutoLayoutSession | null>(null);
   sessionRef.current ??= createAutoLayoutSession({
     createWorker: () =>
@@ -85,6 +92,7 @@ export function useAutoLayout(binding: AutoLayoutEditorBinding) {
     live: (): AutoLayoutFence => {
       const { controller } = bindingRef.current;
       return {
+        owner: controller,
         projectSessionId: controller.projectSessionId,
         structureRevision: controller.project.structureRevision,
         documentId: controller.activeDocumentId,
@@ -94,6 +102,7 @@ export function useAutoLayout(binding: AutoLayoutEditorBinding) {
     liveProject: () => {
       const { controller } = bindingRef.current;
       return {
+        owner: controller,
         projectSessionId: controller.projectSessionId,
         project: controller.project,
       };
@@ -107,7 +116,11 @@ export function useAutoLayout(binding: AutoLayoutEditorBinding) {
     },
     setStatus: (status) => bindingRef.current.setStatus(status),
     onChange: setState,
-    onApplied: () => {
+    onApplied: (documentIds) => {
+      // Only the Cell the person is looking at is reset; laying out other
+      // Cells leaves its selection and view alone.
+      if (!documentIds.includes(bindingRef.current.controller.activeDocumentId))
+        return;
       bindingRef.current.clearEditorSelection();
       setFitRequest((count) => count + 1);
     },
@@ -127,10 +140,16 @@ export function useAutoLayout(binding: AutoLayoutEditorBinding) {
   }, [state.running]);
 
   // Another Project (open, tab switch, replacement) ends the run silently;
-  // unmounting the editor does too.
+  // unmounting the editor does too. A tab switch changes the controller even
+  // where two tabs' session ids read the same, so both are watched. An import
+  // run left by a tab switch leaves a trace for that tab's return.
+  const boundController = binding.controller;
   useEffect(
     () => () => {
       const statuses = session.runStatuses;
+      const leftTab = bindingRef.current.controller !== boundController;
+      const abandoned = leftTab ? session.abandon() : null;
+      if (abandoned) abandonedRef.current.set(boundController, abandoned);
       session.dispose();
       session.clearReport();
       // Opening or switching usually writes its own status; only a status
@@ -140,8 +159,16 @@ export function useAutoLayout(binding: AutoLayoutEditorBinding) {
           status === statuses.planning ? statuses.cancelled : status,
         );
     },
-    [binding.projectSessionId, session],
+    [binding.projectSessionId, boundController, session],
   );
+
+  // Back on a tab whose import run was left: say so, with its Details.
+  useEffect(() => {
+    const abandoned = abandonedRef.current.get(boundController);
+    if (!abandoned) return;
+    abandonedRef.current.delete(boundController);
+    session.restore(abandoned);
+  }, [boundController, session]);
 
   // An import's run starts once the editor renders the imported Project, so
   // the session change above does not end it. A request whose Project is no
@@ -149,7 +176,10 @@ export function useAutoLayout(binding: AutoLayoutEditorBinding) {
   useEffect(() => {
     if (!importRequest) return;
     const { controller } = bindingRef.current;
-    if (importRequest.projectSessionId !== controller.projectSessionId) {
+    if (
+      importRequest.owner !== controller ||
+      importRequest.projectSessionId !== controller.projectSessionId
+    ) {
       setImportRequest(null);
       return;
     }
@@ -166,6 +196,7 @@ export function useAutoLayout(binding: AutoLayoutEditorBinding) {
       : undefined;
     session.startImport({
       project: controller.project,
+      owner: controller,
       projectSessionId: importRequest.projectSessionId,
       structureRevision: importRequest.structureRevision,
       cells: importRequest.cells,
@@ -183,12 +214,14 @@ export function useAutoLayout(binding: AutoLayoutEditorBinding) {
       : 0,
     detailsOpen: detailsOpen && state.report !== null,
     start: () => {
-      const { project, document, projectSessionId } = bindingRef.current;
+      const { project, document, projectSessionId, controller } =
+        bindingRef.current;
       setDetailsOpen(false);
       return session.start({
         project,
         document,
         projectSessionId,
+        owner: controller,
         // Decisions 2 and 6: a Cell still netlist-only gets rail symbols.
         ...(netlistOnly(document) ? { presentation: "netlist" as const } : {}),
       });
@@ -211,6 +244,7 @@ export function useAutoLayout(binding: AutoLayoutEditorBinding) {
       setImportRequest(
         cells.length > 0
           ? {
+              owner: controller,
               projectSessionId: controller.projectSessionId,
               structureRevision: project.structureRevision,
               cells,

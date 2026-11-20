@@ -11,6 +11,7 @@
 import type { AutoLayoutDiagnostic, AutoLayoutResult } from "@icm/auto-layout";
 import type { EditTransactionResult } from "@icm/edit-engine";
 import type { CircuitProject, SchematicDocument } from "@icm/model";
+import { hierarchicalSymbolId } from "@icm/symbols";
 
 import type {
   AutoLayoutCellResult,
@@ -33,6 +34,12 @@ export interface AutoLayoutFence {
   structureRevision: number;
   documentId: string;
   revision: number;
+  /**
+   * The editor's controller object. Session ids repeat across tabs (each
+   * tab's controller counts from 1 and an import's Project id comes from the
+   * file), so a different controller is a different session.
+   */
+  owner?: unknown;
 }
 
 export interface AutoLayoutProgress {
@@ -81,6 +88,8 @@ export interface AutoLayoutImportTarget {
   /** The Project to post: the controller's, not a render's. */
   project: CircuitProject;
   projectSessionId: string;
+  /** The controller the import installed into (see AutoLayoutFence.owner). */
+  owner?: unknown;
   structureRevision: number;
   /** Top Cell first. */
   cells: readonly AutoLayoutImportCell[];
@@ -95,7 +104,11 @@ export interface AutoLayoutSessionOptions {
   /** The editor's live fence values, read when a manual result arrives. */
   live: () => AutoLayoutFence;
   /** The editor's live Project, read when an import result arrives. */
-  liveProject?: () => { projectSessionId: string; project: CircuitProject };
+  liveProject?: () => {
+    projectSessionId: string;
+    project: CircuitProject;
+    owner?: unknown;
+  };
   /** The fenced write; it targets the run's Document, not the open one. */
   transactAtRevision: (
     request: FencedDocumentTransaction,
@@ -103,12 +116,28 @@ export interface AutoLayoutSessionOptions {
   /** Several fenced writes as one undo step, or none of them. */
   transactStepAtRevisions?: (
     requests: readonly FencedDocumentTransaction[],
-  ) => { kept: boolean; results: EditTransactionResult[] };
+  ) => AutoLayoutStepResult;
   setStatus: (status: string) => void;
   onChange: (state: AutoLayoutSessionState) => void;
-  /** After a plan is committed: decision 7 clears selection and fits the view. */
-  onApplied: () => void;
+  /**
+   * After plans are committed, with the Documents they changed: decision 7
+   * clears selection and fits the view when the open Cell is among them.
+   */
+  onApplied: (documentIds: readonly string[]) => void;
   now?: () => number;
+}
+
+/** What a one-step write did; `failed` names the request that ended it. */
+export interface AutoLayoutStepResult {
+  kept: boolean;
+  results: EditTransactionResult[];
+  failed?: { index: number; result: EditTransactionResult };
+}
+
+/** An import run left behind by a tab switch, shown when the tab returns. */
+export interface AutoLayoutAbandonedRun {
+  status: string;
+  report: AutoLayoutRunReport;
 }
 
 export const AUTO_LAYOUT_STALE_MESSAGE =
@@ -123,6 +152,8 @@ const IMPORT_DISCARDED_MESSAGE =
   "The Project changed while Auto Layout was planning; nothing was applied.";
 const AUTO_LAYOUT_EDITED_REASON = "edited since import, not laid out";
 const UNCHANGED_REASON = "already laid out";
+const NO_PLAN_REASON = "no plan was returned";
+const TAB_LEFT_REASON = "the tab was left while Auto Layout was planning";
 
 /** The one-line reason a refused plan left the drawing alone. */
 function refusalReason(error: AutoLayoutDiagnostic): string {
@@ -239,6 +270,7 @@ export function createAutoLayoutSession(options: AutoLayoutSessionOptions) {
   ) => {
     const live = options.live();
     if (
+      live.owner !== fence.owner ||
       live.projectSessionId !== fence.projectSessionId ||
       live.structureRevision !== fence.structureRevision ||
       live.documentId !== fence.documentId ||
@@ -303,7 +335,7 @@ export function createAutoLayoutSession(options: AutoLayoutSessionOptions) {
       options.setStatus(`${AUTO_LAYOUT_UNCHANGED_MESSAGE}${withWarnings}`);
       return;
     }
-    options.onApplied();
+    options.onApplied([fence.documentId]);
     options.setStatus(
       `Auto Layout applied (revision ${committed.revision})${withWarnings}`,
     );
@@ -324,6 +356,7 @@ export function createAutoLayoutSession(options: AutoLayoutSessionOptions) {
     );
     const live = liveProject();
     if (
+      live.owner !== target.owner ||
       live.projectSessionId !== target.projectSessionId ||
       live.project.structureRevision !== target.structureRevision
     ) {
@@ -336,6 +369,21 @@ export function createAutoLayoutSession(options: AutoLayoutSessionOptions) {
       cell: AutoLayoutCellReport;
       request: FencedDocumentTransaction;
     }[] = [];
+    const liveDocument = (documentId: string) =>
+      live.project.documents.find((item) => item.id === documentId);
+    // A Cell edited since import is skipped, and so is every Cell that places
+    // it: a Document edit can change the symbol a parent was planned against
+    // (its Cell-symbol presentation, its terminal labels) without a
+    // structure revision.
+    const edited = target.cells.filter(
+      (cell) => liveDocument(cell.documentId)?.revision !== cell.revision,
+    );
+    const editedSymbols = new Map(
+      edited.flatMap((cell) => {
+        const name = liveDocument(cell.documentId)?.netlist?.name;
+        return name ? [[hierarchicalSymbolId(name), cell.name] as const] : [];
+      }),
+    );
     const cells = target.cells.map((cell): AutoLayoutCellReport => {
       const result = results.find(
         (item) => item.documentId === cell.documentId,
@@ -346,16 +394,22 @@ export function createAutoLayoutSession(options: AutoLayoutSessionOptions) {
         cellName: cell.name,
         diagnostics,
       };
-      const document = live.project.documents.find(
-        (item) => item.id === cell.documentId,
-      );
-      if (document?.revision !== cell.revision)
-        return { ...base, outcome: "edited" };
+      if (edited.includes(cell)) return { ...base, outcome: "edited" };
+      const dependency = liveDocument(cell.documentId)
+        ?.instances.map((instance) => editedSymbols.get(instance.symbolId))
+        .find((name) => name !== undefined);
+      if (dependency)
+        return {
+          ...base,
+          outcome: "refused",
+          reason: `depends on ${dependency}, edited since import`,
+        };
+      if (!result)
+        return { ...base, outcome: "refused", reason: NO_PLAN_REASON };
       const error = firstError(diagnostics);
       if (error)
         return { ...base, outcome: "refused", reason: refusalReason(error) };
-      if (!result || result.edits.length === 0)
-        return { ...base, outcome: "unchanged" };
+      if (result.edits.length === 0) return { ...base, outcome: "unchanged" };
       // Applied once the step commits.
       const report: AutoLayoutCellReport = { ...base, outcome: "applied" };
       planned.push({
@@ -376,9 +430,10 @@ export function createAutoLayoutSession(options: AutoLayoutSessionOptions) {
         ? transactStep(planned.map((item) => item.request))
         : { kept: true, results: [] };
     if (!step.kept) {
-      const refused = step.results.at(-1);
+      const refused = step.failed?.result ?? step.results.at(-1);
       const failed =
-        planned[Math.max(0, step.results.length - 1)]?.cell.documentId;
+        planned[step.failed?.index ?? Math.max(0, step.results.length - 1)]
+          ?.cell.documentId;
       const failedName =
         cells.find((cell) => cell.documentId === failed)?.cellName ?? "";
       const code =
@@ -411,7 +466,8 @@ export function createAutoLayoutSession(options: AutoLayoutSessionOptions) {
       if (cell && result.ok && !result.applied) cell.outcome = "unchanged";
     });
     const applied = cells.filter((cell) => cell.outcome === "applied");
-    if (applied.length > 0) options.onApplied();
+    if (applied.length > 0)
+      options.onApplied(applied.map((cell) => cell.documentId));
     const report: AutoLayoutRunReport = { run: "import", cells };
     const [only] = cells;
     if (single && only) {
@@ -473,13 +529,13 @@ export function createAutoLayoutSession(options: AutoLayoutSessionOptions) {
           finish(failure(`Auto Layout failed: ${data.message}`));
           return;
         case "result":
-          if (current.kind === "manual")
-            apply(
-              current,
-              data.results.find((r) => r.documentId === current.documentId)
-                ?.result ?? { edits: [], groups: [], diagnostics: [] },
+          if (current.kind === "manual") {
+            const planned = data.results.find(
+              (r) => r.documentId === current.documentId,
             );
-          else if (options.liveProject && options.transactStepAtRevisions)
+            if (planned) apply(current, planned.result);
+            else finish(failure(`Auto Layout failed: ${NO_PLAN_REASON}`));
+          } else if (options.liveProject && options.transactStepAtRevisions)
             applyImport(
               current,
               data.results,
@@ -520,6 +576,7 @@ export function createAutoLayoutSession(options: AutoLayoutSessionOptions) {
     document: SchematicDocument;
     projectSessionId: string;
     presentation?: "netlist";
+    owner?: unknown;
   }): boolean => {
     if (run) {
       options.setStatus("Auto Layout is already running");
@@ -530,6 +587,7 @@ export function createAutoLayoutSession(options: AutoLayoutSessionOptions) {
         kind: "manual",
         runId,
         worker,
+        owner: target.owner,
         projectSessionId: target.projectSessionId,
         structureRevision: target.project.structureRevision,
         documentId: target.document.id,
@@ -621,6 +679,36 @@ export function createAutoLayoutSession(options: AutoLayoutSessionOptions) {
       if (!run) return;
       stop();
       update({ running: false, progress: null });
+    },
+    /**
+     * Stop an import run because its tab was left, and return what the tab
+     * should show when it comes back: every Cell stays as imported.
+     */
+    abandon(): AutoLayoutAbandonedRun | null {
+      const current = run;
+      if (!current) return null;
+      stop();
+      update({ running: false, progress: null });
+      if (current.kind !== "import") return null;
+      return {
+        status: `${current.statusPrefix} · Auto Layout stopped because the tab was left; every Cell stays as imported — Details`,
+        report: {
+          run: "import",
+          cells: current.cells.map((cell) => ({
+            documentId: cell.documentId,
+            cellName: cell.name,
+            outcome: "refused",
+            reason: TAB_LEFT_REASON,
+            diagnostics: [],
+          })),
+        },
+      };
+    },
+    /** Show an abandoned run's trace again (its tab is back). */
+    restore(abandoned: AutoLayoutAbandonedRun): void {
+      if (run) return;
+      update({ report: abandoned.report });
+      options.setStatus(abandoned.status);
     },
   };
 }

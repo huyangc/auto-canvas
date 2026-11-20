@@ -426,6 +426,40 @@ describe("one-step commits to several Documents", () => {
     expect(input.setStatus).toHaveBeenLastCalledWith(STALE);
   });
 
+  it("leaves the tool alone when the step does not touch the open Document", () => {
+    const { input, commands, documents, request } =
+      controlled("copy-placement");
+
+    const { kept } = commands.transactStepAtRevisions([request(1)]);
+
+    expect(kept).toBe(true);
+    expect(input.cancelAllTransientInteraction).not.toHaveBeenCalled();
+    expect(input.setStatus).toHaveBeenLastCalledWith(
+      `Committed revision ${documents[1]!.revision + 1}`,
+    );
+  });
+
+  it("names the request that threw", () => {
+    const { controller, input, commands, documents, request, json } =
+      controlled();
+    const before = documents.map((d) => json(d.id));
+    let calls = 0;
+    input.dispatchTransaction.mockImplementation((envelope) => {
+      calls += 1;
+      if (calls === 2) throw new Error("engine failure");
+      return controller.dispatchTransaction(envelope);
+    });
+
+    const step = commands.transactStepAtRevisions([request(0), request(1)]);
+
+    expect(step.kept).toBe(false);
+    expect(step.failed).toMatchObject({
+      index: 1,
+      result: { ok: false, error: { code: "INTERNAL_ERROR" } },
+    });
+    expect(documents.map((d) => json(d.id))).toEqual(before);
+  });
+
   it("cancels a transient tool once for the whole step", () => {
     const { input, commands, documents, request } =
       controlled("copy-placement");

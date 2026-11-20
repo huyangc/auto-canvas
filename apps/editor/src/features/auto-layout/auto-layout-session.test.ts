@@ -454,6 +454,8 @@ describe("Auto Layout after a netlist import", () => {
       tamper?: (
         requests: readonly FencedDocumentTransaction[],
       ) => FencedDocumentTransaction[];
+      /** Make this dispatch (from 1) throw, as an engine failure would. */
+      throwOn?: number;
     } = {},
   ) {
     const controller = new EditorDocumentController(
@@ -462,14 +464,18 @@ describe("Auto Layout after a netlist import", () => {
     const workers: FakeWorker[] = [];
     const setStatus = vi.fn<(status: string) => void>();
     const onApplied = vi.fn();
+    let dispatches = 0;
     const commands = () =>
       createEditorTransactionCommands({
         project: controller.project,
         document: controller.document,
         dispatchProjectTransaction: vi.fn(),
         transactDocument: vi.fn(),
-        dispatchTransaction: (request) =>
-          controller.dispatchTransaction(request),
+        dispatchTransaction: (request) => {
+          dispatches += 1;
+          if (dispatches === options.throwOn) throw new Error("engine failure");
+          return controller.dispatchTransaction(request);
+        },
         commitAsOneStep: (commit) => controller.commitAsOneStep(commit),
         getCurrentInteractionKind: () => "idle",
         cancelAllTransientInteraction: vi.fn(),
@@ -597,31 +603,48 @@ describe("Auto Layout after a netlist import", () => {
     expect(run.controller.canUndo).toBe(false);
   }, 60_000);
 
-  it("skips and names a Cell edited while planning", async () => {
-    const run = await importHarness(NETLIST_THREE_CELLS);
-    const shelves = run.shelves();
-    const edited = run.cells[1]!;
-    run.start();
-    const instance = edited.instances.find((i) => i.placement)!;
-    const moved = {
-      x: instance.placement!.position.x + 40,
-      y: instance.placement!.position.y,
-    };
+  /** A committed drag of one part in `cell`, as a person would make it. */
+  function drag(
+    run: Awaited<ReturnType<typeof importHarness>>,
+    cell: SchematicDocument,
+  ) {
+    const instance = cell.instances.find((i) => i.placement)!;
     expect(
       run.controller.dispatchTransaction({
         transactionId: "drag",
-        documentId: edited.id,
-        expectedRevision: edited.revision,
+        documentId: cell.id,
+        expectedRevision: cell.revision,
         actor: { kind: "human", id: "human-local" },
         edits: [
-          { kind: "move_instance", instanceId: instance.id, position: moved },
+          {
+            kind: "move_instance",
+            instanceId: instance.id,
+            position: {
+              x: instance.placement!.position.x + 40,
+              y: instance.placement!.position.y,
+            },
+          },
         ],
       }).ok,
     ).toBe(true);
+  }
+
+  it("skips and names a Cell edited while planning", async () => {
+    const run = await importHarness(NETLIST_THREE_CELLS);
+    const shelves = run.shelves();
+    // The top Cell, the open one; no other Cell places it.
+    const edited = run.cells[0]!;
+    expect(run.controller.activeDocumentId).toBe(edited.id);
+    run.start();
+    drag(run, edited);
     const afterDrag = withoutRevision(run.find(edited.id));
     run.workers[0]!.finish();
 
     expect(withoutRevision(run.find(edited.id))).toBe(afterDrag);
+    // The open Cell was not laid out: the editor is told which Cells were.
+    expect(run.onApplied).toHaveBeenCalledWith(
+      run.cells.slice(1).map((cell) => cell.id),
+    );
     expect(run.setStatus).toHaveBeenLastCalledWith(
       `${H} · Auto Layout applied to 2 of 3 Cells; ${edited.name}: edited since import, not laid out — Details`,
     );
@@ -638,6 +661,151 @@ describe("Auto Layout after a netlist import", () => {
         expect(withoutRevision(run.find(cell.id))).toBe(shelves[index]);
     run.controller.transact([{ kind: "undo" }]);
     expect(run.shelves()).toEqual(shelves);
+  }, 60_000);
+
+  it("also skips the Cells that place an edited Cell", async () => {
+    const run = await importHarness(NETLIST_THREE_CELLS);
+    const byName = (name: string) => run.cells.find((c) => c.name === name)!;
+    const [top, buf, stage] = [byName("top"), byName("buf"), byName("stage")];
+    const shelves = new Map(
+      run.cells.map((c) => [c.id, withoutRevision(run.find(c.id))]),
+    );
+    run.start();
+    drag(run, stage);
+    run.workers[0]!.finish();
+
+    // buf places stage; its plan used stage's symbol as it was. top places
+    // only buf, which did not change, so top is laid out.
+    expect(withoutRevision(run.find(buf.id))).toBe(shelves.get(buf.id));
+    expect(withoutRevision(run.find(top.id))).not.toBe(shelves.get(top.id));
+    expect(run.setStatus).toHaveBeenLastCalledWith(
+      `${H} · Auto Layout applied to 1 of 3 Cells; stage: edited since import, not laid out; buf: depends on stage, edited since import — Details`,
+    );
+    expect(
+      run.session.state.report?.cells.find((c) => c.documentId === buf.id),
+    ).toMatchObject({
+      outcome: "refused",
+      reason: "depends on stage, edited since import",
+    });
+  }, 60_000);
+
+  it("names the Cell whose commit threw, and rolls every Cell back", async () => {
+    const run = await importHarness(NETLIST_THREE_CELLS, { throwOn: 2 });
+    const shelves = run.shelves();
+    run.start();
+    run.workers[0]!.finish();
+    expect(run.shelves()).toEqual(shelves);
+    expect(run.controller.canUndo).toBe(false);
+    const second = run.cells[1]!;
+    expect(run.setStatus).toHaveBeenLastCalledWith(
+      `${H} · Auto Layout could not commit ${second.name} (INTERNAL_ERROR); nothing was applied — Details`,
+    );
+    expect(
+      run.session.state.report?.cells.map((c) => [c.cellName, c.reason]),
+    ).toEqual([
+      [run.cells[0]!.name, "nothing was applied"],
+      [second.name, "could not commit (INTERNAL_ERROR)"],
+      [run.cells[2]!.name, "nothing was applied"],
+    ]);
+  }, 60_000);
+
+  it("reports a Cell the worker returned no plan for as a failure", async () => {
+    const run = await importHarness(NETLIST_THREE_CELLS);
+    run.start();
+    const missing = run.cells[2]!;
+    // The worker's answer, without the last Cell's result.
+    const messages: AutoLayoutWorkerMessage[] = [];
+    runAutoLayout({ ...run.workers[0]!.request!, search: QUICK }, (message) =>
+      messages.push(message),
+    );
+    const result = messages.at(-1)!;
+    if (result.type !== "result") throw new Error("expected a result");
+    run.workers[0]!.onmessage?.({
+      data: {
+        ...result,
+        results: result.results.filter((r) => r.documentId !== missing.id),
+      },
+    });
+    expect(run.setStatus).toHaveBeenLastCalledWith(
+      `${H} · Auto Layout applied to 2 of 3 Cells; ${missing.name}: no plan was returned — Details`,
+    );
+    expect(withoutRevision(run.find(missing.id))).toBe(
+      withoutRevision(missing),
+    );
+  }, 60_000);
+
+  it("discards a result when the editor's controller is another one", async () => {
+    // Two tabs with the same session id, structure and revisions: only the
+    // controller object tells them apart.
+    const project = await importNetlistProject(NETLIST_THREE_CELLS);
+    const a = new EditorDocumentController(project);
+    const b = new EditorDocumentController(project);
+    expect(a.projectSessionId).toBe(b.projectSessionId);
+    let live = b;
+    const workers: FakeWorker[] = [];
+    const setStatus = vi.fn<(status: string) => void>();
+    const write = vi.fn(() => {
+      throw new Error("nothing may be written");
+    });
+    const session = createAutoLayoutSession({
+      createWorker: () => {
+        const worker = new FakeWorker();
+        workers.push(worker);
+        return worker;
+      },
+      live: () => ({
+        owner: live,
+        projectSessionId: live.projectSessionId,
+        structureRevision: live.project.structureRevision,
+        documentId: live.activeDocumentId,
+        revision: live.document.revision,
+      }),
+      liveProject: () => ({
+        owner: live,
+        projectSessionId: live.projectSessionId,
+        project: live.project,
+      }),
+      transactAtRevision: write,
+      transactStepAtRevisions: write,
+      setStatus,
+      onChange: vi.fn(),
+      onApplied: vi.fn(),
+    });
+    const before = JSON.stringify(a.project);
+    session.startImport({
+      project: b.project,
+      owner: b,
+      projectSessionId: b.projectSessionId,
+      structureRevision: b.project.structureRevision,
+      cells: b.project.documents.map((d) => ({
+        documentId: d.id,
+        name: d.name,
+        revision: d.revision,
+      })),
+      presentation: "netlist",
+      statusPrefix: H,
+    });
+    live = a;
+    workers[0]!.finish();
+    expect(write).not.toHaveBeenCalled();
+    expect(JSON.stringify(a.project)).toBe(before);
+    expect(setStatus).toHaveBeenLastCalledWith(
+      `${H} · The Project changed while Auto Layout was planning; nothing was applied.`,
+    );
+
+    // The manual run: the same fence by controller.
+    live = b;
+    session.start({
+      project: b.project,
+      document: b.document,
+      projectSessionId: b.projectSessionId,
+      owner: b,
+    });
+    live = a;
+    workers[1]!.finish();
+    expect(write).not.toHaveBeenCalled();
+    expect(JSON.stringify(a.project)).toBe(before);
+    expect(setStatus).toHaveBeenLastCalledWith(AUTO_LAYOUT_STALE_MESSAGE);
   }, 60_000);
 
   it("cancels with nothing applied and no history", async () => {

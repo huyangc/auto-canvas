@@ -255,33 +255,52 @@ export function createEditorTransactionCommands({
   /**
    * Commit several fenced transactions, each built as
    * {@link transactAtRevision} builds it, as one undo step. The first refusal
-   * rolls the whole step back. The editor's status and tool-cancelling tail
-   * run once, for the last applied commit or the refusal.
+   * (or throw) rolls the whole step back, and `failed` names that request.
+   * The editor's status and tool-cancelling tail run once, for the last
+   * applied commit or the refusal; a step that does not touch the open
+   * Document leaves the active tool alone.
    */
   const transactStepAtRevisions = (
     requests: readonly FencedDocumentTransaction[],
-  ): { kept: boolean; results: EditTransactionResult[] } => {
+  ): {
+    kept: boolean;
+    results: EditTransactionResult[];
+    failed?: { index: number; result: EditTransactionResult };
+  } => {
     const results: EditTransactionResult[] = [];
     if (!commitAsOneStep)
       throw new Error("The one-step write path is not connected");
     if (requests.length === 0) return { kept: false, results };
     let kept = false;
-    const last = commitDocument(() => {
-      kept = commitAsOneStep(() => {
-        for (const request of requests) {
-          const result = dispatchAtRevision(request);
-          results.push(result);
-          if (!result.ok) return false;
-        }
-        return true;
-      });
-      return results.at(-1)!;
-    });
+    let attempted = -1;
+    const last = commitDocument(
+      () => {
+        kept = commitAsOneStep(() => {
+          for (const [index, request] of requests.entries()) {
+            attempted = index;
+            const result = dispatchAtRevision(request);
+            results.push(result);
+            if (!result.ok) return false;
+          }
+          return true;
+        });
+        return results.at(-1)!;
+      },
+      {
+        preserveInteraction: !requests.some(
+          (request) => request.documentId === document.id,
+        ),
+      },
+    );
     if (!last.ok && last.error.code === "STALE_REVISION")
-      setStatus(
-        requests[results.length - 1]?.staleStatus ?? last.error.message,
-      );
-    return { kept, results };
+      setStatus(requests[attempted]?.staleStatus ?? last.error.message);
+    return kept
+      ? { kept, results }
+      : {
+          kept,
+          results,
+          failed: { index: Math.max(0, attempted), result: last },
+        };
   };
 
   /** The routing gate alone: the edits it would commit, or null after saying why not. */
