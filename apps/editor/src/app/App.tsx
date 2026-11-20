@@ -4322,6 +4322,7 @@ function WorkspaceEditor({
       documentSettingsOpen,
       setDocumentSettingsOpen,
       projectInfoOpen,
+      autoLayoutReportOpen: autoLayout.detailsOpen,
       setProjectInfoOpen,
       recoveryDialogOpen,
       setRecoveryDialogOpen,

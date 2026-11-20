@@ -84,6 +84,8 @@ interface EditorShortcutDependencies {
   documentSettingsOpen: boolean;
   setDocumentSettingsOpen: Dispatch<SetStateAction<boolean>>;
   projectInfoOpen: boolean;
+  /** The Auto Layout Details dialog is open and owns the keyboard. */
+  autoLayoutReportOpen: boolean;
   setProjectInfoOpen: Dispatch<SetStateAction<boolean>>;
   recoveryDialogOpen: ProjectFileLifecycle["recoveryDialogOpen"];
   setRecoveryDialogOpen: ProjectFileLifecycle["setRecoveryDialogOpen"];
@@ -244,6 +246,7 @@ function createEditorShortcutHandler({
   documentSettingsOpen,
   setDocumentSettingsOpen,
   projectInfoOpen,
+  autoLayoutReportOpen,
   setProjectInfoOpen,
   recoveryDialogOpen,
   setRecoveryDialogOpen,
@@ -299,6 +302,10 @@ function createEditorShortcutHandler({
   openNativeProject,
 }: EditorShortcutDependencies) {
   function onKeyDown(event: KeyboardEvent): void {
+    // The Auto Layout report is a modal dialog, but this router captures at
+    // window level before it: Undo or Delete here would edit the drawing
+    // behind it. Escape reaches the dialog's own cancel, which closes it.
+    if (autoLayoutReportOpen) return;
     // Project Info is modal: the canvas never handles its keys.
     // This router sees Escape first, so it closes the dialog here.
     if (projectInfoOpen) {

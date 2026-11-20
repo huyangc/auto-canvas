@@ -163,9 +163,13 @@ describe("editor transaction commands", () => {
 
 describe("revision-fenced Document commits", () => {
   /** The real controller behind the commands, as App wires them. */
-  function controlled(kind: InteractionMode = "idle") {
+  const STALE = "The drawing changed meanwhile; nothing was applied.";
+  function controlled(
+    kind: InteractionMode = "idle",
+    example = "two-stage-op-amp",
+  ) {
     const controller = new EditorDocumentController(
-      createLibraryExampleProject("two-stage-op-amp")!,
+      createLibraryExampleProject(example)!,
     );
     const input = {
       dispatchProjectTransaction: vi.fn(),
@@ -202,7 +206,13 @@ describe("revision-fenced Document commits", () => {
     const { controller, input, commands, move } = controlled();
     const revision = controller.document.revision;
 
-    const result = commands().transactAtRevision(revision, move, "plan-1");
+    const result = commands().transactAtRevision({
+      documentId: controller.document.id,
+      expectedRevision: revision,
+      edits: move,
+      transactionId: "plan-1",
+      staleStatus: STALE,
+    });
 
     expect(result).toMatchObject({ ok: true, applied: true });
     expect(input.dispatchTransaction).toHaveBeenCalledOnce();
@@ -230,7 +240,13 @@ describe("revision-fenced Document commits", () => {
     expect(live).toBeGreaterThan(planned);
     const before = JSON.stringify(controller.document);
 
-    const result = commands().transactAtRevision(planned, move, "plan-2");
+    const result = commands().transactAtRevision({
+      documentId: controller.document.id,
+      expectedRevision: planned,
+      edits: move,
+      transactionId: "plan-2",
+      staleStatus: STALE,
+    });
 
     expect(result).toMatchObject({
       ok: false,
@@ -238,21 +254,69 @@ describe("revision-fenced Document commits", () => {
     });
     expect(controller.document.revision).toBe(live);
     expect(JSON.stringify(controller.document)).toBe(before);
-    expect(input.setStatus).toHaveBeenLastCalledWith(
-      `The drawing changed since revision ${planned}; nothing was applied`,
-    );
+    expect(input.setStatus).toHaveBeenLastCalledWith(STALE);
   });
 
   it("cancels a transient tool the commit lands under, as transact does", () => {
     const { controller, input, commands, move } = controlled("copy-placement");
     const revision = controller.document.revision;
 
-    commands().transactAtRevision(revision, move, "plan-3");
+    commands().transactAtRevision({
+      documentId: controller.document.id,
+      expectedRevision: revision,
+      edits: move,
+      transactionId: "plan-3",
+      staleStatus: STALE,
+    });
 
     expect(input.cancelAllTransientInteraction).toHaveBeenCalledOnce();
     expect(input.setStatus).toHaveBeenLastCalledWith(
       `Committed revision ${revision + 1}; active tool cancelled because the circuit changed`,
     );
+  });
+
+  it("writes to the Document it is given, not the one the commands were bound to", () => {
+    const { controller, input, commands } = controlled(
+      "idle",
+      "five-transistor-ota-sky130",
+    );
+    const bound = controller.document;
+    const target = controller.project.documents.find(
+      (d) => d.id !== bound.id && d.instances.some((i) => i.placement),
+    )!;
+    const instance = target.instances.find((i) => i.placement)!;
+    const boundJson = JSON.stringify(bound);
+
+    const result = commands().transactAtRevision({
+      documentId: target.id,
+      expectedRevision: target.revision,
+      edits: [
+        {
+          kind: "move_instance",
+          instanceId: instance.id,
+          position: {
+            x: instance.placement!.position.x + 20,
+            y: instance.placement!.position.y,
+          },
+        },
+      ],
+      transactionId: "plan-4",
+      staleStatus: STALE,
+    });
+
+    expect(result).toMatchObject({ ok: true, applied: true });
+    expect(input.dispatchTransaction.mock.calls[0]![0]).toMatchObject({
+      documentId: target.id,
+      expectedRevision: target.revision,
+    });
+    expect(
+      controller.project.documents.find((d) => d.id === target.id)!.revision,
+    ).toBe(target.revision + 1);
+    expect(
+      JSON.stringify(
+        controller.project.documents.find((d) => d.id === bound.id),
+      ),
+    ).toBe(boundJson);
   });
 });
 

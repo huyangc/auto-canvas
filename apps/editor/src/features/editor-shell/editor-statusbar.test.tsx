@@ -322,6 +322,12 @@ describe("editor statusbar", () => {
     expect(quick).toContain("Auto Layout… 12 s");
     expect(quick).not.toContain("evaluation");
     expect(quick).toContain('data-testid="auto-layout-cancel"');
+    expect(quick).toContain('aria-label="Cancel Auto Layout"');
+    // The ticking chip is not a live region: the status line announces.
+    expect(quick).not.toMatch(
+      /role="status"[^>]*data-testid="auto-layout-status"/,
+    );
+    expect(quick).toMatch(/<span aria-hidden="true">Auto Layout… 12 s<\/span>/);
     expect(quick).not.toContain('data-testid="auto-layout-details"');
     // The annealer's count shows only once it reports one.
     expect(
@@ -343,6 +349,7 @@ describe("editor statusbar", () => {
     });
     expect(refused).toContain("Auto Layout: refused");
     expect(refused).toContain('data-testid="auto-layout-details"');
+    expect(refused).toContain('aria-label="Auto Layout details"');
     expect(refused).not.toContain('data-testid="auto-layout-cancel"');
     expect(
       statusbarWithAutoLayout({

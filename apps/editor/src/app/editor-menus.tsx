@@ -522,9 +522,17 @@ export function EditorMenuBar({
       autoLayout={(() => {
         const state = editorCommands.state({ id: "layout.auto" });
         return {
-          enabled: state.enabled,
-          reason: state.reason,
-          execute: () => editorCommands.execute({ id: "layout.auto" }),
+          start: {
+            enabled: state.enabled,
+            reason: state.reason,
+            execute: () => editorCommands.execute({ id: "layout.auto" }),
+          },
+          cancel: editorCommands.state({ id: "layout.auto-cancel" }).enabled
+            ? {
+                execute: () =>
+                  editorCommands.execute({ id: "layout.auto-cancel" }),
+              }
+            : null,
         };
       })()}
       agentAction={

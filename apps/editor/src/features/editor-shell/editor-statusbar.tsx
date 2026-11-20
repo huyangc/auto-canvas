@@ -200,14 +200,18 @@ export function EditorStatusbar({
           {autoLayout && autoLayoutChipLabel(autoLayout) ? (
             <span
               className="statusbar-auto-layout"
-              role="status"
               data-testid="auto-layout-status"
             >
-              {autoLayoutChipLabel(autoLayout)}
+              {/* Not live: it ticks every second, and the status line
+                  already announces each outcome. */}
+              <span aria-hidden={autoLayout.running ? true : undefined}>
+                {autoLayoutChipLabel(autoLayout)}
+              </span>
               {autoLayout.running ? (
                 <button
                   type="button"
                   data-testid="auto-layout-cancel"
+                  aria-label="Cancel Auto Layout"
                   onClick={autoLayout.onCancel}
                 >
                   Cancel
@@ -216,6 +220,7 @@ export function EditorStatusbar({
                 <button
                   type="button"
                   data-testid="auto-layout-details"
+                  aria-label="Auto Layout details"
                   aria-haspopup="dialog"
                   onClick={autoLayout.onDetails}
                 >

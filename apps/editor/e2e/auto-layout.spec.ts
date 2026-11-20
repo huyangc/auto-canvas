@@ -51,6 +51,8 @@ test("Auto Layout shows a refusal and its Details", async ({ page }) => {
   test.setTimeout(120_000);
   await openProject(page, refusedFrameProject(), "framed-block.icproj.json");
   const before = await exportedProject(page);
+  // With everything selected, Delete would remove the drawing.
+  await page.locator("body").press("ControlOrMeta+a");
 
   await runAutoLayout(page);
   await expectStatus(page, /^Auto Layout left the drawing unchanged: /);
@@ -62,8 +64,14 @@ test("Auto Layout shows a refusal and its Details", async ({ page }) => {
   await expect(report).toContainText(
     "AUTO_LAYOUT_DRAFTING_INTERFACE_UNSUPPORTED",
   );
-  await report.getByTestId("auto-layout-report-close").click();
+  // The dialog owns the keyboard: no Undo or Delete reaches the drawing.
+  for (const key of ["Delete", "Control+z", "Meta+z"])
+    await page.keyboard.press(key);
+  await expect(report).toBeVisible();
+  // Escape is the dialog's own: it closes the report, nothing else.
+  await page.keyboard.press("Escape");
   await expect(report).toHaveCount(0);
+  await expect(page.getByTestId("auto-layout-status")).toHaveCount(0);
 
   expect(documentsWithoutRevision(await exportedProject(page))).toEqual(
     documentsWithoutRevision(before),
