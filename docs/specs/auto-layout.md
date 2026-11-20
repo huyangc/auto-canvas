@@ -1256,9 +1256,10 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   search has checked its proposal, so R166's stack guard does not see it:
   broken stacks stay 228, with 5 Documents breaking a stack they kept and 4
   keeping one they broke. The rule follows the symbol, not the source drawing:
-  in 14 of the 37 Documents the human drawing has the same exchange, and a
-  blind comparison of 37 changed drawings (2026-11-19) preferred the earlier
-  drawing in 8 of the 10 such cases and the new one in 15 of the other 27.
+  in 14 of the 37 Documents the human drawing has the same exchange. A blind
+  comparison of 37 changed drawings (2026-11-19), which are not the same set as
+  those 37, preferred the earlier drawing in 8 of the 10 whose human drawing
+  exchanges the inputs, and the new one in 15 of the other 27.
 
 - **R71 — Single-host ports.** A non-rail Cell Pin Net that reaches exactly
   one device pin gets a local seat along that pin's transformed exit direction.
