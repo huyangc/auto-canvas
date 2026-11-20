@@ -1,7 +1,7 @@
 // The Auto Layout worker's whole job, as a pure function tests call directly.
 // Only the worker file imports this module, so the planner and the symbol
 // catalogue stay out of the editor's first-paint bundle.
-import { planAutoLayout } from "@icm/auto-layout";
+import { defaultLayoutSearch, planAutoLayout } from "@icm/auto-layout";
 import { builtInSymbols, createProjectSymbolResolver } from "@icm/symbols";
 
 import type {
@@ -14,7 +14,7 @@ export function runAutoLayout(
   request: AutoLayoutWorkerRequest,
   post: (message: AutoLayoutWorkerMessage) => void,
 ): void {
-  const { runId, project, documentId, search } = request;
+  const { runId, project, documentId } = request;
   try {
     const document = project.documents.find((item) => item.id === documentId);
     if (!document) {
@@ -28,6 +28,7 @@ export function runAutoLayout(
     // The resolver the evaluation scripts measure with: built-in symbols plus
     // the Project's placed component definitions and Cell symbols.
     const resolver = createProjectSymbolResolver(project, builtInSymbols);
+    const search = request.search ?? defaultLayoutSearch(document);
     const started = performance.now();
     const result = planAutoLayout(document, resolver, {
       search: {
