@@ -1229,30 +1229,36 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
     Evaluation reports `conventionDraft` (`eligible`, `selected`; report-only).
 
 - **R169 — Input polarity of directed blocks (T142).** A polarity block is a
-  symbol with a non-hierarchical input-role pin and output-role pin plus one
-  pin named `+` or `IN+` and one named `-` or `IN-` (Unicode plus and minus
-  signs fold to these) at distinct local positions: the op-amp and comparator
-  family. Its unrotated, unmirrored pose fixes which of the two is higher on
-  the page; a pose that exchanges them is reversed. Before routing, every
-  placement map the planner builds (a strategy draft, a supplied placement, or
-  the exact seats of a relocation replan) passes one check in `buildPlan`: a
-  reversed block takes the first of the eight poses (rotations 0, 90, 180, 270,
-  each without and then with horizontal mirror) that restores the symbol's
-  order and keeps the exit direction of its first output pin. Its position does
-  not change. A block with no such pose keeps its pose: a built-in op-amp whose
-  output leaves north or south has its two inputs side by side, with no
-  vertical order to restore (4 corpus blocks). A block in `fixedInstanceIds` or
-  owned by a locked layout group or constraint is never rewritten. The
-  rewritten map is used only when the placement geometry check that approved
-  the original map (`geometryProblem`, or `contactGeometryProblem` under a
-  contact policy) also passes on it; otherwise the original map stands. The
-  exit direction is the one the placement already had, so R164's choice stands.
-  On the corpus at main fcd8fc4 (628 Documents): reversed blocks 40 of 137 → 0
-  (37 Documents → 0), 51 plans change, crossings 310 → 312, bends 2037 → 2047,
-  no equivalence or integrity defect. The rewrite is applied in `buildPlan`,
-  after the search has checked its proposal, so R166's stack guard does not see
-  it: the corpus count of broken stacks is unchanged (228), with 5 Documents
-  breaking a stack they kept and 4 keeping one they broke.
+  symbol with an input-role pin and an output-role pin plus one pin named `+`
+  or `IN+` and one named `-` or `IN-` (case-sensitive, after trimming and
+  folding Unicode plus, minus and dash variants), all non-hierarchical, the two
+  at distinct local positions: the op-amp and comparator family. Its unrotated,
+  unmirrored pose fixes the vertical order of the two on the page; a pose that
+  draws them in a different vertical order (exchanged, or level when the
+  symbol's are not, or the reverse) is out of order. Before routing, every
+  placement map that reaches `buildPlan` (a strategy draft, a supplied
+  placement, or exact seats replanned by refinement, relocation or finishing)
+  passes one check: an out-of-order block takes the first of the eight poses
+  (rotations 0, 90, 180, 270, each without and then with horizontal mirror)
+  that has the symbol's order and keeps the exit direction of its first output
+  pin. Its position does not change. A block with no such pose keeps its pose.
+  A block in `fixedInstanceIds` or owned by a locked layout group or constraint
+  is never rewritten. The rewritten map is used only when `geometryProblem` (or
+  `contactGeometryProblem` when a contact policy is passed, as on the
+  exact-seat path) reports no problem on it; otherwise the original map stands.
+  R164 still chooses the exit direction; for a polarity block R169 replaces the
+  reflection or turn it used with the ordered pose. On the corpus at main
+  fcd8fc4 (628 Documents): blocks with exchanged inputs 40 of 137 → 0 (37
+  Documents → 0); 4 blocks (`opamp`, `opamp-wide`) stay out of order by the
+  rule's own test, at 90° poses where the inputs are side by side and no
+  ordered pose keeps the exit; 51 plans change, crossings 310 → 312, bends 2037
+  → 2047, no equivalence or integrity defect. The rewrite is applied after the
+  search has checked its proposal, so R166's stack guard does not see it:
+  broken stacks stay 228, with 5 Documents breaking a stack they kept and 4
+  keeping one they broke. The rule follows the symbol, not the source drawing:
+  in 14 of the 37 Documents the human drawing has the same exchange, and a
+  blind comparison of 37 changed drawings (2026-11-19) preferred the earlier
+  drawing in 8 of the 10 such cases and the new one in 15 of the other 27.
 
 - **R71 — Single-host ports.** A non-rail Cell Pin Net that reaches exactly
   one device pin gets a local seat along that pin's transformed exit direction.
