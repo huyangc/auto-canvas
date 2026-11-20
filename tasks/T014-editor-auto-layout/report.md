@@ -107,3 +107,45 @@ for `scripts/auto-layout-eval.mjs`.
   tested with the real controller, and the browser spec exercises the hook.
 - The planner is not idempotent: running Auto Layout twice changes the drawing
   again. Not a defect of this task, but a user will notice.
+
+## Review round 2
+
+Two reviews of the first head (an independent Opus review and the codex hook;
+both posted on PR 100) asked for changes. Fixed in `6e4dc60`:
+
+1. **P2 — the fenced write targets the run's Document.** `transactAtRevision`
+   takes `{ documentId, expectedRevision, edits, transactionId, staleStatus }`
+   and the session passes `fence.documentId`; before, the envelope used the
+   Document of the last render while the fence was checked against the live
+   controller. New tests: commands bound to a twin Cell at the same revision
+   (the plan lands in the fenced Cell, the twin is unchanged), and the envelope
+   carries the given `documentId`.
+2. **P2 — the Details dialog owns the keyboard.** `use-editor-shortcuts.ts`
+   (authorized for this round; it is outside the plan's owned paths) returns at
+   once while the dialog is open, so Undo and Delete no longer reach the
+   drawing behind it. Escape still closes the dialog.
+3. One wording for a stale result, whichever check notices it.
+4. The status chip is not a live region and its ticking text is `aria-hidden`
+   while planning; the buttons are labelled.
+5. "Cancel Auto Layout" appears in Circuit → Layout while a run plans.
+6. A commit the write path refuses clears the report, so no "warnings" chip
+   for a plan that did not land.
+7. Opening a Project through `installProject` wrote no status of its own, so
+   disposal now replaces a leftover "Auto Layout is planning…" with the
+   cancelled message.
+8. Tests added for the `applied: false` branch (through a `transactAtRevision`
+   double) and for the hook (session change and unmount terminate the worker).
+
+Coordinator's rerun on `6e4dc60`: build, typecheck, lint (0 errors),
+format:check and docs:check pass; `pnpm test:local` 8533 passed, 117 skipped;
+the browser spec 2 passed. In the dev server: the menu shows "Cancel Auto
+Layout" only while planning and it cancels; with a stable fit as the baseline,
+Cancel leaves the drawing's geometry identical and one Undo restores it.
+
+Not covered: the browser spec presses Delete and Undo with Details open and
+checks the Document is unchanged, but does not assert that anything was
+selected first; the jsdom test of the shortcut router is the evidence for
+finding 2.
+
+Plan step 11: `docs/specs/README.md:17` and the auto-layout spec's
+`Status: proposed` were left unchanged, for the owner to decide.
