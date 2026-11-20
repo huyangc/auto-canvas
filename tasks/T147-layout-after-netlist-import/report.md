@@ -140,3 +140,42 @@ assertion changed. `rnl-interchange` is unaffected.
 - In the browser: skipping an edited Cell, and a rollback. Both are covered by
   session tests with the real controller and planner. Cancel was checked by
   hand by the implementer.
+
+## Review round 2
+
+An independent Opus review of `a0b1fc5` approved with two P2s and several P3s
+(posted on PR 101); the codex hook had no findings. Fixed in `e8432ce`:
+
+1. **P2 — runs fence on the controller object, not only the session id.**
+   The session id is `<project id>:<counter>`, and importing the same file in
+   two tabs gives both the same id, so a result planned for one tab could be
+   committed into the other. Both run kinds (the manual run inherited this
+   from T014) now discard when the live controller is a different object, and
+   the hook ends a run when the controller changes. Test: two controllers with
+   equal session id, structure revision and revisions.
+2. **P2 — a rollback names the Cell that failed.** `transactStepAtRevisions`
+   returns `failed: { index, result }`, also when a commit throws.
+3. Selection reset, fit and tool cancelling happen only when the open Cell was
+   laid out.
+4. With several Cells, a planner throw on one becomes that Cell's error
+   (`AUTO_LAYOUT_PLANNER_FAILED`); the others keep their plans.
+5. An import run left by a tab switch is stopped, and when that tab returns
+   its status reads "… Auto Layout stopped because the tab was left; every
+   Cell stays as imported — Details". The trace is in memory only. Runs are
+   not kept alive across a tab switch: the write path is bound to the tab on
+   screen.
+6. The docs now say the netlist presentation is chosen per run.
+7. A Cell with no result is a failure ("no plan was returned").
+8. **The reviewer's unconfirmed concern was real.** A Document-level edit
+   (`set_cell_symbol_presentation`, terminal labels) changes a Cell's symbol
+   terminals without a structure revision, so a parent's plan could be made
+   against a stale child symbol. A Cell that directly places an edited Cell is
+   now skipped: "depends on <cell>, edited since import". Only direct parents
+   are skipped.
+
+Coordinator's rerun on `e8432ce`: build, typecheck, lint, format:check and
+docs:check pass; `pnpm test:local` 8573 passed, 117 skipped; the six browser
+specs 27 passed; `pnpm deadcode` as on `main`, no new finding. In the dev
+server: a two-subcircuit import (applied to 2 of 2, one Undo clears every
+wire), a one-Cell import (applied, one Undo back to the shelf), and the manual
+command on that shelf (laid out with ground and supply symbols).
