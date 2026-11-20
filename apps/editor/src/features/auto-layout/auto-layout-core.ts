@@ -10,14 +10,20 @@ import type {
   AutoLayoutWorkerRequest,
 } from "./auto-layout-protocol";
 
+/** The Cell's result when the planner threw on it (several Cells only). */
+const AUTO_LAYOUT_PLANNER_FAILED = "AUTO_LAYOUT_PLANNER_FAILED";
+
 /**
  * Plan the listed Documents of the posted Project one after another, posting
  * progress, then every result at once. A refused Document is a result like
- * any other (its diagnostics say why); the next one is still planned.
+ * any other (its diagnostics say why); the next one is still planned. With
+ * several Documents, a planner throw on one becomes that Document's error
+ * result, so the others are not lost; a one-Document run fails as T014's did.
  */
 export function runAutoLayout(
   request: AutoLayoutWorkerRequest,
   post: (message: AutoLayoutWorkerMessage) => void,
+  plan: typeof planAutoLayout = planAutoLayout,
 ): void {
   const { runId, project, documentIds, presentation } = request;
   try {
@@ -53,13 +59,33 @@ export function runAutoLayout(
       // Several Cells: say which one is starting, even before its search.
       if (cells > 1) progress(0);
       const started = performance.now();
-      const result = planAutoLayout(document!, resolver, {
-        ...(presentation ? { presentation } : {}),
-        search: {
-          ...search,
-          onProgress: ({ evaluations }) => progress(evaluations),
-        },
-      });
+      const planOne = () =>
+        plan(document!, resolver, {
+          ...(presentation ? { presentation } : {}),
+          search: {
+            ...search,
+            onProgress: ({ evaluations }) => progress(evaluations),
+          },
+        });
+      let result: ReturnType<typeof planAutoLayout>;
+      if (cells === 1) result = planOne();
+      else
+        try {
+          result = planOne();
+        } catch (error) {
+          result = {
+            edits: [],
+            groups: [],
+            diagnostics: [
+              {
+                severity: "error",
+                code: AUTO_LAYOUT_PLANNER_FAILED,
+                rule: "worker",
+                message: `Auto Layout failed: ${error instanceof Error ? error.message : String(error)}`,
+              },
+            ],
+          };
+        }
       results.push({
         documentId: document!.id,
         result,

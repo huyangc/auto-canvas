@@ -234,6 +234,72 @@ describe("runAutoLayout", () => {
         );
     }, 60_000);
 
+    it("keeps the other Cells' plans when the planner throws on one", async () => {
+      const project = await importNetlistProject(NETLIST_B);
+      const ids = [
+        project.topDocumentId,
+        ...project.documents
+          .map((d) => d.id)
+          .filter((id) => id !== project.topDocumentId),
+      ];
+      // A planner double at the core's seam: the second Cell throws.
+      const messages: AutoLayoutWorkerMessage[] = [];
+      runAutoLayout(
+        {
+          type: "plan",
+          runId: 8,
+          project,
+          documentIds: ids,
+          presentation: "netlist",
+          search: QUICK,
+        },
+        (message) => messages.push(message),
+        (document, resolver, options) => {
+          if (document.id === ids[1]) throw new Error("planner bug");
+          return planAutoLayout(document, resolver, options);
+        },
+      );
+      const last = messages.at(-1);
+      if (last?.type !== "result") throw new Error("expected a result");
+      expect(last.results.map((r) => r.documentId)).toEqual(ids);
+      expect(JSON.stringify(last.results[0]!.result)).toBe(
+        JSON.stringify(direct(project, ids[0]!, "netlist")),
+      );
+      expect(last.results[1]!.result).toEqual({
+        edits: [],
+        groups: [],
+        diagnostics: [
+          {
+            severity: "error",
+            code: "AUTO_LAYOUT_PLANNER_FAILED",
+            rule: "worker",
+            message: "Auto Layout failed: planner bug",
+          },
+        ],
+      });
+    }, 60_000);
+
+    it("still fails a one-Cell run whose planner throws, as T014 did", () => {
+      const project = example("two-stage-op-amp");
+      const messages: AutoLayoutWorkerMessage[] = [];
+      runAutoLayout(
+        {
+          type: "plan",
+          runId: 9,
+          project,
+          documentIds: [project.topDocumentId],
+          search: QUICK,
+        },
+        (message) => messages.push(message),
+        () => {
+          throw new Error("planner bug");
+        },
+      );
+      expect(messages).toEqual([
+        { type: "failed", runId: 9, message: "planner bug" },
+      ]);
+    });
+
     it("refuses a Cell over the size limit and still plans the next", async () => {
       const project = await importNetlistProject(resistorChainNetlist(121));
       const chain = project.documents.find(

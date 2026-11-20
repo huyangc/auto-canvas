@@ -133,6 +133,8 @@ async function mountEditor(
 ) {
   const workers: QuickWorker[] = [];
   const committed = vi.fn();
+  const clearEditorSelection = vi.fn();
+  const fitView = vi.fn();
   const view: {
     autoLayout?: ReturnType<typeof useAutoLayout>;
     docs?: ReturnType<typeof useDocumentController>;
@@ -162,8 +164,8 @@ async function mountEditor(
       transactAtRevision: commands.transactAtRevision,
       transactStepAtRevisions: commands.transactStepAtRevisions,
       setStatus,
-      clearEditorSelection: vi.fn(),
-      fitView: vi.fn(),
+      clearEditorSelection,
+      fitView,
       createWorker: () => {
         const worker = new QuickWorker();
         workers.push(worker);
@@ -174,7 +176,7 @@ async function mountEditor(
   }
   root = createRoot(document.createElement("div"));
   await act(async () => root!.render(<Harness />));
-  return { view, workers, committed };
+  return { view, workers, committed, clearEditorSelection, fitView };
 }
 
 describe("Auto Layout after an import", () => {
@@ -270,4 +272,76 @@ describe("Auto Layout after an import", () => {
     expect(view.docs!.canUndo).toBe(false);
     expect(committed).toHaveBeenLastCalledWith(view.docs!.controller.project);
   });
+
+  it("resets selection and view only when the open Cell was laid out", async () => {
+    const imported = await importNetlistProject(NETLIST_B);
+    const { view, workers, clearEditorSelection, fitView } =
+      await mountEditor(imported);
+    await act(async () => view.autoLayout!.requestAfterImport("H"));
+    // The person drags a part in the open top Cell while it plans.
+    const top = view.docs!.document;
+    const instance = top.instances.find((i) => i.placement)!;
+    await act(async () => {
+      view.docs!.dispatchTransaction({
+        transactionId: "drag",
+        documentId: top.id,
+        expectedRevision: top.revision,
+        actor: { kind: "human", id: "human-local" },
+        edits: [
+          {
+            kind: "move_instance",
+            instanceId: instance.id,
+            position: { x: 400, y: 400 },
+          },
+        ],
+      });
+    });
+    await act(async () => workers[0]!.finish());
+    expect(view.status).toMatch(/applied to 1 of 2 Cells/u);
+    expect(clearEditorSelection).not.toHaveBeenCalled();
+    expect(fitView).not.toHaveBeenCalled();
+
+    // A run that lays out the open Cell does reset them.
+    const again = await importNetlistProject(NETLIST_B);
+    await act(async () => {
+      view.docs!.replaceProject(again);
+      view.autoLayout!.requestAfterImport("H");
+    });
+    await act(async () => workers[1]!.finish());
+    expect(view.status).toMatch(/applied to 2 of 2 Cells/u);
+    expect(clearEditorSelection).toHaveBeenCalledOnce();
+    expect(fitView).toHaveBeenCalledOnce();
+  }, 60_000);
+
+  it("stops an import run when its tab is left and says so on return", async () => {
+    const imported = await importNetlistProject(NETLIST_B);
+    const { view, workers } = await mountEditor(imported);
+    const tabA = view.docs!.controller;
+    // A second tab with the same Project: the same session id string.
+    const tabB = new EditorDocumentController(imported);
+    expect(tabB.projectSessionId).toBe(tabA.projectSessionId);
+    await act(async () => view.docs!.activateSession(tabB));
+    await act(async () => view.autoLayout!.requestAfterImport("H"));
+    expect(workers).toHaveLength(1);
+    const before = JSON.stringify(tabA.project);
+
+    await act(async () => view.docs!.activateSession(tabA));
+    expect(workers[0]!.terminated).toBe(true);
+    expect(view.autoLayout!.running).toBe(false);
+    expect(view.autoLayout!.report).toBeNull();
+    // A late answer changes nothing in either tab.
+    workers[0]!.terminated = false;
+    await act(async () => workers[0]!.finish());
+    expect(JSON.stringify(tabA.project)).toBe(before);
+    expect(tabB.canUndo).toBe(false);
+
+    await act(async () => view.docs!.activateSession(tabB));
+    expect(view.status).toBe(
+      "H · Auto Layout stopped because the tab was left; every Cell stays as imported — Details",
+    );
+    expect(view.autoLayout!.report?.cells.map((cell) => cell.reason)).toEqual([
+      "the tab was left while Auto Layout was planning",
+      "the tab was left while Auto Layout was planning",
+    ]);
+  }, 60_000);
 });

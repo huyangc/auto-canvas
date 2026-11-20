@@ -455,13 +455,13 @@ one undo, reporting the exact affected count (also in dry run).
   one-line reason; the chip's **Details** lists every diagnostic (severity, code,
   the planner's own message). Warnings on a delivered plan use the same chip.
 - **After a SPICE import.** File → Import → SPICE / SCS… and Cadence SPICE
-  start a run on every imported Cell with a part, top Cell first. A Cell still
-  netlist-only (an `importReference` and no routes) is planned with R165's
-  netlist presentation, by this run and by the menu command alike. The fence is
-  per Document: opening another Cell is allowed, a Cell edited meanwhile is
-  skipped and named. Every delivered plan commits as one Undo step; a refused
-  Cell keeps its shelf with its reason. Several subcircuits get a notice in
-  Import Review; every status starts with the import's headline.
+  start a run on every imported Cell with a part, top Cell first, with R165's
+  netlist presentation when every one is still netlist-only (an
+  `importReference` and no routes); the menu command uses it on such a Cell.
+  The fence is per Document and controller: another Cell may be opened; a Cell
+  edited meanwhile, and any Cell placing it, is skipped and named. One Undo
+  step; a refused Cell keeps its shelf with its reason. Import Review notes
+  several subcircuits; statuses start with the import's headline.
 
 ## Agent semantic control
 
