@@ -373,3 +373,92 @@ describe("RNL chunk failures", () => {
     );
   });
 });
+
+describe("SPICE import then Auto Layout", () => {
+  const NETLIST = `* two Cells
+.subckt stage in out vdd
+M1 out in 0 0 nmos w=1u l=1u
+R1 vdd out 10k
+.ends stage
+.subckt top in out vdd
+X1 in mid vdd stage
+X2 mid out vdd stage
+C1 out 0 1p
+.ends top
+.model nmos nmos
+`;
+  const files = (text: string, name = "circuit.sp") =>
+    [new File([text], name)] as unknown as FileList;
+  const performing = () =>
+    vi.fn<EditorFileCommandDependencies["guardDirtyReplacement"]>(
+      async (_label, perform) => {
+        await perform();
+      },
+    );
+
+  it("asks for a layout once, after the replacement, with the headline", async () => {
+    for (const profile of ["native", "cadence-bang"] as const) {
+      const order: string[] = [];
+      const onImported = vi.fn((_headline: string) => {
+        order.push("layout");
+      });
+      const target = commands({
+        guardDirtyReplacement: performing(),
+        replaceActiveProject: vi.fn(() => void order.push("replace")),
+        onImported,
+      });
+      await target.importSpiceFiles(files(NETLIST), profile);
+      expect(order).toEqual(["replace", "layout"]);
+      expect(onImported).toHaveBeenCalledOnce();
+      const headline = onImported.mock.calls[0]![0];
+      expect(headline).toMatch(/^Imported 2 Documents and \d+ structural/);
+      expect(target.dependencies.setStatus).toHaveBeenLastCalledWith(headline);
+      expect(target.dependencies.setImportReport).toHaveBeenCalledWith(
+        expect.objectContaining({ cellCount: 2 }),
+      );
+    }
+  });
+
+  it("asks for nothing when the import fails or never replaces the Project", async () => {
+    const failed = vi.fn();
+    const target = commands({
+      guardDirtyReplacement: performing(),
+      onImported: failed,
+    });
+    await target.importSpiceFiles(files(".subckt broken\nX1 a b missing\n"));
+    expect(target.dependencies.replaceActiveProject).not.toHaveBeenCalled();
+    expect(failed).not.toHaveBeenCalled();
+
+    // The dirty-work guard cancelled the replacement.
+    const cancelled = vi.fn();
+    const guarded = commands({
+      guardDirtyReplacement: vi.fn(async () => {}),
+      onImported: cancelled,
+    });
+    await guarded.importSpiceFiles(files(NETLIST));
+    expect(guarded.dependencies.guardDirtyReplacement).toHaveBeenCalledOnce();
+    expect(cancelled).not.toHaveBeenCalled();
+  });
+
+  it("does not lay out an RNL import", async () => {
+    const onImported = vi.fn();
+    vi.doMock("../netlist-export/rnl-import", () => ({
+      planRnlImport: vi.fn(async () => ({
+        status: "ready",
+        project: createEmptyProject("rnl", "RNL"),
+        diagnostics: [],
+      })),
+    }));
+    try {
+      const target = commands({
+        guardDirtyReplacement: performing(),
+        onImported,
+      });
+      await target.importRnlFiles(files("* rnl\n"));
+      expect(target.dependencies.replaceActiveProject).toHaveBeenCalledOnce();
+      expect(onImported).not.toHaveBeenCalled();
+    } finally {
+      vi.doUnmock("../netlist-export/rnl-import");
+    }
+  });
+});

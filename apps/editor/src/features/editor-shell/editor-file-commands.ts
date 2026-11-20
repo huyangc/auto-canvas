@@ -35,6 +35,8 @@ type SpiceImportResult = Awaited<ReturnType<typeof importSpiceSources>>;
 export interface SpiceImportReport {
   entryPath: string;
   diagnostics: SpiceImportResult["diagnostics"];
+  /** Imported Cells with at least one part; Import Review notes several. */
+  cellCount?: number;
 }
 
 export interface EditorFileCommandDependencies {
@@ -62,6 +64,11 @@ export interface EditorFileCommandDependencies {
   setStatus: (status: string) => void;
   /** Raise the refresh banner when an on-demand chunk has gone missing. */
   onChunkLoadFailure?: (feature: string) => void;
+  /**
+   * A SPICE import was installed: lay it out. Called inside the replacement,
+   * after its status, with that status as the headline to keep.
+   */
+  onImported?: (statusPrefix: string) => void;
 }
 
 /** File import/export commands and their user-facing gate/status policy. */
@@ -82,6 +89,7 @@ export function createEditorFileCommands({
   setSelectionOpen,
   setStatus,
   onChunkLoadFailure,
+  onImported,
 }: EditorFileCommandDependencies) {
   const deliverArtifact = async (artifact: EditorExportArtifact) => {
     const result = await exportDelivery.deliverFile({
@@ -267,11 +275,16 @@ export function createEditorFileCommands({
     return { sourceInputs, entryCandidates };
   };
 
-  /** Replace the open Project with an imported one, and open its report. */
+  /**
+   * Replace the open Project with an imported one, and open its report. With
+   * `layout`, the import is then laid out (only once the replacement really
+   * happens: the dirty-work guard may defer or cancel it).
+   */
   const installImport = async (
     label: string,
     importedProject: CircuitProject,
     report: SpiceImportReport,
+    layout: boolean,
   ) => {
     const instanceCount = importedProject.documents.reduce(
       (count, candidate) => count + candidate.instances.length,
@@ -285,9 +298,9 @@ export function createEditorFileCommands({
       setImportReviewOpen(true);
       setSelectionOpen(true);
       const documents = importedProject.documents.length;
-      setStatus(
-        `Imported ${documents} ${documents === 1 ? "Document" : "Documents"} and ${instanceCount} structural ${instanceCount === 1 ? "instance" : "instances"}`,
-      );
+      const headline = `Imported ${documents} ${documents === 1 ? "Document" : "Documents"} and ${instanceCount} structural ${instanceCount === 1 ? "instance" : "instances"}`;
+      setStatus(headline);
+      if (layout) onImported?.(headline);
     });
   };
 
@@ -322,7 +335,7 @@ export function createEditorFileCommands({
         reportFailedImport(report, plan.message);
         return;
       }
-      await installImport("Import RNL sources", plan.project, report);
+      await installImport("Import RNL sources", plan.project, report, false);
     } catch (error) {
       if (error instanceof ChunkLoadError) {
         setStatus(chunkLoadStatus(error.feature));
@@ -356,6 +369,13 @@ export function createEditorFileCommands({
       const nextImportReport: SpiceImportReport = {
         entryPath: entryCandidates[0]!.path,
         diagnostics: result.diagnostics,
+        ...(result.project
+          ? {
+              cellCount: result.project.documents.filter(
+                (item) => item.instances.length > 0,
+              ).length,
+            }
+          : {}),
       };
       if (!result.project || !result.successful) {
         const firstError = result.diagnostics.find(
@@ -371,6 +391,7 @@ export function createEditorFileCommands({
         "Import SPICE sources",
         withImportedInstanceDisplays(result.project),
         nextImportReport,
+        true,
       );
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "SPICE import failed");

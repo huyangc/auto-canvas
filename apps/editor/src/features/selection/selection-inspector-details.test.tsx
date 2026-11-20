@@ -7,6 +7,8 @@ import type {
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
+import { multiCellNotice } from "../auto-layout/netlist-layout";
+
 import {
   NetTraceSection,
   ProjectDiagnosticsSection,
@@ -102,6 +104,35 @@ describe("selection inspector details", () => {
     expect(markup).toContain("SPICE_NOTE");
     expect(markup).not.toContain("BROKEN_ROUTE");
     expect(markup).not.toContain("CROWDED_LABEL");
+  });
+
+  it("notes a multi-subcircuit netlist in Import Review, and only then", () => {
+    const render = (cellCount: number) =>
+      renderToStaticMarkup(
+        <SelectionInspectorDetails
+          snapshot={{
+            selected: "",
+            internalRouteCount: 0,
+            revision: 1,
+            sourceStatus: "in-sync",
+            documentCount: cellCount,
+            activeDocumentId: "document-main",
+            activeInstanceCount: 3,
+            projectInstanceCount: 5,
+            netCount: 2,
+            tool: "pointer",
+            flightlineCount: 0,
+            crossingCount: 0,
+            annotationCount: 0,
+            status: "Imported",
+          }}
+          importReport={{ entryPath: "b.sp", diagnostics: [], cellCount }}
+        />,
+      );
+    const two = render(2);
+    expect(two).toContain('data-testid="import-multi-cell-notice"');
+    expect(two).toContain(multiCellNotice(2));
+    expect(render(1)).not.toContain("import-multi-cell-notice");
   });
 
   it("renders revision-stamped actionable findings and hides observations by default", () => {

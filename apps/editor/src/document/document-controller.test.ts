@@ -637,6 +637,57 @@ describe("EditorDocumentController", () => {
     ]);
   });
 
+  it("keeps one step's commits to several Documents as one undo item", () => {
+    const controller = new EditorDocumentController(hierarchicalProject());
+    const [topId, childId] = controller.project.documents.map((d) => d.id);
+    const json = (id: string) => {
+      const { revision: _, ...rest } = controller.project.documents.find(
+        (d) => d.id === id,
+      )!;
+      return JSON.stringify(rest);
+    };
+    const add = (documentId: string, id: string) =>
+      controller.dispatchTransaction({
+        transactionId: `${documentId}-${id}`,
+        documentId,
+        expectedRevision: controller.project.documents.find(
+          (d) => d.id === documentId,
+        )!.revision,
+        actor: { kind: "human", id: "human-local" },
+        edits: [{ kind: "add_instance", instance: instance(id) }],
+      }).ok;
+    const before = { top: json(topId!), child: json(childId!) };
+
+    // Refused after the first Cell: nothing is left, not even an entry.
+    expect(controller.commitAsOneStep(() => add(topId!, "R1") && false)).toBe(
+      false,
+    );
+    expect([json(topId!), json(childId!)]).toEqual([before.top, before.child]);
+    expect(controller.canUndo).toBe(false);
+
+    expect(
+      controller.commitAsOneStep(
+        () => add(topId!, "R1") && add(childId!, "R2"),
+      ),
+    ).toBe(true);
+    const after = { top: json(topId!), child: json(childId!) };
+    expect(after.top).not.toBe(before.top);
+    expect(after.child).not.toBe(before.child);
+    expect(controller.activeDocumentId).toBe(topId);
+
+    // One GUI Undo restores both Cells; the open Cell stays open.
+    controller.openDocument(childId!);
+    controller.transact([{ kind: "undo" }]);
+    expect([json(topId!), json(childId!)]).toEqual([before.top, before.child]);
+    expect(controller.activeDocumentId).toBe(childId);
+    expect(controller.canUndo).toBe(false);
+
+    // One Redo re-applies both.
+    controller.transact([{ kind: "redo" }]);
+    expect([json(topId!), json(childId!)]).toEqual([after.top, after.child]);
+    expect(controller.activeDocumentId).toBe(childId);
+  });
+
   it("rebuilds symbols for a definition-level Document edit", () => {
     const controller = new EditorDocumentController(hierarchicalProject());
     controller.openDocument("document-child");
