@@ -1,10 +1,20 @@
 // @vitest-environment jsdom
 import { act, useState, type Dispatch, type SetStateAction } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { EditorDocumentController } from "../../document/document-controller";
+import { createEditorTransactionCommands } from "../../app/editor-transaction-commands";
+import {
+  EditorDocumentController,
+  useDocumentController,
+} from "../../document/document-controller";
 import { createLibraryExampleProject } from "../../examples/library-examples";
+import { runAutoLayout } from "./auto-layout-core";
+import {
+  importNetlistProject,
+  NETLIST_A,
+  NETLIST_B,
+} from "./auto-layout-fixture.test-support";
 import type {
   AutoLayoutWorkerMessage,
   AutoLayoutWorkerRequest,
@@ -95,4 +105,172 @@ it("ends a planning run when the editor unmounts", async () => {
   root = undefined;
 
   expect(workers[0]!.terminated).toBe(true);
+});
+
+/** A worker that plans in quick mode when the test says so. */
+class QuickWorker implements AutoLayoutWorker {
+  onmessage: ((event: { data: AutoLayoutWorkerMessage }) => void) | null = null;
+  onerror: ((event: { message?: string }) => void) | null = null;
+  request: AutoLayoutWorkerRequest | null = null;
+  terminated = false;
+  postMessage(request: AutoLayoutWorkerRequest) {
+    this.request = structuredClone(request);
+  }
+  terminate() {
+    this.terminated = true;
+  }
+  finish() {
+    const messages: AutoLayoutWorkerMessage[] = [];
+    runAutoLayout(
+      { ...this.request!, search: { seed: 1, evaluations: 0 } },
+      (message) => messages.push(structuredClone(message)),
+    );
+    for (const data of messages)
+      if (!this.terminated) this.onmessage?.({ data });
+  }
+}
+
+/** The editor's wiring: the controller hook, the commands, Auto Layout. */
+async function mountEditor(
+  initial = createLibraryExampleProject("two-stage-op-amp")!,
+) {
+  const workers: QuickWorker[] = [];
+  const committed = vi.fn();
+  const view: {
+    autoLayout?: ReturnType<typeof useAutoLayout>;
+    docs?: ReturnType<typeof useDocumentController>;
+    status?: string;
+  } = {};
+  function Harness() {
+    const [status, setStatus] = useState("Ready");
+    const docs = useDocumentController(initial, committed);
+    const commands = createEditorTransactionCommands({
+      project: docs.project,
+      document: docs.document,
+      dispatchProjectTransaction: docs.dispatchProjectTransaction,
+      transactDocument: docs.transact,
+      dispatchTransaction: docs.dispatchTransaction,
+      commitAsOneStep: docs.commitAsOneStep,
+      getCurrentInteractionKind: () => "idle",
+      cancelAllTransientInteraction: vi.fn(),
+      setStatus,
+    });
+    view.status = status;
+    view.docs = docs;
+    view.autoLayout = useAutoLayout({
+      project: docs.project,
+      document: docs.document,
+      projectSessionId: docs.projectSessionId,
+      controller: docs.controller,
+      transactAtRevision: commands.transactAtRevision,
+      transactStepAtRevisions: commands.transactStepAtRevisions,
+      setStatus,
+      clearEditorSelection: vi.fn(),
+      fitView: vi.fn(),
+      createWorker: () => {
+        const worker = new QuickWorker();
+        workers.push(worker);
+        return worker;
+      },
+    });
+    return null;
+  }
+  root = createRoot(document.createElement("div"));
+  await act(async () => root!.render(<Harness />));
+  return { view, workers, committed };
+}
+
+describe("Auto Layout after an import", () => {
+  it("starts one run once the imported Project has rendered", async () => {
+    const imported = await importNetlistProject(NETLIST_B);
+    const { view, workers } = await mountEditor();
+    // As installImport does: replace, then ask, before any re-render.
+    await act(async () => {
+      view.docs!.replaceProject(imported);
+      view.autoLayout!.requestAfterImport("Imported 2 Documents");
+    });
+    expect(workers).toHaveLength(1);
+    expect(workers[0]!.terminated).toBe(false);
+    const project = view.docs!.project;
+    expect(workers[0]!.request).toMatchObject({
+      documentIds: [
+        project.topDocumentId,
+        ...project.documents
+          .map((d) => d.id)
+          .filter((id) => id !== project.topDocumentId),
+      ],
+      presentation: "netlist",
+    });
+    expect(view.status).toBe(
+      "Imported 2 Documents · Auto Layout is planning 2 Cells…",
+    );
+
+    await act(async () => workers[0]!.finish());
+    expect(view.status).toBe(
+      "Imported 2 Documents · Auto Layout applied to 2 of 2 Cells — Details",
+    );
+    expect(view.docs!.canUndo).toBe(true);
+    for (const document of view.docs!.project.documents)
+      expect(document.routes.length).toBeGreaterThan(0);
+    // No second run.
+    expect(workers).toHaveLength(1);
+  }, 60_000);
+
+  it("drops a request whose Project was replaced again", async () => {
+    const imported = await importNetlistProject(NETLIST_B);
+    const { view, workers } = await mountEditor();
+    await act(async () => {
+      view.docs!.replaceProject(imported);
+      view.autoLayout!.requestAfterImport("Imported 2 Documents");
+      view.docs!.replaceProject(
+        createLibraryExampleProject("two-stage-op-amp")!,
+      );
+    });
+    expect(workers).toHaveLength(0);
+    expect(view.autoLayout!.running).toBe(false);
+  }, 60_000);
+
+  it("asks for the netlist presentation only on a netlist-only Cell", async () => {
+    const drawn = await mountEditor();
+    await act(async () => void drawn.view.autoLayout!.start());
+    expect(drawn.workers[0]!.request).not.toHaveProperty("presentation");
+    await act(async () => root!.unmount());
+    root = undefined;
+
+    const netlist = await mountEditor(await importNetlistProject(NETLIST_A));
+    await act(async () => void netlist.view.autoLayout!.start());
+    expect(netlist.workers[0]!.request).toMatchObject({
+      presentation: "netlist",
+    });
+    expect(netlist.view.status).toBe(AUTO_LAYOUT_PLANNING_MESSAGE);
+  }, 60_000);
+
+  it("shows the Project a rolled-back step left", async () => {
+    const { view, committed } = await mountEditor();
+    const before = JSON.stringify(view.docs!.document.instances);
+    const instance = view.docs!.document.instances[0]!;
+    let kept = true;
+    await act(async () => {
+      kept = view.docs!.commitAsOneStep(
+        () =>
+          view.docs!.dispatchTransaction({
+            transactionId: "moved",
+            documentId: view.docs!.document.id,
+            expectedRevision: view.docs!.document.revision,
+            actor: { kind: "human", id: "human-local" },
+            edits: [
+              {
+                kind: "move_instance",
+                instanceId: instance.id,
+                position: { x: 0, y: 0 },
+              },
+            ],
+          }).ok && false,
+      );
+    });
+    expect(kept).toBe(false);
+    expect(JSON.stringify(view.docs!.document.instances)).toBe(before);
+    expect(view.docs!.canUndo).toBe(false);
+    expect(committed).toHaveBeenLastCalledWith(view.docs!.controller.project);
+  });
 });

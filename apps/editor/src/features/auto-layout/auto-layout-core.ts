@@ -5,49 +5,68 @@ import { defaultLayoutSearch, planAutoLayout } from "@icm/auto-layout";
 import { builtInSymbols, createProjectSymbolResolver } from "@icm/symbols";
 
 import type {
+  AutoLayoutCellResult,
   AutoLayoutWorkerMessage,
   AutoLayoutWorkerRequest,
 } from "./auto-layout-protocol";
 
-/** Plan one Document of the posted Project and post progress, then the result. */
+/**
+ * Plan the listed Documents of the posted Project one after another, posting
+ * progress, then every result at once. A refused Document is a result like
+ * any other (its diagnostics say why); the next one is still planned.
+ */
 export function runAutoLayout(
   request: AutoLayoutWorkerRequest,
   post: (message: AutoLayoutWorkerMessage) => void,
 ): void {
-  const { runId, project, documentId } = request;
+  const { runId, project, documentIds, presentation } = request;
   try {
-    const document = project.documents.find((item) => item.id === documentId);
-    if (!document) {
+    const documents = documentIds.map((id) =>
+      project.documents.find((item) => item.id === id),
+    );
+    const missing = documentIds.find((_, index) => !documents[index]);
+    if (missing !== undefined) {
       post({
         type: "failed",
         runId,
-        message: `Document ${documentId} is not in the Project`,
+        message: `Document ${missing} is not in the Project`,
       });
       return;
     }
     // The resolver the evaluation scripts measure with: built-in symbols plus
     // the Project's placed component definitions and Cell symbols.
     const resolver = createProjectSymbolResolver(project, builtInSymbols);
-    const search = request.search ?? defaultLayoutSearch(document);
-    const started = performance.now();
-    const result = planAutoLayout(document, resolver, {
-      search: {
-        ...search,
-        onProgress: (progress) =>
-          post({
-            type: "progress",
-            runId,
-            evaluations: progress.evaluations,
-            budget: search.evaluations,
-          }),
-      },
+    const cells = documents.length;
+    const results: AutoLayoutCellResult[] = [];
+    documents.forEach((document, index) => {
+      const search = request.search ?? defaultLayoutSearch(document!);
+      const cell = index + 1;
+      const progress = (evaluations: number) =>
+        post({
+          type: "progress",
+          runId,
+          cell,
+          cells,
+          evaluations,
+          budget: search.evaluations,
+        });
+      // Several Cells: say which one is starting, even before its search.
+      if (cells > 1) progress(0);
+      const started = performance.now();
+      const result = planAutoLayout(document!, resolver, {
+        ...(presentation ? { presentation } : {}),
+        search: {
+          ...search,
+          onProgress: ({ evaluations }) => progress(evaluations),
+        },
+      });
+      results.push({
+        documentId: document!.id,
+        result,
+        milliseconds: performance.now() - started,
+      });
     });
-    post({
-      type: "result",
-      runId,
-      result,
-      milliseconds: performance.now() - started,
-    });
+    post({ type: "result", runId, results });
   } catch (error) {
     post({
       type: "failed",

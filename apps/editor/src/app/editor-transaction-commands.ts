@@ -20,6 +20,7 @@ import type {
   EditorContactEvidence,
   EditorTransactionRequest,
 } from "../document/document-controller";
+import type { FencedDocumentTransaction } from "../features/auto-layout/auto-layout-protocol";
 
 interface TransactionOptions {
   completesWireSession?: boolean;
@@ -28,16 +29,6 @@ interface TransactionOptions {
 
 interface ConnectivityTransactionOptions extends TransactionOptions {
   expectedElectricalEffect?: ExpectedElectricalEffect;
-}
-
-/** Edits planned against one Document at one revision. */
-export interface FencedDocumentTransaction {
-  documentId: string;
-  expectedRevision: number;
-  edits: SchematicEdit[];
-  transactionId: string;
-  /** The one status a person reads when the Document moved on meanwhile. */
-  staleStatus: string;
 }
 
 export interface EditorTransactionCommandDependencies {
@@ -65,6 +56,11 @@ export interface EditorTransactionCommandDependencies {
   dispatchTransaction: (
     request: EditorTransactionRequest,
   ) => EditTransactionResult;
+  /**
+   * The controller's one-step write: the transactions `commit` makes become
+   * one undo step, or none when it answers false.
+   */
+  commitAsOneStep?: (commit: () => boolean) => boolean;
   getCurrentInteractionKind: () => InteractionMode;
   cancelAllTransientInteraction: () => void;
   setStatus: (status: string) => void;
@@ -108,6 +104,7 @@ export function createEditorTransactionCommands({
   dispatchProjectTransaction,
   transactDocument,
   dispatchTransaction,
+  commitAsOneStep,
   getCurrentInteractionKind,
   cancelAllTransientInteraction,
   setStatus,
@@ -231,26 +228,60 @@ export function createEditorTransactionCommands({
    * Document changed since, the Edit Engine refuses with STALE_REVISION,
    * nothing is applied, and the status reads the caller's `staleStatus`.
    */
-  const transactAtRevision = ({
+  const dispatchAtRevision = ({
     documentId,
     expectedRevision,
     edits,
     transactionId,
-    staleStatus,
-  }: FencedDocumentTransaction): EditTransactionResult => {
-    const result = commitDocument(() =>
-      dispatchTransaction({
-        transactionId,
-        documentId,
-        expectedRevision,
-        expectedStructureRevision: project.structureRevision,
-        actor: { kind: "human", id: "human-local" },
-        edits,
-      }),
-    );
+  }: FencedDocumentTransaction): EditTransactionResult =>
+    dispatchTransaction({
+      transactionId,
+      documentId,
+      expectedRevision,
+      expectedStructureRevision: project.structureRevision,
+      actor: { kind: "human", id: "human-local" },
+      edits,
+    });
+
+  const transactAtRevision = (
+    request: FencedDocumentTransaction,
+  ): EditTransactionResult => {
+    const result = commitDocument(() => dispatchAtRevision(request));
     if (!result.ok && result.error.code === "STALE_REVISION")
-      setStatus(staleStatus);
+      setStatus(request.staleStatus);
     return result;
+  };
+
+  /**
+   * Commit several fenced transactions, each built as
+   * {@link transactAtRevision} builds it, as one undo step. The first refusal
+   * rolls the whole step back. The editor's status and tool-cancelling tail
+   * run once, for the last applied commit or the refusal.
+   */
+  const transactStepAtRevisions = (
+    requests: readonly FencedDocumentTransaction[],
+  ): { kept: boolean; results: EditTransactionResult[] } => {
+    const results: EditTransactionResult[] = [];
+    if (!commitAsOneStep)
+      throw new Error("The one-step write path is not connected");
+    if (requests.length === 0) return { kept: false, results };
+    let kept = false;
+    const last = commitDocument(() => {
+      kept = commitAsOneStep(() => {
+        for (const request of requests) {
+          const result = dispatchAtRevision(request);
+          results.push(result);
+          if (!result.ok) return false;
+        }
+        return true;
+      });
+      return results.at(-1)!;
+    });
+    if (!last.ok && last.error.code === "STALE_REVISION")
+      setStatus(
+        requests[results.length - 1]?.staleStatus ?? last.error.message,
+      );
+    return { kept, results };
   };
 
   /** The routing gate alone: the edits it would commit, or null after saying why not. */
@@ -306,6 +337,7 @@ export function createEditorTransactionCommands({
     transactStructure,
     transact,
     transactAtRevision,
+    transactStepAtRevisions,
     gateConnectivity,
     transactConnectivity,
   };

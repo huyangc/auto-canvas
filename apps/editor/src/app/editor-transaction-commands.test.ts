@@ -320,6 +320,125 @@ describe("revision-fenced Document commits", () => {
   });
 });
 
+describe("one-step commits to several Documents", () => {
+  const STALE = "The drawing changed meanwhile; nothing was applied.";
+  function controlled(kind: InteractionMode = "idle") {
+    const controller = new EditorDocumentController(
+      createLibraryExampleProject("five-transistor-ota-sky130")!,
+    );
+    const input = {
+      dispatchProjectTransaction: vi.fn(),
+      transactDocument: vi.fn(),
+      dispatchTransaction: vi.fn(
+        (request: Parameters<typeof controller.dispatchTransaction>[0]) =>
+          controller.dispatchTransaction(request),
+      ),
+      commitAsOneStep: vi.fn((commit: () => boolean) =>
+        controller.commitAsOneStep(commit),
+      ),
+      getCurrentInteractionKind: vi.fn((): InteractionMode => kind),
+      cancelAllTransientInteraction: vi.fn(),
+      setStatus: vi.fn(),
+    };
+    const commands = createEditorTransactionCommands({
+      ...input,
+      project: controller.project,
+      document: controller.document,
+    });
+    // Two Cells with a placed part each, top first.
+    const documents = [
+      controller.document,
+      controller.project.documents.find(
+        (d) =>
+          d.id !== controller.document.id &&
+          d.instances.some((i) => i.placement),
+      )!,
+    ];
+    const request = (index: number, expectedRevision?: number) => {
+      const document = documents[index]!;
+      const instance = document.instances.find((i) => i.placement)!;
+      return {
+        documentId: document.id,
+        expectedRevision: expectedRevision ?? document.revision,
+        edits: [
+          {
+            kind: "move_instance" as const,
+            instanceId: instance.id,
+            position: {
+              x: instance.placement!.position.x + 20,
+              y: instance.placement!.position.y,
+            },
+          },
+        ],
+        transactionId: `step-${index}`,
+        staleStatus: STALE,
+      };
+    };
+    const json = (id: string) => {
+      const { revision: _, ...rest } = controller.project.documents.find(
+        (d) => d.id === id,
+      )!;
+      return JSON.stringify(rest);
+    };
+    return { controller, input, commands, documents, request, json };
+  }
+
+  it("commits two Documents as one undo entry with one status", () => {
+    const { controller, input, commands, documents, request, json } =
+      controlled();
+    const before = documents.map((d) => json(d.id));
+
+    const { kept, results } = commands.transactStepAtRevisions([
+      request(0),
+      request(1),
+    ]);
+
+    expect(kept).toBe(true);
+    expect(results).toHaveLength(2);
+    expect(results.every((r) => r.ok && r.applied)).toBe(true);
+    expect(input.dispatchTransaction).toHaveBeenCalledTimes(2);
+    expect(input.commitAsOneStep).toHaveBeenCalledOnce();
+    expect(input.setStatus).toHaveBeenCalledOnce();
+    expect(input.setStatus).toHaveBeenLastCalledWith(
+      `Committed revision ${documents[1]!.revision + 1}`,
+    );
+    expect(documents.map((d) => json(d.id))).not.toEqual(before);
+    controller.transact([{ kind: "undo" }]);
+    expect(documents.map((d) => json(d.id))).toEqual(before);
+    expect(controller.canUndo).toBe(false);
+  });
+
+  it("rolls every Document back when a later commit is refused", () => {
+    const { controller, input, commands, documents, request, json } =
+      controlled();
+    const before = documents.map((d) => json(d.id));
+
+    const { kept, results } = commands.transactStepAtRevisions([
+      request(0),
+      request(1, documents[1]!.revision - 1),
+    ]);
+
+    expect(kept).toBe(false);
+    expect(results.map((r) => r.ok)).toEqual([true, false]);
+    expect(results[1]).toMatchObject({ error: { code: "STALE_REVISION" } });
+    expect(documents.map((d) => json(d.id))).toEqual(before);
+    expect(controller.canUndo).toBe(false);
+    expect(input.setStatus).toHaveBeenLastCalledWith(STALE);
+  });
+
+  it("cancels a transient tool once for the whole step", () => {
+    const { input, commands, documents, request } =
+      controlled("copy-placement");
+
+    commands.transactStepAtRevisions([request(0), request(1)]);
+
+    expect(input.cancelAllTransientInteraction).toHaveBeenCalledOnce();
+    expect(input.setStatus).toHaveBeenLastCalledWith(
+      `Committed revision ${documents[1]!.revision + 1}; active tool cancelled because the circuit changed`,
+    );
+  });
+});
+
 describe("routing refusals shown to a person", () => {
   it("restates electrical invariants as what the drawing refused to do", () => {
     const preserve = plainRoutingRefusal(

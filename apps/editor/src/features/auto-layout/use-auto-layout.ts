@@ -11,18 +11,18 @@ import {
 import type { EditTransactionResult } from "@icm/edit-engine";
 import type { CircuitProject, SchematicDocument } from "@icm/model";
 
-import type { FencedDocumentTransaction } from "../../app/editor-transaction-commands";
 import type { EditorDocumentController } from "../../document/document-controller";
 
+import type { FencedDocumentTransaction } from "./auto-layout-protocol";
 import {
-  AUTO_LAYOUT_CANCELLED_MESSAGE,
-  AUTO_LAYOUT_PLANNING_MESSAGE,
   createAutoLayoutSession,
   type AutoLayoutFence,
+  type AutoLayoutImportCell,
   type AutoLayoutSession,
   type AutoLayoutSessionState,
   type AutoLayoutWorker,
 } from "./auto-layout-session";
+import { netlistOnly } from "./netlist-layout";
 
 /** One module worker per run; null where the platform has none. */
 function createAutoLayoutWorker(): AutoLayoutWorker | null {
@@ -44,10 +44,22 @@ export interface AutoLayoutEditorBinding {
   transactAtRevision: (
     request: FencedDocumentTransaction,
   ) => EditTransactionResult;
+  /** Several fenced writes as one undo step (an import run's layout). */
+  transactStepAtRevisions?: (
+    requests: readonly FencedDocumentTransaction[],
+  ) => { kept: boolean; results: EditTransactionResult[] };
   setStatus: Dispatch<SetStateAction<string>>;
   clearEditorSelection: () => void;
   fitView: (options?: { announce?: boolean }) => void;
   createWorker?: () => AutoLayoutWorker | null;
+}
+
+/** An import run recorded inside the import, started after its render. */
+interface ImportRequest {
+  projectSessionId: string;
+  structureRevision: number;
+  cells: AutoLayoutImportCell[];
+  statusPrefix: string;
 }
 
 export function useAutoLayout(binding: AutoLayoutEditorBinding) {
@@ -60,6 +72,9 @@ export function useAutoLayout(binding: AutoLayoutEditorBinding) {
     report: null,
   });
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [importRequest, setImportRequest] = useState<ImportRequest | null>(
+    null,
+  );
   const [now, setNow] = useState(() => Date.now());
   // Fit after the committed Document has rendered, so its bounds are current.
   const [fitRequest, setFitRequest] = useState(0);
@@ -76,8 +91,20 @@ export function useAutoLayout(binding: AutoLayoutEditorBinding) {
         revision: controller.document.revision,
       };
     },
+    liveProject: () => {
+      const { controller } = bindingRef.current;
+      return {
+        projectSessionId: controller.projectSessionId,
+        project: controller.project,
+      };
+    },
     transactAtRevision: (request) =>
       bindingRef.current.transactAtRevision(request),
+    transactStepAtRevisions: (requests) => {
+      const step = bindingRef.current.transactStepAtRevisions;
+      if (!step) throw new Error("Auto Layout has no one-step write path");
+      return step(requests);
+    },
     setStatus: (status) => bindingRef.current.setStatus(status),
     onChange: setState,
     onApplied: () => {
@@ -103,20 +130,49 @@ export function useAutoLayout(binding: AutoLayoutEditorBinding) {
   // unmounting the editor does too.
   useEffect(
     () => () => {
-      const wasRunning = session.state.running;
+      const statuses = session.runStatuses;
       session.dispose();
       session.clearReport();
       // Opening or switching usually writes its own status; only a status
       // that still says the run is planning would now be false.
-      if (wasRunning)
+      if (statuses)
         bindingRef.current.setStatus((status) =>
-          status === AUTO_LAYOUT_PLANNING_MESSAGE
-            ? AUTO_LAYOUT_CANCELLED_MESSAGE
-            : status,
+          status === statuses.planning ? statuses.cancelled : status,
         );
     },
     [binding.projectSessionId, session],
   );
+
+  // An import's run starts once the editor renders the imported Project, so
+  // the session change above does not end it. A request whose Project is no
+  // longer the controller's is dropped.
+  useEffect(() => {
+    if (!importRequest) return;
+    const { controller } = bindingRef.current;
+    if (importRequest.projectSessionId !== controller.projectSessionId) {
+      setImportRequest(null);
+      return;
+    }
+    if (importRequest.projectSessionId !== binding.projectSessionId) return;
+    setImportRequest(null);
+    setDetailsOpen(false);
+    const documents = importRequest.cells.map((cell) =>
+      controller.project.documents.find((d) => d.id === cell.documentId),
+    );
+    // At import every Cell is netlist-only; a Cell drawn meanwhile is
+    // planned plain, and then the whole run is (one presentation per run).
+    const presentation = documents.every((d) => d && netlistOnly(d))
+      ? ("netlist" as const)
+      : undefined;
+    session.startImport({
+      project: controller.project,
+      projectSessionId: importRequest.projectSessionId,
+      structureRevision: importRequest.structureRevision,
+      cells: importRequest.cells,
+      ...(presentation ? { presentation } : {}),
+      statusPrefix: importRequest.statusPrefix,
+    });
+  }, [binding.projectSessionId, importRequest, session]);
 
   return {
     running: state.running,
@@ -129,7 +185,39 @@ export function useAutoLayout(binding: AutoLayoutEditorBinding) {
     start: () => {
       const { project, document, projectSessionId } = bindingRef.current;
       setDetailsOpen(false);
-      return session.start({ project, document, projectSessionId });
+      return session.start({
+        project,
+        document,
+        projectSessionId,
+        // Decisions 2 and 6: a Cell still netlist-only gets rail symbols.
+        ...(netlistOnly(document) ? { presentation: "netlist" as const } : {}),
+      });
+    },
+    /**
+     * Lay out every imported Cell once the import has rendered. Called inside
+     * the import, right after the controller installed the Project: records
+     * the controller's new session and every Cell with a part, top first.
+     */
+    requestAfterImport: (statusPrefix: string) => {
+      const { controller } = bindingRef.current;
+      const { project } = controller;
+      const top = project.documents.find((d) => d.id === project.topDocumentId);
+      const cells = [
+        ...(top ? [top] : []),
+        ...project.documents.filter((d) => d !== top),
+      ]
+        .filter((d) => d.instances.length > 0)
+        .map((d) => ({ documentId: d.id, name: d.name, revision: d.revision }));
+      setImportRequest(
+        cells.length > 0
+          ? {
+              projectSessionId: controller.projectSessionId,
+              structureRevision: project.structureRevision,
+              cells,
+              statusPrefix,
+            }
+          : null,
+      );
     },
     cancel: () => session.cancel(),
     openDetails: () => setDetailsOpen(true),

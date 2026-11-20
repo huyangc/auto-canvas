@@ -819,6 +819,24 @@ export function useDocumentController(
       }
       return result;
     },
+    /**
+     * The controller's one-step write. Each commit inside already showed its
+     * Project; after a rollback, show the Project the rollback left.
+     */
+    commitAsOneStep: (commit: () => boolean) => {
+      const before = controller.project;
+      let kept = false;
+      try {
+        kept = controller.commitAsOneStep(commit);
+      } finally {
+        if (!kept && controller.project !== before) {
+          synchronize();
+          if (controllerRef.current === controller)
+            onCommittedRef.current(controller.project);
+        }
+      }
+      return kept;
+    },
     dispatchProjectTransaction: (
       request: ProjectTransaction,
       activeDocumentId?: string,

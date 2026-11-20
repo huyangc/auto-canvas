@@ -15,6 +15,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { SpiceDiagnostic } from "@icm/spice";
 
 import type { EditorTool } from "../../interaction/interaction-state";
+import { multiCellNotice } from "../auto-layout/netlist-layout";
 
 export interface SelectionInspectorSnapshot {
   selected: string;
@@ -48,6 +49,8 @@ export interface SelectionInspectorDetailsProps {
 export interface SpiceImportReport {
   entryPath: string;
   diagnostics: readonly SpiceDiagnostic[];
+  /** Imported Cells with at least one part. */
+  cellCount?: number;
 }
 
 export function summarizeVisualDiagnostics(
@@ -114,6 +117,11 @@ export function SelectionInspectorDetails({
           {importReport?.entryPath ?? "the current source"}; they are not
           current ERC results.
         </p>
+        {importReport?.cellCount !== undefined && importReport.cellCount > 1 ? (
+          <p data-testid="import-multi-cell-notice">
+            {multiCellNotice(importReport.cellCount)}
+          </p>
+        ) : null}
         {!importReport || importReport.diagnostics.length === 0 ? (
           <p>No import messages</p>
         ) : null}

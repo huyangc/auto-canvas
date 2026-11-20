@@ -341,11 +341,19 @@ describe("editor statusbar", () => {
 
   it("offers Details for a refused or warned Auto Layout run", () => {
     const refused = statusbarWithAutoLayout({
-      report: [
-        { severity: "error" },
-        { severity: "warning" },
-        { severity: "warning" },
-      ],
+      report: {
+        run: "manual",
+        cells: [
+          {
+            outcome: "refused",
+            diagnostics: [
+              { severity: "error" },
+              { severity: "warning" },
+              { severity: "warning" },
+            ],
+          },
+        ],
+      },
     });
     expect(refused).toContain("Auto Layout: refused");
     expect(refused).toContain('data-testid="auto-layout-details"');
@@ -353,12 +361,51 @@ describe("editor statusbar", () => {
     expect(refused).not.toContain('data-testid="auto-layout-cancel"');
     expect(
       statusbarWithAutoLayout({
-        report: [{ severity: "warning" }, { severity: "warning" }],
+        report: {
+          run: "manual",
+          cells: [
+            {
+              outcome: "applied",
+              diagnostics: [{ severity: "warning" }, { severity: "warning" }],
+            },
+          ],
+        },
       }),
     ).toContain("Auto Layout: 2 warnings");
     // Nothing to say: no chip.
     expect(statusbarWithAutoLayout({})).not.toContain(
       'data-testid="auto-layout-status"',
     );
+  });
+
+  it("counts Cells while an import run plans several, and after", () => {
+    expect(
+      statusbarWithAutoLayout({
+        running: true,
+        elapsedSeconds: 12,
+        progress: { evaluations: 3, budget: 24, cell: 2, cells: 3 },
+      }),
+    ).toContain("Auto Layout… 12 s · Cell 2 of 3 · evaluation 3/24");
+    expect(
+      statusbarWithAutoLayout({
+        running: true,
+        elapsedSeconds: 1,
+        progress: { evaluations: 0, budget: 0, cell: 1, cells: 1 },
+      }),
+    ).toMatch(/>Auto Layout… 1 s</);
+    const done = statusbarWithAutoLayout({
+      report: {
+        run: "import",
+        cells: [
+          { outcome: "applied", diagnostics: [] },
+          {
+            outcome: "refused",
+            diagnostics: [{ severity: "error" }],
+          },
+        ],
+      },
+    });
+    expect(done).toContain("Auto Layout: 1 of 2 Cells");
+    expect(done).toContain('data-testid="auto-layout-details"');
   });
 });

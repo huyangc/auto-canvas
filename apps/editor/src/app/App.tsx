@@ -689,6 +689,7 @@ function WorkspaceEditor({
     dispatchProjectTransaction,
     transact: transactDocument,
     dispatchTransaction,
+    commitAsOneStep,
     activateSession: activateDocumentSession,
     controller: editorDocumentController,
     projectSessionId,
@@ -1247,6 +1248,7 @@ function WorkspaceEditor({
     commitStructure,
     transact,
     transactAtRevision,
+    transactStepAtRevisions,
     gateConnectivity,
     transactConnectivity,
   } = createEditorTransactionCommands({
@@ -1259,6 +1261,7 @@ function WorkspaceEditor({
     dispatchProjectTransaction,
     transactDocument,
     dispatchTransaction,
+    commitAsOneStep,
     getCurrentInteractionKind: () => getCurrentInteractionState().kind,
     cancelAllTransientInteraction,
     setStatus,
@@ -4182,6 +4185,7 @@ function WorkspaceEditor({
     projectSessionId,
     controller: editorDocumentController,
     transactAtRevision,
+    transactStepAtRevisions,
     setStatus,
     clearEditorSelection,
     fitView,
@@ -4277,6 +4281,7 @@ function WorkspaceEditor({
     setSelectionOpen,
     setStatus,
     onChunkLoadFailure: setChunkLoadFailure,
+    onImported: autoLayout.requestAfterImport,
   });
 
   // Single entry point for selecting a drafting object. Editing is opened
@@ -7078,7 +7083,7 @@ function WorkspaceEditor({
       />
       {autoLayout.detailsOpen && autoLayout.report ? (
         <AutoLayoutReport
-          diagnostics={autoLayout.report}
+          report={autoLayout.report}
           onClose={autoLayout.clearReport}
         />
       ) : null}
