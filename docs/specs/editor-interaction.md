@@ -461,7 +461,10 @@ UI only: switching never changes a Document and adds no Undo step.
   the Cell Manager, the insert dialog or User Components do the same. Behind a modal dialog,
   inside a dialog, menu or open header menu, on the canvas text editor's
   toolbar or from the import card such a key does nothing.
-- Switching to Auto cancels any armed tool or transient interaction. Each mode
+- Switching to Auto cancels any armed tool or transient interaction, together
+  with what was typed into it (an unplaced Text draft, a Net Label name), as
+  Escape does. An existing canvas text being edited is committed first, as by
+  any click outside it. Each mode
   keeps its own Netlist and Properties docks for the session, except that a
   project dock holding an unapplied code draft stays open across the switch.
   Document settings, which apply live, close on a switch. A project tab

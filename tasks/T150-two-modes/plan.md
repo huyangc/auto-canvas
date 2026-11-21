@@ -1074,9 +1074,12 @@ tab ›` work.
       editor's command router is wrapped for `insert.start`).
     - H: measured at 320 and 390 px with a run in progress: nothing
       clipped, no CSS change; the measurement stays in the spec.
-    - I: not done. The switch loses typed text on two paths (a `T` text
-      draft not yet placed, and a Net Label name being typed); only an
-      existing text being edited is committed. Left for the coordinator.
+    - I: coordinator, 2026-11-21, under decision 16: an unplaced `T` text
+      draft and a Net Label name being typed are parts of an armed tool and
+      are cancelled with it on the switch to Auto, as Escape would; an
+      existing canvas text being edited is committed by the click, as by any
+      click outside it. No product-code change; the spec and two browser
+      tests pin it.
     - Owned paths widened to `user-components.spec.ts` (the Auto placement
       case).
 - Keep `App.tsx` thin. New UI goes into feature files, and App.tsx only
