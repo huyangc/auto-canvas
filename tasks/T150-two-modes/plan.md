@@ -203,15 +203,13 @@ tab` (cloud only).
       explicitly; implicit switches are session-only. Such a switch does not
       write the stored mode, so the next open is the mode last chosen with
       the switch (Auto if never chosen). It does store the coach mark as
-      seen. The rest of this item is the superseded draft. The stored mode
-      becomes `draw`, exactly as for a
-      click on the switch. A user who presses `W` once in Auto mode
-      therefore finds the page in Draw on the next open. Going back stays
-      one click on `Auto` in the top bar, which also cancels the armed tool
-      (decision 16).
-      - Not chosen: a shortcut switch that is not persisted. That would
-        create two kinds of Draw mode and contradicts decision 5's "mode
-        remembered".
+      seen. A user who presses `W` once in Auto mode therefore finds the
+      page in Auto again on the next open. Going back within the session
+      stays one click on `Auto` in the top bar, which also cancels the
+      armed tool (decision 16).
+      - Not chosen (the earlier draft): a shortcut switch stored like a
+        click on the switch. The owner rejected it: only an explicit choice
+        is remembered.
 16. **Switching to Auto cancels any armed tool or transient interaction.
     (coordinator accepted)**
     - Switching to Auto calls `cancelAllTransientInteraction()`
@@ -769,10 +767,11 @@ netlist…` and the card's `Choose netlist file…` both click it.
    - Extract `openLibraryExample(id)` from `use-project-entry.ts:91-116`.
      Use it both at boot and from the list, with identical status text and
      guard.
-   - In Auto mode skip `setImportReviewOpen(true)` /
-     `setSelectionOpen(true)` in `installImport` on success only (decision
-     20, trap 5). Pass the mode in as a getter, so a run started before a
-     switch reads the current mode.
+   - In Auto mode skip `setSelectionOpen(true)` in `installImport` on
+     success only (decision 20, trap 5); keep `setImportReviewOpen(true)`,
+     so Properties shows the review when the user opens it. Pass the mode
+     in as a getter, so a run started before a switch reads the current
+     mode.
 8. **Drawing shortcuts and commands bring up Draw** (decision 15; traps 12
    and 14). Write the tests first.
    - **The pure classifier.** Add
@@ -800,7 +799,8 @@ netlist…` and the card's `Choose netlist file…` both click it.
      `switchToDraw` first when the mode is Auto.
    - **Unit tests** (`editor-mode.test.ts`, `use-editor-shortcuts.test.tsx`):
      - for each of B, W, T, I, P and L in Auto mode: the mode becomes Draw,
-       the coach is dismissed, the stored mode is `draw`, the status reads
+       the coach is dismissed, the stored mode is unchanged (session-only,
+       decision 15), the status reads
        `Draw mode: <Tool>`, and the intent's normal effect happens (wire tool
        armed, insert dialog open, library open);
      - the same keys in Draw mode: unchanged behavior and no status prefix;
@@ -994,8 +994,9 @@ runs; use another port.
   - Repeat with `B` (the library opens), `I` (Insert search opens) and
     `T`. In Auto, ⋯ → `Insert component…` also switches to Draw.
   - With a dialog open (Cell Manager), `W` does nothing.
-- **Reload after a shortcut switch.** The page opens in the last mode used.
-  After a `W` switch with no switch back, it opens in Draw.
+- **Reload after a shortcut switch.** The page opens in the mode last chosen
+  with the switch. After a `W` switch with no switch back, it opens in Auto
+  (or in Draw if Draw was chosen with the switch before).
 - **Tab strip (T150d).**
   - With one project, no strip is shown in either mode.
   - File → `New project tab`: the strip appears with two tabs.
@@ -1032,6 +1033,31 @@ tab ›` work.
     card, the examples list and the import-dock rule.
   - Review round 1 (coordinator, 2026-11-21): tab sessions remember docks
     per mode; owned paths widened to `use-project-tab-sessions.ts`.
+  - Review round 2 (2026-11-21): one line per fix.
+    - Unseen Import Review is kept and marked on the Properties button
+      (`data-review-pending`, "Properties, import review waiting"); only a
+      seen review is cleared by Properties, the Netlist, inspection or a
+      mode switch.
+    - The `Import netlist…` input is cleared after each import, so the
+      same file imports again.
+    - Switching to Auto also drops a Net Label being placed and a control
+      pick.
+    - Overlays block the drawing-key switch by event target (dialogs,
+      menus, open header menus, the canvas text editor's toolbar); the
+      Agent file approval is `aria-modal`.
+    - The running Auto Layout label is capped with an ellipsis; Cancel and
+      Agent stay on screen at 800 and 1024 px.
+    - A wire started from a Cell symbol layout pin brings up Draw.
+    - Placements from the Cell Manager and the insert dialog bring up Draw.
+    - A failed import closes the Netlist so its review shows.
+    - At 760 px and below the button shows the elapsed seconds.
+    - Opening a Project resets the other mode's remembered docks.
+    - The no-op `activateTool("pointer")` on the switch to Auto is removed.
+    - `performance.spec.ts` seeds Draw on its preview origin.
+    - Focus moves to the Draw switch after `Draw it yourself →`, and to
+      Cancel when a run starts from the focused Auto Layout button.
+    - Owned paths widened to `editor-dialogs.tsx`, `editor-dialog-layer.tsx`
+      and `performance.spec.ts` for these fixes.
 - Keep `App.tsx` thin. New UI goes into feature files, and App.tsx only
   passes `mode` and handlers. Its JSX gains conditionals, not markup.
 - Never write the Document from mode code: no `transact`, no
