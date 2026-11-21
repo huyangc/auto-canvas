@@ -26,6 +26,48 @@ function forgetNewProjectRequest(): void {
   );
 }
 
+/**
+ * Opens a bundled example as `?example=<id>` does, behind the dirty-work
+ * guard, and drops that request from the address once it is open.
+ */
+export function openLibraryExample(
+  exampleId: string,
+  {
+    netlistProfile,
+    guardDirtyReplacement,
+    replaceActiveProject,
+    setStatus,
+  }: {
+    netlistProfile: NetlistExportProfile;
+    guardDirtyReplacement: ProjectFileLifecycle["guardDirtyReplacement"];
+    replaceActiveProject: ProjectFileLifecycle["replaceActiveProject"];
+    setStatus: Dispatch<SetStateAction<string>>;
+  },
+): void {
+  const example = libraryProjectExamples.find(
+    (candidate) => candidate.id === exampleId,
+  );
+  if (!example) {
+    setStatus(`Example not found: ${exampleId}`);
+    return;
+  }
+  const exampleProject = prepareNetlistExample(
+    structuredClone(example.project),
+    netlistProfile,
+  );
+  void guardDirtyReplacement(`Open ${example.name} example`, () => {
+    replaceActiveProject(exampleProject);
+    setStatus(`Opened example: ${example.name}`);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("example");
+    window.history.replaceState(
+      window.history.state,
+      "",
+      url.pathname + url.search + url.hash,
+    );
+  });
+}
+
 /** Opens what the window's link asks for, once, as the editor boots. */
 export function useBootLink({
   restoredWorkspace,
@@ -90,30 +132,13 @@ export function useBootLink({
     const exampleId = new URLSearchParams(window.location.search).get(
       "example",
     );
-    if (exampleId !== null) {
-      const example = libraryProjectExamples.find(
-        (candidate) => candidate.id === exampleId,
-      );
-      if (!example) {
-        setStatus(`Example not found: ${exampleId}`);
-        return;
-      }
-      const exampleProject = prepareNetlistExample(
-        structuredClone(example.project),
+    if (exampleId !== null)
+      openLibraryExample(exampleId, {
         netlistProfile,
-      );
-      void guardDirtyReplacement(`Open ${example.name} example`, () => {
-        replaceActiveProject(exampleProject);
-        setStatus(`Opened example: ${example.name}`);
-        const url = new URL(window.location.href);
-        url.searchParams.delete("example");
-        window.history.replaceState(
-          window.history.state,
-          "",
-          url.pathname + url.search + url.hash,
-        );
+        guardDirtyReplacement,
+        replaceActiveProject,
+        setStatus,
       });
-    }
   }, [restoreAfterRefresh]);
   return { restoredCloudLink, restoredNewLink };
 }

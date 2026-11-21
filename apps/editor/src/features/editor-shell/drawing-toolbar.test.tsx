@@ -13,8 +13,6 @@ describe("DrawingToolbar", () => {
         styleProfileId="razavi-textbook"
         onStartInsert={vi.fn()}
         documentSettingsOpen
-        undo={{ enabled: true, execute: vi.fn() }}
-        redo={{ enabled: true, execute: vi.fn() }}
         onToggleLibrary={vi.fn()}
         onToggleNetlist={vi.fn()}
         onToggleProjectCode={vi.fn()}

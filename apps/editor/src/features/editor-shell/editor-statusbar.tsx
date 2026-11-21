@@ -3,6 +3,10 @@ import type { WireCornerOrder, WireRoutingMode } from "@icm/edit-engine";
 import type { EditorTool } from "../../interaction/interaction-state";
 import { SITE_CHANGE_LOG_URL } from "../../components/site-resource-links";
 import { ToolIcon } from "./tool-icon";
+import {
+  autoLayoutChipLabel,
+  type AutoLayoutRunView,
+} from "../auto-layout/auto-layout-label";
 
 function toolLabel(
   tool: EditorTool,
@@ -85,54 +89,10 @@ function issuesBadge(issues: {
   };
 }
 
-/** What the Auto Layout chip shows: a planning run, or the last run's report. */
-export interface AutoLayoutChip {
-  running: boolean;
-  elapsedSeconds: number;
-  progress: {
-    evaluations: number;
-    budget: number;
-    /** The Cell being planned, from 1, of `cells`. */
-    cell?: number;
-    cells?: number;
-  } | null;
-  /** The last run's report, one entry per Cell, while it awaits a Details look. */
-  report: {
-    run: "manual" | "import";
-    cells: readonly {
-      outcome: string;
-      diagnostics: readonly { severity: "error" | "warning" }[];
-    }[];
-  } | null;
-  onCancel: () => void;
+/** The last Auto Layout run's report, with Details; a run planning shows in
+ * the top bar instead. */
+export interface AutoLayoutChip extends AutoLayoutRunView {
   onDetails: () => void;
-}
-
-function autoLayoutChipLabel(chip: AutoLayoutChip): string | null {
-  if (chip.running) {
-    const cells = chip.progress?.cells ?? 1;
-    const cell =
-      cells > 1 ? ` · Cell ${chip.progress?.cell ?? 1} of ${cells}` : "";
-    const evaluation =
-      chip.progress && chip.progress.budget > 0 && chip.progress.evaluations > 0
-        ? ` · evaluation ${chip.progress.evaluations}/${chip.progress.budget}`
-        : "";
-    return `Auto Layout… ${chip.elapsedSeconds} s${cell}${evaluation}`;
-  }
-  if (!chip.report) return null;
-  const { cells } = chip.report;
-  if (cells.length > 1) {
-    const applied = cells.filter((cell) => cell.outcome === "applied").length;
-    return `Auto Layout: ${applied} of ${cells.length} Cells`;
-  }
-  const diagnostics = cells.flatMap((cell) => cell.diagnostics);
-  if (
-    cells.some((cell) => cell.outcome === "refused") ||
-    diagnostics.some((d) => d.severity === "error")
-  )
-    return "Auto Layout: refused";
-  const warnings = diagnostics.length;
-  return `Auto Layout: ${warnings} warning${warnings === 1 ? "" : "s"}`;
 }
 
 export function EditorStatusbar({
@@ -179,7 +139,7 @@ export function EditorStatusbar({
   selectionFilterSummary: string | null;
   /** The Agent session's final minute, with the one action that keeps it. */
   agentExpiring?: { onKeep: () => void } | null;
-  /** A planning Auto Layout run (with Cancel) or its report (with Details). */
+  /** The last Auto Layout run's report (with Details); none while one plans. */
   autoLayout?: AutoLayoutChip | null;
   issues?: {
     errorCount: number;
@@ -221,36 +181,23 @@ export function EditorStatusbar({
               </button>
             </span>
           ) : null}
-          {autoLayout && autoLayoutChipLabel(autoLayout) ? (
+          {autoLayout &&
+          !autoLayout.running &&
+          autoLayoutChipLabel(autoLayout) ? (
             <span
               className="statusbar-auto-layout"
               data-testid="auto-layout-status"
             >
-              {/* Not live: it ticks every second, and the status line
-                  already announces each outcome. */}
-              <span aria-hidden={autoLayout.running ? true : undefined}>
-                {autoLayoutChipLabel(autoLayout)}
-              </span>
-              {autoLayout.running ? (
-                <button
-                  type="button"
-                  data-testid="auto-layout-cancel"
-                  aria-label="Cancel Auto Layout"
-                  onClick={autoLayout.onCancel}
-                >
-                  Cancel
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  data-testid="auto-layout-details"
-                  aria-label="Auto Layout details"
-                  aria-haspopup="dialog"
-                  onClick={autoLayout.onDetails}
-                >
-                  Details
-                </button>
-              )}
+              <span>{autoLayoutChipLabel(autoLayout)}</span>
+              <button
+                type="button"
+                data-testid="auto-layout-details"
+                aria-label="Auto Layout details"
+                aria-haspopup="dialog"
+                onClick={autoLayout.onDetails}
+              >
+                Details
+              </button>
             </span>
           ) : null}
           {/* Selecting is the resting state: only another tool is news. */}

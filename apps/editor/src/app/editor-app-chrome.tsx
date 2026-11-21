@@ -1,11 +1,21 @@
+import { AutoLayoutButton } from "../features/auto-layout/auto-layout-button";
+import type { AutoLayoutRunView } from "../features/auto-layout/auto-layout-label";
 import {
   AutoLayoutMenuSection,
   type AutoLayoutMenuActions,
 } from "../features/auto-layout/auto-layout-menu-section";
-import { type ReactNode, type ComponentProps, type MouseEvent } from "react";
+import {
+  type ReactNode,
+  type ComponentProps,
+  type MouseEvent,
+  type RefObject,
+} from "react";
 
 import { ProjectMenu } from "./project-menu";
 import { DrawingToolbar } from "../features/editor-shell/drawing-toolbar";
+import type { EditorMode } from "../features/editor-shell/editor-mode";
+import { ModeCoach } from "../features/editor-shell/mode-coach";
+import { ModeSwitch } from "../features/editor-shell/mode-switch";
 import { EditorTestTelemetry } from "../features/editor-shell/editor-test-telemetry";
 import { FileCommandMenu } from "../features/editor-shell/file-command-menu";
 import { ToolIcon } from "../features/editor-shell/tool-icon";
@@ -70,6 +80,25 @@ export interface EditorAppChromeProps {
   onExportNetlist: (format: "spice" | "spectre") => void;
   /** Circuit → Layout: Auto Layout (with its reason when unavailable) and Cancel. */
   autoLayout: AutoLayoutMenuActions;
+  /** The run the top-bar Auto Layout control shows while it plans. */
+  autoLayoutRun: AutoLayoutRunView;
+  editorMode: EditorMode;
+  /** The switch: an explicit choice, remembered for the next open. */
+  onChangeMode: (mode: EditorMode) => void;
+  coachVisible: boolean;
+  onDismissCoach: () => void;
+  /** The canvas is too narrow for a side rail (the compact layout). */
+  compactLayout: boolean;
+  undo: CommandAction;
+  redo: CommandAction;
+  /**
+   * Auto mode's `Import netlist…`: its own hidden input, so it never clicks
+   * the one inside the closed File menu. The empty card clicks it too.
+   */
+  importNetlist: {
+    inputRef: RefObject<HTMLInputElement | null>;
+    onFiles: (files: FileList | null) => void;
+  };
   agentAction: { label: string; execute: () => void } | null;
   drawingToolbar: ComponentProps<typeof DrawingToolbar>;
   hierarchyToolbar: ComponentProps<typeof HierarchyToolbar>;
@@ -111,6 +140,15 @@ export function EditorAppChrome({
   onOpenNetlistConfiguration,
   onExportNetlist,
   autoLayout,
+  autoLayoutRun,
+  editorMode,
+  onChangeMode,
+  coachVisible,
+  onDismissCoach,
+  compactLayout,
+  undo,
+  redo,
+  importNetlist,
   agentAction,
   drawingToolbar,
   hierarchyToolbar,
@@ -144,6 +182,34 @@ export function EditorAppChrome({
             <h1 title="Auto Canvas">Auto Canvas</h1>
           </div>
           {projectHome}
+          <div className="app-history" role="group" aria-label="History">
+            <button
+              type="button"
+              className="app-action app-history-action"
+              data-testid="draw-tool-undo"
+              aria-label="Undo"
+              title="Undo (Ctrl+Z)"
+              onClick={undo.execute}
+              disabled={!undo.enabled}
+            >
+              <ToolIcon name="undo" />
+            </button>
+            <button
+              type="button"
+              className="app-action app-history-action"
+              data-testid="draw-tool-redo"
+              aria-label="Redo"
+              title="Redo (Ctrl+Shift+Z)"
+              onClick={redo.execute}
+              disabled={!redo.enabled}
+            >
+              <ToolIcon name="redo" />
+            </button>
+          </div>
+          <div className="mode-switch-anchor">
+            <ModeSwitch mode={editorMode} onChange={onChangeMode} />
+            {coachVisible ? <ModeCoach onDismiss={onDismissCoach} /> : null}
+          </div>
           {/* File holds Project Info and the file commands; project tabs
               select projects. */}
           <ProjectMenu
@@ -320,6 +386,34 @@ export function EditorAppChrome({
           </details>
         </div>
         <div className="app-chrome-actions">
+          {editorMode === "auto" ? (
+            <button
+              type="button"
+              className="app-action app-import-netlist"
+              data-testid="import-netlist-button"
+              aria-label="Import netlist…"
+              title="Import a SPICE / SCS netlist and lay it out"
+              onClick={() => {
+                dismissOpenCommandMenus();
+                importNetlist.inputRef.current?.click();
+              }}
+            >
+              <ToolIcon name="netlist" />
+              <span className="app-action-label">Import netlist…</span>
+            </button>
+          ) : null}
+          <input
+            ref={importNetlist.inputRef}
+            hidden
+            type="file"
+            multiple
+            accept=".spi,.cir,.sp,.scs,.inc,.lib"
+            data-testid="import-netlist-file"
+            onChange={(event) =>
+              importNetlist.onFiles(event.currentTarget.files)
+            }
+          />
+          <AutoLayoutButton {...autoLayout} run={autoLayoutRun} />
           {agentAction ? (
             <button
               type="button"
@@ -356,8 +450,12 @@ export function EditorAppChrome({
           ) : null}
         </div>
       </div>
-      <DrawingToolbar {...drawingToolbar} />
-      <HierarchyToolbar {...hierarchyToolbar} />
+      {editorMode === "draw" ? <DrawingToolbar {...drawingToolbar} /> : null}
+      {/* Auto mode lists Cells in its rail; a compact window has no room for
+          one and keeps the row. */}
+      {editorMode === "draw" || compactLayout ? (
+        <HierarchyToolbar {...hierarchyToolbar} />
+      ) : null}
       {projectTabs}
       <EditorTestTelemetry {...telemetry} />
     </header>

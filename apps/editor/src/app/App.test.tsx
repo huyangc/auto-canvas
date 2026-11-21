@@ -79,7 +79,7 @@ describe("editor shell", () => {
     const checks = vi.spyOn(derived, "collectProjectDiagnosticEvidence");
     const project = createEmptyProject("project-smoke", "Smoke Project");
     const markup = renderToStaticMarkup(
-      <App services={services} project={project} />,
+      <App services={services} project={project} initialEditorMode="draw" />,
     );
     expect(markup).toContain("Smoke Project");
     expect(markup).toContain("Schematic canvas");
@@ -180,6 +180,67 @@ describe("editor shell", () => {
     expect(markup).toContain('data-testid="save-cloud-project"');
   });
 
+  it("opens in Auto mode: the canvas, import and Auto Layout, no drawing tools", () => {
+    const project = createEmptyProject("auto-mode", "Auto Mode");
+    const markup = renderToStaticMarkup(
+      <App services={services} project={project} initialEditorMode="auto" />,
+    );
+    expect(markup).toContain('data-testid="mode-switch"');
+    expect(markup).toMatch(/data-testid="mode-auto" aria-pressed="true"/);
+    expect(markup).toMatch(/data-testid="mode-draw" aria-pressed="false"/);
+    expect(markup).toContain('data-testid="auto-layout-button"');
+    expect(markup).toContain('data-testid="import-netlist-button"');
+    expect(markup).toContain('data-testid="import-netlist-file"');
+    expect(markup).toContain('data-testid="auto-empty-state"');
+    expect(markup).toContain("Import a netlist to get a schematic");
+    expect(markup).toContain('data-testid="properties-panel-toggle"');
+    // One Netlist toggle: the floating one; Undo and Redo live in the top bar.
+    expect(markup.split('data-testid="netlist-panel-toggle"')).toHaveLength(2);
+    expect(markup.split('data-testid="draw-tool-undo"')).toHaveLength(2);
+    expect(markup).not.toContain('data-testid="draw-toolbar"');
+    expect(markup).not.toContain('data-testid="shapes-library-panel"');
+    expect(markup).not.toContain('data-testid="library-toggle"');
+    // Netlist and Properties start closed; the canvas has the page.
+    expect(markup).not.toContain('aria-label="Live netlist"');
+    expect(markup).toContain("app-workspace library-collapsed auto-mode");
+    // The example names render only once the list is opened, and the coach
+    // mark never renders without a window.
+    expect(markup).not.toContain("Two-Stage Op Amp");
+    expect(markup).not.toContain('data-testid="mode-coach"');
+    expect(markup).not.toContain('role="dialog"');
+    // File keeps every import command.
+    expect(markup).toContain('data-testid="spice-files"');
+  });
+
+  it("opens in Auto mode without a window or a requested mode", () => {
+    const markup = renderToStaticMarkup(
+      <App
+        services={services}
+        project={createEmptyProject("default-mode", "Default")}
+      />,
+    );
+    expect(markup).toMatch(/data-testid="mode-auto" aria-pressed="true"/);
+    expect(markup).not.toContain('data-testid="draw-toolbar"');
+  });
+
+  it("keeps the drawing toolbar, library and Netlist in Draw mode", () => {
+    const markup = renderToStaticMarkup(
+      <App
+        services={services}
+        project={createEmptyProject("draw-mode", "Draw Mode")}
+        initialEditorMode="draw"
+      />,
+    );
+    expect(markup).toMatch(/data-testid="mode-draw" aria-pressed="true"/);
+    expect(markup).toContain('data-testid="draw-toolbar"');
+    expect(markup).toContain('data-testid="auto-layout-button"');
+    expect(markup).not.toContain('data-testid="import-netlist-button"');
+    expect(markup).not.toContain('data-testid="auto-empty-state"');
+    expect(markup).not.toContain('data-testid="properties-panel-toggle"');
+    expect(markup.split('data-testid="netlist-panel-toggle"')).toHaveLength(2);
+    expect(markup.split('data-testid="draw-tool-undo"')).toHaveLength(2);
+  });
+
   it("shows the hierarchy operation row for a resolvable imported subcircuit", () => {
     const project = createEmptyProject("imported-hierarchy", "Imported");
     const topDocument = project.documents[0]!;
@@ -210,7 +271,7 @@ describe("editor shell", () => {
     project.documents.push(childDocument);
 
     const markup = renderToStaticMarkup(
-      <App services={services} project={project} />,
+      <App services={services} project={project} initialEditorMode="draw" />,
     );
     expect(markup).toContain('data-testid="hierarchy-entry"');
     expect(markup).toContain('data-testid="cell-navigation"');
@@ -319,7 +380,7 @@ describe("editor shell", () => {
   it("opens Netlist beside shapes quick-place without a searchable catalog", () => {
     const project = createEmptyProject("selection-shelf", "Selection Shelf");
     const markup = renderToStaticMarkup(
-      <App services={services} project={project} />,
+      <App services={services} project={project} initialEditorMode="draw" />,
     );
 
     expect(markup).toContain(
