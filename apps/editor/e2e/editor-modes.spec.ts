@@ -886,3 +886,67 @@ test("a running Auto Layout fits a phone-width top bar", async ({ page }) => {
   await cancel.click();
   await expect(cancel).toHaveCount(0);
 });
+
+test("an existing canvas text being edited is committed by the click on the switch", async ({
+  page,
+}) => {
+  await openEditor(page, "/editor?example=two-stage-op-amp");
+  await expectStatus(page, "Opened example: Two-Stage Op Amp");
+  await page.getByTestId("mode-draw").click();
+  const canvas = page.getByTestId("schematic-canvas");
+  const editor = page.getByRole("textbox", { name: "Canvas text editor" });
+  // Place a text note, then edit it.
+  await canvas.hover({ position: { x: 200, y: 150 } });
+  await page.keyboard.press("t");
+  await editor.fill("first note");
+  await page.keyboard.press("Enter");
+  await canvas.click({ position: { x: 200, y: 150 } });
+  await expectStatus(page, /^Added text/u);
+  await page.keyboard.press("Escape");
+  await canvas.dblclick({ position: { x: 205, y: 150 } });
+  await expect(editor).toBeVisible();
+  await editor.fill("edited note");
+  await page.getByTestId("mode-auto").click();
+  await expectAutoChrome(page);
+  const text = JSON.stringify((await exportedProject(page)).documents);
+  expect(text).toContain("edited note");
+  expect(text).not.toContain("first note");
+});
+
+test("switching to Auto cancels typed text an armed tool holds", async ({
+  page,
+}) => {
+  await openEditor(page, "/editor?example=two-stage-op-amp");
+  await expectStatus(page, "Opened example: Two-Stage Op Amp");
+  await page.getByTestId("mode-draw").click();
+  const canvas = page.getByTestId("schematic-canvas");
+  const editor = page.getByRole("textbox", { name: "Canvas text editor" });
+  const revision = await page.getByTestId("revision").textContent();
+  const undo = page.getByTestId("draw-tool-undo");
+  const undoEnabled = await undo.isEnabled();
+
+  // An unplaced Text draft, as Escape would.
+  await canvas.hover({ position: { x: 200, y: 150 } });
+  await page.keyboard.press("t");
+  await editor.fill("never placed");
+  await page.getByTestId("mode-auto").click();
+  await expectAutoChrome(page);
+  await expect(editor).toHaveCount(0);
+  await expect(page.getByTestId("revision")).toHaveText(revision!);
+  expect(await undo.isEnabled()).toBe(undoEnabled);
+
+  // A Net Label name being typed after L.
+  await page.getByTestId("mode-draw").click();
+  await canvas.hover({ position: { x: 200, y: 150 } });
+  await page.keyboard.press("l");
+  await editor.fill("NEVERNAMED");
+  await page.getByTestId("mode-auto").click();
+  await expectAutoChrome(page);
+  await expect(editor).toHaveCount(0);
+  await expect(page.getByTestId("revision")).toHaveText(revision!);
+  expect(await undo.isEnabled()).toBe(undoEnabled);
+
+  const text = JSON.stringify((await exportedProject(page)).documents);
+  expect(text).not.toContain("never placed");
+  expect(text).not.toContain("NEVERNAMED");
+});
