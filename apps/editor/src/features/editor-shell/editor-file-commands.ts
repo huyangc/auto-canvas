@@ -61,6 +61,11 @@ export interface EditorFileCommandDependencies {
   setImportReport: (report: SpiceImportReport | null) => void;
   setImportReviewOpen: (open: boolean) => void;
   setSelectionOpen: (open: boolean) => void;
+  /**
+   * The editor mode when the import lands. Auto keeps the canvas clear after
+   * a successful import: the review waits in Properties until opened.
+   */
+  getEditorMode?: () => "auto" | "draw";
   setStatus: (status: string) => void;
   /** Raise the refresh banner when an on-demand chunk has gone missing. */
   onChunkLoadFailure?: (feature: string) => void;
@@ -87,6 +92,7 @@ export function createEditorFileCommands({
   setImportReport,
   setImportReviewOpen,
   setSelectionOpen,
+  getEditorMode,
   setStatus,
   onChunkLoadFailure,
   onImported,
@@ -296,7 +302,7 @@ export function createEditorFileCommands({
       });
       setImportReport(report);
       setImportReviewOpen(true);
-      setSelectionOpen(true);
+      if (getEditorMode?.() !== "auto") setSelectionOpen(true);
       const documents = importedProject.documents.length;
       const headline = `Imported ${documents} ${documents === 1 ? "Document" : "Documents"} and ${instanceCount} structural ${instanceCount === 1 ? "instance" : "instances"}`;
       setStatus(headline);

@@ -629,3 +629,98 @@
     height: 36px;
   }
 }
+
+/* Auto mode: the canvas takes the page. The collapsed Properties strip goes
+   while it is closed; the canvas's lower-right buttons open both docks. */
+.app-workspace.auto-mode .selection-dock:not(.open) {
+  display: none;
+}
+
+.auto-canvas-overlay {
+  grid-area: canvas;
+  position: relative;
+  z-index: 11;
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--icm-space-3);
+  pointer-events: none;
+}
+
+.auto-empty-state {
+  display: grid;
+  justify-items: center;
+  gap: var(--icm-space-2);
+  width: min(36rem, 100%);
+  padding: 26px;
+  border: 2px dashed var(--icm-border-hover, #9aa7ba);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--icm-surface) 90%, transparent);
+  text-align: center;
+  pointer-events: auto;
+}
+
+.auto-empty-state h2 {
+  margin: 0;
+  font-size: var(--icm-font-lg);
+  font-weight: 600;
+}
+
+.auto-empty-state-note {
+  margin: 0;
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-sm, 0.8125rem);
+}
+
+.auto-empty-state-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--icm-space-2);
+  margin-top: var(--icm-space-2);
+}
+
+.auto-empty-state-examples {
+  display: grid;
+  gap: 2px;
+  width: min(22rem, 100%);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.auto-empty-state-examples button {
+  width: 100%;
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--icm-radius-sm);
+  color: var(--icm-text);
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.auto-empty-state-examples button:hover {
+  border-color: var(--icm-border);
+  background: var(--icm-surface-hover);
+}
+
+.canvas-panel-buttons {
+  position: absolute;
+  right: var(--icm-space-3);
+  bottom: var(--icm-space-3);
+  display: flex;
+  gap: 6px;
+  pointer-events: auto;
+}
+
+.canvas-panel-buttons .app-action {
+  box-shadow: 0 1px 2px rgb(16 24 40 / 10%);
+}
+
+.canvas-panel-buttons .app-action .tool-icon {
+  width: 14px;
+  height: 14px;
+}

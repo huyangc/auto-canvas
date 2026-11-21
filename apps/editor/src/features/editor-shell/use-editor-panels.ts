@@ -106,6 +106,17 @@ export function useEditorPanels(options: UseEditorPanelsOptions) {
     });
   };
 
+  /** Show the Library, never hide it (a drawing key pressed in Auto mode). */
+  const openLibraryPanel = (): void => {
+    if (compactLayout) {
+      setCompactLibraryPanelOpen(true);
+      setSelectionOpen(false);
+      return;
+    }
+    setLibraryPanelOpen(true);
+    persistLibraryOpen(true);
+  };
+
   const closeSearch = (): void => {
     setSearchOpen(false);
     setSearchQuery("");
@@ -120,6 +131,7 @@ export function useEditorPanels(options: UseEditorPanelsOptions) {
     compactLibraryPanelOpen,
     libraryPanelOpen,
     libraryWidth,
+    openLibraryPanel,
     searchOpen,
     searchQuery,
     selectionOpen,

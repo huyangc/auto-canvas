@@ -1,6 +1,10 @@
 import { terminalCurrentDirectionPartners } from "../features/properties/terminal-current-direction";
 import { useCloudProjects } from "./use-cloud-projects";
-import { useBootLink, useRestoredTabLinks } from "./use-project-entry";
+import {
+  openLibraryExample,
+  useBootLink,
+  useRestoredTabLinks,
+} from "./use-project-entry";
 import { useSignalMemberInspection } from "../features/selection/use-signal-member-inspection";
 import { editorSnapshotDerived } from "./editor-snapshot-derived-cache";
 import {
@@ -206,6 +210,13 @@ import {
 } from "./use-editor-derived-model";
 import type { RoutingGuidanceView } from "../interaction/interaction-state";
 import { ShapesPanel } from "../features/editor-shell/shapes-panel";
+import { CanvasPanelButtons } from "../features/editor-shell/canvas-panel-buttons";
+import {
+  useEditorMode,
+  type EditorMode,
+} from "../features/editor-shell/editor-mode";
+import { EmptyStateCard } from "../features/editor-shell/empty-state-card";
+import { libraryProjectExamples } from "../examples/library-examples";
 import { createEditorNavigationController } from "../features/hierarchy/editor-navigation-controller";
 import {
   createProjectStructureCommands,
@@ -433,6 +444,11 @@ export interface AppProps {
   project?: CircuitProject;
   /** Override the deployment's Agent UI capability in tests. */
   publicAgentUiEnabled?: boolean;
+  /**
+   * Open in this mode instead of the one the browser remembers. Without a
+   * window (server rendering) the editor opens in Auto.
+   */
+  initialEditorMode?: EditorMode;
 }
 
 export function App(props: AppProps) {
@@ -526,6 +542,7 @@ function propertiesMosBulkDefaultNetId(
 
 function WorkspaceEditor({
   project: initialProject,
+  initialEditorMode,
   publicAgentUiEnabled: requestedAgentUi = !import.meta.env?.ICM_DESKTOP &&
     PUBLIC_AGENT_UI_ENABLED,
   restoredWorkspace,
@@ -626,6 +643,7 @@ function WorkspaceEditor({
     setAgentStatusDismissed,
     closeSearch,
     toggleLibraryPanel,
+    openLibraryPanel,
   } = useEditorPanels({
     initialCompact: compactLayoutMatches(COMPACT_LAYOUT_MEDIA_QUERY),
     compactMediaQuery: COMPACT_LAYOUT_MEDIA_QUERY,
@@ -638,6 +656,27 @@ function WorkspaceEditor({
   const visibleLibraryPanelOpen = compactLayout
     ? compactLibraryPanelOpen
     : libraryPanelOpen;
+  const {
+    mode: editorMode,
+    setMode: setEditorMode,
+    coachVisible: modeCoachVisible,
+    dismissCoach: dismissModeCoach,
+  } = useEditorMode({ initialMode: initialEditorMode });
+  // Read when an import lands, so a run started before a switch sees the
+  // mode the user is in by then.
+  const editorModeRef = useRef(editorMode);
+  editorModeRef.current = editorMode;
+  // Each mode keeps its own Netlist / Properties docks for the session.
+  const modePanelsRef = useRef<
+    Record<
+      EditorMode,
+      { projectPanel: EditorProjectPanelMode | null; selectionOpen: boolean }
+    >
+  >({
+    auto: { projectPanel: null, selectionOpen: false },
+    draw: { projectPanel: "netlist", selectionOpen: false },
+  });
+  const importNetlistInputRef = useRef<HTMLInputElement>(null);
 
   const [recoveryFailureDismissed, setRecoveryFailureDismissed] =
     useState(false);
@@ -828,8 +867,11 @@ function WorkspaceEditor({
   } | null>(null);
   const canvasContextMenuSuppressed = useRef(false);
   const [netlistPreflightOpen, setNetlistPreflightOpen] = useState(false);
+  // Draw opens with the Netlist beside the canvas; Auto opens on the canvas.
   const [projectPanel, setProjectPanel] =
-    useState<EditorProjectPanelMode | null>("netlist");
+    useState<EditorProjectPanelMode | null>(() =>
+      editorMode === "draw" ? "netlist" : null,
+    );
   const [netlistFocusedInstance, setNetlistFocusedInstance] = useState<{
     documentId: string;
     instanceId: string;
@@ -1040,11 +1082,12 @@ function WorkspaceEditor({
       setDocumentStack([]);
       setViewBox(nextViewBox, nextDocument.presentation.grid);
       resetInteractionState();
-      // Each newly opened circuit starts with its netlist. Ordinary edits and
-      // user-driven panel changes do not reset the workspace.
+      // Each newly opened circuit starts with its netlist in Draw, and on a
+      // clear canvas in Auto. Ordinary edits and user-driven panel changes
+      // do not reset the workspace.
       propertiesOpenBeforeProjectPanelRef.current = false;
       setSelectionOpen(false);
-      setProjectPanel("netlist");
+      setProjectPanel(editorModeRef.current === "auto" ? null : "netlist");
       if (compactLayout) setCompactLibraryPanelOpen(false);
       return nextDocument;
     },
@@ -3527,6 +3570,14 @@ function WorkspaceEditor({
     deferFocus(() => selectionShelfRef.current);
   }
 
+  function toggleSelectionDock(): void {
+    // Narrow layouts have room for one side panel. Whichever the user
+    // just asked for wins.
+    if (!selectionOpen && compactLayout) setCompactLibraryPanelOpen(false);
+    setSelectionOpen((current) => !current);
+    if (selectionOpen) setImportReviewOpen(false);
+  }
+
   function closeProperties(): void {
     setSelectionOpen(false);
     setImportReviewOpen(false);
@@ -3644,6 +3695,43 @@ function WorkspaceEditor({
     setSelectedRouteSegmentIndex(null);
     clearTextEditing();
     setSelectedEndpoint(null);
+  }
+
+  /**
+   * Switch the editor's mode. Only the UI changes: no Document edit and no
+   * Undo step. Auto drops any armed tool, since its toolbar is gone.
+   */
+  function changeEditorMode(
+    next: EditorMode,
+    options: { persist: boolean; status?: string },
+  ): void {
+    if (next !== editorMode) {
+      modePanelsRef.current[editorMode] = { projectPanel, selectionOpen };
+      const restored = modePanelsRef.current[next];
+      setProjectPanel(restored.projectPanel);
+      setSelectionOpen(restored.selectionOpen);
+      if (!restored.selectionOpen) setImportReviewOpen(false);
+      if (next === "auto") {
+        cancelAllTransientInteraction();
+        activateTool("pointer");
+      }
+    }
+    setEditorMode(next, { persist: options.persist });
+    setStatus(options.status ?? (next === "auto" ? "Auto mode" : "Draw mode"));
+  }
+
+  /**
+   * A drawing shortcut or command pressed in Auto: bring up Draw for this
+   * session (the remembered mode stays), then do what was asked.
+   */
+  function bringUpDraw(tool: string, run: () => void): void {
+    const announcement = `Draw mode: ${tool}`;
+    changeEditorMode("draw", { persist: false, status: announcement });
+    run();
+    // The action's own status, if it set one, follows the announcement.
+    setStatus((current) =>
+      current === announcement ? current : `${announcement} · ${current}`,
+    );
   }
 
   function cancelAllTransientInteraction(): void {
@@ -4279,6 +4367,7 @@ function WorkspaceEditor({
     setImportReport,
     setImportReviewOpen,
     setSelectionOpen,
+    getEditorMode: () => editorModeRef.current,
     setStatus,
     onChunkLoadFailure: setChunkLoadFailure,
     onImported: autoLayout.requestAfterImport,
@@ -4318,6 +4407,9 @@ function WorkspaceEditor({
       searchOpen,
       closeSearch,
       toggleLibraryPanel,
+      openLibraryPanel,
+      editorMode,
+      bringUpDraw,
       document,
       documentStack,
       visualSelection,
@@ -4866,6 +4958,14 @@ function WorkspaceEditor({
         closeNativeTab={closeNativeTab}
         closeNativeTabs={closeNativeTabs}
         saveNativeTab={saveNativeTab}
+        editorMode={editorMode}
+        changeEditorMode={(next) => changeEditorMode(next, { persist: true })}
+        bringUpDraw={bringUpDraw}
+        coachVisible={modeCoachVisible}
+        dismissCoach={dismissModeCoach}
+        compactLayout={compactLayout}
+        autoLayoutRun={autoLayout}
+        importNetlistInputRef={importNetlistInputRef}
       />
       <EditorDialogs
         projectStore={projectStore}
@@ -4963,11 +5063,11 @@ function WorkspaceEditor({
         reopenClosedWindowTabs={reopenClosedWindowTabs}
       />
       <div
-        className={
-          visibleLibraryPanelOpen
-            ? "app-workspace"
-            : "app-workspace library-collapsed"
-        }
+        className={`app-workspace${
+          editorMode === "draw" && visibleLibraryPanelOpen
+            ? ""
+            : " library-collapsed"
+        }${editorMode === "auto" ? " auto-mode" : ""}`}
         style={
           {
             "--icm-shapes-width": `${libraryWidth}px`,
@@ -5017,52 +5117,60 @@ function WorkspaceEditor({
             }}
           />
         ) : null}
-        <ShapesPanel
-          styleProfileId={document.presentation.styleProfileId}
-          open={visibleLibraryPanelOpen}
-          onStartInsert={(launch) =>
-            editorCommands.execute({ id: "insert.start", launch })
-          }
-        />
-        {visibleLibraryPanelOpen ? (
-          <div
-            className="library-resize-handle"
-            role="separator"
-            aria-orientation="vertical"
-            aria-label="Resize the Library panel"
-            aria-valuenow={libraryWidth}
-            aria-valuemin={LIBRARY_WIDTH_MIN}
-            aria-valuemax={LIBRARY_WIDTH_MAX}
-            tabIndex={0}
-            data-testid="library-resize-handle"
-            onPointerDown={(event) => {
-              event.preventDefault();
-              event.currentTarget.setPointerCapture(event.pointerId);
-              libraryResizeOriginRef.current = {
-                pointerX: event.clientX,
-                width: libraryWidth,
-              };
-            }}
-            onPointerMove={(event) => {
-              const origin = libraryResizeOriginRef.current;
-              if (!origin) return;
-              setLibraryWidth(origin.width + (event.clientX - origin.pointerX));
-            }}
-            onPointerUp={(event) => {
-              libraryResizeOriginRef.current = null;
-              event.currentTarget.releasePointerCapture(event.pointerId);
-            }}
-            onKeyDown={(event) => {
-              const step = event.shiftKey ? 32 : 8;
-              if (event.key === "ArrowLeft") {
-                event.preventDefault();
-                setLibraryWidth(libraryWidth - step);
-              } else if (event.key === "ArrowRight") {
-                event.preventDefault();
-                setLibraryWidth(libraryWidth + step);
+        {/* Auto mode has no library; its left column is the Cells rail's
+            slot (T150b), empty until then, so the canvas takes it. */}
+        {editorMode === "draw" ? (
+          <>
+            <ShapesPanel
+              styleProfileId={document.presentation.styleProfileId}
+              open={visibleLibraryPanelOpen}
+              onStartInsert={(launch) =>
+                editorCommands.execute({ id: "insert.start", launch })
               }
-            }}
-          />
+            />
+            {visibleLibraryPanelOpen ? (
+              <div
+                className="library-resize-handle"
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="Resize the Library panel"
+                aria-valuenow={libraryWidth}
+                aria-valuemin={LIBRARY_WIDTH_MIN}
+                aria-valuemax={LIBRARY_WIDTH_MAX}
+                tabIndex={0}
+                data-testid="library-resize-handle"
+                onPointerDown={(event) => {
+                  event.preventDefault();
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                  libraryResizeOriginRef.current = {
+                    pointerX: event.clientX,
+                    width: libraryWidth,
+                  };
+                }}
+                onPointerMove={(event) => {
+                  const origin = libraryResizeOriginRef.current;
+                  if (!origin) return;
+                  setLibraryWidth(
+                    origin.width + (event.clientX - origin.pointerX),
+                  );
+                }}
+                onPointerUp={(event) => {
+                  libraryResizeOriginRef.current = null;
+                  event.currentTarget.releasePointerCapture(event.pointerId);
+                }}
+                onKeyDown={(event) => {
+                  const step = event.shiftKey ? 32 : 8;
+                  if (event.key === "ArrowLeft") {
+                    event.preventDefault();
+                    setLibraryWidth(libraryWidth - step);
+                  } else if (event.key === "ArrowRight") {
+                    event.preventDefault();
+                    setLibraryWidth(libraryWidth + step);
+                  }
+                }}
+              />
+            ) : null}
+          </>
         ) : null}
         <EditorRightDock
           project={
@@ -5263,14 +5371,7 @@ function WorkspaceEditor({
               }
               open={selectionOpen}
               shelfRef={selectionShelfRef}
-              onToggle={() => {
-                // Narrow layouts have room for one side panel. Whichever the user
-                // just asked for wins.
-                if (!selectionOpen && compactLayout)
-                  setCompactLibraryPanelOpen(false);
-                setSelectionOpen((current) => !current);
-                if (selectionOpen) setImportReviewOpen(false);
-              }}
+              onToggle={toggleSelectionDock}
               summary={selectionShelfSummary}
               hasInspectableSelection={hasInspectableSelection}
               agentIndicator={
@@ -6989,6 +7090,39 @@ function WorkspaceEditor({
             })()}
           />
         ) : null}
+        {editorMode === "auto" ? (
+          <div className="auto-canvas-overlay">
+            {projectInstanceCount === 0 ? (
+              <EmptyStateCard
+                examples={libraryProjectExamples}
+                onChooseNetlist={() => importNetlistInputRef.current?.click()}
+                onOpenProject={() =>
+                  nativeProjectStore
+                    ? void openNativeProject()
+                    : projectInputRef.current?.click()
+                }
+                onOpenExample={(id) =>
+                  openLibraryExample(id, {
+                    netlistProfile:
+                      netlistPreferences.preferences.profiles[
+                        netlistPreferences.selected
+                      ],
+                    guardDirtyReplacement,
+                    replaceActiveProject,
+                    setStatus,
+                  })
+                }
+                onDraw={() => changeEditorMode("draw", { persist: true })}
+              />
+            ) : null}
+            <CanvasPanelButtons
+              netlistOpen={projectPanel === "netlist"}
+              propertiesOpen={selectionOpen}
+              onToggleNetlist={() => toggleProjectPanel("netlist")}
+              onToggleProperties={toggleSelectionDock}
+            />
+          </div>
+        ) : null}
       </div>
       <EditorComponentEditor
         project={project}
@@ -7047,7 +7181,6 @@ function WorkspaceEditor({
           elapsedSeconds: autoLayout.elapsedSeconds,
           progress: autoLayout.progress,
           report: autoLayout.report,
-          onCancel: () => editorCommands.execute({ id: "layout.auto-cancel" }),
           onDetails: autoLayout.openDetails,
         }}
         zoomPercent={zoomPercent}

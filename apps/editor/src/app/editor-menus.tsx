@@ -17,7 +17,9 @@ import type { CellInsertCandidate } from "../features/component-insert/insert-co
 import { fullInsertLaunch } from "../features/component-insert/insert-launch";
 import type { createEditorFileCommands } from "../features/editor-shell/editor-file-commands";
 import { ProjectTabs } from "../features/editor-shell/project-tabs";
+import type { EditorMode } from "../features/editor-shell/editor-mode";
 import type { useEditorPanels } from "../features/editor-shell/use-editor-panels";
+import type { AutoLayoutRunView } from "../features/auto-layout/auto-layout-label";
 import type { createEditorNavigationController } from "../features/hierarchy/editor-navigation-controller";
 import type { createProjectStructureCommands } from "../features/hierarchy/project-structure-commands";
 import {
@@ -161,6 +163,14 @@ export function EditorMenuBar({
   closeNativeTab,
   closeNativeTabs,
   saveNativeTab,
+  editorMode,
+  changeEditorMode,
+  bringUpDraw,
+  coachVisible,
+  dismissCoach,
+  compactLayout,
+  autoLayoutRun,
+  importNetlistInputRef,
 }: {
   identity: EditorServices["identity"];
   projectStore: EditorServices["projectStore"];
@@ -256,8 +266,21 @@ export function EditorMenuBar({
   closeNativeTab: NativeProjectTabs["closeNativeTab"];
   closeNativeTabs: NativeProjectTabs["closeNativeTabs"];
   saveNativeTab: NativeProjectTabs["saveNativeTab"];
+  editorMode: EditorMode;
+  /** The switch: an explicit choice, remembered for the next open. */
+  changeEditorMode: (mode: EditorMode) => void;
+  /** Auto mode: bring up Draw for this session, then run the command. */
+  bringUpDraw: (tool: string, run: () => void) => void;
+  coachVisible: boolean;
+  dismissCoach: () => void;
+  compactLayout: boolean;
+  autoLayoutRun: AutoLayoutRunView;
+  importNetlistInputRef: RefObject<HTMLInputElement | null>;
 }) {
   const { NativeHeaderActions, openExternalLink } = useEditorServices();
+  // A drawing command pressed in Auto brings up the drawing tools first.
+  const drawing = (tool: string, run: () => void) =>
+    editorMode === "auto" ? bringUpDraw(tool, run) : run();
   return (
     <EditorAppChrome
       userComponentsEnabled={capabilities.userComponents}
@@ -425,14 +448,16 @@ export function EditorMenuBar({
         setUserComponentsOpen(true);
       }}
       onInsertComponent={() =>
-        editorCommands.execute({
-          id: "insert.start",
-          launch: fullInsertLaunch(),
-        })
+        drawing("Insert", () =>
+          editorCommands.execute({
+            id: "insert.start",
+            launch: fullInsertLaunch(),
+          }),
+        )
       }
       placeProjectCell={{
         enabled: cellInsertCandidates.length > 0,
-        execute: placeCellInstance,
+        execute: () => drawing("Place Cell", placeCellInstance),
       }}
       onOpenSelectionFilter={() =>
         editorCommands.execute({ id: "selection.filter.open" })
@@ -525,6 +550,24 @@ export function EditorMenuBar({
             : null,
         };
       })()}
+      autoLayoutRun={autoLayoutRun}
+      editorMode={editorMode}
+      onChangeMode={changeEditorMode}
+      coachVisible={coachVisible}
+      onDismissCoach={dismissCoach}
+      compactLayout={compactLayout}
+      undo={{
+        enabled: editorCommands.state({ id: "history.undo" }).enabled,
+        execute: () => editorCommands.execute({ id: "history.undo" }),
+      }}
+      redo={{
+        enabled: editorCommands.state({ id: "history.redo" }).enabled,
+        execute: () => editorCommands.execute({ id: "history.redo" }),
+      }}
+      importNetlist={{
+        inputRef: importNetlistInputRef,
+        onFiles: (files) => void importSpiceFiles(files),
+      }}
       agentAction={
         publicAgentUiEnabled && agentSession
           ? {
@@ -550,14 +593,6 @@ export function EditorMenuBar({
           editorCommands.execute({ id: "insert.start", launch }),
         tool,
         documentSettingsOpen,
-        undo: {
-          enabled: editorCommands.state({ id: "history.undo" }).enabled,
-          execute: () => editorCommands.execute({ id: "history.undo" }),
-        },
-        redo: {
-          enabled: editorCommands.state({ id: "history.redo" }).enabled,
-          execute: () => editorCommands.execute({ id: "history.redo" }),
-        },
         onToggleLibrary: toggleLibraryPanel,
         onToggleNetlist: () => toggleProjectPanel("netlist"),
         onToggleProjectCode: () => toggleProjectPanel("project-code"),
@@ -597,7 +632,7 @@ export function EditorMenuBar({
         onSelectDocument: selectDocumentFromHierarchy,
         onEnter: enterSelectedHierarchy,
         onManageCells: () => setCellManagerOpen(true),
-        onPlaceCell: placeCellInstance,
+        onPlaceCell: () => drawing("Place Cell", placeCellInstance),
       }}
       telemetry={{
         snapshot: {
