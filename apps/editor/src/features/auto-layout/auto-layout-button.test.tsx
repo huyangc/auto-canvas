@@ -1,3 +1,6 @@
+// @vitest-environment jsdom
+import { act } from "react";
+import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
@@ -74,5 +77,58 @@ describe("top-bar Auto Layout control", () => {
     expect(planning({ evaluations: 0, budget: 0, cell: 1, cells: 1 })).toMatch(
       />Auto Layout… 12 s</,
     );
+  });
+
+  describe("focus when a run starts", () => {
+    Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+    const mount = () => {
+      const host = document.createElement("div");
+      document.body.append(host);
+      const root = createRoot(host);
+      const render = (running: boolean) =>
+        act(() =>
+          root.render(
+            <AutoLayoutButton
+              start={{ enabled: !running, execute: vi.fn() }}
+              cancel={running ? { execute: vi.fn() } : null}
+              run={{ ...idleRun, running }}
+            />,
+          ),
+        );
+      const button = () =>
+        host.querySelector<HTMLButtonElement>(
+          '[data-testid="auto-layout-button"]',
+        )!;
+      const cancel = () =>
+        host.querySelector<HTMLButtonElement>(
+          '[data-testid="auto-layout-cancel"]',
+        );
+      return { host, root, render, button, cancel };
+    };
+
+    it("moves to Cancel from the button that started the run", () => {
+      const view = mount();
+      view.render(false);
+      view.button().focus();
+      view.button().click();
+      // The browser drops focus from the disabled button to the body.
+      view.button().blur();
+      view.render(true);
+      expect(document.activeElement).toBe(view.cancel());
+      act(() => view.root.unmount());
+      view.host.remove();
+    });
+
+    it("stays put for a run started elsewhere while nothing has focus", () => {
+      const view = mount();
+      view.render(false);
+      expect(document.activeElement).toBe(document.body);
+      // An import's run: a Space pressed next must not cancel it.
+      view.render(true);
+      expect(view.cancel()).not.toBeNull();
+      expect(document.activeElement).toBe(document.body);
+      act(() => view.root.unmount());
+      view.host.remove();
+    });
   });
 });

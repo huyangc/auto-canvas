@@ -20,12 +20,21 @@ export function AutoLayoutButton({
   const cancelRef = useRef<HTMLButtonElement>(null);
   // Cancel had focus when it went away with the run.
   const cancelFocused = useRef(false);
+  // The button had focus when it was pressed. The browser may already have
+  // moved that focus to the body by the time the run renders; a body focus
+  // from anything else (an import's run, after its card went) is no handoff.
+  const startedFocused = useRef(false);
   // The button goes disabled while a run plans: focus on it moves to
   // Cancel, and back to the button once Cancel goes.
   useEffect(() => {
     const active = globalThis.document?.activeElement;
+    const pressed = startedFocused.current;
+    startedFocused.current = false;
     if (run.running) {
-      if (active === buttonRef.current || active === globalThis.document.body)
+      if (
+        active === buttonRef.current ||
+        (pressed && active === globalThis.document.body)
+      )
         cancelRef.current?.focus();
       return;
     }
@@ -48,7 +57,16 @@ export function AutoLayoutButton({
             ? "Lay out the open Cell automatically (one Undo step)"
             : start.reason)
         }
-        onClick={start.execute}
+        onClick={() => {
+          startedFocused.current =
+            globalThis.document?.activeElement === buttonRef.current;
+          // A press that starts no run leaves nothing to hand over later.
+          if (startedFocused.current)
+            setTimeout(() => {
+              startedFocused.current = false;
+            }, 0);
+          start.execute();
+        }}
       >
         <svg className="app-action-icon" viewBox="0 0 16 16" aria-hidden="true">
           <path

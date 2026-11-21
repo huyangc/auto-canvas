@@ -144,11 +144,12 @@ export function drawingSwitchBlocked(
 ): boolean {
   // Overlays that hold focus without being modal: a dialog or menu (the
   // Agent file approval, the selection filter, the formula popover, context
-  // menus), an open header menu, and the canvas text editor's toolbar.
+  // menus), an open header menu, the tab strip's open Shelf picker, and the
+  // canvas text editor's toolbar.
   if (
     target instanceof Element &&
     target.closest(
-      '[data-testid="auto-empty-state"], [role="dialog"], [role="menu"], .command-menu[open], [data-canvas-text-editor-part]',
+      '[data-testid="auto-empty-state"], [role="dialog"], [role="menu"], .command-menu[open], .project-tabs-shelf[open], [data-canvas-text-editor-part]',
     )
   )
     return true;

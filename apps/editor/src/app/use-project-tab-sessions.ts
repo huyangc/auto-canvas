@@ -212,6 +212,11 @@ interface ProjectTabSessionsOptions {
   nativeWorkspaceSaving: RefObject<boolean>;
   /** The editor mode now, read when a tab is captured, made or restored. */
   getEditorMode: () => EditorMode;
+  /**
+   * The mode's own docks while the ones on screen were only carried over by
+   * a switch for an unapplied code draft; null when they are the mode's own.
+   */
+  getCarriedOverDocks: () => TabDocks | null;
 }
 
 /** The window's project tabs: one session per tab, saved with the window. */
@@ -286,8 +291,15 @@ export function useProjectTabSessions({
   cancelAllTransientInteraction,
   nativeWorkspaceSaving,
   getEditorMode,
+  getCarriedOverDocks,
 }: ProjectTabSessionsOptions) {
   function captureTabSession() {
+    // Docks carried over for a draft are not this mode's choice: the tab
+    // keeps the mode's own.
+    const docks = getCarriedOverDocks() ?? {
+      panel: projectPanel,
+      properties: selectionOpen,
+    };
     return {
       controller: editorDocumentController,
       file: captureFileSession(),
@@ -296,8 +308,8 @@ export function useProjectTabSessions({
       cellViews: new Map(documentViewBoxes.current),
       stack: documentStack,
       selection: visualSelection,
-      panel: projectPanel,
-      properties: selectionOpen,
+      panel: docks.panel,
+      properties: docks.properties,
       // The docks above belong to this mode; another mode shows its own.
       // Undefined only on a tab saved before the modes existed (Draw).
       mode: getEditorMode() as EditorMode | undefined,
