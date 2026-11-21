@@ -46,16 +46,17 @@ later PRs from the same plan.
   it (an unplaced Text draft, a Net Label name), as Escape does. An existing
   canvas text being edited is committed first, as by any click outside it.
 - The browser suite runs in Draw through Playwright `storageState`;
-  `editor-modes.spec.ts` (43 tests) starts from empty storage and covers
+  `editor-modes.spec.ts` (49 tests) starts from empty storage and covers
   Auto. `performance.spec.ts` seeds Draw on its own origin.
 
 Commits on `task/T150-two-modes` after the plan (`865426c`): `b1d1947`,
 `7285367`, `95e4bd5`, `e11f2f2`, `caa05bf` (implementation), `cd62358`
 (review round 1), `6bdf02b`, `aa4fbd1` (round 2), `0b85f5b`, `e38a56e`,
-`c594475` (round 3), `0e8260e` (round 4). 41 files, +4791 / −332; product
-code under `apps/editor/src` without tests is 22 files, +1620 / −270.
+`c594475` (round 3), `0e8260e` (round 4), `4ada201` (round 5). 41 files,
++4952 / −332; product code under `apps/editor/src` without tests is
+22 files, +1664 / −270.
 
-## Acceptance (coordinator's rerun on `0e8260e`)
+## Acceptance (coordinator's rerun on `4ada201`)
 
 | Command                                            | Result                              |
 | -------------------------------------------------- | ----------------------------------- |
@@ -64,10 +65,11 @@ code under `apps/editor/src` without tests is 22 files, +1620 / −270.
 | `pnpm docs:check`                                  | pass                                |
 | `pnpm test:local`                                  | pass: 8608 passed, 117 skipped      |
 | `pnpm deadcode`                                    | exit 1 as on `main`; no new finding |
-| Browser suite, 53 spec files, one worker           | 417 passed, 2 skipped, 0 failed     |
+| Browser suite, 53 spec files, one worker           | 423 passed, 2 skipped, 0 failed     |
 
 Earlier full runs: 386 passed, 0 failed at `caa05bf`; 397 passed, 4 failed
-at `aa4fbd1`; 414 passed, 0 failed at `c594475`. Those four passed on rerun and none is in code this change
+at `aa4fbd1`; 414 passed, 0 failed at `c594475`; 417 passed, 0 failed at
+`0e8260e`. Those four passed on rerun and none is in code this change
 touches:
 
 - `user-components.spec.ts:3564`, `:3606`, `:3915` failed in teardown with
@@ -153,8 +155,21 @@ from an empty profile (`tmp/t150/check-modes.mjs`, not committed):
    exercised on `main`); a confirmation would change both modes and belongs
    in its own task.
 
+5. **codex round 3 on `16b5191`** — fixed in `4ada201`: the card's example
+   action replaced a clean Project while a code draft was unapplied (it now
+   honours the same Project hold as the other open paths); a dock kept on
+   screen only for a draft was saved as that mode's remembered docks; at
+   320–480 px the Edit and Circuit popovers ran off the right edge
+   (measured by the coordinator: 185…488 in a 390 px window; after the fix
+   75…378). Not changed: codex asked for dock memory per tab and per mode;
+   it stays per session, as decided in round 1 — it carries a preference
+   over, it loses no work. The card's `Choose netlist file…`,
+   `Open project file…` and the top bar's `Import netlist…` do not check
+   for an unapplied code draft; the File-menu paths they mirror do not
+   either on `main` (read from the code).
+
 The implementer saw the new tests fail before their fixes: 12 in round 2,
-9 in round 3 and 3 in round 4.
+9 in round 3, 3 in round 4 and 3 in round 5.
 
 ## Deviations from the plan
 
