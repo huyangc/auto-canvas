@@ -46,16 +46,16 @@ later PRs from the same plan.
   it (an unplaced Text draft, a Net Label name), as Escape does. An existing
   canvas text being edited is committed first, as by any click outside it.
 - The browser suite runs in Draw through Playwright `storageState`;
-  `editor-modes.spec.ts` (40 tests) starts from empty storage and covers
+  `editor-modes.spec.ts` (43 tests) starts from empty storage and covers
   Auto. `performance.spec.ts` seeds Draw on its own origin.
 
 Commits on `task/T150-two-modes` after the plan (`865426c`): `b1d1947`,
 `7285367`, `95e4bd5`, `e11f2f2`, `caa05bf` (implementation), `cd62358`
 (review round 1), `6bdf02b`, `aa4fbd1` (round 2), `0b85f5b`, `e38a56e`,
-`c594475` (round 3). 41 files, +4636 / −332; product code under
-`apps/editor/src` without tests is 22 files, +1575 / −270.
+`c594475` (round 3), `0e8260e` (round 4). 41 files, +4791 / −332; product
+code under `apps/editor/src` without tests is 22 files, +1620 / −270.
 
-## Acceptance (coordinator's rerun on `c594475`)
+## Acceptance (coordinator's rerun on `0e8260e`)
 
 | Command                                            | Result                              |
 | -------------------------------------------------- | ----------------------------------- |
@@ -64,10 +64,10 @@ Commits on `task/T150-two-modes` after the plan (`865426c`): `b1d1947`,
 | `pnpm docs:check`                                  | pass                                |
 | `pnpm test:local`                                  | pass: 8608 passed, 117 skipped      |
 | `pnpm deadcode`                                    | exit 1 as on `main`; no new finding |
-| Browser suite, 53 spec files, one worker           | 414 passed, 2 skipped, 0 failed     |
+| Browser suite, 53 spec files, one worker           | 417 passed, 2 skipped, 0 failed     |
 
 Earlier full runs: 386 passed, 0 failed at `caa05bf`; 397 passed, 4 failed
-at `aa4fbd1`. Those four passed on rerun and none is in code this change
+at `aa4fbd1`; 414 passed, 0 failed at `c594475`. Those four passed on rerun and none is in code this change
 touches:
 
 - `user-components.spec.ts:3564`, `:3606`, `:3915` failed in teardown with
@@ -139,8 +139,22 @@ from an empty profile (`tmp/t150/check-modes.mjs`, not committed):
    text in an armed tool is cancelled with the tool on a switch to Auto,
    under decision 16; the spec says so and two browser tests pin it.
 
-The implementer saw the new tests fail before their fixes: 12 in round 2 and
-9 in round 3.
+4. **codex round 2 and the independent pass on round 3, both on `ddcdd5b`** —
+   fixed in `0e8260e`: at 390 and 720 px wide the open dock covered Auto's
+   two canvas buttons, so a pointer user could not close it (reproduced by
+   the coordinator; rechecked after the fix at 390, 720 and 1000 px); a
+   project dock other than the Netlist had no control in Auto — the first
+   canvas button now carries the open dock's name, reads as pressed and
+   closes it; one test could pass before its second import landed; the
+   spec's "switching never changes a Document" sentence is qualified.
+   Not changed: codex asked for a guard before Auto's Properties or Netlist
+   button discards an unapplied code draft. A user's own close of such a
+   dock is unguarded on `main` in Draw too (read from the code, not
+   exercised on `main`); a confirmation would change both modes and belongs
+   in its own task.
+
+The implementer saw the new tests fail before their fixes: 12 in round 2,
+9 in round 3 and 3 in round 4.
 
 ## Deviations from the plan
 
