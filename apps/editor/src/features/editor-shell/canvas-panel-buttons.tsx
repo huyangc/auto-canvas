@@ -1,6 +1,28 @@
 import { ToolIcon } from "./tool-icon";
 
 /**
+ * Whether Q does what the Properties button does now. Q closes Properties
+ * whenever the dock holds them (and Document settings are not open), and
+ * opens them only for an inspectable selection; the button shows them while
+ * a project dock covers them.
+ */
+export function propertiesKeyActs({
+  selectionOpen,
+  projectPanelOpen,
+  documentSettingsOpen,
+  hasInspectableSelection,
+}: {
+  selectionOpen: boolean;
+  projectPanelOpen: boolean;
+  documentSettingsOpen: boolean;
+  hasInspectableSelection: boolean;
+}): boolean {
+  return selectionOpen
+    ? !projectPanelOpen && !documentSettingsOpen
+    : hasInspectableSelection;
+}
+
+/**
  * Auto mode's two panel buttons at the canvas's lower right: the Netlist and
  * Properties docks start closed there and open from here.
  */

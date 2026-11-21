@@ -106,8 +106,12 @@ describe("top-bar Auto Layout control", () => {
       return { host, root, render, button, cancel };
     };
 
-    it("moves to Cancel from the button that started the run", () => {
+    it("moves to Cancel only from the button that started the run", () => {
       const view = mount();
+      view.render(false);
+      // A run started elsewhere with nothing focused: no handoff.
+      view.render(true);
+      expect(document.activeElement).toBe(document.body);
       view.render(false);
       view.button().focus();
       view.button().click();
@@ -115,6 +119,22 @@ describe("top-bar Auto Layout control", () => {
       view.button().blur();
       view.render(true);
       expect(document.activeElement).toBe(view.cancel());
+      act(() => view.root.unmount());
+      view.host.remove();
+    });
+
+    it("leaves nothing armed after a press that starts no run", async () => {
+      const view = mount();
+      view.render(false);
+      view.button().focus();
+      view.button().click();
+      // The press started nothing; the event has finished.
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+      view.button().blur();
+      // A later run started elsewhere does not take the body's focus.
+      view.render(true);
+      expect(view.cancel()).not.toBeNull();
+      expect(document.activeElement).toBe(document.body);
       act(() => view.root.unmount());
       view.host.remove();
     });

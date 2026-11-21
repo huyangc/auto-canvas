@@ -217,6 +217,8 @@ interface ProjectTabSessionsOptions {
    * a switch for an unapplied code draft; null when they are the mode's own.
    */
   getCarriedOverDocks: () => TabDocks | null;
+  /** A restored tab's docks are its own: no carry-over continues. */
+  endDocksCarryOver: () => void;
 }
 
 /** The window's project tabs: one session per tab, saved with the window. */
@@ -292,6 +294,7 @@ export function useProjectTabSessions({
   nativeWorkspaceSaving,
   getEditorMode,
   getCarriedOverDocks,
+  endDocksCarryOver,
 }: ProjectTabSessionsOptions) {
   function captureTabSession() {
     // Docks carried over for a draft are not this mode's choice: the tab
@@ -343,6 +346,8 @@ export function useProjectTabSessions({
     pendingAutoFitRef.current = session.fit;
     replaceSelection(session.selection);
     const docks = tabDocksFor(session, getEditorMode());
+    // Equal docks would not register as a change: end the carry here.
+    endDocksCarryOver();
     setSelectionOpen(docks.properties);
     setProjectPanel(docks.panel);
     setNetlistEntry(session.netlistEntry);
