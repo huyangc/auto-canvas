@@ -1058,6 +1058,27 @@ tab ›` work.
       Cancel when a run starts from the focused Auto Layout button.
     - Owned paths widened to `editor-dialogs.tsx`, `editor-dialog-layer.tsx`
       and `performance.spec.ts` for these fixes.
+  - Review round 3 (2026-11-21): one line per item.
+    - A: while a code draft is unapplied, a mode switch keeps the project
+      dock open, and a failed import neither closes it nor opens Properties.
+    - B: Document settings apply live; a mode switch closes them, so hidden
+      settings no longer hold the Project.
+    - C: an import's review (report, open, seen) is kept per project tab in
+      memory, not in the saved window; a reload drops it.
+    - D: a report that replaces one on screen is seen at once (no dot).
+    - E: in Auto the overlay guard runs before the Cell symbol layout takes
+      `W`.
+    - F: what closing a project dock reopens is kept per mode with the
+      mode's docks.
+    - G: placing from User Components brings up Draw (the component
+      editor's command router is wrapped for `insert.start`).
+    - H: measured at 320 and 390 px with a run in progress: nothing
+      clipped, no CSS change; the measurement stays in the spec.
+    - I: not done. The switch loses typed text on two paths (a `T` text
+      draft not yet placed, and a Net Label name being typed); only an
+      existing text being edited is committed. Left for the coordinator.
+    - Owned paths widened to `user-components.spec.ts` (the Auto placement
+      case).
 - Keep `App.tsx` thin. New UI goes into feature files, and App.tsx only
   passes `mode` and handlers. Its JSX gains conditionals, not markup.
 - Never write the Document from mode code: no `transact`, no
