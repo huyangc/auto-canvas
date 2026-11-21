@@ -195,3 +195,90 @@ The implementer saw the new tests fail before their fixes: 12 in round 2,
 - The per-mode dock memory in `App.tsx` is per session, not per tab: after
   changing tabs, switching mode shows the docks last used in that mode in
   any tab.
+
+# T150 report — slice b: Cells rail with statuses
+
+Written by the coordinator from the implementer's hand-backs and an
+independent rerun. Slice a is merged (`bda24ec`); slices c and d follow.
+
+## What was built
+
+- **Cells rail.** In Auto mode, a Project with two or more Cells shows a
+  190 px column on the left listing every Cell, top Cell first, each with a
+  status: `not laid out` with the reason (the last finished Auto Layout run
+  in this tab refused the Cell and it has not changed since), `laid out`
+  (it has routes), `as imported`, or `not laid out`. A row opens its Cell.
+  The rail is not shown with one Cell, in Draw, or below 860 px wide, where
+  the hierarchy row stays as before.
+- The refusal reasons are kept in memory per tab and per Project opened in
+  it (`use-cell-layout-outcomes.ts`); nothing is written to the Project. An
+  edit to a refused Cell drops its reason; Undo does not bring it back,
+  because revisions only go up.
+- **Five leftovers from slice a's last codex review:**
+  - A dock kept on screen only for an unapplied code draft is no longer
+    saved with the tab as that mode's own.
+  - A drawing key pressed inside the Shelf picker no longer brings up Draw.
+  - Focus moves to Cancel only when the Auto Layout button itself started
+    the run, so Space or Enter after an import from the card no longer
+    cancels the layout.
+  - The Properties button advertises `Q`, and the first canvas button `N`,
+    only when the key would do what the button does.
+
+Commits on `task/T150b-cells-rail`: `ed24e03` (leftovers), `cf564cc` (rail),
+`1f1a681` (review round 1). 17 files, +1154 / −16; product code under
+`apps/editor/src` without tests is 8 files, +402 / −13.
+
+## Acceptance (coordinator's rerun on `1f1a681`)
+
+| Command                                            | Result                                      |
+| -------------------------------------------------- | ------------------------------------------- |
+| `pnpm build`, `pnpm test:editor-build`             | pass                                        |
+| `pnpm typecheck`, `pnpm lint`, `pnpm format:check` | pass (lint 0 errors)                        |
+| `pnpm docs:check`                                  | pass                                        |
+| `pnpm test:local`                                  | pass: 8624 passed, 117 skipped              |
+| `pnpm deadcode`                                    | exit 1 as on `main`; no new finding         |
+| Browser suite, 53 spec files, one worker           | 426 passed, 2 skipped, 1 failed (see below) |
+
+The one failure is `hierarchy.spec.ts:1179` (a size comparison after a
+zoom: 15.50 against 16.02, tolerance 0.5). It is flaky on the code from
+before T150 as well: 5 of 10 runs fail there with the same numbers, 3 of 10
+on this branch. The full run at `cf564cc` was 426 passed, 0 failed.
+`project-file.spec.ts` is left out as before (it fails to load on `main`).
+
+## Browser check by the coordinator
+
+Against a dev server of this worktree (port 5184), Chrome, 1440×900:
+
+- Importing the owner's two-subcircuit case shows the rail with `top (top)`
+  and `stage`, both `laid out`; the canvas is 76% of the window (88% with
+  one Cell).
+- Clicking `stage` opens it ("Opened Cell stage") and moves the highlight.
+- No rail with a one-Cell import, in Draw, or at 800 px wide.
+- A 44-character Cell name is clipped inside the row; the rail does not
+  scroll sideways.
+- Space pressed right after an import from the card does not cancel the
+  layout.
+
+The `not laid out` with a reason state (a Cell over 120 parts) was not
+driven by hand; the browser test covers it.
+
+## Review
+
+Independent reviewer on `bda24ec..cf564cc`: approve with fixes, no P1 or
+P2. Fixed in `1f1a681`: the draft carry-over flag could survive a tab
+switch and make another tab lose a dock's open state. Not reproduced: a
+long Cell name widening the rail (rendered and measured; an assertion was
+added). Three test gaps closed: the `Q` rule as a tested helper, focus
+tests that fail on the old code, and the outcome store driven by the real
+controller.
+
+## For the owner
+
+By decision 18 a refusal outranks `laid out`: if a manual run times out on
+a Cell that is already drawn, the rail shows `not laid out` with the reason
+over a routed drawing, until the Cell changes.
+
+## Not covered
+
+- The rail between 860 and 1100 px was not checked by hand.
+- Electron was not tried.
