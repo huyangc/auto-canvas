@@ -431,19 +431,49 @@ one undo, reporting the exact affected count (also in dry run).
   replaces the Project. Same-site product links go through this guard without a
   second native prompt.
 
+## Modes
+
+The editor has two modes behind the top bar's `Auto | Draw` switch. A mode is
+UI only: switching never changes a Document and adds no Undo step.
+
+- **Auto** (the default) shows the canvas with **Import netlist…**, the
+  **Auto Layout** button and no drawing toolbar or library. Netlist and
+  Properties start closed and open from the two buttons at the canvas's lower
+  right. Select, drag, rotate, delete, Undo and every key that needs no drawing
+  tool work as in Draw. With no Instance in any Cell the canvas shows an import
+  card: choose a netlist file, open a project file, start from an example, or
+  draw by hand. A successful SPICE import there leaves Import Review closed in
+  Properties; a failed one opens it.
+- **Draw** is the drawing page: the drawing toolbar, the device library and
+  the Netlist beside the canvas.
+- **Remembered only when chosen.** The switch (and the card's **Draw it
+  yourself →**) stores the mode for this browser; the first open is Auto. A
+  drawing key (`B`, `W`, `T`, `I`, `P`, `L`) or Insert component… / Place Cell
+  pressed in Auto brings up Draw for the current session only, then does its
+  normal job; the status reads `Draw mode: <tool>`. Behind a modal dialog or
+  from the import card such a key does nothing.
+- Switching to Auto cancels any armed tool or transient interaction. Each mode
+  keeps its own Netlist and Properties docks for the session.
+- The first time a browser opens the editor in Auto, a one-time note under the
+  switch says where drawing lives; **Got it** or any switch dismisses it for
+  good.
+
 ## Automatic layout
 
-- **Entry and scope.** Circuit → Layout → **Auto Layout** (command `layout.auto`,
-  no shortcut) plans the whole open Cell with the
+- **Entry and scope.** The top bar's **Auto Layout** button, in both modes,
+  and Circuit → Layout → **Auto Layout** (command `layout.auto`, no shortcut)
+  plan the whole open Cell with the
   [auto-layout planner](auto-layout.md) at its default bounded search. Selection,
   locks and other Cells are ignored. It is unavailable while a run plans, while
   a tool, drag, component editor or interface confirmation is active, and on a
   Cell with no Instance; the menu item's tooltip gives the reason.
 - **Off the main thread.** Each run plans in its own module Web Worker on a copy
   of the Project; without Web Workers the command refuses. The editor stays
-  editable. The status chip shows elapsed seconds (plus "evaluation n/N" while
-  the search reports) and **Cancel**, which terminates the worker
-  (`layout.auto-cancel`); nothing is applied.
+  editable. While it plans, the top-bar control shows elapsed seconds (plus
+  "Cell i of N" for several Cells and "evaluation n/N" while the search
+  reports) and **Cancel**, which terminates the worker
+  (`layout.auto-cancel`); nothing is applied. The status-bar chip shows only a
+  finished run's report.
 - **Apply or discard.** A result is applied only if the Project session,
   `structureRevision`, open Cell and Document revision are those the run
   started from; otherwise it is discarded and the status says the drawing
@@ -453,7 +483,8 @@ one undo, reporting the exact affected count (also in dry run).
   fits the drawing.
 - **Refusals and warnings.** A planner error leaves the drawing unchanged with a
   one-line reason; the chip's **Details** lists every diagnostic (severity, code,
-  the planner's own message). Warnings on a delivered plan use the same chip.
+  the planner's own message). Warnings on a delivered plan use the same chip,
+  which keeps only the finished report.
 - **After a SPICE import.** File → Import → SPICE / SCS… and Cadence SPICE
   start a run on every imported Cell with a part, top Cell first, with R165's
   netlist presentation when every one is still netlist-only (an
