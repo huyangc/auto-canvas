@@ -64,6 +64,11 @@ export interface EditorFileCommandDependencies {
   /** Close the Netlist dock, so Properties (with a failed review) shows. */
   clearProjectPanel?: () => void;
   /**
+   * The project dock holds an unapplied code draft: a failed import leaves
+   * it on screen, and its review waits for Properties.
+   */
+  projectPanelHoldsDraft?: () => boolean;
+  /**
    * The editor mode when the import lands. Auto keeps the canvas clear after
    * a successful import: the review waits in Properties until opened.
    */
@@ -95,6 +100,7 @@ export function createEditorFileCommands({
   setImportReviewOpen,
   setSelectionOpen,
   clearProjectPanel,
+  projectPanelHoldsDraft,
   getEditorMode,
   setStatus,
   onChunkLoadFailure,
@@ -317,8 +323,10 @@ export function createEditorFileCommands({
   const reportFailedImport = (report: SpiceImportReport, message: string) => {
     setImportReport(report);
     setImportReviewOpen(true);
-    clearProjectPanel?.();
-    setSelectionOpen(true);
+    if (!projectPanelHoldsDraft?.()) {
+      clearProjectPanel?.();
+      setSelectionOpen(true);
+    }
     setStatus(message);
   };
 

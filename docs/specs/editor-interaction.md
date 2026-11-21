@@ -443,9 +443,14 @@ UI only: switching never changes a Document and adds no Undo step.
   tool work as in Draw. With no Instance in any Cell the canvas shows an import
   card: choose a netlist file, open a project file, start from an example, or
   draw by hand. A successful SPICE import there leaves Import Review closed in
-  Properties, with a dot on the Properties button until it has been seen;
-  until then no other action puts it away, and Properties opened by any route
-  shows it. A failed import opens it, closing the Netlist if it was open.
+  Properties, with a dot on the Properties button until it has been seen.
+  Until then opening Properties, the Netlist, inspecting a part and a mode
+  switch leave it in place, and Properties opened by any route shows it; only
+  another import, a new Project or a reload removes it. Each project tab keeps
+  its own review in memory while another tab is shown (a reload drops it). A
+  failed import opens it, closing the Netlist if it was open, unless the
+  Netlist or Project Code dock holds an unapplied draft: the dock then stays
+  and the review waits for Properties.
 - **Draw** is the drawing page: the drawing toolbar, the device library and
   the Netlist beside the canvas.
 - **Remembered only when chosen.** The switch (and the card's **Draw it
@@ -453,11 +458,13 @@ UI only: switching never changes a Document and adds no Undo step.
   drawing key (`B`, `W`, `T`, `I`, `P`, `L`) or Insert component… / Place Cell
   pressed in Auto brings up Draw for the current session only, then does its
   normal job; the status reads `Draw mode: <tool>`. Placements started from
-  the Cell Manager or the insert dialog do the same. Behind a modal dialog,
+  the Cell Manager, the insert dialog or User Components do the same. Behind a modal dialog,
   inside a dialog, menu or open header menu, on the canvas text editor's
   toolbar or from the import card such a key does nothing.
 - Switching to Auto cancels any armed tool or transient interaction. Each mode
-  keeps its own Netlist and Properties docks for the session. A project tab
+  keeps its own Netlist and Properties docks for the session, except that a
+  project dock holding an unapplied code draft stays open across the switch.
+  Document settings, which apply live, close on a switch. A project tab
   remembers its docks with the mode it was captured in; restored or switched
   to in the other mode, it opens with that mode's defaults instead.
 - The first time a browser opens the editor in Auto, a one-time note under the

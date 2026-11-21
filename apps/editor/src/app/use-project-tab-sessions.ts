@@ -66,6 +66,23 @@ import { executeProjectTransaction } from "@icm/edit-engine";
 import type { CloudProjectStore } from "../services/editor-services";
 import type { CloudProjectSummary } from "../features/editor-shell/cloud-projects";
 
+/**
+ * A tab's import review: the last SPICE import's report, whether it is
+ * shown in Properties, and whether the user has seen it. Kept with the tab
+ * in memory only: a reload drops it, as before the modes.
+ */
+export interface TabImportReview {
+  report: SpiceImportReport | null;
+  open: boolean;
+  seen: boolean;
+}
+
+const NO_IMPORT_REVIEW: TabImportReview = {
+  report: null,
+  open: false,
+  seen: true,
+};
+
 /** The Netlist / Properties docks a tab shows. */
 interface TabDocks {
   panel: EditorProjectPanelMode | null;
@@ -137,8 +154,9 @@ interface ProjectTabSessionsOptions {
     next: GridRect | CameraRectInput | ((current: GridRect) => CameraRectInput),
     grid?: number,
   ) => void;
-  setImportReport: Dispatch<SetStateAction<SpiceImportReport | null>>;
-  setImportReviewOpen: Dispatch<SetStateAction<boolean>>;
+  /** The open tab's import review, captured with it. */
+  importReview: TabImportReview;
+  restoreImportReview: (review: TabImportReview) => void;
   setCanvasContextMenu: Dispatch<
     SetStateAction<{ x: number; y: number } | null>
   >;
@@ -226,8 +244,8 @@ export function useProjectTabSessions({
   replaceSelection,
   cameraRuntime,
   setViewBox,
-  setImportReport,
-  setImportReviewOpen,
+  importReview,
+  restoreImportReview,
   setCanvasContextMenu,
   setNetlistPreflightOpen,
   projectPanel,
@@ -287,6 +305,7 @@ export function useProjectTabSessions({
       dirty: isDirtyWork(),
       unsafe: hasUnsafeWork() || codeDraftDirty,
       fit: false,
+      importReview,
     };
   }
   type TabSession = ReturnType<typeof captureTabSession>;
@@ -295,8 +314,8 @@ export function useProjectTabSessions({
     // The outgoing tab still owns its artifacts and expiring workspaces.
     // Selection changes hide its UI, not its file service.
     setAgentFileCandidate(null);
-    setImportReport(null);
-    setImportReviewOpen(false);
+    // The incoming tab's own review, unseen or not, comes back with it.
+    restoreImportReview(session.importReview);
     setProjectInfoOpen(false);
     setCanvasContextMenu(null);
     setNetlistFocusedInstance(null);
@@ -369,9 +388,14 @@ export function useProjectTabSessions({
       dirty: options.persistenceState === "dirty",
       unsafe: options.persistenceState === "dirty",
       fit: true,
+      importReview: NO_IMPORT_REVIEW,
     };
   }
-  type PortableTab = Omit<TabSession, "controller" | "cellViews"> & {
+  // The import review is not saved with the window (TabImportReview).
+  type PortableTab = Omit<
+    TabSession,
+    "controller" | "cellViews" | "importReview"
+  > & {
     projectText: string;
     activeDocumentId: string;
     cellViews: [string, GridRect][];
@@ -401,6 +425,7 @@ export function useProjectTabSessions({
       );
     const session: TabSession = {
       ...saved,
+      importReview: NO_IMPORT_REVIEW,
       controller,
       cellViews: new Map(saved.cellViews),
       fit: false,
@@ -498,7 +523,12 @@ export function useProjectTabSessions({
       for (const id of workspaceTexts.current.keys())
         if (!liveIds.has(id)) workspaceTexts.current.delete(id);
       const tabs = workspace.tabs.map(({ id, session }) => {
-        const { controller, cellViews, ...rest } = session;
+        const {
+          controller,
+          cellViews,
+          importReview: _inMemoryOnly,
+          ...rest
+        } = session;
         let cached = workspaceTexts.current.get(id);
         if (cached?.project !== controller.project) {
           cached = {

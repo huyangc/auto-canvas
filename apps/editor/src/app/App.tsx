@@ -243,7 +243,10 @@ import {
 import { createEditorTransactionCommands } from "./editor-transaction-commands";
 import { DEFAULT_VIEWBOX } from "./default-view-box";
 import type { ComponentEditorSession } from "./component-editor-session";
-import { useProjectTabSessions } from "./use-project-tab-sessions";
+import {
+  defaultTabDocks,
+  useProjectTabSessions,
+} from "./use-project-tab-sessions";
 import { clearDeletedCloudProjects } from "../document/cloud-project-session";
 import { readWindowWorkspace } from "../document/workspace-reopen";
 import { useNativeProjectTabs } from "./use-native-project-tabs";
@@ -254,6 +257,7 @@ import {
 import { EditorDialogs } from "./editor-dialogs";
 import { EditorComponentEditor } from "./editor-component-editor";
 import { useEditorCommandRouter } from "./use-editor-command-router";
+import type { EditorCommandResult } from "../commands/editor-command";
 import { useAutoLayout } from "../features/auto-layout/use-auto-layout";
 import { AutoLayoutReport } from "../features/auto-layout/auto-layout-report";
 import { useEditorShortcuts } from "./use-editor-shortcuts";
@@ -439,6 +443,22 @@ const NET_LABEL_SNAP_CAPTURE_RADIUS_PX = 12;
 // Handle drags are geometry edits rather than translations.  Keep a complete
 // transient object so the formal SVG renderer can redraw both a curved shaft
 // and its arrow head from the same latest control point before pointer-up.
+/** The docks one editor mode shows, remembered across a switch. */
+interface ModeDocks {
+  projectPanel: EditorProjectPanelMode | null;
+  selectionOpen: boolean;
+  propertiesBefore: boolean;
+}
+
+function defaultModeDocks(mode: EditorMode): ModeDocks {
+  const { panel, properties } = defaultTabDocks(mode);
+  return {
+    projectPanel: panel,
+    selectionOpen: properties,
+    propertiesBefore: false,
+  };
+}
+
 export interface AppProps {
   services: EditorServices;
   project?: CircuitProject;
@@ -669,14 +689,10 @@ function WorkspaceEditor({
   // Each mode keeps its own Netlist / Properties docks for the session, not
   // per tab: a tab remembers only the docks of the mode it was captured in
   // (tabDocksFor), and the other mode's memory here is the last one seen.
-  const modePanelsRef = useRef<
-    Record<
-      EditorMode,
-      { projectPanel: EditorProjectPanelMode | null; selectionOpen: boolean }
-    >
-  >({
-    auto: { projectPanel: null, selectionOpen: false },
-    draw: { projectPanel: "netlist", selectionOpen: false },
+  // `propertiesBefore` is what closing that mode's project dock reopens.
+  const modePanelsRef = useRef<Record<EditorMode, ModeDocks>>({
+    auto: defaultModeDocks("auto"),
+    draw: defaultModeDocks("draw"),
   });
   const importNetlistInputRef = useRef<HTMLInputElement>(null);
 
@@ -858,8 +874,10 @@ function WorkspaceEditor({
   );
   const [importReviewOpen, setImportReviewOpen] = useState(false);
   // An import's review counts as seen once Properties has shown it. Until
-  // then (an Auto import waits behind a closed dock) nothing but another
-  // import or a new Project clears it.
+  // then (an Auto import waits behind a closed dock) opening Properties,
+  // the Netlist, inspection and a mode switch leave it in place; it goes
+  // only with another import, a new Project, or a reload (a project tab
+  // keeps it in memory while another tab is shown).
   const [importReviewSeen, setImportReviewSeen] = useState(true);
   const [cellManagerOpen, setCellManagerOpen] = useState(false);
   const [modelEditorDefinitionId, setModelEditorDefinitionId] = useState<
@@ -984,7 +1002,10 @@ function WorkspaceEditor({
     ],
   );
   const [codeDraftDirty, setCodeDraftDirty] = useState(false);
+  // Read by an import that finishes later than the render it started in.
+  const codeDraftDirtyRef = useRef(false);
   const noteCodeDraftDirty = useCallback((dirty: boolean) => {
+    codeDraftDirtyRef.current = dirty;
     setCodeDraftDirty(dirty);
   }, []);
   const captureAuthoredProject = async () => editorDocumentController.project;
@@ -1096,16 +1117,8 @@ function WorkspaceEditor({
       setProjectPanel(editorModeRef.current === "auto" ? null : "netlist");
       // The other mode's remembered docks belonged to the outgoing circuit:
       // that mode opens the new one with its own start.
-      if (editorModeRef.current === "auto")
-        modePanelsRef.current.draw = {
-          projectPanel: "netlist",
-          selectionOpen: false,
-        };
-      else
-        modePanelsRef.current.auto = {
-          projectPanel: null,
-          selectionOpen: false,
-        };
+      const otherMode = editorModeRef.current === "auto" ? "draw" : "auto";
+      modePanelsRef.current[otherMode] = defaultModeDocks(otherMode);
       if (compactLayout) setCompactLibraryPanelOpen(false);
       return nextDocument;
     },
@@ -3585,9 +3598,10 @@ function WorkspaceEditor({
 
   const importReviewShowing =
     importReviewOpen && selectionOpen && projectPanel === null;
+  // A report that replaces one already on screen is seen at once too.
   useEffect(() => {
     if (importReviewShowing) setImportReviewSeen(true);
-  }, [importReviewShowing]);
+  }, [importReviewShowing, importReport]);
 
   /** Put away an import's review, unless it is still waiting to be seen. */
   function releaseImportReview(): void {
@@ -3740,11 +3754,24 @@ function WorkspaceEditor({
     options: { persist: boolean; status?: string },
   ): void {
     if (next !== editorMode) {
-      modePanelsRef.current[editorMode] = { projectPanel, selectionOpen };
+      modePanelsRef.current[editorMode] = {
+        projectPanel,
+        selectionOpen,
+        propertiesBefore: propertiesOpenBeforeProjectPanelRef.current,
+      };
       const restored = modePanelsRef.current[next];
-      setProjectPanel(restored.projectPanel);
-      setSelectionOpen(restored.selectionOpen);
-      if (!restored.selectionOpen) releaseImportReview();
+      propertiesOpenBeforeProjectPanelRef.current = restored.propertiesBefore;
+      // An unapplied code draft lives in the open project dock: it stays on
+      // screen in the new mode rather than being unmounted and lost.
+      if (!codeDraftDirty) {
+        setProjectPanel(restored.projectPanel);
+        setSelectionOpen(restored.selectionOpen);
+        if (!restored.selectionOpen) releaseImportReview();
+      }
+      // Document settings apply live; left open but hidden they would keep
+      // holding the Project (tab switches and saves refuse while they are
+      // open). Close them as their toolbar toggle does.
+      if (documentSettingsOpen) setDocumentSettingsOpen(false);
       if (next === "auto") {
         // Nothing armed survives without its toolbar: tools, placements and
         // a Net Label or control pick that follows the pointer.
@@ -4410,6 +4437,9 @@ function WorkspaceEditor({
     },
     setSelectionOpen,
     clearProjectPanel: () => setProjectPanel(null),
+    // A failed import never unmounts a dock holding an unapplied code
+    // draft: its review then waits for Properties.
+    projectPanelHoldsDraft: () => codeDraftDirtyRef.current,
     getEditorMode: () => editorModeRef.current,
     setStatus,
     onChunkLoadFailure: setChunkLoadFailure,
@@ -4754,8 +4784,16 @@ function WorkspaceEditor({
     replaceSelection,
     cameraRuntime,
     setViewBox,
-    setImportReport,
-    setImportReviewOpen,
+    importReview: {
+      report: importReport,
+      open: importReviewOpen,
+      seen: importReviewSeen,
+    },
+    restoreImportReview: (review) => {
+      setImportReport(review.report);
+      setImportReviewOpen(review.open);
+      setImportReviewSeen(review.seen);
+    },
     setCanvasContextMenu,
     setNetlistPreflightOpen,
     projectPanel,
@@ -7213,7 +7251,20 @@ function WorkspaceEditor({
         definitionProjectRef={definitionProjectRef}
         selectOnly={selectOnly}
         cancelAllTransientInteraction={cancelAllTransientInteraction}
-        editorCommands={editorCommands}
+        // Placing from User Components is a drawing command too: in Auto
+        // it brings up Draw first, like the menu's Insert component.
+        editorCommands={{
+          ...editorCommands,
+          execute: (request) => {
+            if (request.id !== "insert.start" || editorMode !== "auto")
+              return editorCommands.execute(request);
+            let result: EditorCommandResult = { status: "rejected" };
+            bringUpDraw("Insert", () => {
+              result = editorCommands.execute(request);
+            });
+            return result;
+          },
+        }}
       />
       <SelectionFilterPopover
         open={selectionFilterOpen}

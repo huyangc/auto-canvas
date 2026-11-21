@@ -232,3 +232,24 @@ it("leaves the mode alone for keys that work in Auto", async () => {
     id: "selection.delete",
   });
 });
+
+it("keeps a Cell symbol layout's W from a dialog in Auto mode", async () => {
+  const { dependencies, calls, render } = mountModeRouter("auto");
+  const handleCellLayoutKeyDown = vi.fn(() => true);
+  Object.assign(dependencies, { handleCellLayoutKeyDown });
+  await act(async () => render());
+  const dialog = document.createElement("section");
+  dialog.setAttribute("role", "dialog");
+  const button = document.createElement("button");
+  dialog.append(button);
+  document.body.append(dialog);
+  button.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "w", bubbles: true, cancelable: true }),
+  );
+  expect(handleCellLayoutKeyDown).not.toHaveBeenCalled();
+  expect(calls).toEqual([]);
+  // On the canvas the layout still takes it.
+  press({ key: "w" });
+  expect(handleCellLayoutKeyDown).toHaveBeenCalledOnce();
+  dialog.remove();
+});

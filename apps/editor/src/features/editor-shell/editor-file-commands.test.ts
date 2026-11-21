@@ -476,6 +476,20 @@ C1 out 0 1p
     }
   });
 
+  it("leaves a dock holding an unapplied code draft on a failed import", async () => {
+    const clearProjectPanel = vi.fn();
+    const target = commands({
+      guardDirtyReplacement: performing(),
+      clearProjectPanel,
+      projectPanelHoldsDraft: () => true,
+    });
+    await target.importSpiceFiles(files(".subckt broken\nX1 a b missing\n"));
+    expect(target.dependencies.setImportReviewOpen).toHaveBeenCalledWith(true);
+    expect(clearProjectPanel).not.toHaveBeenCalled();
+    expect(target.dependencies.setSelectionOpen).not.toHaveBeenCalled();
+    expect(target.dependencies.setStatus).toHaveBeenCalled();
+  });
+
   it("does not lay out an RNL import", async () => {
     const onImported = vi.fn();
     vi.doMock("../netlist-export/rnl-import", () => ({

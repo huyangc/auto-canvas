@@ -2842,6 +2842,31 @@ test("invalid component code leaves the circuit untouched", async ({
   expect((await readProject(page)).documents[0]!.instances).toHaveLength(0);
 });
 
+test("placing a User Component in Auto mode brings up Draw", async ({
+  page,
+  service,
+}) => {
+  // The suite opens in Draw; this case starts where a first visitor does.
+  await page.addInitScript(() =>
+    window.localStorage.setItem("icm.editor-mode.v1", "auto"),
+  );
+  await service.openEditorAs(page, "alice");
+  await expect(page.getByTestId("mode-auto")).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  const editor = await openFiniteGain(page);
+  await button(editor, "Apply model").click();
+  await button(editor, "Place").click();
+  await expect(editor).toHaveCount(0);
+  await expect(page.getByTestId("mode-draw")).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(page.getByTestId("status")).toHaveText(/^Draw mode: Insert/u);
+  await place(page);
+});
+
 test("creates a native User Component through the shared model owner and places its automatic symbol", async ({
   page,
   service,

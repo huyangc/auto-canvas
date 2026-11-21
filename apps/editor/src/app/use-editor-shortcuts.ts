@@ -427,7 +427,20 @@ function createEditorShortcutHandler({
       if (event.target instanceof HTMLElement) event.target.blur();
       return;
     }
-    if (!isTypingTarget(event.target) && handleCellLayoutKeyDown?.(event)) {
+    // The Cell symbol layout's W starts a Wire, a drawing tool: in Auto the
+    // overlay guard applies before the layout takes the key.
+    const blockedLayoutWire =
+      editorMode === "auto" &&
+      event.key.toLowerCase() === "w" &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.altKey &&
+      drawingSwitchBlocked(event.target);
+    if (
+      !isTypingTarget(event.target) &&
+      !blockedLayoutWire &&
+      handleCellLayoutKeyDown?.(event)
+    ) {
       event.preventDefault();
       return;
     }

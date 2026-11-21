@@ -715,3 +715,174 @@ test("a failed import in Auto shows its review", async ({ page }) => {
   await expect(importReview(page)).toBeVisible();
   await expect(projectTools(page)).toHaveCount(0);
 });
+
+const BROKEN_NETLIST = ".subckt broken\nX1 a b missing\n";
+
+async function failedImport(page: Page) {
+  await page.getByTestId("import-netlist-file").setInputFiles({
+    name: "broken.sp",
+    mimeType: "text/plain",
+    buffer: Buffer.from(BROKEN_NETLIST),
+  });
+}
+
+test("an unapplied Project Code draft stays on screen across a switch", async ({
+  page,
+}) => {
+  await openEditor(page, "/editor?example=two-stage-op-amp");
+  await expectStatus(page, "Opened example: Two-Stage Op Amp");
+  await page.getByTestId("mode-draw").click();
+  await page.getByTestId("project-code-toggle").click();
+  const code = page.getByRole("textbox", { name: "Project code", exact: true });
+  await code.fill("unapplied draft");
+  await page.getByTestId("mode-auto").click();
+  await expectAutoChrome(page);
+  await expect(code).toHaveText("unapplied draft");
+  // Back in Draw it is still the same draft.
+  await page.getByTestId("mode-draw").click();
+  await expect(code).toHaveText("unapplied draft");
+});
+
+test("an unapplied Netlist code draft stays on screen across a switch", async ({
+  page,
+}) => {
+  await openEditor(page, "/editor?example=two-stage-op-amp");
+  await expectStatus(page, "Opened example: Two-Stage Op Amp");
+  await page.getByTestId("mode-draw").click();
+  const code = page.getByLabel("Netlist code", { exact: true });
+  await expect(code).toBeVisible();
+  await code.click();
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.type("\n* unapplied draft");
+  await page.getByTestId("mode-auto").click();
+  await expectAutoChrome(page);
+  await expect(code).toContainText("* unapplied draft");
+});
+
+test("a failed import keeps an unapplied code draft", async ({ page }) => {
+  await openEditor(page, "/editor?example=two-stage-op-amp");
+  await expectStatus(page, "Opened example: Two-Stage Op Amp");
+  await page.getByTestId("netlist-panel-toggle").click();
+  const code = page.getByLabel("Netlist code", { exact: true });
+  await code.click();
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.type("\n* unapplied draft");
+  await failedImport(page);
+  await expect(page.getByTestId("status")).not.toContainText("Opened example");
+  await expect(code).toContainText("* unapplied draft");
+  // The review waits for Properties.
+  await expectReviewWaiting(page, true);
+});
+
+test("Document settings close on the switch to Auto and hold nothing", async ({
+  page,
+}) => {
+  await openEditor(page, "/editor?example=two-stage-op-amp");
+  await expectStatus(page, "Opened example: Two-Stage Op Amp");
+  await page.getByTestId("mode-draw").click();
+  await page.getByTestId("draw-tool-document-style").click();
+  await expect(page.getByTestId("document-settings-code-editor")).toBeVisible();
+  await page.getByTestId("properties-resize-handle").waitFor();
+  await page.getByTestId("mode-auto").click();
+  await page.getByRole("button", { name: "New project tab" }).click();
+  await expect(page.getByRole("tab")).toHaveCount(2);
+  await expect(page.getByTestId("status")).not.toContainText(
+    "Can't switch project tabs yet",
+  );
+});
+
+test("an unseen Import Review survives a project-tab switch", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await openEditor(page);
+  await autoImport(page);
+  await expectReviewWaiting(page, true);
+  await page.getByRole("button", { name: "New project tab" }).click();
+  await expect(page.getByRole("tab")).toHaveCount(2);
+  await expectReviewWaiting(page, false);
+  await page.getByRole("tab").first().click();
+  await expect(page.getByRole("tab").first()).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await expectReviewWaiting(page, true);
+  await page.getByTestId("properties-panel-toggle").click();
+  await expect(importReview(page)).toBeVisible();
+});
+
+test("a review on screen replaced by another failed import is not waiting", async ({
+  page,
+}) => {
+  await openEditor(page);
+  await failedImport(page);
+  await expect(importReview(page)).toBeVisible();
+  await expectReviewWaiting(page, false);
+  await failedImport(page);
+  await expect(importReview(page)).toBeVisible();
+  await expectReviewWaiting(page, false);
+});
+
+test("a seen review is put away on the next close of Properties", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await openEditor(page);
+  await autoImport(page);
+  const toggle = page.getByTestId("properties-panel-toggle");
+  await toggle.click();
+  await expect(importReview(page)).toBeVisible();
+  await toggle.click();
+  await toggle.click();
+  await expect(page.locator(".selection-dock.open")).toBeVisible();
+  await expect(importReview(page)).toHaveCount(0);
+});
+
+test("a failed import in Draw shows its review", async ({ page }) => {
+  await openEditor(page);
+  await page.getByTestId("mode-draw").click();
+  await failedImport(page);
+  await expect(importReview(page)).toBeVisible();
+});
+
+test("closing Draw's Netlist does not open Properties left open in Auto", async ({
+  page,
+}) => {
+  await openEditor(page, "/editor?example=two-stage-op-amp");
+  await expectStatus(page, "Opened example: Two-Stage Op Amp");
+  await page.getByTestId("properties-panel-toggle").click();
+  await expect(page.locator(".selection-dock.open")).toBeVisible();
+  await page.getByTestId("netlist-panel-toggle").click();
+  await expect(projectTools(page)).toBeVisible();
+  await page.getByTestId("mode-draw").click();
+  await expect(projectTools(page)).toBeVisible();
+  await page.getByTestId("netlist-panel-toggle").click();
+  await expect(projectTools(page)).toHaveCount(0);
+  await expect(page.locator(".selection-dock.open")).toHaveCount(0);
+});
+
+test("a running Auto Layout fits a phone-width top bar", async ({ page }) => {
+  test.setTimeout(120_000);
+  await openEditor(page, "/editor?example=two-stage-op-amp");
+  await expectStatus(page, "Opened example: Two-Stage Op Amp");
+  await page.getByTestId("auto-layout-button").click();
+  const cancel = page.getByTestId("auto-layout-cancel");
+  await expect(cancel).toBeVisible();
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 800 });
+    for (const testId of [
+      "auto-layout-elapsed",
+      "auto-layout-cancel",
+      "auto-layout-button",
+    ]) {
+      const box = (await page.getByTestId(testId).boundingBox())!;
+      expect(box, `${testId} at ${width}px`).not.toBeNull();
+      expect(box.x, `${testId} at ${width}px`).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width, `${testId} at ${width}px`).toBeLessThanOrEqual(
+        width,
+      );
+    }
+  }
+  await cancel.click();
+  await expect(cancel).toHaveCount(0);
+});
