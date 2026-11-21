@@ -6,10 +6,11 @@ Node 24+ and PostgreSQL 16. From the repository root, after
 ```bash
 pnpm start  # build, start in the background, wait for health, print the editor URL
 pnpm stop  # stop the process listening on PORT (default 4310)
+pnpm restart  # rebuild, then stop and start again
 pnpm dev   # background API + foreground Vite hot reload; Ctrl+C stops both
 ```
 
-`npm run start`, `npm run stop` and `npm run dev` also work; dependencies must
+`npm run start`, `npm run stop`, `npm run restart` and `npm run dev` also work; dependencies must
 be installed with pnpm. The launchers check PostgreSQL before building. When
 `psql` and `createdb` are available they create a missing `auto_canvas` database,
 owned by the connecting user, without changing existing databases. Create
@@ -24,7 +25,8 @@ the server in the foreground, and `pnpm server:migrate` applies migrations
 and exits. For the manual persistence check below, use `pnpm dev`.
 
 Copy [`.env.example`](../../.env.example) to `.env` at the repository root
-to customize configuration. `pnpm start`, `pnpm stop` and `pnpm dev` source
+to customize configuration. `pnpm start`, `pnpm stop`, `pnpm restart` and
+`pnpm dev` source
 this optional file as Bash with automatic export before applying defaults.
 Exported shell values take precedence (including empty values); quote values
 containing spaces or shell syntax. A missing `.env` is fine. Git ignores `.env`
@@ -37,6 +39,9 @@ health wait (default 60 seconds); `STOP_TIMEOUT` controls the shutdown grace
 period before SIGKILL (default 10 seconds). Both accept non-negative integer
 seconds. Start refuses occupied ports and reports their processes. Stop finds
 the listener by port, without a PID file, and reports "not running" if absent.
+Restart checks prerequisites and the database and builds first, so a failed
+build leaves the running server serving; it then stops and starts, and starts
+a server when none is running. `SKIP_BUILD=1 pnpm restart` reuses the builds.
 Port inspection requires `lsof` (macOS/Linux) or `ss` (Linux); health checks
 require `curl`. An interrupted or failed launch cleans up the processes it started.
 
