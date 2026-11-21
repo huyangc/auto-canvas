@@ -91,6 +91,7 @@ export function EditorDialogLayer({
           <section
             className="agent-dialog"
             role="dialog"
+            aria-modal="true"
             aria-label="Approve Agent file import"
           >
             <div className="agent-panel-header">

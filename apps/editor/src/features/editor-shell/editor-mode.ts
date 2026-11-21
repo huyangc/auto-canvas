@@ -130,8 +130,10 @@ export function isDrawingIntent(
 }
 
 /**
- * A drawing key never switches the page behind a dialog or from the empty
- * card: the router does not skip those scopes, so the switch must.
+ * A drawing key never switches the page behind a modal dialog, from inside
+ * an overlay or from the empty card: the router does not skip those scopes,
+ * so the switch must. Overlays count by the key's target, so an open
+ * non-modal one does not block keys pressed on the canvas.
  */
 export function drawingSwitchBlocked(
   target: EventTarget | null,
@@ -140,9 +142,14 @@ export function drawingSwitchBlocked(
     ? undefined
     : document,
 ): boolean {
+  // Overlays that hold focus without being modal: a dialog or menu (the
+  // Agent file approval, the selection filter, the formula popover, context
+  // menus), an open header menu, and the canvas text editor's toolbar.
   if (
     target instanceof Element &&
-    target.closest('[data-testid="auto-empty-state"]')
+    target.closest(
+      '[data-testid="auto-empty-state"], [role="dialog"], [role="menu"], .command-menu[open], [data-canvas-text-editor-part]',
+    )
   )
     return true;
   return Boolean(root?.querySelector('dialog[open], [aria-modal="true"]'));

@@ -409,9 +409,12 @@ export function EditorAppChrome({
             multiple
             accept=".spi,.cir,.sp,.scs,.inc,.lib"
             data-testid="import-netlist-file"
-            onChange={(event) =>
-              importNetlist.onFiles(event.currentTarget.files)
-            }
+            onChange={(event) => {
+              // The import reads the live FileList at once; clearing after
+              // it lets the same file be chosen again.
+              importNetlist.onFiles(event.currentTarget.files);
+              event.currentTarget.value = "";
+            }}
           />
           <AutoLayoutButton {...autoLayout} run={autoLayoutRun} />
           {agentAction ? (

@@ -7,11 +7,14 @@ import { ToolIcon } from "./tool-icon";
 export function CanvasPanelButtons({
   netlistOpen,
   propertiesOpen,
+  reviewPending = false,
   onToggleNetlist,
   onToggleProperties,
 }: {
   netlistOpen: boolean;
   propertiesOpen: boolean;
+  /** An import's review waits in Properties, not seen yet. */
+  reviewPending?: boolean;
   onToggleNetlist: () => void;
   onToggleProperties: () => void;
 }) {
@@ -34,14 +37,20 @@ export function CanvasPanelButtons({
         type="button"
         className="app-action"
         data-testid="properties-panel-toggle"
-        aria-label="Properties"
+        aria-label={
+          reviewPending ? "Properties, import review waiting" : "Properties"
+        }
         aria-pressed={propertiesOpen}
+        data-review-pending={reviewPending ? "true" : undefined}
         aria-keyshortcuts="Q"
         title={propertiesOpen ? "Hide Properties (Q)" : "Show Properties (Q)"}
         onClick={onToggleProperties}
       >
         <ToolIcon name="inspect" />
         <span>Properties</span>
+        {reviewPending ? (
+          <span className="canvas-panel-review-dot" aria-hidden="true" />
+        ) : null}
       </button>
     </div>
   );

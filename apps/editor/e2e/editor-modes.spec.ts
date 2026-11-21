@@ -1,6 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { NETLIST_A } from "../src/features/auto-layout/auto-layout-fixture.test-support";
+import {
+  NETLIST_A,
+  NETLIST_B,
+} from "../src/features/auto-layout/auto-layout-fixture.test-support";
 import {
   AUTO_MODE_STORAGE,
   awaitEditorReady,
@@ -457,4 +460,258 @@ test("a Netlist opened in Auto stays with its tab", async ({ page }) => {
     "aria-pressed",
     "true",
   );
+});
+
+/** Import a netlist with the top bar's own input and wait for its layout. */
+async function autoImport(page: Page, netlist = NETLIST_A) {
+  await page.getByTestId("import-netlist-file").setInputFiles({
+    name: "circuit.sp",
+    mimeType: "text/plain",
+    buffer: Buffer.from(netlist),
+  });
+  await expect(page.getByTestId("status")).toContainText(
+    /Auto Layout (applied|left)/u,
+    { timeout: 60_000 },
+  );
+}
+
+const importReview = (page: Page) =>
+  page.getByRole("region", { name: "Import Review" });
+
+async function expectReviewWaiting(page: Page, waiting: boolean) {
+  const button = page.getByTestId("properties-panel-toggle");
+  if (waiting) {
+    await expect(button).toHaveAttribute("data-review-pending", "true");
+    await expect(button).toHaveAccessibleName(
+      "Properties, import review waiting",
+    );
+  } else {
+    await expect(button).not.toHaveAttribute("data-review-pending", "true");
+    await expect(button).toHaveAccessibleName("Properties");
+  }
+}
+
+test("an unseen Import Review survives the Netlist", async ({ page }) => {
+  test.setTimeout(120_000);
+  await openEditor(page);
+  await autoImport(page);
+  await expectReviewWaiting(page, true);
+  await page.getByTestId("netlist-panel-toggle").click();
+  await expect(projectTools(page)).toBeVisible();
+  await expectReviewWaiting(page, true);
+  await page.getByTestId("properties-panel-toggle").click();
+  await expect(importReview(page)).toBeVisible();
+  await expectReviewWaiting(page, false);
+});
+
+test("an unseen Import Review shows for a selected part and Q", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await openEditor(page);
+  await autoImport(page);
+  await expectReviewWaiting(page, true);
+  await page.locator("body").press("ControlOrMeta+a");
+  await page.locator("body").press("q");
+  await expect(importReview(page)).toBeVisible();
+  await expectReviewWaiting(page, false);
+});
+
+test("an unseen Import Review survives W into Draw", async ({ page }) => {
+  test.setTimeout(120_000);
+  await openEditor(page);
+  await autoImport(page);
+  await expectReviewWaiting(page, true);
+  await page.locator("body").press("w");
+  await expectDrawChrome(page);
+  await page.keyboard.press("Escape");
+  await page.locator("body").press("ControlOrMeta+a");
+  await page.locator("body").press("q");
+  await expect(importReview(page)).toBeVisible();
+});
+
+test("the same netlist file imports again", async ({ page }) => {
+  test.setTimeout(120_000);
+  await openEditor(page);
+  await autoImport(page);
+  // The input is cleared after each import, so choosing the same file again
+  // is a change the browser reports.
+  await expect(page.getByTestId("import-netlist-file")).toHaveValue("");
+  await page.locator("body").press("ControlOrMeta+a");
+  await page.locator("body").press("Delete");
+  const instances = page
+    .getByTestId("editor-test-telemetry")
+    .getByTestId("instance-count");
+  await expect(instances).toHaveText("0");
+  await autoImport(page);
+  await expect(instances).not.toHaveText("0");
+});
+
+test("switching to Auto drops a Net Label being placed", async ({ page }) => {
+  await openEditor(page, "/editor?example=two-stage-op-amp");
+  await expectStatus(page, "Opened example: Two-Stage Op Amp");
+  await page.getByTestId("mode-draw").click();
+  const canvas = page.getByTestId("schematic-canvas");
+  await canvas.hover({ position: { x: 200, y: 200 } });
+  await page.keyboard.press("l");
+  const editor = page.getByRole("textbox", { name: "Canvas text editor" });
+  await editor.fill("N1");
+  await editor.press("Enter");
+  await expect(page.getByTestId("net-label-placement-preview")).toBeVisible();
+  const revision = await page.getByTestId("revision").textContent();
+  await page.getByTestId("mode-auto").click();
+  await expect(page.getByTestId("net-label-placement-preview")).toHaveCount(0);
+  await expectStatus(page, "Auto mode");
+  await canvas.click({ position: { x: 300, y: 300 } });
+  await expect(page.getByTestId("revision")).toHaveText(revision!);
+});
+
+test("W inside an open File menu changes nothing", async ({ page }) => {
+  await openEditor(page, "/editor?example=two-stage-op-amp");
+  await expectStatus(page, "Opened example: Two-Stage Op Amp");
+  const file = await openMenu(page, "File");
+  await file.getByRole("button").first().focus();
+  await page.keyboard.press("w");
+  await expect(page.getByTestId("mode-auto")).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(page.getByTestId("active-tool")).toHaveText("pointer");
+});
+
+test("a long running label keeps Cancel and Agent on screen", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await openEditor(page, "/editor?example=two-stage-op-amp");
+  await expectStatus(page, "Opened example: Two-Stage Op Amp");
+  const button = page.getByTestId("auto-layout-button");
+  await button.click();
+  const cancel = page.getByTestId("auto-layout-cancel");
+  await expect(cancel).toBeVisible();
+  // Focus moves to Cancel when the button it was on goes disabled.
+  await expect(cancel).toBeFocused();
+  for (const width of [1024, 800]) {
+    await page.setViewportSize({ width, height: 800 });
+    // The longest label a run reports, as a double for the ticking text.
+    await button
+      .locator(".app-action-label")
+      .evaluate(
+        (label) =>
+          (label.textContent =
+            "Auto Layout… 123 s · Cell 2 of 3 · evaluation 120/240"),
+      );
+    for (const testId of ["auto-layout-cancel", "open-agent"]) {
+      const box = (await page.getByTestId(testId).boundingBox())!;
+      expect(box.x + box.width, `${testId} at ${width}px`).toBeLessThanOrEqual(
+        width,
+      );
+      expect(box.width, `${testId} at ${width}px`).toBeGreaterThan(20);
+    }
+  }
+  // At 760 px and below the label goes; a short elapsed time stays.
+  await page.setViewportSize({ width: 720, height: 800 });
+  await expect(page.getByTestId("auto-layout-elapsed")).toBeVisible();
+  await expect(page.getByTestId("auto-layout-elapsed")).toHaveText(/^\d+ s$/u);
+  await cancel.click();
+  await expect(cancel).toHaveCount(0);
+});
+
+test("Draw it yourself puts focus on the Draw switch", async ({ page }) => {
+  await openEditor(page);
+  await page.getByTestId("empty-draw").click();
+  await expect(page.getByTestId("mode-draw")).toBeFocused();
+});
+
+test("each mode keeps its own Netlist across a round trip", async ({
+  page,
+}) => {
+  await openEditor(page, "/editor?example=two-stage-op-amp");
+  await expectStatus(page, "Opened example: Two-Stage Op Amp");
+  await page.getByTestId("netlist-panel-toggle").click();
+  await expect(projectTools(page)).toBeVisible();
+  await page.getByTestId("mode-draw").click();
+  // Draw's own start: its Netlist is open too, so close it there.
+  await page.getByTestId("netlist-panel-toggle").click();
+  await expect(projectTools(page)).toHaveCount(0);
+  await page.getByTestId("mode-auto").click();
+  await expect(projectTools(page)).toBeVisible();
+  await page.getByTestId("mode-draw").click();
+  await expect(projectTools(page)).toHaveCount(0);
+});
+
+test("a circuit opened in Auto starts Draw with its Netlist", async ({
+  page,
+}) => {
+  await openEditor(page);
+  await page.getByTestId("mode-draw").click();
+  await page.getByTestId("netlist-panel-toggle").click();
+  await expect(projectTools(page)).toHaveCount(0);
+  await page.getByTestId("mode-auto").click();
+  await page.getByTestId("empty-examples").click();
+  await page.getByTestId("empty-example-two-stage-op-amp").click();
+  await expectStatus(page, "Opened example: Two-Stage Op Amp");
+  await expect(projectTools(page)).toHaveCount(0);
+  await page.getByTestId("mode-draw").click();
+  await expect(projectTools(page)).toBeVisible();
+});
+
+test("L, P and Place Cell in Auto bring up Draw", async ({ page }) => {
+  test.setTimeout(120_000);
+  await openEditor(page);
+  await autoImport(page, NETLIST_B);
+  await page.locator("body").press("l");
+  await expectDrawChrome(page);
+  await expect(page.getByTestId("status")).toHaveText(/^Draw mode: Net label/u);
+  await expect(
+    page.getByRole("textbox", { name: "Canvas text editor" }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+
+  await page.getByTestId("mode-auto").click();
+  await page.locator("body").press("p");
+  await expectDrawChrome(page);
+  await expect(page.getByTestId("status")).toHaveText(/^Draw mode: Cell pin/u);
+  await page.keyboard.press("Escape");
+
+  await page.getByTestId("mode-auto").click();
+  const edit = await openMenu(page, "Edit");
+  await edit
+    .getByRole("button", { name: "Place Cell from this Project…" })
+    .click();
+  await expectDrawChrome(page);
+  await expect(page.getByTestId("status")).toHaveText(
+    /^Draw mode: Place Cell/u,
+  );
+  await page.keyboard.press("Escape");
+
+  // The Cell Manager's Place does the same.
+  await page.getByTestId("mode-auto").click();
+  const manager = await openCellManager(page);
+  await manager
+    .locator(".cell-manager-list-item")
+    .filter({ hasNotText: /top/u })
+    .first()
+    .click();
+  await manager.getByRole("button", { name: "Place", exact: true }).click();
+  await expect(manager).toHaveCount(0);
+  await expectDrawChrome(page);
+  await expect(page.getByTestId("status")).toHaveText(
+    /^Draw mode: Place Cell/u,
+  );
+});
+
+test("a failed import in Auto shows its review", async ({ page }) => {
+  await openEditor(page, "/editor?example=two-stage-op-amp");
+  await expectStatus(page, "Opened example: Two-Stage Op Amp");
+  await page.getByTestId("netlist-panel-toggle").click();
+  await expect(projectTools(page)).toBeVisible();
+  await page.getByTestId("import-netlist-file").setInputFiles({
+    name: "broken.sp",
+    mimeType: "text/plain",
+    buffer: Buffer.from(".subckt broken\nX1 a b missing\n"),
+  });
+  await expect(importReview(page)).toBeVisible();
+  await expect(projectTools(page)).toHaveCount(0);
 });

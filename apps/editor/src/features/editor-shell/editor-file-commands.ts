@@ -61,6 +61,8 @@ export interface EditorFileCommandDependencies {
   setImportReport: (report: SpiceImportReport | null) => void;
   setImportReviewOpen: (open: boolean) => void;
   setSelectionOpen: (open: boolean) => void;
+  /** Close the Netlist dock, so Properties (with a failed review) shows. */
+  clearProjectPanel?: () => void;
   /**
    * The editor mode when the import lands. Auto keeps the canvas clear after
    * a successful import: the review waits in Properties until opened.
@@ -92,6 +94,7 @@ export function createEditorFileCommands({
   setImportReport,
   setImportReviewOpen,
   setSelectionOpen,
+  clearProjectPanel,
   getEditorMode,
   setStatus,
   onChunkLoadFailure,
@@ -314,6 +317,7 @@ export function createEditorFileCommands({
   const reportFailedImport = (report: SpiceImportReport, message: string) => {
     setImportReport(report);
     setImportReviewOpen(true);
+    clearProjectPanel?.();
     setSelectionOpen(true);
     setStatus(message);
   };

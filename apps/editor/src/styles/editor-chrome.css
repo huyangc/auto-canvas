@@ -1629,3 +1629,64 @@
     padding-inline: 8px;
   }
 }
+
+/* A running label is long ("… s · Cell i of N · evaluation e/b"): it is
+   capped with an ellipsis so Cancel and Agent always keep their room. */
+.app-chrome-main .app-chrome-actions {
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.app-chrome-actions > * {
+  flex-shrink: 0;
+}
+
+.app-chrome-actions > .auto-layout-control {
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.auto-layout-control .auto-layout-button {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.auto-layout-control[data-running="true"]
+  .auto-layout-button
+  .app-action-label {
+  min-width: 0;
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.auto-layout-control .auto-layout-cancel {
+  flex-shrink: 0;
+}
+
+/* The elapsed time shows only where the label does not. */
+.auto-layout-elapsed {
+  display: none;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 760px) {
+  .app-chrome-main .auto-layout-elapsed {
+    display: inline;
+  }
+}
+
+/* Properties holds an import review not seen yet. */
+.canvas-panel-buttons .app-action {
+  position: relative;
+}
+
+.canvas-panel-review-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--icm-accent);
+}
