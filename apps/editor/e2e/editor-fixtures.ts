@@ -38,6 +38,13 @@ export async function openEditor(page: Page, path = "/editor"): Promise<void> {
   await awaitEditorReady(page);
 }
 
+/**
+ * Empty browser storage, for a spec that opens the editor as a first-time
+ * visitor does: in Auto mode with the coach mark. The suite's default
+ * (playwright.config.ts) opens in Draw.
+ */
+export const AUTO_MODE_STORAGE = { cookies: [], origins: [] };
+
 /** A Project the editor ships among its examples. */
 export function exampleProject(file: string) {
   return parseProject(

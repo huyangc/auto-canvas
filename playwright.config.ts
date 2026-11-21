@@ -55,6 +55,22 @@ export default defineConfig({
   ],
   use: {
     baseURL: externalBaseUrl ?? e2eBaseUrl,
+    // The suite opens the editor in Draw mode, where the drawing tools it
+    // drives live, with the first-open coach mark already seen. Playwright
+    // copies this into every context a test creates too. The Auto-mode spec
+    // (editor-modes.spec.ts) starts from empty storage instead.
+    storageState: {
+      cookies: [],
+      origins: [
+        {
+          origin: new URL(externalBaseUrl ?? e2eBaseUrl).origin,
+          localStorage: [
+            { name: "icm.editor-mode.v1", value: "draw" },
+            { name: "icm.editor-mode-coach.v1", value: "seen" },
+          ],
+        },
+      ],
+    },
     screenshot: "only-on-failure",
     trace: "retain-on-failure",
     ...devices["Desktop Chrome"],
