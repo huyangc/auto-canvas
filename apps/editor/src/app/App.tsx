@@ -7117,9 +7117,16 @@ function WorkspaceEditor({
             ) : null}
             <CanvasPanelButtons
               netlistOpen={projectPanel === "netlist"}
-              propertiesOpen={selectionOpen}
+              propertiesOpen={selectionOpen && projectPanel === null}
               onToggleNetlist={() => toggleProjectPanel("netlist")}
-              onToggleProperties={toggleSelectionDock}
+              onToggleProperties={() => {
+                // The dock shows one panel: Properties replaces the Netlist.
+                if (projectPanel === null) toggleSelectionDock();
+                else {
+                  setProjectPanel(null);
+                  if (!selectionOpen) toggleSelectionDock();
+                }
+              }}
             />
           </div>
         ) : null}
