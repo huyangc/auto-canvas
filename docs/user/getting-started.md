@@ -35,7 +35,11 @@ ending in `!` as global Nets. The imported devices appear on a shelf, then
 **Auto Layout** draws every imported Cell by itself (the top bar shows its
 progress and **Cancel**); one **Undo** returns every Cell to the shelf. A
 netlist with several subcircuits draws each as its own Cell, and Import Review
-says so: check each Cell, since those drawings can be rougher.
+says so: check each Cell, since those drawings can be rougher. In Auto, a
+Project with several Cells lists them in a **Cells** rail at the left, each
+marked **laid out**, **as imported** or **not laid out** (with the reason when
+Auto Layout refused it, such as a Cell with more than 120 parts); click a row
+to open that Cell.
 
 ## The editor
 

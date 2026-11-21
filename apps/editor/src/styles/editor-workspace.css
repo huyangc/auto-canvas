@@ -636,6 +636,93 @@
   display: none;
 }
 
+/* Auto mode's Cells rail takes the Library's column, narrow and fixed. It
+   shows only with two or more Cells and never at compact widths. */
+.app-workspace.auto-mode.with-cells-rail {
+  grid-template-columns: 190px minmax(0, 1fr) auto;
+}
+
+.cells-rail {
+  grid-area: shapes;
+  display: flex;
+  flex-direction: column;
+  gap: var(--icm-space-1);
+  min-width: 0;
+  min-height: 0;
+  padding: var(--icm-space-2);
+  border-right: 1px solid var(--icm-border);
+  background: var(--icm-surface);
+  overflow: auto;
+  scrollbar-color: var(--icm-border-strong) transparent;
+  scrollbar-width: thin;
+}
+
+.cells-rail-title {
+  padding: 0 var(--icm-space-1);
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-xs);
+  font-weight: 600;
+}
+
+.cells-rail ul {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cells-rail button {
+  display: grid;
+  gap: 1px;
+  width: 100%;
+  padding: 5px var(--icm-space-2);
+  border: 1px solid transparent;
+  border-radius: var(--icm-radius-sm);
+  color: var(--icm-text);
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cells-rail button:hover {
+  border-color: var(--icm-border);
+  background: var(--icm-surface-hover);
+}
+
+.cells-rail button[aria-current="true"] {
+  background: var(--icm-accent-soft);
+}
+
+.cells-rail-name {
+  overflow: hidden;
+  font-size: var(--icm-font-sm);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cells-rail-top,
+.cells-rail-status {
+  color: var(--icm-text-muted);
+  font-weight: 400;
+}
+
+.cells-rail-status {
+  font-size: var(--icm-font-xs);
+}
+
+.cells-rail button[data-status="refused"] .cells-rail-status {
+  color: var(--icm-warning);
+}
+
+.cells-rail-reason {
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-xs);
+  overflow-wrap: anywhere;
+}
+
 /* Not a stacking context of its own: its card and buttons take their own
    layers, so at compact widths the buttons can rise above the dock. */
 .auto-canvas-overlay {

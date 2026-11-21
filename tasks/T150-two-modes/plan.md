@@ -1130,3 +1130,33 @@ tab ›` work.
   (`App.test.tsx:340-343`).
 - If any decision above turns out to be wrong in the code, stop and report.
   Do not choose a different design yourself.
+
+## T150b notes (implementer, 2026-11-21)
+
+- **The rail shows only with two or more Cells** (coordinator's brief; the
+  plan was silent). A one-Cell Project keeps the full-width canvas, as the
+  hierarchy row already hides itself for a flat Project. It is 190 px wide in
+  the Library's grid column (`with-cells-rail` on `.app-workspace`); the
+  canvas overlay, its buttons and the empty card stay in the canvas column,
+  and the coach mark hangs under the switch to the rail's right.
+- **Statuses** are the exact v2 words: `not laid out` (with the reason as a
+  second line and in the row's `title`), `laid out`, `as imported`. The top
+  Cell's row adds a muted `(top)`, as the Cells selector does.
+- **Refusals are kept per tab and per Project.** Besides the controller, the
+  retained outcome checks the controller's `projectSessionId`, so a Project
+  opened in the same tab (with possibly the same Document ids) starts with no
+  reasons. Outcomes `edited` and `unchanged` leave an entry alone; only
+  `applied` clears it, and a changed Document revision hides it.
+- **Leftovers A–E from slice a's last review.**
+  - A: `useProjectTabSessions` takes `getCarriedOverDocks()`; while App's
+    `docksCarriedRef` is set, a captured tab keeps the mode's own docks
+    (`modePanelsRef`). Owned path, already widened in round 1.
+  - B: `.project-tabs-shelf[open]` joins the overlay guard.
+  - C: Cancel takes focus from the body only when the Auto Layout button
+    itself had focus when it was pressed; a run started otherwise leaves the
+    body focused.
+  - D: the Properties button advertises Q when Q does what it does: Properties
+    shown (Q hides them) or, with them closed, an inspectable selection.
+    With the dock open on a project panel and Properties open behind it, Q
+    would close Properties while the button shows them, so no Q there.
+  - E: N only while the first button acts on the Netlist.
