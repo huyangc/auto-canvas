@@ -453,7 +453,9 @@ UI only: switching never changes a Document and adds no Undo step.
   normal job; the status reads `Draw mode: <tool>`. Behind a modal dialog or
   from the import card such a key does nothing.
 - Switching to Auto cancels any armed tool or transient interaction. Each mode
-  keeps its own Netlist and Properties docks for the session.
+  keeps its own Netlist and Properties docks for the session. A project tab
+  remembers its docks with the mode it was captured in; restored or switched
+  to in the other mode, it opens with that mode's defaults instead.
 - The first time a browser opens the editor in Auto, a one-time note under the
   switch says where drawing lives; **Got it** or any switch dismisses it for
   good.

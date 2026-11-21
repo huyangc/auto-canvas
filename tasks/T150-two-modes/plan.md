@@ -1030,6 +1030,8 @@ tab ›` work.
   - If the T150a diff is too large to read in one sitting, split it at step
     7: T150a1 is steps 1–6 and 8–11 without the card, and T150a2 is the
     card, the examples list and the import-dock rule.
+  - Review round 1 (coordinator, 2026-11-21): tab sessions remember docks
+    per mode; owned paths widened to `use-project-tab-sessions.ts`.
 - Keep `App.tsx` thin. New UI goes into feature files, and App.tsx only
   passes `mode` and handlers. Its JSX gains conditionals, not markup.
 - Never write the Document from mode code: no `transact`, no
