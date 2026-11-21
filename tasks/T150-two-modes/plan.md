@@ -1031,8 +1031,11 @@ tab ›` work.
   - If the T150a diff is too large to read in one sitting, split it at step
     7: T150a1 is steps 1–6 and 8–11 without the card, and T150a2 is the
     card, the examples list and the import-dock rule.
-  - Review round 1 (coordinator, 2026-11-21): tab sessions remember docks
-    per mode; owned paths widened to `use-project-tab-sessions.ts`.
+  - Review round 1 (coordinator, 2026-11-21): a tab session records the
+    mode its docks were captured in and applies them only in that mode (the
+    other mode gets its defaults); the per-mode dock memory itself is per
+    session, not per tab. Owned paths widened to
+    `use-project-tab-sessions.ts`.
   - Review round 2 (2026-11-21): one line per fix.
     - Unseen Import Review is kept and marked on the Properties button
       (`data-review-pending`, "Properties, import review waiting"); only a
@@ -1096,6 +1099,21 @@ tab ›` work.
     - Not fixed (coordinator): a user's own click on Netlist, Properties or
       `Q` discards an unapplied code draft, as on `main` in Draw; this PR
       keeps that behaviour for user-initiated closes.
+  - Review round 5 (2026-11-21): one line per item.
+    - 1: the empty card's example honours the Project hold (an unapplied
+      code draft and the rest), refusing with "Can't open a Project yet: …"
+      as the other open paths do. The card's netlist and project-file
+      actions and the top bar's `Import netlist…` stay as `main`'s File →
+      Import / Project File, which check only the dirty-work guard.
+    - 2: docks carried over for a draft are not saved as the mode's memory
+      when leaving it; the next normal restore or any dock change ends the
+      carry-over.
+    - 3: at 720 px and below, Edit and Circuit hang their popovers from the
+      window's right edge so they stay on screen, in both modes.
+    - Not fixed (coordinator): separate per-tab dock preferences. The
+      per-mode memory is per session by the round-1 decision; a dock closed
+      in Draw on one tab staying closed on a new tab is a carried
+      preference, not lost work.
 - Keep `App.tsx` thin. New UI goes into feature files, and App.tsx only
   passes `mode` and handlers. Its JSX gains conditionals, not markup.
 - Never write the Document from mode code: no `transact`, no

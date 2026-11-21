@@ -1021,3 +1021,88 @@ test("the Netlist button closes any project dock kept open in Auto", async ({
   await toggle.click();
   await expect(page.getByLabel("Netlist code", { exact: true })).toBeVisible();
 });
+
+test("the card's example waits for an unapplied code draft", async ({
+  page,
+}) => {
+  await openEditor(page);
+  await page.getByTestId("mode-draw").click();
+  await page.getByTestId("project-code-toggle").click();
+  const code = page.getByRole("textbox", { name: "Project code", exact: true });
+  await code.fill("unapplied draft");
+  await page.getByTestId("mode-auto").click();
+  await page.getByTestId("empty-examples").click();
+  await page.getByTestId("empty-example-two-stage-op-amp").click();
+  await expectStatus(
+    page,
+    "Can't open a Project yet: a code panel holds a draft that is not applied",
+  );
+  await expect(code).toHaveText("unapplied draft");
+  await expect(
+    page.getByTestId("editor-test-telemetry").getByTestId("instance-count"),
+  ).toHaveText("0");
+});
+
+test("a dock carried only for a draft is not remembered as the mode's own", async ({
+  page,
+}) => {
+  await openEditor(page, "/editor?example=two-stage-op-amp");
+  await expectStatus(page, "Opened example: Two-Stage Op Amp");
+  // Auto's own choice: Properties.
+  await page.getByTestId("properties-panel-toggle").click();
+  await expect(page.locator(".selection-dock.open")).toBeVisible();
+  await page.getByTestId("mode-draw").click();
+  await page.getByTestId("project-code-toggle").click();
+  const code = page.getByRole("textbox", { name: "Project code", exact: true });
+  await code.fill("unapplied draft");
+  // Carried into Auto and back while the draft is unapplied.
+  await page.getByTestId("mode-auto").click();
+  await expect(code).toBeVisible();
+  await page.getByTestId("mode-draw").click();
+  await expect(code).toBeVisible();
+  // The draft goes; Auto then shows its own Properties again.
+  await page.getByRole("button", { name: /Reload/ }).click();
+  await expect(code).not.toHaveText("unapplied draft");
+  await page.getByTestId("mode-auto").click();
+  await expect(projectTools(page)).toHaveCount(0);
+  await expect(page.locator(".selection-dock.open")).toBeVisible();
+});
+
+for (const width of [320, 390, 480, 720]) {
+  test(`header menus open inside the viewport at ${width} px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 800 });
+    await openEditor(page, "/editor?example=two-stage-op-amp");
+    await expectStatus(page, "Opened example: Two-Stage Op Amp");
+    for (const mode of ["mode-auto", "mode-draw"]) {
+      await page.getByTestId(mode).click();
+      for (const menuId of ["project-menu", "edit-menu", "circuit-menu"]) {
+        const menu = page.getByTestId(menuId);
+        await menu.locator(":scope > summary").click();
+        await expect(menu).toHaveAttribute("open", "");
+        const popover = (await menu
+          .locator(":scope > .command-popover, :scope > .project-menu-popover")
+          .first()
+          .boundingBox())!;
+        expect(
+          popover.x,
+          `${menuId} at ${width}px (${mode})`,
+        ).toBeGreaterThanOrEqual(0);
+        expect(
+          popover.x + popover.width,
+          `${menuId} at ${width}px (${mode})`,
+        ).toBeLessThanOrEqual(width);
+        if (menuId === "edit-menu") {
+          const item = (await menu
+            .getByRole("button", { name: /^Choose Selectable Objects/u })
+            .boundingBox())!;
+          expect(item.x).toBeGreaterThanOrEqual(0);
+          expect(item.x + item.width).toBeLessThanOrEqual(width);
+        }
+        await page.keyboard.press("Escape");
+        await expect(menu).not.toHaveAttribute("open", "");
+      }
+    }
+  });
+}

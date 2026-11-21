@@ -1690,3 +1690,20 @@
   border-radius: 50%;
   background: var(--icm-accent);
 }
+
+/* Phone widths: Undo/Redo and the mode switch push Edit and Circuit to the
+   right, where a popover hung from its trigger's left edge would run off
+   screen. Hang it from the right edge of the window instead, as File hangs
+   from the left. */
+@media (max-width: 720px) {
+  .app-chrome-main .header-menu-popover {
+    position: fixed;
+    top: calc(var(--icm-menubar-h) + 4px);
+    right: 12px;
+    left: auto;
+    box-sizing: border-box;
+    max-width: calc(100vw - 24px);
+    max-height: calc(100dvh - var(--icm-menubar-h) - 16px);
+    overflow: auto;
+  }
+}
