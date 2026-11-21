@@ -718,9 +718,9 @@ test("a failed import in Auto shows its review", async ({ page }) => {
 
 const BROKEN_NETLIST = ".subckt broken\nX1 a b missing\n";
 
-async function failedImport(page: Page) {
+async function failedImport(page: Page, name = "broken.sp") {
   await page.getByTestId("import-netlist-file").setInputFiles({
-    name: "broken.sp",
+    name,
     mimeType: "text/plain",
     buffer: Buffer.from(BROKEN_NETLIST),
   });
@@ -816,10 +816,11 @@ test("a review on screen replaced by another failed import is not waiting", asyn
 }) => {
   await openEditor(page);
   await failedImport(page);
-  await expect(importReview(page)).toBeVisible();
+  await expect(importReview(page)).toContainText("broken.sp");
   await expectReviewWaiting(page, false);
-  await failedImport(page);
-  await expect(importReview(page)).toBeVisible();
+  await failedImport(page, "broken2.sp");
+  // The second report has landed before anything is checked.
+  await expect(importReview(page)).toContainText("broken2.sp");
   await expectReviewWaiting(page, false);
 });
 
@@ -949,4 +950,74 @@ test("switching to Auto cancels typed text an armed tool holds", async ({
   const text = JSON.stringify((await exportedProject(page)).documents);
   expect(text).not.toContain("never placed");
   expect(text).not.toContain("NEVERNAMED");
+});
+
+for (const width of [390, 720]) {
+  test(`at ${width} px the canvas buttons stay reachable over an open dock`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 800 });
+    await openEditor(page, "/editor?example=two-stage-op-amp");
+    await expectStatus(page, "Opened example: Two-Stage Op Amp");
+    const netlist = page.getByTestId("netlist-panel-toggle");
+    const properties = page.getByTestId("properties-panel-toggle");
+    await netlist.click();
+    await expect(projectTools(page)).toBeVisible();
+    // Real clicks: the buttons are on top, not under the dock.
+    await netlist.click();
+    await expect(projectTools(page)).toHaveCount(0);
+    await netlist.click();
+    await expect(projectTools(page)).toBeVisible();
+    await properties.click();
+    await expect(projectTools(page)).toHaveCount(0);
+    await expect(page.locator(".selection-dock.open")).toBeVisible();
+    // Properties' own controls are not under the buttons either.
+    const buttons = (await page
+      .locator(".canvas-panel-buttons")
+      .boundingBox())!;
+    const dock = page.locator(".selection-dock.open");
+    const lastControl = dock
+      .locator("button:visible, select:visible, input:visible")
+      .last();
+    const control = await lastControl.boundingBox();
+    if (control)
+      expect(control.y + control.height).toBeLessThanOrEqual(buttons.y);
+    await properties.click();
+    await expect(page.locator(".selection-dock.open")).toHaveCount(0);
+    // Same check for the Netlist dock's last control.
+    await netlist.click();
+    const netlistControl = await projectTools(page)
+      .locator("button:visible, select:visible")
+      .last()
+      .boundingBox();
+    if (netlistControl)
+      expect(netlistControl.y + netlistControl.height).toBeLessThanOrEqual(
+        buttons.y,
+      );
+  });
+}
+
+test("the Netlist button closes any project dock kept open in Auto", async ({
+  page,
+}) => {
+  await openEditor(page, "/editor?example=two-stage-op-amp");
+  await expectStatus(page, "Opened example: Two-Stage Op Amp");
+  await page.getByTestId("mode-draw").click();
+  await page.getByTestId("project-code-toggle").click();
+  const code = page.getByRole("textbox", { name: "Project code", exact: true });
+  await code.fill("unapplied draft");
+  await page.getByTestId("mode-auto").click();
+  await expect(code).toBeVisible();
+  const toggle = page.getByTestId("netlist-panel-toggle");
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  await expect(toggle).toHaveAccessibleName("Project Code");
+  await expect(toggle).toHaveAttribute("title", "Hide Project Code");
+  await toggle.click();
+  await expect(code).toHaveCount(0);
+  await expect(projectTools(page)).toHaveCount(0);
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  await expect(toggle).toHaveAccessibleName("Netlist");
+  // With nothing open it opens the Netlist.
+  await toggle.click();
+  await expect(page.getByLabel("Netlist code", { exact: true })).toBeVisible();
 });

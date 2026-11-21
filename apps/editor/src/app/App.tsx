@@ -7209,10 +7209,25 @@ function WorkspaceEditor({
               />
             ) : null}
             <CanvasPanelButtons
-              netlistOpen={projectPanel === "netlist"}
+              projectPanelLabel={
+                projectPanel === null
+                  ? null
+                  : {
+                      netlist: "Netlist",
+                      "netlist-configuration": "Netlist Settings",
+                      instances: "Device Data",
+                      "project-code": "Project Code",
+                    }[projectPanel]
+              }
               propertiesOpen={selectionOpen && projectPanel === null}
               reviewPending={importReviewOpen && !importReviewSeen}
-              onToggleNetlist={() => toggleProjectPanel("netlist")}
+              onToggleNetlist={() =>
+                // Whatever project dock is open closes; none open, the
+                // Netlist opens.
+                projectPanel === null
+                  ? showProjectPanel("netlist")
+                  : closeProjectPanel()
+              }
               onToggleProperties={() => {
                 // The dock shows one panel: Properties replaces the Netlist.
                 if (projectPanel === null) toggleSelectionDock();

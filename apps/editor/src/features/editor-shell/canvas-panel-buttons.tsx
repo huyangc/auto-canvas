@@ -5,13 +5,18 @@ import { ToolIcon } from "./tool-icon";
  * Properties docks start closed there and open from here.
  */
 export function CanvasPanelButtons({
-  netlistOpen,
+  projectPanelLabel,
   propertiesOpen,
   reviewPending = false,
   onToggleNetlist,
   onToggleProperties,
 }: {
-  netlistOpen: boolean;
+  /**
+   * The project dock that is open (the Netlist, or Project Code or instance
+   * code kept on screen by an unapplied draft), or null. The first button
+   * closes whichever it is, and opens the Netlist when none is.
+   */
+  projectPanelLabel: string | null;
   propertiesOpen: boolean;
   /** An import's review waits in Properties, not seen yet. */
   reviewPending?: boolean;
@@ -24,14 +29,20 @@ export function CanvasPanelButtons({
         type="button"
         className="app-action"
         data-testid="netlist-panel-toggle"
-        aria-label="Netlist"
-        aria-pressed={netlistOpen}
+        aria-label={projectPanelLabel ?? "Netlist"}
+        aria-pressed={projectPanelLabel !== null}
         aria-keyshortcuts="N"
-        title={netlistOpen ? "Hide Netlist (N)" : "Show Netlist (N)"}
+        title={
+          projectPanelLabel === null
+            ? "Show Netlist (N)"
+            : projectPanelLabel === "Netlist"
+              ? "Hide Netlist (N)"
+              : `Hide ${projectPanelLabel}`
+        }
         onClick={onToggleNetlist}
       >
         <ToolIcon name="netlist" />
-        <span>Netlist</span>
+        <span>{projectPanelLabel ?? "Netlist"}</span>
       </button>
       <button
         type="button"
