@@ -71,7 +71,9 @@ pnpm start
 
 Open the printed URL (default <http://127.0.0.1:4310>). This builds the app,
 starts the server in the background, and serves the editor, API and Agent relay
-on one URL. Stop it with `pnpm stop`. Logs append to `.local/logs/server.log`.
+on one URL. Stop it with `pnpm stop`; after changing code, `pnpm restart`
+rebuilds and replaces the running server. Logs append to
+`.local/logs/server.log`.
 The launcher creates a missing `auto_canvas` database when PostgreSQL CLI tools
 are available; create `auto_canvas_test` separately before running tests.
 
@@ -80,13 +82,15 @@ serves the editor with hot reload on <http://localhost:5173>. Ctrl+C stops both.
 API logs append to `.local/logs/server-dev.log`. Use `pnpm dev:editor` to run
 only Vite against an already-running server.
 
-`npm run start`, `npm run stop` and `npm run dev` work the same; installing
+`npm run start`, `npm run stop`, `npm run restart` and `npm run dev` work the
+same; installing
 must use pnpm. The server applies database migrations at startup. Configuration
 (database URL, host, port, project limit and launcher timeouts) is in
 [apps/server/README.md](apps/server/README.md).
 
 Optionally copy [.env.example](.env.example) to `.env` at the repository root
-and uncomment the settings you need. `start`, `stop` and `dev` load this Bash
+and uncomment the settings you need. `start`, `stop`, `restart` and `dev` load
+this Bash
 configuration before applying defaults; exported shell variables take precedence.
 A missing `.env` uses defaults. `.env` is ignored by Git.
 
@@ -98,6 +102,7 @@ Set `AUTO_CANVAS_BASE_PATH=/canvas` to build and serve every editor/API URL unde
 | ------------------------- | ------------------------------------------------------------------------- |
 | `pnpm start`              | Build and start the whole app in the background                           |
 | `pnpm stop`               | Stop the server on the configured port                                    |
+| `pnpm restart`            | Rebuild, then stop and start again; a failed build keeps the old server   |
 | `pnpm dev`                | Server plus Vite hot reload; Ctrl+C stops both                            |
 | `pnpm dev:editor`         | Editor dev server (Vite)                                                  |
 | `pnpm server:dev`         | Build and start the server against `auto_canvas`                          |

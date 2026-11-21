@@ -36,6 +36,7 @@
     "mcp:package": "pnpm build && node scripts/package-mcp.mjs",
     "start": "bash scripts/start.sh",
     "stop": "bash scripts/stop.sh",
+    "restart": "bash scripts/restart.sh",
     "dev": "bash scripts/dev.sh",
     "dev:editor": "pnpm --filter @icm/editor dev",
     "lint": "node scripts/lint.mjs",

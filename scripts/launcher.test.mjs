@@ -61,6 +61,7 @@ beforeEach(async () => {
   for (const script of [
     "start.sh",
     "stop.sh",
+    "restart.sh",
     "dev.sh",
     "lib/launcher.sh",
     "lib/editor-supervisor.mjs",
@@ -187,6 +188,65 @@ test("background start waits for health, refuses a second start, stops by port, 
   const stopped = await launch("stop").result;
   expect(stopped).toMatchObject({ code: 0 });
   expect(stopped.output).toContain("not running");
+});
+
+test("restart rebuilds, replaces the running server and starts one when none runs", async () => {
+  const pid = () => Number(readFileSync(join(root, "server.pid"), "utf8"));
+  // Nothing is running: restart is a start.
+  const first = await launch("restart").result;
+  expect(first.code).toBe(0);
+  expect(first.output).toContain("not running");
+  expect(first.output).toContain(`http://127.0.0.1:${env.PORT}`);
+  const before = pid();
+  expect(alive(before)).toBe(true);
+
+  const again = await launch("restart").result;
+  expect(again.code).toBe(0);
+  expect(again.output).toContain(`Stopping listeners on port ${env.PORT}`);
+  expect(alive(before)).toBe(false);
+  expect(pid()).not.toBe(before);
+  expect(
+    await (await fetch(`http://127.0.0.1:${env.PORT}/api/health`)).json(),
+  ).toEqual({ ok: true });
+  // One build per restart, made before the old server stops; start reuses it.
+  expect(readFileSync(join(root, "build.log"), "utf8")).toBe("build\nbuild\n");
+
+  const reused = await launch("restart", { SKIP_BUILD: "1" }).result;
+  expect(reused.code).toBe(0);
+  expect(readFileSync(join(root, "build.log"), "utf8")).toBe("build\nbuild\n");
+  expect((await launch("stop").result).code).toBe(0);
+});
+
+test("restart leaves the running server alone when it cannot bring up a new one", async () => {
+  expect((await launch("start").result).code).toBe(0);
+  const running = Number(readFileSync(join(root, "server.pid"), "utf8"));
+  const stillServing = async () => {
+    expect(alive(running)).toBe(true);
+    expect(
+      await (await fetch(`http://127.0.0.1:${env.PORT}/api/health`)).json(),
+    ).toEqual({ ok: true });
+  };
+
+  const failedBuild = await launch("restart", { FIXTURE_BUILD_EXIT: "7" })
+    .result;
+  expect(failedBuild.code).toBe(7);
+  expect(failedBuild.output).not.toContain("Stopping listeners");
+  await stillServing();
+
+  const noDatabase = await launch("restart", {
+    FIXTURE_DB_MODE: "unreachable",
+    DATABASE_URL: "postgresql://localhost/custom",
+  }).result;
+  expect(noDatabase.code).toBe(1);
+  expect(noDatabase.output).toContain("Cannot connect to PostgreSQL");
+  await stillServing();
+
+  rmSync(join(root, "node_modules"), { recursive: true });
+  const noDependencies = await launch("restart").result;
+  expect(noDependencies.code).toBe(1);
+  expect(noDependencies.output).toContain("pnpm install --frozen-lockfile");
+  await stillServing();
+  expect((await launch("stop").result).code).toBe(0);
 });
 
 test.each(["start", "dev"])(
