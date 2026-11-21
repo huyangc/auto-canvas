@@ -5,10 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { EditorDocumentController } from "../../document/document-controller";
 import { createLibraryExampleProject } from "../../examples/library-examples";
-import type {
-  AutoLayoutCellReport,
-  AutoLayoutRunReport,
-} from "./auto-layout-session";
+import type { AutoLayoutCellVerdicts } from "./auto-layout-session";
 import { useCellLayoutOutcomes } from "./use-cell-layout-outcomes";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -27,20 +24,22 @@ const controllerOf = (...ids: string[]): FakeController => ({
   project: { documents: ids.map((id) => ({ id, revision: 1 })) },
 });
 
-const cell = (
-  documentId: string,
-  outcome: AutoLayoutCellReport["outcome"],
-  reason?: string,
-): AutoLayoutCellReport => ({
+const refused = (documentId: string, reason: string, revision = 1) => ({
   documentId,
-  cellName: documentId,
-  outcome,
-  ...(reason === undefined ? {} : { reason }),
-  diagnostics: [],
+  outcome: "refused" as const,
+  reason,
+  revision,
 });
-
-const run = (...cells: AutoLayoutCellReport[]): AutoLayoutRunReport => ({
-  run: "import",
+const applied = (documentId: string) => ({
+  documentId,
+  outcome: "applied" as const,
+});
+const verdicts = (
+  owner: FakeController,
+  ...cells: AutoLayoutCellVerdicts["cells"]
+): AutoLayoutCellVerdicts => ({
+  owner,
+  projectSessionId: owner.projectSessionId,
   cells,
 });
 
@@ -52,77 +51,55 @@ afterEach(async () => {
 
 async function mount(initial: FakeController) {
   const view: {
-    reasonFor?: ReturnType<typeof useCellLayoutOutcomes>;
-    setReport?: Dispatch<SetStateAction<AutoLayoutRunReport | null>>;
+    outcomes?: ReturnType<typeof useCellLayoutOutcomes>;
     setController?: Dispatch<SetStateAction<FakeController>>;
   } = {};
   function Harness() {
-    const [report, setReport] = useState<AutoLayoutRunReport | null>(null);
     const [controller, setController] = useState(initial);
-    view.setReport = setReport;
     view.setController = setController;
-    view.reasonFor = useCellLayoutOutcomes(report, controller);
+    view.outcomes = useCellLayoutOutcomes(controller);
     return null;
   }
   root = createRoot(document.createElement("div"));
   await act(async () => root!.render(<Harness />));
+  const record = (record: AutoLayoutCellVerdicts) =>
+    act(async () => view.outcomes!.record(record));
   const reason = (controller: FakeController, id: string) =>
-    view.reasonFor!(controller.project.documents.find((d) => d.id === id)!);
-  return { view, reason };
+    view.outcomes!.reasonFor(
+      controller.project.documents.find((d) => d.id === id)!,
+    );
+  return { view, record, reason };
 }
 
 describe("retained Auto Layout outcomes per Cell", () => {
-  it("keeps a refused Cell's reason after the report is cleared", async () => {
+  it("keeps a refused Cell's reason until a later run applies it", async () => {
     const tab = controllerOf("top", "chain");
-    const { view, reason } = await mount(tab);
+    const { record, reason } = await mount(tab);
     expect(reason(tab, "chain")).toBeUndefined();
-    await act(async () =>
-      view.setReport!(
-        run(cell("top", "applied"), cell("chain", "refused", "too big")),
-      ),
-    );
+    await record(verdicts(tab, applied("top"), refused("chain", "too big")));
     expect(reason(tab, "chain")).toBe("too big");
     expect(reason(tab, "top")).toBeUndefined();
-    // Details closed: the report goes, the reason stays.
-    await act(async () => view.setReport!(null));
+    // A run that does not mention the Cell leaves its reason alone.
+    await record(verdicts(tab, applied("top")));
     expect(reason(tab, "chain")).toBe("too big");
+    await record(verdicts(tab, applied("chain")));
+    expect(reason(tab, "chain")).toBeUndefined();
   });
 
   it("drops a reason once the Cell's Document changes", async () => {
     const tab = controllerOf("top", "chain");
-    const { view, reason } = await mount(tab);
-    await act(async () =>
-      view.setReport!(run(cell("chain", "refused", "too big"))),
-    );
+    const { record, reason } = await mount(tab);
+    await record(verdicts(tab, refused("chain", "too big")));
     tab.project.documents[1]!.revision = 2;
     expect(reason(tab, "chain")).toBeUndefined();
   });
 
-  it("clears a Cell's reason when a later run applies it", async () => {
-    const tab = controllerOf("top", "chain");
-    const { view, reason } = await mount(tab);
-    await act(async () =>
-      view.setReport!(run(cell("chain", "refused", "too big"))),
-    );
-    // A run that does not mention the Cell leaves its reason alone.
-    await act(async () => view.setReport!(run(cell("top", "applied"))));
-    expect(reason(tab, "chain")).toBe("too big");
-    await act(async () => view.setReport!(run(cell("chain", "applied"))));
-    expect(reason(tab, "chain")).toBeUndefined();
-  });
-
-  it("keeps each tab's reasons with its controller", async () => {
+  it("keeps each run's verdicts with the tab it names", async () => {
     const first = controllerOf("top", "chain");
     const second = controllerOf("top", "chain");
-    const { view, reason } = await mount(first);
-    await act(async () =>
-      view.setReport!(run(cell("chain", "refused", "too big"))),
-    );
-    // A tab switch clears the report and binds another controller.
-    await act(async () => {
-      view.setReport!(null);
-      view.setController!(second);
-    });
+    const { view, record, reason } = await mount(second);
+    // The first tab's run reports while the second is open.
+    await record(verdicts(first, refused("chain", "too big")));
     expect(reason(second, "chain")).toBeUndefined();
     await act(async () => view.setController!(first));
     expect(reason(first, "chain")).toBe("too big");
@@ -130,10 +107,8 @@ describe("retained Auto Layout outcomes per Cell", () => {
 
   it("starts another Project opened in the tab with no reasons", async () => {
     const tab = controllerOf("top", "chain");
-    const { view, reason } = await mount(tab);
-    await act(async () =>
-      view.setReport!(run(cell("chain", "refused", "too big"))),
-    );
+    const { record, reason } = await mount(tab);
+    await record(verdicts(tab, refused("chain", "too big")));
     // Same ids and revisions, another Project session (a replacement).
     tab.projectSessionId = "session-2";
     expect(reason(tab, "chain")).toBeUndefined();
@@ -143,19 +118,26 @@ describe("retained Auto Layout outcomes per Cell", () => {
     const controller = new EditorDocumentController(
       createLibraryExampleProject("two-stage-op-amp")!,
     );
-    const view: { reasonFor?: ReturnType<typeof useCellLayoutOutcomes> } = {};
-    let setReport: Dispatch<SetStateAction<AutoLayoutRunReport | null>>;
+    const view: { outcomes?: ReturnType<typeof useCellLayoutOutcomes> } = {};
     function Harness() {
-      const [report, set] = useState<AutoLayoutRunReport | null>(null);
-      setReport = set;
-      view.reasonFor = useCellLayoutOutcomes(report, controller);
+      view.outcomes = useCellLayoutOutcomes(controller);
       return null;
     }
     root = createRoot(document.createElement("div"));
     await act(async () => root!.render(<Harness />));
-    const reason = () => view.reasonFor!(controller.document);
+    const reason = () => view.outcomes!.reasonFor(controller.document);
     await act(async () =>
-      setReport(run(cell(controller.activeDocumentId, "refused", "too big"))),
+      view.outcomes!.record({
+        owner: controller,
+        projectSessionId: controller.projectSessionId,
+        cells: [
+          refused(
+            controller.activeDocumentId,
+            "too big",
+            controller.document.revision,
+          ),
+        ],
+      }),
     );
     expect(reason()).toBe("too big");
     const instance = controller.document.instances[0]!;

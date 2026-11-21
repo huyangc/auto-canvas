@@ -464,10 +464,13 @@ it does.
   the reason, when the last finished Auto Layout run in this tab refused the
   Cell and its Document has not changed since; **laid out** when it has
   routes; **as imported** while it is still netlist-only; otherwise **not laid
-  out**. The reasons live in memory per tab and per Project, not in the
-  Project file; closing Details keeps them, an edit of that Cell or a later
-  run that applies it drops them. A one-Cell Project has no rail, and at
-  compact widths Auto keeps the hierarchy row instead.
+  out**. The reasons come only from verdicts the planner returned for that
+  tab's own run; a run that was cancelled, failed, found the drawing changed
+  or was left by a tab switch leaves the statuses as they were (Details still
+  says what happened). They live in memory per tab and per Project, not in
+  the Project file; closing Details keeps them, an edit of that Cell or a
+  later run that applies it drops them. A one-Cell Project has no rail, and
+  at compact widths Auto keeps the hierarchy row instead.
 - **Draw** is the drawing page: the drawing toolbar, the device library and
   the Netlist beside the canvas.
 - **Remembered only when chosen.** The switch (and the card's **Draw it

@@ -77,6 +77,27 @@ export interface AutoLayoutSessionState {
   report: AutoLayoutRunReport | null;
 }
 
+/**
+ * What a run's planner decided for its Cells, for the run's own tab: the
+ * controller and Project session the run was fenced to, a refusal's reason
+ * with the Document revision it judged, or a commit. Only a result the
+ * planner returned produces one; a cancelled, failed, stale or abandoned run
+ * produces none.
+ */
+export interface AutoLayoutCellVerdicts {
+  owner: unknown;
+  projectSessionId: string;
+  cells: readonly (
+    | { documentId: string; outcome: "applied" }
+    | {
+        documentId: string;
+        outcome: "refused";
+        reason: string;
+        revision: number;
+      }
+  )[];
+}
+
 /** One Cell an import run plans, as the controller held it at install. */
 export interface AutoLayoutImportCell {
   documentId: string;
@@ -124,6 +145,8 @@ export interface AutoLayoutSessionOptions {
    * clears selection and fits the view when the open Cell is among them.
    */
   onApplied: (documentIds: readonly string[]) => void;
+  /** The planner's verdicts on a run's Cells, as they are settled. */
+  onVerdicts?: (verdicts: AutoLayoutCellVerdicts) => void;
   now?: () => number;
 }
 
@@ -298,6 +321,18 @@ export function createAutoLayoutSession(options: AutoLayoutSessionOptions) {
           }
         : null;
     if (error) {
+      options.onVerdicts?.({
+        owner: fence.owner,
+        projectSessionId: fence.projectSessionId,
+        cells: [
+          {
+            documentId: fence.documentId,
+            outcome: "refused",
+            reason: refusalReason(error),
+            revision: fence.revision,
+          },
+        ],
+      });
       finish(
         `Auto Layout left the drawing unchanged: ${refusalReason(error)}`,
         report("refused"),
@@ -335,6 +370,11 @@ export function createAutoLayoutSession(options: AutoLayoutSessionOptions) {
       options.setStatus(`${AUTO_LAYOUT_UNCHANGED_MESSAGE}${withWarnings}`);
       return;
     }
+    options.onVerdicts?.({
+      owner: fence.owner,
+      projectSessionId: fence.projectSessionId,
+      cells: [{ documentId: fence.documentId, outcome: "applied" }],
+    });
     options.onApplied([fence.documentId]);
     options.setStatus(
       `Auto Layout applied (revision ${committed.revision})${withWarnings}`,
@@ -384,6 +424,13 @@ export function createAutoLayoutSession(options: AutoLayoutSessionOptions) {
         return name ? [[hierarchicalSymbolId(name), cell.name] as const] : [];
       }),
     );
+    // Refusals the planner itself returned, with the revision it judged.
+    const plannerRefusals: {
+      documentId: string;
+      outcome: "refused";
+      reason: string;
+      revision: number;
+    }[] = [];
     const cells = target.cells.map((cell): AutoLayoutCellReport => {
       const result = results.find(
         (item) => item.documentId === cell.documentId,
@@ -407,8 +454,15 @@ export function createAutoLayoutSession(options: AutoLayoutSessionOptions) {
       if (!result)
         return { ...base, outcome: "refused", reason: NO_PLAN_REASON };
       const error = firstError(diagnostics);
-      if (error)
+      if (error) {
+        plannerRefusals.push({
+          documentId: cell.documentId,
+          outcome: "refused",
+          reason: refusalReason(error),
+          revision: cell.revision,
+        });
         return { ...base, outcome: "refused", reason: refusalReason(error) };
+      }
       if (result.edits.length === 0) return { ...base, outcome: "unchanged" };
       // Applied once the step commits.
       const report: AutoLayoutCellReport = { ...base, outcome: "applied" };
@@ -425,6 +479,18 @@ export function createAutoLayoutSession(options: AutoLayoutSessionOptions) {
       return report;
     });
     stop();
+    const verdicts = (applied: readonly AutoLayoutCellReport[]) =>
+      options.onVerdicts?.({
+        owner: target.owner,
+        projectSessionId: target.projectSessionId,
+        cells: [
+          ...plannerRefusals,
+          ...applied.map((cell) => ({
+            documentId: cell.documentId,
+            outcome: "applied" as const,
+          })),
+        ],
+      });
     const step =
       planned.length > 0
         ? transactStep(planned.map((item) => item.request))
@@ -445,6 +511,8 @@ export function createAutoLayoutSession(options: AutoLayoutSessionOptions) {
             ? `could not commit (${code})`
             : "nothing was applied";
       }
+      // Nothing was committed: only the planner's own refusals stand.
+      verdicts([]);
       const rollback = `Auto Layout could not commit ${failedName} (${code}); nothing was applied`;
       finish(
         prefix(
@@ -466,6 +534,7 @@ export function createAutoLayoutSession(options: AutoLayoutSessionOptions) {
       if (cell && result.ok && !result.applied) cell.outcome = "unchanged";
     });
     const applied = cells.filter((cell) => cell.outcome === "applied");
+    verdicts(applied);
     if (applied.length > 0)
       options.onApplied(applied.map((cell) => cell.documentId));
     const report: AutoLayoutRunReport = { run: "import", cells };
