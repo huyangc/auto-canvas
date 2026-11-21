@@ -457,6 +457,17 @@ it does.
   named after it; with none open it opens the Netlist. At compact widths,
   where a dock covers the canvas, both buttons stay above it and the dock
   keeps its bottom strip clear for them.
+- **Cells rail.** In Auto, a Project with two or more Cells shows a narrow
+  `Cell list` rail at the canvas's left: one row per Cell, the top Cell
+  first, the open Cell current. A row opens its Cell, as the Cells selector
+  does. Each row has one status, the first that holds: **not laid out** with
+  the reason, when the last finished Auto Layout run in this tab refused the
+  Cell and its Document has not changed since; **laid out** when it has
+  routes; **as imported** while it is still netlist-only; otherwise **not laid
+  out**. The reasons live in memory per tab and per Project, not in the
+  Project file; closing Details keeps them, an edit of that Cell or a later
+  run that applies it drops them. A one-Cell Project has no rail, and at
+  compact widths Auto keeps the hierarchy row instead.
 - **Draw** is the drawing page: the drawing toolbar, the device library and
   the Netlist beside the canvas.
 - **Remembered only when chosen.** The switch (and the card's **Draw it
@@ -465,7 +476,8 @@ it does.
   pressed in Auto brings up Draw for the current session only, then does its
   normal job; the status reads `Draw mode: <tool>`. Placements started from
   the Cell Manager, the insert dialog or User Components do the same. Behind a modal dialog,
-  inside a dialog, menu or open header menu, on the canvas text editor's
+  inside a dialog, menu, open header menu or the tab strip's open Shelf
+  picker, on the canvas text editor's
   toolbar or from the import card such a key does nothing.
 - Switching to Auto cancels any armed tool or transient interaction, together
   with what was typed into it (an unplaced Text draft, a Net Label name), as
@@ -474,7 +486,8 @@ it does.
   keeps its own Netlist and Properties docks for the session, except that a
   project dock holding an unapplied code draft stays open across the switch.
   Document settings, which apply live, close on a switch. A project tab
-  remembers its docks with the mode it was captured in; restored or switched
+  remembers its docks with the mode it was captured in (a dock kept open only
+  for a draft is not one of them); restored or switched
   to in the other mode, it opens with that mode's defaults instead.
 - The first time a browser opens the editor in Auto, a one-time note under the
   switch says where drawing lives; **Got it** or any switch dismisses it for

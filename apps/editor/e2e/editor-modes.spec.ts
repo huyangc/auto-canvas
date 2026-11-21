@@ -1165,3 +1165,100 @@ test("a Space after an import from the card does not cancel its layout", async (
     { timeout: 60_000 },
   );
 });
+
+const boxesOverlap = (
+  a: { x: number; y: number; width: number; height: number },
+  b: { x: number; y: number; width: number; height: number },
+) =>
+  a.x < b.x + b.width &&
+  b.x < a.x + a.width &&
+  a.y < b.y + b.height &&
+  b.y < a.y + a.height;
+
+test("the Cells rail lists each Cell with its layout status", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await openEditor(page);
+  // One Cell: nothing to choose from, the canvas keeps the width.
+  await expect(page.getByTestId("cells-rail")).toHaveCount(0);
+  await autoImport(page, resistorChainNetlist(121));
+  await expectStatus(
+    page,
+    "Auto Layout applied to 1 of 2 Cells; chain: more than 120 parts",
+  );
+  const project = await exportedProject(page);
+  const chainId = project.documents.find(
+    (d: { name: string }) => d.name === "chain",
+  ).id;
+  const rail = page.getByRole("navigation", { name: "Cell list" });
+  await expect(rail).toHaveAttribute("data-testid", "cells-rail");
+  const top = rail.getByTestId(`cells-rail-${project.topDocumentId}`);
+  const chain = rail.getByTestId(`cells-rail-${chainId}`);
+  await expect(rail.getByRole("button")).toHaveCount(2);
+  await expect(rail.getByRole("button").first()).toHaveAttribute(
+    "data-testid",
+    `cells-rail-${project.topDocumentId}`,
+  );
+  await expect(top.locator(".cells-rail-status")).toHaveText("laid out");
+  await expect(top).toHaveAttribute("aria-current", "true");
+  await expect(chain.locator(".cells-rail-status")).toHaveText("not laid out");
+  await expect(chain.locator(".cells-rail-reason")).toHaveText(
+    "more than 120 parts",
+  );
+  await expect(chain).toHaveAttribute("title", /more than 120 parts/u);
+
+  // Nothing on the canvas sits over the rail.
+  const railBox = (await rail.boundingBox())!;
+  expect(railBox.width).toBeLessThanOrEqual(200);
+  for (const testId of [
+    "mode-coach",
+    "netlist-panel-toggle",
+    "properties-panel-toggle",
+  ]) {
+    const box = (await page.getByTestId(testId).boundingBox())!;
+    expect(boxesOverlap(box, railBox), testId).toBe(false);
+  }
+
+  // The reason outlives the report's Details.
+  await page.getByTestId("auto-layout-details").click();
+  const report = page.getByTestId("auto-layout-report");
+  await expect(report).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(report).toHaveCount(0);
+  await expect(page.getByTestId("auto-layout-status")).toHaveCount(0);
+  await expect(chain.locator(".cells-rail-reason")).toHaveText(
+    "more than 120 parts",
+  );
+
+  // A row opens its Cell.
+  await chain.click();
+  await expectStatus(page, "Opened Cell chain");
+  await expect(chain).toHaveAttribute("aria-current", "true");
+  await expect(top).not.toHaveAttribute("aria-current", "true");
+
+  // An edit of the refused Cell makes its reason stale.
+  const revisionOutput = page
+    .getByTestId("editor-test-telemetry")
+    .getByTestId("revision");
+  const revision = await revisionOutput.textContent();
+  await page.locator("body").press("ControlOrMeta+a");
+  await page.locator("body").press("r");
+  await expect(revisionOutput).not.toHaveText(revision!);
+  await expect(chain.locator(".cells-rail-reason")).toHaveCount(0);
+  await expect(chain.locator(".cells-rail-status")).toHaveText("as imported");
+  await expectAutoChrome(page);
+
+  // Draw keeps its Library and Cell selector; the rail is Auto's.
+  await page.getByTestId("mode-draw").click();
+  await expectDrawChrome(page);
+  await expect(page.getByTestId("cells-rail")).toHaveCount(0);
+  await expect(page.getByTestId("cell-navigation")).toBeVisible();
+  await page.getByTestId("mode-auto").click();
+  await expect(rail).toBeVisible();
+
+  // At compact width Auto keeps the hierarchy row instead.
+  await page.setViewportSize({ width: 800, height: 800 });
+  await expect(page.getByTestId("cells-rail")).toHaveCount(0);
+  await expect(page.getByTestId("cell-navigation")).toBeVisible();
+});

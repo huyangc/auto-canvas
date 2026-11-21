@@ -259,6 +259,8 @@ import { EditorComponentEditor } from "./editor-component-editor";
 import { useEditorCommandRouter } from "./use-editor-command-router";
 import type { EditorCommandResult } from "../commands/editor-command";
 import { useAutoLayout } from "../features/auto-layout/use-auto-layout";
+import { useCellLayoutOutcomes } from "../features/auto-layout/use-cell-layout-outcomes";
+import { CellsRail } from "../features/hierarchy/cells-rail";
 import { AutoLayoutReport } from "../features/auto-layout/auto-layout-report";
 import { useEditorShortcuts } from "./use-editor-shortcuts";
 import { EditorCanvasContextMenu, EditorMenuBar } from "./editor-menus";
@@ -4363,6 +4365,15 @@ function WorkspaceEditor({
     clearEditorSelection,
     fitView,
   });
+  // The Cells rail's reasons outlive the report (Details close, tab switch).
+  const cellRefusalReason = useCellLayoutOutcomes(
+    autoLayout.report,
+    editorDocumentController,
+  );
+  // Auto mode's left column lists the Cells. One Cell has nothing to choose
+  // from, and at compact width the hierarchy row stays (decision 22).
+  const cellsRailShown =
+    editorMode === "auto" && !compactLayout && project.documents.length > 1;
   const editorCommands = useEditorCommandRouter({
     autoLayoutRunning: autoLayout.running,
     hasLayoutTarget:
@@ -5176,7 +5187,9 @@ function WorkspaceEditor({
           editorMode === "draw" && visibleLibraryPanelOpen
             ? ""
             : " library-collapsed"
-        }${editorMode === "auto" ? " auto-mode" : ""}`}
+        }${editorMode === "auto" ? " auto-mode" : ""}${
+          cellsRailShown ? " with-cells-rail" : ""
+        }`}
         style={
           {
             "--icm-shapes-width": `${libraryWidth}px`,
@@ -5226,8 +5239,16 @@ function WorkspaceEditor({
             }}
           />
         ) : null}
-        {/* Auto mode has no library; its left column is the Cells rail's
-            slot (T150b), empty until then, so the canvas takes it. */}
+        {/* Auto mode has no library; its left column is the Cells rail. */}
+        {cellsRailShown ? (
+          <CellsRail
+            documents={project.documents}
+            topDocumentId={project.topDocumentId}
+            activeDocumentId={document.id}
+            refusalReason={cellRefusalReason}
+            onSelectDocument={selectDocumentFromHierarchy}
+          />
+        ) : null}
         {editorMode === "draw" ? (
           <>
             <ShapesPanel
