@@ -13,7 +13,23 @@ Written and implemented by the coordinator (tooling, about 15 lines of Bash).
 
 One choice beyond "stop, then start": the build happens before the stop. A
 restart whose build, database check or prerequisites fail leaves the running
-server serving, and the downtime is the stop and start only.
+process and its API up, and the API's downtime is the stop and start only.
+
+## Review
+
+An independent Opus review (APPROVE) and the codex hook raised the same P2:
+the first wording said a failed build "keeps the old server serving". The
+build rewrites `apps/editor/dist`, which the running server reads on every
+request (`apps/server/src/static-editor.ts`), so editor pages can 404 during
+the rebuild and stay incomplete after a failed build; `pnpm start` never
+builds under a live server. The reviewer judged build-first still the better
+order (stop-first takes the API down for the whole build). Fixed by saying
+exactly that in the script comment and both READMEs. Building into a staging
+directory and swapping it in would close the window; not done here.
+
+Left as they are (P3): no extra hint when the start fails after the stop (the
+"stopped" line and start's own error are shown); no test for a hidden
+listener aborting the restart or for a start failing after the stop.
 
 ## Acceptance
 

@@ -102,7 +102,7 @@ Set `AUTO_CANVAS_BASE_PATH=/canvas` to build and serve every editor/API URL unde
 | ------------------------- | ------------------------------------------------------------------------- |
 | `pnpm start`              | Build and start the whole app in the background                           |
 | `pnpm stop`               | Stop the server on the configured port                                    |
-| `pnpm restart`            | Rebuild, then stop and start again; a failed build keeps the old server   |
+| `pnpm restart`            | Rebuild, then stop and start again; a failed build keeps the old API up   |
 | `pnpm dev`                | Server plus Vite hot reload; Ctrl+C stops both                            |
 | `pnpm dev:editor`         | Editor dev server (Vite)                                                  |
 | `pnpm server:dev`         | Build and start the server against `auto_canvas`                          |
