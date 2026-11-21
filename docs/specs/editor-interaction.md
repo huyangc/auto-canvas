@@ -434,7 +434,9 @@ one undo, reporting the exact affected count (also in dry run).
 ## Modes
 
 The editor has two modes behind the top bar's `Auto | Draw` switch. A mode is
-UI only: switching never changes a Document and adds no Undo step.
+UI only: switching changes no Document and adds no Undo step of its own,
+apart from committing a canvas text edit in progress, as any click outside
+it does.
 
 - **Auto** (the default) shows the canvas with **Import netlist…**, the
   **Auto Layout** button and no drawing toolbar or library. Netlist and
@@ -449,8 +451,12 @@ UI only: switching never changes a Document and adds no Undo step.
   another import, a new Project or a reload removes it. Each project tab keeps
   its own review in memory while another tab is shown (a reload drops it). A
   failed import opens it, closing the Netlist if it was open, unless the
-  Netlist or Project Code dock holds an unapplied draft: the dock then stays
-  and the review waits for Properties.
+  Netlist, Project Code or Device Data (instance code) dock holds an
+  unapplied draft: the dock then stays and the review waits for Properties.
+  The canvas's first button closes whichever project dock is open, and is
+  named after it; with none open it opens the Netlist. At compact widths,
+  where a dock covers the canvas, both buttons stay above it and the dock
+  keeps its bottom strip clear for them.
 - **Draw** is the drawing page: the drawing toolbar, the device library and
   the Netlist beside the canvas.
 - **Remembered only when chosen.** The switch (and the card's **Draw it

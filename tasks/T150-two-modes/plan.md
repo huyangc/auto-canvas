@@ -1082,6 +1082,20 @@ tab ›` work.
       tests pin it.
     - Owned paths widened to `user-components.spec.ts` (the Auto placement
       case).
+  - Review round 4 (2026-11-21): one line per item.
+    - 1: at compact widths in Auto the canvas buttons sit above an open dock
+      (the overlay is no longer a stacking context of its own), and the
+      dock keeps a bottom strip clear for them; Draw is unchanged.
+    - 2: the first canvas button closes whichever project dock is open
+      (Netlist, Netlist Settings, Device Data, Project Code), is named and
+      titled after it, and opens the Netlist when none is.
+    - 3: the replaced-report test waits for `broken2.sp` before asserting;
+      it fails with the `importReport` effect dependency removed.
+    - 4: the spec qualifies "no Document change" by the commit of a canvas
+      text edit in progress, and names the Device Data (instance code) dock.
+    - Not fixed (coordinator): a user's own click on Netlist, Properties or
+      `Q` discards an unapplied code draft, as on `main` in Draw; this PR
+      keeps that behaviour for user-initiated closes.
 - Keep `App.tsx` thin. New UI goes into feature files, and App.tsx only
   passes `mode` and handlers. Its JSX gains conditionals, not markup.
 - Never write the Document from mode code: no `transact`, no
