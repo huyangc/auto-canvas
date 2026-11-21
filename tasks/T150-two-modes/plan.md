@@ -62,6 +62,10 @@ Each item is marked with where it comes from:
      library and the existing Cell selector.
 5. **The mode is remembered per browser; the first time is Auto.
    (coordinator's default)**
+   - Owner, 2026-11-21: remembered only when switched explicitly; implicit
+     switches are session-only. The switch and the empty card's `Draw it
+yourself →` write `icm.editor-mode.v1`; a drawing shortcut or command
+     (decision 15) does not.
 6. **Switching mode changes only the UI.** It makes no Document change and no
    Undo step. (coordinator's default)
 7. **Opening an example or a project keeps the remembered mode.**
@@ -195,7 +199,12 @@ tab` (cloud only).
         already in.
       - Not chosen: keep the coach until `Got it`. It would read "switch to
         Draw" while Draw is already on.
-    - **Remembered mode.** The stored mode becomes `draw`, exactly as for a
+    - **Remembered mode.** Owner, 2026-11-21: remembered only when switched
+      explicitly; implicit switches are session-only. Such a switch does not
+      write the stored mode, so the next open is the mode last chosen with
+      the switch (Auto if never chosen). It does store the coach mark as
+      seen. The rest of this item is the superseded draft. The stored mode
+      becomes `draw`, exactly as for a
       click on the switch. A user who presses `W` once in Auto mode
       therefore finds the page in Draw on the next open. Going back stays
       one click on `Auto` in the top bar, which also cancels the armed tool
