@@ -59,11 +59,39 @@ import { materializeRazaviProjectBulkConnections } from "../presentation/razavi-
 import type { ComponentEditorSession } from "./component-editor-session";
 import { DEFAULT_VIEWBOX } from "./default-view-box";
 import type { EditorProjectPanelMode } from "./editor-project-dock";
+import type { EditorMode } from "../features/editor-shell/editor-mode";
 import type { HighlightedNetOrigin } from "./use-editor-derived-model";
 import type { useAgentProjectResources } from "./use-agent-hosts";
 import { executeProjectTransaction } from "@icm/edit-engine";
 import type { CloudProjectStore } from "../services/editor-services";
 import type { CloudProjectSummary } from "../features/editor-shell/cloud-projects";
+
+/** The Netlist / Properties docks a tab shows. */
+interface TabDocks {
+  panel: EditorProjectPanelMode | null;
+  properties: boolean;
+}
+
+/** A new tab's docks: Draw opens with its Netlist, Auto on a clear canvas. */
+export function defaultTabDocks(mode: EditorMode): TabDocks {
+  return mode === "auto"
+    ? { panel: null, properties: false }
+    : { panel: "netlist", properties: false };
+}
+
+/**
+ * The docks to show for a tab: the ones it remembered, if it was captured in
+ * the mode now on screen, or else that mode's defaults. A tab saved before
+ * the modes existed was captured on the drawing page, which is Draw.
+ */
+export function tabDocksFor(
+  session: TabDocks & { mode?: EditorMode | undefined },
+  current: EditorMode,
+): TabDocks {
+  return (session.mode ?? "draw") === current
+    ? { panel: session.panel, properties: session.properties }
+    : defaultTabDocks(current);
+}
 
 type DocumentControllerState = ReturnType<typeof useDocumentController>;
 type ProjectFileLifecycle = ReturnType<typeof useProjectFileLifecycle>;
@@ -164,6 +192,8 @@ interface ProjectTabSessionsOptions {
   resetInteractionState: () => void;
   cancelAllTransientInteraction: () => void;
   nativeWorkspaceSaving: RefObject<boolean>;
+  /** The editor mode now, read when a tab is captured, made or restored. */
+  getEditorMode: () => EditorMode;
 }
 
 /** The window's project tabs: one session per tab, saved with the window. */
@@ -237,6 +267,7 @@ export function useProjectTabSessions({
   resetInteractionState,
   cancelAllTransientInteraction,
   nativeWorkspaceSaving,
+  getEditorMode,
 }: ProjectTabSessionsOptions) {
   function captureTabSession() {
     return {
@@ -249,6 +280,9 @@ export function useProjectTabSessions({
       selection: visualSelection,
       panel: projectPanel,
       properties: selectionOpen,
+      // The docks above belong to this mode; another mode shows its own.
+      // Undefined only on a tab saved before the modes existed (Draw).
+      mode: getEditorMode() as EditorMode | undefined,
       netlistEntry,
       dirty: isDirtyWork(),
       unsafe: hasUnsafeWork() || codeDraftDirty,
@@ -277,8 +311,9 @@ export function useProjectTabSessions({
     autoFitProjectRef.current = session.controller.projectSessionId;
     pendingAutoFitRef.current = session.fit;
     replaceSelection(session.selection);
-    setSelectionOpen(session.properties);
-    setProjectPanel(session.panel);
+    const docks = tabDocksFor(session, getEditorMode());
+    setSelectionOpen(docks.properties);
+    setProjectPanel(docks.panel);
     setNetlistEntry(session.netlistEntry);
     setStatus(`Switched to ${session.controller.project.name}`);
     setRestoringWorkspace(false);
@@ -328,8 +363,8 @@ export function useProjectTabSessions({
         draftingIds: [],
         junctionIds: [],
       },
-      panel: "netlist",
-      properties: false,
+      ...defaultTabDocks(getEditorMode()),
+      mode: getEditorMode(),
       netlistEntry: null,
       dirty: options.persistenceState === "dirty",
       unsafe: options.persistenceState === "dirty",

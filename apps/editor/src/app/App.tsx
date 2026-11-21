@@ -666,7 +666,9 @@ function WorkspaceEditor({
   // mode the user is in by then.
   const editorModeRef = useRef(editorMode);
   editorModeRef.current = editorMode;
-  // Each mode keeps its own Netlist / Properties docks for the session.
+  // Each mode keeps its own Netlist / Properties docks for the session, not
+  // per tab: a tab remembers only the docks of the mode it was captured in
+  // (tabDocksFor), and the other mode's memory here is the last one seen.
   const modePanelsRef = useRef<
     Record<
       EditorMode,
@@ -4752,6 +4754,7 @@ function WorkspaceEditor({
     resetInteractionState,
     cancelAllTransientInteraction,
     nativeWorkspaceSaving,
+    getEditorMode: () => editorModeRef.current,
   });
   useRestoredTabLinks({
     restoringWorkspace,

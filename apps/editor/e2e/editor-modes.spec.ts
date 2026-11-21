@@ -389,3 +389,72 @@ test("the Auto top bar stays one row with its controls on screen", async ({
     });
   }
 });
+
+const projectTools = (page: Page) =>
+  page.getByRole("complementary", { name: "Project tools" });
+
+test("a new project tab in Auto opens on a clear canvas", async ({ page }) => {
+  await openEditor(page, "/editor?example=two-stage-op-amp");
+  await expectStatus(page, "Opened example: Two-Stage Op Amp");
+  await page.getByRole("button", { name: "New project tab" }).click();
+  await expect(page.getByRole("tab")).toHaveCount(2);
+  await expectAutoChrome(page);
+  await expect(projectTools(page)).toHaveCount(0);
+  await expect(page.getByTestId("netlist-panel-toggle")).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  );
+});
+
+test("a reload after a drawing key opens Auto without Draw's docks", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await openEditor(page);
+  await page.getByTestId("import-netlist-file").setInputFiles({
+    name: "circuit.sp",
+    mimeType: "text/plain",
+    buffer: Buffer.from(NETLIST_A),
+  });
+  await expect(page.getByTestId("status")).toContainText(
+    /Imported 1 Document.*Auto Layout applied/u,
+    { timeout: 60_000 },
+  );
+  await page.locator("body").press("w");
+  await expectDrawChrome(page);
+  await expect(projectTools(page)).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("statusbar-tool")).toHaveCount(0);
+  // The window saves this tab as Draw shows it, Netlist open, and brings it
+  // back on reload.
+  await page.reload();
+  await awaitEditorReady(page);
+  await expect(page.getByRole("tab", { selected: true })).toContainText("cs");
+  await expectAutoChrome(page);
+  await expect(projectTools(page)).toHaveCount(0);
+  await expect(page.locator(".selection-dock.open")).toHaveCount(0);
+  await expect(page.getByTestId("netlist-panel-toggle")).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  );
+});
+
+test("a Netlist opened in Auto stays with its tab", async ({ page }) => {
+  await openEditor(page, "/editor?example=two-stage-op-amp");
+  await expectStatus(page, "Opened example: Two-Stage Op Amp");
+  await page.getByTestId("netlist-panel-toggle").click();
+  await expect(projectTools(page)).toBeVisible();
+  await page.getByRole("button", { name: "New project tab" }).click();
+  await expect(page.getByRole("tab")).toHaveCount(2);
+  await expect(projectTools(page)).toHaveCount(0);
+  await page.getByRole("tab").first().click();
+  await expect(page.getByRole("tab").first()).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await expect(projectTools(page)).toBeVisible();
+  await expect(page.getByTestId("netlist-panel-toggle")).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+});
