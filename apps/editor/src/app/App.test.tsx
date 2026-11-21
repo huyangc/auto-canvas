@@ -128,7 +128,8 @@ describe("editor shell", () => {
     );
     const actionRow = markup.slice(actionRowStart, actionRowEnd);
     expect(actionRow).not.toContain('data-testid="publish-gallery-button"');
-    expect(actionRow).toContain('class="account-signin account-menu-fallback"');
+    // The header carries no account control (T149).
+    expect(actionRow).not.toContain("account-");
     const netlistStart = markup.indexOf('aria-label="Netlist"');
     const netlistEnd = markup.indexOf("</div>", netlistStart);
     const netlistMenu = markup.slice(netlistStart, netlistEnd);
@@ -217,7 +218,7 @@ describe("editor shell", () => {
     expect(markup).toContain("Manage Cells…");
   });
 
-  it("links GitHub and the change log directly without a Help surface", () => {
+  it("keeps the header to its brand, menus and Agent, with the change log in the status bar", () => {
     const project = createEmptyProject("resource-links", "Resource Links");
     const markup = renderToStaticMarkup(
       <App services={services} project={project} />,
@@ -226,20 +227,29 @@ describe("editor shell", () => {
     expect(markup).not.toContain(">About</button>");
     expect(markup).not.toContain(">Help</button>");
     expect(markup).not.toContain('id="editor-help-dialog"');
-    expect(markup).toContain('data-testid="editor-report-bug"');
-    expect(markup).toContain("Report bug");
-    expect(markup).toContain('data-testid="editor-repository-link"');
-    // GitHub and the credit stay in view in the header.
-    expect(markup).toContain('aria-label="GitHub repository"');
-    expect(markup).toContain('class="tokenzhang-credit"');
-    expect(markup).not.toContain('data-testid="app-more-menu"');
-    expect(markup).toContain(
-      'href="https://github.com/cascode-ai/analog-canvas"',
+    expect(markup).toContain('<h1 title="Auto Canvas">Auto Canvas</h1>');
+    expect(markup).not.toContain("Analog Canvas</h1>");
+    const actionRowStart = markup.indexOf('class="app-chrome-actions"');
+    expect(actionRowStart).toBeGreaterThan(-1);
+    const actionRow = markup.slice(
+      actionRowStart,
+      markup.indexOf('<div class="toolbar-row', actionRowStart),
     );
-    // The repository opens beside the drawing, never in its place.
-    expect(
-      /<a[^>]*data-testid="editor-repository-link"[^>]*>/u.exec(markup)?.[0],
-    ).toContain('target="_blank"');
+    // No GitHub, bug report, credit or account control in the header (T149).
+    for (const removed of [
+      'data-testid="editor-report-bug"',
+      'data-testid="editor-repository-link"',
+      'aria-label="GitHub repository"',
+      "tokenzhang",
+      "Presented by",
+      "account-",
+    ])
+      expect(actionRow).not.toContain(removed);
+    expect(markup).not.toContain('data-testid="editor-report-bug"');
+    expect(markup).not.toContain('data-testid="editor-repository-link"');
+    expect(markup).not.toContain('class="tokenzhang-credit"');
+    expect(markup).not.toContain('href="https://tokenzhang.com"');
+    expect(markup).not.toContain('data-testid="app-more-menu"');
     expect(markup).toContain('data-testid="statusbar-change-log"');
     expect(markup).toContain(
       'href="https://github.com/cascode-ai/analog-canvas/commits/main"',
@@ -247,22 +257,13 @@ describe("editor shell", () => {
     expect(markup).toContain('data-testid="statusbar-shortcut-hints"');
     expect(markup).toContain("Hints</button>");
     expect(markup).not.toContain('data-testid="canvas-shortcut-hints"');
-    expect(markup).toContain('class="app-chrome-actions"');
-    expect(markup).toContain("Presented by");
-    expect(markup).toContain('href="https://tokenzhang.com"');
-    expect(markup).toContain('src="/tokenzhang-favicon.png"');
-    const navigationEnd = markup.indexOf("</nav>");
-    const repositoryLink = markup.indexOf(
-      'data-testid="editor-repository-link"',
-    );
-    const ownerLink = markup.indexOf('href="https://tokenzhang.com"');
-    expect(repositoryLink).toBeGreaterThan(navigationEnd);
-    expect(ownerLink).toBeGreaterThan(repositoryLink);
     expect(markup).not.toContain('role="dialog"');
     // Agent connects directly from the command row; no one-item menu or
     // connection panel appears before the user clicks it.
-    expect(markup).toContain('data-testid="open-agent" title="Connect Agent"');
-    expect(markup).toContain('class="app-action-label">Agent</span>');
+    expect(actionRow).toContain(
+      'data-testid="open-agent" title="Connect Agent"',
+    );
+    expect(actionRow).toContain('class="app-action-label">Agent</span>');
     expect(markup).not.toContain("<summary>Agent</summary>");
     expect(markup).not.toContain('data-testid="connect-agent-panel"');
   });

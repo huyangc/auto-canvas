@@ -332,7 +332,7 @@ test("keeps the command surface compact, its menus dismissable, and publishes PW
   expect(
     await (await page.request.get("/manifest.webmanifest")).json(),
   ).toMatchObject({
-    name: "Analog Canvas",
+    name: "Auto Canvas",
     display: "standalone",
     theme_color: "#2383e2",
     icons: [

@@ -318,25 +318,6 @@ body {
   margin-left: auto;
 }
 
-.app-repository-link {
-  display: inline-grid;
-  flex: 0 0 auto;
-  width: var(--icm-control-h);
-  height: var(--icm-control-h);
-  place-items: center;
-  border-radius: var(--icm-radius-sm);
-  color: var(--icm-text-muted);
-}
-
-.app-repository-link:hover {
-  color: var(--icm-text);
-  background: var(--icm-surface-hover);
-}
-
-.app-repository-link svg {
-  width: 18px;
-  height: 18px;
-}
 .bug-report-link {
   box-sizing: border-box;
   display: inline-flex;
@@ -375,79 +356,9 @@ body {
   font-weight: 750;
   line-height: 1;
 }
-.tokenzhang-credit {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--icm-space-1);
-  white-space: nowrap;
-}
-
-/* A first line that is never empty, so the credit, too, can wrap away. */
-
-/* One line, even if long: "Presented by [Z] TokenZhang" never wraps. */
-.app-chrome-actions .tokenzhang-credit {
-  align-items: center;
-  gap: var(--icm-space-1);
-  max-height: var(--icm-menubar-h);
-  line-height: 1.1;
-  white-space: nowrap;
-}
-
-.tokenzhang-credit-kicker {
-  color: var(--icm-text-muted);
-  font-size: var(--icm-font-xs);
-  font-weight: 500;
-  line-height: 1.1;
-}
-
-.tokenzhang-link {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--icm-space-1);
-  color: var(--icm-text);
-  font-size: var(--icm-font-xs);
-  font-weight: 500;
-  line-height: 1.1;
-  text-decoration: none;
-}
-
-.tokenzhang-link:hover {
-  color: var(--icm-accent);
-  text-decoration: underline;
-  text-underline-offset: 0.15rem;
-}
-
-.tokenzhang-link-icon {
-  width: var(--icm-icon);
-  height: var(--icm-icon);
-  border-radius: 3px;
-}
-
-.app-chrome-actions .tokenzhang-link-icon {
-  width: 12px;
-  height: 12px;
-}
-
 @media (max-width: 900px) {
-  .tokenzhang-link-label {
-    display: none;
-  }
-
   /* Narrow windows keep the verb; the tooltip still says where. */
   .publish-label-long {
     display: none;
   }
-
-  .app-chrome-actions .bug-report-label {
-    display: none;
-  }
-
-  .app-chrome-actions .bug-report-link {
-    width: var(--icm-control-h);
-    padding: 0;
-  }
 }
-
-/* Below the credit group's exit the actions still crowd the brand: the
-   subtitle yields (the tab bar right underneath names the page), the bug
-   link goes icon-only, and the account chip tightens. */

@@ -83,7 +83,7 @@ test("keeps Library Netlist and Project Code together on the left at full and ha
   }
 });
 
-test("compacts the editor header at half width and keeps account identity available", async ({
+test("compacts the editor header at half width without GitHub, credit or account controls", async ({
   page,
 }) => {
   await page.route("**/api/auth/providers", (route) =>
@@ -101,13 +101,16 @@ test("compacts the editor header at half width and keeps account identity availa
   await page.setViewportSize({ width: 720, height: 900 });
   await page.goto("/editor");
 
-  await expect(
-    page.getByRole("heading", { name: "Analog Canvas" }),
-  ).toBeHidden();
+  await expect(page.getByRole("heading", { name: "Auto Canvas" })).toBeHidden();
+  await expect(page.locator(".editor-brand")).toHaveAttribute(
+    "aria-label",
+    "Auto Canvas",
+  );
   await expect(page.getByTestId("header-gallery-link")).toHaveCount(0);
   await expect(page.getByTestId("header-arena-link")).toHaveCount(0);
-  await expect(page.getByTestId("account-name")).toBeVisible();
-  await expect(page.getByTestId("account-owner")).toBeHidden();
+  // Even signed in, the header offers no account control (T149).
+  await expect(page.getByTestId("account-name")).toHaveCount(0);
+  await expect(page.getByTestId("account-owner")).toHaveCount(0);
 
   // One width per editor-chrome.css band the original six covered.
   for (const width of [320, 390, 480, 720, 1440]) {
@@ -150,23 +153,26 @@ test("compacts the editor header at half width and keeps account identity availa
     expect(actionBounds.at(-1)!.right).toBeLessThanOrEqual(width);
     await expect(actions.getByTestId("publish-gallery-button")).toHaveCount(0);
     await expect(actions.getByTestId("open-agent")).toBeVisible();
-    await expect(actions.locator(".tokenzhang-link-icon")).toBeVisible();
-    // The name, or its round mark at phone widths, identifies the account.
-    await expect(actions.getByTestId("account-name")).toBeVisible();
+    // No GitHub, bug report, credit or account control at any width (T149).
+    for (const removed of [
+      '[data-testid="editor-repository-link"]',
+      '[data-testid="editor-report-bug"]',
+      ".tokenzhang-credit",
+      ".account-menu, .account-signin, .account-menu-fallback",
+    ])
+      await expect(actions.locator(removed)).toHaveCount(0);
+    await expect(actions).not.toContainText("Presented by");
     if (width <= 760) {
       await expect(
         actions.getByTestId("open-agent").locator(".app-action-label"),
       ).toBeHidden();
     }
   }
-  await page.getByTestId("account-name").click();
-  await expect(
-    page.getByRole("button", { name: "Sign out", exact: true }),
-  ).toBeVisible();
 });
 
-// A failed providers or session request falls back to the account menu.
-test("keeps the account affordance when auth providers are unavailable", async ({
+// A failed providers or session request no longer brings an account
+// fallback into the header (T149).
+test("shows no account fallback when auth providers are unavailable", async ({
   page,
 }) => {
   await page.route("**/api/auth/providers", (route) =>
@@ -178,9 +184,8 @@ test("keeps the account affordance when auth providers are unavailable", async (
   await page.setViewportSize({ width: 390, height: 900 });
   await page.goto("/editor");
 
-  const fallback = page.locator(".account-menu-fallback");
-  await expect(fallback).toBeVisible();
-  await expect(fallback.locator("summary")).toContainText("⋯");
-  await fallback.locator("summary").click();
-  await expect(fallback.locator(".account-popover")).toContainText("Account");
+  const actions = page.locator(".app-chrome-actions");
+  await expect(actions.getByTestId("open-agent")).toBeVisible();
+  await expect(page.locator(".account-menu-fallback")).toHaveCount(0);
+  await expect(actions.locator(".account-signin")).toHaveCount(0);
 });
