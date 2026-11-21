@@ -138,6 +138,21 @@ test("an Auto import keeps the canvas clear and lays the netlist out", async ({
   await expect(
     page.getByRole("region", { name: "Import Review" }),
   ).toBeVisible();
+  // The Netlist takes the dock from the canvas corner, and Properties takes
+  // it back.
+  await page.getByTestId("netlist-panel-toggle").click();
+  await expect(
+    page.getByRole("complementary", { name: "Project tools" }),
+  ).toBeVisible();
+  await page.getByTestId("properties-panel-toggle").click();
+  await expect(
+    page.getByRole("complementary", { name: "Project tools" }),
+  ).toHaveCount(0);
+  await expect(page.getByTestId("properties-panel-toggle")).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(page.locator(".selection-dock.open")).toBeVisible();
 });
 
 test("the card opens a project file through the chooser", async ({ page }) => {
