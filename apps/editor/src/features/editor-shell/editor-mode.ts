@@ -34,7 +34,7 @@ export function readStoredEditorMode(
   }
 }
 
-export function writeStoredEditorMode(
+function writeStoredEditorMode(
   storage: ModeStorage | undefined,
   mode: EditorMode,
 ): void {
@@ -46,7 +46,7 @@ export function writeStoredEditorMode(
 }
 
 /** Whether this browser has already dismissed the first-open coach mark. */
-export function readCoachSeen(storage: ModeStorage | undefined): boolean {
+function readCoachSeen(storage: ModeStorage | undefined): boolean {
   try {
     return storage?.getItem(MODE_COACH_STORAGE_KEY) === "seen";
   } catch {
@@ -55,7 +55,7 @@ export function readCoachSeen(storage: ModeStorage | undefined): boolean {
   }
 }
 
-export function writeCoachSeen(storage: ModeStorage | undefined): void {
+function writeCoachSeen(storage: ModeStorage | undefined): void {
   try {
     storage?.setItem(MODE_COACH_STORAGE_KEY, "seen");
   } catch {

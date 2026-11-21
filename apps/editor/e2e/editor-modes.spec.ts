@@ -346,3 +346,31 @@ test("canvas edits in Auto stay in Auto: rotate, Undo and Delete", async ({
   await expect(page.getByTestId("instance-count")).not.toHaveText(count!);
   await expectAutoChrome(page);
 });
+
+test("the Auto top bar stays one row with its controls on screen", async ({
+  page,
+}) => {
+  await openEditor(page);
+  for (const width of [320, 390, 480, 720, 1440]) {
+    await page.setViewportSize({ width, height: 800 });
+    const main = (await page.locator(".app-chrome-main").boundingBox())!;
+    expect(main.height).toBeLessThanOrEqual(48);
+    for (const testId of [
+      "draw-tool-undo",
+      "mode-switch",
+      "auto-layout-button",
+      "project-menu",
+    ]) {
+      const box = (await page.getByTestId(testId).boundingBox())!;
+      expect(box.x, `${testId} at ${width}px`).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width, `${testId} at ${width}px`).toBeLessThanOrEqual(
+        width,
+      );
+      expect(box.y + box.height).toBeLessThanOrEqual(main.y + main.height);
+    }
+    // Below 720 px Import netlist… is in File only.
+    await expect(page.getByTestId("import-netlist-button")).toBeVisible({
+      visible: width > 720,
+    });
+  }
+});
