@@ -17,6 +17,7 @@ import type { FencedDocumentTransaction } from "./auto-layout-protocol";
 import {
   createAutoLayoutSession,
   type AutoLayoutAbandonedRun,
+  type AutoLayoutCellVerdicts,
   type AutoLayoutFence,
   type AutoLayoutImportCell,
   type AutoLayoutSession,
@@ -53,6 +54,11 @@ export interface AutoLayoutEditorBinding {
   setStatus: Dispatch<SetStateAction<string>>;
   clearEditorSelection: () => void;
   fitView: (options?: { announce?: boolean }) => void;
+  /**
+   * The planner's verdicts on a run's Cells, naming the run's own tab; a
+   * run left by a tab switch, cancelled or failed sends none.
+   */
+  onVerdicts?: (verdicts: AutoLayoutCellVerdicts) => void;
   createWorker?: () => AutoLayoutWorker | null;
 }
 
@@ -116,6 +122,7 @@ export function useAutoLayout(binding: AutoLayoutEditorBinding) {
     },
     setStatus: (status) => bindingRef.current.setStatus(status),
     onChange: setState,
+    onVerdicts: (verdicts) => bindingRef.current.onVerdicts?.(verdicts),
     onApplied: (documentIds) => {
       // Only the Cell the person is looking at is reset; laying out other
       // Cells leaves its selection and view alone.

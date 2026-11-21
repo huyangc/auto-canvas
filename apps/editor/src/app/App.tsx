@@ -4358,6 +4358,10 @@ function WorkspaceEditor({
     report: setStatus,
     onChunkLoadFailure: setChunkLoadFailure,
   });
+  // The Cells rail's reasons: the planner's verdicts, recorded for the tab
+  // each run belonged to; they outlive the report (Details close, tab
+  // switch).
+  const cellOutcomes = useCellLayoutOutcomes(editorDocumentController);
   const autoLayout = useAutoLayout({
     project,
     document,
@@ -4368,12 +4372,8 @@ function WorkspaceEditor({
     setStatus,
     clearEditorSelection,
     fitView,
+    onVerdicts: cellOutcomes.record,
   });
-  // The Cells rail's reasons outlive the report (Details close, tab switch).
-  const cellRefusalReason = useCellLayoutOutcomes(
-    autoLayout.report,
-    editorDocumentController,
-  );
   // Auto mode's left column lists the Cells. One Cell has nothing to choose
   // from, and at compact width the hierarchy row stays (decision 22).
   const cellsRailShown =
@@ -5252,7 +5252,7 @@ function WorkspaceEditor({
             documents={project.documents}
             topDocumentId={project.topDocumentId}
             activeDocumentId={document.id}
-            refusalReason={cellRefusalReason}
+            refusalReason={cellOutcomes.reasonFor}
             onSelectDocument={selectDocumentFromHierarchy}
           />
         ) : null}

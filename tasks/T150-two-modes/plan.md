@@ -1172,3 +1172,17 @@ tab ›` work.
     hides the reason and Undo does not bring it back.
   - The rail's browser test pins that a long Cell name does not scroll the
     rail sideways.
+- T150b review round 2 (codex on PR 105, 2026-11-21): one line per item.
+  - 1: a refusal could be recorded against the incoming tab when a run's
+    result and a tab switch landed in one commit (reproduced at hook level
+    with the real session and controller). The session now hands the store
+    `AutoLayoutCellVerdicts` (`onVerdicts`) naming the run's own controller
+    and Project session, with each refusal's judged revision, when the
+    result arrives; `useCellLayoutOutcomes(controller)` no longer reads the
+    report.
+  - 2: only planner verdicts are recorded: a planner refusal and a
+    committed Cell. A run left by a tab switch (its synthetic report),
+    cancelled, failed, stale, a commit rollback's "nothing was applied",
+    "no plan was returned" and "depends on …, edited since import" record
+    nothing; Details still shows them.
+  - Not fixed (coordinator): panel shortcut hints during a drag.
