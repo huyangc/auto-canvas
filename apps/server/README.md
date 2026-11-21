@@ -39,9 +39,12 @@ health wait (default 60 seconds); `STOP_TIMEOUT` controls the shutdown grace
 period before SIGKILL (default 10 seconds). Both accept non-negative integer
 seconds. Start refuses occupied ports and reports their processes. Stop finds
 the listener by port, without a PID file, and reports "not running" if absent.
-Restart checks prerequisites and the database and builds first, so a failed
-build leaves the running server serving; it then stops and starts, and starts
-a server when none is running. `SKIP_BUILD=1 pnpm restart` reuses the builds.
+Restart checks prerequisites and the database and builds first, then stops
+and starts; it starts a server when none is running. The old process and its
+API stay up through a failed check or build. The build rewrites the editor
+files that process serves, so editor pages may fail to load during the
+rebuild, and after a failed build the editor may be incomplete until a
+successful `pnpm restart`. `SKIP_BUILD=1 pnpm restart` reuses the builds.
 Port inspection requires `lsof` (macOS/Linux) or `ss` (Linux); health checks
 require `curl`. An interrupted or failed launch cleans up the processes it started.
 
