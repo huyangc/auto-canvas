@@ -4853,6 +4853,11 @@ function WorkspaceEditor({
     cancelAllTransientInteraction,
     nativeWorkspaceSaving,
     getEditorMode: () => editorModeRef.current,
+    getCarriedOverDocks: () => {
+      if (!docksCarriedRef.current) return null;
+      const own = modePanelsRef.current[editorModeRef.current];
+      return { panel: own.projectPanel, properties: own.selectionOpen };
+    },
   });
   useRestoredTabLinks({
     restoringWorkspace,
@@ -7247,6 +7252,13 @@ function WorkspaceEditor({
                     }[projectPanel]
               }
               propertiesOpen={selectionOpen && projectPanel === null}
+              // Q closes Properties whenever the dock holds them, and opens
+              // them only for an inspectable selection.
+              propertiesShortcut={
+                selectionOpen
+                  ? projectPanel === null && !documentSettingsOpen
+                  : hasInspectableSelection
+              }
               reviewPending={importReviewOpen && !importReviewSeen}
               onToggleNetlist={() =>
                 // Whatever project dock is open closes; none open, the

@@ -3,6 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 import {
   NETLIST_A,
   NETLIST_B,
+  resistorChainNetlist,
 } from "../src/features/auto-layout/auto-layout-fixture.test-support";
 import {
   AUTO_MODE_STORAGE,
@@ -1106,3 +1107,61 @@ for (const width of [320, 390, 480, 720]) {
     }
   });
 }
+
+test("a dock carried for a draft is not saved with the tab as Auto's own", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await openEditor(page);
+  await page.getByTestId("import-netlist-file").setInputFiles({
+    name: "circuit.sp",
+    mimeType: "text/plain",
+    buffer: Buffer.from(NETLIST_A),
+  });
+  await expect(page.getByTestId("status")).toContainText(
+    /Imported 1 Document.*Auto Layout applied/u,
+    { timeout: 60_000 },
+  );
+  await page.getByTestId("mode-draw").click();
+  await page.getByTestId("project-code-toggle").click();
+  const code = page.getByRole("textbox", { name: "Project code", exact: true });
+  await code.fill("unapplied draft");
+  // Carried into Auto for the draft, which then goes.
+  await page.getByTestId("mode-auto").click();
+  await expect(code).toBeVisible();
+  await page.getByRole("button", { name: /Reload/ }).click();
+  await expect(code).not.toHaveText("unapplied draft");
+  // The window saves Auto's own docks for this tab, not the carried one.
+  await page.reload();
+  await awaitEditorReady(page);
+  await expect(page.getByRole("tab", { selected: true })).toContainText("cs");
+  await expectAutoChrome(page);
+  await expect(projectTools(page)).toHaveCount(0);
+  await expect(page.locator(".selection-dock.open")).toHaveCount(0);
+});
+
+test("a Space after an import from the card does not cancel its layout", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await openEditor(page);
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByTestId("empty-choose-netlist").click();
+  await (
+    await chooser
+  ).setFiles({
+    name: "chain.sp",
+    mimeType: "text/plain",
+    buffer: Buffer.from(resistorChainNetlist(60)),
+  });
+  // The card's button went with the card; the run's Cancel does not take
+  // its focus.
+  const cancel = page.getByTestId("auto-layout-cancel");
+  await expect(cancel).toBeVisible();
+  await expect(cancel).not.toBeFocused();
+  await page.keyboard.press("Space");
+  await expect(page.getByTestId("status")).toContainText(
+    "Auto Layout applied to 2 of 2 Cells",
+    { timeout: 60_000 },
+  );
+});

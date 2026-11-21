@@ -7,6 +7,7 @@ import { ToolIcon } from "./tool-icon";
 export function CanvasPanelButtons({
   projectPanelLabel,
   propertiesOpen,
+  propertiesShortcut,
   reviewPending = false,
   onToggleNetlist,
   onToggleProperties,
@@ -18,11 +19,23 @@ export function CanvasPanelButtons({
    */
   projectPanelLabel: string | null;
   propertiesOpen: boolean;
+  /**
+   * Q does what the Properties button does now: it hides Properties shown
+   * here, or shows them for an inspectable selection. Otherwise the router
+   * rejects Q, so the button does not advertise it.
+   */
+  propertiesShortcut: boolean;
   /** An import's review waits in Properties, not seen yet. */
   reviewPending?: boolean;
   onToggleNetlist: () => void;
   onToggleProperties: () => void;
 }) {
+  // N toggles the Netlist itself: it does not close another project dock.
+  const netlistKey =
+    projectPanelLabel === null || projectPanelLabel === "Netlist";
+  const propertiesTitle = propertiesOpen
+    ? "Hide Properties"
+    : "Show Properties";
   return (
     <div className="canvas-panel-buttons" role="group" aria-label="Panels">
       <button
@@ -31,7 +44,7 @@ export function CanvasPanelButtons({
         data-testid="netlist-panel-toggle"
         aria-label={projectPanelLabel ?? "Netlist"}
         aria-pressed={projectPanelLabel !== null}
-        aria-keyshortcuts="N"
+        aria-keyshortcuts={netlistKey ? "N" : undefined}
         title={
           projectPanelLabel === null
             ? "Show Netlist (N)"
@@ -53,8 +66,8 @@ export function CanvasPanelButtons({
         }
         aria-pressed={propertiesOpen}
         data-review-pending={reviewPending ? "true" : undefined}
-        aria-keyshortcuts="Q"
-        title={propertiesOpen ? "Hide Properties (Q)" : "Show Properties (Q)"}
+        aria-keyshortcuts={propertiesShortcut ? "Q" : undefined}
+        title={propertiesShortcut ? `${propertiesTitle} (Q)` : propertiesTitle}
         onClick={onToggleProperties}
       >
         <ToolIcon name="inspect" />
