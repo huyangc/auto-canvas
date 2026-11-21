@@ -1160,3 +1160,15 @@ tab ›` work.
     With the dock open on a project panel and Properties open behind it, Q
     would close Properties while the button shows them, so no Q there.
   - E: N only while the first button acts on the Netlist.
+- T150b review round 1 (2026-11-21): one line per item.
+  - 1: a tab restore (`endDocksCarryOver` from `restoreTabSession`) and a
+    Project replacement end a draft's dock carry-over, so a tab whose docks
+    equal the carried ones is saved with its own docks.
+  - 2: the Q rule is `propertiesKeyActs` beside `canvas-panel-buttons.tsx`,
+    unit-tested per case; App calls it.
+  - 3: the focus tests fail on slice a's code; a press that starts no run
+    arms nothing for a later run.
+  - 4: one outcome test drives the real `EditorDocumentController`: an edit
+    hides the reason and Undo does not bring it back.
+  - The rail's browser test pins that a long Cell name does not scroll the
+    rail sideways.

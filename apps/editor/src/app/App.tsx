@@ -210,7 +210,10 @@ import {
 } from "./use-editor-derived-model";
 import type { RoutingGuidanceView } from "../interaction/interaction-state";
 import { ShapesPanel } from "../features/editor-shell/shapes-panel";
-import { CanvasPanelButtons } from "../features/editor-shell/canvas-panel-buttons";
+import {
+  CanvasPanelButtons,
+  propertiesKeyActs,
+} from "../features/editor-shell/canvas-panel-buttons";
 import {
   useEditorMode,
   type EditorMode,
@@ -1119,6 +1122,7 @@ function WorkspaceEditor({
       // clear canvas in Auto. Ordinary edits and user-driven panel changes
       // do not reset the workspace.
       propertiesOpenBeforeProjectPanelRef.current = false;
+      docksCarriedRef.current = false;
       setSelectionOpen(false);
       setProjectPanel(editorModeRef.current === "auto" ? null : "netlist");
       // The other mode's remembered docks belonged to the outgoing circuit:
@@ -4869,6 +4873,9 @@ function WorkspaceEditor({
       const own = modePanelsRef.current[editorModeRef.current];
       return { panel: own.projectPanel, properties: own.selectionOpen };
     },
+    endDocksCarryOver: () => {
+      docksCarriedRef.current = false;
+    },
   });
   useRestoredTabLinks({
     restoringWorkspace,
@@ -7273,13 +7280,12 @@ function WorkspaceEditor({
                     }[projectPanel]
               }
               propertiesOpen={selectionOpen && projectPanel === null}
-              // Q closes Properties whenever the dock holds them, and opens
-              // them only for an inspectable selection.
-              propertiesShortcut={
-                selectionOpen
-                  ? projectPanel === null && !documentSettingsOpen
-                  : hasInspectableSelection
-              }
+              propertiesShortcut={propertiesKeyActs({
+                selectionOpen,
+                projectPanelOpen: projectPanel !== null,
+                documentSettingsOpen,
+                hasInspectableSelection,
+              })}
               reviewPending={importReviewOpen && !importReviewSeen}
               onToggleNetlist={() =>
                 // Whatever project dock is open closes; none open, the

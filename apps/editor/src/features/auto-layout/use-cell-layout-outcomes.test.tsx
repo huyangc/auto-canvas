@@ -3,6 +3,8 @@ import { act, useState, type Dispatch, type SetStateAction } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { EditorDocumentController } from "../../document/document-controller";
+import { createLibraryExampleProject } from "../../examples/library-examples";
 import type {
   AutoLayoutCellReport,
   AutoLayoutRunReport,
@@ -135,5 +137,43 @@ describe("retained Auto Layout outcomes per Cell", () => {
     // Same ids and revisions, another Project session (a replacement).
     tab.projectSessionId = "session-2";
     expect(reason(tab, "chain")).toBeUndefined();
+  });
+
+  it("hides a reason after an edit of the real Document, also after Undo", async () => {
+    const controller = new EditorDocumentController(
+      createLibraryExampleProject("two-stage-op-amp")!,
+    );
+    const view: { reasonFor?: ReturnType<typeof useCellLayoutOutcomes> } = {};
+    let setReport: Dispatch<SetStateAction<AutoLayoutRunReport | null>>;
+    function Harness() {
+      const [report, set] = useState<AutoLayoutRunReport | null>(null);
+      setReport = set;
+      view.reasonFor = useCellLayoutOutcomes(report, controller);
+      return null;
+    }
+    root = createRoot(document.createElement("div"));
+    await act(async () => root!.render(<Harness />));
+    const reason = () => view.reasonFor!(controller.document);
+    await act(async () =>
+      setReport(run(cell(controller.activeDocumentId, "refused", "too big"))),
+    );
+    expect(reason()).toBe("too big");
+    const instance = controller.document.instances[0]!;
+    expect(
+      controller.transact([
+        {
+          kind: "move_instance",
+          instanceId: instance.id,
+          position: { x: instance.placement!.position.x + 40, y: 0 },
+        },
+      ]).ok,
+    ).toBe(true);
+    expect(reason()).toBeUndefined();
+    // Undo restores the drawing, not the run's verdict on it.
+    expect(controller.transact([{ kind: "undo" }]).ok).toBe(true);
+    expect(controller.document.instances[0]!.placement).toEqual(
+      instance.placement,
+    );
+    expect(reason()).toBeUndefined();
   });
 });

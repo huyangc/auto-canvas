@@ -1140,6 +1140,39 @@ test("a dock carried for a draft is not saved with the tab as Auto's own", async
   await expect(page.locator(".selection-dock.open")).toHaveCount(0);
 });
 
+test("a tab switch ends a draft's carry-over, so the other tab keeps its docks", async ({
+  page,
+}) => {
+  await openEditor(page, "/editor?example=two-stage-op-amp");
+  await expectStatus(page, "Opened example: Two-Stage Op Amp");
+  // Tab 2 opens its Netlist in Auto: its own dock.
+  await page.getByRole("button", { name: "New project tab" }).click();
+  const tabs = page.getByRole("tab");
+  await expect(tabs).toHaveCount(2);
+  await page.getByTestId("netlist-panel-toggle").click();
+  await expect(projectTools(page)).toBeVisible();
+  // Tab 1 carries a Netlist draft from Draw into Auto; the draft then goes
+  // and the same dock stays on screen.
+  await tabs.nth(0).click();
+  await expect(projectTools(page)).toHaveCount(0);
+  await page.getByTestId("mode-draw").click();
+  const code = page.getByLabel("Netlist code", { exact: true });
+  await code.click();
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.type("\n* unapplied draft");
+  await page.getByTestId("mode-auto").click();
+  await expect(code).toContainText("* unapplied draft");
+  await page.getByRole("button", { name: "Reload", exact: true }).click();
+  await expect(code).not.toContainText("* unapplied draft");
+  // Tab 2 shows the same docks; leaving it again must save them as its own.
+  await tabs.nth(1).click();
+  await expect(projectTools(page)).toBeVisible();
+  await tabs.nth(0).click();
+  await expect(projectTools(page)).toHaveCount(0);
+  await tabs.nth(1).click();
+  await expect(projectTools(page)).toBeVisible();
+});
+
 test("a Space after an import from the card does not cancel its layout", async ({
   page,
 }) => {
@@ -1219,6 +1252,21 @@ test("the Cells rail lists each Cell with its layout status", async ({
     const box = (await page.getByTestId(testId).boundingBox())!;
     expect(boxesOverlap(box, railBox), testId).toBe(false);
   }
+  // A long Cell name is clipped in its row; the rail never scrolls sideways.
+  // A double for the name, as the running-label test does.
+  await chain
+    .locator(".cells-rail-name")
+    .evaluate(
+      (name) =>
+        (name.firstChild!.textContent =
+          "folded_cascode_operational_transconductance1"),
+    );
+  expect(await rail.evaluate((nav) => nav.scrollWidth <= nav.clientWidth)).toBe(
+    true,
+  );
+  await chain
+    .locator(".cells-rail-name")
+    .evaluate((name) => (name.firstChild!.textContent = "chain"));
 
   // The reason outlives the report's Details.
   await page.getByTestId("auto-layout-details").click();
