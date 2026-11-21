@@ -695,6 +695,10 @@ function WorkspaceEditor({
     draw: defaultModeDocks("draw"),
   });
   const importNetlistInputRef = useRef<HTMLInputElement>(null);
+  // The docks on screen were carried over by a switch for an unapplied code
+  // draft, not restored from this mode's memory: leaving the mode then keeps
+  // its memory as it was. Any later dock change makes them the mode's own.
+  const docksCarriedRef = useRef(false);
 
   const [recoveryFailureDismissed, setRecoveryFailureDismissed] =
     useState(false);
@@ -3598,6 +3602,19 @@ function WorkspaceEditor({
 
   const importReviewShowing =
     importReviewOpen && selectionOpen && projectPanel === null;
+  // A dock change after a carry-over (the user's or an import's) makes the
+  // docks on screen this mode's own again.
+  const carriedDocks = useRef({ projectPanel, selectionOpen });
+  useEffect(() => {
+    const before = carriedDocks.current;
+    carriedDocks.current = { projectPanel, selectionOpen };
+    if (
+      before.projectPanel !== projectPanel ||
+      before.selectionOpen !== selectionOpen
+    )
+      docksCarriedRef.current = false;
+  }, [projectPanel, selectionOpen]);
+
   // A report that replaces one already on screen is seen at once too.
   useEffect(() => {
     if (importReviewShowing) setImportReviewSeen(true);
@@ -3754,20 +3771,22 @@ function WorkspaceEditor({
     options: { persist: boolean; status?: string },
   ): void {
     if (next !== editorMode) {
-      modePanelsRef.current[editorMode] = {
-        projectPanel,
-        selectionOpen,
-        propertiesBefore: propertiesOpenBeforeProjectPanelRef.current,
-      };
+      if (!docksCarriedRef.current)
+        modePanelsRef.current[editorMode] = {
+          projectPanel,
+          selectionOpen,
+          propertiesBefore: propertiesOpenBeforeProjectPanelRef.current,
+        };
       const restored = modePanelsRef.current[next];
       propertiesOpenBeforeProjectPanelRef.current = restored.propertiesBefore;
       // An unapplied code draft lives in the open project dock: it stays on
       // screen in the new mode rather than being unmounted and lost.
       if (!codeDraftDirty) {
+        docksCarriedRef.current = false;
         setProjectPanel(restored.projectPanel);
         setSelectionOpen(restored.selectionOpen);
         if (!restored.selectionOpen) releaseImportReview();
-      }
+      } else docksCarriedRef.current = true;
       // Document settings apply live; left open but hidden they would keep
       // holding the Project (tab switches and saves refuse while they are
       // open). Close them as their toolbar toggle does.
@@ -7186,7 +7205,15 @@ function WorkspaceEditor({
                     ? void openNativeProject()
                     : projectInputRef.current?.click()
                 }
-                onOpenExample={(id) =>
+                onOpenExample={(id) => {
+                  // Like every other open path, wait for what holds this
+                  // Project (an unapplied code draft, open settings…); the
+                  // dirty-work guard sees only committed edits.
+                  const blocker = projectSwitchBlockerRef.current();
+                  if (blocker) {
+                    setStatus(`Can't open a Project yet: ${blocker}`);
+                    return;
+                  }
                   openLibraryExample(id, {
                     netlistProfile:
                       netlistPreferences.preferences.profiles[
@@ -7195,8 +7222,8 @@ function WorkspaceEditor({
                     guardDirtyReplacement,
                     replaceActiveProject,
                     setStatus,
-                  })
-                }
+                  });
+                }}
                 onDraw={() => {
                   changeEditorMode("draw", { persist: true });
                   // The card leaves with its button: focus the switch.
