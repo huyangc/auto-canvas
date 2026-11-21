@@ -36,42 +36,46 @@ later PRs from the same plan.
   put away until it has been shown. A failed import opens the review in
   either mode.
 - Project tabs remember their docks per mode: a tab restored in the other
-  mode gets that mode's start (Auto closed, Draw with the Netlist).
+  mode gets that mode's start (Auto closed, Draw with the Netlist). A tab
+  also keeps its unseen Import Review in memory while another tab is shown;
+  a reload drops it, as on `main`.
+- While a code draft (Project Code or the Netlist code) is unapplied, a mode
+  switch or a failed import leaves that dock on screen, so the draft is not
+  lost. Document settings, which apply live, close on a switch.
+- Switching to Auto cancels an armed tool together with what was typed into
+  it (an unplaced Text draft, a Net Label name), as Escape does. An existing
+  canvas text being edited is committed first, as by any click outside it.
 - The browser suite runs in Draw through Playwright `storageState`;
-  `editor-modes.spec.ts` (28 tests) starts from empty storage and covers
+  `editor-modes.spec.ts` (40 tests) starts from empty storage and covers
   Auto. `performance.spec.ts` seeds Draw on its own origin.
 
 Commits on `task/T150-two-modes` after the plan (`865426c`): `b1d1947`,
 `7285367`, `95e4bd5`, `e11f2f2`, `caa05bf` (implementation), `cd62358`
-(review round 1), `6bdf02b`, `aa4fbd1` (review round 2). 39 files,
-+4042 / −318; product code under `apps/editor/src` without tests is
-22 files, +1459 / −256.
+(review round 1), `6bdf02b`, `aa4fbd1` (round 2), `0b85f5b`, `e38a56e`,
+`c594475` (round 3). 41 files, +4636 / −332; product code under
+`apps/editor/src` without tests is 22 files, +1575 / −270.
 
-## Acceptance (coordinator's rerun on `aa4fbd1`)
+## Acceptance (coordinator's rerun on `c594475`)
 
-| Command                                            | Result                                      |
-| -------------------------------------------------- | ------------------------------------------- |
-| `pnpm build`, `pnpm test:editor-build`             | pass                                        |
-| `pnpm typecheck`, `pnpm lint`, `pnpm format:check` | pass (lint 0 errors)                        |
-| `pnpm docs:check`                                  | pass                                        |
-| `pnpm test:local`                                  | pass: 8606 passed, 117 skipped              |
-| `pnpm deadcode`                                    | exit 1 as on `main`; no new finding         |
-| Browser suite, 53 spec files, one worker           | 397 passed, 2 skipped, 4 failed (see below) |
+| Command                                            | Result                              |
+| -------------------------------------------------- | ----------------------------------- |
+| `pnpm build`, `pnpm test:editor-build`             | pass                                |
+| `pnpm typecheck`, `pnpm lint`, `pnpm format:check` | pass (lint 0 errors)                |
+| `pnpm docs:check`                                  | pass                                |
+| `pnpm test:local`                                  | pass: 8608 passed, 117 skipped      |
+| `pnpm deadcode`                                    | exit 1 as on `main`; no new finding |
+| Browser suite, 53 spec files, one worker           | 414 passed, 2 skipped, 0 failed     |
 
-The four failures all pass when rerun, and none is in code this change
+Earlier full runs: 386 passed, 0 failed at `caa05bf`; 397 passed, 4 failed
+at `aa4fbd1`. Those four passed on rerun and none is in code this change
 touches:
 
-- `user-components.spec.ts:3564`, `:3606`, `:3915` fail in teardown with
+- `user-components.spec.ts:3564`, `:3606`, `:3915` failed in teardown with
   "Route is already handled". On `main`, `:3564` alone fails 8 of 16 runs
   with the same error, so this is an existing race in that spec's fixture.
-  On this branch `:3564` failed 2 of 8 in isolation; `:3606` and `:3915`
-  passed on rerun.
 - `hierarchy.spec.ts:1179` failed once on a size comparison after a zoom
-  (15.50 against 16.02, tolerance 0.5). It passed 7 of 7 on rerun and in the
-  full run at `caa05bf`. Not compared with `main`.
-
-The full run at `caa05bf`, before the review rounds, was 386 passed,
-2 skipped, 0 failed.
+  (15.50 against 16.02, tolerance 0.5) and passed 7 of 7 on rerun. Not
+  compared with `main`.
 
 `project-file.spec.ts` is left out of every run: it fails to load on `main`
 as well (`import.meta.env.BASE_URL` is undefined through
@@ -121,14 +125,28 @@ from an empty profile (`tmp/t150/check-modes.mjs`, not committed):
    - The plan's text that still described the superseded "stored mode
      becomes Draw" behaviour was corrected in `aa4fbd1`.
 
-The implementer saw 12 of the new tests fail on `cd62358` before the round-2
-fixes.
+3. **codex review and the independent re-review on `28a663f`** — the
+   re-review found all 13 earlier findings fixed and five new P3; codex
+   found five P2 and three P3, largely the same items. Fixed in `0b85f5b`:
+   an unapplied code draft was lost by a mode switch or a failed import;
+   hidden Document settings kept blocking tab changes and saves after a
+   switch to Auto; an unseen Import Review was lost on a project-tab switch;
+   a report replacing one on screen was marked as waiting; `W` in Cell
+   symbol layout ignored the overlay guard; closing the Netlist reopened
+   another mode's Properties; placing from User Components stayed in Auto.
+   The top bar at 320 and 390 px during a run was measured and needed no
+   change. One item was settled without a code change (`c594475`): typed
+   text in an armed tool is cancelled with the tool on a switch to Auto,
+   under decision 16; the spec says so and two browser tests pin it.
+
+The implementer saw the new tests fail before their fixes: 12 in round 2 and
+9 in round 3.
 
 ## Deviations from the plan
 
 1. Owned paths widened: `use-project-tab-sessions.ts` (round 1),
-   `editor-dialogs.tsx` and `editor-dialog-layer.tsx` (round 2),
-   `performance.spec.ts`.
+   `editor-dialogs.tsx`, `editor-dialog-layer.tsx` and `performance.spec.ts`
+   (round 2), `user-components.spec.ts` (round 3).
 2. The dot on the Properties button for a waiting Import Review is new; the
    wireframe did not have it.
 3. In Draw, an import whose dock opens on the Netlist now also keeps its
@@ -141,9 +159,10 @@ fixes.
 
 - Electron and the desktop file chooser were not tried.
 - `performance.spec.ts` was not run (it needs `ICM_PERF`).
-- The wire from a Cell symbol layout pin bringing up Draw (review item 6) and
-  a failed import replacing an open Netlist (item 8) are covered by code and
-  a unit test respectively, not by a browser test.
+- The wire from a Cell symbol layout pin bringing up Draw has no browser
+  test; its overlay guard has a unit test.
+- While a code draft is unapplied, Auto can show the Netlist or Project Code
+  dock after a switch. That is the price of not losing the draft.
 - The per-mode dock memory in `App.tsx` is per session, not per tab: after
   changing tabs, switching mode shows the docks last used in that mode in
   any tab.
