@@ -184,4 +184,32 @@ describe("drawing intents", () => {
     document.body.append(dialog);
     expect(drawingSwitchBlocked(button)).toBe(true);
   });
+
+  it("blocks the switch from inside an overlay that is not modal", () => {
+    const inside = (markup: string) => {
+      document.body.innerHTML = markup;
+      return document.querySelector<HTMLElement>("#target")!;
+    };
+    // The Agent file approval, the selection filter, the formula popover.
+    for (const markup of [
+      '<section role="dialog"><button id="target">Reject</button></section>',
+      '<div role="dialog" aria-modal="false"><button id="target">All</button></div>',
+      // A context menu or the rich-text editor's own menus.
+      '<div role="menu"><button id="target">Copy</button></div>',
+      // An open header menu, File included.
+      '<details class="command-menu project-menu" open><summary>File</summary><button id="target">Save</button></details>',
+      // The canvas text editor's toolbar.
+      '<div data-canvas-text-editor-part=""><button id="target">B</button></div>',
+    ])
+      expect(drawingSwitchBlocked(inside(markup)), markup).toBe(true);
+  });
+
+  it("does not let an open non-modal overlay block keys pressed elsewhere", () => {
+    document.body.innerHTML =
+      '<div role="dialog" aria-modal="false"><button>All</button></div>' +
+      '<details class="command-menu"><summary>Edit</summary></details>' +
+      '<svg id="canvas"></svg>';
+    expect(drawingSwitchBlocked(document.querySelector("#canvas"))).toBe(false);
+    expect(drawingSwitchBlocked(document.body)).toBe(false);
+  });
 });

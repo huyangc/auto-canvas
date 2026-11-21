@@ -23,7 +23,10 @@ yourself. **Draw** adds the drawing toolbar and the device library. The first
 time a browser opens the editor, a note under the switch points there; **Got
 it** dismisses it for good. The mode is remembered when you choose it with
 the switch; a drawing key such as `W` pressed in Auto brings up Draw for the
-current session only. Switching never changes the drawing.
+current session only (not while a dialog or menu has the keyboard).
+Switching never changes the drawing. After an import in Auto, a dot on the
+**Properties** button says Import Review is waiting there; if the import
+fails, the review opens by itself.
 
 To start from a netlist, choose **Import netlist…** (or **File → Import SPICE
 / SCS…**) and select one `.cir`, `.sp`, `.spi` or `.scs` entry plus its local

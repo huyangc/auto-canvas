@@ -1,3 +1,5 @@
+import { useEffect, useRef } from "react";
+
 import type { AutoLayoutMenuActions } from "./auto-layout-menu-section";
 import {
   autoLayoutChipLabel,
@@ -14,11 +16,29 @@ export function AutoLayoutButton({
   run,
 }: AutoLayoutMenuActions & { run: AutoLayoutRunView }) {
   const planning = run.running ? autoLayoutChipLabel(run) : null;
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  // Cancel had focus when it went away with the run.
+  const cancelFocused = useRef(false);
+  // The button goes disabled while a run plans: focus on it moves to
+  // Cancel, and back to the button once Cancel goes.
+  useEffect(() => {
+    const active = globalThis.document?.activeElement;
+    if (run.running) {
+      if (active === buttonRef.current || active === globalThis.document.body)
+        cancelRef.current?.focus();
+      return;
+    }
+    if (cancelFocused.current && active === globalThis.document?.body)
+      buttonRef.current?.focus();
+    cancelFocused.current = false;
+  }, [run.running]);
   return (
     <span className="auto-layout-control" data-running={planning !== null}>
       <button
         type="button"
         className="app-action app-action-primary auto-layout-button"
+        ref={buttonRef}
         data-testid="auto-layout-button"
         aria-label="Auto Layout"
         disabled={planning !== null || !start.enabled}
@@ -47,12 +67,30 @@ export function AutoLayoutButton({
         >
           {planning ?? "Auto Layout"}
         </span>
+        {/* Narrow windows drop the label: the elapsed time stays. */}
+        {planning !== null ? (
+          <span
+            className="auto-layout-elapsed"
+            data-testid="auto-layout-elapsed"
+            aria-hidden="true"
+          >
+            {run.elapsedSeconds} s
+          </span>
+        ) : null}
       </button>
       {planning !== null && cancel ? (
         <button
           type="button"
           className="app-action auto-layout-cancel"
+          ref={cancelRef}
           data-testid="auto-layout-cancel"
+          onBlur={(event) => {
+            // Removal with the run is not a move elsewhere.
+            if (event.relatedTarget) cancelFocused.current = false;
+          }}
+          onFocus={() => {
+            cancelFocused.current = true;
+          }}
           aria-label="Cancel Auto Layout"
           onClick={cancel.execute}
         >

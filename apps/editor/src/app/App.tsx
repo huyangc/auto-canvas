@@ -857,6 +857,10 @@ function WorkspaceEditor({
     null,
   );
   const [importReviewOpen, setImportReviewOpen] = useState(false);
+  // An import's review counts as seen once Properties has shown it. Until
+  // then (an Auto import waits behind a closed dock) nothing but another
+  // import or a new Project clears it.
+  const [importReviewSeen, setImportReviewSeen] = useState(true);
   const [cellManagerOpen, setCellManagerOpen] = useState(false);
   const [modelEditorDefinitionId, setModelEditorDefinitionId] = useState<
     string | null
@@ -1090,6 +1094,18 @@ function WorkspaceEditor({
       propertiesOpenBeforeProjectPanelRef.current = false;
       setSelectionOpen(false);
       setProjectPanel(editorModeRef.current === "auto" ? null : "netlist");
+      // The other mode's remembered docks belonged to the outgoing circuit:
+      // that mode opens the new one with its own start.
+      if (editorModeRef.current === "auto")
+        modePanelsRef.current.draw = {
+          projectPanel: "netlist",
+          selectionOpen: false,
+        };
+      else
+        modePanelsRef.current.auto = {
+          projectPanel: null,
+          selectionOpen: false,
+        };
       if (compactLayout) setCompactLibraryPanelOpen(false);
       return nextDocument;
     },
@@ -2125,8 +2141,13 @@ function WorkspaceEditor({
         setStatus("Cell pin no longer has a routable endpoint");
         return;
       }
-      activateTool("wire");
-      startWire(source);
+      const begin = () => {
+        activateTool("wire");
+        startWire(source);
+      };
+      // A wire from a layout pin is a drawing tool: Auto brings up Draw.
+      if (editorModeRef.current === "auto") bringUpDraw("Wire", begin);
+      else begin();
     },
   });
   const {
@@ -3562,10 +3583,21 @@ function WorkspaceEditor({
     if (pruned !== visualSelection) replaceSelection(pruned);
   }, [document, visualSelection]);
 
+  const importReviewShowing =
+    importReviewOpen && selectionOpen && projectPanel === null;
+  useEffect(() => {
+    if (importReviewShowing) setImportReviewSeen(true);
+  }, [importReviewShowing]);
+
+  /** Put away an import's review, unless it is still waiting to be seen. */
+  function releaseImportReview(): void {
+    if (importReviewSeen) setImportReviewOpen(false);
+  }
+
   function openProperties(): void {
     setProjectPanel(null);
     setDocumentSettingsOpen(false);
-    setImportReviewOpen(false);
+    releaseImportReview();
     setSelectionOpen(true);
     // Focus the header, not the first field: Q stays a pure toggle and
     // editing starts only when the user clicks an input.
@@ -3577,12 +3609,12 @@ function WorkspaceEditor({
     // just asked for wins.
     if (!selectionOpen && compactLayout) setCompactLibraryPanelOpen(false);
     setSelectionOpen((current) => !current);
-    if (selectionOpen) setImportReviewOpen(false);
+    if (selectionOpen) releaseImportReview();
   }
 
   function closeProperties(): void {
     setSelectionOpen(false);
-    setImportReviewOpen(false);
+    releaseImportReview();
   }
 
   function showProjectPanel(mode: EditorProjectPanelMode): void {
@@ -3593,7 +3625,7 @@ function WorkspaceEditor({
     setDocumentSettingsOpen(false);
     setProjectPanel(mode);
     setSelectionOpen(false);
-    setImportReviewOpen(false);
+    releaseImportReview();
     if (compactLayout) setCompactLibraryPanelOpen(false);
   }
 
@@ -3672,7 +3704,7 @@ function WorkspaceEditor({
   function inspectInstance(instanceId: string): void {
     setSelectedEndpoint(null);
     updateInstanceSelection(instanceId, false);
-    setImportReviewOpen(false);
+    releaseImportReview();
     setSelectionOpen(true);
     setStatus(`Properties for ${instanceId}`);
   }
@@ -3712,10 +3744,15 @@ function WorkspaceEditor({
       const restored = modePanelsRef.current[next];
       setProjectPanel(restored.projectPanel);
       setSelectionOpen(restored.selectionOpen);
-      if (!restored.selectionOpen) setImportReviewOpen(false);
+      if (!restored.selectionOpen) releaseImportReview();
       if (next === "auto") {
+        // Nothing armed survives without its toolbar: tools, placements and
+        // a Net Label or control pick that follows the pointer.
         cancelAllTransientInteraction();
-        activateTool("pointer");
+        if (wireLabelEditing) cancelWireLabelEditing();
+        else cancelNetLabelEditing();
+        setControlPickState(null);
+        setControlHoverNetId(null);
       }
     }
     setEditorMode(next, { persist: options.persist });
@@ -4367,8 +4404,12 @@ function WorkspaceEditor({
       showProjectPanel("netlist");
     },
     setImportReport,
-    setImportReviewOpen,
+    setImportReviewOpen: (open) => {
+      if (open) setImportReviewSeen(false);
+      setImportReviewOpen(open);
+    },
     setSelectionOpen,
+    clearProjectPanel: () => setProjectPanel(null),
     getEditorMode: () => editorModeRef.current,
     setStatus,
     onChunkLoadFailure: setChunkLoadFailure,
@@ -5060,6 +5101,9 @@ function WorkspaceEditor({
         jumpToProjectDiagnostic={jumpToProjectDiagnostic}
         cellManagerEntries={cellManagerEntries}
         editorCommands={editorCommands}
+        drawing={(tool, run) =>
+          editorMode === "auto" ? bringUpDraw(tool, run) : run()
+        }
         exportDesignNetlist={exportDesignNetlist}
         workspaceReopen={workspaceReopen}
         setWorkspaceReopen={setWorkspaceReopen}
@@ -7115,12 +7159,21 @@ function WorkspaceEditor({
                     setStatus,
                   })
                 }
-                onDraw={() => changeEditorMode("draw", { persist: true })}
+                onDraw={() => {
+                  changeEditorMode("draw", { persist: true });
+                  // The card leaves with its button: focus the switch.
+                  deferFocus(() =>
+                    globalThis.document.querySelector<HTMLElement>(
+                      '[data-testid="mode-draw"]',
+                    ),
+                  );
+                }}
               />
             ) : null}
             <CanvasPanelButtons
               netlistOpen={projectPanel === "netlist"}
               propertiesOpen={selectionOpen && projectPanel === null}
+              reviewPending={importReviewOpen && !importReviewSeen}
               onToggleNetlist={() => toggleProjectPanel("netlist")}
               onToggleProperties={() => {
                 // The dock shows one panel: Properties replaces the Netlist.

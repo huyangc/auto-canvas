@@ -138,6 +138,7 @@ export function EditorDialogs({
   jumpToProjectDiagnostic,
   cellManagerEntries,
   editorCommands,
+  drawing,
   exportDesignNetlist,
   workspaceReopen,
   setWorkspaceReopen,
@@ -228,6 +229,11 @@ export function EditorDialogs({
   jumpToProjectDiagnostic: NavigationController["jumpToProjectDiagnostic"];
   cellManagerEntries: ReturnType<typeof summarizeProjectCells>;
   editorCommands: ReturnType<typeof createEditorCommandRouter>;
+  /**
+   * Run a placement the way a drawing command runs: in Auto mode it brings
+   * up Draw first (the menu's Place Cell does the same).
+   */
+  drawing: (tool: string, run: () => void) => void;
   exportDesignNetlist: ReturnType<
     typeof createEditorFileCommands
   >["exportDesignNetlist"];
@@ -342,10 +348,12 @@ export function EditorDialogs({
               scope: insertScope,
               initialSelectionId: insertInitialSelectionId,
               onApply: (request) =>
-                editorCommands.execute({
-                  id: "insert.start",
-                  launch: { kind: "quick", request },
-                }),
+                drawing("Insert", () =>
+                  editorCommands.execute({
+                    id: "insert.start",
+                    launch: { kind: "quick", request },
+                  }),
+                ),
               onCancel: cancelComponentInsertFromHook,
             }
           : null
@@ -445,24 +453,26 @@ export function EditorDialogs({
                 }
                 setCellManagerOpen(false);
                 setModelEditorDefinitionId(null);
-                editorCommands.execute({
-                  id: "insert.start",
-                  launch: {
-                    kind: "quick",
-                    request: {
-                      kind: "external-subcircuit",
-                      definitionId,
-                      symbolId: candidate.symbol.id,
-                      symbolName: candidate.masterName,
-                      masterName: candidate.masterName,
-                      parameters: {},
-                      initialRotation: 0,
-                      showReference: !candidate.symbol.hierarchicalBlock,
-                      referenceText: null,
-                      showValue: true,
+                drawing("Insert", () =>
+                  editorCommands.execute({
+                    id: "insert.start",
+                    launch: {
+                      kind: "quick",
+                      request: {
+                        kind: "external-subcircuit",
+                        definitionId,
+                        symbolId: candidate.symbol.id,
+                        symbolName: candidate.masterName,
+                        masterName: candidate.masterName,
+                        parameters: {},
+                        initialRotation: 0,
+                        showReference: !candidate.symbol.hierarchicalBlock,
+                        referenceText: null,
+                        showValue: true,
+                      },
                     },
-                  },
-                });
+                  }),
+                );
               },
               onPlaceCell: (childDocumentId) => {
                 const candidate = cellInsertCandidates.find(
@@ -471,24 +481,26 @@ export function EditorDialogs({
                 if (!candidate) return;
                 setCellManagerOpen(false);
                 setModelEditorDefinitionId(null);
-                editorCommands.execute({
-                  id: "insert.start",
-                  launch: {
-                    kind: "quick",
-                    request: {
-                      kind: "cell",
-                      symbolId: candidate.symbol.id,
-                      symbolName: candidate.cellName,
-                      childDocumentId,
-                      cellName: candidate.cellName,
-                      parameters: {},
-                      initialRotation: 0,
-                      showReference: false,
-                      referenceText: null,
-                      showValue: true,
+                drawing("Place Cell", () =>
+                  editorCommands.execute({
+                    id: "insert.start",
+                    launch: {
+                      kind: "quick",
+                      request: {
+                        kind: "cell",
+                        symbolId: candidate.symbol.id,
+                        symbolName: candidate.cellName,
+                        childDocumentId,
+                        cellName: candidate.cellName,
+                        parameters: {},
+                        initialRotation: 0,
+                        showReference: false,
+                        referenceText: null,
+                        showValue: true,
+                      },
                     },
-                  },
-                });
+                  }),
+                );
               },
               cloudProjects,
               activeCloudProjectId: cloudBinding?.id ?? null,
