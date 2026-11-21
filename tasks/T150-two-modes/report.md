@@ -211,7 +211,11 @@ independent rerun. Slice a is merged (`bda24ec`); slices c and d follow.
   The rail is not shown with one Cell, in Draw, or below 860 px wide, where
   the hierarchy row stays as before.
 - The refusal reasons are kept in memory per tab and per Project opened in
-  it (`use-cell-layout-outcomes.ts`); nothing is written to the Project. An
+  it (`use-cell-layout-outcomes.ts`); nothing is written to the Project.
+  Only a verdict the planner returned is recorded, and the run itself names
+  the tab it belongs to when its result arrives. A cancelled, failed, stale
+  or abandoned run leaves the statuses as they were; Details still says
+  what happened. An
   edit to a refused Cell drops its reason; Undo does not bring it back,
   because revisions only go up.
 - **Five leftovers from slice a's last codex review:**
@@ -225,24 +229,26 @@ independent rerun. Slice a is merged (`bda24ec`); slices c and d follow.
     only when the key would do what the button does.
 
 Commits on `task/T150b-cells-rail`: `ed24e03` (leftovers), `cf564cc` (rail),
-`1f1a681` (review round 1). 17 files, +1154 / −16; product code under
-`apps/editor/src` without tests is 8 files, +402 / −13.
+`1f1a681` (review round 1), `e4c221c` (round 2). 21 files, +1468 / −17;
+product code under `apps/editor/src` without tests is 10 files,
++457 / −14.
 
-## Acceptance (coordinator's rerun on `1f1a681`)
+## Acceptance (coordinator's rerun on `e4c221c`)
 
-| Command                                            | Result                                      |
-| -------------------------------------------------- | ------------------------------------------- |
-| `pnpm build`, `pnpm test:editor-build`             | pass                                        |
-| `pnpm typecheck`, `pnpm lint`, `pnpm format:check` | pass (lint 0 errors)                        |
-| `pnpm docs:check`                                  | pass                                        |
-| `pnpm test:local`                                  | pass: 8624 passed, 117 skipped              |
-| `pnpm deadcode`                                    | exit 1 as on `main`; no new finding         |
-| Browser suite, 53 spec files, one worker           | 426 passed, 2 skipped, 1 failed (see below) |
+| Command                                            | Result                              |
+| -------------------------------------------------- | ----------------------------------- |
+| `pnpm build`, `pnpm test:editor-build`             | pass                                |
+| `pnpm typecheck`, `pnpm lint`, `pnpm format:check` | pass (lint 0 errors)                |
+| `pnpm docs:check`                                  | pass                                |
+| `pnpm test:local`                                  | pass: 8626 passed, 117 skipped      |
+| `pnpm deadcode`                                    | exit 1 as on `main`; no new finding |
+| Browser suite, 53 spec files, one worker           | 427 passed, 2 skipped, 0 failed     |
 
-The one failure is `hierarchy.spec.ts:1179` (a size comparison after a
-zoom: 15.50 against 16.02, tolerance 0.5). It is flaky on the code from
-before T150 as well: 5 of 10 runs fail there with the same numbers, 3 of 10
-on this branch. The full run at `cf564cc` was 426 passed, 0 failed.
+Earlier full runs: 426 passed, 0 failed at `cf564cc`; 426 passed, 1 failed
+at `1f1a681`. That failure was `hierarchy.spec.ts:1179` (a size comparison
+after a zoom: 15.50 against 16.02, tolerance 0.5), which is flaky on the
+code from before T150 as well: 5 of 10 runs fail there with the same
+numbers, 3 of 10 on this branch.
 `project-file.spec.ts` is left out as before (it fails to load on `main`).
 
 ## Browser check by the coordinator
@@ -271,6 +277,13 @@ long Cell name widening the rail (rendered and measured; an assertion was
 added). Three test gaps closed: the `Q` rule as a tested helper, focus
 tests that fail on the old code, and the outcome store driven by the real
 controller.
+
+codex on `856abf2`: two P2 in the rail's outcome store, both reproduced by
+the implementer with the real session and controller and fixed in
+`e4c221c`: a result landing in the same commit as a tab switch was
+recorded against the incoming tab; a run left by a tab switch was recorded
+as refusals for Cells the planner never judged. Not changed: its P3 about
+shortcut hints during a drag (a tooltip cannot be read mid-drag).
 
 ## For the owner
 
