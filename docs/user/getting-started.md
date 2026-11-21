@@ -12,22 +12,38 @@ Run `pnpm build` again after pulling package changes, then open the displayed
 loopback URL. The editor starts with an empty `New Circuit` Project whose one
 Cell is `dut`; nothing needs to be opened first.
 
-To start from a netlist, choose **File → Import SPICE / SCS…** and select one
-`.cir`, `.sp`, `.spi` or `.scs` entry plus its local include files.
-**Import Cadence SPICE (`!` globals)…** also treats net names ending in `!` as
-global Nets. The imported devices appear on a shelf, then **Auto Layout**
-draws every imported Cell by itself (the status bar shows its progress and
-**Cancel**); one **Undo** returns every Cell to the shelf. A netlist with
-several subcircuits draws each as its own Cell, and Import Review says so:
-check each Cell, since those drawings can be rougher.
+## Two modes
+
+The top bar's `Auto | Draw` switch picks how the page looks. **Auto**, the
+default, is for netlists: the canvas fills the page, with **Import netlist…**
+and **Auto Layout** in the top bar and the Netlist and Properties panels behind
+the two buttons at the canvas's lower right. An empty Project shows a card to
+choose a netlist file, open a project file, start from an example, or draw it
+yourself. **Draw** adds the drawing toolbar and the device library. The first
+time a browser opens the editor, a note under the switch points there; **Got
+it** dismisses it for good. The mode is remembered when you choose it with
+the switch; a drawing key such as `W` pressed in Auto brings up Draw for the
+current session only (not while a dialog or menu has the keyboard).
+Switching never changes the drawing. After an import in Auto, a dot on the
+**Properties** button says Import Review is waiting there; if the import
+fails, the review opens by itself.
+
+To start from a netlist, choose **Import netlist…** (or **File → Import SPICE
+/ SCS…**) and select one `.cir`, `.sp`, `.spi` or `.scs` entry plus its local
+include files. **Import Cadence SPICE (`!` globals)…** also treats net names
+ending in `!` as global Nets. The imported devices appear on a shelf, then
+**Auto Layout** draws every imported Cell by itself (the top bar shows its
+progress and **Cancel**); one **Undo** returns every Cell to the shelf. A
+netlist with several subcircuits draws each as its own Cell, and Import Review
+says so: check each Cell, since those drawings can be rougher.
 
 ## The editor
 
-The header has **File**, **Edit** and **Circuit** menus and the **Agent**
-action. **File** holds Project Info (circuit and
-Cell names) and the file commands; **New Project** replaces the current tab's
-circuit after asking about unsaved work. **Circuit** holds **Hierarchy** (Cell
-Manager) and **Netlist**.
+The header has **Undo** and **Redo**, the mode switch, **File**, **Edit** and
+**Circuit** menus, **Auto Layout** and the **Agent** action. **File** holds
+Project Info (circuit and Cell names) and the file commands; **New Project**
+replaces the current tab's circuit after asking about unsaved work.
+**Circuit** holds **Hierarchy** (Cell Manager) and **Netlist**.
 
 Each project tab is an independent circuit with its own view, selection, undo
 history and Cloud binding. Use **+** for a new project, **Open file in new

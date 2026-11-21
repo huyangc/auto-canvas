@@ -440,6 +440,56 @@ C1 out 0 1p
     expect(cancelled).not.toHaveBeenCalled();
   });
 
+  it("keeps the canvas clear after a successful import in Auto mode", async () => {
+    for (const mode of ["auto", "draw"] as const) {
+      const target = commands({
+        guardDirtyReplacement: performing(),
+        getEditorMode: () => mode,
+      });
+      await target.importSpiceFiles(files(NETLIST));
+      // The review is kept either way; Auto waits for Properties to open.
+      expect(target.dependencies.setImportReviewOpen).toHaveBeenCalledWith(
+        true,
+      );
+      if (mode === "auto")
+        expect(target.dependencies.setSelectionOpen).not.toHaveBeenCalled();
+      else
+        expect(target.dependencies.setSelectionOpen).toHaveBeenCalledWith(true);
+    }
+  });
+
+  it("shows a failed import's review in place of an open Netlist", async () => {
+    for (const mode of ["auto", "draw"] as const) {
+      const clearProjectPanel = vi.fn();
+      const target = commands({
+        guardDirtyReplacement: performing(),
+        getEditorMode: () => mode,
+        clearProjectPanel,
+      });
+      await target.importSpiceFiles(files(".subckt broken\nX1 a b missing\n"));
+      expect(target.dependencies.replaceActiveProject).not.toHaveBeenCalled();
+      expect(target.dependencies.setImportReviewOpen).toHaveBeenCalledWith(
+        true,
+      );
+      expect(target.dependencies.setSelectionOpen).toHaveBeenCalledWith(true);
+      expect(clearProjectPanel).toHaveBeenCalledOnce();
+    }
+  });
+
+  it("leaves a dock holding an unapplied code draft on a failed import", async () => {
+    const clearProjectPanel = vi.fn();
+    const target = commands({
+      guardDirtyReplacement: performing(),
+      clearProjectPanel,
+      projectPanelHoldsDraft: () => true,
+    });
+    await target.importSpiceFiles(files(".subckt broken\nX1 a b missing\n"));
+    expect(target.dependencies.setImportReviewOpen).toHaveBeenCalledWith(true);
+    expect(clearProjectPanel).not.toHaveBeenCalled();
+    expect(target.dependencies.setSelectionOpen).not.toHaveBeenCalled();
+    expect(target.dependencies.setStatus).toHaveBeenCalled();
+  });
+
   it("does not lay out an RNL import", async () => {
     const onImported = vi.fn();
     vi.doMock("../netlist-export/rnl-import", () => ({

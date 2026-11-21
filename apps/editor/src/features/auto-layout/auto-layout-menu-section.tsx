@@ -1,5 +1,5 @@
-// Circuit → Layout: Auto Layout, and Cancel while a run plans (the status
-// chip that also offers Cancel can be hidden when the status bar is short).
+// Circuit → Layout: Auto Layout, and Cancel while a run plans (the top-bar
+// control offers both too; this keeps them reachable from the keyboard menu).
 export interface AutoLayoutMenuActions {
   start: { enabled: boolean; reason?: string | undefined; execute: () => void };
   /** Present only while a run is planning. */

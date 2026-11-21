@@ -59,11 +59,56 @@ import { materializeRazaviProjectBulkConnections } from "../presentation/razavi-
 import type { ComponentEditorSession } from "./component-editor-session";
 import { DEFAULT_VIEWBOX } from "./default-view-box";
 import type { EditorProjectPanelMode } from "./editor-project-dock";
+import type { EditorMode } from "../features/editor-shell/editor-mode";
 import type { HighlightedNetOrigin } from "./use-editor-derived-model";
 import type { useAgentProjectResources } from "./use-agent-hosts";
 import { executeProjectTransaction } from "@icm/edit-engine";
 import type { CloudProjectStore } from "../services/editor-services";
 import type { CloudProjectSummary } from "../features/editor-shell/cloud-projects";
+
+/**
+ * A tab's import review: the last SPICE import's report, whether it is
+ * shown in Properties, and whether the user has seen it. Kept with the tab
+ * in memory only: a reload drops it, as before the modes.
+ */
+export interface TabImportReview {
+  report: SpiceImportReport | null;
+  open: boolean;
+  seen: boolean;
+}
+
+const NO_IMPORT_REVIEW: TabImportReview = {
+  report: null,
+  open: false,
+  seen: true,
+};
+
+/** The Netlist / Properties docks a tab shows. */
+interface TabDocks {
+  panel: EditorProjectPanelMode | null;
+  properties: boolean;
+}
+
+/** A new tab's docks: Draw opens with its Netlist, Auto on a clear canvas. */
+export function defaultTabDocks(mode: EditorMode): TabDocks {
+  return mode === "auto"
+    ? { panel: null, properties: false }
+    : { panel: "netlist", properties: false };
+}
+
+/**
+ * The docks to show for a tab: the ones it remembered, if it was captured in
+ * the mode now on screen, or else that mode's defaults. A tab saved before
+ * the modes existed was captured on the drawing page, which is Draw.
+ */
+export function tabDocksFor(
+  session: TabDocks & { mode?: EditorMode | undefined },
+  current: EditorMode,
+): TabDocks {
+  return (session.mode ?? "draw") === current
+    ? { panel: session.panel, properties: session.properties }
+    : defaultTabDocks(current);
+}
 
 type DocumentControllerState = ReturnType<typeof useDocumentController>;
 type ProjectFileLifecycle = ReturnType<typeof useProjectFileLifecycle>;
@@ -109,8 +154,9 @@ interface ProjectTabSessionsOptions {
     next: GridRect | CameraRectInput | ((current: GridRect) => CameraRectInput),
     grid?: number,
   ) => void;
-  setImportReport: Dispatch<SetStateAction<SpiceImportReport | null>>;
-  setImportReviewOpen: Dispatch<SetStateAction<boolean>>;
+  /** The open tab's import review, captured with it. */
+  importReview: TabImportReview;
+  restoreImportReview: (review: TabImportReview) => void;
   setCanvasContextMenu: Dispatch<
     SetStateAction<{ x: number; y: number } | null>
   >;
@@ -164,6 +210,8 @@ interface ProjectTabSessionsOptions {
   resetInteractionState: () => void;
   cancelAllTransientInteraction: () => void;
   nativeWorkspaceSaving: RefObject<boolean>;
+  /** The editor mode now, read when a tab is captured, made or restored. */
+  getEditorMode: () => EditorMode;
 }
 
 /** The window's project tabs: one session per tab, saved with the window. */
@@ -196,8 +244,8 @@ export function useProjectTabSessions({
   replaceSelection,
   cameraRuntime,
   setViewBox,
-  setImportReport,
-  setImportReviewOpen,
+  importReview,
+  restoreImportReview,
   setCanvasContextMenu,
   setNetlistPreflightOpen,
   projectPanel,
@@ -237,6 +285,7 @@ export function useProjectTabSessions({
   resetInteractionState,
   cancelAllTransientInteraction,
   nativeWorkspaceSaving,
+  getEditorMode,
 }: ProjectTabSessionsOptions) {
   function captureTabSession() {
     return {
@@ -249,10 +298,14 @@ export function useProjectTabSessions({
       selection: visualSelection,
       panel: projectPanel,
       properties: selectionOpen,
+      // The docks above belong to this mode; another mode shows its own.
+      // Undefined only on a tab saved before the modes existed (Draw).
+      mode: getEditorMode() as EditorMode | undefined,
       netlistEntry,
       dirty: isDirtyWork(),
       unsafe: hasUnsafeWork() || codeDraftDirty,
       fit: false,
+      importReview,
     };
   }
   type TabSession = ReturnType<typeof captureTabSession>;
@@ -261,8 +314,8 @@ export function useProjectTabSessions({
     // The outgoing tab still owns its artifacts and expiring workspaces.
     // Selection changes hide its UI, not its file service.
     setAgentFileCandidate(null);
-    setImportReport(null);
-    setImportReviewOpen(false);
+    // The incoming tab's own review, unseen or not, comes back with it.
+    restoreImportReview(session.importReview);
     setProjectInfoOpen(false);
     setCanvasContextMenu(null);
     setNetlistFocusedInstance(null);
@@ -277,8 +330,9 @@ export function useProjectTabSessions({
     autoFitProjectRef.current = session.controller.projectSessionId;
     pendingAutoFitRef.current = session.fit;
     replaceSelection(session.selection);
-    setSelectionOpen(session.properties);
-    setProjectPanel(session.panel);
+    const docks = tabDocksFor(session, getEditorMode());
+    setSelectionOpen(docks.properties);
+    setProjectPanel(docks.panel);
     setNetlistEntry(session.netlistEntry);
     setStatus(`Switched to ${session.controller.project.name}`);
     setRestoringWorkspace(false);
@@ -328,15 +382,20 @@ export function useProjectTabSessions({
         draftingIds: [],
         junctionIds: [],
       },
-      panel: "netlist",
-      properties: false,
+      ...defaultTabDocks(getEditorMode()),
+      mode: getEditorMode(),
       netlistEntry: null,
       dirty: options.persistenceState === "dirty",
       unsafe: options.persistenceState === "dirty",
       fit: true,
+      importReview: NO_IMPORT_REVIEW,
     };
   }
-  type PortableTab = Omit<TabSession, "controller" | "cellViews"> & {
+  // The import review is not saved with the window (TabImportReview).
+  type PortableTab = Omit<
+    TabSession,
+    "controller" | "cellViews" | "importReview"
+  > & {
     projectText: string;
     activeDocumentId: string;
     cellViews: [string, GridRect][];
@@ -366,6 +425,7 @@ export function useProjectTabSessions({
       );
     const session: TabSession = {
       ...saved,
+      importReview: NO_IMPORT_REVIEW,
       controller,
       cellViews: new Map(saved.cellViews),
       fit: false,
@@ -463,7 +523,12 @@ export function useProjectTabSessions({
       for (const id of workspaceTexts.current.keys())
         if (!liveIds.has(id)) workspaceTexts.current.delete(id);
       const tabs = workspace.tabs.map(({ id, session }) => {
-        const { controller, cellViews, ...rest } = session;
+        const {
+          controller,
+          cellViews,
+          importReview: _inMemoryOnly,
+          ...rest
+        } = session;
         let cached = workspaceTexts.current.get(id);
         if (cached?.project !== controller.project) {
           cached = {

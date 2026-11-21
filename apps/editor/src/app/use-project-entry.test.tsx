@@ -8,7 +8,7 @@ import { workspaceRoute } from "../document/project-workspace";
 import { libraryProjectExamples } from "../examples/library-examples";
 import { createNetlistExportProfile } from "../features/netlist-export/netlist-process-presets";
 import { prepareNetlistExample } from "../features/netlist-export/netlist-process";
-import { useBootLink } from "./use-project-entry";
+import { openLibraryExample, useBootLink } from "./use-project-entry";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 let root: Root | undefined;
@@ -137,4 +137,38 @@ it("keeps a restored workspace instead of opening the example", async () => {
   expect(options.guardDirtyReplacement).not.toHaveBeenCalled();
   expect(options.replaceActiveProject).not.toHaveBeenCalled();
   expect(options.setStatus).not.toHaveBeenCalled();
+});
+
+it("opens an example from the empty card exactly as the link does", async () => {
+  window.history.replaceState(null, "", "/editor?keep=1");
+  const example = libraryProjectExamples[1]!;
+  const options = {
+    netlistProfile: createNetlistExportProfile("sky130"),
+    guardDirtyReplacement: vi.fn(
+      async (_intent: string, perform: (dirty: boolean) => unknown) => {
+        await perform(false);
+      },
+    ),
+    replaceActiveProject: vi.fn(),
+    setStatus: vi.fn(),
+  };
+  openLibraryExample(
+    example.id,
+    options as unknown as Parameters<typeof openLibraryExample>[1],
+  );
+  await act(async () => {});
+  expect(options.guardDirtyReplacement).toHaveBeenCalledWith(
+    `Open ${example.name} example`,
+    expect.any(Function),
+  );
+  expect(options.replaceActiveProject).toHaveBeenCalledExactlyOnceWith(
+    prepareNetlistExample(
+      structuredClone(example.project),
+      options.netlistProfile,
+    ),
+  );
+  expect(options.setStatus).toHaveBeenCalledExactlyOnceWith(
+    `Opened example: ${example.name}`,
+  );
+  expect(window.location.search).toBe("?keep=1");
 });

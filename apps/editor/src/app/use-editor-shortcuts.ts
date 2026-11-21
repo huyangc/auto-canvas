@@ -22,6 +22,11 @@ import type { useCircuitClipboard } from "../features/clipboard/use-circuit-clip
 import type { useComponentPlacement } from "../features/component-insert/use-component-placement";
 import type { createDraftingCommands } from "../features/drafting/drafting-commands";
 import type { createDraftingCreateController } from "../features/drafting/drafting-create-controller";
+import {
+  drawingSwitchBlocked,
+  isDrawingIntent,
+  type EditorMode,
+} from "../features/editor-shell/editor-mode";
 import type { useEditorPanels } from "../features/editor-shell/use-editor-panels";
 import type { createEditorNavigationController } from "../features/hierarchy/editor-navigation-controller";
 import type { CellInterfaceConfirmation } from "../features/hierarchy/project-structure-commands";
@@ -75,6 +80,10 @@ interface EditorShortcutDependencies {
   searchOpen: EditorPanels["searchOpen"];
   closeSearch: EditorPanels["closeSearch"];
   toggleLibraryPanel: EditorPanels["toggleLibraryPanel"];
+  openLibraryPanel: EditorPanels["openLibraryPanel"];
+  editorMode: EditorMode;
+  /** Auto mode: bring up Draw for this session, then run the key's action. */
+  bringUpDraw: (tool: string, run: () => void) => void;
   document: SchematicDocument;
   documentStack: HierarchyFrame[];
   visualSelection: SelectionController["selection"];
@@ -237,6 +246,9 @@ function createEditorShortcutHandler({
   searchOpen,
   closeSearch,
   toggleLibraryPanel,
+  openLibraryPanel,
+  editorMode,
+  bringUpDraw,
   document,
   documentStack,
   visualSelection,
@@ -415,7 +427,20 @@ function createEditorShortcutHandler({
       if (event.target instanceof HTMLElement) event.target.blur();
       return;
     }
-    if (!isTypingTarget(event.target) && handleCellLayoutKeyDown?.(event)) {
+    // The Cell symbol layout's W starts a Wire, a drawing tool: in Auto the
+    // overlay guard applies before the layout takes the key.
+    const blockedLayoutWire =
+      editorMode === "auto" &&
+      event.key.toLowerCase() === "w" &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.altKey &&
+      drawingSwitchBlocked(event.target);
+    if (
+      !isTypingTarget(event.target) &&
+      !blockedLayoutWire &&
+      handleCellLayoutKeyDown?.(event)
+    ) {
       event.preventDefault();
       return;
     }
@@ -461,6 +486,12 @@ function createEditorShortcutHandler({
       canReturnToParent: documentStack.length > 0,
     });
     if (!shortcut) return;
+    // In Auto mode a key that needs the drawing tools brings them up and
+    // then acts, except behind a dialog or from the empty card, where it
+    // does nothing at all.
+    const drawingTool =
+      editorMode === "auto" ? isDrawingIntent(shortcut)?.tool : undefined;
+    if (drawingTool !== undefined && drawingSwitchBlocked(event.target)) return;
 
     const escapeIntent =
       shortcut.kind === "run-command" &&
@@ -483,6 +514,21 @@ function createEditorShortcutHandler({
       }
     } else if (!escapeIntent) event.preventDefault();
 
+    if (drawingTool !== undefined) {
+      bringUpDraw(drawingTool, () =>
+        shortcut.kind === "toggle-panel"
+          ? // B opens the library; it never closes one Draw already shows.
+            openLibraryPanel()
+          : dispatchShortcut(shortcut),
+      );
+      return;
+    }
+    dispatchShortcut(shortcut);
+  }
+
+  function dispatchShortcut(
+    shortcut: NonNullable<ReturnType<typeof resolveEditorShortcut>>,
+  ): void {
     switch (shortcut.kind) {
       case "run-command":
         editorCommands.execute(shortcut.command);

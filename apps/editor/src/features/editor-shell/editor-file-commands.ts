@@ -61,6 +61,18 @@ export interface EditorFileCommandDependencies {
   setImportReport: (report: SpiceImportReport | null) => void;
   setImportReviewOpen: (open: boolean) => void;
   setSelectionOpen: (open: boolean) => void;
+  /** Close the Netlist dock, so Properties (with a failed review) shows. */
+  clearProjectPanel?: () => void;
+  /**
+   * The project dock holds an unapplied code draft: a failed import leaves
+   * it on screen, and its review waits for Properties.
+   */
+  projectPanelHoldsDraft?: () => boolean;
+  /**
+   * The editor mode when the import lands. Auto keeps the canvas clear after
+   * a successful import: the review waits in Properties until opened.
+   */
+  getEditorMode?: () => "auto" | "draw";
   setStatus: (status: string) => void;
   /** Raise the refresh banner when an on-demand chunk has gone missing. */
   onChunkLoadFailure?: (feature: string) => void;
@@ -87,6 +99,9 @@ export function createEditorFileCommands({
   setImportReport,
   setImportReviewOpen,
   setSelectionOpen,
+  clearProjectPanel,
+  projectPanelHoldsDraft,
+  getEditorMode,
   setStatus,
   onChunkLoadFailure,
   onImported,
@@ -296,7 +311,7 @@ export function createEditorFileCommands({
       });
       setImportReport(report);
       setImportReviewOpen(true);
-      setSelectionOpen(true);
+      if (getEditorMode?.() !== "auto") setSelectionOpen(true);
       const documents = importedProject.documents.length;
       const headline = `Imported ${documents} ${documents === 1 ? "Document" : "Documents"} and ${instanceCount} structural ${instanceCount === 1 ? "instance" : "instances"}`;
       setStatus(headline);
@@ -308,7 +323,10 @@ export function createEditorFileCommands({
   const reportFailedImport = (report: SpiceImportReport, message: string) => {
     setImportReport(report);
     setImportReviewOpen(true);
-    setSelectionOpen(true);
+    if (!projectPanelHoldsDraft?.()) {
+      clearProjectPanel?.();
+      setSelectionOpen(true);
+    }
     setStatus(message);
   };
 

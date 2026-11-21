@@ -298,7 +298,6 @@ describe("editor statusbar", () => {
           elapsedSeconds: 0,
           progress: null,
           report: null,
-          onCancel: vi.fn(),
           onDetails: vi.fn(),
           ...chip,
         }}
@@ -312,31 +311,17 @@ describe("editor statusbar", () => {
     );
   }
 
-  it("shows a planning Auto Layout run with its elapsed time and Cancel", () => {
-    const quick = statusbarWithAutoLayout({
+  it("leaves a planning Auto Layout run to the top bar", () => {
+    // Progress and Cancel live on the top-bar control
+    // (auto-layout-button.test.tsx); the chip shows only a finished report.
+    const planning = statusbarWithAutoLayout({
       running: true,
       elapsedSeconds: 12,
       progress: { evaluations: 0, budget: 24 },
     });
-    expect(quick).toContain('data-testid="auto-layout-status"');
-    expect(quick).toContain("Auto Layout… 12 s");
-    expect(quick).not.toContain("evaluation");
-    expect(quick).toContain('data-testid="auto-layout-cancel"');
-    expect(quick).toContain('aria-label="Cancel Auto Layout"');
-    // The ticking chip is not a live region: the status line announces.
-    expect(quick).not.toMatch(
-      /role="status"[^>]*data-testid="auto-layout-status"/,
-    );
-    expect(quick).toMatch(/<span aria-hidden="true">Auto Layout… 12 s<\/span>/);
-    expect(quick).not.toContain('data-testid="auto-layout-details"');
-    // The annealer's count shows only once it reports one.
-    expect(
-      statusbarWithAutoLayout({
-        running: true,
-        elapsedSeconds: 3,
-        progress: { evaluations: 3, budget: 24 },
-      }),
-    ).toContain("Auto Layout… 3 s · evaluation 3/24");
+    expect(planning).not.toContain('data-testid="auto-layout-status"');
+    expect(planning).not.toContain('data-testid="auto-layout-cancel"');
+    expect(planning).not.toContain("Auto Layout…");
   });
 
   it("offers Details for a refused or warned Auto Layout run", () => {
@@ -378,21 +363,9 @@ describe("editor statusbar", () => {
     );
   });
 
-  it("counts Cells while an import run plans several, and after", () => {
-    expect(
-      statusbarWithAutoLayout({
-        running: true,
-        elapsedSeconds: 12,
-        progress: { evaluations: 3, budget: 24, cell: 2, cells: 3 },
-      }),
-    ).toContain("Auto Layout… 12 s · Cell 2 of 3 · evaluation 3/24");
-    expect(
-      statusbarWithAutoLayout({
-        running: true,
-        elapsedSeconds: 1,
-        progress: { evaluations: 0, budget: 0, cell: 1, cells: 1 },
-      }),
-    ).toMatch(/>Auto Layout… 1 s</);
+  it("counts Cells after an import run of several", () => {
+    // While it plans, the top-bar control counts them
+    // (auto-layout-button.test.tsx).
     const done = statusbarWithAutoLayout({
       report: {
         run: "import",

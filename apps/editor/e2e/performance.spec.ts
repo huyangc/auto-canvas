@@ -149,6 +149,13 @@ function frameStats(state: Recorded, from: number, to: number) {
 async function openProject(page: Page, name: string, bytes: Buffer) {
   await page.setViewportSize({ width: 1600, height: 1000 });
   await page.addInitScript(recordFrames);
+  // The preview server is its own origin, outside the suite's seeded storage
+  // (playwright.config.ts): seed the same Draw mode so the numbers stay
+  // comparable with runs from before the modes.
+  await page.addInitScript(() => {
+    window.localStorage.setItem("icm.editor-mode.v1", "draw");
+    window.localStorage.setItem("icm.editor-mode-coach.v1", "seen");
+  });
   await page.goto(`${origin}editor`);
   await openProjectFile(
     page,

@@ -1474,3 +1474,236 @@
     display: none;
   }
 }
+
+/* The top bar's history, mode switch and Auto Layout (T150). Undo and Redo
+   are icons at every width; their names stay as accessible labels. */
+.app-history {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 2px;
+}
+
+.app-history-action {
+  justify-content: center;
+  width: var(--icm-control-h);
+  padding: 0;
+}
+
+.app-history-action .tool-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.app-history-action:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.mode-switch-anchor {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.mode-switch {
+  display: inline-flex;
+  height: var(--icm-control-h);
+  overflow: hidden;
+  border: 1px solid var(--icm-accent);
+  border-radius: 7px;
+}
+
+.mode-switch button {
+  padding: 0 12px;
+  border: 0;
+  color: var(--icm-accent);
+  background: var(--icm-surface);
+  font: inherit;
+  font-size: var(--icm-font-md);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.mode-switch button[aria-pressed="true"] {
+  color: #fff;
+  background: var(--icm-accent);
+}
+
+.mode-coach {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 0;
+  z-index: 40;
+  width: 250px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  color: #fff;
+  background: #1c2330;
+  box-shadow: 0 6px 18px rgb(16 24 40 / 25%);
+  font-size: var(--icm-font-md);
+  line-height: 1.4;
+  white-space: normal;
+}
+
+.mode-coach::before {
+  content: "";
+  position: absolute;
+  top: -7px;
+  left: 24px;
+  border: 7px solid transparent;
+  border-top: 0;
+  border-bottom-color: #1c2330;
+}
+
+.mode-coach p {
+  margin: 0;
+}
+
+.mode-coach button {
+  margin-top: 8px;
+  padding: 2px 10px;
+  border: 0;
+  border-radius: 5px;
+  color: #1c2330;
+  background: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.auto-layout-control {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 4px;
+  align-items: center;
+}
+
+.auto-layout-button.app-action-primary {
+  border-color: var(--icm-accent);
+  color: #fff;
+  background: var(--icm-accent);
+}
+
+.auto-layout-button.app-action-primary:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.auto-layout-control[data-running="true"] .auto-layout-button:disabled {
+  opacity: 1;
+}
+
+/* Below 720 px the new top-bar controls drop to icons, Import netlist…
+   leaves for File, and the header stays one row. */
+@media (max-width: 720px) {
+  .app-chrome-main .app-import-netlist {
+    display: none;
+  }
+
+  .app-chrome-main .auto-layout-button .app-action-label {
+    display: none;
+  }
+
+  .app-chrome-main .auto-layout-button {
+    padding-inline: 8px;
+  }
+
+  .mode-switch button {
+    padding-inline: 6px;
+  }
+}
+
+@media (max-width: 480px) {
+  .app-history-action {
+    width: 1.5rem;
+  }
+
+  .mode-switch button {
+    padding-inline: 4px;
+    font-size: var(--icm-font-sm, 0.8125rem);
+  }
+}
+
+@media (max-width: 760px) {
+  .app-chrome-actions .app-action.auto-layout-cancel {
+    width: auto;
+    padding-inline: 8px;
+  }
+}
+
+/* A running label is long ("… s · Cell i of N · evaluation e/b"): it is
+   capped with an ellipsis so Cancel and Agent always keep their room. */
+.app-chrome-main .app-chrome-actions {
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.app-chrome-actions > * {
+  flex-shrink: 0;
+}
+
+.app-chrome-actions > .auto-layout-control {
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.auto-layout-control .auto-layout-button {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.auto-layout-control[data-running="true"]
+  .auto-layout-button
+  .app-action-label {
+  min-width: 0;
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.auto-layout-control .auto-layout-cancel {
+  flex-shrink: 0;
+}
+
+/* The elapsed time shows only where the label does not. */
+.auto-layout-elapsed {
+  display: none;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 760px) {
+  .app-chrome-main .auto-layout-elapsed {
+    display: inline;
+  }
+}
+
+/* Properties holds an import review not seen yet. */
+.canvas-panel-buttons .app-action {
+  position: relative;
+}
+
+.canvas-panel-review-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--icm-accent);
+}
+
+/* Phone widths: Undo/Redo and the mode switch push Edit and Circuit to the
+   right, where a popover hung from its trigger's left edge would run off
+   screen. Hang it from the right edge of the window instead, as File hangs
+   from the left. */
+@media (max-width: 720px) {
+  .app-chrome-main .header-menu-popover {
+    position: fixed;
+    top: calc(var(--icm-menubar-h) + 4px);
+    right: 12px;
+    left: auto;
+    box-sizing: border-box;
+    max-width: calc(100vw - 24px);
+    max-height: calc(100dvh - var(--icm-menubar-h) - 16px);
+    overflow: auto;
+  }
+}
