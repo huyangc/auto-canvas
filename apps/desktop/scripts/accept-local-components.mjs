@@ -182,10 +182,12 @@ export async function acceptLocalComponents({
       globalThis.__openedProductLinks.push(url);
     };
   });
-  await page.getByRole("link", { name: "TokenZhang", exact: true }).click();
-  await page
-    .getByRole("link", { name: "GitHub repository", exact: true })
-    .click();
+  await expect(
+    page.getByRole("link", { name: "TokenZhang", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("link", { name: "GitHub repository", exact: true }),
+  ).toHaveCount(0);
   const about = page.getByRole("button", { name: "About", exact: true });
   const aboutBox = await about.boundingBox();
   const homeBox = await page
@@ -198,12 +200,10 @@ export async function acceptLocalComponents({
     .click();
   await expect
     .poll(() => running.evaluate(() => globalThis.__openedProductLinks.length))
-    .toBe(3);
+    .toBe(1);
   const opened = await running.evaluate(() => globalThis.__openedProductLinks);
-  assert.equal(opened[0], "https://tokenzhang.com");
-  assert.equal(opened[1], "https://github.com/cascode-ai/analog-canvas");
   assert.match(
-    opened[2],
+    opened[0],
     /^https:\/\/github\.com\/cascode-ai\/analog-canvas\/commit\/[a-f0-9]{40}$/u,
   );
   await page

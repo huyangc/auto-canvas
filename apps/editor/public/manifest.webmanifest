@@ -1,6 +1,6 @@
 {
-  "name": "Analog Canvas",
-  "short_name": "Analog Canvas",
+  "name": "Auto Canvas",
+  "short_name": "Auto Canvas",
   "description": "Local-first circuit schematic editor",
   "id": "./",
   "start_url": "./",

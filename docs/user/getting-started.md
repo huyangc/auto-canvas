@@ -201,7 +201,7 @@ Gallery ask to **Save to Cloud and continue**, **Continue without saving**
 the last Cloud Project of this tab. **Import Project File…** opens a portable
 file; invalid or future-version files leave your work unchanged.
 
-**Privacy** (status bar and account menu) explains what the site keeps;
+**Privacy** (status bar) explains what the site keeps;
 **Stop counting me**, Do Not Track or Global Privacy Control refuse the visitor
 cookie. **Delete account…** removes your account, Cloud Projects, published
 circuits, shared components and likes and cannot be undone; export first.

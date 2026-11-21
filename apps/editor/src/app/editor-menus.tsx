@@ -261,17 +261,8 @@ export function EditorMenuBar({
   return (
     <EditorAppChrome
       userComponentsEnabled={capabilities.userComponents}
-      externalLinksEnabled={capabilities.externalLinks}
       hostActions={NativeHeaderActions ? <NativeHeaderActions /> : null}
-      onOpenExternalLink={
-        openExternalLink
-          ? (target) => {
-              void openExternalLink(target).catch((error) =>
-                setStatus(String(error)),
-              );
-            }
-          : undefined
-      }
+      desktopPreviewLabel={!capabilities.externalLinks && !openExternalLink}
       identityEnabled={identity !== null}
       projectHome={
         NativeProjectHome ? (
@@ -363,7 +354,6 @@ export function EditorMenuBar({
         </>
       }
       projectName={project.name}
-      projectSchemaVersion={project.schemaVersion}
       hasUnsavedWork={hasUnsavedChanges()}
 
       fileCommands={{

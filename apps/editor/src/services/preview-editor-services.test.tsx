@@ -25,12 +25,12 @@ describe("desktop preview composition", () => {
       'data-testid="statusbar-change-log"',
       'data-testid="statusbar-privacy"',
       'data-testid="editor-report-bug"',
+      'data-testid="editor-repository-link"',
+      'href="https://tokenzhang.com"',
     ])
       expect(html).not.toContain(marker);
     expect(html).toContain("Export Project File");
     expect(html).toContain("Desktop preview");
-    expect(html).toContain('href="https://tokenzhang.com"');
-    expect(html).toContain('data-testid="editor-repository-link"');
     expect(html).toContain("User Components…");
     expect(html.indexOf(">About</button>")).toBeGreaterThan(
       html.indexOf('class="app-chrome-actions"'),

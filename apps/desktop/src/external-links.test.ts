@@ -11,12 +11,6 @@ it("opens fixed product links in the system browser and refuses arbitrary destin
       headers: { origin },
       body: JSON.stringify(body),
     });
-  expect((await handle(request({ target: "owner" }))).ok).toBe(true);
-  expect(open).toHaveBeenLastCalledWith("https://tokenzhang.com");
-  expect((await handle(request({ target: "repository" }))).ok).toBe(true);
-  expect(open).toHaveBeenLastCalledWith(
-    "https://github.com/cascode-ai/analog-canvas",
-  );
   expect((await handle(request({ target: "source" }))).ok).toBe(true);
   expect(open).toHaveBeenLastCalledWith(
     `https://github.com/cascode-ai/analog-canvas/commit/${"a".repeat(40)}`,
@@ -28,12 +22,15 @@ it("opens fixed product links in the system browser and refuses arbitrary destin
   expect(
     (await handle(request({ target: "https://example.com" }))).status,
   ).toBe(400);
+  // The header's owner and repository links were removed (T149).
+  for (const retired of ["owner", "repository"])
+    expect((await handle(request({ target: retired }))).status).toBe(400);
   expect(
-    (await handle(request({ target: "owner", url: "file:///C:/Windows" })))
+    (await handle(request({ target: "rnl", url: "file:///C:/Windows" })))
       .status,
   ).toBe(400);
   expect(
-    (await handle(request({ target: "owner" }, "https://example.com"))).status,
+    (await handle(request({ target: "rnl" }, "https://example.com"))).status,
   ).toBe(403);
-  expect(open).toHaveBeenCalledTimes(4);
+  expect(open).toHaveBeenCalledTimes(2);
 });

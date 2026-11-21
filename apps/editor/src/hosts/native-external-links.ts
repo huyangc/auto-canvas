@@ -1,4 +1,4 @@
-export type NativeExternalTarget = "owner" | "repository" | "source" | "rnl";
+export type NativeExternalTarget = "source" | "rnl";
 export async function openNativeExternalLink(target: NativeExternalTarget) {
   const response = await fetch("/desktop/external", {
     method: "POST",

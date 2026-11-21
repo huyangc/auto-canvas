@@ -82,8 +82,8 @@ Cold and running-instance opens are supported. After replacing the ZIP, enable
 association in the new installation to update its path. Installers, signing and
 automatic updates remain deferred.
 
-About is on the right of the header. TokenZhang, the GitHub repository and the
-source commit open in the system browser through fixed product-link commands.
+About is on the right of the header. The source commit (in About) and the RNL
+introduction open in the system browser through fixed product-link commands.
 The desktop renderer's network and external-navigation restrictions remain
 active; no Project bytes, file paths or credentials are passed to those links.
 
