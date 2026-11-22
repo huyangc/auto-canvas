@@ -227,6 +227,8 @@ export function createNotebookIdentity({
     { profile: NotebookProfile; start: readonly number[] }
   >();
   const pending = new Map<string, Promise<NotebookIdentityResult>>();
+  /** Profile writes still running after their validation gave up on them. */
+  let lateWrites = 0;
   const send = fetch ?? directGet;
 
   /** Rejects with 503 after `timeoutMs`, aborting `controller`. */
@@ -301,13 +303,26 @@ export function createNotebookIdentity({
         ? unauthorized
         : unavailable;
     }
-    // The hook writes to the database. A write that stalls must not keep
-    // this validation, and its slot, for longer than its own deadline; the
-    // write itself is left to finish or fail.
+    // The hook writes to the database. A write that stalls does not keep its
+    // caller past the deadline, but it is left to finish or fail and counts
+    // against the validations in flight until it does: retries cannot queue
+    // more writes than that limit.
+    let writing = true;
+    const write = (async () => onProfile(profile))().finally(() => {
+      writing = false;
+    });
     const limit = deadline(new AbortController());
     try {
-      await Promise.race([onProfile(profile), limit.passed]);
+      await Promise.race([write, limit.passed]);
     } catch {
+      if (writing) {
+        lateWrites += 1;
+        void write
+          .catch(() => undefined)
+          .finally(() => {
+            lateWrites -= 1;
+          });
+      }
       return unavailable;
     } finally {
       limit.clear();
@@ -337,7 +352,7 @@ export function createNotebookIdentity({
       }
       const joined = pending.get(key);
       if (joined) return joined;
-      if (pending.size >= MAX_IN_FLIGHT) return unavailable;
+      if (pending.size + lateWrites >= MAX_IN_FLIGHT) return unavailable;
       const validation = validate(token, key).finally(() =>
         pending.delete(key),
       );
