@@ -30,6 +30,8 @@ const PUBLIC_PATHS = new Set([
 ]);
 const SPEC_MARKER = { "x-notebook-e2e": "spec" };
 
+// The notebook run refuses a non-canonical port (playwright.config.ts), so
+// this spells the origin exactly as Playwright and the browser do.
 export const origin = `http://127.0.0.1:${process.env.ICM_E2E_PORT ?? "4173"}`;
 
 /**

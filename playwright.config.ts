@@ -68,8 +68,18 @@ function checkNotebookEnvironment(): void {
     ["ICM_E2E_PORT", e2ePort],
     ["AUTO_CANVAS_E2E_API_PORT", apiPort],
   ] as const)
-    if (!Number.isInteger(port) || port < 1024 || port > 65535)
-      refuse(`${name} must be an integer from 1024 to 65535`);
+    // Canonical decimal only, as the fixture requires: the helpers and the
+    // fixture spell the port as the variable does, the browser as a number.
+    if (
+      (process.env[name] !== undefined &&
+        !/^[1-9]\d*$/u.test(process.env[name])) ||
+      !Number.isInteger(port) ||
+      port < 1024 ||
+      port > 65535
+    )
+      refuse(
+        `${name} must be an integer from 1024 to 65535, without leading zeros`,
+      );
     else if (reserved.has(port))
       refuse(`${name} is reserved for the developer's servers`);
   if (e2ePort === apiPort)

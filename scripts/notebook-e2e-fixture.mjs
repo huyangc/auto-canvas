@@ -47,8 +47,12 @@ function refuse(message) {
 
 function port(name) {
   const value = process.env[name];
-  if (value === undefined || !/^\d+$/u.test(value))
-    refuse(`${name} must be an integer from 1024 to 65535`);
+  // Canonical decimal only: "04273" would name the port Playwright and the
+  // helpers spell "4273" (playwright.config.ts refuses it the same way).
+  if (value === undefined || !/^[1-9]\d*$/u.test(value))
+    refuse(
+      `${name} must be an integer from 1024 to 65535, without leading zeros`,
+    );
   const number = Number(value);
   if (number < 1024 || number > 65535)
     refuse(`${name} must be an integer from 1024 to 65535`);
@@ -129,10 +133,18 @@ const sockets = new Set();
 let pool;
 let ready = false;
 let closing;
+/** The startup allocation in flight, if any (see `allocate`). */
+let pending = null;
+/** Resumes a NOTEBOOK_E2E_PAUSE_AT pause. */
+let releasePause = null;
 
 function cleanup(reason, code) {
   if (closing) return closing;
   closing = (async () => {
+    // Let a paused stage go on, then wait for the allocation in flight: its
+    // resource exists (or has failed) before anything is torn down.
+    releasePause?.();
+    while (pending) await pending;
     for (const socket of sockets) socket.destroy();
     await Promise.all(
       servers.map(
@@ -291,6 +303,14 @@ let seq = 0;
 let log = [];
 let holds = [];
 let held = [];
+/** Moves on at each reset; a hold started before it belongs to no test. */
+let generation = 0;
+
+/** Ends a held request's client connection without an answer. */
+function discard(response) {
+  response.socket?.destroy();
+  response.destroy();
+}
 
 function readBody(request) {
   return new Promise((done, fail) => {
@@ -382,10 +402,16 @@ async function control(request, response, path) {
     );
   }
   if (route === "POST /__fixture/reset") {
+    // A held request of the previous test is dropped, never forwarded, and a
+    // body still arriving for one cannot join the next test's queue.
+    generation += 1;
+    const discarded = held.length;
+    for (const item of held) discard(item.response);
+    held = [];
     log = [];
     holds = [];
     notebookMode = "up";
-    return json(response, 200, { seq });
+    return json(response, 200, { seq, discarded });
   }
   if (route === "POST /__fixture/hold") {
     if (
@@ -485,8 +511,13 @@ function createProxy(upstreamPort) {
     if (hold) {
       entry.held = true;
       // The whole body is buffered before the request counts as held.
+      const heldIn = generation;
       readBody(request).then(
-        (body) => held.push({ entry, request, response, body }),
+        (body) => {
+          if (heldIn === generation)
+            held.push({ entry, request, response, body });
+          else discard(response);
+        },
         () => {
           entry.status = 499;
         },
@@ -534,32 +565,86 @@ function createProxy(upstreamPort) {
 }
 
 // ---- Startup, each stage tracked as it is allocated. ----
+class StartupAborted extends Error {}
+
+/**
+ * Runs one allocation of the startup. None starts once shutdown has begun,
+ * and cleanup waits for the one in flight (`pending`) before it tears down,
+ * so a resource that appears while cleanup runs is never missed.
+ */
+async function allocate(run) {
+  if (closing) throw new StartupAborted("shutdown began");
+  const result = run();
+  pending = result.then(
+    () => {},
+    () => {},
+  );
+  try {
+    return await result;
+  } finally {
+    pending = null;
+    if (closing) throw new StartupAborted("shutdown began");
+  }
+}
+
+/**
+ * Test-only (scripts/notebook-e2e-fixture-check.mjs): with
+ * NOTEBOOK_E2E_PAUSE_AT=<stage>, prints `paused at <stage>` and waits there
+ * until cleanup starts, so the check can signal at a known point.
+ */
+function pauseAt(stage) {
+  if (process.env.NOTEBOOK_E2E_PAUSE_AT !== stage) return Promise.resolve();
+  console.log(`${PREFIX} paused at ${stage}`);
+  return new Promise((resume) => {
+    releasePause = resume;
+  });
+}
+
 try {
   console.log(`${PREFIX} resource pid=${process.pid} role=fixture`);
   const { createDb } = await import("../apps/server/dist/db.js");
+  if (closing) throw new StartupAborted("shutdown began");
   pool = createDb(databaseUrl.href);
   const schema = `notebook_e2e_${randomUUID().replaceAll("-", "")}`;
-  schemas.push(schema);
-  await pool.query(`CREATE SCHEMA ${schema}`);
-  console.log(`${PREFIX} resource schema=${schema}`);
+  await allocate(async () => {
+    // Tracked and printed before the CREATE is sent: from then on it may
+    // exist, and cleanup drops it only after the CREATE has finished.
+    schemas.push(schema);
+    console.log(`${PREFIX} resource schema=${schema}`);
+    const created = pool.query(`CREATE SCHEMA ${schema}`);
+    await pauseAt("schema");
+    await created;
+  });
   failIf("after-schema");
-  const stubPort = await startStub();
+  const stubPort = await allocate(() => startStub());
   failIf("after-stub");
-  const upstreamPort = await startServer(stubPort, schema);
+  const upstreamPort = await allocate(async () => {
+    const listening = startServer(stubPort, schema);
+    listening.catch(() => {});
+    await pauseAt("server");
+    return listening;
+  });
   failIf("after-server");
   const proxy = createProxy(upstreamPort);
   failIf("before-listen");
-  await new Promise((done, fail) => {
-    proxy.once("error", fail);
-    proxy.listen(proxyPort, "127.0.0.1", () => {
-      proxy.off("error", fail);
-      done();
-    });
-  });
+  await allocate(
+    () =>
+      new Promise((done, fail) => {
+        proxy.once("error", fail);
+        proxy.listen(proxyPort, "127.0.0.1", () => {
+          proxy.off("error", fail);
+          done();
+        });
+      }),
+  );
   proxy.on("error", (error) => void cleanup(`proxy error: ${error.code}`, 1));
   ready = true;
   console.log(`${PREFIX} ready http://127.0.0.1:${proxyPort}/canvas/`);
 } catch (error) {
-  console.error(`${PREFIX} startup failed: ${error?.message ?? error}`);
-  await cleanup("startup error", 1);
+  if (!(error instanceof StartupAborted))
+    console.error(`${PREFIX} startup failed: ${error?.message ?? error}`);
+  await cleanup(
+    error instanceof StartupAborted ? "startup aborted" : "startup error",
+    1,
+  );
 }

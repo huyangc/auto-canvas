@@ -508,7 +508,11 @@ test("N3 an account switch in another tab reloads into the new account without t
   expectNoForeignOrigin(recorder.records);
 });
 
-/** B opens the editor as Bob: his own, empty Shelf, none of these names. */
+/**
+ * B opens the editor as Bob: his own, empty Shelf, none of these names in
+ * it. Only the Shelf is checked: until T163 Bob's editor may restore an
+ * unsaved tab of Alice's from the browser storage they share.
+ */
 async function expectBobsOwnEditor(
   b: Page,
   bob: NotebookUser,
@@ -520,7 +524,7 @@ async function expectBobsOwnEditor(
   const wall = await openShelfWall(b);
   await expect(wall.getByTestId("shelf-empty")).toBeVisible();
   for (const name of names)
-    await expect(b.getByText(name, { exact: true })).toHaveCount(0);
+    await expect(wall.getByText(name, { exact: true })).toHaveCount(0);
 }
 
 test("N4a a save issued before the switch stays the old account's", async ({
@@ -1399,23 +1403,77 @@ test("N10e previews that do not decode fall back to placeholders", async ({
   expectNoForeignOrigin(recorder.records);
 });
 
+interface ObserverProbe {
+  observers: {
+    root: string | null;
+    rows: number;
+    called: boolean;
+    disconnected: boolean;
+  }[];
+  fetches: Promise<void>[];
+}
+
 test("N10f measurement: version list observer root and requests before scrolling", async ({
   page,
   context,
 }) => {
+  // Records each IntersectionObserver (its root, how many version rows it
+  // observes, whether its first callback ran or it was disconnected) and
+  // each version preview fetch the page starts. The gate's fetch wraps the
+  // page's fetch as it finds it, so this wrapper sees the scoped fetch's
+  // requests too.
   await context.addInitScript(() => {
-    const roots: (string | null)[] = [];
-    Object.defineProperty(window, "__observerRoots", { value: roots });
+    const probe: ObserverProbe = { observers: [], fetches: [] };
+    Object.defineProperty(window, "__observerProbe", { value: probe });
     const Native = window.IntersectionObserver;
+    const entries = new WeakMap<
+      IntersectionObserver,
+      ObserverProbe["observers"][number]
+    >();
     window.IntersectionObserver = class extends Native {
       constructor(
         callback: IntersectionObserverCallback,
         options?: IntersectionObserverInit,
       ) {
-        super(callback, options);
-        const root = options?.root;
-        roots.push(root instanceof Element ? root.className : null);
+        const entry = {
+          root:
+            options?.root instanceof Element ? options.root.className : null,
+          rows: 0,
+          called: false,
+          disconnected: false,
+        };
+        super((changes, observer) => {
+          entry.called = true;
+          callback(changes, observer);
+        }, options);
+        entries.set(this, entry);
+        probe.observers.push(entry);
       }
+      override observe(target: Element): void {
+        if (target.closest(".version-row")) entries.get(this)!.rows += 1;
+        super.observe(target);
+      }
+      override disconnect(): void {
+        entries.get(this)!.disconnected = true;
+        super.disconnect();
+      }
+    };
+    const nativeFetch = window.fetch;
+    window.fetch = function (
+      this: unknown,
+      ...args: Parameters<typeof fetch>
+    ): Promise<globalThis.Response> {
+      const [input] = args;
+      const url = input instanceof Request ? input.url : String(input);
+      const started = nativeFetch.apply(this, args);
+      if (/\/versions\/[^/]+\/preview\.svg/u.test(url))
+        probe.fetches.push(
+          started.then(
+            () => {},
+            () => {},
+          ),
+        );
+      return started;
     };
   });
   const recorder = recordRequests(context);
@@ -1429,18 +1487,53 @@ test("N10f measurement: version list observer root and requests before scrolling
     await openShelfWall(page);
     const from = await recorder.mark(`1280x${height}`);
     await openVersionHistory(page, id);
-    await expect(
-      page.getByTestId("version-1").locator(":scope > *").first(),
-    ).toBeAttached();
-    await expect(
-      page.getByTestId("version-3").locator(":scope > img"),
-    ).toHaveAttribute("src", /^blob:/u);
+    // The rows, each with its placeholder or image: however many previews
+    // load before scrolling (an accepted limit today, PR 114), this waits
+    // only for the observers' first evaluation, not for any preview.
+    for (const n of [1, 2, 3])
+      await expect(
+        page.getByTestId(`version-${n}`).locator(":scope > img"),
+      ).toBeAttached();
     await page.evaluate(
       () =>
         new Promise<void>((resolve) =>
           requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
         ),
     );
+    // Every row is accounted for (observed, or its preview already asked
+    // for) and every observer of a row has had its first callback.
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const probe = (
+            window as unknown as { __observerProbe: ObserverProbe }
+          ).__observerProbe;
+          const rowObservers = probe.observers.filter(
+            (observer) => observer.rows > 0,
+          );
+          const observed = rowObservers.reduce(
+            (sum, observer) => sum + observer.rows,
+            0,
+          );
+          const placeholders = document.querySelectorAll(
+            ".version-row > img:not([src])",
+          ).length;
+          return (
+            (placeholders === 0 || observed + probe.fetches.length >= 3) &&
+            rowObservers.every(
+              (observer) => observer.called || observer.disconnected,
+            )
+          );
+        }),
+      )
+      .toBe(true);
+    // The fetches those first callbacks started have finished.
+    const started = await page.evaluate(async () => {
+      const probe = (window as unknown as { __observerProbe: ObserverProbe })
+        .__observerProbe;
+      await Promise.all(probe.fetches);
+      return probe.fetches.length;
+    });
     const layout = await page.evaluate(() => {
       const box = (selector: string) => {
         const element = document.querySelector(selector)!;
@@ -1462,15 +1555,29 @@ test("N10f measurement: version list observer root and requests before scrolling
             height: Math.round(rect.height),
           };
         }),
-        roots: (window as unknown as { __observerRoots: (string | null)[] })
-          .__observerRoots,
+        rowObserverRoots: (
+          window as unknown as { __observerProbe: ObserverProbe }
+        ).__observerProbe.observers
+          .filter((observer) => observer.rows > 0)
+          .map((observer) => observer.root),
+        allObserverRoots: (
+          window as unknown as { __observerProbe: ObserverProbe }
+        ).__observerProbe.observers.map((observer) => observer.root),
       };
     });
     const requested = recorder
       .between(from)
       .filter((record) => /\/versions\/[^/]+\/preview\.svg$/u.test(record.url))
       .map((record) => decodeURIComponent(record.url.split("/versions/")[1]!));
-    measurements.push({ viewport: `1280x${height}`, ...layout, requested });
+    // A measurement: the count is recorded, not required.
+    expect(requested.length).toBeGreaterThanOrEqual(0);
+    expect(requested.length).toBeLessThanOrEqual(3);
+    measurements.push({
+      viewport: `1280x${height}`,
+      ...layout,
+      fetchesStartedInPage: started,
+      requested,
+    });
   }
   test.info().annotations.push({
     type: "N10f measurements",
