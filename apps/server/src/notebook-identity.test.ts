@@ -411,11 +411,13 @@ describe("profile hook", () => {
     expect((await resolver.resolve(bearer("alice-token"))).ok).toBe(true);
     expect(seen).toHaveLength(2);
   });
-  it("answers 503 at the deadline when the hook stalls, and releases the validation", async () => {
-    let stall = true;
+  it("answers 503 at the deadline when the hook stalls, and validates again once that write has ended", async () => {
+    let finish: (() => void) | undefined;
     const resolver = identity({
       onProfile: () =>
-        stall ? new Promise(() => undefined) : Promise.resolve(),
+        finish
+          ? Promise.resolve()
+          : new Promise<void>((resolve) => (finish = resolve)),
     });
     const started = performance.now();
     expect(await resolver.resolve(bearer("alice-token"))).toEqual({
@@ -423,8 +425,32 @@ describe("profile hook", () => {
       status: 503,
     });
     expect(performance.now() - started).toBeLessThan(2000);
-    stall = false;
+    finish!();
+    await delay(0);
     expect((await resolver.resolve(bearer("alice-token"))).ok).toBe(true);
+  });
+  it("starts no second validation for a token whose write is still running", async () => {
+    const writes: (() => void)[] = [];
+    const resolver = identity({
+      onProfile: () => new Promise<void>((resolve) => writes.push(resolve)),
+    });
+    for (let attempt = 0; attempt < 3; attempt += 1)
+      expect(await resolver.resolve(bearer("alice-token"))).toEqual({
+        ok: false,
+        status: 503,
+      });
+    expect(seen).toHaveLength(1);
+    expect(writes).toHaveLength(1);
+    // Another token is not held up by it.
+    void resolver.resolve(bearer("bob-token"));
+    while (writes.length < 2) await delay(5);
+    for (const finish of writes) finish();
+    await delay(0);
+    expect(await resolver.resolve(bearer("alice-token"))).toEqual({
+      ok: false,
+      status: 503,
+    });
+    expect(seen).toHaveLength(3);
   });
   it("counts writes that outlive their deadline against the 32 validations in flight", async () => {
     const writes: (() => void)[] = [];
