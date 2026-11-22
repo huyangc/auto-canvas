@@ -87,16 +87,11 @@ export async function revealPropertiesShelf(page: Page): Promise<void> {
 }
 
 /**
- * Open one group of editor commands. The header has three menus: File (the
- * project and its file commands), Edit, and Circuit (Hierarchy and Netlist).
+ * Open one group of editor commands. The header has two menus: File (the
+ * project and its file commands) and ⋯ (Edit, Hierarchy, Netlist and Layout).
  */
 export async function openMenu(page: Page, name: string): Promise<Locator> {
-  const menuTestId =
-    name === "File"
-      ? "project-menu"
-      : name === "Edit"
-        ? "edit-menu"
-        : "circuit-menu";
+  const menuTestId = name === "File" ? "project-menu" : "more-menu";
   const menu = page.getByTestId(menuTestId);
   if ((await menu.getAttribute("open")) === null)
     await menu.locator(":scope > summary").click();

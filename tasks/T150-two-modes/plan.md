@@ -1186,3 +1186,49 @@ tab ›` work.
     "no plan was returned" and "depends on …, edited since import" record
     nothing; Details still shows them.
   - Not fixed (coordinator): panel shortcut hints during a drag.
+
+## T150c notes (implementer, 2026-11-21)
+
+- **Order.** Decision 4 and the wireframe agree: the left group is the brand,
+  the project name, Undo/Redo and the switch; the right group is `Import
+  netlist…` (Auto), `Auto Layout`, `File ▾`, `Agent`, host actions, the
+  desktop preview label, then `⋯` last. File moved from the left group to the
+  right one with its contents and test ids unchanged; its fixed popover now
+  hangs from the window's right edge (`right: 12px`) instead of the left,
+  since its trigger is at the right.
+- **`⋯`** is `<details class="command-menu more-menu"
+name="editor-command-menu" data-testid="more-menu">`; its summary is `⋯`
+  with `aria-label="More"` and a title naming the groups, and no caret. Groups
+  in order: Edit (now with a visible `Edit` title, as the others have; its
+  `Selection` and `Advanced` sub-labels are kept), Hierarchy, Netlist, Layout
+  (`AutoLayoutMenuSection`). Every button's text, test id and handler is the
+  one Edit or Circuit had. Escape closes it and gives focus back to `⋯`, as
+  File does (the window's Escape handler alone left focus inside the closed
+  menu); outside click, a command and the shared `name` (one of File / `⋯`
+  open) work as before. Above 720 px its popover opens leftwards from the
+  trigger; at 720 px and below slice a's rule hangs it from the window's right
+  edge. It scrolls (`max-height`, `overflow: auto`) in a short window.
+- **The name** (decision 23) is a `button.app-project-name` after the brand
+  (and the desktop's project home), showing `project.name` or `Untitled` for a
+  blank name, with a decorative copy of File's dot (`aria-hidden`; File keeps
+  the accessible `Unsaved changes` and its test id, since the label is hidden
+  below 720 px). Its title is `<name> · open Project Info to rename`; a click
+  runs File's `onOpenInfo`. No new test id. Above 720 px the brand group may
+  shrink (`flex-shrink: 1000`, `min-width: auto`) and only the name gives way
+  (`min-width: 3rem`, `max-width: 16rem`, ellipsis); at 720 px and below it is
+  hidden. Pinned at 320–1440 px in both modes with a 110-character name.
+- **Paths beyond the plan.** `chrome-isolation.spec.ts:116-140` named the left
+  group as `.app-brand > :is(.editor-brand, .project-menu, .command-menu)` and
+  needed four of them; File and `⋯` now sit on the right, so it measures the
+  whole row's brand, history, switch, File and `⋯` in order instead (the plan
+  allows that file "where an assertion names a moved control").
+  `docs/user/schematic-hierarchy.md` named `Circuit → Hierarchy` and
+  `Edit → …` three times; updated to `⋯ → …`. Comments in
+  `auto-layout-session.ts` and `auto-layout-menu-section(.test).tsx` say
+  `⋯ → Layout`.
+- **The table walk** (step 18) is `MENU_TABLE` in `editor-modes.spec.ts`, one
+  entry per row of decision 21. Not walked, because they need a state the
+  fixture does not have: Revert, Recover, RNL…, desktop file commands, Cancel
+  Auto Layout (covered by the running tests), Open Shelf project in tab, the
+  empty card (covered by the first-open test). The T150d rows are walked as
+  they stand before T150d (the strip is shown).

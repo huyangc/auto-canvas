@@ -3,7 +3,7 @@
 // owns one session per editor.
 //
 // Two kinds of run share the worker and the write path:
-// - manual (Circuit → Layout → Auto Layout): the open Cell, fenced by the open
+// - manual (⋯ → Layout → Auto Layout): the open Cell, fenced by the open
 //   Cell (T014), with T014's statuses;
 // - import (after File → Import → SPICE): every imported Cell, fenced per
 //   Document, committed as one undo step, every status prefixed with the

@@ -5,6 +5,7 @@ import {
   type AutoLayoutMenuActions,
 } from "../features/auto-layout/auto-layout-menu-section";
 import {
+  useRef,
   type ReactNode,
   type ComponentProps,
   type MouseEvent,
@@ -44,6 +45,54 @@ interface AlignmentAction extends CommandAction {
   label: string;
 }
 
+/**
+ * The top bar's project name: read-only, cut with an ellipsis when long, with
+ * File's unsaved-work dot. It opens Project Info, where the name is changed.
+ * The File menu's dot keeps the accessible "Unsaved changes"; this one is
+ * decorative.
+ */
+function ProjectNameLabel({
+  name,
+  dirty,
+  onOpenInfo,
+}: {
+  name: string;
+  dirty: boolean;
+  onOpenInfo: (() => void) | undefined;
+}) {
+  const shown = name.trim() || "Untitled";
+  const content = (
+    <>
+      <span className="app-project-name-text">{shown}</span>
+      {dirty ? (
+        <span className="project-unsaved-indicator" aria-hidden="true">
+          ●
+        </span>
+      ) : null}
+    </>
+  );
+  if (!onOpenInfo)
+    return (
+      <span className="app-project-name" title={shown}>
+        {content}
+      </span>
+    );
+  return (
+    <button
+      type="button"
+      className="app-project-name"
+      title={`${shown} · open Project Info to rename`}
+      aria-haspopup="dialog"
+      onClick={() => {
+        dismissOpenCommandMenus();
+        onOpenInfo();
+      }}
+    >
+      {content}
+    </button>
+  );
+}
+
 export interface EditorAppChromeProps {
   identityEnabled?: boolean;
   userComponentsEnabled?: boolean;
@@ -78,7 +127,7 @@ export interface EditorAppChromeProps {
   onOpenNetlistConfiguration: () => void;
   netlistFormat: "spice" | "spectre";
   onExportNetlist: (format: "spice" | "spectre") => void;
-  /** Circuit → Layout: Auto Layout (with its reason when unavailable) and Cancel. */
+  /** ⋯ → Layout: Auto Layout (with its reason when unavailable) and Cancel. */
   autoLayout: AutoLayoutMenuActions;
   /** The run the top-bar Auto Layout control shows while it plans. */
   autoLayoutRun: AutoLayoutRunView;
@@ -154,6 +203,7 @@ export function EditorAppChrome({
   hierarchyToolbar,
   telemetry,
 }: EditorAppChromeProps) {
+  const moreMenu = useRef<HTMLDetailsElement>(null);
   const copyNetlist = (format: "spice" | "spectre") => {
     dismissOpenCommandMenus();
     onExportNetlist(format);
@@ -182,6 +232,11 @@ export function EditorAppChrome({
             <h1 title="Auto Canvas">Auto Canvas</h1>
           </div>
           {projectHome}
+          <ProjectNameLabel
+            name={projectName}
+            dirty={hasUnsavedWork}
+            onOpenInfo={fileCommands.onOpenInfo}
+          />
           <div className="app-history" role="group" aria-label="History">
             <button
               type="button"
@@ -210,6 +265,39 @@ export function EditorAppChrome({
             <ModeSwitch mode={editorMode} onChange={onChangeMode} />
             {coachVisible ? <ModeCoach onDismiss={onDismissCoach} /> : null}
           </div>
+        </div>
+        <div className="app-chrome-actions">
+          {editorMode === "auto" ? (
+            <button
+              type="button"
+              className="app-action app-import-netlist"
+              data-testid="import-netlist-button"
+              aria-label="Import netlist…"
+              title="Import a SPICE / SCS netlist and lay it out"
+              onClick={() => {
+                dismissOpenCommandMenus();
+                importNetlist.inputRef.current?.click();
+              }}
+            >
+              <ToolIcon name="netlist" />
+              <span className="app-action-label">Import netlist…</span>
+            </button>
+          ) : null}
+          <input
+            ref={importNetlist.inputRef}
+            hidden
+            type="file"
+            multiple
+            accept=".spi,.cir,.sp,.scs,.inc,.lib"
+            data-testid="import-netlist-file"
+            onChange={(event) => {
+              // The import reads the live FileList at once; clearing after
+              // it lets the same file be chosen again.
+              importNetlist.onFiles(event.currentTarget.files);
+              event.currentTarget.value = "";
+            }}
+          />
+          <AutoLayoutButton {...autoLayout} run={autoLayoutRun} />
           {/* File holds Project Info and the file commands; project tabs
               select projects. */}
           <ProjectMenu
@@ -220,17 +308,69 @@ export function EditorAppChrome({
           >
             <FileCommandMenu {...fileCommands} embedded />
           </ProjectMenu>
+          {agentAction ? (
+            <button
+              type="button"
+              className="app-action app-action-agent"
+              data-testid="open-agent"
+              title={agentAction.label}
+              aria-label="Agent"
+              onClick={() => {
+                dismissOpenCommandMenus();
+                agentAction.execute();
+              }}
+            >
+              <svg
+                className="app-action-icon"
+                viewBox="0 0 16 16"
+                aria-hidden="true"
+              >
+                <path
+                  d="M8 1.5 9.4 6.6 14.5 8 9.4 9.4 8 14.5 6.6 9.4 1.5 8 6.6 6.6Z"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              <span className="app-action-label">Agent</span>
+            </button>
+          ) : null}
+          {hostActions}
+          {desktopPreviewLabel ? (
+            <span title="Save updates a local Project. Export Project File writes an exchange copy. Online services are unavailable.">
+              Desktop preview
+            </span>
+          ) : null}
+          {/* ⋯ holds what the Edit and Circuit menus held, in their groups:
+              Edit, Hierarchy, Netlist and Layout. */}
           <details
-            className="command-menu"
+            className="command-menu more-menu"
             name="editor-command-menu"
-            data-testid="edit-menu"
+            data-testid="more-menu"
+            ref={moreMenu}
+            onKeyDown={(event) => {
+              // As File does: Escape closes the menu and hands focus back
+              // to its button (the window's handler may have closed it).
+              if (event.key !== "Escape" || !moreMenu.current) return;
+              moreMenu.current.open = false;
+              moreMenu.current.querySelector("summary")?.focus();
+            }}
           >
-            <summary>Edit</summary>
+            <summary
+              aria-label="More"
+              title="More: Edit, Hierarchy, Netlist, Layout"
+            >
+              <span aria-hidden="true">⋯</span>
+            </summary>
             <div
-              className="command-popover header-menu-popover"
+              className="command-popover header-menu-popover more-menu-popover"
               onClick={closeMenuAfterCommand}
             >
               <div className="command-section" role="group" aria-label="Edit">
+                <span className="command-section-title" aria-hidden="true">
+                  Edit
+                </span>
                 <button type="button" onClick={onInsertComponent}>
                   Insert component… (I)
                 </button>
@@ -316,18 +456,6 @@ export function EditorAppChrome({
                   Choose Selectable Objects… (Ctrl+Shift+F)
                 </button>
               </div>
-            </div>
-          </details>
-          <details
-            className="command-menu"
-            name="editor-command-menu"
-            data-testid="circuit-menu"
-          >
-            <summary>Circuit</summary>
-            <div
-              className="command-popover header-menu-popover"
-              onClick={closeMenuAfterCommand}
-            >
               <div
                 className="command-section"
                 role="group"
@@ -384,73 +512,6 @@ export function EditorAppChrome({
               <AutoLayoutMenuSection {...autoLayout} />
             </div>
           </details>
-        </div>
-        <div className="app-chrome-actions">
-          {editorMode === "auto" ? (
-            <button
-              type="button"
-              className="app-action app-import-netlist"
-              data-testid="import-netlist-button"
-              aria-label="Import netlist…"
-              title="Import a SPICE / SCS netlist and lay it out"
-              onClick={() => {
-                dismissOpenCommandMenus();
-                importNetlist.inputRef.current?.click();
-              }}
-            >
-              <ToolIcon name="netlist" />
-              <span className="app-action-label">Import netlist…</span>
-            </button>
-          ) : null}
-          <input
-            ref={importNetlist.inputRef}
-            hidden
-            type="file"
-            multiple
-            accept=".spi,.cir,.sp,.scs,.inc,.lib"
-            data-testid="import-netlist-file"
-            onChange={(event) => {
-              // The import reads the live FileList at once; clearing after
-              // it lets the same file be chosen again.
-              importNetlist.onFiles(event.currentTarget.files);
-              event.currentTarget.value = "";
-            }}
-          />
-          <AutoLayoutButton {...autoLayout} run={autoLayoutRun} />
-          {agentAction ? (
-            <button
-              type="button"
-              className="app-action app-action-agent"
-              data-testid="open-agent"
-              title={agentAction.label}
-              aria-label="Agent"
-              onClick={() => {
-                dismissOpenCommandMenus();
-                agentAction.execute();
-              }}
-            >
-              <svg
-                className="app-action-icon"
-                viewBox="0 0 16 16"
-                aria-hidden="true"
-              >
-                <path
-                  d="M8 1.5 9.4 6.6 14.5 8 9.4 9.4 8 14.5 6.6 9.4 1.5 8 6.6 6.6Z"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.4"
-                  strokeLinejoin="round"
-                />
-              </svg>
-              <span className="app-action-label">Agent</span>
-            </button>
-          ) : null}
-          {hostActions}
-          {desktopPreviewLabel ? (
-            <span title="Save updates a local Project. Export Project File writes an exchange copy. Online services are unavailable.">
-              Desktop preview
-            </span>
-          ) : null}
         </div>
       </div>
       {editorMode === "draw" ? <DrawingToolbar {...drawingToolbar} /> : null}

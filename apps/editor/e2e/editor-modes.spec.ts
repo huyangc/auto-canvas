@@ -14,6 +14,7 @@ import {
   openCellManager,
   openEditor,
   openMenu,
+  renameProject,
 } from "./editor-fixtures";
 
 // A first-time visitor: nothing stored, so the editor opens in Auto mode.
@@ -379,6 +380,7 @@ test("the Auto top bar stays one row with its controls on screen", async ({
       "mode-switch",
       "auto-layout-button",
       "project-menu",
+      "more-menu",
     ]) {
       const box = (await page.getByTestId(testId).boundingBox())!;
       expect(box.x, `${testId} at ${width}px`).toBeGreaterThanOrEqual(0);
@@ -567,17 +569,20 @@ test("switching to Auto drops a Net Label being placed", async ({ page }) => {
   await expect(page.getByTestId("revision")).toHaveText(revision!);
 });
 
-test("W inside an open File menu changes nothing", async ({ page }) => {
+test("W inside an open File or ⋯ menu changes nothing", async ({ page }) => {
   await openEditor(page, "/editor?example=two-stage-op-amp");
   await expectStatus(page, "Opened example: Two-Stage Op Amp");
-  const file = await openMenu(page, "File");
-  await file.getByRole("button").first().focus();
-  await page.keyboard.press("w");
-  await expect(page.getByTestId("mode-auto")).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
-  await expect(page.getByTestId("active-tool")).toHaveText("pointer");
+  for (const name of ["File", "Edit"]) {
+    const group = await openMenu(page, name);
+    await group.getByRole("button").first().focus();
+    await page.keyboard.press("w");
+    await expect(page.getByTestId("mode-auto")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await expect(page.getByTestId("active-tool")).toHaveText("pointer");
+    await page.keyboard.press("Escape");
+  }
 });
 
 test("a long running label keeps Cancel and Agent on screen", async ({
@@ -1078,7 +1083,7 @@ for (const width of [320, 390, 480, 720]) {
     await expectStatus(page, "Opened example: Two-Stage Op Amp");
     for (const mode of ["mode-auto", "mode-draw"]) {
       await page.getByTestId(mode).click();
-      for (const menuId of ["project-menu", "edit-menu", "circuit-menu"]) {
+      for (const menuId of ["project-menu", "more-menu"]) {
         const menu = page.getByTestId(menuId);
         await menu.locator(":scope > summary").click();
         await expect(menu).toHaveAttribute("open", "");
@@ -1094,7 +1099,11 @@ for (const width of [320, 390, 480, 720]) {
           popover.x + popover.width,
           `${menuId} at ${width}px (${mode})`,
         ).toBeLessThanOrEqual(width);
-        if (menuId === "edit-menu") {
+        expect(
+          popover.y + popover.height,
+          `${menuId} at ${width}px (${mode})`,
+        ).toBeLessThanOrEqual(800);
+        if (menuId === "more-menu") {
           const item = (await menu
             .getByRole("button", { name: /^Choose Selectable Objects/u })
             .boundingBox())!;
@@ -1309,4 +1318,419 @@ test("the Cells rail lists each Cell with its layout status", async ({
   await page.setViewportSize({ width: 800, height: 800 });
   await expect(page.getByTestId("cells-rail")).toHaveCount(0);
   await expect(page.getByTestId("cell-navigation")).toBeVisible();
+});
+
+// T150c: one ⋯ menu replaces Edit and Circuit, and the top bar names the
+// project.
+
+type Place =
+  /** A header menu group, opened through `openMenu`; `submenu` first. */
+  | {
+      menu: "File" | "Edit" | "Hierarchy" | "Netlist" | "Layout";
+      items: readonly string[];
+      submenu?: "Import" | "Export";
+      /** Labels rather than buttons (File → Import's file pickers). */
+      labels?: boolean;
+      enabled?: boolean;
+    }
+  /** Controls outside the menus, by test id or a "." class selector. */
+  | { shown: readonly string[]; enabled?: boolean }
+  /** Not in this mode. */
+  | { absent: readonly string[] };
+
+interface MenuTableRow {
+  /** The row's Item column in decision 21 of tasks/T150-two-modes/plan.md. */
+  item: string;
+  auto: readonly Place[];
+  draw: readonly Place[];
+}
+
+const both = (places: readonly Place[]) => ({ auto: places, draw: places });
+
+const drawingTools = [
+  "draw-tool-wire",
+  "draw-tool-no-connect",
+  "draw-tool-text",
+  "annotation-menu",
+  "draw-tool-document-style",
+  "draw-tool-reset-labels",
+];
+
+// Decision 21's table, row by row, as the user reaches each item; an item
+// missing from the page fails the walk. Not walked: Revert and Recover (only
+// with a saved copy or recovery sessions), RNL… (a host that imports RNL),
+// the desktop file commands, Cancel Auto Layout (only while a run plans; the
+// running tests cover it), Open Shelf project in tab (Cloud sign-in) and the
+// empty card (only with no Instance).
+const MENU_TABLE: readonly MenuTableRow[] = [
+  {
+    item: "File commands",
+    ...both([
+      {
+        menu: "File",
+        items: ["Project Info", "New Project", "Save", "Check and Save"],
+      },
+      {
+        menu: "File",
+        submenu: "Import",
+        labels: true,
+        items: [
+          "Project File…",
+          "SPICE / SCS…",
+          "Cadence SPICE (`!` globals)…",
+        ],
+      },
+      {
+        menu: "File",
+        submenu: "Export",
+        items: [
+          "Export Project File…",
+          "Export SVG",
+          "Export PNG",
+          "Export PDF",
+          "Export Netlist",
+        ],
+      },
+    ]),
+  },
+  {
+    item: "SPICE / SCS… shortcut",
+    auto: [{ shown: ["import-netlist-button"], enabled: true }],
+    draw: [{ absent: ["import-netlist-button"] }],
+  },
+  ...[
+    "Insert component… (I)",
+    "User Components…",
+    "Place Cell from this Project…",
+    "Find in Circuit… (Ctrl+F)",
+  ].map((name) => ({
+    item: name,
+    ...both([{ menu: "Edit", items: [name], enabled: true }]),
+  })),
+  {
+    item: "Selection group",
+    ...both([
+      {
+        menu: "Edit",
+        items: [
+          "Delete",
+          "Copy selection as PNG",
+          "Copy selection as SVG",
+          "Rotate",
+          "Mirror left/right (Shift+R)",
+          "Mirror top/bottom (Ctrl+R)",
+          "Align left",
+          "Align horizontal center",
+          "Align right",
+          "Align top",
+          "Align vertical center",
+          "Align bottom",
+        ],
+      },
+    ]),
+  },
+  {
+    item: "Choose Selectable Objects…",
+    ...both([
+      {
+        menu: "Edit",
+        items: ["Choose Selectable Objects… (Ctrl+Shift+F)"],
+        enabled: true,
+      },
+    ]),
+  },
+  {
+    item: "Cell Manager…",
+    ...both([{ menu: "Hierarchy", items: ["Cell Manager…"], enabled: true }]),
+  },
+  {
+    item: "Netlist commands",
+    ...both([
+      {
+        menu: "Netlist",
+        items: [
+          "Copy Netlist",
+          "Netlist Settings…",
+          "Edit Device Data…",
+          "Review Netlist Issues…",
+        ],
+        enabled: true,
+      },
+    ]),
+  },
+  {
+    item: "Auto Layout",
+    ...both([
+      { shown: ["auto-layout-button"], enabled: true },
+      { menu: "Layout", items: ["Auto Layout"], enabled: true },
+    ]),
+  },
+  {
+    item: "Undo / Redo",
+    ...both([{ shown: ["draw-tool-undo", "draw-tool-redo"] }]),
+  },
+  {
+    item: "Library, Netlist, Project Code toggles",
+    auto: [
+      { shown: ["netlist-panel-toggle"], enabled: true },
+      { absent: ["library-toggle", "project-code-toggle"] },
+    ],
+    draw: [
+      {
+        shown: [
+          "library-toggle",
+          "netlist-panel-toggle",
+          "project-code-toggle",
+        ],
+        enabled: true,
+      },
+    ],
+  },
+  {
+    item: "Drawing tools",
+    auto: [{ absent: drawingTools }],
+    draw: [{ shown: drawingTools }],
+  },
+  {
+    item: "Properties dock",
+    auto: [{ shown: ["properties-panel-toggle"], enabled: true }],
+    draw: [
+      { shown: [".selection-dock"] },
+      { absent: ["properties-panel-toggle"] },
+    ],
+  },
+  {
+    item: "Cell navigation",
+    auto: [{ shown: ["cells-rail"] }, { absent: ["cell-navigation"] }],
+    draw: [{ shown: ["cell-navigation"] }, { absent: ["cells-rail"] }],
+  },
+  { item: "Agent", ...both([{ shown: ["open-agent"], enabled: true }]) },
+  {
+    item: "Status bar",
+    ...both([
+      {
+        shown: [
+          "status",
+          "statusbar-grid-toggle",
+          "statusbar-shortcut-hints",
+          "statusbar-change-log",
+        ],
+      },
+    ]),
+  },
+  { item: "Project tabs", ...both([{ shown: ["project-tabs"] }]) },
+  {
+    item: "Rename a project",
+    ...both([
+      { menu: "File", items: ["Project Info"], enabled: true },
+      { shown: [".app-project-name"], enabled: true },
+    ]),
+  },
+];
+
+async function expectPlace(page: Page, place: Place, context: string) {
+  if ("absent" in place) {
+    for (const testId of place.absent)
+      await expect(page.getByTestId(testId), context).toHaveCount(0);
+    return;
+  }
+  if ("shown" in place) {
+    for (const testId of place.shown) {
+      const control = testId.startsWith(".")
+        ? page.locator(testId)
+        : page.getByTestId(testId);
+      await expect(control, `${context}: ${testId}`).toBeVisible();
+      if (place.enabled)
+        await expect(control, `${context}: ${testId}`).toBeEnabled();
+    }
+    return;
+  }
+  const group = await openMenu(page, place.menu);
+  await expect(
+    page.getByTestId(place.menu === "File" ? "project-menu" : "more-menu"),
+    context,
+  ).toHaveAttribute("open", "");
+  if (place.submenu) {
+    const toggle = group.getByRole("button", {
+      name: place.submenu,
+      exact: true,
+    });
+    if ((await toggle.getAttribute("aria-expanded")) !== "true")
+      await toggle.click();
+  }
+  for (const name of place.items) {
+    const item = place.labels
+      ? group.locator("label.file-import", { hasText: name })
+      : group.getByRole("button", { name, exact: true });
+    await expect(item, `${context}: ${name}`).toHaveCount(1);
+    await item.scrollIntoViewIfNeeded();
+    await expect(item, `${context}: ${name}`).toBeVisible();
+    if (place.enabled) await expect(item, `${context}: ${name}`).toBeEnabled();
+  }
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".command-menu[open]")).toHaveCount(0);
+}
+
+test("every row of the menu table is where it says, in Auto and in Draw", async ({
+  page,
+}) => {
+  test.setTimeout(180_000);
+  await openEditor(page);
+  // Two Cells, so Place Cell and the rail show.
+  await autoImport(page, NETLIST_B);
+  for (const mode of ["auto", "draw"] as const) {
+    await page.getByTestId(`mode-${mode}`).click();
+    // A selection of several parts fills the Selection group.
+    await page.locator("body").press("ControlOrMeta+a");
+    for (const row of MENU_TABLE)
+      for (const place of row[mode])
+        await expectPlace(page, place, `${row.item} (${mode})`);
+  }
+});
+
+test("a long ⋯ menu scrolls inside a short window", async ({ page }) => {
+  await openEditor(page, "/editor?example=two-stage-op-amp");
+  await expectStatus(page, "Opened example: Two-Stage Op Amp");
+  for (const [width, height] of [
+    [1280, 420],
+    [390, 420],
+  ] as const) {
+    await page.setViewportSize({ width, height });
+    for (const mode of ["mode-auto", "mode-draw"]) {
+      await page.getByTestId(mode).click();
+      // The Selection group with its six Align items makes the menu long.
+      await page.locator("body").press("ControlOrMeta+a");
+      const edit = await openMenu(page, "Edit");
+      await expect(
+        edit.getByRole("button", { name: "Align bottom" }),
+      ).toHaveCount(1);
+      const popover = page.locator(".more-menu-popover");
+      const box = (await popover.boundingBox())!;
+      const context = `${width}x${height} (${mode})`;
+      expect(box.x, context).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width, context).toBeLessThanOrEqual(width);
+      expect(box.y + box.height, context).toBeLessThanOrEqual(height);
+      expect(
+        await popover.evaluate((el) => el.scrollHeight > el.clientHeight),
+        context,
+      ).toBe(true);
+      // The last group is reached by scrolling the menu, not the page.
+      const last = page.getByTestId("auto-layout-command");
+      await last.scrollIntoViewIfNeeded();
+      await expect(last).toBeInViewport();
+      await page.keyboard.press("Escape");
+    }
+  }
+});
+
+test("the ⋯ menu works from the keyboard and closes like the other menus", async ({
+  page,
+}) => {
+  await openEditor(page, "/editor?example=two-stage-op-amp");
+  await expectStatus(page, "Opened example: Two-Stage Op Amp");
+  const more = page.getByTestId("more-menu");
+  const summary = more.locator(":scope > summary");
+  await expect(summary).toHaveAccessibleName("More");
+  await expect(summary).toHaveAttribute("title", /Edit, Hierarchy/u);
+  // Keyboard: Enter opens it, Tab reaches its items, Escape closes it and
+  // gives focus back to its button.
+  await summary.focus();
+  await page.keyboard.press("Enter");
+  await expect(more).toHaveAttribute("open", "");
+  await page.keyboard.press("Tab");
+  await expect(
+    more.getByRole("button", { name: "Insert component… (I)" }),
+  ).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(more).not.toHaveAttribute("open", "");
+  await expect(summary).toBeFocused();
+  // An outside click closes it.
+  await summary.click();
+  await expect(more).toHaveAttribute("open", "");
+  await page
+    .getByTestId("schematic-canvas")
+    .click({ position: { x: 5, y: 5 } });
+  await expect(more).not.toHaveAttribute("open", "");
+  // Only one of File and ⋯ is open at a time.
+  const file = page.getByTestId("project-menu");
+  await summary.click();
+  await file.locator(":scope > summary").click();
+  await expect(file).toHaveAttribute("open", "");
+  await expect(more).not.toHaveAttribute("open", "");
+  await summary.click();
+  await expect(more).toHaveAttribute("open", "");
+  await expect(file).not.toHaveAttribute("open", "");
+  // A command closes it, as the old menus did.
+  await more.getByRole("button", { name: "Cell Manager…" }).click();
+  await expect(more).not.toHaveAttribute("open", "");
+  await expect(
+    page.getByRole("dialog", { name: /Cell Manager/u }),
+  ).toBeVisible();
+});
+
+test("the top bar names the project on one row, in both modes", async ({
+  page,
+}) => {
+  await openEditor(page);
+  const name = page.locator(".app-project-name");
+  await expect(name).toHaveText("New Circuit");
+  const long = `${"Folded cascode operational transconductance amplifier ".repeat(2)}test`;
+  await renameProject(page, long);
+  await expect(name.locator(".app-project-name-text")).toHaveText(long);
+  await expect(name).toHaveAttribute("title", new RegExp(`^${long}`, "u"));
+  // Unsaved work shows File's dot beside the name too.
+  await expect(name.locator(".project-unsaved-indicator")).toBeVisible();
+  for (const mode of ["mode-auto", "mode-draw"]) {
+    await page.getByTestId(mode).click();
+    for (const width of [320, 390, 480, 720, 721, 760, 800, 900, 1024, 1440]) {
+      await page.setViewportSize({ width, height: 800 });
+      const context = `${width}px (${mode})`;
+      const main = (await page.locator(".app-chrome-main").boundingBox())!;
+      expect(main.height, context).toBeLessThanOrEqual(48);
+      for (const testId of [
+        "draw-tool-undo",
+        "mode-switch",
+        "auto-layout-button",
+        "project-menu",
+        "more-menu",
+      ]) {
+        const box = (await page.getByTestId(testId).boundingBox())!;
+        expect(box.x, `${testId} at ${context}`).toBeGreaterThanOrEqual(0);
+        expect(
+          box.x + box.width,
+          `${testId} at ${context}`,
+        ).toBeLessThanOrEqual(width);
+        expect(box.y, `${testId} at ${context}`).toBeGreaterThanOrEqual(main.y);
+        expect(box.y + box.height).toBeLessThanOrEqual(main.y + main.height);
+      }
+      // The wireframe's order: Auto Layout, File, Agent, ⋯ (Agent goes only
+      // on the narrowest windows).
+      const right = await Promise.all(
+        ["auto-layout-button", "project-menu", "open-agent", "more-menu"].map(
+          async (testId) => (await page.getByTestId(testId).boundingBox())?.x,
+        ),
+      );
+      const shown = right.filter((x): x is number => x !== undefined);
+      expect(shown, context).toEqual([...shown].sort((a, b) => a - b));
+      // Below 720 px the name goes; File → Project Info still has it.
+      await expect(name, context).toBeVisible({ visible: width > 720 });
+      if (width > 720) {
+        const box = (await name.boundingBox())!;
+        expect(box.y + box.height).toBeLessThanOrEqual(main.y + main.height);
+        // A long name is cut with an ellipsis, never wrapped.
+        expect(
+          await name
+            .locator(".app-project-name-text")
+            .evaluate((el) => el.scrollWidth > el.clientWidth),
+          context,
+        ).toBe(true);
+      }
+    }
+  }
+  // The name opens Project Info, where it is changed.
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await name.click();
+  await expect(
+    page.getByRole("dialog", { name: "Project Info" }),
+  ).toBeVisible();
 });

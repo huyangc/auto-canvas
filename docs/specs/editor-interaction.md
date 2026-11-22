@@ -495,11 +495,20 @@ it does.
 - The first time a browser opens the editor in Auto, a one-time note under the
   switch says where drawing lives; **Got it** or any switch dismisses it for
   good.
+- **Top bar.** In both modes it reads: the brand, the project's name, Undo and
+  Redo, the switch, **Import netlist…** (Auto only), **Auto Layout**, **File**,
+  **Agent** and **⋯**. The name is read-only, cut with an ellipsis, with File's
+  unsaved-work dot; a click opens Project Info. Below 720 px it is hidden and
+  the header stays one row. **⋯** holds what the Edit and Circuit menus held,
+  in the groups **Edit**, **Hierarchy**, **Netlist** and **Layout**, with the
+  same commands; it closes like File (Escape, an outside click, a command),
+  and only one of the two is open at a time. A long ⋯ scrolls inside the
+  window.
 
 ## Automatic layout
 
 - **Entry and scope.** The top bar's **Auto Layout** button, in both modes,
-  and Circuit → Layout → **Auto Layout** (command `layout.auto`, no shortcut)
+  and ⋯ → Layout → **Auto Layout** (command `layout.auto`, no shortcut)
   plan the whole open Cell with the
   [auto-layout planner](auto-layout.md) at its default bounded search. Selection,
   locks and other Cells are ignored. It is unavailable while a run plans, while

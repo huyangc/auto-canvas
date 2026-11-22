@@ -1205,10 +1205,13 @@
   flex: 0 0 auto;
 }
 
+/* File sits at the top bar's right (T150c), so its popover hangs from the
+   window's right edge, as the ⋯ menu's does. */
 .project-menu .project-menu-popover {
   position: fixed;
   top: calc(var(--icm-menubar-h) + 4px);
-  left: 12px;
+  right: 12px;
+  left: auto;
   box-sizing: border-box;
   width: min(22rem, calc(100vw - 24px));
   min-width: 0;
@@ -1222,7 +1225,7 @@
   vertical-align: middle;
 }
 
-/* Three menus: File, Edit and Circuit. */
+/* Two menus: File and ⋯ (Edit, Hierarchy, Netlist and Layout). */
 .project-menu > summary {
   max-width: min(18rem, 34vw);
 }
@@ -1691,10 +1694,8 @@
   background: var(--icm-accent);
 }
 
-/* Phone widths: Undo/Redo and the mode switch push Edit and Circuit to the
-   right, where a popover hung from its trigger's left edge would run off
-   screen. Hang it from the right edge of the window instead, as File hangs
-   from the left. */
+/* Phone widths: hang the ⋯ popover from the right edge of the window, as
+   File's hangs, so it stays on screen; a long one scrolls. */
 @media (max-width: 720px) {
   .app-chrome-main .header-menu-popover {
     position: fixed;
@@ -1705,5 +1706,87 @@
     max-width: calc(100vw - 24px);
     max-height: calc(100dvh - var(--icm-menubar-h) - 16px);
     overflow: auto;
+  }
+}
+
+/* The ⋯ menu (T150c) is the top bar's last control: its popover opens
+   leftwards from the trigger and scrolls when its groups outgrow the
+   window. */
+.more-menu > summary {
+  justify-content: center;
+  min-width: var(--icm-control-h);
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.app-chrome-main .more-menu > summary::after {
+  display: none;
+}
+
+.more-menu .more-menu-popover {
+  max-height: calc(100dvh - var(--icm-menubar-h) - 16px);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+/* From 720 px down the popover hangs from the window's edge instead (the
+   phone-width rule above). */
+@media (min-width: 721px) {
+  .more-menu .more-menu-popover {
+    right: 0;
+    left: auto;
+  }
+}
+
+/* The project name (T150c): the one top-bar item that gives way to a narrow
+   window. It shrinks to an ellipsis before anything else moves, and below
+   720 px it goes; File → Project Info still has it. */
+@media (min-width: 721px) {
+  .app-chrome-main .app-brand {
+    flex: 0 1000 auto;
+    min-width: auto;
+  }
+
+  .app-chrome-main .app-brand > * {
+    flex-shrink: 0;
+  }
+}
+
+.app-chrome-main .app-brand > .app-project-name {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 4px;
+  min-width: 3rem;
+  max-width: 16rem;
+  height: var(--icm-control-h);
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--icm-radius-sm);
+  color: var(--icm-text);
+  background: transparent;
+  font: inherit;
+  font-size: var(--icm-font-md);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+button.app-project-name {
+  cursor: pointer;
+}
+
+button.app-project-name:hover {
+  background: var(--icm-surface-hover);
+}
+
+.app-project-name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 720px) {
+  .app-chrome-main .app-brand > .app-project-name {
+    display: none;
   }
 }
