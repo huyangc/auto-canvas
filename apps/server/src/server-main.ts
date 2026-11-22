@@ -76,7 +76,22 @@ export async function startServer({
           const stripped = stripIntegrationMount(url);
           if (!stripped)
             return Response.json({ error: "Not found" }, { status: 404 });
-          return app.fetch(new Request(stripped, request), bindings);
+          let mounted: Request;
+          try {
+            mounted = new Request(stripped, request);
+          } catch {
+            // Fetch cannot construct some methods (TRACE, CONNECT, TRACK).
+            // No route accepts them, so they get the answer an unknown
+            // method gets, with the API's caching rule.
+            return Response.json(
+              { error: "Not found" },
+              {
+                status: 404,
+                headers: { "cache-control": "private, no-store" },
+              },
+            );
+          }
+          return app.fetch(mounted, bindings);
         },
         port: Number(env.PORT ?? 4310),
         hostname: env.HOST ?? "127.0.0.1",

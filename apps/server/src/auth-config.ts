@@ -38,8 +38,10 @@ export function readAuthConfig(
     url.hash !== "" ||
     url.username !== "" ||
     url.password !== "" ||
-    // An empty query, fragment or user part leaves no trace in the parsed URL.
-    /[?#@]/u.test(value)
+    // The parsed URL has already lost an empty query, fragment or user part
+    // and has resolved dot segments ("/api/.." reads as "/"), so the text
+    // itself must be an origin with at most a trailing slash.
+    !/^https?:\/\/[^/?#@\\]+\/?$/iu.test(value)
   )
     throw invalid();
   return { mode: "notebook", notebookApi: url };

@@ -537,10 +537,15 @@ async function checkLocalMountRefusal(
       });
       const label = `base ${JSON.stringify(basePath)} editor ${Boolean(editorRoot)}`;
       try {
-        for (const path of [
+        // Both the mount in front of this server's own base path (what a
+        // wrongly enabled mount stripping would expose) and in front of
+        // /canvas (what notebook's rewrite sends).
+        for (const path of new Set([
+          `/@notebook${basePath}/api/projects`,
+          `/@notebook${basePath}/api/auth/me`,
           "/@notebook/canvas/api/projects",
           "/@notebook/canvas/api/auth/me",
-        ]) {
+        ])) {
           const text = await (await fetch(server.origin + path)).text();
           assert.ok(!text.includes(projectId), `${label} ${path} project id`);
           assert.ok(
