@@ -1,7 +1,19 @@
 import { branchProjectVersion } from "./version-project";
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { CircuitProject } from "@icm/model";
 import { VersionHistoryComparison } from "./version-history-comparison";
+
+// The notebook build fetches API images with the session's header. Loaded
+// lazily so that the standard build keeps no part of src/notebook/.
+// A chunk that failed to load shows no image rather than ending the editor.
+const NotebookApiImage = import.meta.env.ICM_NOTEBOOK
+  ? lazy(() =>
+      import("../notebook/api-image").then(
+        (module) => ({ default: module.ApiImage }),
+        () => ({ default: () => null }),
+      ),
+    )
+  : null;
 
 export interface ProjectVersion {
   versionId: string;
@@ -152,11 +164,21 @@ export function VersionHistoryDialog({
                 className="version-row"
                 data-testid={`version-${version.versionNo}`}
               >
-                <img
-                  src={source.previewUrl(version.versionId)}
-                  alt={`Version ${version.versionNo} preview`}
-                  loading="lazy"
-                />
+                {import.meta.env.ICM_NOTEBOOK && NotebookApiImage ? (
+                  <Suspense fallback={null}>
+                    <NotebookApiImage
+                      src={source.previewUrl(version.versionId)}
+                      alt={`Version ${version.versionNo} preview`}
+                      loading="lazy"
+                    />
+                  </Suspense>
+                ) : (
+                  <img
+                    src={source.previewUrl(version.versionId)}
+                    alt={`Version ${version.versionNo} preview`}
+                    loading="lazy"
+                  />
+                )}
                 <div className="version-copy">
                   <b>
                     v{version.versionNo} · {version.name}

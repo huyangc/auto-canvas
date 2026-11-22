@@ -28,6 +28,29 @@ function isolateDevDependencyCache(): Plugin {
   };
 }
 
+/**
+ * The notebook build (served under silicon-notebook at /canvas) differs from
+ * the standard one only behind import.meta.env.ICM_NOTEBOOK, a literal that
+ * lets the bundler drop the other build's branch. Only `vite build` honours
+ * VITE_AUTO_CANVAS_AUTH; the dev server and preview are never notebook builds.
+ */
+function notebookBuildSwitch(): Plugin {
+  return {
+    name: "notebook-build-switch",
+    config(_config, { command }) {
+      const value = process.env.VITE_AUTO_CANVAS_AUTH;
+      if (value !== undefined && value !== "local" && value !== "notebook")
+        throw new Error(
+          'VITE_AUTO_CANVAS_AUTH must be unset, "local" or "notebook"',
+        );
+      const notebook = command === "build" && value === "notebook";
+      return {
+        define: { "import.meta.env.ICM_NOTEBOOK": notebook ? "true" : "false" },
+      };
+    },
+  };
+}
+
 function versionStaticServiceWorker(): Plugin {
   // The browser-test build writes elsewhere (build:e2e), so follow outDir.
   let outDir = "";
@@ -63,6 +86,7 @@ export default defineConfig({
   // and WebAssembly; serve it as the package ships it.
   optimizeDeps: { exclude: ["@rich-netlist/runtime"] },
   plugins: [
+    notebookBuildSwitch(),
     lockedCanvasPackage(),
     isolateDevDependencyCache(),
     react(),
