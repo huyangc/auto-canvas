@@ -503,7 +503,8 @@ it does.
   in the groups **Edit**, **Hierarchy**, **Netlist** and **Layout**, with the
   same commands; it closes like File (Escape, an outside click, a command),
   and only one of the two is open at a time. A long ⋯ scrolls inside the
-  window.
+  window; as in File, the arrow keys, Home and End on one of its items scroll
+  the menu and never pan the canvas, and Escape returns focus to its button.
 
 ## Automatic layout
 

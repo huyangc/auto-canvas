@@ -1267,3 +1267,17 @@ name="editor-command-menu" data-testid="more-menu">`; its summary is `⋯`
     reads the CSSOM for any header rule still at 721 px.
   - 3: a browser test cancels a planning run from ⋯ → Layout, in Auto and
     in Draw.
+- T150c review round 3 (codex round 2 on PR 107, 2026-11-21): one line per
+  item.
+  - 1: `apps/desktop/scripts/accept-local-components.mjs` (owned path widened
+    for this script by the coordinator) opened `edit-menu`; `openLibrary()`
+    now opens `more-menu` and clicks `User Components…` in its `Edit` group.
+    A repository-wide search found no other consumer of `edit-menu`,
+    `circuit-menu` or an Edit/Circuit menu lookup: the other desktop scripts
+    reach File through `project-menu-toggle`, and the e2e specs go through
+    `openMenu`. The packaged-app acceptance was not run; the same three calls
+    were driven against the desktop entry's dev server, in Auto and Draw.
+  - 2: the shortcut router leaves Escape, ArrowUp/Down, Home and End to the
+    open ⋯ as it does to File: the browser scrolls the menu, focus stays on
+    the item, the canvas does not pan, and Escape closes the menu with focus
+    back on its button. A browser test pins both menus in a 240 px window.
