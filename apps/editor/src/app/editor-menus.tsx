@@ -1,7 +1,12 @@
 import type { useCloudProjects } from "./use-cloud-projects";
 // The editor's menus bound to its commands: the header with its project tabs,
 // File and ⋯ menus and toolbars, and the canvas context menu.
-import type { Dispatch, RefObject, SetStateAction } from "react";
+import {
+  useRef,
+  type Dispatch,
+  type RefObject,
+  type SetStateAction,
+} from "react";
 import {
   deriveRoutingAffectedClosure,
   type HierarchyFrame,
@@ -281,6 +286,9 @@ export function EditorMenuBar({
   // A drawing command pressed in Auto brings up the drawing tools first.
   const drawing = (tool: string, run: () => void) =>
     editorMode === "auto" ? bringUpDraw(tool, run) : run();
+  const closeActiveTab = useRef<((trigger: HTMLElement | null) => void) | null>(
+    null,
+  );
   // The project tab strip's actions. File offers them too: the strip hides
   // with one project.
   const tabActions = {
@@ -293,6 +301,7 @@ export function EditorMenuBar({
       nativeProjectStore
         ? void openNativeProject()
         : tabProjectInputRef.current?.click(),
+    onClose: (trigger: HTMLElement | null) => closeActiveTab.current?.(trigger),
   };
   const shelfActions = {
     onOpened: () => void reloadCloudProjects(),
@@ -333,6 +342,7 @@ export function EditorMenuBar({
               if (nativeProjectStore) void closeNativeTab(id);
               else void projectTabs.close(id, () => createTabSession());
             }}
+            closeActiveTab={closeActiveTab}
             onCloseMany={(ids) => {
               if (nativeProjectStore) void closeNativeTabs(ids);
               else void projectTabs.closeMany(ids, () => createTabSession());

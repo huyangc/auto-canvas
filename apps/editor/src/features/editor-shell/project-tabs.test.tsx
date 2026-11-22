@@ -79,11 +79,55 @@ describe("ProjectTabs", () => {
     const decision = () =>
       view.host.querySelector('[data-testid="project-tab-close-decision"]');
     await vi.waitFor(() => expect(decision()).not.toBeNull());
-    // Another tab leaves (the Agent closes it): one tab, the strip hides, and
-    // the decision for the unsaved tab is still answerable.
+    // Another tab leaves: one tab, the strip hides, and the decision for the unsaved tab is still answerable.
     await view.render({ ...two, tabs: [tab("b", "b", true)] });
     expect(view.strip().hidden).toBe(true);
     expect(decision()).not.toBeNull();
+  });
+
+  it("closes the active tab for File as its × does, with one tab", async () => {
+    const closeActiveTab = {
+      current: null as ((trigger: HTMLElement | null) => void) | null,
+    };
+    const file = document.createElement("button");
+    document.body.append(file);
+    const clean = { ...props([tab("a")]), closeActiveTab };
+    const view = await mount(clean);
+    const decision = () =>
+      view.host.querySelector<HTMLElement>(
+        '[data-testid="project-tab-close-decision"]',
+      );
+    const answer = async (name: string) => {
+      await vi.waitFor(() =>
+        expect(decision()?.textContent).toContain("Keep open"),
+      );
+      const button = [...decision()!.querySelectorAll("button")].find(
+        (item) => item.textContent === name,
+      )!;
+      await act(async () => button.click());
+    };
+    // No unsaved work: closed at once.
+    await act(async () => closeActiveTab.current!(file));
+    expect(clean.onClose).toHaveBeenCalledWith("a");
+    expect(decision()).toBeNull();
+    // Unsaved work: the strip's own decision; Keep open gives focus back.
+    const dirty = { ...props([tab("a", "a", true)]), closeActiveTab };
+    await view.render(dirty);
+    await act(async () => closeActiveTab.current!(file));
+    expect(dirty.onClose).not.toHaveBeenCalled();
+    await answer("Keep open");
+    expect(decision()).toBeNull();
+    expect(dirty.onClose).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(document.activeElement).toBe(file));
+    await act(async () => closeActiveTab.current!(file));
+    await answer("Close without saving");
+    expect(dirty.onClose).toHaveBeenCalledWith("a");
+    // Busy, as the × is disabled.
+    const busy = { ...dirty, busy: true, onClose: vi.fn() };
+    await view.render(busy);
+    await act(async () => closeActiveTab.current!(file));
+    expect(busy.onClose).not.toHaveBeenCalled();
+    expect(decision()).toBeNull();
   });
 
   it("ends a rename in progress, keeping the typed name, when the strip hides", async () => {

@@ -186,18 +186,26 @@ export async function renameProject(page: Page, name: string): Promise<void> {
 
 /**
  * Run one of the tab strip's actions, `New project tab`, `Open file in new
- * tab` or `Open Shelf project in tab`: on the strip when it shows (two or
- * more tabs), otherwise from File, which holds them too. For the Shelf it
- * returns the open picker that lists the Shelf projects.
+ * tab`, `Open Shelf project in tab` or `Close tab` (the active tab's ×): on
+ * the strip when it shows (two or more tabs), otherwise from File, which
+ * holds them too. For the Shelf it returns the open picker that lists the
+ * Shelf projects; a picker already open stays open.
  */
 export async function projectTabAction(
   page: Page,
   name:
-    "New project tab" | "Open file in new tab" | "Open Shelf project in tab",
+    | "New project tab"
+    | "Open file in new tab"
+    | "Open Shelf project in tab"
+    | "Close tab",
 ): Promise<Locator> {
   const strip = page.getByTestId("project-tabs");
   if (await strip.isVisible()) {
-    await strip.getByLabel(name, { exact: true }).click();
+    if (name === "Close tab")
+      await strip
+        .locator('.project-tab[data-active="true"] [data-tab-close]')
+        .click();
+    else await strip.getByLabel(name, { exact: true }).click();
     return page.locator(".project-tabs-shelf");
   }
   const file = await openMenu(page, "File");

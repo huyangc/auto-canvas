@@ -1,4 +1,5 @@
 import {
+  useEffect,
   useLayoutEffect,
   useRef,
   useState,
@@ -20,6 +21,8 @@ export interface FileProjectTabActions {
   busy: boolean;
   onNew(): void;
   onOpenFile(): void;
+  /** The active tab's ×: its decision gives focus back to the trigger. */
+  onClose(trigger: HTMLElement | null): void;
   /** The strip's Shelf picker, with its handlers; Cloud only. */
   shelf?: {
     projects: readonly CloudProjectSummary[];
@@ -187,6 +190,18 @@ export function FileCommandMenu({
     "import" | "export" | "shelf" | null
   >(null);
   const shelf = cloudEnabled ? projectTabs?.shelf : undefined;
+  // Drawn inside the header's File menu, which stays mounted while closed:
+  // its submenus collapse when it closes, so the Shelf reloads on each open.
+  const embeddedGroup = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const menu = embeddedGroup.current?.closest("details");
+    if (!menu) return;
+    const collapse = () => {
+      if (!menu.open) setOpenSubmenu(null);
+    };
+    menu.addEventListener("toggle", collapse);
+    return () => menu.removeEventListener("toggle", collapse);
+  }, [embedded]);
   const activateFileLabel = (
     event: ReactKeyboardEvent<HTMLLabelElement>,
   ): void => {
@@ -268,6 +283,21 @@ export function FileCommandMenu({
             </div>
           </CommandSubmenu>
         </div>
+      ) : null}
+      {projectTabs ? (
+        <button
+          type="button"
+          disabled={projectTabs.busy}
+          onClick={(event) =>
+            projectTabs.onClose(
+              event.currentTarget
+                .closest("details")
+                ?.querySelector("summary") ?? null,
+            )
+          }
+        >
+          Close tab
+        </button>
       ) : null}
       <button
         type="button"
@@ -428,7 +458,12 @@ export function FileCommandMenu({
   );
   if (embedded)
     return (
-      <div className="command-section" role="group" aria-label="File">
+      <div
+        ref={embeddedGroup}
+        className="command-section"
+        role="group"
+        aria-label="File"
+      >
         {/* The File menu's own summary names these commands. */}
         {commands}
       </div>
