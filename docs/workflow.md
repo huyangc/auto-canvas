@@ -95,6 +95,9 @@ codex exec -m gpt-6.2-astra --sandbox read-only --ephemeral -c 'notify=[]' \
 一轮有效须同时满足：命令退出码为零、输出文件非空、输出里有结论。超时、非零退出或
 输出为空是失败的一轮，不等于“没有意见”，要重跑。
 
+一轮通过须输出明确的通过结论（无 P0/P1），且每条意见都带优先级。“需要修改”之类没有
+优先级的结论，或没有优先级的意见，都不算通过，要求给出优先级后重跑。
+
 Opus 对着代码核实每条意见，修改方案，再评审一轮，直到某一轮不再报告 P0/P1。
 方案里记录结论（轮数和判定），原始输出放在 `tasks/<id>/logs/`（不入库）。
 
@@ -117,6 +120,8 @@ AGENTS.md，跑完方案里的验收命令，它的最终消息就是报告，Op
 人要求时，仍可用脚本跑一轮 Codex 实现。脚本要求任务分支上，任务目录之外没有未提交的
 改动：先提交子代理已审查的改动，或丢弃被否决的改动。
 
+任务的轮次和三轮上限以 `review.md` 为准。Codex 日志的 `round-<n>` 只数 Codex 轮次，
+前面有过子代理轮次时它仍从 1 开始，派发时在 `review.md` 里写明这是任务的第几轮。
 
 ```bash
 scripts/codex-task.sh tasks/T001-<slug>
@@ -179,12 +184,11 @@ CI 里，它们的证据以 Opus 亲自重跑的结果为准，写进 PR 的 Evi
 ### Claude Code PR 操作
 
 自动评审（model `gpt-6.2-sol`）由开发者本机的 `~/.claude/hooks/codex-pr-review.sh`
-提供，不是仓库产物。它运行 `codex exec review` 时不带 `-m`，模型取自
-`~/.codex/config.toml`；该轮日志 `~/.claude/codex-pr-review/logs/pr<PR号>-r<n>.log`
-里有一行 `model:`，要确认是 `gpt-6.2-sol`，否则改好配置重跑，
-或用下面带 `-m gpt-6.2-sol` 的手动命令并贴回输出。
-开 PR 后它自动跑一轮并贴回评论，判过 P0/P1 后有新提交时自动重审。新 clone 可能没有
-这个 hook，但评审规则不变；没有 hook 时手动运行并按上述要求贴回证据：
+提供，不是仓库产物：开 PR 后它自动跑一轮并贴回评论，判过 P0/P1 后有新提交时自动重审。
+它运行 `codex exec review` 时不带 `-m`，模型取自 `~/.codex/config.toml`；该轮日志
+`~/.claude/codex-pr-review/logs/pr<PR号>-r<n>.log` 里有一行 `model:`，要确认是
+`gpt-6.2-sol`，否则改好配置重跑，或用下面带 `-m gpt-6.2-sol` 的手动命令并贴回输出。
+新 clone 可能没有这个 hook，但评审规则不变；没有 hook 时手动运行并按上述要求贴回证据：
 
 ```bash
 codex exec review --base origin/main --ephemeral -m gpt-6.2-sol \
