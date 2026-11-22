@@ -31,15 +31,10 @@ function model(instance: Instance): string | undefined {
  * across all transistor seeds, and at most 256 devices. Exhaustion returns no
  * detection, never a partially validated symmetry. IDs only break search ties.
  */
-export function netlistSymmetry(
-  document: SchematicDocument,
-  resolver: SymbolResolver,
+export function* netlistMirrorPairs(
+  { devices: all, rails }: ReturnType<typeof readabilityNetlist>,
+  swap?: readonly [string, string],
 ) {
-  const {
-    devices: all,
-    rails,
-    centres,
-  } = readabilityNetlist(document, resolver);
   const devices = all
     .filter((d) => !isMarker(d.instance))
     .sort((a, b) => a.instance.id.localeCompare(b.instance.id));
@@ -80,9 +75,15 @@ export function netlistSymmetry(
       )
     );
   };
-  const result = { violations: 0, opportunities: 0 };
   for (const group of components) {
     if (group.length > MAX_COMPONENT_DEVICES) continue;
+    const initial: Mapping = new Map([...rails].map((n) => [n, n]));
+    if (swap) {
+      if (!swap.every((n) => group.some((id) => owners.get(n)?.has(id))))
+        continue;
+      initial.set(swap[0], swap[1]);
+      initial.set(swap[1], swap[0]);
+    }
     let states = 0;
     const assign = (
       a: string,
@@ -115,8 +116,12 @@ export function netlistSymmetry(
       }
       return next;
     };
-    const search = (mapping: Mapping, netMap: Mapping): Mapping | undefined => {
-      if (mapping.size === group.length) return mapping;
+    const search = (
+      mapping: Mapping,
+      netMap: Mapping,
+    ): { devices: Mapping; nets: Mapping } | undefined => {
+      if (mapping.size === group.length)
+        return { devices: mapping, nets: netMap };
       if (states >= SEARCH_STATES) return;
       // Most constrained device first; ties use stable IDs, never geometry.
       const free = group.filter((id) => !mapping.has(id));
@@ -158,7 +163,7 @@ export function netlistSymmetry(
     const transistors = group.filter((id) =>
       channelPins(byId.get(id)!.instance.symbolId),
     );
-    let mapping: Mapping | undefined;
+    let mapping: ReturnType<typeof search>;
     for (
       let i = 0;
       i < transistors.length && !mapping && states < SEARCH_STATES;
@@ -168,12 +173,7 @@ export function netlistSymmetry(
         const a = transistors[i]!;
         if (++states > SEARCH_STATES) break;
         if (!compatible(a, b)) continue;
-        const nets = assign(
-          a,
-          b,
-          new Map([...rails].map((n) => [n, n])),
-          false,
-        );
+        const nets = assign(a, b, initial, false);
         if (nets)
           mapping = search(
             new Map([
@@ -185,10 +185,26 @@ export function netlistSymmetry(
         if (mapping) break;
       }
     if (!mapping) continue;
-    const pairs = [...mapping].flatMap(([a, b]) => {
+    yield {
+      netPairs: mapping.nets,
+      pairs: [...mapping.devices].filter(([a, b]) => a < b),
+      axisDevices: group.filter((id) => mapping.devices.get(id) === id),
+    };
+  }
+}
+
+export function netlistSymmetry(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+) {
+  const topology = readabilityNetlist(document, resolver);
+  const { centres } = topology;
+  const result = { violations: 0, opportunities: 0 };
+  for (const { pairs: members } of netlistMirrorPairs(topology)) {
+    const pairs = members.flatMap(([a, b]) => {
       const x = centres.get(a),
         y = centres.get(b);
-      return a < b && x && y ? [{ x, y, axis: (x.x + y.x) / 2 }] : [];
+      return x && y ? [{ x, y, axis: (x.x + y.x) / 2 }] : [];
     });
     if (!pairs.length) continue;
     const axes = pairs.map((p) => p.axis).sort((a, b) => a - b);

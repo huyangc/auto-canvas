@@ -18,6 +18,8 @@ export function separateLabels(
   resolver: SymbolResolver,
   result: AutoLayoutResult,
   options: AutoLayoutOptions,
+  separateRunOns = false,
+  clearWires = false,
 ) {
   if (
     !result.edits.length ||
@@ -58,7 +60,16 @@ export function separateLabels(
     if (!origin) continue;
     const old = ctx.measure(a),
       hits = ctx.overlapsAt(old.inkBounds, a.id);
-    if (!hits.length) continue;
+    if (
+      !hits.length &&
+      !(
+        clearWires &&
+        (ctx.struckAt(old.inkBounds, a.id).length ||
+          ctx.ownerGapAt(a, old.inkBounds) !== undefined)
+      ) &&
+      !(separateRunOns && ctx.runsOnAt(a, old.inkBounds).length)
+    )
+      continue;
     const step = Math.max(2, d.presentation.grid / 2);
     // Search around the usual seat. Prefer clear ink, then stay close to the
     // device and the original seat. Preserve the binding, alignment and anchor.
@@ -82,7 +93,11 @@ export function separateLabels(
             },
           };
           const box = ctx.measure(candidate).inkBounds;
-          if (ctx.overlapsAt(box, a.id).length) continue;
+          if (
+            ctx.overlapsAt(box, a.id).length ||
+            (separateRunOns && ctx.runsOnAt(candidate, box).length)
+          )
+            continue;
           const struck = ctx.struckAt(box, a.id);
           if (struck.some((id) => !current.struck.includes(id))) continue;
           const gap = ctx.ownerGapAt(candidate, box) ?? 0;

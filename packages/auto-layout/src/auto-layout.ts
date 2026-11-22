@@ -1,5 +1,15 @@
+import { preferPowerFlow } from "./netlist-power-flow.js";
+import { selectDifferentialStageColumns } from "./differential-stage-columns.js";
+import { selectNetlistPortSides } from "./netlist-port-sides.js";
+import {
+  differentialBranches,
+  branchInterleaving,
+  differentialPortSeats,
+} from "./differential-branches.js";
 import { feedbackRowCircuit, hasTransistor } from "./feedback-rows.js";
 import { conventionDraftEligible } from "./convention-relations.js";
+import { netlistMirrorSeats } from "./netlist-mirror-seats.js";
+import { netlistSymmetry } from "./readability-netlist-symmetry.js";
 import { symmetricHalfParts } from "./symmetric-half-order.js";
 import { amplifierGateRows } from "./amp-gate-row.js";
 import { nodeAttachments } from "./attachment-seat.js";
@@ -319,7 +329,7 @@ export function planAutoLayout(
     resolver,
     options.presentation === "netlist"
       ? planNetlistPresentation(document, resolver, options)
-      : planDocument(document, resolver, options),
+      : planDocument(document, resolver, options, "drawing"),
   );
 }
 
@@ -362,31 +372,330 @@ function planDocument(
   document: SchematicDocument,
   resolver: SymbolResolver,
   options: AutoLayoutOptions,
+  input: "drawing" | "netlist" = "netlist",
 ): AutoLayoutResult {
   return reusePlanning(() =>
     reusePreviews(() =>
-      timePlanning(() =>
-        // R162 draws the source's body leads on the selected plan and R15a
-        // seats Net labels on that finished drawing; R161 then checks the
-        // plan actually returned, on every exit including a stopped search.
-        preserveDraftingInterfaces(
-          document,
-          resolver,
-          followNetLabels(
+      timePlanning(() => {
+        const finish = (result: AutoLayoutResult) =>
+          preserveDraftingInterfaces(
             document,
             resolver,
-            drawSourceBodies(
+            followNetLabels(
               document,
               resolver,
+              drawSourceBodies(document, resolver, options, result),
               options,
-              selectFinalLayout(document, resolver, options),
             ),
-            options,
-          ),
-        ),
-      ),
+          );
+        const best = finish(selectFinalLayout(document, resolver, options));
+        return input === "drawing"
+          ? preserveDrawnSymmetry(document, resolver, options, best, finish)
+          : refineNetlistPlacement(document, resolver, options, best, finish);
+      }),
     ),
   );
+}
+
+function refineNetlistPlacement(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  options: AutoLayoutOptions,
+  baseline: AutoLayoutResult,
+  finish: (result: AutoLayoutResult) => AutoLayoutResult,
+): AutoLayoutResult {
+  if (
+    document.routes.length ||
+    document.instances.length > 40 ||
+    options.fixedInstanceIds?.size ||
+    options.partition ||
+    options.search?.evaluations === 0 ||
+    options.search?.deadline !== undefined ||
+    options.search?.signal?.aborted ||
+    document.constraints.length ||
+    document.layoutGroups.length ||
+    document.drafting?.objects.length ||
+    document.inductorCouplings?.length
+  )
+    return baseline;
+  const initial = finishedDocument(document, resolver, baseline);
+  if (!initial) return baseline;
+  const contacts = contactPolicy(
+    document,
+    freezePinGroups(document, resolver),
+    true,
+  );
+  const routeSeats = (seats: Map<string, Placement>, clearWires = false) => {
+    const draft = planLayoutOnce(
+      document,
+      resolver,
+      options,
+      emptyOverrides(),
+      "template",
+      true,
+      undefined,
+      undefined,
+      seats,
+      false,
+      false,
+      contacts,
+    );
+    if (!draft.final) return;
+    const candidate = finish(
+      separateLabels(
+        document,
+        resolver,
+        finalizeFacing(document, resolver, options, draft.result),
+        options,
+        true,
+        clearWires,
+      ),
+    );
+    const final = finishedDocument(document, resolver, candidate);
+    if (final && connectionsIntact(final, resolver))
+      return { final, candidate };
+  };
+
+  const mirrorBest = hasTransistor(document)
+    ? refineMirroredDevices(
+        document,
+        resolver,
+        options,
+        baseline,
+        initial,
+        routeSeats,
+      )
+    : baseline;
+  const final =
+    mirrorBest === baseline
+      ? initial
+      : finishedDocument(document, resolver, mirrorBest);
+  if (!final) return mirrorBest;
+  const stopped = () => options.search?.signal?.aborted === true;
+  const ports = selectNetlistPortSides(
+    document,
+    resolver,
+    { candidate: mirrorBest, final },
+    routeSeats,
+    stopped,
+  );
+  if (stopped()) return ports;
+  const traced = differentialBranches(document, resolver);
+  const branches = traced ?? differentialBranches(document, resolver, true);
+  const differential = branches && (traced || branches.path.length === 1);
+  const placed =
+    ports === mirrorBest ? final : finishedDocument(document, resolver, ports);
+  const stage =
+    differential && placed
+      ? selectDifferentialStageColumns(
+          document,
+          resolver,
+          branches,
+          { candidate: ports, final: placed },
+          routeSeats,
+          stopped,
+        )
+      : ports;
+  const drawing =
+    stage === ports ? placed : finishedDocument(document, resolver, stage);
+  return drawing && !stopped()
+    ? preferPowerFlow(
+        document,
+        resolver,
+        { candidate: stage, final: drawing },
+        branches,
+      ).candidate
+    : stage;
+}
+function refineMirroredDevices(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  options: AutoLayoutOptions,
+  baseline: AutoLayoutResult,
+  initial: SchematicDocument,
+  routeSeats: (
+    seats: Map<string, Placement>,
+  ) => { final: SchematicDocument; candidate: AutoLayoutResult } | undefined,
+) {
+  let symmetry = netlistSymmetry(initial, resolver);
+  if (!symmetry.opportunities) return baseline;
+  let best = baseline;
+  let before = auditRouting(initial, resolver);
+  let placed = initial;
+  for (const seats of netlistMirrorSeats(document, initial, resolver)) {
+    const trial = routeSeats(seats);
+    if (!trial) continue;
+    const { final, candidate } = trial;
+    const after = auditRouting(final, resolver);
+    if (
+      after.crossings > before.crossings ||
+      after.bends > before.bends ||
+      after.wireLength > before.wireLength
+    )
+      continue;
+    const mirror = netlistSymmetry(final, resolver);
+    if (
+      mirror.opportunities !== symmetry.opportunities ||
+      mirror.violations > symmetry.violations ||
+      (mirror.violations === symmetry.violations &&
+        after.crossings === before.crossings &&
+        after.bends === before.bends &&
+        after.wireLength === before.wireLength)
+    )
+      continue;
+    if (
+      selectFinishedLayout(document, resolver, best, candidate) === candidate
+    ) {
+      best = candidate;
+      before = after;
+      symmetry = mirror;
+      placed = final;
+    }
+  }
+  const branches = differentialBranches(document, resolver);
+  if (!branches) return best;
+  const placements = (doc: SchematicDocument) => {
+    const seats = new Map<string, Placement>();
+    for (const i of doc.instances)
+      if (i.placement) seats.set(i.id, i.placement);
+    return seats;
+  };
+  const original = placements(placed);
+  if (document.instances.some((i) => !original.has(i.id))) return best;
+  const initialConflicts = branchInterleaving(branches, original);
+  if (!initialConflicts) return best;
+  const guards = routedGuards(placed, resolver);
+  let bestConflicts = initialConflicts,
+    bestAudit = before;
+  for (const seats of differentialPortSeats(
+    document,
+    placed,
+    resolver,
+    branches,
+    original,
+  )) {
+    if (options.search?.signal?.aborted) break;
+    const predicted = branchInterleaving(branches, seats);
+    if (predicted >= initialConflicts || predicted > bestConflicts) continue;
+    const trial = routeSeats(seats);
+    if (!trial) continue;
+    const { final, candidate } = trial;
+    const conflicts = branchInterleaving(branches, placements(final));
+    const audit = auditRouting(final, resolver);
+    if (
+      conflicts >= initialConflicts ||
+      conflicts > bestConflicts ||
+      audit.crossings > before.crossings ||
+      audit.bends > before.bends + 2 ||
+      audit.wireLength > before.wireLength * 1.1 ||
+      audit.unsafeProblems.length
+    )
+      continue;
+    if (
+      conflicts === bestConflicts &&
+      (audit.crossings > bestAudit.crossings ||
+        (audit.crossings === bestAudit.crossings &&
+          (audit.bends > bestAudit.bends ||
+            (audit.bends === bestAudit.bends &&
+              audit.wireLength >= bestAudit.wireLength))))
+    )
+      continue;
+    const mirror = netlistSymmetry(final, resolver);
+    if (
+      mirror.opportunities !== symmetry.opportunities ||
+      mirror.violations > symmetry.violations ||
+      Object.entries(routedGuards(final, resolver)).some(
+        ([k, v]) => v > (guards[k] ?? 0),
+      )
+    )
+      continue;
+    best = candidate;
+    bestConflicts = conflicts;
+    bestAudit = audit;
+  }
+  return best;
+}
+
+/** On a wired drawing, try the author's seats if the new routes cross more
+ * often and the placement loses a symmetry visible in the original. */
+function preserveDrawnSymmetry(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  options: AutoLayoutOptions,
+  best: AutoLayoutResult,
+  finish: (result: AutoLayoutResult) => AutoLayoutResult,
+): AutoLayoutResult {
+  if (
+    !document.routes.length ||
+    document.instances.length > 40 ||
+    !hasTransistor(document) ||
+    options.fixedInstanceIds?.size ||
+    options.partition ||
+    options.search?.evaluations === 0 ||
+    options.search?.signal?.aborted ||
+    options.search?.deadline !== undefined ||
+    document.constraints.length ||
+    document.layoutGroups.length ||
+    document.inductorCouplings?.length ||
+    document.drafting?.objects.length
+  )
+    return best;
+
+  const placements = new Map<string, Placement>();
+  for (const { id, placement } of document.instances) {
+    if (
+      !placement ||
+      placement.position.x % document.presentation.grid ||
+      placement.position.y % document.presentation.grid
+    )
+      return best;
+    placements.set(id, placement);
+  }
+  const current = finishedDocument(document, resolver, best);
+  if (!current) return best;
+  const before = auditRouting(current, resolver);
+  if (
+    !before.crossings ||
+    before.crossings <= auditRouting(document, resolver).crossings ||
+    netlistSymmetry(current, resolver).violations <=
+      netlistSymmetry(document, resolver).violations
+  )
+    return best;
+
+  const draft = planLayoutOnce(
+    document,
+    resolver,
+    options,
+    emptyOverrides(),
+    "template",
+    true,
+    undefined,
+    undefined,
+    placements,
+    false,
+    false,
+    contactPolicy(document, freezePinGroups(document, resolver)),
+  );
+  if (!draft.final) return best;
+  const candidate = finish(
+    separateLabels(
+      document,
+      resolver,
+      finalizeFacing(document, resolver, options, draft.result),
+      options,
+      true,
+    ),
+  );
+  const final = finishedDocument(document, resolver, candidate);
+  if (!final || !connectionsIntact(final, resolver)) return best;
+  const after = auditRouting(final, resolver);
+  if (
+    after.crossings >= before.crossings ||
+    after.bends > before.bends ||
+    after.wireLength > before.wireLength
+  )
+    return best;
+  return selectFinishedLayout(document, resolver, best, candidate);
 }
 
 function selectFinalLayout(
