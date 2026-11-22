@@ -440,3 +440,128 @@ File had the same gap on `main`, fixed in the same line.
   state lacks them: Revert, Recover, RNL…, desktop file commands, Cancel
   Auto Layout. Open Shelf project in tab and the empty card have their own
   tests.
+
+# T150 report — slice d: the tab strip is hidden with one project
+
+Written by the coordinator from the implementer's hand-backs and an
+independent rerun. Slices a, b and c are merged (`1515168`); this is the
+last slice of T150.
+
+## What was built
+
+- With one project tab the tab strip row is not shown, in both modes; the
+  canvas gains its 30 px. With two or more tabs the strip is there as
+  before. `ProjectTabs` stays mounted, so its close decisions, tab menu
+  and Shelf dialog keep working.
+- File holds what the strip offered: `New project tab`,
+  `Open file in new tab`, `Open Shelf project in tab ›` (with Cloud) and
+  `Close tab`, with any number of tabs. They use the strip's own handlers
+  and are disabled when the strip's controls are.
+- With one tab a project is renamed through File → Project Info or the
+  top-bar name; its unsaved mark is File's dot and the top-bar name's dot.
+- File's submenus (Shelf, Import, Export) collapse when File closes, so
+  the Shelf reloads its list each time it is opened.
+- No arrow key reaches the canvas from an item of an open File or `⋯`
+  menu (Left and Right were the leftover from slice c).
+- Browser tests reach the strip's actions through `projectTabAction`,
+  which uses the strip when it is visible and File otherwise; about 45
+  single-tab call sites were switched, listed in the plan notes.
+
+Commits on `task/T150d-tab-strip`: `0b9e29f` (implementation), `fd041cd`
+(review round 1). 21 files, +1248 / −136; product code under
+`apps/editor/src` without tests is 6 files, +232 / −36.
+
+## Acceptance (coordinator's rerun on `fd041cd`)
+
+| Command                                            | Result                              |
+| -------------------------------------------------- | ----------------------------------- |
+| `pnpm build`, `pnpm test:editor-build`             | pass                                |
+| `pnpm typecheck`, `pnpm lint`, `pnpm format:check` | pass (lint 0 errors)                |
+| `pnpm docs:check`                                  | pass                                |
+| `pnpm test:local`                                  | pass: 8638 passed, 117 skipped      |
+| `pnpm deadcode`                                    | exit 1 as on `main`; no new finding |
+| Browser suite, 53 spec files, one worker           | 447 passed, 2 skipped, 0 failed     |
+
+The full run at `0b9e29f` was 443 passed, 0 failed. `project-file.spec.ts`
+is left out as before (it fails to load on `main`); the implementer ran a
+copy with its one failing import inlined, 8 of 8 passed.
+
+## Browser check by the coordinator
+
+Against a dev server of this worktree (port 5184), Chrome, 1440×900:
+
+| Mode | Tabs | Strip  | Canvas top | Canvas height |
+| ---- | ---- | ------ | ---------- | ------------- |
+| Auto | 1    | hidden | 45         | 819           |
+| Auto | 2    | shown  | 75         | 789           |
+| Draw | 1    | hidden | 82         | 782           |
+| Draw | 2    | shown  | 112        | 752           |
+
+- File → `New project tab` brings the strip back; closing to one tab hides
+  it again.
+- The top-bar name opens Project Info and shows the new name after a
+  rename.
+- Left and Right from an item of the open File menu leave the canvas
+  `viewBox` unchanged.
+- File → `Close tab` with one edited project shows the strip's own
+  decision ("Close without saving" / "Keep open") and leaves one blank
+  project.
+- Import expanded, File closed and reopened: Import is collapsed.
+
+The implementer measured the same numbers on the desktop entry's dev
+server; the coordinator did not repeat that.
+
+## Review
+
+Independent reviewer on `1515168..0b9e29f`: approve with fixes, one P2
+and several P3, all handled in `fd041cd`.
+
+- **P2: File's Shelf submenu stayed expanded after File closed and showed
+  a stale list on reopen.** Fixed by collapsing File's submenus when File
+  closes; Import and Export had the same leftover on `main`.
+- **Is File → New Project the same as closing the single tab?** The first
+  version relied on it. The reviewer traced differences; the implementer
+  then ran both on the same steps:
+
+  |                  | Tab × on `1515168`                                                                        | File → New Project                                                 |
+  | ---------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+  | 1 part placed    | asks "Close without saving / Keep open"                                                   | no prompt                                                          |
+  | 12 parts         | the same prompt                                                                           | asks "Continue without saving / Stay / Save to Cloud and continue" |
+  | after not saving | the work stays as a recovery copy, offered by File → Recover Unsaved Work… after a reload | the recovery copy is deleted                                       |
+
+  They differ, so File got `Close tab`, which runs the active tab's own
+  close.
+
+- The spec said a close decision ends when the strip hides; the code
+  keeps it answerable. The spec was corrected.
+- Two browser tests for the hide transition were added. A rename in a tab
+  is always committed by the click or blur that leads to the hide, so
+  "the strip hides under a rename in progress" is covered by the jsdom
+  test only.
+- `accept-preview.mjs`: `stripShown` waits for a settled tab count.
+
+## Open decision for the owner
+
+On the desktop, File lists both `Open file in new tab` and the host's
+`Open Project…`; both call `openNativeProject()`. The plan names that
+handler for the new item, so both are kept until the owner decides.
+
+## Deviations from the plan
+
+1. The plan counted 19 strip references in 7 spec files; hiding the strip
+   also hides its tabs from role queries and the `renameProject` fixture,
+   so about 45 single-tab call sites in 11 files changed.
+2. `Close tab` in File is not in the plan (see Review).
+3. `apps/desktop/scripts/accept-preview.mjs` was edited: its rename, its
+   Unsaved check and its `New project tab` click go through File when the
+   strip is hidden.
+4. A pending close decision disappears when the active tab changes, with
+   the strip shown or hidden; that predates this slice and is unchanged.
+
+## Not covered
+
+- The Electron acceptance (`pnpm --filter @icm/desktop test:preview`) has
+  not been run by anyone in T150. `accept-local-components.mjs` (slice c)
+  and `accept-preview.mjs` (this slice) were edited by reading; only their
+  changed calls were driven against the desktop entry's dev server.
+- `performance.spec.ts` was not run (it needs `ICM_PERF`).
