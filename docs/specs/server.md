@@ -218,6 +218,9 @@ is loaded, the page reads that token and asks `GET api/auth/me` with it
 - a notebook user: the editor modules load, the token is read again (a
   different token starts over), and the editor mounts.
 
+If the notebook entry itself cannot be loaded, or the editor fails as it
+mounts, the page asks the user to reload instead (no Retry).
+
 When the editor mounts, the page's global `fetch` is replaced, once and for the
 rest of the page's life, by one bound to that token. It adds
 `Authorization: Bearer <token>` to exactly the API requests: `http:` or `https:`
@@ -229,7 +232,9 @@ below. Known limits: a Worker has its own `fetch` and gets no header (no editor
 Worker calls the API); `<img>`, navigation and WebSockets never go through
 `fetch`; any script in the page can read the token from `localStorage` anyway.
 Previews are therefore fetched through that `fetch` and shown from object URLs,
-never loaded from the HTTP cache.
+never loaded from the HTTP cache. A lazy preview is fetched only once it comes
+within about a viewport height of the visible area; until it is shown, and
+after it fails, an empty `<img>` holds its place.
 
 The page watches for another session: a `storage` event for the token key or a
 cleared storage, focus, the page becoming visible, and a page restored from the

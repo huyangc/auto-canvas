@@ -68,3 +68,53 @@ pnpm exec playwright test <the 53 other spec files> (same ports) → 0; 449 pass
 - `pnpm test:e2e:local` is blocked by `e2e/project-file.spec.ts`, which fails before this task's changes, at module load through `site-resource-links.ts:10`. It needs its own fix, outside this task's scope.
 - The mutation check for the pre-commit re-read was not run: the environment refused the temporary edit. The test asserts that nothing is installed when the token changes with no event.
 - The display name and a way back to silicon-notebook remain deferred to the owner, as the plan says.
+
+# T162 report — round 2
+
+(From the implementer subagent's hand-back; saved by the reviewer.)
+
+All five findings of review round 2 (6–10) are fixed.
+
+## Acceptance (with `VITE_AUTO_CANVAS_AUTH` unset)
+- `pnpm build`: pass (exit 0)
+- `pnpm exec vitest run apps/editor/src/notebook scripts/notebook-editor-build.test.mjs`: pass, 8 files, 62 tests
+- `pnpm test:local`: pass, 851 files passed and 3 skipped; 8821 tests passed and 117 skipped
+- `pnpm build:notebook-editor`: pass (exit 0); `index.html` has 8 `/canvas/assets/` references
+- `silicon_notebook_token` files: 0 in `apps/editor/dist`, 1 in `apps/editor/dist-notebook`
+- paths containing `@notebook` in either output: 0
+- The two `git diff --stat` commands against `7432d01e15f8` (the merge base with `origin/task/T161-notebook-identity`): both empty
+- `pnpm typecheck`, `pnpm lint`, `pnpm format:check`, `pnpm docs:check`: all exit 0. The first typecheck failed on a type error I introduced (described under finding 7); it was fixed and the checks rerun.
+
+## Findings
+- **6 (`main.tsx`):** If the notebook entry chunk fails to load, a rejection handler now builds a small screen with plain DOM in `#root`. It has `data-testid="notebook-error"`, `role="alert"`, one sentence asking the user to reload, and a Reload button that calls `location.reload()`. The handler imports no module and sits only inside the `ICM_NOTEBOOK` branch. The new test `notebook/main-entry.test.ts` turns the switch on with `vi.stubEnv`, makes `../entries/notebook` fail and `../entries/web` a stub, then checks the screen and that the standard mount was not called.
+- **7 (`api-image.tsx`):** With `loading="lazy"` and `IntersectionObserver` available, the component now shows a placeholder and observes it with `rootMargin: "100% 0px"` (one viewport height). The fetch starts on the first intersecting entry, which also disconnects the observer. Unmount and `src` changes disconnect it too.
+  - Eager images, and pages without `IntersectionObserver`, fetch at once.
+  - New tests with a fake observer cover: no fetch before intersection, exactly one after it (including a stray second report), none after unmount, an eager image fetched at once, the no-observer fallback, and that the placeholder keeps the image's attributes. The existing tests now expect the placeholder where they expected an empty render.
+  - `ApiImage` now declares its return type as `ReactElement | null`. Without it, `tile-preview`'s lazy fallback `() => null` stopped type-checking; this kept `tile-preview.tsx` unchanged.
+- **8 (build test Worker check):** The checker is now a pure function, `codeTargetProblems(sources)`, that returns a list of problems. A `new Worker(` or `new SharedWorker(` is accepted only when its first argument starts at an accepted `new URL(…, import.meta.url)` and ends right after it (the next character is `,` or `)`). Accepted means a literal target that resolves under `/canvas/`, or a recorded computed exception matched occurrence by occurrence.
+  - The real build still passes: no problems, and each computed shape found exactly once.
+  - A new self-check runs the checker over a synthetic chunk with one valid Worker, `new Worker(new URL("https://evil.example/w.js", document.baseURI))` and `new Worker("https://evil.example/w.js")`. It reports exactly the two bad ones.
+- **9 (`version-history-dialog.tsx`, `api-image.tsx`):** While loading and after a failure, `ApiImage` renders a placeholder `<img>` with no `src`, the caller's attributes, `alt=""` and `aria-hidden="true"`. The CSS selects `.version-row img` by tag, so the existing rules size it.
+  - In the dialog's notebook branch, the `Suspense` fallback and the chunk-load-failure component now render the same kind of `<img>`, so the preview cell is never empty. The standard `<img>` branch is untouched and no CSS changed.
+  - I checked in headless Chrome that an `<img>` with no `src` and `alt=""` takes the CSS size (112×76 including border in a 110px grid column) and that `width`/`height` attributes give it an aspect ratio.
+  - New test `notebook/version-history-preview.test.tsx` (switch on): the row's first child is a source-less `<img>` while loading and after a 404, with `version-copy` next to it; after success it is the blob-backed image.
+- **10 (`screens.ts`):** `showGateScreen` takes an optional fourth parameter, `reload` (default: the document's `location.reload()`). With a retry callback the error screen is unchanged. Without one it says "The canvas could not start. Reload the page to try again." and shows a single Reload button. A new test covers both variants and that each button calls only its own callback.
+- **Docs:** `docs/specs/server.md` (an owned path) gained two sentences: the reload message when the entry or the mount fails, and lazy previews with their placeholder.
+
+## Identity proof
+1. Built the current tree: `pnpm --filter @icm/editor exec vite build --outDir $PWD/tmp/id/head --emptyOutDir`.
+2. Backed up the five shared files (`main.tsx`, `vite-env.d.ts`, `tile-preview.tsx`, `version-history-dialog.tsx`, `vite.config.ts`) and replaced each with `git show origin/main:<path> > <path>`. `git diff --stat origin/main` on those five files was then empty.
+3. Built again to `tmp/id/base` with the same command.
+4. Restored the backups. `git diff --stat origin/main` on the five files shows the round-2 versions again.
+5. `diff -rq tmp/id/base tmp/id/head` exited 0, with 194 files on each side.
+
+The later `ApiImage` type-only edit touches only `src/notebook/`, which the build test confirms is not rendered into the standard output. The build test's "no notebook module" assertions still pass.
+
+## Playwright (standard build)
+`ICM_E2E_PORT=4273 AUTO_CANVAS_E2E_API_PORT=4321 AUTO_CANVAS_TEST_DATABASE_URL=postgresql:///auto_canvas_test_2 pnpm exec playwright test apps/editor/e2e/project-tabs.spec.ts apps/editor/e2e/cloud-projects-server.spec.ts apps/editor/e2e/base-path.spec.ts`: 23 passed in 1.2 minutes.
+- The first two are the only spec files that use the `shelf-*` or `version-*` test ids.
+- `base-path.spec.ts` was added because it tests the editor under a base path.
+- `project-file.spec.ts` was not run, as instructed.
+
+## Deviations or blockers
+None. The temporary output directories under `tmp/` were removed; `apps/editor/dist-notebook` remains (it is git-ignored).

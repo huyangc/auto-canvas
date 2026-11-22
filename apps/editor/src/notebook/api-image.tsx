@@ -3,6 +3,7 @@ import {
   useRef,
   useState,
   type ImgHTMLAttributes,
+  type ReactElement,
   type SyntheticEvent,
 } from "react";
 
@@ -13,46 +14,84 @@ type ImageState =
   | { src: string; kind: "ready"; objectUrl: string }
   | { src: string; kind: "failed" };
 
+/** How far outside the viewport a lazy image starts loading. */
+const LAZY_ROOT_MARGIN = "100% 0px";
+
 /**
  * An API image in the notebook build. An <img src> cannot carry the
  * session's header, so the image is fetched through the page's (scoped)
- * fetch and shown from an object URL. Nothing is rendered while it loads or
- * after it fails; a failure calls onError as the <img> it replaces would.
+ * fetch and shown from an object URL. While it loads, and after it fails,
+ * a placeholder <img> without a source takes its place, with the same
+ * attributes, so the page's CSS sizes it as it sizes the image. A failure
+ * calls onError as the <img> it replaces would. With loading="lazy" the
+ * fetch waits until the placeholder is near the viewport, as the browser
+ * would wait for an <img loading="lazy">.
  */
-export function ApiImage({ src, onError, ...props }: ApiImageProps) {
+// The callers' lazy loaders fall back to a component that renders nothing,
+// so this one is typed as a component that may.
+export function ApiImage({
+  src,
+  onError,
+  loading,
+  ...props
+}: ApiImageProps): ReactElement | null {
   const [state, setState] = useState<ImageState>({ src, kind: "loading" });
+  const placeholder = useRef<HTMLImageElement>(null);
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
+  const lazy = loading === "lazy";
   useEffect(() => {
     let current = true;
     let objectUrl: string | null = null;
+    let observer: IntersectionObserver | null = null;
+    const stopObserving = () => {
+      observer?.disconnect();
+      observer = null;
+    };
     // A src seen before must not show the object URL revoked when it changed.
     setState({ src, kind: "loading" });
     const fail = () => {
       setState({ src, kind: "failed" });
       onErrorRef.current?.(failureEvent());
     };
-    fetch(src)
-      .then(async (response) => {
-        if (!current) return;
-        if (!response.ok) return fail();
-        const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
-        // A result for a src that has changed, or after unmount, is discarded.
-        if (!current) return URL.revokeObjectURL(url);
-        objectUrl = url;
-        setState({ src, kind: "ready", objectUrl: url });
-      })
-      .catch(() => {
-        if (current) fail();
-      });
+    const load = () => {
+      stopObserving();
+      fetch(src)
+        .then(async (response) => {
+          if (!current) return;
+          if (!response.ok) return fail();
+          const blob = await response.blob();
+          const url = URL.createObjectURL(blob);
+          // A result for a src that has changed, or after unmount, is discarded.
+          if (!current) return URL.revokeObjectURL(url);
+          objectUrl = url;
+          setState({ src, kind: "ready", objectUrl: url });
+        })
+        .catch(() => {
+          if (current) fail();
+        });
+    };
+    const element = placeholder.current;
+    if (lazy && element && typeof IntersectionObserver === "function") {
+      observer = new IntersectionObserver(
+        (entries) => {
+          // Not after the fetch started (the observer is then disconnected).
+          if (!current || !observer) return;
+          if (entries.some((entry) => entry.isIntersecting)) load();
+        },
+        { rootMargin: LAZY_ROOT_MARGIN },
+      );
+      observer.observe(element);
+    } else load();
     return () => {
       current = false;
+      stopObserving();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [src]);
-  if (state.src !== src || state.kind !== "ready") return null;
-  return <img {...props} src={state.objectUrl} />;
+  }, [src, lazy]);
+  if (state.src !== src || state.kind !== "ready")
+    return <img ref={placeholder} {...props} alt="" aria-hidden="true" />;
+  return <img {...props} loading={loading} src={state.objectUrl} />;
 }
 
 /** The existing callers only note that the image failed. */
