@@ -190,6 +190,70 @@ notebook id, so standalone rows stay separate.
 and a stub notebook; `node scripts/server-mode-check.mjs` checks the built
 server in both modes after `pnpm build`.
 
+### The editor in notebook mode
+
+The editor that runs under silicon-notebook is a second build of the web
+editor, the **notebook build**: `pnpm build:notebook-editor` writes it to
+`apps/editor/dist-notebook/` with the base path `/canvas`. The switch is the
+build-time variable `VITE_AUTO_CANVAS_AUTH`: unset or `local` builds the
+standard editor, `notebook` the notebook build, and any other value, including
+the empty string, stops the build. Only `vite build` honours it; the dev server
+and preview always serve the standard editor. The editor code reads only the
+resulting literal `import.meta.env.ICM_NOTEBOOK`, so each build drops the other
+build's code, and the standard build holds nothing of the notebook gate.
+`pnpm build:e2e` also runs `vite build`, so exporting the variable in a shell
+would make the browser-test build a notebook build; nothing but
+`build:notebook-editor` sets it.
+
+silicon-notebook keeps its session token in this origin's `localStorage` under
+`silicon_notebook_token`. Before any editor module that touches the user's data
+is loaded, the page reads that token and asks `GET api/auth/me` with it
+(no redirects, no cookies, no HTTP cache):
+
+- no token, or a value that is not a well-formed token, or a 401: a signed-out
+  page with a link to silicon-notebook (`/`);
+- storage that cannot be read, a network failure, any other status, or an
+  answer whose user is not a notebook user (a standalone server): an error page
+  with Retry. The page never falls back to single-user behaviour;
+- a notebook user: the editor modules load, the token is read again (a
+  different token starts over), and the editor mounts.
+
+When the editor mounts, the page's global `fetch` is replaced, once and for the
+rest of the page's life, by one bound to that token. It adds
+`Authorization: Bearer <token>` to exactly the API requests: `http:` or `https:`
+URLs on the page's origin whose path starts with the deployment's
+`<base>api/`. Such a request is sent with redirects refused, `no-store` and no
+credentials, and a `no-cors` one is refused; every other request goes to the
+browser's `fetch` untouched. A 401 answer to an API request ends the page as
+below. Known limits: a Worker has its own `fetch` and gets no header (no editor
+Worker calls the API); `<img>`, navigation and WebSockets never go through
+`fetch`; any script in the page can read the token from `localStorage` anyway.
+Previews are therefore fetched through that `fetch` and shown from object URLs,
+never loaded from the HTTP cache.
+
+The page watches for another session: a `storage` event for the token key or a
+cleared storage, focus, the page becoming visible, and a page restored from the
+back/forward cache. When the stored token is then missing, unreadable or a
+different one, or after a 401, the page at once stops sending API requests,
+removes the editor (which also removes its unsaved-work prompt), shows that the
+notebook session changed and reloads. It never renews a token and uses no
+timers.
+
+The Agent is off in the notebook build: no Agent control is shown, the Agent
+runtime is never loaded, its saved session is never read and `?agent=pair`
+does nothing. Not yet in this build: browser storage per user (T163; until
+then, drafts and preferences in this browser are shared by every notebook user
+who signs in on it), and the user's display name or a way back to
+silicon-notebook in the editor's own chrome.
+
+[Gate tests](../../apps/editor/src/notebook/gate.test.ts),
+[scoped fetch tests](../../apps/editor/src/notebook/scoped-fetch.test.ts),
+[session tests](../../apps/editor/src/notebook/session.test.ts),
+[preview tests](../../apps/editor/src/notebook/api-image.test.tsx) and the
+[build test](../../scripts/notebook-editor-build.test.mjs), which builds both
+editors and checks that no executable reference of the notebook build leaves
+`/canvas/`.
+
 ## Agent relay
 
 The [Agent session contract](web-agent-session.md) and [Agent API](agent-api.md)

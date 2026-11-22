@@ -1,0 +1,59 @@
+/**
+ * The notebook build's three gate screens and its loading line, written with
+ * plain DOM operations: they appear before React is loaded, and the
+ * account-changed screen replaces a React root that has been unmounted.
+ */
+
+export type GateScreen = "loading" | "signed-out" | "error" | "account-changed";
+
+export function showGateScreen(
+  container: HTMLElement,
+  screen: GateScreen,
+  retry?: () => void,
+): void {
+  const page = container.ownerDocument;
+  const paragraph = (text: string) => {
+    const element = page.createElement("p");
+    element.textContent = text;
+    return element;
+  };
+  if (screen === "loading") {
+    const status = page.createElement("div");
+    status.setAttribute("role", "status");
+    status.textContent = "Loading…";
+    container.replaceChildren(status);
+    return;
+  }
+  const main = page.createElement("main");
+  main.setAttribute("data-testid", `notebook-${screen}`);
+  if (screen === "signed-out") {
+    const text = paragraph(
+      "The canvas needs a silicon-notebook session: sign in to ",
+    );
+    const link = page.createElement("a");
+    link.href = "/";
+    link.textContent = "silicon-notebook";
+    text.append(link, ".");
+    main.append(text);
+  } else if (screen === "error") {
+    main.setAttribute("role", "alert");
+    main.append(
+      paragraph(
+        "The canvas could not confirm your silicon-notebook session right now.",
+      ),
+    );
+    const button = page.createElement("button");
+    button.type = "button";
+    button.textContent = "Retry";
+    if (retry) button.addEventListener("click", () => retry());
+    main.append(button);
+  } else {
+    main.setAttribute("role", "status");
+    main.append(
+      paragraph(
+        "Your silicon-notebook session changed, so the canvas is reloading.",
+      ),
+    );
+  }
+  container.replaceChildren(main);
+}
