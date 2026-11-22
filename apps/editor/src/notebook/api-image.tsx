@@ -38,12 +38,13 @@ export function ApiImage({
 }: ApiImageProps): ReactElement | null {
   const [state, setState] = useState<ImageState>({ src, kind: "loading" });
   const placeholder = useRef<HTMLImageElement>(null);
+  /** The object URL in use, until it is revoked. */
+  const objectUrl = useRef<string | null>(null);
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
   const lazy = loading === "lazy";
   useEffect(() => {
     let current = true;
-    let objectUrl: string | null = null;
     let observer: IntersectionObserver | null = null;
     const stopObserving = () => {
       observer?.disconnect();
@@ -65,7 +66,7 @@ export function ApiImage({
           const url = URL.createObjectURL(blob);
           // A result for a src that has changed, or after unmount, is discarded.
           if (!current) return URL.revokeObjectURL(url);
-          objectUrl = url;
+          objectUrl.current = url;
           setState({ src, kind: "ready", objectUrl: url });
         })
         .catch(() => {
@@ -87,7 +88,8 @@ export function ApiImage({
     return () => {
       current = false;
       stopObserving();
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
+      objectUrl.current = null;
     };
   }, [src, lazy]);
   if (state.src !== src || state.kind !== "ready")
@@ -98,7 +100,10 @@ export function ApiImage({
       loading={loading}
       src={state.objectUrl}
       onError={(event) => {
-        // Fetched, but not something the browser can show as an image.
+        // Fetched, but not something the browser can show as an image:
+        // nothing will use that URL again.
+        if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
+        objectUrl.current = null;
         setState({ src, kind: "failed" });
         onError?.(event);
       }}

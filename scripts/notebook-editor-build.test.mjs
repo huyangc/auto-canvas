@@ -128,7 +128,8 @@ const COMPUTED = [
   },
 ];
 
-const LITERAL = /^(?:`[^`$]*`|"[^"\\]*"|'[^'\\]*')$/u;
+// Without escapes: the text between the quotes is then the string itself.
+const LITERAL = /^(?:`[^`$\\]*`|"[^"\\]*"|'[^'\\]*')$/u;
 
 const URL_PATTERN =
   /new URL\(((?:[^()]|\([^()]*\))*?),(?:``\+)?import\.meta\.url\)/gu;
@@ -207,17 +208,20 @@ it("reports a Worker whose first argument is not an accepted local URL", () => {
         'new Worker(new URL("https://evil.example/w.js", document.baseURI));',
         'new Worker("https://evil.example/w.js");',
         'new globalThis.SharedWorker(new URL("//evil.example/w.js",import.meta.url));',
+        // "../../x.js" in escapes: outside /canvas/ once the browser decodes it.
+        "new URL(`\\u002e\\u002e/\\u002e\\u002e/x.js`,import.meta.url);",
       ].join(""),
     },
   ]);
-  // The outside literal itself, then the three Workers, in source order.
-  expect(problems).toHaveLength(4);
+  // The two bad URLs themselves, then the three Workers, in source order.
+  expect(problems).toHaveLength(5);
   expect(problems[0]).toMatch(/resolves to https:\/\/evil\.example\/w\.js/u);
-  expect(problems[1]).toMatch(/Worker argument.*document\.baseURI/u);
-  expect(problems[2]).toMatch(
+  expect(problems[1]).toMatch(/computed new URL\(`\\u002e/u);
+  expect(problems[2]).toMatch(/Worker argument.*document\.baseURI/u);
+  expect(problems[3]).toMatch(
     /Worker argument.*: "https:\/\/evil\.example\/w\.js"\)/u,
   );
-  expect(problems[3]).toMatch(/Worker argument.*"\/\/evil\.example/u);
+  expect(problems[4]).toMatch(/Worker argument.*"\/\/evil\.example/u);
 });
 
 /**
@@ -443,9 +447,12 @@ it("validates VITE_AUTO_CANVAS_AUTH in the config hook and defines the switch", 
   await expect(
     define("build", { VITE_AUTO_CANVAS_AUTH: "oidc" }),
   ).rejects.toThrow(/VITE_AUTO_CANVAS_AUTH/u);
-  expect(await define("serve", { VITE_AUTO_CANVAS_AUTH: "notebook" })).toBe(
-    "false",
-  );
+  // Only a build reads the variable: the dev server and preview start
+  // whatever the shell exports.
+  for (const value of ["notebook", "oidc", ""])
+    expect(await define("serve", { VITE_AUTO_CANVAS_AUTH: value })).toBe(
+      "false",
+    );
   expect(await define("build", {})).toBe("false");
   expect(await define("build", { VITE_AUTO_CANVAS_AUTH: "notebook" })).toBe(
     "true",
