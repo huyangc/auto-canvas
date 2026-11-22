@@ -186,11 +186,12 @@ try {
   ])
     await expect(first.getByTestId(testId)).toHaveCount(0);
   for (const x of [160, 320, 480]) {
-    await first
-      .locator("summary")
-      .filter({ hasText: /^Edit$/ })
-      .click();
-    await first
+    // ⋯ holds what the Edit menu held (T150c), in its Edit group. The
+    // editor opens in Auto; this item brings up Draw before it inserts.
+    const more = first.getByTestId("more-menu");
+    await more.locator(":scope > summary").click();
+    await more
+      .getByRole("group", { name: "Edit", exact: true })
       .getByRole("button", { name: "Insert component… (I)", exact: true })
       .click();
     const picker = first.getByRole("dialog", {
