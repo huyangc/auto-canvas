@@ -95,7 +95,8 @@ export function createNotebookIdentity({
   notebookApi,
   onProfile,
   fetch = globalThis.fetch,
-  now = Date.now,
+  // Monotonic: a wall clock set backwards must not stretch the window.
+  now = () => performance.now(),
   timeoutMs = 5000,
   capacity = 10_000,
 }: NotebookIdentityOptions): {

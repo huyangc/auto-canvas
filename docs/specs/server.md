@@ -126,7 +126,8 @@ administrator. At most 32 validations run at once (a further distinct token
 is 503) and concurrent requests with one token share one validation.
 
 A validated token is cached, keyed by its SHA-256, until 60 seconds after its
-validation started; hits never extend it, and failures are never cached. This
+validation started, measured on a monotonic clock; hits never extend it, and
+failures are never cached. This
 is the authorization lag: after notebook revokes a session, disables an account
 or changes a role **on its server**, the canvas honours the old answer for at
 most 60 seconds from the start of the last validation. A browser sign-out that

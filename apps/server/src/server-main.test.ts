@@ -132,6 +132,15 @@ describe("startServer", () => {
       expect(listed.projects.map((p: { name: string }) => p.name)).toEqual([
         "Mounted",
       ]);
+      // The slashless base redirects to the address the browser knows. The
+      // mount is private between notebook's proxy and this server, so it must
+      // not appear in a Location header (notebook's own rule forwards the bare
+      // entry with its slash, so this request only arrives by hand).
+      const bare = await fetch(`${origin}/@notebook/canvas?x=1`, {
+        redirect: "manual",
+      });
+      expect(bare.status).toBe(308);
+      expect(bare.headers.get("location")).toBe("/canvas/?x=1");
 
       const component = `${origin}/@notebook/canvas/api/components/mounted-part`;
       const definition = {
