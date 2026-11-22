@@ -131,7 +131,9 @@ display name (trimmed, at most 80 Unicode characters, the id when empty) updated
 before the request continues; that user owns the Projects and Components the
 request touches, and `role: "admin"` makes them a Component Library
 administrator. At most 32 validations run at once (a further distinct token
-is 503) and concurrent requests with one token share one validation.
+is 503) and concurrent requests with one token share one validation. A write
+of the user's row that outlived its 5 seconds still counts as one of the 32
+until it ends.
 
 A validated token is cached, keyed by its SHA-256, until 60 seconds after its
 validation started, measured on both a monotonic clock and the wall clock

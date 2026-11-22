@@ -426,6 +426,40 @@ describe("profile hook", () => {
     stall = false;
     expect((await resolver.resolve(bearer("alice-token"))).ok).toBe(true);
   });
+  it("counts writes that outlive their deadline against the 32 validations in flight", async () => {
+    const writes: (() => void)[] = [];
+    let stall = true;
+    handler = (_incoming, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ id: "x", display_name: "X", role: "" }));
+    };
+    const resolver = identity({
+      onProfile: () =>
+        stall
+          ? new Promise<void>((resolve) => writes.push(resolve))
+          : Promise.resolve(),
+    });
+    const first = await Promise.all(
+      Array.from({ length: 32 }, (_, index) =>
+        resolver.resolve(bearer(`token-${index}`)),
+      ),
+    );
+    expect(first.every((result) => !result.ok)).toBe(true);
+    expect(writes).toHaveLength(32);
+    // Every slot is held by a write: nothing more is asked of notebook.
+    seen.length = 0;
+    for (const token of ["token-0", "alice-token"])
+      expect(await resolver.resolve(bearer(token))).toEqual({
+        ok: false,
+        status: 503,
+      });
+    expect(seen).toHaveLength(0);
+    expect(writes).toHaveLength(32);
+    stall = false;
+    for (const finish of writes) finish();
+    await delay(0);
+    expect((await resolver.resolve(bearer("alice-token"))).ok).toBe(true);
+  });
   it("answers 503 to every caller when the hook returns after the window, caching nothing", async () => {
     let hold = true;
     let release!: () => void;
