@@ -122,11 +122,12 @@ proxy. It connects only to a loopback address: when the configured host is
 `localhost` and the resolver answers with anything else, those answers are
 dropped and the lookup fails (503). A lookup that ends without a response
 (the connection closes, or notebook answers `101`) or does not finish by the
-deadline is 503 and can be tried again at once. A 200 JSON object whose `id` is a non-empty string of at most 200
+deadline is 503 and can be tried again at once; so is a write of the user's
+row that takes longer than the same 5 seconds. A 200 JSON object whose `id` is a non-empty string of at most 200
 characters other than `local`, and whose `display_name` and `role` are strings,
 identifies the user; notebook's 401 is 401 `unauthorized`; anything else is
 503 `identity-unavailable`. The user's row in `users` is inserted or its
-display name (trimmed, at most 80 characters, the id when empty) updated
+display name (trimmed, at most 80 Unicode characters, the id when empty) updated
 before the request continues; that user owns the Projects and Components the
 request touches, and `role: "admin"` makes them a Component Library
 administrator. At most 32 validations run at once (a further distinct token

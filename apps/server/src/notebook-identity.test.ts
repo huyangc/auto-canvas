@@ -212,6 +212,19 @@ describe("validation against notebook", () => {
     const result = await identity().resolve(bearer("long-token"));
     expect(result.ok && result.profile.displayName).toBe("x".repeat(80));
   });
+  it("cuts the display name by whole characters and keeps it well formed", async () => {
+    const names = [`${"x".repeat(79)}😀😀`, "a\ud83dz"];
+    handler = (_incoming, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({ id: "u", display_name: names.shift(), role: "" }),
+      );
+    };
+    const cut = await identity().resolve(bearer("emoji-token"));
+    expect(cut.ok && cut.profile.displayName).toBe(`${"x".repeat(79)}😀`);
+    const lone = await identity().resolve(bearer("lone-token"));
+    expect(lone.ok && lone.profile.displayName).toBe("a\ufffdz");
+  });
   it("reaches a notebook configured as localhost", async () => {
     const resolver = identity({
       notebookApi: new URL(`http://localhost:${api.port}`),
@@ -346,6 +359,27 @@ describe("validation against notebook", () => {
     });
     expect(performance.now() - started).toBeLessThan(2000);
   });
+  it("answers 503 at the deadline when a 200 answer's body never arrives or ends", async () => {
+    let cancelled = false;
+    const service = identity({
+      fetch: async () =>
+        new Response(
+          new ReadableStream({
+            cancel() {
+              cancelled = true;
+            },
+          }),
+          { status: 200 },
+        ),
+    });
+    const started = performance.now();
+    expect(await service.resolve(bearer("alice-token"))).toEqual({
+      ok: false,
+      status: 503,
+    });
+    expect(performance.now() - started).toBeLessThan(2000);
+    expect(cancelled).toBe(true);
+  });
   it("answers 503 when notebook is down", async () => {
     const down = createServer();
     down.listen(0, "127.0.0.1");
@@ -376,6 +410,21 @@ describe("profile hook", () => {
     fail = false;
     expect((await resolver.resolve(bearer("alice-token"))).ok).toBe(true);
     expect(seen).toHaveLength(2);
+  });
+  it("answers 503 at the deadline when the hook stalls, and releases the validation", async () => {
+    let stall = true;
+    const resolver = identity({
+      onProfile: () =>
+        stall ? new Promise(() => undefined) : Promise.resolve(),
+    });
+    const started = performance.now();
+    expect(await resolver.resolve(bearer("alice-token"))).toEqual({
+      ok: false,
+      status: 503,
+    });
+    expect(performance.now() - started).toBeLessThan(2000);
+    stall = false;
+    expect((await resolver.resolve(bearer("alice-token"))).ok).toBe(true);
   });
   it("answers 503 to every caller when the hook returns after the window, caching nothing", async () => {
     let hold = true;
