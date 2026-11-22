@@ -386,6 +386,14 @@ One canonical reducer owns the canvas: `Idle`, `SymbolPlacement`,
 
 ## Project sessions
 
+- The tab strip shows with two or more project tabs. With one, the row is
+  hidden in both modes and the canvas takes its height; File's **New project
+  tab**, **Open file in new tab** and (with Cloud) **Open Shelf project in
+  tab** are there with any number of tabs. The one project's name is the top
+  bar's; File → **New Project** does what closing its tab did (one blank
+  project, after one decision about unsaved work). A rename in its tab, or a
+  close decision, ends as usual when the strip hides under it (the rename
+  keeps the typed name).
 - Project renames (tab double-click, or Project Info which also renames the
   on-screen Cell via `rename_project` + `rename_document` in one undo) commit only
   a changed nonempty name, ≤120 characters (longer old names are never
@@ -503,8 +511,9 @@ it does.
   in the groups **Edit**, **Hierarchy**, **Netlist** and **Layout**, with the
   same commands; it closes like File (Escape, an outside click, a command),
   and only one of the two is open at a time. A long ⋯ scrolls inside the
-  window; as in File, the arrow keys, Home and End on one of its items scroll
-  the menu and never pan the canvas, and Escape returns focus to its button.
+  window; as in File, the arrow keys, Home and End on one of its items never
+  pan the canvas (Left and Right included; File's submenus use them), they
+  scroll the menu as the browser does, and Escape returns focus to its button.
 
 ## Automatic layout
 

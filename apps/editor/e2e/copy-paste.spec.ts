@@ -9,6 +9,7 @@ import {
   setComponentCodeField,
   expectRecovered,
   openProject,
+  projectTabAction,
 } from "./editor-fixtures";
 import type { CircuitProject, SchematicDocument } from "@icm/model";
 import { serializeProject } from "@icm/project-protocol";
@@ -76,9 +77,7 @@ test("moves and copies converted bus groups across tabs with member bindings, hi
   await expect(ghost).toBeVisible();
   await page.keyboard.press("r");
   await page.keyboard.press("Shift+r");
-  await page
-    .getByRole("button", { name: "New project tab", exact: true })
-    .click();
+  await projectTabAction(page, "New project tab");
   await expect(page.getByRole("tab")).toHaveCount(2);
   await canvas.hover({ position: { x: 380, y: 280 } });
   await expect(ghost).toBeVisible();
@@ -202,9 +201,7 @@ test("keeps a captured bus snapshot after source rename and reuses its child on 
     ),
   ).toBe(true);
 
-  await page
-    .getByRole("button", { name: "New project tab", exact: true })
-    .click();
+  await projectTabAction(page, "New project tab");
   for (const point of [
     { x: 260, y: 240 },
     { x: 620, y: 480 },

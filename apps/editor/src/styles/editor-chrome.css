@@ -849,6 +849,20 @@
   rotate: 90deg;
 }
 
+/* File's Shelf list scrolls in its own box, as the tab strip's picker does,
+   so a long Shelf does not push File's later commands away. */
+.file-shelf {
+  max-height: 280px;
+  overflow: auto;
+}
+
+.file-shelf .project-shelf-open {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 @media (min-width: 481px) and (max-width: 780px) {
   .file-command-popover .export-submenu-options {
     right: 100%;

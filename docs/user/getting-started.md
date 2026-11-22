@@ -54,9 +54,12 @@ work. **⋯** holds **Edit** (insert, find, the selection's commands),
 **Hierarchy** (Cell Manager), **Netlist** and **Layout** (Auto Layout).
 
 Each project tab is an independent circuit with its own view, selection, undo
-history and Cloud binding. Use **+** for a new project, **Open file in new
-tab**, or **Open Shelf project in tab**. Double-click a tab's name to rename
-it; right-click it for **Close**, **Close Others** and **Close All**. Refresh
+history and Cloud binding. With one project the tab bar is hidden, and **File**
+has **New project tab**, **Open file in new tab** and **Open Shelf project in
+tab**; with two or more the tab bar shows, with the same actions (**+** is New
+project tab). With one project rename it in Project Info; in the tab bar,
+double-click a tab's name to rename it and right-click it for **Close**,
+**Close Others** and **Close All**. Refresh
 restores this window's tabs and unsaved circuits (not Undo stacks); after
 closing the browser tab, a new editor tab offers **Reopen tabs**. This
 browser-local workspace is not a backup: save or export what you need.
@@ -213,7 +216,8 @@ choices have a dropdown. Shapes are drawing only.
 **File → Save** (`Ctrl+S`) saves to one private Cloud Project, updating it on
 each save; a new or imported drawing creates its Cloud Project on first save.
 A dot beside the name means unsaved changes, and leaving the page warns. Your
-Cloud Projects are on your account page and in the tab bar's ▾ Shelf.
+Cloud Projects are on your account page and in File → **Open Shelf project in
+tab** (and the tab bar's ▾ Shelf).
 
 Edits are also kept as a browser recovery copy (not a save; clearing site data
 loses it). If a newer unsaved copy is found at start, a banner offers

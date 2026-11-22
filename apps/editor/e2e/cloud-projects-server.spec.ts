@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { renameProject } from "./editor-fixtures.js";
+import { projectTabAction, renameProject } from "./editor-fixtures.js";
 import { placeComponent } from "./manual-editor-fixtures.js";
 
 test("local identity saves, reopens from the shelf and lists the earlier revision", async ({
@@ -31,18 +31,13 @@ test("local identity saves, reopens from the shelf and lists the earlier revisio
     const fresh = await browser.newPage();
     try {
       await fresh.goto(new URL("/editor?new=1", page.url()).href);
-      await fresh
-        .getByLabel("Open Shelf project in tab", { exact: true })
-        .click();
+      const shelf = await projectTabAction(fresh, "Open Shelf project in tab");
       const opened = fresh.waitForResponse(
         (response) =>
           new URL(response.url()).pathname === `/api/projects/${projectId}` &&
           response.request().method() === "GET",
       );
-      await fresh
-        .locator(".project-tabs-shelf")
-        .getByRole("button", { name, exact: true })
-        .click();
+      await shelf.getByRole("button", { name, exact: true }).click();
       expect((await opened).status()).toBe(200);
       await expect(fresh.getByTestId("hit-R1")).toBeVisible();
       await expect(fresh.getByTestId("active-instance-count")).toHaveText("1");
@@ -57,10 +52,9 @@ test("local identity saves, reopens from the shelf and lists the earlier revisio
       await expect(fresh.getByTestId("status")).toHaveText(
         `Saved ${name} updated to Cloud`,
       );
-      await fresh
-        .getByLabel("Open Shelf project in tab", { exact: true })
-        .click();
-      await fresh
+      await (
+        await projectTabAction(fresh, "Open Shelf project in tab")
+      )
         .getByRole("button", { name: "Browse Cloud Projects…" })
         .click();
       await fresh.getByTestId(`shelf-actions-${projectId}`).click();

@@ -162,8 +162,18 @@ export async function openProjectInfo(page: Page): Promise<Locator> {
   return dialog;
 }
 
-/** Rename the active project in its tab, as a reader would. */
+/**
+ * Rename the active project as a reader would: in its tab when the strip
+ * shows, otherwise in File → Project Info (one project hides the strip).
+ */
 export async function renameProject(page: Page, name: string): Promise<void> {
+  if (!(await page.getByTestId("project-tabs").isVisible())) {
+    const dialog = await openProjectInfo(page);
+    await dialog.getByRole("textbox", { name: "Name", exact: true }).fill(name);
+    await dialog.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(dialog).toBeHidden();
+    return;
+  }
   await page.getByRole("tab", { selected: true }).dblclick();
   const field = page.getByRole("textbox", {
     name: "Project name",
@@ -174,14 +184,35 @@ export async function renameProject(page: Page, name: string): Promise<void> {
   await expect(field).toBeHidden();
 }
 
+/**
+ * Run one of the tab strip's actions, `New project tab`, `Open file in new
+ * tab` or `Open Shelf project in tab`: on the strip when it shows (two or
+ * more tabs), otherwise from File, which holds them too. For the Shelf it
+ * returns the open picker that lists the Shelf projects.
+ */
+export async function projectTabAction(
+  page: Page,
+  name:
+    "New project tab" | "Open file in new tab" | "Open Shelf project in tab",
+): Promise<Locator> {
+  const strip = page.getByTestId("project-tabs");
+  if (await strip.isVisible()) {
+    await strip.getByLabel(name, { exact: true }).click();
+    return page.locator(".project-tabs-shelf");
+  }
+  const file = await openMenu(page, "File");
+  const item = file.getByRole("button", { name, exact: true });
+  if ((await item.getAttribute("aria-expanded")) !== "true") await item.click();
+  return file.getByRole("group", { name: "Shelf projects", exact: true });
+}
+
 /** Rename a Shelf project with the Shelf's own Rename control. */
 export async function renameShelfProject(
   page: Page,
   from: string,
   to: string,
 ): Promise<void> {
-  await page.getByLabel("Open Shelf project in tab", { exact: true }).click();
-  const shelf = page.locator(".project-tabs-shelf");
+  const shelf = await projectTabAction(page, "Open Shelf project in tab");
   await shelf.getByRole("button", { name: from, exact: true }).hover();
   await shelf
     .getByRole("button", { name: `Rename ${from}`, exact: true })
