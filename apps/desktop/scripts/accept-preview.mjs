@@ -411,15 +411,21 @@ try {
   // changing (a restored window, a file opening): read it once two reads a
   // moment apart agree, then wait for the strip to match it.
   async function stripShown(page) {
-    const tabs = page.getByRole("tab", { includeHidden: true });
+    const strip = page.getByTestId("project-tabs");
+    const tabs = strip.getByRole("tab", { includeHidden: true });
+    // Plain Node has no test timeout: give up after 10 s and say why.
+    const deadline = Date.now() + 10_000;
     let previous = -1;
     let count = await tabs.count();
     while (count === 0 || count !== previous) {
+      if (Date.now() > deadline)
+        throw new Error(
+          `stripShown: the project tab count did not settle within 10 s (last ${previous}, then ${count}; 0 means no project tab rendered)`,
+        );
       await page.waitForTimeout(250);
       previous = count;
       count = await tabs.count();
     }
-    const strip = page.getByTestId("project-tabs");
     if (count > 1) await expect(strip).toBeVisible();
     else await expect(strip).toBeHidden();
     return count > 1;
