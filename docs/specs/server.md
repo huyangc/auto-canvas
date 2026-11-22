@@ -218,8 +218,9 @@ is loaded, the page reads that token and asks `GET api/auth/me` with it
 - a notebook user: the editor modules load, the token is read again (a
   different token starts over), and the editor mounts.
 
-If the notebook entry itself cannot be loaded, or the editor fails as it
-mounts, the page asks the user to reload instead (no Retry).
+If the notebook entry or the editor's modules cannot be loaded, or the editor
+fails as it mounts, the page asks the user to reload instead (no Retry: the
+same document may not load a failed module again).
 
 When the editor mounts, the page's global `fetch` is replaced, once and for the
 rest of the page's life, by one bound to that token. It adds
@@ -234,7 +235,8 @@ Worker calls the API); `<img>`, navigation and WebSockets never go through
 Previews are therefore fetched through that `fetch` and shown from object URLs,
 never loaded from the HTTP cache. A lazy preview is fetched only once it comes
 within about a viewport height of the visible area; until it is shown, and
-after it fails, an empty `<img>` holds its place.
+after it fails (the request, or the browser showing what it returned), an
+empty `<img>` holds its place.
 
 The page watches for another session: a `storage` event for the token key or a
 cleared storage, focus, the page becoming visible, and a page restored from the

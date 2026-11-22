@@ -97,7 +97,10 @@ export function startNotebookGate<Modules>(effects: GateEffects<Modules>) {
     try {
       modules = await effects.loadApp();
     } catch {
-      if (current()) effects.showScreen("error", retry);
+      // No Retry: a document may keep a failed module load, so importing
+      // the same modules again can fail after the network is back. The
+      // screen asks for a reload instead.
+      if (current()) effects.showScreen("error");
       return;
     }
     if (!current()) return;

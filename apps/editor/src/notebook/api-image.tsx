@@ -23,7 +23,8 @@ const LAZY_ROOT_MARGIN = "100% 0px";
  * fetch and shown from an object URL. While it loads, and after it fails,
  * a placeholder <img> without a source takes its place, with the same
  * attributes, so the page's CSS sizes it as it sizes the image. A failure
- * calls onError as the <img> it replaces would. With loading="lazy" the
+ * (of the fetch, or of the browser showing what was fetched) calls onError
+ * as the <img> it replaces would. With loading="lazy" the
  * fetch waits until the placeholder is near the viewport, as the browser
  * would wait for an <img loading="lazy">.
  */
@@ -91,7 +92,18 @@ export function ApiImage({
   }, [src, lazy]);
   if (state.src !== src || state.kind !== "ready")
     return <img ref={placeholder} {...props} alt="" aria-hidden="true" />;
-  return <img {...props} loading={loading} src={state.objectUrl} />;
+  return (
+    <img
+      {...props}
+      loading={loading}
+      src={state.objectUrl}
+      onError={(event) => {
+        // Fetched, but not something the browser can show as an image.
+        setState({ src, kind: "failed" });
+        onError?.(event);
+      }}
+    />
+  );
 }
 
 /** The existing callers only note that the image failed. */
