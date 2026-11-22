@@ -118,7 +118,9 @@ one 5-second deadline for headers and body, body at most 64 KiB) who the token
 belongs to. That lookup is a direct connection to the configured origin that
 ignores every proxy setting (`NODE_USE_ENV_PROXY`, `--use-env-proxy`,
 `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`), so the token never leaves for a
-proxy. A 200 JSON object whose `id` is a non-empty string of at most 200
+proxy. It connects only to a loopback address: when the configured host is
+`localhost` and the resolver answers with anything else, those answers are
+dropped and the lookup fails (503). A 200 JSON object whose `id` is a non-empty string of at most 200
 characters other than `local`, and whose `display_name` and `role` are strings,
 identifies the user; notebook's 401 is 401 `unauthorized`; anything else is
 503 `identity-unavailable`. The user's row in `users` is inserted or its
@@ -136,7 +138,11 @@ failures are never cached. This
 is the authorization lag: after notebook revokes a session, disables an account
 or changes a role **on its server**, the canvas honours the old answer for at
 most 60 seconds from the start of the last validation. A browser sign-out that
-only cleared the browser's local storage does not revoke the session. Tokens,
+only cleared the browser's local storage does not revoke the session. One
+combination is not covered: on a platform whose monotonic clock stops during
+suspend, a host that sleeps and then has its wall clock set backwards before
+the next request can honour a cached answer for longer; restarting the server
+clears the cache. Tokens,
 `Authorization` headers and notebook's response bodies are never logged.
 
 Routes in this mode:

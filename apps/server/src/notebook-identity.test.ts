@@ -18,6 +18,7 @@ import {
 } from "vitest";
 import {
   createNotebookIdentity,
+  onlyLoopback,
   parseBearer,
   type NotebookProfile,
 } from "./notebook-identity.js";
@@ -210,6 +211,28 @@ describe("validation against notebook", () => {
     };
     const result = await identity().resolve(bearer("long-token"));
     expect(result.ok && result.profile.displayName).toBe("x".repeat(80));
+  });
+  it("reaches a notebook configured as localhost", async () => {
+    const resolver = identity({
+      notebookApi: new URL(`http://localhost:${api.port}`),
+    });
+    expect((await resolver.resolve(bearer("alice-token"))).ok).toBe(true);
+    expect(seen).toHaveLength(1);
+  });
+  it("keeps only loopback answers of the resolver", () => {
+    const answers = [
+      { address: "10.0.0.5", family: 4 },
+      { address: "127.0.0.1", family: 4 },
+      { address: "fe80::1", family: 6 },
+      { address: "::1", family: 6 },
+      { address: "127.8.9.10", family: 4 },
+    ];
+    expect(onlyLoopback(answers)).toEqual([
+      { address: "127.0.0.1", family: 4 },
+      { address: "::1", family: 6 },
+      { address: "127.8.9.10", family: 4 },
+    ]);
+    expect(onlyLoopback([{ address: "192.168.1.2", family: 4 }])).toEqual([]);
   });
   it("answers 401 when notebook does", async () => {
     expect(await identity().resolve(bearer("unknown-token"))).toEqual({

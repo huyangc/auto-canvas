@@ -389,6 +389,9 @@ async function checkNotebookMode(fixture, stub) {
     AUTO_CANVAS_BASE_PATH: "/canvas",
     AUTO_CANVAS_AGENT_IDLE_MS: "nonsense",
     EDITOR_ROOT: fixture.directory,
+    // Node prints connection options under this setting; the final check
+    // that no token value was logged must hold then too.
+    NODE_DEBUG: "net",
   });
   try {
     const get = (path, headers = {}) =>
