@@ -1734,3 +1734,86 @@ test("the top bar names the project on one row, in both modes", async ({
     page.getByRole("dialog", { name: "Project Info" }),
   ).toBeVisible();
 });
+
+const clipped = (page: Page, testId: string) =>
+  page.getByTestId(testId).evaluate((el) => el.scrollWidth > el.clientWidth);
+
+test("a long project name gives way before the top bar's controls", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await openEditor(page, "/editor?example=two-stage-op-amp");
+  await expectStatus(page, "Opened example: Two-Stage Op Amp");
+  const name = page.locator(".app-project-name");
+  const nameWidth = async () => (await name.boundingBox())!.width;
+  // A short name is shown whole.
+  await page.setViewportSize({ width: 1024, height: 800 });
+  await expect(name.locator(".app-project-name-text")).toHaveText(
+    "New Circuit",
+  );
+  expect(
+    await name
+      .locator(".app-project-name-text")
+      .evaluate((el) => el.scrollWidth > el.clientWidth),
+  ).toBe(false);
+  const long = `${"Folded cascode operational transconductance amplifier ".repeat(2)}test`;
+  await renameProject(page, long);
+  await page.setViewportSize({ width: 1440, height: 800 });
+  const cap = await nameWidth();
+  for (const width of [761, 800, 860, 900, 1024]) {
+    await page.setViewportSize({ width, height: 800 });
+    const context = `${width}px`;
+    expect(await clipped(page, "auto-layout-button"), context).toBe(false);
+    expect(await clipped(page, "import-netlist-button"), context).toBe(false);
+    const actions = (await page.locator(".app-chrome-actions").boundingBox())!;
+    const box = (await name.boundingBox())!;
+    expect(box.x + box.width, context).toBeLessThanOrEqual(actions.x);
+    if (width <= 900) expect(box.width, context).toBeLessThan(cap);
+  }
+  // With a run planning, its label gives way too; Cancel and ⋯ stay on
+  // screen and nothing overlaps.
+  const button = page.getByTestId("auto-layout-button");
+  await button.click();
+  const cancel = page.getByTestId("auto-layout-cancel");
+  await expect(cancel).toBeVisible();
+  for (const width of [800, 1024]) {
+    await page.setViewportSize({ width, height: 800 });
+    await button
+      .locator(".app-action-label")
+      .evaluate(
+        (label) =>
+          (label.textContent =
+            "Auto Layout… 123 s · Cell 2 of 3 · evaluation 120/240"),
+      );
+    const context = `${width}px, running`;
+    const boxes = await Promise.all(
+      [
+        ".app-project-name",
+        '[data-testid="mode-switch"]',
+        '[data-testid="auto-layout-button"]',
+        '[data-testid="auto-layout-cancel"]',
+        '[data-testid="project-menu"]',
+        '[data-testid="open-agent"]',
+        '[data-testid="more-menu"]',
+      ].map(async (selector) => ({
+        selector,
+        box: (await page.locator(selector).boundingBox())!,
+      })),
+    );
+    for (const { selector, box } of boxes) {
+      expect(box.x + box.width, `${selector} ${context}`).toBeLessThanOrEqual(
+        width,
+      );
+      expect(box.width, `${selector} ${context}`).toBeGreaterThan(20);
+    }
+    for (let index = 1; index < boxes.length; index++)
+      expect(
+        boxes[index]!.box.x,
+        `${boxes[index]!.selector} after ${boxes[index - 1]!.selector} ${context}`,
+      ).toBeGreaterThanOrEqual(
+        boxes[index - 1]!.box.x + boxes[index - 1]!.box.width - 0.5,
+      );
+  }
+  await cancel.click();
+  await expect(cancel).toHaveCount(0);
+});

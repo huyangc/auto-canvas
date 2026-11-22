@@ -1739,22 +1739,31 @@
 }
 
 /* The project name (T150c): the one top-bar item that gives way to a narrow
-   window. It shrinks to an ellipsis before anything else moves, and below
-   720 px it goes; File → Project Info still has it. */
+   window. It shrinks to an ellipsis, down to 3rem, before anything else
+   moves, and below 720 px it goes; File → Project Info still has it. The
+   brand group lays its items out in the bar's own row, so the name's
+   explicit min-width is its floor (a group's automatic minimum would hold
+   the whole unwrapped name), and the name takes nearly all of a deficit
+   before the actions group (a running Auto Layout label) shares it. */
 @media (min-width: 721px) {
   .app-chrome-main .app-brand {
-    flex: 0 1000 auto;
-    min-width: auto;
+    display: contents;
   }
 
   .app-chrome-main .app-brand > * {
+    flex-shrink: 0;
+  }
+
+  /* Idle, the actions keep their full size: the name alone gives way. */
+  .app-chrome-main
+    .app-chrome-actions:not(:has(.auto-layout-control[data-running="true"])) {
     flex-shrink: 0;
   }
 }
 
 .app-chrome-main .app-brand > .app-project-name {
   display: inline-flex;
-  flex: 0 1 auto;
+  flex: 0 1000 auto;
   align-items: center;
   gap: 4px;
   min-width: 3rem;
