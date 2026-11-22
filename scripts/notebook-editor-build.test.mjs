@@ -282,11 +282,6 @@ async function checkStorageGuards(output) {
     .map(({ id }) => id);
   expect([...new Set(consumers)].sort()).toEqual(STORAGE_CONSUMERS);
   expect(storageEventProblems(modules)).toEqual([]);
-  expect(
-    forbiddenNameProblems(
-      output.map((item) => ({ id: item.fileName, code: text(item) })),
-    ),
-  ).toEqual([]);
   const assets = workerAssets(output).map((item) => ({
     id: item.fileName,
     code: text(item),
@@ -294,10 +289,18 @@ async function checkStorageGuards(output) {
   const emittedServiceWorker = assets.find(({ id }) =>
     /(?:^|\/)sw\.js$/u.test(id),
   );
+  // A build that does not write returns no copied public file: the service
+  // worker that ships is then the source file itself.
   const serviceWorker = emittedServiceWorker ?? {
     id: "apps/editor/public/sw.js",
     code: await readFile(resolve(root, "public/sw.js"), "utf8"),
   };
+  expect(
+    forbiddenNameProblems([
+      ...output.map((item) => ({ id: item.fileName, code: text(item) })),
+      ...(emittedServiceWorker ? [] : [serviceWorker]),
+    ]),
+  ).toEqual([]);
   expect(
     workerStorageProblems(
       assets.filter((asset) => asset !== emittedServiceWorker),

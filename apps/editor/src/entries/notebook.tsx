@@ -119,7 +119,9 @@ export function mountNotebookEditor(overrides: NotebookEntryOverrides = {}) {
           <App services={services} publicAgentUiEnabled={false} />
         </EditorErrorBoundary>,
       );
-      // For the browser cases: the namespace is fixed and the editor mounted.
+      // For the browser cases: the namespace is fixed and the editor's
+      // render is scheduled. React has not committed it yet: a case that
+      // needs the mounted editor waits for the editor itself.
       page.performance.mark("auto-canvas:notebook-commit");
       return () => root.unmount();
     },

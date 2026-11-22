@@ -555,3 +555,8 @@ their wiring, the spec lifecycle paragraph, drain/gate/jsdom tests. Neither merg
 4. **Late lifecycle observers** (for the browser cases) are registered once the editor is
    mounted, not at `load`: `main.tsx` starts a dynamic import. The entry sets its commit mark
    after mount so a test can wait for it.
+
+   (Planner's correction after the code review of PR 116: `createRoot().render()` only
+   schedules the render, so the mark means "namespace fixed, render scheduled", not
+   "mounted". A case that needs the mounted editor waits for the editor itself, e.g. the
+   `schematic-canvas` test id, before it registers late observers.)
