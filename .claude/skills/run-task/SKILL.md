@@ -23,7 +23,9 @@ report and a claim: write `report.md` from it, then review.
 
 Only when the owner asks. Run `scripts/codex-task.sh tasks/<id>-<slug>` with
 Bash `run_in_background` (rounds take many minutes) and tell the user the round
-started and where the logs are.
+started and where the logs are. A Codex round starts from a task branch with
+no uncommitted changes outside the task directory: commit a subagent's reviewed
+edits (or discard rejected ones) first.
 
 Its first output line names the round. Start a `Monitor` on
 `node scripts/codex-log.mjs tasks/<id>-<slug> --round <n> --follow` with the
@@ -74,7 +76,7 @@ yourself:
   not commit Codex's partial work between rounds.
 - **After round 3**, or when a finding needs a product decision or a change of
   plan, stop and ask the user. A plan change edits plan.md (note it in
-  review.md) before the next round.
+  review.md) and goes through plan review again before the next round.
 
 ## Deliver
 
