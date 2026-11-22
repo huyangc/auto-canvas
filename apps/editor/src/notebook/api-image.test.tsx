@@ -144,6 +144,22 @@ it("defers a lazy image's fetch until it is near the viewport", async () => {
   );
 });
 
+it("observes a lazy image against the container that scrolls it, or the page", async () => {
+  vi.stubGlobal("IntersectionObserver", FakeObserver);
+  await render(<ApiImage src="/canvas/api/a.png" alt="A" loading="lazy" />);
+  expect(FakeObserver.instances[0]!.options?.root).toBeNull();
+  await render(
+    <div data-testid="list" style={{ overflowY: "auto" }}>
+      <div>
+        <ApiImage src="/canvas/api/b.png" alt="B" loading="lazy" />
+      </div>
+    </div>,
+  );
+  expect(FakeObserver.instances.at(-1)!.options?.root).toBe(
+    container.querySelector("[data-testid=list]"),
+  );
+});
+
 it("never fetches a lazy image unmounted before it came near the viewport", async () => {
   vi.stubGlobal("IntersectionObserver", FakeObserver);
   await render(<ApiImage src="/canvas/api/a.png" alt="A" loading="lazy" />);

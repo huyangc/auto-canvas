@@ -80,7 +80,7 @@ export function ApiImage({
           if (!current || !observer) return;
           if (entries.some((entry) => entry.isIntersecting)) load();
         },
-        { rootMargin: LAZY_ROOT_MARGIN },
+        { root: scrollContainer(element), rootMargin: LAZY_ROOT_MARGIN },
       );
       observer.observe(element);
     } else load();
@@ -104,6 +104,25 @@ export function ApiImage({
       }}
     />
   );
+}
+
+/**
+ * The nearest ancestor that scrolls its content, or null for the page. A
+ * margin around the viewport does not reach into such a container: its own
+ * box clips what counts as visible, so the margin has to be around it.
+ */
+function scrollContainer(element: Element): Element | null {
+  const view = element.ownerDocument.defaultView;
+  for (
+    let parent = element.parentElement;
+    parent && view;
+    parent = parent.parentElement
+  )
+    if (
+      /^(?:auto|scroll|overlay)$/u.test(view.getComputedStyle(parent).overflowY)
+    )
+      return parent;
+  return null;
 }
 
 /** The existing callers only note that the image failed. */

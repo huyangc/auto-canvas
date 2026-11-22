@@ -169,7 +169,10 @@ function codeTargetProblems(sources) {
           `${fileName}: computed new URL(${target}, import.meta.url)`,
         );
     }
-    for (const match of code.matchAll(/new (?:Shared)?Worker\(/gu)) {
+    // Also a qualified constructor: new globalThis.Worker(…).
+    for (const match of code.matchAll(
+      /new (?:[\w$]+\.)*(?:Shared)?Worker\(/gu,
+    )) {
       const argument = match.index + match[0].length;
       const end = accepted.get(argument);
       if (end === undefined || !/^[,)]/u.test(code.slice(end)))
@@ -203,14 +206,18 @@ it("reports a Worker whose first argument is not an accepted local URL", () => {
         'new Worker(new URL("./ok.js",import.meta.url),{type:"module"});',
         'new Worker(new URL("https://evil.example/w.js", document.baseURI));',
         'new Worker("https://evil.example/w.js");',
+        'new globalThis.SharedWorker(new URL("//evil.example/w.js",import.meta.url));',
       ].join(""),
     },
   ]);
-  expect(problems).toHaveLength(2);
-  expect(problems[0]).toMatch(/Worker argument.*document\.baseURI/u);
-  expect(problems[1]).toMatch(
+  // The outside literal itself, then the three Workers, in source order.
+  expect(problems).toHaveLength(4);
+  expect(problems[0]).toMatch(/resolves to https:\/\/evil\.example\/w\.js/u);
+  expect(problems[1]).toMatch(/Worker argument.*document\.baseURI/u);
+  expect(problems[2]).toMatch(
     /Worker argument.*: "https:\/\/evil\.example\/w\.js"\)/u,
   );
+  expect(problems[3]).toMatch(/Worker argument.*"\/\/evil\.example/u);
 });
 
 /**
@@ -268,8 +275,8 @@ it("reads script and style references in any quoting and case", () => {
   expect(htmlReferences("<base href='https://evil.example/'>").base).toBe(true);
 });
 
-/** Static and dynamic imports in emitted worker JavaScript, from its AST. */
-function workerImports(code, fileName) {
+/** Static and dynamic imports in emitted JavaScript, from its AST. */
+function moduleImports(code, fileName) {
   const specifiers = [];
   const visit = (node) => {
     if (Array.isArray(node)) return node.forEach(visit);
@@ -347,6 +354,14 @@ it("builds the notebook editor with every executable reference inside /canvas/",
     // (A pure-CSS chunk Vite removed stays listed here, so only locality.)
     for (const target of [...chunk.imports, ...chunk.dynamicImports])
       expectLocal(target, DEPLOY, chunk.fileName);
+    // What the code itself imports, which the lists above may not hold: a
+    // computed import() fails here.
+    for (const specifier of moduleImports(chunk.code, chunk.fileName))
+      expectLocal(
+        specifier,
+        new URL(chunk.fileName, DEPLOY),
+        `${chunk.fileName} import`,
+      );
     // The preload helper's operands: the dependency lists Vite emits.
     for (const list of chunk.code.matchAll(
       /__vite__mapDeps=\(i,m=__vite__mapDeps,d=\(m\.f\|\|\(m\.f=(\[[^\]]*\])/gu,
@@ -374,7 +389,7 @@ it("builds the notebook editor with every executable reference inside /canvas/",
   expect(workers.length).toBeGreaterThan(0);
   for (const worker of workers) {
     const base = new URL(worker.fileName, DEPLOY);
-    for (const specifier of workerImports(text(worker), worker.fileName)) {
+    for (const specifier of moduleImports(text(worker), worker.fileName)) {
       expectLocal(specifier, base, worker.fileName);
       expect(
         fileNames.has(
