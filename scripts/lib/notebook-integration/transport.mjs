@@ -31,9 +31,20 @@ export function createReporter() {
   };
 }
 
-/** GET with the path sent byte for byte; never follows redirects. */
-export function rawRequest(port, rawPath, method = "GET") {
+/**
+ * GET with the path sent byte for byte; never follows redirects. Settles on
+ * every outcome: a response cut short (error, aborted, or closed before its
+ * end) rejects, and the whole exchange has one deadline.
+ */
+export function rawRequest(port, rawPath, method = "GET", deadlineMs = 30_000) {
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const settle = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn(value);
+    };
     const req = request(
       {
         host: "127.0.0.1",
@@ -41,13 +52,21 @@ export function rawRequest(port, rawPath, method = "GET") {
         path: rawPath,
         method,
         agent: false,
-        timeout: 30_000,
       },
       (res) => {
         const chunks = [];
+        const cut = (why) => {
+          settle(reject, new Error(`response ${why} before its end`));
+          req.destroy();
+        };
         res.on("data", (chunk) => chunks.push(chunk));
+        res.on("error", (error) => cut(`failed (${error.message})`));
+        res.on("aborted", () => cut("aborted"));
+        res.on("close", () => {
+          if (!res.complete) cut("closed");
+        });
         res.on("end", () =>
-          resolve({
+          settle(resolve, {
             status: res.statusCode,
             headers: res.headers,
             body: Buffer.concat(chunks).toString("utf8"),
@@ -55,8 +74,11 @@ export function rawRequest(port, rawPath, method = "GET") {
         );
       },
     );
-    req.on("timeout", () => req.destroy(new Error("request timeout")));
-    req.on("error", reject);
+    const timer = setTimeout(() => {
+      settle(reject, new Error(`no complete response within ${deadlineMs} ms`));
+      req.destroy();
+    }, deadlineMs);
+    req.on("error", (error) => settle(reject, error));
     req.end();
   });
 }

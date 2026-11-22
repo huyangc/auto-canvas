@@ -73,7 +73,15 @@ for (const signal of ["SIGINT", "SIGTERM"])
   process.once(signal, () => {
     interrupted = true;
     console.log(`interrupted (${signal}); cleaning up`);
-    void sandbox.dispose().finally(() => process.exit(130));
+    void sandbox
+      .dispose()
+      .then((left) => {
+        for (const pgid of left)
+          console.log(
+            `FAIL ${options.stage}: process group ${pgid} still present`,
+          );
+      })
+      .finally(() => process.exit(130));
   });
 
 const report = createReporter();
@@ -95,7 +103,13 @@ try {
     );
   failures = 1;
 } finally {
-  await sandbox.dispose();
+  const left = await sandbox.dispose();
+  for (const pgid of left) {
+    console.log(
+      `FAIL ${options.stage}: process group ${pgid} still present after cleanup`,
+    );
+    failures += 1;
+  }
   if (options.keep) console.log(`kept ${sandbox.root}`);
 }
 process.exit(interrupted ? 130 : failures === 0 ? 0 : 1);

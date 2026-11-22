@@ -3,8 +3,35 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
+/**
+ * The source must be a real directory, not a symlink: the preserving copy
+ * would copy the link itself. Returns a problem, or undefined.
+ */
+function sourceModulesProblem(from) {
+  try {
+    const stat = fs.lstatSync(from);
+    if (stat.isSymbolicLink())
+      return `the source ${from} is a symlink, not a real directory`;
+    if (!stat.isDirectory()) return `the source ${from} is not a directory`;
+  } catch (error) {
+    return `the source ${from}: ${error.message}`;
+  }
+  return undefined;
+}
+
+/**
+ * Check the source, copy it, then preflight the copy. Nothing is copied when
+ * the source is not a real directory.
+ */
+export function prepareModules(sandbox, from, to) {
+  const problem = sourceModulesProblem(from);
+  if (problem) return { problems: [problem] };
+  copyModules(sandbox, from, to);
+  return preflightModules(sandbox, to);
+}
+
 /** Copy-on-write clone where the platform has one; internal symlinks preserved. */
-export function copyModules(sandbox, from, to) {
+function copyModules(sandbox, from, to) {
   fs.mkdirSync(path.dirname(to), { recursive: true });
   const attempts =
     process.platform === "darwin"
@@ -53,8 +80,25 @@ console.log(JSON.stringify({ loaded, failed }));
 `;
 
 /** Returns a list of problems; an empty list means the copy is usable. */
-export function preflightModules(sandbox, modules) {
+function preflightModules(sandbox, modules) {
   const problems = [];
+  // The copy must be a real directory inside the sandbox: a copied symlink
+  // would make the stages run the modules it points at, in place.
+  let root;
+  try {
+    if (!fs.lstatSync(modules).isDirectory())
+      return {
+        problems: [`the copy ${modules} is not a real directory`],
+      };
+    root = fs.realpathSync(modules);
+  } catch (error) {
+    return { problems: [`the copy ${modules}: ${error.message}`] };
+  }
+  const within = path.relative(fs.realpathSync(sandbox.root), root);
+  if (!within || within.startsWith("..") || path.isAbsolute(within))
+    return {
+      problems: [`the copy ${modules} resolves outside the sandbox: ${root}`],
+    };
   for (const link of walk(modules)) {
     let target;
     try {
@@ -63,7 +107,7 @@ export function preflightModules(sandbox, modules) {
       problems.push(`broken symlink ${link}`);
       continue;
     }
-    const rel = path.relative(fs.realpathSync(modules), target);
+    const rel = path.relative(root, target);
     if (rel.startsWith("..") || path.isAbsolute(rel))
       problems.push(`symlink ${link} resolves outside the copy: ${target}`);
   }

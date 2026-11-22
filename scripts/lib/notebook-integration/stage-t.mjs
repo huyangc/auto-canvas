@@ -2,8 +2,14 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { copyModules, preflightModules } from "./modules.mjs";
-import { startNext, tail } from "./steps.mjs";
+import { prepareModules } from "./modules.mjs";
+import {
+  checkStopped,
+  ownershipHeld,
+  startNext,
+  stopServer,
+  tail,
+} from "./steps.mjs";
 import { rawRequest, startStub, transportAssertions } from "./transport.mjs";
 
 // One allowed path unit, and a segment of units (see the plan's Context).
@@ -30,12 +36,11 @@ export async function stageT({ sandbox, report, notebook }) {
   const app = path.join(sandbox.root, "app");
   fs.mkdirSync(path.join(app, "pages"), { recursive: true });
   const modules = path.join(app, "node_modules");
-  copyModules(
+  const preflight = prepareModules(
     sandbox,
     path.join(notebook, "frontend", "node_modules"),
     modules,
   );
-  const preflight = preflightModules(sandbox, modules);
   if (preflight.problems.length) {
     report.fail(
       "private modules preflight",
@@ -80,6 +85,7 @@ export async function stageT({ sandbox, report, notebook }) {
         [path.join(modules, "next/dist/bin/next"), "build"],
         { cwd: app, env, name: "t-build" },
       );
+      checkStopped(report, `${prefix}next build`, build.pgid, build.gone);
       if (
         !report.check(`${prefix}next build`, build.status === 0, () =>
           tail(build.output),
@@ -118,8 +124,16 @@ export async function stageT({ sandbox, report, notebook }) {
       } else {
         await singleRuleControl({ nextPort, stub, report, prefix });
       }
+      ownershipHeld(
+        sandbox,
+        report,
+        `${prefix}next start still owns its port after the last probe`,
+        nextPort,
+        server.pid,
+      );
     } finally {
-      if (server) await sandbox.stopGroup(server.handle.pgid);
+      if (server)
+        await stopServer(sandbox, report, `${prefix}next start`, server.handle);
       await stub.close();
     }
   }
@@ -131,17 +145,18 @@ async function singleRuleControl({ nextPort, stub, report, prefix }) {
   for (let round = 1; round <= 2; round += 1) {
     let mark = stub.records.length;
     const slash = await rawRequest(nextPort, "/canvas/");
-    allOk &&= report.check(
+    const slashOk = report.check(
       `${prefix}round ${round}: GET /canvas/ -> 308 /canvas, not forwarded`,
       slash.status === 308 &&
         slash.headers.location === "/canvas" &&
         stub.records.length === mark,
       `status ${slash.status}, location ${slash.headers.location}, upstream ${stub.records.length - mark}`,
     );
+    allOk = allOk && slashOk;
     mark = stub.records.length;
     const bare = await rawRequest(nextPort, "/canvas");
     const fresh = stub.records.slice(mark);
-    allOk &&= report.check(
+    const bareOk = report.check(
       `${prefix}round ${round}: GET /canvas -> 308 /canvas/, upstream /@notebook/canvas`,
       bare.status === 308 &&
         bare.headers.location === "/canvas/" &&
@@ -149,6 +164,7 @@ async function singleRuleControl({ nextPort, stub, report, prefix }) {
         fresh[0].url === "/@notebook/canvas",
       `status ${bare.status}, location ${bare.headers.location}, upstream ${JSON.stringify(fresh)}`,
     );
+    allOk = allOk && bareOk;
   }
   if (allOk) report.ok("control: single rule loops");
 }

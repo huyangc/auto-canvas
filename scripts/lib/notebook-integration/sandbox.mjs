@@ -42,7 +42,10 @@ function optionsOf(args) {
 }
 net.Socket.prototype.connect = function guardedConnect(...args) {
   const { options, wrapped } = optionsOf(args);
-  if (!options || options.path !== undefined) return original.apply(this, args);
+  // A Unix socket only when path is a non-empty string: the default http and
+  // https agents pass path: null for an ordinary TCP connection.
+  if (!options || (typeof options.path === "string" && options.path !== ""))
+    return original.apply(this, args);
   const host = options.host === undefined || options.host === null ? "localhost" : String(options.host);
   if (host.toLowerCase() === "localhost") {
     const rewritten = { ...options, host: "127.0.0.1" };
@@ -194,26 +197,52 @@ export function createSandbox(notebook, { keep }) {
     return handle;
   }
 
-  /** Stop an owned group: SIGTERM, SIGKILL after 5 s, verify, then forget it. */
-  async function stopGroup(pgid) {
-    if (!groups.has(pgid)) return true;
+  // One shutdown per group id: a later caller awaits the shutdown in progress.
+  const stopping = new Map();
+
+  /** Absent (ESRCH) retires the id at once, before anything else can signal it. */
+  function observeGone(pgid) {
+    if (groupAlive(pgid)) return false;
+    groups.delete(pgid);
+    return true;
+  }
+
+  /**
+   * Stop an owned group: SIGTERM, SIGKILL after 5 s, then verify. A group
+   * still present after the final wait stays owned (the exit handler still
+   * knows it) and the result is false.
+   */
+  function stopGroup(pgid) {
+    if (stopping.has(pgid)) return stopping.get(pgid);
+    if (!groups.has(pgid)) return Promise.resolve(true);
     const signalGroup = (signal) => {
+      if (!groups.has(pgid)) return;
       try {
         process.kill(-pgid, signal);
       } catch (error) {
+        if (error.code === "ESRCH") {
+          groups.delete(pgid);
+          return;
+        }
         // EPERM: nothing left in the group that can take a signal (see
         // groupAlive); the wait below decides whether it is really gone.
-        if (error.code !== "ESRCH" && error.code !== "EPERM") throw error;
+        if (error.code !== "EPERM") throw error;
       }
     };
-    signalGroup("SIGTERM");
-    if (!(await waitFor(() => !groupAlive(pgid), 5000, 50))) {
-      signalGroup("SIGKILL");
-      await waitFor(() => !groupAlive(pgid), 5000, 50);
-    }
-    const gone = !groupAlive(pgid);
-    groups.delete(pgid);
-    return gone;
+    const shutdown = (async () => {
+      try {
+        signalGroup("SIGTERM");
+        if (!(await waitFor(() => observeGone(pgid), 5000, 50))) {
+          signalGroup("SIGKILL");
+          await waitFor(() => observeGone(pgid), 5000, 50);
+        }
+        return !groups.has(pgid) || observeGone(pgid);
+      } finally {
+        stopping.delete(pgid);
+      }
+    })();
+    stopping.set(pgid, shutdown);
+    return shutdown;
   }
 
   async function run(
@@ -222,7 +251,11 @@ export function createSandbox(notebook, { keep }) {
     { cwd, env: childEnv, name, timeoutMs = 900_000 },
   ) {
     const handle = start(command, args, { cwd, env: childEnv, name });
-    const timer = setTimeout(() => void stopGroup(handle.pgid), timeoutMs);
+    // The normal path below awaits the same shutdown if this one is running.
+    const timer = setTimeout(
+      () => void stopGroup(handle.pgid).catch(() => {}),
+      timeoutMs,
+    );
     await handle.done;
     clearTimeout(timer);
     const gone =
@@ -233,6 +266,7 @@ export function createSandbox(notebook, { keep }) {
       signal: handle.signal,
       output: handle.error ? `${handle.error.message}\n${output}` : output,
       gone,
+      pgid: handle.pgid,
     };
   }
 
@@ -276,16 +310,49 @@ export function createSandbox(notebook, { keep }) {
     }
   }
 
-  const listenerIs = (port, pid) => {
-    const pids = listenerPids(port);
-    return pids.length === 1 && pids[0] === pid;
-  };
+  /** The local addresses listening on a port, as lsof names them. */
+  function listenerAddresses(port) {
+    try {
+      const out = execFileSync(
+        "lsof",
+        ["-nP", "-a", `-iTCP:${port}`, "-sTCP:LISTEN", "-Fn"],
+        {
+          encoding: "utf8",
+          env: { PATH: process.env.PATH ?? "" },
+          stdio: ["ignore", "pipe", "ignore"],
+        },
+      );
+      return [
+        ...new Set(
+          out
+            .split("\n")
+            .filter((line) => line.startsWith("n"))
+            .map((line) => line.slice(1)),
+        ),
+      ];
+    } catch {
+      return [];
+    }
+  }
 
+  const listenerIs = (port, pid) => listenerState(port, pid).state === "owned";
+
+  /** "none" (no listener), "owned" (exactly the expected pid) or "foreign". */
+  function listenerState(port, pid) {
+    const pids = listenerPids(port);
+    if (pids.length === 0) return { state: "none", pids };
+    if (pids.length === 1 && pids[0] === pid) return { state: "owned", pids };
+    return { state: "foreign", pids };
+  }
+
+  /** Stops every owned group; resolves to the ids still present afterwards. */
   let disposal;
   function dispose() {
     disposal ??= (async () => {
       await Promise.all([...groups].map((pgid) => stopGroup(pgid)));
+      const left = [...groups];
       if (!keep) removeRoot();
+      return left;
     })();
     return disposal;
   }
@@ -319,6 +386,8 @@ export function createSandbox(notebook, { keep }) {
     freePort,
     listenerPids,
     listenerIs,
+    listenerState,
+    listenerAddresses,
     dispose,
     randomToken: () => crypto.randomBytes(8).toString("hex"),
   };

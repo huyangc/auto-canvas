@@ -3,8 +3,14 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-import { copyModules, preflightModules } from "./modules.mjs";
-import { startNext, tail } from "./steps.mjs";
+import { prepareModules } from "./modules.mjs";
+import {
+  checkStopped,
+  ownershipHeld,
+  startNext,
+  stopServer,
+  tail,
+} from "./steps.mjs";
 import { waitFor } from "./sandbox.mjs";
 import {
   expectRewrites,
@@ -34,6 +40,12 @@ export async function stageA({ sandbox, report, notebook, options }) {
       cwd: sandbox.root,
       name: "clone",
     },
+  );
+  checkStopped(
+    report,
+    "clone of the notebook repository",
+    cloned.pgid,
+    cloned.gone,
   );
   if (
     !report.check("clone of the notebook repository", cloned.status === 0, () =>
@@ -88,8 +100,11 @@ export async function stageA({ sandbox, report, notebook, options }) {
   )
     return;
   const modules = path.join(frontend, "node_modules");
-  copyModules(sandbox, path.join(notebook, "frontend/node_modules"), modules);
-  const preflight = preflightModules(sandbox, modules);
+  const preflight = prepareModules(
+    sandbox,
+    path.join(notebook, "frontend/node_modules"),
+    modules,
+  );
   if (preflight.problems.length) {
     report.fail(
       "private modules preflight",
@@ -102,7 +117,8 @@ export async function stageA({ sandbox, report, notebook, options }) {
   );
 
   // A1: no new dependency.
-  const changed = git(["diff", "--name-only", base, candidate])
+  // --no-renames: a moved file shows both its old and its new path.
+  const changed = git(["diff", "--no-renames", "--name-only", base, candidate])
     .split("\n")
     .filter(Boolean);
   if (base === candidate)
@@ -121,12 +137,15 @@ export async function stageA({ sandbox, report, notebook, options }) {
     );
   }
 
-  const build = (extra, name) =>
-    sandbox.run("npm", ["run", "build"], {
+  const build = async (extra, name) => {
+    const result = await sandbox.run("npm", ["run", "build"], {
       cwd: frontend,
       env: sandbox.env(extra),
       name,
     });
+    checkStopped(report, `${name}`, result.pgid, result.gone);
+    return result;
+  };
   const cleanNext = () =>
     fs.rmSync(path.join(frontend, ".next"), { recursive: true, force: true });
 
@@ -169,9 +188,16 @@ export async function stageA({ sandbox, report, notebook, options }) {
             `status ${res.status}`,
           );
         }
+        ownershipHeld(
+          sandbox,
+          report,
+          "A2 next start still owns its port after the last probe",
+          web,
+          server.pid,
+        );
       }
     } finally {
-      await sandbox.stopGroup(server.handle.pgid);
+      await stopServer(sandbox, report, "A2 next start", server.handle);
     }
   }
 
@@ -226,15 +252,23 @@ export async function stageA({ sandbox, report, notebook, options }) {
             !server.error,
             () => server.error,
           )
-        )
+        ) {
           await transportAssertions({
             nextPort: web,
             stub,
             report,
             prefix: "A4 ",
           });
+          ownershipHeld(
+            sandbox,
+            report,
+            "A4 next start still owns its port after the last probe",
+            web,
+            server.pid,
+          );
+        }
       } finally {
-        await sandbox.stopGroup(server.handle.pgid);
+        await stopServer(sandbox, report, "A4 next start", server.handle);
       }
     } else
       report.fail(
@@ -303,7 +337,14 @@ async function stageA6({
       PORT: String(apiPort),
       FRONTEND_PORT: String(webPort),
       BACKEND_PROXY_TARGET: backend,
-      ...A6_EXTRA_ENV,
+      // Authentication stays on (no SILICON_NOTEBOOK_AUTH_OPTIONAL): the
+      // launcher's `next start` listens on every interface, so the clone must
+      // refuse anyone without a session. The seeded administrator gets a
+      // random password instead of the default "admin".
+      SILICON_NOTEBOOK_ADMIN_PASSWORD: sandbox.randomToken(),
+      // The backend's log handler wraps at 80 columns without a terminal,
+      // which splits the startup "paths:" line the database check reads.
+      COLUMNS: "1000",
     }),
   });
   const logTail = () => {
@@ -368,18 +409,35 @@ async function stageA6({
     }
     report.ok("A6 both services are in the owned process group");
 
-    const owned = await waitFor(
-      () =>
-        sandbox.listenerIs(apiPort, backendPid) &&
-        sandbox.listenerIs(webPort, frontendPid),
+    // Ownership has three states per port: no listener yet, the expected
+    // pid, or another pid, which fails at once (and is never signalled).
+    const ownership = () => ({
+      api: sandbox.listenerState(apiPort, backendPid),
+      web: sandbox.listenerState(webPort, frontendPid),
+    });
+    const bothOwned = ({ api, web }) =>
+      api.state === "owned" && web.state === "owned";
+    const describeOwnership = ({ api, web }) =>
+      `api ${apiPort}: ${api.state} [${api.pids}] (want ${backendPid}); ` +
+      `web ${webPort}: ${web.state} [${web.pids}] (want ${frontendPid})`;
+    let seen = ownership();
+    await waitFor(
+      () => {
+        seen = ownership();
+        return (
+          seen.api.state === "foreign" ||
+          seen.web.state === "foreign" ||
+          bothOwned(seen)
+        );
+      },
       120_000,
       500,
     );
     if (
       !report.check(
         "A6 each port is owned by the service the launcher started",
-        owned,
-        `api ${apiPort}: ${sandbox.listenerPids(apiPort)} (want ${backendPid}); web ${webPort}: ${sandbox.listenerPids(webPort)} (want ${frontendPid})\n${logTail()}`,
+        bothOwned(seen),
+        () => `${describeOwnership(seen)}\n${logTail()}`,
       )
     )
       return;
@@ -391,6 +449,7 @@ async function stageA6({
         return false;
       }
     };
+    // The services are up once the anonymous readiness probe says so.
     let dead = "";
     const ready = await waitFor(
       async () => {
@@ -399,11 +458,8 @@ async function stageA6({
           return true;
         }
         try {
-          const [health, home] = await Promise.all([
-            rawRequest(webPort, "/api/health"),
-            rawRequest(webPort, "/"),
-          ]);
-          return health.status === 200 && home.status === 200;
+          const res = await rawRequest(webPort, "/api/ready");
+          return res.status === 200 && JSON.parse(res.body).ready === true;
         } catch {
           return false;
         }
@@ -411,14 +467,50 @@ async function stageA6({
       120_000,
       1000,
     );
+    if (!ready || dead)
+      return void report.fail(
+        "A6 /api/ready reports ready through the frontend",
+        `${dead || "timeout"}\n${logTail()}`,
+      );
+    seen = ownership();
+    if (!bothOwned(seen))
+      return void report.fail(
+        "A6 ports still owned after the readiness answer",
+        describeOwnership(seen),
+      );
+
+    // The safety property comes first. The frontend listens on every
+    // interface (the launcher gives `next start` no -H, and `next start`
+    // reads no variable for its host), so without a session the clone must
+    // answer 401, through the frontend and on the backend port. On failure
+    // A6 stops here and the finally below stops the services.
+    const unauthenticated = await Promise.all(
+      [webPort, apiPort].map((port) =>
+        rawRequest(port, "/api/health").catch((error) => ({
+          status: `error ${error.message}`,
+        })),
+      ),
+    );
     if (
       !report.check(
-        "A6 /api/health and / answer 200 through the frontend",
-        ready && !dead,
-        `${dead || "timeout"}\n${logTail()}`,
+        "A6 the clone refuses unauthenticated API requests",
+        unauthenticated.every((res) => res.status === 401),
+        `GET /api/health without a session: frontend ${unauthenticated[0].status}, backend ${unauthenticated[1].status}`,
       )
     )
       return;
+    report.note(
+      `A6 listeners: frontend ${sandbox.listenerAddresses(webPort).join(", ")}; ` +
+        `backend ${sandbox.listenerAddresses(apiPort).join(", ")}`,
+    );
+    report.ok("A6 /api/ready reports ready through the frontend");
+
+    const home = await rawRequest(webPort, "/");
+    report.check(
+      "A6 GET / -> 200 through the frontend",
+      home.status === 200,
+      `status ${home.status}`,
+    );
     const canvas = await rawRequest(webPort, "/canvas");
     report.check(
       "A6 GET /canvas -> 404 without the canvas rule",
@@ -426,31 +518,41 @@ async function stageA6({
       `status ${canvas.status}`,
     );
 
+    // The database is the clone's: the backend logs the resolved database
+    // path at startup, and that exact file must exist inside <clone>/.local.
     const local = path.join(nb, ".local");
-    const files = fs.existsSync(local)
-      ? fs.readdirSync(local, { recursive: true }).map(String)
-      : [];
-    const sqlite = files.filter((file) => /\.(db|sqlite3?)$/.test(file));
     const backendLog = path.join(local, "logs/backend.log");
     const head = fs.existsSync(backendLog)
-      ? fs.readFileSync(backendLog, "utf8").split("\n").slice(0, 20).join("\n")
+      ? fs.readFileSync(backendLog, "utf8").split("\n").slice(0, 40).join("\n")
       : "";
+    const dbPath = /paths: database=sqlite path=(\S+) storage=/.exec(head)?.[1];
+    const dbProblem = (() => {
+      if (!dbPath) return "no 'paths: database=sqlite path=' line";
+      if (!path.isAbsolute(dbPath)) return `${dbPath} is not absolute`;
+      if (!fs.existsSync(dbPath)) return `${dbPath} does not exist`;
+      const real = fs.realpathSync(dbPath);
+      const rel = path.relative(fs.realpathSync(local), real);
+      if (!rel || rel.startsWith("..") || path.isAbsolute(rel))
+        return `${real} is outside ${local}`;
+      return "";
+    })();
     report.check(
-      "A6 the database and logs are the clone's",
-      sqlite.length > 0 && head.includes(nb),
-      `sqlite ${JSON.stringify(sqlite)}; backend log head:\n${head}`,
+      `A6 the database is the clone's (${dbPath ?? "?"})`,
+      !dbProblem,
+      () => `${dbProblem}; backend log head:\n${head}`,
+    );
+    seen = ownership();
+    report.check(
+      "A6 both ports still owned after the last probe",
+      bothOwned(seen),
+      () => describeOwnership(seen),
     );
   } finally {
     const gone = await sandbox.stopGroup(launcher.pgid);
     report.check(
       "A6 the owned process group is stopped",
       gone,
-      "group still alive",
+      `process group ${launcher.pgid} still present`,
     );
   }
 }
-
-// Variables the launcher needed beyond the plan's list. Without an env file the
-// backend requires a login for every request (GET /api/health answered 401);
-// the notebook's .env.example allows this switch "for local tests only".
-const A6_EXTRA_ENV = { SILICON_NOTEBOOK_AUTH_OPTIONAL: "true" };

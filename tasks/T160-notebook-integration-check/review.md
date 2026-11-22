@@ -65,3 +65,50 @@ interfaces, and the reviewer accepted it as a note.
 
 Keep everything else as it is. Rerun the whole Acceptance section of the plan
 except `pnpm deadcode`, and the three refusal runs.
+
+Two findings added during the round, from a second codex pass over the same
+code, and given to the implementer with findings 5–13:
+
+| # | Severity | Where | Finding | Expected fix |
+| --- | --- | --- | --- | --- |
+| 14 | must-fix | `sandbox.mjs` (`OFFLINE_GUARD`) | The guard let a connection through when `options.path !== undefined`. The default `http` and `https` agents pass `path: null` for an ordinary TCP connection, so every such connection bypassed the guard unrecorded; the control used only `fetch`, which takes another path, so it passed. | A Unix socket only when `path` is a non-empty string; the control proves the guard separately for `fetch`, `http.get` and `https.get`. |
+| 15 | should-fix | `stage-t.mjs` (single-rule control) | `allOk &&= report.check(…)` stopped evaluating later hops after a first failure. | Evaluate each check, then combine. |
+
+## Round 3 — accepted
+
+Reviewed: the round-2 changes; the A6 launch environment and the offline guard
+read by the reviewer; every acceptance command rerun by the reviewer.
+
+- Finding 5: `next start` 15.5.18 reads no variable for its host and the
+  notebook's launcher passes none, so the frontend cannot be bound to loopback
+  without editing the clone. Authentication therefore stays on
+  (`SILICON_NOTEBOOK_AUTH_OPTIONAL` is gone) and the seeded administrator gets
+  a random password per run instead of the default. Readiness is the anonymous
+  `GET /api/ready`. The first assertion after the services are up is that an
+  API request without a session is refused (401) through the frontend and on
+  the backend port.
+- Findings 6–15: as described in the report.
+
+| # | Severity | Where | Finding | Expected fix |
+| --- | --- | --- | --- | --- |
+| 16 | should-fix | `steps.mjs` (source-checkout observation) | The reviewer's negative-control run reported a tenth failure: two entries newer than the run under the source `frontend/node_modules`, namely `.vite-temp` and `.vite/vitest/…`. They are test-runner caches written by another session working in the notebook repository at the same time (its worktree's `node_modules` is a symlink to the main checkout's); this script runs neither Vite nor Vitest. The plan's premise "nothing but an install writes there" was wrong. | Fixed by the reviewer: entries under `.vite`, `.vite-temp` and `.cache`, and the directory's own timestamp, are printed as notes; anything else under `node_modules` — what an install or a downloaded binding would write — still fails. |
+
+Acceptance rerun:
+
+```text
+stage T → 0; 121 passed, 0 failed
+stage A, candidate claude/canvas-proxy-rewrite-a58b3d, base d3388036b → 0; 85 passed, 0 failed
+  ok   A6 the clone refuses unauthenticated API requests
+  note A6 listeners: frontend *:<port>; backend 127.0.0.1:<port>
+stage A, negative control (--ref = --base = d3388036b), after finding 16 → 1; 76 passed, 9 failed: A3 (1), A4 (6), A5 (2)
+--stage X → 2; the three TMPDIR refusals → 2; no nb-check-* directory under the checkout
+pnpm lint → 0; pnpm format:check → 0; pnpm docs:check → 0; pnpm typecheck → 0
+```
+
+The owner's listeners on 3000, 8000 and 4310 kept their PIDs; the notebook
+checkout's `git status` was unchanged.
+
+Known limit, accepted: while A6 runs, the clone's frontend listens on every
+interface. It serves only the notebook's static pages and refuses API requests
+without a session; its database is a fresh throwaway with a random
+administrator password.

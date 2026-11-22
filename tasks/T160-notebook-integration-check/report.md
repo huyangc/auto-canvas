@@ -81,3 +81,39 @@ runs did not hit the window; both of the reviewer's did. Cleanup still
 completed (no process, no temporary directory, owner PIDs unchanged). Fixed in
 `sandbox.mjs`: `EPERM` now means "not gone yet" and the wait continues. See
 `review.md`.
+
+# T160 report — round 2
+
+(From the implementer subagent's hand-back; saved by the reviewer.)
+
+## Review findings addressed
+
+- 5 (must-fix): `next start` 15.5.18 reads no variable for its host (`-H` has no `.env()` binding; without it `server.listen(port, undefined)` listens on every interface), and `prod.sh` passes no `-H`, so option (a) is impossible without editing the clone. Took option (b): `SILICON_NOTEBOOK_AUTH_OPTIONAL` is dropped and the seeded admin gets a random `SILICON_NOTEBOOK_ADMIN_PASSWORD` instead of the default `admin`. Readiness is the anonymous `GET /api/ready` → `ready: true` through the frontend. The first assertion after the services are up is `A6 the clone refuses unauthenticated API requests`: `GET /api/health` with no session → 401 through the frontend and on the backend port; on failure A6 stops at once. Observed: ok in every run; listeners frontend `*:<port>` (all interfaces, as expected) and backend `127.0.0.1:<port>`.
+- 6 (must-fix): `prepareModules` refuses a source `node_modules` that is not a real directory (`lstat`), and copies nothing in that case. After the copy, the preflight requires a real destination directory whose `realpath` is inside the sandbox. Demonstrated with a fake tree under the system temp directory: `FAIL private modules preflight: the source … is a symlink, not a real directory`, nothing built.
+- 7: `rawRequest` rejects on the response's `error`, `aborted` and `close` before completion, and has one deadline for the whole exchange. Checked: a body cut short was rejected after 56 ms, a hanging body at the deadline.
+- 8: one shutdown promise per group id; `ESRCH` retires the id at once; every signal checks ownership first; the `EPERM` handling is kept.
+- 9: a group still present after the final wait stays owned. Every caller reports `FAIL <step>: process group <id> still present`, and `dispose` returns the leftover ids, which the entry script reports with a non-zero exit.
+- 10: listener states none, owned and foreign; a foreign PID fails at once; ownership is re-checked after the readiness answer and after the last probe of every server.
+- 11: A6 parses the backend's `paths: database=sqlite path=…` startup line (`COLUMNS=1000` keeps it unwrapped) and requires that exact file to exist with its `realpath` inside `<clone>/.local`.
+- 12: A1 uses `git diff --no-renames --name-only`.
+- 13: `find` runs through `spawnSync`; a non-zero exit or any stderr output is a FAIL.
+- 14 (must-fix): on Node v26 the default `http` agent passes `[{ path: null, … }]`, `https` passes `{ path: null, … }`, and `fetch` passes an array with no path, so the old guard skipped every `http` / `https` connection. A Unix socket now means a non-empty string `path`. The control checks `fetch`, `http.get` and `https.get` separately; each must fail with the guard's refusal and be logged as `192.0.2.1 49152`. Stage T passing shows loopback through the default agents still works.
+- 15: the single-rule control evaluates every check before combining the results.
+
+## Acceptance results (implementer)
+
+```text
+stage T → 0; 121 passed, 0 failed
+stage A, candidate 49cd77372 → 0; 85 passed, 0 failed (three consecutive runs)
+  an earlier run failed only on the source node_modules observation (a Vitest cache written from the notebook repository's own worktree; see review finding 16)
+stage A, negative control → 1; 76 passed, 9 failed (A3 1, A4 6, A5 2)
+--stage X → 2; the three TMPDIR refusals → 2
+pnpm lint, format:check, docs:check, typecheck → 0
+owner listener PIDs unchanged (3000: 41839, 8000: 41838, 4310: 85736)
+```
+
+## Deviations
+
+- Two variables added to A6 beyond the review row: a random `SILICON_NOTEBOOK_ADMIN_PASSWORD` (closes the default-password hole when authentication stays on) and `COLUMNS=1000`.
+- The offline-guard control prints three lines (`offline guard active (fetch)`, `(http.get)`, `(https.get)`) instead of one.
+- The post-copy destination check of finding 6 cannot be reached from the command line (the source check fires first) and was not demonstrated separately.
