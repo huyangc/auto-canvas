@@ -115,7 +115,10 @@ header (another scheme, extra whitespace, control or non-ASCII characters) is
 401 `unauthorized` without contacting notebook. The server asks notebook's
 `GET /api/me` (sending only that header, without following redirects, within
 one 5-second deadline for headers and body, body at most 64 KiB) who the token
-belongs to. A 200 JSON object whose `id` is a non-empty string of at most 200
+belongs to. That lookup is a direct connection to the configured origin that
+ignores every proxy setting (`NODE_USE_ENV_PROXY`, `--use-env-proxy`,
+`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`), so the token never leaves for a
+proxy. A 200 JSON object whose `id` is a non-empty string of at most 200
 characters other than `local`, and whose `display_name` and `role` are strings,
 identifies the user; notebook's 401 is 401 `unauthorized`; anything else is
 503 `identity-unavailable`. The user's row in `users` is inserted or its

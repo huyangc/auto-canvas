@@ -1,4 +1,7 @@
 import { createHash } from "node:crypto";
+import * as http from "node:http";
+import * as https from "node:https";
+import { Readable } from "node:stream";
 
 export interface NotebookProfile {
   id: string;
@@ -11,6 +14,7 @@ export type NotebookIdentityResult =
 interface NotebookIdentityOptions {
   notebookApi: URL;
   onProfile: (profile: NotebookProfile) => Promise<void>;
+  /** Replaces the direct, proxy-free transport. */
   fetch?: typeof globalThis.fetch;
   now?: () => number;
   timeoutMs?: number;
@@ -40,6 +44,55 @@ class Rejected extends Error {
   constructor(readonly status: 401 | 503) {
     super(`Notebook identity ${status}`);
   }
+}
+
+// Dedicated agents without `proxyEnv`: unlike the global agents and `fetch`,
+// they ignore NODE_USE_ENV_PROXY / --use-env-proxy and every *_PROXY variable,
+// so the bearer token always goes straight to the configured notebook host.
+const directAgents = {
+  "http:": new http.Agent({ keepAlive: false }),
+  "https:": new https.Agent({ keepAlive: false }),
+};
+
+/**
+ * The default transport: one direct GET that never follows a redirect, shaped
+ * as the part of `fetch` used below. A non-200 response carries no body.
+ */
+function directGet(
+  url: URL,
+  { headers, signal }: { headers: Record<string, string>; signal: AbortSignal },
+): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    const client = url.protocol === "https:" ? https : http;
+    const agent =
+      url.protocol === "https:"
+        ? directAgents["https:"]
+        : directAgents["http:"];
+    const request = client.request(
+      url,
+      { method: "GET", headers, agent, signal },
+      (incoming) => {
+        try {
+          const status = incoming.statusCode ?? 0;
+          if (status !== 200) {
+            incoming.destroy();
+            resolve(new Response(null, { status }));
+            return;
+          }
+          resolve(
+            new Response(Readable.toWeb(incoming) as ReadableStream, {
+              status,
+            }),
+          );
+        } catch (error) {
+          incoming.destroy();
+          reject(error instanceof Error ? error : new Error("Bad response"));
+        }
+      },
+    );
+    request.on("error", reject);
+    request.end();
+  });
 }
 
 async function readCapped(response: Response): Promise<string> {
@@ -94,7 +147,7 @@ function profileOf(text: string): NotebookProfile {
 export function createNotebookIdentity({
   notebookApi,
   onProfile,
-  fetch = globalThis.fetch,
+  fetch,
   // Monotonic: a wall clock set backwards must not stretch the window.
   now = () => performance.now(),
   timeoutMs = 5000,
@@ -108,6 +161,7 @@ export function createNotebookIdentity({
     { profile: NotebookProfile; expires: number }
   >();
   const pending = new Map<string, Promise<NotebookIdentityResult>>();
+  const send = fetch ?? directGet;
 
   async function fetchProfile(token: string): Promise<NotebookProfile> {
     const controller = new AbortController();
@@ -115,7 +169,7 @@ export function createNotebookIdentity({
     try {
       let response: Response;
       try {
-        response = await fetch(endpoint, {
+        response = await send(endpoint, {
           headers: { Authorization: `Bearer ${token}` },
           redirect: "manual",
           signal: controller.signal,

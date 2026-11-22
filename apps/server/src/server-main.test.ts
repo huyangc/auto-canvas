@@ -97,6 +97,72 @@ describe("startServer", () => {
     }
   });
 
+  it("releases the relay and the pool when the editor root is missing", async () => {
+    const pools: pg.Pool[] = [];
+    const tracked = () => {
+      const pool = createDb();
+      pools.push(pool);
+      return pool;
+    };
+    await expect(
+      startServer({
+        env: { ...listen, EDITOR_ROOT: `/nonexistent-${randomUUID()}` },
+        argv: [],
+        createDb: tracked,
+        log: quiet,
+      }),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    expect(pools).toHaveLength(1);
+    expect(pools[0]!.ended).toBe(true);
+  });
+
+  it("releases the pool when the migration fails", async () => {
+    const pools: pg.Pool[] = [];
+    const failing = () => {
+      const pool = createDb();
+      vi.spyOn(pool, "connect").mockRejectedValue(new Error("connect refused"));
+      pools.push(pool);
+      return pool;
+    };
+    await expect(
+      startServer({ env: listen, argv: [], createDb: failing, log: quiet }),
+    ).rejects.toThrow("connect refused");
+    expect(pools).toHaveLength(1);
+    expect(pools[0]!.ended).toBe(true);
+  });
+
+  it("survives upgrade requests whose peer resets at once in notebook mode", async () => {
+    const server = await startServer({
+      env: {
+        ...listen,
+        AUTO_CANVAS_AUTH: "notebook",
+        AUTO_CANVAS_NOTEBOOK_API: notebookApi,
+      },
+      argv: [],
+      createDb,
+      log: quiet,
+    });
+    const { port } = server!.address;
+    try {
+      for (let attempt = 0; attempt < 50; attempt++) {
+        const socket = connect(port, "127.0.0.1");
+        socket.on("error", () => undefined);
+        await once(socket, "connect");
+        socket.write(
+          "GET /@notebook/api/agent/sessions/x/editor HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n",
+        );
+        // An RST rather than a FIN: the reply is written to a reset peer.
+        socket.resetAndDestroy();
+      }
+      const health = await fetch(
+        `http://127.0.0.1:${port}/@notebook/api/health`,
+      );
+      expect(await health.json()).toEqual({ ok: true });
+    } finally {
+      await server!.close();
+    }
+  });
+
   it("migrates and returns null for --migrate without constructing a relay", async () => {
     vi.stubEnv("AUTO_CANVAS_AGENT_IDLE_MS", "nonsense");
     try {

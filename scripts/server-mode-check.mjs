@@ -27,6 +27,7 @@ const children = new Set();
 const serverOutput = [];
 const aliceToken = `alice-${randomUUID()}`;
 const unknownToken = `unknown-${randomUUID()}`;
+let stubLookups = 0;
 // Variables the check sets itself; inherited values must not leak in.
 const OWN_VARIABLES = [
   "AUTO_CANVAS_AUTH",
@@ -51,16 +52,16 @@ async function createSchema() {
   return url.href;
 }
 
-function childEnv(env) {
+function childEnv(env, unset = []) {
   const result = { ...process.env };
-  for (const name of OWN_VARIABLES) delete result[name];
+  for (const name of [...OWN_VARIABLES, ...unset]) delete result[name];
   return { ...result, HOST: "127.0.0.1", PORT: "0", ...env };
 }
 
-function spawnServer(env) {
+function spawnServer(env, unset) {
   const child = spawn(process.execPath, ["apps/server/dist/cli.js"], {
     cwd: root,
-    env: childEnv(env),
+    env: childEnv(env, unset),
     stdio: ["ignore", "pipe", "pipe"],
   });
   children.add(child);
@@ -78,8 +79,8 @@ function spawnServer(env) {
 }
 
 /** Starts a server and resolves with its port and a stop function. */
-async function startServer(env) {
-  const { child, output } = spawnServer(env);
+async function startServer(env, unset) {
+  const { child, output } = spawnServer(env, unset);
   const port = await new Promise((resolve, reject) => {
     const timeout = setTimeout(
       () => reject(new Error("Server start timed out")),
@@ -344,6 +345,7 @@ async function notebookStub() {
       response.end();
       return;
     }
+    stubLookups++;
     if (request.headers.authorization !== `Bearer ${aliceToken}`) {
       response.writeHead(401, { "content-type": "application/json" });
       response.end('{"detail":"Not authenticated"}');
@@ -451,6 +453,76 @@ async function checkNotebookMode(fixture, stub) {
   );
 }
 
+/** Every proxy setting Node can honour, pointed at `proxy`, with no exemption. */
+function proxyEnv(proxy) {
+  const env = { NODE_USE_ENV_PROXY: "1" };
+  for (const name of ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"]) {
+    env[name] = proxy;
+    env[name.toLowerCase()] = proxy;
+  }
+  return env;
+}
+
+async function checkProxyBypass(stub) {
+  let trapped = 0;
+  const trap = createNetServer((socket) => {
+    trapped++;
+    socket.destroy();
+  });
+  trap.listen(0, "127.0.0.1");
+  await once(trap, "listening");
+  const proxy = proxyEnv(`http://127.0.0.1:${trap.address().port}`);
+  const exempt = ["NO_PROXY", "no_proxy"];
+  const notebookApi = `http://127.0.0.1:${stub.address().port}`;
+  try {
+    // Control: in the same environment the global fetch does go to the trap,
+    // so a zero count below means the server bypassed the proxy.
+    const control = spawn(
+      process.execPath,
+      [
+        "-e",
+        `fetch(${JSON.stringify(`${notebookApi}/api/me`)}).then(() => {}, () => {})`,
+      ],
+      { cwd: root, env: childEnv(proxy, exempt), stdio: "ignore" },
+    );
+    const timer = setTimeout(() => control.kill("SIGKILL"), 30_000);
+    await once(control, "exit");
+    clearTimeout(timer);
+    const controlTrapped = trapped;
+    trapped = 0;
+
+    const lookupsBefore = stubLookups;
+    const env = {
+      DATABASE_URL: await createSchema(),
+      AUTO_CANVAS_AUTH: "notebook",
+      AUTO_CANVAS_NOTEBOOK_API: notebookApi,
+      ...proxy,
+    };
+    const server = await startServer(env, exempt);
+    try {
+      const listed = await fetch(`${server.origin}/@notebook/api/projects`, {
+        headers: { Authorization: `Bearer ${aliceToken}` },
+      });
+      assert.equal(listed.status, 200);
+      assert.deepEqual((await listed.json()).projects, []);
+    } finally {
+      await server.stop();
+    }
+    assert.equal(stubLookups - lookupsBefore, 1, "stub lookups");
+    assert.equal(trapped, 0, "server connections to the proxy");
+    if (controlTrapped === 0)
+      console.log(
+        "NOT PROVEN proxy: the global fetch ignored the environment proxy on this Node, so the bypass was not exercised",
+      );
+    else
+      console.log(
+        "ok proxy: identity lookup goes direct with NODE_USE_ENV_PROXY and *_PROXY set (control fetch reached the trap)",
+      );
+  } finally {
+    await new Promise((resolve) => trap.close(resolve));
+  }
+}
+
 async function checkLocalMountRefusal(
   databaseUrlForSchema,
   projectId,
@@ -518,6 +590,7 @@ try {
   fixture = await editorFixture();
   stub = await notebookStub();
   await checkNotebookMode(fixture, stub);
+  await checkProxyBypass(stub);
   await checkLocalMountRefusal(seeded, projectId, fixture);
   const output = serverOutput.join("");
   for (const token of [aliceToken, unknownToken])
