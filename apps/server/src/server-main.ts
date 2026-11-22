@@ -1,5 +1,5 @@
 import type { AddressInfo } from "node:net";
-import { serve } from "@hono/node-server";
+import { serve, type ServerType } from "@hono/node-server";
 import type { Pool } from "pg";
 import { AgentRelayHost } from "./agent-relay/host.js";
 import { createApp } from "./app.js";
@@ -36,79 +36,83 @@ export async function startServer({
   const auth = readAuthConfig(env);
   const basePath = normalizeBasePath(env.AUTO_CANVAS_BASE_PATH);
   const db = createDb(env.DATABASE_URL);
-  await migrate(db);
-  if (argv.includes("--migrate")) {
-    await db.end();
-    return null;
-  }
-  // The relay gets the same resolved prefix as the HTTP app, whatever the
-  // process environment says.
-  const agentRelay =
-    auth.mode === "local"
-      ? new AgentRelayHost(db, undefined, undefined, basePath)
-      : null;
-  await agentRelay?.start();
-  const app = createApp({
-    db,
-    basePath,
-    auth,
-    ...(agentRelay ? { agentRelay } : {}),
-  });
-  if (env.EDITOR_ROOT) await serveEditor(app, env.EDITOR_ROOT, basePath);
-  let listening!: (address: AddressInfo) => void;
-  const ready = new Promise<AddressInfo>((resolve) => (listening = resolve));
-  const server = serve(
-    {
-      fetch: (request, bindings) => {
-        const url = publicUrl(
-          request.url,
-          request.headers.get("x-forwarded-proto"),
-          bindings.incoming.socket.remoteAddress,
-        );
-        if (auth.mode === "local")
-          return app.fetch(
-            url.href === request.url ? request : new Request(url, request),
-            bindings,
-          );
-        // Notebook mode is reachable only through notebook's /@notebook mount.
-        const stripped = stripIntegrationMount(url);
-        if (!stripped)
-          return Response.json({ error: "Not found" }, { status: 404 });
-        return app.fetch(new Request(stripped, request), bindings);
-      },
-      port: Number(env.PORT ?? 4310),
-      hostname: env.HOST ?? "127.0.0.1",
-    },
-    (info) => {
-      log(`Auto Canvas server listening on ${info.address}:${info.port}`);
-      listening(info);
-    },
-  );
-  if (agentRelay) agentRelay.attach(server);
-  else
-    server.on("upgrade", (_request, socket) => {
-      socket.end(
-        "HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n",
-      );
-    });
-  let onListenError!: (error: Error) => void;
-  const failed = new Promise<never>((_, reject) => {
-    onListenError = reject;
-    server.once("error", reject);
-  });
+  let agentRelay: AgentRelayHost | null = null;
+  let server: ServerType;
   let address: AddressInfo;
   try {
+    await migrate(db);
+    if (argv.includes("--migrate")) {
+      await db.end();
+      return null;
+    }
+    // The relay gets the same resolved prefix as the HTTP app, whatever the
+    // process environment says.
+    if (auth.mode === "local")
+      agentRelay = new AgentRelayHost(db, undefined, undefined, basePath);
+    await agentRelay?.start();
+    const app = createApp({
+      db,
+      basePath,
+      auth,
+      ...(agentRelay ? { agentRelay } : {}),
+    });
+    if (env.EDITOR_ROOT) await serveEditor(app, env.EDITOR_ROOT, basePath);
+    let listening!: (address: AddressInfo) => void;
+    const ready = new Promise<AddressInfo>((resolve) => (listening = resolve));
+    server = serve(
+      {
+        fetch: (request, bindings) => {
+          const url = publicUrl(
+            request.url,
+            request.headers.get("x-forwarded-proto"),
+            bindings.incoming.socket.remoteAddress,
+          );
+          if (auth.mode === "local")
+            return app.fetch(
+              url.href === request.url ? request : new Request(url, request),
+              bindings,
+            );
+          // Notebook mode is reachable only through notebook's /@notebook mount.
+          const stripped = stripIntegrationMount(url);
+          if (!stripped)
+            return Response.json({ error: "Not found" }, { status: 404 });
+          return app.fetch(new Request(stripped, request), bindings);
+        },
+        port: Number(env.PORT ?? 4310),
+        hostname: env.HOST ?? "127.0.0.1",
+      },
+      (info) => {
+        log(`Auto Canvas server listening on ${info.address}:${info.port}`);
+        listening(info);
+      },
+    );
+    if (agentRelay) agentRelay.attach(server);
+    else
+      server.on("upgrade", (_request, socket) => {
+        // A handed-off socket has no error handler left: a peer that resets
+        // while the reply is written must close only this connection.
+        socket.on("error", () => socket.destroy());
+        socket.end(
+          "HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n",
+        );
+      });
+    let onListenError!: (error: Error) => void;
+    const failed = new Promise<never>((_, reject) => {
+      onListenError = reject;
+      server.once("error", reject);
+    });
     address = await Promise.race([ready, failed]);
+    // Only a failure to listen is ours to report. A later server error stays
+    // unhandled and stops the process, as it did before startServer existed.
+    server.off("error", onListenError);
   } catch (error) {
-    // A caller that catches a failed start gets no close() handle, so the
-    // relay's alarms and the database pool are released here.
+    // A caller that catches a failed start gets no close() handle, so
+    // whatever was acquired so far (the relay's alarms, the database pool) is
+    // released here.
     await agentRelay?.close().catch(() => undefined);
-    await db.end().catch(() => undefined);
+    if (!db.ended) await db.end().catch(() => undefined);
     throw error;
   }
-  // Only a failure to listen is ours to report. A later server error stays
-  // unhandled and stops the process, as it did before startServer existed.
-  server.off("error", onListenError);
   let closing: Promise<void> | undefined;
   return {
     address,

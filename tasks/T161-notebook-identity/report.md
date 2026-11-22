@@ -102,3 +102,26 @@ Open questions:
 
 1. The launchers (`scripts/start.sh` and the rest, out of scope) health-check `/api/health`. That path is 404 in notebook mode, so `pnpm start` with `AUTO_CANVAS_AUTH=notebook` would time out. This presumably belongs to T162/T164 or a launcher task.
 2. The authorization window starts at the start of validation, so a slow notebook answer shortens the cache entry (tested: a 4 s answer gives a 56 s entry).
+
+# T161 report — round 2
+
+(From the implementer subagent's hand-back; saved by the reviewer.)
+
+## Review findings addressed
+
+- **Finding 6 (must-fix):** the notebook `/api/me` lookup no longer uses the global `fetch` by default. It uses a direct `node:http` / `node:https` request with dedicated no-keep-alive agents that have no `proxyEnv`; an injected `fetch` still replaces it, as before. All step-2 rules hold: only `Authorization` is set, redirects are not followed, one `timeoutMs` deadline, 64 KiB cap, nothing secret in errors. Measured on Node v26.7.0 with everything pointed at a counting trap and `NO_PROXY` unset: global `fetch` → trap; `http.get` with the global agent → trap; `http.get` with `new http.Agent({ keepAlive: false })` → direct; the same with `proxyEnv: process.env` → trap; `https.get` with the default agent → trap; with a dedicated `https.Agent` → direct. `scripts/server-mode-check.mjs` has a new proxy group: a control `fetch` reaches the trap; the notebook-mode server authenticates with zero trap connections and one stub lookup. The group fails (503) with the old transport. `docs/specs/server.md` says the lookup is a direct connection that ignores proxy settings.
+- **Finding 7 (must-fix):** the notebook-mode upgrade refusal attaches a socket `error` handler before writing the 404. A test resets 50 upgrade connections and the server still answers; without the fix it raises unhandled `EPIPE`.
+- **Finding 8 (should-fix):** `startServer` has one cleanup path for everything after `createDb`: close the relay if built, end the pool, rethrow. Tests cover a missing `EDITOR_ROOT` and a failing `connect`; the bind-failure test is unchanged.
+
+## Acceptance results
+
+```text
+rm -rf apps/server/dist && pnpm exec vitest run apps/server → 18 files, 224 tests
+pnpm test:local scripts/launcher.test.mjs → 22 tests
+pnpm build → 0
+node scripts/server-mode-check.mjs → 0, seven "ok" lines
+protected paths diff → empty
+pnpm typecheck, lint, format:check, docs:check → 0
+```
+
+Process note: `pnpm build` without removing `apps/server/dist` does not re-emit an unchanged source file (incremental build info), so `dist` was removed before the final build.

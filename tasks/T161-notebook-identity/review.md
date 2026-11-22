@@ -58,3 +58,29 @@ fixed in `7abbfe6` and `8953134`.
 Keep everything else as it is; the scope and the owned paths of the plan are
 unchanged. Rerun the whole Acceptance section of the plan except `pnpm
 deadcode` (finding 2).
+
+## Round 3 — accepted
+
+Reviewed: the round-2 changes (`notebook-identity.ts`, `server-main.ts`,
+`server-main.test.ts`, `scripts/server-mode-check.mjs`, `docs/specs/server.md`)
+read by the reviewer; acceptance rerun by the reviewer.
+
+- Finding 6: the default transport is a direct `node:http` / `node:https`
+  request through dedicated agents with no `proxyEnv`. The implementer measured
+  on Node 26.7: with `NODE_USE_ENV_PROXY=1` and the `*_PROXY` variables set,
+  the global `fetch` and the global agents go to the proxy, a dedicated agent
+  goes direct. `server-mode-check.mjs` has a proxy group with a control that
+  reaches the trap; it fails (503) when the built server is switched back to
+  the global `fetch`.
+- Finding 7: the upgrade refusal attaches an `error` handler first; a test
+  resets 50 upgrade connections and the server still answers.
+- Finding 8: one cleanup path for everything after `createDb`.
+
+```text
+pnpm exec vitest run apps/server (no dist) → 0; 224 tests
+pnpm test:local scripts/launcher.test.mjs → 0; 22 tests
+pnpm build → 0
+node scripts/server-mode-check.mjs → 0; seven "ok" groups, including the proxy group
+protected paths diff against origin/main → empty
+pnpm typecheck, lint, format:check, docs:check → 0
+```
