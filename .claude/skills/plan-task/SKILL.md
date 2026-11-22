@@ -34,6 +34,7 @@ for a capable engineer who has never seen this conversation.
    outputs go under `tasks/<id>/logs/`.
 6. **Confirm with the user** the goal, scope and any product decision the plan
    makes (what replaces a removed feature, what stays). Then set
-   `- Status: approved` and record the base commit.
+   `- Status: approved` and record the base commit. If the confirmation
+   changes the plan's scope or design, review the plan again first.
 7. **Branch.** From a clean `main`: `git switch -c task/<id>-<slug>`, commit
    the plan alone (`Plan T<nnn>: <title>`), and hand over to `run-task`.
