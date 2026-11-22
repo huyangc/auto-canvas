@@ -61,3 +61,37 @@ taken against `HEAD~1` (the round-1 commit's parent is the plan commit; use
 `git diff --stat $(git merge-base HEAD origin/task/T161-notebook-identity)`),
 and without `pnpm test:e2e:local` (finding 3); instead run the Playwright spec
 files that exercise the shelf and the version history and say which.
+
+## Round 3 — accepted
+
+Reviewed: the working tree after the round-2 fixes (findings 6–10), on
+2026-11-22. Implementation by a Claude Opus subagent; acceptance rerun and
+every changed file read by the reviewer.
+
+| # | Severity | Where | Finding | Expected fix |
+| --- | --- | --- | --- | --- |
+| 6 | fixed | `apps/editor/src/main.tsx` | Entry chunk load failure left a blank page. | A rejection handler inside the `ICM_NOTEBOOK` branch draws a plain-DOM `notebook-error` screen with Reload; it imports nothing. Test `notebook/main-entry.test.ts`. |
+| 7 | fixed | `notebook/api-image.tsx` | Every tile fetched its preview on mount. | With `loading="lazy"` the fetch waits for an `IntersectionObserver` (root margin `100% 0px`) on the placeholder; disconnected when the fetch starts, on unmount and on a `src` change. Six fake-observer tests. |
+| 8 | fixed | `scripts/notebook-editor-build.test.mjs` | A Worker argument was accepted on its prefix. | `codeTargetProblems()`: the first argument must be exactly one accepted `new URL(…, import.meta.url)` (followed by `,` or `)`); a self-check over a synthetic chunk reports both bad Workers. |
+| 9 | fixed | `version-history-dialog.tsx`, `notebook/api-image.tsx` | An empty preview cell shifted the row. | A source-less `<img alt="" aria-hidden="true">` holds the cell while loading, after a failure, in the `Suspense` fallback and when the chunk fails. No CSS changed. Test `notebook/version-history-preview.test.tsx`. |
+| 10 | fixed | `notebook/screens.ts` | A dead Retry button. | Without a retry callback: a reload sentence and a Reload button. Both variants tested. |
+| 11 | note | `notebook/api-image.tsx` | The placeholder is not shown by a browser test; the implementer checked the CSS size of a source-less `<img>` in headless Chrome by hand. | T162b covers the shelf and the version list in the notebook build. |
+
+Acceptance rerun by the reviewer:
+
+```text
+pnpm build → 0
+pnpm exec vitest run apps/editor/src/notebook scripts/notebook-editor-build.test.mjs → 0; 8 files, 62 tests
+pnpm test:local → 0; 851 files passed, 3 skipped; 8821 tests passed, 117 skipped
+pnpm build:notebook-editor → 0; index.html has 8 /canvas/assets/ references
+silicon_notebook_token: 0 files in apps/editor/dist, 1 in apps/editor/dist-notebook
+no path containing @notebook in either output
+working-tree changes outside the owned files (apps/editor/src, e2e, playwright.config.ts, apps/server, packages) → none
+pnpm typecheck → 0; pnpm lint → 0; pnpm format:check → 0; pnpm docs:check → 0
+```
+
+Not rerun by the reviewer: the implementer's identity proof of the standard
+output (`diff -rq` of a base build and this build, 194 files each, no
+difference) and its three Playwright spec files (23 passed). The build test's
+"no notebook module in the standard output" assertions, which the reviewer
+did rerun, cover the same property from the other side.

@@ -5,12 +5,14 @@ import { VersionHistoryComparison } from "./version-history-comparison";
 
 // The notebook build fetches API images with the session's header. Loaded
 // lazily so that the standard build keeps no part of src/notebook/.
-// A chunk that failed to load shows no image rather than ending the editor.
+// Until the image is shown, and if its chunk failed to load, an <img>
+// without a source holds the row's preview cell (the CSS sizes it).
+const NotebookPreviewPlaceholder = () => <img alt="" aria-hidden="true" />;
 const NotebookApiImage = import.meta.env.ICM_NOTEBOOK
   ? lazy(() =>
       import("../notebook/api-image").then(
         (module) => ({ default: module.ApiImage }),
-        () => ({ default: () => null }),
+        () => ({ default: NotebookPreviewPlaceholder }),
       ),
     )
   : null;
@@ -165,7 +167,7 @@ export function VersionHistoryDialog({
                 data-testid={`version-${version.versionNo}`}
               >
                 {import.meta.env.ICM_NOTEBOOK && NotebookApiImage ? (
-                  <Suspense fallback={null}>
+                  <Suspense fallback={<NotebookPreviewPlaceholder />}>
                     <NotebookApiImage
                       src={source.previewUrl(version.versionId)}
                       alt={`Version ${version.versionNo} preview`}

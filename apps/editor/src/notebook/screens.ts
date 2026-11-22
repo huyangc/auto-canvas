@@ -10,6 +10,7 @@ export function showGateScreen(
   container: HTMLElement,
   screen: GateScreen,
   retry?: () => void,
+  reload: () => void = () => container.ownerDocument.location.reload(),
 ): void {
   const page = container.ownerDocument;
   const paragraph = (text: string) => {
@@ -37,15 +38,24 @@ export function showGateScreen(
     main.append(text);
   } else if (screen === "error") {
     main.setAttribute("role", "alert");
-    main.append(
-      paragraph(
-        "The canvas could not confirm your silicon-notebook session right now.",
-      ),
-    );
     const button = page.createElement("button");
     button.type = "button";
-    button.textContent = "Retry";
-    if (retry) button.addEventListener("click", () => retry());
+    if (retry) {
+      main.append(
+        paragraph(
+          "The canvas could not confirm your silicon-notebook session right now.",
+        ),
+      );
+      button.textContent = "Retry";
+      button.addEventListener("click", () => retry());
+    } else {
+      // Nothing in this page can be tried again (the editor failed to start).
+      main.append(
+        paragraph("The canvas could not start. Reload the page to try again."),
+      );
+      button.textContent = "Reload";
+      button.addEventListener("click", () => reload());
+    }
     main.append(button);
   } else {
     main.setAttribute("role", "status");

