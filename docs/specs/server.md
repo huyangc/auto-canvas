@@ -265,6 +265,8 @@ silicon-notebook in the editor's own chrome.
 [build test](../../scripts/notebook-editor-build.test.mjs), which builds both
 editors and checks that no executable reference of the notebook build leaves
 `/canvas/`.
+The browser tests are [notebook-auth.spec.ts](../../apps/editor/e2e/notebook-auth.spec.ts) and
+[notebook-bfcache.spec.ts](../../apps/editor/e2e/notebook-bfcache.spec.ts).
 
 ## Agent relay
 
