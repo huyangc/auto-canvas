@@ -43,11 +43,14 @@ to open that Cell.
 
 ## The editor
 
-The header has **Undo** and **Redo**, the mode switch, **File**, **Edit** and
-**Circuit** menus, **Auto Layout** and the **Agent** action. **File** holds
-Project Info (circuit and Cell names) and the file commands; **New Project**
-replaces the current tab's circuit after asking about unsaved work.
-**Circuit** holds **Hierarchy** (Cell Manager) and **Netlist**.
+The header has the project's name, **Undo** and **Redo**, the mode switch,
+**Auto Layout**, the **File** menu, the **Agent** action and the **⋯** menu.
+The name is read-only there; click it to open Project Info, where it is
+changed (below 720 px it is hidden; File → Project Info still has it).
+**File** holds Project Info (circuit and Cell names) and the file commands;
+**New Project** replaces the current tab's circuit after asking about unsaved
+work. **⋯** holds **Edit** (insert, find, the selection's commands),
+**Hierarchy** (Cell Manager), **Netlist** and **Layout** (Auto Layout).
 
 Each project tab is an independent circuit with its own view, selection, undo
 history and Cloud binding. Use **+** for a new project, **Open file in new
@@ -237,7 +240,7 @@ drawing and its component definitions. Apply is undoable; invalid code changes
 nothing. Selecting parts highlights their JSON.
 
 To edit a component's definition, select it and press `E` (`Q` still edits the
-instance). **Edit → User Components… → Create Component…** opens the
+instance). **⋯ → Edit → User Components… → Create Component…** opens the
 **Circuit** and **Symbol** tabs: enter SPICE or Spectre (or choose a Project
 source), use Automatic or Custom JSON artwork, and map each native terminal to
 a pin or to VDD/VSS. **Apply model** changes the Project in one undoable step;
@@ -264,7 +267,7 @@ one definition per used component type; deleting the last use removes it.
 ## Netlist and export
 
 **File → Export** saves the whole drawing as SVG, PNG (3×) or vector PDF.
-**Edit → Copy selection as PNG/SVG** copies the selection as an image with a
+**⋯ → Edit → Copy selection as PNG/SVG** copies the selection as an image with a
 transparent background (needs HTTPS or localhost and clipboard permission).
 
 The **Netlist** button copies the netlist and opens its code in the right

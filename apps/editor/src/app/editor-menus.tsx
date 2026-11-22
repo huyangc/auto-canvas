@@ -1,6 +1,6 @@
 import type { useCloudProjects } from "./use-cloud-projects";
 // The editor's menus bound to its commands: the header with its project tabs,
-// File, Edit and Circuit menus and toolbars, and the canvas context menu.
+// File and ⋯ menus and toolbars, and the canvas context menu.
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import {
   deriveRoutingAffectedClosure,

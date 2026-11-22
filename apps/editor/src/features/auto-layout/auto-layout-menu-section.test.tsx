@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { AutoLayoutMenuSection } from "./auto-layout-menu-section";
 
-describe("Circuit → Layout menu section", () => {
+describe("⋯ → Layout menu section", () => {
   it("offers Cancel Auto Layout only while a run is planning", () => {
     const idle = renderToStaticMarkup(
       <AutoLayoutMenuSection

@@ -115,20 +115,21 @@ test("compacts the editor header at half width without GitHub, credit or account
   // One width per editor-chrome.css band the original six covered.
   for (const width of [320, 390, 480, 720, 1440]) {
     await page.setViewportSize({ width, height: 900 });
-    const leftControls = page.locator(
-      ".app-brand > :is(.editor-brand, .project-menu, .command-menu)",
+    // T150c: File and ⋯ moved to the right of the row, after Auto Layout.
+    const rowControls = page.locator(
+      ".app-chrome-main :is(.editor-brand, .app-history, .mode-switch, .project-menu, .command-menu)",
     );
-    const leftBounds = (await leftControls.evaluateAll(edges)).filter(
+    const rowBounds = (await rowControls.evaluateAll(edges)).filter(
       ({ right, left }) => right > left,
     );
-    expect(leftBounds.length).toBeGreaterThanOrEqual(4);
-    expect(leftBounds[0]!.left).toBeLessThan(24);
-    for (let index = 1; index < leftBounds.length; index++) {
-      expect(leftBounds[index]!.left).toBeGreaterThanOrEqual(
-        leftBounds[index - 1]!.right,
+    expect(rowBounds.length).toBeGreaterThanOrEqual(4);
+    expect(rowBounds[0]!.left).toBeLessThan(24);
+    for (let index = 1; index < rowBounds.length; index++) {
+      expect(rowBounds[index]!.left).toBeGreaterThanOrEqual(
+        rowBounds[index - 1]!.right,
       );
       expect(
-        Math.abs(leftBounds[index]!.top - leftBounds[0]!.top),
+        Math.abs(rowBounds[index]!.top - rowBounds[0]!.top),
       ).toBeLessThanOrEqual(8);
     }
 

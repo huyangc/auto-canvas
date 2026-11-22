@@ -94,8 +94,8 @@ describe("editor shell", () => {
     expect(markup).not.toContain('data-testid="cell-command-menu"');
     expect(markup).toContain(">Cell Manager…</button>");
     expect(markup).toContain("Edit Device Data…");
-    // Three header menus: File (the file commands), Edit, and Circuit
-    // (Hierarchy and Netlist); the command row keeps actions.
+    // Two header menus: File (the file commands) and ⋯ (Edit, Hierarchy,
+    // Netlist and Layout); the command row keeps actions.
     const menu = (testId: string) => {
       const start = markup.indexOf(`data-testid="${testId}"`);
       expect(start).toBeGreaterThan(-1);
@@ -116,11 +116,36 @@ describe("editor shell", () => {
     expect(fileCommands).not.toContain("Smoke Project");
     expect(fileCommands).not.toContain("Project name");
     expect(fileCommands).not.toContain("Open projects");
-    expect(menu("edit-menu")).toContain('role="group" aria-label="Edit"');
-    for (const group of ["Hierarchy", "Netlist"])
-      expect(menu("circuit-menu")).toContain(
-        `role="group" aria-label="${group}"`,
-      );
+    // ⋯ replaces Edit and Circuit (T150c): their groups, in order, and
+    // nothing else is a header menu.
+    const more = menu("more-menu");
+    expect(more).toContain('<summary aria-label="More"');
+    const groupOrder = ["Edit", "Hierarchy", "Netlist", "Layout"].map((group) =>
+      more.indexOf(`role="group" aria-label="${group}"`),
+    );
+    for (const at of groupOrder) expect(at).toBeGreaterThan(-1);
+    expect(groupOrder).toEqual([...groupOrder].sort((a, b) => a - b));
+    for (const item of [
+      "Insert component… (I)",
+      "User Components…",
+      'data-testid="project-search-button"',
+      'data-testid="selection-filter-button"',
+      'data-testid="hierarchy-entry"',
+      'data-testid="copy-netlist"',
+      "Netlist Settings…",
+      "Edit Device Data…",
+      "Review Netlist Issues…",
+      'data-testid="auto-layout-command"',
+    ])
+      expect(more).toContain(item);
+    expect(markup).not.toContain('data-testid="edit-menu"');
+    expect(markup).not.toContain('data-testid="circuit-menu"');
+    expect(markup).not.toContain("<summary>Edit</summary>");
+    expect(markup).not.toContain("<summary>Circuit</summary>");
+    // The project's name is in the top bar, read-only; it opens Project Info.
+    expect(markup).toMatch(
+      /<button type="button" class="app-project-name"[^>]*><span class="app-project-name-text">Smoke Project<\/span><\/button>/u,
+    );
     const actionRowStart = markup.indexOf('class="app-chrome-actions"');
     const actionRowEnd = markup.indexOf(
       '<div class="toolbar-row',
@@ -178,6 +203,16 @@ describe("editor shell", () => {
     // person is asking; the Netlist menu carries the plain action.
     expect(markup).not.toContain("Preflight…");
     expect(markup).toContain('data-testid="save-cloud-project"');
+  });
+
+  it("names an unnamed project Untitled in the top bar", () => {
+    const project = createEmptyProject("unnamed", "   ");
+    const markup = renderToStaticMarkup(
+      <App services={services} project={project} />,
+    );
+    expect(markup).toContain(
+      '<span class="app-project-name-text">Untitled</span>',
+    );
   });
 
   it("opens in Auto mode: the canvas, import and Auto Layout, no drawing tools", () => {

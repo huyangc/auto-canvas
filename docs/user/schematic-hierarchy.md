@@ -7,7 +7,7 @@ another Cell, as long as no recursion results.
 
 ## Cell Manager
 
-Open **Cell Manager…** (**Circuit → Hierarchy**, or **Manage Cells…** in the
+Open **Cell Manager…** (**⋯ → Hierarchy**, or **Manage Cells…** in the
 hierarchy toolbar). It lists each Cell with its Port and caller counts, opens
 or renames it, and lists callers with **Jump to caller**.
 
@@ -27,7 +27,7 @@ or renames it, and lists callers with **Jump to caller**.
   Cell again opens the existing copy. Both Projects must use the same Symbol
   Library version.
 
-**Place Cell** in the hierarchy toolbar (or **Edit → Place Cell from this
+**Place Cell** in the hierarchy toolbar (or **⋯ → Edit → Place Cell from this
 Project…**) opens a searchable Cell picker; place the instance like any
 component (`R`, mirror, `Esc`). It shows the Cell name; its `Xn` instance name
 is the netlist identity. **Enter Cell** (`E`) opens a selected instance's
@@ -102,7 +102,7 @@ preview. The starter text is commented examples:
 Uncomment, add the body and end with `.ends my_cell` (or `ends my_cell`).
 **Apply model** commits; **Apply & Place** then places it in the parent
 (`Esc` keeps the applied model). With several subcircuits, choose the public
-entry; helpers stay with the source. The same editor opens from **Edit → User
+entry; helpers stay with the source. The same editor opens from **⋯ → Edit → User
 Components… → Create Component…**.
 
 - **Format / Process / Copy** converts this model's draft between SPICE and
