@@ -468,21 +468,22 @@ last slice of T150.
   single-tab call sites were switched, listed in the plan notes.
 
 Commits on `task/T150d-tab-strip`: `0b9e29f` (implementation), `fd041cd`
-(review round 1). 21 files, +1248 / −136; product code under
-`apps/editor/src` without tests is 6 files, +232 / −36.
+(review round 1), `4cfa8ff` (round 2). 22 files, +1573 / −136; product
+code under `apps/editor/src` without tests is 6 files, +240 / −36.
 
-## Acceptance (coordinator's rerun on `fd041cd`)
+## Acceptance (coordinator's rerun on `4cfa8ff`)
 
 | Command                                            | Result                              |
 | -------------------------------------------------- | ----------------------------------- |
 | `pnpm build`, `pnpm test:editor-build`             | pass                                |
 | `pnpm typecheck`, `pnpm lint`, `pnpm format:check` | pass (lint 0 errors)                |
 | `pnpm docs:check`                                  | pass                                |
-| `pnpm test:local`                                  | pass: 8638 passed, 117 skipped      |
+| `pnpm test:local`                                  | pass: 8639 passed, 117 skipped      |
 | `pnpm deadcode`                                    | exit 1 as on `main`; no new finding |
-| Browser suite, 53 spec files, one worker           | 447 passed, 2 skipped, 0 failed     |
+| Browser suite, 53 spec files, one worker           | 449 passed, 2 skipped, 0 failed     |
 
-The full run at `0b9e29f` was 443 passed, 0 failed. `project-file.spec.ts`
+Earlier full runs: 443 passed, 0 failed at `0b9e29f`; 447 passed, 0 failed
+at `fd041cd`. `project-file.spec.ts`
 is left out as before (it fails to load on `main`); the implementer ran a
 copy with its one failing import inlined, 8 of 8 passed.
 
@@ -539,6 +540,28 @@ and several P3, all handled in `fd041cd`.
   "the strip hides under a rename in progress" is covered by the jsdom
   test only.
 - `accept-preview.mjs`: `stripShown` waits for a settled tab count.
+
+codex on the report commit after `fd041cd`: one P2 and one P3, fixed in
+`4cfa8ff`.
+
+- **P2: ArrowLeft on the Browse Cloud Projects dialog's Close button
+  collapsed File's Shelf submenu and hid the open modal**, leaving the
+  page inert. Reproduced by the implementer in a browser test: it failed
+  for the File-hosted Shelf and passed for the strip's. Other keys were
+  probed in both hosts (Escape, ArrowDown, `w`, Ctrl+F, Ctrl+O); ArrowLeft
+  was the only difference. Now every key typed inside the Shelf's dialog,
+  inputs or inline decisions stays there, in File as on the strip. As a
+  guard, File reopens itself if it is closed while a dialog inside it is
+  open; no user route to that state was found.
+- **P3: `stripShown` in `accept-preview.mjs` could poll forever.** It gives
+  up after 10 s with an error naming the last two tab counts, and counts
+  only the strip's own tabs.
+
+The implementer also corrected two of its own earlier statements: two
+call sites listed as single-tab run with several tabs (both go through the
+helper, so nothing changes), and the claim that a closed tab's replacement
+gets the mode's default docks was not tested and is withdrawn. The three
+rows of the table above were tested.
 
 ## Open decision for the owner
 
