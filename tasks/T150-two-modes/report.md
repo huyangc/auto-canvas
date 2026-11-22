@@ -321,22 +321,27 @@ independent rerun. Slices a and b are merged (`0c07eae`); slice d follows.
   modes, so a dropped item fails it.
 
 Commits on `task/T150c-menus`: `150154d` (implementation), `029f77e`
-(review round 1), `5c3f4bf` (round 2). 17 files, +1234 / −144; product
-code under `apps/editor/src` without tests is 5 files, +289 / −94.
+(review round 1), `5c3f4bf` (round 2), `b338ecd` (round 3), `6737342`
+(round 4). 19 files, +1377 / −147; product code under `apps/editor/src`
+without tests is 6 files, +293 / −95.
 
-## Acceptance (coordinator's rerun on `5c3f4bf`)
+## Acceptance (coordinator's rerun on `6737342`)
 
-| Command                                            | Result                              |
-| -------------------------------------------------- | ----------------------------------- |
-| `pnpm build`, `pnpm test:editor-build`             | pass                                |
-| `pnpm typecheck`, `pnpm lint`, `pnpm format:check` | pass (lint 0 errors)                |
-| `pnpm docs:check`                                  | pass                                |
-| `pnpm test:local`                                  | pass: 8628 passed, 117 skipped      |
-| `pnpm deadcode`                                    | exit 1 as on `main`; no new finding |
-| Browser suite, 53 spec files, one worker           | 436 passed, 2 skipped, 0 failed     |
+| Command                                            | Result                                      |
+| -------------------------------------------------- | ------------------------------------------- |
+| `pnpm build`, `pnpm test:editor-build`             | pass                                        |
+| `pnpm typecheck`, `pnpm lint`, `pnpm format:check` | pass (lint 0 errors)                        |
+| `pnpm docs:check`                                  | pass                                        |
+| `pnpm test:local`                                  | pass: 8628 passed, 117 skipped              |
+| `pnpm deadcode`                                    | exit 1 as on `main`; no new finding         |
+| Browser suite, 53 spec files, one worker           | 439 passed, 2 skipped, 1 failed (see below) |
 
-Earlier full runs: 431 passed, 0 failed at `150154d`; 432 passed, 0 failed
-at `029f77e`. `project-file.spec.ts`
+The one failure is `hierarchy.spec.ts:1179` (a size comparison after a
+zoom: 15.50 against 16.03, tolerance 0.5), the test that is flaky on the
+code from before T150 as well (5 of 10 runs fail there with the same
+numbers; see slice b). Earlier full runs: 431 passed, 0 failed at
+`150154d`; 432 passed, 0 failed at `029f77e`; 436 passed, 0 failed at
+`5c3f4bf`. `project-file.spec.ts`
 is left out as before (it fails to load on `main`).
 
 ## Browser check by the coordinator
@@ -394,6 +399,25 @@ codex on the report commit after `029f77e`: one P2 and two P3, fixed in
 The web bar is unchanged by `5c3f4bf`; the coordinator's measurements in
 the table above were repeated on it with the same numbers.
 
+codex on `e064609`: one P1 and one P2, both verified in the code by the
+coordinator and fixed in `b338ecd`.
+
+- **P1: the desktop acceptance script still opened `edit-menu`**
+  (`apps/desktop/scripts/accept-local-components.mjs`), so the documented
+  desktop `test:preview` flow would time out before User Components. The
+  script now opens `⋯` and picks User Components… from its Edit group. A
+  search of the whole repository found no other consumer of the removed
+  menu ids. The coordinator's brief and the independent review had both
+  looked only under `apps/editor`.
+- **P2: Up and Down panned the canvas instead of scrolling the open `⋯`
+  menu.** The router's exemption covered only File; it covers both menus
+  now.
+
+codex on `b338ecd`: one P2, fixed in `6737342`: the new exemption also
+matched a closed `⋯` button with keyboard focus, so Escape no longer
+cancelled an armed tool from there. Both menus are exempt only while open.
+File had the same gap on `main`, fixed in the same line.
+
 ## Deviations from the plan
 
 1. `chrome-isolation.spec.ts`: its row check named the left group, which
@@ -407,6 +431,11 @@ the table above were repeated on it with the same numbers.
 
 - Electron was not tried; the desktop bar was measured by the implementer
   in a browser against the desktop entry's dev server, not in the app.
+- The desktop acceptance (`pnpm --filter @icm/desktop test:preview`) was
+  not run by anyone: it needs the packaged app. Only the three changed
+  calls of its `openLibrary()` were driven, by the implementer, against the
+  desktop entry's dev server in both modes; the rest of that script
+  (create, save to library, place, export) was not exercised.
 - Rows of the decision table the browser walk skips, because the fixture
   state lacks them: Revert, Recover, RNL…, desktop file commands, Cancel
   Auto Layout. Open Shelf project in tab and the empty card have their own
