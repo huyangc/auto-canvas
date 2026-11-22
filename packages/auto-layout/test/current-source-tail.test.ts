@@ -122,73 +122,56 @@ it.each([false, true])(
   60_000,
 );
 
-it.each(["high-side", "feedback", "biased-follower"] as const)(
+it.each(["feedback", "biased-follower"] as const)(
   "keeps the inputs outside both banks and the tail below a %s pair",
   (topology) => {
-    const high = topology === "high-side";
     const follower = topology === "biased-follower";
     const doc = circuit(
       {
-        upper: high ? "pmos" : "nmos",
-        lower: high ? "pmos" : "nmos",
+        upper: "nmos",
+        lower: "nmos",
         bias: "current-source",
         supply: "vdd-port",
         u: "port",
         v: "port",
         a: "port",
         b: "port",
-        ...(high
-          ? {}
-          : {
-              ...(follower
-                ? {
-                    f1: "nmos",
-                    f2: "nmos",
-                    j1: "current-source",
-                    j2: "current-source",
-                  }
-                : { r1: "resistor", r2: "resistor" }),
-              m1: "pmos",
-              m2: "pmos",
-              ...(follower ? {} : { gnd: "ground" }),
-            }),
+        ...(follower
+          ? {
+              f1: "nmos",
+              f2: "nmos",
+              j1: "current-source",
+              j2: "current-source",
+            }
+          : { r1: "resistor", r2: "resistor" }),
+        m1: "pmos",
+        m2: "pmos",
+        ...(follower ? {} : { gnd: "ground" }),
       },
       {
         nu: ["u.P", "lower.G"],
         nv: ["v.P", "upper.G"],
-        na: [
-          "a.P",
-          "upper.D",
-          ...(high ? [] : ["m1.D", follower ? "f1.G" : "r1.2"]),
-        ],
-        nb: [
-          "b.P",
-          "lower.D",
-          ...(high ? [] : ["m2.D", follower ? "f2.G" : "r2.1"]),
-        ],
-        common: ["upper.S", "lower.S", high ? "bias.-" : "bias.+"],
+        na: ["a.P", "upper.D", "m1.D", follower ? "f1.G" : "r1.2"],
+        nb: ["b.P", "lower.D", "m2.D", follower ? "f2.G" : "r2.1"],
+        common: ["upper.S", "lower.S", "bias.+"],
         rail: [
           "supply.P",
-          ...(high
-            ? ["bias.+"]
-            : ["m1.S", "m2.S", ...(follower ? ["f1.D", "f2.D"] : [])]),
+          "m1.S",
+          "m2.S",
+          ...(follower ? ["f1.D", "f2.D"] : []),
         ],
-        ...(high
-          ? {}
-          : {
-              ...(follower
-                ? {
-                    biasA: ["f1.S", "j1.+", "m1.G"],
-                    biasB: ["f2.S", "j2.+", "m2.G"],
-                  }
-                : { feedback: ["r1.1", "r2.2", "m1.G", "m2.G"] }),
-              ground: [
-                "bias.-",
-                ...(follower
-                  ? ["j1.-", "j2.-", "upper.B", "lower.B", "f1.B", "f2.B"]
-                  : ["gnd.0"]),
-              ],
-            }),
+        ...(follower
+          ? {
+              biasA: ["f1.S", "j1.+", "m1.G"],
+              biasB: ["f2.S", "j2.+", "m2.G"],
+            }
+          : { feedback: ["r1.1", "r2.2", "m1.G", "m2.G"] }),
+        ground: [
+          "bias.-",
+          ...(follower
+            ? ["j1.-", "j2.-", "upper.B", "lower.B", "f1.B", "f2.B"]
+            : ["gnd.0"]),
+        ],
       },
     );
     if (follower) {
@@ -279,3 +262,58 @@ it.each(["high-side", "feedback", "biased-follower"] as const)(
   },
   60000,
 );
+
+it("leaves the current source of a high-side pair between the supply and the pair (R170)", () => {
+  const doc = circuit(
+    {
+      upper: "pmos",
+      lower: "pmos",
+      bias: "current-source",
+      supply: "vdd-port",
+      u: "port",
+      v: "port",
+      a: "port",
+      b: "port",
+    },
+    {
+      nu: ["u.P", "lower.G"],
+      nv: ["v.P", "upper.G"],
+      na: ["a.P", "upper.D"],
+      nb: ["b.P", "lower.D"],
+      common: ["upper.S", "lower.S", "bias.-"],
+      rail: ["supply.P", "bias.+"],
+    },
+  );
+  doc.netlist = {
+    name: "inputstage",
+    formalParameters: [],
+    terminals: ["u", "v", "a", "b"].map((id, k) => ({
+      id,
+      name: id,
+      netId: "n" + id,
+      direction: k < 2 ? "input" : "output",
+      interfaceInstanceIds: [id],
+    })),
+  };
+  const plan = planAutoLayout(doc, resolver, { presentation: "netlist" });
+  expect(plan.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
+  const replay = preview(doc, resolver, plan.edits);
+  if (!replay.ok) throw Error("layout must replay");
+  const d = replay.document,
+    y = (id: string) =>
+      d.instances.find((i) => i.id === id)!.placement!.position.y;
+  const pair = visibleInstanceBounds(d, resolver).filter(
+    (b) => b.id === "upper" || b.id === "lower",
+  );
+  expect(pair).toHaveLength(2);
+  expect(y("supply")).toBeLessThan(y("bias"));
+  expect(y("bias")).toBeLessThan(Math.min(...pair.map((b) => b.bounds.y)));
+  expect(
+    equivalentTerminals(
+      netlistPresentation(doc, resolver).document,
+      d,
+      resolver,
+    ),
+  ).toBe(true);
+  expect(auditRouting(d, resolver).crossings).toBe(0);
+}, 60000);

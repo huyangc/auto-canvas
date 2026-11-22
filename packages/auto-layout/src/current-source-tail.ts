@@ -13,6 +13,7 @@ import type {
 } from "./differential-stage-columns.js";
 import { pinPoints, placement, transformPoint } from "./geometry.js";
 import { emptyChoices, emptyOverrides } from "./layout-choices.js";
+import { polarity } from "./net-roles.js";
 import { placeMarkers } from "./place-markers.js";
 import { auditRouting } from "./routing-audit.js";
 import { routedGuards } from "./routed-search-score.js";
@@ -304,6 +305,10 @@ export function selectCurrentSourceTail(
 ) {
   const tail = currentSourceTail(s);
   if (!tail || stopped()) return prior;
+  // R81 puts the tail of a p-channel pair above the pair, but this stage only
+  // builds a tail below it (R170): leave the earlier steps' drawing.
+  const driver = s.devices.find((i) => i.id === tail.drivers[0])?.symbolId;
+  if (driver && polarity(driver) === "p") return prior;
   const centered = (d: SchematicDocument) =>
     complete(d) && centeredTail(d, r, s, tail);
   const incumbent = centered(prior.final)
