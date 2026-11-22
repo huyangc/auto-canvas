@@ -1729,9 +1729,10 @@
   overscroll-behavior: contain;
 }
 
-/* From 720 px down the popover hangs from the window's edge instead (the
-   phone-width rule above). */
-@media (min-width: 721px) {
+/* At 720 px and below the popover hangs from the window's edge instead (the
+   phone-width rule above); the ranges meet, so a fractional width between
+   720 and 721 px still gets one of them. */
+@media (width > 720px) {
   .more-menu .more-menu-popover {
     right: 0;
     left: auto;
@@ -1745,7 +1746,7 @@
    explicit min-width is its floor (a group's automatic minimum would hold
    the whole unwrapped name), and the name takes nearly all of a deficit
    before the actions group (a running Auto Layout label) shares it. */
-@media (min-width: 721px) {
+@media (width > 720px) {
   .app-chrome-main .app-brand {
     display: contents;
   }
@@ -1754,8 +1755,42 @@
     flex-shrink: 0;
   }
 
-  /* Idle, the actions keep their full size: the name alone gives way. */
-  .app-chrome-main
+  /* Idle, the actions keep their full size: the name alone gives way. A
+     host with controls of its own may still run out of room after its
+     name and wordmark have gone (up to 1000 px, below); its actions then
+     shrink as a last resort, through the Auto Layout label, and File, ⋯
+     and the rest keep their size. */
+  .app-chrome-main:not([data-host-controls])
+    .app-chrome-actions:not(:has(.auto-layout-control[data-running="true"])) {
+    flex-shrink: 0;
+  }
+
+  .auto-layout-control .auto-layout-button .app-action-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+/* A host with header controls of its own (the desktop's Local projects and
+   About, which have no icons) needs more room. Up to 1000 px its project
+   name goes first, as below 720 px (File → Project Info still has it); up
+   to 940 px the wordmark goes too (the brand mark stays); only then, in
+   that band, may the actions shrink. Above 1000 px it is the web's bar. */
+@media (width > 720px) and (width <= 1000px) {
+  .app-chrome-main[data-host-controls] .app-brand > .app-project-name {
+    display: none;
+  }
+}
+
+@media (width > 720px) and (width <= 940px) {
+  .app-chrome-main[data-host-controls] .editor-brand h1 {
+    display: none;
+  }
+}
+
+@media (width > 1000px) {
+  .app-chrome-main[data-host-controls]
     .app-chrome-actions:not(:has(.auto-layout-control[data-running="true"])) {
     flex-shrink: 0;
   }

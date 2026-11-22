@@ -1817,3 +1817,154 @@ test("a long project name gives way before the top bar's controls", async ({
   await cancel.click();
   await expect(cancel).toHaveCount(0);
 });
+
+test("⋯ → Layout offers Cancel while a run plans, in Auto and in Draw", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await openEditor(page, "/editor?example=two-stage-op-amp");
+  await expectStatus(page, "Opened example: Two-Stage Op Amp");
+  for (const mode of ["mode-auto", "mode-draw"]) {
+    await page.getByTestId(mode).click();
+    await expect(page.getByTestId("auto-layout-button")).toBeEnabled();
+    const layout = await openMenu(page, "Layout");
+    await expect(page.getByTestId("auto-layout-cancel-command")).toHaveCount(0);
+    await layout.getByTestId("auto-layout-command").click();
+    await expect(page.getByTestId("auto-layout-cancel")).toBeVisible();
+    const running = await openMenu(page, "Layout");
+    const cancel = running.getByTestId("auto-layout-cancel-command");
+    await expect(cancel, mode).toBeVisible();
+    await expect(cancel, mode).toBeEnabled();
+    await expect(cancel, mode).toHaveText("Cancel Auto Layout");
+    await cancel.click();
+    await expectStatus(page, /cancel/iu);
+    await expect(page.getByTestId("auto-layout-cancel")).toHaveCount(0);
+    await expect(page.locator(".command-menu[open]")).toHaveCount(0);
+  }
+});
+
+/**
+ * The desktop host's own header controls, as doubles in the web page: its
+ * project home ("Local projects") after the brand, its About button in the
+ * actions, no Agent, and the marker App sets for a host with controls of
+ * its own. Their markup is what `NativeProjectHome` and `NativeAboutButton`
+ * render.
+ */
+async function addDesktopHostControls(page: Page) {
+  await page.evaluate(() => {
+    const main = document.querySelector(".app-chrome-main")!;
+    main.setAttribute("data-host-controls", "");
+    const home = document.createElement("button");
+    home.type = "button";
+    home.className = "app-action";
+    home.textContent = "Local projects";
+    document.querySelector(".editor-brand")!.after(home);
+    const about = document.createElement("button");
+    about.type = "button";
+    about.className = "app-action";
+    about.textContent = "About";
+    document.querySelector('[data-testid="more-menu"]')!.before(about);
+    document.querySelector('[data-testid="open-agent"]')?.remove();
+  });
+}
+
+test("with the desktop host's controls the bar keeps ⋯ and File on screen", async ({
+  page,
+}) => {
+  await openEditor(page);
+  const long = `${"Folded cascode operational transconductance amplifier ".repeat(2)}test`;
+  for (const name of ["New Circuit", long]) {
+    if (name === long) await renameProject(page, long);
+    await addDesktopHostControls(page);
+    // Just above each band of the header: 720 (icons), 760 (labels), 900
+    // (wordmark), and with host controls 940 (wordmark) and 1000 (name).
+    for (const width of [721, 761, 801, 901, 941, 961, 1001, 1101]) {
+      await page.setViewportSize({ width, height: 800 });
+      const context = `${width}px, ${name.length}-character name`;
+      const main = page.locator(".app-chrome-main");
+      const row = (await main.boundingBox())!;
+      expect(row.height, context).toBeLessThanOrEqual(48);
+      expect(
+        await main.evaluate((el) => el.scrollWidth <= el.clientWidth),
+        context,
+      ).toBe(true);
+      for (const testId of [
+        "more-menu",
+        "project-menu",
+        "auto-layout-button",
+        "mode-switch",
+        "draw-tool-undo",
+        "draw-tool-redo",
+      ]) {
+        const box = (await page.getByTestId(testId).boundingBox())!;
+        expect(box.x, `${testId} at ${context}`).toBeGreaterThanOrEqual(0);
+        expect(
+          box.x + box.width,
+          `${testId} at ${context}`,
+        ).toBeLessThanOrEqual(width);
+        expect(box.width, `${testId} at ${context}`).toBeGreaterThan(20);
+        expect(box.y + box.height).toBeLessThanOrEqual(row.y + row.height);
+      }
+      // The name goes first, at 1000 px and below, then the wordmark at
+      // 940 px and below; above 1000 px Auto Layout keeps its full label.
+      await expect(page.locator(".app-project-name"), context).toBeVisible({
+        visible: width > 1000,
+      });
+      await expect(page.locator(".editor-brand h1"), context).toBeVisible({
+        visible: width > 940,
+      });
+      if (width > 1000)
+        expect(await clipped(page, "auto-layout-button"), context).toBe(false);
+    }
+    await page.reload();
+    await awaitEditorReady(page);
+  }
+});
+
+test("the plain web bar keeps ⋯ on screen just above each band", async ({
+  page,
+}) => {
+  await openEditor(page);
+  await renameProject(
+    page,
+    `${"Folded cascode operational transconductance amplifier ".repeat(2)}test`,
+  );
+  await expect(page.getByTestId("open-agent")).toBeVisible();
+  for (const width of [721, 761, 901]) {
+    await page.setViewportSize({ width, height: 800 });
+    const box = (await page.getByTestId("more-menu").boundingBox())!;
+    expect(box.x + box.width, `${width}px`).toBeLessThanOrEqual(width);
+    expect(
+      await page
+        .locator(".app-chrome-main")
+        .evaluate((el) => el.scrollWidth <= el.clientWidth),
+      `${width}px`,
+    ).toBe(true);
+  }
+});
+
+test("no header rule leaves a gap between 720 and 721 px", async ({ page }) => {
+  // A fractional viewport (zoom, display scaling) falls between
+  // (max-width: 720px) and (min-width: 721px); the header's rules use
+  // complementary ranges instead.
+  await openEditor(page);
+  const gaps = await page.evaluate(() =>
+    [...document.styleSheets].flatMap((sheet) => {
+      try {
+        return [...sheet.cssRules]
+          .filter(
+            (rule): rule is CSSMediaRule =>
+              rule instanceof CSSMediaRule &&
+              /min-width:\s*721px/u.test(rule.conditionText) &&
+              /app-chrome|more-menu|app-brand|app-project-name/u.test(
+                rule.cssText,
+              ),
+          )
+          .map((rule) => rule.conditionText);
+      } catch {
+        return [];
+      }
+    }),
+  );
+  expect(gaps).toEqual([]);
+});

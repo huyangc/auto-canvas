@@ -1191,7 +1191,7 @@ tab ›` work.
 
 - **Order.** Decision 4 and the wireframe agree: the left group is the brand,
   the project name, Undo/Redo and the switch; the right group is `Import
-  netlist…` (Auto), `Auto Layout`, `File ▾`, `Agent`, host actions, the
+netlist…` (Auto), `Auto Layout`, `File ▾`, `Agent`, host actions, the
   desktop preview label, then `⋯` last. File moved from the left group to the
   right one with its contents and test ids unchanged; its fixed popover now
   hangs from the window's right edge (`right: 12px`) instead of the left,
@@ -1247,3 +1247,23 @@ name="editor-command-menu" data-testid="more-menu">`; its summary is `⋯`
     README line under `apps/desktop`, coordinator's leave);
     `getting-started.md` lists `Import netlist…` (Auto only) among the header
     controls.
+- T150c review round 2 (codex on PR 107, 2026-11-21): one line per item.
+  - 1: true. Measured on the desktop entry (`vite.desktop.config.ts` dev
+    server on a spare port, `/desktop/**` answered by `page.route`), Auto:
+    with Local projects and About (no Agent, no preview label), ⋯ ended at
+    846, 937, 937, 948 px for windows of 761, 901, 920, 960 px (short name)
+    and 858–948 px (long name); 721 and ≥ 1000 px fitted. App now marks the
+    row `data-host-controls` when the host adds header controls, and for
+    such a host from 721 up to 1000 px the name hides, up to 940 px the
+    wordmark hides, and only in that band may the actions shrink (the Auto
+    Layout label cuts with an ellipsis, about 761–850 px); File, ⋯ and the
+    rest keep their size. Host actions have no icons, so they keep their
+    labels. Afterwards ⋯ is inside at every measured width, one row. The
+    browser test uses doubles of the host's two buttons in the web page
+    (Playwright here serves only the web entry); App.test pins the marker
+    with the preview services.
+  - 2: the slice's `(min-width: 721px)` blocks are `(width > 720px)`, so
+    they meet `(max-width: 720px)` with no fractional gap; a browser test
+    reads the CSSOM for any header rule still at 721 px.
+  - 3: a browser test cancels a planning run from ⋯ → Layout, in Auto and
+    in Draw.

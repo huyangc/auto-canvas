@@ -217,7 +217,14 @@ export function EditorAppChrome({
     alignmentActions.length > 0;
   return (
     <header className="app-chrome">
-      <div className="app-chrome-main">
+      <div
+        className="app-chrome-main"
+        // A host with header controls of its own (the desktop's project home
+        // and About) leaves the bar less room; the CSS compacts it sooner.
+        data-host-controls={
+          hostActions || projectHome || desktopPreviewLabel ? "" : undefined
+        }
+      >
         <div className="app-brand">
           <div
             className="editor-brand"
