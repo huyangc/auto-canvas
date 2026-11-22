@@ -119,6 +119,11 @@ records for that exact source and preserves existing ZIPs. The acceptance script
 uses isolated app data, intercepts native dialog choices, writes real files and
 relaunches the packaged executable. [Source/adaptation inventory](SOURCES.md).
 
+The package is assembled on Windows x64 only. Elsewhere, after the three build
+commands, `node scripts/accept-preview.mjs --development` (from `apps/desktop`)
+runs the same script against the unpackaged shell; it does not cover the
+packaged executable or the Windows file association.
+
 The shell is adapted from **LXY-freshman / Schematic Draft** under AGPL-3.0-only. [The retained original notice](upstream-NOTICE.md) describes that historical fork, not the current preview's feature set. See [SOURCES.md](SOURCES.md) for fixed source links and attribution.
 
 ## Preview distribution
