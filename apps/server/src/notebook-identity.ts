@@ -139,9 +139,18 @@ function directGet(
   });
 }
 
-async function readCapped(response: Response): Promise<string> {
+async function readCapped(
+  response: Response,
+  signal: AbortSignal,
+): Promise<string> {
   if (!response.body) return "";
   const reader = response.body.getReader();
+  // Best effort: a stream that ignores this is left behind by the deadline.
+  signal.addEventListener(
+    "abort",
+    () => void reader.cancel().catch(() => undefined),
+    { once: true },
+  );
   const chunks: Uint8Array[] = [];
   let size = 0;
   try {
@@ -180,7 +189,11 @@ function profileOf(text: string): NotebookProfile {
     typeof role !== "string"
   )
     throw new Rejected(503);
-  const displayName = name.trim().slice(0, MAX_DISPLAY_NAME_LENGTH);
+  // By code point, and well formed: half of a surrogate pair would be stored
+  // by the database as a different character than the one answered here.
+  const displayName = Array.from(name.trim().toWellFormed())
+    .slice(0, MAX_DISPLAY_NAME_LENGTH)
+    .join("");
   return { id, displayName: displayName || id, isAdmin: role === "admin" };
 }
 
@@ -216,43 +229,61 @@ export function createNotebookIdentity({
   const pending = new Map<string, Promise<NotebookIdentityResult>>();
   const send = fetch ?? directGet;
 
+  /** Rejects with 503 after `timeoutMs`, aborting `controller`. */
+  function deadline(controller: AbortController): {
+    passed: Promise<never>;
+    clear: () => void;
+  } {
+    let timer: ReturnType<typeof setTimeout>;
+    const passed = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        controller.abort();
+        reject(new Rejected(503));
+      }, timeoutMs);
+    });
+    return { passed, clear: () => clearTimeout(timer) };
+  }
+
+  async function lookup(
+    token: string,
+    signal: AbortSignal,
+  ): Promise<NotebookProfile> {
+    let response: Response;
+    try {
+      response = await send(endpoint, {
+        headers: { Authorization: `Bearer ${token}` },
+        redirect: "manual",
+        signal,
+      });
+    } catch {
+      throw new Rejected(503);
+    }
+    if (response.status !== 200) {
+      void response.body?.cancel().catch(() => undefined);
+      throw new Rejected(response.status === 401 ? 401 : 503);
+    }
+    let text: string;
+    try {
+      text = await readCapped(response, signal);
+    } catch {
+      void response.body?.cancel().catch(() => undefined);
+      throw new Rejected(503);
+    }
+    return profileOf(text);
+  }
+
+  // One deadline for headers, body and cleanup: it ends the wait itself,
+  // whatever the transport or the stream does with the signal.
   async function fetchProfile(token: string): Promise<NotebookProfile> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const limit = deadline(controller);
     try {
-      let response: Response;
-      try {
-        // The deadline ends the wait itself, whatever the transport does
-        // with the signal.
-        response = await new Promise<Response>((resolve, reject) => {
-          controller.signal.addEventListener(
-            "abort",
-            () => reject(new Rejected(503)),
-            { once: true },
-          );
-          send(endpoint, {
-            headers: { Authorization: `Bearer ${token}` },
-            redirect: "manual",
-            signal: controller.signal,
-          }).then(resolve, reject);
-        });
-      } catch {
-        throw new Rejected(503);
-      }
-      if (response.status !== 200) {
-        await response.body?.cancel().catch(() => undefined);
-        throw new Rejected(response.status === 401 ? 401 : 503);
-      }
-      let text: string;
-      try {
-        text = await readCapped(response);
-      } catch {
-        await response.body?.cancel().catch(() => undefined);
-        throw new Rejected(503);
-      }
-      return profileOf(text);
+      return await Promise.race([
+        lookup(token, controller.signal),
+        limit.passed,
+      ]);
     } finally {
-      clearTimeout(timer);
+      limit.clear();
       controller.abort();
     }
   }
@@ -270,10 +301,16 @@ export function createNotebookIdentity({
         ? unauthorized
         : unavailable;
     }
+    // The hook writes to the database. A write that stalls must not keep
+    // this validation, and its slot, for longer than its own deadline; the
+    // write itself is left to finish or fail.
+    const limit = deadline(new AbortController());
     try {
-      await onProfile(profile);
+      await Promise.race([onProfile(profile), limit.passed]);
     } catch {
       return unavailable;
+    } finally {
+      limit.clear();
     }
     // A slow hook must not hand out a profile after its window has passed.
     if (windowOver(start)) return unavailable;
