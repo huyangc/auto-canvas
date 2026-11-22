@@ -196,15 +196,17 @@ async function save(
 export function registerProjects(
   app: Hono,
   db: Pool,
-  userId: string,
+  userOf: (c: Context) => string,
   limit: number,
 ): void {
   app.get("/api/projects", async (c) => {
+    const userId = userOf(c);
     c.header("cache-control", "no-store");
     return c.json({ projects: await list(db, userId), limit });
   });
-  app.post("/api/projects", (c) => save(c, db, userId, limit));
+  app.post("/api/projects", (c) => save(c, db, userOf(c), limit));
   app.get("/api/projects/:id", async (c) => {
+    const userId = userOf(c);
     c.header("cache-control", "no-store");
     const result = await db.query<ProjectRow>(
       "SELECT * FROM cloud_projects WHERE id = $1 AND user_id = $2",
@@ -215,9 +217,10 @@ export function registerProjects(
       : notFound();
   });
   app.put("/api/projects/:id", (c) =>
-    save(c, db, userId, limit, c.req.param("id")),
+    save(c, db, userOf(c), limit, c.req.param("id")),
   );
   app.patch("/api/projects/:id", async (c) => {
+    const userId = userOf(c);
     const body = await c.req.json<{ favorite?: unknown }>().catch(() => null);
     if (typeof body?.favorite !== "boolean")
       return c.json({ error: "invalid-fields" }, 400);
@@ -229,8 +232,9 @@ export function registerProjects(
       ? c.json({ project: opened(result.rows[0]) })
       : notFound();
   });
-  app.delete("/api/projects/:id", (c) =>
-    transaction(db, async (connection) => {
+  app.delete("/api/projects/:id", (c) => {
+    const userId = userOf(c);
+    return transaction(db, async (connection) => {
       const result = await connection.query(
         "DELETE FROM cloud_projects WHERE id = $1 AND user_id = $2 RETURNING id",
         [c.req.param("id"), userId],
@@ -241,9 +245,10 @@ export function registerProjects(
             projects: await list(connection, userId),
           })
         : notFound();
-    }),
-  );
+    });
+  });
   app.get("/api/projects/:id/preview.svg", async (c) => {
+    const userId = userOf(c);
     const result = await db.query<ProjectRow>(
       "SELECT * FROM cloud_projects WHERE id = $1 AND user_id = $2",
       [c.req.param("id"), userId],
@@ -265,6 +270,7 @@ export function registerProjects(
     await next();
   });
   app.get("/api/projects/:id/versions", async (c) => {
+    const userId = userOf(c);
     c.header("cache-control", "private, no-store");
     const current = await db.query<Pick<ProjectRow, "revision">>(
       "SELECT revision FROM cloud_projects WHERE id = $1 AND user_id = $2",
@@ -295,6 +301,7 @@ export function registerProjects(
       action === "restore" ? "POST" : "GET",
       `/api/projects/:id/versions/:vid/${action}`,
       async (c) => {
+        const userId = userOf(c);
         const result = await db.query<VersionRow>(
           `SELECT v.* FROM cloud_project_versions v JOIN cloud_projects p ON p.id = v.project_id
         WHERE p.id = $1 AND p.user_id = $2 AND v.id = $3`,

@@ -63,6 +63,8 @@ build the server and its workspace dependencies.
 | `AUTO_CANVAS_AGENT_IDLE_MS`     | `300000`                         | Agent session idle timeout in milliseconds                        |
 | `AGENT_ALLOWED_ORIGIN`          | request origin                   | Optional allowed browser origin for Agent HTTP/WebSocket requests |
 | `EDITOR_ROOT`                   | unset                            | Built editor directory; enables static assets and SPA fallback    |
+| `AUTO_CANVAS_AUTH`              | unset (`local`)                  | `local` or `notebook`: whose users own Projects and Components    |
+| `AUTO_CANVAS_NOTEBOOK_API`      | unset                            | Notebook mode only: loopback notebook origin for `GET /api/me`    |
 | `AUTO_CANVAS_API_URL`           | `http://127.0.0.1:4310`          | Vite dev/preview proxy target; configured in the editor process   |
 | `AUTO_CANVAS_TEST_DATABASE_URL` | `postgresql:///auto_canvas_test` | Contract and browser test database                                |
 | `START_TIMEOUT`                 | `60`                             | Launcher health wait in seconds                                   |
@@ -164,6 +166,22 @@ manifest bootstrap URLs and OpenAPI server URLs all carry the prefix.
 without `/canvas`. `AUTO_CANVAS_API_URL` is the proxy target origin, without the
 prefix; Vite forwards the prefixed request unchanged. Public manifests and icons
 are relative to the deployment, and the service worker uses `/canvas/` as its scope.
+
+### Notebook identity mode
+
+With `AUTO_CANVAS_AUTH=notebook` and `AUTO_CANVAS_NOTEBOOK_API` set to the
+notebook backend's loopback origin (for example `http://127.0.0.1:8000`), the
+server uses silicon-notebook's users: each API request carries a notebook
+session token, which the server checks with notebook's `GET /api/me`. The
+server then answers only under `/@notebook/<base path>/`, the Agent relay is
+off, and `GET /api/integration/ready.json` reports readiness. Unset or `local`
+keeps the single-user server unchanged. Use one canvas database per notebook
+installation: every installation's seeded administrator has the id
+`user-local`. The rules, including the 60-second authorization lag, are in the
+[notebook identity section](../../docs/specs/server.md#notebook-identity-mode)
+of the HTTP contract. After `pnpm build`, `node scripts/server-mode-check.mjs`
+checks both modes against the built server on isolated schemas of
+`AUTO_CANVAS_TEST_DATABASE_URL`.
 
 Run the built-server proxy integration and the opt-in browser workflow with:
 

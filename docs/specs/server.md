@@ -96,6 +96,80 @@ Vite dev and preview forward `/api/auth`, `/api/projects`, `/api/components`,
 Host/Origin. Gallery, simulation execution and account deletion are deliberately
 unimplemented by this server.
 
+## Notebook identity mode
+
+`AUTO_CANVAS_AUTH` selects who the server's users are. Unset or exactly
+`local` keeps the single-user behaviour described above, unchanged in every
+route, header, query and migration. Exactly `notebook` makes the server use
+silicon-notebook's users instead; every other value, including the empty
+string, fails startup with an error that names the variable without echoing
+its value. Notebook mode needs `AUTO_CANVAS_NOTEBOOK_API`: an `http:` or
+`https:` origin on `127.0.0.1`, `localhost` or `[::1]`, with no path other than
+`/`, no query, fragment or credentials. Configuration errors stop startup
+before any database connection. There is no schema change.
+
+The server has no user of its own in this mode. Every API request other than
+the two public probes must carry `Authorization: Bearer <token>`, a notebook
+session token of 1–512 characters from `A–Z a–z 0–9 . _ ~ + / = -`; any other
+header (another scheme, extra whitespace, control or non-ASCII characters) is
+401 `unauthorized` without contacting notebook. The server asks notebook's
+`GET /api/me` (sending only that header, without following redirects, within
+one 5-second deadline for headers and body, body at most 64 KiB) who the token
+belongs to. A 200 JSON object whose `id` is a non-empty string of at most 200
+characters other than `local`, and whose `display_name` and `role` are strings,
+identifies the user; notebook's 401 is 401 `unauthorized`; anything else is
+503 `identity-unavailable`. The user's row in `users` is inserted or its
+display name (trimmed, at most 80 characters, the id when empty) updated
+before the request continues; that user owns the Projects and Components the
+request touches, and `role: "admin"` makes them a Component Library
+administrator. At most 32 validations run at once (a further distinct token
+is 503) and concurrent requests with one token share one validation.
+
+A validated token is cached, keyed by its SHA-256, until 60 seconds after its
+validation started; hits never extend it, and failures are never cached. This
+is the authorization lag: after notebook revokes a session, disables an account
+or changes a role **on its server**, the canvas honours the old answer for at
+most 60 seconds from the start of the last validation. A browser sign-out that
+only cleared the browser's local storage does not revoke the session. Tokens,
+`Authorization` headers and notebook's response bodies are never logged.
+
+Routes in this mode:
+
+- The server answers only under silicon-notebook's mount: requests must start
+  with `/@notebook/` followed by the configured base path, and the server
+  strips `/@notebook` before routing. Anything else is 404 `Not found`.
+  `@notebook` can never be part of `AUTO_CANVAS_BASE_PATH`.
+- `GET /api/health` (`{ok:true}`) and `GET /api/integration/ready.json`
+  (`{ok:true, mode:"notebook"}` after a database query) need no token. Only
+  `GET` is public; `HEAD` on either needs a token. The readiness path is not
+  registered in standalone mode.
+- Every other API response, including early 401, 403, 404 and 503 answers, has
+  `Cache-Control: private, no-store`, replacing the preview caching above.
+- Any API request with `Sec-Fetch-Site: cross-site` is 403 `forbidden`. The
+  Origin comparison of standalone mode does not apply: the credential is a
+  header a browser never attaches by itself, and behind notebook's proxy the
+  Host is the upstream address.
+- `GET /api/auth/me` returns the notebook user (`provider: "notebook"`,
+  `email: null`, `role` `admin` or `user`); `GET /api/auth/providers` is as in
+  standalone mode; `POST /api/auth/profile` and `POST /api/auth/logout` are
+  409 `managed-by-notebook`.
+- The Agent relay is off: no relay is constructed, `/api/agent` and
+  `/api/agent/*` are 404 for every method, and WebSocket upgrades are answered
+  `HTTP/1.1 404 Not Found`. `AUTO_CANVAS_AGENT_IDLE_MS` is not read.
+
+A canvas database belongs to one notebook installation. Every installation's
+seeded administrator has the id `user-local`, so pointing a database used with
+one installation at another would hand that installation's administrator the
+first one's Projects and Components. The standalone user `local` is never a
+notebook id, so standalone rows stay separate.
+
+[Notebook mode tests](../../apps/server/src/notebook-auth.test.ts),
+[identity tests](../../apps/server/src/notebook-identity.test.ts),
+[standalone tests](../../apps/server/src/standalone-mode.test.ts) and
+[startup tests](../../apps/server/src/server-main.test.ts) use real PostgreSQL
+and a stub notebook; `node scripts/server-mode-check.mjs` checks the built
+server in both modes after `pnpm build`.
+
 ## Agent relay
 
 The [Agent session contract](web-agent-session.md) and [Agent API](agent-api.md)
