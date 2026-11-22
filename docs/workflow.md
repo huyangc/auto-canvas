@@ -1,57 +1,63 @@
-# 工作流：Opus 出方案，Codex 实现
+# 工作流：Opus 出方案，子代理实现，codex 评审
 
-每项工作是 `tasks/` 下的一个任务目录。Opus（Claude Code）负责方案和审查，
-Codex 负责实现，人负责确认范围和最终验收。
+每项工作是 `tasks/` 下的一个任务目录。Opus（Claude Code 主会话）负责方案和审查，
+Claude Code 子代理负责实现，codex 评审方案和代码，人负责确认范围和最终验收。
 
 ```text
-需求 → ① Opus 方案 plan.md → 人确认范围
-     → ② Codex 实现（scripts/codex-task.sh）→ report.md
+需求 → ① Opus 方案 plan.md → codex 方案评审（gpt-6.2-astra，只读，到无 P0/P1）
+     → 人确认范围
+     → ② 实现子代理（Agent 工具，按难度选 model）→ 最终消息即报告，Opus 写 report.md
      → ③ Opus 审查：亲自重跑验收命令 + 读 diff
           ├ 通过 → Opus 在任务分支提交 → ④
           └ 不通过 → review.md 写明问题 → 回到 ②（最多 3 轮，之后找人决定）
-     → ④ 推送并开 PR → codex 评审贴回 PR + CI → 按授权 rebase 合入 main
+     → ④ 推送并开 PR → codex 代码评审（gpt-6.2-sol）贴回 PR + CI → 按授权 rebase 合入 main
 ```
+
+人要求时，②可以改为一轮 Codex 实现，见[按要求运行 Codex 轮次](#按要求运行-codex-轮次)。
 
 ## 任务目录
 
 ```text
 tasks/T001-<slug>/
-  plan.md     Opus 写，Codex 只读
-  report.md   Codex 每轮覆盖重写
-  review.md   Opus 每轮追加一节，Codex 只读
-  logs/       每轮 Codex 的事件流和最后一条消息（不入库）
+  plan.md     Opus 写，实现者只读
+  report.md   Opus 根据实现者的报告每轮覆盖重写（Codex 轮次由 Codex 自己写）
+  review.md   Opus 每轮追加一节，实现者只读
+  logs/       方案评审的原始输出；Codex 轮次的事件流和最后一条消息（不入库）
 ```
 
 模板在 [tasks/_template/](../tasks/_template/)。编号递增，slug 用小写短横线。
 
 ## 规则
 
-- **一个任务一个分支**：`task/T001-<slug>`，从 `main` 开出。Codex 不提交、
-  不切分支，提交、PR 和合并由 Opus 在审查通过后进行。不直接推送 `main`。
+- **一个任务一个分支**：`task/T001-<slug>`，从 `main` 开出。实现者只在简报
+  要求时提交，且只提交在任务分支上；不推送、不合并、不 rebase、不切分支。Codex
+  轮次从不提交。PR 和合并由 Opus 在审查通过后进行。不直接推送 `main`。
+- **方案先经 codex 评审**：确认范围之前，方案要过一轮或多轮
+  [方案评审](#方案评审)。
 - **方案要能直接执行**：写清目标、真实路径、要改的耦合点、步骤顺序、范围
   内外、可直接运行的验收命令及预期结果。方案不确定的地方先查代码，查不清就
   在方案里列为调查步骤，并写明调查结论放进 report。
 - **任务要小到能审查**：一轮 diff 应能读完。大范围删除按“先切断入口，再删除
   不可达代码”分成几个任务。
 - **验收以 Opus 重跑为准**：report 里的测试结果只作参考。
-- **超出范围就停下**：Codex 遇到方案没覆盖的必要改动，要记录在 report，
+- **超出范围就停下**：实现者遇到方案没覆盖的必要改动，要记录在报告里，
   而不是自行设计。
 - **用 LLM API 前先确认**：凡是会调用 LLM 服务商 API、消耗 token 的命令、
   脚本、评测或实验，开始前由 Opus 向用户说明要跑什么、大约多少次调用和费用，
   得到用户确认后才运行。一次确认只对所说明的那一次运行有效，自主批量执行时
-  也不例外。方案里遇到这类步骤要写明“先问用户”，Codex 不自行运行。只读取
+  也不例外。方案里遇到这类步骤要写明“先问用户”，实现者不自行运行。只读取
   已缓存结果、不发起 API 调用的运行不受限。Codex 轮次
-  （`scripts/codex-task.sh`）、codex PR 评审和 Claude Code 子代理是流程自带
-  的工具，不属于这条规则。
+  （`scripts/codex-task.sh`）、codex 方案评审、codex PR 评审和 Claude Code
+  子代理是流程自带的工具，不属于这条规则。
 
 ## 并行任务
 
-范围互不重叠的任务可以同时交给 Codex，再一起审查。
+范围互不重叠的任务可以同时交给实现子代理，再一起审查。
 
 - **先判断能否并行**：两个任务的 owned paths 不能有交集，也不能一个依赖另一个
   的结果；有交集或依赖的按顺序做。删除类任务要连同所有引用方一起算范围。
-- **每个任务一个 worktree**，主目录留在 `main`。在 worktree 里装好依赖后，从该目录
-  运行 `scripts/codex-task.sh`：
+- **每个任务一个 worktree**，主目录留在 `main`。在 worktree 里装好依赖后，在该
+  worktree 里启动实现子代理：
 
   ```bash
   git worktree add .claude/worktrees/<id> -b task/<id>-<slug> origin/main
@@ -68,41 +74,63 @@ tasks/T001-<slug>/
 
   车道 2、3 的数据库要先用 `createdb` 建好。
 
-- **一起审查，逐个交付**：每轮结束后照常按 `codex-task` 审查，各自开 PR。PR 按顺序
+- **子代理读不到其他 worktree**：它需要的输入（例如评测语料）要先复制进它自己
+  的 worktree。
+
+- **一起审查，逐个交付**：每轮结束后照常按 `run-task` 审查，各自开 PR。PR 按顺序
   合入；后合入的先 rebase 到最新 `main` 并重跑验收，再合入。
 - **最多三个并行**：受审查精力和本机资源限制。
 
-## 运行 Codex
+## 方案评审
+
+方案写完、人确认范围之前，用 codex（model `gpt-6.2-astra`，只读沙箱）评审方案：
+
+```bash
+codex exec -m gpt-6.2-astra --sandbox read-only --ephemeral -c 'notify=[]' \
+  -o <out.txt> "<评审提示词：方案文件路径及其依据>" < /dev/null
+```
+
+`< /dev/null` 不能省，否则 `codex exec` 会等待标准输入。
+
+Opus 对着代码核实每条意见，修改方案，再评审一轮，直到某一轮不再报告 P0/P1。
+方案里记录结论（轮数和判定），原始输出放在 `tasks/<id>/logs/`（不入库）。
+
+## 派发实现子代理
+
+用 `Agent` 工具启动，必须显式给出 `model`，按任务难度选：需要设计或查根因判断的
+用 `opus`，方案已写死的用 `sonnet`，`haiku` 只用于查找。子代理在该任务的 worktree、
+任务分支上工作。
+
+简报包含：目标、plan.md 路径、AGENTS.md、可改的路径、验收命令、是否提交（提交要带
+Test-Impact trailer），以及绝不推送、合并、rebase、切分支。后台运行。子代理遵守
+AGENTS.md，跑完方案里的验收命令，它的最终消息就是报告，Opus 据此写 report.md。
+报告只是一个说法，验收由 Opus 重跑。
+
+### 按要求运行 Codex 轮次
+
+人要求时，仍可用脚本跑一轮 Codex 实现：
 
 ```bash
 scripts/codex-task.sh tasks/T001-<slug>
 ```
 
-脚本会检查分支、拼出提示词（AGENTS.md + plan.md + review.md），然后用
-`codex exec --approve-for-me`（workspace-write 沙箱，审批请求交给自动审查）在仓库根目录运行。环境变量
-`CODEX_MODEL` 可覆盖模型。日志在 `tasks/<id>/logs/round-<n>.jsonl`。
+脚本检查分支、拼出提示词（AGENTS.md + plan.md + review.md），用
+`codex exec --approve-for-me`（workspace-write 沙箱）在仓库根目录运行。环境变量
+`CODEX_MODEL` 可覆盖模型。日志在 `tasks/<id>/logs/round-<n>.jsonl`。沙箱里没有
+网络，依赖要事先装好（`pnpm install --frozen-lockfile`）；脚本设置
+`pnpm_config_verify_deps_before_run=false`（及旧版 pnpm 的 `npm_config_` 写法），
+防止 pnpm 在离线沙箱里重装依赖、清空 `node_modules`。
 
-沙箱里没有网络，依赖要事先装好（`pnpm install --frozen-lockfile`）。脚本设置
-`pnpm_config_verify_deps_before_run=false`（以及旧版 pnpm 读取的 `npm_config_` 写法），防止 pnpm 在运行脚本前尝试重装依赖、
-在离线沙箱里清空 `node_modules`。
-
-## 查看 Codex 的过程
-
-原始事件流可能有几 MB，不要直接读，用 `scripts/codex-log.mjs` 过滤：
+原始事件流可能有几 MB，用 `scripts/codex-log.mjs` 过滤：
 
 ```bash
-node scripts/codex-log.mjs tasks/T001-<slug>
-node scripts/codex-log.mjs tasks/T001-<slug> --show 12
-node scripts/codex-log.mjs tasks/T001-<slug> --round 2 --follow
+node scripts/codex-log.mjs tasks/T001-<slug>                          # 最新一轮时间线，供审查对账
+node scripts/codex-log.mjs tasks/T001-<slug> --show 12                # 第 12 条命令的完整输出
+node scripts/codex-log.mjs tasks/T001-<slug> --round 2 --follow       # 供 Monitor 使用
 ```
 
-- **默认**：最新一轮的时间线，含每条命令的退出码和 Codex 的消息。审查时用它和
-  report 对账。
-- **`--show <n>`**：时间线里第 n 条命令的完整输出。
-- **`--follow`**：运行中只输出消息、错误和结果，供 Claude Code 的 `Monitor` 使用。
-  `codex-task.sh` 结束时写入 `round-<n>.exit`，它读到后输出 `END exit=<状态>` 并退出。
-  连续 15 分钟没有新事件时输出 `STALLED`，可能是命令耗时长，也可能是这一轮已经中断。
-
+`--follow` 只输出消息、错误和结果；`codex-task.sh` 结束时写入 `round-<n>.exit`，
+它读到后输出 `END exit=<状态>` 并退出，连续 15 分钟没有新事件时输出 `STALLED`。
 日志只记录动作和消息，不包含 Codex 的思考过程。
 
 ## PR 评审与合入
@@ -115,7 +143,7 @@ node scripts/codex-log.mjs tasks/T001-<slug> --round 2 --follow
 
 - **提交**：改动实现的提交要带 Test-Impact trailer，规则见
   [docs/testing/README.md](testing/README.md#test-impact)；由 Opus 审查时核对，CI 不检查。
-- **评审证据**：PR 合入前必须经过 codex 评审，这是 Opus 审查之外的第二道独立阅读。
+- **评审证据**：PR 合入前必须经过 codex 评审（model `gpt-6.2-sol`），这是 Opus 审查之外的第二道独立阅读。
   每一轮的原始输出都要逐字贴回 PR，包括零意见和手动轮次，并附触发方式、完整命令、
   head SHA、退出码和输出字节数。一轮成功必须同时满足退出码为零且输出非空；
   `base..HEAD` 为空是硬失败。
@@ -142,12 +170,13 @@ CI 里，它们的证据以 Opus 亲自重跑的结果为准，写进 PR 的 Evi
 
 ### Claude Code PR 操作
 
-自动评审由开发者本机的 `~/.claude/hooks/codex-pr-review.sh` 提供，不是仓库产物：
+自动评审（model `gpt-6.2-sol`）由开发者本机的 `~/.claude/hooks/codex-pr-review.sh`
+提供，不是仓库产物：
 开 PR 后它自动跑一轮并贴回评论，判过 P0/P1 后有新提交时自动重审。新 clone 可能没有
 这个 hook，但评审规则不变；没有 hook 时手动运行并按上述要求贴回证据：
 
 ```bash
-codex exec review --base origin/main --ephemeral \
+codex exec review --base origin/main --ephemeral -m gpt-6.2-sol \
   -c 'model_reasoning_effort=medium' -c 'notify=[]' -o <out>
 ```
 
@@ -165,5 +194,6 @@ codex exec review --base origin/main --ephemeral \
 
 ## Claude Code 技能
 
-- `plan-task`：调查代码，写 plan.md，开任务分支。
-- `codex-task`：派发 Codex，审查，提交并开 PR，或写 review.md 进入下一轮。
+- `plan-task`：调查代码，写 plan.md，过 codex 方案评审，开任务分支。
+- `run-task`：派发实现子代理（或按要求派发 Codex 轮次），审查，提交并开 PR，或写
+  review.md 进入下一轮。
