@@ -3,7 +3,7 @@
 // file its own module registry so the replacement cannot leak elsewhere.
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { createServer, type Server } from "node:http";
+import { createServer, request as httpRequest, type Server } from "node:http";
 import { connect, createServer as createNetServer } from "node:net";
 import type { AddressInfo } from "node:net";
 import pg from "pg";
@@ -234,6 +234,41 @@ describe("startServer", () => {
       });
       expect(bare.status).toBe(308);
       expect(bare.headers.get("location")).toBe("/canvas/?x=1");
+
+      // A method Fetch cannot construct still gets the API's 404, not a 500.
+      const traced = await new Promise<{
+        status: number;
+        cache: string | undefined;
+        body: string;
+      }>((resolve, reject) => {
+        const trace = httpRequest(
+          {
+            host: "127.0.0.1",
+            port,
+            path: "/@notebook/canvas/api/projects",
+            method: "TRACE",
+          },
+          (response) => {
+            let body = "";
+            response.setEncoding("utf8");
+            response.on("data", (chunk: string) => (body += chunk));
+            response.on("end", () =>
+              resolve({
+                status: response.statusCode ?? 0,
+                cache: response.headers["cache-control"],
+                body,
+              }),
+            );
+          },
+        );
+        trace.on("error", reject);
+        trace.end();
+      });
+      expect(traced).toEqual({
+        status: 404,
+        cache: "private, no-store",
+        body: JSON.stringify({ error: "Not found" }),
+      });
 
       const component = `${origin}/@notebook/canvas/api/components/mounted-part`;
       const definition = {
