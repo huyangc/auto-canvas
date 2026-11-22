@@ -1,9 +1,11 @@
-# Agent Entry (Codex: implementer)
+# Agent Entry (implementer)
 
 auto-canvas is a web schematic canvas for automatic analog placement and
 routing (APR) with human fine-tuning. It starts from an analog-canvas snapshot
 (UPSTREAM.md). The repository workflow is in [docs/workflow.md](docs/workflow.md):
-Opus plans and reviews, Codex implements.
+Opus plans and reviews, an implementer subagent implements (Codex when the
+owner asks), and codex reviews the plan and the code. These rules apply to
+whoever implements.
 
 These rules replace the upstream analog-canvas process: there are no Issues,
 deployments or Production acceptance here. Opus delivers reviewed work through
@@ -21,15 +23,17 @@ a PR; see the workflow document.
 4. Run every acceptance command in the plan. A failing command is fixed or
    reported with its output; never weaken, skip or delete a test to make it
    pass unless the plan puts that test in scope for removal.
-5. Write the task's `report.md` from `tasks/_template/report.md`.
+5. Report from `tasks/_template/report.md`. A Codex round writes `report.md`;
+   a subagent returns the same content as its final message unless its brief
+   says to write the file.
 
 ## Hard rules
 
-- Do not commit, push, merge, rebase or switch branches. Opus commits after
-  review.
+- Commit only when your brief says so, and only on the task branch. Never
+  push, merge, rebase or switch branches. A Codex round never commits.
 - Do not edit `plan.md` or `review.md`.
 - Do not install, upgrade or remove dependencies or change `pnpm-lock.yaml`
-  unless the plan says so. The sandbox has no network.
+  unless the plan says so. A Codex round's sandbox has no network.
 - Do not hand-edit generated files (`*.generated.ts`, generated docs); run the
   generator script that owns the file.
 - Keep behavior the plan does not mention unchanged.

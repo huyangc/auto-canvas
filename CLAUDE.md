@@ -2,7 +2,8 @@
 
 auto-canvas is a web schematic canvas for automatic analog placement and
 routing (APR) with human fine-tuning, starting from an analog-canvas snapshot
-(UPSTREAM.md). Codex implements; you plan and review.
+(UPSTREAM.md). Subagents implement; you plan and review, and codex reviews
+the plan and the code.
 
 This file loads in every session, so it holds only standing rules specific to
 Claude Code. Feature details belong in the documents listed under
@@ -13,23 +14,26 @@ with one of them, correct the entry file.
 
 - Turn a request into a task under `tasks/` with the `plan-task` skill. Ground
   every plan in the code you read: real paths, real commands, the actual
-  coupling. Confirm scope decisions with the user before dispatch.
-- Dispatch and review with the `codex-task` skill. Rerun the acceptance
-  commands yourself and read the diff; Codex's report is a claim, not
-  evidence.
+  coupling. Have codex (`gpt-6.2-astra`, read-only) review the plan until a
+  round reports no P0/P1, then confirm scope decisions with the user before
+  dispatch.
+- Dispatch and review with the `run-task` skill. Rerun the acceptance
+  commands yourself and read the diff; the implementer's report is a claim,
+  not evidence.
 - Commit only reviewed work, on the task branch, then deliver it through a PR.
   You may push and open the PR without asking; merging needs authorization for
   that delivery, a posted codex review of the remote head and passing checks.
   See [PR review and merge](docs/workflow.md#pr-评审与合入). Never push directly
   to `main`.
 - Write product code yourself only for a fix of a few lines found in review,
-  or when the user asks. Anything larger goes back to Codex as a review round.
+  or when the user asks. Anything larger goes back to an implementer subagent
+  as a review round.
 - Before anything that spends LLM API tokens starts, ask the user and wait for
   their confirmation: say what will run, about how many calls and the expected
   cost. This holds inside delegated and autonomous runs, and for runs a plan
-  would hand to Codex. One confirmation covers the run described. Codex rounds,
-  the codex PR review and subagents are the workflow's own tools and are not
-  such runs. See [the workflow rules](docs/workflow.md#规则).
+  would hand to an implementer. One confirmation covers the run described. Codex
+  rounds, the codex plan and PR reviews and subagents are the workflow's own
+  tools and are not such runs. See [the workflow rules](docs/workflow.md#规则).
 
 The PR process is the one in `docs/workflow.md`; analog-canvas's upstream
 Issue/deploy process does not apply.
@@ -44,26 +48,27 @@ its tests are in `.claude/hooks/tests/`.
 
 Choose by the judgment a task needs, not by its size:
 
-| Model    | Use for                                                                                         |
-| -------- | ----------------------------------------------------------------------------------------------- |
-| `opus`   | Plans, spec and code review, architecture trade-offs, hard root-cause analysis, security review |
-| `sonnet` | Fully specified non-product work: mechanical tooling or test-fixture edits, documentation sync  |
-| `haiku`  | Pure lookup: finding files, symbols and call sites, listing and counting                        |
+| Model    | Use for                                                                                                         |
+| -------- | --------------------------------------------------------------------------------------------------------------- |
+| `opus`   | Implementation that needs design or root-cause judgment; plans, spec and code review, architecture, security review |
+| `sonnet` | Fully specified implementation, tooling or test-fixture edits, documentation sync                               |
+| `haiku`  | Pure lookup: finding files, symbols and call sites, listing and counting                                        |
 
 When unsure, choose `opus`. If a subagent reports an ambiguous plan or needed
 rework, fix the plan with `opus` first; do not rerun the same plan on a stronger
 model.
 
-Subagents do not change who does what: product code still goes to Codex, and a
-review subagent does not replace rerunning the acceptance commands yourself.
+Product code goes to an implementer subagent, not to the main session beyond a
+few-line fix, and a review subagent does not replace rerunning the acceptance
+commands yourself.
 Brief a subagent with the goal, relevant paths, authoritative sections and what
 it must verify, then check anything doubtful in its result yourself.
 
 ## Authoritative documents
 
 - Workflow and task layout: [docs/workflow.md](docs/workflow.md)
-- Codex's rules and repository facts: [AGENTS.md](AGENTS.md). Keep it consistent
-  with any workflow change.
+- The implementer's rules and repository facts: [AGENTS.md](AGENTS.md). Keep it
+  consistent with any workflow change.
 - Product ownership and contracts:
   [docs/overall-product-plan.md](docs/overall-product-plan.md),
   [docs/specs/](docs/specs/README.md)
