@@ -33,8 +33,10 @@ for a capable engineer who has never seen this conversation.
    P0/P1. Record the rounds and verdict in the plan's `Plan review` line; raw
    outputs go under `tasks/<id>/logs/`.
 6. **Confirm with the user** the goal, scope and any product decision the plan
-   makes (what replaces a removed feature, what stays). Then set
-   `- Status: approved` and record the base commit. If the confirmation
-   changes the plan's scope or design, review the plan again first.
+   makes (what replaces a removed feature, what stays). If the
+   confirmation changes the plan's scope or design, review the plan again; if
+   that changes scope or a product decision again, go back to the user. Set
+   `- Status: approved` and record the base commit only once the user has
+   confirmed the final reviewed scope and product decisions.
 7. **Branch.** From a clean `main`: `git switch -c task/<id>-<slug>`, commit
    the plan alone (`Plan T<nnn>: <title>`), and hand over to `run-task`.

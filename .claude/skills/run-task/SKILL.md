@@ -28,7 +28,8 @@ no uncommitted changes outside the task directory: commit a subagent's reviewed
 edits (or discard rejected ones) first. The task's round count and the
 three-round limit are the ones in `review.md`; a Codex log's `round-<n>` counts
 Codex rounds only and starts at 1 after subagent rounds, so name the task round
-in `review.md` when dispatching.
+in `review.md` when dispatching. When the two differ, correct the `report.md`
+heading to the task round while reviewing.
 
 Its first output line names the round. Start a `Monitor` on
 `node scripts/codex-log.mjs tasks/<id>-<slug> --round <n> --follow` with the
@@ -93,7 +94,8 @@ Follow [PR review and merge](../../../docs/workflow.md#pr-评审与合入):
    finding. Fix P0/P1 findings that hold, push, and read the re-review. No comment on the current
    head means no review: run it by hand.
 3. Merge only if this delivery authorizes it, `gh pr checks` meets the workflow's
-   merge condition (every check `pass`) and
+   merge condition (every check `pass`), the review of that head was run with
+   `gpt-6.2-sol` (see the workflow's merge condition) and
    `~/.claude/hooks/codex-pr-review.sh verify <PR>` succeeds, or the workflow's
    manual check does where the hook is not installed:
    `gh pr merge <PR> --rebase`. Confirm `state` is `MERGED`. Otherwise hand back
