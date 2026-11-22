@@ -49,3 +49,17 @@ token changed to Bob from another page: the editor reloads as Bob; Bob's databas
 no "browser storage used before sign-in" line, no page error, no console error
 12 checks, 0 failed
 ```
+
+## Round 2 — accepted (corrections by the reviewer)
+
+Reviewed: codex `gpt-6.2-sol` PR review round 1 of PR 116 at `b719e48` (two
+P2, one P3; no blocking finding), each checked and found valid.
+
+| #   | Severity | Where                                    | Finding                                                                                                                                                                                                                                        | Expected fix                                                                                                                                                                                                                 |
+| --- | -------- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 4   | fixed    | `browser-contract.md`, R6                | On a foreground restore from the back/forward cache Chromium can dispatch `visibilitychange` before `pageshow`; the gate rechecks at whichever comes first, so "still concealed in an early `pageshow` listener" would fail a correct product. | The contract now asserts concealment at the first read of the token key after the persisted `pagehide`, and the variant's document state after it (planner's correction in the contract).                                    |
+| 5   | fixed    | `entries/notebook.tsx`, the commit mark  | `createRoot().render()` schedules the render; the mark does not show a mounted editor.                                                                                                                                                         | The mark keeps its place and its meaning is stated: namespace fixed, render scheduled. The plan's refinement 4 and the contract say that a case needing the mounted editor waits for the editor itself. No behaviour change. |
+| 6   | fixed    | `scripts/notebook-editor-build.test.mjs` | A build that does not write returns no copied `sw.js`, and the fallback source reached only the worker-storage check, not the forbidden-names check.                                                                                           | The fallback source is included in `forbiddenNameProblems`.                                                                                                                                                                  |
+
+Rerun by the reviewer: notebook unit and build tests 11 files, 144 tests;
+typecheck, lint, format, docs 0.

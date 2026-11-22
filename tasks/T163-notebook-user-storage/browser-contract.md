@@ -185,3 +185,19 @@ The report shows, from Playwright's JSON reporter, that every case named here ra
    signed-out and failing cases, which never import the editor.
 5. **L1.** Assert the logical names in the returned lock snapshot directly, including the
    absence of foreign entries.
+
+## Corrections after the code review of PR 116 (binding)
+
+1. **R6 does not depend on the order of the restore events.** On a foreground restore
+   Chromium can dispatch `visibilitychange` before `pageshow`, and the gate re-reads the
+   token at whichever comes first. So "in an early `pageshow` listener the body is still
+   concealed" is replaced by: the recorder's wrapper of the native `Storage.prototype.getItem`
+   records, at the **first read of the token key after the persisted `pagehide`**, that the
+   body was concealed at that moment; after that recheck the document shows the state the
+   variant expects (changed session: the account-changed screen in `#root`, no
+   `schematic-canvas`, nothing outside `#root` but scripts; unchanged session: body
+   revealed, editor present, no reload). The persisted `pagehide` record stays as it is.
+2. **The commit mark is not "mounted".** `auto-canvas:notebook-commit` is set when the
+   namespace is fixed and the render is scheduled. Late observers are registered after the
+   editor itself is present (the `schematic-canvas` test id), not at the mark and not at
+   `load`.
