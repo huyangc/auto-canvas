@@ -295,3 +295,94 @@ over a routed drawing, until the Cell changes.
 
 - The rail between 860 and 1100 px was not checked by hand.
 - Electron was not tried.
+
+# T150 report — slice c: one ⋯ menu and the project name in the top bar
+
+Written by the coordinator from the implementer's hand-backs and an
+independent rerun. Slices a and b are merged (`0c07eae`); slice d follows.
+
+## What was built
+
+- The Edit and Circuit header menus are one `⋯` menu
+  (`data-testid="more-menu"`) with the groups Edit, Hierarchy, Netlist and
+  Layout. Every item keeps its text, test id, enabled condition and
+  handler; nothing was dropped.
+- The top bar reads: brand, project name, Undo/Redo, `Auto | Draw` on the
+  left; `Import netlist…` (Auto only), `Auto Layout`, `File`, `Agent`, `⋯`
+  on the right. File moved from the left group to the right with the same
+  contents; its popover now hangs from the right.
+- The project name is a button that opens Project Info. It shows
+  "Untitled" for a blank name, carries a decorative copy of the unsaved
+  dot, and is hidden at 720 px and below. When the row is tight the name
+  is what shrinks (down to 3rem, with an ellipsis); the controls keep
+  their size.
+- The shared browser fixture `openMenu` maps every non-File menu name to
+  `⋯`. A table-driven browser test walks decision 21's table in both
+  modes, so a dropped item fails it.
+
+Commits on `task/T150c-menus`: `150154d` (implementation), `029f77e`
+(review round 1). 16 files, +908 / −143; product code under
+`apps/editor/src` without tests is 5 files, +246 / −93.
+
+## Acceptance (coordinator's rerun on `029f77e`)
+
+| Command                                            | Result                              |
+| -------------------------------------------------- | ----------------------------------- |
+| `pnpm build`, `pnpm test:editor-build`             | pass                                |
+| `pnpm typecheck`, `pnpm lint`, `pnpm format:check` | pass (lint 0 errors)                |
+| `pnpm docs:check`                                  | pass                                |
+| `pnpm test:local`                                  | pass: 8627 passed, 117 skipped      |
+| `pnpm deadcode`                                    | exit 1 as on `main`; no new finding |
+| Browser suite, 53 spec files, one worker           | 432 passed, 2 skipped, 0 failed     |
+
+The full run at `150154d` was 431 passed, 0 failed. `project-file.spec.ts`
+is left out as before (it fails to load on `main`).
+
+## Browser check by the coordinator
+
+Against a dev server of this worktree (port 5184), Chrome:
+
+- At 1440 px in both modes and at 390 px in Auto the bar is one 44 px row
+  in the order above; the old Edit and Circuit menus are gone.
+- `⋯` shows the four groups; `Auto Layout` from it lays the example out;
+  `Insert component…` from it in Auto brings up Draw and opens the dialog.
+- The `⋯` and File popovers lie inside the window at 1440 and 390 px.
+- Long project name (110 characters), Auto mode, before and after the
+  review fix:
+
+  | Width | Name before | Auto Layout button before | Name after | Button after |
+  | ----- | ----------- | ------------------------- | ---------- | ------------ |
+  | 800   | 208 px      | 26 px, label cut          | 99 px      | 122 px       |
+  | 900   | 208 px      | 122 px                    | 199 px     | 122 px       |
+  | 1024  | 208 px      | 122 px                    | 197 px     | 122 px       |
+  | 1280  | 208 px      | 122 px                    | 208 px     | 122 px       |
+
+## Review
+
+Independent reviewer on `0c07eae..150154d`: approve with fixes. It compared
+the old menus with `⋯` item by item and decision 21's table row by row and
+found no difference. One P2, reasoned from the CSS and confirmed by the
+coordinator's measurement above: a long project name did not give way, so
+between about 761 and 890 px in Auto the Auto Layout button was squeezed to
+its icon. Fixed in `029f77e`: from 721 px up the brand group's items sit in
+the bar's own row and the name alone shrinks while idle; during a run the
+long label is cut with an ellipsis once the name is at its floor. Two doc
+nits fixed (`apps/desktop/README.md`, the header list in the user guide).
+
+## Deviations from the plan
+
+1. `chrome-isolation.spec.ts`: its row check named the left group, which
+   now holds only the brand; it measures the whole row in order instead.
+2. `docs/user/schematic-hierarchy.md` and one line of
+   `apps/desktop/README.md` named the old menu paths and were updated.
+3. From 721 px up the gap between the brand, the name, Undo/Redo and the
+   switch is the bar's gap, not the group's smaller one.
+
+## Not covered
+
+- The desktop host chrome (Local projects, About, "Desktop preview") with
+  a long name was not measured; Electron was not tried.
+- Rows of the decision table the browser walk skips, because the fixture
+  state lacks them: Revert, Recover, RNL…, desktop file commands, Cancel
+  Auto Layout. Open Shelf project in tab and the empty card have their own
+  tests.
