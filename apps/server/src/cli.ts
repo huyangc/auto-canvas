@@ -1,58 +1,9 @@
 #!/usr/bin/env node
-import { serve } from "@hono/node-server";
-import { AgentRelayHost } from "./agent-relay/host.js";
-import { createApp } from "./app.js";
-import { createDb } from "./db.js";
-import { migrate } from "./migrate.js";
-import { normalizeBasePath } from "./base-path.js";
-import { publicUrl } from "./public-url.js";
-import { serveEditor } from "./static-editor.js";
+import { startServer } from "./server-main.js";
 
-const basePath = normalizeBasePath(process.env.AUTO_CANVAS_BASE_PATH);
-const db = createDb();
-await migrate(db);
-if (process.argv.includes("--migrate")) {
-  await db.end();
-} else {
-  const agentRelay = new AgentRelayHost(db);
-  await agentRelay.start();
-  const app = createApp({ db, agentRelay, basePath });
-  if (process.env.EDITOR_ROOT)
-    await serveEditor(app, process.env.EDITOR_ROOT, basePath);
-  const server = serve(
-    {
-      fetch: (request, bindings) => {
-        const url = publicUrl(
-          request.url,
-          request.headers.get("x-forwarded-proto"),
-          bindings.incoming.socket.remoteAddress,
-        );
-        return app.fetch(
-          url.href === request.url ? request : new Request(url, request),
-          bindings,
-        );
-      },
-      port: Number(process.env.PORT ?? 4310),
-      hostname: process.env.HOST ?? "127.0.0.1",
-    },
-    (info) =>
-      console.log(
-        `Auto Canvas server listening on ${info.address}:${info.port}`,
-      ),
-  );
-  agentRelay.attach(server);
-  let closing = false;
-  const close = () => {
-    if (closing) return;
-    closing = true;
-    const relayClosed = agentRelay.close().catch((error: unknown) => {
-      console.error("Agent relay shutdown failed", error);
-    });
-    const serverClosed = new Promise<void>((resolve) =>
-      server.close(() => resolve()),
-    );
-    void Promise.all([relayClosed, serverClosed]).then(() => db.end());
-  };
+const server = await startServer();
+if (server) {
+  const close = () => void server.close();
   process.once("SIGINT", close);
   process.once("SIGTERM", close);
 }

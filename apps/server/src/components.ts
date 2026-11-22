@@ -1,4 +1,4 @@
-import type { Hono } from "hono";
+import type { Context, Hono } from "hono";
 import type { Pool } from "pg";
 import { ComponentLibrary } from "./component-library.js";
 import {
@@ -16,10 +16,12 @@ interface LocalUser {
 export function registerComponents(
   app: Hono,
   db: Pool,
-  sessionUser: () => Promise<LocalUser>,
+  sessionUser: (c: Context) => Promise<LocalUser | null>,
   basePath = "",
+  originGuard = true,
 ) {
-  const route = async (request: Request): Promise<Response> => {
+  const route = async (c: Context): Promise<Response> => {
+    const request = c.req.raw;
     const url = new URL(request.url);
     url.pathname = url.pathname.slice(basePath.length);
     const id = url.pathname.slice("/api/components/".length);
@@ -48,7 +50,7 @@ export function registerComponents(
     };
     if (request.method === "GET") {
       const deleted = url.searchParams.get("status") === "deleted";
-      const user = await sessionUser();
+      const user = await sessionUser(c);
       const admin = user?.isAdmin === true;
       if (deleted && !user)
         return Response.json(
@@ -98,14 +100,15 @@ export function registerComponents(
     const origin = request.headers.get("origin");
     const site = request.headers.get("sec-fetch-site");
     if (
-      (origin && origin !== url.origin) ||
-      (site && !["same-origin", "none"].includes(site))
+      originGuard &&
+      ((origin && origin !== url.origin) ||
+        (site && !["same-origin", "none"].includes(site)))
     )
       return Response.json(
         { error: "Cross-origin writes are forbidden" },
         { status: 403 },
       );
-    const user = await sessionUser();
+    const user = await sessionUser(c);
     if (!user)
       return Response.json(
         { error: "Sign in to save a component to the public library" },
@@ -174,6 +177,6 @@ export function registerComponents(
       idempotencyKey: body.idempotencyKey,
     });
   };
-  app.all("/api/components", (c) => route(c.req.raw));
-  app.all("/api/components/*", (c) => route(c.req.raw));
+  app.all("/api/components", (c) => route(c));
+  app.all("/api/components/*", (c) => route(c));
 }
