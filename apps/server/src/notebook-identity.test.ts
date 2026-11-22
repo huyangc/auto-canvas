@@ -242,6 +242,12 @@ describe("validation against notebook", () => {
     expect(seen).toHaveLength(1);
     expect(hooked).toHaveLength(0);
   });
+  // Node gives a client without an "upgrade" listener no response for this.
+  const switchProtocols: Handler = (incoming) => {
+    incoming.socket.write(
+      "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n",
+    );
+  };
   const json =
     (body: unknown, status = 200): Handler =>
     (_i, response) => {
@@ -304,6 +310,13 @@ describe("validation against notebook", () => {
         incoming.socket.destroy();
       },
     ],
+    [
+      "a connection closed without an answer",
+      (incoming) => {
+        incoming.socket.end();
+      },
+    ],
+    ["a protocol switch", switchProtocols],
   ])("answers 503 for %s", async (_name, answer) => {
     handler = answer;
     expect(await identity().resolve(bearer("alice-token"))).toEqual({
@@ -311,6 +324,27 @@ describe("validation against notebook", () => {
       status: 503,
     });
     expect(hooked).toHaveLength(0);
+  });
+  it("releases the validation after a protocol switch, so the token can be tried again", async () => {
+    const service = identity();
+    handler = switchProtocols;
+    expect(await service.resolve(bearer("alice-token"))).toEqual({
+      ok: false,
+      status: 503,
+    });
+    handler = answerProfiles;
+    expect(await service.resolve(bearer("alice-token"))).toMatchObject({
+      ok: true,
+    });
+  });
+  it("answers 503 at the deadline when the transport never settles", async () => {
+    const service = identity({ fetch: () => new Promise(() => undefined) });
+    const started = performance.now();
+    expect(await service.resolve(bearer("alice-token"))).toEqual({
+      ok: false,
+      status: 503,
+    });
+    expect(performance.now() - started).toBeLessThan(2000);
   });
   it("answers 503 when notebook is down", async () => {
     const down = createServer();
