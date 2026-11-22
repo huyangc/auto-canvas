@@ -47,19 +47,24 @@ function reversed(block?: "inverter") {
     ["b", placement(-80, 0)],
   ]);
   if (block) seats.set("X1", placement(0, 100));
-  const run = planLayoutOnce(
-    d,
-    resolver,
-    {},
-    emptyOverrides(),
-    "template",
-    true,
-    undefined,
-    undefined,
-    seats,
-  );
-  if (!run.final) throw Error("expected connected resistor fixture");
-  return { d, plan: { final: run.final, candidate: run.result } };
+  /** The planner's own routing of exact seats, as the refinement supplies it. */
+  const route = (placed: typeof seats) => {
+    const run = planLayoutOnce(
+      d,
+      resolver,
+      {},
+      emptyOverrides(),
+      "template",
+      true,
+      undefined,
+      undefined,
+      placed,
+    );
+    return run.final ? { final: run.final, candidate: run.result } : undefined;
+  };
+  const plan = route(seats);
+  if (!plan) throw Error("expected connected resistor fixture");
+  return { d, plan, route };
 }
 
 it("carries a routed netlist to the input-left orientation in one replay", () => {
@@ -89,18 +94,23 @@ it("carries a routed netlist to the input-left orientation in one replay", () =>
     wireLength: before.wireLength,
   });
 });
-it("keeps the incumbent when the mirror would turn a free block left (R170)", () => {
-  const { d, plan } = reversed("inverter");
-  expect(
-    selectNetlistPortSides(
-      d,
-      resolver,
-      plan,
-      () => undefined,
-      () => false,
-    ),
-  ).toBe(plan.candidate);
-});
+it.each(["reflected plan only", "rerouted mirrors too"] as const)(
+  "keeps the incumbent when the mirror would turn a free block left (R170): %s",
+  (trials) => {
+    // Without a router only the directly reflected plan reaches the veto;
+    // with it the mirrored seats and edge columns are routed and judged too.
+    const { d, plan, route } = reversed("inverter");
+    expect(
+      selectNetlistPortSides(
+        d,
+        resolver,
+        plan,
+        trials === "reflected plan only" ? () => undefined : route,
+        () => false,
+      ),
+    ).toBe(plan.candidate);
+  },
+);
 
 it("returns the incumbent when the search is stopped", () => {
   const { d, plan } = reversed();

@@ -31,3 +31,12 @@ gate vs tmp/exp/runs/s0 --differ 31 → GATE PASSED (31 plans differ from the ba
 drawing corpus eval → 0
 gate vs tmp/pr106/pr-drawing --same-plans → GATE PASSED (612 completed, 16 refused; 0 plans differ)
 ```
+
+## PR review round 1 — one test fix by the reviewer
+
+codex (gpt-6.2-sol) on `e3eec9e`: no production defect; [P2] the R170 regression
+test in `netlist-port-sides.test.ts` passed a router that returns nothing, so
+only the directly reflected plan reached the veto. Fixed by the reviewer (a few
+lines, test only): the fixture now returns the planner's own router, and the
+test runs once without a router and once with it. With the veto disabled both
+rows fail.
