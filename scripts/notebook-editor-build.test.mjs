@@ -91,6 +91,221 @@ const renderedModules = (output) =>
         .map(([id]) => id.replaceAll("\\", "/")),
     );
 
+const repository = resolve(".").replaceAll("\\", "/");
+
+/** Each rendered module's code, under its repository-relative id. */
+const renderedModuleSources = (output) =>
+  output
+    .filter((item) => item.type === "chunk")
+    .flatMap((chunk) =>
+      Object.entries(chunk.modules)
+        .filter(([, module]) => module.renderedLength > 0)
+        .map(([id, module]) => {
+          const path = id.replaceAll("\\", "/");
+          // A package keeps its path inside node_modules, without the
+          // store's version directory.
+          const vendored = path.lastIndexOf("/node_modules/");
+          return {
+            id:
+              vendored >= 0
+                ? path.slice(vendored + 1)
+                : path.startsWith(`${repository}/`)
+                  ? path.slice(repository.length + 1)
+                  : path,
+            code: module.code ?? "",
+          };
+        }),
+    );
+
+// --- Per-user storage guards (T163) ------------------------------------
+// The notebook entry replaces the page's storage globals with per-user
+// facades (apps/editor/src/notebook/browser-storage.ts). These guards flag
+// the forms they recognise; a new storage consumer is reviewed against the
+// boundary in docs/specs/server.md, never silenced by extending a list.
+
+const CONSUMER =
+  /\b(?:localStorage|sessionStorage|indexedDB|BroadcastChannel)\b|\.\s*(?:locks|getDirectory)\b|\bcaches\s*\./u;
+
+/**
+ * The notebook output's rendered modules that use a storage global, checked
+ * against the inventory of plan T163 (rows 1–15, the gate's token read, the
+ * installer, and stale-build recovery's `caches`).
+ */
+const STORAGE_CONSUMERS = [
+  "apps/editor/src/agent/agent-runtime-loader.ts", // row 8, not reached (Agent off)
+  "apps/editor/src/agent/use-agent-session.ts", // row 8, not reached (Agent off)
+  "apps/editor/src/app/App.tsx", // rows 10-15
+  "apps/editor/src/app/use-agent-hosts.ts", // row 8
+  "apps/editor/src/components/chunk-load-fallback.tsx", // row 4
+  "apps/editor/src/components/stale-build-recovery.ts", // row 17, Cache Storage
+  "apps/editor/src/document/browser-recovery-store.ts", // rows 1, 1a
+  "apps/editor/src/document/cloud-project-session.ts", // rows 5, 6
+  "apps/editor/src/document/project-workspace.ts", // rows 3, 3a-3c
+  "apps/editor/src/document/recovery-coordinator.ts", // row 2
+  "apps/editor/src/document/use-project-file-lifecycle.ts", // rows 4-6
+  "apps/editor/src/document/workspace-reopen.ts", // row 2
+  "apps/editor/src/entries/notebook.tsx", // row G, the gate's token read
+  "apps/editor/src/features/component-insert/use-component-placement.ts", // rows 10-15
+  "apps/editor/src/features/editor-shell/editor-mode.ts", // rows 10-15
+  "apps/editor/src/features/editor-shell/use-editor-panels.ts", // rows 10-15
+  "apps/editor/src/features/netlist-export/netlist-export-preferences.ts", // rows 10-15
+  "apps/editor/src/features/user-components/component-publication-journal.ts", // row 7
+  "apps/editor/src/notebook/browser-storage.ts", // the installer
+  // Not storage: a module-local array named `caches` shadows the global.
+  "node_modules/react-dom/cjs/react-dom-client.production.js",
+  "packages/derived/dist/document-caches.js",
+];
+
+/** Modules using a storage global that are not in `pinned`. */
+function storageConsumerProblems(modules, pinned) {
+  const allowed = new Set(pinned);
+  return modules
+    .filter(({ id, code }) => CONSUMER.test(code) && !allowed.has(id))
+    .map(({ id, code }) => `${id}: ${code.match(CONSUMER)[0]}`);
+}
+
+const STORAGE_EVENT = /addEventListener\(\s*["'`]storage["'`]|\bonstorage\b/u;
+const STORAGE_EVENT_OWNER = "apps/editor/src/notebook/gate.ts";
+
+/** Registrations for `storage` events outside the gate. */
+function storageEventProblems(modules) {
+  return modules
+    .filter(
+      ({ id, code }) => id !== STORAGE_EVENT_OWNER && STORAGE_EVENT.test(code),
+    )
+    .map(({ id }) => `${id}: registers for storage events`);
+}
+
+const FORBIDDEN = [
+  "Storage.prototype",
+  "IDBFactory",
+  "IDBDatabase.prototype",
+  "LockManager",
+  "storageArea",
+  "SharedWorker",
+  "document.cookie",
+];
+
+/** Names that would reach storage around the facades, in any emitted file. */
+function forbiddenNameProblems(items) {
+  return items.flatMap(({ id, code }) =>
+    FORBIDDEN.filter((name) => code.includes(name)).map(
+      (name) => `${id}: ${name}`,
+    ),
+  );
+}
+
+const WORKER_STORAGE =
+  /\b(?:localStorage|sessionStorage|indexedDB|BroadcastChannel|caches)\b|\.\s*locks\b/u;
+const SERVICE_WORKER_STORAGE =
+  /\b(?:localStorage|sessionStorage|indexedDB|BroadcastChannel)\b|\.\s*locks\b/u;
+
+/** Worker assets reach no storage; the service worker only its shell cache. */
+function workerStorageProblems(workers, serviceWorker) {
+  const problems = workers
+    .filter(({ code }) => WORKER_STORAGE.test(code))
+    .map(({ id, code }) => `${id}: ${code.match(WORKER_STORAGE)[0]}`);
+  if (serviceWorker && SERVICE_WORKER_STORAGE.test(serviceWorker.code))
+    problems.push(
+      `${serviceWorker.id}: ${serviceWorker.code.match(SERVICE_WORKER_STORAGE)[0]}`,
+    );
+  return problems;
+}
+
+it("recognises storage use around the per-user facades, and not lookalikes", () => {
+  // The installer's descriptor lookup of "storage" is no registration.
+  expect(
+    storageEventProblems([
+      {
+        id: "apps/editor/src/notebook/browser-storage.ts",
+        code: 'Object.getOwnPropertyDescriptor(Navigator.prototype, "storage")',
+      },
+      {
+        id: STORAGE_EVENT_OWNER,
+        code: 'addEventListener("storage", listener)',
+      },
+    ]),
+  ).toEqual([]);
+  expect(
+    storageEventProblems([
+      {
+        id: "apps/editor/src/app/App.tsx",
+        code: "window.addEventListener(`storage`, refresh)",
+      },
+      { id: "apps/editor/src/app/other.ts", code: "window.onstorage = f" },
+    ]),
+  ).toHaveLength(2);
+  // The auto-layout worker's blocks are not locks.
+  expect(
+    workerStorageProblems(
+      [
+        {
+          id: "assets/auto-layout.worker.js",
+          code: "const n=t.blocks;blocks()",
+        },
+      ],
+      { id: "sw.js", code: "caches.open(name)" },
+    ),
+  ).toEqual([]);
+  expect(
+    workerStorageProblems(
+      [{ id: "assets/worker.js", code: "indexedDB.open(`x`)" }],
+      { id: "sw.js", code: "navigator.locks.request(n,f)" },
+    ),
+  ).toEqual(["assets/worker.js: indexedDB", "sw.js: .locks"]);
+  expect(
+    storageConsumerProblems(
+      [
+        {
+          id: "apps/editor/src/app/unpinned.ts",
+          code: "sessionStorage.getItem(k)",
+        },
+        { id: "apps/editor/src/app/plain.ts", code: "const sessionStore = 1" },
+        { id: "apps/editor/src/app/App.tsx", code: "localStorage.getItem(k)" },
+      ],
+      ["apps/editor/src/app/App.tsx"],
+    ),
+  ).toEqual(["apps/editor/src/app/unpinned.ts: sessionStorage"]);
+  expect(
+    forbiddenNameProblems([
+      { id: "assets/a.js", code: "Storage.prototype.getItem;document.cookie" },
+    ]),
+  ).toEqual(["assets/a.js: Storage.prototype", "assets/a.js: document.cookie"]);
+});
+
+async function checkStorageGuards(output) {
+  const modules = renderedModuleSources(output);
+  expect(storageConsumerProblems(modules, STORAGE_CONSUMERS)).toEqual([]);
+  // The list stays exact: a pinned module that no longer uses storage goes.
+  const consumers = modules
+    .filter(({ code }) => CONSUMER.test(code))
+    .map(({ id }) => id);
+  expect([...new Set(consumers)].sort()).toEqual(STORAGE_CONSUMERS);
+  expect(storageEventProblems(modules)).toEqual([]);
+  expect(
+    forbiddenNameProblems(
+      output.map((item) => ({ id: item.fileName, code: text(item) })),
+    ),
+  ).toEqual([]);
+  const assets = workerAssets(output).map((item) => ({
+    id: item.fileName,
+    code: text(item),
+  }));
+  const emittedServiceWorker = assets.find(({ id }) =>
+    /(?:^|\/)sw\.js$/u.test(id),
+  );
+  const serviceWorker = emittedServiceWorker ?? {
+    id: "apps/editor/public/sw.js",
+    code: await readFile(resolve(root, "public/sw.js"), "utf8"),
+  };
+  expect(
+    workerStorageProblems(
+      assets.filter((asset) => asset !== emittedServiceWorker),
+      serviceWorker,
+    ),
+  ).toEqual([]);
+}
+
 const isLocal = (url) =>
   url.origin === new URL(DEPLOY).origin && url.pathname.startsWith("/canvas/");
 
@@ -405,6 +620,7 @@ it("builds the notebook editor with every executable reference inside /canvas/",
   }
 
   checkCodeTargets(output);
+  await checkStorageGuards(output);
 
   // The bundled RNL Worker is the one used: the editor passes no location,
   // and the client's own Worker URL is local and emitted.

@@ -246,17 +246,54 @@ empty `<img>` holds its place.
 The page watches for another session: a `storage` event for the token key or a
 cleared storage, focus, the page becoming visible, and a page restored from the
 back/forward cache. When the stored token is then missing, unreadable or a
-different one, or after a 401, the page at once stops sending API requests,
-removes the editor (which also removes its unsaved-work prompt), shows that the
-notebook session changed and reloads. It never renews a token and uses no
-timers.
+different one, or after a 401, the page ends its editor once: it refuses every
+further API request at once (other requests are not affected, and requests
+already under way are not cancelled), lets the editor store its unsaved work as
+when the page is hidden, removes the editor, shows that the notebook session
+changed, waits up to about 3 seconds for the editor's storage writes, and
+reloads. From the first step another change or 401 does nothing: the editor is
+not mounted again and the page reloads once, even if removing the editor fails.
+When the page is put into the back/forward cache it is hidden first, and on
+return it is shown again only if the session is unchanged; the hiding covers
+the editor's content in the page body, while the document title, which carries
+the project name, stays until the editor is removed. The page never renews a
+token.
 
 The Agent is off in the notebook build: no Agent control is shown, the Agent
 runtime is never loaded, its saved session is never read and `?agent=pair`
-does nothing. Not yet in this build: browser storage per user (T163; until
-then, drafts and preferences in this browser are shared by every notebook user
-who signs in on it), and the user's display name or a way back to
-silicon-notebook in the editor's own chrome.
+does nothing.
+
+**Browser storage per user.** Until the gate has identified the user the editor
+cannot use `localStorage`, `sessionStorage`, `indexedDB`, `navigator.locks`,
+`BroadcastChannel` or `navigator.storage`; then, for the rest of the page's
+life, they are bound to that user: every key, database, lock and channel name
+gets the prefix `nb1:<encoded id>:` (letters, digits, `_`, `-` kept, every
+other UTF-16 code unit as `.` and four hex digits) and the editor sees only
+those names. Preferences are per user too. The namespace adds the encoded user
+id to store names and stores no additional copy of the token. A store the
+browser denies stays denied; if a store the browser offers cannot be bound to
+the user, the page shows the error page and does not start.
+
+Boundary: this separates the editor's own data per user. It does not cover
+other scripts of the origin (silicon-notebook's pages), frames and windows,
+`storage` event contents, Workers and the service worker, cookies or Cache
+Storage; quota and eviction stay shared. It is not a defence against hostile
+same-origin code. New storage use in the editor is reviewed against this
+section; the notebook build test flags the forms it recognises.
+
+Exceptions: the gate reads silicon-notebook's token from the browser's own
+storage; the `theme` display preference is read by an inline script before the
+editor's entry module and is shared on the device; the service worker's shell
+cache holds no user data. Content and bindings stored by a single-user editor
+on this origin are never read, migrated or deleted; nothing is deleted when the
+session changes or ends, while within one user's stores the editor deletes as
+it always does and the service worker replaces old shells. At a session change
+the wait is a best effort: unfinished writes, or a tab that closes or crashes,
+lose what the standard editor would lose, and a copy kept only for the tab
+returns only in that tab. Other users' data stays in the browser profile,
+unshown and unencrypted; signing out does not remove it. Not yet in this
+build: the user's display name or a way back to silicon-notebook in the
+editor's own chrome.
 
 Deploying the notebook build, two separate rules:
 
@@ -271,12 +308,14 @@ Deploying the notebook build, two separate rules:
   it.
 
 [Gate tests](../../apps/editor/src/notebook/gate.test.ts),
+[browser storage tests](../../apps/editor/src/notebook/browser-storage.test.ts),
+[entry tests](../../apps/editor/src/notebook/entry.integration.test.tsx),
 [scoped fetch tests](../../apps/editor/src/notebook/scoped-fetch.test.ts),
 [session tests](../../apps/editor/src/notebook/session.test.ts),
 [preview tests](../../apps/editor/src/notebook/api-image.test.tsx) and the
 [build test](../../scripts/notebook-editor-build.test.mjs), which builds both
 editors and checks that no executable reference of the notebook build leaves
-`/canvas/`.
+`/canvas/` and that storage use stays within the modules it lists.
 The browser tests are [notebook-auth.spec.ts](../../apps/editor/e2e/notebook-auth.spec.ts),
 [notebook-bfcache.spec.ts](../../apps/editor/e2e/notebook-bfcache.spec.ts),
 [notebook-worker.spec.ts](../../apps/editor/e2e/notebook-worker.spec.ts)
