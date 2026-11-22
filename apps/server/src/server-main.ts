@@ -41,7 +41,12 @@ export async function startServer({
     await db.end();
     return null;
   }
-  const agentRelay = auth.mode === "local" ? new AgentRelayHost(db) : null;
+  // The relay gets the same resolved prefix as the HTTP app, whatever the
+  // process environment says.
+  const agentRelay =
+    auth.mode === "local"
+      ? new AgentRelayHost(db, undefined, undefined, basePath)
+      : null;
   await agentRelay?.start();
   const app = createApp({
     db,
@@ -91,7 +96,16 @@ export async function startServer({
     onListenError = reject;
     server.once("error", reject);
   });
-  const address = await Promise.race([ready, failed]);
+  let address: AddressInfo;
+  try {
+    address = await Promise.race([ready, failed]);
+  } catch (error) {
+    // A caller that catches a failed start gets no close() handle, so the
+    // relay's alarms and the database pool are released here.
+    await agentRelay?.close().catch(() => undefined);
+    await db.end().catch(() => undefined);
+    throw error;
+  }
   // Only a failure to listen is ours to report. A later server error stays
   // unhandled and stops the process, as it did before startServer existed.
   server.off("error", onListenError);

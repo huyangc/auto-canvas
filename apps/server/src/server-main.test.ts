@@ -70,6 +70,33 @@ describe("startServer", () => {
     expect(neverCalled).not.toHaveBeenCalled();
   });
 
+  it("releases the database pool when the port is taken", async () => {
+    const blocker = createNetServer();
+    blocker.listen(0, "127.0.0.1");
+    await once(blocker, "listening");
+    const { port } = blocker.address() as AddressInfo;
+    const pools: pg.Pool[] = [];
+    const tracked = () => {
+      const pool = createDb();
+      pools.push(pool);
+      return pool;
+    };
+    try {
+      await expect(
+        startServer({
+          env: { PORT: String(port), HOST: "127.0.0.1" },
+          argv: [],
+          createDb: tracked,
+          log: quiet,
+        }),
+      ).rejects.toMatchObject({ code: "EADDRINUSE" });
+      expect(pools).toHaveLength(1);
+      expect(pools[0]!.ended).toBe(true);
+    } finally {
+      await new Promise((resolve) => blocker.close(resolve));
+    }
+  });
+
   it("migrates and returns null for --migrate without constructing a relay", async () => {
     vi.stubEnv("AUTO_CANVAS_AGENT_IDLE_MS", "nonsense");
     try {
