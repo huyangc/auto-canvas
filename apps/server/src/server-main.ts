@@ -107,8 +107,11 @@ export async function startServer({
         // A handed-off socket has no error handler left: a peer that resets
         // while the reply is written must close only this connection.
         socket.on("error", () => socket.destroy());
+        // end() closes only our side. Destroy once the reply has flushed, so
+        // a peer that keeps its side open cannot hold server.close() back.
         socket.end(
           "HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n",
+          () => socket.destroy(),
         );
       });
     let onListenError!: (error: Error) => void;

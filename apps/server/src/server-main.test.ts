@@ -329,6 +329,37 @@ describe("startServer", () => {
     await new Promise((resolve) => probe.close(resolve));
   });
 
+  it("closes although a refused upgrade's peer keeps its side open", async () => {
+    const server = await startServer({
+      env: {
+        ...listen,
+        AUTO_CANVAS_AUTH: "notebook",
+        AUTO_CANVAS_NOTEBOOK_API: notebookApi,
+      },
+      argv: [],
+      createDb,
+      log: quiet,
+    });
+    const socket = connect({
+      port: server!.address.port,
+      host: "127.0.0.1",
+      allowHalfOpen: true,
+    });
+    socket.on("error", () => undefined);
+    socket.write(
+      "GET /@notebook/api/agent/sessions/x/editor HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n",
+    );
+    // The peer reads the reply but never ends its own side.
+    socket.resume();
+    await once(socket, "end");
+    const closed = await Promise.race([
+      server!.close().then(() => "closed"),
+      new Promise((resolve) => setTimeout(() => resolve("hung"), 3000)),
+    ]);
+    socket.destroy();
+    expect(closed).toBe("closed");
+  });
+
   it("starts local mode and serves health as before", async () => {
     const server = await startServer({
       env: listen,

@@ -6,7 +6,16 @@ import {
   type ServerResponse,
 } from "node:http";
 import type { AddressInfo } from "node:net";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import {
   createNotebookIdentity,
   parseBearer,
@@ -375,6 +384,39 @@ describe("cache", () => {
       status: 401,
     });
     expect(seen).toHaveLength(3);
+  });
+  describe("with the real clocks", () => {
+    afterEach(() => vi.restoreAllMocks());
+    const realClockIdentity = () =>
+      createNotebookIdentity({
+        notebookApi: api,
+        onProfile: async (profile) => {
+          hooked.push(profile);
+        },
+        timeoutMs: 200,
+      });
+    it("ends the window on the wall clock when the monotonic clock stood still, as on a suspended host", async () => {
+      const resolver = realClockIdentity();
+      expect((await resolver.resolve(bearer("alice-token"))).ok).toBe(true);
+      expect((await resolver.resolve(bearer("alice-token"))).ok).toBe(true);
+      expect(seen).toHaveLength(1);
+      const wall = Date.now();
+      vi.spyOn(Date, "now").mockReturnValue(wall + 60_000);
+      expect((await resolver.resolve(bearer("alice-token"))).ok).toBe(true);
+      expect(seen).toHaveLength(2);
+    });
+    it("ends the window on the monotonic clock when the wall clock was set back", async () => {
+      const resolver = realClockIdentity();
+      expect((await resolver.resolve(bearer("alice-token"))).ok).toBe(true);
+      const wall = Date.now();
+      const monotonic = performance.now();
+      vi.spyOn(Date, "now").mockReturnValue(wall - 600_000);
+      expect((await resolver.resolve(bearer("alice-token"))).ok).toBe(true);
+      expect(seen).toHaveLength(1);
+      vi.spyOn(performance, "now").mockReturnValue(monotonic + 60_000);
+      expect((await resolver.resolve(bearer("alice-token"))).ok).toBe(true);
+      expect(seen).toHaveLength(2);
+    });
   });
   it("keeps rotated tokens as separate entries", async () => {
     profiles["alice-rotated"] = profiles["alice-token"]!;
