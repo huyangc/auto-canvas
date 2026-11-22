@@ -60,6 +60,10 @@ already there.
 ```bash
 unset ICM_E2E_BASE_URL ICM_E2E_SERVER AUTO_CANVAS_E2E_BASE_PATH AUTO_CANVAS_AUTH VITE_AUTO_CANVAS_AUTH AUTO_CANVAS_BASE_PATH
 export ICM_E2E_ISOLATED=1 ICM_E2E_PORT=4273 AUTO_CANVAS_E2E_API_PORT=4321 AUTO_CANVAS_TEST_DATABASE_URL=postgresql:///auto_canvas_test_2
+# One existing case starts a Vite server inside the Playwright worker; without
+# this its proxy defaults to port 4310, a developer's own server.
+export AUTO_CANVAS_API_URL=http://127.0.0.1:4321
+unset RNL_VIEWER_TEST_URL
 lsof -nP -iTCP:4273 -iTCP:4321 -sTCP:LISTEN | wc -l                               # expected: 0 before any run
 pnpm exec playwright test --list apps/editor/e2e/project-file.spec.ts | tail -1   # expected: "Total: 8 tests in 1 file", exit 0
 pnpm exec playwright test --list | tail -1                                        # expected: a total above 400 tests, exit 0

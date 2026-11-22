@@ -12,7 +12,6 @@ import {
 
 import { AGENT_SESSION_RECOVERY_STORAGE_KEY } from "../src/agent/session-recovery-presence";
 import { WORKING_COPY_STORAGE_KEY } from "../src/document/recovery-coordinator";
-import { CLOUD_PROJECT_LIMIT } from "../src/features/editor-shell/cloud-projects";
 import {
   clickCommand,
   clickNetlistWorkflowCommand,
@@ -33,6 +32,11 @@ import {
 } from "./editor-fixtures.js";
 import { sessionUser, signIn } from "./account-fixtures.js";
 import { placedInstance } from "./canvas-fixtures.js";
+
+// The browser test pins the visible limit. A spec must not import an editor
+// module that reads import.meta.env when it is evaluated: under Playwright's
+// Node transform that throws and collects no tests at all.
+const CLOUD_PROJECT_LIMIT = 200;
 
 async function mockCloudProjects(page: Page) {
   let stored: {
