@@ -331,9 +331,10 @@ function createEditorShortcutHandler({
       event.target instanceof Element &&
       (event.target.closest(".project-tab-name-input") ||
         event.target.closest(".cloud-shelf-dialog") ||
-        // File and ⋯ scroll and close themselves; Escape returns focus to
-        // their buttons.
-        (event.target.closest(".project-menu, .more-menu") &&
+        // An open File or ⋯ scrolls and closes itself; Escape returns focus
+        // to its button. Closed, its focused button leaves the keys to the
+        // canvas (Escape cancels a tool, arrows pan).
+        (event.target.closest(".project-menu[open], .more-menu[open]") &&
           ["Escape", "ArrowUp", "ArrowDown", "Home", "End"].includes(
             event.key,
           )) ||
