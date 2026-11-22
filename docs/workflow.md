@@ -119,8 +119,9 @@ AGENTS.md，跑完方案里的验收命令，它的最终消息就是报告，Op
 
 ### 按要求运行 Codex 轮次
 
-人要求时，仍可用脚本跑一轮 Codex 实现。脚本要求任务分支上，任务目录之外没有未提交的
-改动：先提交子代理已审查的改动，或丢弃被否决的改动。
+人要求时，仍可用脚本跑一轮 Codex 实现。任务的第一轮 Codex 开始时，任务目录之外
+不能有未提交的改动：先提交子代理已审查的改动，或丢弃被否决的改动。之后的 Codex 轮
+次接着上一轮未提交的改动继续，轮间不提交。
 
 任务的轮次和三轮上限以 `review.md` 为准。Codex 日志的 `round-<n>` 只数 Codex 轮次，
 前面有过子代理轮次时它仍从 1 开始，派发时在 `review.md` 里写明这是任务的第几轮。两者不同时，Opus 审查时把
@@ -194,6 +195,8 @@ CI 里，它们的证据以 Opus 亲自重跑的结果为准，写进 PR 的 Evi
 它运行 `codex exec review` 时不带 `-m`，模型取自 `~/.codex/config.toml`；该轮日志
 `~/.claude/codex-pr-review/logs/pr<PR号>-r<n>.log` 里有一行 `model:`，要确认是
 `gpt-6.2-sol`，否则改好配置重跑，或用下面带 `-m gpt-6.2-sol` 的手动命令并贴回输出。
+日志文件名只含 PR 号和轮次，不含仓库；同一个 hook 服务多个仓库，或日志不是贴到这个
+head 上那一轮的，就不要依赖它，改用带 `-m gpt-6.2-sol` 的手动命令。
 新 clone 可能没有这个 hook，但评审规则不变；没有 hook 时手动运行并按上述要求贴回证据：
 
 ```bash
@@ -211,7 +214,9 @@ codex exec review --base origin/main --ephemeral -m gpt-6.2-sol \
 
 合入前 `verify` 必须成功，它以 PR 评论和远端 `headRefOid` 对账。没有 hook 时人工做同样的
 核对：`gh pr view <PR号> --json headRefOid,comments`，确认有一条评审评论的 head SHA 与
-`headRefOid` 一致，且退出码为零、输出非空。
+`headRefOid` 一致，且退出码为零、输出非空。`verify` 只认 hook 的评论格式；手动命令贴出的
+一轮要按这里的方法人工核对：评论里有完整命令、head SHA、退出码和输出字节数，且对应远端
+`headRefOid`。
 
 ## Claude Code 技能
 

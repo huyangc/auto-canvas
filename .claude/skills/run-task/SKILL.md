@@ -23,9 +23,10 @@ report and a claim: write `report.md` from it, then review.
 
 Only when the owner asks. Run `scripts/codex-task.sh tasks/<id>-<slug>` with
 Bash `run_in_background` (rounds take many minutes) and tell the user the round
-started and where the logs are. A Codex round starts from a task branch with
-no uncommitted changes outside the task directory: commit a subagent's reviewed
-edits (or discard rejected ones) first. The task's round count and the
+started and where the logs are. The first Codex round of a task starts with
+no uncommitted changes outside the task directory (commit a subagent's reviewed
+edits or discard rejected ones first); later Codex rounds continue on the
+previous round's uncommitted diff, which is not committed between rounds. The task's round count and the
 three-round limit are the ones in `review.md`; a Codex log's `round-<n>` counts
 Codex rounds only and starts at 1 after subagent rounds, so name the task round
 in `review.md` when dispatching. When the two differ, correct the `report.md`
