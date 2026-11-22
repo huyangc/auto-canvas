@@ -212,6 +212,8 @@ it("calls onError and returns to the placeholder when the fetched body is not an
   await act(async () => image.dispatchEvent(new Event("error")));
   expect(onError).toHaveBeenCalledTimes(1);
   expectPlaceholder();
+  // Released at once, and only once.
+  expect(revoked).toEqual(["blob:test/1"]);
   await act(async () => root?.unmount());
   root = undefined;
   expect(revoked).toEqual(["blob:test/1"]);

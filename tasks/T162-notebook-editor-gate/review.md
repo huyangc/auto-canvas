@@ -151,3 +151,21 @@ no path containing @notebook in either output
 working-tree changes outside the owned files → none
 pnpm typecheck → 0; pnpm lint → 0; pnpm format:check → 0; pnpm docs:check → 0
 ```
+
+## Round 6 — accepted (fixes by the reviewer); review loop closed
+
+Reviewed: codex `gpt-6.2-sol` PR review round 4 of PR 114 at `937ac95`
+(three P3; no blocking finding), each checked against the code and found
+valid; fixed by the reviewer.
+
+| # | Severity | Where | Finding | Expected fix |
+| --- | --- | --- | --- | --- |
+| 20 | fixed | `apps/editor/vite.config.ts` | An empty or unknown `VITE_AUTO_CANVAS_AUTH` in the shell stopped `vite dev` and `vite preview` too, although only a build reads the variable. | The value is validated only when `command === "build"`. The config test resolves `serve` with `notebook`, `oidc` and an empty value: the switch is `false`, nothing throws. |
+| 21 | fixed | `apps/editor/src/notebook/api-image.tsx` | After a decode failure the object URL stayed allocated until the row unmounted. | It is revoked when the image's `error` fires; the test asserts the revocation before unmount and that it happens once. |
+| 22 | fixed | `scripts/notebook-editor-build.test.mjs` | A template-literal target with JavaScript escapes was read as raw text, which the browser would decode differently. | A literal with a backslash is no longer a literal for the check: it is reported as a computed target. The self-check has `../../x.js` written in escapes. |
+
+Acceptance rerun by the reviewer: see the PR comment for this head.
+
+The reviewer stops the fix-and-review loop here unless a later review of the
+remote head reports a P0, P1 or P2: four rounds have been non-blocking and
+the last one held only P3. Later P3 findings are recorded on the PR.

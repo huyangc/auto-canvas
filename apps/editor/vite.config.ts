@@ -39,7 +39,13 @@ function notebookBuildSwitch(): Plugin {
     name: "notebook-build-switch",
     config(_config, { command }) {
       const value = process.env.VITE_AUTO_CANVAS_AUTH;
-      if (value !== undefined && value !== "local" && value !== "notebook")
+      // Whatever the shell exports, the dev server and preview start as usual.
+      if (
+        command === "build" &&
+        value !== undefined &&
+        value !== "local" &&
+        value !== "notebook"
+      )
         throw new Error(
           'VITE_AUTO_CANVAS_AUTH must be unset, "local" or "notebook"',
         );
