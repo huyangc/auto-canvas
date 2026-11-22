@@ -111,3 +111,31 @@ intermittent reproduction rates, measure performance before bisecting, report
 attempted methods and missing input when no feedback loop exists, redact
 private artifacts and obtain authorization for environment access or
 production instrumentation.
+
+## silicon-notebook integration check
+
+`scripts/notebook-integration-check.mjs` checks, on demand, the two rewrite
+rules that serve auto-canvas under silicon-notebook's Next.js server at
+`/canvas`. It is not part of CI or `pnpm check`.
+
+- Stage T builds a throwaway Next.js app with the two rules against a stub
+  upstream and checks the transport: requests reach only the private mount
+  `/@notebook/canvas`, the bare entry does not redirect in a loop, and
+  malformed paths never reach the upstream.
+- Stage A clones a silicon-notebook revision, checks that it adds no
+  dependency, that its default build keeps exactly today's rewrite rules, that
+  a build with `CANVAS_PROXY_TARGET` adds exactly two frozen rules that pass
+  the stage T table, that invalid values fail the build, and that the notebook
+  starts without auto-canvas.
+
+```bash
+node scripts/notebook-integration-check.mjs --stage T --notebook <notebook checkout>
+node scripts/notebook-integration-check.mjs --stage A --notebook <notebook checkout> \
+  --ref <branch or commit> --base <commit without the change> --python <interpreter with the backend dependencies>
+```
+
+Everything is built and started in a temporary directory the script creates
+(`--keep` leaves it). The notebook checkout is only read: the script clones its
+git repository and copies, never uses in place, its installed
+`frontend/node_modules`; Node children run offline behind a guard. Rerun the
+check after any Next.js upgrade in the notebook repository.

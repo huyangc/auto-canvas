@@ -1,0 +1,154 @@
+// Stage T: a real Next.js production server with the two canvas rules.
+import fs from "node:fs";
+import path from "node:path";
+
+import { copyModules, preflightModules } from "./modules.mjs";
+import { startNext, tail } from "./steps.mjs";
+import { rawRequest, startStub, transportAssertions } from "./transport.mjs";
+
+// One allowed path unit, and a segment of units (see the plan's Context).
+const UNIT = String.raw`(?:[^/\\%.\x00-\x20\x7f]|%(?!2[eEfF]|5[cC]|[01][0-9a-fA-F]|20|7[fF]))`;
+const SEGMENT =
+  String.raw`\.*` + UNIT + "(?:" + UNIT + String.raw`|\.)*|\.{3,}`;
+
+const nextConfig = `const segment = ${JSON.stringify(SEGMENT)};
+const target = process.env.CHECK_TARGET;
+export default {
+  experimental: { proxyTimeout: 300_000 },
+  async rewrites() {
+    if (process.env.CHECK_RULES === "one")
+      return [{ source: "/canvas/:path*", destination: target + "/@notebook/canvas/:path*" }];
+    return [
+      { source: "/canvas", destination: target + "/@notebook/canvas/" },
+      { source: "/canvas/:path(" + segment + ")*", destination: target + "/@notebook/canvas/:path*" },
+    ];
+  },
+};
+`;
+
+export async function stageT({ sandbox, report, notebook }) {
+  const app = path.join(sandbox.root, "app");
+  fs.mkdirSync(path.join(app, "pages"), { recursive: true });
+  const modules = path.join(app, "node_modules");
+  copyModules(
+    sandbox,
+    path.join(notebook, "frontend", "node_modules"),
+    modules,
+  );
+  const preflight = preflightModules(sandbox, modules);
+  if (preflight.problems.length) {
+    report.fail(
+      "private modules preflight",
+      preflight.problems.slice(0, 10).join("; "),
+    );
+    return;
+  }
+  report.ok(
+    `private modules preflight (next ${preflight.version}; native SWC ${preflight.loaded.join(", ")})`,
+  );
+
+  const marker = `nb-check-${sandbox.randomToken()}`;
+  fs.writeFileSync(
+    path.join(app, "package.json"),
+    '{"name":"nb-check","private":true}\n',
+  );
+  fs.writeFileSync(
+    path.join(app, "pages/index.js"),
+    `export default function Home() { return <main>${marker}</main>; }\n`,
+  );
+  fs.writeFileSync(path.join(app, "next.config.mjs"), nextConfig);
+
+  const configurations = [
+    { label: "(i) two rules, 127.0.0.1", rules: "two", host: "127.0.0.1" },
+    { label: "(ii) two rules, localhost", rules: "two", host: "localhost" },
+    { label: "(iii) one rule, 127.0.0.1", rules: "one", host: "127.0.0.1" },
+  ];
+  for (const configuration of configurations) {
+    const prefix = `T${configuration.label.split(" ")[0]} `;
+    console.log(`-- ${configuration.label}`);
+    const stubPort = await sandbox.freePort();
+    const stub = await startStub(stubPort);
+    const env = sandbox.env({
+      CHECK_RULES: configuration.rules,
+      CHECK_TARGET: `http://${configuration.host}:${stubPort}`,
+    });
+    let server;
+    try {
+      fs.rmSync(path.join(app, ".next"), { recursive: true, force: true });
+      const build = await sandbox.run(
+        process.execPath,
+        [path.join(modules, "next/dist/bin/next"), "build"],
+        { cwd: app, env, name: "t-build" },
+      );
+      if (
+        !report.check(`${prefix}next build`, build.status === 0, () =>
+          tail(build.output),
+        )
+      )
+        continue;
+      const nextPort = await sandbox.freePort();
+      server = await startNext(sandbox, {
+        dir: app,
+        port: nextPort,
+        env,
+        name: "t-start",
+        marker,
+      });
+      if (
+        !report.check(
+          `${prefix}next start serves the marker`,
+          !server.error,
+          () => server.error,
+        )
+      )
+        continue;
+      if (configuration.rules === "two") {
+        await transportAssertions({ nextPort, stub, report, prefix });
+        if (configuration.host === "127.0.0.1") {
+          await stub.close();
+          const res = await rawRequest(nextPort, "/canvas").catch((error) => ({
+            status: error.message,
+          }));
+          report.check(
+            `${prefix}GET /canvas with the upstream down -> 500`,
+            res.status === 500,
+            `status ${res.status}`,
+          );
+        }
+      } else {
+        await singleRuleControl({ nextPort, stub, report, prefix });
+      }
+    } finally {
+      if (server) await sandbox.stopGroup(server.handle.pgid);
+      await stub.close();
+    }
+  }
+}
+
+/** The negative control: one wildcard rule alone loops between Next and the upstream. */
+async function singleRuleControl({ nextPort, stub, report, prefix }) {
+  let allOk = true;
+  for (let round = 1; round <= 2; round += 1) {
+    let mark = stub.records.length;
+    const slash = await rawRequest(nextPort, "/canvas/");
+    allOk &&= report.check(
+      `${prefix}round ${round}: GET /canvas/ -> 308 /canvas, not forwarded`,
+      slash.status === 308 &&
+        slash.headers.location === "/canvas" &&
+        stub.records.length === mark,
+      `status ${slash.status}, location ${slash.headers.location}, upstream ${stub.records.length - mark}`,
+    );
+    mark = stub.records.length;
+    const bare = await rawRequest(nextPort, "/canvas");
+    const fresh = stub.records.slice(mark);
+    allOk &&= report.check(
+      `${prefix}round ${round}: GET /canvas -> 308 /canvas/, upstream /@notebook/canvas`,
+      bare.status === 308 &&
+        bare.headers.location === "/canvas/" &&
+        fresh.length === 1 &&
+        fresh[0].url === "/@notebook/canvas",
+      `status ${bare.status}, location ${bare.headers.location}, upstream ${JSON.stringify(fresh)}`,
+    );
+  }
+  if (allOk) report.ok("control: single rule loops");
+}
