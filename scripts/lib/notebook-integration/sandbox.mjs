@@ -13,6 +13,13 @@ const OWNER_PORTS = new Set([3000, 8000, 4310]);
 /** Raised for a refusal that maps to exit status 2. */
 export class UsageError extends Error {}
 
+/** Raised by start() once disposal has begun: nothing new may be spawned. */
+class SandboxClosing extends Error {
+  constructor(name) {
+    super(`not starting ${name}: the sandbox is being disposed`);
+  }
+}
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export async function waitFor(check, timeoutMs, intervalMs = 200) {
@@ -31,14 +38,26 @@ const net = require("net");
 const fs = require("fs");
 const original = net.Socket.prototype.connect;
 const LOOPBACK = new Set(["127.0.0.1", "::1"]);
+// The first argument is classified exactly as Node's net.js normalizeArgs and
+// Socket.prototype.connect do (read from Node 26.7.0): an array carrying the
+// internal normalizedArgs symbol is already normalised ([options, cb]); any
+// other object (arrays included) is the options; a string s is a pipe path
+// only when isPipeName(s), i.e. toNumber(s) === false with
+// toNumber(x) = (x = Number(x)) >= 0 ? x : false, so " 80 ", "0x50", "1e2"
+// and "" are ports; everything else is a port, with the host from a string
+// second argument.
+function isNormalized(value) {
+  return Array.isArray(value) && Object.getOwnPropertySymbols(value).some((symbol) => symbol.description === "normalizedArgs");
+}
+function isPipeName(value) {
+  return typeof value === "string" && !(Number(value) >= 0);
+}
 function optionsOf(args) {
   const first = args[0];
-  if (Array.isArray(first)) return { options: first[0], wrapped: first };
+  if (isNormalized(first)) return { options: first[0], wrapped: first };
   if (first !== null && typeof first === "object") return { options: first };
-  if (typeof first === "number" || (typeof first === "string" && /^\d+$/.test(first))) {
-    return { options: { port: Number(first), host: typeof args[1] === "string" ? args[1] : undefined } };
-  }
-  return { options: { path: first } };
+  if (isPipeName(first)) return { options: { path: first } };
+  return { options: { port: first, host: args.length > 1 && typeof args[1] === "string" ? args[1] : undefined } };
 }
 net.Socket.prototype.connect = function guardedConnect(...args) {
   const { options, wrapped } = optionsOf(args);
@@ -59,7 +78,7 @@ net.Socket.prototype.connect = function guardedConnect(...args) {
   }
   if (LOOPBACK.has(host)) return original.apply(this, args);
   try {
-    fs.appendFileSync(process.env.NB_CHECK_OFFLINE_LOG, host + " " + options.port + "\n");
+    fs.appendFileSync(process.env.NB_CHECK_OFFLINE_LOG, host + " " + String(options.port).trim() + "\n");
   } catch {}
   const error = new Error("offline guard refused " + host + ":" + options.port);
   error.code = "ENETUNREACH";
@@ -113,6 +132,7 @@ export function createSandbox(notebook, { keep }) {
   const groups = new Set();
   const usedPorts = new Set();
   let counter = 0;
+  let closing = false;
 
   function removeRoot() {
     // Identity check: only ever remove the directory this run created.
@@ -128,6 +148,40 @@ export function createSandbox(notebook, { keep }) {
   if (/\s/.test(root)) {
     removeRoot();
     throw new UsageError(`temporary root ${root} contains whitespace`);
+  }
+
+  /**
+   * Throws unless `target` lies inside the sandbox root and every existing
+   * component from the root down to it is a real directory (lstat: never a
+   * symlink, never a file), with the deepest existing one resolving inside the
+   * root. Call it before writing to, removing or handing out a path under the
+   * root, so a symlink planted there (for example a tracked one in the clone)
+   * can never redirect a write outside.
+   */
+  function assertInsideSandbox(target) {
+    const fail = (why) => {
+      throw new Error(`${target}: ${why}`);
+    };
+    const realRoot = fs.realpathSync(root);
+    const rel = path.relative(root, path.resolve(target));
+    if (rel.startsWith("..") || path.isAbsolute(rel))
+      fail(`not under the sandbox root ${root}`);
+    let current = root;
+    for (const part of ["", ...rel.split(path.sep).filter(Boolean)]) {
+      current = path.join(current, part);
+      let stat;
+      try {
+        stat = fs.lstatSync(current);
+      } catch (error) {
+        if (error.code === "ENOENT") break;
+        fail(`${current}: ${error.message}`);
+      }
+      if (stat.isSymbolicLink()) fail(`${current} is a symlink`);
+      if (!stat.isDirectory()) fail(`${current} is not a directory`);
+      const within = path.relative(realRoot, fs.realpathSync(current));
+      if (within.startsWith("..") || path.isAbsolute(within))
+        fail(`${current} resolves outside the sandbox root`);
+    }
   }
 
   function env(extra = {}) {
@@ -165,8 +219,14 @@ export function createSandbox(notebook, { keep }) {
     }
   }
 
+  /** Throws once disposal has begun, so a stage cannot go on to a new step. */
+  function ensureOpen(name) {
+    if (closing) throw new SandboxClosing(name);
+  }
+
   /** Spawn a process that leads its own group; stdout and stderr go to a log file. */
   function start(command, args, { cwd, env: childEnv, name }) {
+    ensureOpen(name);
     const logFile = path.join(
       logs,
       `${String(++counter).padStart(2, "0")}-${name}.log`,
@@ -345,9 +405,13 @@ export function createSandbox(notebook, { keep }) {
     return { state: "foreign", pids };
   }
 
-  /** Stops every owned group; resolves to the ids still present afterwards. */
+  /**
+   * Stops every owned group; resolves to the ids still present afterwards.
+   * Closing is marked before the snapshot, so no group can start after it.
+   */
   let disposal;
   function dispose() {
+    closing = true;
     disposal ??= (async () => {
       await Promise.all([...groups].map((pgid) => stopGroup(pgid)));
       const left = [...groups];
@@ -379,6 +443,8 @@ export function createSandbox(notebook, { keep }) {
     marker,
     offlineLog,
     env,
+    ensureOpen,
+    assertInsideSandbox,
     start,
     run,
     stopGroup,

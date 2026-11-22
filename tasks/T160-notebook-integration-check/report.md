@@ -117,3 +117,36 @@ owner listener PIDs unchanged (3000: 41839, 8000: 41838, 4310: 85736)
 - Two variables added to A6 beyond the review row: a random `SILICON_NOTEBOOK_ADMIN_PASSWORD` (closes the default-password hole when authentication stays on) and `COLUMNS=1000`.
 - The offline-guard control prints three lines (`offline guard active (fetch)`, `(http.get)`, `(https.get)`) instead of one.
 - The post-copy destination check of finding 6 cannot be reached from the command line (the source check fires first) and was not demonstrated separately.
+
+# T160 report — round 3
+
+(From the implementer subagent's hand-back; saved by the reviewer.)
+
+## Review findings addressed
+
+- 17 (must-fix): new `assertInsideSandbox(path)` in `sandbox.mjs`: every existing component from the sandbox root down must be a real directory (lstat, no symlink) whose realpath is inside the root. It is called (a) on the modules copy's destination before the first `rm` / `cp`; (b) after the checkout on `<clone>`, `frontend`, `.local`, `frontend/.next` and `frontend/node_modules`, failing before any copy, build or launch; (c) before the A6 launch on `.local`, which is created as a real directory when absent. The database assertion is now bounded by `<realpath(root)>/nb/.local`. Shown with a throwaway repository whose `frontend` is a tracked symlink to a directory holding a sentinel: stage A fails at the path check and the sentinel survives. A 12-case unit check of the helper passes.
+- 18: the offline guard classifies `connect`'s first argument as Node 26.7.0's `Socket.prototype.connect` and `normalizeArgs` do: an array is pre-normalised only with the `normalizedArgs` symbol, any object is the options, a string is a pipe only when `Number(s) >= 0` is false, and anything else is a port with the host from a string second argument. A fourth control, `offline guard active (socket.connect)`, uses `connect(" 49152 ", "192.0.2.1")`. The old guard let it through; the new one refuses and logs it.
+- 19: `startNext` and the A6 readiness loop check listener ownership before every readiness request; another pid, or a lost listener, fails at once.
+- 20: A1 uses `git diff --no-renames --name-only -z`, split on NUL.
+- 21: both `ps` calls in A6 get only `PATH`.
+- 22: unexpected exceptions and cleanup failures go through the reporter, and the `stage <X>: N passed, M failed` line is printed last, after disposal, so it always agrees with the exit status.
+- 23 (must-fix): stage A refuses, after the checkout, before every build and before the A6 launch, a clone holding `<clone>/.env` or `frontend/.env`, `.env.local`, `.env.production`, `.env.production.local`, `.env.development`, `.env.development.local`, `.env.test` or `.env.test.local`; a file, a symlink or a dangling symlink counts. A re-read of `prod.sh`, `python_env.py`, `extension_services.sh` and `autotune.sh` found no other configuration file read by fixed name: `prod.sh` sources only `<root>/.env`, and Python reads no dotenv when `SILICON_NOTEBOOK_ENV_FILE` is empty. Shown with a throwaway repository whose commit has a root `.env`: stage A fails before any build or launch.
+- 24: `dispose()` marks the sandbox closing before taking its snapshot. After that, `start()` / `run()` and `ensureOpen()` (used before every stage-A build and launch and before the modules copy) throw `SandboxClosing`. SIGINT during stage T's first `next build` and during the first A5 build: exit 130, no process group of the script left, the temporary root removed.
+
+## Acceptance results (implementer)
+
+```text
+stage T → 0; 122 passed, 0 failed
+stage A, candidate 49cd77372, twice → 0; 88 passed, 0 failed
+stage A, negative control → 1; 79 passed, 9 failed: A3 (1), A4 (6), A5 (2)
+--stage X and the three TMPDIR refusals → 2
+pnpm lint, format:check, docs:check, typecheck → 0
+owner listener PIDs unchanged (3000: 41839, 8000: 41838, 4310: 85736); notebook checkout git status unchanged
+```
+
+## Deviations
+
+- `ensureOpen()` is also called by stage A's clone check and by `prepareModules`, not only by `start()`.
+- `optionsOf` treats an array without Node's internal symbol as options, as Node does.
+- One sentence added to `docs/testing/README.md` about the stage-A refusals.
+- During an experiment `pkill -f "sleep 30"` was used to end a test child; see the review's process note.

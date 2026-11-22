@@ -137,5 +137,8 @@ node scripts/notebook-integration-check.mjs --stage A --notebook <notebook check
 Everything is built and started in a temporary directory the script creates
 (`--keep` leaves it). The notebook checkout is only read: the script clones its
 git repository and copies, never uses in place, its installed
-`frontend/node_modules`; Node children run offline behind a guard. Rerun the
+`frontend/node_modules`; Node children run offline behind a guard. Stage A
+refuses, before any copy, build or launch, a revision whose paths the check
+writes to are symlinks or which holds a dotenv file the launcher or Next would
+read (`.env`, `frontend/.env*`). Rerun the
 check after any Next.js upgrade in the notebook repository.

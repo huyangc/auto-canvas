@@ -131,3 +131,48 @@ found valid.
 Keep everything else as it is. Rerun the whole Acceptance section of the plan
 except `pnpm deadcode`, and the three refusal runs. This is the third
 implementation round; the workflow's limit is three.
+
+Two findings added during the round, from another codex pass over the same
+code (PR review round 4), and given to the implementer with findings 17–22:
+
+| # | Severity | Where | Finding | Expected fix |
+| --- | --- | --- | --- | --- |
+| 23 | must-fix | `stage-a.mjs` (clone, builds, A6) | `ALLOW_NO_ENV_FILE=1` lets the launcher run without `<clone>/.env` but does not stop it from sourcing one that the tested revision contains (a tracked file or a symlink), which would override the allow-listed environment; Next likewise loads `frontend/.env*`. | Refuse a clone that holds `<clone>/.env` or any of `frontend/.env`, `.env.local`, `.env.production(.local)`, `.env.development(.local)`, `.env.test(.local)` — after the checkout, before every build and before the A6 launch. |
+| 24 | should-fix | `sandbox.mjs` (`dispose`, `start`) | After an interrupt, `dispose()` snapshots the owned groups while the stage keeps running and can start another child that the snapshot does not cover. | Mark the sandbox closing before the snapshot; `start()` / `run()` refuse to spawn once closing. |
+
+## Round 5 — accepted
+
+Reviewed: the round-4 changes; `assertInsideSandbox` read by the reviewer;
+every acceptance command rerun by the reviewer.
+
+- Finding 17: `assertInsideSandbox` (every existing component from the sandbox
+  root down is a real directory whose real path is inside the root) runs before
+  the modules copy, after the checkout on the clone's write locations, and
+  before the A6 launch. Demonstrated by the implementer with a throwaway
+  repository whose `frontend` is a tracked symlink to a directory holding a
+  sentinel: stage A fails at the path check and the sentinel survives.
+- Finding 23: demonstrated with a throwaway repository whose commit has a root
+  `.env`: stage A fails before any build or launch.
+- Findings 18–22 and 24: as described in the report.
+
+Acceptance rerun:
+
+```text
+stage T → 0; 122 passed, 0 failed
+stage A, candidate claude/canvas-proxy-rewrite-a58b3d (49cd77372), base d3388036b → 0; 88 passed, 0 failed
+stage A, negative control (--ref = --base = d3388036b) → 1; 79 passed, 9 failed: A3 (1), A4 (6), A5 (2)
+--stage X → 2; the three TMPDIR refusals → 2; no nb-check-* directory under the checkout
+pnpm lint → 0; pnpm format:check → 0; pnpm docs:check → 0; pnpm typecheck → 0
+```
+
+The owner's listeners on 3000, 8000 and 4310 kept their PIDs; the notebook
+checkout's `git status` was unchanged.
+
+Process note for later tasks: during its own experiments the implementer ran
+`pkill -f "sleep 30"` to end a test child. That matches by command line and
+could have hit an unrelated process; nothing of the owner's was affected as far
+as the listener PIDs show. The check script contains nothing of the kind.
+Briefs must forbid killing by name or pattern.
+
+This was the third implementation round, the workflow's limit. Any further
+blocking finding goes to the owner for a decision instead of a fourth round.

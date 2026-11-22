@@ -85,7 +85,6 @@ for (const signal of ["SIGINT", "SIGTERM"])
   });
 
 const report = createReporter();
-let failures = 1;
 try {
   console.log(`temporary root: ${sandbox.root}`);
   if (await offlineControl(sandbox, report)) {
@@ -95,21 +94,23 @@ try {
     offlineVerdict(sandbox, report);
   }
   observeSource(sandbox, report, notebook);
-  failures = report.summary(options.stage);
 } catch (error) {
   if (!interrupted)
-    console.log(
-      `FAIL ${options.stage}: unexpected error: ${error.stack ?? error}`,
-    );
-  failures = 1;
+    report.fail(options.stage, `unexpected error: ${error.stack ?? error}`);
+  else report.note(`stage stopped after the interrupt: ${error.message}`);
 } finally {
-  const left = await sandbox.dispose();
-  for (const pgid of left) {
-    console.log(
-      `FAIL ${options.stage}: process group ${pgid} still present after cleanup`,
-    );
-    failures += 1;
+  // Cleanup failures count like any other: the summary comes after them.
+  try {
+    for (const pgid of await sandbox.dispose())
+      report.fail(
+        options.stage,
+        `process group ${pgid} still present after cleanup`,
+      );
+  } catch (error) {
+    report.fail(options.stage, `cleanup failed: ${error.stack ?? error}`);
   }
   if (options.keep) console.log(`kept ${sandbox.root}`);
 }
+// Printed last, after disposal, so it always agrees with the exit status.
+const failures = report.summary(options.stage);
 process.exit(interrupted ? 130 : failures === 0 ? 0 : 1);

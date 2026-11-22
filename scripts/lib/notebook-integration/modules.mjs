@@ -20,12 +20,19 @@ function sourceModulesProblem(from) {
 }
 
 /**
- * Check the source, copy it, then preflight the copy. Nothing is copied when
- * the source is not a real directory.
+ * Check the source, check that the destination and every parent of it is a
+ * real directory inside the sandbox, copy, then preflight the copy. Nothing
+ * is removed or copied when either check fails.
  */
 export function prepareModules(sandbox, from, to) {
   const problem = sourceModulesProblem(from);
   if (problem) return { problems: [problem] };
+  sandbox.ensureOpen("the modules copy");
+  try {
+    sandbox.assertInsideSandbox(to);
+  } catch (error) {
+    return { problems: [`the copy's destination ${error.message}`] };
+  }
   copyModules(sandbox, from, to);
   return preflightModules(sandbox, to);
 }

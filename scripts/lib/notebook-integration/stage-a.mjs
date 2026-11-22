@@ -21,7 +21,37 @@ import {
   transportAssertions,
 } from "./transport.mjs";
 
-export async function stageA({ sandbox, report, notebook, options }) {
+// Dotenv files a launch or build of the clone would read by fixed name:
+// scripts/prod.sh sources <clone>/.env (ALLOW_NO_ENV_FILE only allows it to
+// be absent), and Next loads these from frontend/ at build and start. Any of
+// them, as a file or a symlink (lstat: a dangling one counts), would override
+// the allow-listed environment, so its presence refuses the step.
+const DOTENV_FILES = [
+  ".env",
+  ...[
+    ".env",
+    ".env.local",
+    ".env.production",
+    ".env.production.local",
+    ".env.development",
+    ".env.development.local",
+    ".env.test",
+    ".env.test.local",
+  ].map((name) => `frontend/${name}`),
+];
+
+/** Thrown after a refusal has been reported: the stage stops there. */
+class Refused extends Error {}
+
+export async function stageA(context) {
+  try {
+    await stageABody(context);
+  } catch (error) {
+    if (!(error instanceof Refused)) throw error;
+  }
+}
+
+async function stageABody({ sandbox, report, notebook, options }) {
   const nb = path.join(sandbox.root, "nb");
   const frontend = path.join(nb, "frontend");
   const git = (args, cwd = nb) =>
@@ -82,6 +112,53 @@ export async function stageA({ sandbox, report, notebook, options }) {
   console.log(`     base      ${base} (${options.base})`);
   git(["checkout", "--quiet", "--detach", candidate]);
 
+  // The revision decides what <clone> holds: a tracked symlink at any path
+  // this stage writes to, or a dotenv file, refuses the stage before any
+  // copy, build or launch.
+  const clonePaths = [
+    nb,
+    frontend,
+    path.join(nb, ".local"),
+    path.join(frontend, ".next"),
+    path.join(frontend, "node_modules"),
+  ];
+  const cloneProblems = (paths) => {
+    const problems = [];
+    for (const target of paths) {
+      try {
+        sandbox.assertInsideSandbox(target);
+      } catch (error) {
+        problems.push(error.message);
+      }
+    }
+    const dotenv = DOTENV_FILES.filter((relative) => {
+      try {
+        fs.lstatSync(path.join(nb, relative));
+        return true;
+      } catch (error) {
+        return error.code !== "ENOENT";
+      }
+    });
+    if (dotenv.length)
+      problems.push(`dotenv file(s) in the clone: ${dotenv.join(", ")}`);
+    return problems;
+  };
+  const refuseUnsafeClone = (name, paths) => {
+    sandbox.ensureOpen(name);
+    const problems = cloneProblems(paths);
+    if (problems.length) {
+      report.fail(name, `${problems.join("; ")} (nothing built or launched)`);
+      throw new Refused();
+    }
+  };
+  refuseUnsafeClone(
+    "the clone's paths are real directories inside the sandbox, without dotenv files",
+    clonePaths,
+  );
+  report.ok(
+    "the clone's paths are real directories inside the sandbox, without dotenv files",
+  );
+
   // Modules: the source checkout's installed modules must match the revision.
   const lockAtCandidate = git([
     "show",
@@ -117,9 +194,17 @@ export async function stageA({ sandbox, report, notebook, options }) {
   );
 
   // A1: no new dependency.
-  // --no-renames: a moved file shows both its old and its new path.
-  const changed = git(["diff", "--no-renames", "--name-only", base, candidate])
-    .split("\n")
+  // --no-renames: a moved file shows both its old and its new path; -z: names
+  // are NUL-terminated and never quoted, so unusual bytes still match.
+  const changed = git([
+    "diff",
+    "--no-renames",
+    "--name-only",
+    "-z",
+    base,
+    candidate,
+  ])
+    .split("\0")
     .filter(Boolean);
   if (base === candidate)
     report.ok("A1 (base equals candidate, nothing to compare)");
@@ -138,6 +223,7 @@ export async function stageA({ sandbox, report, notebook, options }) {
   }
 
   const build = async (extra, name) => {
+    refuseUnsafeClone(`${name}: the clone holds no dotenv file`, [frontend]);
     const result = await sandbox.run("npm", ["run", "build"], {
       cwd: frontend,
       env: sandbox.env(extra),
@@ -289,7 +375,16 @@ export async function stageA({ sandbox, report, notebook, options }) {
     );
   }
 
-  await stageA6({ sandbox, report, options, nb, frontend, build, cleanNext });
+  await stageA6({
+    sandbox,
+    report,
+    options,
+    nb,
+    frontend,
+    build,
+    cleanNext,
+    refuseUnsafeClone,
+  });
 }
 
 async function stageA6({
@@ -300,6 +395,7 @@ async function stageA6({
   frontend,
   build,
   cleanNext,
+  refuseUnsafeClone,
 }) {
   const apiPort = await sandbox.freePort();
   const webPort = await sandbox.freePort();
@@ -325,6 +421,24 @@ async function stageA6({
     readManifest(frontend),
     todaysRules(backend),
   );
+
+  // The launcher writes logs and the database under <clone>/.local: it must be
+  // a real directory inside the sandbox, created here when the revision has
+  // none, so the launcher can never be handed a symlink.
+  const local = path.join(nb, ".local");
+  refuseUnsafeClone("A6 <clone>/.local is safe before the launch", [nb, local]);
+  try {
+    fs.lstatSync(local);
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    fs.mkdirSync(local);
+  }
+  refuseUnsafeClone("A6 <clone>/.local is safe before the launch", [
+    nb,
+    frontend,
+    local,
+  ]);
+  report.ok("A6 <clone>/.local is a real directory and no dotenv file exists");
 
   const launcher = sandbox.start("npm", ["run", "start"], {
     cwd: nb,
@@ -380,6 +494,7 @@ async function stageA6({
         return Number(
           execFileSync("ps", ["-o", "pgid=", "-p", String(pid)], {
             encoding: "utf8",
+            env: { PATH: process.env.PATH ?? "" },
           }).trim(),
         );
       } catch {
@@ -395,6 +510,7 @@ async function stageA6({
         try {
           command = execFileSync("ps", ["-o", "command=", "-p", String(pid)], {
             encoding: "utf8",
+            env: { PATH: process.env.PATH ?? "" },
           }).trim();
         } catch {
           command = "(gone)";
@@ -449,12 +565,20 @@ async function stageA6({
         return false;
       }
     };
-    // The services are up once the anonymous readiness probe says so.
+    // The services are up once the anonymous readiness probe says so. Each
+    // request is sent only while both ports are still owned: another pid, or
+    // a port that lost its listener, fails at once.
     let dead = "";
+    let lost = "";
     const ready = await waitFor(
       async () => {
         if (!alive(backendPid) || !alive(frontendPid)) {
           dead = `pid ${alive(backendPid) ? frontendPid : backendPid} died`;
+          return true;
+        }
+        const now = ownership();
+        if (!bothOwned(now)) {
+          lost = `ownership lost during readiness: ${describeOwnership(now)}`;
           return true;
         }
         try {
@@ -467,10 +591,10 @@ async function stageA6({
       120_000,
       1000,
     );
-    if (!ready || dead)
+    if (!ready || dead || lost)
       return void report.fail(
         "A6 /api/ready reports ready through the frontend",
-        `${dead || "timeout"}\n${logTail()}`,
+        `${dead || lost || "timeout"}\n${logTail()}`,
       );
     seen = ownership();
     if (!bothOwned(seen))
@@ -520,7 +644,9 @@ async function stageA6({
 
     // The database is the clone's: the backend logs the resolved database
     // path at startup, and that exact file must exist inside <clone>/.local.
-    const local = path.join(nb, ".local");
+    // The boundary is <root>/nb/.local spelled from the sandbox root (a real
+    // path), never a re-resolved .local, so a .local swapped for a symlink
+    // cannot become its own boundary.
     const backendLog = path.join(local, "logs/backend.log");
     const head = fs.existsSync(backendLog)
       ? fs.readFileSync(backendLog, "utf8").split("\n").slice(0, 40).join("\n")
@@ -530,10 +656,16 @@ async function stageA6({
       if (!dbPath) return "no 'paths: database=sqlite path=' line";
       if (!path.isAbsolute(dbPath)) return `${dbPath} is not absolute`;
       if (!fs.existsSync(dbPath)) return `${dbPath} does not exist`;
+      const boundary = path.join(fs.realpathSync(sandbox.root), "nb", ".local");
       const real = fs.realpathSync(dbPath);
-      const rel = path.relative(fs.realpathSync(local), real);
+      const rel = path.relative(boundary, real);
       if (!rel || rel.startsWith("..") || path.isAbsolute(rel))
-        return `${real} is outside ${local}`;
+        return `${real} is outside ${boundary}`;
+      try {
+        sandbox.assertInsideSandbox(path.dirname(dbPath));
+      } catch (error) {
+        return error.message;
+      }
       return "";
     })();
     report.check(

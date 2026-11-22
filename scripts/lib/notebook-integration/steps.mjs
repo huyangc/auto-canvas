@@ -10,9 +10,10 @@ import { rawRequest } from "./transport.mjs";
 export const tail = (text, lines = 25) =>
   text.trimEnd().split("\n").slice(-lines).join("\n");
 
-// The three ways a Node child of this toolchain reaches the network: the
-// global fetch, and http.get / https.get with their default agents (which
-// hand Socket.prototype.connect `path: null`). Each child exits 0 only when
+// The ways a Node child of this toolchain reaches the network: the
+// global fetch, http.get / https.get with their default agents (which
+// hand Socket.prototype.connect `path: null`) and a direct socket.connect.
+// Each child exits 0 only when
 // the request failed with the guard's own refusal (a timeout is exit 4).
 const REFUSED =
   "const refused=(e)=>process.exit(/offline guard refused/.test(String(e&&e.cause&&e.cause.message)+String(e&&e.message))?0:4);";
@@ -29,6 +30,14 @@ const OFFLINE_PROBES = [
       `const q=require("${scheme}").get("${scheme}://192.0.2.1:49152/",{timeout:3000},()=>process.exit(3));` +
       'q.on("timeout",()=>q.destroy(new Error("timeout")));q.on("error",refused)',
   ]),
+  // The direct signature with a port string Node coerces (whitespace around
+  // the digits): Node connects to that port, so the guard must see a port.
+  [
+    "socket.connect",
+    REFUSED +
+      'const s=new (require("net").Socket)();s.setTimeout(3000,()=>s.destroy(new Error("timeout")));' +
+      's.on("error",refused);s.on("connect",()=>process.exit(3));s.connect(" 49152 ","192.0.2.1")',
+  ],
 ];
 
 /**
@@ -139,7 +148,8 @@ export function observeSource(sandbox, report, notebook) {
 /**
  * Start `next start` as a direct child and trust it only once it owns the
  * port. Another pid on the port fails at once (it is never signalled), and
- * ownership is checked again right after the readiness answer.
+ * ownership is checked again before every readiness request and right after
+ * the readiness answer.
  */
 export async function startNext(sandbox, { dir, port, env, name, marker }) {
   const bin = path.join(dir, "node_modules/next/dist/bin/next");
@@ -175,7 +185,15 @@ export async function startNext(sandbox, { dir, port, env, name, marker }) {
         : `port ${port} is not owned by pid ${pid} (no listener)`,
     );
   }
+  // Ownership is established now; each readiness request is sent only while
+  // it still holds (another pid, or no listener any more, fails at once).
+  let lost;
   const home = await waitFor(async () => {
+    const now = sandbox.listenerState(port, pid);
+    if (now.state !== "owned") {
+      lost = now;
+      return true;
+    }
     try {
       const res = await rawRequest(port, "/");
       return res.status === 200 ? res : false;
@@ -183,6 +201,10 @@ export async function startNext(sandbox, { dir, port, env, name, marker }) {
       return false;
     }
   }, 60_000);
+  if (lost)
+    return fail(
+      `port ${port} changed owner during readiness (${lost.state}, listeners ${lost.pids.join(", ") || "none"}; want ${pid})`,
+    );
   if (!home) return fail("GET / never answered 200");
   const after = sandbox.listenerState(port, pid);
   if (after.state !== "owned")
