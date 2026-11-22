@@ -112,3 +112,22 @@ Known limit, accepted: while A6 runs, the clone's frontend listens on every
 interface. It serves only the notebook's static pages and refuses API requests
 without a session; its database is a fresh throwaway with a random
 administrator password.
+
+## Round 4 — changes-requested
+
+Reviewed: codex `gpt-6.2-sol` PR review round 3 of PR 113 at `a2e1d03`
+(one P1, three P2, two P3), each checked against the code by the reviewer and
+found valid.
+
+| # | Severity | Where | Finding | Expected fix |
+| --- | --- | --- | --- | --- |
+| 17 | must-fix | `modules.mjs` (`prepareModules` / `copyModules`), `stage-a.mjs` (clone paths, A6) | Stage A removes and replaces `<clone>/frontend/node_modules` before anything has checked where `<clone>/frontend` really is. A revision whose `frontend` (or any parent of the destination) is a symlink out of the clone would make that removal and copy act outside the sandbox — possibly on the owner's install. The same holds for `<clone>/.local`: the launcher writes there, and the database assertion resolves `.local` itself, so an external `.local` would be accepted as its own boundary. The plan requires preventing such writes, not detecting them afterwards. | One helper, `assertInsideSandbox(path)`: every existing component of the path from the sandbox root down must be a real directory (`lstat`, no symlink) and the `realpath` of the deepest existing ancestor must be inside the sandbox root's `realpath`. Call it (a) on the destination of the modules copy **before** the first `rm` / `cp`; (b) after the clone and checkout, on `<clone>`, `<clone>/frontend` and, if they exist in the revision, `<clone>/.local`, `<clone>/frontend/.next`, `<clone>/frontend/node_modules` — a tracked symlink at any of them is a FAIL before any build or launch; (c) immediately before the A6 launcher starts, again on `<clone>/.local` (create it as a real directory first if absent, so the launcher cannot be handed a symlink), and base the database assertion on the sandbox root, not on a re-resolved `.local`. Demonstrate with a throwaway git repository under the system temp directory whose commit has `frontend` as a symlink to another temporary directory containing a sentinel file: stage A must FAIL before touching it and the sentinel must still exist. Put the command and output in your final message. |
+| 18 | should-fix | `sandbox.mjs` (`OFFLINE_GUARD`, `optionsOf`) | For the direct signature `socket.connect(port, host)`, Node also accepts numeric port strings with surrounding whitespace (and other forms it coerces); `optionsOf` recognises only digit-only strings, so the rest are treated as Unix-socket paths and pass unchecked. | Classify the first argument as Node does. Read `net.js` of this Node version (`normalizeArgs` and its `isPipeName` / `toNumber` helpers) and mirror exactly that rule for port-versus-path. Add a fourth control, `offline guard active (socket.connect)`, using the direct signature with a whitespace-padded port string to `192.0.2.1`. |
+| 19 | should-fix | `steps.mjs` (`startNext` readiness loop), `stage-a.mjs` (A6 readiness loop) | Ownership is checked once before the readiness polling and once after the answer, but not before each request, so if the listener changes hands during readiness the loop keeps probing the newcomer until the timeout. | Check `listenerState` before every readiness request; `foreign` fails at once; `none` after ownership had been established fails at once too (the server lost its port). |
+| 20 | should-fix | `stage-a.mjs` (A1) | `git diff --name-only` quotes paths with unusual bytes, so a protected file with such a name would not match the anchored patterns. | `git diff --no-renames --name-only -z`, split on NUL. |
+| 21 | note | `stage-a.mjs` (the two `ps` calls in A6) | They inherit the invoking shell's whole environment, unlike every other child. | Pass the same minimal environment as `lsof` gets (`PATH` only). |
+| 22 | should-fix | `notebook-integration-check.mjs` (summary and exit) | The summary line is printed before disposal, so a run can print `0 failed` and then a cleanup FAIL and exit 1; an exception inside a stage skips the summary altogether. | Record cleanup failures and unexpected exceptions through the reporter and print the `stage <X>: N passed, M failed` line last, after disposal, so it always agrees with the exit status. |
+
+Keep everything else as it is. Rerun the whole Acceptance section of the plan
+except `pnpm deadcode`, and the three refusal runs. This is the third
+implementation round; the workflow's limit is three.
