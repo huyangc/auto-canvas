@@ -1265,6 +1265,29 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   those 37, preferred the earlier drawing in 8 of the 10 whose human drawing
   exchanges the inputs, and the new one in 15 of the other 27.
 
+- **R170 — Reflections in netlist refinement (T151).** Four limits on the
+  refinement that runs on netlist input. (1) The power-flow step never reflects
+  a drawing left-right; it may still reflect it top-bottom and move rail leads.
+  (2) A top-bottom reflection is rejected when an instance whose pose in the
+  incumbent keeps its symbol's input order under R169 does not keep it in the
+  reflected drawing. A block the incumbent already draws out of order does not
+  veto. (3) Every trial of the port search's mirror frame (the reflected plan,
+  the routed mirrored seats and the edge columns built on the mirrored drawing)
+  is compared with the best drawing at that moment and dropped when either
+  holds for a single item: (a) a free directed block (R164: on no block cycle,
+  not locked) has an output pin exiting west and had none in the incumbent; (b)
+  a `port` or `port-filled` on a non-rail Net is on the wrong half and was not
+  in the incumbent. An input is wrong on the right half and an output on the
+  left half; a port without a known direction (explicit interface direction,
+  else Net role) counts as an input. The half is the sign of `dx`, the port's x
+  minus the unsnapped midpoint of the non-marker instances' enclosing box in
+  the same drawing, and neither half when `|dx|` is strictly less than one grid
+  step. An item that improves never offsets one that gets worse. Ports without
+  a placement or a Net on `P`, blocks on a cycle and the search's other frames
+  are not vetoed. (4) The current-source tail step returns its incumbent when
+  the tail's input pair is p-polarity, since it only builds a tail below the
+  pair and R81 places that tail above.
+
 - **R71 — Single-host ports.** A non-rail Cell Pin Net that reaches exactly
   one device pin gets a local seat along that pin's transformed exit direction.
   Use a 40-unit default seat up to 40 instances and 80 units above that,
@@ -1402,6 +1425,7 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   leaves a valid pair without a tail. One tail may support multiple pairs.
   Placement uses the pair members' polarity: the tail lies one row below n
   pairs or above p pairs, including shared tails and tails in mirror units.
+  The netlist refinement's tail step applies to n pairs only (R170).
 
 - **R82 — Differential pair with mirror load.** A mirror reference drain on
   input A's drain and an output drain on input B's distinct drain form a

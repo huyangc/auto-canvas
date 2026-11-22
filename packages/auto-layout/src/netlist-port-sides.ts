@@ -1,5 +1,6 @@
 import { slideNetlistPort } from "./slide-netlist-port.js";
 import { reflectNetlistPlan } from "./reflect-netlist-plan.js";
+import { reflectionWorsensDirection } from "./netlist-reflection-veto.js";
 import { diagnoseLabelClearance, resolveRouteGeometry } from "@icm/derived";
 import { reflectOrientation, type SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
@@ -382,8 +383,15 @@ function searchPortLayouts(
     const current = portGeometry(start.final, resolver, context)!;
     let rank: number[] | undefined;
     const seen = new Set<string>();
+    // R170: every trial of the mirror frame is a whole-drawing reflection.
+    let mirrored = false;
     const consider = (trial: Trial | undefined) => {
       if (!trial) return;
+      if (
+        mirrored &&
+        reflectionWorsensDirection(best.final, trial.final, resolver)
+      )
+        return;
       const final = portGeometry(trial.final, resolver, context);
       if (!final) return;
       const next = portLevels(final, final.seats);
@@ -427,6 +435,7 @@ function searchPortLayouts(
       "jog",
     ] as const;
     for (const mode of probeCorridors ? [] : modes) {
+      mirrored = mode === "mirror";
       if (stopped()) break;
       for (const drawing of frames(mode, start.final, current, context)) {
         const geo =
@@ -486,6 +495,7 @@ function searchPortLayouts(
       }
       if (levels.every((n) => n === 2)) break;
     }
+    mirrored = false;
     if (levels.some((n) => n < 2)) {
       const grid = source.presentation.grid,
         mid = current.box.x + current.box.width / 2;
