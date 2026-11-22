@@ -173,7 +173,7 @@ node scripts/codex-log.mjs tasks/T001-<slug> --round 2 --follow       # 供 Moni
 - **合入条件**：`gh pr checks` 里的检查全部是 `pass`（没有失败、取消、进行中或
   `skipping`）；且 PR 上已贴出针对其远端 `headRefOid` 的评审；任何新提交之后都要评审新的
   远端 head。该评审须用 `gpt-6.2-sol` 跑，且对同一轮可证：hook 该轮日志显示
-  `model: gpt-6.2-sol`，或该轮是带 `-m gpt-6.2-sol` 的手动命令（贴出的命令行可见）。
+  `model: gpt-6.2-sol`，或该轮是下面的手动命令（它同时设 `-m` 和 `review_model`，贴出的命令行可见）。
   无法确认模型时（例如交接的 PR 没有 hook 日志），合入前运行手动命令并贴回。
   `verify` 只核对 head SHA，不核对模型。`mergeStateStatus: CLEAN`、
   本地 `git rev-parse HEAD`、agent 汇报和 hook 本地状态都不算证据。满足后用
@@ -192,16 +192,17 @@ CI 里，它们的证据以 Opus 亲自重跑的结果为准，写进 PR 的 Evi
 
 自动评审（model `gpt-6.2-sol`）由开发者本机的 `~/.claude/hooks/codex-pr-review.sh`
 提供，不是仓库产物：开 PR 后它自动跑一轮并贴回评论，判过 P0/P1 后有新提交时自动重审。
-它运行 `codex exec review` 时不带 `-m`，模型取自 `~/.codex/config.toml`；该轮日志
+它运行 `codex exec review` 时不带 `-m`，模型取自 `~/.codex/config.toml` 的 `model`，
+设了 `review_model` 时以它为准（评审用它），依赖 hook 一轮前两个键都要查；该轮日志
 `~/.claude/codex-pr-review/logs/pr<PR号>-r<n>.log` 里有一行 `model:`，要确认是
-`gpt-6.2-sol`，否则改好配置重跑，或用下面带 `-m gpt-6.2-sol` 的手动命令并贴回输出。
+`gpt-6.2-sol`，否则改好配置重跑，或用下面的手动命令并贴回输出。
 日志文件名只含 PR 号和轮次，不含仓库；同一个 hook 服务多个仓库，或日志不是贴到这个
-head 上那一轮的，就不要依赖它，改用带 `-m gpt-6.2-sol` 的手动命令。
+head 上那一轮的，就不要依赖它，改用下面的手动命令。
 新 clone 可能没有这个 hook，但评审规则不变；没有 hook 时手动运行并按上述要求贴回证据：
 
 ```bash
 codex exec review --base origin/main --ephemeral -m gpt-6.2-sol \
-  -c 'model_reasoning_effort=medium' -c 'notify=[]' -o <out>
+  -c 'review_model="gpt-6.2-sol"' -c 'model_reasoning_effort=medium' -c 'notify=[]' -o <out>
 ```
 
 装有 hook 时可用的手动操作：
