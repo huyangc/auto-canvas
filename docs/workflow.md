@@ -102,7 +102,8 @@ Opus 对着代码核实每条意见，修改方案，再评审一轮，直到某
 方案里记录结论（轮数和判定），原始输出放在 `tasks/<id>/logs/`（不入库）。
 
 人确认范围时或之后的改动若改变了方案的范围或设计，改后的方案在派发前要重新过方案
-评审，并更新方案里的 `Plan review` 一行。
+评审，并更新方案里的 `Plan review` 一行。重审后范围或产品决定又变了，要回到人那里；
+只有人确认了最终评审过的范围和产品决定，才把状态标为 approved。
 
 ## 派发实现子代理
 
@@ -121,7 +122,8 @@ AGENTS.md，跑完方案里的验收命令，它的最终消息就是报告，Op
 改动：先提交子代理已审查的改动，或丢弃被否决的改动。
 
 任务的轮次和三轮上限以 `review.md` 为准。Codex 日志的 `round-<n>` 只数 Codex 轮次，
-前面有过子代理轮次时它仍从 1 开始，派发时在 `review.md` 里写明这是任务的第几轮。
+前面有过子代理轮次时它仍从 1 开始，派发时在 `review.md` 里写明这是任务的第几轮。两者不同时，Opus 审查时把 `report.md`
+标题改成任务的轮次。
 
 ```bash
 scripts/codex-task.sh tasks/T001-<slug>
@@ -168,7 +170,10 @@ node scripts/codex-log.mjs tasks/T001-<slug> --round 2 --follow       # 供 Moni
   行为。文档或配置类改动没有可测行为时，在 PR 上说明即可。
 - **合入条件**：`gh pr checks` 里的检查全部是 `pass`（没有失败、取消、进行中或
   `skipping`）；且 PR 上已贴出针对其远端 `headRefOid` 的评审；任何新提交之后都要评审新的
-  远端 head。`mergeStateStatus: CLEAN`、
+  远端 head。该评审须用 `gpt-6.2-sol` 跑，且对同一轮可证：hook 该轮日志显示
+  `model: gpt-6.2-sol`，或该轮是带 `-m gpt-6.2-sol` 的手动命令（贴出的命令行可见）。
+  无法确认模型时（例如交接的 PR 没有 hook 日志），合入前运行手动命令并贴回。
+  `verify` 只核对 head SHA，不核对模型。`mergeStateStatus: CLEAN`、
   本地 `git rev-parse HEAD`、agent 汇报和 hook 本地状态都不算证据。满足后用
   `gh pr merge <PR号> --rebase` 合入；用户要自己合入时只交回 PR 链接和状态。
 - **合入结果**：只认 `gh pr view <PR号> --json state` 返回 `MERGED`。stacked PR 使用
