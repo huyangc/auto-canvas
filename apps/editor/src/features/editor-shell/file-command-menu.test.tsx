@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { ProjectMenu } from "../../app/project-menu";
 import { FileCommandMenu } from "./file-command-menu";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -33,6 +34,7 @@ function tabActions() {
     busy: false,
     onNew: vi.fn(),
     onOpenFile: vi.fn(),
+    onClose: vi.fn(),
     shelf: {
       projects: [
         {
@@ -81,6 +83,12 @@ describe("FileCommandMenu project tab actions", () => {
     expect(markup).toContain(">New project tab<");
     expect(markup).toContain(">Open file in new tab<");
     expect(markup).toContain('aria-label="Shelf projects"');
+    expect(markup.indexOf(">Open Shelf project in tab")).toBeLessThan(
+      markup.indexOf(">Close tab<"),
+    );
+    expect(markup.indexOf(">Close tab<")).toBeLessThan(
+      markup.indexOf('data-testid="save-cloud-project"'),
+    );
     // After New Project, before Save.
     expect(markup.indexOf(">New Project<")).toBeLessThan(
       markup.indexOf(">New project tab<"),
@@ -104,6 +112,7 @@ describe("FileCommandMenu project tab actions", () => {
     const none = renderToStaticMarkup(<FileCommandMenu {...baseProps()} />);
     expect(none).not.toContain("New project tab");
     expect(none).not.toContain("Open file in new tab");
+    expect(none).not.toContain("Close tab");
     expect(none).not.toContain("Open Shelf project in tab");
   });
 
@@ -114,6 +123,9 @@ describe("FileCommandMenu project tab actions", () => {
     await act(async () => button(host, "Open file in new tab")!.click());
     expect(actions.onNew).toHaveBeenCalledTimes(1);
     expect(actions.onOpenFile).toHaveBeenCalledTimes(1);
+    // The menu's own button takes the focus back when the tab is kept.
+    await act(async () => button(host, "Close tab")!.click());
+    expect(actions.onClose).toHaveBeenCalledWith(host.querySelector("summary"));
     await act(async () =>
       root!.render(
         <FileCommandMenu
@@ -124,6 +136,7 @@ describe("FileCommandMenu project tab actions", () => {
     );
     expect(button(host, "New project tab")!.disabled).toBe(true);
     expect(button(host, "Open file in new tab")!.disabled).toBe(true);
+    expect(button(host, "Close tab")!.disabled).toBe(true);
   });
 
   it("opens the Shelf submenu, reloads it, and opens a Shelf project", async () => {
@@ -146,6 +159,44 @@ describe("FileCommandMenu project tab actions", () => {
     expect(actions.shelf.onOpened).toHaveBeenCalledTimes(2);
     await act(async () => button(options, "Amp")!.click());
     expect(actions.shelf.onOpen).toHaveBeenCalledWith("amp");
+  });
+
+  it("collapses its submenus when the File menu that holds it closes", async () => {
+    const actions = tabActions();
+    const host = document.createElement("div");
+    document.body.append(host);
+    root = createRoot(host);
+    await act(async () =>
+      root!.render(
+        <ProjectMenu label="File" name="Amp" dirty={false}>
+          <FileCommandMenu {...baseProps()} projectTabs={actions} embedded />
+        </ProjectMenu>,
+      ),
+    );
+    const details = host.querySelector("details")!;
+    const toggleFile = (open: boolean) =>
+      act(async () => {
+        details.open = open;
+        details.dispatchEvent(new Event("toggle"));
+      });
+    for (const [title, label] of [
+      ["Open Shelf project in tab", "Shelf projects"],
+      ["Import", "Import"],
+      ["Export", "Export"],
+    ] as const) {
+      const options = host.querySelector<HTMLElement>(
+        `[role="group"][aria-label="${label}"]`,
+      )!;
+      await toggleFile(true);
+      await act(async () => button(host, title)!.click());
+      expect(options.hidden, title).toBe(false);
+      await toggleFile(false);
+      await toggleFile(true);
+      expect(options.hidden, title).toBe(true);
+    }
+    // So every open of the Shelf reads the list again.
+    await act(async () => button(host, "Open Shelf project in tab")!.click());
+    expect(actions.shelf.onOpened).toHaveBeenCalledTimes(2);
   });
 
   it("keeps the File menu open for the Shelf's own controls", async () => {

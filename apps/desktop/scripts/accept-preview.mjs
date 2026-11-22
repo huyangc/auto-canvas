@@ -407,8 +407,23 @@ try {
       .click();
   }
   // One project hides the tab strip: File → Project Info renames it then,
-  // and File holds the strip's New project tab.
-  const stripShown = (page) => page.getByTestId("project-tabs").isVisible();
+  // and File holds the strip's New project tab. The tab count can still be
+  // changing (a restored window, a file opening): read it once two reads a
+  // moment apart agree, then wait for the strip to match it.
+  async function stripShown(page) {
+    const tabs = page.getByRole("tab", { includeHidden: true });
+    let previous = -1;
+    let count = await tabs.count();
+    while (count === 0 || count !== previous) {
+      await page.waitForTimeout(250);
+      previous = count;
+      count = await tabs.count();
+    }
+    const strip = page.getByTestId("project-tabs");
+    if (count > 1) await expect(strip).toBeVisible();
+    else await expect(strip).toBeHidden();
+    return count > 1;
+  }
   async function renameProject(page, name) {
     await page.keyboard.press("Escape");
     if (!(await stripShown(page))) {

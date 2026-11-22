@@ -1357,7 +1357,8 @@ in tab`; its options group is named `Shelf projects`, so the strip's
   open: clicks stop at the Shelf, and Left/Right/Escape in its name field or
   Escape in the dialog stay there. Opening a project closes File, as it
   closes the strip's picker. The list scrolls in its own 280 px box.
-- **The single tab's context menu and where each item lives now**: Close and
+- **The single tab's context menu and where each item lives now** (Close
+  is superseded by review round 1: File → Close tab): Close and
   Close All (Close Others is disabled with one tab) leave one blank project
   after one decision about unsaved work; File → New Project does the same
   (the replace guard: Save and continue / Continue without saving / Stay; on
@@ -1381,3 +1382,52 @@ Project…`, which run the same `openNativeProject()` (the plan named the
   Project Info with one tab), `apps/desktop/scripts/accept-preview.mjs` (its
   own `renameProject`, the Unsaved check and `New project tab` drive the
   strip with one tab; now through File when the strip is hidden).
+- T150d review round 1 (2026-11-21): one line per item.
+  - 1: File's submenus (Shelf, Import, Export) collapse when the header's
+    File closes: in embedded mode `FileCommandMenu` listens to `toggle` on
+    the enclosing `details`. Each open of the Shelf reloads its list. Import
+    and Export, which stayed expanded across File closes on `main` too, are
+    fixed by the same reset. `expectPlace` now asserts each submenu starts
+    collapsed and clicks it; `projectTabAction` keeps its `aria-expanded`
+    check, since File stays open across consecutive Shelf actions (a rename
+    keeps File open).
+  - 2, the experiment (temporary spec, the same steps per route; one tab, the
+    project renamed, then 1 part placed or a 12-part example imported and
+    renamed; Auto and Draw gave the same results):
+    - on `1515168`'s product files, the tab's × with "Close without saving":
+      the prompt is the strip's (`Close without saving` / `Keep open`) for 1
+      and 12 parts; afterwards one blank project with the mode's default
+      docks; the closed work stays a recovery copy, not offered in File at
+      once, offered by File → Recover Unsaved Work… after a reload, with no
+      start-up banner;
+    - on `0b9e29f`, File → New Project: with 1 part no prompt at all (fewer
+      than 3 objects is not "unsafe"), the copy kept and offered after a
+      reload; with 12 parts the replace guard (`Continue without saving` /
+      `Stay` / `Save to Cloud and continue`), and after "Continue without
+      saving" the recovery copy is deleted: nothing to recover after a
+      reload. New Project on `1515168` gave the same results.
+    - They differ in what the user sees (the prompt and its choices) and in
+      what can be recovered. Decision: File gains `Close tab`, after `Open
+file in new tab` and the Shelf item, with any number of tabs. It runs the
+      active tab's own close (`ProjectTabs` fills a `closeActiveTab` ref with
+      `closeOne(activeId, trigger)`), so the guard, the decision and the
+      result are the ×'s; Keep open gives focus back to File's button; it is
+      disabled while the × is. None of the single-tab call sites switched in
+      T150d was a close (every close in the specs ran with two or more tabs),
+      so none needed routing back; `projectTabAction(page, "Close tab")`
+      clicks the active tab's × or File's item.
+  - 3: the spec says a rename in its tab ends as a blur would, keeping the
+    typed name, and an open close decision stays on screen and answerable.
+  - 4: browser tests for the hide transition: a rename typed in tab A is kept
+    when tab B's × closes B and the strip hides; with B active and unsaved,
+    B's close decision stays and is answered after A is closed from its tab
+    menu. A change of the active tab drops a pending decision, with the strip
+    shown or hidden (as on `main`), so the decision's own tab stays active in
+    that test.
+  - 5: `accept-preview.mjs`'s `stripShown` waits until two reads of the tab
+    count 250 ms apart agree, then waits for the strip to match (shown with
+    two or more). Read and syntax-checked only; the packaged acceptance was
+    not run.
+  - Open owner decision (not changed): on the desktop File lists both `Open
+file in new tab` and the host's `Open Project…`, which both call
+    `openNativeProject()`.

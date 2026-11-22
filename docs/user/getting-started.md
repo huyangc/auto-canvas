@@ -55,9 +55,9 @@ work. **⋯** holds **Edit** (insert, find, the selection's commands),
 
 Each project tab is an independent circuit with its own view, selection, undo
 history and Cloud binding. With one project the tab bar is hidden, and **File**
-has **New project tab**, **Open file in new tab** and **Open Shelf project in
-tab**; with two or more the tab bar shows, with the same actions (**+** is New
-project tab). With one project rename it in Project Info; in the tab bar,
+has **New project tab**, **Open file in new tab**, **Open Shelf project in
+tab** and **Close tab**; with two or more the tab bar shows, with the same
+actions (**+** is New project tab, **×** closes a tab). With one project rename it in Project Info; in the tab bar,
 double-click a tab's name to rename it and right-click it for **Close**,
 **Close Others** and **Close All**. Refresh
 restores this window's tabs and unsaved circuits (not Undo stacks); after

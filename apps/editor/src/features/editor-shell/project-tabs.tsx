@@ -1,4 +1,11 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import { ContextMenu } from "../../components/context-menu";
 import type { CloudProjectSummary } from "./cloud-projects";
 import "./project-tabs.css";
@@ -20,6 +27,7 @@ export function ProjectTabs({
   onEditingChange,
   onClose,
   onCloseMany,
+  closeActiveTab,
   onSaveClose,
   onNew,
   onOpenFile,
@@ -39,6 +47,8 @@ export function ProjectTabs({
   onClose(id: string): void;
   /** Close Others and Close All, after any unsaved tab is confirmed. */
   onCloseMany(ids: readonly string[]): void;
+  /** Filled with the active tab's ×, for File's Close tab. */
+  closeActiveTab?: RefObject<((trigger: HTMLElement | null) => void) | null>;
   onSaveClose?(id: string): Promise<boolean>;
   onNew(): void;
   onOpenFile(): void;
@@ -114,7 +124,7 @@ export function ProjectTabs({
       if (selecting.current === request) selecting.current = null;
     });
   };
-  const closeTrigger = useRef<HTMLButtonElement | null>(null);
+  const closeTrigger = useRef<HTMLElement | null>(null);
   const closeTarget = tabs.find((tab) => tab.id === closing);
   useEffect(() => setClosing(null), [activeId]);
   // A tab's right-click menu, and several tabs it closes once confirmed.
@@ -130,7 +140,7 @@ export function ProjectTabs({
     renamedByClick.current === id;
   const unsavedClosing = (closingMany ?? []).filter(unsaved).length;
   /** Closes one tab, asking first when it holds unsaved edits. */
-  const closeOne = (id: string, trigger: HTMLButtonElement | null) => {
+  const closeOne = (id: string, trigger: HTMLElement | null) => {
     if (!tabs.some((item) => item.id === id)) return;
     if (unsaved(id)) {
       closeTrigger.current = trigger;
@@ -138,6 +148,12 @@ export function ProjectTabs({
       setClosing(id);
     } else onClose(id);
   };
+  useEffect(() => {
+    if (!closeActiveTab) return;
+    closeActiveTab.current = (trigger) => {
+      if (!busy) closeOne(activeId, trigger);
+    };
+  });
   const closeMany = (ids: readonly string[]) => {
     if (!ids.length) return;
     setClosing(null);

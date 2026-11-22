@@ -1344,3 +1344,136 @@ test("with one project File → Project Info renames it, and the top bar shows t
   await expect(label).toContainText("●");
   await expect(page.getByTestId("project-unsaved-indicator")).toBeVisible();
 });
+
+test("with one project File → Close tab asks as the tab's × does, and keeps the work recoverable", async ({
+  page,
+}) => {
+  await openEditor(page, "/editor?new=1");
+  const strip = page.getByTestId("project-tabs");
+  const toggle = page.getByTestId("project-menu-toggle");
+  const count = page.getByTestId("active-instance-count");
+  const decision = page.getByTestId("project-tab-close-decision");
+  // A clean project closes at once, into a new blank project.
+  const blankId = (await saved(page)).id;
+  await projectTabAction(page, "Close tab");
+  await expect(decision).toHaveCount(0);
+  await expect.poll(async () => (await saved(page)).id).not.toBe(blankId);
+  // Unsaved work: the tab's own decision, with the strip still hidden.
+  await renameProject(page, "Work in progress");
+  await placeComponentAt(page, "resistor", { x: 260, y: 220 });
+  await expect(strip).toBeHidden();
+  await projectTabAction(page, "Close tab");
+  await expect(decision).toBeVisible();
+  await expect(decision.locator(".inline-confirm-decision")).toHaveText(
+    "Close without savingKeep open",
+  );
+  await decision
+    .getByRole("button", { name: "Keep open", exact: true })
+    .click();
+  await expect(decision).toHaveCount(0);
+  await expect(toggle).toBeFocused();
+  await expect(count).toHaveText("1");
+  await projectTabAction(page, "Close tab");
+  await decision
+    .getByRole("button", { name: "Close without saving", exact: true })
+    .click();
+  await expect(count).toHaveText("0");
+  await expect(page.locator(".app-project-name")).toContainText("New Circuit");
+  // As after the ×, the closed work is a recovery copy to restore.
+  page.on("dialog", (dialog) => void dialog.accept());
+  await page.reload();
+  await awaitEditorReady(page);
+  const file = await openMenu(page, "File");
+  await file
+    .getByRole("button", { name: "Recover Unsaved Work…", exact: true })
+    .click();
+  await expect(
+    page
+      .getByTestId("recovery-session-card")
+      .filter({ hasText: "Work in progress" }),
+  ).toHaveCount(1);
+});
+
+test("File's Shelf list collapses when File closes and reloads on the next open", async ({
+  page,
+}) => {
+  await openEditor(page, "/editor?new=1");
+  let listings = 0;
+  page.on("request", (request) => {
+    if (
+      request.method() === "GET" &&
+      new URL(request.url()).pathname.endsWith("/api/projects")
+    )
+      listings++;
+  });
+  const file = page.getByTestId("project-menu");
+  const shelfToggle = file.getByRole("button", {
+    name: "Open Shelf project in tab",
+    exact: true,
+  });
+  for (const round of [1, 2]) {
+    await openMenu(page, "File");
+    await expect(shelfToggle).toHaveAttribute("aria-expanded", "false");
+    await shelfToggle.click();
+    await expect(shelfToggle).toHaveAttribute("aria-expanded", "true");
+    await expect.poll(() => listings, `round ${round}`).toBe(round);
+    await page.keyboard.press("Escape");
+    await expect(file).not.toHaveAttribute("open", "");
+  }
+});
+
+test("a rename in its tab survives the strip hiding when the other tab closes", async ({
+  page,
+}) => {
+  await openEditor(page, "/editor?new=1");
+  await renameProject(page, "Alpha");
+  await projectTabAction(page, "New project tab");
+  const tabs = page.getByRole("tab", { includeHidden: true });
+  await expect(tabs).toHaveCount(2);
+  await tabs.first().click();
+  await tabs.first().dblclick();
+  const name = page.getByRole("textbox", { name: "Project name", exact: true });
+  await name.fill("Alpha renamed");
+  // Close the other tab while the name is typed: one tab, the strip hides.
+  await page
+    .getByRole("button", { name: "Close tab New Circuit", exact: true })
+    .click();
+  await expect(page.getByTestId("project-tabs")).toBeHidden();
+  await expect(name).toHaveCount(0);
+  await expect(page.locator(".app-project-name")).toContainText(
+    "Alpha renamed",
+  );
+  await expect(page.getByTestId("project-name")).toHaveText("Alpha renamed");
+});
+
+test("an open close decision stays answerable when the strip hides under it", async ({
+  page,
+}) => {
+  await openEditor(page, "/editor?new=1");
+  await projectTabAction(page, "New project tab");
+  const tabs = page.getByRole("tab", { includeHidden: true });
+  await expect(tabs).toHaveCount(2);
+  // The second tab, active, holds unsaved work; the first stays clean.
+  await placeComponentAt(page, "resistor", { x: 260, y: 220 });
+  await page.locator(".project-tab").nth(1).locator("[data-tab-close]").click();
+  const decision = page.getByTestId("project-tab-close-decision");
+  await expect(decision).toBeVisible();
+  // Close the first tab from its own menu: the strip hides, the decision
+  // for the second stays on screen. (A change of the active tab drops a
+  // pending decision, with the strip shown or hidden.)
+  await tabs.first().click({ button: "right" });
+  await page
+    .getByTestId("project-tab-menu")
+    .getByRole("menuitem", { name: "Close", exact: true })
+    .click();
+  await expect(tabs).toHaveCount(1);
+  await expect(page.getByTestId("project-tabs")).toBeHidden();
+  await expect(decision).toBeVisible();
+  await expect(page.getByTestId("active-instance-count")).toHaveText("1");
+  await decision
+    .getByRole("button", { name: "Close without saving", exact: true })
+    .click();
+  await expect(decision).toHaveCount(0);
+  await expect(tabs).toHaveCount(1);
+  await expect(page.getByTestId("active-instance-count")).toHaveText("0");
+});

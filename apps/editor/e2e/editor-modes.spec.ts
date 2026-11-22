@@ -1365,7 +1365,7 @@ const drawingTools = [
 const fileTabActions: readonly Place[] = [
   {
     menu: "File",
-    items: ["New project tab", "Open file in new tab"],
+    items: ["New project tab", "Open file in new tab", "Close tab"],
     enabled: true,
   },
   {
@@ -1564,6 +1564,7 @@ const TWO_TAB_ROWS: readonly MenuTableRow[] = [
           '.project-tabs > [aria-label="New project tab"]',
           '.project-tabs > [aria-label="Open file in new tab"]',
           '.project-tabs-shelf > [aria-label="Open Shelf project in tab"]',
+          '.project-tab[data-active="true"] [data-tab-close]',
         ],
         enabled: true,
       },
@@ -1609,12 +1610,13 @@ async function expectPlace(page: Page, place: Place, context: string) {
     context,
   ).toHaveAttribute("open", "");
   if (place.submenu) {
+    // Each open of File starts with its submenus collapsed.
     const toggle = group.getByRole("button", {
       name: place.submenu,
       exact: true,
     });
-    if ((await toggle.getAttribute("aria-expanded")) !== "true")
-      await toggle.click();
+    await expect(toggle, context).toHaveAttribute("aria-expanded", "false");
+    await toggle.click();
   }
   for (const name of place.items) {
     const item = place.labels
