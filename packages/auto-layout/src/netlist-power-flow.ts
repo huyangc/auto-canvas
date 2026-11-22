@@ -7,7 +7,7 @@ import { conductingPairs } from "./dc-connectivity.js";
 import { enclosingBox, pinPoints } from "./geometry.js";
 import { classifyNets } from "./net-roles.js";
 import { isMarker } from "./placement-connectivity.js";
-import { portDirection } from "./port-convention.js";
+import { keepsOrder } from "./polarity-order.js";
 import { readabilityMetrics } from "./readability-metrics.js";
 import { reflectNetlistPlan } from "./reflect-netlist-plan.js";
 import { routedGuards } from "./routed-search-score.js";
@@ -98,46 +98,29 @@ export function preferPowerFlow(
   let best = initial;
   const flow = powerDirection(initial.final, r),
     overall = railOrder(initial.final, r);
-  for (const dim of ["x", "y"] as const) {
-    if (
-      (dim === "y" && differential) ||
-      flow[dim] > 0 ||
-      overall[dim] > 0 ||
-      (flow[dim] === 0 && overall[dim] === 0)
-    )
-      continue;
+  // R170: a left-right reflection is never offered for power flow; it moved
+  // inputs to the right without changing crossings or bends.
+  if (
+    !differential &&
+    flow.y <= 0 &&
+    overall.y <= 0 &&
+    (flow.y !== 0 || overall.y !== 0)
+  ) {
     const doc = best.final;
     const bodies = doc.instances.filter((i) => !isMarker(i));
-    if (!bodies.length) continue;
-    const box = enclosingBox({ ...doc, instances: bodies }, r);
-    const center = box[dim] + (dim === "x" ? box.width : box.height) / 2;
-    if (dim === "x") {
-      const roles = classifyNets(doc, r);
-      const anchored = doc.instances.some((i) => {
-        if (i.symbolId !== "port" && i.symbolId !== "port-filled") return false;
-        if (
-          differential?.inputs.includes(i.id) ||
-          differential?.outputs.includes(i.id)
-        )
-          return false;
-        const d = portDirection(doc, roles, roles.pinNet(i.id, "P") ?? "");
-        const x = i.placement!.position.x;
-        return (d === "input" && x < center) || (d === "output" && x > center);
-      });
-      if (anchored) continue;
+    if (bodies.length) {
+      const box = enclosingBox({ ...doc, instances: bodies }, r);
+      const center = box.y + box.height / 2;
+      const grid = doc.presentation.grid;
+      const axis = (Math.round((2 * center) / grid) * grid) / 2;
+      const trial = reflectNetlistPlan(source, r, best, axis, "top-bottom");
+      if (
+        trial &&
+        keepsInputOrder(doc, trial.final, r) &&
+        admissible(doc, trial.final, r)
+      )
+        best = trial;
     }
-    const grid = doc.presentation.grid;
-    const axis = (Math.round((2 * center) / grid) * grid) / 2;
-    const trial = reflectNetlistPlan(
-      source,
-      r,
-      best,
-      axis,
-      dim === "x" ? "left-right" : "top-bottom",
-    );
-    if (!trial) continue;
-    if (!admissible(doc, trial.final, r)) continue;
-    best = trial;
   }
   if (differential) return best;
   const budget = auditRouting(initial.final, r);
@@ -167,6 +150,22 @@ export function preferPowerFlow(
     }
   }
   return best;
+}
+
+/** R169 via R170: the reflected plan never passes `buildPlan`, so a block the
+ * incumbent draws in its symbol's input order must keep that order. A block
+ * already out of order (fixed, locked or without a compatible pose) does not
+ * veto. */
+function keepsInputOrder(
+  doc: SchematicDocument,
+  nextDoc: SchematicDocument,
+  r: SymbolResolver,
+) {
+  return doc.instances.every((i) => {
+    if (!i.placement || !keepsOrder(i, r, i.placement)) return true;
+    const next = nextDoc.instances.find((n) => n.id === i.id);
+    return !next?.placement || keepsOrder(next, r, next.placement);
+  });
 }
 
 function admissible(

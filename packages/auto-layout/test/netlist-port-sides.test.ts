@@ -11,9 +11,14 @@ import { preview, terminalPartition } from "../src/transaction.js";
 import { circuit } from "./document-fixture.js";
 
 const resolver = new InMemorySymbolResolver(builtInSymbols);
-function reversed() {
+function reversed(block?: "inverter") {
   const d = circuit(
-    { R1: "resistor", a: "port", b: "port" },
+    {
+      R1: "resistor",
+      ...(block ? { X1: block } : {}),
+      a: "port",
+      b: "port",
+    },
     { first: ["a.P", "R1.1"], second: ["b.P", "R1.2"] },
   );
   d.netlist = {
@@ -41,6 +46,7 @@ function reversed() {
     ["a", placement(80, 0, "horizontal")],
     ["b", placement(-80, 0)],
   ]);
+  if (block) seats.set("X1", placement(0, 100));
   const run = planLayoutOnce(
     d,
     resolver,
@@ -83,6 +89,19 @@ it("carries a routed netlist to the input-left orientation in one replay", () =>
     wireLength: before.wireLength,
   });
 });
+it("keeps the incumbent when the mirror would turn a free block left (R170)", () => {
+  const { d, plan } = reversed("inverter");
+  expect(
+    selectNetlistPortSides(
+      d,
+      resolver,
+      plan,
+      () => undefined,
+      () => false,
+    ),
+  ).toBe(plan.candidate);
+});
+
 it("returns the incumbent when the search is stopped", () => {
   const { d, plan } = reversed();
   expect(
