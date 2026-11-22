@@ -1281,3 +1281,9 @@ name="editor-command-menu" data-testid="more-menu">`; its summary is `⋯`
     open ⋯ as it does to File: the browser scrolls the menu, focus stays on
     the item, the canvas does not pan, and Escape closes the menu with focus
     back on its button. A browser test pins both menus in a 240 px window.
+- T150c review round 4 (codex on `b338ecd`, 2026-11-21): the router's menu
+  exemption is `.project-menu[open], .more-menu[open]`, so a closed, focused
+  File or ⋯ button leaves Escape (cancel the armed tool) and the arrows
+  (pan) to the canvas. File had the same gap on `main`; its own Escape
+  handler does not need the key while closed, so it is fixed in the same
+  line. A browser test pins both buttons.

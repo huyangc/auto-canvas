@@ -2018,3 +2018,41 @@ for (const [menuId, popoverClass] of [
     }
   });
 }
+
+for (const menuId of ["more-menu", "project-menu"]) {
+  test(`a closed, focused ${menuId} button leaves the canvas keys alone`, async ({
+    page,
+  }) => {
+    await openEditor(page, "/editor?example=two-stage-op-amp");
+    await expectStatus(page, "Opened example: Two-Stage Op Amp");
+    await page.getByTestId("mode-draw").click();
+    const menu = page.getByTestId(menuId);
+    const summary = menu.locator(":scope > summary");
+    const tool = page.getByTestId("active-tool");
+    // Focus on the closed button: W arms the wire, Escape drops it.
+    await summary.focus();
+    await page.keyboard.press("w");
+    await expect(tool).toHaveText("wire");
+    await page.keyboard.press("Escape");
+    await expect(tool).toHaveText("pointer");
+    // After Escape closes the menu, focus is on its button: the same holds.
+    await summary.click();
+    await expect(menu).toHaveAttribute("open", "");
+    await page.keyboard.press("Escape");
+    await expect(menu).not.toHaveAttribute("open", "");
+    await expect(summary).toBeFocused();
+    await page.keyboard.press("w");
+    await expect(tool).toHaveText("wire");
+    await page.keyboard.press("Escape");
+    await expect(tool).toHaveText("pointer");
+    // An arrow key pans the canvas from the closed button as from the body.
+    const canvas = page.getByTestId("schematic-canvas");
+    const before = await canvas.getAttribute("viewBox");
+    await summary.focus();
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("ArrowDown");
+    await expect
+      .poll(() => canvas.getAttribute("viewBox"), menuId)
+      .not.toBe(before);
+  });
+}
