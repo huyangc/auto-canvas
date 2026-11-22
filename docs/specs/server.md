@@ -133,7 +133,7 @@ request touches, and `role: "admin"` makes them a Component Library
 administrator. At most 32 validations run at once (a further distinct token
 is 503) and concurrent requests with one token share one validation. A write
 of the user's row that outlived its 5 seconds still counts as one of the 32
-until it ends.
+until it ends, and until then its token is 503 without a new validation.
 
 A validated token is cached, keyed by its SHA-256, until 60 seconds after its
 validation started, measured on both a monotonic clock and the wall clock

@@ -227,8 +227,8 @@ export function createNotebookIdentity({
     { profile: NotebookProfile; start: readonly number[] }
   >();
   const pending = new Map<string, Promise<NotebookIdentityResult>>();
-  /** Profile writes still running after their validation gave up on them. */
-  let lateWrites = 0;
+  /** Tokens whose profile write outlived the validation that started it. */
+  const lateWrites = new Set<string>();
   const send = fetch ?? directGet;
 
   /** Rejects with 503 after `timeoutMs`, aborting `controller`. */
@@ -304,9 +304,9 @@ export function createNotebookIdentity({
         : unavailable;
     }
     // The hook writes to the database. A write that stalls does not keep its
-    // caller past the deadline, but it is left to finish or fail and counts
-    // against the validations in flight until it does: retries cannot queue
-    // more writes than that limit.
+    // caller past the deadline, but it is left to finish or fail. Until it
+    // does, it counts against the validations in flight and its token starts
+    // no other validation: retries cannot queue more writes.
     let writing = true;
     const write = (async () => onProfile(profile))().finally(() => {
       writing = false;
@@ -316,12 +316,8 @@ export function createNotebookIdentity({
       await Promise.race([write, limit.passed]);
     } catch {
       if (writing) {
-        lateWrites += 1;
-        void write
-          .catch(() => undefined)
-          .finally(() => {
-            lateWrites -= 1;
-          });
+        lateWrites.add(key);
+        void write.catch(() => undefined).finally(() => lateWrites.delete(key));
       }
       return unavailable;
     } finally {
@@ -352,7 +348,9 @@ export function createNotebookIdentity({
       }
       const joined = pending.get(key);
       if (joined) return joined;
-      if (pending.size + lateWrites >= MAX_IN_FLIGHT) return unavailable;
+      // One validation per token, also while its write is still running.
+      if (lateWrites.has(key)) return unavailable;
+      if (pending.size + lateWrites.size >= MAX_IN_FLIGHT) return unavailable;
       const validation = validate(token, key).finally(() =>
         pending.delete(key),
       );
