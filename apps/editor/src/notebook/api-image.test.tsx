@@ -186,6 +186,21 @@ it("calls onError and keeps the placeholder for a non-OK response", async () => 
   expect(created).toEqual([]);
 });
 
+it("calls onError and returns to the placeholder when the fetched body is not an image", async () => {
+  const onError = vi.fn();
+  await render(<ApiImage src="/canvas/api/a.svg" alt="A" onError={onError} />);
+  await answer("/canvas/api/a.svg", new Response("", { status: 200 }));
+  const image = container.querySelector("img")!;
+  expect(image.getAttribute("src")).toBe("blob:test/1");
+  // What the browser does when it cannot decode the object URL.
+  await act(async () => image.dispatchEvent(new Event("error")));
+  expect(onError).toHaveBeenCalledTimes(1);
+  expectPlaceholder();
+  await act(async () => root?.unmount());
+  root = undefined;
+  expect(revoked).toEqual(["blob:test/1"]);
+});
+
 it("calls onError for a network error", async () => {
   const onError = vi.fn();
   await render(<ApiImage src="/canvas/api/a.png" alt="A" onError={onError} />);

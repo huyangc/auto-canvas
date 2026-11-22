@@ -95,3 +95,33 @@ output (`diff -rq` of a base build and this build, 194 files each, no
 difference) and its three Playwright spec files (23 passed). The build test's
 "no notebook module in the standard output" assertions, which the reviewer
 did rerun, cover the same property from the other side.
+
+## Round 4 — accepted (fixes by the reviewer)
+
+Reviewed: codex `gpt-6.2-sol` PR review round 2 of PR 114 at `a2751d4`
+(one P2, two P3; no blocking finding), each checked against the code and
+found valid. Each fix is a few lines, so the reviewer made them instead of
+opening a third implementation round.
+
+| # | Severity | Where | Finding | Expected fix |
+| --- | --- | --- | --- | --- |
+| 12 | fixed | `apps/editor/src/notebook/gate.ts` | When the editor modules fail to load, Retry imports the same URLs in the same document, which may keep the failed load; Retry can then fail for good after the network is back. | A failed module load shows the error screen without Retry (the reload variant from finding 10). Retry stays for identification failures. Test "asks for a reload, without Retry, when the editor modules fail to load". |
+| 13 | fixed | `apps/editor/src/notebook/api-image.tsx` | A 200 answer the browser cannot decode left a broken image and never called `onError`, so a Shelf tile kept no fallback. | The shown image's `error` event returns to the placeholder and calls `onError`. Test with an empty 200 body and a dispatched `error`. |
+| 14 | fixed | `scripts/notebook-editor-build.test.mjs` | The HTML check read only double-quoted attributes. | `htmlReferences()` reads the page with an HTML parser (jsdom, already a dev dependency): every script source and every `stylesheet` / `modulepreload` / `preload` link, any quoting and case; a `<base>` fails. A self-check covers single-quoted, unquoted and upper-case references. |
+| 15 | note | codex finding 1, second half | Recovery after a failed module load is not shown against the built entry. | T162b (browser tests). |
+
+Acceptance rerun by the reviewer:
+
+```text
+pnpm build → 0
+pnpm exec vitest run apps/editor/src/notebook scripts/notebook-editor-build.test.mjs → 0; 8 files, 64 tests
+pnpm test:local → 0; 851 files passed, 3 skipped; 8823 tests passed, 117 skipped
+pnpm build:notebook-editor → 0; index.html has 8 /canvas/assets/ references
+silicon_notebook_token: 0 files in apps/editor/dist, 1 in apps/editor/dist-notebook
+no path containing @notebook in either output
+working-tree changes outside the owned files → none
+pnpm typecheck → 0; pnpm lint → 0; pnpm format:check → 0; pnpm docs:check → 0
+```
+
+The branch then takes the two new commits of its base
+(`task/T161-notebook-identity`, server only) by a merge.

@@ -5,6 +5,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { JSDOM } from "jsdom";
 import { build, parseAst, resolveConfig } from "vite";
 import { expect, it } from "vitest";
 import webConfig from "../apps/editor/vite.config.ts";
@@ -212,6 +213,61 @@ it("reports a Worker whose first argument is not an accepted local URL", () => {
   );
 });
 
+/**
+ * The script and style references of a page as an HTML parser reads them
+ * (any quoting, any case): every script source and every link that loads a
+ * stylesheet or a module.
+ */
+function htmlReferences(page) {
+  const { document } = new JSDOM(page).window;
+  const loads = (link) =>
+    (link.getAttribute("rel") ?? "")
+      .toLowerCase()
+      .split(/\s+/u)
+      .some((token) =>
+        ["modulepreload", "preload", "stylesheet"].includes(token),
+      );
+  return {
+    base: document.querySelector("base") !== null,
+    references: [
+      ...[...document.querySelectorAll("script[src]")].map((script) =>
+        script.getAttribute("src"),
+      ),
+      ...[...document.querySelectorAll("link[href]")]
+        .filter(loads)
+        .map((link) => link.getAttribute("href")),
+    ],
+  };
+}
+
+it("reads script and style references in any quoting and case", () => {
+  expect(
+    htmlReferences(
+      [
+        "<!doctype html><head>",
+        "<script src='https://evil.example/a.js'></script>",
+        "<SCRIPT type=module SRC=https://evil.example/b.js></SCRIPT>",
+        "<link rel=stylesheet href=https://evil.example/c.css>",
+        "<link REL='alternate StyleSheet' HREF='https://evil.example/d.css'>",
+        '<link rel="modulepreload" href="/canvas/assets/e.js">',
+        '<link rel="icon" href="https://elsewhere.example/icon.svg">',
+        "<script>inline()</script>",
+        "</head>",
+      ].join(""),
+    ),
+  ).toEqual({
+    base: false,
+    references: [
+      "https://evil.example/a.js",
+      "https://evil.example/b.js",
+      "https://evil.example/c.css",
+      "https://evil.example/d.css",
+      "/canvas/assets/e.js",
+    ],
+  });
+  expect(htmlReferences("<base href='https://evil.example/'>").base).toBe(true);
+});
+
 /** Static and dynamic imports in emitted worker JavaScript, from its AST. */
 function workerImports(code, fileName) {
   const specifiers = [];
@@ -279,13 +335,9 @@ it("builds the notebook editor with every executable reference inside /canvas/",
   for (const item of output) expect(item.fileName).not.toContain("@notebook");
 
   const html = output.find((item) => item.fileName === "index.html");
-  const page = text(html);
-  const references = [
-    ...page.matchAll(/<script\b[^>]*\bsrc="([^"]*)"/gu),
-    ...page.matchAll(
-      /<link\b(?=[^>]*\brel="(?:modulepreload|stylesheet)")[^>]*\bhref="([^"]*)"/gu,
-    ),
-  ].map((match) => match[1]);
+  const { references, base } = htmlReferences(text(html));
+  // A <base> would move every relative reference.
+  expect(base).toBe(false);
   expect(references.length).toBeGreaterThan(0);
   for (const reference of references)
     expectLocal(reference, DEPLOY, "index.html");

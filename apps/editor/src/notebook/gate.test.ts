@@ -225,19 +225,17 @@ describe("a run", () => {
     expect(gate.count("reload")).toBe(0);
   });
 
-  it("shows the error screen when loading fails, and Retry works", async () => {
+  it("asks for a reload, without Retry, when the editor modules fail to load", async () => {
     const gate = harness(token("alice"));
     await gate.identify(0, ALICE);
     gate.loads[0]!.reject(new Error("chunk missing"));
     await flush();
     expect(gate.screen().screen).toBe("error");
+    // The same document may never load those modules again.
+    expect(gate.screen().retry).toBeUndefined();
     expect(gate.count("install")).toBe(0);
     expect(gate.count("mount")).toBe(0);
-    gate.screen().retry!();
-    await gate.identify(1, ALICE);
-    await gate.load(1);
-    expect(gate.count("install")).toBe(1);
-    expect(gate.count("mount")).toBe(1);
+    expect(gate.count("reload")).toBe(0);
   });
 });
 
