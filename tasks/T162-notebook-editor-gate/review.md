@@ -125,3 +125,29 @@ pnpm typecheck → 0; pnpm lint → 0; pnpm format:check → 0; pnpm docs:check 
 
 The branch then takes the two new commits of its base
 (`task/T161-notebook-identity`, server only) by a merge.
+
+## Round 5 — accepted (fixes by the reviewer)
+
+Reviewed: codex `gpt-6.2-sol` PR review round 3 of PR 114 at `0451202`
+(one P2, two P3; no blocking finding), each checked against the code and
+found valid; fixed by the reviewer, a few lines each.
+
+| # | Severity | Where | Finding | Expected fix |
+| --- | --- | --- | --- | --- |
+| 16 | fixed | `apps/editor/src/notebook/api-image.tsx` | The observer's margin was around the page's viewport; inside a list that scrolls its own content the list's box clips what counts as visible, so previews there started loading only once in view. | The observer's root is the nearest ancestor that scrolls (`overflow-y` `auto`, `scroll` or `overlay`), or the page. Test "observes a lazy image against the container that scrolls it, or the page". |
+| 17 | fixed | `scripts/notebook-editor-build.test.mjs` | Imports were read from the AST only for worker assets; a computed `import()` in an application chunk is not in the bundler's lists. | `moduleImports()` now also runs over every chunk: each specifier must be a literal that resolves inside the deployment. The real notebook build passes it. |
+| 18 | fixed | `scripts/notebook-editor-build.test.mjs` | The Worker scan missed qualified constructors (`new globalThis.Worker(…)`). | The scan accepts any dotted qualifier; the self-check has a qualified `SharedWorker` with an outside URL. |
+| 19 | note | the build test as a whole | It reads emitted text and AST; a constructor reached through an alias or a computed member is not seen. | Accepted: the test guards this repository's own bundle against a regression, it is not a defence against hostile code. |
+
+Acceptance rerun by the reviewer:
+
+```text
+pnpm build → 0
+pnpm exec vitest run apps/editor/src/notebook scripts/notebook-editor-build.test.mjs → 0; 8 files, 65 tests
+pnpm test:local → 0; 851 files passed, 3 skipped; 8831 tests passed, 117 skipped
+pnpm build:notebook-editor → 0; index.html has 8 /canvas/assets/ references
+silicon_notebook_token: 0 files in apps/editor/dist, 1 in apps/editor/dist-notebook
+no path containing @notebook in either output
+working-tree changes outside the owned files → none
+pnpm typecheck → 0; pnpm lint → 0; pnpm format:check → 0; pnpm docs:check → 0
+```

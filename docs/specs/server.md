@@ -234,7 +234,8 @@ Worker calls the API); `<img>`, navigation and WebSockets never go through
 `fetch`; any script in the page can read the token from `localStorage` anyway.
 Previews are therefore fetched through that `fetch` and shown from object URLs,
 never loaded from the HTTP cache. A lazy preview is fetched only once it comes
-within about a viewport height of the visible area; until it is shown, and
+within about a viewport height of the visible area (of the list that
+scrolls it, when it is inside one); until it is shown, and
 after it fails (the request, or the browser showing what it returned), an
 empty `<img>` holds its place.
 
