@@ -148,17 +148,26 @@ export function createNotebookIdentity({
   notebookApi,
   onProfile,
   fetch,
-  // Monotonic: a wall clock set backwards must not stretch the window.
-  now = () => performance.now(),
+  now,
   timeoutMs = 5000,
   capacity = 10_000,
 }: NotebookIdentityOptions): {
   resolve(request: Request): Promise<NotebookIdentityResult>;
 } {
   const endpoint = new URL("/api/me", notebookApi);
+  // The window is measured on two clocks and ends when either says so. The
+  // monotonic one cannot be stretched by a wall clock set backwards; the wall
+  // clock keeps counting while the host is suspended, which the monotonic
+  // clock does not do on every platform. An injected clock replaces both.
+  const clocks = now ? [now] : [() => performance.now(), () => Date.now()];
+  const stamp = () => clocks.map((clock) => clock());
+  const windowOver = (start: readonly number[]) =>
+    clocks.some(
+      (clock, index) => clock() - start[index]! >= AUTHORIZATION_WINDOW_MS,
+    );
   const cache = new Map<
     string,
-    { profile: NotebookProfile; expires: number }
+    { profile: NotebookProfile; start: readonly number[] }
   >();
   const pending = new Map<string, Promise<NotebookIdentityResult>>();
   const send = fetch ?? directGet;
@@ -199,7 +208,7 @@ export function createNotebookIdentity({
     token: string,
     key: string,
   ): Promise<NotebookIdentityResult> {
-    const start = now();
+    const start = stamp();
     let profile: NotebookProfile;
     try {
       profile = await fetchProfile(token);
@@ -213,16 +222,15 @@ export function createNotebookIdentity({
     } catch {
       return unavailable;
     }
-    const expires = start + AUTHORIZATION_WINDOW_MS;
     // A slow hook must not hand out a profile after its window has passed.
-    if (now() >= expires) return unavailable;
+    if (windowOver(start)) return unavailable;
     cache.delete(key);
     while (cache.size >= capacity) {
       const oldest = cache.keys().next();
       if (oldest.done) break;
       cache.delete(oldest.value);
     }
-    if (capacity > 0) cache.set(key, { profile, expires });
+    if (capacity > 0) cache.set(key, { profile, start });
     return { ok: true, profile };
   }
 
@@ -233,7 +241,8 @@ export function createNotebookIdentity({
       const key = createHash("sha256").update(token).digest("hex");
       const entry = cache.get(key);
       if (entry) {
-        if (now() < entry.expires) return { ok: true, profile: entry.profile };
+        if (!windowOver(entry.start))
+          return { ok: true, profile: entry.profile };
         cache.delete(key);
       }
       const joined = pending.get(key);
