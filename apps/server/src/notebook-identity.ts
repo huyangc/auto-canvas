@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import * as http from "node:http";
 import * as https from "node:https";
+import { lookup as dnsLookup, type LookupAddress } from "node:dns";
+import { BlockList, type LookupFunction } from "node:net";
 import { Readable } from "node:stream";
 
 export interface NotebookProfile {
@@ -58,6 +60,38 @@ const directAgents = {
  * The default transport: one direct GET that never follows a redirect, shaped
  * as the part of `fetch` used below. A non-200 response carries no body.
  */
+const loopback = new BlockList();
+loopback.addSubnet("127.0.0.0", 8, "ipv4");
+loopback.addAddress("::1", "ipv6");
+
+/** The loopback addresses among a resolver's answers, in their order. */
+export function onlyLoopback(
+  addresses: readonly LookupAddress[],
+): LookupAddress[] {
+  return addresses.filter(({ address, family }) =>
+    loopback.check(address, family === 6 ? "ipv6" : "ipv4"),
+  );
+}
+
+// "localhost" passed the configuration check as a loopback name, but what it
+// resolves to is the resolver's business. Only loopback answers reach the
+// socket, so a wrong hosts entry cannot send the token to another machine.
+const loopbackLookup: LookupFunction = (hostname, options, callback) => {
+  dnsLookup(hostname, { ...options, all: true }, (error, addresses) => {
+    const local = error ? [] : onlyLoopback(addresses);
+    const first = local[0];
+    if (!first) {
+      callback(
+        error ?? new Error("The notebook API host is not a loopback address"),
+        options.all ? [] : "",
+      );
+      return;
+    }
+    if (options.all) callback(null, local);
+    else callback(null, first.address, first.family);
+  });
+};
+
 function directGet(
   url: URL,
   { headers, signal }: { headers: Record<string, string>; signal: AbortSignal },
@@ -70,7 +104,7 @@ function directGet(
         : directAgents["http:"];
     const request = client.request(
       url,
-      { method: "GET", headers, agent, signal },
+      { method: "GET", agent, signal, lookup: loopbackLookup },
       (incoming) => {
         try {
           const status = incoming.statusCode ?? 0;
@@ -90,6 +124,10 @@ function directGet(
         }
       },
     );
+    // Set on the request, not in the options above: Node's connection debug
+    // output (NODE_DEBUG=net, https) prints those options.
+    for (const [name, value] of Object.entries(headers))
+      request.setHeader(name, value);
     request.on("error", reject);
     request.end();
   });
