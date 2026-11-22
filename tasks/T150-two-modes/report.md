@@ -321,21 +321,22 @@ independent rerun. Slices a and b are merged (`0c07eae`); slice d follows.
   modes, so a dropped item fails it.
 
 Commits on `task/T150c-menus`: `150154d` (implementation), `029f77e`
-(review round 1). 16 files, +908 / −143; product code under
-`apps/editor/src` without tests is 5 files, +246 / −93.
+(review round 1), `5c3f4bf` (round 2). 17 files, +1234 / −144; product
+code under `apps/editor/src` without tests is 5 files, +289 / −94.
 
-## Acceptance (coordinator's rerun on `029f77e`)
+## Acceptance (coordinator's rerun on `5c3f4bf`)
 
 | Command                                            | Result                              |
 | -------------------------------------------------- | ----------------------------------- |
 | `pnpm build`, `pnpm test:editor-build`             | pass                                |
 | `pnpm typecheck`, `pnpm lint`, `pnpm format:check` | pass (lint 0 errors)                |
 | `pnpm docs:check`                                  | pass                                |
-| `pnpm test:local`                                  | pass: 8627 passed, 117 skipped      |
+| `pnpm test:local`                                  | pass: 8628 passed, 117 skipped      |
 | `pnpm deadcode`                                    | exit 1 as on `main`; no new finding |
-| Browser suite, 53 spec files, one worker           | 432 passed, 2 skipped, 0 failed     |
+| Browser suite, 53 spec files, one worker           | 436 passed, 2 skipped, 0 failed     |
 
-The full run at `150154d` was 431 passed, 0 failed. `project-file.spec.ts`
+Earlier full runs: 431 passed, 0 failed at `150154d`; 432 passed, 0 failed
+at `029f77e`. `project-file.spec.ts`
 is left out as before (it fails to load on `main`).
 
 ## Browser check by the coordinator
@@ -369,6 +370,30 @@ the bar's own row and the name alone shrinks while idle; during a run the
 long label is cut with an ellipsis once the name is at its floor. Two doc
 nits fixed (`apps/desktop/README.md`, the header list in the user guide).
 
+codex on the report commit after `029f77e`: one P2 and two P3, fixed in
+`5c3f4bf`.
+
+- **`⋯` ran off screen in a narrow desktop window.** The implementer ran
+  the desktop entry's dev server and measured it: in Auto, from 761 to
+  about 950 px wide, the right edge of `⋯` lay past the window (937 in a
+  901 px window with a short name, 948 with a long one). The desktop host
+  adds "Local projects" and "About" to the bar. Now a bar with host
+  controls hides the project name up to 1000 px and the wordmark up to
+  940 px, and only then lets the actions shrink; `⋯`, File, the switch,
+  Undo/Redo and the Auto Layout button stay. Measured after the fix at ten
+  widths from 721 to 1100 px: `⋯` inside the window, one 44 px row. These
+  desktop numbers are the implementer's; the coordinator did not repeat
+  them. The committed browser test uses doubles of the host's two buttons
+  on the web page, because the Playwright config serves only the web
+  entry.
+- The slice's `min-width: 721px` rules left a gap for a fractional
+  viewport between 720 and 721 px (browser zoom); they are range queries
+  now.
+- `Cancel Auto Layout` inside `⋯` has a browser test in both modes.
+
+The web bar is unchanged by `5c3f4bf`; the coordinator's measurements in
+the table above were repeated on it with the same numbers.
+
 ## Deviations from the plan
 
 1. `chrome-isolation.spec.ts`: its row check named the left group, which
@@ -380,8 +405,8 @@ nits fixed (`apps/desktop/README.md`, the header list in the user guide).
 
 ## Not covered
 
-- The desktop host chrome (Local projects, About, "Desktop preview") with
-  a long name was not measured; Electron was not tried.
+- Electron was not tried; the desktop bar was measured by the implementer
+  in a browser against the desktop entry's dev server, not in the app.
 - Rows of the decision table the browser walk skips, because the fixture
   state lacks them: Revert, Recover, RNL…, desktop file commands, Cancel
   Auto Layout. Open Shelf project in tab and the empty card have their own
