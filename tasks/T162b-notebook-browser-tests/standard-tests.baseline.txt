@@ -1,0 +1,459 @@
+	agent-bus-productivity.spec.ts	traces and marks explicit bus members through a real Agent with atomic copy and history
+	agent-bus-reuse.spec.ts	copies a migrated group through the real editor with shared dependencies and one Undo
+	agent-connection.spec.ts	first connection handoff › MCP pairs from one handoff, reads the circuit, edits and shares undo
+	agent-connection.spec.ts	first connection handoff › raw HTTP pairs from one handoff, reads the circuit, edits and shares undo
+	auto-layout.spec.ts	Auto Layout applies a plan in one Undo step
+	auto-layout.spec.ts	Auto Layout shows a refusal and its Details
+	bus-lifecycle.spec.ts	converts a legacy Cell Pin through the same explicit member mapping dialog
+	bus-lifecycle.spec.ts	explicitly converts a legacy Label, cancels safely, and preserves migration through undo and reopening
+	bus-productivity.spec.ts	chooses, marks, traces and clears concrete members through Properties
+	bus-productivity.spec.ts	continuously taps ascending, ends without wrapping and keeps each completed branch undoable
+	bus-productivity.spec.ts	continuously taps descending, ends without wrapping and keeps each completed branch undoable
+	bus-productivity.spec.ts	disconnected members cannot trace retained conductors
+	bus-productivity.spec.ts	expands mixed Labels from L onto selected branches with one undo and safe cancellation
+	bus-productivity.spec.ts	intentional fanout keeps its member through invalid choice and cancelled inline naming
+	bus-productivity.spec.ts	navigates missing members from Issues and preserves copied No Connect through reopen and recovery
+	chrome-isolation.spec.ts	compacts the editor header at half width without GitHub, credit or account controls
+	chrome-isolation.spec.ts	keeps Library Netlist and Project Code together on the left at full and half width
+	chrome-isolation.spec.ts	keeps editor chrome typography from suppressing SVG italics
+	chrome-isolation.spec.ts	shows no account fallback when auth providers are unavailable
+	circuit-authoring.spec.ts	No Connect can be found by NC or noconn and activates a tool, not an Instance
+	circuit-authoring.spec.ts	No Connect clears a stale hover on zoom and keeps the snap reach in screen pixels
+	circuit-authoring.spec.ts	No Connect does not guess between overlapping pins or create free-floating marks
+	circuit-authoring.spec.ts	No Connect refuses wired pins and preserves independent open nodes through save and reload
+	circuit-authoring.spec.ts	No Connect tool snaps near pins, places repeatedly and exits without changing wires
+	circuit-authoring.spec.ts	a switch changes contact style in place, keeping its wires
+	circuit-authoring.spec.ts	authors components, connectivity and No Connect manually from an empty canvas
+	circuit-authoring.spec.ts	constructs VDD as a drawn dotless power rail, cancelled before or after its first endpoint
+	circuit-authoring.spec.ts	keeps Bulk status and its prominent draw action on one compact row
+	circuit-authoring.spec.ts	keeps DMOS bulk hidden until drawing an explicit bulk route
+	circuit-authoring.spec.ts	keeps a tapped VDD rail movable and stretchable as one supply bar
+	cloud-projects-server.spec.ts	local identity saves, reopens from the shelf and lists the earlier revision
+	component-insert.spec.ts	C copy shows alignment guides, commits the preview and clears guides on Escape
+	component-insert.spec.ts	Enter confirms property code unchanged and Shift+Enter adds layout whitespace
+	component-insert.spec.ts	a gate's input count changes drawn pins and black-box target together
+	component-insert.spec.ts	a part set down beside a pin is pulled onto it and connects
+	component-insert.spec.ts	blocks destructive browser refresh shortcuts while work is unsaved
+	component-insert.spec.ts	category chips multi-select which kinds the quick pick shows
+	component-insert.spec.ts	edits independent input and output swaps with undo, named connections and saved state
+	component-insert.spec.ts	edits the polarity label's text without losing its marks
+	component-insert.spec.ts	keeps a usable canvas while toggling Library at the narrow breakpoint
+	component-insert.spec.ts	keeps shortcuts hidden until the status-bar Hints control requests them
+	component-insert.spec.ts	merges opamp body marks into one Library entry and property
+	component-insert.spec.ts	new circuits open Library and Netlist, keep the saved preference, and mirror Library annotations in the menu
+	component-insert.spec.ts	places a D flip-flop on the first click with slight pointer drift over its preview
+	component-insert.spec.ts	publishes placement cancellation synchronously before rapid Copy
+	component-insert.spec.ts	reopens I, starts Copy from retained selection without stacking modes, and Escape closes it from outside
+	component-insert.spec.ts	shows the complete foldable categorized Library, quick-places a device, and restores state
+	component-insert.spec.ts	the status bar toggles the grid, labelled full-width and an icon half-width
+	component-insert.spec.ts	tiles the whole catalog into one flat quick-pick grid
+	component-insert.spec.ts	widens the Insert picker and adds columns with the editor viewport
+	component-properties-catalog.spec.ts	Delay Cell switches formula parameters and project transistor Cell without moving pins
+	component-properties-catalog.spec.ts	Properties resumes displayed PDK source on opening and changing the selection
+	component-properties-catalog.spec.ts	Show Value uses bound geometry through the existing Properties controls
+	component-properties-catalog.spec.ts	a SKY130 inductor shows a Net row for each terminal it draws no pin for (#1833)
+	component-properties-catalog.spec.ts	an op-amp's Supply pins switch draws VDD and VSS as pins to wire, and back (#1833)
+	component-properties-catalog.spec.ts	cccs Visual Annotation edits without crashing or changing electrical identity
+	component-properties-catalog.spec.ts	cccs picks ordered current terminals with snap and direction feedback, and survives an incomplete draft
+	component-properties-catalog.spec.ts	hidden block supplies preview Nets and bind explicitly or Auto
+	component-properties-catalog.spec.ts	placed parts, the VDD marker and a legacy clock use the text-first Properties surface
+	component-properties-catalog.spec.ts	vccs highlights control Nets and commits each pick immediately
+	component-property-workflows.spec.ts	Cell Pin Properties edits the formal name even without a canvas label
+	component-property-workflows.spec.ts	Properties keeps component and Annotation text colors independent
+	component-property-workflows.spec.ts	Properties resizes from 300px with plain selectable code and its inline controls
+	component-property-workflows.spec.ts	Q opens a text-first Properties editor with one-click exact draft copy
+	component-property-workflows.spec.ts	Rail Properties switches Cell Pin and Global atomically, survives reload and undo
+	component-property-workflows.spec.ts	a W/L numerator drags freely and keeps its offset through history and file reload
+	component-property-workflows.spec.ts	batch Code drafts follow selection identity even when common values are identical
+	component-property-workflows.spec.ts	batch Code lists differing values, edits them atomically and refuses incompatible values
+	component-property-workflows.spec.ts	edits a formula-capable Signal Flow block with undo, redo, and Reset defaults
+	component-property-workflows.spec.ts	explicit property typing keeps Delete local and returns shortcuts to canvas
+	component-property-workflows.spec.ts	fully differential comparator places four pins and retains its model through polarity edits
+	component-property-workflows.spec.ts	live Defaults are undoable and invalid drafts never change the canvas
+	component-property-workflows.spec.ts	live property edits survive blank click and Escape without replaying legacy drafts
+	component-property-workflows.spec.ts	live typing preserves the caret, local undo and incomplete JSON
+	component-property-workflows.spec.ts	one live JSON edit combines model, dimensions and appearance in one undo boundary
+	component-property-workflows.spec.ts	property code undo and redo use Control on Windows
+	component-property-workflows.spec.ts	property inspection and remounts keep canvas keyboard ownership
+	component-property-workflows.spec.ts	selects a reviewed SKY130 MOS through the inline Target netlist field
+	component-property-workflows.spec.ts	source Shape controls apply only to controlled sources
+	component-property-workflows.spec.ts	transformer parameter labels show independently, edit on the canvas and survive history and files
+	component-property-workflows.spec.ts	value display projects MOS W/L beside the reference
+	context-menu.spec.ts	Netlist keeps format selection in the project panel while File keeps drawing exports
+	context-menu.spec.ts	bottom alignment lines up drawn text bottoms off the grid, a repeat is a no-op, and Undo/Redo reverse it
+	context-menu.spec.ts	drafting shapes, text and device labels join device selection from either order and share its context menu
+	context-menu.spec.ts	right-click on a device only offers direct selection actions
+	context-menu.spec.ts	visual clipboard copies a mixed selection as its formal SVG and a lone Wire as a transparent PNG, reports a denied clipboard, and never touches history
+	copy-paste.spec.ts	C alone previews before clipboard permission resolves and Escape cancels without a revision
+	copy-paste.spec.ts	C/V copies as fresh: a unique new reference and the label as drawn
+	copy-paste.spec.ts	connects copied multi-pin groups through a manually bent wire
+	copy-paste.spec.ts	keeps a captured bus snapshot after source rename and reuses its child on repeated cross-tab paste
+	copy-paste.spec.ts	moves and copies converted bus groups across tabs with member bindings, history and recovery
+	copy-paste.spec.ts	the copy ghost follows the pointer, turns with R, and keeps placing over existing geometry until Escape
+	detach-move.spec.ts	Ctrl+drag moves only the part, and a still Ctrl+click toggles selection
+	detach-move.spec.ts	Shift+M arms for the next click and carries a whole selection off its wires
+	detach-move.spec.ts	Shift+drag drops a copy, and a Shift+click adds to the selection even as the hand drifts
+	diagnostics-surfacing.spec.ts	Check and Save surfaces findings in the existing workbench and canvas
+	diagnostics-surfacing.spec.ts	accepts free angles and optionally straightens them in one undoable action
+	diagnostics-surfacing.spec.ts	signed-out Save does not suppress ERC or visual check results
+	digital-gate-grid.spec.ts	digital gates fit their hit boxes to the painted body, not the empty strip beside it
+	drafting.spec.ts	Escape cancels a text drag and a component drag, with its Smart Snap guides, without a revision
+	drafting.spec.ts	Polyline annotation draws a right angle, edits vertices, stretches and preserves both endpoint styles
+	drafting.spec.ts	T writes Text first, places it at its preview on the stored annotation pitch after zoom and pan, and undoes it in one step
+	drafting.spec.ts	a drawn rectangle selects by its outline, passes interior clicks through and resizes by its corner
+	drafting.spec.ts	adds formatted drafting text and undo/redo restores it
+	drafting.spec.ts	arrow endpoints keep independent styles through rotation, history, file export and a click on the dot
+	drafting.spec.ts	authors inline fractions alongside styled text and preserves them through editing and export
+	drafting.spec.ts	authors one validated formula through the canonical text editor
+	drafting.spec.ts	centers fraction parts on a content-sized bar and defaults notes to bold
+	drafting.spec.ts	construction line hits by its stroke and inserts a vertex on double-click
+	drafting.spec.ts	double-click inside a rectangle writes a centered, anchored label
+	drafting.spec.ts	drawing tools keep a visible locator before the first point and clear queued hover on leave and Escape
+	drafting.spec.ts	edits an unrestricted device formula in the same visual annotation
+	drafting.spec.ts	keeps every line of a multi-line note on its own line
+	drafting.spec.ts	keeps the text editor clear of a docked panel and a long formula inside its frame at the lowest zoom
+	drafting.spec.ts	keeps unsafe formula source out of the Project
+	drafting.spec.ts	line arrow clicks add bends and snap through to an arbitrary rectangle edge
+	drafting.spec.ts	rectangle annotation code commits paint and stacking atomically and survives export
+	drafting.spec.ts	schematic text uses the pinned textbook face with measured advances and PDF symbol fallback
+	drafting.spec.ts	types Greek letters by LaTeX name and from the symbol menu
+	drawing-style.spec.ts	Shift-click gathers wires, and one color change restyles all of them
+	drawing-style.spec.ts	colors a generated pin-contact dot independently, with undo, reload, SVG, PNG and PDF
+	drawing-style.spec.ts	styles a wire's colour, line and arrow through property code, with undo, export, reload and Auto, and names it globally in one step
+	editor-modes.spec.ts	B, I and T in Auto bring up Draw and do their job
+	editor-modes.spec.ts	Document settings close on the switch to Auto and hold nothing
+	editor-modes.spec.ts	Draw it yourself puts focus on the Draw switch
+	editor-modes.spec.ts	Insert component… from the menu in Auto brings up Draw
+	editor-modes.spec.ts	L, P and Place Cell in Auto bring up Draw
+	editor-modes.spec.ts	W inside an open File or ⋯ menu changes nothing
+	editor-modes.spec.ts	W on a Cell Manager button in Auto changes nothing
+	editor-modes.spec.ts	a Netlist opened in Auto stays with its tab
+	editor-modes.spec.ts	a Space after an import from the card does not cancel its layout
+	editor-modes.spec.ts	a circuit opened in Auto starts Draw with its Netlist
+	editor-modes.spec.ts	a closed, focused more-menu button leaves the canvas keys alone
+	editor-modes.spec.ts	a closed, focused project-menu button leaves the canvas keys alone
+	editor-modes.spec.ts	a dock carried for a draft is not saved with the tab as Auto's own
+	editor-modes.spec.ts	a dock carried only for a draft is not remembered as the mode's own
+	editor-modes.spec.ts	a drawing key in Auto brings up Draw for this session only
+	editor-modes.spec.ts	a failed import in Auto shows its review
+	editor-modes.spec.ts	a failed import in Draw shows its review
+	editor-modes.spec.ts	a failed import keeps an unapplied code draft
+	editor-modes.spec.ts	a long project name gives way before the top bar's controls
+	editor-modes.spec.ts	a long running label keeps Cancel and Agent on screen
+	editor-modes.spec.ts	a long ⋯ menu scrolls inside a short window
+	editor-modes.spec.ts	a new project tab in Auto opens on a clear canvas
+	editor-modes.spec.ts	a reload after a drawing key opens Auto without Draw's docks
+	editor-modes.spec.ts	a review on screen replaced by another failed import is not waiting
+	editor-modes.spec.ts	a running Auto Layout fits a phone-width top bar
+	editor-modes.spec.ts	a seen review is put away on the next close of Properties
+	editor-modes.spec.ts	a tab switch ends a draft's carry-over, so the other tab keeps its docks
+	editor-modes.spec.ts	an Auto import keeps the canvas clear and lays the netlist out
+	editor-modes.spec.ts	an existing canvas text being edited is committed by the click on the switch
+	editor-modes.spec.ts	an unapplied Netlist code draft stays on screen across a switch
+	editor-modes.spec.ts	an unapplied Project Code draft stays on screen across a switch
+	editor-modes.spec.ts	an unseen Import Review shows for a selected part and Q
+	editor-modes.spec.ts	an unseen Import Review survives W into Draw
+	editor-modes.spec.ts	an unseen Import Review survives a project-tab switch
+	editor-modes.spec.ts	an unseen Import Review survives the Netlist
+	editor-modes.spec.ts	arrow keys scroll the open more-menu, not the canvas
+	editor-modes.spec.ts	arrow keys scroll the open project-menu, not the canvas
+	editor-modes.spec.ts	at 390 px the canvas buttons stay reachable over an open dock
+	editor-modes.spec.ts	at 720 px the canvas buttons stay reachable over an open dock
+	editor-modes.spec.ts	canvas edits in Auto stay in Auto: rotate, Undo and Delete
+	editor-modes.spec.ts	closing Draw's Netlist does not open Properties left open in Auto
+	editor-modes.spec.ts	each mode keeps its own Netlist across a round trip
+	editor-modes.spec.ts	every row of the menu table is where it says, in Auto and in Draw
+	editor-modes.spec.ts	first open: Auto mode, the coach mark, and the import card
+	editor-modes.spec.ts	header menus open inside the viewport at 320 px
+	editor-modes.spec.ts	header menus open inside the viewport at 390 px
+	editor-modes.spec.ts	header menus open inside the viewport at 480 px
+	editor-modes.spec.ts	header menus open inside the viewport at 720 px
+	editor-modes.spec.ts	no header rule leaves a gap between 720 and 721 px
+	editor-modes.spec.ts	switching to Auto cancels typed text an armed tool holds
+	editor-modes.spec.ts	switching to Auto drops a Net Label being placed
+	editor-modes.spec.ts	switching to Auto drops an armed wire and leaves the drawing alone
+	editor-modes.spec.ts	the Auto top bar stays one row with its controls on screen
+	editor-modes.spec.ts	the Cells rail lists each Cell with its layout status
+	editor-modes.spec.ts	the Netlist button closes any project dock kept open in Auto
+	editor-modes.spec.ts	the card opens a project file through the chooser
+	editor-modes.spec.ts	the card opens an example and goes to Draw
+	editor-modes.spec.ts	the card's example waits for an unapplied code draft
+	editor-modes.spec.ts	the plain web bar keeps ⋯ on screen just above each band
+	editor-modes.spec.ts	the same netlist file imports again
+	editor-modes.spec.ts	the switch to Draw dismisses the coach and is remembered
+	editor-modes.spec.ts	the top bar names the project on one row, in both modes
+	editor-modes.spec.ts	the top-bar Auto Layout shows its run and Cancel stops it
+	editor-modes.spec.ts	the ⋯ menu works from the keyboard and closes like the other menus
+	editor-modes.spec.ts	with the desktop host's controls the bar keeps ⋯ and File on screen
+	editor-modes.spec.ts	⋯ → Layout offers Cancel while a run plans, in Auto and in Draw
+	editor-shell.spec.ts	Fit View keeps the drawing clear of the Properties dock
+	editor-shell.spec.ts	docked Properties JSON is the only global configuration surface
+	editor-shell.spec.ts	every web path opens the editor without community requests
+	editor-shell.spec.ts	formal SVG keeps wide rotated edge labels inside its figure, and the PNG is that figure
+	editor-shell.spec.ts	keeps insertion, selection and inspection from resizing the canvas, and typing from triggering shortcuts
+	editor-shell.spec.ts	keeps panel tooltips visible and exposes panel keyboard shortcuts
+	editor-shell.spec.ts	keeps the command surface compact, its menus dismissable, and publishes PWA metadata
+	editor-shell.spec.ts	right-drag frames a region and fits the camera to it transiently
+	editor-shell.spec.ts	shows the complete Project Code and protects an invalid or stale draft
+	group-mirror.spec.ts	a free wire mirrors from its context menu; one held by an unselected part says why it stays
+	hierarchy.spec.ts	Cell layout composes additive and framed pin selection, spacing, arrangement and Wire
+	hierarchy.spec.ts	Cell layout reconciles a selected pin removed by an HTTP Agent
+	hierarchy.spec.ts	Wire naming owns text keys, restores the previous draft on Escape and cancels without orphans
+	hierarchy.spec.ts	a Cell Pin shows a display alias, here and on its block, and keeps its name
+	hierarchy.spec.ts	allows distinct Cell Pins to expose one internal contact
+	hierarchy.spec.ts	applies and places an external model in a compact narrow Manager
+	hierarchy.spec.ts	confirms connected last-Port deletion and restores caller wires with Undo and Redo
+	hierarchy.spec.ts	converts the external draft with the reused format selector and keeps failed conversion inline
+	hierarchy.spec.ts	declares and places a Cell Pin on a new local Net
+	hierarchy.spec.ts	edits a vector Cell Pin with width feedback, invalid draft retention and Escape cancellation
+	hierarchy.spec.ts	entering a Cell with E, and leaving it, lands on the F fit (#1686)
+	hierarchy.spec.ts	external Manager keeps primary actions and symbol layout visible at 1440×900
+	hierarchy.spec.ts	external Manager keeps primary actions and symbol layout visible at 720×450
+	hierarchy.spec.ts	imports a long-named Cloud Cell with a child and owned model into the original parent
+	hierarchy.spec.ts	inline Wire naming preserves Label overbar semantics for CLK
+	hierarchy.spec.ts	inline Wire naming preserves Label overbar semantics for CLK,RESET
+	hierarchy.spec.ts	inline Wire naming preserves Label overbar semantics for DATA<1:0>
+	hierarchy.spec.ts	keeps Hierarchy discoverable and restores the operation row on demand
+	hierarchy.spec.ts	keeps a legacy bracketed Cell Pin scalar when changing only its formatting
+	hierarchy.spec.ts	keeps an unnamed caller member selector visible without creating a parent name when reopened or formatted
+	hierarchy.spec.ts	keeps inline scalar CLK while wiring from a bus member
+	hierarchy.spec.ts	keeps inline scalar CLK while wiring onto a bus member
+	hierarchy.spec.ts	keeps inline scalar DATA<3> while wiring onto a bus member
+	hierarchy.spec.ts	manages external declarations independently of local Cell interfaces
+	hierarchy.spec.ts	names a free Wire bundle inline, maps it into a child and restores it through recovery and reopen
+	hierarchy.spec.ts	names a loose bus with a Label and maps its order into differently named Cell pins after reopening
+	hierarchy.spec.ts	names an unfinished layout Wire inline and commits its path and Label in one undo
+	hierarchy.spec.ts	places a selected local Cell directly from Manager and explains self placement
+	hierarchy.spec.ts	places an existing Cell and blocks deleting its shared definition
+	hierarchy.spec.ts	process shortcuts change only visible model text and clipboard failure stays inline
+	hierarchy.spec.ts	refuses copying a legacy interface-only model until its native implementation is applied
+	hierarchy.spec.ts	refuses widening a fixed scalar in the inline Wire name editor and retains its route
+	hierarchy.spec.ts	same-name Cell Pins stay independent while the final interface groups them
+	hierarchy.spec.ts	saves ordinary Cell order without changing Top and restores it with Undo
+	hierarchy.spec.ts	searches definitions without discarding the selected model
+	hierarchy.spec.ts	selects an ordered slice in place without losing authored Wire points
+	hierarchy.spec.ts	shares multiple model entries, explicitly forks and reopens an undoable portable Project
+	hierarchy.spec.ts	starts a whole bus by default and optionally chooses a member without committing cancelled drafts
+	hierarchy.spec.ts	starts an external model with English comments and copies only its applied complete definition
+	instance-table.spec.ts	bulk edits instance JSON in the sidebar with atomic undo and live netlist updates
+	label-editing.spec.ts	Alt selects an attached label without its host, and the label then drags alone
+	label-editing.spec.ts	L labels a selected wire or snaps near an unselectable wire
+	label-editing.spec.ts	canvas text editor cancels explicitly and commits on Escape or outside click
+	label-editing.spec.ts	deletes imported Net Labels with non-editor ids
+	label-editing.spec.ts	keeps a long right-aligned Port label readable while editing
+	label-editing.spec.ts	keeps the rich-text editor outside its target and shields canvas input
+	label-typography.spec.ts	a bar over a Pin's V_LO names its complement and draws V̄_LO, keeping the author's look
+	label-typography.spec.ts	creates a barred Net Label as a separate signal from its unbarred name
+	label-typography.spec.ts	draws a new subscript upright, lights the looks it has, and slants it only on request
+	label-typography.spec.ts	keeps an overbar from widening a narrow glyph
+	label-typography.spec.ts	stacks complementary scripts under one uninterrupted overbar while editing
+	move-and-drag.spec.ts	a closed 85-part group in a large background cancels, commits once and restores all geometry with Undo
+	move-and-drag.spec.ts	a selected group carries its internal wiring and Junction through the live preview
+	move-and-drag.spec.ts	command move follows the pointer and commits a materially different click instead of a stale preview
+	move-and-drag.spec.ts	command move turns a part while stretching its boundary wire, restores the exact preview on Escape and commits pose and translation together
+	move-and-drag.spec.ts	dragging an unselected part past the threshold draws its wire stretching before the drop
+	move-and-drag.spec.ts	selects and moves multiple instances while viewport gestures stay transient
+	netlist-auto-layout.spec.ts	a Cell over the size limit keeps its shelf; the other is laid out
+	netlist-auto-layout.spec.ts	a multi-subcircuit netlist is announced and every Cell laid out at once
+	netlist-auto-layout.spec.ts	a one-Cell netlist is laid out after import, in one Undo step
+	netlist-code-edit.spec.ts	an incomplete circuit shows a read-only draft linked to the canvas, and reopening Netlist preserves its data
+	netlist-code-edit.spec.ts	bound labels retain typography on rename and support manual scripts without an alias
+	netlist-code-edit.spec.ts	explicit inspectors yield to Netlist for a replacement while ordinary edits preserve the panel choice
+	netlist-code-edit.spec.ts	lists every netlist issue and shows the one clicked on the canvas
+	netlist-code-edit.spec.ts	opens editable netlist by default, links cards and parts both ways, and synchronizes names and values with undo
+	netlist-code-edit.spec.ts	rejects duplicate names atomically, retains a draft when the canvas changes, and Refresh drops cards the code adds or deletes
+	netlist-code-edit.spec.ts	restores process and device choices, applies defaults and keeps edit/undo consistent
+	netlist-code-edit.spec.ts	selects an export entry independently of saved Top and edits only that Cell
+	netlist-conversion.spec.ts	imports SCS and local includes, copies SPICE, and retains the circuit after unsupported input
+	netlist-workflows.spec.ts	File > Export > Netlist saves the netlist the Netlist panel shows, in the format it shows
+	netlist-workflows.spec.ts	copies generated NoConnect nodes immediately and retains the optional Check Report
+	netlist-workflows.spec.ts	copies structural SPICE and Spectre netlists while exposing instance authoring
+	netlist-workflows.spec.ts	edits output configuration without creating another electrical authority, and blocks output when a default is missing
+	netlist-workflows.spec.ts	exports the formal scene as a vector PDF with its scripts in place
+	netlist-workflows.spec.ts	grows and shrinks the live netlist with content, scrolling only at the viewport limit, with aligned controls
+	netlist-workflows.spec.ts	imports a parameterized hierarchy and re-exports its structural semantics
+	netlist-workflows.spec.ts	keeps rejected SPICE import diagnostics in a historical report
+	netlist-workflows.spec.ts	keeps the netlist live and selectable when clipboard access fails
+	netlist-workflows.spec.ts	refreshes a legacy circuit with missing device defaults in one click
+	performance.spec.ts	editor latency on a large Project › records copy-to-ghost and drop-to-next-ghost on a dense Project
+	performance.spec.ts	editor latency on a large Project › records mixed-selection drag and pan frame cost
+	project-file.spec.ts	Check and Save keeps its snapshot safe while the drawing is replaced or edited
+	project-file.spec.ts	Cloud Save keeps one binding through rename and revert while export stays interchange
+	project-file.spec.ts	File menu falls back to one scroll area in a short viewport
+	project-file.spec.ts	fits and repairs an old booster symbol on open, and rejects invalid imports without replacing it
+	project-file.spec.ts	imports an older Project, upgrades it and repairs split Ground markers before explicit export
+	project-file.spec.ts	native cross-window clipboard preserves an editable circuit and text-field shortcuts
+	project-file.spec.ts	paired refresh preserves the saved Cloud binding
+	project-file.spec.ts	replacement guard saves to Cloud and continues
+	project-source-format.spec.ts	edits a complete instance in portable Project Code and undoes once
+	project-source-format.spec.ts	lights the whole Project Code of a part selected on the canvas
+	project-tabs.spec.ts	C carries a fresh copy into another tab, and V and Ctrl/Cmd+V paste the same
+	project-tabs.spec.ts	File's Shelf list collapses when File closes and reloads on the next open
+	project-tabs.spec.ts	a fresh browser tab offers the tabs a closed window left, reopens them once, and brings a Cloud Project's unsaved edits back as a copy (#1250, #1599)
+	project-tabs.spec.ts	a rename in its tab survives the strip hiding when the other tab closes
+	project-tabs.spec.ts	an open close decision stays answerable when the strip hides under it
+	project-tabs.spec.ts	attaches a Net Label copied across Projects with Ctrl+C/V to a wire with its exact look
+	project-tabs.spec.ts	each blank Project has its own stable identity, and New Circuit opens a blank tab beside the circuit this window drew
+	project-tabs.spec.ts	external tab activation cannot discard the focused name draft
+	project-tabs.spec.ts	keys inside the Shelf's rename field and Browse dialog stay there (File)
+	project-tabs.spec.ts	keys inside the Shelf's rename field and Browse dialog stay there (strip)
+	project-tabs.spec.ts	one project hides the tab strip, and File holds its actions
+	project-tabs.spec.ts	plain C/V works between internal tabs when system clipboard permission is denied
+	project-tabs.spec.ts	project tabs append a partial selection and retain independent history, cameras and code drafts
+	project-tabs.spec.ts	refresh restores every unsaved tab and the active view, and a closed tab stays closed
+	project-tabs.spec.ts	tab file opening is additive, and closing one tab, the others or all asks only for unsaved ones
+	project-tabs.spec.ts	tab names edit in place as one undoable change and commit to their own tab through activation, New, Close and blur
+	project-tabs.spec.ts	tab rename keeps header geometry and Project Info renames the circuit and its Cell
+	project-tabs.spec.ts	the Shelf appends a Cloud Project tab, deduplicates and saves Cloud identities
+	project-tabs.spec.ts	unchanged imported or legacy names make no edit on Enter, blur or IME Enter, past the Cloud-length input limit
+	project-tabs.spec.ts	with one project File opens a file in a new tab and browses the Shelf
+	project-tabs.spec.ts	with one project File → Close tab asks as the tab's × does, and keeps the work recoverable
+	project-tabs.spec.ts	with one project File → Project Info renames it, and the top bar shows the name
+	recovery-dialog.spec.ts	a damaged copy restores its previous generation; a newer-schema copy downloads but never restores
+	recovery-dialog.spec.ts	dialog closes with Escape, keeps focus labels and deletes a copy
+	recovery-dialog.spec.ts	export keeps recovery; explicit discard removes it and hides a clean replacement
+	recovery-dialog.spec.ts	startup recovery without a saved workspace restores into a new working copy
+	recovery-dialog.spec.ts	storage failure keeps editing, offers a backup and never acknowledges Cloud Save
+	recovery-hardening.spec.ts	a hard renderer crash restores the latest committed Project, which never entered Cache Storage
+	recovery-hardening.spec.ts	simultaneous tabs keep separate working copies
+	reference-label.spec.ts	canvas edits one visual annotation without changing the Netlist Reference, and restores it in place
+	rnl-interchange.spec.ts	File > Export > Netlist saves SPICE+RNL and Spectre+RNL as they are shown
+	rnl-interchange.spec.ts	brings five-transistor-ota-sky130 (abstract) back through spectre+rnl with every part, ground, wire and label
+	rnl-interchange.spec.ts	imports bipolar devices, a diode and mirrored labels from spectre+rnl
+	rnl-interchange.spec.ts	imports bipolar devices, a diode and mirrored labels from spice+rnl
+	rnl-interchange.spec.ts	links the RNL formats to the introduction to RNL, and only them
+	rnl-interchange.spec.ts	loads each Canvas package version once for both RNL formats
+	rnl-interchange.spec.ts	opens both current RNL exports and the Canvas package in one reusable Viewer tab
+	rnl-interchange.spec.ts	rejects changed Canvas package bytes and retries with the locked asset
+	rnl-interchange.spec.ts	reports a failed Canvas package fetch and retries on the next request
+	rnl-interchange.spec.ts	writes SPICE+RNL and Spectre+RNL, and imports the file it wrote as it was drawn
+	rotate-and-mirror.spec.ts	Ctrl+R mirrors a selected component instead of refreshing
+	rotate-and-mirror.spec.ts	Properties mirror buttons carry the MOS name and value with the part, and undo restores them
+	rotate-and-mirror.spec.ts	swaps a comparator's + and - without turning the body over
+	rotate-and-mirror.spec.ts	turns and flips a marquee selection with its labels and a note as one body, not each part in place
+	runtime-crash-safety.spec.ts	a failed dialog chunk degrades to a scoped notice, not the crash screen
+	runtime-crash-safety.spec.ts	a render crash shows the recovery screen instead of a blank page
+	runtime-crash-safety.spec.ts	a scene build failure degrades to the last good view and recovers
+	runtime-crash-safety.spec.ts	the recovery button gets a stuck page back into the editor
+	selection-and-find.spec.ts	Escape retires queued marquee samples before release
+	selection-and-find.spec.ts	Selection Filter blocks direct wire, junction, and shape operations
+	selection-and-find.spec.ts	directional marquee: window needs full coverage, crossing selects on touch
+	selection-and-find.spec.ts	highlights a selected route's whole Net and recomputes it after a Net Label is deleted
+	selection-and-find.spec.ts	marquee release uses the last pointer sample before a browser frame
+	selection-and-find.spec.ts	opens circuit Find with Ctrl+F and selects a matching component
+	selection-and-find.spec.ts	opens selectable-object choices with Ctrl+Shift+F, filters Select All, and Ctrl+D deselects
+	selection-and-find.spec.ts	rechecks resolved diagnostics and invalidates them through undo
+	selection-and-find.spec.ts	surfaces, filters and locates current-document ERC and visual diagnostics
+	selection-and-find.spec.ts	w retires queued marquee samples before release
+	selection-visuals.spec.ts	M drop recomputes its mixed-selection landing after the camera pans under a stationary pointer
+	selection-visuals.spec.ts	M preserves Alt's no-contact preview at an unchanged placement click
+	selection-visuals.spec.ts	a Net highlight set from the Check Report can always be cleared
+	selection-visuals.spec.ts	a component dragged over a wire paints a red warning on the covered span
+	selection-visuals.spec.ts	a rectangle carries its unselected text during preview, and the text alone lands at an integer fine offset
+	selection-visuals.spec.ts	a zoomed-out mixed drag reaches adjacent grid landings without self-contact and keeps a retained contact on drop
+	selection-visuals.spec.ts	selection traces the device, marks carried wires as would-move, and leaves its label untinted
+	symbol-body-text.spec.ts	double-clicking a Symbol's body text edits it on the canvas and in Properties
+	symbol-body-text.spec.ts	integrator edits its body text on the canvas
+	symbol-body-text.spec.ts	the swapped-input op-amp edits its body text too
+	thin-target-hit.spec.ts	Analog Block hit boxes closely enclose browser-rendered artwork
+	thin-target-hit.spec.ts	FD Amp blank space does not capture clicks, body and pins remain usable, and a wire beside a symbol body beats its box
+	thin-target-hit.spec.ts	enlarged Analog Block triangles leave clear space around internal letters in canvas and SVG
+	user-components-server.spec.ts	authors, publishes and reloads a PostgreSQL component before placing its capture
+	user-components.spec.ts	Agent and GUI share the open candidate while applied netlists advance only on Apply
+	user-components.spec.ts	Agent collaborates on a library JSON draft without publishing or changing drawing captures
+	user-components.spec.ts	Create from keeps a new publication destination through draft reopening even for the original author
+	user-components.spec.ts	Create keeps authoring views, custom artwork and commit actions usable in narrow or zoomed workspaces
+	user-components.spec.ts	Library and My shelf stay compact at narrow widths without global repair notices
+	user-components.spec.ts	Library keeps management in My shelf without persistent repair banners
+	user-components.spec.ts	Symbol only can add a circuit through the same editor without a permanent Repair panel
+	user-components.spec.ts	a changed saved checkpoint refuses Agent Save and Save draft & leave without losing either writer's text
+	user-components.spec.ts	a failed editor-component-library chunk can be dismissed and recovered by refreshing
+	user-components.spec.ts	a failed user-components-library chunk can be dismissed and recovered by refreshing
+	user-components.spec.ts	automatic layout only enables explicit offsets and distinguishes pending source from missing circuit
+	user-components.spec.ts	automatically loads all components and retries an interrupted page without losing cards
+	user-components.spec.ts	blank component authoring has one actionable status and contextual advanced actions
+	user-components.spec.ts	captured origin lookup failure preserves its target and refuses implicit new publication
+	user-components.spec.ts	cold editor leaves User Components unloaded until its Library opens
+	user-components.spec.ts	complete same-name custom artwork initializes checked mappings
+	user-components.spec.ts	component authoring stays compact without overflowing at narrow widths and zoom
+	user-components.spec.ts	connected custom native port rename preserves graphical mapping, Nets and No Connects in one undo
+	user-components.spec.ts	copying custom circuits keeps terminal identities scoped to each native owner
+	user-components.spec.ts	creates a native User Component through the shared model owner and places its automatic symbol
+	user-components.spec.ts	creating a native component keeps existing source owners isolated
+	user-components.spec.ts	custom circuit mappings reject collapsed ports and use an explicit property supply
+	user-components.spec.ts	editing a native definition guards unsaved text and keeps a stale draft on the latest version
+	user-components.spec.ts	editing connected custom artwork and switching modes preserves logical pins and captured peers
+	user-components.spec.ts	empty Custom JSON survives mode switching and saved draft recovery
+	user-components.spec.ts	exit menus stay anchored without resizing the editor and preserve raw input on cancel
+	user-components.spec.ts	explicitly attaches a legacy class to an existing applied Project model without changing its draft or peers
+	user-components.spec.ts	explicitly upgrades a symbol-only public entry without rewriting captured Projects
+	user-components.spec.ts	filters and reopens the catalog, retaining cards and scroll through a failed management refresh
+	user-components.spec.ts	first Custom entry after saving Automatic uses the current interface
+	user-components.spec.ts	historical invalid pin mappings remain inspectable without blocking valid library cards
+	user-components.spec.ts	invalid component code leaves the circuit untouched
+	user-components.spec.ts	legacy four-to-six repair uses the full native pin editor, keeps a saved draft off the original class and preserves peers in one undo
+	user-components.spec.ts	library cards separate artwork, long titles and authors at narrow and zoomed sizes
+	user-components.spec.ts	library preview fits actual off-viewBox artwork without changing the stored definition
+	user-components.spec.ts	library selection refuses a revision changed during preview and editing returns to the library
+	user-components.spec.ts	live preview and the administrator lifecycle keep captured Projects
+	user-components.spec.ts	native Save draft keeps an existing placeholder owner's name and terminals
+	user-components.spec.ts	native custom source changes diagnose missing mappings without crashing the Editor
+	user-components.spec.ts	native port removal captures repaired custom artwork and detaches removed No Connects in one undo
+	user-components.spec.ts	native port removal migrates preferred artwork past a different placed capture
+	user-components.spec.ts	new circuit authoring starts with native source and places a complete six-terminal component without public saving
+	user-components.spec.ts	new native publication survives a lost response, Project reopen and another edit without duplicating its public identity
+	user-components.spec.ts	offline focus retains the component catalog and offers retry
+	user-components.spec.ts	opens a retained source draft without an external owner and keeps its raw text
+	user-components.spec.ts	owners manage library records in compact menus without changing placed copies
+	user-components.spec.ts	placing a User Component in Auto mode brings up Draw
+	user-components.spec.ts	project drafts can be deleted, undone, redone and saved without touching applied facts
+	user-components.spec.ts	public circuit authoring drafts survive closing and portable reopening without changing drawing captures
+	user-components.spec.ts	public symbol placement connects contacts atomically and keeps the clicked orientation during a revision check
+	user-components.spec.ts	publication checkpoints the published JSON without marking later input as saved
+	user-components.spec.ts	publication conflicts retain update intent until an explicit reload
+	user-components.spec.ts	publishes an applied native component and captures a complete revision in another editor on insertion
+	user-components.spec.ts	reopened artwork drafts require Apply before publishing and Place applies the displayed candidate
+	user-components.spec.ts	repairs a wired legacy custom component with explicit native port mapping in one undo
+	user-components.spec.ts	reselecting a Library tab cancels pending detail reads without leaving cards busy
+	user-components.spec.ts	returning to the library confirms beside the trigger and preserves an unfinished native draft
+	user-components.spec.ts	shared source refusal stays in the editor and preserves every caller
+	user-components.spec.ts	slow Create loading stays modal and cancellation ignores the late component-definition-editor module
+	user-components.spec.ts	slow Create loading stays modal and cancellation ignores the late editor-component-session-body module
+	user-components.spec.ts	source errors have one main status and additional diagnostics with locations
+	user-components.spec.ts	switching definition type resolves the current unsaved candidate before hiding it
+	user-components.spec.ts	symbol modes switch immediately and retain custom text through draft recovery
+	user-components.spec.ts	variant draft keeps the original untouched and applies as one undo
+	verb-first.spec.ts	C before selection picks up one copy and only subsequent clicks place it
+	verb-first.spec.ts	Delete, M and R pressed first arm their verb for the next clicks until Escape
+	web-agent-session.spec.ts	a Claim survives a wall-clock jump, and once expired keeps its explanation after socket recovery and can be replaced
+	web-agent-session.spec.ts	a created Claim is visible before socket readiness and removed when setup times out
+	web-agent-session.spec.ts	after an Agent opens a Project with the same Cell ID, an unnamed write goes to the shown one and leaves the first intact
+	web-agent-session.spec.ts	connection controls recover from a cancelled or hung create, and across dialog and Properties while old requests are pending
+	web-agent-session.spec.ts	copies a working handoff through the normal local dev relay
+	web-agent-session.spec.ts	grants a browser Agent, edits through the live host, and shares undo
+	web-agent-session.spec.ts	keeps browser recovery on the renewed idle deadline and expires after inactivity
+	web-agent-session.spec.ts	keeps one paired working copy through Cell switches, a render crash, refresh without resuming a pause
+	web-agent-session.spec.ts	keeps pairing across Project tabs, rejects old writes and copies through the workspace transaction
+	web-agent-session.spec.ts	retries a failed Agent connection without a permission picker
+	web-agent-session.spec.ts	workspace Cloud operations reuse GUI open validation, save conflicts and Save As
+	wheel-behavior.spec.ts	arrow keys pan by one screen-space step, a wheel zooms and a trackpad pans, the setting overrides both, and a framed narrow view keeps full-speed pan and zoom range
+	wire-drawing.spec.ts	commits two endpoint clicks even before React publishes the first one, turning between the parts
+	wire-drawing.spec.ts	connects one MOS Gate to Drain without false contact ambiguity
+	wire-drawing.spec.ts	derives crossings and creates junctions only when a wire ends on a route
+	wire-drawing.spec.ts	double-click ends the wire even when it lands on another wire
+	wire-drawing.spec.ts	double-click preserves the previewed corner order from a transistor pin
+	wire-drawing.spec.ts	finishes a free wire at an arbitrary grid point and reuses that end as a later wire source
+	wire-drawing.spec.ts	keeps Wire input above labels and resolves a screen-tolerant route tap
+	wire-drawing.spec.ts	keeps the chosen corner shape when the wire tool is picked again
+	wire-editing.spec.ts	highlighting suppresses only that Net's imported guidance, and cutting an imported Route never reconnects through it
+	wire-editing.spec.ts	keeps remaining imported flightlines after routing one guided connection
+	wire-editing.spec.ts	re-points a Wire end that is anchored to a pin
+	wiring-semantics.spec.ts	Wire options and / choose the corner without a middle button, and Enter finishes at the latest pointer
+	wiring-semantics.spec.ts	a click on the active pin fixes no step, Delete on a junction dot disconnects its tap, and the wire tool branches from the dot
+	wiring-semantics.spec.ts	a connected wire's segments drag with a live preview, a diagonal along the pointer's axis, a no-op drag records nothing, and a deleted part leaves its wires dangling
+	wiring-semantics.spec.ts	a middle press cycles the wire corner, even drifting under the hand, and never commits the wire
+	wiring-semantics.spec.ts	dragging a wire's end onto another wire joins them into one net
+	wiring-semantics.spec.ts	middle clicks reach 45 degrees after one corner flip from a fixed vertical leg
+	wiring-semantics.spec.ts	single click captures pin at canvas scale 4
+	wiring-semantics.spec.ts	single click captures route at canvas scale 0.5
+	wiring-semantics.spec.ts	the preview draws the wire the release commits, joining every compatible pin it crosses
