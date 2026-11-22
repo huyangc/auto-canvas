@@ -1477,3 +1477,105 @@ test("an open close decision stays answerable when the strip hides under it", as
   await expect(tabs).toHaveCount(1);
   await expect(page.getByTestId("active-instance-count")).toHaveText("0");
 });
+
+for (const host of ["strip", "File"] as const)
+  test(`keys inside the Shelf's rename field and Browse dialog stay there (${host})`, async ({
+    page,
+  }) => {
+    const amp = {
+      id: "cloud-amp",
+      name: "Amp",
+      revision: 1,
+      schemaVersion: createEmptyProject("p", "Amp").schemaVersion,
+      updatedAt: "2026-11-21T08:00:00.000Z",
+    };
+    await page.route("**/api/projects", (route) =>
+      route.request().method() === "GET"
+        ? route.fulfill({ json: { projects: [amp] } })
+        : route.fallback(),
+    );
+    await openEditor(page, "/editor?new=1");
+    if (host === "strip") await newProjectTab(page);
+    await expect(page.getByTestId("project-tabs")).toBeVisible({
+      visible: host === "strip",
+    });
+    const file = page.getByTestId("project-menu");
+    const shelf = await projectTabAction(page, "Open Shelf project in tab");
+    // The picker that holds the Shelf is still open, and in File the
+    // Shelf's submenu is still expanded.
+    const pickerOpen = async (context: string) => {
+      await expect(shelf, context).toBeVisible();
+      if (host === "File") {
+        await expect(file, context).toHaveAttribute("open", "");
+        await expect(
+          file.getByRole("button", {
+            name: "Open Shelf project in tab",
+            exact: true,
+          }),
+          context,
+        ).toHaveAttribute("aria-expanded", "true");
+      }
+    };
+    const keys = ["ArrowLeft", "ArrowRight", "Home", "End", "Space"];
+
+    // The row's rename field: caret keys and Space edit the name.
+    await shelf.getByRole("button", { name: "Amp", exact: true }).hover();
+    await shelf
+      .getByRole("button", { name: "Rename Amp", exact: true })
+      .click();
+    const field = shelf.getByRole("textbox", {
+      name: "Shelf project name",
+      exact: true,
+    });
+    for (const key of keys) {
+      await field.press(key);
+      await pickerOpen(`rename field ${key}`);
+      await expect(field).toBeFocused();
+    }
+    await expect(field).toHaveValue("Amp ");
+    await field.press("Escape");
+    await expect(field).toHaveCount(0);
+    await pickerOpen("rename field Escape");
+
+    // The Browse dialog: its own controls take every key.
+    await shelf.getByRole("button", { name: "Browse Cloud Projects…" }).click();
+    const dialog = page.getByRole("dialog", { name: "Cloud Projects" });
+    await expect(dialog).toBeVisible();
+    const close = dialog.getByRole("button", { name: "Close", exact: true });
+    for (const key of ["ArrowLeft", "ArrowRight", "Home", "End"]) {
+      await close.focus();
+      await page.keyboard.press(key);
+      await expect(dialog, `Close ${key}`).toBeVisible();
+      await pickerOpen(`dialog ${key}`);
+    }
+    // The tile's actions open from the keyboard, and its rename field edits.
+    const actions = dialog.getByTestId("shelf-actions-cloud-amp");
+    await actions.focus();
+    await page.keyboard.press("Enter");
+    await page.getByRole("menuitem", { name: "Rename", exact: true }).click();
+    const tileName = dialog.getByRole("textbox", {
+      name: "Project name",
+      exact: true,
+    });
+    await expect(tileName).toBeFocused();
+    for (const key of keys) {
+      await tileName.press(key);
+      await expect(dialog, `tile name ${key}`).toBeVisible();
+      await expect(tileName).toBeFocused();
+      await pickerOpen(`tile name ${key}`);
+    }
+    await expect(tileName).toHaveValue("Amp ");
+    await dialog.getByRole("button", { name: "Keep it", exact: true }).click();
+    if (host === "File") {
+      // File cannot close under its open dialog: the dialog would be hidden
+      // with the page still inert behind it.
+      await file.evaluate((menu: HTMLDetailsElement) => {
+        menu.open = false;
+      });
+      await expect(dialog).toBeVisible();
+      await pickerOpen("File closed under the dialog");
+    }
+    await close.click();
+    await expect(dialog).toBeHidden();
+    await pickerOpen("dialog closed");
+  });

@@ -197,7 +197,14 @@ export function FileCommandMenu({
     const menu = embeddedGroup.current?.closest("details");
     if (!menu) return;
     const collapse = () => {
-      if (!menu.open) setOpenSubmenu(null);
+      if (menu.open) return;
+      // File never closes under the Shelf's open Browse dialog: hidden with
+      // File, the modal would leave the page inert behind nothing.
+      if (menu.querySelector("dialog[open]")) {
+        menu.open = true;
+        return;
+      }
+      setOpenSubmenu(null);
     };
     menu.addEventListener("toggle", collapse);
     return () => menu.removeEventListener("toggle", collapse);
@@ -262,13 +269,14 @@ export function FileCommandMenu({
               // project closes the menu itself.
               onClick={(event) => event.stopPropagation()}
               onKeyDown={(event) => {
-                const target = event.target as Element;
+                // Every key typed in the Shelf's own fields, its inline
+                // decisions or its Browse dialog stays there, as in the
+                // strip's picker: the submenu's Left (collapse) and File's
+                // Escape (close) would hide a field or an open modal.
                 if (
-                  (target.closest("input") &&
-                    ["ArrowLeft", "ArrowRight", "Escape"].includes(
-                      event.key,
-                    )) ||
-                  (event.key === "Escape" && target.closest("dialog"))
+                  (event.target as Element).closest(
+                    "input, textarea, select, dialog, .inline-confirm",
+                  )
                 )
                   event.stopPropagation();
               }}

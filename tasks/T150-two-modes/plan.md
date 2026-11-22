@@ -1294,8 +1294,14 @@ name="editor-command-menu" data-testid="more-menu">`; its summary is `⋯`
   `origin/main` `1515168`). The plan's "19 in 7 files" undercounted: every
   `getByRole("tab")` lookup is a strip reference too, since a hidden strip
   hides its tabs from role queries, and the `renameProject` fixture
-  double-clicks the selected tab. 145 lines in 11 files name the strip; most
-  run with two or more tabs and are left alone.
+  double-clicks the selected tab. A grep for tab
+  lookups and tab helpers found 145 lines in 11 files (helper calls and some
+  imports included, so it is not a count of strip clicks). Which helper calls
+  run with one tab was measured in review round 2 (a temporary log of the
+  strip's visibility per call, 187 tests); the raw `getByRole("tab")` lines
+  left alone are inferred to run with several, since a hidden tab matches no
+  role query and those tests pass. `project-file` and `base-path` were not in
+  the log.
   - Runs with one tab (changed):
     - `editor-fixtures.ts:166-175` `renameProject`: it now double-clicks
       the tab when the strip shows and takes File → Project Info when it
@@ -1305,8 +1311,9 @@ name="editor-command-menu" data-testid="more-menu">`; its summary is `⋯`
       unchanged; and `:183-184`
       `renameShelfProject` (`project-tabs.spec.ts:462` runs with two, `:475`
       with three; through the new helper either way);
-    - `base-path.spec.ts:89-96` and `cloud-projects-server.spec.ts:34-46,
-60-62` (the Shelf picker from a fresh one-tab page);
+    - `base-path.spec.ts:89-96` and `cloud-projects-server.spec.ts:34-46` (the
+      Shelf picker from a fresh one-tab page; `:60-62` goes through the helper
+      too but runs with several);
     - `copy-paste.spec.ts:79-81, 205-207`, `user-components.spec.ts:3322`,
       `web-agent-session.spec.ts:762-764` (New project tab);
     - `web-agent-session.spec.ts:881, 1061` and `project-tabs.spec.ts:620`
@@ -1322,7 +1329,7 @@ tab`; made exact). That file does not load in Playwright on `main`
       (`import.meta.env.BASE_URL`); a copy with the one constant inlined ran
       8/8.
     - `project-tabs.spec.ts`: `:29-31` (`newProjectTab` is now the helper),
-      `:49-55` (`openShelfProject`), `:88, 236, 559, 589, 691, 935, 1166`
+      `:49-55` (`openShelfProject`), `:88, 236, 559, 589, 935, 1166`
       (New project tab from one tab), `:284-362` (the close test: one tab
       after Close and after Close All, so `includeHidden` and the strip
       hidden), `:795-884`, `:886-927` and `:988-1082` (in-tab rename from one
@@ -1396,8 +1403,9 @@ Project…`, which run the same `openNativeProject()` (the plan named the
     renamed; Auto and Draw gave the same results):
     - on `1515168`'s product files, the tab's × with "Close without saving":
       the prompt is the strip's (`Close without saving` / `Keep open`) for 1
-      and 12 parts; afterwards one blank project with the mode's default
-      docks; the closed work stays a recovery copy, not offered in File at
+      and 12 parts; afterwards one blank project (docks as before:
+      they were not varied, so a dock difference between the routes was not
+      tested); the closed work stays a recovery copy, not offered in File at
       once, offered by File → Recover Unsaved Work… after a reload, with no
       start-up banner;
     - on `0b9e29f`, File → New Project: with 1 part no prompt at all (fewer
@@ -1431,3 +1439,26 @@ file in new tab` and the Shelf item, with any number of tabs. It runs the
   - Open owner decision (not changed): on the desktop File lists both `Open
 file in new tab` and the host's `Open Project…`, which both call
     `openNativeProject()`.
+- T150d review round 2 (codex on PR 109, 2026-11-21): one line per item.
+  - 1: reproduced in a browser: in File, ArrowLeft on the Browse dialog's
+    Close button collapsed the Shelf submenu and hid the open modal; the
+    strip's picker kept it. The Shelf's wrapper in File now keeps every key
+    typed inside an input, select, textarea, an inline decision or a dialog
+    away from the submenu and File; Left on a Shelf row still collapses the
+    submenu, as in Import / Export. A probe of Escape, ArrowDown, `w`,
+    Ctrl+F and Ctrl+O from the dialog's Close button, its padding and the
+    backdrop showed the same result in both hosts before the fix (Escape
+    closes only the dialog, the rest do nothing outside it). A browser test
+    pins both hosts: Left, Right, Home, End and Space in the row's rename
+    field and in the Browse dialog's tile rename field edit the name; the
+    arrows, Home and End on the dialog's Close leave it open; the picker and
+    File stay open.
+  - 1, File closing under the dialog: no route found. Outside clicks are
+    inert behind the modal, every key in it is exempt from the shortcut
+    router, File's Escape no longer sees it, and nothing outside a click or a
+    key closes File. Guarded anyway: File reopens itself if it is closed
+    while a dialog inside it is open (unit test; the browser test closes it
+    by script).
+  - 2: `accept-preview.mjs`'s `stripShown` counts only the strip's tabs (a
+    dialog's tabs no longer count) and gives up after 10 s with an error
+    that names what it waited for. `node --check` only; not run.

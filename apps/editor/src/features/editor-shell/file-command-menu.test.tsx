@@ -223,14 +223,67 @@ describe("FileCommandMenu project tab actions", () => {
     const field = options.querySelector<HTMLInputElement>(
       'input[aria-label="Shelf project name"]',
     )!;
-    // Caret keys and Escape in the name field stay with the field.
-    for (const key of ["ArrowLeft", "ArrowRight", "Escape"])
-      await act(async () =>
-        field.dispatchEvent(
-          new KeyboardEvent("keydown", { key, bubbles: true }),
-        ),
-      );
+    // Every key in the name field stays with the field, and so does every
+    // key inside the Browse dialog (here a double: jsdom has no showModal).
+    const modal = document.createElement("dialog");
+    const modalButton = document.createElement("button");
+    modal.append(modalButton);
+    options.querySelector(".file-shelf")!.append(modal);
+    for (const target of [field, modalButton])
+      for (const key of [
+        "ArrowLeft",
+        "ArrowRight",
+        "ArrowUp",
+        "ArrowDown",
+        "Home",
+        "End",
+        "Enter",
+        " ",
+        "a",
+        "Escape",
+      ])
+        await act(async () =>
+          target.dispatchEvent(
+            new KeyboardEvent("keydown", { key, bubbles: true }),
+          ),
+        );
     expect(onMenuKey).not.toHaveBeenCalled();
+  });
+
+  it("stays open under the Shelf's open dialog", async () => {
+    const actions = tabActions();
+    const host = document.createElement("div");
+    document.body.append(host);
+    root = createRoot(host);
+    await act(async () =>
+      root!.render(
+        <ProjectMenu label="File" name="Amp" dirty={false}>
+          <FileCommandMenu {...baseProps()} projectTabs={actions} embedded />
+        </ProjectMenu>,
+      ),
+    );
+    const details = host.querySelector("details")!;
+    const toggleFile = (open: boolean) =>
+      act(async () => {
+        details.open = open;
+        details.dispatchEvent(new Event("toggle"));
+      });
+    await toggleFile(true);
+    await act(async () => button(host, "Open Shelf project in tab")!.click());
+    const options = host.querySelector<HTMLElement>(
+      '[role="group"][aria-label="Shelf projects"]',
+    )!;
+    const modal = document.createElement("dialog");
+    modal.setAttribute("open", "");
+    options.querySelector(".file-shelf")!.append(modal);
+    await toggleFile(false);
+    expect(details.open).toBe(true);
+    expect(options.hidden).toBe(false);
+    // With the dialog gone it closes and collapses as before.
+    modal.remove();
+    await toggleFile(false);
+    expect(details.open).toBe(false);
+    expect(options.hidden).toBe(true);
   });
 });
 
