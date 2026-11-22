@@ -1232,3 +1232,18 @@ name="editor-command-menu" data-testid="more-menu">`; its summary is `⋯`
   Auto Layout (covered by the running tests), Open Shelf project in tab, the
   empty card (covered by the first-open test). The T150d rows are walked as
   they stand before T150d (the strip is shown).
+- T150c review round 1 (2026-11-21): one line per item.
+  - 1: a long name did not give way (the brand group's automatic minimum held
+    the whole unwrapped name), so between about 761 and 890 px in Auto the
+    Auto Layout button was clipped to its icon. From 721 px up the brand group
+    is `display: contents`, so its items sit in the bar's own row: the name
+    (`flex: 0 1000 auto`, `min-width: 3rem`) gives way first, its siblings do
+    not shrink, and the actions group shrinks only while a run's label is
+    shown. Measured with the 110-character name in Auto, name / Auto Layout
+    width: 761 px 60/122, 800 px 99/122, 860 px 159/122, 900 px 199/122,
+    1024 px 197/122; Draw keeps 208 px. A browser test pins it, also with a
+    running label at 800 and 1024 px.
+  - 2: `apps/desktop/README.md:35` names `⋯ → Edit → User Components…` (one
+    README line under `apps/desktop`, coordinator's leave);
+    `getting-started.md` lists `Import netlist…` (Auto only) among the header
+    controls.

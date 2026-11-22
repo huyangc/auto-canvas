@@ -44,7 +44,8 @@ to open that Cell.
 ## The editor
 
 The header has the project's name, **Undo** and **Redo**, the mode switch,
-**Auto Layout**, the **File** menu, the **Agent** action and the **⋯** menu.
+**Import netlist…** (Auto only), **Auto Layout**, the **File** menu, the
+**Agent** action and the **⋯** menu.
 The name is read-only there; click it to open Project Info, where it is
 changed (below 720 px it is hidden; File → Project Info still has it).
 **File** holds Project Info (circuit and Cell names) and the file commands;
