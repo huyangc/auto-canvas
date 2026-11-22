@@ -331,7 +331,9 @@ function createEditorShortcutHandler({
       event.target instanceof Element &&
       (event.target.closest(".project-tab-name-input") ||
         event.target.closest(".cloud-shelf-dialog") ||
-        (event.target.closest(".project-menu") &&
+        // File and ⋯ scroll and close themselves; Escape returns focus to
+        // their buttons.
+        (event.target.closest(".project-menu, .more-menu") &&
           ["Escape", "ArrowUp", "ArrowDown", "Home", "End"].includes(
             event.key,
           )) ||

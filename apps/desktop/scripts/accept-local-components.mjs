@@ -5,8 +5,11 @@ import { expect } from "@playwright/test";
 import { builtInSymbols } from "@icm/symbols";
 
 async function openLibrary(page) {
-  await page.getByTestId("edit-menu").locator("summary").click();
-  await page
+  // ⋯ holds what the Edit menu held (T150c), in its Edit group.
+  const more = page.getByTestId("more-menu");
+  await more.locator(":scope > summary").click();
+  await more
+    .getByRole("group", { name: "Edit", exact: true })
     .getByRole("button", { name: "User Components…", exact: true })
     .click();
   const library = page.getByRole("dialog", {

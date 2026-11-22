@@ -1968,3 +1968,53 @@ test("no header rule leaves a gap between 720 and 721 px", async ({ page }) => {
   );
   expect(gaps).toEqual([]);
 });
+
+for (const [menuId, popoverClass] of [
+  ["project-menu", ".project-menu-popover"],
+  ["more-menu", ".more-menu-popover"],
+] as const) {
+  test(`arrow keys scroll the open ${menuId}, not the canvas`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 240 });
+    await openEditor(page, "/editor?example=two-stage-op-amp");
+    await expectStatus(page, "Opened example: Two-Stage Op Amp");
+    for (const mode of ["mode-auto", "mode-draw"]) {
+      await page.getByTestId(mode).click();
+      const canvas = page.getByTestId("schematic-canvas");
+      const viewBox = await canvas.getAttribute("viewBox");
+      const menu = page.getByTestId(menuId);
+      const summary = menu.locator(":scope > summary");
+      await summary.click();
+      await expect(menu).toHaveAttribute("open", "");
+      const popover = menu.locator(popoverClass);
+      expect(
+        await popover.evaluate((el) => el.scrollHeight > el.clientHeight),
+        `${menuId} overflows (${mode})`,
+      ).toBe(true);
+      const first = popover.getByRole("button").first();
+      await first.focus();
+      for (let press = 0; press < 6; press++)
+        await page.keyboard.press("ArrowDown");
+      // The menu scrolls as the browser scrolls it; focus stays put, as in
+      // File, and the drawing does not pan.
+      await expect
+        .poll(
+          () => popover.evaluate((el) => el.scrollTop),
+          `${menuId} (${mode})`,
+        )
+        .toBeGreaterThan(0);
+      await expect(first).toBeFocused();
+      await page.keyboard.press("End");
+      await page.keyboard.press("ArrowUp");
+      expect(await canvas.getAttribute("viewBox"), `${menuId} (${mode})`).toBe(
+        viewBox,
+      );
+      // Escape still closes it and gives focus back to its button.
+      await page.keyboard.press("Escape");
+      await expect(menu).not.toHaveAttribute("open", "");
+      await expect(summary).toBeFocused();
+      expect(await canvas.getAttribute("viewBox")).toBe(viewBox);
+    }
+  });
+}
