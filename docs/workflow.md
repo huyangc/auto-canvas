@@ -87,10 +87,11 @@ tasks/T001-<slug>/
 
 ```bash
 codex exec -m gpt-6.2-astra --sandbox read-only --ephemeral -c 'notify=[]' \
-  -o <out.txt> "<评审提示词：方案文件路径及其依据>" < /dev/null
+  -c 'approval_policy="never"' -o <out.txt> "<评审提示词：方案文件路径及其依据>" < /dev/null
 ```
 
-`< /dev/null` 不能省，否则 `codex exec` 会等待标准输入。
+`< /dev/null` 不能省，否则 `codex exec` 会等待标准输入。`approval_policy="never"`
+是因为本机配置可能允许审批请求，借此离开只读沙箱。
 
 一轮有效须同时满足：命令退出码为零、输出文件非空、输出里有结论。超时、非零退出或
 输出为空是失败的一轮，不等于“没有意见”，要重跑。
@@ -122,8 +123,8 @@ AGENTS.md，跑完方案里的验收命令，它的最终消息就是报告，Op
 改动：先提交子代理已审查的改动，或丢弃被否决的改动。
 
 任务的轮次和三轮上限以 `review.md` 为准。Codex 日志的 `round-<n>` 只数 Codex 轮次，
-前面有过子代理轮次时它仍从 1 开始，派发时在 `review.md` 里写明这是任务的第几轮。两者不同时，Opus 审查时把 `report.md`
-标题改成任务的轮次。
+前面有过子代理轮次时它仍从 1 开始，派发时在 `review.md` 里写明这是任务的第几轮。两者不同时，Opus 审查时把
+`report.md` 标题改成任务的轮次。
 
 ```bash
 scripts/codex-task.sh tasks/T001-<slug>
