@@ -92,6 +92,14 @@ export function ProjectTabs({
     },
     [],
   );
+  // With one project the strip row hides; File holds its actions and
+  // Project Info its rename. The component stays for its close decisions and
+  // menu, which an open one keeps answerable.
+  const stripShown = tabs.length > 1;
+  // A rename the strip hides under ends as a blur would end it.
+  useEffect(() => {
+    if (!stripShown) finishRename(nameInput.current?.value ?? null);
+  }, [stripShown]);
   const [closing, setClosing] = useState<string | null>(null);
   const selecting = useRef<{ id: string; promise: Promise<boolean> } | null>(
     null,
@@ -172,7 +180,11 @@ export function ProjectTabs({
             : null;
       }}
     >
-      <div className="project-tabs" data-testid="project-tabs">
+      <div
+        className="project-tabs"
+        data-testid="project-tabs"
+        hidden={!stripShown}
+      >
         <div role="tablist" aria-label="Open projects" ref={list}>
           {tabs.map((tab) => (
             <div

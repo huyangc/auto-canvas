@@ -2,6 +2,7 @@ import { AgentHttpClient } from "@icm/agent-client";
 import { expect, test } from "@playwright/test";
 import {
   clickCommand,
+  projectTabAction,
   renameProject,
   readAgentClaim,
 } from "./editor-fixtures.js";
@@ -86,13 +87,8 @@ test("a prefixed editor saves and reopens a Cloud circuit beside notebook", asyn
     watch(fresh);
     try {
       await fresh.goto(`${origin}/canvas/?new=1`);
-      await fresh
-        .getByLabel("Open Shelf project in tab", { exact: true })
-        .click();
-      await fresh
-        .locator(".project-tabs-shelf")
-        .getByRole("button", { name, exact: true })
-        .click();
+      const shelf = await projectTabAction(fresh, "Open Shelf project in tab");
+      await shelf.getByRole("button", { name, exact: true }).click();
       await expect(fresh.getByTestId("hit-R1")).toBeVisible();
       await expect(fresh.getByTestId("active-instance-count")).toHaveText("1");
       await clickCommand(fresh, "Edit", "User Components…");

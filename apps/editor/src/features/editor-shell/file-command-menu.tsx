@@ -9,6 +9,26 @@ import {
 } from "react";
 
 import type { RecentProjectFile } from "../../hosts/native-project-store";
+import type { CloudProjectSummary } from "./cloud-projects";
+import { ProjectShelf } from "./project-shelf";
+
+/**
+ * The project tab strip's own actions. The strip hides with one project, so
+ * File offers them too, under the strip's names.
+ */
+export interface FileProjectTabActions {
+  busy: boolean;
+  onNew(): void;
+  onOpenFile(): void;
+  /** The strip's Shelf picker, with its handlers; Cloud only. */
+  shelf?: {
+    projects: readonly CloudProjectSummary[];
+    onOpened(): void;
+    onOpen(id: string): void;
+    onRename(id: string, name: string): Promise<void>;
+    onDelete(id: string): Promise<void>;
+  };
+}
 
 export interface FileCommandMenuProps {
   NativeFileCommands?: ComponentType<
@@ -51,6 +71,7 @@ export interface FileCommandMenuProps {
   onOpenRecovery: () => void;
   /** Opens Project Info, where the circuit and its Cell are named. */
   onOpenInfo?: () => void;
+  projectTabs?: FileProjectTabActions;
   /**
    * Drawn as the File group inside another menu (the header's File menu),
    * which refreshes the native file list when it opens, not as a menu of its
@@ -62,6 +83,7 @@ export interface FileCommandMenuProps {
 function CommandSubmenu({
   id,
   title,
+  label = title,
   open,
   onToggle,
   onClose,
@@ -69,6 +91,8 @@ function CommandSubmenu({
 }: {
   id: string;
   title: string;
+  /** The options' accessible name, when it is not the title. */
+  label?: string;
   open: boolean;
   onToggle: () => void;
   onClose: () => void;
@@ -127,7 +151,7 @@ function CommandSubmenu({
         className="export-submenu-options"
         id={id}
         role="group"
-        aria-label={title}
+        aria-label={label}
         hidden={!open}
       >
         {children}
@@ -156,11 +180,13 @@ export function FileCommandMenu({
   onRevert,
   onOpenRecovery,
   onOpenInfo,
+  projectTabs,
   embedded = false,
 }: FileCommandMenuProps) {
-  const [openSubmenu, setOpenSubmenu] = useState<"import" | "export" | null>(
-    null,
-  );
+  const [openSubmenu, setOpenSubmenu] = useState<
+    "import" | "export" | "shelf" | null
+  >(null);
+  const shelf = cloudEnabled ? projectTabs?.shelf : undefined;
   const activateFileLabel = (
     event: ReactKeyboardEvent<HTMLLabelElement>,
   ): void => {
@@ -169,7 +195,7 @@ export function FileCommandMenu({
     event.currentTarget.querySelector("input")?.click();
   };
   // Private Cloud Projects are listed on the account page and in the
-  // project tabs' Shelf, not here.
+  // project tabs' Shelf, which Open Shelf project in tab shows here too.
   const commands = (
     <>
       {onOpenInfo ? (
@@ -180,6 +206,69 @@ export function FileCommandMenu({
       <button type="button" onClick={onNewProject}>
         New Project
       </button>
+      {projectTabs ? (
+        <>
+          <button
+            type="button"
+            disabled={projectTabs.busy}
+            onClick={projectTabs.onNew}
+          >
+            New project tab
+          </button>
+          <button
+            type="button"
+            disabled={projectTabs.busy}
+            onClick={projectTabs.onOpenFile}
+          >
+            Open file in new tab
+          </button>
+        </>
+      ) : null}
+      {shelf ? (
+        <div>
+          <CommandSubmenu
+            id="file-shelf-options"
+            title="Open Shelf project in tab"
+            // The strip's picker has the title as its name.
+            label="Shelf projects"
+            open={openSubmenu === "shelf"}
+            onToggle={() => {
+              if (openSubmenu !== "shelf") shelf.onOpened();
+              setOpenSubmenu((current) =>
+                current === "shelf" ? null : "shelf",
+              );
+            }}
+            onClose={() => setOpenSubmenu(null)}
+          >
+            <div
+              className="file-shelf"
+              // The Shelf's own controls (rename, delete, browse) keep File
+              // open, as they keep the strip's picker open; opening a
+              // project closes the menu itself.
+              onClick={(event) => event.stopPropagation()}
+              onKeyDown={(event) => {
+                const target = event.target as Element;
+                if (
+                  (target.closest("input") &&
+                    ["ArrowLeft", "ArrowRight", "Escape"].includes(
+                      event.key,
+                    )) ||
+                  (event.key === "Escape" && target.closest("dialog"))
+                )
+                  event.stopPropagation();
+              }}
+            >
+              <ProjectShelf
+                projects={shelf.projects}
+                busy={projectTabs?.busy ?? false}
+                onOpen={shelf.onOpen}
+                onRename={shelf.onRename}
+                onDelete={shelf.onDelete}
+              />
+            </div>
+          </CommandSubmenu>
+        </div>
+      ) : null}
       <button
         type="button"
         data-testid="save-cloud-project"

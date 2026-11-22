@@ -8,12 +8,14 @@ import {
 import {
   AUTO_MODE_STORAGE,
   awaitEditorReady,
+  awaitTwoFrames,
   exampleProject,
   expectStatus,
   exportedProject,
   openCellManager,
   openEditor,
   openMenu,
+  projectTabAction,
   renameProject,
 } from "./editor-fixtures";
 
@@ -402,7 +404,7 @@ const projectTools = (page: Page) =>
 test("a new project tab in Auto opens on a clear canvas", async ({ page }) => {
   await openEditor(page, "/editor?example=two-stage-op-amp");
   await expectStatus(page, "Opened example: Two-Stage Op Amp");
-  await page.getByRole("button", { name: "New project tab" }).click();
+  await projectTabAction(page, "New project tab");
   await expect(page.getByRole("tab")).toHaveCount(2);
   await expectAutoChrome(page);
   await expect(projectTools(page)).toHaveCount(0);
@@ -435,7 +437,8 @@ test("a reload after a drawing key opens Auto without Draw's docks", async ({
   // back on reload.
   await page.reload();
   await awaitEditorReady(page);
-  await expect(page.getByRole("tab", { selected: true })).toContainText("cs");
+  // One tab: the top bar shows its name.
+  await expect(page.locator(".app-project-name")).toContainText("cs");
   await expectAutoChrome(page);
   await expect(projectTools(page)).toHaveCount(0);
   await expect(page.locator(".selection-dock.open")).toHaveCount(0);
@@ -450,7 +453,7 @@ test("a Netlist opened in Auto stays with its tab", async ({ page }) => {
   await expectStatus(page, "Opened example: Two-Stage Op Amp");
   await page.getByTestId("netlist-panel-toggle").click();
   await expect(projectTools(page)).toBeVisible();
-  await page.getByRole("button", { name: "New project tab" }).click();
+  await projectTabAction(page, "New project tab");
   await expect(page.getByRole("tab")).toHaveCount(2);
   await expect(projectTools(page)).toHaveCount(0);
   await page.getByRole("tab").first().click();
@@ -790,7 +793,7 @@ test("Document settings close on the switch to Auto and hold nothing", async ({
   await expect(page.getByTestId("document-settings-code-editor")).toBeVisible();
   await page.getByTestId("properties-resize-handle").waitFor();
   await page.getByTestId("mode-auto").click();
-  await page.getByRole("button", { name: "New project tab" }).click();
+  await projectTabAction(page, "New project tab");
   await expect(page.getByRole("tab")).toHaveCount(2);
   await expect(page.getByTestId("status")).not.toContainText(
     "Can't switch project tabs yet",
@@ -804,7 +807,7 @@ test("an unseen Import Review survives a project-tab switch", async ({
   await openEditor(page);
   await autoImport(page);
   await expectReviewWaiting(page, true);
-  await page.getByRole("button", { name: "New project tab" }).click();
+  await projectTabAction(page, "New project tab");
   await expect(page.getByRole("tab")).toHaveCount(2);
   await expectReviewWaiting(page, false);
   await page.getByRole("tab").first().click();
@@ -1143,7 +1146,8 @@ test("a dock carried for a draft is not saved with the tab as Auto's own", async
   // The window saves Auto's own docks for this tab, not the carried one.
   await page.reload();
   await awaitEditorReady(page);
-  await expect(page.getByRole("tab", { selected: true })).toContainText("cs");
+  // One tab: the top bar shows its name.
+  await expect(page.locator(".app-project-name")).toContainText("cs");
   await expectAutoChrome(page);
   await expect(projectTools(page)).toHaveCount(0);
   await expect(page.locator(".selection-dock.open")).toHaveCount(0);
@@ -1155,7 +1159,7 @@ test("a tab switch ends a draft's carry-over, so the other tab keeps its docks",
   await openEditor(page, "/editor?example=two-stage-op-amp");
   await expectStatus(page, "Opened example: Two-Stage Op Amp");
   // Tab 2 opens its Netlist in Auto: its own dock.
-  await page.getByRole("button", { name: "New project tab" }).click();
+  await projectTabAction(page, "New project tab");
   const tabs = page.getByRole("tab");
   await expect(tabs).toHaveCount(2);
   await page.getByTestId("netlist-panel-toggle").click();
@@ -1328,13 +1332,15 @@ type Place =
   | {
       menu: "File" | "Edit" | "Hierarchy" | "Netlist" | "Layout";
       items: readonly string[];
-      submenu?: "Import" | "Export";
+      submenu?: "Import" | "Export" | "Open Shelf project in tab";
       /** Labels rather than buttons (File → Import's file pickers). */
       labels?: boolean;
       enabled?: boolean;
     }
   /** Controls outside the menus, by test id or a "." class selector. */
   | { shown: readonly string[]; enabled?: boolean }
+  /** Mounted but not shown. */
+  | { hidden: readonly string[] }
   /** Not in this mode. */
   | { absent: readonly string[] };
 
@@ -1356,12 +1362,26 @@ const drawingTools = [
   "draw-tool-reset-labels",
 ];
 
+const fileTabActions: readonly Place[] = [
+  {
+    menu: "File",
+    items: ["New project tab", "Open file in new tab"],
+    enabled: true,
+  },
+  {
+    menu: "File",
+    submenu: "Open Shelf project in tab",
+    items: ["Browse Cloud Projects…"],
+    enabled: true,
+  },
+];
+
 // Decision 21's table, row by row, as the user reaches each item; an item
 // missing from the page fails the walk. Not walked: Revert and Recover (only
 // with a saved copy or recovery sessions), RNL… (a host that imports RNL),
 // the desktop file commands, Cancel Auto Layout (only while a run plans; the
-// running tests cover it), Open Shelf project in tab (Cloud sign-in) and the
-// empty card (only with no Instance).
+// running tests cover it) and the empty card (only with no Instance). One
+// project is open; TWO_TAB_ROWS has the rows that differ with two.
 const MENU_TABLE: readonly MenuTableRow[] = [
   {
     item: "File commands",
@@ -1518,9 +1538,40 @@ const MENU_TABLE: readonly MenuTableRow[] = [
       },
     ]),
   },
-  { item: "Project tabs", ...both([{ shown: ["project-tabs"] }]) },
+  // One project: the tab strip hides and File alone holds its actions.
+  {
+    item: "Project tab actions",
+    ...both([{ hidden: ["project-tabs"] }, ...fileTabActions]),
+  },
   {
     item: "Rename a project",
+    ...both([
+      { menu: "File", items: ["Project Info"], enabled: true },
+      { shown: [".app-project-name"], enabled: true },
+    ]),
+  },
+];
+
+// Decision 21's rows that differ with two or more tabs: the strip comes back
+// with its own actions, and File keeps them.
+const TWO_TAB_ROWS: readonly MenuTableRow[] = [
+  {
+    item: "Project tab actions (two tabs)",
+    ...both([
+      {
+        shown: [
+          "project-tabs",
+          '.project-tabs > [aria-label="New project tab"]',
+          '.project-tabs > [aria-label="Open file in new tab"]',
+          '.project-tabs-shelf > [aria-label="Open Shelf project in tab"]',
+        ],
+        enabled: true,
+      },
+      ...fileTabActions,
+    ]),
+  },
+  {
+    item: "Rename a project (two tabs)",
     ...both([
       { menu: "File", items: ["Project Info"], enabled: true },
       { shown: [".app-project-name"], enabled: true },
@@ -1532,6 +1583,13 @@ async function expectPlace(page: Page, place: Place, context: string) {
   if ("absent" in place) {
     for (const testId of place.absent)
       await expect(page.getByTestId(testId), context).toHaveCount(0);
+    return;
+  }
+  if ("hidden" in place) {
+    for (const testId of place.hidden) {
+      await expect(page.getByTestId(testId), context).toHaveCount(1);
+      await expect(page.getByTestId(testId), context).toBeHidden();
+    }
     return;
   }
   if ("shown" in place) {
@@ -1583,6 +1641,15 @@ test("every row of the menu table is where it says, in Auto and in Draw", async 
     // A selection of several parts fills the Selection group.
     await page.locator("body").press("ControlOrMeta+a");
     for (const row of MENU_TABLE)
+      for (const place of row[mode])
+        await expectPlace(page, place, `${row.item} (${mode})`);
+  }
+  // With two tabs the strip is back, in both modes.
+  await projectTabAction(page, "New project tab");
+  await expect(page.getByRole("tab")).toHaveCount(2);
+  for (const mode of ["auto", "draw"] as const) {
+    await page.getByTestId(`mode-${mode}`).click();
+    for (const row of TWO_TAB_ROWS)
       for (const place of row[mode])
         await expectPlace(page, place, `${row.item} (${mode})`);
   }
@@ -2010,6 +2077,16 @@ for (const [menuId, popoverClass] of [
       expect(await canvas.getAttribute("viewBox"), `${menuId} (${mode})`).toBe(
         viewBox,
       );
+      // Left and Right never pan from an open menu either; each is checked by
+      // itself, since a pair would cancel out.
+      for (const key of ["ArrowLeft", "ArrowRight"]) {
+        await page.keyboard.press(key);
+        await awaitTwoFrames(page);
+        expect(
+          await canvas.getAttribute("viewBox"),
+          `${menuId} (${mode}) ${key}`,
+        ).toBe(viewBox);
+      }
       // Escape still closes it and gives focus back to its button.
       await page.keyboard.press("Escape");
       await expect(menu).not.toHaveAttribute("open", "");

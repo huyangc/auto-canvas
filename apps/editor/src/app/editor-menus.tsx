@@ -281,6 +281,25 @@ export function EditorMenuBar({
   // A drawing command pressed in Auto brings up the drawing tools first.
   const drawing = (tool: string, run: () => void) =>
     editorMode === "auto" ? bringUpDraw(tool, run) : run();
+  // The project tab strip's actions. File offers them too: the strip hides
+  // with one project.
+  const tabActions = {
+    busy:
+      projectTabs.busy ||
+      cloudManagementBusy ||
+      (nativeProjectStore !== undefined && (nativeBusy || saveBusy)),
+    onNew: () => void projectTabs.open(() => createTabSession()),
+    onOpenFile: () =>
+      nativeProjectStore
+        ? void openNativeProject()
+        : tabProjectInputRef.current?.click(),
+  };
+  const shelfActions = {
+    onOpened: () => void reloadCloudProjects(),
+    onOpen: (id: string) => void openCloudProjectById(id, true),
+    onRename: renameShelfProject,
+    onDelete: deleteShelfProject,
+  };
   return (
     <EditorAppChrome
       userComponentsEnabled={capabilities.userComponents}
@@ -302,11 +321,7 @@ export function EditorMenuBar({
             cloudEnabled={projectStore !== null}
             tabs={projectTabs.tabs}
             activeId={projectTabs.activeId}
-            busy={
-              projectTabs.busy ||
-              cloudManagementBusy ||
-              (nativeProjectStore !== undefined && (nativeBusy || saveBusy))
-            }
+            busy={tabActions.busy}
             onSelect={projectTabs.select}
             onRename={(id, name) => {
               if (id === projectTabs.activeId) renameProject(name);
@@ -344,23 +359,13 @@ export function EditorMenuBar({
                   },
                 }
               : {})}
-            onNew={() => {
-              void projectTabs.open(() => createTabSession());
-            }}
-            onOpenFile={() =>
-              nativeProjectStore
-                ? void openNativeProject()
-                : tabProjectInputRef.current?.click()
-            }
+            onNew={tabActions.onNew}
+            onOpenFile={tabActions.onOpenFile}
             cloudProjects={cloudProjects}
-            onRenameShelf={renameShelfProject}
-            onDeleteShelf={deleteShelfProject}
-            onShelfOpened={() => {
-              void reloadCloudProjects();
-            }}
-            onOpenShelf={(id) => {
-              void openCloudProjectById(id, true);
-            }}
+            onRenameShelf={shelfActions.onRename}
+            onDeleteShelf={shelfActions.onDelete}
+            onShelfOpened={shelfActions.onOpened}
+            onOpenShelf={shelfActions.onOpen}
           />
           <input
             ref={tabProjectInputRef}
@@ -437,6 +442,10 @@ export function EditorMenuBar({
         onRevert: revertToSavedProjectBaseline,
         onOpenRecovery: openRecoveryDialog,
         onOpenInfo: () => setProjectInfoOpen(true),
+        projectTabs: {
+          ...tabActions,
+          shelf: { projects: cloudProjects, ...shelfActions },
+        },
       }}
       searchOpen={searchOpen}
       selectionFilterOpen={selectionFilterOpen}

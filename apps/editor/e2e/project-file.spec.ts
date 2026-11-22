@@ -21,6 +21,7 @@ import {
   exportedProject,
   openMenu,
   openProjectFile,
+  openProjectInfo,
   parseSavedProject,
   placeResistors,
   recoveryProjectTexts,
@@ -28,6 +29,7 @@ import {
   expectRecovered,
   openProject,
   readAgentClaim,
+  renameProject,
 } from "./editor-fixtures.js";
 import { sessionUser, signIn } from "./account-fixtures.js";
 import { placedInstance } from "./canvas-fixtures.js";
@@ -251,7 +253,9 @@ test("Check and Save keeps its snapshot safe while the drawing is replaced or ed
   // the Cloud Project the old one becomes.
   await checkAndSaveOneResistor();
   const fileMenu = await openMenu(page, "File");
-  await fileMenu.getByRole("button", { name: "New Project" }).click();
+  await fileMenu
+    .getByRole("button", { name: "New Project", exact: true })
+    .click();
   await expect(page.getByTestId("hit-R1")).toHaveCount(0);
   await expect(issues).toHaveText("Not checked");
   releases.shift()!();
@@ -466,11 +470,12 @@ test("Cloud Save keeps one binding through rename and revert while export stays 
   await expectStatus(page, "Export requested");
   await expect(page.getByTestId("project-unsaved-indicator")).toBeVisible();
 
-  await page.getByRole("tab", { selected: true }).dblclick();
-  const name = page.getByRole("textbox", { name: "Project name", exact: true });
+  const info = await openProjectInfo(page);
+  const name = info.getByRole("textbox", { name: "Name", exact: true });
   await expect(name).toHaveAttribute("autocomplete", "off");
   await name.fill("Bandgap Reference");
   await name.press("Enter");
+  await expect(info).toBeHidden();
   const fileMenu = await openMenu(page, "File");
   await fileMenu.getByRole("button", { name: "Save", exact: true }).click();
   await expect.poll(() => cloud.stored()?.name).toBe("Bandgap Reference");
@@ -483,13 +488,9 @@ test("Cloud Save keeps one binding through rename and revert while export stays 
 
   // Renaming is local until Save and retains the same Cloud identity.
   const originalCloudId = cloud.stored()!.id;
-  await page.getByRole("tab", { selected: true }).dblclick();
-  await name.fill("Bandgap characterization");
-  await name.press("Enter");
+  await renameProject(page, "Bandgap characterization");
   expect(cloud.stored()!.name).toBe("Bandgap Reference");
-  await expect(
-    page.getByRole("tab", { selected: true }).getByLabel("Unsaved"),
-  ).toBeVisible();
+  await expect(page.getByTestId("project-unsaved-indicator")).toBeVisible();
   await page.keyboard.press("ControlOrMeta+s");
   await expect
     .poll(() => cloud.stored()?.name)

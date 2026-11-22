@@ -6,6 +6,10 @@
   border-top: 1px solid var(--icm-border);
   background: var(--icm-surface-muted);
 }
+/* One project: the row hides and the canvas takes its height. */
+.project-tabs[hidden] {
+  display: none;
+}
 .project-tabs-workspace {
   position: relative;
   min-width: 0;

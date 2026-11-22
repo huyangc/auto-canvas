@@ -7,6 +7,7 @@ import {
   openCellManagerTab,
   openProjectFile as openFile,
   openEditor,
+  projectTabAction,
   readAgentClaim,
 } from "./editor-fixtures";
 import { openSelectionShelf, placeComponent } from "./manual-editor-fixtures";
@@ -3319,7 +3320,7 @@ test("copying custom circuits keeps terminal identities scoped to each native ow
   await page.getByTestId("hit-X1").click();
   await page.getByTestId("hit-X2").click({ modifiers: ["ControlOrMeta"] });
   await page.keyboard.press("ControlOrMeta+c");
-  await button(page, "New project tab").click();
+  await projectTabAction(page, "New project tab");
   for (const [index, y] of [200, 440].entries()) {
     await page.keyboard.press("ControlOrMeta+v");
     await page

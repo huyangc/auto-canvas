@@ -7,6 +7,7 @@ import {
   openProjectInfo,
   parseSavedProject,
   placeComponentAt,
+  projectTabAction,
   renameProject,
   openEditor,
   readAgentClaim,
@@ -26,8 +27,8 @@ const author = sessionUser({
   role: undefined,
 });
 
-const newProjectTab = (page: Page) =>
-  page.getByRole("button", { name: "New project tab", exact: true });
+// The strip's + with two or more tabs, File's New project tab with one.
+const newProjectTab = (page: Page) => projectTabAction(page, "New project tab");
 
 const expectSelected = (tab: Locator) =>
   expect(tab).toHaveAttribute("aria-selected", "true");
@@ -47,11 +48,8 @@ async function dropCopy(page: Page, x: number, y: number, count: string) {
 
 /** Open a Shelf project in a tab, which becomes the selected one. */
 async function openShelfProject(page: Page, name: string) {
-  await page.getByLabel("Open Shelf project in tab", { exact: true }).click();
-  await page
-    .locator(".project-tabs-shelf")
-    .getByRole("button", { name, exact: true })
-    .click();
+  const shelf = await projectTabAction(page, "Open Shelf project in tab");
+  await shelf.getByRole("button", { name, exact: true }).click();
   await expectSelected(page.getByRole("tab", { name: new RegExp(`${name}$`) }));
 }
 
@@ -85,7 +83,7 @@ test("project tabs append a partial selection and retain independent history, ca
   );
   await page.mouse.up();
   // The destination already holds a part; the copy must append beside it.
-  await newProjectTab(page).click();
+  await newProjectTab(page);
   await expect(page.getByRole("tab")).toHaveCount(2);
   await expect(page.getByTestId("active-instance-count")).toHaveText("0");
   await placeComponentAt(page, "resistor", { x: 260, y: 400 });
@@ -233,7 +231,7 @@ test("C carries a fresh copy into another tab, and V and Ctrl/Cmd+V paste the sa
   await page.keyboard.press("c");
   await expect(ghost).toBeVisible();
   await page.keyboard.press("r");
-  await newProjectTab(page).click();
+  await newProjectTab(page);
   await expect(page.getByRole("tab")).toHaveCount(2);
   // Still in hand, still turned, and nothing from the source circuit rides
   // along: no O, no ground name.
@@ -281,7 +279,8 @@ test("tab file opening is additive, and closing one tab, the others or all asks 
     mimeType: "application/json",
     buffer: Buffer.from(JSON.stringify(exported)),
   });
-  const tabs = page.getByRole("tab");
+  // With one tab left the strip hides; the tabs are still there.
+  const tabs = page.getByRole("tab", { includeHidden: true });
   await expect(tabs).toHaveCount(2);
   await expectSelected(page.getByRole("tab", { name: "Second circuit" }));
   await tabs.nth(1).focus();
@@ -330,10 +329,10 @@ test("tab file opening is additive, and closing one tab, the others or all asks 
 
   // A tab's right-click menu: Close Others keeps the tab right-clicked, and
   // clean tabs go without asking.
-  const newTab = newProjectTab(page);
   const menu = page.getByTestId("project-tab-menu");
-  await newTab.click();
-  await newTab.click();
+  await expect(page.getByTestId("project-tabs")).toBeHidden();
+  await newProjectTab(page);
+  await newProjectTab(page);
   await expect(tabs).toHaveCount(3);
   await tabs.first().click({ button: "right" });
   await expect(menu.getByRole("menuitem")).toHaveText([
@@ -347,7 +346,7 @@ test("tab file opening is additive, and closing one tab, the others or all asks 
   await expect(page.getByTestId("active-instance-count")).toHaveText("1");
 
   // Close All asks once for the unsaved tabs, then leaves one blank tab.
-  await newTab.click();
+  await newProjectTab(page);
   await placeComponentAt(page, "capacitor", { x: 300, y: 240 });
   await tabs.first().click({ button: "right" });
   await menu.getByRole("menuitem", { name: "Close All" }).click();
@@ -360,6 +359,7 @@ test("tab file opening is additive, and closing one tab, the others or all asks 
     .getByRole("button", { name: "Close without saving", exact: true })
     .click();
   await expect(tabs).toHaveCount(1);
+  await expect(page.getByTestId("project-tabs")).toBeHidden();
   await expect(page.getByTestId("active-instance-count")).toHaveText("0");
 });
 
@@ -556,7 +556,7 @@ test("plain C/V works between internal tabs when system clipboard permission is 
   await page.keyboard.press("c");
   await expect(page.getByTestId("copy-placement-preview")).toBeVisible();
   await page.keyboard.press("Escape");
-  await newProjectTab(page).click();
+  await newProjectTab(page);
   // Unsaved work in an inactive tab continues protecting browser close/reload.
   expect(
     await page.evaluate(() => {
@@ -586,7 +586,7 @@ test("refresh restores every unsaved tab and the active view, and a closed tab s
   const expected: CircuitProject[] = [];
   const views: (string | null)[] = [];
   for (const symbol of ["nmos", "resistor"]) {
-    if (expected.length) await newProjectTab(page).click();
+    if (expected.length) await newProjectTab(page);
     await placeComponentAt(page, symbol, {
       x: 240 + expected.length * 30,
       y: 250,
@@ -617,7 +617,8 @@ test("refresh restores every unsaved tab and the active view, and a closed tab s
     .getByRole("button", { name: "Close without saving", exact: true })
     .click();
   await page.reload();
-  await expect(page.getByRole("tab")).toHaveCount(1);
+  await expect(page.getByRole("tab", { includeHidden: true })).toHaveCount(1);
+  await expect(page.getByTestId("project-tabs")).toBeHidden();
 });
 
 /** This window's saved tabs, each as [unsaved, its Cloud Project id]. */
@@ -688,7 +689,7 @@ test("a fresh browser tab offers the tabs a closed window left, reopens them onc
   await expectSelected(alphaTab(page));
   await placeComponentAt(page, "resistor", { x: 260, y: 240 });
   await expect(alphaTab(page).getByLabel("Unsaved")).toBeVisible();
-  await newProjectTab(page).click();
+  await newProjectTab(page);
   await placeComponentAt(page, "capacitor", { x: 270, y: 250 });
   await expect
     .poll(() => savedTabs(page))
@@ -798,10 +799,22 @@ test("tab names edit in place as one undoable change and commit to their own tab
   await openEditor(page, "/editor?new=1");
   const tabs = page.getByRole("tab", { includeHidden: true });
   const first = tabs.first();
-  const second = tabs.nth(1);
+  // A name is edited in its tab only while the strip shows: a second
+  // project, opened beside the first, brings it.
+  await page.getByTestId("tab-project-file").setInputFiles({
+    name: "helper.icproj.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(
+      serializeProject(createEmptyProject("project-helper", "Helper")),
+    ),
+  });
+  await expect(tabs).toHaveCount(2);
+  await first.click();
+  await expectSelected(first);
+  const second = tabs.nth(2);
   const selected = page.getByRole("tab", { selected: true });
   const name = page.getByRole("textbox", { name: "Project name", exact: true });
-  const newTab = newProjectTab(page);
+  const newTab = () => newProjectTab(page);
   await first.dblclick();
   await expect(name).toBeFocused();
   await name.fill("OTA input stage");
@@ -815,8 +828,8 @@ test("tab names edit in place as one undoable change and commit to their own tab
   // New, clicked while a name commits and widens its tab, still opens a tab.
   await first.dblclick();
   await name.fill("A circuit name that expands on commit");
-  await newTab.click();
-  await expect(tabs).toHaveCount(2);
+  await newTab();
+  await expect(tabs).toHaveCount(3);
   await expect(first).toContainText("A circuit name that expands on commit");
   await expect(selected).toContainText("New Circuit");
   await renameProject(page, "Project B");
@@ -857,8 +870,8 @@ test("tab names edit in place as one undoable change and commit to their own tab
 
   // Close, clicked while a clean tab's name commits, asks about the edit
   // the name just made.
-  await newTab.click();
-  await expect(tabs).toHaveCount(3);
+  await newTab();
+  await expect(tabs).toHaveCount(4);
   await selected.dblclick();
   await name.fill("Another renamed circuit");
   await page
@@ -866,19 +879,19 @@ test("tab names edit in place as one undoable change and commit to their own tab
     .click();
   const decision = page.getByTestId("project-tab-close-decision");
   await expect(decision).toBeVisible();
-  await expect(tabs).toHaveCount(3);
+  await expect(tabs).toHaveCount(4);
   await page.getByRole("button", { name: "Keep open", exact: true }).click();
   await expect(selected).toContainText("Another renamed circuit");
 
   // Closing a clean tab does not borrow the renamed tab's unsaved decision.
-  await newTab.click();
+  await newTab();
   await first.click();
   await first.dblclick();
   await name.fill("Edited project");
   await page
     .getByRole("button", { name: "Close tab New Circuit", exact: true })
     .click();
-  await expect(tabs).toHaveCount(3);
+  await expect(tabs).toHaveCount(4);
   await expect(decision).toHaveCount(0);
   await expect(selected).toContainText("Edited project");
 });
@@ -888,6 +901,8 @@ test("unchanged imported or legacy names make no edit on Enter, blur or IME Ente
 }) => {
   const spaced = createEmptyProject("spaced-name", "  Preserved name  ");
   await openEditor(page, "/editor?new=1");
+  // Two projects, so the strip shows and the name is edited in its tab.
+  await newProjectTab(page);
   await openProjectFile(page, serializeProject(spaced));
   const tab = page.getByRole("tab", { selected: true });
   const name = page.getByRole("textbox", { name: "Project name", exact: true });
@@ -932,7 +947,7 @@ test("external tab activation cannot discard the focused name draft", async ({
 }) => {
   await openEditor(page, "/editor?new=1");
   await renameProject(page, "Project A");
-  await newProjectTab(page).click();
+  await newProjectTab(page);
   await expect(page.getByRole("tab", { selected: true })).toContainText(
     "New Circuit",
   );
@@ -989,13 +1004,15 @@ test("tab rename keeps header geometry and Project Info renames the circuit and 
   page,
 }) => {
   await page.goto("/editor?new=1");
+  // Two projects, so the strip shows and the name is edited in its tab.
+  await newProjectTab(page);
   await placeComponentAt(page, "resistor", { x: 260, y: 220 });
   const toggle = page.getByTestId("project-menu-toggle");
   const fileMenu = await openMenu(page, "File");
   // One New Project and no second list of the tabs: the tabs choose the
   // project, and the name is edited in its tab.
   await expect(
-    fileMenu.getByRole("button", { name: "New Project" }),
+    fileMenu.getByRole("button", { name: "New Project", exact: true }),
   ).toHaveCount(1);
   const file = page.getByTestId("project-menu");
   await expect(file.getByRole("menuitemradio")).toHaveCount(0);
@@ -1163,7 +1180,7 @@ test("attaches a Net Label copied across Projects with Ctrl+C/V to a wire with i
   };
   await page.goto("/editor?new=1");
   await open(project);
-  await newProjectTab(page).click();
+  await newProjectTab(page);
   const destination = structuredClone(project);
   destination.id = "destination";
   destination.documents[0]!.annotations = [];
@@ -1239,4 +1256,91 @@ test("attaches a Net Label copied across Projects with Ctrl+C/V to a wire with i
     sizeScale: sourceLabel.sizeScale,
     formatOverride: sourceLabel.formatOverride,
   });
+});
+
+test("one project hides the tab strip, and File holds its actions", async ({
+  page,
+}) => {
+  await openEditor(page, "/editor?new=1");
+  const strip = page.getByTestId("project-tabs");
+  const canvas = page.getByTestId("schematic-canvas");
+  const tabs = page.getByRole("tab", { includeHidden: true });
+  const height = async () => (await canvas.boundingBox())!.height;
+  for (const mode of ["mode-draw", "mode-auto"]) {
+    await page.getByTestId(mode).click();
+    await expect(tabs).toHaveCount(1);
+    await expect(strip).toBeHidden();
+    const withoutStrip = await height();
+
+    // File → New project tab brings the strip back; the canvas gives way by
+    // its height.
+    await newProjectTab(page);
+    await expect(tabs).toHaveCount(2);
+    await expect(strip).toBeVisible();
+    await expectSelected(page.getByRole("tab").nth(1));
+    const stripHeight = (await strip.boundingBox())!.height;
+    expect(stripHeight).toBeGreaterThan(0);
+    expect(withoutStrip - (await height()), mode).toBe(stripHeight);
+
+    // Closing back to one tab hides it again.
+    await page
+      .getByRole("button", { name: /Close tab / })
+      .last()
+      .click();
+    await expect(tabs).toHaveCount(1);
+    await expect(strip).toBeHidden();
+    expect(await height(), mode).toBe(withoutStrip);
+  }
+});
+
+test("with one project File opens a file in a new tab and browses the Shelf", async ({
+  page,
+}) => {
+  await openEditor(page, "/editor?new=1");
+  // File → Open file in new tab asks for the file the strip's ↗ asks for.
+  const chooser = page.waitForEvent("filechooser");
+  await projectTabAction(page, "Open file in new tab");
+  await (
+    await chooser
+  ).setFiles({
+    name: "second.icproj.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(
+      serializeProject(createEmptyProject("project-second", "Second circuit")),
+    ),
+  });
+  await expectSelected(page.getByRole("tab", { name: "Second circuit" }));
+  // Back to one project; File → Open Shelf project in tab lists the Shelf.
+  await page
+    .getByRole("button", { name: "Close tab Second circuit", exact: true })
+    .click();
+  await expect(page.getByTestId("project-tabs")).toBeHidden();
+  const file = page.getByTestId("project-menu");
+  const shelf = await projectTabAction(page, "Open Shelf project in tab");
+  await expect(shelf).toBeVisible();
+  // Browse opens over the page, and File keeps the list behind it.
+  await shelf.getByRole("button", { name: "Browse Cloud Projects…" }).click();
+  const dialog = page.getByRole("dialog", { name: "Cloud Projects" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(file).toHaveAttribute("open", "");
+  await expect(shelf).toBeVisible();
+});
+
+test("with one project File → Project Info renames it, and the top bar shows the name", async ({
+  page,
+}) => {
+  await openEditor(page, "/editor?new=1");
+  await expect(page.getByTestId("project-tabs")).toBeHidden();
+  const label = page.locator(".app-project-name");
+  await expect(label).toContainText("New Circuit");
+  const info = await openProjectInfo(page);
+  await info.getByRole("textbox", { name: "Name", exact: true }).fill("OTA");
+  await info.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(info).toBeHidden();
+  await expect(label).toHaveText(/^OTA/u);
+  // The unsaved dots: the top bar's and File's.
+  await expect(label).toContainText("●");
+  await expect(page.getByTestId("project-unsaved-indicator")).toBeVisible();
 });

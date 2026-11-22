@@ -13,6 +13,7 @@ import {
   setComponentParameter,
   openCellManager,
   openEditor,
+  projectTabAction,
   readAgentClaim,
 } from "./editor-fixtures.js";
 import { readComponentCode } from "./manual-editor-fixtures.js";
@@ -759,9 +760,7 @@ test("keeps pairing across Project tabs, rejects old writes and copies through t
     agent.snapshot("workspace-source-snapshot", session.documentIds[0]!);
   expect(await sourceSnapshot()).toMatchObject({ ok: true, revision: 1 });
   await panel.getByRole("button", { name: "Close Agent dialog" }).click();
-  await page
-    .getByRole("button", { name: "New project tab", exact: true })
-    .click();
+  await projectTabAction(page, "New project tab");
   await expect(page.getByTestId("active-instance-count")).toHaveText("0");
   // Use the original context explicitly: this may have the same logical Project/Cell IDs.
   const rejected = await page.request.post(
@@ -878,7 +877,8 @@ test("keeps pairing across Project tabs, rejects old writes and copies through t
     .getByRole("button", { name: /Close tab/u })
     .click();
   await page.getByRole("button", { name: "Close without saving" }).click();
-  await expect(page.getByRole("tab")).toHaveCount(1);
+  // One tab: the strip hides.
+  await expect(page.getByRole("tab", { includeHidden: true })).toHaveCount(1);
   client.workspaceId = source.workspaceId;
   expect(
     await agent.snapshot(
@@ -1058,7 +1058,8 @@ test("workspace Cloud operations reuse GUI open validation, save conflicts and S
   expect(
     await workspace({ action: "open", cloudProjectId: "cloud-invalid" }),
   ).toMatchObject({ ok: false });
-  await expect(page.getByRole("tab")).toHaveCount(1);
+  // One tab: the strip hides.
+  await expect(page.getByRole("tab", { includeHidden: true })).toHaveCount(1);
   const oldContext = client.contextRevision;
   const openedInBackground = await workspace({
     action: "open",

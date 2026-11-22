@@ -1287,3 +1287,97 @@ name="editor-command-menu" data-testid="more-menu">`; its summary is `⋯`
   (pan) to the canvas. File had the same gap on `main`; its own Escape
   handler does not need the key while closed, so it is fixed in the same
   line. A browser test pins both buttons.
+
+## T150d notes (implementer, 2026-11-21)
+
+- **Step 19, the strip references in the browser specs** (lines on
+  `origin/main` `1515168`). The plan's "19 in 7 files" undercounted: every
+  `getByRole("tab")` lookup is a strip reference too, since a hidden strip
+  hides its tabs from role queries, and the `renameProject` fixture
+  double-clicks the selected tab. 145 lines in 11 files name the strip; most
+  run with two or more tabs and are left alone.
+  - Runs with one tab (changed):
+    - `editor-fixtures.ts:166-175` `renameProject`: it now double-clicks
+      the tab when the strip shows and takes File → Project Info when it
+      does not, so its 12 callers (`base-path`, `cloud-projects-server`,
+      `editor-modes` ×4, `editor-shell`, `netlist-code-edit`, `project-tabs`
+      ×3: most with one tab, `project-tabs.spec.ts:822, 939` with two) are
+      unchanged; and `:183-184`
+      `renameShelfProject` (`project-tabs.spec.ts:462` runs with two, `:475`
+      with three; through the new helper either way);
+    - `base-path.spec.ts:89-96` and `cloud-projects-server.spec.ts:34-46,
+60-62` (the Shelf picker from a fresh one-tab page);
+    - `copy-paste.spec.ts:79-81, 205-207`, `user-components.spec.ts:3322`,
+      `web-agent-session.spec.ts:762-764` (New project tab);
+    - `web-agent-session.spec.ts:881, 1061` and `project-tabs.spec.ts:620`
+      (`toHaveCount(1)` on visible tabs: now `includeHidden` plus, in
+      `project-tabs`, the strip hidden);
+    - `editor-modes.spec.ts:405, 453, 793, 807, 1158` (New project tab) and
+      `:438, 1146` (the one tab's name: now the top-bar name);
+    - `editor-modes.spec.ts:1521` (`MENU_TABLE`'s "Project tabs" row);
+    - `project-file.spec.ts:469-473, 486-493` (rename by tab and the tab's
+      Unsaved mark; File → Project Info and File's dot now) and `:256`
+      (`name: "New Project"` without `exact` now also matches `New project
+tab`; made exact). That file does not load in Playwright on `main`
+      (`import.meta.env.BASE_URL`); a copy with the one constant inlined ran
+      8/8.
+    - `project-tabs.spec.ts`: `:29-31` (`newProjectTab` is now the helper),
+      `:49-55` (`openShelfProject`), `:88, 236, 559, 589, 691, 935, 1166`
+      (New project tab from one tab), `:284-362` (the close test: one tab
+      after Close and after Close All, so `includeHidden` and the strip
+      hidden), `:795-884`, `:886-927` and `:988-1082` (in-tab rename from one
+      tab: these now open a second project first, since the strip is where
+      the in-tab rename lives).
+  - Several tabs (left alone): `project-tabs.spec.ts` `showTab` and every
+    tab click and count in its first two tests, the Shelf test after its
+    first open (`:441-536`), the reopen test (`:651-728`, except `:691, 710`),
+    the blank-identity test (`:730-793`), `:1172-1175`; `copy-paste.spec.ts:82,
+240`; `editor-modes.spec.ts:406, 454-460, 794, 808-815, 1159-1170`;
+    `web-agent-session.spec.ts:876-878, 892-920, 1072-1106`.
+- **Where the close decisions and the tab menu render**: inside `ProjectTabs`
+  after the strip row (`project-tabs.tsx`, the `ContextMenu` and the two
+  `project-tab-close-decision` blocks). The strip row is `hidden` with one
+  tab (`.project-tabs[hidden] { display: none }`); the component, its
+  `project-tabs-workspace` wrapper, the menu and the decisions stay mounted,
+  so a decision open when the strip hides under it stays answerable (unit
+  test). A rename in its tab ends when the strip hides, keeping the typed
+  name, as a blur would.
+- **Handlers**: every strip action's handler is in `editor-menus.tsx`
+  (`EditorMenuBar`); none elsewhere. They are now one `tabActions` /
+  `shelfActions` pair used by both the strip and File.
+- **File** (`file-command-menu.tsx`, `projectTabs` prop): after New Project,
+  `New project tab`, `Open file in new tab` (web: the hidden
+  `tab-project-file` input; desktop: `openNativeProject()`), and with Cloud
+  `Open Shelf project in tab ›`, a submenu (button name `Open Shelf project
+in tab`; its options group is named `Shelf projects`, so the strip's
+  summary stays the only element with that label) that renders the same
+  `ProjectShelf` with the strip's handlers and reloads the list when it
+  opens. All three are disabled while the strip's are (`busy`). The Shelf's
+  own controls (rename, delete, Browse, the Cloud Projects dialog) keep File
+  open: clicks stop at the Shelf, and Left/Right/Escape in its name field or
+  Escape in the dialog stay there. Opening a project closes File, as it
+  closes the strip's picker. The list scrolls in its own 280 px box.
+- **The single tab's context menu and where each item lives now**: Close and
+  Close All (Close Others is disabled with one tab) leave one blank project
+  after one decision about unsaved work; File → New Project does the same
+  (the replace guard: Save and continue / Continue without saving / Stay; on
+  the desktop Save writes the file, and the old file is released, measured
+  on the desktop entry). Double-click rename → File → Project Info and the
+  top-bar name. The tab's Unsaved mark → File's dot and the top-bar name's
+  dot. Keyboard tab switching has nothing to switch to.
+- **Desktop**: native tabs use the same `ProjectTabs`; one native tab hides
+  the strip, and File's `Open file in new tab` opens a second native tab.
+  File there now lists both `Open file in new tab` and the host's `Open
+Project…`, which run the same `openNativeProject()` (the plan named the
+  desktop handler; flagged for the coordinator).
+- **Leftover from T150c**: the router's open-menu exemption also passes
+  ArrowLeft and ArrowRight, so no arrow pans from an open File or ⋯; File's
+  Import / Export submenus still open and close on them (their own handlers
+  run after the router returns). The browser test presses each key alone (a
+  Left/Right pair would cancel out and pass on `main`).
+- **Paths beyond the plan**: `editor-chrome.css` (the Shelf list's box in
+  File), `editor-shell.spec.ts` and `netlist-code-edit.spec.ts` not changed
+  (they reach the strip only through `renameProject`, which now takes File →
+  Project Info with one tab), `apps/desktop/scripts/accept-preview.mjs` (its
+  own `renameProject`, the Unsaved check and `New project tab` drive the
+  strip with one tab; now through File when the strip is hidden).

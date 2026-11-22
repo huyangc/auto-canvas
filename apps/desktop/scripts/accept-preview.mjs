@@ -406,8 +406,22 @@ try {
       .getByRole("button", { name: "Save copy", exact: true })
       .click();
   }
+  // One project hides the tab strip: File → Project Info renames it then,
+  // and File holds the strip's New project tab.
+  const stripShown = (page) => page.getByTestId("project-tabs").isVisible();
   async function renameProject(page, name) {
     await page.keyboard.press("Escape");
+    if (!(await stripShown(page))) {
+      await fileCommand(page, "Project Info");
+      const info = page.getByRole("dialog", {
+        name: "Project Info",
+        exact: true,
+      });
+      await info.getByRole("textbox", { name: "Name", exact: true }).fill(name);
+      await info.getByRole("button", { name: "Save", exact: true }).click();
+      await expect(info).toBeHidden();
+      return;
+    }
     await page.getByRole("tab", { selected: true }).dblclick();
     const field = page.getByRole("textbox", {
       name: "Project name",
@@ -499,9 +513,7 @@ try {
   await expect(native.getByTestId("project-name")).toHaveText(
     "Edited during Save As",
   );
-  await expect(
-    native.getByRole("tab", { selected: true }).getByLabel("Unsaved"),
-  ).toBeVisible();
+  await expect(native.getByTestId("project-unsaved-indicator")).toBeVisible();
   assert.equal(
     parseProject(await readFile(nativeB, "utf8")).name,
     "Native A again",
@@ -596,9 +608,11 @@ try {
     .toBe("Native B restarted");
   // A background dirty tab must be included in Save all and close.
   await renameProject(restarted, "Background saved on close");
-  await restarted
-    .getByRole("button", { name: "New project tab", exact: true })
-    .click();
+  if (await stripShown(restarted))
+    await restarted
+      .getByRole("button", { name: "New project tab", exact: true })
+      .click();
+  else await fileCommand(restarted, "New project tab");
   await expect(restarted.getByTestId("instance-count")).toHaveText("0");
   const savedClose = running.waitForEvent("close");
   await running.evaluate(({ BrowserWindow, dialog }) => {
