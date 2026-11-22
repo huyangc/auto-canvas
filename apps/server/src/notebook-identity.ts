@@ -129,6 +129,12 @@ function directGet(
     for (const [name, value] of Object.entries(headers))
       request.setHeader(name, value);
     request.on("error", reject);
+    // A request can end without a response and without an error: Node closes
+    // a 101 answer nobody listens for that way. (After a response this
+    // rejection changes nothing.)
+    request.on("close", () =>
+      reject(new Error("The notebook API closed without a response")),
+    );
     request.end();
   });
 }
@@ -216,10 +222,19 @@ export function createNotebookIdentity({
     try {
       let response: Response;
       try {
-        response = await send(endpoint, {
-          headers: { Authorization: `Bearer ${token}` },
-          redirect: "manual",
-          signal: controller.signal,
+        // The deadline ends the wait itself, whatever the transport does
+        // with the signal.
+        response = await new Promise<Response>((resolve, reject) => {
+          controller.signal.addEventListener(
+            "abort",
+            () => reject(new Rejected(503)),
+            { once: true },
+          );
+          send(endpoint, {
+            headers: { Authorization: `Bearer ${token}` },
+            redirect: "manual",
+            signal: controller.signal,
+          }).then(resolve, reject);
         });
       } catch {
         throw new Rejected(503);
