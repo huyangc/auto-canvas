@@ -1,4 +1,5 @@
 import { defaultLayoutSearch, planAutoLayout } from "@icm/auto-layout";
+import { executeTransaction } from "@icm/edit-engine";
 import { parseProjectSnapshot } from "@icm/model";
 import { builtInSymbols, createProjectSymbolResolver } from "@icm/symbols";
 import { describe, expect, it } from "vitest";
@@ -158,6 +159,55 @@ describe("runAutoLayout", () => {
       if (message?.type !== "result") throw new Error("expected a result");
       return message.results;
     };
+    it("aligns the three transistor pairs of a netlist into two vertical branches", async () => {
+      const project = await importNetlistProject(`
+.subckt dut VDD
+XM1 VDD vip vop 0 sky130_fd_pr__nfet_01v8 l=0.15 w=1 nf=1 m=1
+XM2 VDD vin von 0 sky130_fd_pr__nfet_01v8 l=0.15 w=1 nf=1 m=1
+XM3 vop vb1 net0 0 sky130_fd_pr__nfet_01v8 l=0.15 w=1 nf=1 m=1
+XM4 von vb1 net1 0 sky130_fd_pr__nfet_01v8 l=0.15 w=1 nf=1 m=1
+XM5 net0 vb2 0 0 sky130_fd_pr__nfet_01v8 l=0.15 w=1 nf=1 m=1
+XM6 net1 vb2 0 0 sky130_fd_pr__nfet_01v8 l=0.15 w=1 nf=1 m=1
+.ends dut
+`);
+      const document = project.documents.find(
+        (d) => d.id === project.topDocumentId,
+      )!;
+      expect(document.routes).toHaveLength(0);
+      const [cell] = results({
+        type: "plan",
+        runId: 1,
+        project,
+        documentIds: [document.id],
+        presentation: "netlist",
+      });
+      const applied = executeTransaction(
+        document,
+        {
+          transactionId: "differential-branches",
+          documentId: document.id,
+          expectedRevision: document.revision,
+          actor: { kind: "agent", id: "test" },
+          edits: cell!.result.edits,
+        },
+        {
+          symbolResolver: createProjectSymbolResolver(project, builtInSymbols),
+        },
+      );
+      if (!applied.ok || !applied.applied)
+        throw Error("Expected a routed netlist");
+      const position = (id: string) =>
+        applied.document.instances.find((i) => i.id === id)!.placement!
+          .position;
+      const left = ["XM1", "XM3", "XM5"].map(position),
+        right = ["XM2", "XM4", "XM6"].map(position);
+      expect(new Set(left.map((p) => p.x)).size).toBe(1);
+      expect(new Set(right.map((p) => p.x)).size).toBe(1);
+      expect(left[0]!.x).not.toBe(right[0]!.x);
+      expect(left.map((p) => p.y)).toEqual(right.map((p) => p.y));
+      expect(left[0]!.y).toBeLessThan(left[1]!.y);
+      expect(left[1]!.y).toBeLessThan(left[2]!.y);
+    }, 60_000);
     const direct = (
       project: Awaited<ReturnType<typeof importNetlistProject>>,
       documentId: string,

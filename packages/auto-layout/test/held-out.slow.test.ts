@@ -5,6 +5,7 @@ import { executeTransaction } from "@icm/edit-engine";
 import { parseProject } from "@icm/project-protocol";
 import { builtInSymbols, createProjectSymbolResolver } from "@icm/symbols";
 import { planAutoLayout } from "../src/index.js";
+import { netlistSymmetry } from "../src/readability-netlist-symmetry.js";
 import { refinementMetrics } from "../src/refine.js";
 import { auditRouting, floatingPins } from "../src/routing-audit.js";
 import { freezePinGroups } from "../src/route.js";
@@ -12,7 +13,7 @@ import { terminalPartition, lostNameClaim } from "../src/transaction.js";
 import cases from "./held-out-cases.json";
 
 const crossingLimits: Record<string, number> = {
-  "fd-two-stage": 12,
+  "fd-two-stage": 9,
   "common-source-ac": 2,
   skew: 4,
   deadtime: 17,
@@ -81,6 +82,13 @@ it.each(cases)(
       }
     const audit = auditRouting(result.document, resolver);
     expect(audit.unsafeProblems).toEqual([]);
+    if (fixture.id === "fd-two-stage") {
+      expect(netlistSymmetry(result.document, resolver)).toEqual({
+        opportunities: 5,
+        violations: 0,
+      });
+      expect(audit.bends).toBeLessThanOrEqual(13);
+    }
     for (const pin of floatingPins(result.document, resolver))
       expect(
         plan.diagnostics.some(
