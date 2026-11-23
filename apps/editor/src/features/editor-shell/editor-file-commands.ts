@@ -69,13 +69,6 @@ export interface EditorFileCommandDependencies {
    */
   projectPanelHoldsDraft?: () => boolean;
   /**
-   * Read at the replacement boundary, after the files have been read: what
-   * keeps the Project from being replaced holds now (an unapplied code draft
-   * begun during the read, a save in flight). A drop checks it earlier too,
-   * for a quicker answer, but only this check is race-free.
-   */
-  replacementBlocker?: () => string | null;
-  /**
    * The editor mode when the import lands. Auto keeps the canvas clear after
    * a successful import: the review waits in Properties until opened.
    */
@@ -108,7 +101,6 @@ export function createEditorFileCommands({
   setSelectionOpen,
   clearProjectPanel,
   projectPanelHoldsDraft,
-  replacementBlocker,
   getEditorMode,
   setStatus,
   onChunkLoadFailure,
@@ -308,9 +300,11 @@ export function createEditorFileCommands({
     importedProject: CircuitProject,
     report: SpiceImportReport,
     layout: boolean,
+    // Read at the replacement boundary, after the files are read: what keeps
+    // the Project from being replaced holds now. Only a drop passes one; the
+    // choosers keep their existing flow.
+    replacementBlocker?: () => string | null,
   ) => {
-    // The files are read by now: a draft begun while reading is unsaved work
-    // the dirty-work guard cannot see, and the replacement unmounts it.
     const blocker = replacementBlocker?.();
     if (blocker) {
       setStatus(`Can't open a Project yet: ${blocker}`);
@@ -382,6 +376,7 @@ export function createEditorFileCommands({
   const importSpiceFiles = async (
     files: FileList | null,
     namingProfile: "native" | "cadence-bang" = "native",
+    options: { replacementBlocker?: () => string | null } = {},
   ): Promise<void> => {
     const sources = await readSources(files);
     if (!sources) return;
@@ -425,6 +420,7 @@ export function createEditorFileCommands({
         withImportedInstanceDisplays(result.project),
         nextImportReport,
         true,
+        options.replacementBlocker,
       );
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "SPICE import failed");

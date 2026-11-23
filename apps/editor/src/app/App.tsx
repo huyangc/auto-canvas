@@ -4479,9 +4479,6 @@ function WorkspaceEditor({
     setStatus,
     onChunkLoadFailure: setChunkLoadFailure,
     onImported: autoLayout.requestAfterImport,
-    // Read again once the dropped or chosen files are read: a draft begun
-    // meanwhile must not be replaced away.
-    replacementBlocker: () => projectSwitchBlockerRef.current(),
   });
   // A file dropped from outside does what its menu command does, in both
   // modes: a netlist imports (and lays itself out), a Project file opens.
@@ -4497,7 +4494,12 @@ function WorkspaceEditor({
   const { dragActive: fileDropActive } = useFileDrop({
     importNetlist: (files) => {
       if (dropBlocked()) return Promise.resolve();
-      return importSpiceFiles(files);
+      // Read again once the files are in: a draft begun while reading must
+      // not be replaced away. Only the drop adds this; the choosers keep
+      // their own flow.
+      return importSpiceFiles(files, "native", {
+        replacementBlocker: () => projectSwitchBlockerRef.current(),
+      });
     },
     openProjectFile: (file) => {
       if (dropBlocked()) return Promise.resolve();
