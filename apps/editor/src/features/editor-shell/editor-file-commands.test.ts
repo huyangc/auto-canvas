@@ -443,16 +443,19 @@ C1 out 0 1p
   it("rechecks what holds the Project once the files are read", async () => {
     // A draft begun while the bytes were read: the earlier check missed it,
     // and the replacement would unmount it.
-    const target = commands({
-      guardDirtyReplacement: performing(),
+    const target = commands({ guardDirtyReplacement: performing() });
+    await target.importSpiceFiles(files(NETLIST), "native", {
       replacementBlocker: () => "an unapplied Netlist code draft",
     });
-    await target.importSpiceFiles(files(NETLIST));
     expect(target.dependencies.replaceActiveProject).not.toHaveBeenCalled();
     expect(target.dependencies.setImportReport).not.toHaveBeenCalled();
     expect(target.dependencies.setStatus).toHaveBeenLastCalledWith(
       "Can't open a Project yet: an unapplied Netlist code draft",
     );
+    // The chooser path passes no blocker and keeps its flow.
+    const chooser = commands({ guardDirtyReplacement: performing() });
+    await chooser.importSpiceFiles(files(NETLIST));
+    expect(chooser.dependencies.replaceActiveProject).toHaveBeenCalledOnce();
   });
 
   it("keeps the canvas clear after a successful import in Auto mode", async () => {
