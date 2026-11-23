@@ -736,6 +736,29 @@
   pointer-events: none;
 }
 
+/* A file dragged from outside onto the window: above the top bar and the
+   docks, never the drag's own target, and gone as soon as the drag lands. */
+.file-drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: var(--icm-space-4);
+  background: color-mix(in srgb, var(--icm-surface) 45%, transparent);
+  pointer-events: none;
+}
+
+.file-drop-overlay p {
+  margin: 0;
+  padding: 26px;
+  border: 2px dashed var(--icm-border-hover, #9aa7ba);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--icm-surface) 90%, transparent);
+  color: var(--icm-text);
+  font-size: var(--icm-font-md);
+}
+
 .auto-empty-state {
   position: relative;
   z-index: 11;

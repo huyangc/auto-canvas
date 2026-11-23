@@ -25,7 +25,10 @@ export function EmptyStateCard({
       data-testid="auto-empty-state"
     >
       <h2>Import a netlist to get a schematic</h2>
-      <p className="auto-empty-state-note">.sp / .spi / .cir / .scs</p>
+      <p className="auto-empty-state-note">
+        Drop a netlist (.sp / .spi / .cir / .scs) or a Project file (.json)
+        anywhere on this page, or choose one
+      </p>
       <div className="auto-empty-state-actions">
         <button
           type="button"

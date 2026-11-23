@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   EDITOR_MODE_STORAGE_KEY,
   MODE_COACH_STORAGE_KEY,
   drawingSwitchBlocked,
   isDrawingIntent,
+  modalDialogOpen,
   readStoredEditorMode,
   useEditorMode,
 } from "./editor-mode";
@@ -226,5 +227,27 @@ describe("drawing intents", () => {
       '<svg id="canvas"></svg>';
     expect(drawingSwitchBlocked(document.querySelector("#canvas"))).toBe(false);
     expect(drawingSwitchBlocked(document.body)).toBe(false);
+  });
+
+  it("reports a modal dialog, and nothing without a DOM", () => {
+    expect(modalDialogOpen()).toBe(false);
+    document.body.append(document.createElement("div"));
+    expect(modalDialogOpen()).toBe(false);
+    const modal = document.createElement("div");
+    modal.setAttribute("aria-modal", "true");
+    document.body.append(modal);
+    expect(modalDialogOpen()).toBe(true);
+    modal.remove();
+    const dialog = document.createElement("dialog");
+    dialog.setAttribute("open", "");
+    document.body.append(dialog);
+    expect(modalDialogOpen()).toBe(true);
+    // Passing undefined would only pick the live document as the default.
+    vi.stubGlobal("document", undefined);
+    try {
+      expect(modalDialogOpen()).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

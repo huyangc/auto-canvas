@@ -482,7 +482,21 @@ it does.
   later run that applies it drops them. A one-Cell Project has no rail, and
   at compact widths Auto keeps the hierarchy row instead.
 - **Draw** is the drawing page: the drawing toolbar, the device library and
-  the Netlist beside the canvas.
+  the Netlist beside the canvas. A netlist or Project file dropped on the
+  window does what it does in Auto.
+- **A dropped file.** In both modes, a netlist file dragged from outside the
+  window onto the editor — the top bar, the canvas, a dock or a code editor —
+  and released there is imported exactly as by **Import netlist…**, with that
+  command's entry rule, its unsaved-work guard and the Auto Layout that
+  follows every imported Cell with a part. A Project file (`.json`) dropped
+  the same way opens as by **File → Import → Project File…** — the same
+  entry rule, the same guard, into the current tab, with its own drawing and
+  no Auto Layout after it. While a file is over the window the page shows a
+  drop frame; behind a modal dialog a dropped file does nothing, a folder is
+  refused with a status line, a set of files containing a `.json` must be
+  that one file, and every other set follows the chooser's existing entry and
+  include rules. A dropped file is never displayed by the browser and never
+  inserted into a code editor.
 - **Remembered only when chosen.** The switch (and the card's **Draw it
   yourself →**) stores the mode for this browser; the first open is Auto. A
   drawing key (`B`, `W`, `T`, `I`, `P`, `L`) or Insert component… / Place Cell
