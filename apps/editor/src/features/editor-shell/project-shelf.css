@@ -1,0 +1,90 @@
+/* The Cloud Projects window: header bar with its close button, scrolling
+ * body, and the frame a drag moves. These rules live beside the component
+ * rather than in the shelf wall's stylesheet because the wall is a lazy
+ * chunk: the frame must be styled before, and without, that chunk. */
+
+.cloud-shelf-dialog {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: min(1100px, 92vw);
+  max-height: min(85vh, 100dvh - 2rem);
+  padding: 0;
+  overflow: hidden;
+  color: var(--icm-text);
+  background: var(--icm-surface);
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-lg);
+}
+
+.cloud-shelf-dialog::backdrop {
+  background: rgb(0 0 0 / 30%);
+}
+
+/* The dialog is rendered inside the File menu's popover, whose `button` rule
+ * (`width: 100%; min-height: 32px; padding: 0 10px …`) outranks a single
+ * class. The dialog-qualified selectors below win, and the close button
+ * restates every property that rule sets. */
+
+.cloud-shelf-dialog .cloud-shelf-header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--icm-border);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+/* The drag writes this class while the pointer holds the header. */
+.cloud-shelf-dialog.is-dragging .cloud-shelf-header {
+  cursor: grabbing;
+}
+
+.cloud-shelf-dialog .cloud-shelf-header h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.cloud-shelf-dialog .cloud-shelf-close {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  min-height: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--icm-radius-sm);
+  box-shadow: none;
+  color: var(--icm-text-muted);
+  background: none;
+  font: inherit;
+  font-size: 18px;
+  font-weight: 400;
+  line-height: 1;
+  text-align: center;
+  white-space: normal;
+  cursor: pointer;
+}
+
+.cloud-shelf-dialog .cloud-shelf-close:hover {
+  color: var(--icm-text);
+  background: var(--icm-accent-soft);
+}
+
+.cloud-shelf-dialog .cloud-shelf-close:focus-visible {
+  outline: 2px solid var(--icm-accent);
+  outline-offset: 1px;
+}
+
+/* The only part that scrolls: the header stays put while the wall moves. */
+.cloud-shelf-dialog .cloud-shelf-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 20px 20px;
+}

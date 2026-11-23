@@ -90,28 +90,6 @@
   color: var(--icm-text-muted);
 }
 
-.shelf-tile-delete {
-  appearance: none;
-  border: 1px solid var(--icm-border);
-  background: var(--icm-surface);
-  color: var(--icm-text-muted);
-  font: inherit;
-  font-size: 0.8rem;
-  padding: 4px 10px;
-  border-radius: var(--icm-radius-sm);
-  margin-top: 6px;
-  cursor: pointer;
-}
-
-.shelf-tile-delete:hover:not(:disabled) {
-  color: var(--icm-text);
-  border-color: var(--icm-text);
-}
-
-.shelf-tile-delete:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
 .shelf-rename-form {
   display: flex;
   flex-wrap: wrap;
@@ -182,16 +160,34 @@
   color: var(--icm-error);
 }
 
-.cloud-shelf-dialog {
-  width: min(1100px, 90vw);
-  max-height: 85vh;
-  overflow: auto;
-  background: var(--icm-surface);
-  color: var(--icm-text);
-  border: 1px solid var(--icm-border);
-  border-radius: var(--icm-radius-lg);
-  padding: 20px;
+/* Delete, the menu's danger item. InlineConfirm wraps its trigger in a span,
+ * which the menu's `> *` rule would pad like an item of its own; the padding
+ * and the danger colours go on the trigger button inside instead. A top
+ * border and the danger colour keep it apart from the actions above it. */
+.shelf-context-menu > .inline-confirm {
+  min-width: 0;
+  padding: 0;
+  border-radius: 0;
 }
-.cloud-shelf-dialog::backdrop {
-  background: rgb(0 0 0 / 30%);
+.shelf-context-menu .shelf-menu-delete {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 9px 12px;
+  border: 0;
+  border-top: 1px solid var(--icm-border);
+  border-radius: 0 0 5px 5px;
+  color: var(--icm-error);
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.shelf-context-menu .shelf-menu-delete:hover,
+.shelf-context-menu .shelf-menu-delete:focus-visible {
+  background: rgb(235 87 87 / 10%);
+}
+.shelf-context-menu .inline-confirm-decision {
+  padding: 8px 12px;
 }

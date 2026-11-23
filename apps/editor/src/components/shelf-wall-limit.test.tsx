@@ -68,6 +68,8 @@ it("keeps the server limit in counts and duplicate failures after shelf mutation
   expect(count()).toContain("2 of 37 saved");
   await action("Favorite");
   expect(count()).toContain("2 of 37 saved");
+  // Delete is one of the tile's ••• actions now, and still asks twice.
+  await click('[data-testid="shelf-actions-other"]');
   await click('[data-testid="shelf-delete-other"]');
   await click(
     '[aria-label="Delete Other from your shelf"] .inline-confirm-danger',
