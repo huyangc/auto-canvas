@@ -1031,3 +1031,31 @@ C1 out 0 1p
   expect(editor.file.replaceGuard).toBeNull();
   expect(editor.file.replacementInFlight()).toBe(false);
 });
+
+it("does not prompt for an unrendered edit that put the saved version back", async () => {
+  const editor = await mount();
+  const baseline = editor.current.doc.controller.project;
+  await act(async () => {
+    editor.file.restoreFileSession({
+      persistenceState: "clean",
+      cloudBinding: { id: "cloud-A", revision: 1 },
+      savedBaseline: { project: structuredClone(baseline), viewBox: view },
+      safeSnapshotToken: null,
+    });
+  });
+  editor.commitEditInPlace("Edited");
+  // The same tick puts the acknowledged content back, before any render.
+  const restored = structuredClone(baseline);
+  restored.structureRevision += 2;
+  for (const document of restored.documents) document.revision += 2;
+  editor.current.doc.controller.commitProjectStructure(restored);
+  let guarded!: Promise<boolean>;
+  await act(async () => {
+    guarded = editor.file.guardDirtyReplacement("Open B", () => {
+      editor.file.replaceActiveProject(project("B"));
+    });
+  });
+  await editor.run(guarded);
+  expect(editor.file.replaceGuard).toBeNull();
+  expect(editor.current.doc.controller.project.name).toBe("B");
+});

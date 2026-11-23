@@ -422,13 +422,20 @@ export function useProjectFileLifecycle({
     const state = persistenceStateRef.current;
     if (hasPendingEdits?.() === true) return true;
     // The controller commits synchronously and the render follows: an edit
-    // made in that interval is unsaved work even before the state notices.
+    // made in that interval is unsaved work even before the state notices,
+    // unless it put the saved version back.
     if (
       (state === "unbound" || state === "clean") &&
       projectChangeToken(readCurrentProject()) !==
         projectChangeToken(liveProjectRef.current)
-    )
-      return true;
+    ) {
+      const saved = savedProjectBaselineRef.current;
+      if (
+        saved === null ||
+        !sameProjectContent(readCurrentProject(), saved.project)
+      )
+        return true;
+    }
     return (
       state === "dirty" ||
       state === "saving" ||
