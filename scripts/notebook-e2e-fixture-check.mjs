@@ -704,6 +704,14 @@ try {
       "AUTO_CANVAS_TEST_DATABASE_URL",
       {
         AUTO_CANVAS_TEST_DATABASE_URL:
+          "postgresql:///auto_canvas_test_2?port=5432",
+      },
+      "host, port, socket, db, dbname or database parameter",
+    ],
+    [
+      "AUTO_CANVAS_TEST_DATABASE_URL",
+      {
+        AUTO_CANVAS_TEST_DATABASE_URL:
           "postgresql://%2Ftmp/auto_canvas_test_2?host=/tmp",
       },
       'resolves the database "%2Ftmp/auto_canvas_test_2"',

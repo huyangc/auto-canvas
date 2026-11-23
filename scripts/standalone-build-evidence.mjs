@@ -25,7 +25,10 @@
 // own binaries (verified on macOS 27: `ps eww` shows that of node and of
 // Chromium, none of `/bin/sh` or `/bin/sleep`), so a system binary that also
 // left the group and lost its parent is found by neither rule; `resource
-// marker=` says whether the marker reaches our processes at all here.
+// marker=` says whether the marker reaches our processes at all here. A
+// marker read that fails is retried; if it still cannot be read while the
+// marker is active, cleanup reports `cleanup incomplete: …` and exits
+// non-zero rather than claiming the run left nothing behind.
 import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
@@ -49,7 +52,14 @@ const parseConnectionString = createRequire(
  * Parameters that redirect the connection or rename its database, so the URL
  * no longer names one database on the server it appears to.
  */
-const DATABASE_PARAMETERS = ["host", "socket", "db", "dbname", "database"];
+const DATABASE_PARAMETERS = [
+  "host",
+  "port",
+  "socket",
+  "db",
+  "dbname",
+  "database",
+];
 /** Ports the developer's own servers use; never bound or contacted. */
 const RESERVED_PORTS = new Set([3000, 8000, 4310]);
 /** Variables the server gets from this script only. */
@@ -62,6 +72,9 @@ const TRACK_INTERVAL_MS = 200;
 const SIGNAL_CODES = { SIGINT: 130, SIGTERM: 143, SIGHUP: 129 };
 /** The per-run marker, set only in the environment of the run's children. */
 const RUN_MARKER = "STANDALONE_EVIDENCE_RUN_MARKER";
+/** A marker read that fails is retried at once, so a transient `ps` recovers. */
+const MARKER_SCAN_ATTEMPTS = 3;
+const MARKER_SCAN_RETRY_MS = 100;
 
 function refuse(message) {
   console.error(`${PREFIX} refused: ${message}`);
@@ -134,7 +147,7 @@ if (!/^auto_canvas_test(?:_\d+)?$/u.test(databaseName ?? ""))
 for (const parameter of DATABASE_PARAMETERS)
   if (databaseUrl.searchParams.has(parameter))
     refuse(
-      "--database must not have a host, socket, db, dbname or database parameter",
+      "--database must not have a host, port, socket, db, dbname or database parameter",
     );
 
 const editorRoot = resolve(
@@ -208,11 +221,31 @@ function processTable() {
 }
 
 /**
+ * Test-only (scripts/standalone-build-evidence-check.mjs): with
+ * STANDALONE_EVIDENCE_MARKER_SCAN=fail the run's own marker reads fail (the
+ * startup probe reads a token of its own, so the marker still looks active),
+ * to show what cleanup reports when it cannot check them.
+ */
+function markerScanRefused(marker) {
+  return (
+    process.env.STANDALONE_EVIDENCE_MARKER_SCAN === "fail" &&
+    run !== null &&
+    marker === run.marker
+  );
+}
+
+/**
  * The pids whose environment carries exactly this marker (a UUID minted for
  * one run), from `ps eww`. An empty set where `ps` hides the environment
  * (see the module comment); the group and parent rules still apply there.
  */
 function markedPids(marker) {
+  if (markerScanRefused(marker))
+    return Promise.reject(
+      new Error(
+        "the marker scan was refused (STANDALONE_EVIDENCE_MARKER_SCAN)",
+      ),
+    );
   const token = `${RUN_MARKER}=${marker}`;
   return new Promise((done, fail) => {
     execFile(
@@ -249,7 +282,9 @@ async function markerVisible(marker) {
     if (child.pid === undefined) return false;
     const deadline = Date.now() + 2_000;
     for (;;) {
-      if ((await markedPids(token)).has(child.pid)) return true;
+      // A failed read here is a not-yet-visible probe, never a crash.
+      if ((await markedPids(token).catch(() => new Set())).has(child.pid))
+        return true;
       if (child.exitCode !== null || child.signalCode !== null) return false;
       if (Date.now() > deadline) return false;
       await new Promise((resume) => setTimeout(resume, 100));
@@ -279,8 +314,27 @@ function trackRun() {
 async function scanRun() {
   const table = await processTable();
   // The marker rule: a child that left the run's group and lost its parent
-  // between two scans still carries this run's marker.
-  const marked = await markedPids(run.marker).catch(() => new Set());
+  // between two scans still carries this run's marker. A failed read is not
+  // "no marked process": it is retried at once (a transient `ps` failure),
+  // and one that stays unreadable while the marker is active leaves the
+  // unread state on the run, where cleanup reports it.
+  let marked = new Set();
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      marked = await markedPids(run.marker);
+      run.markerUnread = false;
+      break;
+    } catch {
+      if (attempt < MARKER_SCAN_ATTEMPTS) {
+        await new Promise((resume) => setTimeout(resume, MARKER_SCAN_RETRY_MS));
+        continue;
+      }
+      // Only an active marker loses anything here: an inert one reaches
+      // nothing, which the startup's own line says.
+      run.markerUnread = run.markerActive === true;
+      break;
+    }
+  }
   let grew = true;
   while (grew) {
     grew = false;
@@ -388,6 +442,11 @@ function cleanup(reason, code) {
       console.error(`${PREFIX} could not stop the run: ${error.message}`);
       incomplete.push("run processes");
     }
+    // An active marker that could not be read at the last scan leaves any
+    // descendant that left both the group and its parent unaccounted for:
+    // that is not a clean run, whatever the other rules found.
+    if (run?.markerUnread)
+      incomplete.push("run processes (the run's marker could not be read)");
     if (!(await stopServer())) incomplete.push(`server ${server.child.pid}`);
     // The probe of the marker rule (a child of this script, never of the
     // run) lives two seconds at most; a signal during it stops it here.
@@ -571,11 +630,34 @@ function expectedTypes({ kind, as }) {
   return null;
 }
 
+/**
+ * The document's effective base URL: its first `<base href>`, resolved
+ * against the document's own URL, or the document's URL. The browser resolves
+ * every reference against this, not against the raw attribute. A base the
+ * browser cannot parse is ignored, as the browser ignores it; the document
+ * is still reported.
+ */
+function baseUrlOf(document, documentUrl) {
+  const base = document.querySelector("base[href]");
+  const href = base === null ? null : base.getAttribute("href");
+  if (href === null) return { url: new URL(documentUrl) };
+  try {
+    return { url: new URL(href, documentUrl) };
+  } catch {
+    return {
+      url: new URL(documentUrl),
+      problem: `<base href="${href}"> is not a URL`,
+    };
+  }
+}
+
 async function checkStandardOutput(origin) {
   const { JSDOM } = await import("jsdom");
   const page = await fetch(`${origin}/`);
   if (page.status !== 200) throw new Error(`GET / answered ${page.status}`);
   const document = new JSDOM(await page.text()).window.document;
+  const serverOrigin = new URL(origin).origin;
+  const base = baseUrlOf(document, `${origin}/`);
   const references = [];
   for (const script of document.querySelectorAll("script[src]"))
     references.push({ kind: "script", value: script.getAttribute("src") });
@@ -593,19 +675,38 @@ async function checkStandardOutput(origin) {
         value,
       });
   }
-  const problems = [];
+  const problems = base.problem === undefined ? [] : [base.problem];
   for (const reference of references) {
     const { kind, value } = reference;
-    if (
-      typeof value !== "string" ||
-      !value.startsWith("/assets/") ||
-      value.startsWith("//") ||
-      /^[a-z][a-z0-9+.-]*:/iu.test(value)
-    ) {
-      problems.push(`${kind} ${value}: not a root-relative /assets/ path`);
+    if (typeof value !== "string" || value === "") {
+      problems.push(`${kind} ${value}: no URL`);
       continue;
     }
-    const response = await fetch(`${origin}${value}`);
+    // The URL the browser loads, not the attribute: a `<base href>` or a
+    // dot segment can point it at another origin, or outside /assets/.
+    let target;
+    try {
+      target = new URL(value, base.url);
+    } catch {
+      problems.push(`${kind} ${value}: not a URL`);
+      continue;
+    }
+    if (target.origin !== serverOrigin) {
+      problems.push(
+        `${kind} ${value}: resolves to ${target.href}, not the server's origin`,
+      );
+      continue;
+    }
+    if (
+      !target.pathname.startsWith("/assets/") ||
+      target.pathname.length <= "/assets/".length
+    ) {
+      problems.push(
+        `${kind} ${value}: resolves to ${target.pathname}, not a path under /assets/`,
+      );
+      continue;
+    }
+    const response = await fetch(target);
     await response.arrayBuffer();
     const type = (response.headers.get("content-type") ?? "")
       .split(";")[0]
@@ -657,7 +758,7 @@ async function startRun(command, origin) {
   // A spawn that failed has no process group to track or stop.
   if (child.pid === undefined)
     return new Promise((done, fail) => child.once("error", fail));
-  run = { child, pgid: child.pid, marker };
+  run = { child, pgid: child.pid, marker, markerActive: visible };
   console.log(`${PREFIX} resource run-pgid=${child.pid}`);
   // A failed scan in between is retried by the next one; cleanup's own
   // scans fail loudly.

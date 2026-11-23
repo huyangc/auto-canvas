@@ -61,7 +61,7 @@ built server in single-user mode serving the standard build `apps/editor/dist`
 on its own schema at `AUTO_CANVAS_E2E_API_PORT`) and runs the cases with one
 worker in Chrome. The run refuses to start unless `AUTO_CANVAS_TEST_DATABASE_URL` names
 an `auto_canvas_test` or `auto_canvas_test_<digits>` database — the name `pg`
-itself resolves, so a `host`, `socket`, `db`, `dbname` or `database` parameter
+itself resolves, so a `host`, `port`, `socket`, `db`, `dbname` or `database` parameter
 is refused — and
 `AUTO_CANVAS_API_URL` is an `http://127.0.0.1:<port>` origin, and never uses
 ports 3000, 8000 or 4310. `node scripts/notebook-e2e-fixture-check.mjs` checks
@@ -75,12 +75,13 @@ build output there, and the builds that precede it overwrite
 `apps/editor/dist`): it starts, as its own child, the server the launcher
 runs (`node apps/server/dist/cli.js` with `EDITOR_ROOT=apps/editor/dist`) on a
 throwaway schema, checks that every script, module preload and stylesheet
-reference of the standard output is a `/assets/` path the server answers with
-the content type its use needs (a JavaScript MIME type, `text/css`), and with
+reference of the standard output resolves (against the document's base URL)
+to a `/assets/` path on that server and is answered with the content type its
+use needs (a JavaScript MIME type, `text/css`), and with
 `--run` runs a command (the Agent browser cases) against that server. It
 refuses a checkout with `.env` files, ports 3000, 8000 and 4310, a bound port
 and any database but `auto_canvas_test…` (the name `pg` resolves, without a
-`host`, `socket`, `db`, `dbname` or `database` parameter), and stops
+`host`, `port`, `socket`, `db`, `dbname` or `database` parameter), and stops
 everything it started on every exit path: the run's processes by its process
 group, by their parents, and by a per-run marker in their environment.
 `node scripts/standalone-build-evidence-check.mjs` checks its

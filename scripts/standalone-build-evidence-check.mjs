@@ -257,31 +257,39 @@ try {
       "a dbname parameter",
       withDatabase("postgresql:///auto_canvas_test?dbname=auto_canvas"),
       null,
-      "host, socket, db, dbname or database parameter",
+      "host, port, socket, db, dbname or database parameter",
     ],
     [
       "a db parameter",
       withDatabase("postgresql:///auto_canvas_test?db=auto_canvas"),
       null,
-      "host, socket, db, dbname or database parameter",
+      "host, port, socket, db, dbname or database parameter",
     ],
     [
       "a database parameter",
       withDatabase("postgresql:///auto_canvas_test?database=auto_canvas"),
       null,
-      "host, socket, db, dbname or database parameter",
+      "host, port, socket, db, dbname or database parameter",
     ],
     [
       "a host parameter",
       withDatabase("postgresql:///auto_canvas_test_2?host=/tmp"),
       null,
-      "host, socket, db, dbname or database parameter",
+      "host, port, socket, db, dbname or database parameter",
     ],
     [
       "a socket parameter",
       withDatabase("postgresql:///auto_canvas_test_2?socket=/tmp"),
       null,
-      "host, socket, db, dbname or database parameter",
+      "host, port, socket, db, dbname or database parameter",
+    ],
+    [
+      // A port parameter overrides the authority's port: the same database
+      // name on another PostgreSQL.
+      "a port parameter",
+      withDatabase("postgresql:///auto_canvas_test_2?port=5432"),
+      null,
+      "host, port, socket, db, dbname or database parameter",
     ],
     [
       // The WHATWG pathname says auto_canvas_test_2, but with the host
@@ -379,6 +387,48 @@ try {
       );
     } finally {
       await rm(mismatchRoot, { recursive: true, force: true });
+    }
+  }
+
+  // C-4 resolves each reference as the browser does: the raw attribute can
+  // leave the owned server (`<base href>`) or /assets/ (dot segments), and
+  // both are reported while the run still cleans up.
+  for (const [label, index, problem] of [
+    [
+      "C-4 base URL",
+      '<!doctype html><base href="https://elsewhere.example/"><script type="module" src="/assets/a.js"></script><link rel="stylesheet" href="/assets/a.css">\n',
+      /script \/assets\/a\.js: resolves to https:\/\/elsewhere\.example\/assets\/a\.js, not the server's origin/u,
+    ],
+    [
+      "C-4 escape",
+      '<!doctype html><script type="module" src="/assets/../index.html"></script><link rel="stylesheet" href="/assets/a.css">\n',
+      /script \/assets\/\.\.\/index\.html: resolves to \/index\.html, not a path under \/assets\//u,
+    ],
+  ]) {
+    const root = await mkdtemp(join(tmpdir(), "standalone-evidence-resolve-"));
+    try {
+      await mkdir(join(root, "assets"));
+      await writeFile(join(root, "index.html"), index);
+      await writeFile(join(root, "assets/a.js"), "export {};\n");
+      await writeFile(join(root, "assets/a.css"), "body {}\n");
+      await withRun(
+        script,
+        await args(),
+        { ...env, STANDALONE_EVIDENCE_EDITOR_ROOT: root },
+        async (run) => {
+          const { code } = await run.exited;
+          assert.equal(code, 1, `${label}: exit ${code}\n${run.output}`);
+          assert.match(run.output, /C-4 failed/u);
+          assert.match(run.output, problem);
+          assert.match(run.output, /cleanup ok/u);
+          await expectClean(run, label);
+          console.log(
+            `ok ${label}: the resolved URL is checked, not the attribute`,
+          );
+        },
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
     }
   }
 
@@ -613,6 +663,31 @@ try {
         }
     }
   }
+
+  // (vic) The run's marker cannot be read while it is active (`ps` fails at
+  // shutdown): cleanup reports what it could not check and exits non-zero,
+  // rather than claiming the run left nothing behind. The server and the
+  // schema are still cleaned.
+  await withRun(
+    script,
+    await args(["--run", "true"]),
+    { ...env, STANDALONE_EVIDENCE_MARKER_SCAN: "fail" },
+    async (run) => {
+      const { code } = await run.exited;
+      assert.match(run.output, /resource marker=active/u, run.output);
+      assert.equal(code, 1, `unread marker: exit ${code}\n${run.output}`);
+      assert.match(
+        run.output,
+        /cleanup incomplete: .*marker could not be read/u,
+        run.output,
+      );
+      assert.doesNotMatch(run.output, /cleanup ok/u, run.output);
+      await expectClean(run, "unread marker");
+      console.log(
+        "ok unread marker: cleanup incomplete names the marker it could not read, exit 1",
+      );
+    },
+  );
 
   // (vii) A server spawn that fails before any process exists: `error`
   // without `exit`; cleanup still finishes promptly and completely.

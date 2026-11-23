@@ -17,6 +17,7 @@ import {
   instrumentStorage,
   newUser,
   notebookSuite,
+  origin,
   readProbe,
   readSingleUserRecovery,
   recordRequests,
@@ -162,6 +163,15 @@ test("N11c the notebook build keeps the Agent off with a saved Agent session and
 }) => {
   await instrumentStorage(context);
   const recorder = recordRequests(context);
+  // The Agent reaches its session through a WebSocket (socketUrl in
+  // use-agent-session.ts), and Playwright reports WebSockets apart from
+  // requests: without this observer a socket attempt the server rejects
+  // would pass unnoticed.
+  const sockets: { phase: string; url: string }[] = [];
+  let socketPhase = "agent";
+  page.on("websocket", (socket) =>
+    sockets.push({ phase: socketPhase, url: socket.url() }),
+  );
   const alice = newUser("alice");
   await page.goto("/");
   // A record the standard editor would resume (hasAgentSessionRecovery in
@@ -229,6 +239,20 @@ test("N11c the notebook build keeps the Agent off with a saved Agent session and
     ),
   ).toEqual([]);
   await expect(page.getByTestId("open-agent")).toHaveCount(0);
+  // No WebSocket at all: the notebook build's only one is the Agent's, so
+  // an attempt is the failure this case looks for, whatever the server
+  // answered.
+  const agentSockets = sockets
+    .filter((socket) => socket.phase === "agent")
+    .map((socket) => socket.url);
+  test.info().annotations.push({
+    type: "N11c websockets",
+    description: JSON.stringify({
+      attempted: agentSockets,
+      observed: sockets,
+    }),
+  });
+  expect(agentSockets, "WebSocket attempts of the notebook editor").toEqual([]);
   test.info().annotations.push({
     type: "N11c agent chunks requested",
     description: JSON.stringify(
@@ -239,4 +263,39 @@ test("N11c the notebook build keeps the Agent off with a saved Agent session and
   });
   await expectBearers(recorder, { from, to: end, source: page, user: alice });
   expectNoForeignOrigin(recorder.records);
+  // Control, after the agent window's rules: the observer does see a
+  // WebSocket. This one goes to the same path the Agent would use; the
+  // canvas server answers an upgrade it does not serve with a 404 and
+  // closes it.
+  socketPhase = "control";
+  const controlPath = `/canvas/api/agent/sessions/control/editor`;
+  await page.evaluate(
+    (url) =>
+      new Promise<void>((done) => {
+        const socket = new WebSocket(url);
+        const settle = () => {
+          socket.onopen = null;
+          socket.onerror = null;
+          socket.onclose = null;
+          socket.close();
+          done();
+        };
+        socket.onopen = settle;
+        socket.onerror = settle;
+        socket.onclose = settle;
+        setTimeout(settle, 5_000);
+      }),
+    `${origin.replace(/^http/u, "ws")}${controlPath}`,
+  );
+  await expect
+    .poll(() =>
+      sockets
+        .filter((socket) => socket.phase === "control")
+        .map((socket) => `${new URL(socket.url).pathname}`),
+    )
+    .toEqual([controlPath]);
+  test.info().annotations.push({
+    type: "N11c websocket control",
+    description: JSON.stringify(sockets.map((socket) => socket)),
+  });
 });

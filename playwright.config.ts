@@ -23,7 +23,14 @@ const parseConnectionString = createRequire(
   database?: string | null;
 };
 /** Parameters that redirect the connection or rename its database. */
-const DATABASE_PARAMETERS = ["host", "socket", "db", "dbname", "database"];
+const DATABASE_PARAMETERS = [
+  "host",
+  "port",
+  "socket",
+  "db",
+  "dbname",
+  "database",
+];
 
 const prefixTest = process.env.AUTO_CANVAS_E2E_BASE_PATH === "1";
 // The notebook build behind a stand-in for silicon-notebook
@@ -127,7 +134,7 @@ function checkNotebookEnvironment(): void {
     )
   )
     refuse(
-      "AUTO_CANVAS_TEST_DATABASE_URL must name auto_canvas_test or auto_canvas_test_<digits> on the server the driver reaches, without a host, socket, db, dbname or database parameter",
+      "AUTO_CANVAS_TEST_DATABASE_URL must name auto_canvas_test or auto_canvas_test_<digits> on the server the driver reaches, without a host, port, socket, db, dbname or database parameter",
     );
   // Nothing in the notebook run uses it today; set, it closes the editor dev
   // proxies' default (the developer's port 4310) for any Vite server a

@@ -36,7 +36,14 @@ const parseConnectionString = createRequire(
  * Parameters that redirect the connection or rename its database, so the URL
  * no longer names one database on the server it appears to.
  */
-const DATABASE_PARAMETERS = ["host", "socket", "db", "dbname", "database"];
+const DATABASE_PARAMETERS = [
+  "host",
+  "port",
+  "socket",
+  "db",
+  "dbname",
+  "database",
+];
 
 /** Ports the developer's own servers use; never bound or contacted. */
 const RESERVED_PORTS = new Set([3000, 8000, 4310]);
@@ -117,7 +124,7 @@ function testDatabaseUrl() {
   for (const parameter of DATABASE_PARAMETERS)
     if (url.searchParams.has(parameter))
       refuse(
-        `${name} must not have a host, socket, db, dbname or database parameter`,
+        `${name} must not have a host, port, socket, db, dbname or database parameter`,
       );
   return url;
 }

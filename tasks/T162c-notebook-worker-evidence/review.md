@@ -112,3 +112,28 @@ same script, and the first run's servers had already exited, so the reviewer
 attributes it to the two steps overlapping on the lane rather than to a
 reproducible defect. Recorded for honesty; the rerun above is the result of
 record.
+
+## Round 6 — changes-requested
+
+Reviewed: codex `gpt-6.2-sol` PR review round 4 of PR 117 at `b67523e` (three
+P2, one P3; no blocking finding), each checked and found valid.
+
+| #   | Severity   | Where                                               | Finding                                                                                                                                | Expected fix                                                                                                                                                         |
+| --- | ---------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 25  | should-fix | `scripts/standalone-build-evidence.mjs` `scanRun()` | A failed marker scan was treated as "no marked processes": a reparented Chromium could survive while `cleanup ok` printed.             | Retry the scan within the shutdown deadline; if the marker of a live run still cannot be read, `cleanup incomplete: … marker could not be read` and a non-zero exit. |
+| 26  | should-fix | same file, C-4                                      | References were fetched as raw attributes: a `<base href>` or a path normalizing outside `/assets/` could point the browser elsewhere. | Resolve against the document's effective base URL; require the resolved origin to be the server's and the resolved pathname under `/assets/`; fetch only that.       |
+| 27  | should-fix | `notebook-evidence.spec.ts` N11c                    | Playwright reports WebSockets separately and the proxy logs no upgrades, so an Agent WebSocket the server rejected went unnoticed.     | A WebSocket observer armed before the navigation; no socket in the agent window; a control that opens one and must be caught.                                        |
+| 28  | should-fix | the three validators                                | A `port` query parameter overrides the authority's port.                                                                               | Refuse `port` with the others; refusal cases.                                                                                                                        |
+
+## Round 7 — accepted
+
+Reviewed: the working tree after round 5, on 2026-11-23. Read by the reviewer:
+the diff of the evidence script (marker retry, base URL, resolved fetches), the
+N11c changes, the validators; acceptance rerun by the reviewer.
+
+| #   | Severity | Where                                  | Finding                                                                                                                                                                                              | Expected fix                                                                                                                                                              |
+| --- | -------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 25  | fixed    | `scanRun()`, `cleanup()`               | Three attempts, 100 ms apart; a live run whose marker stays unreadable is added to `incomplete`, so the script names it and exits non-zero; an inert marker adds nothing (the startup line says so). | Test hook `STANDALONE_EVIDENCE_MARKER_SCAN=fail`; case: marker active, exit 1, `cleanup incomplete: … marker could not be read`, no `cleanup ok`, server and schema gone. |
+| 26  | fixed    | `baseUrlOf()`, `checkStandardOutput()` | Every reference is resolved against the effective base URL; the resolved origin and pathname are checked before any fetch.                                                                           | Cases: `<base href="https://elsewhere.example/">` reported; `/assets/../index.html` reported; the valid index still passes.                                               |
+| 27  | fixed    | N11c                                   | `page.on("websocket")` armed before the navigation; no socket in the agent window; a control opens `/canvas/api/agent/sessions/control/editor` and must be caught.                                   | Annotations `N11c websockets {"attempted":[],"observed":[]}` and the control's one socket.                                                                                |
+| 28  | fixed    | the three validators, docs             | `port` refused with `host`, `socket`, `db`, `dbname` and `database`.                                                                                                                                 | Refusal cases in both check scripts and the config loop.                                                                                                                  |
