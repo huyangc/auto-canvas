@@ -1,5 +1,7 @@
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useRef, useState } from "react";
+import { useDialogDrag } from "../../components/dialog-drag";
 import type { CloudProjectSummary } from "./cloud-projects";
+import "./project-shelf.css";
 
 const ShelfWall = import.meta.env?.ICM_DESKTOP
   ? () => null
@@ -35,6 +37,8 @@ export function ProjectShelf({
     null,
   );
   const [error, setError] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLDialogElement | null>(null);
+  const onHeaderPointerDown = useDialogDrag(dialogRef);
   const rename = async () => {
     if (!editing || busy) return;
     const name = editing.name.trim();
@@ -59,18 +63,33 @@ export function ProjectShelf({
       {shelfOpen ? (
         <dialog
           className="cloud-shelf-dialog"
-          aria-label="Cloud Projects"
+          aria-labelledby="cloud-shelf-title"
           ref={(dialog) => {
+            dialogRef.current = dialog;
             if (dialog && !dialog.open) dialog.showModal();
           }}
           onCancel={() => setShelfOpen(false)}
         >
-          <button type="button" onClick={() => setShelfOpen(false)}>
-            Close
-          </button>
-          <Suspense fallback={<p>Loading Cloud Projects…</p>}>
-            <ShelfWall />
-          </Suspense>
+          <header
+            className="cloud-shelf-header"
+            onPointerDown={onHeaderPointerDown}
+          >
+            <h2 id="cloud-shelf-title">Cloud Projects</h2>
+            <button
+              type="button"
+              className="cloud-shelf-close"
+              aria-label="Close"
+              title="Close"
+              onClick={() => setShelfOpen(false)}
+            >
+              ×
+            </button>
+          </header>
+          <div className="cloud-shelf-body">
+            <Suspense fallback={<p>Loading Cloud Projects…</p>}>
+              <ShelfWall />
+            </Suspense>
+          </div>
         </dialog>
       ) : null}
       {projects.length ? (

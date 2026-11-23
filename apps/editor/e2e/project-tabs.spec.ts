@@ -1579,3 +1579,100 @@ for (const host of ["strip", "File"] as const)
     await expect(dialog).toBeHidden();
     await pickerOpen("dialog closed");
   });
+
+test("the Browse dialog tiles its cards evenly, closes from its × and drags by its header", async ({
+  page,
+}) => {
+  const projects = ["Alpha", "Beta"].map((name, index) => ({
+    id: `cloud-${name.toLowerCase()}`,
+    name,
+    revision: 1,
+    schemaVersion: createEmptyProject("p", name).schemaVersion,
+    updatedAt: `2026-11-2${2 - index}T08:00:00.000Z`,
+  }));
+  await page.route("**/api/projects", (route) =>
+    route.request().method() === "GET"
+      ? route.fulfill({ json: { projects } })
+      : route.fallback(),
+  );
+  // A preview of a fixed size settles the tiles before they are measured.
+  await page.route("**/api/projects/*/preview.svg*", (route) =>
+    route.fulfill({
+      contentType: "image/svg+xml",
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="200"><rect width="300" height="200" fill="#f3f3f1"/></svg>',
+    }),
+  );
+  await openEditor(page, "/editor?new=1");
+  const shelf = await projectTabAction(page, "Open Shelf project in tab");
+  await shelf.getByRole("button", { name: "Browse Cloud Projects…" }).click();
+  const dialog = page.getByRole("dialog", { name: "Cloud Projects" });
+  await expect(dialog).toBeVisible();
+
+  // Every card starts at the top of its own column. Without the masonry
+  // layout rules the second card keeps its flow place: one card lower, cut
+  // off by the window.
+  await expect
+    .poll(() =>
+      dialog
+        .locator(".shelf-tile-preview img")
+        .evaluateAll(
+          (images) =>
+            images.length === 2 &&
+            images.every(
+              (image) =>
+                image instanceof HTMLImageElement &&
+                image.complete &&
+                image.naturalWidth > 0,
+            ),
+        ),
+    )
+    .toBe(true);
+  const first = dialog.getByTestId("shelf-tile-cloud-alpha");
+  const second = dialog.getByTestId("shelf-tile-cloud-beta");
+  const firstBox = (await first.boundingBox())!;
+  const secondBox = (await second.boundingBox())!;
+  const dialogBox = (await dialog.boundingBox())!;
+  expect(Math.abs(secondBox.y - firstBox.y)).toBeLessThanOrEqual(1);
+  expect(secondBox.x).toBeGreaterThan(firstBox.x + firstBox.width);
+  expect(secondBox.x + secondBox.width).toBeLessThanOrEqual(
+    dialogBox.x + dialogBox.width + 1,
+  );
+  expect(secondBox.y + secondBox.height).toBeLessThanOrEqual(
+    dialogBox.y + dialogBox.height + 1,
+  );
+
+  // The header drags the window, and the close button keeps working after it.
+  const viewport = page.viewportSize()!;
+  const header = dialog.locator(".cloud-shelf-header");
+  // A point on the header clear of the title and the close button.
+  const grip = async () => {
+    const box = (await header.boundingBox())!;
+    return { x: box.x + box.width * 0.5, y: box.y + box.height / 2 };
+  };
+  const start = await grip();
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(start.x + 40, start.y + 30, { steps: 5 });
+  await page.mouse.up();
+  const dragged = (await dialog.boundingBox())!;
+  expect(Math.round(dragged.x - dialogBox.x)).toBe(40);
+  expect(Math.round(dragged.y - dialogBox.y)).toBe(30);
+
+  // Dragged far past the corner, the window stops 8px inside the viewport.
+  const again = await grip();
+  await page.mouse.move(again.x, again.y);
+  await page.mouse.down();
+  await page.mouse.move(viewport.width - 2, viewport.height - 2, { steps: 5 });
+  await page.mouse.up();
+  const clamped = (await dialog.boundingBox())!;
+  expect(clamped.x).toBeGreaterThan(dragged.x);
+  expect(
+    Math.abs(clamped.x + clamped.width - (viewport.width - 8)),
+  ).toBeLessThanOrEqual(1);
+  expect(
+    Math.abs(clamped.y + clamped.height - (viewport.height - 8)),
+  ).toBeLessThanOrEqual(1);
+
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(dialog).toBeHidden();
+});

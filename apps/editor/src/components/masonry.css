@@ -1,0 +1,15 @@
+/* The Masonry component writes each item's width, `transform: translate(x, y)`
+ * and the container's height straight to the DOM (masonry.tsx). Absolute
+ * positioning is what makes that placement take effect: in normal flow an
+ * item keeps its place in the document and the transform only shifts it, so
+ * the second card lands one column right and one card down, hanging off the
+ * bottom. */
+.masonry {
+  position: relative;
+}
+
+.masonry-item {
+  position: absolute;
+  top: 0;
+  left: 0;
+}

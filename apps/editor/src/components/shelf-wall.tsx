@@ -439,15 +439,6 @@ export function ShelfWall() {
                     </button>
                   </form>
                 ) : null}
-                <InlineConfirm
-                  className="shelf-tile-delete"
-                  data-testid={`shelf-delete-${project.id}`}
-                  aria-label={`Delete ${project.name} from your shelf`}
-                  disabled={busyId !== null}
-                  onConfirm={() => removeProject(project)}
-                >
-                  Delete
-                </InlineConfirm>
               </div>
             ),
           }))}
@@ -473,8 +464,9 @@ export function ShelfWall() {
           style={{ left: menu.x, top: menu.y }}
           onKeyDown={(event) => {
             const items = [
+              // Delete hides its trigger while its second step is open.
               ...event.currentTarget.querySelectorAll<HTMLElement>(
-                '[role="menuitem"]',
+                '[role="menuitem"]:not([hidden])',
               ),
             ];
             const index = items.indexOf(document.activeElement as HTMLElement);
@@ -548,6 +540,19 @@ export function ShelfWall() {
           >
             {menu.project.favorite ? "Remove favorite" : "Favorite"}
           </button>
+          <InlineConfirm
+            role="menuitem"
+            className="shelf-menu-delete"
+            data-testid={`shelf-delete-${menu.project.id}`}
+            aria-label={`Delete ${menu.project.name} from your shelf`}
+            disabled={busyId !== null}
+            onConfirm={async () => {
+              await removeProject(menu.project);
+              setMenu(null);
+            }}
+          >
+            Delete
+          </InlineConfirm>
         </div>
       ) : null}
     </section>
