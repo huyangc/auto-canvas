@@ -216,6 +216,9 @@ export class AgentSessionDO {
       );
     }
 
+    // Internal-only dispatch. The public relay router has no such resource.
+    if (request.method === "POST" && url.pathname === "/account-ended")
+      return this.endPairing(machine, allowedOrigin);
     if (request.method === "POST" && url.pathname === "/claim") {
       return this.claim(request, machine, allowedOrigin);
     }
@@ -569,14 +572,7 @@ export class AgentSessionDO {
         sessionId: machine.sessionId,
       });
     }
-    for (const pending of this.pendingForwards.values()) {
-      clearTimeout(pending.timeout);
-      pending.reject(new Error("SESSION_EXPIRED"));
-    }
-    this.pendingForwards.clear();
-    for (const subscriber of [...this.eventSubscribers.keys()]) {
-      this.removeEventSubscriber(subscriber, true);
-    }
+    this.endSubscribers("SESSION_EXPIRED");
     await this.clearStoredSession();
     this.machine = null;
   }
@@ -1465,12 +1461,35 @@ export class AgentSessionDO {
         allowedOrigin,
       );
     }
+    return this.endPairing(machine, allowedOrigin);
+  }
+
+  private endSubscribers(reason: string) {
+    for (const pending of this.pendingForwards.values()) {
+      clearTimeout(pending.timeout);
+      pending.reject(new Error(reason));
+    }
+    this.pendingForwards.clear();
+    for (const subscriber of [...this.eventSubscribers.keys()]) {
+      this.removeEventSubscriber(subscriber, true);
+    }
+  }
+
+  private async endPairing(
+    machine: AgentSessionMachine,
+    allowedOrigin: string | null,
+  ) {
     machine.revoke();
     this.emit({ type: "session.revoked", sessionId: machine.sessionId });
     this.notifyEditor({
       type: "session.revoked",
       sessionId: machine.sessionId,
     });
+    this.endSubscribers("SESSION_REVOKED");
+    for (const socket of this.state.getWebSockets?.(EDITOR_SOCKET_TAG) ?? []) {
+      if (socket.readyState === WebSocket.OPEN)
+        socket.close(1000, "Session revoked");
+    }
     await this.clearStoredSession();
     return new Response(null, {
       status: 204,

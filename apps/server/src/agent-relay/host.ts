@@ -8,6 +8,10 @@ import { WebSocketServer, type WebSocket as NodeWebSocket } from "ws";
 import { AgentSessionDO } from "./agent-session-do.js";
 import {
   EDITOR_PROTOCOL,
+  errorBody,
+  errorMessage,
+  jsonResponse,
+  transportStatus,
   routeAgentSessionRequest,
   type AgentSessionNamespaceLike,
   type AgentSessionEnv,
@@ -425,15 +429,84 @@ export class AgentRelayHost implements AgentSessionNamespaceLike {
     return object;
   }
 
-  async fetch(request: Request, accountEditor = false): Promise<Response> {
+  // Every private relay operation is dispatched by pairing id, including claim,
+  // connector resume and WebSocket upgrades. A revoked or expired web session
+  // loses all these authorities even if the editor never sent its cleanup.
+  private accountSessions(
+    allowedOrigin: string | null,
+    creatingFor?: Buffer,
+  ): AgentSessionNamespaceLike {
+    const revoked = () =>
+      jsonResponse(
+        errorBody("SESSION_REVOKED", errorMessage("SESSION_REVOKED")),
+        transportStatus("SESSION_REVOKED"),
+        allowedOrigin,
+      );
+    return {
+      getByName: (id) => ({
+        fetch: async (input, init) => {
+          if (creatingFor) {
+            // Register ownership before exposing the credentials. The FK and row
+            // lock serialize this with logout/rotation on the same cookie.
+            const link = await this.db.query(
+              "INSERT INTO account_agent_pairings(pairing_id,session_hash) SELECT $1,token_hash FROM standalone_sessions WHERE token_hash=$2 AND expires_at>now() FOR SHARE",
+              [id, creatingFor],
+            );
+            if (!link.rowCount) return revoked();
+          } else {
+            const live = await this.db.query(
+              "SELECT 1 FROM account_agent_pairings p JOIN standalone_sessions s ON s.token_hash=p.session_hash WHERE p.pairing_id=$1 AND s.expires_at>now()",
+              [id],
+            );
+            if (!live.rowCount) return revoked();
+          }
+          const result = await this.getByName(id).fetch(input, init);
+          if (creatingFor) {
+            const stillOwned = await this.db.query(
+              "SELECT 1 FROM account_agent_pairings WHERE pairing_id=$1",
+              [id],
+            );
+            if (!stillOwned.rowCount) {
+              await this.endAccountPairings([id]);
+              return revoked();
+            }
+            if (!result.ok)
+              await this.db.query(
+                "DELETE FROM account_agent_pairings WHERE pairing_id=$1",
+                [id],
+              );
+          }
+          return result;
+        },
+      }),
+    };
+  }
+
+  async endAccountPairings(ids: string[]) {
+    for (const id of ids)
+      await this.getByName(id).fetch(
+        "https://agent-session.internal/account-ended",
+        { method: "POST" },
+      );
+  }
+
+  async fetch(
+    request: Request,
+    account?: { editor: boolean; creatingFor?: Buffer },
+  ): Promise<Response> {
     const url = new URL(request.url);
     const editorOrigin =
-      accountEditor && request.headers.get("origin") === url.origin;
+      account?.editor && request.headers.get("origin") === url.origin;
     // Same-origin editors create pairings and authenticate with editor secrets.
     const allowedOrigin = editorOrigin ? url.origin : this.allowedOrigin;
     return (
       (await routeAgentSessionRequest(request, {
-        AGENT_SESSION: this,
+        AGENT_SESSION: account
+          ? this.accountSessions(
+              allowedOrigin ?? url.origin,
+              account.creatingFor,
+            )
+          : this,
         AUTO_CANVAS_BASE_PATH: this.basePath,
         ...(allowedOrigin ? { AGENT_ALLOWED_ORIGIN: allowedOrigin } : {}),
       })) ?? new Response("Not found", { status: 404 })
@@ -477,7 +550,10 @@ export class AgentRelayHost implements AgentSessionNamespaceLike {
             /^\/api\/agent\/sessions\/[^/]+\/editor$/u.test(
               url.pathname.slice(this.basePath.length),
             )
-              ? await this.fetch(new Request(url, { headers }), accountEditor)
+              ? await this.fetch(
+                  new Request(url, { headers }),
+                  accountEditor ? { editor: true } : undefined,
+                )
               : new Response("Not found", { status: 404 });
           if (!upgrade.upgraded) {
             const body = Buffer.from(await response.text());

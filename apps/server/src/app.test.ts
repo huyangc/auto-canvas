@@ -684,6 +684,79 @@ describe("standalone accounts", () => {
       await relay.close();
     }
   });
+  it("revokes only the ending web session's Agent credentials without browser cleanup", async () => {
+    const relay = new AgentRelayHost(db);
+    app = createApp({ db, auth: { mode: "accounts" }, agentRelay: relay });
+    const createPair = async (headers: Record<string, string>) => {
+      const created = await request(
+        "/api/agent/sessions",
+        "POST",
+        {
+          projectSessionId: "p:tab",
+          projectId: "p",
+          documentIds: ["doc"],
+          scopes: ["circuit.snapshot"],
+        },
+        headers,
+      );
+      expect(created.status).toBe(200);
+      const { session } = await created.json();
+      const claimed = await request("/api/agent/claims", "POST", {
+        claimCode: session.claimCode,
+      });
+      expect(claimed.status).toBe(200);
+      const claim = await claimed.json();
+      return { session, claim };
+    };
+    try {
+      const one = await boundCookie(await credentials("register", "A12345678"));
+      const two = await boundCookie(await credentials("login", "A12345678"));
+      const old = await createPair(one),
+        live = await createPair(two);
+      const status = (p: typeof old) =>
+        request(
+          "/api/agent/sessions/" + p.session.sessionId + "/status",
+          "GET",
+          undefined,
+          { Authorization: "Bearer " + p.claim.agentToken },
+        );
+      expect((await status(old)).status).toBe(200);
+      expect(
+        (await request("/api/auth/logout", "POST", undefined, one)).status,
+      ).toBe(200);
+      expect((await (await status(old)).json()).error.code).toBe(
+        "SESSION_REVOKED",
+      );
+      expect(
+        (
+          await (
+            await request("/api/agent/claims", "POST", {
+              claimCode: old.session.claimCode,
+            })
+          ).json()
+        ).error.code,
+      ).toBe("SESSION_REVOKED");
+      expect(
+        (
+          await (
+            await request("/api/agent/connectors/resume", "POST", {
+              sessionId: old.session.sessionId,
+              connectorToken: old.claim.connectorToken,
+            })
+          ).json()
+        ).error.code,
+      ).toBe("SESSION_REVOKED");
+      expect((await status(live)).status).toBe(200);
+      await db.query(
+        "UPDATE standalone_sessions SET expires_at=now()-interval '1 minute'",
+      );
+      expect((await (await status(live)).json()).error.code).toBe(
+        "SESSION_REVOKED",
+      );
+    } finally {
+      await relay.close();
+    }
+  });
   it("isolates failed guesses by network peer and username", async () => {
     app = createApp({ db, auth: { mode: "accounts" } });
     const attempt = (ip: string) =>

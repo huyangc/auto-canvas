@@ -132,7 +132,10 @@ export function mountAccountGate(
   window.addEventListener(
     "keydown",
     (event) => {
-      if (closing) event.stopImmediatePropagation();
+      if (closing || container.inert) {
+        if (!closing) event.preventDefault();
+        event.stopImmediatePropagation();
+      }
     },
     true,
   );

@@ -185,6 +185,7 @@ describe("startServer", () => {
       "002-component-library.sql",
       "003-agent-relay.sql",
       "004-standalone-accounts.sql",
+      "005-account-agent-pairings.sql",
     ]);
   });
 
