@@ -1,16 +1,12 @@
 import { describe, expect, it } from "vitest";
-import {
-  createEmptyDocument,
-  createEmptyProject,
-  createSimulationFolder,
-} from "@icm/model";
+import { createEmptyDocument, createEmptyProject } from "@icm/model";
+import { createSimulationFolder } from "../../model/src/simulation-folder.test-support.js";
 import type { SchematicDocument } from "@icm/model";
 import { importSpiceSources } from "@icm/spice";
 import { analyzeDesignNetlist } from "./extract.js";
 import { printDesignNetlist } from "./printers.js";
 import {
   createDesignNetlistExport,
-  designExtractsNetlist,
   unfinishedDrawingDiagnostics,
 } from "./export.js";
 import {
@@ -40,7 +36,6 @@ describe("complete external model export", () => {
         severity: "error",
       }),
     );
-    expect(designExtractsNetlist(project)).toBe(false);
   });
 
   // #1933: only a source the conversion refuses goes in as SPICE.
@@ -956,7 +951,7 @@ describe("netlist extractability", () => {
       }),
     ]);
     // Older drawings keep exporting exactly as they did.
-    expect(designExtractsNetlist(project)).toBe(true);
+    expect(createDesignNetlistExport(project).status).toBe("ready");
     // A model of the author's own raises nothing.
     expect(findings(oneTransistor({ body: true }))).toEqual([]);
   });
@@ -972,7 +967,7 @@ describe("netlist extractability", () => {
       "MISSING_REQUIRED_PARAMETER",
       "MISSING_REQUIRED_PARAMETER",
     ]);
-    expect(designExtractsNetlist(project)).toBe(false);
+    expect(createDesignNetlistExport(project).status).toBe("blocked");
     expect(
       errors.filter((item) => item.code === "MISSING_REQUIRED_PARAMETER"),
     ).toEqual(
@@ -1008,7 +1003,6 @@ describe("netlist extractability", () => {
     });
     document.nets[1]!.terminals.push({ instanceId: "GND1", pinName: "0" });
     expect(document.mosBulkDefaults).toBeUndefined();
-    expect(designExtractsNetlist(project)).toBe(true);
     const result = createDesignNetlistExport(project, { format: "spice" });
     expect(result.status).toBe("ready");
     if (result.status !== "ready") return;
@@ -1045,24 +1039,6 @@ describe("netlist extractability", () => {
     // which the Cell states as its own pin.
     expect(result.file.text).toMatch(/M1 \S+ \S+ VSS VSS /u);
     expect(unfinishedDrawingDiagnostics(result.diagnostics)).toEqual([]);
-    expect(designExtractsNetlist(project)).toBe(true);
-  });
-
-  it("answers no while connectivity is still missing", () => {
-    // A body on no Net is not a process choice: SPICE has no fourth node to
-    // write, and no export option supplies one.
-    expect(designExtractsNetlist(oneTransistor({ body: false }))).toBe(false);
-  });
-
-  it("gives the same answer as the export the editor performs", () => {
-    for (const body of [true, false]) {
-      const project = oneTransistor({ body });
-      const result = createDesignNetlistExport(project, { format: "spice" });
-      expect(designExtractsNetlist(project)).toBe(
-        result.status === "ready" &&
-          unfinishedDrawingDiagnostics(result.diagnostics).length === 0,
-      );
-    }
   });
 
   /** One resistor from the transistor's drain to wherever `tail` says. */
@@ -1112,7 +1088,6 @@ describe("netlist extractability", () => {
     const instance = project.documents[0]!.instances[0]!;
     delete (instance as { netlist?: unknown }).netlist;
 
-    expect(designExtractsNetlist(project)).toBe(false);
     const result = createDesignNetlistExport(project, { format: "spice" });
     expect(result.status).toBe("blocked");
     expect(
@@ -1143,14 +1118,12 @@ describe("netlist extractability", () => {
     ).toEqual([
       "Net net1 is a dead end: only R1.2 reaches it. Connect it, or mark that pin NoConnect",
     ]);
-    expect(designExtractsNetlist(project)).toBe(false);
   });
 
   it("takes an explicit NoConnect as the author's own answer", () => {
     const project = withStub({ noConnect: true });
     const result = createDesignNetlistExport(project, { format: "spice" });
     expect(unfinishedDrawingDiagnostics(result.diagnostics)).toEqual([]);
-    expect(designExtractsNetlist(project)).toBe(true);
   });
 
   it("leaves a node somebody named alone", () => {
@@ -1159,6 +1132,5 @@ describe("netlist extractability", () => {
     const project = withStub({ named: true });
     const result = createDesignNetlistExport(project, { format: "spice" });
     expect(unfinishedDrawingDiagnostics(result.diagnostics)).toEqual([]);
-    expect(designExtractsNetlist(project)).toBe(true);
   });
 });

@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  createSimulationFolder,
   createEmptyDocument,
   createEmptyProject,
   freezeSnapshot,
 } from "@icm/model";
+import { createSimulationFolder } from "../../../../packages/model/src/simulation-folder.test-support.js";
 import { parseProject, serializeProject } from "@icm/project-protocol";
 import { EditorDocumentController } from "./document-controller";
 import { createProjectSnapshotSerializer } from "./project-snapshot-serializer";

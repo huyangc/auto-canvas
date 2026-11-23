@@ -87,19 +87,12 @@ export type SimulationDeviceOperatingPointSpec = z.infer<
 export type SimulationMeasurementSpec = z.infer<
   typeof Schema.SimulationMeasurementSpecSchema
 >;
-export type SimulationRunPlanAxis = z.infer<
-  typeof Schema.SimulationRunPlanAxisSchema
->;
-export type SimulationVoltageProbeAnchor = z.infer<
-  typeof Schema.SimulationVoltageProbeAnchorSchema
->;
 export type SimulationVoltageProbe = z.infer<
   typeof Schema.SimulationVoltageProbeSchema
 >;
 export type SimulationStructuredInput = z.infer<
   typeof Schema.SimulationStructuredInputSchema
 >;
-export type SimulationRawFile = z.infer<typeof Schema.SimulationRawFileSchema>;
 export type SimulationRawDependency = z.infer<
   typeof Schema.SimulationRawDependencySchema
 >;

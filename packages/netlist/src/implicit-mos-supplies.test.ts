@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  createEmptyDocument,
-  createEmptyProject,
-  createSimulationFolder,
-} from "@icm/model";
+import { createEmptyDocument, createEmptyProject } from "@icm/model";
+import { createSimulationFolder } from "../../model/src/simulation-folder.test-support.js";
 import { createDesignNetlistExport } from "./export.js";
 import { compileNgspiceSourceSimulation } from "./simulation-source-ngspice.js";
 

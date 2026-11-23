@@ -88,11 +88,10 @@ function authoredDeclarations(
   }
   /** Literal model primitives inside a top-level master used by generated IR.
    * Reuses the same declaration/shadowing rules as occurrence resolution.
-   * Ordinary occurrence queries exclude conditional calls. Library queries can
-   * report potential paths whose alternatives all prove the same module; they
-   * never assert that a branch is active or guess unknown/ambiguous masters.
+   * Conditional calls are excluded: a branch is never assumed active, and an
+   * unknown or ambiguous master is never guessed.
    * This is source identity, not a promise that a module has qualified numbers. */
-  function primitiveModels(master: string, conditionalCandidates = false) {
+  function primitiveModels(master: string) {
     let visits = 0;
     function visit(
       parent: Definition,
@@ -128,33 +127,14 @@ function authoredDeclarations(
         }
         const result: ModelPrimitive[] = [];
         for (const [id, calls] of groups) {
-          const unconditional = calls.length === 1 && !calls[0]!.conditional;
-          if (
-            !unconditional &&
-            !(conditionalCandidates && calls.every((c) => c.conditional))
-          )
-            continue;
-          const alternatives = calls.map((call) =>
-            call.master
-              ? visit(
-                  definition,
-                  call.master,
-                  [...path, id],
-                  new Set([...ancestors, definition]),
-                )
-              : [],
-          );
-          // A potential primitive is not a claim that its branch is active.
-          // Every possible declaration at that path must prove the same module.
-          // Unknown/ambiguous alternatives contribute no proof, never a fallback.
-          const signature = (p: ModelPrimitive) =>
-            JSON.stringify([p.path, p.module]);
-          const signatures = alternatives
-            .slice(1)
-            .map((items) => new Set(items.map(signature)));
+          const call = calls[0]!;
+          if (calls.length !== 1 || call.conditional || !call.master) continue;
           result.push(
-            ...(alternatives[0] ?? []).filter((p) =>
-              signatures.every((s) => s.has(signature(p))),
+            ...visit(
+              definition,
+              call.master,
+              [...path, id],
+              new Set([...ancestors, definition]),
             ),
           );
         }
@@ -165,25 +145,6 @@ function authoredDeclarations(
     return visit(top, master, [], new Set());
   }
   return { make, top, globals, primitiveModels };
-}
-
-/** A source-only query of the same declaration table used by Canvas scopes. */
-export function authoredModelSymbols(
-  events: readonly AuthoredCircuitEvent[],
-  names: readonly string[],
-  syntax: { key(name: string): string; flatDefinitions?: boolean },
-) {
-  const { top, primitiveModels } = authoredDeclarations(events, syntax);
-  return [...new Set(names)]
-    .filter(
-      (name) =>
-        top.definitions.has(syntax.key(name)) ||
-        top.opaque.has(syntax.key(name)),
-    )
-    .map((name) => ({
-      name,
-      primitives: primitiveModels(name, true),
-    }));
 }
 
 /** One resolver owns enumeration and explicit resolution, including formal-port

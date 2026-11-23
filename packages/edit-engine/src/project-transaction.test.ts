@@ -1,11 +1,11 @@
 import {
   createRoutePath,
-  createSimulationFolder,
   flattenRichText,
   plainNameDocument,
   roleLabelFormat,
   semanticTextDocument,
 } from "@icm/model";
+import { createSimulationFolder } from "../../model/src/simulation-folder.test-support.js";
 import { describe, expect, it } from "vitest";
 
 import { createEmptyDocument, createEmptyProject } from "@icm/model";

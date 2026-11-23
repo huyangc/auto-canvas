@@ -455,8 +455,7 @@ never invents an identifier.
   globals, `NoConnect` and nodes with authored or imported names.
 - `createDesignNetlistExport` reports it without withholding output;
   `unfinishedDrawingDiagnostics` answers fitness: Check Report, panel and
-  copy/export refuse on a non-empty answer, and `designExtractsNetlist`
-  (Gallery mark) answers `false`.
+  copy/export refuse on a non-empty answer.
 - Export never omits a device or invents a model beyond the generic cards.
 
 ### Netlist panel and copy
@@ -469,7 +468,7 @@ never invents an identifier.
   dirty source is never overwritten (Reload); Copy waits for apply or discard.
 - While strict export is blocked the panel shows a read-only draft
   (`createDraftNetlistPreview`) with `?` for missing facts and a draft first
-  line; Copy, export and `designExtractsNetlist` never use it.
+  line; Copy and export never use it.
 - The copy/export projection drops the generated title and adds no comments;
   names print exactly as authored (`portCase` only on explicit Agent request);
   SPICE keeps an empty first title line; SCS starts with its language line.

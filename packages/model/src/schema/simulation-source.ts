@@ -24,7 +24,7 @@ export const SimulationCircuitBindingSchema = z.strictObject({
 });
 
 /** Unapplied editing buffer, never an electrical override or executable source. */
-export const SimulationSourceDraftSchema = z.strictObject({
+const SimulationSourceDraftSchema = z.strictObject({
   path: SimulationInputPathSchema,
   base: z.string(),
   text: z.string(),
@@ -229,7 +229,7 @@ const SimulationSourceVariableSchema = SimulationDesignVariableSchema.omit({
 }).extend({
   sourcePath: SimulationInputPathSchema,
 });
-export const SimulationSourceDeviceOperatingPointSchema =
+const SimulationSourceDeviceOperatingPointSchema =
   SimulationDeviceOperatingPointSpecSchema.extend({
     circuit: SimulationCircuitScopeSchema,
   });

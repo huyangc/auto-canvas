@@ -22,8 +22,6 @@ export interface SimulationLanguageHelp {
     repeat?: boolean;
   }[];
 }
-export const NGSPICE_LANGUAGE_REFERENCE =
-  "https://ngspice.sourceforge.io/docs/ngspice-46-manual.pdf";
 
 const analyses: SimulationLanguageHelp[] = [
   {
@@ -336,7 +334,7 @@ const taskHints: Record<string, [string, string, number]> = {
   write: ["Results", "保存 导出 采集 export capture", 40],
   meas: ["Results", "测量 measurement", 41],
 };
-export const simulationLanguageHelp: readonly SimulationLanguageHelp[] =
+const simulationLanguageHelp: readonly SimulationLanguageHelp[] =
   languageHelp.map((rule) => {
     const name = rule.name.replace(/^\./u, "");
     const task = taskHints[name];

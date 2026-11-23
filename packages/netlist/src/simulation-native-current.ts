@@ -123,7 +123,8 @@ export function nativeCurrentInstrumentation(
   };
 }
 
-export function nativeTerminalCurrent(
+/** The terminal-current rule `nativeTerminalSignals` reports through. */
+function nativeTerminalCurrent(
   device: NativeSimulationDevice,
   pinName: string,
 ):

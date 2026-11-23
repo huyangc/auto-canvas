@@ -1,4 +1,5 @@
-import { createEmptyProject, createSimulationFolder } from "@icm/model";
+import { createEmptyProject } from "@icm/model";
+import { createSimulationFolder } from "../../../../packages/model/src/simulation-folder.test-support.js";
 import { describe, expect, it, vi } from "vitest";
 
 import { EditorDocumentController } from "../document/document-controller";

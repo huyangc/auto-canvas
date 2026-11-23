@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { createEmptyProject, createSimulationFolder } from "@icm/model";
+import { createEmptyProject } from "@icm/model";
+import { createSimulationFolder } from "../../../../packages/model/src/simulation-folder.test-support.js";
 import { hierarchicalSymbolId } from "@icm/symbols";
 import { serializeProject, parseProject } from "@icm/project-protocol";
 import { renderToStaticMarkup } from "react-dom/server";

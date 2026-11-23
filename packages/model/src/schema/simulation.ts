@@ -79,7 +79,7 @@ export const SimulationProbeOccurrenceSchema = z.array(StableIdSchema).max(64);
  * authored probe for preparation to diagnose instead of making the Project
  * invalid or silently rebinding it.
  */
-export const SimulationVoltageProbeAnchorSchema = z.discriminatedUnion("kind", [
+const SimulationVoltageProbeAnchorSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("terminal"),
     instanceId: StableIdSchema,
@@ -325,7 +325,7 @@ export const SimulationDesignVariableSchema = z.strictObject({
   bindings: z.array(SimulationDesignVariableBindingSchema).max(256),
 });
 
-export const SimulationRunPlanAxisSchema = z.discriminatedUnion("kind", [
+const SimulationRunPlanAxisSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("corner"),
     values: z.array(z.string().min(1).max(64)).min(1).max(64),

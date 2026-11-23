@@ -5,7 +5,7 @@ import {
   type CircuitProject,
   type SchematicDocument,
 } from "@icm/model";
-import { createDesignNetlistExport, designExtractsNetlist } from "./export.js";
+import { createDesignNetlistExport } from "./export.js";
 import { analyzeDesignNetlist, SIMULATION_DECK_GROUND } from "./extract.js";
 
 function mos(
@@ -100,7 +100,6 @@ describe("a body that takes the conventional supply says so (#1302)", () => {
       }),
     ]);
     // Information gates nothing.
-    expect(designExtractsNetlist(project)).toBe(true);
   });
 
   it("names the NMOS bodies on ground, with the VDD added beside it", () => {

@@ -116,12 +116,6 @@ export const NATIVE_MOS_OP_PARAMETERS = [
   "vdsat",
 ] as const;
 
-export function nativeDeviceOpVectors(
-  device: NativeSimulationDevice,
-): string[] {
-  return nativeDeviceOpFields(device).map(({ vector }) => vector);
-}
-
 export function nativeDeviceOpFields(device: NativeSimulationDevice): Array<{
   parameter: (typeof NATIVE_MOS_OP_PARAMETERS)[number];
   vector: string;
@@ -148,59 +142,4 @@ export function nativeDeviceOpFields(device: NativeSimulationDevice): Array<{
     parameter,
     vector: `@${device.nativeDevice}[${parameter}]`,
   }));
-}
-
-export function nativeTerminalCurrent(
-  device: NativeSimulationDevice,
-  pinName: string,
-):
-  | { ok: true; vectors: string[]; directives: string[] }
-  | { ok: false; message: string } {
-  const reviewed = reviewedExternalBindingById(
-    device.card.reviewedExternalBindingId,
-  );
-  const pin =
-    reviewed?.terminals.find((t) => t.pinName === pinName)?.targetName ??
-    pinName;
-  const index = device.card.nodes.findIndex((node) => node.pinName === pin);
-  if (index < 0)
-    return {
-      ok: false,
-      message: `No mapped terminal ${device.reference}.${pinName}`,
-    };
-  if (!device.reference.includes(".")) {
-    if (device.card.deviceClass === "voltage-source" && index === 0)
-      return { ok: true, vectors: [`i(${device.reference})`], directives: [] };
-    // Native .probe owns its sense source and collection. No JSON instrumentation.
-    return {
-      ok: true,
-      vectors: [],
-      directives: [`.probe i(${device.reference},${index + 1})`],
-    };
-  }
-  if (device.polarity && device.nativeDevice && pinName.toLowerCase() === "d")
-    if (reviewed?.nativeMosModel === "psp103" && device.polarity === "pmos")
-      return {
-        ok: false,
-        message:
-          "PSP103 PMOS ide is polarity-normalized, not signed drain current. Use an explicit native branch-current probe in Code.",
-      };
-  if (device.polarity && device.nativeDevice && pinName.toLowerCase() === "d")
-    return {
-      ok: true,
-      vectors: nativeDeviceOpFields(device)
-        .filter((field) => field.parameter === "id")
-        .map((field) => field.vector),
-      directives: [],
-    };
-  if (
-    device.card.deviceClass === "voltage-source" &&
-    device.nativeDevice &&
-    index === 0
-  )
-    return { ok: true, vectors: [`i(${device.nativeDevice})`], directives: [] };
-  return {
-    ok: false,
-    message: `Native current acquisition is unavailable for ${device.reference}.${pinName}. Hierarchical terminals currently support model-native drain current and voltage-source branch current only; no hidden sense circuit is inserted.`,
-  };
 }

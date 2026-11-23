@@ -1,14 +1,13 @@
 import {
   createEmptyProject,
-  createSimulationFolder,
   readSimulationExperimentConfig,
   NativeSimulationExperimentConfigSchema,
 } from "@icm/model";
+import { createSimulationFolder } from "../../model/src/simulation-folder.test-support.js";
 import { describe, expect, it } from "vitest";
 import { compileSourceSimulation } from "./simulation-source-compile.js";
 import { nativeSourceCollection } from "./simulation-native-collection.js";
 import { inspectSimulationSourceGraph } from "./simulation-source-graph.js";
-import { migrateSimulationConfigToNative } from "./simulation-native-migration.js";
 
 function fixture(program: string) {
   const project = createEmptyProject("native", "Native");
@@ -23,47 +22,6 @@ function fixture(program: string) {
 }
 
 describe("native Code is the experiment authority", () => {
-  it("explicitly converts safe legacy metadata and retains unsupported intent without data loss", () => {
-    const { project, folder } = fixture("analysis result op");
-    const file = folder.input.files.find(
-      (f) => f.path === folder.input.configPath,
-    )!;
-    file.text = JSON.stringify({
-      version: 1,
-      environment: { profileId: "test" },
-      collection: { rawfile: null },
-    });
-    const original = JSON.stringify(folder);
-    const converted = migrateSimulationConfigToNative(project, folder);
-    expect(
-      converted.ok && readSimulationExperimentConfig(converted.folder),
-    ).toMatchObject({ ok: true, authority: "code" });
-    expect(JSON.stringify(folder)).toBe(original);
-    file.text = JSON.stringify({
-      version: 1,
-      environment: { profileId: "test" },
-      collection: { rawfile: "result.raw" },
-    });
-    const collectionBefore = structuredClone(folder);
-    expect(migrateSimulationConfigToNative(project, folder)).toMatchObject({
-      ok: false,
-      message: expect.stringContaining("single declared write path"),
-    });
-    expect(folder).toEqual(collectionBefore);
-    file.text = JSON.stringify({
-      version: 1,
-      environment: { profileId: "test" },
-      runPlan: {
-        mode: "sweep",
-        axes: [{ kind: "temperature", values: [0, 27] }],
-      },
-    });
-    const blocked = JSON.stringify(folder);
-    expect(migrateSimulationConfigToNative(project, folder)).toMatchObject({
-      ok: false,
-    });
-    expect(JSON.stringify(folder)).toBe(blocked);
-  });
   it("creates no electrical sidecar fields and rejects adding a second authority", () => {
     const { folder } = fixture("analysis result op");
     const config = JSON.parse(

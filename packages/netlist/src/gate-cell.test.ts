@@ -7,10 +7,10 @@ import { describe, expect, it } from "vitest";
 import {
   createEmptyDocument,
   createEmptyProject,
-  createSimulationFolder,
   type CircuitProject,
   type SchematicDocument,
 } from "@icm/model";
+import { createSimulationFolder } from "../../model/src/simulation-folder.test-support.js";
 
 import { createDesignNetlistExport } from "./export.js";
 import { compileNgspiceSourceSimulation } from "./simulation-source-ngspice.js";

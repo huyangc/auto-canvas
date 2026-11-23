@@ -15,7 +15,6 @@ const legacySetups = () =>
   ota.simulationSetups.map((s) => LegacyProjectSimulationSetupSchema.parse(s));
 import {
   generateCircuitSource,
-  planCircuitSourceEdit,
   type GeneratedCircuitSource,
 } from "./simulation-circuit-source.js";
 
@@ -47,7 +46,7 @@ function replace(
   return text;
 }
 describe("Circuit parameter source projection", () => {
-  it("prints and edits ngspice source parameters without passing through the native grammar", () => {
+  it("prints ngspice source parameters without passing through the native grammar", () => {
     const { project, source } = fixture();
     const generated = generateCircuitSource(
       project,
@@ -60,50 +59,30 @@ describe("Circuit parameter source projection", () => {
     const body = generated.source.sourceBodies!.find(
       (p) => p.instanceId === "VDD",
     )!;
-    const plan = planCircuitSourceEdit(
-      generated.source,
-      generated.source.text.slice(0, body.startOffset) +
-        " DC 1.8 AC 1 90" +
-        generated.source.text.slice(body.endOffset),
-    );
-    expect(plan.ok, JSON.stringify(plan)).toBe(true);
-    expect(plan.ok && plan.changes).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ parameter: "acMagnitude", value: "1" }),
-        expect.objectContaining({ parameter: "acPhase", value: "90" }),
-      ]),
-    );
+    // The VDD range is the parameter clause after the card's nodes.
+    const text = generated.source.text;
+    expect(text.slice(0, body.startOffset)).toMatch(/\nVDD vdd 0$/);
+    expect(text.slice(body.startOffset, body.endOffset)).toBe(" DC 1.8");
     expect(generated.source.text).not.toContain('type="dc"');
   });
-  it("adds, changes and removes AC/phase and waveforms while keeping source nodes locked", () => {
+  it("prints AC/phase and waveform parameters on a source", () => {
     const { project, source } = fixture();
     const body = source.sourceBodies!.find(
       (body) => body.instanceId === "VDD",
     )!;
-    const edit = (suffix: string) =>
-      planCircuitSourceEdit(
-        source,
-        source.text.slice(0, body.startOffset) +
-          suffix +
-          source.text.slice(body.endOffset),
-      );
-    const plan = edit(
-      ' dc=(BIAS) mag=1 phase=-90 type="sine" sinedc=0 ampl=1 freq=1k',
-    );
-    expect(plan.ok).toBe(true);
-    if (!plan.ok) return;
-    expect(plan.changes).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ parameter: "acMagnitude", value: "1" }),
-        expect.objectContaining({ parameter: "acPhase", value: "-90" }),
-        expect.objectContaining({ parameter: "waveform", value: "sin" }),
-      ]),
-    );
     const instance = project.documents
       .find((d) => d.id === body.documentId)!
       .instances.find((i) => i.id === body.instanceId)!;
-    plan.changes.forEach((change) => {
-      instance.netlist!.parameters[change.parameter] = change.value;
+    // The values the retired Circuit-source editor wrote for
+    // ' dc=(BIAS) mag=1 phase=-90 type="sine" sinedc=0 ampl=1 freq=1k'.
+    Object.assign(instance.netlist!.parameters, {
+      waveform: "sin",
+      dc: "{BIAS}",
+      acMagnitude: "1",
+      acPhase: "-90",
+      offset: "0",
+      amplitude: "1",
+      frequency: "1000",
     });
     const regenerated = generateCircuitSource(project, source.binding);
     expect(regenerated.ok).toBe(true);
@@ -111,33 +90,6 @@ describe("Circuit parameter source projection", () => {
     expect(regenerated.source.text).toContain(
       'type="sine" dc=(BIAS) mag=1 phase=-90 sinedc=0 ampl=1 freq=1000 delay=0 theta=0 tdphase=0',
     );
-    const nextBody = regenerated.source.sourceBodies!.find(
-      (b) => b.instanceId === "VDD",
-    )!;
-    const removed = planCircuitSourceEdit(
-      regenerated.source,
-      regenerated.source.text.slice(0, nextBody.startOffset) +
-        ' type="dc" dc=1.8' +
-        regenerated.source.text.slice(nextBody.endOffset),
-    );
-    expect(removed).toMatchObject({
-      ok: true,
-      changes: expect.arrayContaining([
-        expect.objectContaining({ parameter: "acMagnitude", unset: true }),
-        expect.objectContaining({ parameter: "acPhase", unset: true }),
-        expect.objectContaining({ parameter: "waveform", value: "dc" }),
-      ]),
-    });
-    expect(
-      planCircuitSourceEdit(
-        source,
-        source.text.replace("VDD (vdd 0)", "VDD (changed 0)"),
-      ),
-    ).toMatchObject({ ok: false, code: "SIMULATION_CIRCUIT_STRUCTURE_LOCKED" });
-    expect(edit(" dc=1.8 mag=")).toMatchObject({
-      ok: false,
-      code: "SIMULATION_PARAMETER_INVALID",
-    });
   });
   it("prints an unresolved model slot without crashing or assigning a model", () => {
     const { project, source } = fixture();
@@ -152,16 +104,6 @@ describe("Circuit parameter source projection", () => {
     if (!result.ok) return;
     expect(result.source.text).toContain("<model>");
     expect(result.warnings.some((d) => d.severity === "error")).toBe(true);
-    expect(planCircuitSourceEdit(result.source, result.source.text)).toEqual({
-      ok: true,
-      changes: [],
-    });
-    expect(
-      planCircuitSourceEdit(
-        result.source,
-        result.source.text.replace("<model>", "invented_model"),
-      ),
-    ).toMatchObject({ ok: false, code: "SIMULATION_CIRCUIT_STRUCTURE_LOCKED" });
     expect(
       analyzeDesignNetlist(project, {
         rootDocumentId: source.binding.documentId,
@@ -169,7 +111,7 @@ describe("Circuit parameter source projection", () => {
     ).toBeNull();
     expect(JSON.stringify(project)).toBe(before);
   });
-  it("keeps incomplete circuits editable without inventing defaults or relaxing export", () => {
+  it("prints incomplete circuits without inventing defaults or relaxing export", () => {
     const { project, source } = fixture();
     const width = source.parameters.find((p) => p.parameter === "w")!;
     const instance = project.documents
@@ -184,19 +126,6 @@ describe("Circuit parameter source projection", () => {
       (p) => p.instanceId === width.instanceId && p.parameter === "w",
     );
     expect(result.source.parameters[index]!.rawValue).toBe("<w>");
-    expect(planCircuitSourceEdit(result.source, result.source.text)).toEqual({
-      ok: true,
-      changes: [],
-    });
-    expect(
-      planCircuitSourceEdit(
-        result.source,
-        replace(result.source, [{ index, text: "20" }]),
-      ),
-    ).toMatchObject({
-      ok: true,
-      changes: [{ instanceId: width.instanceId, parameter: "w", value: "20u" }],
-    });
     expect(instance.netlist!.parameters.w).toBeUndefined();
     const capacitance = source.parameters.find((p) => p.parameter === "value")!;
     const capacitor = project.documents
@@ -229,31 +158,12 @@ describe("Circuit parameter source projection", () => {
       ).toBe(true);
     }
   });
-  it("locates persisted numeric parameters and maps reviewed micrometres back to canonical SI", () => {
+  it("locates persisted numeric parameters in reviewed micrometres without changing the Project", () => {
     const { project, source } = fixture();
-    expect(planCircuitSourceEdit(source, source.text)).toEqual({
-      ok: true,
-      changes: [],
-    });
     const index = source.parameters.findIndex(
       (p) => p.parameter === "w" && p.conversion === "sky130-micrometres",
     );
     expect(index).toBeGreaterThanOrEqual(0);
-    const plan = planCircuitSourceEdit(
-      source,
-      replace(source, [{ index, text: "25" }]),
-    );
-    expect(plan).toMatchObject({
-      ok: true,
-      changes: [
-        {
-          documentId: source.parameters[index]!.documentId,
-          instanceId: source.parameters[index]!.instanceId,
-          parameter: "w",
-          value: "25u",
-        },
-      ],
-    });
     expect(project).toEqual(
       CircuitProjectSchema.parse(currentFiveTransistorOtaCircuitSource()),
     );
@@ -262,80 +172,25 @@ describe("Circuit parameter source projection", () => {
         span.rawValue,
       );
   });
-  it("rejects a mixed parameter and topology paste atomically", () => {
-    const { source } = fixture();
-    const index = source.parameters.findIndex((p) => p.parameter === "w");
-    const changed = replace(source, [{ index, text: "25" }]).replace(
-      "subckt",
-      "subckt changed",
-    );
-    expect(planCircuitSourceEdit(source, changed)).toMatchObject({
-      ok: false,
-      code: "SIMULATION_CIRCUIT_STRUCTURE_LOCKED",
-    });
-    expect(
-      planCircuitSourceEdit(source, replace(source, [{ index, text: "-1" }])),
-    ).toMatchObject({ ok: false, code: "SIMULATION_PARAMETER_INVALID" });
-    expect(
-      planCircuitSourceEdit(source, replace(source, [{ index, text: "{W+}" }])),
-    ).toMatchObject({ ok: false, code: "SIMULATION_PARAMETER_INVALID" });
-    expect(
-      planCircuitSourceEdit(source, replace(source, [{ index, text: "25u" }])),
-    ).toMatchObject({ ok: false, code: "SIMULATION_PARAMETER_INVALID" });
-    expect(
-      planCircuitSourceEdit(
-        source,
-        replace(source, [{ index, text: "bad-value" }]) + "Rnew n1 0 1k\n",
-      ),
-    ).toMatchObject({ ok: false, code: "SIMULATION_CIRCUIT_STRUCTURE_LOCKED" });
-  });
-  it("accepts multiple numeric edits with shifting text offsets in one plan", () => {
-    const { source } = fixture();
-    const widths = source.parameters
-      .flatMap((p, index) =>
-        p.parameter === "w" ? [{ index, text: "123.5" }] : [],
-      )
-      .slice(0, 2);
-    const plan = planCircuitSourceEdit(source, replace(source, widths));
-    expect(plan.ok && plan.changes.length).toBe(2);
-  });
-  it("round-trips native parameter references through Canvas and reviewed PDK units", () => {
+  it("prints a native parameter reference stored in canonical SI as reviewed PDK units", () => {
     const { project, source } = fixture();
     const index = source.parameters.findIndex((p) => p.parameter === "w");
+    const span = source.parameters[index]!;
     const edited = replace(source, [{ index, text: "(WIDTH * 2)" }]);
-    const plan = planCircuitSourceEdit(source, edited);
-    expect(plan.ok).toBe(true);
-    if (!plan.ok) return;
-    expect(plan.changes[0]!.value).toBe("{(WIDTH * 2) * 1u}");
-    for (const change of plan.changes)
-      project.documents
-        .find((d) => d.id === change.documentId)!
-        .instances.find((i) => i.id === change.instanceId)!.netlist!.parameters[
-        change.parameter
-      ] = change.value;
+    // The value the retired Circuit-source editor stored for "(WIDTH * 2)".
+    project.documents
+      .find((d) => d.id === span.documentId)!
+      .instances.find((i) => i.id === span.instanceId)!.netlist!.parameters.w =
+      "{(WIDTH * 2) * 1u}";
     const regenerated = generateCircuitSource(project, source.binding);
     expect(regenerated.ok).toBe(true);
     if (!regenerated.ok) return;
     expect(regenerated.source.text).toBe(edited);
-    expect(planCircuitSourceEdit(regenerated.source, edited)).toEqual({
-      ok: true,
-      changes: [],
-    });
     const exported = analyzeDesignNetlist(project, {
       rootDocumentId: source.binding.documentId,
     });
     expect(exported.ir).not.toBeNull();
   });
-  it.each(["{W;quit}", "{W}\nRnew out 0 1"])(
-    "does not let an expression escape its Circuit slot: %s",
-    (text) => {
-      const { source } = fixture();
-      const index = source.parameters.findIndex((p) => p.parameter === "w");
-      expect(
-        planCircuitSourceEdit(source, replace(source, [{ index, text }])).ok,
-      ).toBe(false);
-    },
-  );
 });
 
 describe("a Cell whose source senses a pin's current", () => {

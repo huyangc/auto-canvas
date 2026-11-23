@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
-import { createSimulationFolder } from "@icm/model";
+import { createSimulationFolder } from "../../../../packages/model/src/simulation-folder.test-support.js";
 import { callTool, type ToolSessionState } from "../../../mcp-server/src/tools";
 import { compareExpectedNetlist } from "../../../mcp-server/src/netlist-comparison";
 import { createDefaultNetlistExportPreferences } from "../features/netlist-export/netlist-export-preferences";

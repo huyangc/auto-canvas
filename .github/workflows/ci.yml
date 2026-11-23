@@ -50,6 +50,7 @@ jobs:
       - run: pnpm components:check
       - run: pnpm typecheck
       - run: pnpm lint
+      - run: pnpm deadcode
       - run: pnpm build
       # vitest.config.ts excludes known inherited failures when CI is set.
       - run: pnpm test:local

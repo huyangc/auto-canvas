@@ -1,10 +1,5 @@
 import type { SimulationSourceInput } from "@icm/model";
-import {
-  authoredModelSymbols,
-  type ModelPrimitive,
-} from "./authored-circuit-scopes.js";
-import { inspectVacaskSourceGraph } from "./vacask-source.js";
-import { vacaskAuthoredCircuitEvents } from "./vacask-source-scopes.js";
+import { type ModelPrimitive } from "./authored-circuit-scopes.js";
 
 export interface NativeMasterSymbol {
   name: string;
@@ -24,23 +19,6 @@ export interface ResolvedNativeModelLibrarySymbols {
   mountPath: string;
   section?: string | undefined;
   masters: NativeMasterSymbol[];
-}
-
-/** Offline/runtime provisioning reads the actual library files. The same
- * scope table handles local shadows, ambiguous models and conditional calls. */
-export function inspectNativeModelLibrarySymbols(
-  input: SimulationSourceInput,
-  names: readonly string[],
-) {
-  const graph = inspectVacaskSourceGraph(input);
-  return {
-    masters: graph.diagnostics.some((d) => d.severity === "error")
-      ? []
-      : authoredModelSymbols(vacaskAuthoredCircuitEvents(graph), names, {
-          key: (name) => name,
-        }),
-    diagnostics: graph.diagnostics,
-  };
 }
 
 /** A summary without a matching declared content digest is not evidence. */

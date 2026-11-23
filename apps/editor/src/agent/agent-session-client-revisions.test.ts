@@ -3,9 +3,9 @@ import type { AgentSessionStatusResponse } from "@icm/agent-adapter";
 import {
   createEmptyDocument,
   createEmptyProject,
-  createSimulationFolder,
   type CircuitProject,
 } from "@icm/model";
+import { createSimulationFolder } from "../../../../packages/model/src/simulation-folder.test-support.js";
 import { AgentSessionError } from "../../../../packages/agent-client/src/errors";
 import {
   emptyAgentProject,

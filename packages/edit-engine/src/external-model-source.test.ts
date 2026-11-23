@@ -1,15 +1,10 @@
-import {
-  createEmptyProject,
-  createSimulationFolder,
-  createRoutePath,
-  routeEnd,
-} from "@icm/model";
+import { createEmptyProject, createRoutePath, routeEnd } from "@icm/model";
+import { createSimulationFolder } from "../../model/src/simulation-folder.test-support.js";
 import {
   createDesignNetlistExport,
   compileNgspiceSourceSimulation,
   compileSourceSimulation,
   generateCircuitSource,
-  planCircuitSourceEdit,
   planMappedProjectModelEdit,
 } from "@icm/netlist";
 import { describe, expect, it } from "vitest";
@@ -1318,12 +1313,21 @@ describe("Project-owned external model source", () => {
         expect(included.ok, JSON.stringify(included)).toBe(true);
         if (included.ok) {
           expect(included.source.text).toContain("unused_model");
-          const edit = planCircuitSourceEdit(
-            included.source,
-            included.source.text.replace("R1 A 0 1k", "R1 A 0 2k"),
-          );
-          expect(edit.ok, JSON.stringify(edit)).toBe(true);
-          if (edit.ok) expect(edit.modelUpdates?.[0]?.id).toBe("unused-source");
+          // The Code panel's shared-model edit, on the preview's own map.
+          const mapped = (source: typeof included.source) =>
+            planMappedProjectModelEdit(
+              source.text,
+              source.text.replace("R1 A 0 1k", "R1 A 0 2k"),
+              source.modelLocations ?? [],
+              source.modelSnapshots ?? [],
+            );
+          const edit = mapped(included.source);
+          expect(edit, JSON.stringify(edit)).toMatchObject({
+            matched: true,
+            ok: true,
+          });
+          if (edit.matched && edit.ok)
+            expect(edit.modelUpdates[0]?.id).toBe("unused-source");
           project.modelSources![0]!.draft = {
             entry: "model.spice",
             files: [{ path: "model.spice", text: ".subckt unfinished\n" }],
@@ -1337,12 +1341,9 @@ describe("Project-owned external model source", () => {
           );
           expect(withDraft.ok).toBe(true);
           if (withDraft.ok) {
-            const refused = planCircuitSourceEdit(
-              withDraft.source,
-              withDraft.source.text.replace("R1 A 0 1k", "R1 A 0 2k"),
-            );
-            expect(refused.ok).toBe(false);
-            if (!refused.ok)
+            const refused = mapped(withDraft.source);
+            expect(refused).toMatchObject({ matched: true, ok: false });
+            if (refused.matched && !refused.ok)
               expect(refused.message).toContain("saved model draft");
           }
         }

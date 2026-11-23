@@ -470,6 +470,19 @@ describe("native VACASK circuit projection", () => {
 });
 
 describe("project scalar semantics at the VACASK boundary", () => {
+  // Moved from vacask-values.test.ts: the SI values native scalars read as.
+  it.each([
+    "1000000",
+    "0.001",
+    "0.0000508",
+    "10000",
+    "1e-9",
+    "255",
+    "-10",
+    "-0.000001",
+  ])("prints canonical Project SI %s unchanged", (value) =>
+    expect(vacaskProjectValue(value)).toBe(value),
+  );
   it.each([
     ["1M", "0.001"],
     ["1meg", "1000000"],

@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { createEmptyProject, createSimulationFolder } from "@icm/model";
+import { createEmptyProject } from "@icm/model";
+import { createSimulationFolder } from "../../model/src/simulation-folder.test-support.js";
 
-import { createDesignNetlistExport, designExtractsNetlist } from "./export.js";
+import { createDesignNetlistExport } from "./export.js";
 import { analyzeDesignNetlist } from "./extract.js";
 import { compileNgspiceSourceSimulation } from "./simulation-source-ngspice.js";
 import { printVacaskWithLocations } from "./vacask-printer.js";
@@ -84,7 +85,6 @@ describe("the generic diode model (#1310)", () => {
       }),
     ]);
     // Information gates nothing: the Gallery still marks it a netlist.
-    expect(designExtractsNetlist(project)).toBe(true);
     // The name stays the author's: naming another model there replaces it.
     expect(
       result.locations.fields.find(
