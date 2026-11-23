@@ -11,7 +11,7 @@ import type { HttpBindings } from "@hono/node-server";
 import type { Context, Hono } from "hono";
 import { getCookie, setCookie } from "hono/cookie";
 import { bodyLimit } from "hono/body-limit";
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 import type { SessionUser } from "./identity.js";
 import { registerProjects } from "./projects.js";
 import { registerComponents } from "./components.js";
@@ -29,6 +29,30 @@ function sessionCookie(c: Context, base: string) {
 }
 const digest = (token: string) => createHash("sha256").update(token).digest();
 const dummySalt = randomBytes(16);
+
+// Called in a transaction. Locking session rows before reading their pairings
+// includes pairings admitted concurrently just before revocation.
+async function removeSessions(
+  conn: PoolClient,
+  presented: Buffer,
+  includeExpired = false,
+): Promise<string[]> {
+  const { rows } = await conn.query<{ token_hash: Buffer }>(
+    "SELECT token_hash FROM standalone_sessions WHERE token_hash=$1 OR ($2 AND expires_at<=now()) ORDER BY token_hash FOR UPDATE",
+    [presented, includeExpired],
+  );
+  if (!rows.length) return [];
+  const hashes = rows.map((row) => row.token_hash);
+  const pairings = await conn.query<{ pairing_id: string }>(
+    "SELECT pairing_id FROM account_agent_pairings WHERE session_hash=ANY($1::bytea[])",
+    [hashes],
+  );
+  await conn.query(
+    "DELETE FROM standalone_sessions WHERE token_hash=ANY($1::bytea[])",
+    [hashes],
+  );
+  return pairings.rows.map((row) => row.pairing_id);
+}
 
 export function registerAccounts(
   app: Hono,
@@ -87,7 +111,7 @@ export function registerAccounts(
       c.req.header("x-editor-secret") !== undefined &&
       /^\/api\/agent\/sessions\/[^/]+(?:\/(?:status|control))?$/u.test(path) &&
       !c.req.header("Authorization");
-    return relay.fetch(c.req.raw, editorSecretRoute);
+    return relay.fetch(c.req.raw, { editor: editorSecretRoute });
   });
   app.use("/api/*", async (c, next) => {
     c.header("Cache-Control", "private, no-store");
@@ -181,6 +205,7 @@ export function registerAccounts(
           userId = row.user_id;
         }
         const token = randomBytes(32).toString("hex");
+        let retired: string[];
         const conn = await db.connect();
         try {
           await conn.query("BEGIN");
@@ -202,9 +227,10 @@ export function registerAccounts(
               );
             }
           }
-          await conn.query(
-            "DELETE FROM standalone_sessions WHERE expires_at<=now() OR token_hash=$1",
-            [digest(getCookie(c, sessionCookie(c, base)) ?? "")],
+          retired = await removeSessions(
+            conn,
+            digest(getCookie(c, sessionCookie(c, base)) ?? ""),
+            true,
           );
           await conn.query(
             "INSERT INTO standalone_sessions(token_hash,user_id,expires_at) VALUES ($1,$2,now()+ interval '30 days')",
@@ -217,6 +243,7 @@ export function registerAccounts(
         } finally {
           conn.release();
         }
+        await relay.endAccountPairings(retired);
         issueCookie(c, token);
         return c.json({ ok: true }, action === "register" ? 201 : 200);
       } finally {
@@ -233,11 +260,29 @@ export function registerAccounts(
     c.set("sessionUser", user);
     await next();
   });
-  app.post("/api/agent/sessions", (c) => relay.fetch(c.req.raw, true));
+  app.post("/api/agent/sessions", (c) =>
+    relay.fetch(c.req.raw, {
+      editor: true,
+      creatingFor: digest(getCookie(c, sessionCookie(c, base))!),
+    }),
+  );
   app.post("/api/auth/logout", async (c) => {
-    await db.query("DELETE FROM standalone_sessions WHERE token_hash=$1", [
-      digest(getCookie(c, sessionCookie(c, base))!),
-    ]);
+    const conn = await db.connect();
+    let retired: string[];
+    try {
+      await conn.query("BEGIN");
+      retired = await removeSessions(
+        conn,
+        digest(getCookie(c, sessionCookie(c, base))!),
+      );
+      await conn.query("COMMIT");
+    } catch (error) {
+      await conn.query("ROLLBACK");
+      throw error;
+    } finally {
+      conn.release();
+    }
+    await relay.endAccountPairings(retired);
     // A later sign-in may already have replaced the shared cookie. Revoking
     // this request's token ends its session without clearing the newer one.
     return c.json({ ok: true });

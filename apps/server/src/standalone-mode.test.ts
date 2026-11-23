@@ -215,6 +215,8 @@ it("keeps the released migrations byte for byte", () => {
       ]),
   );
   expect(digests).toEqual({
+    "005-account-agent-pairings.sql":
+      "44cf790e1e0afbc719e6526d469b5991982b2ab1ccbc8ec0389c24352c66cea6",
     "004-standalone-accounts.sql":
       "1772531a59e884ef167dea319a24521942856f92521b3e2e45d90880f5b02737",
     "001-single-user.sql":
