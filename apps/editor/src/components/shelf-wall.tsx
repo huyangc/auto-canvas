@@ -70,8 +70,30 @@ function formatUpdatedAt(value: string): string {
   });
 }
 
+/** Below this width the wall shows one column, whatever the masonry math. */
+const SINGLE_COLUMN_QUERY = "(max-width: 700px)";
+
+function useSingleColumn(): boolean {
+  const [single, setSingle] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
+      window.matchMedia(SINGLE_COLUMN_QUERY).matches,
+  );
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const media = window.matchMedia(SINGLE_COLUMN_QUERY);
+    const update = () => setSingle(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+  return single;
+}
+
 export function ShelfWall() {
   const [state, setState] = useState<ShelfState>({ status: "loading" });
+  const singleColumn = useSingleColumn();
   const [history, setHistory] = useState<CloudProjectSummary | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(
@@ -332,6 +354,9 @@ export function ShelfWall() {
       </p>
       <Masonry
         aria-label="Circuits on your shelf"
+        // Wider than any container below the breakpoint, so the wall falls to
+        // one column there.
+        minColumnWidth={singleColumn ? 701 : 250}
         items={[...state.projects]
           .sort(
             (a, b) =>
@@ -551,8 +576,12 @@ export function ShelfWall() {
             aria-label={`Delete ${menu.project.name} from your shelf`}
             disabled={busyId !== null}
             onConfirm={async () => {
-              await removeProject(menu.project);
-              setMenu(null);
+              const target = menu.project;
+              await removeProject(target);
+              // Close only the menu that asked: another may have opened since.
+              setMenu((current) =>
+                current?.project.id === target.id ? null : current,
+              );
             }}
           >
             Delete

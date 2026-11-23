@@ -140,30 +140,34 @@ export function useDialogDrag(
   // A dialog unmounted mid-drag (Escape) takes its listeners with it.
   useEffect(() => () => stopDrag.current?.(), []);
 
-  // A pinned dialog keeps its place when the window resizes, so bring it back
-  // inside the viewport if the viewport shrank around it.
+  // A pinned dialog keeps its place. Bring it back inside the viewport when
+  // the window shrinks around it, and when its own content grows it (the wall
+  // arrives after the dialog was already dragged).
+  const reclamp = useCallback(() => {
+    const dialog = dialogRef.current;
+    if (
+      !dialog ||
+      dialog !== dragged.current ||
+      dialog.style.position !== "fixed"
+    )
+      return;
+    const baseRect = layoutRect(dialog, offset.current);
+    const next = clampDragOffset(
+      offset.current,
+      baseRect,
+      viewportSize(),
+      margin,
+    );
+    offset.current = next;
+    place(dialog, baseRect, next);
+  }, [dialogRef, margin]);
   useEffect(() => {
-    const reclamp = () => {
-      const dialog = dialogRef.current;
-      if (
-        !dialog ||
-        dialog !== dragged.current ||
-        dialog.style.position !== "fixed"
-      )
-        return;
-      const baseRect = layoutRect(dialog, offset.current);
-      const next = clampDragOffset(
-        offset.current,
-        baseRect,
-        viewportSize(),
-        margin,
-      );
-      offset.current = next;
-      place(dialog, baseRect, next);
-    };
     window.addEventListener("resize", reclamp);
     return () => window.removeEventListener("resize", reclamp);
-  }, [dialogRef, margin]);
+  }, [reclamp]);
+  /** Observes a pinned dialog so growth re-clamps it; replaced per drag. */
+  const resizeObserver = useRef<ResizeObserver | null>(null);
+  useEffect(() => () => resizeObserver.current?.disconnect(), []);
 
   return useCallback(
     (event: PointerEvent<HTMLElement>) => {
@@ -183,6 +187,13 @@ export function useDialogDrag(
       const header = event.currentTarget;
       const baseRect = layoutRect(dialog, offset.current);
       pin(dialog, baseRect);
+      // The dialog grows when the lazy wall arrives; keep it inside the
+      // viewport then too, not only on a window resize.
+      if (typeof ResizeObserver !== "undefined") {
+        resizeObserver.current?.disconnect();
+        resizeObserver.current = new ResizeObserver(reclamp);
+        resizeObserver.current.observe(dialog);
+      }
       const origin = offset.current;
       const startX = event.clientX;
       const startY = event.clientY;
@@ -227,6 +238,6 @@ export function useDialogDrag(
       dialog.classList.add("is-dragging");
       stopDrag.current = stop;
     },
-    [dialogRef, margin],
+    [dialogRef, margin, reclamp],
   );
 }

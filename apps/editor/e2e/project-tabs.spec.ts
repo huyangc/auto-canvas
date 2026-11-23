@@ -1692,6 +1692,19 @@ test("the Browse dialog tiles its cards evenly, closes from its × and drags by 
     Math.abs(clamped.y + clamped.height - (viewport.height - 8)),
   ).toBeLessThanOrEqual(1);
 
+  // A viewport that shrinks around the pinned dialog brings it back inside.
+  await page.setViewportSize({ width: 900, height: 520 });
+  await expect
+    .poll(async () => {
+      const box = await dialog.boundingBox();
+      if (!box) return false;
+      return (
+        box.x + box.width <= 900 - 8 + 1 && box.y + box.height <= 520 - 8 + 1
+      );
+    })
+    .toBe(true);
+  await page.setViewportSize(viewport);
+
   await dialog.getByRole("button", { name: "Close", exact: true }).click();
   await expect(dialog).toBeHidden();
 
@@ -1712,4 +1725,19 @@ test("the Browse dialog tiles its cards evenly, closes from its × and drags by 
   expect(Math.round(moved.y - reopened.y)).toBe(-10);
   await dialog.getByRole("button", { name: "Close", exact: true }).click();
   await expect(dialog).toBeHidden();
+
+  // At 700px and below the wall is one column, not two narrow ones.
+  await page.setViewportSize({ width: 700, height: 800 });
+  await shelf.getByRole("button", { name: "Browse Cloud Projects…" }).click();
+  await expect(dialog).toBeVisible();
+  await previewsSettled();
+  const narrowFirst = (await first.boundingBox())!;
+  const narrowSecond = (await second.boundingBox())!;
+  expect(Math.abs(narrowSecond.x - narrowFirst.x)).toBeLessThanOrEqual(1);
+  expect(narrowSecond.y).toBeGreaterThan(
+    narrowFirst.y + narrowFirst.height - 1,
+  );
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await page.setViewportSize(viewport);
 });
