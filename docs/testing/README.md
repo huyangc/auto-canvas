@@ -149,7 +149,20 @@ symlink on any path the build or launcher writes (`frontend/next-env.d.ts`,
 `frontend/tsconfig.json`, `frontend/.next`, `release-manifest.json`,
 `.local`), a dotenv file, or runtime state that must start fresh (`.local`,
 `release-manifest.json`, `frontend/.next`, `frontend/node_modules`). It
-re-checks the clone after every build and before the launch. `--stage S` runs
-these refusals, and the early-exit ownership wait, against throwaway
-repositories only. An interrupted run still prints the stage summary and
-exits 130.
+re-checks the clone, and that the private `frontend/node_modules` is still a
+real directory whose links stay inside it, after every build and before the
+launch. `--stage S` runs these refusals, and the early-exit ownership wait,
+against throwaway repositories only; it reads nothing from `--notebook`. An
+interrupted run still prints the stage summary and exits 130.
+
+The offline guard is a Node preload. It also survives npm: it is passed as
+npm's `node-options` and the script shell is pinned through the environment,
+which outranks any `.npmrc` of the revision. Every stage first proves this
+with throwaway npm packages (a project or nested `.npmrc` with `node-options`,
+a `.npmrc` `script-shell`, `npm exec`). The preload records each process that
+loads it, and stages T and A fail when the process that did the work (each
+`next build`, each `next start`, the A6 frontend) is not in that record, so a
+script that removes the guard by other means is a failure, not a silent pass.
+Long-running children are started under a small supervisor that leads their
+process group until shutdown, so a group is only ever signalled while it is
+provably this run's.

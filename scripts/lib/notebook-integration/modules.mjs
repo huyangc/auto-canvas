@@ -86,26 +86,40 @@ for (const name of fs.readdirSync(base)) {
 console.log(JSON.stringify({ loaded, failed }));
 `;
 
-/** Returns a list of problems; an empty list means the copy is usable. */
-function preflightModules(sandbox, modules) {
+/**
+ * The recheck of a private copy that a build or a server may have touched:
+ * every component from the sandbox root down is a real directory, and the
+ * copy has the shape the preflight required. Returns a list of problems.
+ */
+export function modulesInClone(sandbox, modules) {
+  try {
+    sandbox.assertInsideSandbox(modules);
+  } catch (error) {
+    return [`the private modules ${error.message}`];
+  }
+  return modulesShapeProblems(sandbox, modules);
+}
+
+/**
+ * The copy's shape: a real directory (lstat, never a symlink) whose real
+ * path is inside the sandbox root, and every symlink in it resolving inside
+ * the copy. Checked by the preflight, and again after every build and before
+ * the copy is used again (R6-3): a build that replaced the directory or
+ * linked it to a shared tree would otherwise go unnoticed.
+ */
+export function modulesShapeProblems(sandbox, modules) {
   const problems = [];
-  // The copy must be a real directory inside the sandbox: a copied symlink
-  // would make the stages run the modules it points at, in place.
   let root;
   try {
     if (!fs.lstatSync(modules).isDirectory())
-      return {
-        problems: [`the copy ${modules} is not a real directory`],
-      };
+      return [`the copy ${modules} is not a real directory`];
     root = fs.realpathSync(modules);
   } catch (error) {
-    return { problems: [`the copy ${modules}: ${error.message}`] };
+    return [`the copy ${modules}: ${error.message}`];
   }
   const within = path.relative(fs.realpathSync(sandbox.root), root);
   if (!within || within.startsWith("..") || path.isAbsolute(within))
-    return {
-      problems: [`the copy ${modules} resolves outside the sandbox: ${root}`],
-    };
+    return [`the copy ${modules} resolves outside the sandbox: ${root}`];
   for (const link of walk(modules)) {
     let target;
     try {
@@ -118,6 +132,14 @@ function preflightModules(sandbox, modules) {
     if (rel.startsWith("..") || path.isAbsolute(rel))
       problems.push(`symlink ${link} resolves outside the copy: ${target}`);
   }
+  return problems;
+}
+
+/** Returns a list of problems; an empty list means the copy is usable. */
+function preflightModules(sandbox, modules) {
+  // The copy must be a real directory inside the sandbox: a copied symlink
+  // would make the stages run the modules it points at, in place.
+  const problems = modulesShapeProblems(sandbox, modules);
   if (problems.length) return { problems };
   let version;
   try {

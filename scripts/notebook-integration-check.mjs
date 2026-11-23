@@ -113,8 +113,11 @@ try {
     offlineVerdict(sandbox, report);
   }
   // The scan compares against the marker inside the sandbox, which an
-  // interrupt has already removed.
-  if (interrupted)
+  // interrupt has already removed. Stage S reads nothing from the notebook,
+  // so it does not scan it (the directory need not even have modules).
+  if (options.stage === "S") {
+    // nothing to observe
+  } else if (interrupted)
     report.note("source-checkout observation skipped: interrupted");
   else observeSource(sandbox, report, notebook);
 } catch (error) {

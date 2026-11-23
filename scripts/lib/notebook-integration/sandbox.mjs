@@ -32,10 +32,19 @@ export async function waitFor(check, timeoutMs, intervalMs = 200) {
   }
 }
 
-// The preload: every Node child of the check loads it through NODE_OPTIONS.
+// The preload: every Node child of the check loads it through NODE_OPTIONS
+// (and, for npm lifecycle scripts, through npm_config_node_options, which
+// outranks any .npmrc of the revision under test). Its first act is the
+// positive marker: one JSON line per process that loaded it, so a step can
+// prove that the process doing the work was guarded instead of inferring it
+// from an empty offline log.
 const OFFLINE_GUARD = String.raw`"use strict";
 const net = require("net");
 const fs = require("fs");
+try {
+  if (process.env.NB_CHECK_GUARD_LOADED)
+    fs.appendFileSync(process.env.NB_CHECK_GUARD_LOADED, JSON.stringify({ pid: process.pid, ppid: process.ppid, argv: process.argv }) + "\n");
+} catch {}
 const original = net.Socket.prototype.connect;
 const LOOPBACK = new Set(["127.0.0.1", "::1"]);
 // The first argument is classified exactly as Node's net.js normalizeArgs and
@@ -87,6 +96,38 @@ net.Socket.prototype.connect = function guardedConnect(...args) {
 };
 `;
 
+// Every long-running child is started through this supervisor, which leads
+// the process group and stays alive in it until the sandbox releases it (it
+// ignores SIGTERM; only a release or SIGKILL ends it). The group id is the
+// supervisor's pid, and while the supervisor has not exited it is an unreaped
+// child of this script, so that number cannot belong to anyone else: the
+// group is signalled only while that holds. The command's own status, signal
+// or spawn error arrive over the IPC channel.
+const SUPERVISOR = String.raw`"use strict";
+const { spawn } = require("child_process");
+const send = (message) => { try { process.send(message); } catch {} };
+for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"]) process.on(signal, () => {});
+let child;
+// The command and its environment arrive in the first message, not on the
+// command line: a command line is readable by every local user (ps), and
+// the environment may hold a secret made for this run.
+process.on("message", (message) => {
+  if (message === "release") process.exit(0);
+  if (child || !message || !Array.isArray(message.spec)) return;
+  const [command, args, cwd, env] = message.spec;
+  try {
+    child = spawn(command, args, { cwd, env, stdio: "inherit" });
+  } catch (error) {
+    send({ error: error.message });
+    return;
+  }
+  child.once("spawn", () => send({ pid: child.pid }));
+  child.once("error", (error) => send({ error: error.message }));
+  child.once("exit", (status, signal) => send({ status, signal }));
+});
+process.on("disconnect", () => process.exit(0));
+`;
+
 function sameDirectory(a, b) {
   return a.dev === b.dev && a.ino === b.ino;
 }
@@ -128,8 +169,13 @@ export function createSandbox(notebook, { keep }) {
   const guardPath = path.join(root, "offline-guard.cjs");
   fs.writeFileSync(guardPath, OFFLINE_GUARD);
   const offlineLog = path.join(root, "offline.log");
+  const guardLoadedLog = path.join(root, "guard-loaded.log");
 
-  const groups = new Set();
+  // Owned groups: pgid -> the handle of the supervisor that leads it.
+  const groups = new Map();
+  // Every group signal this run sent (signal 0 probes excluded), for the
+  // self-check that a group which has exited is never signalled.
+  const signalsSent = [];
   const usedPorts = new Set();
   let counter = 0;
   let closing = false;
@@ -185,6 +231,7 @@ export function createSandbox(notebook, { keep }) {
   }
 
   function env(extra = {}) {
+    const nodeOptions = `--require ${guardPath} --dns-result-order=ipv4first`;
     const base = {
       PATH: process.env.PATH ?? "",
       HOME: home,
@@ -192,8 +239,20 @@ export function createSandbox(notebook, { keep }) {
       NEXT_TELEMETRY_DISABLED: "1",
       NEXT_IGNORE_INCORRECT_LOCKFILE: "1",
       PYTHONDONTWRITEBYTECODE: "1",
-      NODE_OPTIONS: `--require ${guardPath} --dns-result-order=ipv4first`,
+      NODE_OPTIONS: nodeOptions,
+      // npm replaces NODE_OPTIONS for lifecycle scripts with its node-options
+      // setting when one is configured, and a .npmrc of the revision (at the
+      // clone's root, in frontend/, or under a nested package) may configure
+      // it. Environment configuration outranks every .npmrc file, so the
+      // guarded value is also npm's node-options; and the script shell is
+      // pinned, so a revision's script-shell cannot run a wrapper that drops
+      // NODE_OPTIONS. What config cannot close (a script that clears
+      // NODE_OPTIONS itself, or passes --node-options on an inner npm command
+      // line) is caught by the positive marker each step checks.
+      npm_config_node_options: nodeOptions,
+      npm_config_script_shell: "/bin/sh",
       NB_CHECK_OFFLINE_LOG: offlineLog,
+      NB_CHECK_GUARD_LOADED: guardLoadedLog,
       npm_config_offline: "true",
       npm_config_update_notifier: "false",
       npm_config_cache: npmCache,
@@ -205,9 +264,40 @@ export function createSandbox(notebook, { keep }) {
     return { ...base, ...extra };
   }
 
+  /** The current end of the marker log; pass it to guardedSince later. */
+  function guardMark() {
+    try {
+      return fs.statSync(guardLoadedLog).size;
+    } catch {
+      return 0;
+    }
+  }
+
+  /** The processes that loaded the guard since `mark`: { pid, ppid, argv }. */
+  function guardedSince(mark, log = guardLoadedLog) {
+    let text;
+    try {
+      const buffer = fs.readFileSync(log);
+      text = buffer.subarray(mark).toString("utf8");
+    } catch {
+      return [];
+    }
+    const entries = [];
+    for (const line of text.split("\n")) {
+      if (!line) continue;
+      try {
+        entries.push(JSON.parse(line));
+      } catch {
+        // a torn line cannot prove anything
+      }
+    }
+    return entries;
+  }
+
   // macOS answers EPERM, not ESRCH, while a group holds only exited members
   // that their parent has not reaped yet. That is "not gone yet": keep waiting
-  // rather than treat it as an error, and never as proof of absence.
+  // rather than treat it as an error, and never as proof of absence. A probe
+  // (signal 0) affects no process, so it is safe on any group id.
   function groupAlive(pgid) {
     try {
       process.kill(-pgid, 0);
@@ -219,12 +309,36 @@ export function createSandbox(notebook, { keep }) {
     }
   }
 
+  /** Members of a group other than its supervisor (one ps call). */
+  function membersBesidesLeader(pgid) {
+    try {
+      const out = execFileSync("ps", ["-A", "-o", "pid=,pgid="], {
+        encoding: "utf8",
+        env: { PATH: process.env.PATH ?? "" },
+        stdio: ["ignore", "pipe", "ignore"],
+        maxBuffer: 16 * 1024 * 1024,
+      });
+      return out
+        .split("\n")
+        .map((line) => line.trim().split(/\s+/).map(Number))
+        .filter(([pid, group]) => group === pgid && pid !== pgid)
+        .map(([pid]) => pid);
+    } catch {
+      return undefined; // unknown: never read as "none left"
+    }
+  }
+
   /** Throws once disposal has begun, so a stage cannot go on to a new step. */
   function ensureOpen(name) {
     if (closing) throw new SandboxClosing(name);
   }
 
-  /** Spawn a process that leads its own group; stdout and stderr go to a log file. */
+  /**
+   * Spawn a command under a supervisor that leads its own group; stdout and
+   * stderr go to a log file. `handle.pgid` is the group, `handle.pid` the
+   * command's own pid once `handle.ready` resolves, `handle.done` resolves
+   * when the command has exited (`status`, `signal`, `error`).
+   */
   function start(command, args, { cwd, env: childEnv, name }) {
     ensureOpen(name);
     const logFile = path.join(
@@ -232,35 +346,68 @@ export function createSandbox(notebook, { keep }) {
       `${String(++counter).padStart(2, "0")}-${name}.log`,
     );
     const fd = fs.openSync(logFile, "w");
-    const child = spawn(command, args, {
+    const child = spawn(process.execPath, ["-e", SUPERVISOR], {
       cwd,
-      env: childEnv ?? env(),
+      env: { PATH: process.env.PATH ?? "" },
       detached: true,
-      stdio: ["ignore", fd, fd],
+      stdio: ["ignore", fd, fd, "ipc"],
     });
     fs.closeSync(fd);
-    const handle = { child, pgid: child.pid, logFile, exited: false };
-    if (child.pid !== undefined) groups.add(child.pid);
-    handle.done = new Promise((resolve) => {
-      child.once("error", (error) => {
-        handle.exited = true;
-        handle.error = error;
-        resolve();
-      });
-      child.once("exit", (status, signal) => {
-        handle.exited = true;
-        handle.status = status;
-        handle.signal = signal;
-        resolve();
+    const handle = {
+      child,
+      pgid: child.pid,
+      pid: undefined,
+      logFile,
+      exited: false,
+      leaderExited: child.pid === undefined,
+    };
+    if (child.pid !== undefined) groups.set(child.pid, handle);
+    let markReady;
+    handle.ready = new Promise((resolve) => (markReady = resolve));
+    let markDone;
+    handle.done = new Promise((resolve) => (markDone = resolve));
+    const finish = (fields) => {
+      if (handle.exited) return;
+      Object.assign(handle, fields, { exited: true });
+      markReady();
+      markDone();
+    };
+    child.on("message", (message) => {
+      if (message?.pid) {
+        handle.pid = message.pid;
+        markReady();
+      } else if (message?.error) finish({ error: new Error(message.error) });
+      else if (message && "status" in message)
+        finish({ status: message.status, signal: message.signal });
+    });
+    child.once("error", (error) => {
+      handle.leaderExited = true;
+      finish({ error });
+    });
+    // Synchronous: from here on the group id is no longer provably ours, so
+    // it is never signalled again; it is dropped as soon as it is empty.
+    child.once("exit", (status, signal) => {
+      handle.leaderExited = true;
+      if (handle.pgid !== undefined && !groupAlive(handle.pgid))
+        groups.delete(handle.pgid);
+      finish({
+        error: new Error(
+          `the supervisor exited (${signal ?? status}) before the command reported`,
+        ),
       });
     });
+    // The command line holds no part of the command's environment.
+    if (child.pid !== undefined)
+      child.send({ spec: [command, args, cwd, childEnv ?? env()] }, (error) => {
+        if (error) finish({ error });
+      });
     return handle;
   }
 
   // One shutdown per group id: a later caller awaits the shutdown in progress.
   const stopping = new Map();
 
-  /** Absent (ESRCH) retires the id at once, before anything else can signal it. */
+  /** Absent (ESRCH) retires the id at once. */
   function observeGone(pgid) {
     if (groupAlive(pgid)) return false;
     groups.delete(pgid);
@@ -268,34 +415,47 @@ export function createSandbox(notebook, { keep }) {
   }
 
   /**
-   * Stop an owned group: SIGTERM, SIGKILL after 5 s, then verify. A group
-   * still present after the final wait stays owned (the exit handler still
-   * knows it) and the result is false.
+   * Stop an owned group. While its supervisor is alive: SIGTERM to the group
+   * (the supervisor ignores it) if anything else is in it, SIGKILL after 5 s,
+   * then release the supervisor. Once the supervisor has exited the group is
+   * never signalled again, only probed until it is gone. A group still
+   * present after the final wait stays recorded and the result is false.
    */
   function stopGroup(pgid) {
     if (stopping.has(pgid)) return stopping.get(pgid);
-    if (!groups.has(pgid)) return Promise.resolve(true);
+    const handle = groups.get(pgid);
+    if (!handle) return Promise.resolve(true);
+    // The identity check: the supervisor (pid == pgid) has not exited, so
+    // the group is the one this run created.
     const signalGroup = (signal) => {
-      if (!groups.has(pgid)) return;
+      if (handle.leaderExited || !groups.has(pgid)) return;
+      signalsSent.push({ pgid, signal });
       try {
         process.kill(-pgid, signal);
       } catch (error) {
-        if (error.code === "ESRCH") {
-          groups.delete(pgid);
-          return;
-        }
-        // EPERM: nothing left in the group that can take a signal (see
-        // groupAlive); the wait below decides whether it is really gone.
-        if (error.code !== "EPERM") throw error;
+        // EPERM: nothing left that can take a signal (see groupAlive).
+        if (error.code !== "ESRCH" && error.code !== "EPERM") throw error;
       }
     };
+    const othersGone = () => membersBesidesLeader(pgid)?.length === 0;
     const shutdown = (async () => {
       try {
-        signalGroup("SIGTERM");
-        if (!(await waitFor(() => observeGone(pgid), 5000, 50))) {
-          signalGroup("SIGKILL");
-          await waitFor(() => observeGone(pgid), 5000, 50);
+        if (!handle.leaderExited) {
+          if (!othersGone()) {
+            signalGroup("SIGTERM");
+            if (!(await waitFor(othersGone, 5000, 100))) signalGroup("SIGKILL");
+          }
+          if (!handle.leaderExited) {
+            try {
+              handle.child.send("release");
+            } catch {
+              // channel already closed: the kill below ends it
+            }
+            if (!(await waitFor(() => handle.leaderExited, 5000, 50)))
+              signalGroup("SIGKILL");
+          }
         }
+        await waitFor(() => observeGone(pgid), 5000, 50);
         return !groups.has(pgid) || observeGone(pgid);
       } finally {
         stopping.delete(pgid);
@@ -311,22 +471,25 @@ export function createSandbox(notebook, { keep }) {
     { cwd, env: childEnv, name, timeoutMs = 900_000 },
   ) {
     const handle = start(command, args, { cwd, env: childEnv, name });
+    let timedOut = false;
     // The normal path below awaits the same shutdown if this one is running.
-    const timer = setTimeout(
-      () => void stopGroup(handle.pgid).catch(() => {}),
-      timeoutMs,
-    );
+    const timer = setTimeout(() => {
+      timedOut = true;
+      void stopGroup(handle.pgid).catch(() => {});
+    }, timeoutMs);
     await handle.done;
     clearTimeout(timer);
-    const gone =
-      handle.child.pid === undefined || (await stopGroup(handle.pgid));
+    const gone = handle.pgid === undefined || (await stopGroup(handle.pgid));
     const output = fs.readFileSync(handle.logFile, "utf8");
     return {
       status: handle.error ? -1 : (handle.status ?? -1),
       signal: handle.signal,
+      // The sandbox ended the command: its status says nothing about it.
+      timedOut,
       output: handle.error ? `${handle.error.message}\n${output}` : output,
       gone,
       pgid: handle.pgid,
+      pid: handle.pid,
     };
   }
 
@@ -413,8 +576,8 @@ export function createSandbox(notebook, { keep }) {
   function dispose() {
     closing = true;
     disposal ??= (async () => {
-      await Promise.all([...groups].map((pgid) => stopGroup(pgid)));
-      const left = [...groups];
+      await Promise.all([...groups.keys()].map((pgid) => stopGroup(pgid)));
+      const left = [...groups.keys()];
       if (!keep) removeRoot();
       return left;
     })();
@@ -422,7 +585,9 @@ export function createSandbox(notebook, { keep }) {
   }
 
   process.on("exit", () => {
-    for (const pgid of groups) {
+    // Only groups whose supervisor is still alive are provably this run's.
+    for (const [pgid, handle] of groups) {
+      if (handle.leaderExited) continue;
       try {
         process.kill(-pgid, "SIGKILL");
       } catch {
@@ -442,13 +607,17 @@ export function createSandbox(notebook, { keep }) {
     root,
     marker,
     offlineLog,
+    guardLoadedLog,
     env,
+    guardMark,
+    guardedSince,
     ensureOpen,
     assertInsideSandbox,
     start,
     run,
     stopGroup,
-    groupAlive,
+    ownsGroup: (pgid) => groups.has(pgid),
+    signalsSent: () => [...signalsSent],
     freePort,
     listenerPids,
     listenerIs,

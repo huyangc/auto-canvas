@@ -243,3 +243,130 @@ Unchanged across all runs, including the interrupt runs. I did not use ports 427
 - **Dotenv refusals:** these now also exit 2; they exited 1 before.
 - **Docs:** I updated the T160 section of `docs/testing/README.md` for the refusals, stage S and the interrupt behaviour.
 - **False-positive risk:** the walk refuses any symlink in the revision that resolves outside the clone. The candidate and the base commit pass it, but another revision with such a link would be refused.
+
+## Round 5 of implementation (review round 8: findings R6-1 to R6-5)
+
+(From the implementer subagent's hand-back; saved by the reviewer. A new subagent did this round.)
+
+Nothing is committed, stashed or pushed. I did not edit `review.md`, and nothing under `tasks/**` beyond it was touched.
+
+`git status --short`:
+
+```
+ M docs/testing/README.md
+ M scripts/lib/notebook-integration/modules.mjs
+ M scripts/lib/notebook-integration/sandbox.mjs
+ M scripts/lib/notebook-integration/self-check.mjs
+ M scripts/lib/notebook-integration/stage-a.mjs
+ M scripts/lib/notebook-integration/stage-t.mjs
+ M scripts/lib/notebook-integration/steps.mjs
+ M scripts/notebook-integration-check.mjs
+ M tasks/T160-notebook-integration-check/review.md   (the reviewer's file, already modified before I started)
+```
+
+My helper scripts are in the git-ignored `tmp/r8/` (`repro-r61.mjs`, `run-all.sh`, `refusals.sh`, `interrupt.sh`, `make-npmrc-repo.sh`, `e2e-npmrc.sh`, and mutated copies `mut1` to `mut4`).
+
+#### R6-1 (must-fix): npm drops the offline guard
+
+**Reproduced first** (`tmp/r8/repro-r61.mjs`, run on the round-7 code). Each throwaway package under the sandbox has a lifecycle script that connects to 192.0.2.1:49152 (TEST-NET-1, not routed), and in all three cases the guard was lost and the offline log stayed empty:
+
+- a project `.npmrc` with `node-options`: the script saw `NODE_OPTIONS=--dns-result-order=ipv4first`, the connection was attempted unguarded (timeout), offline log `null`;
+- the same `.npmrc` in a nested package run by an inner `npm` (the `frontend/.npmrc` case): same result;
+- `.npmrc` `script-shell=` pointing at a wrapper that unsets `NODE_OPTIONS`: `NODE_OPTIONS=undefined`, unguarded, log `null`.
+
+**Changes:**
+
+- **`sandbox.mjs` `env()`:** now also sets `npm_config_node_options` to the same guarded value and `npm_config_script_shell=/bin/sh`. I confirmed the mechanism in npm 11.19.0's source (`@npmcli/config/lib/set-envs.js`): npm sets `NODE_OPTIONS` from the effective `node-options` value, and environment settings outrank every `.npmrc` (project, nested, user, global).
+- **`sandbox.mjs` positive marker:** the preload's first act is to append `{pid, ppid, argv}` to `<root>/guard-loaded.log` (`NB_CHECK_GUARD_LOADED`). New helpers `guardMark()` and `guardedSince(mark)`.
+- **`steps.mjs` checks:** new `guardLoaded()` and `nextCommand()`. These are checked:
+  - in stage A after each `npm run build` (a2, a3, a5 twice, a6): the line `<build>: the offline guard was loaded in next build`;
+  - in stage T after each `next build`: the same check;
+  - in `startNext()`: the pid that owns the port must be in the marker, otherwise the step fails with "the offline guard was not loaded in next start";
+  - in A6: `A6 the offline guard was loaded in the frontend (pid N)`.
+
+  The checks look for the process doing the work, not just "any guarded process": npm itself always loads the guard, so a weaker check would pass even when the guard was lost.
+
+- **`steps.mjs` `offlineControl()`:** four npm lifecycle controls now run first in every stage: project `.npmrc` `node-options`, nested package `.npmrc` `node-options`, project `.npmrc` `script-shell`, and `npm exec --call` under a project `node-options`. Each must be refused, appear in the offline log, and leave the probe process in the marker.
+- **`self-check.mjs` (stage S) detection controls:** two routes that configuration cannot close must be caught by the marker check: a lifecycle script that runs `NODE_OPTIONS= node …`, and an inner `npm run … --node-options=…` (a command-line flag outranks the environment). Both are detected; the probe in these connects nowhere.
+
+**Proof that it fails without the fix:**
+
+- With the fix removed (`mut1`: the two env lines deleted), stage S gives "4 passed, 4 failed". All four npm controls fail with `exit 4, log [], probe in the guard marker: false`, i.e. the connection was attempted unguarded.
+- End to end on a real revision: a throwaway clone of the notebook repo, at the candidate commit 49cd77372 plus one commit adding `frontend/.npmrc` with `node-options` (deleted afterwards).
+  - With the fixed code, stage A exits 0 with 98 passed, 0 failed, and every "guard was loaded" line is ok.
+  - With the fix removed (`mut4`: env lines deleted, npm controls skipped), stage A exits 1 with 89 passed, 5 failed. The failures are all five builds: `FAIL a2-build: the offline guard was loaded in next build: … guarded since the step began: 21107 /opt/homebrew/bin/npm run build`, and the same for a3, a5, a5 and a6.
+  - In that unfixed run `ok no outbound connection attempted` still passed. That is exactly the defect: an empty log proved nothing.
+
+**Other npm routes I examined:**
+
+- `.npmrc` `node-options` at the root, in `frontend/`, in a nested package, or in the user or global config: closed by the environment setting (controls cover the project and nested cases).
+- `script-shell`: closed by pinning it in the environment (control covers it).
+- `npx` / `npm exec`: same configuration and shell, so closed the same way (control covers it).
+- `npm_config_*` precedence: the command line beats the environment, which beats project, user and global files. Only an inner npm given `--node-options` or `--script-shell` on its command line beats us; config cannot close that, so the marker check catches it (stage S control).
+- A script that clears `NODE_OPTIONS` itself, or a launcher that does: not an npm setting, caught by the marker (stage S control). This is not a sandbox against a hostile revision.
+- `userconfig` / `globalconfig` redirection by a project `.npmrc`: harmless, because the environment still outranks whichever files are loaded.
+- `ignore-scripts`: not a way to lose the guard (pre/post scripts get the same environment). Turning it on would skip the notebook's real `prebuild`, so I left it alone.
+- `node-gyp`: only used when installing native addons, which never happens here.
+- No npm setting picks a different Node binary.
+
+Known limit: the marker covers the main `next build`, `next start` and the A6 frontend. Build workers inherit `NODE_OPTIONS` but are not individually verified.
+
+#### R6-2: a fully exited group could be signalled after its number is reused
+
+- **Change, `sandbox.mjs` `start()` / `stopGroup()`:** every long-running child now starts under a small supervisor. It leads the process group, ignores SIGTERM, and stays alive until it is released. The command's own pid, exit status, signal or spawn error come back over IPC (`handle.ready`, `handle.pid`).
+- A group is signalled only while its supervisor has not exited, which means the number is still held by this script's own child. Once the supervisor exits, the group is never signalled again (only probed with signal 0) and is dropped as soon as it is empty. The exit handler follows the same rule.
+- Shutdown order: SIGTERM to the group if anything besides the supervisor is in it (checked with `ps`), SIGKILL after 5 s, then release the supervisor.
+- `startNext`, `stopServer`, A6 and stage S now use `handle.pid` instead of `child.pid`.
+- **Controls (stage S):** `S a group that has fully exited is sent nothing and dropped`, plus the positive case `S a live owned group is signalled and stopped`.
+- **Without the fix** (`mut2`: the identity check removed and an unconditional SIGTERM, as in round 7): `FAIL S a group that has fully exited…: signals [{"pgid":8182,"signal":"SIGTERM"}]`.
+- **Interrupts still clean up:** SIGINT during A6, after the services were in the owned group, gives exit 130, the temporary root is gone, and no process mentions it. Interrupts during stage T exited 130 the same way in two runs.
+
+#### R6-3: `frontend/node_modules` not rechecked after builds
+
+- **Change:** `modules.mjs` has new `modulesShapeProblems()` (the preflight's rule, now shared with the preflight) and `modulesInClone()`, which adds `assertInsideSandbox`.
+- In stage A, `refuseUnsafeClone(..., { modules: true })` runs before and after every build and before the A6 launch; a problem exits 2. In stage T, the shape is checked after each build (`T(x) the private modules are unchanged in shape after the build`).
+- **Controls (stage S):** node_modules replaced by a link to a shared tree → refused; a package linked out of the copy → refused; internal links only → accepted.
+- **Without the fix** (`mut3`, the function made to return `[]`): both refusal controls fail with `problems []`.
+
+#### R6-4: A5 counted a timed-out build as a rejection
+
+- **Change:** `run()` now returns `timedOut`, and `steps.mjs` has a new `abnormalEnd()`. In A5, a timeout, a signal or a missing status is its own failure, and only a build that ended by itself with a non-zero status counts as a rejection.
+- **Control (stage S):** `S a build stopped at its timeout is not counted as a rejection`. It runs a script that prints `CANVAS_PROXY_TARGET` and hangs, with a 3 s timeout.
+- **Without the fix** (`mut3`): `FAIL … timedOut true, status -1, signal SIGTERM, reason ""`. The old A5 rule (`status !== 0` and the variable in the output) would have accepted exactly this result.
+
+#### R6-5: stage S failed without `frontend/node_modules`
+
+- **Change:** in `notebook-integration-check.mjs` the source-checkout scan now runs for stages T and A only.
+- **Shown:** `--stage S --notebook <an empty directory>` exits 0 with 31 passed.
+
+After an interrupt, the new post-build checks are skipped (`ensureOpen` right after each build), so they do not add misleading failures.
+
+#### Acceptance commands
+
+| Command                                                       | Exit   | Decisive line                                                                                                |
+| ------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------ |
+| stage S                                                       | 0      | `stage S: 31 passed, 0 failed`                                                                               |
+| stage T                                                       | 0      | `stage T: 132 passed, 0 failed` (was 122)                                                                    |
+| stage A, candidate                                            | 0      | `stage A: 98 passed, 0 failed` (was 88)                                                                      |
+| stage A, negative control                                     | 1      | `stage A: 89 passed, 9 failed`                                                                               |
+| `--stage X`                                                   | 2      | `--stage must be T, A or S` plus usage                                                                       |
+| `pnpm typecheck`, `lint`, `format:check`, `docs:check`        | 0 each | —                                                                                                            |
+| the three `TMPDIR` refusals (run as `tmp/t160-rerun.sh` does) | 2 each | `…/silicon-notebook/frontend is inside the notebook checkout`; 0 `nb-check-*` directories under the checkout |
+
+- **Negative control failures:** exactly the earlier ones, A3 (1), A4 (6), A5 (2), and nothing new.
+- **Why the counts grew:**
+  - T gains 10: 4 npm controls, plus 3 builds × (guard check + modules shape check).
+  - A gains 10: 4 npm controls, 5 build guard checks, and 1 A6 frontend guard check. The negative control gains the same 10.
+  - S now has 31 checks. The new ones are the 4 npm controls, live group, exited group, 2 detection cases, 3 modules cases and the timeout case.
+- The final full set ran once, after all edits, with no timeouts or reruns. The lint warnings in the log are in `apps/`, not in these files.
+
+#### Your listener PIDs
+
+Before and after all my runs: 3000 → 41839, 8000 → 41838, 4310 → 85736, unchanged. No `nb-check-*` directory is left in the temp directory, and no process mentions one.
+
+#### Not done or not verified
+
+- `pnpm deadcode` was not run (it was not in this round's list).
+- The developer checkout was only read, never written: one `git show` of `frontend/package.json` at 49cd77372, one `git clone` of the repository, and one copy of `frontend/node_modules` for the throwaway end-to-end repository, now deleted.
+- I did not diff the notebook checkout's `git status` before and after (it was not asked for this round).
+- The guard marker does not individually verify Next's build worker processes.

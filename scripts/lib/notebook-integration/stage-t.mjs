@@ -2,9 +2,11 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { prepareModules } from "./modules.mjs";
+import { modulesInClone, prepareModules } from "./modules.mjs";
 import {
   checkStopped,
+  guardLoaded,
+  nextCommand,
   ownershipHeld,
   startNext,
   stopServer,
@@ -80,16 +82,34 @@ export async function stageT({ sandbox, report, notebook }) {
     let server;
     try {
       fs.rmSync(path.join(app, ".next"), { recursive: true, force: true });
+      const mark = sandbox.guardMark();
       const build = await sandbox.run(
         process.execPath,
         [path.join(modules, "next/dist/bin/next"), "build"],
         { cwd: app, env, name: "t-build" },
       );
       checkStopped(report, `${prefix}next build`, build.pgid, build.gone);
+      // After an interrupt the sandbox is gone: nothing below means anything.
+      sandbox.ensureOpen(`${prefix}checks after next build`);
+      guardLoaded(
+        sandbox,
+        report,
+        `${prefix}the offline guard was loaded in next build`,
+        mark,
+        nextCommand("build"),
+      );
+      // R6-3: the build may not replace or relink the private modules.
+      const shape = modulesInClone(sandbox, modules);
+      report.check(
+        `${prefix}the private modules are unchanged in shape after the build`,
+        shape.length === 0,
+        () => shape.slice(0, 10).join("; "),
+      );
       if (
         !report.check(`${prefix}next build`, build.status === 0, () =>
           tail(build.output),
-        )
+        ) ||
+        shape.length
       )
         continue;
       const nextPort = await sandbox.freePort();

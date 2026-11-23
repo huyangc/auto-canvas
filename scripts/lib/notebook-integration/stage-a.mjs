@@ -3,11 +3,14 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-import { prepareModules } from "./modules.mjs";
+import { modulesInClone, prepareModules } from "./modules.mjs";
 import { cloneTreeProblems } from "./clone-safety.mjs";
 import {
+  abnormalEnd,
   awaitOwnership,
   checkStopped,
+  guardLoaded,
+  nextCommand,
   ownershipHeld,
   startNext,
   stopServer,
@@ -125,7 +128,7 @@ async function stageABody({ sandbox, report, notebook, options }) {
     path.join(frontend, ".next"),
     path.join(frontend, "node_modules"),
   ];
-  const cloneProblems = (paths, phase) => {
+  const cloneProblems = (paths, phase, { modules = false } = {}) => {
     const problems = [];
     for (const target of paths) {
       try {
@@ -145,13 +148,19 @@ async function stageABody({ sandbox, report, notebook, options }) {
     if (dotenv.length)
       problems.push(`dotenv file(s) in the clone: ${dotenv.join(", ")}`);
     if (phase) problems.push(...cloneTreeProblems(nb, phase));
+    // R6-3: the walk skips frontend/node_modules, so the copied modules are
+    // rechecked on their own around every build and before the launch.
+    if (modules)
+      problems.push(
+        ...modulesInClone(sandbox, path.join(frontend, "node_modules")),
+      );
     return problems;
   };
   // A refusal names the offending paths relative to the clone, happens before
   // the next process starts and ends the run with exit status 2.
-  const refuseUnsafeClone = (name, paths, phase) => {
+  const refuseUnsafeClone = (name, paths, phase, extra) => {
     sandbox.ensureOpen(name);
-    const problems = cloneProblems(paths, phase);
+    const problems = cloneProblems(paths, phase, extra);
     if (problems.length) {
       report.fail(name, `${problems.join("; ")} (nothing built or launched)`);
       throw new Refused();
@@ -234,18 +243,32 @@ async function stageABody({ sandbox, report, notebook, options }) {
       `${name}: the clone is safe to build in`,
       [frontend],
       "built",
+      { modules: true },
     );
+    const mark = sandbox.guardMark();
     const result = await sandbox.run("npm", ["run", "build"], {
       cwd: frontend,
       env: sandbox.env(extra),
       name,
     });
     checkStopped(report, `${name}`, result.pgid, result.gone);
-    // The generated files the build wrote must still be what they should be.
+    // After an interrupt the sandbox is gone: nothing below means anything.
+    sandbox.ensureOpen(`${name}: checks after the build`);
+    // R6-1: the process that did the build must have loaded the guard.
+    guardLoaded(
+      sandbox,
+      report,
+      `${name}: the offline guard was loaded in next build`,
+      mark,
+      nextCommand("build"),
+    );
+    // The generated files the build wrote must still be what they should be,
+    // and the modules must still be the private copy.
     refuseUnsafeClone(
       `${name}: the build left regular files inside the clone`,
       [frontend],
       "built",
+      { modules: true },
     );
     return result;
   };
@@ -382,14 +405,19 @@ async function stageABody({ sandbox, report, notebook, options }) {
     await stub.close();
   }
 
-  // A5: invalid values fail the build with the right diagnostic.
+  // A5: invalid values fail the build with the right diagnostic. Only a
+  // build that ended by itself with a non-zero status counts as a rejection.
   for (const value of ["http://[::1]:4310", "http://example.com"]) {
     const result = await build({ CANVAS_PROXY_TARGET: value }, "a5-build");
-    report.check(
-      `A5 CANVAS_PROXY_TARGET=${value} fails the build and names the variable`,
-      result.status !== 0 && result.output.includes("CANVAS_PROXY_TARGET"),
-      `exit ${result.status}\n${tail(result.output, 8)}`,
-    );
+    const name = `A5 CANVAS_PROXY_TARGET=${value} fails the build and names the variable`;
+    const abnormal = abnormalEnd(result);
+    if (abnormal) report.fail(name, `${abnormal}\n${tail(result.output, 8)}`);
+    else
+      report.check(
+        name,
+        result.status !== 0 && result.output.includes("CANVAS_PROXY_TARGET"),
+        `exit ${result.status}\n${tail(result.output, 8)}`,
+      );
   }
 
   await stageA6({
@@ -458,9 +486,11 @@ async function stageA6({
     "A6 <clone>/.local is safe before the launch",
     [nb, frontend, local],
     "launch",
+    { modules: true },
   );
   report.ok("A6 <clone>/.local is a real directory and no dotenv file exists");
 
+  const launchMark = sandbox.guardMark();
   const launcher = sandbox.start("npm", ["run", "start"], {
     cwd: nb,
     name: "a6-launcher",
@@ -644,6 +674,15 @@ async function stageA6({
         `backend ${sandbox.listenerAddresses(apiPort).join(", ")}`,
     );
     report.ok("A6 /api/ready reports ready through the frontend");
+    // R6-1: the frontend that answered (the pid owning the port) must have
+    // loaded the guard, whatever npm or the launcher did to NODE_OPTIONS.
+    guardLoaded(
+      sandbox,
+      report,
+      `A6 the offline guard was loaded in the frontend (pid ${frontendPid})`,
+      launchMark,
+      (entry) => entry.pid === frontendPid,
+    );
 
     const home = await rawRequest(webPort, "/");
     report.check(

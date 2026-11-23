@@ -56,19 +56,156 @@ export async function offlineControl(sandbox, report) {
     });
     const name = `offline guard active (${mechanism})`;
     const stopped = checkStopped(report, name, result.pgid, result.gone);
-    const lines = fs.existsSync(log)
-      ? fs.readFileSync(log, "utf8").trim().split("\n")
-      : [];
-    const logged =
-      lines.length > 0 && lines.every((line) => line === "192.0.2.1 49152");
     const ok = report.check(
       name,
-      result.status === 0 && logged,
-      `exit ${result.status}, log ${JSON.stringify(lines)}\n${tail(result.output, 5)}`,
+      result.status === 0 && refusedOnly(log),
+      () =>
+        `exit ${result.status}, log ${JSON.stringify(readLines(log))}\n${tail(result.output, 5)}`,
     );
     allOk = allOk && ok && stopped;
   }
+  for (const control of NPM_CONTROLS) {
+    const ok = await npmLifecycleControl(sandbox, report, control);
+    allOk = allOk && ok;
+  }
   return allOk;
+}
+
+const readLines = (log) =>
+  fs.existsSync(log) ? fs.readFileSync(log, "utf8").trim().split("\n") : [];
+
+/** The log holds the probe's refused connection and nothing else. */
+const refusedOnly = (log) => {
+  const lines = readLines(log);
+  return lines.length > 0 && lines.every((line) => line === "192.0.2.1 49152");
+};
+
+// The probe a lifecycle script runs: a direct connection to TEST-NET-1
+// (192.0.2.1, never routed), exit 0 only for the guard's own refusal.
+const LIFECYCLE_PROBE =
+  REFUSED +
+  'const s=new (require("net").Socket)();s.setTimeout(3000,()=>s.destroy(new Error("timeout")));' +
+  's.on("error",refused);s.on("connect",()=>process.exit(3));s.connect(49152,"192.0.2.1");\n';
+
+const packageJson = (scripts) =>
+  `${JSON.stringify({ name: "nb-check-control", private: true, scripts })}\n`;
+
+/**
+ * The ways a revision's npm configuration could take the preload away from a
+ * lifecycle script, each as a throwaway package (R6-1): a project .npmrc
+ * node-options (npm sets NODE_OPTIONS from it), the same in a nested package
+ * run by an inner npm (like frontend/.npmrc under the root's scripts), a
+ * project .npmrc script-shell pointing at a wrapper that drops NODE_OPTIONS,
+ * and npm exec (npx) under a project node-options.
+ */
+const NPM_CONTROLS = [
+  {
+    name: "npm run, project .npmrc node-options",
+    files: {
+      "package.json": packageJson({ probe: "node probe.cjs" }),
+      ".npmrc": "node-options=--dns-result-order=ipv4first\n",
+      "probe.cjs": LIFECYCLE_PROBE,
+    },
+    args: ["run", "--silent", "probe"],
+  },
+  {
+    name: "npm run, nested package .npmrc node-options",
+    files: {
+      "package.json": packageJson({
+        probe: "cd sub && npm run --silent probe",
+      }),
+      "sub/package.json": packageJson({ probe: "node probe.cjs" }),
+      "sub/.npmrc": "node-options=--dns-result-order=ipv4first\n",
+      "sub/probe.cjs": LIFECYCLE_PROBE,
+    },
+    args: ["run", "--silent", "probe"],
+  },
+  {
+    name: "npm run, project .npmrc script-shell",
+    files: {
+      "package.json": packageJson({ probe: "node probe.cjs" }),
+      ".npmrc": "script-shell=./drop-node-options.sh\n",
+      "drop-node-options.sh":
+        '#!/bin/sh\nunset NODE_OPTIONS\nexec /bin/sh "$@"\n',
+      "probe.cjs": LIFECYCLE_PROBE,
+    },
+    args: ["run", "--silent", "probe"],
+  },
+  {
+    name: "npm exec, project .npmrc node-options",
+    files: {
+      "package.json": packageJson({}),
+      ".npmrc": "node-options=--dns-result-order=ipv4first\n",
+      "probe.cjs": LIFECYCLE_PROBE,
+    },
+    args: ["exec", "--call", "node probe.cjs"],
+  },
+];
+
+/** Write a throwaway package under the sandbox; returns its directory. */
+export function writePackage(sandbox, slug, files) {
+  const dir = path.join(sandbox.root, "controls", slug);
+  for (const [relative, content] of Object.entries(files)) {
+    const file = path.join(dir, relative);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, content, {
+      mode: relative.endsWith(".sh") ? 0o755 : 0o644,
+    });
+  }
+  return dir;
+}
+
+/** The probe process loaded the guard (its argv names the probe file). */
+const ranScript = (file) => (entry) =>
+  typeof entry.argv?.[1] === "string" && path.basename(entry.argv[1]) === file;
+
+async function npmLifecycleControl(sandbox, report, control) {
+  const slug = control.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+  const dir = writePackage(sandbox, slug, control.files);
+  const log = path.join(sandbox.root, `control-offline-${slug}.log`);
+  const mark = sandbox.guardMark();
+  const result = await sandbox.run("npm", control.args, {
+    cwd: dir,
+    name: `offline-control-${slug}`,
+    env: sandbox.env({ NB_CHECK_OFFLINE_LOG: log }),
+    timeoutMs: 60_000,
+  });
+  const name = `offline guard survives npm (${control.name})`;
+  const stopped = checkStopped(report, name, result.pgid, result.gone);
+  const guarded = sandbox.guardedSince(mark).some(ranScript("probe.cjs"));
+  const ok = report.check(
+    name,
+    result.status === 0 && refusedOnly(log) && guarded,
+    () =>
+      `exit ${result.status}, log ${JSON.stringify(readLines(log))}, probe in the guard marker: ${guarded}\n${tail(result.output, 5)}`,
+  );
+  return ok && stopped;
+}
+
+/** A guard-marker entry for `next <subcommand>` (the bin, however reached). */
+export const nextCommand = (subcommand) => (entry) =>
+  Array.isArray(entry.argv) &&
+  typeof entry.argv[1] === "string" &&
+  path.basename(entry.argv[1]) === "next" &&
+  entry.argv.slice(2).includes(subcommand);
+
+/**
+ * The positive proof that a step's real work ran guarded: a process matching
+ * `match` recorded the guard in the marker log since `mark`. An absent guard
+ * is a FAIL, never a silent pass of the offline verdict.
+ */
+export function guardLoaded(sandbox, report, name, mark, match) {
+  const entries = sandbox.guardedSince(mark);
+  return report.check(
+    name,
+    entries.some(match),
+    () =>
+      `no matching process in the guard marker; guarded since the step began: ${
+        entries
+          .map((entry) => `${entry.pid} ${entry.argv?.slice(1).join(" ")}`)
+          .join(" | ") || "none"
+      }`,
+  );
 }
 
 export function offlineVerdict(sandbox, report) {
@@ -153,6 +290,7 @@ export function observeSource(sandbox, report, notebook) {
  */
 export async function startNext(sandbox, { dir, port, env, name, marker }) {
   const bin = path.join(dir, "node_modules/next/dist/bin/next");
+  const mark = sandbox.guardMark();
   const handle = sandbox.start(
     process.execPath,
     [bin, "start", "-p", String(port), "-H", "127.0.0.1"],
@@ -162,11 +300,13 @@ export async function startNext(sandbox, { dir, port, env, name, marker }) {
       name,
     },
   );
-  const pid = handle.child.pid;
+  await handle.ready;
+  const pid = handle.pid;
   const fail = (detail) => ({
     handle,
     error: `${detail}\n${tail(fs.readFileSync(handle.logFile, "utf8"))}`,
   });
+  if (pid === undefined) return fail("next start did not spawn");
   let foreign;
   const settled = await waitFor(() => {
     if (handle.exited) return true;
@@ -213,6 +353,10 @@ export async function startNext(sandbox, { dir, port, env, name, marker }) {
     );
   if (marker && !home.body.includes(marker))
     return fail("GET / lacks the rendered marker");
+  // The server that answered must be a guarded process: its own pid is in
+  // the guard marker.
+  if (!sandbox.guardedSince(mark).some((entry) => entry.pid === pid))
+    return fail(`the offline guard was not loaded in next start (pid ${pid})`);
   return { handle, port, pid };
 }
 
@@ -222,9 +366,23 @@ export function checkStopped(report, step, pgid, gone) {
   return gone;
 }
 
+/**
+ * Why a command's result says nothing about the command (R6-4): the sandbox
+ * stopped it at its timeout, it died by a signal, or it never reported a
+ * status. Empty for a command that ended by itself with an exit status.
+ */
+export function abnormalEnd(result) {
+  if (result.timedOut)
+    return "did not end by itself: the sandbox stopped it at its timeout";
+  if (result.signal) return `ended by signal ${result.signal}`;
+  if (!Number.isInteger(result.status) || result.status < 0)
+    return `reported no exit status (${result.status})`;
+  return "";
+}
+
 /** Stop a server's group and report a group that is still present. */
 export async function stopServer(sandbox, report, step, handle) {
-  if (!handle || handle.child.pid === undefined) return true;
+  if (!handle || handle.pgid === undefined) return true;
   return checkStopped(
     report,
     step,

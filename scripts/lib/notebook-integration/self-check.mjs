@@ -2,11 +2,20 @@
 // (a throwaway local git repository cloned inside the sandbox, never the
 // notebook checkout). Each negative control also proves that the file outside
 // the clone is byte-identical afterwards.
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
 import { cloneTreeProblems } from "./clone-safety.mjs";
-import { awaitOwnership } from "./steps.mjs";
+import { modulesInClone } from "./modules.mjs";
+import { waitFor } from "./sandbox.mjs";
+import {
+  abnormalEnd,
+  awaitOwnership,
+  guardLoaded,
+  tail,
+  writePackage,
+} from "./steps.mjs";
 
 /** Build a throwaway repository, commit it, and clone it. Returns the clone. */
 async function makeClone(sandbox, name, { files = {}, links = {} }) {
@@ -178,19 +187,44 @@ export async function stageS({ sandbox, report }) {
     cwd: sandbox.root,
     name: "self-dying-service",
   });
+  // The environment of a supervised command may hold a secret made for the
+  // run; it must not be readable on a command line (ps).
+  const secret = `secret-${sandbox.randomToken()}`;
   const waiting = sandbox.start(
     process.execPath,
     ["-e", "setTimeout(()=>{},60000)"],
-    { cwd: sandbox.root, name: "self-waiting-service" },
+    {
+      cwd: sandbox.root,
+      name: "self-waiting-service",
+      env: { ...sandbox.env(), NB_CHECK_SELF_SECRET: secret },
+    },
   );
   try {
+    await Promise.all([dying.ready, waiting.ready]);
+    const commandLines = execFileSync(
+      "ps",
+      ["-o", "command=", "-p", `${waiting.pgid},${waiting.pid}`],
+      { encoding: "utf8", env: { PATH: process.env.PATH ?? "" } },
+    );
+    const inherited = execFileSync(
+      "ps",
+      ["eww", "-o", "command=", "-p", String(waiting.pid)],
+      { encoding: "utf8", env: { PATH: process.env.PATH ?? "" } },
+    );
+    report.check(
+      "S a supervised command's environment is not on any command line",
+      commandLines.trim().split("\n").length === 2 &&
+        !commandLines.includes(secret) &&
+        inherited.includes(secret),
+      `command lines hold the secret: ${commandLines.includes(secret)}; the command itself received it: ${inherited.includes(secret)}`,
+    );
     await dying.done;
     const started = Date.now();
     const result = await awaitOwnership(sandbox, {
       apiPort,
       webPort,
-      backendPid: dying.child.pid,
-      frontendPid: waiting.child.pid,
+      backendPid: dying.pid,
+      frontendPid: waiting.pid,
     });
     const seconds = (Date.now() - started) / 1000;
     report.check(
@@ -199,7 +233,191 @@ export async function stageS({ sandbox, report }) {
       `ok ${result.ok}, reason ${JSON.stringify(result.reason)}, ${seconds}s`,
     );
   } finally {
-    await sandbox.stopGroup(waiting.pgid);
+    // A live group is signalled (the positive half of the R6-2 control).
+    const before = sandbox.signalsSent().length;
+    const gone = await sandbox.stopGroup(waiting.pgid);
+    const sent = sandbox
+      .signalsSent()
+      .slice(before)
+      .filter((entry) => entry.pgid === waiting.pgid);
+    report.check(
+      "S a live owned group is signalled and stopped",
+      gone && sent.some((entry) => entry.signal === "SIGTERM"),
+      `gone ${gone}, signals ${JSON.stringify(sent)}`,
+    );
     await sandbox.stopGroup(dying.pgid);
   }
+
+  await exitedGroupControl(sandbox, report);
+  await npmGuardDetectionControls(sandbox, report);
+  modulesRecheckControls(sandbox, report);
+  await abnormalEndControl(sandbox, report);
+}
+
+/**
+ * R6-2: a group whose members have all exited (here the command and its
+ * supervisor, ended by their own recorded pids) is never signalled again:
+ * its number may already belong to someone else. Cleanup must send it
+ * nothing and drop it.
+ */
+async function exitedGroupControl(sandbox, report) {
+  const handle = sandbox.start(
+    process.execPath,
+    ["-e", "setTimeout(()=>{},60000)"],
+    { cwd: sandbox.root, name: "self-exited-group" },
+  );
+  await handle.ready;
+  process.kill(handle.pid, "SIGKILL");
+  await handle.done;
+  process.kill(handle.pgid, "SIGKILL");
+  await waitFor(() => handle.leaderExited, 10_000, 50);
+  const before = sandbox.signalsSent().length;
+  const gone = await sandbox.stopGroup(handle.pgid);
+  const sent = sandbox
+    .signalsSent()
+    .slice(before)
+    .filter((entry) => entry.pgid === handle.pgid);
+  report.check(
+    "S a group that has fully exited is sent nothing and dropped",
+    gone && sent.length === 0 && !sandbox.ownsGroup(handle.pgid),
+    `gone ${gone}, signals ${JSON.stringify(sent)}, still owned ${sandbox.ownsGroup(handle.pgid)}`,
+  );
+}
+
+/**
+ * R6-1, the detection half: what npm configuration cannot close (a script
+ * that clears NODE_OPTIONS itself, or an inner npm given --node-options on
+ * its command line, which outranks the environment) must be caught by the
+ * marker check the stages run after each command. The probe here connects
+ * nowhere; it only has to be absent from the marker.
+ */
+async function npmGuardDetectionControls(sandbox, report) {
+  const cases = [
+    {
+      name: "a lifecycle script that clears NODE_OPTIONS",
+      files: {
+        "package.json": `${JSON.stringify({ name: "c", private: true, scripts: { probe: "NODE_OPTIONS= node unguarded.cjs" } })}\n`,
+        "unguarded.cjs": "process.exit(0);\n",
+      },
+    },
+    {
+      name: "an inner npm given --node-options",
+      files: {
+        "package.json": `${JSON.stringify({
+          name: "c",
+          private: true,
+          scripts: {
+            probe:
+              "npm run --silent inner --node-options=--dns-result-order=ipv4first",
+            inner: "node unguarded.cjs",
+          },
+        })}\n`,
+        "unguarded.cjs": "process.exit(0);\n",
+      },
+    },
+  ];
+  for (const scenario of cases) {
+    const slug = `detect-${scenario.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`;
+    const dir = writePackage(sandbox, slug, scenario.files);
+    const mark = sandbox.guardMark();
+    const result = await sandbox.run("npm", ["run", "--silent", "probe"], {
+      cwd: dir,
+      name: `self-${slug}`,
+      timeoutMs: 60_000,
+    });
+    // The same check the stages run, on a throwaway reporter.
+    const probe = { check: (name, condition) => Boolean(condition) };
+    const detected = !guardLoaded(
+      sandbox,
+      probe,
+      "unguarded",
+      mark,
+      (entry) =>
+        typeof entry.argv?.[1] === "string" &&
+        path.basename(entry.argv[1]) === "unguarded.cjs",
+    );
+    // npm itself did load the guard: a marker that only asked "was the
+    // guard loaded at all during the command" would have passed.
+    const npmGuarded = sandbox.guardedSince(mark).length > 0;
+    report.check(
+      `S the marker check detects ${scenario.name}`,
+      result.status === 0 && detected && npmGuarded,
+      () =>
+        `exit ${result.status}, detected ${detected}, npm guarded ${npmGuarded}\n${tail(result.output, 5)}`,
+    );
+  }
+}
+
+/**
+ * R6-3: the recheck stage A runs on frontend/node_modules after every build
+ * and before the launch, on throwaway trees inside the sandbox.
+ */
+function modulesRecheckControls(sandbox, report) {
+  const base = path.join(sandbox.root, "self-check", "modules");
+  const outside = path.join(base, "outside");
+  fs.mkdirSync(path.join(outside, "pkg"), { recursive: true });
+  const outsideFile = path.join(outside, "pkg", "index.js");
+  fs.writeFileSync(outsideFile, "shared\n");
+  const scenarios = [
+    {
+      name: "replaced by a link to a shared tree",
+      setup: (modules) => fs.symlinkSync(outside, modules),
+      refused: "is a symlink",
+    },
+    {
+      name: "a package linked out of the copy",
+      setup: (modules) => {
+        fs.mkdirSync(modules, { recursive: true });
+        fs.symlinkSync(path.join(outside, "pkg"), path.join(modules, "pkg"));
+      },
+      refused: "resolves outside the copy",
+    },
+    {
+      name: "internal links only",
+      setup: (modules) => {
+        fs.mkdirSync(path.join(modules, "real"), { recursive: true });
+        fs.mkdirSync(path.join(modules, ".bin"));
+        fs.symlinkSync("../real", path.join(modules, ".bin", "real"));
+      },
+      refused: undefined,
+    },
+  ];
+  for (const [index, scenario] of scenarios.entries()) {
+    const frontend = path.join(base, `clone-${index}`, "frontend");
+    fs.mkdirSync(frontend, { recursive: true });
+    const modules = path.join(frontend, "node_modules");
+    scenario.setup(modules);
+    const problems = modulesInClone(sandbox, modules);
+    const verdict =
+      scenario.refused === undefined
+        ? problems.length === 0
+        : problems.some((problem) => problem.includes(scenario.refused));
+    report.check(
+      `S node_modules after a build, ${scenario.name}: ${scenario.refused === undefined ? "accepted" : "refused"}`,
+      verdict && fs.readFileSync(outsideFile, "utf8") === "shared\n",
+      `problems ${JSON.stringify(problems)}`,
+    );
+  }
+}
+
+/**
+ * R6-4: a build that prints the variable and then hangs until the sandbox
+ * stops it is not a rejection: the A5 rule must see the abnormal end.
+ */
+async function abnormalEndControl(sandbox, report) {
+  const result = await sandbox.run(
+    process.execPath,
+    [
+      "-e",
+      'console.log("CANVAS_PROXY_TARGET is printed, then the build hangs");setInterval(()=>{},1000)',
+    ],
+    { cwd: sandbox.root, name: "self-hanging-build", timeoutMs: 3000 },
+  );
+  const reason = abnormalEnd(result);
+  const normal = abnormalEnd({ status: 1, signal: null, timedOut: false });
+  report.check(
+    "S a build stopped at its timeout is not counted as a rejection",
+    result.timedOut && /timeout/.test(reason) && normal === "" && result.gone,
+    `timedOut ${result.timedOut}, status ${result.status}, signal ${result.signal}, reason ${JSON.stringify(reason)}, normal exit 1 -> ${JSON.stringify(normal)}`,
+  );
 }
