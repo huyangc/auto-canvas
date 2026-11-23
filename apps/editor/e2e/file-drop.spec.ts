@@ -125,22 +125,24 @@ test.describe("a file dropped onto the window in Auto", () => {
 
     const data = await droppedFiles(page, netlist(NETLIST_A));
     const headerElement = await header.elementHandle();
-    const cardElement = await card.elementHandle();
     await card.dispatchEvent("dragenter", { dataTransfer: data });
     await header.dispatchEvent("dragenter", { dataTransfer: data });
     await expect(overlay).toBeVisible();
-    // Still over the header, whatever the card saw: a move between elements
-    // names its destination, unlike a leave of the window (relatedTarget
-    // null, which clears the frame).
+    // A move between elements: the leave is followed by the next element's
+    // over, and the frame outlives the leave's own timer.
     await card.dispatchEvent("dragleave", {
       dataTransfer: data,
       relatedTarget: headerElement,
     });
+    await header.dispatchEvent("dragover", { dataTransfer: data });
+    await page.waitForTimeout(300);
     await expect(overlay).toBeVisible();
+    // Leaving the window names no destination and nothing follows.
     await header.dispatchEvent("dragleave", {
       dataTransfer: data,
-      relatedTarget: cardElement,
+      relatedTarget: null,
     });
+    await page.waitForTimeout(300);
     await expect(overlay).toHaveCount(0);
     await expect(card).toBeVisible();
     await expect(page.getByTestId("status")).not.toContainText("Imported");
@@ -401,6 +403,30 @@ test.describe("a file dropped onto the window in Draw", () => {
     expect(await status.textContent()).toContain("Imported 1 Document");
     await expect(status).toContainText("Auto Layout applied");
     await expect(toolbar).toBeVisible();
+  });
+
+  test("a drop holds back while an unapplied code draft would be lost", async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await openEditor(page, "/editor?example=two-stage-op-amp");
+    await expect(page.getByTestId("status")).toContainText(
+      "Opened example: Two-Stage Op Amp",
+    );
+    await showNetlistPanel(page);
+    const code = page.getByLabel("Netlist code", { exact: true });
+    await code.click();
+    await page.keyboard.press("ControlOrMeta+End");
+    await page.keyboard.type("\n* unapplied draft");
+    await dropFiles(
+      page,
+      page.getByTestId("schematic-canvas"),
+      netlist(NETLIST_A),
+    );
+    await expect(page.getByTestId("status")).toContainText(
+      "Can't open a Project yet:",
+    );
+    await expect(code).toContainText("* unapplied draft");
   });
 
   test("a netlist dropped on the code editor is imported, never inserted", async ({

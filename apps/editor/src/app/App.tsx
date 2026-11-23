@@ -4482,9 +4482,24 @@ function WorkspaceEditor({
   });
   // A file dropped from outside does what its menu command does, in both
   // modes: a netlist imports (and lays itself out), a Project file opens.
+  // The tab guard's blocker holds a drop back as it holds an open back: the
+  // import commands replace the Project, and the replace guard cannot see an
+  // unapplied code draft, which the replacement unmounts.
+  const dropBlocked = (): boolean => {
+    const blocker = projectSwitchBlockerRef.current();
+    if (!blocker) return false;
+    setStatus(`Can't open a Project yet: ${blocker}`);
+    return true;
+  };
   const { dragActive: fileDropActive } = useFileDrop({
-    importNetlist: (files) => importSpiceFiles(files),
-    openProjectFile: (file) => openProjectFile(file),
+    importNetlist: (files) => {
+      if (dropBlocked()) return Promise.resolve();
+      return importSpiceFiles(files);
+    },
+    openProjectFile: (file) => {
+      if (dropBlocked()) return Promise.resolve();
+      return openProjectFile(file);
+    },
     setStatus,
   });
 

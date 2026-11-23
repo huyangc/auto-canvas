@@ -42,19 +42,19 @@ export function useFileDrop(options: {
         hideTimerRef.current = null;
       }
     };
-    const show = (): void => {
-      cancelHide();
-      setDragActive(!modalDialogOpen());
-    };
-    // A leave hides the frame only if no enter or over follows it, so a move
-    // between elements in one breathing room keeps it and leaving the
-    // window drops it.
-    const hideSoon = (): void => {
+    // Every file event re-arms the frame's lifetime, so a drag that stops
+    // reporting (a target unmounted under it, a cancelled external drag, the
+    // window left without a leave that reaches us) hides it by itself.
+    const armHide = (delay: number): void => {
       cancelHide();
       hideTimerRef.current = setTimeout(() => {
         hideTimerRef.current = null;
         setDragActive(false);
-      }, 150);
+      }, delay);
+    };
+    const show = (): void => {
+      setDragActive(!modalDialogOpen());
+      armHide(1000);
     };
 
     const onDragEnter = (event: DragEvent): void => {
@@ -77,7 +77,10 @@ export function useFileDrop(options: {
       if (!carriesFiles(event)) return;
       event.preventDefault();
       event.stopPropagation();
-      hideSoon();
+      // A move between elements is followed by an enter or over at once; a
+      // leave with nothing after it, as leaving the window or a cancel,
+      // hides the frame shortly.
+      armHide(150);
     };
 
     const onDrop = (event: DragEvent): void => {

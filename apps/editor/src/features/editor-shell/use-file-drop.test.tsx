@@ -182,6 +182,23 @@ it("keeps the frame while the file moves, and hides it after a leave", async () 
   expect(latest.dragActive).toBe(false);
 });
 
+it("hides the frame when the target disappears without a leave", async () => {
+  const { latest, dispatch } = await mount();
+  const data = transfer([new File(["* a\n"], "a.sp")]);
+  const child = document.createElement("span");
+  document.body.append(child);
+
+  await dispatch("dragenter", data, child);
+  await dispatch("dragover", data, child);
+  expect(latest.dragActive).toBe(true);
+  // The element under the file unmounts; no dragleave ever reaches window.
+  child.remove();
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+  });
+  expect(latest.dragActive).toBe(false);
+});
+
 it("does nothing, and shows nothing, behind a modal dialog", async () => {
   const modal = document.createElement("div");
   modal.setAttribute("aria-modal", "true");
