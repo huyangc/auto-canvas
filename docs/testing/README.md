@@ -165,4 +165,11 @@ loads it, and stages T and A fail when the process that did the work (each
 script that removes the guard by other means is a failure, not a silent pass.
 Long-running children are started under a small supervisor that leads their
 process group until shutdown, so a group is only ever signalled while it is
-provably this run's.
+provably this run's. A shutdown first has the supervisor acknowledge that it
+has spawned the command or cancelled the launch, so nothing can start after a
+stop (an interrupt during a start included); the protocol is described at the
+top of `scripts/lib/notebook-integration/sandbox.mjs`. Stage S exercises it
+(a stop right after a start, during a held-back launch, after the start, an
+unanswered stop, a refused release), along with the transport table's
+ownership check before every probe, the A6 check that both service PIDs are
+gone, A1's exact manifest list and the handling of a failing `lsof`.

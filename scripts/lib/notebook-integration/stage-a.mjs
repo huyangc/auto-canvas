@@ -48,6 +48,24 @@ const DOTENV_FILES = [
 /** Thrown after a refusal has been reported: the stage stops there. */
 class Refused extends Error {}
 
+// A1's protected files, exactly as the plan names them (R7-4): the two
+// manifests at the root and in frontend/, and backend/requirements*. A
+// package.json elsewhere (a test fixture) is not a dependency change.
+const DEPENDENCY_MANIFESTS = new Set([
+  "package.json",
+  "package-lock.json",
+  "frontend/package.json",
+  "frontend/package-lock.json",
+]);
+
+/** The changed paths that are dependency manifests. */
+export const dependencyManifests = (files) =>
+  files.filter(
+    (file) =>
+      DEPENDENCY_MANIFESTS.has(file) ||
+      /^backend\/requirements[^/]*$/.test(file),
+  );
+
 export async function stageA(context) {
   try {
     await stageABody(context);
@@ -225,11 +243,7 @@ async function stageABody({ sandbox, report, notebook, options }) {
   if (base === candidate)
     report.ok("A1 (base equals candidate, nothing to compare)");
   else {
-    const forbidden = changed.filter(
-      (file) =>
-        /(^|\/)package(-lock)?\.json$/.test(file) ||
-        /^backend\/requirements[^/]*$/.test(file),
-    );
+    const forbidden = dependencyManifests(changed);
     for (const file of changed) report.info(`changed: ${file}`);
     report.check(
       "A1 no new dependency",
@@ -384,6 +398,7 @@ async function stageABody({ sandbox, report, notebook, options }) {
             stub,
             report,
             prefix: "A4 ",
+            owner: () => sandbox.listenerState(web, server.pid),
           });
           ownershipHeld(
             sandbox,
@@ -523,6 +538,8 @@ async function stageA6({
           );
     return parts.join("\n");
   };
+  // The services the launcher reported, kept for the check after shutdown.
+  let services = [];
   try {
     if (!(await waitFor(() => launcher.exited, 120_000)))
       return void report.fail(
@@ -540,6 +557,10 @@ async function stageA6({
       )
     )
       return;
+    services = [
+      ["backend", backendPid],
+      ["frontend", frontendPid],
+    ];
     const groupOf = (pid) => {
       try {
         return Number(
@@ -741,5 +762,44 @@ async function stageA6({
       gone,
       `process group ${launcher.pgid} still present`,
     );
+    // R7-3: a service that moved to another group would survive the group's
+    // shutdown. Both recorded pids must be gone; a survivor is reported for
+    // the owner to inspect and never signalled (it is no longer provably
+    // this run's).
+    if (services.length) {
+      const survivors = await survivingPids(services);
+      report.check(
+        "A6 both service PIDs are gone after the shutdown",
+        survivors.length === 0,
+        () => survivors.map(describeSurvivor).join("; "),
+      );
+    }
   }
+}
+
+/** The [name, pid] pairs still alive after a 5 s grace period. */
+export async function survivingPids(services) {
+  const alive = ([, pid]) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (error) {
+      return error.code === "EPERM";
+    }
+  };
+  await waitFor(() => !services.some(alive), 5000, 100);
+  return services.filter(alive);
+}
+
+function describeSurvivor([name, pid]) {
+  let command;
+  try {
+    command = execFileSync("ps", ["-o", "pgid=,command=", "-p", String(pid)], {
+      encoding: "utf8",
+      env: { PATH: process.env.PATH ?? "" },
+    }).trim();
+  } catch {
+    command = "(gone by now)";
+  }
+  return `${name} pid ${pid} still alive, not signalled: ${command}`;
 }

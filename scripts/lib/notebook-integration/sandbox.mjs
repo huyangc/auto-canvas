@@ -1,7 +1,7 @@
 // The safety machinery of the notebook integration check: a private temporary
 // root, an allow-listed child environment, the offline guard, process groups
 // and listener ownership. Nothing here ever touches the notebook checkout.
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import net from "node:net";
@@ -9,6 +9,10 @@ import os from "node:os";
 import path from "node:path";
 
 const OWNER_PORTS = new Set([3000, 8000, 4310]);
+
+// The bound for a supervisor's answer to "stop" (see the protocol); a busy
+// machine may take seconds to boot a Node process.
+const STOP_ACK_MS = 10_000;
 
 /** Raised for a refusal that maps to exit status 2. */
 export class UsageError extends Error {}
@@ -97,39 +101,126 @@ net.Socket.prototype.connect = function guardedConnect(...args) {
 `;
 
 // Every long-running child is started through this supervisor, which leads
-// the process group and stays alive in it until the sandbox releases it (it
-// ignores SIGTERM; only a release or SIGKILL ends it). The group id is the
-// supervisor's pid, and while the supervisor has not exited it is an unreaped
-// child of this script, so that number cannot belong to anyone else: the
-// group is signalled only while that holds. The command's own status, signal
-// or spawn error arrive over the IPC channel.
+// the process group. The group id is the supervisor's pid, and while the
+// supervisor has not exited it is an unreaped child of this script, so that
+// number cannot belong to anyone else: the group is signalled only while
+// that holds.
+//
+// The start / stop / release protocol (R7-1). Messages travel over one IPC
+// channel, in order in each direction.
+//
+//   script -> supervisor   { spec }    once, queued by start(): the command,
+//                                      its arguments, cwd and environment
+//                                      (never on a command line: ps shows
+//                                      those), and, for stage S only, test
+//                                      delays of the launch and of the stop
+//                                      acknowledgement.
+//   script -> supervisor   "stop"      once, first step of every shutdown.
+//   script -> supervisor   "release"   only after the stop acknowledgement
+//                                      and after the group held nothing but
+//                                      the supervisor.
+//   supervisor -> script   { pid } | { error } | { status, signal }
+//                                      the command's spawn, spawn error, end.
+//   supervisor -> script   { stopAck, cancelled, running }
+//                                      the answer to "stop". Before sending
+//                                      it the supervisor has set `stopped`,
+//                                      so from then on it starts nothing:
+//                                      either the command was already
+//                                      spawned (running tells whether it is
+//                                      still alive) or a pending launch was
+//                                      cancelled.
+//   supervisor -> script   { releaseRefused }
+//                                      "release" while the command is alive.
+//
+// Supervisor states: booting (its code has not run yet; messages wait in the
+// channel) -> idle (no spec yet) -> pending (spec received, delayed launch) ->
+// launched (spawned or spawn failed) ; any of idle, pending, launched ->
+// stopped on "stop". It ignores SIGTERM/SIGINT/SIGHUP and exits only on
+// "release" with no live command, on SIGKILL, or when the channel to the
+// script closes, in which case it first SIGKILLs its own group (the script
+// is gone and nobody else may clean up a group it does not own).
+//
+// Shutdown (stopGroup), while the supervisor is this script's live child:
+// send "stop" and wait for the acknowledgement (bounded). Only after it is
+// the group's membership meaningful, because nothing new can start in it.
+// Then SIGTERM the group if anything besides the supervisor is in it,
+// SIGKILL after 5 s, then "release". No acknowledgement within the bound, or
+// a refused or unanswered release: SIGKILL to the group (still provably
+// ours). Once the supervisor has exited, the group is never signalled again.
 const SUPERVISOR = String.raw`"use strict";
 const { spawn } = require("child_process");
 const send = (message) => { try { process.send(message); } catch {} };
 for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"]) process.on(signal, () => {});
 let child;
-// The command and its environment arrive in the first message, not on the
-// command line: a command line is readable by every local user (ps), and
-// the environment may hold a secret made for this run.
-process.on("message", (message) => {
-  if (message === "release") process.exit(0);
-  if (child || !message || !Array.isArray(message.spec)) return;
-  const [command, args, cwd, env] = message.spec;
+let running = false;
+let stopped = false;
+let pending;
+let ackDelayMs = 0;
+function launch(spec) {
+  pending = undefined;
+  if (stopped || child) return;
+  const [command, args, cwd, env] = spec;
   try {
     child = spawn(command, args, { cwd, env, stdio: "inherit" });
   } catch (error) {
     send({ error: error.message });
     return;
   }
-  child.once("spawn", () => send({ pid: child.pid }));
-  child.once("error", (error) => send({ error: error.message }));
-  child.once("exit", (status, signal) => send({ status, signal }));
+  running = child.pid !== undefined;
+  if (running) send({ pid: child.pid });
+  child.once("error", (error) => { running = false; send({ error: error.message }); });
+  child.once("exit", (status, signal) => { running = false; send({ status, signal }); });
+}
+process.on("message", (message) => {
+  if (message === "stop") {
+    stopped = true;
+    const cancelled = pending !== undefined;
+    if (cancelled) clearTimeout(pending);
+    pending = undefined;
+    const ack = { stopAck: true, cancelled, running };
+    if (ackDelayMs > 0) setTimeout(send, ackDelayMs, ack);
+    else send(ack);
+  } else if (message === "release") {
+    if (running) send({ releaseRefused: true });
+    else process.exit(0);
+  } else if (message && Array.isArray(message.spec)) {
+    if (stopped || child || pending) return;
+    ackDelayMs = message.ackDelayMs > 0 ? message.ackDelayMs : 0;
+    if (message.delayMs > 0) pending = setTimeout(launch, message.delayMs, message.spec);
+    else launch(message.spec);
+  }
 });
-process.on("disconnect", () => process.exit(0));
+process.on("disconnect", () => {
+  try { process.kill(0, "SIGKILL"); } catch {}
+  process.exit(1);
+});
 `;
 
 function sameDirectory(a, b) {
   return a.dev === b.dev && a.ino === b.ino;
+}
+
+/**
+ * The field lines of an lsof -F run (R7-5). lsof exits 1 with no output when
+ * nothing matches: that is an empty list. A check that could not run (lsof
+ * missing, killed, another status, status 1 with a diagnostic) throws with
+ * it, so a healthy server is never read as "not listening". Status 0 is a
+ * result even if lsof warned on stderr.
+ */
+export function lsofLines(result, what, field) {
+  const stderr = (result.stderr ?? "").trim();
+  if (result.error)
+    throw new Error(`${what} could not run: ${result.error.message}`);
+  if (result.status === 1 && !(result.stdout ?? "").trim() && !stderr)
+    return [];
+  if (result.status !== 0)
+    throw new Error(
+      `${what} failed (${result.status ?? result.signal}): ${stderr || "(no stderr)"}`,
+    );
+  return result.stdout
+    .split("\n")
+    .filter((line) => line.startsWith(field))
+    .map((line) => line.slice(1));
 }
 
 /** Throws UsageError when the temporary parent is, or lies inside, the checkout. */
@@ -339,7 +430,7 @@ export function createSandbox(notebook, { keep }) {
    * command's own pid once `handle.ready` resolves, `handle.done` resolves
    * when the command has exited (`status`, `signal`, `error`).
    */
-  function start(command, args, { cwd, env: childEnv, name }) {
+  function start(command, args, { cwd, env: childEnv, name, testHooks = {} }) {
     ensureOpen(name);
     const logFile = path.join(
       logs,
@@ -360,6 +451,7 @@ export function createSandbox(notebook, { keep }) {
       logFile,
       exited: false,
       leaderExited: child.pid === undefined,
+      stopAckMs: testHooks.stopAckMs ?? STOP_ACK_MS,
     };
     if (child.pid !== undefined) groups.set(child.pid, handle);
     let markReady;
@@ -372,17 +464,39 @@ export function createSandbox(notebook, { keep }) {
       markReady();
       markDone();
     };
+    // Replies to the shutdown's "stop" and "release" (see the protocol).
+    const replies = [];
+    handle.reply = (kind) =>
+      new Promise((resolve) => replies.push({ kind, resolve }));
+    const answer = (kind, value) => {
+      for (const waiter of replies.filter((entry) => entry.kind === kind)) {
+        replies.splice(replies.indexOf(waiter), 1);
+        waiter.resolve(value);
+      }
+    };
     child.on("message", (message) => {
-      if (message?.pid) {
+      if (message?.stopAck) {
+        handle.stopAck = message;
+        if (message.cancelled)
+          finish({ error: new Error("the launch was cancelled by a stop") });
+        answer("stopAck", message);
+      } else if (message?.releaseRefused) answer("release", "refused");
+      else if (message?.pid) {
         handle.pid = message.pid;
         markReady();
       } else if (message?.error) finish({ error: new Error(message.error) });
       else if (message && "status" in message)
         finish({ status: message.status, signal: message.signal });
     });
-    child.once("error", (error) => {
+    child.on("error", (error) => {
+      // Only a supervisor that never started is gone; other errors (a
+      // failed send) leave it this script's live child: the bounded waits
+      // of the shutdown deal with a channel that stopped working.
+      if (child.pid !== undefined) return;
       handle.leaderExited = true;
       finish({ error });
+      answer("stopAck", undefined);
+      answer("release", "exited");
     });
     // Synchronous: from here on the group id is no longer provably ours, so
     // it is never signalled again; it is dropped as soon as it is empty.
@@ -395,12 +509,21 @@ export function createSandbox(notebook, { keep }) {
           `the supervisor exited (${signal ?? status}) before the command reported`,
         ),
       });
+      answer("stopAck", undefined);
+      answer("release", "exited");
     });
     // The command line holds no part of the command's environment.
     if (child.pid !== undefined)
-      child.send({ spec: [command, args, cwd, childEnv ?? env()] }, (error) => {
-        if (error) finish({ error });
-      });
+      child.send(
+        {
+          spec: [command, args, cwd, childEnv ?? env()],
+          delayMs: testHooks.launchDelayMs ?? 0,
+          ackDelayMs: testHooks.ackDelayMs ?? 0,
+        },
+        (error) => {
+          if (error) finish({ error });
+        },
+      );
     return handle;
   }
 
@@ -438,21 +561,53 @@ export function createSandbox(notebook, { keep }) {
       }
     };
     const othersGone = () => membersBesidesLeader(pgid)?.length === 0;
+    // A reply, or undefined when the bound passes first.
+    const within = (promise, ms) =>
+      Promise.race([promise, sleep(ms).then(() => undefined)]);
     const shutdown = (async () => {
       try {
         if (!handle.leaderExited) {
-          if (!othersGone()) {
-            signalGroup("SIGTERM");
-            if (!(await waitFor(othersGone, 5000, 100))) signalGroup("SIGKILL");
+          // 1. Synchronise with the launch: after the acknowledgement the
+          //    supervisor starts nothing, so the membership read below is
+          //    final. A supervisor that does not answer (still booting on a
+          //    busy machine, or stuck) is killed with its group while it is
+          //    still this script's live child.
+          let ack;
+          try {
+            handle.child.send("stop", () => {});
+            ack = await within(handle.reply("stopAck"), handle.stopAckMs);
+          } catch {
+            ack = undefined; // channel closed: the supervisor is exiting
           }
-          if (!handle.leaderExited) {
-            try {
-              handle.child.send("release");
-            } catch {
-              // channel already closed: the kill below ends it
+          if (!ack) signalGroup("SIGKILL");
+          else {
+            // 2. Anything besides the supervisor is the command or its
+            //    descendants: SIGTERM, then SIGKILL.
+            if (!othersGone()) {
+              signalGroup("SIGTERM");
+              if (!(await waitFor(othersGone, 5000, 100)))
+                signalGroup("SIGKILL");
             }
-            if (!(await waitFor(() => handle.leaderExited, 5000, 50)))
-              signalGroup("SIGKILL");
+            // 3. Release. The supervisor refuses while its command lives;
+            //    a refusal or no answer ends it with SIGKILL to the group.
+            if (!handle.leaderExited) {
+              let released;
+              try {
+                handle.child.send("release", () => {});
+                released = await within(
+                  Promise.race([
+                    handle.reply("release"),
+                    waitFor(() => handle.leaderExited, 5000, 50).then((gone) =>
+                      gone ? "exited" : undefined,
+                    ),
+                  ]),
+                  5000,
+                );
+              } catch {
+                released = undefined;
+              }
+              if (released !== "exited") signalGroup("SIGKILL");
+            }
           }
         }
         await waitFor(() => observeGone(pgid), 5000, 50);
@@ -510,27 +665,18 @@ export function createSandbox(notebook, { keep }) {
   }
 
   function listenerPids(port) {
-    try {
-      const out = execFileSync(
-        "lsof",
-        ["-nP", "-a", `-iTCP:${port}`, "-sTCP:LISTEN", "-Fp"],
-        {
-          encoding: "utf8",
-          env: { PATH: process.env.PATH ?? "" },
-          stdio: ["ignore", "pipe", "ignore"],
-        },
-      );
-      return [
-        ...new Set(
-          out
-            .split("\n")
-            .filter((line) => line.startsWith("p"))
-            .map((line) => Number(line.slice(1))),
-        ),
-      ];
-    } catch {
-      return [];
-    }
+    const result = spawnSync(
+      "lsof",
+      ["-nP", "-a", `-iTCP:${port}`, "-sTCP:LISTEN", "-Fp"],
+      {
+        encoding: "utf8",
+        env: { PATH: process.env.PATH ?? "" },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    return [
+      ...new Set(lsofLines(result, `lsof for port ${port}`, "p").map(Number)),
+    ];
   }
 
   /** The local addresses listening on a port, as lsof names them. */
@@ -585,7 +731,14 @@ export function createSandbox(notebook, { keep }) {
   }
 
   process.on("exit", () => {
-    // Only groups whose supervisor is still alive are provably this run's.
+    // The synchronous path cannot wait for a stop acknowledgement, and needs
+    // none: SIGKILL to a group whose supervisor is still this script's live
+    // child is safe (the number is ours) and total (the supervisor dies with
+    // it, so a launch still queued in its channel can never run). A group
+    // whose supervisor has exited is not ours to signal; it was already
+    // stopped, or reported as still present. If this script dies without
+    // running this handler (SIGKILL), each supervisor sees its channel close
+    // and SIGKILLs its own group.
     for (const [pgid, handle] of groups) {
       if (handle.leaderExited) continue;
       try {

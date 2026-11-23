@@ -370,3 +370,130 @@ Before and after all my runs: 3000 → 41839, 8000 → 41838, 4310 → 85736, un
 - The developer checkout was only read, never written: one `git show` of `frontend/package.json` at 49cd77372, one `git clone` of the repository, and one copy of `frontend/node_modules` for the throwaway end-to-end repository, now deleted.
 - I did not diff the notebook checkout's `git status` before and after (it was not asked for this round).
 - The guard marker does not individually verify Next's build worker processes.
+
+## Round 6 of implementation (review round 10: findings R7-1 to R7-5)
+
+(From the implementer subagent's hand-back; saved by the reviewer.)
+
+The blocking race (R7-1) is fixed. On the round-9 code (`8f0065e`) the new stop-race control fails: in 12 of 12 runs the command started after the stop and wrote its marker file. On the new code it passes. Nothing is committed, stashed or pushed. I did not edit `review.md` or anything else under `tasks/**`.
+
+`git status --short`:
+
+```
+ M docs/testing/README.md
+ M scripts/lib/notebook-integration/sandbox.mjs
+ M scripts/lib/notebook-integration/self-check.mjs
+ M scripts/lib/notebook-integration/stage-a.mjs
+ M scripts/lib/notebook-integration/stage-t.mjs
+ M scripts/lib/notebook-integration/transport.mjs
+ M tasks/T160-notebook-integration-check/review.md   (the reviewer's file, already modified before I started)
+```
+
+My helper scripts are in the git-ignored `tmp/r10/`: `old/sandbox.mjs` (the `8f0065e` version), `race-driver.mjs`, `interrupt-at.mjs` and a mutated copy `mut/`.
+
+#### R7-1 (must-fix): start, stop and release protocol
+
+**Reproduced.** `tmp/r10/race-driver.mjs` runs the new stage S stop-race controls against `8f0065e`'s `sandbox.mjs`:
+
+- "a stop right after start()": 12 of 12 runs never spawned when cleanup looked, yet the side effect was written. The command was started after the release and left orphaned.
+- The held-back-launch variant fails the same way (the old supervisor ignores the delay).
+- "a stop after the command started" passes on the old code too.
+- Result on old code: exit 1.
+
+**Changed, in `sandbox.mjs`:**
+
+- **Protocol comment block** above `SUPERVISOR`: the messages in each direction, the supervisor's states, and who may send what when.
+- **Supervisor:**
+  - The spec still arrives as the first IPC message, never on a command line.
+  - On `"stop"` it sets `stopped`, cancels a pending launch, and replies `{stopAck, cancelled, running}`. After that, `launch()` refuses to start anything.
+  - On `"release"` it exits only if its command is not alive; otherwise it replies `{releaseRefused}`.
+  - When its channel to the script closes, it SIGKILLs its own group, then exits.
+  - Stage S-only test hooks travel in the spec: `launchDelayMs` and `ackDelayMs`.
+- **`start()`:** accepts `testHooks` (`launchDelayMs`, `ackDelayMs`, `stopAckMs`). `handle.reply(kind)` collects the stop and release replies. A cancelled launch resolves `handle.done` with an error.
+- **`stopGroup()`:**
+  1. Send `"stop"` and wait for the acknowledgement, bounded by `STOP_ACK_MS` (10 s, because the machine is busy). No acknowledgement means SIGKILL to the group, which is safe because the supervisor is still this script's live child.
+  2. Only then read the group's membership with `ps`, which is now final because nothing can start in the group any more. If anything besides the supervisor is there: SIGTERM, then SIGKILL after 5 s.
+  3. Send `"release"`. A refusal or no exit within 5 s means SIGKILL to the group.
+- **Process `exit` handler:** comment updated. Every send now has a callback, so a closed channel cannot raise an unhandled `error`.
+
+**Orderings and why each is safe:**
+
+- **Stop before the supervisor has run its first line:** spec and `"stop"` wait in the channel in that order. On boot it processes the spec, then the stop, and acknowledges with `running: true`, so the group is SIGTERMed. If boot takes longer than the bound, the group is SIGKILLed with the supervisor in it, so it can spawn nothing.
+- **Stop while the launch is pending** (only reachable with the delay hook): the launch is cancelled, the acknowledgement says `cancelled`, and nothing ever runs.
+- **Plain stop right after `start()`:** IPC order means the spec is always handled before the stop. This is why the 12 repeated runs all come out "signalled", and why the cancel order needs the delay hook to be forced deterministically.
+- **Spawn error:** `{error}` arrives before the acknowledgement (`running: false`), the group is empty, and the release is accepted.
+- **Command exits before the acknowledgement:** `{status}` comes first, then the acknowledgement with `running: false`. Leftover descendants are SIGTERMed, then the release follows.
+- **Two shutdown callers:** the `stopping` map gives both one shared promise, so only one `"stop"` is sent. A later call on a group whose supervisor has exited only probes it.
+- **Synchronous `exit` handler:** it cannot wait for an acknowledgement and needs none. SIGKILL to a group whose supervisor is still a live child is safe (the number is ours) and total (the supervisor dies too, so a launch still queued in its channel never runs). Groups whose supervisor has exited are not signalled.
+- **Script killed with SIGKILL** (no handler runs): each supervisor sees its channel close and SIGKILLs its own group.
+- **Stated limit:** a command that moved itself to another group escapes all of this. R7-3 now reports such a process for A6.
+
+**Controls (stage S), all pass:**
+
+- "a stop right after start() (12x)": 12 signalled. Afterwards no command alive and no side effect.
+- "a stop while the launch is pending (3x)": 3 cancelled.
+- "a stop after the command started (3x)": 3 signalled.
+- "a supervisor that does not acknowledge a stop is killed with its group": acknowledgement held 3 s against a 300 ms bound. Exactly one SIGKILL, command dead, no side effect.
+- "a release while the command runs is refused and the supervisor stays".
+- On the old code the first, second and unanswered-stop controls fail. The unanswered-stop control sent SIGTERM rather than SIGKILL there, and the release control cannot run against the old supervisor at all.
+
+**Interrupting real stages during a start** (`tmp/r10/interrupt-at.mjs` sends SIGINT to the check's own pid the moment a line appears):
+
+- Stage T, at "-- (i)", 3 runs: every run exit 130, the t-build that had been started was stopped, temporary root removed, 0 processes mentioning it.
+- Stage A, at the line printed in the same tick just before the A6 launcher's `start()`, so the spec was queued when the interrupt arrived (the R7-1 window), 2 runs: exit 130, "ok A6 the owned process group is stopped", root removed, 0 processes mentioning it.
+
+#### R7-2: transport probes after Next lost its port
+
+- **Changed:** `transport.mjs` `transportAssertions()` takes `owner()` and asks it before every probe. At the first answer that is not "owned" it fails "the server owned its port before every probe" and stops. With ownership held it prints that line as ok with the probe count. `stage-t.mjs` and A4 in `stage-a.mjs` pass `sandbox.listenerState(port, pid)`.
+- **Control:** "S the transport table stops at the first probe after the listener changed" passes: owner asked once, 0 requests reached the stub.
+- **Without the fix** (old `transport.mjs`): the control fails with `asked 0, upstream 48`.
+
+#### R7-3: an A6 service in another group would survive
+
+- **Changed:** `stage-a.mjs` A6 `finally` now checks "A6 both service PIDs are gone after the shutdown" using the new `survivingPids()` (5 s grace). A survivor is reported with its process group and command line and is never signalled.
+- **Control:** "S a service moved out of the owned group is reported after the shutdown". The command spawns its own detached grandchild; the owned group is stopped; only the grandchild is reported. Afterwards the control ends the grandchild by its recorded pid, which this run started.
+- **Without the fix:** the earlier code had only the group check, which passes in the same situation (the control shows `group gone true` with the survivor present).
+
+#### R7-4: A1 matched fixture `package.json` files
+
+- **Changed:** `stage-a.mjs` has a new `dependencyManifests()`. It matches exactly `package.json`, `package-lock.json`, `frontend/package.json`, `frontend/package-lock.json`, plus `^backend/requirements[^/]*$`.
+- **Control:** "S A1 matches the exact manifests and not a fixture's package.json".
+- **Without the fix** (old pattern in `mut/`): it also flags `frontend/tests/fixtures/example/package.json` and `docs/package.json`, so the control fails.
+
+#### R7-5: a failing `lsof` looked like an unused port
+
+- **Changed:** `sandbox.mjs` has a new exported `lsofLines()`. `listenerPids()` now uses `spawnSync`.
+  - Status 1 with no output is "no match" and gives an empty list.
+  - Status 0 is a result, even if lsof warned on stderr.
+  - A spawn error, a signal, or any other status (status 1 with a diagnostic included) throws with the diagnostic. The stage then fails at once as an unexpected error instead of waiting.
+- **Control:** "S a failing lsof is an error, an unused port an empty list". Cases: binary missing, status 1 with stderr, killed, empty no-match, and a real lsof on an unused port.
+- **Without the fix** (`mut/`, which returns `[]` for any failure): the control fails on the first three cases.
+
+#### Acceptance runs (final code)
+
+| Command                                                    | Exit    | Decisive line                                           |
+| ---------------------------------------------------------- | ------- | ------------------------------------------------------- |
+| stage S                                                    | 0       | `stage S: 41 passed, 0 failed`                          |
+| stage T                                                    | 0       | `stage T: 134 passed, 0 failed`                         |
+| stage A, candidate                                         | 0       | `stage A: 100 passed, 0 failed`                         |
+| stage A, negative control                                  | 1       | `stage A: 91 passed, 9 failed`                          |
+| `--stage X`                                                | 2       | `--stage must be T, A or S`                             |
+| three `TMPDIR` refusals (as `tmp/t160-rerun.sh` runs them) | 2, 2, 2 | 0 `nb-check-*` directories in the notebook's `frontend` |
+| `pnpm typecheck`, `lint`, `format:check`, `docs:check`     | 0 each  | —                                                       |
+
+- **Negative control failures:** exactly A3 (1), A4 (6), A5 (2), nothing new.
+- **Why the totals changed:**
+  - S goes from 32 to 41: the three stop-race variants, the unanswered stop, the refused release, and the R7-2, R7-3, R7-4 and R7-5 controls.
+  - T goes from 132 to 134: one "owned its port before every probe" line each for T(i) and T(ii).
+  - A goes from 98 to 100: the A4 ownership line and "A6 both service PIDs are gone after the shutdown". The negative control gains the same two (89 to 91).
+- The full set ran once, with no timeout reruns.
+
+#### Your listener PIDs
+
+Before and after all runs: 3000 → 41839, 8000 → 41838, 4310 → 85736, unchanged. No process mentions an `nb-check-` directory afterwards.
+
+#### Not done or not verified
+
+- Running the old-code race driver left a few orphaned `node -e setTimeout(…)` commands. That was the defect itself; they end on their own within 5 s, or 20 s for the one from the release control, and I did not signal them. The release control could not run against the old supervisor at all (its handle has no `reply`), so that driver run ended with an error after the other results.
+- The cancel order cannot occur without the test delay hook, because the IPC channel is ordered. That is why the control forces it with the hook rather than by repetition.
+- I did not diff the notebook checkout's `git status` this round. `pnpm deadcode` was not run.

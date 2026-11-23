@@ -129,7 +129,13 @@ export async function stageT({ sandbox, report, notebook }) {
       )
         continue;
       if (configuration.rules === "two") {
-        await transportAssertions({ nextPort, stub, report, prefix });
+        await transportAssertions({
+          nextPort,
+          stub,
+          report,
+          prefix,
+          owner: () => sandbox.listenerState(nextPort, server.pid),
+        });
         if (configuration.host === "127.0.0.1") {
           await stub.close();
           const res = await rawRequest(nextPort, "/canvas").catch((error) => ({

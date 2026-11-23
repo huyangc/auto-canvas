@@ -2,13 +2,15 @@
 // (a throwaway local git repository cloned inside the sandbox, never the
 // notebook checkout). Each negative control also proves that the file outside
 // the clone is byte-identical afterwards.
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
 import { cloneTreeProblems } from "./clone-safety.mjs";
 import { modulesInClone } from "./modules.mjs";
-import { waitFor } from "./sandbox.mjs";
+import { lsofLines, waitFor } from "./sandbox.mjs";
+import { dependencyManifests, survivingPids } from "./stage-a.mjs";
+import { startStub, transportAssertions } from "./transport.mjs";
 import {
   abnormalEnd,
   awaitOwnership,
@@ -249,9 +251,317 @@ export async function stageS({ sandbox, report }) {
   }
 
   await exitedGroupControl(sandbox, report);
+  await stopRaceControls(sandbox, report);
   await npmGuardDetectionControls(sandbox, report);
   modulesRecheckControls(sandbox, report);
   await abnormalEndControl(sandbox, report);
+  await ownershipBeforeProbeControl(sandbox, report);
+  await movedServiceControl(sandbox, report);
+  dependencyManifestControl(report);
+  lsofFailureControl(sandbox, report);
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const pidAlive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
+  }
+};
+
+/**
+ * R7-1: a stop requested while a launch may still be in flight. The command
+ * writes a marker file 300 ms after it starts; after every stop no process of
+ * it may be alive and the marker must be absent. Three orders: a stop right
+ * after start() (repeated, so both the "spawned first" and "stop first" paths
+ * are hit), a stop while the launch is held back by the supervisor's test
+ * delay (must be cancelled: nothing ever runs), and a stop after the command
+ * has started (must be signalled).
+ */
+export async function stopRaceControls(sandbox, report) {
+  const dir = path.join(sandbox.root, "self-check", "stop-race");
+  fs.mkdirSync(dir, { recursive: true });
+  const code =
+    'setTimeout(()=>require("fs").writeFileSync(process.env.NB_CHECK_RACE_MARKER,"ran"),300);' +
+    "setTimeout(()=>{},5000)";
+  const variants = [
+    { name: "a stop right after start()", rounds: 12 },
+    {
+      name: "a stop while the launch is pending",
+      rounds: 3,
+      launchDelayMs: 500,
+      expect: "cancelled",
+    },
+    {
+      name: "a stop after the command started",
+      rounds: 3,
+      afterReady: true,
+      expect: "signalled",
+    },
+  ];
+  for (const variant of variants) {
+    const slug = variant.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+    const runs = [];
+    for (let round = 0; round < variant.rounds; round += 1) {
+      const marker = path.join(dir, `${slug}-${round}`);
+      const handle = sandbox.start(process.execPath, ["-e", code], {
+        cwd: dir,
+        name: `self-race-${slug}`,
+        env: sandbox.env({ NB_CHECK_RACE_MARKER: marker }),
+        testHooks: { launchDelayMs: variant.launchDelayMs },
+      });
+      if (variant.afterReady) await handle.ready;
+      const before = sandbox.signalsSent().length;
+      const gone = await sandbox.stopGroup(handle.pgid);
+      const signalled = sandbox
+        .signalsSent()
+        .slice(before)
+        .some((entry) => entry.pgid === handle.pgid);
+      runs.push({ handle, marker, gone, signalled });
+    }
+    // Longer than the command's 300 ms delay (and the 500 ms launch delay).
+    await sleep(1000);
+    const outcomes = {};
+    const problems = [];
+    for (const [round, run] of runs.entries()) {
+      const outcome = run.handle.stopAck?.cancelled
+        ? "cancelled"
+        : run.signalled
+          ? "signalled"
+          : run.handle.pid === undefined
+            ? "never spawned"
+            : "spawned, not signalled";
+      outcomes[outcome] = (outcomes[outcome] ?? 0) + 1;
+      const ran = fs.existsSync(run.marker);
+      const alive = run.handle.pid !== undefined && pidAlive(run.handle.pid);
+      if (
+        !run.gone ||
+        ran ||
+        alive ||
+        (variant.expect && outcome !== variant.expect)
+      )
+        problems.push(
+          `round ${round}: ${outcome}, group gone ${run.gone}, side effect ${ran}, command alive ${alive}`,
+        );
+    }
+    report.info(`${variant.name}: ${JSON.stringify(outcomes)}`);
+    report.check(
+      `S ${variant.name} (${variant.rounds}x) leaves no command running and no side effect`,
+      problems.length === 0,
+      () => problems.join("; "),
+    );
+  }
+
+  // A supervisor that does not acknowledge the stop within the bound (here
+  // its acknowledgement is held back 3 s against a 300 ms bound) is killed
+  // with its group while it is still this script's live child.
+  const marker = path.join(dir, "unanswered");
+  const handle = sandbox.start(process.execPath, ["-e", code], {
+    cwd: dir,
+    name: "self-race-unanswered",
+    env: sandbox.env({ NB_CHECK_RACE_MARKER: marker }),
+    testHooks: { ackDelayMs: 3000, stopAckMs: 300 },
+  });
+  await handle.ready;
+  const before = sandbox.signalsSent().length;
+  const gone = await sandbox.stopGroup(handle.pgid);
+  const sent = sandbox
+    .signalsSent()
+    .slice(before)
+    .filter((entry) => entry.pgid === handle.pgid);
+  await sleep(500);
+  const ran = fs.existsSync(marker);
+  const alive = pidAlive(handle.pid);
+  report.check(
+    "S a supervisor that does not acknowledge a stop is killed with its group",
+    gone &&
+      !ran &&
+      !alive &&
+      sent.length === 1 &&
+      sent[0].signal === "SIGKILL" &&
+      handle.stopAck === undefined,
+    `gone ${gone}, signals ${JSON.stringify(sent)}, side effect ${ran}, command alive ${alive}`,
+  );
+
+  // The supervisor never leaves a live command behind: a "release" while the
+  // command runs is refused and the supervisor stays (the group stays ours).
+  const held = sandbox.start(
+    process.execPath,
+    ["-e", "setTimeout(()=>{},20000)"],
+    {
+      cwd: dir,
+      name: "self-release-refused",
+    },
+  );
+  await held.ready;
+  const reply = held.reply("release");
+  held.child.send("release", () => {});
+  const answer = await Promise.race([reply, sleep(5000).then(() => "none")]);
+  await sleep(200);
+  const stayed = !held.leaderExited && pidAlive(held.pid);
+  const stopped = await sandbox.stopGroup(held.pgid);
+  report.check(
+    "S a release while the command runs is refused and the supervisor stays",
+    answer === "refused" && stayed && stopped && !pidAlive(held.pid),
+    `answer ${answer}, supervisor and command stayed ${stayed}, then stopped ${stopped}`,
+  );
+}
+
+/**
+ * R7-2: the transport table asks for ownership before every probe and stops
+ * at the first foreign listener, before sending anything to it.
+ */
+async function ownershipBeforeProbeControl(sandbox, report) {
+  const port = await sandbox.freePort();
+  const stub = await startStub(port);
+  const failures = [];
+  const quiet = {
+    ok() {},
+    fail: (name, detail) => failures.push(`${name}: ${detail}`),
+    check(name, condition, detail) {
+      if (!condition)
+        this.fail(name, typeof detail === "function" ? detail() : detail);
+      return Boolean(condition);
+    },
+  };
+  let asked = 0;
+  try {
+    await transportAssertions({
+      nextPort: port,
+      stub,
+      report: quiet,
+      owner: () => {
+        asked += 1;
+        return { state: "foreign", pids: [2] };
+      },
+    });
+  } finally {
+    await stub.close();
+  }
+  report.check(
+    "S the transport table stops at the first probe after the listener changed",
+    asked === 1 &&
+      stub.records.length === 0 &&
+      failures.length === 1 &&
+      /before every probe.*foreign.*after 0 probes/.test(failures[0]),
+    () =>
+      `asked ${asked}, upstream ${stub.records.length}, failures ${JSON.stringify(failures)}`,
+  );
+}
+
+/**
+ * R7-3: a service that left the owned group survives its shutdown; the A6
+ * check reports it (and never signals it). The control's own grandchild,
+ * detached into its own group, plays that service; it is ended afterwards
+ * by its recorded pid.
+ */
+async function movedServiceControl(sandbox, report) {
+  const pidFile = path.join(sandbox.root, "self-check", "moved-service.pid");
+  const code =
+    'const c=require("child_process").spawn(process.execPath,["-e","setTimeout(()=>{},20000)"],{detached:true,stdio:"ignore"});' +
+    'require("fs").writeFileSync(process.env.NB_CHECK_PID_FILE,String(c.pid));c.unref();setTimeout(()=>{},20000)';
+  const handle = sandbox.start(process.execPath, ["-e", code], {
+    cwd: sandbox.root,
+    name: "self-moved-service",
+    env: sandbox.env({ NB_CHECK_PID_FILE: pidFile }),
+  });
+  await waitFor(() => fs.existsSync(pidFile), 10_000, 50);
+  const moved = Number(fs.readFileSync(pidFile, "utf8"));
+  const gone = await sandbox.stopGroup(handle.pgid);
+  const survivors = await survivingPids([
+    ["moved", moved],
+    ["command", handle.pid],
+  ]);
+  report.check(
+    "S a service moved out of the owned group is reported after the shutdown",
+    gone &&
+      survivors.length === 1 &&
+      survivors[0][1] === moved &&
+      pidAlive(moved),
+    `group gone ${gone}, survivors ${JSON.stringify(survivors)}`,
+  );
+  // This run started it and recorded its pid: end it.
+  try {
+    process.kill(moved, "SIGKILL");
+  } catch {
+    // already gone
+  }
+}
+
+/** R7-4: A1 protects the exact manifests, not any package.json. */
+function dependencyManifestControl(report) {
+  const changed = [
+    "frontend/tests/fixtures/example/package.json",
+    "docs/package.json",
+    "frontend/package.json",
+    "package-lock.json",
+    "backend/requirements-dev.txt",
+    "backend/sub/requirements.txt",
+  ];
+  const found = dependencyManifests(changed);
+  const expected = [
+    "frontend/package.json",
+    "package-lock.json",
+    "backend/requirements-dev.txt",
+  ];
+  report.check(
+    "S A1 matches the exact manifests and not a fixture's package.json",
+    JSON.stringify(found) === JSON.stringify(expected),
+    `found ${JSON.stringify(found)}`,
+  );
+}
+
+/**
+ * R7-5: an lsof run that cannot run or fails is an error with its
+ * diagnostic, never an empty listener list; "no match" stays empty.
+ */
+function lsofFailureControl(sandbox, report) {
+  const throws = (result) => {
+    try {
+      lsofLines(result, "lsof", "p");
+      return false;
+    } catch {
+      return true;
+    }
+  };
+  const missing = spawnSync("nb-check-no-such-lsof", [], {
+    encoding: "utf8",
+    env: { PATH: process.env.PATH ?? "" },
+  });
+  const cases = [
+    ["lsof missing", throws(missing)],
+    [
+      "status 1 with a diagnostic",
+      throws({ status: 1, stdout: "", stderr: "lsof: bad option" }),
+    ],
+    [
+      "killed",
+      throws({ status: null, signal: "SIGKILL", stdout: "", stderr: "" }),
+    ],
+    ["no match is empty", !throws({ status: 1, stdout: "", stderr: "" })],
+    [
+      "a real unused port",
+      (() => {
+        try {
+          return sandbox.listenerPids(1).length === 0;
+        } catch {
+          return false;
+        }
+      })(),
+    ],
+  ];
+  report.check(
+    "S a failing lsof is an error, an unused port an empty list",
+    cases.every(([, ok]) => ok),
+    () =>
+      cases
+        .filter(([, ok]) => !ok)
+        .map(([name]) => name)
+        .join(", "),
+  );
 }
 
 /**

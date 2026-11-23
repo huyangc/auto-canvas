@@ -251,14 +251,63 @@ const FORWARDED = [
   ["/canvas/...", "/@notebook/canvas/..."],
 ];
 
-/** The transport table: what a Next server with the two canvas rules must do. */
+/** Thrown by a probe when the server no longer owns its port. */
+class OwnershipLost extends Error {}
+
+/**
+ * The transport table: what a Next server with the two canvas rules must do.
+ * `owner()` returns `{ state, pids }` for the server's port (see
+ * `listenerState`); it is asked before every probe, and the table stops at
+ * the first answer that is not "owned" (R7-2): a replacement listener never
+ * receives a request.
+ */
 export async function transportAssertions({
   nextPort,
   stub,
   report,
   prefix = "",
+  owner,
+}) {
+  const name = `${prefix}the server owned its port before every probe`;
+  let probes = 0;
+  try {
+    await transportTable({
+      nextPort,
+      stub,
+      report,
+      prefix,
+      owner,
+      count: () => (probes += 1),
+    });
+  } catch (error) {
+    if (!(error instanceof OwnershipLost)) throw error;
+    report.fail(
+      name,
+      `${error.message} (after ${probes} probes; the table stops here)`,
+    );
+    return false;
+  }
+  if (owner) report.ok(`${name} (${probes} probes)`);
+  return true;
+}
+
+async function transportTable({
+  nextPort,
+  stub,
+  report,
+  prefix,
+  owner,
+  count,
 }) {
   const probe = async (rawPath) => {
+    if (owner) {
+      const { state, pids } = owner();
+      if (state !== "owned")
+        throw new OwnershipLost(
+          `port ${nextPort} is ${state} (listeners ${pids.join(", ") || "none"}) before GET ${JSON.stringify(rawPath)}`,
+        );
+    }
+    count();
     const mark = stub.records.length;
     let res;
     try {
