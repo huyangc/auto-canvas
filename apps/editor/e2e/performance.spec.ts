@@ -201,11 +201,19 @@ test.describe("editor latency on a large Project", () => {
   test.skip(!enabled, "set ICM_PERF=1 to run the latency harness");
 
   test.beforeAll(async () => {
-    server = await preview({
-      root: resolve(process.cwd(), "apps/editor"),
-      logLevel: "silent",
-      preview: { host: "127.0.0.1", port: previewPort, strictPort: true },
-    });
+    // This preview runs in the test worker, outside Playwright's webServer env.
+    const originalApi = process.env.AUTO_CANVAS_API_URL;
+    process.env.AUTO_CANVAS_API_URL ??= `http://127.0.0.1:${process.env.AUTO_CANVAS_E2E_API_PORT ?? "4311"}`;
+    try {
+      server = await preview({
+        root: resolve(process.cwd(), "apps/editor"),
+        logLevel: "silent",
+        preview: { host: "127.0.0.1", port: previewPort, strictPort: true },
+      });
+    } finally {
+      if (originalApi === undefined) delete process.env.AUTO_CANVAS_API_URL;
+      else process.env.AUTO_CANVAS_API_URL = originalApi;
+    }
     origin =
       server.resolvedUrls?.local[0] ?? `http://127.0.0.1:${previewPort}/`;
   });
