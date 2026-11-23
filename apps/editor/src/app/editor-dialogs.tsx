@@ -309,9 +309,12 @@ export function EditorDialogs({
               exportOnly: projectStore === null,
               nativeSave: nativeProjectStore !== undefined,
               saving: replaceGuardSaving,
-              onCancel: cancelReplaceGuard,
-              onSaveAndContinue: saveAndContinueReplaceGuard,
-              onDiscard: confirmReplaceGuard,
+              // Bound to this confirmation: a callback left from an earlier
+              // dialog answers nothing once another one is on screen.
+              onCancel: () => cancelReplaceGuard(replaceGuard.id),
+              onSaveAndContinue: () =>
+                saveAndContinueReplaceGuard(replaceGuard.id),
+              onDiscard: () => confirmReplaceGuard(replaceGuard.id),
             }
           : null
       }

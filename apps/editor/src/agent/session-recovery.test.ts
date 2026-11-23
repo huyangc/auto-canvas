@@ -78,7 +78,7 @@ describe("Agent same-browser session recovery", () => {
     expect(hasAgentSessionRecovery(storage)).toBe(false);
   });
 
-  it("deletes malformed records and preserves pairing across Projects; the server verifies deadlines", () => {
+  it("deletes malformed records and reconnects only the working copy it was written for", () => {
     const storage = new MemoryStorage();
     storage.setItem(AGENT_SESSION_RECOVERY_STORAGE_KEY, "not-json");
     expect(readAgentSessionRecovery(storage, target)).toBeNull();
@@ -90,13 +90,19 @@ describe("Agent same-browser session recovery", () => {
       expiresAt: target.now,
     });
 
+    // A proof from another working copy (another tab, a replaced Project)
+    // is not evidence for this one.
     writeAgentSessionRecovery(storage, record());
     expect(
       readAgentSessionRecovery(storage, {
         ...target,
         projectSessionId: "different-project:1",
       }),
-    ).toEqual(record());
+    ).toBeNull();
+    expect(
+      readAgentSessionRecovery(storage, { ...target, projectId: "other" }),
+    ).toBeNull();
+    expect(readAgentSessionRecovery(storage, target)).toEqual(record());
   });
 
   it("clears recovery only when a terminal lifecycle action requests it", () => {
