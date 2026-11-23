@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs";
 
 import {
   buildProjectConnectivityIndex,
-  evaluateSubmissionGates,
   pointOnSegment,
   resolveAnnotationText,
   resolveDocumentLogicalNets,
@@ -527,12 +526,8 @@ describe("the bundled five-transistor Sky130 OTA", () => {
     });
   });
 
-  it("passes the Check-and-Save gates with no electrical rule issue", () => {
+  it("has no electrical rule issue", () => {
     const resolver = projectResolver(project);
-    expect(evaluateSubmissionGates(project, resolver)).toEqual({
-      ok: true,
-      failures: [],
-    });
     expect(
       runErcChecks(
         project,

@@ -24,7 +24,7 @@ interface PlanningTiming {
 let active: PlanningTiming | undefined;
 const measurements = new WeakMap<AutoLayoutResult, PlanningTiming>();
 
-/** @internal Evaluation-only timings; never influence deterministic output. */
+/** Evaluation-only timings; never influence deterministic output. */
 export function planningTiming(result: AutoLayoutResult) {
   return measurements.get(result);
 }

@@ -3,7 +3,7 @@ import type { SymbolResolver } from "@icm/symbols";
 import { partitionBounds } from "./partition-geometry.js";
 import type { LayoutPartition } from "./types.js";
 
-/** @internal Evaluation-only comparison; never fed into prompt construction. */
+/** Evaluation-only comparison; never fed into prompt construction. */
 export function partitionMetrics(
   human: SchematicDocument,
   resolver: SymbolResolver,
@@ -101,7 +101,7 @@ export function partitionMetrics(
   };
 }
 
-/** @internal ARI on two complete partitions of the same universe. */
+/** ARI on two complete partitions of the same universe. */
 export function adjustedRandIndex(a: string[][], b: string[][]): number {
   const choose2 = (n: number) => (n * (n - 1)) / 2;
   const pairs = choose2(a.flat().length);

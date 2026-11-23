@@ -2,8 +2,7 @@
 
 Status: `accepted`
 
-Primary owners: `apps/server/src/agent-relay/agent-session.ts`,
-`apps/server/src/agent-relay/agent-session-runtime.ts`,
+Primary owners: `apps/server/src/agent-relay/agent-session-runtime.ts`,
 `apps/server/src/agent-relay/agent-session-do.ts`, and `apps/editor/src/agent`
 
 The browser Project is authoritative; the relay only forwards. Circuit

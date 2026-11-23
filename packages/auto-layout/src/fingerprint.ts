@@ -18,7 +18,7 @@ interface Graph {
   edges: Edge[];
 }
 
-/** @internal Offline library contract; sources contain aggregate evidence only. */
+/** Offline library contract; sources contain aggregate evidence only. */
 export interface FingerprintEntry {
   hash: string;
   canonical: string;
@@ -121,7 +121,7 @@ function circuitGraph(
   return { version: 1 as const, nodes, edges };
 }
 
-/** @internal R120: geometry-free, typed bipartite fingerprint. */
+/** R120: geometry-free, typed bipartite fingerprint. */
 export function blockFingerprint(
   document: SchematicDocument,
   resolver: SymbolResolver,
@@ -195,7 +195,7 @@ function parseGraph(canonical: string): Graph {
   return graph;
 }
 
-/** @internal R121: validate at the file boundary; the package performs no I/O. */
+/** R121: validate at the file boundary; the package performs no I/O. */
 export function parseFingerprintLibrary(value: unknown): {
   version: 1;
   entries: FingerprintEntry[];
@@ -244,7 +244,7 @@ export function parseFingerprintLibrary(value: unknown): {
   return value as unknown as { version: 1; entries: FingerprintEntry[] };
 }
 
-/** @internal R122: typed, injective backtracking with a shared search-node budget.
+/** R122: typed, injective backtracking with a shared search-node budget.
  * Budget exhaustion returns the deterministic partial result and explicit status. */
 export function matchFingerprints(
   document: SchematicDocument,

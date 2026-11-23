@@ -6,22 +6,21 @@ Primary owner: `packages/spice`
 `convertNetlist` is a pure TypeScript port of netlist-crawler's MIT structural
 translator (license and attribution in
 `packages/spice/third-party/netlist-crawler/`, also carried in the source for
-bundles). The Worker and Vite dev server expose `POST /api/netlist/convert`;
-editor SCS import calls the core directly so it works offline. No other
-service, process, account or simulator. Canonical SPICE/Spectre export
-printers stay the authority for authored exports.
+bundles). Editor SCS import calls the core directly so it works offline;
+there is no HTTP endpoint. No other service, process, account or simulator.
+Canonical SPICE/Spectre export printers stay the authority for authored
+exports.
 
-## Protocol
+## Core interface
 
-Request `{ text, source, target, fragment }`; `source`/`target` are `spice`,
-`ngspice` (alias) or `spectre`.
+`convertNetlist({ text, source, target, fragment })`; `source`/`target` are
+`spice`, `ngspice` (alias) or `spectre`.
 
-- 200 `{ status: "converted", text, source, target, issues }`.
-- 422 `{ status: "blocked", diagnostics }` with original `line`, `statement`,
-  `code`, `message`; no partial text.
-- 400 invalid JSON/envelope, 405 method, 415 media type, 413 size: text ≤
-  512 KiB and 10,000 non-comment statements, body ≤ 1 MiB.
-- Responses `no-store`; input is never stored or executed.
+- Converted: `{ status: "converted", text, source, target, issues }`.
+- Blocked: `{ status: "blocked", issues }` with the original `line`,
+  `statement`, `code` and `message` of each issue; no partial text.
+- Limits: text ≤ 512 KiB and 10,000 non-comment statements.
+- Input is never stored or executed.
 - Default is a fragment. `fragment: false` treats a SPICE source's first
   physical line as its title and appends `.end` to SPICE output if absent.
   Conversion is not simulator validation.
@@ -50,7 +49,7 @@ Request `{ text, source, target, fragment }`; `source`/`target` are `spice`,
   in a `simulator lang=spice` section for SCS (no translation or
   qualification); existing SPICE sections stay SPICE. The editor's import
   reads each SPICE section as its own SPICE file, its bytes as written, and
-  leaves it out of the size and statement limits; the endpoint counts it.
+  leaves it out of the size and statement limits; other callers count it.
 - Native export stand-ins read as SPICE models: `bsim4 type=n|p` as
   `nmos|pmos level=54`, `bjt type=npn|pnp` with `is`, `bf`, `vaf`, and
   `diode` with `is`, `n`. The bipolar and diode mappings cover only these

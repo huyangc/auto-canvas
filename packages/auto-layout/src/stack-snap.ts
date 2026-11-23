@@ -131,7 +131,7 @@ export function stackHolds(
  * different drains) or differential pair (same non-rail source Net, different
  * gates and drains) of one polarity.
  */
-export function pairMembers(
+function pairMembers(
   devices: readonly Instance[],
   roles: NetRoles,
 ): Set<string> {

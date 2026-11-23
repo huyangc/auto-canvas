@@ -16,7 +16,7 @@ export function partitionDocuments(
     : [document];
 }
 
-/** @internal Evaluation and finishing use the same visible block bounds. */
+/** Evaluation and finishing use the same visible block bounds. */
 export function partitionBounds(
   document: SchematicDocument,
   resolver: SymbolResolver,

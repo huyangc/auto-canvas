@@ -44,4 +44,4 @@ test("imports SCS and local includes, copies SPICE, and retains the circuit afte
   expect(await copyNetlistText(page)).toBe(text);
 });
 
-// The local server's conversion endpoint is dev/netlist-conversion.test.ts.
+// The conversion core's own cases are packages/spice/src/conversion.test.ts.

@@ -450,7 +450,7 @@ export async function expectComponentCodeField(
 }
 
 /** The bytes of the file that `action` makes the page download. */
-export async function downloaded(
+async function downloaded(
   page: Page,
   action: () => Promise<void>,
 ): Promise<Buffer> {

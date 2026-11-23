@@ -161,14 +161,6 @@ export function drivingOutput(
   }
 }
 
-/** R164: the output pin point of a driver under its current placement. */
-export function drivingPoint(
-  driver: { instance: Instance; pin: SymbolPin },
-  placement: Placement,
-) {
-  return transformPoint(driver.pin.at, placement.position, placement);
-}
-
 /**
  * R164: after a mirror, turn a block whose output now leaves to the left back
  * to face right in place: reflect it left-right again and shift it so its

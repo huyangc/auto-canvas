@@ -18,7 +18,7 @@ const CONSENSUS_THRESHOLD = 0.5;
 const MAX_DEVICE_SHARE = 0.5;
 const MAX_DEVICE_COUNT = 12;
 
-/** @internal Check T029's output before the planner's legacy L0 merges. */
+/** Check T029's output before the planner's legacy L0 merges. */
 export function partitionInvariantErrors(
   document: SchematicDocument,
   resolver: SymbolResolver,
@@ -90,7 +90,7 @@ function sampleClusters(sample: LlmPartitionResult, ids: string[]): string[][] {
   return [...clusters, ...ids.filter((id) => !seen.has(id)).map((id) => [id])];
 }
 
-/** @internal R113: accept consensus proposals and complete with graph rules. */
+/** R113: accept consensus proposals and complete with graph rules. */
 export function reconcilePartition(
   document: SchematicDocument,
   resolver: SymbolResolver,

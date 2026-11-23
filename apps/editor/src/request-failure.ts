@@ -15,11 +15,6 @@ export interface RequestFailure {
   message: string;
 }
 
-/** Whether a read's answer is a failure rather than what it asked for. */
-export function isRequestFailure(value: unknown): value is RequestFailure {
-  return typeof value === "object" && value !== null && "failure" in value;
-}
-
 /** A fetch that threw: the browser never reached the server. */
 export const OFFLINE_FAILURE: RequestFailure = {
   failure: "offline",

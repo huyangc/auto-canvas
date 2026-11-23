@@ -59,16 +59,6 @@ const sessionRequests = /* @__PURE__ */ new WeakMap<
   { expiresAt: number; request: Promise<SessionUserResult> }
 >();
 
-export function cacheSessionUser(
-  fetchLike: typeof fetch,
-  user: SessionUser | null,
-): void {
-  sessionRequests.set(fetchLike, {
-    expiresAt: Date.now() + SESSION_CACHE_MS,
-    request: Promise.resolve({ available: true, user }),
-  });
-}
-
 /** The signed-in user, or null (also on any failure). */
 export async function fetchSessionUser(
   fetchLike: typeof fetch = fetch,
@@ -196,70 +186,6 @@ export async function verifyEmailCode(
   }
 }
 
-export async function renameAccount(
-  displayName: string,
-  fetchLike: typeof fetch = fetch,
-): Promise<SessionUser | null> {
-  try {
-    const response = await fetchLike(apiUrl("auth/profile"), {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ displayName }),
-    });
-    if (!response.ok) return null;
-    const payload = (await response.json()) as { user?: SessionUser };
-    return payload.user ?? null;
-  } catch {
-    return null;
-  }
-}
-
-export type DeleteAccountResult =
-  | {
-      ok: true;
-      deleted: {
-        circuits: number;
-        likes: number;
-        projects: number;
-        components: number;
-      };
-    }
-  | { ok: false; message: string };
-
-/** Deletes the signed-in account and everything the site keeps for it. */
-export async function deleteAccount(
-  fetchLike: typeof fetch = fetch,
-): Promise<DeleteAccountResult> {
-  try {
-    const response = await fetchLike(apiUrl("auth/account/delete"), {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ confirm: "delete-account" }),
-    });
-    if (response.ok) {
-      const payload = (await response.json()) as {
-        deleted: Extract<DeleteAccountResult, { ok: true }>["deleted"];
-      };
-      return { ok: true, deleted: payload.deleted };
-    }
-    if (response.status === 401)
-      return { ok: false, message: "You are signed out. Sign in again." };
-    return {
-      ok: false,
-      message:
-        "Could not delete the account. You are still signed in; try again in a moment.",
-    };
-  } catch {
-    return {
-      ok: false,
-      message:
-        "Could not reach the site. You are still signed in; try again in a moment.",
-    };
-  }
-}
-
 /** Switches this browser back from an AI account to the Owner's own. */
 async function returnToOwner(
   fetchLike: typeof fetch = fetch,
@@ -275,7 +201,7 @@ async function returnToOwner(
   }
 }
 
-export async function signOut(fetchLike: typeof fetch = fetch): Promise<void> {
+async function signOut(fetchLike: typeof fetch = fetch): Promise<void> {
   try {
     await fetchLike(apiUrl("auth/logout"), {
       method: "POST",

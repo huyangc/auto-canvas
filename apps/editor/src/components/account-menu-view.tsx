@@ -1,8 +1,7 @@
 import { apiUrl } from "../lib/app-url";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { accountInitial, type AccountMenuViewProps } from "./account";
 import { GitHubMark, GoogleMark } from "./provider-marks";
-import { OPEN_SIGN_IN_EVENT, takeSignInRequest } from "./sign-in-request";
 
 /** Presentational account area; all effects live in `AccountMenu`. */
 export default function AccountMenuView({
@@ -20,27 +19,7 @@ export default function AccountMenuView({
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const signIn = useRef<HTMLDetailsElement | null>(null);
   const { providers, user } = state;
-
-  // An invitation to sign in anywhere on the page opens these choices, also
-  // one made while they were still loading.
-  useEffect(() => {
-    const open = () => {
-      const details = signIn.current;
-      if (!details || !takeSignInRequest()) return;
-      details.open = true;
-      details.scrollIntoView({ block: "nearest" });
-      details
-        .querySelector<HTMLElement>(
-          ".account-signin-panel a, .account-signin-panel input",
-        )
-        ?.focus();
-    };
-    window.addEventListener(OPEN_SIGN_IN_EVENT, open);
-    open();
-    return () => window.removeEventListener(OPEN_SIGN_IN_EVENT, open);
-  }, []);
 
   const sendCode = async (address: string) => {
     setBusy(true);
@@ -113,11 +92,7 @@ export default function AccountMenuView({
 
   const notes = message ?? notice;
   return (
-    <details
-      ref={signIn}
-      className="account-signin"
-      data-testid="account-signin"
-    >
+    <details className="account-signin" data-testid="account-signin">
       <summary>Sign in</summary>
       <div className="account-signin-panel">
         {providers.github ? (

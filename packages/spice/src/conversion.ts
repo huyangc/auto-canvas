@@ -50,7 +50,7 @@ export interface NetlistConversionOptions {
   withLineOrigins?: boolean;
   /** A Spectre source's SPICE sections pass through untranslated; set, they
    * do not count toward the size and statement limits (#1933). The editor's
-   * import sets it; the public endpoint bounds the whole text. */
+   * import sets it; other callers bound the whole text. */
   uncountedSpiceSections?: boolean;
 }
 export type NetlistConversionResult =
@@ -64,7 +64,7 @@ export type NetlistConversionResult =
     }
   | { status: "blocked"; issues: NetlistConversionIssue[] };
 export const MAX_CONVERSION_BYTES = 512 * 1024;
-export const isNetlistDialect = (value: unknown): value is NetlistDialect =>
+const isNetlistDialect = (value: unknown): value is NetlistDialect =>
   value === "spice" || value === "ngspice" || value === "spectre";
 
 class ConversionError extends Error {

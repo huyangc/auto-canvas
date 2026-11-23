@@ -21,7 +21,7 @@ on. Each topic has one owner spec; others link to it.
 | [`persistence-and-recovery.md`](persistence-and-recovery.md) | Cloud Save, browser recovery, workspace, desktop files                |
 | [`export.md`](export.md)                                     | Formal SVG/PNG/PDF                                                    |
 | [`netlist-export.md`](netlist-export.md)                     | Extraction, SPICE/Spectre printing, refusals (sole owner)             |
-| [`netlist-conversion.md`](netlist-conversion.md)             | SPICE/SCS conversion protocol and import boundary                     |
+| [`netlist-conversion.md`](netlist-conversion.md)             | SPICE/SCS conversion core and import boundary                         |
 | [`rnl-interchange.md`](rnl-interchange.md)                   | RNL export formats and import (proposed)                              |
 | [`performance.md`](performance.md)                           | Benchmark workloads and release budgets                               |
 | [`editor-interaction.md`](editor-interaction.md)             | Gestures, selection, previews, controls (sole owner)                  |
