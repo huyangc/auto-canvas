@@ -723,7 +723,7 @@ describe("standalone accounts", () => {
     const again = await credentials("login", "a12345678");
     expect(again.status).toBe(200);
     const firstCookie = await boundCookie(first),
-      otherCookie = cookieFrom(again);
+      otherCookie = await boundCookie(again);
     expect(firstCookie).not.toEqual(otherCookie);
     expect(
       (await request("/api/auth/logout", "POST", undefined, firstCookie))
@@ -807,7 +807,19 @@ describe("standalone accounts", () => {
     expect(created.status).toBe(201);
     const { project } = await created.json();
     const path = "/api/projects/" + project.id;
-    const signedInAgain = cookieFrom(await credentials("login", "a12345678"));
+    for (const unbound of [
+      "/api/projects",
+      path,
+      path + "/preview.svg",
+      path + "/versions",
+    ]) {
+      expect(
+        (await request(unbound, "GET", undefined, { Cookie: a.Cookie })).status,
+      ).toBe(401);
+    }
+    const signedInAgain = await boundCookie(
+      await credentials("login", "a12345678"),
+    );
     expect(
       (await (await request(path, "GET", undefined, signedInAgain)).json())
         .project.projectText,

@@ -1486,6 +1486,8 @@ export function useAgentSession(
             method: "DELETE",
             headers: { "x-editor-secret": live.editorSecret },
             keepalive: true,
+          }).catch(() => {
+            /* A disconnected relay expires the unclaimed session. */
           });
         }
         live.socket?.close(1000, "tab closed");

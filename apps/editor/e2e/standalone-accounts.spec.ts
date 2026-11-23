@@ -71,6 +71,14 @@ test("accounts reopen their saved drawing in another browser and isolate local d
       .click();
     await expect(fresh.locator(".app-project-name-text")).toHaveText(name);
     await expect(fresh.getByTestId("hit-R1")).toBeVisible();
+    await (
+      await projectTabAction(fresh, "Open Shelf project in tab")
+    )
+      .getByRole("button", { name: "Browse Cloud Projects…" })
+      .click();
+    await expect(
+      fresh.getByRole("img", { name: "Preview of " + name }),
+    ).toHaveAttribute("src", /^blob:/);
   } finally {
     await fresh.close();
   }

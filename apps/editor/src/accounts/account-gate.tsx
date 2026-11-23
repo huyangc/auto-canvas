@@ -5,25 +5,8 @@ import { bindAccountStorage } from "./storage";
 import { AccountContext } from "./account-context";
 import "./accounts.css";
 
-type Account = { id: string; displayName: string };
-type Identity = { mode: "local" } | { mode: "accounts"; user: Account | null };
-async function identify(): Promise<Identity> {
-  const res = await fetch(apiUrl("session"), {
-    cache: "no-store",
-    redirect: "error",
-  });
-  const result = await res.json();
-  if (res.ok && result?.mode === "local") return { mode: "local" };
-  if (
-    res.ok &&
-    result?.mode === "accounts" &&
-    (result.user === null ||
-      (typeof result.user?.id === "string" &&
-        typeof result.user.displayName === "string"))
-  )
-    return result;
-  throw Error("Cannot reach the account server.");
-}
+import { identify } from "./session";
+
 const eventKey = () => `auto-canvas:session:${import.meta.env.BASE_URL}`;
 function announce() {
   try {
@@ -176,12 +159,25 @@ export function mountAccountGate(
           !url.pathname.startsWith(apiBase.pathname)
         )
           return nativeFetch(input, init);
-        if (closing) throw Error("The account session has ended");
         const req = new Request(input instanceof Request ? input : url, {
           ...init,
           redirect: "error",
           cache: "no-store",
         });
+        if (closing) {
+          // Unmount revokes unclaimed pairings with the editor secret alone.
+          if (
+            req.method === "DELETE" &&
+            req.keepalive &&
+            req.headers.has("x-editor-secret") &&
+            /^agent\/sessions\/[^/]+$/u.test(
+              url.pathname.slice(apiBase.pathname.length),
+            )
+          ) {
+            return nativeFetch(req, { credentials: "omit" });
+          }
+          throw Error("The account session has ended");
+        }
         if (req.mode === "no-cors")
           throw Error("Account requests require same-origin headers");
         req.headers.set("X-Canvas-Account", id);

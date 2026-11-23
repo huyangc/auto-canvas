@@ -1,16 +1,5 @@
-import { lazy, Suspense, useState } from "react";
-
-// The notebook build fetches API images with the session's header. Loaded
-// lazily so that the standard build keeps no part of src/notebook/.
-// A chunk that failed to load shows no image rather than ending the editor.
-const NotebookApiImage = import.meta.env.ICM_NOTEBOOK
-  ? lazy(() =>
-      import("../notebook/api-image").then(
-        (module) => ({ default: module.ApiImage }),
-        () => ({ default: () => null }),
-      ),
-    )
-  : null;
+import { useState } from "react";
+import { ProjectPreviewImage } from "./api-image";
 
 /**
  * A Cloud Project thumbnail that degrades gracefully: when the preview
@@ -68,19 +57,8 @@ export function TilePreview({
             strokeLinecap="round"
           />
         </svg>
-      ) : import.meta.env.ICM_NOTEBOOK && NotebookApiImage ? (
-        <Suspense fallback={null}>
-          <NotebookApiImage
-            src={src}
-            alt={alt}
-            loading="lazy"
-            decoding="async"
-            {...(hasIntrinsicSize ? { width, height } : {})}
-            onError={() => setFailed(true)}
-          />
-        </Suspense>
       ) : (
-        <img
+        <ProjectPreviewImage
           src={src}
           alt={alt}
           loading="lazy"
