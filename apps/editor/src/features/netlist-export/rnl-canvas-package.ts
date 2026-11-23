@@ -1,3 +1,4 @@
+// Vite config and the standalone lock verifier load this before workspace packages are built.
 import { digestSha256Hex } from "@icm/model/sha256";
 import lock from "./rnl-canvas-package.lock.json" with { type: "json" };
 

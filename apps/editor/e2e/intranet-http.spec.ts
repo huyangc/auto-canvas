@@ -4,6 +4,7 @@ import { openEditor, showNetlistPanel } from "./editor-fixtures";
 
 test.beforeEach(async ({ page, baseURL }) => {
   const url = new URL(baseURL!);
+  test.skip(url.protocol !== "http:", "Requires an ordinary HTTP origin");
   // The same local server, via an IPv4-mapped address Chromium treats as
   // ordinary HTTP. Leave browser APIs untouched, including in Workers.
   if (["localhost", "127.0.0.1"].includes(url.hostname))
@@ -42,7 +43,9 @@ test("generates the rich SPICE netlist over HTTP", async ({ page }) => {
 
 test("rejects changed RNL package bytes over HTTP", async ({ page }) => {
   await page.route("**/*analog-canvas-extensions*.rnl*", (route) =>
-    route.fulfill({ body: "changed package" }),
+    route.request().resourceType() === "fetch"
+      ? route.fulfill({ body: "changed package" })
+      : route.continue(),
   );
   const panel = await showNetlistPanel(page);
   await panel.getByLabel("Netlist format").selectOption("spice+rnl");
