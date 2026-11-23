@@ -63,9 +63,7 @@ export function useFileDrop(options: {
       // Leaving the window clears whatever pairing was lost: an element
       // that unmounted under the file takes its own dragleave with it.
       depthRef.current =
-        event.relatedTarget === null
-          ? 0
-          : Math.max(0, depthRef.current - 1);
+        event.relatedTarget === null ? 0 : Math.max(0, depthRef.current - 1);
       refresh();
     };
 
