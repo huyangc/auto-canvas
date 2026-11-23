@@ -243,7 +243,9 @@ export function registerAccounts(
         } finally {
           conn.release();
         }
-        await relay.endAccountPairings(retired);
+        // The committed transaction already removed these credentials. Sweep
+        // historical relay objects without holding up this sign-in response.
+        void relay.endAccountPairings(retired);
         issueCookie(c, token);
         return c.json({ ok: true }, action === "register" ? 201 : 200);
       } finally {

@@ -763,6 +763,13 @@ describe("standalone accounts", () => {
         { Authorization: "Bearer " + live.claim.agentToken },
       );
       expect(events.status).toBe(200);
+      const replaced = await request(
+        "/api/agent/sessions/" + live.session.sessionId + "/control",
+        "POST",
+        { action: "replace-project" },
+        { "x-editor-secret": live.session.editorSecret },
+      );
+      expect(replaced.status).toBe(200);
       expect(await events.text()).toContain("session.revoked");
       expect((await (await status(live)).json()).error.code).toBe(
         "SESSION_REVOKED",
