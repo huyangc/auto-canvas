@@ -60,7 +60,12 @@ export function useFileDrop(options: {
       if (!carriesFiles(event)) return;
       event.preventDefault();
       event.stopPropagation();
-      depthRef.current = Math.max(0, depthRef.current - 1);
+      // Leaving the window clears whatever pairing was lost: an element
+      // that unmounted under the file takes its own dragleave with it.
+      depthRef.current =
+        event.relatedTarget === null
+          ? 0
+          : Math.max(0, depthRef.current - 1);
       refresh();
     };
 
@@ -95,11 +100,19 @@ export function useFileDrop(options: {
       );
     };
 
+    // A drag the page started itself ends here; an outside drag's dragend
+    // belongs to the OS source, so the leave reset above covers it.
+    const onDragEnd = (): void => {
+      depthRef.current = 0;
+      setDragActive(false);
+    };
+
     const listeners: [string, (event: DragEvent) => void][] = [
       ["dragenter", onDragEnter],
       ["dragover", onDragOver],
       ["dragleave", onDragLeave],
       ["drop", onDrop],
+      ["dragend", onDragEnd],
     ];
     for (const [type, listener] of listeners)
       window.addEventListener(type, listener as EventListener, true);

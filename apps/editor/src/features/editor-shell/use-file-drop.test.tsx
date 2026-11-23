@@ -167,6 +167,28 @@ it("counts the elements a file is over, and drops the count at a drop", async ()
   expect(latest.dragActive).toBe(true);
   await dispatch("drop", data);
   expect(latest.dragActive).toBe(false);
+
+  // Leaving the window clears counts whose leaving events were lost with an
+  // element that unmounted under the file. jsdom's Event has no
+  // relatedTarget, so say so on each.
+  await dispatch("dragenter", data);
+  await dispatch("dragenter", data, child);
+  await dispatch("dragenter", data, child);
+  expect(latest.dragActive).toBe(true);
+  const leaving = new Event("dragleave", { bubbles: true, cancelable: true });
+  Object.defineProperty(leaving, "dataTransfer", { value: data });
+  Object.defineProperty(leaving, "relatedTarget", { value: null });
+  await act(async () => {
+    child.dispatchEvent(leaving);
+  });
+  expect(latest.dragActive).toBe(false);
+  expect(leaving.defaultPrevented).toBe(true);
+
+  // A drag this page started ends on dragend.
+  await dispatch("dragenter", data);
+  expect(latest.dragActive).toBe(true);
+  await dispatch("dragend", data);
+  expect(latest.dragActive).toBe(false);
 });
 
 it("does nothing, and shows nothing, behind a modal dialog", async () => {
