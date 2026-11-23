@@ -42,7 +42,6 @@
       "@icm/math-typesetting/profile": [
         "./packages/math-typesetting/src/profile.ts"
       ],
-      "@icm/model/sha256": ["./packages/model/src/sha256.ts"],
       "@icm/model": ["./packages/model/src/index.ts"],
       "@icm/project-protocol": ["./packages/project-protocol/src/index.ts"],
       "@icm/netlist": ["./packages/netlist/src/index.ts"],

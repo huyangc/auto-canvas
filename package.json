@@ -20,8 +20,8 @@
     "@icm/component-library": "workspace:*"
   },
   "scripts": {
-    "rnl:package:check": "node --conditions=development scripts/rnl-canvas-package.mjs --check",
-    "rnl:package:fetch": "node --conditions=development scripts/rnl-canvas-package.mjs --fetch",
+    "rnl:package:check": "node scripts/rnl-canvas-package.mjs --check",
+    "rnl:package:fetch": "node scripts/rnl-canvas-package.mjs --fetch",
     "build": "pnpm -r --if-present build",
     "performance:check": "pnpm build && node scripts/performance-baseline.mjs",
     "export:golden": "pnpm build && node scripts/export-golden.mjs",
