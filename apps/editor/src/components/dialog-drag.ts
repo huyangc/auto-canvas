@@ -93,6 +93,8 @@ export function useDialogDrag(
   margin: number = DRAG_MARGIN,
 ): (event: PointerEvent<HTMLElement>) => void {
   const offset = useRef<DragOffset>({ x: 0, y: 0 });
+  /** The element `offset` belongs to; a reopened dialog is a new one. */
+  const dragged = useRef<HTMLElement | null>(null);
   const stopDrag = useRef<(() => void) | null>(null);
   // A dialog unmounted mid-drag (Escape) takes its listeners with it.
   useEffect(() => () => stopDrag.current?.(), []);
@@ -104,6 +106,13 @@ export function useDialogDrag(
       const target = event.target;
       if (target instanceof Element && target.closest(INTERACTIVE)) return;
       stopDrag.current?.();
+      // Closing the dialog unmounts it while this hook keeps living, so a
+      // reopened dialog carries no transform but the old offset would still
+      // shift its first drag. The element is the owner of the offset.
+      if (dragged.current !== dialog) {
+        dragged.current = dialog;
+        offset.current = { x: 0, y: 0 };
+      }
 
       const header = event.currentTarget;
       const rect = dialog.getBoundingClientRect();

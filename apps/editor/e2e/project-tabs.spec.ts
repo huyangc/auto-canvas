@@ -1611,22 +1611,24 @@ test("the Browse dialog tiles its cards evenly, closes from its × and drags by 
   // Every card starts at the top of its own column. Without the masonry
   // layout rules the second card keeps its flow place: one card lower, cut
   // off by the window.
-  await expect
-    .poll(() =>
-      dialog
-        .locator(".shelf-tile-preview img")
-        .evaluateAll(
-          (images) =>
-            images.length === 2 &&
-            images.every(
-              (image) =>
-                image instanceof HTMLImageElement &&
-                image.complete &&
-                image.naturalWidth > 0,
-            ),
-        ),
-    )
-    .toBe(true);
+  const previewsSettled = () =>
+    expect
+      .poll(() =>
+        dialog
+          .locator(".shelf-tile-preview img")
+          .evaluateAll(
+            (images) =>
+              images.length === 2 &&
+              images.every(
+                (image) =>
+                  image instanceof HTMLImageElement &&
+                  image.complete &&
+                  image.naturalWidth > 0,
+              ),
+          ),
+      )
+      .toBe(true);
+  await previewsSettled();
   const first = dialog.getByTestId("shelf-tile-cloud-alpha");
   const second = dialog.getByTestId("shelf-tile-cloud-beta");
   const firstBox = (await first.boundingBox())!;
@@ -1673,6 +1675,24 @@ test("the Browse dialog tiles its cards evenly, closes from its × and drags by 
     Math.abs(clamped.y + clamped.height - (viewport.height - 8)),
   ).toBeLessThanOrEqual(1);
 
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(dialog).toBeHidden();
+
+  // Reopening centers a new window, and its first drag starts from there:
+  // the offset of the closed one must not leap into it.
+  await shelf.getByRole("button", { name: "Browse Cloud Projects…" }).click();
+  await expect(dialog).toBeVisible();
+  await previewsSettled();
+  const reopened = (await dialog.boundingBox())!;
+  expect(Math.abs(reopened.x - dialogBox.x)).toBeLessThanOrEqual(1);
+  const regrip = await grip();
+  await page.mouse.move(regrip.x, regrip.y);
+  await page.mouse.down();
+  await page.mouse.move(regrip.x + 20, regrip.y - 10, { steps: 5 });
+  await page.mouse.up();
+  const moved = (await dialog.boundingBox())!;
+  expect(Math.round(moved.x - reopened.x)).toBe(20);
+  expect(Math.round(moved.y - reopened.y)).toBe(-10);
   await dialog.getByRole("button", { name: "Close", exact: true }).click();
   await expect(dialog).toBeHidden();
 });
