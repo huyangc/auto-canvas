@@ -1,22 +1,27 @@
 import { expect, test } from "@playwright/test";
 import { NETLIST_A } from "../src/features/auto-layout/auto-layout-fixture.test-support";
-import { openEditor, showNetlistPanel } from "./editor-fixtures";
+import { awaitEditorReady, showNetlistPanel } from "./editor-fixtures";
 
 test.beforeEach(async ({ page, baseURL }) => {
   const url = new URL(baseURL!);
   test.skip(url.protocol !== "http:", "Requires an ordinary HTTP origin");
   // The same local server, via an IPv4-mapped address Chromium treats as
   // ordinary HTTP. Leave browser APIs untouched, including in Workers.
-  if (["localhost", "127.0.0.1"].includes(url.hostname))
-    url.hostname = "[::ffff:127.0.0.1]";
+  const externalTarget = Boolean(process.env.ICM_E2E_BASE_URL);
+  if (!externalTarget) url.hostname = "[::ffff:127.0.0.1]";
   await page.addInitScript(() => {
     localStorage.setItem("icm.editor-mode.v1", "draw");
     localStorage.setItem("icm.editor-mode-coach.v1", "seen");
   });
-  await openEditor(page, url.href);
-  expect(
-    await page.evaluate(() => [isSecureContext, typeof crypto.subtle]),
-  ).toEqual([false, "undefined"]);
+  await page.goto(url.href);
+  const secure = await page.evaluate(() => isSecureContext);
+  test.skip(
+    externalTarget && secure,
+    "External deployment is a secure context",
+  );
+  await awaitEditorReady(page);
+  expect(secure).toBe(false);
+  expect(await page.evaluate(() => typeof crypto.subtle)).toBe("undefined");
 });
 
 test("imports a SPICE file and applies automatic layout over HTTP", async ({
