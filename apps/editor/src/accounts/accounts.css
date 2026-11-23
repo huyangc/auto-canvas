@@ -34,3 +34,14 @@
   background: var(--icm-accent);
   color: white;
 }
+
+dialog.canvas-account-screen[open] {
+  position: fixed;
+  inset: 0;
+  margin: 0;
+  width: 100vw;
+  max-width: 100vw;
+  max-height: 100dvh;
+  border: 0;
+  box-sizing: border-box;
+}

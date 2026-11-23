@@ -9,3 +9,5 @@ export function bindAccountStorage(id: string, base: string) {
 export function accountKey(key: string): string {
   return storagePrefix + key;
 }
+
+export const ACCOUNT_SESSION_ENDING = "auto-canvas-account-session-ending";
