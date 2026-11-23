@@ -434,16 +434,22 @@ export function ownershipHeld(sandbox, report, name, port, pid) {
  * ownership is asked immediately before each request, and anything but
  * "owned" throws OwnershipLost (defined in transport.mjs) before it is sent,
  * so a caller stops at the first mismatch and a replacement listener never
- * receives a request. A third argument caps the request itself (R9-3).
+ * receives a request. An optional third argument is the budget for the whole
+ * call (R11-3): the lsof enumeration is bounded by what is left and the time
+ * is recomputed after it, so a slow listener check cannot make the request
+ * outlive its deadline. A budget it has used up throws before sending.
  */
 export function ownershipGate(sandbox, port, pid) {
-  return (rawPath, method, deadlineMs) => {
-    const { state, pids } = sandbox.listenerState(port, pid);
+  return (rawPath, method, budgetMs) => {
+    const budget = gateBudget(budgetMs, method, rawPath);
+    const { state, pids } = sandbox.listenerState(port, pid, {
+      timeoutMs: budget.left(),
+    });
     if (state !== "owned")
       throw new OwnershipLost(
         `port ${port} is ${state} (listeners ${pids.join(", ") || "none"}; want ${pid}) before ${method ?? "GET"} ${JSON.stringify(rawPath)}`,
       );
-    return rawRequest(port, rawPath, method, deadlineMs);
+    return rawRequest(port, rawPath, method, budget.left());
   };
 }
 
@@ -453,19 +459,47 @@ export function ownershipGate(sandbox, port, pid) {
  * before it is sent — the frontend's, because the request goes to it, and the
  * backend's, because the frontend proxies it there. Checking only the
  * frontend would let a backend that lost its port receive the request at the
- * replacement.
+ * replacement. A budget (R11-3) covers both listener enumerations and the
+ * request, with the remaining time recomputed after each of them.
  */
 export function proxiedGate(sandbox, { webPort, webPid, apiPort, apiPid }) {
-  return (rawPath, method, deadlineMs) => {
-    const web = sandbox.listenerState(webPort, webPid);
-    const api = sandbox.listenerState(apiPort, apiPid);
+  return (rawPath, method, budgetMs) => {
+    const budget = gateBudget(budgetMs, method, rawPath);
+    const web = sandbox.listenerState(webPort, webPid, {
+      timeoutMs: budget.left(),
+    });
+    const api = sandbox.listenerState(apiPort, apiPid, {
+      timeoutMs: budget.left(),
+    });
     if (web.state !== "owned" || api.state !== "owned")
       throw new OwnershipLost(
         `before ${method ?? "GET"} ${JSON.stringify(rawPath)} (forwarded through the frontend to the backend): ` +
           `web ${webPort} is ${web.state} (listeners ${web.pids.join(", ") || "none"}; want ${webPid}); ` +
           `api ${apiPort} is ${api.state} (listeners ${api.pids.join(", ") || "none"}; want ${apiPid})`,
       );
-    return rawRequest(webPort, rawPath, method, deadlineMs);
+    return rawRequest(webPort, rawPath, method, budget.left());
+  };
+}
+
+/**
+ * The time a gated request has left. Without a budget every call is
+ * unbounded, as before (R11-3 changed only the callers that set one); with
+ * one, `left()` is measured from the start of the gate and throws once the
+ * listener enumeration has used it up, so the HTTP request never starts
+ * without time left.
+ */
+function gateBudget(budgetMs, method, rawPath) {
+  if (budgetMs === undefined) return { left: () => undefined };
+  const started = Date.now();
+  return {
+    left() {
+      const remaining = budgetMs - (Date.now() - started);
+      if (remaining <= 0)
+        throw new Error(
+          `the listener check used the whole ${budgetMs} ms budget before ${method ?? "GET"} ${JSON.stringify(rawPath)} (nothing sent)`,
+        );
+      return remaining;
+    },
   };
 }
 

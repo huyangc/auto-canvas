@@ -183,7 +183,25 @@ backend that lost its port is caught before a replacement receives the
 request. The readiness probes of `next start` and of A6's `/api/ready` loop
 cap each probe at the time they have left and test their deadline again after
 the probe: a stalled server can neither extend the limit nor have a late
-success accepted.
+success accepted. The listener enumeration of that readiness probe is bounded
+by the same deadline as the request it precedes, and the remaining time is
+recomputed after it, so a slow `lsof` cannot make the request outlive the
+limit.
+
+Before a built app is started or probed, the check reads that build's own
+`.next/routes-manifest.json` and requires every rewrite destination to be one
+of the temporary origins it watches: A2's build, A4's (the build A3 made) and
+A6's. `next start` forwards to the destination frozen at build time, not to
+the port the ownership gate watches, so a revision that ignores
+`BACKEND_PROXY_TARGET` or `CANVAS_PROXY_TARGET` would keep its own default —
+the developer's backend on port 8000 — and requests would reach it while the
+check watched a temporary port. A build whose destinations are not the run's
+is reported and never started; the A4 negative control still runs, because the
+base revision's two rules do point at the temporary backend (only its canvas
+rules are missing, which is the failure the control is for). The native SWC
+preflight runs as a supervised child with a finite timeout, so a binding that
+stalls is a failure of the check within the bound and an interrupt still
+reaches the cleanup instead of blocking it.
 
 A shutdown that leaves a process group present is reported and ends the stage
 there: nothing after it runs, so no later step reads build output, removes

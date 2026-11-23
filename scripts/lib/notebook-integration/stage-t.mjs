@@ -78,7 +78,7 @@ export function requireModules(sandbox, report, prefix, modules, when) {
 export async function stageT({ sandbox, report, notebook }) {
   const app = path.join(sandbox.root, "app");
   const modules = path.join(app, "node_modules");
-  const preflight = prepareModules(
+  const preflight = await prepareModules(
     sandbox,
     path.join(notebook, "frontend", "node_modules"),
     modules,

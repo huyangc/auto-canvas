@@ -26,7 +26,7 @@ function sourceModulesProblem(from) {
  * real directory inside the sandbox, copy, then preflight the copy. Nothing
  * is removed or copied when either check fails.
  */
-export function prepareModules(sandbox, from, to) {
+export async function prepareModules(sandbox, from, to) {
   const problem = sourceModulesProblem(from);
   if (problem) return { problems: [problem] };
   sandbox.ensureOpen("the modules copy");
@@ -141,8 +141,19 @@ export function modulesShapeProblems(sandbox, modules) {
   return problems;
 }
 
-/** Returns a list of problems; an empty list means the copy is usable. */
-function preflightModules(sandbox, modules) {
+/**
+ * Returns a list of problems; an empty list means the copy is usable. The
+ * native-binding check runs as a supervised child of the sandbox with a finite
+ * timeout (R11-2): a binding that stalls is then a failure of this check
+ * within the bound, and an interrupt still reaches the script's cleanup (the
+ * child is in an owned group the disposal stops) instead of blocking the
+ * event loop in an unbounded synchronous spawn.
+ */
+export async function preflightModules(
+  sandbox,
+  modules,
+  { timeoutMs = 120_000 } = {},
+) {
   // The copy must be a real directory inside the sandbox: a copied symlink
   // would make the stages run the modules it points at, in place.
   const problems = modulesShapeProblems(sandbox, modules);
@@ -163,12 +174,39 @@ function preflightModules(sandbox, modules) {
     if (!fs.existsSync(path.join(modules, file)))
       problems.push(`${file} is missing`);
   if (problems.length) return { problems, version };
+  const result = await sandbox.run(
+    process.execPath,
+    ["-e", LOAD_NATIVE, modules],
+    { env: sandbox.env(), name: "swc-preflight", timeoutMs },
+  );
+  // After an interrupt the sandbox is gone: the killed check says nothing
+  // about the copy, and the stage is stopping anyway.
+  sandbox.ensureOpen("the private modules preflight");
+  if (result.timedOut)
+    return {
+      problems: [
+        `the native SWC check did not finish within ${timeoutMs} ms (a stalled binding?)`,
+      ],
+      version,
+    };
+  if (!result.gone)
+    return {
+      problems: [
+        `the native SWC check left process group ${result.pgid} present`,
+      ],
+      version,
+    };
+  if (result.status !== 0)
+    return {
+      problems: [
+        `native SWC check failed: exit ${result.status}\n${result.output.trimEnd().split("\n").slice(-5).join("\n")}`,
+      ],
+      version,
+    };
   try {
-    const out = execFileSync(process.execPath, ["-e", LOAD_NATIVE, modules], {
-      env: sandbox.env(),
-      encoding: "utf8",
-    });
-    const { loaded, failed } = JSON.parse(out.trim().split("\n").pop());
+    const { loaded, failed } = JSON.parse(
+      result.output.trim().split("\n").pop(),
+    );
     if (!loaded.length)
       problems.push(
         `no native SWC binding loads (${failed.join("; ") || "none present"})`,

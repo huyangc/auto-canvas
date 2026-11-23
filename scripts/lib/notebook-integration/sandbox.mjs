@@ -889,7 +889,13 @@ export function createSandbox(notebook, { keep }) {
     }
   }
 
-  function listenerPids(port) {
+  /**
+   * The pids listening on a port. `timeoutMs` bounds the lsof run itself
+   * (R11-3): a caller with a deadline hands it the time it has left, so a
+   * stalled enumeration is a failure within the deadline instead of an
+   * unbounded block.
+   */
+  function listenerPids(port, { timeoutMs } = {}) {
     const result = spawnSync(
       "lsof",
       ["-nP", "-a", `-iTCP:${port}`, "-sTCP:LISTEN", "-Fp"],
@@ -897,6 +903,9 @@ export function createSandbox(notebook, { keep }) {
         encoding: "utf8",
         env: { PATH: process.env.PATH ?? "" },
         stdio: ["ignore", "pipe", "pipe"],
+        ...(Number.isFinite(timeoutMs) && timeoutMs > 0
+          ? { timeout: Math.max(1, Math.ceil(timeoutMs)) }
+          : {}),
       },
     );
     return [
@@ -931,9 +940,12 @@ export function createSandbox(notebook, { keep }) {
 
   const listenerIs = (port, pid) => listenerState(port, pid).state === "owned";
 
-  /** "none" (no listener), "owned" (exactly the expected pid) or "foreign". */
-  function listenerState(port, pid) {
-    const pids = listenerPids(port);
+  /**
+   * "none" (no listener), "owned" (exactly the expected pid) or "foreign".
+   * `options.timeoutMs` bounds the lsof enumeration (R11-3).
+   */
+  function listenerState(port, pid, options) {
+    const pids = listenerPids(port, options);
     if (pids.length === 0) return { state: "none", pids };
     if (pids.length === 1 && pids[0] === pid) return { state: "owned", pids };
     return { state: "foreign", pids };

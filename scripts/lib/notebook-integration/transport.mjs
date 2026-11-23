@@ -181,6 +181,50 @@ export function expectRewrites(report, name, manifest, expected) {
   return report.check(name, problems.length === 0, () => problems.join("; "));
 }
 
+/**
+ * Every rewrite destination of a built app must be an origin this run watches
+ * (R11-1). `next start` reads the destinations from `.next/routes-manifest.json`
+ * at build time, not from the environment at run time, so a revision that
+ * ignores `BACKEND_PROXY_TARGET` or `CANVAS_PROXY_TARGET` keeps its own
+ * default (the developer's backend on 8000) and a server started from that
+ * build would forward requests there while every ownership check watches the
+ * temporary ports. A destination is accepted only when it is one of `origins`
+ * exactly or continues it with a slash, so a host that merely string-prefixes
+ * an accepted origin is refused. Returns a list of problems.
+ */
+function rewriteDestinationProblems(manifest, origins) {
+  const problems = [];
+  for (const phase of ["beforeFiles", "afterFiles", "fallback"])
+    for (const rule of manifest[phase]) {
+      const destination = String(rule.destination ?? "");
+      if (
+        origins.some(
+          (origin) =>
+            destination === origin || destination.startsWith(`${origin}/`),
+        )
+      )
+        continue;
+      problems.push(
+        `${phase} ${JSON.stringify(rule.source)} -> ${JSON.stringify(destination)}`,
+      );
+    }
+  return problems;
+}
+
+/**
+ * Assert that a build's own manifest sends every rewrite to one of this run's
+ * origins; a boolean, and the first caller checks it before starting the build
+ * as a server (R11-1).
+ */
+export function expectDestinations(report, name, manifest, origins) {
+  const problems = rewriteDestinationProblems(manifest, origins);
+  return report.check(
+    name,
+    problems.length === 0,
+    () => `${problems.join("; ")} (not one of ${origins.join(", ")})`,
+  );
+}
+
 /** The two rules the notebook ships today, for a backend target. */
 export const todaysRules = (backend) => [
   { source: "/api/:path*", destination: `${backend}/api/:path*` },

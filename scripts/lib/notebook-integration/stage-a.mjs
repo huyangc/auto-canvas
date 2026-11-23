@@ -21,6 +21,7 @@ import {
 } from "./steps.mjs";
 import { waitFor, waitForWithin } from "./sandbox.mjs";
 import {
+  expectDestinations,
   expectRewrites,
   readManifest,
   startStub,
@@ -244,7 +245,7 @@ async function stageABody({ sandbox, report, notebook, options }) {
   )
     return;
   const modules = path.join(frontend, "node_modules");
-  const preflight = prepareModules(
+  const preflight = await prepareModules(
     sandbox,
     path.join(notebook, "frontend/node_modules"),
     modules,
@@ -331,56 +332,67 @@ async function stageABody({ sandbox, report, notebook, options }) {
       tail(a2.output),
     )
   ) {
-    expectRewrites(
+    // R11-1: the server is started only from a build whose own manifest
+    // sends its requests where this run watches. A revision that ignores
+    // BACKEND_PROXY_TARGET keeps its default (the developer's backend on
+    // 8000); `next start` reads the destinations from the build, so nothing
+    // of that build is started or probed — the mismatch above is the failure.
+    const a2Rules = expectRewrites(
       report,
       "A2 default rewrites are exactly today's two",
       readManifest(frontend, sandbox.readFile),
       today,
     );
-    const web = await sandbox.freePort();
-    const server = await startNext(sandbox, {
-      dir: frontend,
-      port: web,
-      env: sandbox.env(),
-      name: "a2-start",
-    });
-    try {
-      if (
-        report.check(
-          "A2 next start owns its port and serves /",
-          !server.error,
-          () => server.error,
-        )
-      ) {
-        // Every probe goes through the ownership gate (R8-2): a port that
-        // changed hands stops the loop before another request is sent.
-        const get = ownershipGate(sandbox, web, server.pid);
-        try {
-          for (const route of ["/canvas", "/canvas/editor"]) {
-            const res = await get(route);
-            report.check(
-              `A2 GET ${route} -> 404 without the canvas rule`,
-              res.status === 404,
-              `status ${res.status}`,
+    if (!a2Rules)
+      report.note(
+        "A2 build not started: its rewrites are not this run's backend target",
+      );
+    else {
+      const web = await sandbox.freePort();
+      const server = await startNext(sandbox, {
+        dir: frontend,
+        port: web,
+        env: sandbox.env(),
+        name: "a2-start",
+      });
+      try {
+        if (
+          report.check(
+            "A2 next start owns its port and serves /",
+            !server.error,
+            () => server.error,
+          )
+        ) {
+          // Every probe goes through the ownership gate (R8-2): a port that
+          // changed hands stops the loop before another request is sent.
+          const get = ownershipGate(sandbox, web, server.pid);
+          try {
+            for (const route of ["/canvas", "/canvas/editor"]) {
+              const res = await get(route);
+              report.check(
+                `A2 GET ${route} -> 404 without the canvas rule`,
+                res.status === 404,
+                `status ${res.status}`,
+              );
+            }
+            ownershipHeld(
+              sandbox,
+              report,
+              "A2 next start still owns its port after the last probe",
+              web,
+              server.pid,
+            );
+          } catch (error) {
+            if (!(error instanceof OwnershipLost)) throw error;
+            report.fail(
+              "A2 next start owned its port before every probe",
+              error.message,
             );
           }
-          ownershipHeld(
-            sandbox,
-            report,
-            "A2 next start still owns its port after the last probe",
-            web,
-            server.pid,
-          );
-        } catch (error) {
-          if (!(error instanceof OwnershipLost)) throw error;
-          report.fail(
-            "A2 next start owned its port before every probe",
-            error.message,
-          );
         }
+      } finally {
+        await stopServer(sandbox, report, "A2 next start", server.handle);
       }
-    } finally {
-      await stopServer(sandbox, report, "A2 next start", server.handle);
     }
   }
 
@@ -394,14 +406,17 @@ async function stageABody({ sandbox, report, notebook, options }) {
       { BACKEND_PROXY_TARGET: backend, CANVAS_PROXY_TARGET: target },
       "a3-build",
     );
-    let enabled = false;
+    // A3's table is read here and kept for A4: A4 starts the build A3 made,
+    // so the check of the build that will run is this build's own manifest
+    // (R11-1), not A2's.
+    let manifest;
     if (
       report.check("A3 enabled build exits 0", a3.status === 0, () =>
         tail(a3.output),
       )
     ) {
-      const manifest = readManifest(frontend, sandbox.readFile);
-      enabled = expectRewrites(
+      manifest = readManifest(frontend, sandbox.readFile);
+      expectRewrites(
         report,
         "A3 rewrites are today's two plus exactly two canvas rules",
         manifest,
@@ -419,7 +434,23 @@ async function stageABody({ sandbox, report, notebook, options }) {
     }
 
     // A4: the real build passes the transport table and its target is frozen.
-    if (enabled || a3.status === 0) {
+    // Before the server is started or a probe is sent, the manifest of this
+    // very build must send every rewrite to one of this run's temporary
+    // ports (R11-1). The negative control runs the base revision, whose
+    // manifest has the two API rules pointing at the temporary backend and
+    // no canvas rules: its destinations are this run's, so the build is
+    // started and the transport table fails as planned. A revision that
+    // ignores either target variable keeps its own default (port 8000); its
+    // server is never started and no probe is sent to it.
+    const a4Destinations = manifest
+      ? expectDestinations(
+          report,
+          "A4 every rewrite destination of the build it starts is this run's",
+          manifest,
+          [backend, target],
+        )
+      : false;
+    if (a4Destinations) {
       const web = await sandbox.freePort();
       const wrong = await sandbox.freePort();
       const server = await startNext(sandbox, {
@@ -457,7 +488,9 @@ async function stageABody({ sandbox, report, notebook, options }) {
     } else
       report.fail(
         "A4 real build passes the transport table",
-        "no enabled build to start",
+        manifest
+          ? "the build's rewrite destinations are not this run's temporary ports; nothing started"
+          : "no enabled build to start",
       );
   } finally {
     await stub.close();
@@ -518,12 +551,31 @@ async function stageA6({
     )
   )
     return;
-  expectRewrites(
+  // R11-1: the launcher runs `next start` from this very build, and `next
+  // start` forwards `/api/*` to the destination frozen in the manifest — not
+  // the temporary backend the ownership gate below watches. A revision that
+  // ignores BACKEND_PROXY_TARGET keeps its default (the developer's backend
+  // on 8000); the mismatch is reported here and nothing is launched or probed
+  // from that build.
+  const a6Manifest = readManifest(frontend, sandbox.readFile);
+  const a6Rules = expectRewrites(
     report,
     "A6 rewrites equal today's two",
-    readManifest(frontend, sandbox.readFile),
+    a6Manifest,
     todaysRules(backend),
   );
+  const a6Destinations = expectDestinations(
+    report,
+    "A6 every rewrite destination is the temporary backend",
+    a6Manifest,
+    [backend],
+  );
+  if (!a6Rules || !a6Destinations) {
+    report.note(
+      "A6 the clone was not launched: its build does not forward to this run's backend",
+    );
+    return;
+  }
 
   // The launcher writes logs and the database under <clone>/.local: it must be
   // a real directory inside the sandbox, created here when the revision has

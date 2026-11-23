@@ -9,7 +9,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { cloneTreeProblems } from "./clone-safety.mjs";
-import { modulesInClone, prepareModules } from "./modules.mjs";
+import {
+  modulesInClone,
+  prepareModules,
+  preflightModules,
+} from "./modules.mjs";
 import {
   PathRefused,
   UsageError,
@@ -303,6 +307,9 @@ export async function stageS({ sandbox, report }) {
   await proxiedProbeControl(sandbox, report);
   await readinessDeadlineControl(report);
   await frontendNotADirectoryControl(sandbox, report);
+  await rewriteDestinationControl(sandbox, report);
+  await swcPreflightControls(sandbox, report);
+  await listenerBudgetControl(sandbox, report);
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -1344,5 +1351,287 @@ async function frontendNotADirectoryControl(sandbox, report) {
       .filter((line) => /frontend|unexpected error|^\s+at /.test(line))
       .slice(0, 6)
       .join(" | ")}`,
+  );
+}
+
+// ---- R11-1: a build whose destinations are not this run's ----------------
+
+/**
+ * R11-1: a stand-in revision whose build writes a manifest that still points
+ * at the developer's backend default (127.0.0.1:8000, never one of this run's
+ * ports) must fail before any server of that build is started or probed. The
+ * fake notebook's `next` records every `start` and every request in a marker
+ * outside its own temporary root; the real entry script runs the whole of
+ * stage A on it, so the failure is the stage's own.
+ *
+ * The installed modules are untracked: `git clone` yields a clone without
+ * `frontend/node_modules` (which stage A requires to start absent), while the
+ * copy is taken from the source directory exactly as it is from a real
+ * checkout. They are created after the commit, so nothing of them is tracked.
+ */
+async function rewriteDestinationControl(sandbox, report) {
+  const base = path.join(sandbox.root, "self-check", "r11-1");
+  const repo = path.join(base, "repo");
+  const marker = path.join(base, "next-ran.log");
+  sandbox.makeDir(repo, { recursive: true });
+  const fakeNext = `"use strict";
+const fs = require("fs");
+const http = require("http");
+const MARK = ${JSON.stringify(marker)};
+const note = (line) => { try { fs.appendFileSync(MARK, line + "\\n"); } catch {} };
+const args = process.argv.slice(2);
+if (args[0] === "build") {
+  const dir = process.cwd();
+  fs.mkdirSync(dir + "/.next", { recursive: true });
+  fs.writeFileSync(dir + "/.next/routes-manifest.json", JSON.stringify({ rewrites: { beforeFiles: [], afterFiles: [
+    { source: "/api/:path*", destination: "http://127.0.0.1:8000/api/:path*" },
+    { source: "/mcp", destination: "http://127.0.0.1:8000/mcp/" }
+  ], fallback: [] } }));
+  process.exit(0);
+}
+if (args[0] === "start") {
+  const port = Number(args[args.indexOf("-p") + 1]);
+  const server = http.createServer((req, res) => {
+    note("request " + req.method + " " + req.url);
+    if (req.url === "/") {
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end("<main>fake</main>");
+    } else {
+      res.writeHead(404);
+      res.end("no");
+    }
+  });
+  server.listen(port, "127.0.0.1", () => note("start " + port));
+  return;
+}
+process.exit(2);
+`;
+  const tracked = {
+    "package.json": `${JSON.stringify({
+      name: "fake-notebook-root",
+      private: true,
+      scripts: { start: 'node -e "process.exit(9)"' },
+    })}\n`,
+    "frontend/package.json": `${JSON.stringify({
+      name: "fake-notebook-frontend",
+      private: true,
+      scripts: { build: "node node_modules/next/dist/bin/next build" },
+    })}\n`,
+    "frontend/package-lock.json": '{"lockfileVersion":3}\n',
+  };
+  for (const [relative, content] of Object.entries(tracked)) {
+    const file = path.join(repo, relative);
+    sandbox.makeDir(path.dirname(file), { recursive: true });
+    sandbox.writeFile(file, content);
+  }
+  for (const args of [
+    ["init", "--quiet"],
+    ["add", "-A"],
+    ["commit", "--quiet", "-m", "x"],
+  ]) {
+    const result = spawnSync(
+      "git",
+      ["-c", "user.name=check", "-c", "user.email=c@c", ...args],
+      { cwd: repo, encoding: "utf8", env: { PATH: process.env.PATH ?? "" } },
+    );
+    if (result.status !== 0) {
+      report.fail(
+        "S R11-1: a build pointing at the developer's backend is never started",
+        `git ${args[0]} failed: ${result.stderr}`,
+      );
+      return;
+    }
+  }
+  // Untracked, created after the commit: the clone has no node_modules, and
+  // stage A copies these from the source the way it copies a real install.
+  const modules = path.join(repo, "frontend", "node_modules");
+  const moduleFiles = {
+    "next/package.json": '{"name":"next","version":"15.5.18"}\n',
+    "next/dist/bin/next": fakeNext,
+    "typescript/lib/typescript.js": "",
+    "@types/react/index.d.ts": "",
+    "@types/node/index.d.ts": "",
+    "@next/swc-fake/package.json":
+      '{"name":"@next/swc-fake","main":"index.js"}\n',
+    "@next/swc-fake/index.js": "module.exports = {};\n",
+  };
+  for (const [relative, content] of Object.entries(moduleFiles)) {
+    const file = path.join(modules, relative);
+    sandbox.makeDir(path.dirname(file), { recursive: true });
+    sandbox.writeFile(file, content);
+  }
+
+  const env = { PATH: process.env.PATH ?? "" };
+  for (const name of ["LANG", "LC_ALL", "TMPDIR", "HOME"])
+    if (process.env[name] !== undefined) env[name] = process.env[name];
+  const run = spawnSync(
+    process.execPath,
+    [
+      entryScript,
+      "--stage",
+      "A",
+      "--notebook",
+      repo,
+      "--ref",
+      "HEAD",
+      "--base",
+      "HEAD",
+      "--python",
+      "/usr/bin/true",
+    ],
+    { cwd: repo, encoding: "utf8", env, timeout: 300_000 },
+  );
+  const output = `${run.stdout ?? ""}${run.stderr ?? ""}`;
+  const records = exists(marker)
+    ? fs.readFileSync(marker, "utf8").trim().split("\n").filter(Boolean)
+    : [];
+  const decisive = [
+    /A2 default rewrites are exactly today's two: .*127\.0\.0\.1:8000/,
+    /A4 every rewrite destination of the build it starts is this run's: .*127\.0\.0\.1:8000/,
+    /A6 every rewrite destination is the temporary backend: .*127\.0\.0\.1:8000/,
+  ].map((pattern) => pattern.test(output));
+  report.check(
+    "S R11-1: a build whose manifest points at the developer's backend is never started or probed",
+    run.status === 1 &&
+      records.length === 0 &&
+      decisive.every(Boolean) &&
+      !/A2 next start owns its port/.test(output) &&
+      !/A4 next start owns its port/.test(output) &&
+      !/A6 the launcher/.test(output),
+    `exit ${run.status}; start/request records: ${records.length ? JSON.stringify(records.slice(0, 6)) : "none"}; destination failures A2/A4/A6: ${JSON.stringify(decisive)}`,
+  );
+}
+
+// ---- R11-2: the native SWC preflight is a supervised, bounded child ------
+
+/**
+ * R11-2: the native SWC preflight runs through the supervisor with a finite
+ * timeout. A binding that stalls is a problem of the preflight at the timeout
+ * (never a hang), its group is the one this run stopped (a SIGTERM to the
+ * group, not the unbounded synchronous child the old code left to the script's
+ * exit), and the process is gone afterwards; a binding that loads is accepted.
+ */
+async function swcPreflightControls(sandbox, report) {
+  const base = path.join(sandbox.root, "self-check", "swc-preflight");
+  const make = (name, binding) => {
+    const modules = path.join(base, name);
+    const files = {
+      "next/package.json": '{"name":"next","version":"15.5.18"}\n',
+      "typescript/lib/typescript.js": "",
+      "@types/react/index.d.ts": "",
+      "@types/node/index.d.ts": "",
+      "@next/swc-fake/package.json":
+        '{"name":"@next/swc-fake","main":"index.js"}\n',
+      "@next/swc-fake/index.js": binding,
+    };
+    for (const [relative, content] of Object.entries(files)) {
+      const file = path.join(modules, relative);
+      sandbox.makeDir(path.dirname(file), { recursive: true });
+      sandbox.writeFile(file, content);
+    }
+    return modules;
+  };
+  const ok = await preflightModules(
+    sandbox,
+    make("ok", "module.exports = {};\n"),
+    { timeoutMs: 60_000 },
+  );
+  report.check(
+    "S the native SWC preflight accepts a binding that loads",
+    ok.problems.length === 0 &&
+      ok.version === "15.5.18" &&
+      ok.loaded.includes("swc-fake"),
+    `problems ${JSON.stringify(ok.problems)}, version ${ok.version}, loaded ${JSON.stringify(ok.loaded)}`,
+  );
+
+  const stalling = make("stall", "setInterval(() => {}, 1000);\n");
+  const mark = sandbox.guardMark();
+  const before = sandbox.signalsSent().length;
+  const started = Date.now();
+  const stalled = await preflightModules(sandbox, stalling, {
+    timeoutMs: 1500,
+  });
+  const elapsed = Date.now() - started;
+  const entry = sandbox
+    .guardedSince(mark)
+    .find((item) => Array.isArray(item.argv) && item.argv[1] === stalling);
+  const signalled = sandbox
+    .signalsSent()
+    .slice(before)
+    .filter((signal) => entry && signal.pgid === entry.ppid);
+  if (entry) await waitFor(() => !pidAlive(entry.pid), 3000, 50);
+  report.check(
+    "S a stalled native SWC preflight ends at its timeout as a supervised group",
+    stalled.problems.some((problem) =>
+      /did not finish within 1500 ms/.test(problem),
+    ) &&
+      elapsed < 6000 &&
+      entry !== undefined &&
+      !pidAlive(entry.pid) &&
+      signalled.length > 0,
+    `problems ${JSON.stringify(stalled.problems)} after ${elapsed} ms; guarded pid ${entry?.pid ?? "none"} alive ${entry ? pidAlive(entry.pid) : "?"}; group ${entry?.ppid ?? "?"} signals ${JSON.stringify(signalled)}`,
+  );
+}
+
+// ---- R11-3: one deadline for listener checks and the request -------------
+
+/**
+ * R11-3: the listener enumeration is bounded and the HTTP request shares one
+ * deadline with it. A stand-in `lsof` that would sleep 5 s is cut off at the
+ * budget handed to `listenerPids` (the old code had no bound), and a gate
+ * whose budget the listener checks have used up sends nothing — the request
+ * never starts without time left before it.
+ */
+async function listenerBudgetControl(sandbox, report) {
+  const base = path.join(sandbox.root, "self-check", "r11-3");
+  const bin = path.join(base, "bin");
+  sandbox.makeDir(bin, { recursive: true });
+  sandbox.writeFile(
+    path.join(bin, "lsof"),
+    "#!/bin/sh\nexec /bin/sleep 5\n",
+    0o755,
+  );
+  const port = await sandbox.freePort();
+  const savedPath = process.env.PATH;
+  let bounded = null;
+  let elapsed = 0;
+  try {
+    process.env.PATH = `${bin}:${savedPath ?? ""}`;
+    const started = Date.now();
+    try {
+      sandbox.listenerPids(port, { timeoutMs: 300 });
+    } catch (error) {
+      bounded = error;
+    }
+    elapsed = Date.now() - started;
+  } finally {
+    process.env.PATH = savedPath;
+  }
+
+  // A gate whose budget is used up before the first listener check throws
+  // without sending and without claiming the port was lost.
+  const exhausted = refusal(() =>
+    ownershipGate(sandbox, port, process.pid)("/x", undefined, 0),
+  ).error;
+  const exhaustedProxied = refusal(() =>
+    proxiedGate(sandbox, {
+      webPort: port,
+      webPid: process.pid,
+      apiPort: port,
+      apiPid: process.pid,
+    })("/api/ready", undefined, 0),
+  ).error;
+  report.check(
+    "S R11-3: the listener enumeration shares the probe deadline",
+    bounded !== null &&
+      /lsof/.test(bounded.message) &&
+      elapsed < 3000 &&
+      exhausted instanceof Error &&
+      !(exhausted instanceof OwnershipLost) &&
+      /whole 0 ms budget/.test(exhausted.message) &&
+      exhaustedProxied instanceof Error &&
+      !(exhaustedProxied instanceof OwnershipLost) &&
+      /whole 0 ms budget/.test(exhaustedProxied.message),
+    `bounded lsof: ${bounded?.message ?? "not bounded"} after ${elapsed} ms (the stand-in sleeps 5 s); gate with a 0 ms budget: ${exhausted?.message ?? "sent"}; proxied gate: ${exhaustedProxied?.message ?? "sent"}`,
   );
 }
