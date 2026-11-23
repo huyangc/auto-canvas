@@ -6,6 +6,7 @@ process.env.NO_PROXY = [process.env.NO_PROXY, "127.0.0.1", "localhost"]
   .filter(Boolean)
   .join(",");
 
+const accountsTest = process.env.AUTO_CANVAS_E2E_ACCOUNTS === "1";
 const prefixTest = process.env.AUTO_CANVAS_E2E_BASE_PATH === "1";
 const e2ePort = Number(process.env.ICM_E2E_PORT ?? "4173");
 const e2eBaseUrl = `http://127.0.0.1:${e2ePort}`;
@@ -33,7 +34,14 @@ export default defineConfig({
   testDir: "apps/editor/e2e",
   ...(prefixTest
     ? { testMatch: "**/base-path.spec.ts" }
-    : { testIgnore: "**/base-path.spec.ts" }),
+    : accountsTest
+      ? { testMatch: "**/standalone-accounts.spec.ts" }
+      : {
+          testIgnore: [
+            "**/base-path.spec.ts",
+            "**/standalone-accounts.spec.ts",
+          ],
+        }),
   // Each scenario owns an isolated browser context. Test-level parallelism
   // lets CI shards balance cases instead of assigning the entire suite to one
   // shard based on the three large spec files.
@@ -102,6 +110,7 @@ export default defineConfig({
                 command:
                   "pnpm --filter @icm/server... build && node apps/server/dist/cli.js",
                 env: {
+                  AUTO_CANVAS_AUTH: accountsTest ? "accounts" : "local",
                   DATABASE_URL:
                     process.env.AUTO_CANVAS_TEST_DATABASE_URL ??
                     "postgresql:///auto_canvas_test",

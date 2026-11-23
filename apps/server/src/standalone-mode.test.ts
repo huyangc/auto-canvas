@@ -62,10 +62,6 @@ const localUser = (displayName: string) => ({
 });
 const apps: [string, () => Hono][] = [
   [
-    "no auth option",
-    () => createApp({ db, user: { displayName: "Test user" } }),
-  ],
-  [
     "auth local",
     () =>
       createApp({
@@ -206,7 +202,7 @@ describe.each(apps)("standalone mode with %s", (_name, build) => {
   });
 });
 
-it("keeps the three migrations on main byte for byte", () => {
+it("keeps the released migrations byte for byte", () => {
   const directory = new URL("./migrations/", import.meta.url);
   const digests = Object.fromEntries(
     readdirSync(directory)
@@ -219,6 +215,8 @@ it("keeps the three migrations on main byte for byte", () => {
       ]),
   );
   expect(digests).toEqual({
+    "004-standalone-accounts.sql":
+      "1772531a59e884ef167dea319a24521942856f92521b3e2e45d90880f5b02737",
     "001-single-user.sql":
       "d27de4cde9f13faa5955337d94b1b8e6f0f21661bdd18c3e8618919005af4801",
     "002-component-library.sql":

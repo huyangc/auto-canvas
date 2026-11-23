@@ -9,9 +9,13 @@ export function apiServerProxy(): Plugin {
       const basePath = normalizeBasePath(process.env.AUTO_CANVAS_BASE_PATH);
       const target = process.env.AUTO_CANVAS_API_URL ?? "http://127.0.0.1:4310";
       const proxy = Object.fromEntries(
-        ["/api/auth", "/api/projects", "/api/components", "/api/health"].map(
-          (path) => [basePath + path, { target, changeOrigin: false }],
-        ),
+        [
+          "/api/session",
+          "/api/auth",
+          "/api/projects",
+          "/api/components",
+          "/api/health",
+        ].map((path) => [basePath + path, { target, changeOrigin: false }]),
       );
       return { server: { proxy }, preview: { proxy } };
     },

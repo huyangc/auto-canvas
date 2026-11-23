@@ -1,3 +1,4 @@
+import { registerAccounts } from "./standalone-accounts.js";
 import { Hono } from "hono";
 import { normalizeBasePath } from "./base-path.js";
 import { AgentRelayHost } from "./agent-relay/host.js";
@@ -38,14 +39,17 @@ export function createApp({
   // Local mode constructs its default relay before anything else, as it always
   // has; notebook mode has no relay and never evaluates that default.
   const relay =
-    auth.mode === "local"
+    auth.mode !== "notebook"
       ? (agentRelay ?? new AgentRelayHost(db, undefined, undefined, basePath))
       : null;
   basePath = normalizeBasePath(basePath);
   if (!Number.isSafeInteger(limits.projectLimit) || limits.projectLimit < 1)
     throw new Error("AUTO_CANVAS_PROJECT_LIMIT must be a positive integer");
   const app = new Hono();
-  if (relay) registerLocal(app, db, basePath, relay, user, limits.projectLimit);
+  if (relay && auth.mode === "accounts")
+    registerAccounts(app, db, basePath, limits.projectLimit, relay);
+  else if (relay)
+    registerLocal(app, db, basePath, relay, user, limits.projectLimit);
   else if (auth.mode === "notebook")
     registerNotebook(app, db, basePath, limits.projectLimit, {
       notebookApi: auth.notebookApi,
@@ -100,6 +104,10 @@ function registerLocal(
     if (c.req.method === "HEAD" && isIdentityOrProjectPath(path))
       return c.json({ error: "Not found" }, 404);
     await next();
+  });
+  app.get("/api/session", (c) => {
+    c.header("Cache-Control", "no-store");
+    return c.json({ mode: "local" });
   });
   app.all("/api/agent/*", (c) => agentRelay.fetch(c.req.raw));
   app.get("/api/health", async (c) => {

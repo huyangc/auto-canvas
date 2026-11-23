@@ -196,12 +196,19 @@ const LOCAL_EXPECTATIONS = [
 ];
 
 async function checkLocalContract() {
-  for (const auth of [undefined, "local"]) {
+  for (const auth of ["accounts", "local"]) {
     const server = await startServer({
       DATABASE_URL: await createSchema(),
-      ...(auth === undefined ? {} : { AUTO_CANVAS_AUTH: auth }),
+      ...(auth === "accounts" ? {} : { AUTO_CANVAS_AUTH: auth }),
     });
     try {
+      if (auth === "accounts") {
+        assert.equal(
+          (await fetch(server.origin + "/api/projects")).status,
+          401,
+        );
+        continue;
+      }
       for (const headers of [{}, { Authorization: "Bearer x" }])
         for (const [method, path, body, expected] of LOCAL_EXPECTATIONS) {
           const actual = await snapshot(
@@ -221,7 +228,9 @@ async function checkLocalContract() {
       await server.stop();
     }
   }
-  console.log("ok local mode: identity routes unchanged (unset and local)");
+  console.log(
+    "ok local mode: default account gate and explicit local identity",
+  );
 }
 
 async function checkRestart(databaseUrlForSchema) {
@@ -248,7 +257,10 @@ async function checkRestart(databaseUrlForSchema) {
       ).projectText,
     };
   };
-  const first = await startServer({ DATABASE_URL: databaseUrlForSchema });
+  const first = await startServer({
+    DATABASE_URL: databaseUrlForSchema,
+    AUTO_CANVAS_AUTH: "local",
+  });
   let before;
   try {
     const json = { "content-type": "application/json" };
@@ -292,7 +304,10 @@ async function checkRestart(databaseUrlForSchema) {
   } finally {
     await first.stop();
   }
-  const second = await startServer({ DATABASE_URL: databaseUrlForSchema });
+  const second = await startServer({
+    DATABASE_URL: databaseUrlForSchema,
+    AUTO_CANVAS_AUTH: "local",
+  });
   try {
     const after = await state(second.origin);
     assert.deepEqual(after, before);
@@ -535,6 +550,7 @@ async function checkLocalMountRefusal(
     for (const editorRoot of [undefined, fixture.directory]) {
       const server = await startServer({
         DATABASE_URL: databaseUrlForSchema,
+        AUTO_CANVAS_AUTH: "local",
         ...(basePath ? { AUTO_CANVAS_BASE_PATH: basePath } : {}),
         ...(editorRoot ? { EDITOR_ROOT: editorRoot } : {}),
       });

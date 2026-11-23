@@ -47,7 +47,7 @@ export async function startServer({
     }
     // The relay gets the same resolved prefix as the HTTP app, whatever the
     // process environment says.
-    if (auth.mode === "local")
+    if (auth.mode !== "notebook")
       agentRelay = new AgentRelayHost(db, undefined, undefined, basePath);
     await agentRelay?.start();
     const app = createApp({
@@ -67,7 +67,7 @@ export async function startServer({
             request.headers.get("x-forwarded-proto"),
             bindings.incoming.socket.remoteAddress,
           );
-          if (auth.mode === "local")
+          if (auth.mode !== "notebook")
             return app.fetch(
               url.href === request.url ? request : new Request(url, request),
               bindings,

@@ -1,3 +1,4 @@
+import { accountKey } from "../accounts/storage";
 const RECENT_CLOUD_PROJECT_STORAGE_KEY =
   "analog-canvas.recent-cloud-project.v1";
 
@@ -24,7 +25,9 @@ export function readRecentCloudProjectId(
   storage: CloudProjectSessionStorage | null = browserSessionStorage(),
 ): string | null {
   try {
-    const value = storage?.getItem(RECENT_CLOUD_PROJECT_STORAGE_KEY)?.trim();
+    const value = storage
+      ?.getItem(accountKey(RECENT_CLOUD_PROJECT_STORAGE_KEY))
+      ?.trim();
     return value ? value : null;
   } catch {
     return null;
@@ -37,7 +40,7 @@ export function rememberRecentCloudProject(
   storage: CloudProjectSessionStorage | null = browserSessionStorage(),
 ): void {
   try {
-    storage?.setItem(RECENT_CLOUD_PROJECT_STORAGE_KEY, projectId);
+    storage?.setItem(accountKey(RECENT_CLOUD_PROJECT_STORAGE_KEY), projectId);
   } catch {
     // Tab navigation remains usable when sessionStorage is unavailable.
   }
@@ -48,7 +51,7 @@ export function forgetRecentCloudProject(
   storage: CloudProjectSessionStorage | null = browserSessionStorage(),
 ): void {
   try {
-    storage?.removeItem(RECENT_CLOUD_PROJECT_STORAGE_KEY);
+    storage?.removeItem(accountKey(RECENT_CLOUD_PROJECT_STORAGE_KEY));
   } catch {
     // The pointer is best-effort and never affects Project correctness.
   }
@@ -63,7 +66,7 @@ export function readDeletedCloudProjects(
 ): Set<string> {
   try {
     const ids: unknown = JSON.parse(
-      storage?.getItem(DELETED_CLOUD_PROJECTS_STORAGE_KEY) ?? "[]",
+      storage?.getItem(accountKey(DELETED_CLOUD_PROJECTS_STORAGE_KEY)) ?? "[]",
     );
     return new Set(
       Array.isArray(ids)
@@ -87,7 +90,7 @@ export function noteCloudProjectDeleted(
   try {
     const deleted = readDeletedCloudProjects(storage).add(projectId);
     storage?.setItem(
-      DELETED_CLOUD_PROJECTS_STORAGE_KEY,
+      accountKey(DELETED_CLOUD_PROJECTS_STORAGE_KEY),
       JSON.stringify([...deleted]),
     );
   } catch {
@@ -100,7 +103,7 @@ export function clearDeletedCloudProjects(
   storage: CloudProjectSessionStorage | null = browserSessionStorage(),
 ): void {
   try {
-    storage?.removeItem(DELETED_CLOUD_PROJECTS_STORAGE_KEY);
+    storage?.removeItem(accountKey(DELETED_CLOUD_PROJECTS_STORAGE_KEY));
   } catch {
     // Nothing more is read from it while storage is unavailable.
   }

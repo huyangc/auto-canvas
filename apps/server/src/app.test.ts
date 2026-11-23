@@ -41,7 +41,11 @@ const db = new pg.Pool({
   connectionString: url,
   options: `-c search_path=${schema}`,
 });
-let app = createApp({ db, user: { displayName: "Test user" } });
+let app = createApp({
+  auth: { mode: "local" },
+  db,
+  user: { displayName: "Test user" },
+});
 const origin = "http://localhost";
 const projectText = (name = "Circuit") =>
   serializeProject(createEmptyProject("server-test", name));
@@ -88,7 +92,11 @@ beforeAll(async () => {
 });
 beforeEach(async () => {
   await db.query("TRUNCATE users CASCADE");
-  app = createApp({ db, user: { displayName: "Test user" } });
+  app = createApp({
+    auth: { mode: "local" },
+    db,
+    user: { displayName: "Test user" },
+  });
 });
 afterAll(async () => {
   await db.end();
@@ -130,6 +138,7 @@ describe("single-user identity", () => {
       ok: true,
     });
     app = createApp({
+      auth: { mode: "local" },
       db,
       user: { displayName: "Ignored after first startup" },
     });
@@ -207,7 +216,7 @@ describe("Cloud Projects", () => {
     });
     expect(second.id).toMatch(/^[23456789abcdefghjkmnpqrstvwxyz]{10}$/u);
     expect(second).not.toHaveProperty("projectText");
-    app = createApp({ db });
+    app = createApp({ auth: { mode: "local" }, db });
     const listed = await request("/api/projects");
     expect(listed.headers.get("cache-control")).toBe("no-store");
     expect(
@@ -219,7 +228,11 @@ describe("Cloud Projects", () => {
     expect(new Date(opened.updatedAt).toISOString()).toBe(opened.updatedAt);
   });
   it("enforces the configured limit atomically and allows creation after deletion", async () => {
-    app = createApp({ db, limits: { projectLimit: 2 } });
+    app = createApp({
+      auth: { mode: "local" },
+      db,
+      limits: { projectLimit: 2 },
+    });
     expect(await (await request("/api/projects")).json()).toEqual({
       projects: [],
       limit: 2,
@@ -577,4 +590,170 @@ it("serves the built editor with SPA fallback, MIME/COOP headers and path guards
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+describe("standalone accounts", () => {
+  const credentials = (
+    action: string,
+    username: string,
+    password = "passphrase",
+    headers = {},
+  ) =>
+    request(
+      "/api/auth/" + action,
+      "POST",
+      { username, password },
+      { "content-type": "application/json", ...headers },
+    );
+  const cookieFrom = (r: Response) => ({
+    Cookie: r.headers.get("set-cookie")!.split(";")[0]!,
+  });
+  it("validates names, authenticates case-insensitively and expires or revokes sessions", async () => {
+    app = createApp({ db, auth: { mode: "accounts" } });
+    for (const invalid of [
+      "aa1234567",
+      "123456789",
+      "a1234567",
+      "a123456789",
+      "é12345678",
+      "a12345678 ",
+      "a１２３４５６７８",
+    ]) {
+      expect((await credentials("register", invalid)).status).toBe(400);
+    }
+    expect((await credentials("register", "A12345678", "short")).status).toBe(
+      400,
+    );
+    expect(
+      (
+        await credentials("register", "A12345678", "passphrase", {
+          Origin: "https://foreign.test",
+        })
+      ).status,
+    ).toBe(403);
+    for (const path of ["/api/projects", "/api/components", "/api/auth/me"])
+      expect((await request(path)).status).toBe(401);
+    expect((await request("/api/agent/sessions", "POST", {})).status).toBe(401);
+    expect(await (await request("/api/session")).json()).toEqual({
+      mode: "accounts",
+      user: null,
+    });
+    const first = await credentials("register", "A12345678");
+    expect(first.status).toBe(201);
+    expect(first.headers.get("set-cookie")).toMatch(/httponly/i);
+    expect((await credentials("register", "a12345678")).status).toBe(409);
+    expect((await credentials("login", "a12345678", "incorrect")).status).toBe(
+      401,
+    );
+    const again = await credentials("login", "a12345678");
+    expect(again.status).toBe(200);
+    const firstCookie = cookieFrom(first),
+      otherCookie = cookieFrom(again);
+    expect(firstCookie).not.toEqual(otherCookie);
+    expect(
+      (await request("/api/auth/logout", "POST", undefined, firstCookie))
+        .status,
+    ).toBe(200);
+    expect(
+      (await request("/api/projects", "GET", undefined, firstCookie)).status,
+    ).toBe(401);
+    const profile = await (
+      await request("/api/auth/me", "GET", undefined, otherCookie)
+    ).json();
+    expect(profile.user).toMatchObject({
+      displayName: "a12345678",
+      isAdmin: false,
+      provider: "account",
+    });
+    await db.query(
+      "UPDATE standalone_sessions SET expires_at=now()-interval '1 minute'",
+    );
+    expect(
+      (await request("/api/projects", "GET", undefined, otherCookie)).status,
+    ).toBe(401);
+  });
+  it("scopes the HTTPS cookie to the deployment and prevents caching private previews", async () => {
+    const prefixed = createApp({
+      db,
+      auth: { mode: "accounts" },
+      basePath: "/canvas",
+    });
+    const url = "https://example.test/canvas/api";
+    const registered = await prefixed.request(url + "/auth/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: "A12345678", password: "passphrase" }),
+    });
+    expect(registered.status).toBe(201);
+    const cookie = registered.headers.get("set-cookie");
+    expect(cookie).toMatch(/Path=\/canvas(?:;|$)/i);
+    expect(cookie).toMatch(/; Secure(?:;|$)/i);
+    expect(cookie).toMatch(/SameSite=Strict/i);
+    const headers = cookieFrom(registered);
+    const saved = await prefixed.request(url + "/projects", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ name: "Test", projectText: projectText() }),
+    });
+    const { project } = await saved.json();
+    const preview = await prefixed.request(
+      url + "/projects/" + project.id + "/preview.svg?v=1",
+      { headers },
+    );
+    expect(preview.status).toBe(200);
+    expect(preview.headers.get("cache-control")).toBe("private, no-store");
+    expect(
+      (await prefixed.request(url + "/agent/sessions", { method: "POST" }))
+        .status,
+    ).toBe(401);
+  });
+  it("scopes projects, previews and history to the owner and rejects writes from a stale tab", async () => {
+    const legacy = await create("Legacy");
+    app = createApp({ db, auth: { mode: "accounts" } });
+    const a = cookieFrom(await credentials("register", "A12345678"));
+    const b = cookieFrom(await credentials("register", "B12345678"));
+    const list = async (headers: Record<string, string>) =>
+      (await (await request("/api/projects", "GET", undefined, headers)).json())
+        .projects;
+    expect(await list(a)).toEqual([]);
+    expect(
+      (await request("/api/projects/" + legacy.id, "GET", undefined, a)).status,
+    ).toBe(404);
+    const body = {
+      name: "Owner's diagram",
+      projectText: projectText("Owner's diagram"),
+    };
+    const created = await request("/api/projects", "POST", body, a);
+    expect(created.status).toBe(201);
+    const { project } = await created.json();
+    const path = "/api/projects/" + project.id;
+    const signedInAgain = cookieFrom(await credentials("login", "a12345678"));
+    expect(
+      (await (await request(path, "GET", undefined, signedInAgain)).json())
+        .project.projectText,
+    ).toBe(body.projectText);
+    for (const suffix of ["", "/preview.svg", "/versions"])
+      expect((await request(path + suffix, "GET", undefined, b)).status).toBe(
+        404,
+      );
+    expect(
+      (await request(path, "PUT", body, { ...b, "If-Match": "revision-1" }))
+        .status,
+    ).toBe(404);
+    expect((await request(path, "PATCH", { favorite: true }, b)).status).toBe(
+      404,
+    );
+    expect((await request(path, "DELETE", undefined, b)).status).toBe(404);
+    const { user } = await (
+      await request("/api/auth/me", "GET", undefined, a)
+    ).json();
+    const stale = await request("/api/projects", "POST", body, {
+      ...b,
+      "X-Canvas-Account": user.id,
+    });
+    expect(stale.status).toBe(401);
+    expect(stale.headers.get("X-Canvas-Session")).toBe("expired");
+    expect(await list(b)).toEqual([]);
+    expect(await list(a)).toHaveLength(1);
+  });
 });

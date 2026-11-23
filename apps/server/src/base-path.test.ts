@@ -33,12 +33,14 @@ it("confines HTTP routes and the static SPA to the configured prefix", async () 
   // Only the database boundary is isolated; Hono and static serving are real.
   const query = vi.fn().mockResolvedValue({ rows: [] });
   const db = { query } as unknown as Pool;
-  const app = createApp({ db, basePath: "/canvas/" });
+  const app = createApp({ auth: { mode: "local" }, db, basePath: "/canvas/" });
   expect(
     await (
-      await createApp({ db, basePath: "/canvas" }).request(
-        "/canvas/api/missing",
-      )
+      await createApp({
+        auth: { mode: "local" },
+        db,
+        basePath: "/canvas",
+      }).request("/canvas/api/missing")
     ).json(),
   ).toEqual({
     error: "Not found",

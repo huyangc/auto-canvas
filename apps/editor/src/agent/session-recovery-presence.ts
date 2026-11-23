@@ -1,3 +1,4 @@
+import { accountKey } from "../accounts/storage";
 export const AGENT_SESSION_RECOVERY_STORAGE_KEY =
   "icm.agent-session-recovery.v1";
 
@@ -11,7 +12,7 @@ export interface BrowserStorageLike {
 export function hasAgentSessionRecovery(storage: BrowserStorageLike): boolean {
   try {
     const value = JSON.parse(
-      storage.getItem(AGENT_SESSION_RECOVERY_STORAGE_KEY) ?? "null",
+      storage.getItem(accountKey(AGENT_SESSION_RECOVERY_STORAGE_KEY)) ?? "null",
     ) as unknown;
     if (typeof value !== "object" || value === null) return false;
     const record = value as Record<string, unknown>;

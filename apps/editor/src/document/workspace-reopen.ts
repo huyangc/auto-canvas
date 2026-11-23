@@ -1,3 +1,4 @@
+import { accountKey } from "../accounts/storage";
 import { createId } from "@icm/model";
 import { parseProject, serializeProject } from "@icm/project-protocol";
 import {
@@ -320,7 +321,7 @@ export async function readWindowWorkspace(
       recovery,
       windowId,
       // The working copy this page's recovery resumes.
-      sessionStorage.getItem(WORKING_COPY_STORAGE_KEY),
+      sessionStorage.getItem(accountKey(WORKING_COPY_STORAGE_KEY)),
     );
     if (left)
       return {

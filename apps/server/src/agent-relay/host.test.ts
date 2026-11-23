@@ -225,7 +225,7 @@ it("persists and re-arms an untouched object's alarm on a new host", async () =>
 });
 
 async function listening(relay: AgentRelayHost) {
-  const app = createApp({ db, agentRelay: relay });
+  const app = createApp({ auth: { mode: "local" }, db, agentRelay: relay });
   const server = serve({
     fetch: app.fetch,
     // Do not replace global Request/Response in Vitest's shared registry.

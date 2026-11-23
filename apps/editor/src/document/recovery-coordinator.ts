@@ -1,3 +1,4 @@
+import { accountKey } from "../accounts/storage";
 // Recovery coordinator: bridges committed Projects and the IndexedDB store.
 //
 // Responsibilities, and nothing more:
@@ -278,11 +279,12 @@ export function createRecoveryCoordinator(
   const now = options.now ?? (() => new Date().toISOString());
 
   const storage = getSessionStorage();
-  let workingCopyId = storage?.getItem(WORKING_COPY_STORAGE_KEY) ?? "";
+  let workingCopyId =
+    storage?.getItem(accountKey(WORKING_COPY_STORAGE_KEY)) ?? "";
   if (workingCopyId.length === 0) {
     workingCopyId = createId();
     try {
-      storage?.setItem(WORKING_COPY_STORAGE_KEY, workingCopyId);
+      storage?.setItem(accountKey(WORKING_COPY_STORAGE_KEY), workingCopyId);
     } catch {
       // A tab-scoped identity that cannot persist still works for this page.
     }
@@ -453,7 +455,7 @@ export function createRecoveryCoordinator(
       currentSource = session.source;
       formalFileHint = session.formalFileHint;
       try {
-        storage?.setItem(WORKING_COPY_STORAGE_KEY, workingCopyId);
+        storage?.setItem(accountKey(WORKING_COPY_STORAGE_KEY), workingCopyId);
       } catch {
         /* Memory remains authoritative. */
       }
@@ -466,7 +468,7 @@ export function createRecoveryCoordinator(
       currentSource = source;
       formalFileHint = undefined;
       try {
-        storage?.setItem(WORKING_COPY_STORAGE_KEY, workingCopyId);
+        storage?.setItem(accountKey(WORKING_COPY_STORAGE_KEY), workingCopyId);
       } catch {
         // Persisted identity is best-effort; the in-memory identity rules.
       }

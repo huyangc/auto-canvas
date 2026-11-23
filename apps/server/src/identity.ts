@@ -3,7 +3,7 @@ export interface SessionUser {
   id: string;
   displayName: string;
   email: null;
-  provider: "local" | "notebook";
+  provider: "local" | "notebook" | "account";
   role: "user" | "admin";
   isAdmin: boolean;
 }

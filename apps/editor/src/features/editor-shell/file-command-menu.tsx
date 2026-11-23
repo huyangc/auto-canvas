@@ -11,6 +11,7 @@ import {
 
 import type { RecentProjectFile } from "../../hosts/native-project-store";
 import type { CloudProjectSummary } from "./cloud-projects";
+import { SignOutCommand } from "../../accounts/account-context";
 import { ProjectShelf } from "./project-shelf";
 
 /**
@@ -462,6 +463,7 @@ export function FileCommandMenu({
           Recover Unsaved Work…
         </button>
       ) : null}
+      <SignOutCommand />
     </>
   );
   if (embedded)

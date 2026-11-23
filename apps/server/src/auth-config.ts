@@ -1,6 +1,8 @@
-/** Who the server's users are: its own single user, or silicon-notebook's. */
+/** Who the server's users are: standalone accounts, a legacy local profile or notebook users. */
 export type AuthConfig =
-  { mode: "local" } | { mode: "notebook"; notebookApi: URL };
+  | { mode: "accounts" }
+  | { mode: "local" }
+  | { mode: "notebook"; notebookApi: URL };
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
 
@@ -12,9 +14,12 @@ export function readAuthConfig(
   env: Readonly<Record<string, string | undefined>>,
 ): AuthConfig {
   const mode = env.AUTO_CANVAS_AUTH;
-  if (mode === undefined || mode === "local") return { mode: "local" };
+  if (mode === undefined || mode === "accounts") return { mode: "accounts" };
+  if (mode === "local") return { mode: "local" };
   if (mode !== "notebook")
-    throw new Error('AUTO_CANVAS_AUTH must be unset, "local" or "notebook"');
+    throw new Error(
+      'AUTO_CANVAS_AUTH must be unset, "accounts", "local" or "notebook"',
+    );
   const value = env.AUTO_CANVAS_NOTEBOOK_API;
   const invalid = () =>
     new Error(

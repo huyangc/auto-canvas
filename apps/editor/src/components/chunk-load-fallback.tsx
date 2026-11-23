@@ -1,3 +1,4 @@
+import { accountKey } from "../accounts/storage";
 import { lazy, type ComponentType } from "react";
 
 import { REFRESH_RESTORE_STORAGE_KEY } from "../document/use-project-file-lifecycle";
@@ -11,7 +12,10 @@ export function refreshWithRestore(): void {
   try {
     // The recovery coordinator flushes on pagehide, so the snapshot survives
     // this reload; the flag lets the refreshed page restore it automatically.
-    window.sessionStorage.setItem(REFRESH_RESTORE_STORAGE_KEY, "true");
+    window.sessionStorage.setItem(
+      accountKey(REFRESH_RESTORE_STORAGE_KEY),
+      "true",
+    );
   } catch {
     // Without sessionStorage the reload still recovers via the manual banner.
   }

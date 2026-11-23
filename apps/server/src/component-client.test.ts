@@ -35,7 +35,7 @@ it("drives publication, catalog revalidation, views, update, deletion and restor
       { idempotencyKey: "client-create", fetch: fetchLike },
     );
     expect(saved.outcome).toBe("created");
-    app = createApp({ db: route.db });
+    app = createApp({ auth: { mode: "local" }, db: route.db });
     expect(await readSharedComponent(saved.entry.id, fetchLike)).toEqual(
       saved.entry,
     );

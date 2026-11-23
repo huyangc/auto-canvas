@@ -1,0 +1,251 @@
+import { useState, type FormEvent, type ReactNode } from "react";
+import { createRoot } from "react-dom/client";
+import { apiUrl } from "../lib/app-url";
+import { bindAccountStorage } from "./storage";
+import { AccountContext } from "./account-context";
+import "./accounts.css";
+
+type Account = { id: string; displayName: string };
+type Identity = { mode: "local" } | { mode: "accounts"; user: Account | null };
+async function identify(): Promise<Identity> {
+  const res = await fetch(apiUrl("session"), {
+    cache: "no-store",
+    redirect: "error",
+  });
+  const result = await res.json();
+  if (res.ok && result?.mode === "local") return { mode: "local" };
+  if (
+    res.ok &&
+    result?.mode === "accounts" &&
+    (result.user === null ||
+      (typeof result.user?.id === "string" &&
+        typeof result.user.displayName === "string"))
+  )
+    return result;
+  throw Error("Cannot reach the account server.");
+}
+const eventKey = () => `auto-canvas:session:${import.meta.env.BASE_URL}`;
+function announce() {
+  try {
+    localStorage.setItem(
+      eventKey(),
+      Array.from(crypto.getRandomValues(new Uint32Array(2))).join("-"),
+    );
+  } catch {
+    /* Storage may be disabled. */
+  }
+}
+
+function Credentials({ onSuccess }: { onSuccess(): void }) {
+  const [register, setRegister] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
+  async function submit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (pending) return;
+    setPending(true);
+    setError("");
+    const data = new FormData(e.currentTarget);
+    try {
+      const res = await fetch(
+        apiUrl(register ? "auth/register" : "auth/login"),
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            username: data.get("username"),
+            password: data.get("password"),
+          }),
+        },
+      );
+      if (!res.ok) {
+        setError((await res.json()).error || "Please try again.");
+        return;
+      }
+      announce();
+      onSuccess();
+    } catch {
+      setError("Cannot reach the account server.");
+    } finally {
+      setPending(false);
+    }
+  }
+  return (
+    <main className="canvas-account-screen">
+      <form
+        className="canvas-account-form"
+        onSubmit={(event) => void submit(event)}
+      >
+        <span>Auto Canvas</span>
+        <h1>{register ? "Create an account" : "Sign in"}</h1>
+        <label>
+          Username
+          <input
+            required
+            autoFocus
+            name="username"
+            pattern="[A-Za-z][0-9]{8}"
+            maxLength={9}
+            autoComplete="username"
+            autoCapitalize="none"
+            spellCheck={false}
+            aria-describedby="username-format"
+          />
+        </label>
+        <small id="username-format">
+          One letter followed by eight digits, e.g. A12345678.
+        </small>
+        <label>
+          Password
+          <input
+            key={register ? "new" : "existing"}
+            required
+            name="password"
+            type="password"
+            minLength={8}
+            maxLength={128}
+            autoComplete={register ? "new-password" : "current-password"}
+          />
+        </label>
+        {register && <small>Use 8–128 characters.</small>}
+        {error && <p role="alert">{error}</p>}
+        <button type="submit" disabled={pending}>
+          {register ? "Register" : "Sign in"}
+        </button>
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => {
+            setRegister(!register);
+            setError("");
+          }}
+        >
+          {register ? "Back to sign in" : "Create an account"}
+        </button>
+      </form>
+    </main>
+  );
+}
+
+export function mountAccountGate(
+  container: HTMLElement,
+  editor: () => ReactNode,
+) {
+  const root = createRoot(container);
+  let generation = 0;
+  let active: string | undefined;
+  let closing = false;
+  const nativeFetch = window.fetch.bind(window);
+  const reload = () => {
+    // Unmount first to flush this account's workspace and release unload guards.
+    if (closing) return;
+    closing = true;
+    active = undefined;
+    root.unmount();
+    window.location.reload();
+  };
+  window.addEventListener("storage", (event) => {
+    if (event.key === eventKey()) reload();
+  });
+  const check = async () => {
+    const current = ++generation;
+    try {
+      const identity = await identify();
+      if (current !== generation) return;
+      if (identity.mode !== "accounts") {
+        root.render(editor());
+        return;
+      }
+      if (!identity.user) {
+        root.render(<Credentials onSuccess={() => void check()} />);
+        return;
+      }
+      const { id, displayName } = identity.user;
+      bindAccountStorage(id, import.meta.env.BASE_URL);
+      active = id;
+      // A sibling tab can change this origin's cookie between rendering and a
+      // save. The server checks the account that the editor intended to use.
+      const apiBase = new URL(apiUrl(""), location.origin);
+      window.fetch = async (input, init) => {
+        const url = new URL(
+          input instanceof Request ? input.url : String(input),
+          document.baseURI,
+        );
+        if (
+          url.origin !== apiBase.origin ||
+          !url.pathname.startsWith(apiBase.pathname)
+        )
+          return nativeFetch(input, init);
+        if (closing) throw Error("The account session has ended");
+        const req = new Request(input instanceof Request ? input : url, {
+          ...init,
+          redirect: "error",
+          cache: "no-store",
+        });
+        if (req.mode === "no-cors")
+          throw Error("Account requests require same-origin headers");
+        req.headers.set("X-Canvas-Account", id);
+        const response = await nativeFetch(req);
+        if (
+          response.status === 401 &&
+          response.headers.get("X-Canvas-Session") === "expired" &&
+          active
+        ) {
+          active = undefined;
+          reload();
+        }
+        return response;
+      };
+      async function logout() {
+        try {
+          const result = await fetch(apiUrl("auth/logout"), { method: "POST" });
+          if (!result.ok) throw Error();
+          announce();
+          reload();
+        } catch {
+          window.alert("Sign out failed. Please try again.");
+        }
+      }
+      root.render(
+        <AccountContext.Provider
+          value={{ username: displayName, logout: () => void logout() }}
+        >
+          {editor()}
+        </AccountContext.Provider>,
+      );
+    } catch {
+      if (current === generation)
+        root.render(
+          <main className="canvas-account-screen">
+            <section className="canvas-account-form">
+              <h1>Account server unavailable</h1>
+              <button onClick={() => void check()}>Retry</button>
+            </section>
+          </main>,
+        );
+    }
+  };
+  const recheck = async () => {
+    if (!active) return;
+    try {
+      const res = await nativeFetch(apiUrl("auth/me"), { cache: "no-store" });
+      if (
+        res.status === 401 ||
+        (res.ok && (await res.json()).user?.id !== active)
+      )
+        reload();
+    } catch {
+      /* Retry when the window next receives focus. */
+    }
+  };
+  window.addEventListener("focus", () => void recheck());
+  window.addEventListener("pageshow", (event) => {
+    if (event.persisted) void recheck();
+  });
+  root.render(
+    <main className="canvas-account-screen" role="status">
+      Opening Auto Canvas…
+    </main>,
+  );
+  void check();
+}
