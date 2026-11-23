@@ -45,7 +45,26 @@ class RelayObject implements DurableStateLike {
   >();
   private readonly streams = new Set<() => Promise<void>>();
   private idleTimer: ReturnType<typeof setTimeout> | undefined;
+  private accountTimer?: ReturnType<typeof setTimeout>;
+  private accountDeadline = Infinity;
   private idleSince = Date.now();
+
+  expireWithAccount(at: number, expire: () => void) {
+    if (at >= this.accountDeadline) return;
+    this.accountDeadline = at;
+    clearTimeout(this.accountTimer);
+    const schedule = () => {
+      if (this.stopped) return;
+      const remaining = at - Date.now();
+      if (remaining <= 0) return expire();
+      this.accountTimer = setTimeout(
+        schedule,
+        Math.min(2_147_483_647, remaining),
+      );
+      this.accountTimer.unref();
+    };
+    schedule();
+  }
   private session!: Session;
   private stopped = false;
   private failure: unknown;
@@ -272,6 +291,7 @@ class RelayObject implements DurableStateLike {
     const remaining = this.idleMs - (Date.now() - this.idleSince);
     if (this.storage.isEmpty || remaining <= 0) {
       this.stopped = true;
+      clearTimeout(this.accountTimer);
       this.evict();
     } else {
       this.idleTimer = setTimeout(
@@ -285,6 +305,7 @@ class RelayObject implements DurableStateLike {
   async close(): Promise<void> {
     if (this.stopped) return;
     this.stopped = true;
+    clearTimeout(this.accountTimer);
     clearTimeout(this.idleTimer);
     // Startup may still be loading its cache or registering another blocker.
     while (this.blockers.size) await Promise.all(this.blockers);
@@ -317,6 +338,10 @@ export class AgentRelayHost implements AgentSessionNamespaceLike {
   });
   private stopped = false;
   private closing: Promise<void> | undefined;
+  private readonly cleanupRetries = new Map<
+    string,
+    ReturnType<typeof setTimeout>
+  >();
   private readonly idleMs: number;
 
   constructor(
@@ -453,14 +478,20 @@ export class AgentRelayHost implements AgentSessionNamespaceLike {
               [id, creatingFor],
             );
             if (!link.rowCount) return revoked();
-          } else {
-            const live = await this.db.query(
-              "SELECT 1 FROM account_agent_pairings p JOIN standalone_sessions s ON s.token_hash=p.session_hash WHERE p.pairing_id=$1 AND s.expires_at>now()",
-              [id],
-            );
-            if (!live.rowCount) return revoked();
           }
-          const result = await this.getByName(id).fetch(input, init);
+          const beforeLookup = Date.now();
+          const live = await this.db.query<{ remaining_ms: number }>(
+            "SELECT (EXTRACT(epoch FROM s.expires_at-clock_timestamp())*1000)::float8 AS remaining_ms FROM account_agent_pairings p JOIN standalone_sessions s ON s.token_hash=p.session_hash WHERE p.pairing_id=$1 AND s.expires_at>now()",
+            [id],
+          );
+          const deadline = beforeLookup + (live.rows[0]?.remaining_ms ?? 0);
+          if (deadline <= Date.now()) return revoked();
+          const object = this.getByName(id);
+          object.expireWithAccount(
+            deadline,
+            () => void this.endAccountPairings([id]),
+          );
+          const result = await object.fetch(input, init);
           if (creatingFor) {
             const stillOwned = await this.db.query(
               "SELECT 1 FROM account_agent_pairings WHERE pairing_id=$1",
@@ -482,12 +513,30 @@ export class AgentRelayHost implements AgentSessionNamespaceLike {
     };
   }
 
+  // The database already denies the old credentials. Close any live transports
+  // independently; a temporary relay failure cannot undo the auth transaction.
   async endAccountPairings(ids: string[]) {
-    for (const id of ids)
-      await this.getByName(id).fetch(
-        "https://agent-session.internal/account-ended",
-        { method: "POST" },
-      );
+    for (const id of ids) {
+      if (this.stopped) return;
+      try {
+        const response = await this.getByName(id).fetch(
+          "https://agent-session.internal/account-ended",
+          { method: "POST" },
+        );
+        if (response.status >= 500) throw new Error("Agent cleanup failed");
+        clearTimeout(this.cleanupRetries.get(id));
+        this.cleanupRetries.delete(id);
+      } catch {
+        if (this.stopped || this.cleanupRetries.has(id)) continue;
+        console.warn("Retrying cleanup of a revoked Agent pairing");
+        const retry = setTimeout(() => {
+          this.cleanupRetries.delete(id);
+          void this.endAccountPairings([id]);
+        }, 5000);
+        retry.unref();
+        this.cleanupRetries.set(id, retry);
+      }
+    }
   }
 
   async fetch(
@@ -578,6 +627,8 @@ export class AgentRelayHost implements AgentSessionNamespaceLike {
 
   private async shutdown(): Promise<void> {
     this.stopped = true;
+    for (const retry of this.cleanupRetries.values()) clearTimeout(retry);
+    this.cleanupRetries.clear();
     for (const alarm of this.alarms.values()) clearTimeout(alarm.timer);
     this.alarms.clear();
     const results = await Promise.allSettled(

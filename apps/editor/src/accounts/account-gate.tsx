@@ -271,6 +271,8 @@ export function mountAccountGate(
       async function logout() {
         if (container.inert || closing) return;
         container.inert = true;
+        // Detach the Agent transport synchronously before capturing edits.
+        window.dispatchEvent(new Event(ACCOUNT_SESSION_ENDING));
         try {
           if (!prepare) throw Error("The workspace is still opening.");
           await prepare();
@@ -287,7 +289,6 @@ export function mountAccountGate(
         try {
           const result = await fetch(apiUrl("auth/logout"), { method: "POST" });
           if (!result.ok) throw Error();
-          window.dispatchEvent(new Event(ACCOUNT_SESSION_ENDING));
           announce();
           reload();
         } catch {

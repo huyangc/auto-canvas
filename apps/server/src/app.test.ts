@@ -721,6 +721,11 @@ describe("standalone accounts", () => {
           { Authorization: "Bearer " + p.claim.agentToken },
         );
       expect((await status(old)).status).toBe(200);
+      // A failed relay cleanup cannot roll back logout or reauthorize the token.
+      vi.spyOn(
+        relay.getByName(old.session.sessionId),
+        "fetch",
+      ).mockRejectedValueOnce(new Error("Temporary relay failure"));
       expect(
         (await request("/api/auth/logout", "POST", undefined, one)).status,
       ).toBe(200);
@@ -747,9 +752,18 @@ describe("standalone accounts", () => {
         ).error.code,
       ).toBe("SESSION_REVOKED");
       expect((await status(live)).status).toBe(200);
+      // No further login/request should be needed to terminate an existing stream.
       await db.query(
-        "UPDATE standalone_sessions SET expires_at=now()-interval '1 minute'",
+        "UPDATE standalone_sessions SET expires_at=now()+interval '0.5 seconds'",
       );
+      const events = await request(
+        "/api/agent/sessions/" + live.session.sessionId + "/events",
+        "GET",
+        undefined,
+        { Authorization: "Bearer " + live.claim.agentToken },
+      );
+      expect(events.status).toBe(200);
+      expect(await events.text()).toContain("session.revoked");
       expect((await (await status(live)).json()).error.code).toBe(
         "SESSION_REVOKED",
       );
