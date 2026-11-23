@@ -31,6 +31,7 @@ async function mount(
     openCloudProjectById: vi.fn(),
     guardDirtyReplacement: vi.fn(async (_intent, perform) => {
       await perform(false);
+      return false;
     }),
     netlistProfile: createNetlistExportProfile("sky130"),
     ...overrides,

@@ -1041,7 +1041,7 @@ function WorkspaceEditor({
     startupCloudProjectId,
     canRestoreStartupCloudProject,
     restoreAfterRefresh,
-    startupRestoreReady,
+    startupRestoreOutcome,
     startupRestorePending,
     setRecoveryDialogOpen,
     isDirtyWork,
@@ -1057,6 +1057,7 @@ function WorkspaceEditor({
     exportProjectFile,
     downloadCurrentProjectBackup,
     guardDirtyReplacement,
+    beginReplacementCommand,
     cancelReplaceGuard,
     confirmReplaceGuard,
     saveAndContinueReplaceGuard,
@@ -1090,6 +1091,10 @@ function WorkspaceEditor({
     restoreWorkingSession: agentStartupRecovery !== null,
     externalWorkspaceRestored: restoredWorkspace !== null,
     beforeSnapshot: captureAuthoredProject,
+    // A commit is visible on the controller before the render shows it.
+    currentProject: () => editorDocumentController.project,
+    // The coordinator's working copy now, never this render's copy.
+    currentWorkingCopyId: () => captureRecoverySession().workingCopyId,
     describeOpenBlocker: () => projectSwitchBlockerRef.current(),
     describeCloudSaveBlocker: () =>
       isCloudManagementInFlight()
@@ -1181,6 +1186,12 @@ function WorkspaceEditor({
     sessionUser,
     startupCloudProjectId,
   ]);
+  // The workspace records' restore result, written by the tab hook below and
+  // read by the Agent's gate: a failed tab restore must not resume a stored
+  // Agent proof, even when its working-copy id still matches.
+  const workspaceRestoreOutcomeRef = useRef<"restored" | "unsuccessful" | null>(
+    null,
+  );
   const {
     agentTargetRef,
     backgroundAgentHosts,
@@ -1197,7 +1208,6 @@ function WorkspaceEditor({
     recoveryWorkingCopyId,
     stageRecovery,
     flushRecovery,
-    agentStartupRecovery,
     project,
     browserAgentHost,
     agentFileCandidate,
@@ -1206,7 +1216,8 @@ function WorkspaceEditor({
     browserAgentProjectHost,
     captureAuthoredProject,
     cloudBinding,
-    startupRestoreReady,
+    startupRestoreOutcome,
+    workspaceRestoreOutcome: () => workspaceRestoreOutcomeRef.current,
     isDirtyWork,
     replaceActiveProject,
     guardDirtyReplacement,
@@ -4475,6 +4486,7 @@ function WorkspaceEditor({
     netlistRootDocumentId,
     netlistConfigurationError: netlistPreferences.error,
     guardDirtyReplacement,
+    beginReplacementCommand,
     replaceActiveProject,
     showNetlist: (mode, namingProfile) => {
       netlistPreferences.selectMode(mode);
@@ -4501,13 +4513,10 @@ function WorkspaceEditor({
   // The tab guard's blocker holds a drop back as it holds an open back, and
   // the files are read for a while first: the block is asked again at the
   // replacement boundary, when a draft begun meanwhile, another tab or a
-  // save may now hold the Project.
-  //
-  // Known, and left to a task of its own (T171): a tab switch between the
-  // boundary check and the recovery write, or before a failed import's
-  // report, still lands on the tab that is now open. The choosers and the
-  // File menu have the same race; it belongs in the replacement guard, not
-  // in one caller of it.
+  // save may now hold the Project. The drop acquires the replacement slot
+  // here, before it reads anything, so a second drop is refused at once; the
+  // command then travels with the import/open to the guard, which is the
+  // only place a stale result is discarded.
   const boundaryBlocker = (session: string) => (): string | null =>
     editorDocumentController.projectSessionId !== session
       ? "another Project is active"
@@ -4523,9 +4532,11 @@ function WorkspaceEditor({
         editorDocumentController.projectSessionId,
       );
       if (holdDrop(blocker())) return Promise.resolve();
-      // Only the drop adds the second check; the choosers keep their flow.
+      const command = beginReplacementCommand("Import the dropped netlist");
+      if (!command) return Promise.resolve();
       return importSpiceFiles(files, "native", {
         replacementBlocker: blocker,
+        command,
       });
     },
     openProjectFile: (file) => {
@@ -4533,7 +4544,9 @@ function WorkspaceEditor({
         editorDocumentController.projectSessionId,
       );
       if (holdDrop(blocker())) return Promise.resolve();
-      return openProjectFile(file, { replacementBlocker: blocker });
+      const command = beginReplacementCommand(`Open ${file.name}`);
+      if (!command) return Promise.resolve();
+      return openProjectFile(file, { replacementBlocker: blocker, command });
     },
     setStatus,
   });
@@ -4838,6 +4851,7 @@ function WorkspaceEditor({
     openImportFile,
     flushNativeWorkspace,
     restoredTabs,
+    workspaceRestoreOutcome,
     currentEditBlocker,
     projectSwitchBlocker,
     projectTabs,
@@ -4937,6 +4951,7 @@ function WorkspaceEditor({
       docksCarriedRef.current = false;
     },
   });
+  workspaceRestoreOutcomeRef.current = workspaceRestoreOutcome;
   useRestoredTabLinks({
     openImportFile,
     importReady: recoveryReady && !startupRestorePending,

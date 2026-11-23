@@ -18,6 +18,7 @@ import {
   chunkLoadStatus,
   importChunk,
 } from "../../components/chunk-import";
+import type { ReplacementCommand } from "../../document/use-project-file-lifecycle";
 
 import {
   createVisualExportArtifact,
@@ -53,7 +54,10 @@ export interface EditorFileCommandDependencies {
   guardDirtyReplacement: (
     label: string,
     replace: () => void | Promise<void>,
-  ) => Promise<void>;
+    command?: ReplacementCommand,
+  ) => Promise<boolean>;
+  /** Takes the single replacement slot; null with a refusal when it is held. */
+  beginReplacementCommand(intent: string): ReplacementCommand | null;
   replaceActiveProject: (
     project: CircuitProject,
     viewBox: GridRect,
@@ -97,6 +101,7 @@ export function createEditorFileCommands({
   netlistRootDocumentId,
   netlistConfigurationError,
   guardDirtyReplacement,
+  beginReplacementCommand,
   replaceActiveProject,
   showNetlist,
   setImportReport,
@@ -265,8 +270,15 @@ export function createEditorFileCommands({
     }
   };
 
-  /** The chosen files and the one entry among them, or null after saying why. */
-  const readSources = async (files: FileList | null) => {
+  /**
+   * The chosen files and the one entry among them, or null after saying why.
+   * A command that went stale publishes nothing: the active tab's status is
+   * not ours to overwrite.
+   */
+  const readSources = async (
+    files: FileList | null,
+    command: ReplacementCommand,
+  ) => {
     if (!files || files.length === 0) return null;
     const sourceInputs = await Promise.all(
       [...files].map(async (file) => ({
@@ -274,6 +286,7 @@ export function createEditorFileCommands({
         bytes: new Uint8Array(await file.arrayBuffer()),
       })),
     );
+    if (!command.isCurrent()) return null;
     const conventionalEntries = sourceInputs.filter((input) =>
       /\.(?:cir|sp|spi|scs|cdl)$/iu.test(input.path),
     );
@@ -285,10 +298,13 @@ export function createEditorFileCommands({
         ? namedCircuitEntries
         : conventionalEntries;
     if (entryCandidates.length !== 1) {
-      recordUsage?.("netlist.import", "failed");
-      setStatus(
-        `Select one unambiguous .cir, .sp, .spi, .cdl, or .scs entry and its local include files; found ${entryCandidates.length}`,
-      );
+      // A stale command publishes nothing, and logs no failure of its own.
+      if (command.isCurrent()) {
+        recordUsage?.("netlist.import", "failed");
+        setStatus(
+          `Select one unambiguous .cir, .sp, .spi, .cdl, or .scs entry and its local include files; found ${entryCandidates.length}`,
+        );
+      }
       return null;
     }
     return { sourceInputs, entryCandidates };
@@ -297,44 +313,57 @@ export function createEditorFileCommands({
   /**
    * Replace the open Project with an imported one, and open its report. With
    * `layout`, the import is then laid out (only once the replacement really
-   * happens: the dirty-work guard may defer or cancel it).
+   * happens: the dirty-work guard may defer or cancel it). Answers whether
+   * the guard's dialog now owns the command.
    */
   const installImport = async (
     label: string,
     importedProject: CircuitProject,
     report: SpiceImportReport,
     layout: boolean,
+    command: ReplacementCommand,
     // Read at the replacement boundary, after the files are read: what keeps
     // the Project from being replaced holds now. Only a drop passes one; the
     // choosers keep their existing flow.
     replacementBlocker?: () => string | null,
-  ) => {
+  ): Promise<boolean> => {
+    if (!command.isCurrent()) return false;
     const blocker = replacementBlocker?.();
     if (blocker) {
-      setStatus(`Can't open a Project yet: ${blocker}`);
-      return;
+      if (command.isCurrent())
+        setStatus(`Can't open a Project yet: ${blocker}`);
+      return false;
     }
     const instanceCount = importedProject.documents.reduce(
       (count, candidate) => count + candidate.instances.length,
       0,
     );
-    await guardDirtyReplacement(label, () => {
-      replaceActiveProject(importedProject, defaultViewBox, {
-        source: "spice-import",
-      });
-      setImportReport(report);
-      setImportReviewOpen(true);
-      if (getEditorMode?.() !== "auto") setSelectionOpen(true);
-      const documents = importedProject.documents.length;
-      const headline = `Imported ${documents} ${documents === 1 ? "Document" : "Documents"} and ${instanceCount} structural ${instanceCount === 1 ? "instance" : "instances"}`;
-      setStatus(headline);
-      recordUsage?.("netlist.import", "ok");
-      if (layout) onImported?.(headline);
-    });
+    return guardDirtyReplacement(
+      label,
+      () => {
+        replaceActiveProject(importedProject, defaultViewBox, {
+          source: "spice-import",
+        });
+        setImportReport(report);
+        setImportReviewOpen(true);
+        if (getEditorMode?.() !== "auto") setSelectionOpen(true);
+        const documents = importedProject.documents.length;
+        const headline = `Imported ${documents} ${documents === 1 ? "Document" : "Documents"} and ${instanceCount} structural ${instanceCount === 1 ? "instance" : "instances"}`;
+        setStatus(headline);
+        recordUsage?.("netlist.import", "ok");
+        if (layout) onImported?.(headline);
+      },
+      command,
+    );
   };
 
-  /** Show an import that failed, with its findings. */
-  const reportFailedImport = (report: SpiceImportReport, message: string) => {
+  /** Show an import that failed, with its findings, for the owner only. */
+  const reportFailedImport = (
+    report: SpiceImportReport,
+    message: string,
+    command: ReplacementCommand,
+  ) => {
+    if (!command.isCurrent()) return;
     recordUsage?.("netlist.import", "failed");
     setImportReport(report);
     setImportReviewOpen(true);
@@ -345,88 +374,143 @@ export function createEditorFileCommands({
     setStatus(message);
   };
 
-  const importRnlFiles = async (files: FileList | null): Promise<void> => {
-    const sources = await readSources(files);
-    if (!sources) return;
-    // readSources returns only with exactly one entry.
-    const [entry] = sources.entryCandidates;
-    if (!entry) return;
-    const entryPath = entry.path;
-    setStatus("Importing RNL sources");
+  const importRnlFiles = async (
+    files: FileList | null,
+    options: { command?: ReplacementCommand } = {},
+  ): Promise<void> => {
+    const command =
+      options.command ?? beginReplacementCommand("Import RNL sources");
+    if (!command) return;
+    let handedOff = false;
     try {
-      const { planRnlImport } = await importChunk(
-        "RNL import",
-        () => import("../netlist-export/rnl-import"),
-      );
-      const plan = await planRnlImport({
-        inputs: sources.sourceInputs,
-        entryPath,
-        runtime: await loadRnlRuntime(),
-      });
-      const report = { entryPath, diagnostics: plan.diagnostics };
-      if (plan.status === "failed") {
-        reportFailedImport(report, plan.message);
+      let sources;
+      try {
+        sources = await readSources(files, command);
+      } catch {
+        if (command.isCurrent()) setStatus("Couldn't read the dropped file");
         return;
       }
-      await installImport("Import RNL sources", plan.project, report, false);
-    } catch (error) {
-      recordUsage?.("netlist.import", "failed");
-      if (error instanceof ChunkLoadError) {
-        setStatus(chunkLoadStatus(error.feature));
-        onChunkLoadFailure?.(error.feature);
-        return;
+      if (!sources) return;
+      // readSources returns only with exactly one entry.
+      const [entry] = sources.entryCandidates;
+      if (!entry) return;
+      const entryPath = entry.path;
+      if (!command.isCurrent()) return;
+      setStatus("Importing RNL sources");
+      try {
+        const { planRnlImport } = await importChunk(
+          "RNL import",
+          () => import("../netlist-export/rnl-import"),
+        );
+        if (!command.isCurrent()) return;
+        const plan = await planRnlImport({
+          inputs: sources.sourceInputs,
+          entryPath,
+          runtime: await loadRnlRuntime(),
+        });
+        if (!command.isCurrent()) return;
+        const report = { entryPath, diagnostics: plan.diagnostics };
+        if (plan.status === "failed") {
+          reportFailedImport(report, plan.message, command);
+          return;
+        }
+        handedOff = await installImport(
+          "Import RNL sources",
+          plan.project,
+          report,
+          false,
+          command,
+        );
+      } catch (error) {
+        if (!command.isCurrent()) return;
+        recordUsage?.("netlist.import", "failed");
+        if (error instanceof ChunkLoadError) {
+          setStatus(chunkLoadStatus(error.feature));
+          onChunkLoadFailure?.(error.feature);
+          return;
+        }
+        setStatus(error instanceof Error ? error.message : "RNL import failed");
       }
-      setStatus(error instanceof Error ? error.message : "RNL import failed");
+    } finally {
+      if (!handedOff) command.release();
     }
   };
 
   const importSpiceFiles = async (
     files: FileList | null,
     namingProfile: "native" | "cadence-bang" = "native",
-    options: { replacementBlocker?: () => string | null } = {},
+    options: {
+      replacementBlocker?: () => string | null;
+      command?: ReplacementCommand;
+    } = {},
   ): Promise<void> => {
-    const sources = await readSources(files);
-    if (!sources) return;
-    const { sourceInputs, entryCandidates } = sources;
-    setStatus("Importing SPICE sources");
+    const command =
+      options.command ?? beginReplacementCommand("Import SPICE sources");
+    if (!command) return;
+    let handedOff = false;
     try {
-      const result = await importSchematic(
-        sourceInputs,
-        entryCandidates[0]!.path,
-        namingProfile,
-        chooseMosSymbol,
-      );
-      const nextImportReport: SpiceImportReport = {
-        entryPath: entryCandidates[0]!.path,
-        diagnostics: result.diagnostics,
-        ...(result.project
-          ? {
-              cellCount: result.project.documents.filter(
-                (item) => item.instances.length > 0,
-              ).length,
-            }
-          : {}),
-      };
-      if (!result.project || !result.successful) {
-        const firstError = result.diagnostics.find(
-          (item) => item.severity === "error",
-        );
-        reportFailedImport(
-          nextImportReport,
-          firstError?.message ?? "SPICE import failed",
-        );
+      let sources;
+      try {
+        sources = await readSources(files, command);
+      } catch {
+        if (command.isCurrent()) setStatus("Couldn't read the dropped file");
         return;
       }
-      await installImport(
-        "Import SPICE sources",
-        withImportedInstanceDisplays(result.project),
-        nextImportReport,
-        true,
-        options.replacementBlocker,
-      );
-    } catch (error) {
-      recordUsage?.("netlist.import", "failed");
-      setStatus(error instanceof Error ? error.message : "SPICE import failed");
+      if (!sources) return;
+      const { sourceInputs, entryCandidates } = sources;
+      if (!command.isCurrent()) return;
+      setStatus("Importing SPICE sources");
+      try {
+        // The schematic import may ask which symbol a MOS device takes: that
+        // answer is an await like any other, checked below.
+        const result = await importSchematic(
+          sourceInputs,
+          entryCandidates[0]!.path,
+          namingProfile,
+          chooseMosSymbol,
+        );
+        if (!command.isCurrent()) return;
+        const nextImportReport: SpiceImportReport = {
+          entryPath: entryCandidates[0]!.path,
+          diagnostics: result.diagnostics,
+          ...(result.project
+            ? {
+                cellCount: result.project.documents.filter(
+                  (item) => item.instances.length > 0,
+                ).length,
+              }
+            : {}),
+        };
+        if (!result.project || !result.successful) {
+          const firstError = result.diagnostics.find(
+            (item) => item.severity === "error",
+          );
+          reportFailedImport(
+            nextImportReport,
+            firstError?.message ?? "SPICE import failed",
+            command,
+          );
+          return;
+        }
+        handedOff = await installImport(
+          "Import SPICE sources",
+          withImportedInstanceDisplays(result.project),
+          nextImportReport,
+          true,
+          command,
+          options.replacementBlocker,
+        );
+      } catch (error) {
+        // A conversion that finishes after the session changed raises no
+        // app-wide banner and overwrites no status.
+        if (!command.isCurrent()) return;
+        recordUsage?.("netlist.import", "failed");
+        setStatus(
+          error instanceof Error ? error.message : "SPICE import failed",
+        );
+      }
+    } finally {
+      if (!handedOff) command.release();
     }
   };
 

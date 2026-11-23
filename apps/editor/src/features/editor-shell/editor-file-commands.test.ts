@@ -23,6 +23,15 @@ vi.mock("./editor-export-commands", async (importOriginal) => ({
 }));
 vi.mock("../netlist-export/rnl-runtime", () => ({ loadRnlRuntime: vi.fn() }));
 
+function replacementCommand(intent = "Replace the Project") {
+  return {
+    owner: { activation: 0 },
+    intent,
+    isCurrent: () => true,
+    release: vi.fn(),
+  };
+}
+
 function commands(overrides: Partial<EditorFileCommandDependencies> = {}) {
   const project =
     overrides.project ?? createEmptyProject("project", "My Circuit / 1");
@@ -32,6 +41,9 @@ function commands(overrides: Partial<EditorFileCommandDependencies> = {}) {
   const copyText = vi
     .fn<EditorExportDelivery["copyText"]>()
     .mockResolvedValue();
+  const beginReplacementCommand = vi.fn<
+    EditorFileCommandDependencies["beginReplacementCommand"]
+  >((intent) => replacementCommand(intent));
   const dependencies = {
     project,
     document: project.documents[0]!,
@@ -39,7 +51,10 @@ function commands(overrides: Partial<EditorFileCommandDependencies> = {}) {
     defaultViewBox: { x: 0, y: 0, width: 960, height: 640 },
     exportDelivery: { deliverFile, copyText },
     electricalWarningsPresent: () => false,
-    guardDirtyReplacement: vi.fn(),
+    guardDirtyReplacement: vi.fn<
+      EditorFileCommandDependencies["guardDirtyReplacement"]
+    >(async () => false),
+    beginReplacementCommand,
     replaceActiveProject: vi.fn(),
     showNetlist: vi.fn(),
     setImportReport: vi.fn(),
@@ -54,6 +69,7 @@ function commands(overrides: Partial<EditorFileCommandDependencies> = {}) {
     dependencies,
     deliverFile,
     copyText,
+    beginReplacementCommand,
   };
 }
 
@@ -393,6 +409,7 @@ C1 out 0 1p
     vi.fn<EditorFileCommandDependencies["guardDirtyReplacement"]>(
       async (_label, perform) => {
         await perform();
+        return false;
       },
     );
 
@@ -432,7 +449,7 @@ C1 out 0 1p
     // The dirty-work guard cancelled the replacement.
     const cancelled = vi.fn();
     const guarded = commands({
-      guardDirtyReplacement: vi.fn(async () => {}),
+      guardDirtyReplacement: vi.fn(async () => false),
       onImported: cancelled,
     });
     await guarded.importSpiceFiles(files(NETLIST));
@@ -528,5 +545,251 @@ C1 out 0 1p
     } finally {
       vi.doUnmock("../netlist-export/rnl-import");
     }
+  });
+});
+
+describe("a replacement that outlives its session", () => {
+  const NETLIST = `* two Cells
+.subckt stage in out vdd
+M1 out in 0 0 nmos w=1u l=1u
+R1 vdd out 10k
+.ends stage
+.subckt top in out vdd
+X1 in mid vdd stage
+X2 mid out vdd stage
+C1 out 0 1p
+.ends top
+.model nmos nmos
+`;
+
+  function controllableCommand() {
+    let current = true;
+    const command = {
+      owner: { activation: 0 },
+      intent: "Import sources",
+      isCurrent: () => current,
+      release: vi.fn(),
+    };
+    return {
+      command,
+      goStale() {
+        current = false;
+      },
+    };
+  }
+
+  /** A drop whose file read is released by the test. */
+  function gatedFiles(text: string, name = "circuit.sp") {
+    const read = Promise.withResolvers<ArrayBuffer>();
+    const files = [
+      { name, arrayBuffer: () => read.promise },
+    ] as unknown as FileList;
+    return {
+      files,
+      release: () =>
+        read.resolve(new TextEncoder().encode(text).buffer as ArrayBuffer),
+      fail: (error: unknown) => read.reject(error),
+    };
+  }
+
+  async function settle(call: Promise<unknown>) {
+    await call;
+  }
+
+  it("publishes nothing from a SPICE import whose session ended during the read", async () => {
+    const { command, goStale } = controllableCommand();
+    const gated = gatedFiles(NETLIST);
+    const target = commands({
+      beginReplacementCommand: vi.fn(() => command),
+      guardDirtyReplacement: vi.fn(async () => false),
+    });
+    const importing = target.importSpiceFiles(gated.files, "native", {
+      command,
+    });
+    await Promise.resolve();
+    goStale();
+    gated.release();
+    await settle(importing);
+    expect(target.dependencies.setStatus).not.toHaveBeenCalled();
+    expect(target.dependencies.setImportReport).not.toHaveBeenCalled();
+    expect(target.dependencies.setImportReviewOpen).not.toHaveBeenCalled();
+    expect(target.dependencies.setSelectionOpen).not.toHaveBeenCalled();
+    expect(target.dependencies.replaceActiveProject).not.toHaveBeenCalled();
+    expect(command.release).toHaveBeenCalledOnce();
+  });
+
+  it("publishes nothing from an RNL import whose session ended during the read", async () => {
+    const { command, goStale } = controllableCommand();
+    const gated = gatedFiles("* rnl\n");
+    const target = commands({ beginReplacementCommand: vi.fn(() => command) });
+    const importing = target.importRnlFiles(gated.files, { command });
+    await Promise.resolve();
+    goStale();
+    gated.release();
+    await settle(importing);
+    expect(target.dependencies.setStatus).not.toHaveBeenCalled();
+    expect(command.release).toHaveBeenCalledOnce();
+  });
+
+  it("says nothing about an ambiguous selection for a stale owner", async () => {
+    const { command, goStale } = controllableCommand();
+    const gated = gatedFiles("* notes\n", "notes.txt");
+    const target = commands({ beginReplacementCommand: vi.fn(() => command) });
+    const importing = target.importSpiceFiles(gated.files, "native", {
+      command,
+    });
+    await Promise.resolve();
+    goStale();
+    gated.release();
+    await settle(importing);
+    expect(target.dependencies.setStatus).not.toHaveBeenCalled();
+  });
+
+  it("opens no Import Review for a failure that outlived its session", async () => {
+    const { command, goStale } = controllableCommand();
+    const gated = gatedFiles(".subckt broken\nX1 a b missing\n");
+    const target = commands({
+      beginReplacementCommand: vi.fn(() => command),
+    });
+    const importing = target.importSpiceFiles(gated.files, "native", {
+      command,
+    });
+    await Promise.resolve();
+    goStale();
+    gated.release();
+    await settle(importing);
+    expect(target.dependencies.setImportReport).not.toHaveBeenCalled();
+    expect(target.dependencies.setImportReviewOpen).not.toHaveBeenCalled();
+  });
+
+  it("shows no further callback for a valid import whose session ended after progress", async () => {
+    const { command, goStale } = controllableCommand();
+    const target = commands({
+      beginReplacementCommand: vi.fn(() => command),
+      guardDirtyReplacement: vi.fn(async () => false),
+    });
+    const importing = target.importSpiceFiles(
+      [new File([NETLIST], "circuit.sp")] as unknown as FileList,
+      "native",
+      { command },
+    );
+    await vi.waitFor(() =>
+      expect(target.dependencies.setStatus).toHaveBeenCalledWith(
+        "Importing SPICE sources",
+      ),
+    );
+    goStale();
+    await settle(importing);
+    expect(await target.dependencies.setStatus).not.toHaveBeenCalledWith(
+      expect.stringContaining("Imported "),
+    );
+    expect(target.dependencies.setImportReport).not.toHaveBeenCalled();
+    expect(target.dependencies.replaceActiveProject).not.toHaveBeenCalled();
+    expect(target.dependencies.onChunkLoadFailure).not.toHaveBeenCalled();
+  });
+
+  it("names a dropped file it could not read while current, and stays silent when stale", async () => {
+    const current = controllableCommand();
+    const failing = gatedFiles(NETLIST);
+    const target = commands({
+      beginReplacementCommand: vi.fn(() => current.command),
+    });
+    const importing = target.importSpiceFiles(failing.files, "native", {
+      command: current.command,
+    });
+    await Promise.resolve();
+    failing.fail(new Error("no bytes"));
+    await settle(importing);
+    expect(target.dependencies.setStatus).toHaveBeenLastCalledWith(
+      "Couldn't read the dropped file",
+    );
+
+    const stale = controllableCommand();
+    const afterSwitch = gatedFiles(NETLIST);
+    const quiet = commands({
+      beginReplacementCommand: vi.fn(() => stale.command),
+    });
+    const importingAfterSwitch = quiet.importSpiceFiles(
+      afterSwitch.files,
+      "native",
+      { command: stale.command },
+    );
+    await Promise.resolve();
+    stale.goStale();
+    afterSwitch.fail(new Error("no bytes"));
+    await settle(importingAfterSwitch);
+    expect(quiet.dependencies.setStatus).not.toHaveBeenCalled();
+  });
+
+  it("raises no chunk banner or status for a conversion that failed after a switch", async () => {
+    const { command, goStale } = controllableCommand();
+    const planning = Promise.withResolvers<never>();
+    vi.doMock("../netlist-export/rnl-import", () => ({
+      planRnlImport: vi.fn(() => planning.promise),
+    }));
+    try {
+      const target = commands({
+        beginReplacementCommand: vi.fn(() => command),
+      });
+      const importing = target.importRnlFiles(
+        [new File(["* rnl\n"], "circuit.sp")] as unknown as FileList,
+        { command },
+      );
+      await vi.waitFor(() =>
+        expect(target.dependencies.setStatus).toHaveBeenCalledWith(
+          "Importing RNL sources",
+        ),
+      );
+      goStale();
+      planning.reject(new ChunkLoadError("RNL import", new Error("gone")));
+      await settle(importing);
+      expect(target.dependencies.onChunkLoadFailure).not.toHaveBeenCalled();
+      expect(target.dependencies.setStatus).not.toHaveBeenLastCalledWith(
+        expect.stringContaining("Refresh"),
+      );
+    } finally {
+      vi.doUnmock("../netlist-export/rnl-import");
+    }
+  });
+
+  it("keeps the new Import Review after the install cleared the old one and lays out the installed Project", async () => {
+    const target = commands({
+      guardDirtyReplacement: vi.fn(async (_label, perform) => {
+        await perform();
+        return false;
+      }),
+      replaceActiveProject: vi.fn(() => {
+        // The install clears the outgoing review before the command's own
+        // report follows it.
+        target.dependencies.setImportReport(null);
+      }),
+    });
+    await target.importSpiceFiles([
+      new File([NETLIST], "circuit.sp"),
+    ] as unknown as FileList);
+    const calls = vi.mocked(target.dependencies.setImportReport).mock.calls;
+    expect(calls.at(-1)?.[0]).toEqual(
+      expect.objectContaining({ cellCount: 2 }),
+    );
+  });
+
+  it("acquires its own command for the picker path", async () => {
+    const command = replacementCommand();
+    const begin = vi.fn(() => command);
+    const target = commands({
+      beginReplacementCommand: begin,
+      guardDirtyReplacement: vi.fn(async (_label, perform) => {
+        await perform();
+        return false;
+      }),
+    });
+    await target.importSpiceFiles([
+      new File(["* nothing\n"], "notes.txt"),
+    ] as unknown as FileList);
+    expect(begin).toHaveBeenCalledWith("Import SPICE sources");
+    expect(command.release).toHaveBeenCalled();
+    expect(target.dependencies.setStatus).toHaveBeenCalledWith(
+      expect.stringContaining("unambiguous"),
+    );
   });
 });
