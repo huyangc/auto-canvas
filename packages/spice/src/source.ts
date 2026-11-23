@@ -1,4 +1,4 @@
-import { deriveStableId } from "@icm/model";
+import { deriveStableId, digestSha256Hex } from "@icm/model";
 
 import { diagnostic } from "./diagnostics.js";
 import type { SpiceDiagnostic } from "./diagnostics.js";
@@ -80,16 +80,6 @@ function resolveInclude(
   return normalized;
 }
 
-async function sha256(bytes: Uint8Array): Promise<string> {
-  const digest = await globalThis.crypto.subtle.digest(
-    "SHA-256",
-    Uint8Array.from(bytes).buffer,
-  );
-  return `sha256:${[...new Uint8Array(digest)]
-    .map((value) => value.toString(16).padStart(2, "0"))
-    .join("")}`;
-}
-
 export function decodeSourceContent(bytes: Uint8Array): {
   encoding: SpiceSourceFile["encoding"];
   text: string;
@@ -153,7 +143,7 @@ async function loadInputs(inputs: readonly SpiceSourceInput[]): Promise<{
       files.set(path, {
         id: deriveStableId("source", path),
         path,
-        hash: await sha256(input.bytes),
+        hash: `sha256:${await digestSha256Hex(input.bytes)}`,
         encoding: decoded.encoding,
         text: decoded.text,
       });

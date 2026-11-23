@@ -10,7 +10,7 @@ import {
   componentDraftCatalog,
 } from "@icm/edit-engine";
 import { deleteComponentDrafts } from "../features/user-components/component-draft-management";
-import type { CircuitProject } from "@icm/model";
+import { digestSha256Hex, type CircuitProject } from "@icm/model";
 import { externalSubcircuitSymbolId } from "@icm/symbols";
 import {
   ComponentLibraryError,
@@ -83,19 +83,13 @@ function expectLibrary(entry: SharedComponent, expected: number) {
       "refresh",
     );
 }
-async function digest(entry: SharedComponent) {
-  const hash = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(
-      JSON.stringify({
-        definition: entry.definition,
-        ...(entry.circuit ? { circuit: entry.circuit } : {}),
-      }),
-    ),
+function digest(entry: SharedComponent) {
+  return digestSha256Hex(
+    JSON.stringify({
+      definition: entry.definition,
+      ...(entry.circuit ? { circuit: entry.circuit } : {}),
+    }),
   );
-  return [...new Uint8Array(hash)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
 }
 
 /** Public service permissions and native package rules are shared with the GUI. */
