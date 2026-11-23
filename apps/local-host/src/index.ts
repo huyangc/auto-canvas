@@ -68,6 +68,18 @@ export async function startLocalHost(
       const pathname = decodeURIComponent(
         new URL(request.url ?? "/", "http://localhost").pathname,
       );
+      if (pathname === "/api/session") {
+        response.writeHead(200, {
+          "content-type": "application/json",
+          "cache-control": "no-store",
+        });
+        response.end(
+          request.method === "HEAD"
+            ? undefined
+            : JSON.stringify({ mode: "local" }),
+        );
+        return;
+      }
       const relativePath = pathname === "/" ? "index.html" : pathname.slice(1);
       let target = inside(root, relativePath);
       try {

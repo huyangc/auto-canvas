@@ -13,7 +13,7 @@ consumed by the web editor. Project file semantics belong to
 
 The default identity mode is `accounts`. The web editor reads `GET /api/session` to select the sign-in form or a signed-in workspace. In this mode the response is `{mode:"accounts", user}`, with a null user when signed out. A new user supplies a username of one ASCII letter and eight digits (case-insensitive) and a password of 8–128 characters. JSON requests to `POST /api/auth/register` and `POST /api/auth/login` establish a 30-day HttpOnly, SameSite=Strict cookie scoped to the deployment path. HTTPS sets Secure. Logout revokes the current session. PostgreSQL stores a salted scrypt password hash and a digest of each session token.
 
-Private Projects, their revisions and previews use the signed-in user's ID. The editor binds API requests and browser recovery storage to that account. File → Save writes to PostgreSQL. File → Open Shelf project in tab lists the account's saved drawings across browsers. Unsaved drafts are per account and browser. The migration preserves the legacy local profile and its Projects.
+Private Projects, their revisions and previews use the signed-in user's ID. The editor binds API requests and browser recovery storage to that account. Cookie-authenticated mutations require the signed-in user ID in `X-Canvas-Account`. Session cookies use a separate name for each public origin and deployment path. File → Save writes to PostgreSQL. File → Open Shelf project in tab lists the account's saved drawings across browsers. Unsaved drafts are per account and browser. The migration preserves the legacy local profile and its Projects.
 
 ## Legacy local identity and Project rules
 

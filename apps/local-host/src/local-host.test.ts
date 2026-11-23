@@ -16,6 +16,9 @@ describe("portable local host", () => {
     await writeFile(join(root, "core.wasm"), new Uint8Array([0, 97, 115, 109]));
     const running = await startLocalHost({ editorRoot: root });
     try {
+      const session = await fetch(running.origin + "/api/session");
+      expect(await session.json()).toEqual({ mode: "local" });
+      expect(session.headers.get("cache-control")).toBe("no-store");
       expect(running.origin).toMatch(/^http:\/\/127\.0\.0\.1:/u);
       const response = await fetch(running.origin);
       expect(response.status).toBe(200);

@@ -15,7 +15,7 @@ The standalone web editor now requires a registered account by default. Users ca
 
 ## Review findings addressed
 
-Initial implementation. No prior review was supplied.
+PR review round 1 identified an upgrade race, static-host startup, cookie collisions between ports, relay origin handling and authentication throttling. Cookie-authenticated mutations now require an account binding, and cookies are named per deployment. The portable host reports its mode. Capability calls use the relay origin policy. Failed guesses are tracked per peer and username with bounded eviction. Regression tests cover all five changes.
 
 ## Acceptance results
 

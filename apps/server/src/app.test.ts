@@ -17,6 +17,7 @@ import {
   CURRENT_PROJECT_FILE_VERSION,
   serializeProject,
 } from "@icm/project-protocol";
+import { AgentRelayHost } from "./agent-relay/host.js";
 import { createApp } from "./app.js";
 import { migrate } from "./migrate.js";
 import * as svgRenderer from "@icm/render-svg";
@@ -608,6 +609,80 @@ describe("standalone accounts", () => {
   const cookieFrom = (r: Response) => ({
     Cookie: r.headers.get("set-cookie")!.split(";")[0]!,
   });
+  async function boundCookie(
+    registered: Response,
+    server = app,
+    url = origin + "/api",
+  ) {
+    const headers = cookieFrom(registered);
+    const { user } = await (
+      await server.request(url + "/session", { headers })
+    ).json();
+    return { ...headers, "X-Canvas-Account": user.id as string };
+  }
+  it("uses disjoint cookie slots on the same host across ports", async () => {
+    app = createApp({ db, auth: { mode: "accounts" } });
+    const ports = [4310, 4311];
+    const cookies = [];
+    for (const port of ports) {
+      const url = "http://localhost:" + port + "/api/auth/register";
+      const r = await app.request(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          username: "a0000" + port,
+          password: "passphrase",
+        }),
+      });
+      expect(r.status).toBe(201);
+      cookies.push(cookieFrom(r).Cookie);
+    }
+    expect(cookies[0]?.split("=")[0]).not.toBe(cookies[1]?.split("=")[0]);
+    // A browser sends both same-host cookies to both ports.
+    for (const port of ports) {
+      const r = await app.request("http://localhost:" + port + "/api/session", {
+        headers: { Cookie: cookies.join("; ") },
+      });
+      expect((await r.json()).user.displayName).toBe("a0000" + port);
+    }
+  });
+  it("lets the relay check capability origins and keeps pairing same-origin", async () => {
+    const allowed = "https://capability.test";
+    app = createApp({
+      db,
+      auth: { mode: "accounts" },
+      agentRelay: new AgentRelayHost(db, allowed),
+    });
+    const preflight = await request("/api/agent/claims", "OPTIONS", undefined, {
+      Origin: allowed,
+    });
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers.get("access-control-allow-origin")).toBe(allowed);
+    expect(
+      (await request("/api/agent/sessions", "POST", {}, { Origin: allowed }))
+        .status,
+    ).toBe(403);
+  });
+  it("isolates failed guesses by network peer and username", async () => {
+    app = createApp({ db, auth: { mode: "accounts" } });
+    const attempt = (ip: string) =>
+      app.request(
+        origin + "/api/auth/login",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            username: "A12345678",
+            password: "incorrect",
+          }),
+        },
+        { incoming: { socket: { remoteAddress: ip } } },
+      );
+    for (let i = 0; i < 12; i++)
+      expect((await attempt("192.0.2.1")).status).toBe(401);
+    expect((await attempt("192.0.2.1")).status).toBe(429);
+    expect((await attempt("192.0.2.2")).status).toBe(401);
+  });
   it("validates names, authenticates case-insensitively and expires or revokes sessions", async () => {
     app = createApp({ db, auth: { mode: "accounts" } });
     for (const invalid of [
@@ -647,7 +722,7 @@ describe("standalone accounts", () => {
     );
     const again = await credentials("login", "a12345678");
     expect(again.status).toBe(200);
-    const firstCookie = cookieFrom(first),
+    const firstCookie = await boundCookie(first),
       otherCookie = cookieFrom(again);
     expect(firstCookie).not.toEqual(otherCookie);
     expect(
@@ -689,7 +764,7 @@ describe("standalone accounts", () => {
     expect(cookie).toMatch(/Path=\/canvas(?:;|$)/i);
     expect(cookie).toMatch(/; Secure(?:;|$)/i);
     expect(cookie).toMatch(/SameSite=Strict/i);
-    const headers = cookieFrom(registered);
+    const headers = await boundCookie(registered, prefixed, url);
     const saved = await prefixed.request(url + "/projects", {
       method: "POST",
       headers,
@@ -710,8 +785,8 @@ describe("standalone accounts", () => {
   it("scopes projects, previews and history to the owner and rejects writes from a stale tab", async () => {
     const legacy = await create("Legacy");
     app = createApp({ db, auth: { mode: "accounts" } });
-    const a = cookieFrom(await credentials("register", "A12345678"));
-    const b = cookieFrom(await credentials("register", "B12345678"));
+    const a = await boundCookie(await credentials("register", "A12345678"));
+    const b = await boundCookie(await credentials("register", "B12345678"));
     const list = async (headers: Record<string, string>) =>
       (await (await request("/api/projects", "GET", undefined, headers)).json())
         .projects;
@@ -723,6 +798,11 @@ describe("standalone accounts", () => {
       name: "Owner's diagram",
       projectText: projectText("Owner's diagram"),
     };
+    // A pre-upgrade tab sends only the newly signed-in user's cookie.
+    expect(
+      (await request("/api/projects", "POST", body, { Cookie: b.Cookie }))
+        .status,
+    ).toBe(401);
     const created = await request("/api/projects", "POST", body, a);
     expect(created.status).toBe(201);
     const { project } = await created.json();
