@@ -911,6 +911,24 @@ it("stands down silently while a user's command holds the slot and admits the ne
   ).not.toBeNull();
 });
 
+it("answers only the confirmation a callback was bound to", async () => {
+  const editor = await mount();
+  await editor.rename("Unsaved A");
+  await editor.guard();
+  // A callback left from an earlier confirmation names another dialog: it
+  // leaves this one (and the drawing) untouched.
+  await act(async () => editor.file.confirmReplaceGuard("earlier-dialog"));
+  expect(editor.file.replaceGuard).not.toBeNull();
+  expect(editor.current.doc.project.name).toBe("Unsaved A");
+  expect(editor.deletedSessions).toEqual([]);
+  await act(async () => editor.file.cancelReplaceGuard("earlier-dialog"));
+  expect(editor.file.replaceGuard).not.toBeNull();
+  // The dialog's own id answers it.
+  const id = (editor.file.replaceGuard as { id: string }).id;
+  await act(async () => editor.file.confirmReplaceGuard(id));
+  expect(editor.current.doc.project.name).toBe("B");
+});
+
 it("starts one deletion when a dialog handler is invoked twice in one tick", async () => {
   const editor = await mount();
   await editor.rename("Unsaved A");

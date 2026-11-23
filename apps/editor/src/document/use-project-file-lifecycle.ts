@@ -98,6 +98,8 @@ export interface ReplacementCommand {
 export type StartupRestoreOutcome = "pending" | "restored" | "unsuccessful";
 
 interface ReplaceGuardState {
+  /** Names one confirmation: its own callbacks answer only this dialog. */
+  id: string;
   intent: string;
   /** `discarded` is true after Continue without saving. */
   perform: (discarded: boolean) => void | Promise<void>;
@@ -772,6 +774,7 @@ export function useProjectFileLifecycle({
           suggestedName: fileName,
         });
         if (liveSessionRef.current !== exportSessionId) return;
+        if (owner && !isActivationCurrent(owner)) return;
         if (result.status === "saved") {
           noteProjectSnapshotSafe(snapshot);
           setStatus(`Exported: ${fileName}`);
@@ -782,7 +785,10 @@ export function useProjectFileLifecycle({
               : `Export requested: ${fileName}`,
           );
       } catch (error) {
-        if (liveSessionRef.current === exportSessionId)
+        if (
+          liveSessionRef.current === exportSessionId &&
+          (!owner || isActivationCurrent(owner))
+        )
           setStatus(
             `Export failed: ${error instanceof Error ? error.message : String(error)}`,
           );
@@ -869,6 +875,7 @@ export function useProjectFileLifecycle({
       // A stale exit cancels nothing: the incoming tab owns the scheduler now.
       if (!command.isCurrent()) return false;
       const guard: ReplaceGuardState = {
+        id: createId("replace-guard"),
         intent,
         perform,
         owner: command.owner,
@@ -885,16 +892,17 @@ export function useProjectFileLifecycle({
     }
   }
 
-  function cancelReplaceGuard(): void {
+  function cancelReplaceGuard(dialogId?: string): void {
     const guard = replaceGuardRef.current;
-    if (!guard || answeringGuardRef.current !== null) return;
+    if (!guard || (dialogId !== undefined && guard.id !== dialogId)) return;
+    if (answeringGuardRef.current !== null) return;
     closeReplaceGuard(guard);
     guard.command.release();
   }
 
-  function confirmReplaceGuard(): void {
+  function confirmReplaceGuard(dialogId?: string): void {
     const guard = replaceGuardRef.current;
-    if (!guard) return;
+    if (!guard || (dialogId !== undefined && guard.id !== dialogId)) return;
     if (!beginAnswer(guard)) return;
     void (async () => {
       try {
@@ -930,9 +938,9 @@ export function useProjectFileLifecycle({
     })();
   }
 
-  function saveAndContinueReplaceGuard(): void {
+  function saveAndContinueReplaceGuard(dialogId?: string): void {
     const guard = replaceGuardRef.current;
-    if (!guard) return;
+    if (!guard || (dialogId !== undefined && guard.id !== dialogId)) return;
     if (!beginAnswer(guard)) return;
     void (async () => {
       try {
@@ -950,7 +958,13 @@ export function useProjectFileLifecycle({
               nativeSavedTokenRef.current
           ) {
             closeReplaceGuard(guard);
-            await guard.perform(false);
+            // The dialog is closed: whoever releases now, the slot must not
+            // outlive it, even when the callback installs nothing.
+            try {
+              await guard.perform(false);
+            } finally {
+              guard.command.release();
+            }
           }
           return;
         }
@@ -958,7 +972,11 @@ export function useProjectFileLifecycle({
           await exportProjectFile(guard.command.owner);
           if (guard.command.isCurrent() && !hasUnsafeWork()) {
             closeReplaceGuard(guard);
-            await guard.perform(false);
+            try {
+              await guard.perform(false);
+            } finally {
+              guard.command.release();
+            }
           }
           return;
         }
@@ -972,7 +990,11 @@ export function useProjectFileLifecycle({
           sameProjectContent(readCurrentProject(), baseline.project)
         ) {
           closeReplaceGuard(guard);
-          await guard.perform(false);
+          try {
+            await guard.perform(false);
+          } finally {
+            guard.command.release();
+          }
         }
       } finally {
         endAnswer(guard);
@@ -1436,10 +1458,17 @@ export function useProjectFileLifecycle({
     if (!command) return settleStartupOutcome("unsuccessful");
     void (async () => {
       try {
-        const read = await recovery.readSessionProject(
-          refreshRestorePlan.workingCopyId,
-          "latest",
-        );
+        let read: Awaited<ReturnType<typeof recovery.readSessionProject>>;
+        try {
+          read = await recovery.readSessionProject(
+            refreshRestorePlan.workingCopyId,
+            "latest",
+          );
+        } catch {
+          // A read that fails settles the outcome rather than leaving the
+          // Agent gate pending for the rest of this activation.
+          return settleStartupOutcome("unsuccessful");
+        }
         if (!command.isCurrent()) return settleStartupOutcome("unsuccessful");
         if (read.status !== "valid") {
           setStatus("No restorable recovery was found for this refresh");

@@ -88,13 +88,14 @@ export function peekAgentSessionRecovery(
 }
 
 /**
- * Reads the same-tab reconnect proof. Project fields are historical metadata,
- * not authorization boundaries; the current host publishes its context separately.
+ * Reads the same-tab reconnect proof for `target`. A proof written for another
+ * Project or another working copy (another tab, a replaced Project) is not
+ * evidence for this one: it reconnects nothing and is left in place.
  * Malformed records are removed before they can reach the relay.
  */
 export function readAgentSessionRecovery(
   storage: BrowserStorageLike,
-  _target: RecoveryTarget,
+  target: RecoveryTarget,
 ): AgentSessionRecoveryRecord | null {
   const raw = storage.getItem(accountKey(AGENT_SESSION_RECOVERY_STORAGE_KEY));
   if (raw === null) return null;
@@ -110,5 +111,10 @@ export function readAgentSessionRecovery(
     clearAgentSessionRecovery(storage);
     return null;
   }
+  if (
+    record.projectId !== target.projectId ||
+    record.projectSessionId !== target.projectSessionId
+  )
+    return null;
   return record;
 }
