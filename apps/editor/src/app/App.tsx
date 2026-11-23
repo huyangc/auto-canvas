@@ -219,6 +219,7 @@ import {
   type EditorMode,
 } from "../features/editor-shell/editor-mode";
 import { EmptyStateCard } from "../features/editor-shell/empty-state-card";
+import { useFileDrop } from "../features/editor-shell/use-file-drop";
 import { libraryProjectExamples } from "../examples/library-examples";
 import { createEditorNavigationController } from "../features/hierarchy/editor-navigation-controller";
 import {
@@ -4479,6 +4480,13 @@ function WorkspaceEditor({
     onChunkLoadFailure: setChunkLoadFailure,
     onImported: autoLayout.requestAfterImport,
   });
+  // A file dropped from outside does what its menu command does, in both
+  // modes: a netlist imports (and lays itself out), a Project file opens.
+  const { dragActive: fileDropActive } = useFileDrop({
+    importNetlist: (files) => importSpiceFiles(files),
+    openProjectFile: (file) => openProjectFile(file),
+    setStatus,
+  });
 
   // Single entry point for selecting a drafting object. Editing is opened
   // separately (double-click/Enter) so selection and text caret ownership do
@@ -7414,6 +7422,15 @@ function WorkspaceEditor({
           report={autoLayout.report}
           onClose={autoLayout.clearReport}
         />
+      ) : null}
+      {fileDropActive ? (
+        <div
+          className="file-drop-overlay"
+          data-testid="file-drop-overlay"
+          aria-hidden="true"
+        >
+          <p>Release to open the file</p>
+        </div>
       ) : null}
     </main>
   );

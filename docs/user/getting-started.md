@@ -28,9 +28,11 @@ Switching never changes the drawing. After an import in Auto, a dot on the
 **Properties** button says Import Review is waiting there; if the import
 fails, the review opens by itself.
 
-To start from a netlist, choose **Import netlist…** (or **File → Import SPICE
-/ SCS…**) and select one `.cir`, `.sp`, `.spi` or `.scs` entry plus its local
-include files. **Import Cadence SPICE (`!` globals)…** also treats net names
+To start from a netlist, drag one `.cir`, `.sp`, `.spi` or `.scs` file (with
+its local include files, if it has any) onto the window, or choose **Import
+netlist…** (or **File → Import SPICE / SCS…**) and select the entry plus its
+local include files; both work in Auto and in Draw. **Import Cadence SPICE
+(`!` globals)…** also treats net names
 ending in `!` as global Nets. The imported devices appear on a shelf, then
 **Auto Layout** draws every imported Cell by itself (the top bar shows its
 progress and **Cancel**); one **Undo** returns every Cell to the shelf. A
@@ -227,7 +229,10 @@ File…** for a portable `.icproj.json`. New, Open, Revert and going to the
 Gallery ask to **Save to Cloud and continue**, **Continue without saving**
 (discards that working copy) or **Stay**. Returning from the Gallery reopens
 the last Cloud Project of this tab. **Import Project File…** opens a portable
-file; invalid or future-version files leave your work unchanged.
+file; invalid or future-version files leave your work unchanged. A `.json`
+dropped on the window does the same as **Import Project File…**: it opens in
+the current tab with its drawing kept, replacing the open Project behind the
+same unsaved-work prompt.
 
 **Privacy** (status bar) explains what the site keeps;
 **Stop counting me**, Do Not Track or Global Privacy Control refuse the visitor

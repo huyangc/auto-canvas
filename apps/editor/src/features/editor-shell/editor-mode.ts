@@ -129,6 +129,16 @@ export function isDrawingIntent(
   return tool === undefined ? null : { tool };
 }
 
+/** Whether a modal dialog is open. `root` is injectable, absent without a DOM. */
+export function modalDialogOpen(
+  root: Pick<Document, "querySelector"> | undefined = typeof document ===
+  "undefined"
+    ? undefined
+    : document,
+): boolean {
+  return Boolean(root?.querySelector('dialog[open], [aria-modal="true"]'));
+}
+
 /**
  * A drawing key never switches the page behind a modal dialog, from inside
  * an overlay or from the empty card: the router does not skip those scopes,
@@ -153,5 +163,5 @@ export function drawingSwitchBlocked(
     )
   )
     return true;
-  return Boolean(root?.querySelector('dialog[open], [aria-modal="true"]'));
+  return modalDialogOpen(root);
 }
