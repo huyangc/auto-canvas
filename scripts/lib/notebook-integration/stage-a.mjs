@@ -4,7 +4,9 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { prepareModules } from "./modules.mjs";
+import { cloneTreeProblems } from "./clone-safety.mjs";
 import {
+  awaitOwnership,
   checkStopped,
   ownershipHeld,
   startNext,
@@ -48,6 +50,7 @@ export async function stageA(context) {
     await stageABody(context);
   } catch (error) {
     if (!(error instanceof Refused)) throw error;
+    context.refused = true;
   }
 }
 
@@ -122,7 +125,7 @@ async function stageABody({ sandbox, report, notebook, options }) {
     path.join(frontend, ".next"),
     path.join(frontend, "node_modules"),
   ];
-  const cloneProblems = (paths) => {
+  const cloneProblems = (paths, phase) => {
     const problems = [];
     for (const target of paths) {
       try {
@@ -141,11 +144,14 @@ async function stageABody({ sandbox, report, notebook, options }) {
     });
     if (dotenv.length)
       problems.push(`dotenv file(s) in the clone: ${dotenv.join(", ")}`);
+    if (phase) problems.push(...cloneTreeProblems(nb, phase));
     return problems;
   };
-  const refuseUnsafeClone = (name, paths) => {
+  // A refusal names the offending paths relative to the clone, happens before
+  // the next process starts and ends the run with exit status 2.
+  const refuseUnsafeClone = (name, paths, phase) => {
     sandbox.ensureOpen(name);
-    const problems = cloneProblems(paths);
+    const problems = cloneProblems(paths, phase);
     if (problems.length) {
       report.fail(name, `${problems.join("; ")} (nothing built or launched)`);
       throw new Refused();
@@ -154,6 +160,7 @@ async function stageABody({ sandbox, report, notebook, options }) {
   refuseUnsafeClone(
     "the clone's paths are real directories inside the sandbox, without dotenv files",
     clonePaths,
+    "start",
   );
   report.ok(
     "the clone's paths are real directories inside the sandbox, without dotenv files",
@@ -223,13 +230,23 @@ async function stageABody({ sandbox, report, notebook, options }) {
   }
 
   const build = async (extra, name) => {
-    refuseUnsafeClone(`${name}: the clone holds no dotenv file`, [frontend]);
+    refuseUnsafeClone(
+      `${name}: the clone is safe to build in`,
+      [frontend],
+      "built",
+    );
     const result = await sandbox.run("npm", ["run", "build"], {
       cwd: frontend,
       env: sandbox.env(extra),
       name,
     });
     checkStopped(report, `${name}`, result.pgid, result.gone);
+    // The generated files the build wrote must still be what they should be.
+    refuseUnsafeClone(
+      `${name}: the build left regular files inside the clone`,
+      [frontend],
+      "built",
+    );
     return result;
   };
   const cleanNext = () =>
@@ -426,18 +443,22 @@ async function stageA6({
   // a real directory inside the sandbox, created here when the revision has
   // none, so the launcher can never be handed a symlink.
   const local = path.join(nb, ".local");
-  refuseUnsafeClone("A6 <clone>/.local is safe before the launch", [nb, local]);
+  refuseUnsafeClone(
+    "A6 <clone>/.local is safe before the launch",
+    [nb, local],
+    "built",
+  );
   try {
     fs.lstatSync(local);
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
     fs.mkdirSync(local);
   }
-  refuseUnsafeClone("A6 <clone>/.local is safe before the launch", [
-    nb,
-    frontend,
-    local,
-  ]);
+  refuseUnsafeClone(
+    "A6 <clone>/.local is safe before the launch",
+    [nb, frontend, local],
+    "launch",
+  );
   report.ok("A6 <clone>/.local is a real directory and no dotenv file exists");
 
   const launcher = sandbox.start("npm", ["run", "start"], {
@@ -536,24 +557,19 @@ async function stageA6({
     const describeOwnership = ({ api, web }) =>
       `api ${apiPort}: ${api.state} [${api.pids}] (want ${backendPid}); ` +
       `web ${webPort}: ${web.state} [${web.pids}] (want ${frontendPid})`;
-    let seen = ownership();
-    await waitFor(
-      () => {
-        seen = ownership();
-        return (
-          seen.api.state === "foreign" ||
-          seen.web.state === "foreign" ||
-          bothOwned(seen)
-        );
-      },
-      120_000,
-      500,
-    );
+    const waited = await awaitOwnership(sandbox, {
+      apiPort,
+      webPort,
+      backendPid,
+      frontendPid,
+    });
+    let seen = waited.seen;
     if (
       !report.check(
         "A6 each port is owned by the service the launcher started",
-        bothOwned(seen),
-        () => `${describeOwnership(seen)}\n${logTail()}`,
+        waited.ok,
+        () =>
+          `${waited.reason || "timeout"}: ${describeOwnership(seen)}\n${logTail()}`,
       )
     )
       return;

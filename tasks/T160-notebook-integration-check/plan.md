@@ -36,12 +36,17 @@ Each step below says how these are enforced; they are also acceptance items.
   // escape of dot, slash, backslash, a control character, space or DEL
   const unit = String.raw`(?:[^/\\%.\x00-\x20\x7f]|%(?!2[eEfF]|5[cC]|[01][0-9a-fA-F]|20|7[fF]))`;
   // a segment has at least one such unit, or is three or more dots
-  const segment = String.raw`\.*` + unit + "(?:" + unit + String.raw`|\.)*|\.{3,}`;
+  const segment =
+    String.raw`\.*` + unit + "(?:" + unit + String.raw`|\.)*|\.{3,}`;
   const rules = (target) => [
     { source: "/canvas", destination: `${target}/@notebook/canvas/` },
-    { source: `/canvas/:path(${segment})*`, destination: `${target}/@notebook/canvas/:path*` },
+    {
+      source: `/canvas/:path(${segment})*`,
+      destination: `${target}/@notebook/canvas/:path*`,
+    },
   ];
   ```
+
 - Next.js 15.5.18 behaviour the stages rely on (read from the installed source):
   - A request target containing a backslash or `//` gets `308` before any rewrite is considered; the `Location` is the target with every backslash replaced by `/` and every run of slashes collapsed to one (`next/dist/server/lib/router-utils/resolve-routes.js:89-100`, `shared/lib/utils.js:124-130`).
   - The default trailing-slash handling redirects `/x/` to `/x` with `308` before rewrites.

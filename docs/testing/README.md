@@ -142,3 +142,14 @@ refuses, before any copy, build or launch, a revision whose paths the check
 writes to are symlinks or which holds a dotenv file the launcher or Next would
 read (`.env`, `frontend/.env*`). Rerun the
 check after any Next.js upgrade in the notebook repository.
+
+Stage A refuses (exit status 2 for the run, before any process starts) a
+revision whose clone holds a symlink that leaves the clone or dangles, a
+symlink on any path the build or launcher writes (`frontend/next-env.d.ts`,
+`frontend/tsconfig.json`, `frontend/.next`, `release-manifest.json`,
+`.local`), a dotenv file, or runtime state that must start fresh (`.local`,
+`release-manifest.json`, `frontend/.next`, `frontend/node_modules`). It
+re-checks the clone after every build and before the launch. `--stage S` runs
+these refusals, and the early-exit ownership wait, against throwaway
+repositories only. An interrupted run still prints the stage summary and
+exits 130.

@@ -18,13 +18,13 @@ changed.
 
 ## Steps
 
-| Step | Status | Notes |
-| --- | --- | --- |
-| 1 Command line | done | |
-| 2 Shared helpers | done | Start marker and identity check of the temporary parent, allow-listed child environment, offline guard with its control, process groups, listener ownership, private modules copy with preflight, manifest reader, the shared transport table. |
-| 3 Stage T | done | Three configurations; 116 assertions. |
-| 4 Stage A | done with deviation | A6 needs one variable beyond the plan: `SILICON_NOTEBOOK_AUTH_OPTIONAL=true` (see Investigation). |
-| 5 Docs | done | `docs/testing/README.md`, section "silicon-notebook integration check". |
+| Step             | Status              | Notes                                                                                                                                                                                                                                          |
+| ---------------- | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1 Command line   | done                |                                                                                                                                                                                                                                                |
+| 2 Shared helpers | done                | Start marker and identity check of the temporary parent, allow-listed child environment, offline guard with its control, process groups, listener ownership, private modules copy with preflight, manifest reader, the shared transport table. |
+| 3 Stage T        | done                | Three configurations; 116 assertions.                                                                                                                                                                                                          |
+| 4 Stage A        | done with deviation | A6 needs one variable beyond the plan: `SILICON_NOTEBOOK_AUTH_OPTIONAL=true` (see Investigation).                                                                                                                                              |
+| 5 Docs           | done                | `docs/testing/README.md`, section "silicon-notebook integration check".                                                                                                                                                                        |
 
 ## Files
 
@@ -150,3 +150,96 @@ owner listener PIDs unchanged (3000: 41839, 8000: 41838, 4310: 85736); notebook 
 - `optionsOf` treats an array without Node's internal symbol as options, as Node does.
 - One sentence added to `docs/testing/README.md` about the stage-A refusals.
 - During an experiment `pkill -f "sleep 30"` was used to end a test child; see the review's process note.
+
+## Round 4 of implementation (review round 6: findings R5-1 to R5-3)
+
+(From the implementer subagent's hand-back; saved by the reviewer.)
+
+R5-1, R5-2 and R5-3 are fixed on top of `2eee320`, uncommitted. The acceptance runs below pass, including the negative control. I did not run `pnpm test:local`, and I did not re-run `pnpm deadcode`, which I had not touched since round 1.
+
+**git status --short**
+
+```
+ M docs/testing/README.md
+ M scripts/lib/notebook-integration/stage-a.mjs
+ M scripts/lib/notebook-integration/steps.mjs
+ M scripts/notebook-integration-check.mjs
+?? scripts/lib/notebook-integration/clone-safety.mjs
+?? scripts/lib/notebook-integration/self-check.mjs
+```
+
+### What changed per finding
+
+**R5-1: file-level symlinks at write targets**
+
+- **New `clone-safety.mjs`, `cloneTreeProblems(clone, phase)`.** It walks the whole clone, skipping `.git` and `frontend/node_modules`. That directory is populated by the script, so `prepareModules` still checks it is a real directory inside the sandbox and `preflightModules` checks its links.
+  - It refuses any symlink that dangles or resolves outside the clone.
+  - It refuses any symlink on a write path, even one pointing inside the clone. I derived the write paths by reading `prod.sh`, `extension_services.py`/`.sh` and the revision's tree at the pinned ref. They are `frontend/next-env.d.ts`, `frontend/tsconfig.json`, `frontend/.next`, `release-manifest.json` and `.local`. `.local` covers `logs`, `run/extensions`, the SQLite file, storage and diagnostics.
+  - It requires `.local`, `release-manifest.json`, `frontend/.next` and `frontend/node_modules` not to exist in the revision, tracked or not. After the copy and build, `node_modules` and `.next` are allowed as real directories, and the generated files must be regular files.
+  - For the launch phase, `.local` must be an empty real directory that the script created.
+  - Every message names the path relative to the clone.
+- **`stage-a.mjs`, `refuseUnsafeClone(name, paths, phase)`.** It runs at three points:
+  - the "start" phase, right after checkout and before the modules copy;
+  - before and after every build, in `build()` (these are the "built" checks, so one now runs after each build and not only before the first);
+  - in A6 before and after the script creates `.local` (the "launch" phase).
+  - The existing dotenv and `assertInsideSandbox` checks are kept. A refusal throws `Refused`, which sets `context.refused`.
+- **`notebook-integration-check.mjs`.** A refusal now exits 2.
+- **Proof:** new `--stage S` (`self-check.mjs`) makes throwaway git repositories inside the sandbox, clones them, and runs the checks on the clones; the notebook checkout is never touched. In every scenario the outside file is byte-identical afterwards. Output (all `ok`):
+  ```
+  S next-env-outside: refused (frontend/next-env.d.ts)
+  S backend-log-outside: refused (.local/logs/backend.log)
+  S symlinked-local: refused (.local)
+  S inside-link-allowed: accepted
+  S inside-link-on-write-path: refused (frontend/next-env.d.ts is a symlink on a path the run writes)
+  S dangling-link: refused (docs-link is a dangling symlink)
+  S tracked-release-manifest: refused (release-manifest.json exists)
+  S tracked-local: refused (.local exists)
+  S launch-fresh-local: accepted
+  S launch-local-not-empty: refused (.local is not empty)
+  S built-generated-file-redirected: refused (frontend/next-env.d.ts is a symlink resolving outside)
+  S built-next-is-a-link: refused (frontend/.next is a symlink resolving outside)
+  stage S: 19 passed, 0 failed
+  ```
+- **Not exercised end to end:** the refusal-to-exit-2 path through the full stage A is not run against a clone, because the later phases need the built notebook. The exit-2 wiring is by code only.
+
+**R5-2: service exits before binding**
+
+- **`steps.mjs`, new `awaitOwnership()`.** The initial ownership wait now stops at once when a launcher-reported PID is dead, or when a foreign process holds a port. A6 in `stage-a.mjs` uses it and prints the reason and log tail.
+- **Control:** S runs `awaitOwnership` with a stand-in service that exits immediately and another that sleeps. It returns "exited before binding" in under 10 s.
+- **Not proven:** I did not run the old 120 s loop against this control to show it would have failed.
+
+**R5-3: interrupt path**
+
+- **`notebook-integration-check.mjs`.** The signal handler now only marks the interrupt and starts the shared, run-once disposal. A single `finish()` prints the `stage X: N passed, M failed` line and then exits with 130, or 2 after a refusal.
+- **Hard stop:** a 60 s timer forces the summary if the stage hangs.
+- **Skipped scan:** the source-checkout `find` scan is skipped, with a note, after an interrupt. Without that, the scan ran after the sandbox (and its marker) was already removed and added two spurious FAILs.
+
+### Acceptance
+
+- **Stage T:** exit 0, "stage T: 122 passed, 0 failed".
+- **Stage A on the candidate:** exit 0, "stage A: 88 passed, 0 failed".
+- **Negative control (`--ref` = `--base` = `d3388036b`):** exit 1, "stage A: 79 passed, 9 failed". The failures are A3 (1), A4 (6) and A5 (2), as before.
+- **Stage S:** exit 0, 19 passed.
+- **Refusals:** `--stage X` gives usage, exit 2. `TMPDIR` set to `$NB/frontend`, to the upper-case path variant, and to a symlink into it each give the "inside the notebook checkout" refusal, exit 2, and no `nb-check-*` directory is created.
+- **Interrupted run during stage T `next build`:** summary line printed ("stage T: 5 passed, 1 failed"), exit 130, no temp dir left.
+- **Interrupted run in A6, after "each port is owned":** summary printed ("stage A: 83 passed, 0 failed"), exit 130, process group stopped, 0 `nb-check` dirs left. This is the rerun after the scan fix; the first A6 interrupt showed the two spurious FAILs.
+- **Static checks:** `pnpm typecheck` passes; `pnpm lint` has 0 errors and the same 3701 warnings as before; `pnpm format:check` passes; `pnpm docs:check` passes.
+- **`pnpm test:local`:** not run. No unit test covers these scripts, and the machine is busy with the other task. Not verified.
+- **Machine load:** no run failed by timeout, so no rerun was needed.
+
+### Owner listeners (read-only `lsof`)
+
+| Port | Before | After |
+| ---- | ------ | ----- |
+| 3000 | 41839  | 41839 |
+| 8000 | 41838  | 41838 |
+| 4310 | 85736  | 85736 |
+
+Unchanged across all runs, including the interrupt runs. I did not use ports 4273 or 4321 or `auto_canvas_test_2`, and I signalled only process groups my own runs started.
+
+### Deviations and notes
+
+- **Stage S:** `--stage S` is an addition to the plan's stages. Unknown stages such as `X` still exit 2.
+- **Dotenv refusals:** these now also exit 2; they exited 1 before.
+- **Docs:** I updated the T160 section of `docs/testing/README.md` for the refusals, stage S and the interrupt behaviour.
+- **False-positive risk:** the walk refuses any symlink in the revision that resolves outside the clone. The candidate and the base commit pass it, but another revision with such a link would be refused.

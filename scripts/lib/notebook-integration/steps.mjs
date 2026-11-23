@@ -245,3 +245,56 @@ export function ownershipHeld(sandbox, report, name, port, pid) {
     `port ${port}: ${state} (listeners ${pids.join(", ") || "none"}; want ${pid})`,
   );
 }
+
+const pidAlive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
+  }
+};
+
+/**
+ * Wait until each port is listened on by exactly the service the launcher
+ * reported. Ends at once when another pid holds a port (never signalled) or a
+ * reported service has exited, whichever happens first; otherwise at the
+ * timeout. Returns `{ ok, seen, reason }`.
+ */
+export async function awaitOwnership(
+  sandbox,
+  { apiPort, webPort, backendPid, frontendPid, timeoutMs = 120_000 },
+) {
+  const state = () => ({
+    api: sandbox.listenerState(apiPort, backendPid),
+    web: sandbox.listenerState(webPort, frontendPid),
+  });
+  let seen = state();
+  let reason = "";
+  await waitFor(
+    () => {
+      seen = state();
+      if (seen.api.state === "owned" && seen.web.state === "owned") return true;
+      if (seen.api.state === "foreign" || seen.web.state === "foreign") {
+        reason = "another process holds a port";
+        return true;
+      }
+      const dead = [
+        ["backend", backendPid],
+        ["frontend", frontendPid],
+      ].filter(([, pid]) => !pidAlive(pid));
+      if (dead.length) {
+        reason = `${dead.map(([name, pid]) => `${name} pid ${pid}`).join(", ")} exited before binding its port`;
+        return true;
+      }
+      return false;
+    },
+    timeoutMs,
+    500,
+  );
+  return {
+    ok: seen.api.state === "owned" && seen.web.state === "owned",
+    seen,
+    reason,
+  };
+}

@@ -14,6 +14,7 @@ import {
   UsageError,
 } from "./lib/notebook-integration/sandbox.mjs";
 import { stageA } from "./lib/notebook-integration/stage-a.mjs";
+import { stageS } from "./lib/notebook-integration/self-check.mjs";
 import { stageT } from "./lib/notebook-integration/stage-t.mjs";
 import {
   offlineControl,
@@ -23,9 +24,10 @@ import {
 import { createReporter } from "./lib/notebook-integration/transport.mjs";
 
 const USAGE =
-  "usage: node scripts/notebook-integration-check.mjs --stage <T|A> --notebook <dir>\n" +
+  "usage: node scripts/notebook-integration-check.mjs --stage <T|A|S> --notebook <dir>\n" +
   "         [--ref <git ref>] [--base <commit>] [--python <interpreter>] [--keep]\n" +
-  "  stage A needs --ref, --base and --python";
+  "  stage A needs --ref, --base and --python; stage S runs the script's own\n" +
+  "  refusal self-checks on throwaway material";
 
 function parseArgs(argv) {
   const options = { keep: false };
@@ -40,8 +42,8 @@ function parseArgs(argv) {
       options[flag.slice(2)] = value;
     } else throw new UsageError(`unknown argument ${flag}`);
   }
-  if (!["T", "A"].includes(options.stage))
-    throw new UsageError("--stage must be T or A");
+  if (!["T", "A", "S"].includes(options.stage))
+    throw new UsageError("--stage must be T, A or S");
   if (!options.notebook) throw new UsageError("--notebook is required");
   if (options.stage === "A")
     for (const name of ["ref", "base", "python"])
@@ -68,32 +70,53 @@ try {
   process.exit(2);
 }
 
+const report = createReporter();
 let interrupted = false;
+let finished = false;
+
+// The one final reporting path: the summary line is printed exactly once, after
+// cleanup, and the exit status follows from it (130 after an interrupt, 2
+// after a refusal of the revision under test).
+function finish(context) {
+  if (finished) return;
+  finished = true;
+  const failures = report.summary(options.stage);
+  process.exit(
+    interrupted ? 130 : context?.refused ? 2 : failures === 0 ? 0 : 1,
+  );
+}
+
+// An interrupt only starts the shutdown. The running stage ends because its
+// processes stop and the sandbox refuses new ones; cleanup runs exactly once
+// (the shared disposal) and then the normal path below reports and exits.
 for (const signal of ["SIGINT", "SIGTERM"])
   process.once(signal, () => {
     interrupted = true;
     console.log(`interrupted (${signal}); cleaning up`);
-    void sandbox
-      .dispose()
-      .then((left) => {
-        for (const pgid of left)
-          console.log(
-            `FAIL ${options.stage}: process group ${pgid} still present`,
-          );
-      })
-      .finally(() => process.exit(130));
+    void sandbox.dispose().catch(() => {});
+    setTimeout(() => {
+      report.fail(
+        options.stage,
+        "the stage did not stop within 60 s of the interrupt",
+      );
+      finish();
+    }, 60_000).unref();
   });
 
-const report = createReporter();
+const context = { sandbox, report, notebook, options };
 try {
   console.log(`temporary root: ${sandbox.root}`);
   if (await offlineControl(sandbox, report)) {
-    const context = { sandbox, report, notebook, options };
     if (options.stage === "T") await stageT(context);
+    else if (options.stage === "S") await stageS(context);
     else await stageA(context);
     offlineVerdict(sandbox, report);
   }
-  observeSource(sandbox, report, notebook);
+  // The scan compares against the marker inside the sandbox, which an
+  // interrupt has already removed.
+  if (interrupted)
+    report.note("source-checkout observation skipped: interrupted");
+  else observeSource(sandbox, report, notebook);
 } catch (error) {
   if (!interrupted)
     report.fail(options.stage, `unexpected error: ${error.stack ?? error}`);
@@ -111,6 +134,4 @@ try {
   }
   if (options.keep) console.log(`kept ${sandbox.root}`);
 }
-// Printed last, after disposal, so it always agrees with the exit status.
-const failures = report.summary(options.stage);
-process.exit(interrupted ? 130 : failures === 0 ? 0 : 1);
+finish(context);
