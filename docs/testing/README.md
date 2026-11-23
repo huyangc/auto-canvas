@@ -75,15 +75,17 @@ build output there, and the builds that precede it overwrite
 `apps/editor/dist`): it starts, as its own child, the server the launcher
 runs (`node apps/server/dist/cli.js` with `EDITOR_ROOT=apps/editor/dist`) on a
 throwaway schema, checks that every script, module preload and stylesheet
-reference of the standard output resolves (against the document's base URL)
-to a `/assets/` path on that server and is answered with the content type its
-use needs (a JavaScript MIME type, `text/css`), and with
+reference of the standard output is a root-relative `/assets/` attribute that
+also resolves (against the document's base URL) to a `/assets/` path on that
+server and is answered with the content type its use needs (a JavaScript MIME
+type, `text/css`), and with
 `--run` runs a command (the Agent browser cases) against that server. It
 refuses a checkout with `.env` files, ports 3000, 8000 and 4310, a bound port
 and any database but `auto_canvas_test…` (the name `pg` resolves, without a
 `host`, `port`, `socket`, `db`, `dbname` or `database` parameter), and stops
 everything it started on every exit path: the run's processes by its process
-group, by their parents, and by a per-run marker in their environment.
+group, by their parents, and by a per-run marker in their environment; a
+readout it cannot make is reported as unverified rather than assumed clean.
 `node scripts/standalone-build-evidence-check.mjs` checks its
 refusals and cleanup (after `pnpm build` and `pnpm build:notebook-editor`).
 

@@ -167,3 +167,20 @@ Acceptance after the repairs, by the reviewer: fixture check passed (39
 refusals), 31 notebook tests passed, the notebook selection check passed, the
 standard listing equal to the new baseline; builds, typecheck, lint, format,
 docs 0.
+
+## Round 6 — codex round 5 findings (three P2) — accepted
+
+Reviewed: codex `gpt-6.2-sol` PR review round 5 of PR 117 at `22133ec`, the
+three P2 findings; the implementer's round-6 diff; the reviewer reran the
+fixture check, the evidence check, the notebook suite and both listings.
+
+| #   | Severity | Where                                | Finding                                                                                                                                                                     | Fix / evidence                                                                                                                                                                                                                                                                                                            |
+| --- | -------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 29  | fixed    | `standalone-build-evidence.mjs`      | A `ps` failure at shutdown rejected before any signal: the detached `--run` command survived its known group leader.                                                         | Shutdown scans retry (`TABLE_SCAN_ATTEMPTS`); an unreadable table routes to `stopRunUninspected()`, which signals the run's own group from the leader this script spawned (SIGTERM, SIGKILL after the deadline) and reports the descendants as unverified. Hook `STANDALONE_EVIDENCE_PROCESS_TABLE=fail`; case (vid): exit 130, group `(pid pid pid) stopped from its leader, descendants reported unverified`. |
+| 30  | fixed    | `checkStandardOutput()` (C-4)        | Only the resolved URL was checked, so `assets/main.js` fetched from `/` and an absolute URL to the verification server passed.                                              | The raw attribute must start with `/assets/` before the resolved checks; cases: `C-4 relative attribute` and `C-4 absolute attribute` both reported, the valid index passes.                                                                                                                                               |
+| 31  | fixed    | N7 (`notebook-worker.spec.ts`)       | The no-store fallback was chosen from the current preview's cache reuse only; a non-reused history seed could be fetched with the default cache mode and still pass.        | `reused` is per URL, `fallback` lists the URLs whose own seed was not reused; the wrapper records `{url, cache}` and each fallback URL must have its product request(s) with `no-store`, plus the aggregate. The fallback branch is unreachable on this machine (Chrome reuses both seeds); it was verified with a scratch tweak (`reused {current:true, history:false}`, history recorded `no-store`) and the file restored byte-identically. |
+
+Rerun by the reviewer on this tree: `notebook-e2e-fixture-check` passed
+(39 refusals), `standalone-build-evidence-check` passed (25 refusals, all C-4
+cases, the unread-table case), standard listing equal to the 476-line
+baseline, notebook listing 31, notebook suite 31 passed.

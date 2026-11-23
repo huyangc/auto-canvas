@@ -306,29 +306,53 @@ test("N7 previews never come from the HTTP cache or the service worker, and Bob 
     current: logFor(controlLog, urls.current).length,
     history: logFor(controlLog, urls.history).length,
   };
-  const reused = control[0]!.seed;
+  const reused = { current: control[0]!.seed, history: control[1]!.seed };
+  // Per URL: the seed the browser reused is evidence for that preview only,
+  // so the fallback is applied to each preview whose own seed was not reused.
+  const fallback = (["current", "history"] as const).filter(
+    (key) => !reused[key],
+  );
   test.info().annotations.push({
     type: "N7 control",
     description: JSON.stringify({
-      path: reused ? "http-cache reuse" : "no-store fallback",
+      path: fallback.length === 0 ? "http-cache reuse" : "no-store fallback",
+      reused,
+      fallback,
       current: control[0],
       historySynthetic: control[1],
       wireHits: controlHits,
     }),
   });
-  let cacheModes: string[] | null = null;
-  if (reused) {
-    // The entry is there and a default-cache request takes it from the
-    // cache: nothing for that URL reached the wire.
-    expect(control[0]).toEqual({ status: 200, seed: true });
-    expect(controlHits.current).toBe(0);
-  } else {
-    // This Chrome did not reuse the entry: record instead the cache mode
-    // of the Request the scoped fetch hands to its native fetch (an init
-    // script's wrapper, installed before the page's scripts, is that
-    // native fetch).
+  for (const [index, key] of [
+    [0, "current"],
+    [1, "history"],
+  ] as const) {
+    if (reused[key]) {
+      // The entry is there and a default-cache request takes it from the
+      // cache: nothing for that URL reached the wire.
+      expect(control[index]).toEqual({ status: 200, seed: true });
+      expect(controlHits[key], `${key}: wire hits in the control phase`).toBe(
+        0,
+      );
+    } else {
+      // This Chrome did not reuse that entry: the default-cache request went
+      // to the server, so the product's own request must be the no-store one.
+      expect(control[index]).toEqual({ status: 200, seed: false });
+      expect(
+        controlHits[key],
+        `${key}: the default-cache request reached the server`,
+      ).toBeGreaterThanOrEqual(1);
+    }
+  }
+  let cacheModes: { url: string; cache: string }[] | null = null;
+  if (fallback.length > 0) {
+    // Record the cache mode of the Request the scoped fetch hands to its
+    // native fetch (an init script's wrapper, installed before the page's
+    // scripts, is that native fetch), per URL: whichever entries this Chrome
+    // did not reuse are the ones the product itself must bypass the HTTP
+    // cache for.
     await context.addInitScript(() => {
-      const modes: string[] = [];
+      const modes: { url: string; cache: string }[] = [];
       Object.defineProperty(window, "__previewCacheModes", { value: modes });
       const original = window.fetch;
       window.fetch = function (
@@ -340,7 +364,7 @@ test("N7 previews never come from the HTTP cache or the service worker, and Bob 
           input instanceof Request &&
           /\/preview\.svg(?:\?|$)/u.test(input.url)
         )
-          modes.push(input.cache);
+          modes.push({ url: input.url, cache: input.cache });
         return original.call(this, input, init);
       } as typeof fetch;
     });
@@ -363,14 +387,36 @@ test("N7 previews never come from the HTTP cache or the service worker, and Bob 
   const versionImage = page.getByTestId("version-1").locator(":scope > img");
   await expect(versionImage).toHaveAttribute("src", /^blob:/u);
   const aliceTo = await recorder.mark("alice end");
-  if (!reused) {
+  if (fallback.length > 0) {
     cacheModes = await page.evaluate(
       () =>
-        (window as unknown as { __previewCacheModes: string[] })
-          .__previewCacheModes,
+        (
+          window as unknown as {
+            __previewCacheModes: { url: string; cache: string }[];
+          }
+        ).__previewCacheModes,
     );
-    expect(cacheModes.length).toBeGreaterThanOrEqual(2);
-    expect(new Set(cacheModes)).toEqual(new Set(["no-store"]));
+    // Each preview whose seed this Chrome did not reuse must have been
+    // fetched by the product with no-store: a default-cache request would be
+    // free to take that seed, as the control's own request would have.
+    for (const key of fallback) {
+      const forUrl = cacheModes.filter(
+        (entry) => pathOf(entry.url) === pathOf(urls[key]),
+      );
+      expect(
+        forUrl.length,
+        `${key}: the product's preview request`,
+      ).toBeGreaterThanOrEqual(1);
+      expect(
+        forUrl.map((entry) => entry.cache),
+        `${key}: cache mode`,
+      ).toEqual(forUrl.map(() => "no-store"));
+    }
+    // The product sends no-store whatever the cache holds, so every recorded
+    // preview request does, the reused URL's included.
+    expect(cacheModes.map((entry) => entry.cache)).toEqual(
+      cacheModes.map(() => "no-store"),
+    );
   }
   const aliceLog = await fixture.log(aliceFrom.seq + 1, aliceTo.seq);
   // Measured first, asserted after: the report needs every value. The bytes

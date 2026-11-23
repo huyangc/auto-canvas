@@ -28,7 +28,11 @@
 // marker=` says whether the marker reaches our processes at all here. A
 // marker read that fails is retried; if it still cannot be read while the
 // marker is active, cleanup reports `cleanup incomplete: …` and exits
-// non-zero rather than claiming the run left nothing behind.
+// non-zero rather than claiming the run left nothing behind. The process
+// table is read the same way at shutdown; when it cannot be read at all, the
+// run's own group is still stopped from the leader this script spawned, and
+// the descendants only that table could have found are reported as
+// unverified.
 import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
@@ -75,6 +79,12 @@ const RUN_MARKER = "STANDALONE_EVIDENCE_RUN_MARKER";
 /** A marker read that fails is retried at once, so a transient `ps` recovers. */
 const MARKER_SCAN_ATTEMPTS = 3;
 const MARKER_SCAN_RETRY_MS = 100;
+/**
+ * The shutdown's process-table reads: retried the same way, so a read that
+ * fails transiently is not taken for an inspection that cannot be made.
+ */
+const TABLE_SCAN_ATTEMPTS = 3;
+const TABLE_SCAN_RETRY_MS = 100;
 
 function refuse(message) {
   console.error(`${PREFIX} refused: ${message}`);
@@ -193,6 +203,15 @@ class Aborted extends Error {}
 
 /** Every live process: pid, parent, group and start time. */
 function processTable() {
+  // Test-only (scripts/standalone-build-evidence-check.mjs): with
+  // STANDALONE_EVIDENCE_PROCESS_TABLE=fail no table can be read, to show
+  // that the run's group is still stopped without one.
+  if (process.env.STANDALONE_EVIDENCE_PROCESS_TABLE === "fail")
+    return Promise.reject(
+      new Error(
+        "the process table read was refused (STANDALONE_EVIDENCE_PROCESS_TABLE)",
+      ),
+    );
   return new Promise((done, fail) => {
     execFile(
       "ps",
@@ -366,42 +385,122 @@ async function liveRunProcesses() {
     .map(([pid]) => ({ pid, pgid: table.get(pid).pgid }));
 }
 
+/** Whether the leader this script spawned for the run has not been reaped. */
+function runLeaderAlive() {
+  return (
+    run !== null && run.child.exitCode === null && run.child.signalCode === null
+  );
+}
+
+/**
+ * Signals the run's own process group (its id is the pid of the leader this
+ * script spawned), and nothing outside it. Only while that leader lives: then
+ * the group cannot have emptied, so its id cannot have been reused by a
+ * process of someone else. False when the leader is already gone.
+ */
+function signalRunGroup(signal) {
+  if (!runLeaderAlive()) return false;
+  try {
+    process.kill(-run.pgid, signal);
+  } catch {
+    // The group emptied in the meantime.
+  }
+  return true;
+}
+
+/**
+ * The live processes of the run at shutdown, with the retries a transient
+ * `ps` failure needs; a read that still fails rejects, and the caller reports
+ * what it could not verify.
+ */
+async function shutdownScan() {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await liveRunProcesses();
+    } catch (error) {
+      if (attempt >= TABLE_SCAN_ATTEMPTS) throw error;
+      await new Promise((resume) => setTimeout(resume, TABLE_SCAN_RETRY_MS));
+    }
+  }
+}
+
+/**
+ * Stops every process of the run. Returns what could not be cleaned, a phrase
+ * for the `cleanup incomplete` line, or null when nothing is left.
+ *
+ * The run's group is this script's own child, so it is stopped from that
+ * leader even when the process table cannot be read: only the descendants
+ * that rule alone would have found are then unverified, and that is said
+ * rather than assumed clean.
+ */
 async function stopRun() {
-  if (!run) return;
+  if (!run) return null;
   clearInterval(trackTimer);
+  /** The run's live processes, or null when the table could not be read. */
+  const scan = () => shutdownScan().catch(() => null);
   const signalAll = async (signal) => {
-    const live = await liveRunProcesses();
+    const live = await scan();
+    if (live === null) return null;
     // The group as a whole too (a process forked since the last scan), but
     // only while a recorded member of it lives: a group id is never reused
     // before its last member is gone.
-    if (live.some((item) => item.pgid === run.pgid))
-      try {
-        process.kill(-run.pgid, signal);
-      } catch {
-        // The group emptied in the meantime.
-      }
+    if (live.some((item) => item.pgid === run.pgid)) signalRunGroup(signal);
     for (const { pid } of live)
       try {
         process.kill(pid, signal);
       } catch {
         // Gone in the meantime.
       }
+    return live;
   };
-  await signalAll("SIGTERM");
+  if ((await signalAll("SIGTERM")) === null) return stopRunUninspected();
   const deadline = Date.now() + KILL_AFTER_MS;
-  while ((await liveRunProcesses()).length && Date.now() < deadline)
+  let live = await scan();
+  while (live !== null && live.length && Date.now() < deadline) {
     await new Promise((resume) => setTimeout(resume, 100));
-  if ((await liveRunProcesses()).length) await signalAll("SIGKILL");
+    live = await scan();
+  }
+  if (live === null) return stopRunUninspected();
+  if (live.length && (await signalAll("SIGKILL")) === null)
+    return stopRunUninspected();
   const killed = Date.now() + KILL_AFTER_MS;
   for (;;) {
-    const live = await liveRunProcesses();
-    if (!live.length) return;
+    const now = await scan();
+    if (now === null) return stopRunUninspected();
+    if (!now.length) return null;
     if (Date.now() > killed)
       throw new Error(
-        `run processes survived SIGKILL: ${live.map((item) => item.pid).join(" ")}`,
+        `run processes survived SIGKILL: ${now.map((item) => item.pid).join(" ")}`,
       );
     await new Promise((resume) => setTimeout(resume, 100));
   }
+}
+
+/**
+ * Shutdown when the process table cannot be read: the run's own group is
+ * still signalled from the leader this script spawned (SIGTERM, SIGKILL after
+ * the same deadline), and the descendants the table would have found are
+ * reported as unverified.
+ */
+async function stopRunUninspected() {
+  console.error(
+    `${PREFIX} could not read the process table at shutdown: stopping the run's own group only`,
+  );
+  // The listener is attached before each signal, so an exit cannot be missed.
+  const leaderExit = () =>
+    runLeaderAlive()
+      ? settlesWithin(once(run.child, "exit"), KILL_AFTER_MS)
+      : Promise.resolve(true);
+  const exited = leaderExit();
+  signalRunGroup("SIGTERM");
+  if (!(await exited)) {
+    const killed = leaderExit();
+    signalRunGroup("SIGKILL");
+    await killed;
+  }
+  if (runLeaderAlive())
+    return `run processes (the group leader ${run.child.pid} survived SIGKILL; the process table could not be read)`;
+  return "run processes (the process table could not be read: the run's descendants could not be verified)";
 }
 
 async function stopServer() {
@@ -437,7 +536,8 @@ function cleanup(reason, code) {
     /** What could not be cleaned, each named in the final line. */
     const incomplete = [];
     try {
-      await stopRun();
+      const runIncomplete = await stopRun();
+      if (runIncomplete !== null) incomplete.push(runIncomplete);
     } catch (error) {
       console.error(`${PREFIX} could not stop the run: ${error.message}`);
       incomplete.push("run processes");
@@ -680,6 +780,16 @@ async function checkStandardOutput(origin) {
     const { kind, value } = reference;
     if (typeof value !== "string" || value === "") {
       problems.push(`${kind} ${value}: no URL`);
+      continue;
+    }
+    // The attribute itself is root-relative under /assets/, as the build
+    // writes it: `assets/main.js` resolves under /assets/ when fetched from
+    // `/` but is not the reference the output makes, and an absolute URL
+    // hard-coded to this verification server's origin only works here.
+    if (!value.startsWith("/assets/")) {
+      problems.push(
+        `${kind} ${value}: not a root-relative path under /assets/`,
+      );
       continue;
     }
     // The URL the browser loads, not the attribute: a `<base href>` or a

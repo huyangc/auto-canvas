@@ -53,6 +53,8 @@ function childEnv(overrides = {}) {
   const env = { ...process.env };
   delete env.STANDALONE_EVIDENCE_EDITOR_ROOT;
   delete env.STANDALONE_EVIDENCE_NODE;
+  delete env.STANDALONE_EVIDENCE_MARKER_SCAN;
+  delete env.STANDALONE_EVIDENCE_PROCESS_TABLE;
   return { ...env, ...overrides };
 }
 
@@ -390,30 +392,53 @@ try {
     }
   }
 
-  // C-4 resolves each reference as the browser does: the raw attribute can
-  // leave the owned server (`<base href>`) or /assets/ (dot segments), and
-  // both are reported while the run still cleans up.
-  for (const [label, index, problem] of [
+  // C-4 checks the raw attribute too: it must be root-relative under
+  // /assets/ as the build writes it. A relative `assets/main.js` resolves
+  // under /assets/ when fetched from `/`, and an absolute URL hard-coded to
+  // this verification server passes on its port alone; both are reported.
+  // Each reference is still resolved as the browser does: `<base href>` can
+  // leave the owned server, dot segments can leave /assets/. Every check
+  // still cleans up.
+  for (const [label, indexFor, problem, note] of [
     [
       "C-4 base URL",
-      '<!doctype html><base href="https://elsewhere.example/"><script type="module" src="/assets/a.js"></script><link rel="stylesheet" href="/assets/a.css">\n',
+      () =>
+        '<!doctype html><base href="https://elsewhere.example/"><script type="module" src="/assets/a.js"></script><link rel="stylesheet" href="/assets/a.css">\n',
       /script \/assets\/a\.js: resolves to https:\/\/elsewhere\.example\/assets\/a\.js, not the server's origin/u,
+      "the resolved URL is checked, not the attribute",
     ],
     [
       "C-4 escape",
-      '<!doctype html><script type="module" src="/assets/../index.html"></script><link rel="stylesheet" href="/assets/a.css">\n',
+      () =>
+        '<!doctype html><script type="module" src="/assets/../index.html"></script><link rel="stylesheet" href="/assets/a.css">\n',
       /script \/assets\/\.\.\/index\.html: resolves to \/index\.html, not a path under \/assets\//u,
+      "the resolved URL is checked, not the attribute",
+    ],
+    [
+      "C-4 relative attribute",
+      () =>
+        '<!doctype html><script type="module" src="assets/main.js"></script><link rel="stylesheet" href="/assets/a.css">\n',
+      /script assets\/main\.js: not a root-relative path under \/assets\//u,
+      "a relative attribute is reported",
+    ],
+    [
+      "C-4 absolute attribute",
+      (port) =>
+        `<!doctype html><script type="module" src="http://127.0.0.1:${port}/assets/a.js"></script><link rel="stylesheet" href="/assets/a.css">\n`,
+      /script http:\/\/127\.0\.0\.1:\d+\/assets\/a\.js: not a root-relative path under \/assets\//u,
+      "an absolute URL to the verification server is reported",
     ],
   ]) {
     const root = await mkdtemp(join(tmpdir(), "standalone-evidence-resolve-"));
     try {
       await mkdir(join(root, "assets"));
-      await writeFile(join(root, "index.html"), index);
+      const port = String(await freePort());
+      await writeFile(join(root, "index.html"), indexFor(port));
       await writeFile(join(root, "assets/a.js"), "export {};\n");
       await writeFile(join(root, "assets/a.css"), "body {}\n");
       await withRun(
         script,
-        await args(),
+        ["--port", port, "--database", databaseUrl],
         { ...env, STANDALONE_EVIDENCE_EDITOR_ROOT: root },
         async (run) => {
           const { code } = await run.exited;
@@ -422,9 +447,7 @@ try {
           assert.match(run.output, problem);
           assert.match(run.output, /cleanup ok/u);
           await expectClean(run, label);
-          console.log(
-            `ok ${label}: the resolved URL is checked, not the attribute`,
-          );
+          console.log(`ok ${label}: ${note}, cleanup ok`);
         },
       );
     } finally {
@@ -685,6 +708,35 @@ try {
       await expectClean(run, "unread marker");
       console.log(
         "ok unread marker: cleanup incomplete names the marker it could not read, exit 1",
+      );
+    },
+  );
+
+  // (vid) The process table cannot be read at shutdown
+  // (STANDALONE_EVIDENCE_PROCESS_TABLE): the run's group is still stopped from
+  // the leader the script spawned, so the detached command does not survive,
+  // and the descendants only the table could have verified are reported
+  // rather than assumed gone. The server and the schema are still cleaned.
+  await withRun(
+    script,
+    await args(["--run", "sleep 60 & sleep 60; wait"]),
+    { ...env, STANDALONE_EVIDENCE_PROCESS_TABLE: "fail" },
+    async (run) => {
+      await run.printed(/resource run-pgid=\d+/u);
+      await until(() => groupMembers(run.pgid).length >= 3, "the sleeps");
+      const members = groupMembers(run.pgid);
+      run.child.kill("SIGINT");
+      const { code } = await run.exited;
+      assert.equal(code, 130, `unread table: exit ${code}\n${run.output}`);
+      assert.match(
+        run.output,
+        /cleanup incomplete: run processes \(the process table could not be read: the run's descendants could not be verified\)/u,
+        run.output,
+      );
+      assert.doesNotMatch(run.output, /cleanup ok/u, run.output);
+      await expectClean(run, "unread process table", members);
+      console.log(
+        `ok unread process table: group ${run.pgid} (${members.join(" ")}) stopped from its leader, descendants reported unverified, exit 130`,
       );
     },
   );
