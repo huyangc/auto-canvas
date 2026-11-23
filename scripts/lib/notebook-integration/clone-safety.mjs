@@ -60,6 +60,31 @@ const within = (parent, child) => {
 };
 
 /**
+ * The first component of `relative` (inside the clone) that is a symlink or
+ * not a directory, or undefined. Descendant checks under such an ancestor
+ * would throw ENOTDIR (or look through the link); they are skipped and the
+ * refusal names the ancestor instead (R8-4).
+ */
+const badAncestor = (clone, relative) => {
+  const parts = relative.split("/").slice(0, -1);
+  let current = "";
+  for (const part of parts) {
+    current = current ? `${current}/${part}` : part;
+    let stat;
+    try {
+      stat = fs.lstatSync(path.join(clone, current));
+    } catch (error) {
+      if (error.code === "ENOENT") return undefined;
+      return { path: current, why: `cannot be checked (${error.code})` };
+    }
+    if (stat.isSymbolicLink()) return { path: current, why: "is a symlink" };
+    if (!stat.isDirectory())
+      return { path: current, why: "is not a directory" };
+  }
+  return undefined;
+};
+
+/**
  * Problems with the tree at `clone`, each naming a path relative to it.
  * phase "start": nothing the script creates may exist yet. phase "built":
  * the build's products (`frontend/.next`, the copied modules) may exist but
@@ -97,10 +122,24 @@ export function cloneTreeProblems(clone, phase) {
     }
   };
   walk("");
+  // Descendant checks: skipped under an ancestor that is not a real
+  // directory, which is named once instead.
+  const named = new Set();
+  const usable = (relative) => {
+    const bad = badAncestor(clone, relative);
+    if (!bad) return true;
+    if (!named.has(bad.path)) {
+      named.add(bad.path);
+      problems.push(
+        `${bad.path} ${bad.why} (the paths under it are not checked)`,
+      );
+    }
+    return false;
+  };
   // A write-path ancestor that is a symlink is caught above; here the
   // generated files themselves must be regular files.
   for (const file of ["frontend/next-env.d.ts", "frontend/tsconfig.json"]) {
-    if (!exists(path.join(clone, file))) continue;
+    if (!usable(file) || !exists(path.join(clone, file))) continue;
     if (!fs.lstatSync(path.join(clone, file)).isFile())
       problems.push(`${file} is not a regular file`);
   }
@@ -108,7 +147,7 @@ export function cloneTreeProblems(clone, phase) {
     if (phase !== "start" && relative === "frontend/node_modules") return false;
     if (phase !== "start" && relative === "frontend/.next") return false;
     if (phase === "launch" && relative === ".local") return false;
-    return exists(path.join(clone, relative));
+    return usable(relative) && exists(path.join(clone, relative));
   });
   for (const relative of fresh)
     problems.push(
@@ -122,7 +161,7 @@ export function cloneTreeProblems(clone, phase) {
     else if (fs.readdirSync(local).length)
       problems.push(".local is not empty before the launch");
   }
-  if (phase !== "start") {
+  if (phase !== "start" && usable("frontend/.next")) {
     const next = fs.lstatSync(path.join(clone, "frontend/.next"), {
       throwIfNoEntry: false,
     });

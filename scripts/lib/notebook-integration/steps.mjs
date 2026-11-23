@@ -1,11 +1,12 @@
 // Shared steps of the notebook integration check: the offline control, the
 // Next build/start helpers and the source-checkout observation.
 import { spawnSync } from "node:child_process";
-import fs from "node:fs";
 import path from "node:path";
 
 import { waitFor } from "./sandbox.mjs";
-import { rawRequest } from "./transport.mjs";
+import { OwnershipLost, rawRequest } from "./transport.mjs";
+
+export { OwnershipLost };
 
 export const tail = (text, lines = 25) =>
   text.trimEnd().split("\n").slice(-lines).join("\n");
@@ -58,9 +59,9 @@ export async function offlineControl(sandbox, report) {
     const stopped = checkStopped(report, name, result.pgid, result.gone);
     const ok = report.check(
       name,
-      result.status === 0 && refusedOnly(log),
+      result.status === 0 && refusedOnly(sandbox, log),
       () =>
-        `exit ${result.status}, log ${JSON.stringify(readLines(log))}\n${tail(result.output, 5)}`,
+        `exit ${result.status}, log ${JSON.stringify(readLines(sandbox, log))}\n${tail(result.output, 5)}`,
     );
     allOk = allOk && ok && stopped;
   }
@@ -71,12 +72,14 @@ export async function offlineControl(sandbox, report) {
   return allOk;
 }
 
-const readLines = (log) =>
-  fs.existsSync(log) ? fs.readFileSync(log, "utf8").trim().split("\n") : [];
+const readLines = (sandbox, log) => {
+  const text = sandbox.readFile(log, "utf8");
+  return text === undefined ? [] : text.trim().split("\n");
+};
 
 /** The log holds the probe's refused connection and nothing else. */
-const refusedOnly = (log) => {
-  const lines = readLines(log);
+const refusedOnly = (sandbox, log) => {
+  const lines = readLines(sandbox, log);
   return lines.length > 0 && lines.every((line) => line === "192.0.2.1 49152");
 };
 
@@ -147,10 +150,10 @@ export function writePackage(sandbox, slug, files) {
   const dir = path.join(sandbox.root, "controls", slug);
   for (const [relative, content] of Object.entries(files)) {
     const file = path.join(dir, relative);
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, content, {
-      mode: relative.endsWith(".sh") ? 0o755 : 0o644,
-    });
+    // Validated creation and write (R8-1): a link planted at either path is
+    // refused instead of followed.
+    sandbox.makeDir(path.dirname(file), { recursive: true });
+    sandbox.writeFile(file, content, relative.endsWith(".sh") ? 0o755 : 0o644);
   }
   return dir;
 }
@@ -175,9 +178,9 @@ async function npmLifecycleControl(sandbox, report, control) {
   const guarded = sandbox.guardedSince(mark).some(ranScript("probe.cjs"));
   const ok = report.check(
     name,
-    result.status === 0 && refusedOnly(log) && guarded,
+    result.status === 0 && refusedOnly(sandbox, log) && guarded,
     () =>
-      `exit ${result.status}, log ${JSON.stringify(readLines(log))}, probe in the guard marker: ${guarded}\n${tail(result.output, 5)}`,
+      `exit ${result.status}, log ${JSON.stringify(readLines(sandbox, log))}, probe in the guard marker: ${guarded}\n${tail(result.output, 5)}`,
   );
   return ok && stopped;
 }
@@ -209,9 +212,7 @@ export function guardLoaded(sandbox, report, name, mark, match) {
 }
 
 export function offlineVerdict(sandbox, report) {
-  const content = fs.existsSync(sandbox.offlineLog)
-    ? fs.readFileSync(sandbox.offlineLog, "utf8").trim()
-    : "";
+  const content = (sandbox.readFile(sandbox.offlineLog, "utf8") ?? "").trim();
   report.check("no outbound connection attempted", content === "", content);
 }
 
@@ -304,7 +305,7 @@ export async function startNext(sandbox, { dir, port, env, name, marker }) {
   const pid = handle.pid;
   const fail = (detail) => ({
     handle,
-    error: `${detail}\n${tail(fs.readFileSync(handle.logFile, "utf8"))}`,
+    error: `${detail}\n${tail(sandbox.readFile(handle.logFile, "utf8") ?? "")}`,
   });
   if (pid === undefined) return fail("next start did not spawn");
   let foreign;
@@ -402,6 +403,24 @@ export function ownershipHeld(sandbox, report, name, port, pid) {
     state === "owned",
     `port ${port}: ${state} (listeners ${pids.join(", ") || "none"}; want ${pid})`,
   );
+}
+
+/**
+ * The one gate every request to a port this run claims goes through (R8-2):
+ * ownership is asked immediately before each request, and anything but
+ * "owned" throws OwnershipLost (defined in transport.mjs) before it is sent,
+ * so a caller stops at the first mismatch and a replacement listener never
+ * receives a request.
+ */
+export function ownershipGate(sandbox, port, pid) {
+  return (rawPath, method) => {
+    const { state, pids } = sandbox.listenerState(port, pid);
+    if (state !== "owned")
+      throw new OwnershipLost(
+        `port ${port} is ${state} (listeners ${pids.join(", ") || "none"}; want ${pid}) before ${method ?? "GET"} ${JSON.stringify(rawPath)}`,
+      );
+    return rawRequest(port, rawPath, method);
+  };
 }
 
 const pidAlive = (pid) => {

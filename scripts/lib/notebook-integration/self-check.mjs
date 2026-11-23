@@ -3,18 +3,28 @@
 // notebook checkout). Each negative control also proves that the file outside
 // the clone is byte-identical afterwards.
 import { execFileSync, spawnSync } from "node:child_process";
+import { createServer } from "node:http";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { cloneTreeProblems } from "./clone-safety.mjs";
-import { modulesInClone } from "./modules.mjs";
-import { lsofLines, waitFor } from "./sandbox.mjs";
-import { dependencyManifests, survivingPids } from "./stage-a.mjs";
+import { modulesInClone, prepareModules } from "./modules.mjs";
+import { PathRefused, UsageError, lsofLines, waitFor } from "./sandbox.mjs";
+import {
+  dependencyManifests,
+  makeLocal,
+  removeNext,
+  survivingPids,
+} from "./stage-a.mjs";
+import { removeAppNext, singleRuleControl, writeApp } from "./stage-t.mjs";
 import { startStub, transportAssertions } from "./transport.mjs";
 import {
   abnormalEnd,
   awaitOwnership,
   guardLoaded,
+  ownershipGate,
+  OwnershipLost,
   tail,
   writePackage,
 } from "./steps.mjs";
@@ -24,14 +34,18 @@ async function makeClone(sandbox, name, { files = {}, links = {} }) {
   const base = path.join(sandbox.root, "self-check", name);
   const repo = path.join(base, "repo");
   const clone = path.join(base, "clone");
-  fs.mkdirSync(repo, { recursive: true });
+  sandbox.makeDir(repo, { recursive: true });
   for (const [relative, content] of Object.entries(files)) {
-    fs.mkdirSync(path.dirname(path.join(repo, relative)), { recursive: true });
-    fs.writeFileSync(path.join(repo, relative), content);
+    const file = path.join(repo, relative);
+    sandbox.makeDir(path.dirname(file), { recursive: true });
+    sandbox.writeFile(file, content);
   }
   for (const [relative, target] of Object.entries(links)) {
-    fs.mkdirSync(path.dirname(path.join(repo, relative)), { recursive: true });
-    fs.symlinkSync(target, path.join(repo, relative));
+    const link = path.join(repo, relative);
+    sandbox.makeDir(path.dirname(link), { recursive: true });
+    // A link is what the scenario plants: created directly, since a helper
+    // that validates write paths refuses to make one.
+    fs.symlinkSync(target, link);
   }
   const git = (args, cwd) =>
     sandbox.run(
@@ -57,11 +71,11 @@ async function makeClone(sandbox, name, { files = {}, links = {} }) {
 
 export async function stageS({ sandbox, report }) {
   const outside = path.join(sandbox.root, "self-check", "outside");
-  fs.mkdirSync(outside, { recursive: true });
+  sandbox.makeDir(outside, { recursive: true });
   const outsideFile = path.join(outside, "target.txt");
   const outsideBytes = Buffer.from("outside the clone\n");
-  fs.writeFileSync(outsideFile, outsideBytes);
-  fs.mkdirSync(path.join(outside, "dir"));
+  sandbox.writeFile(outsideFile, outsideBytes);
+  sandbox.makeDir(path.join(outside, "dir"));
 
   const scenarios = [
     {
@@ -125,9 +139,9 @@ export async function stageS({ sandbox, report }) {
     {
       name: "launch-fresh-local",
       files: { "frontend/package.json": "{}\n" },
-      before: (clone) => {
-        fs.mkdirSync(path.join(clone, "frontend/.next"));
-        fs.mkdirSync(path.join(clone, ".local"));
+      before: (clone, box) => {
+        box.makeDir(path.join(clone, "frontend/.next"), { recursive: true });
+        box.makeDir(path.join(clone, ".local"));
       },
       phase: "launch",
       refused: undefined,
@@ -135,9 +149,9 @@ export async function stageS({ sandbox, report }) {
     {
       name: "launch-local-not-empty",
       files: { "frontend/package.json": "{}\n" },
-      before: (clone) => {
-        fs.mkdirSync(path.join(clone, ".local"));
-        fs.writeFileSync(path.join(clone, ".local/x"), "");
+      before: (clone, box) => {
+        box.makeDir(path.join(clone, ".local"));
+        box.writeFile(path.join(clone, ".local/x"), "");
       },
       phase: "launch",
       refused: ".local is not empty",
@@ -145,9 +159,9 @@ export async function stageS({ sandbox, report }) {
     {
       name: "built-generated-file-redirected",
       files: { "frontend/next-env.d.ts": "x\n" },
-      before: (clone) => {
-        fs.mkdirSync(path.join(clone, "frontend/.next"));
-        fs.rmSync(path.join(clone, "frontend/next-env.d.ts"));
+      before: (clone, box) => {
+        box.makeDir(path.join(clone, "frontend/.next"), { recursive: true });
+        box.removePath(path.join(clone, "frontend/next-env.d.ts"));
         fs.symlinkSync(outsideFile, path.join(clone, "frontend/next-env.d.ts"));
       },
       phase: "built",
@@ -164,16 +178,31 @@ export async function stageS({ sandbox, report }) {
       phase: "built",
       refused: "frontend/.next is a symlink resolving outside",
     },
+    // R8-4: a `frontend` that is not a directory is a refusal naming it, not
+    // an ENOTDIR stack trace.
+    {
+      name: "frontend-is-a-regular-file",
+      files: { frontend: "not a directory\n" },
+      phase: "start",
+      refused: "frontend is not a directory",
+    },
+    {
+      name: "frontend-is-a-link-to-a-file",
+      files: { "real.txt": "x\n" },
+      links: { frontend: "real.txt" },
+      phase: "start",
+      refused: "frontend is a symlink on a path the run writes",
+    },
   ];
   for (const scenario of scenarios) {
     const clone = await makeClone(sandbox, scenario.name, scenario);
-    scenario.before?.(clone);
+    scenario.before?.(clone, sandbox);
     const problems = cloneTreeProblems(clone, scenario.phase);
     const verdict =
       scenario.refused === undefined
         ? problems.length === 0
         : problems.some((problem) => problem.includes(scenario.refused));
-    const untouched = fs.readFileSync(outsideFile).equals(outsideBytes);
+    const untouched = sandbox.readFile(outsideFile).equals(outsideBytes);
     report.check(
       `S ${scenario.name}: ${scenario.refused === undefined ? "accepted" : `refused (${scenario.refused})`}`,
       verdict && untouched,
@@ -256,9 +285,12 @@ export async function stageS({ sandbox, report }) {
   modulesRecheckControls(sandbox, report);
   await abnormalEndControl(sandbox, report);
   await ownershipBeforeProbeControl(sandbox, report);
+  await ownershipGateControls(sandbox, report);
   await movedServiceControl(sandbox, report);
   dependencyManifestControl(report);
   lsofFailureControl(sandbox, report);
+  ownOperationControls(sandbox, report);
+  await frontendNotADirectoryControl(sandbox, report);
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -283,7 +315,7 @@ const pidAlive = (pid) => {
  */
 export async function stopRaceControls(sandbox, report) {
   const dir = path.join(sandbox.root, "self-check", "stop-race");
-  fs.mkdirSync(dir, { recursive: true });
+  sandbox.makeDir(dir, { recursive: true });
   const code =
     'setTimeout(()=>require("fs").writeFileSync(process.env.NB_CHECK_RACE_MARKER,"ran"),300);' +
     "setTimeout(()=>{},5000)";
@@ -665,9 +697,9 @@ async function npmGuardDetectionControls(sandbox, report) {
 function modulesRecheckControls(sandbox, report) {
   const base = path.join(sandbox.root, "self-check", "modules");
   const outside = path.join(base, "outside");
-  fs.mkdirSync(path.join(outside, "pkg"), { recursive: true });
+  sandbox.makeDir(path.join(outside, "pkg"), { recursive: true });
   const outsideFile = path.join(outside, "pkg", "index.js");
-  fs.writeFileSync(outsideFile, "shared\n");
+  sandbox.writeFile(outsideFile, "shared\n");
   const scenarios = [
     {
       name: "replaced by a link to a shared tree",
@@ -677,7 +709,7 @@ function modulesRecheckControls(sandbox, report) {
     {
       name: "a package linked out of the copy",
       setup: (modules) => {
-        fs.mkdirSync(modules, { recursive: true });
+        sandbox.makeDir(modules, { recursive: true });
         fs.symlinkSync(path.join(outside, "pkg"), path.join(modules, "pkg"));
       },
       refused: "resolves outside the copy",
@@ -685,8 +717,8 @@ function modulesRecheckControls(sandbox, report) {
     {
       name: "internal links only",
       setup: (modules) => {
-        fs.mkdirSync(path.join(modules, "real"), { recursive: true });
-        fs.mkdirSync(path.join(modules, ".bin"));
+        sandbox.makeDir(path.join(modules, "real"), { recursive: true });
+        sandbox.makeDir(path.join(modules, ".bin"));
         fs.symlinkSync("../real", path.join(modules, ".bin", "real"));
       },
       refused: undefined,
@@ -694,7 +726,7 @@ function modulesRecheckControls(sandbox, report) {
   ];
   for (const [index, scenario] of scenarios.entries()) {
     const frontend = path.join(base, `clone-${index}`, "frontend");
-    fs.mkdirSync(frontend, { recursive: true });
+    sandbox.makeDir(frontend, { recursive: true });
     const modules = path.join(frontend, "node_modules");
     scenario.setup(modules);
     const problems = modulesInClone(sandbox, modules);
@@ -704,7 +736,7 @@ function modulesRecheckControls(sandbox, report) {
         : problems.some((problem) => problem.includes(scenario.refused));
     report.check(
       `S node_modules after a build, ${scenario.name}: ${scenario.refused === undefined ? "accepted" : "refused"}`,
-      verdict && fs.readFileSync(outsideFile, "utf8") === "shared\n",
+      verdict && sandbox.readFile(outsideFile, "utf8") === "shared\n",
       `problems ${JSON.stringify(problems)}`,
     );
   }
@@ -729,5 +761,367 @@ async function abnormalEndControl(sandbox, report) {
     "S a build stopped at its timeout is not counted as a rejection",
     result.timedOut && /timeout/.test(reason) && normal === "" && result.gone,
     `timedOut ${result.timedOut}, status ${result.status}, signal ${result.signal}, reason ${JSON.stringify(reason)}, normal exit 1 -> ${JSON.stringify(normal)}`,
+  );
+}
+
+// ---- R8-1: the script's own file operations -------------------------------
+
+/** Run `fn`, expecting the refusal class that ends the run with exit 2. */
+function refusal(fn) {
+  try {
+    const value = fn();
+    return { value };
+  } catch (error) {
+    return { error };
+  }
+}
+
+/**
+ * R8-1: every removal, write, copy and read the script itself performs inside
+ * a clone is validated and acted in one call. Each control reproduces a
+ * simulated run in which the revision's code replaced the directory above a
+ * write path with a symlink (here: to a directory outside the sandbox that
+ * holds sentinels), then calls the same operation the stage calls. The
+ * operation must be refused with the exit-2 refusal class, the path named,
+ * and every sentinel outside must survive.
+ */
+function ownOperationControls(sandbox, report) {
+  const base = path.join(sandbox.root, "self-check", "r8-1");
+  // A directory outside the sandbox root: the throwaway target a control's
+  // symlink points at. It is this run's own temporary directory.
+  const outside = fs.mkdtempSync(
+    path.join(path.dirname(sandbox.root), "nb-check-outside-"),
+  );
+  const sentinel = (relative) => {
+    const file = path.join(outside, relative);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, "keep\n");
+    return file;
+  };
+  const intact = (relative) => {
+    try {
+      return fs.readFileSync(path.join(outside, relative), "utf8") === "keep\n";
+    } catch {
+      return false;
+    }
+  };
+  const link = (target, at) => {
+    sandbox.makeDir(path.dirname(at), { recursive: true });
+    fs.symlinkSync(target, at);
+  };
+  const controls = [
+    {
+      name: "the .next removal when frontend was swapped for a link",
+      run: () => {
+        const clone = path.join(base, "next/clone");
+        sandbox.makeDir(path.join(clone, "frontend/.next"), {
+          recursive: true,
+        });
+        sandbox.writeFile(path.join(clone, "frontend/.next/victim"), "v\n");
+        sandbox.removePath(path.join(clone, "frontend"));
+        link(outside, path.join(clone, "frontend"));
+        sentinel(".next/sentinel");
+        return refusal(() => removeNext(sandbox, path.join(clone, "frontend")));
+      },
+      survives: () => intact(".next/sentinel"),
+    },
+    {
+      name: "the .local creation when the clone was swapped for a link",
+      run: () => {
+        const parent = path.join(base, "local");
+        sandbox.makeDir(path.join(parent, "clone"), { recursive: true });
+        sandbox.removePath(path.join(parent, "clone"));
+        link(outside, path.join(parent, "clone"));
+        return refusal(() => makeLocal(sandbox, path.join(parent, "clone")));
+      },
+      survives: () => !fs.existsSync(path.join(outside, ".local")),
+    },
+    {
+      name: "the stage T app files when app was swapped for a link",
+      run: () => {
+        const app = path.join(base, "app/app");
+        // The target is outside the sandbox root: made directly, since the
+        // helpers exist to refuse exactly this path.
+        fs.mkdirSync(path.join(outside, "app"), { recursive: true });
+        fs.writeFileSync(
+          path.join(outside, "app/next.config.mjs"),
+          "outside\n",
+        );
+        link(outside, app);
+        return refusal(() =>
+          writeApp(sandbox, app, { config: "", marker: "m" }),
+        );
+      },
+      survives: () =>
+        fs.readFileSync(path.join(outside, "app/next.config.mjs"), "utf8") ===
+          "outside\n" && !fs.existsSync(path.join(outside, "app/pages")),
+    },
+    {
+      name: "the stage T .next removal when app was swapped for a link",
+      run: () => {
+        const app = path.join(base, "app2/app");
+        sentinel("app2/.next/sentinel");
+        link(outside, app);
+        return refusal(() => removeAppNext(sandbox, app));
+      },
+      survives: () => intact("app2/.next/sentinel"),
+    },
+    {
+      name: "a file write whose parent is a symlink",
+      run: () => {
+        const at = path.join(base, "write/target.txt");
+        link(outside, path.join(base, "write"));
+        return refusal(() => sandbox.writeFile(at, "x\n"));
+      },
+      survives: () => !fs.existsSync(path.join(outside, "target.txt")),
+    },
+    {
+      name: "a log-file open whose parent is a symlink",
+      run: () => {
+        link(outside, path.join(base, "logs"));
+        return refusal(() =>
+          sandbox.openForWrite(path.join(base, "logs", "x.log")),
+        );
+      },
+      survives: () => !fs.existsSync(path.join(outside, "x.log")),
+    },
+    {
+      name: "a read of a symlink",
+      run: () => {
+        sentinel("read/target");
+        link(path.join(outside, "read/target"), path.join(base, "read-link"));
+        return refusal(() => sandbox.readFile(path.join(base, "read-link")));
+      },
+      survives: () => intact("read/target"),
+    },
+    {
+      name: "a directory listing of a symlink",
+      run: () => {
+        link(outside, path.join(base, "list-link"));
+        return refusal(() => sandbox.listDir(path.join(base, "list-link")));
+      },
+      survives: () => exists(outside),
+    },
+    {
+      name: "a command started in a swapped working directory",
+      run: () => {
+        link(outside, path.join(base, "cwd-link"));
+        const result = refusal(() =>
+          sandbox.start(process.execPath, ["-e", "0"], {
+            cwd: path.join(base, "cwd-link"),
+            name: "self-r8-1-cwd",
+          }),
+        );
+        if (result.value) sandbox.stopGroup(result.value.pgid).catch(() => {});
+        return result;
+      },
+      survives: () => !fs.existsSync(path.join(outside, "ran")),
+    },
+    {
+      name: "a tree copy whose destination parent is a symlink",
+      run: () => {
+        link(outside, path.join(base, "copy"));
+        return refusal(() =>
+          sandbox.copyTree(path.join(base, "copy/tree"), () => {
+            throw new Error("the copy must not run");
+          }),
+        );
+      },
+      survives: () => !fs.existsSync(path.join(outside, "tree")),
+    },
+    {
+      name: "a control package written through a symlinked directory",
+      run: () => {
+        sandbox.makeDir(path.join(sandbox.root, "controls"), {
+          recursive: true,
+        });
+        link(outside, path.join(sandbox.root, "controls", "r8-1-link"));
+        return refusal(() =>
+          writePackage(sandbox, "r8-1-link", { "package.json": "{}\n" }),
+        );
+      },
+      survives: () => !fs.existsSync(path.join(outside, "package.json")),
+    },
+  ];
+  // The symlinks each control points at are made inside its run, so the
+  // control is self-contained.
+  try {
+    sandbox.makeDir(base, { recursive: true });
+    for (const control of controls) {
+      const result = control.run();
+      const survived = control.survives();
+      const refused =
+        result.error instanceof PathRefused &&
+        result.error instanceof UsageError;
+      report.check(
+        `S R8-1: ${control.name} is refused and nothing outside changes`,
+        refused && survived,
+        `${result.error ? result.error.message : "was not refused"}; outside unchanged ${survived}`,
+      );
+    }
+  } finally {
+    // Only ever remove the directory this control created, even when a control
+    // threw before its own cleanup.
+    if (
+      path.dirname(outside) === path.dirname(sandbox.root) &&
+      path.basename(outside).startsWith("nb-check-outside-")
+    )
+      fs.rmSync(outside, { recursive: true, force: true });
+  }
+}
+
+const exists = (target) => {
+  try {
+    fs.lstatSync(target);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+// ---- R8-2: one ownership gate for every request ---------------------------
+
+const quietReporter = () => {
+  const failures = [];
+  return {
+    failures,
+    report: {
+      ok() {},
+      note() {},
+      info() {},
+      fail(name, detail) {
+        failures.push(`${name}: ${detail}`);
+      },
+      check(name, condition, detail) {
+        if (!condition)
+          this.fail(name, typeof detail === "function" ? detail() : detail);
+        return Boolean(condition);
+      },
+      summary() {
+        return failures.length;
+      },
+    },
+  };
+};
+
+/**
+ * R8-2: the one gate refuses before a request is sent to a port this run no
+ * longer owns (or never owned), so the single-rule control and the stage-A
+ * probes stop at the first mismatch; a request to the port while it is owned
+ * still goes through.
+ */
+async function ownershipGateControls(sandbox, report) {
+  const port = await sandbox.freePort();
+  const stub = await startStub(port);
+  const { failures, report: quiet } = quietReporter();
+  const foreign = process.pid + 1;
+  try {
+    let thrown;
+    const before = stub.records.length;
+    try {
+      await ownershipGate(sandbox, port, foreign)("/api/health");
+    } catch (error) {
+      thrown = error;
+    }
+    const refusedBeforeSending =
+      thrown instanceof OwnershipLost &&
+      stub.records.length === before &&
+      /foreign/.test(thrown.message);
+    const stopped = await singleRuleControl({
+      get: ownershipGate(sandbox, port, foreign),
+      stub,
+      report: quiet,
+      prefix: "",
+    });
+    const stoppedAtFirst =
+      stopped === false &&
+      failures.length === 1 &&
+      /foreign/.test(failures[0]) &&
+      stub.records.length === before;
+    const owned = await ownershipGate(
+      sandbox,
+      port,
+      process.pid,
+    )("/@notebook/canvas/x");
+    report.check(
+      "S R8-2: every request is gated on ownership and stops at the first mismatch",
+      refusedBeforeSending && stoppedAtFirst && owned.status === 200,
+      `refused before sending ${refusedBeforeSending}; control stopped at the first mismatch ${stoppedAtFirst} (${JSON.stringify(failures)}); a request while owned answered ${owned.status}; upstream records ${stub.records.length}`,
+    );
+  } finally {
+    await stub.close();
+  }
+}
+
+// ---- R8-4: frontend is not a directory -----------------------------------
+
+/** The entry script, resolved from this module's location. */
+const entryScript = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../notebook-integration-check.mjs",
+);
+
+/**
+ * R8-4: a revision whose `frontend` is a regular file must end with the
+ * documented refusal (exit 2, naming the ancestor), not an ENOTDIR stack
+ * trace. Runs the real entry script on a throwaway repository, so the exit
+ * status and the output are the stage's own.
+ */
+async function frontendNotADirectoryControl(sandbox, report) {
+  const base = path.join(sandbox.root, "self-check", "r8-4");
+  const repo = path.join(base, "repo");
+  sandbox.makeDir(repo, { recursive: true });
+  sandbox.writeFile(path.join(repo, "README.md"), "x\n");
+  sandbox.writeFile(path.join(repo, "frontend"), "not a directory\n");
+  for (const args of [
+    ["init", "--quiet"],
+    ["add", "-A"],
+    ["commit", "--quiet", "-m", "x"],
+  ]) {
+    const result = spawnSync(
+      "git",
+      ["-c", "user.name=check", "-c", "user.email=c@c", ...args],
+      { cwd: repo, encoding: "utf8", env: { PATH: process.env.PATH ?? "" } },
+    );
+    if (result.status !== 0) {
+      report.fail(
+        "S R8-4: frontend as a regular file is refused",
+        `git ${args[0]} failed: ${result.stderr}`,
+      );
+      return;
+    }
+  }
+  const env = { PATH: process.env.PATH ?? "" };
+  for (const name of ["LANG", "LC_ALL", "TMPDIR", "HOME"])
+    if (process.env[name] !== undefined) env[name] = process.env[name];
+  const run = spawnSync(
+    process.execPath,
+    [
+      entryScript,
+      "--stage",
+      "A",
+      "--notebook",
+      repo,
+      "--ref",
+      "HEAD",
+      "--base",
+      "HEAD",
+      "--python",
+      "/usr/bin/true",
+    ],
+    { cwd: repo, encoding: "utf8", env, timeout: 300_000 },
+  );
+  const output = `${run.stdout ?? ""}${run.stderr ?? ""}`;
+  report.check(
+    "S R8-4: frontend as a regular file is refused (exit 2, naming it, no trace)",
+    run.status === 2 &&
+      /frontend is not a directory/.test(output) &&
+      !/unexpected error/.test(output) &&
+      !/\n\s+at /.test(output),
+    `exit ${run.status}${run.signal ? ` (${run.signal})` : ""}; ${output
+      .split("\n")
+      .filter((line) => /frontend|unexpected error|^\s+at /.test(line))
+      .slice(0, 6)
+      .join(" | ")}`,
   );
 }

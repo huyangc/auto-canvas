@@ -11,6 +11,7 @@ import path from "node:path";
 
 import {
   createSandbox,
+  PathRefused,
   UsageError,
 } from "./lib/notebook-integration/sandbox.mjs";
 import { stageA } from "./lib/notebook-integration/stage-a.mjs";
@@ -121,7 +122,15 @@ try {
     report.note("source-checkout observation skipped: interrupted");
   else observeSource(sandbox, report, notebook);
 } catch (error) {
-  if (!interrupted)
+  // A refused file operation is the check's own refusal (validate, then act),
+  // never a stack trace: reported once, and the run ends with exit status 2.
+  if (error instanceof PathRefused) {
+    context.refused = true;
+    report.fail(
+      "the script's own file operations stay in the sandbox",
+      error.message,
+    );
+  } else if (!interrupted)
     report.fail(options.stage, `unexpected error: ${error.stack ?? error}`);
   else report.note(`stage stopped after the interrupt: ${error.message}`);
 } finally {

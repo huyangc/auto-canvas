@@ -11,6 +11,8 @@ import {
   checkStopped,
   guardLoaded,
   nextCommand,
+  ownershipGate,
+  OwnershipLost,
   ownershipHeld,
   startNext,
   stopServer,
@@ -19,7 +21,6 @@ import {
 import { waitFor } from "./sandbox.mjs";
 import {
   expectRewrites,
-  rawRequest,
   readManifest,
   startStub,
   todaysRules,
@@ -66,10 +67,36 @@ export const dependencyManifests = (files) =>
       /^backend\/requirements[^/]*$/.test(file),
   );
 
+/**
+ * The script's own removal of the build output before a build. Validated in
+ * the same call (R8-1): a `frontend` that a server of the revision swapped
+ * for a link is refused, never followed.
+ */
+export const removeNext = (sandbox, frontend) =>
+  sandbox.removePath(path.join(frontend, ".next"));
+
+/** The script's own creation of `<clone>/.local` when the revision has none. */
+export const makeLocal = (sandbox, nb) =>
+  sandbox.makeDir(path.join(nb, ".local"));
+
+/** Reads of files a build or the launcher wrote, never through a link. */
+export function launchLogTail(sandbox, nb, launcherLog) {
+  const logs = path.join(nb, ".local/logs");
+  const parts = [tail(sandbox.readFile(launcherLog, "utf8") ?? "", 15)];
+  for (const entry of sandbox.listDir(logs))
+    if (entry.isFile())
+      parts.push(
+        `--- ${entry.name}\n${tail(sandbox.readFile(path.join(logs, entry.name), "utf8") ?? "", 15)}`,
+      );
+  return parts.join("\n");
+}
+
 export async function stageA(context) {
   try {
     await stageABody(context);
   } catch (error) {
+    // A refused file operation (PathRefused) is caught by the entry script,
+    // which reports it once and ends the run with exit status 2.
     if (!(error instanceof Refused)) throw error;
     context.refused = true;
   }
@@ -134,6 +161,9 @@ async function stageABody({ sandbox, report, notebook, options }) {
     return;
   console.log(`     candidate ${candidate} (${options.ref})`);
   console.log(`     base      ${base} (${options.base})`);
+  // The checkout writes inside the clone: its directory must still be a real
+  // directory inside the sandbox (R8-1).
+  sandbox.assertRealDir(nb);
   git(["checkout", "--quiet", "--detach", candidate]);
 
   // The revision decides what <clone> holds: a tracked symlink at any path
@@ -160,7 +190,9 @@ async function stageABody({ sandbox, report, notebook, options }) {
         fs.lstatSync(path.join(nb, relative));
         return true;
       } catch (error) {
-        return error.code !== "ENOENT";
+        // ENOTDIR: an ancestor is not a directory; that ancestor is the
+        // refusal (reported by the path checks), not a dotenv file.
+        return error.code !== "ENOENT" && error.code !== "ENOTDIR";
       }
     });
     if (dotenv.length)
@@ -286,8 +318,7 @@ async function stageABody({ sandbox, report, notebook, options }) {
     );
     return result;
   };
-  const cleanNext = () =>
-    fs.rmSync(path.join(frontend, ".next"), { recursive: true, force: true });
+  const cleanNext = () => removeNext(sandbox, frontend);
 
   // A2: the default build is exactly today's rules.
   const apiPort = await sandbox.freePort();
@@ -302,7 +333,7 @@ async function stageABody({ sandbox, report, notebook, options }) {
     expectRewrites(
       report,
       "A2 default rewrites are exactly today's two",
-      readManifest(frontend),
+      readManifest(frontend, sandbox.readFile),
       today,
     );
     const web = await sandbox.freePort();
@@ -320,21 +351,32 @@ async function stageABody({ sandbox, report, notebook, options }) {
           () => server.error,
         )
       ) {
-        for (const route of ["/canvas", "/canvas/editor"]) {
-          const res = await rawRequest(web, route);
-          report.check(
-            `A2 GET ${route} -> 404 without the canvas rule`,
-            res.status === 404,
-            `status ${res.status}`,
+        // Every probe goes through the ownership gate (R8-2): a port that
+        // changed hands stops the loop before another request is sent.
+        const get = ownershipGate(sandbox, web, server.pid);
+        try {
+          for (const route of ["/canvas", "/canvas/editor"]) {
+            const res = await get(route);
+            report.check(
+              `A2 GET ${route} -> 404 without the canvas rule`,
+              res.status === 404,
+              `status ${res.status}`,
+            );
+          }
+          ownershipHeld(
+            sandbox,
+            report,
+            "A2 next start still owns its port after the last probe",
+            web,
+            server.pid,
+          );
+        } catch (error) {
+          if (!(error instanceof OwnershipLost)) throw error;
+          report.fail(
+            "A2 next start owned its port before every probe",
+            error.message,
           );
         }
-        ownershipHeld(
-          sandbox,
-          report,
-          "A2 next start still owns its port after the last probe",
-          web,
-          server.pid,
-        );
       }
     } finally {
       await stopServer(sandbox, report, "A2 next start", server.handle);
@@ -357,7 +399,7 @@ async function stageABody({ sandbox, report, notebook, options }) {
         tail(a3.output),
       )
     ) {
-      const manifest = readManifest(frontend);
+      const manifest = readManifest(frontend, sandbox.readFile);
       enabled = expectRewrites(
         report,
         "A3 rewrites are today's two plus exactly two canvas rules",
@@ -478,7 +520,7 @@ async function stageA6({
   expectRewrites(
     report,
     "A6 rewrites equal today's two",
-    readManifest(frontend),
+    readManifest(frontend, sandbox.readFile),
     todaysRules(backend),
   );
 
@@ -491,12 +533,9 @@ async function stageA6({
     [nb, local],
     "built",
   );
-  try {
-    fs.lstatSync(local);
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error;
-    fs.mkdirSync(local);
-  }
+  // Validated creation (an existing real directory is left as it is; the
+  // launch check below requires it empty).
+  makeLocal(sandbox, nb);
   refuseUnsafeClone(
     "A6 <clone>/.local is safe before the launch",
     [nb, frontend, local],
@@ -527,17 +566,7 @@ async function stageA6({
       COLUMNS: "1000",
     }),
   });
-  const logTail = () => {
-    const logs = path.join(nb, ".local/logs");
-    const parts = [tail(fs.readFileSync(launcher.logFile, "utf8"), 15)];
-    if (fs.existsSync(logs))
-      for (const entry of fs.readdirSync(logs, { withFileTypes: true }))
-        if (entry.isFile())
-          parts.push(
-            `--- ${entry.name}\n${tail(fs.readFileSync(path.join(logs, entry.name), "utf8"), 15)}`,
-          );
-    return parts.join("\n");
-  };
+  const logTail = () => launchLogTail(sandbox, nb, launcher.logFile);
   // The services the launcher reported, kept for the check after shutdown.
   let services = [];
   try {
@@ -546,9 +575,30 @@ async function stageA6({
         "A6 launcher finished",
         `still running after 120 s\n${logTail()}`,
       );
-    const output = fs.readFileSync(launcher.logFile, "utf8");
+    const output = sandbox.readFile(launcher.logFile, "utf8") ?? "";
     const backendPid = Number(/backend\s+:.*\(PID (\d+)/.exec(output)?.[1]);
     const frontendPid = Number(/frontend\s+:.*\(PID (\d+)/.exec(output)?.[1]);
+    // Whatever was reported is checked after the shutdown, even if the
+    // launcher then failed.
+    services = [
+      ["backend", backendPid],
+      ["frontend", frontendPid],
+    ].filter(([, pid]) => pid > 0);
+    // R8-3: a launcher that printed its PIDs and then failed is a failure of
+    // its own, before any readiness is looked at.
+    const launcherEnd = abnormalEnd({
+      status: launcher.error ? -1 : launcher.status,
+      signal: launcher.signal,
+    });
+    if (
+      !report.check(
+        "A6 the launcher exited 0",
+        !launcherEnd && launcher.status === 0 && !launcher.error,
+        () =>
+          `${launcherEnd || launcher.error?.message || `exit ${launcher.status}`}\n${logTail()}`,
+      )
+    )
+      return;
     if (
       !report.check(
         "A6 launcher printed both PIDs",
@@ -557,10 +607,6 @@ async function stageA6({
       )
     )
       return;
-    services = [
-      ["backend", backendPid],
-      ["frontend", frontendPid],
-    ];
     const groupOf = (pid) => {
       try {
         return Number(
@@ -632,6 +678,22 @@ async function stageA6({
         return false;
       }
     };
+    // Every request to a port this run claims goes through the ownership gate
+    // (R8-2); the gate asks again immediately before each request, so a port
+    // that changes hands stops the probes instead of reaching a replacement.
+    const getWeb = ownershipGate(sandbox, webPort, frontendPid);
+    const getApi = ownershipGate(sandbox, apiPort, backendPid);
+    // A request that fails after the gate passed (the server died between the
+    // two) is reported as its status, not as a stack trace; a lost port still
+    // stops the probes.
+    const send = async (get, rawPath) => {
+      try {
+        return await get(rawPath);
+      } catch (error) {
+        if (error instanceof OwnershipLost) throw error;
+        return { status: `error ${error.message}` };
+      }
+    };
     // The services are up once the anonymous readiness probe says so. Each
     // request is sent only while both ports are still owned: another pid, or
     // a port that lost its listener, fails at once.
@@ -649,9 +711,13 @@ async function stageA6({
           return true;
         }
         try {
-          const res = await rawRequest(webPort, "/api/ready");
+          const res = await getWeb("/api/ready");
           return res.status === 200 && JSON.parse(res.body).ready === true;
-        } catch {
+        } catch (error) {
+          if (error instanceof OwnershipLost) {
+            lost = error.message;
+            return true;
+          }
           return false;
         }
       },
@@ -675,13 +741,19 @@ async function stageA6({
     // reads no variable for its host), so without a session the clone must
     // answer 401, through the frontend and on the backend port. On failure
     // A6 stops here and the finally below stops the services.
-    const unauthenticated = await Promise.all(
-      [webPort, apiPort].map((port) =>
-        rawRequest(port, "/api/health").catch((error) => ({
-          status: `error ${error.message}`,
-        })),
-      ),
-    );
+    let unauthenticated;
+    try {
+      unauthenticated = [
+        await send(getWeb, "/api/health"),
+        await send(getApi, "/api/health"),
+      ];
+    } catch (error) {
+      if (!(error instanceof OwnershipLost)) throw error;
+      return void report.fail(
+        "A6 both ports owned before every probe after readiness",
+        error.message,
+      );
+    }
     if (
       !report.check(
         "A6 the clone refuses unauthenticated API requests",
@@ -705,13 +777,23 @@ async function stageA6({
       (entry) => entry.pid === frontendPid,
     );
 
-    const home = await rawRequest(webPort, "/");
+    let home;
+    let canvas;
+    try {
+      home = await send(getWeb, "/");
+      canvas = await send(getWeb, "/canvas");
+    } catch (error) {
+      if (!(error instanceof OwnershipLost)) throw error;
+      return void report.fail(
+        "A6 both ports owned before every probe after readiness",
+        error.message,
+      );
+    }
     report.check(
       "A6 GET / -> 200 through the frontend",
       home.status === 200,
       `status ${home.status}`,
     );
-    const canvas = await rawRequest(webPort, "/canvas");
     report.check(
       "A6 GET /canvas -> 404 without the canvas rule",
       canvas.status === 404,
@@ -724,9 +806,10 @@ async function stageA6({
     // path), never a re-resolved .local, so a .local swapped for a symlink
     // cannot become its own boundary.
     const backendLog = path.join(local, "logs/backend.log");
-    const head = fs.existsSync(backendLog)
-      ? fs.readFileSync(backendLog, "utf8").split("\n").slice(0, 40).join("\n")
-      : "";
+    const head = (sandbox.readFile(backendLog, "utf8") ?? "")
+      .split("\n")
+      .slice(0, 40)
+      .join("\n");
     const dbPath = /paths: database=sqlite path=(\S+) storage=/.exec(head)?.[1];
     const dbProblem = (() => {
       if (!dbPath) return "no 'paths: database=sqlite path=' line";

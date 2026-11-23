@@ -1,5 +1,4 @@
 // Stage T: a real Next.js production server with the two canvas rules.
-import fs from "node:fs";
 import path from "node:path";
 
 import { modulesInClone, prepareModules } from "./modules.mjs";
@@ -7,12 +6,14 @@ import {
   checkStopped,
   guardLoaded,
   nextCommand,
+  ownershipGate,
+  OwnershipLost,
   ownershipHeld,
   startNext,
   stopServer,
   tail,
 } from "./steps.mjs";
-import { rawRequest, startStub, transportAssertions } from "./transport.mjs";
+import { startStub, transportAssertions } from "./transport.mjs";
 
 // One allowed path unit, and a segment of units (see the plan's Context).
 const UNIT = String.raw`(?:[^/\\%.\x00-\x20\x7f]|%(?!2[eEfF]|5[cC]|[01][0-9a-fA-F]|20|7[fF]))`;
@@ -34,9 +35,30 @@ export default {
 };
 `;
 
+/**
+ * The throwaway app's files. Written through the sandbox's validated writer
+ * (R8-1): if a run's Next server replaced the app directory with a link, the
+ * write is refused instead of landing wherever the link points.
+ */
+export function writeApp(sandbox, app, { config, marker }) {
+  sandbox.makeDir(path.join(app, "pages"), { recursive: true });
+  sandbox.writeFile(
+    path.join(app, "package.json"),
+    '{"name":"nb-check","private":true}\n',
+  );
+  sandbox.writeFile(
+    path.join(app, "pages/index.js"),
+    `export default function Home() { return <main>${marker}</main>; }\n`,
+  );
+  sandbox.writeFile(path.join(app, "next.config.mjs"), config);
+}
+
+/** The app's build output, removed through the sandbox's validated removal. */
+export const removeAppNext = (sandbox, app) =>
+  sandbox.removePath(path.join(app, ".next"));
+
 export async function stageT({ sandbox, report, notebook }) {
   const app = path.join(sandbox.root, "app");
-  fs.mkdirSync(path.join(app, "pages"), { recursive: true });
   const modules = path.join(app, "node_modules");
   const preflight = prepareModules(
     sandbox,
@@ -55,15 +77,7 @@ export async function stageT({ sandbox, report, notebook }) {
   );
 
   const marker = `nb-check-${sandbox.randomToken()}`;
-  fs.writeFileSync(
-    path.join(app, "package.json"),
-    '{"name":"nb-check","private":true}\n',
-  );
-  fs.writeFileSync(
-    path.join(app, "pages/index.js"),
-    `export default function Home() { return <main>${marker}</main>; }\n`,
-  );
-  fs.writeFileSync(path.join(app, "next.config.mjs"), nextConfig);
+  writeApp(sandbox, app, { config: nextConfig, marker });
 
   const configurations = [
     { label: "(i) two rules, 127.0.0.1", rules: "two", host: "127.0.0.1" },
@@ -81,7 +95,7 @@ export async function stageT({ sandbox, report, notebook }) {
     });
     let server;
     try {
-      fs.rmSync(path.join(app, ".next"), { recursive: true, force: true });
+      removeAppNext(sandbox, app);
       const mark = sandbox.guardMark();
       const build = await sandbox.run(
         process.execPath,
@@ -137,18 +151,37 @@ export async function stageT({ sandbox, report, notebook }) {
           owner: () => sandbox.listenerState(nextPort, server.pid),
         });
         if (configuration.host === "127.0.0.1") {
+          // Every request to the port goes through the ownership gate (R8-2);
+          // a port that changed hands is reported and the request is not sent.
+          const get = ownershipGate(sandbox, nextPort, server.pid);
           await stub.close();
-          const res = await rawRequest(nextPort, "/canvas").catch((error) => ({
-            status: error.message,
-          }));
-          report.check(
-            `${prefix}GET /canvas with the upstream down -> 500`,
-            res.status === 500,
-            `status ${res.status}`,
+          const res = await get("/canvas").then(
+            (value) => value,
+            (error) => {
+              if (error instanceof OwnershipLost) {
+                report.fail(
+                  `${prefix}the server owned its port before the upstream-down request`,
+                  error.message,
+                );
+                return undefined;
+              }
+              return { status: error.message };
+            },
           );
+          if (res)
+            report.check(
+              `${prefix}GET /canvas with the upstream down -> 500`,
+              res.status === 500,
+              `status ${res.status}`,
+            );
         }
       } else {
-        await singleRuleControl({ nextPort, stub, report, prefix });
+        await singleRuleControl({
+          get: ownershipGate(sandbox, nextPort, server.pid),
+          stub,
+          report,
+          prefix,
+        });
       }
       ownershipHeld(
         sandbox,
@@ -165,32 +198,48 @@ export async function stageT({ sandbox, report, notebook }) {
   }
 }
 
-/** The negative control: one wildcard rule alone loops between Next and the upstream. */
-async function singleRuleControl({ nextPort, stub, report, prefix }) {
+/**
+ * The negative control: one wildcard rule alone loops between Next and the
+ * upstream. Every request is sent only while the server still owns its port
+ * (R8-2); the first mismatch stops the control before another request.
+ */
+export async function singleRuleControl({ get, stub, report, prefix }) {
   let allOk = true;
   for (let round = 1; round <= 2; round += 1) {
-    let mark = stub.records.length;
-    const slash = await rawRequest(nextPort, "/canvas/");
-    const slashOk = report.check(
-      `${prefix}round ${round}: GET /canvas/ -> 308 /canvas, not forwarded`,
-      slash.status === 308 &&
-        slash.headers.location === "/canvas" &&
-        stub.records.length === mark,
-      `status ${slash.status}, location ${slash.headers.location}, upstream ${stub.records.length - mark}`,
-    );
-    allOk = allOk && slashOk;
-    mark = stub.records.length;
-    const bare = await rawRequest(nextPort, "/canvas");
-    const fresh = stub.records.slice(mark);
-    const bareOk = report.check(
-      `${prefix}round ${round}: GET /canvas -> 308 /canvas/, upstream /@notebook/canvas`,
-      bare.status === 308 &&
-        bare.headers.location === "/canvas/" &&
-        fresh.length === 1 &&
-        fresh[0].url === "/@notebook/canvas",
-      `status ${bare.status}, location ${bare.headers.location}, upstream ${JSON.stringify(fresh)}`,
-    );
-    allOk = allOk && bareOk;
+    let slash;
+    let bare;
+    try {
+      let mark = stub.records.length;
+      slash = await get("/canvas/");
+      const slashOk = report.check(
+        `${prefix}round ${round}: GET /canvas/ -> 308 /canvas, not forwarded`,
+        slash.status === 308 &&
+          slash.headers.location === "/canvas" &&
+          stub.records.length === mark,
+        `status ${slash.status}, location ${slash.headers.location}, upstream ${stub.records.length - mark}`,
+      );
+      allOk = allOk && slashOk;
+      mark = stub.records.length;
+      bare = await get("/canvas");
+      const fresh = stub.records.slice(mark);
+      const bareOk = report.check(
+        `${prefix}round ${round}: GET /canvas -> 308 /canvas/, upstream /@notebook/canvas`,
+        bare.status === 308 &&
+          bare.headers.location === "/canvas/" &&
+          fresh.length === 1 &&
+          fresh[0].url === "/@notebook/canvas",
+        `status ${bare.status}, location ${bare.headers.location}, upstream ${JSON.stringify(fresh)}`,
+      );
+      allOk = allOk && bareOk;
+    } catch (error) {
+      if (!(error instanceof OwnershipLost)) throw error;
+      report.fail(
+        `${prefix}the server owned its port before every control request`,
+        error.message,
+      );
+      return false;
+    }
   }
   if (allOk) report.ok("control: single rule loops");
+  return allOk;
 }

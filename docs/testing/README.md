@@ -151,9 +151,40 @@ symlink on any path the build or launcher writes (`frontend/next-env.d.ts`,
 `release-manifest.json`, `frontend/.next`, `frontend/node_modules`). It
 re-checks the clone, and that the private `frontend/node_modules` is still a
 real directory whose links stay inside it, after every build and before the
-launch. `--stage S` runs these refusals, and the early-exit ownership wait,
-against throwaway repositories only; it reads nothing from `--notebook`. An
-interrupted run still prints the stage summary and exits 130.
+launch.
+
+The same rule covers the script's **own** file operations. Every removal,
+directory creation, file write, log-file open, tree copy and read it performs
+under the sandbox root is validated and performed in one call: the path must
+lie inside the sandbox root, every directory above it must be a real directory
+(no symlink), and the target itself must not be a symlink; writes and reads
+open it with `O_NOFOLLOW`. A directory that a build or a server of the
+revision replaced with a symlink is refused with the path named and exit
+status 2, never followed. This is not a sandbox against a hostile revision: a
+check and the operation that follows are not atomic against a process that is
+still running. The operations that can overlap with a live process are the
+log-file opens and reads (a server's own log is read while it runs); the open
+is bounded by `O_NOFOLLOW`, so a link planted between the check and the open
+fails the open instead of being followed. Every removal and write the script
+performs — the `.next` removals, the app files, `.local`, the modules copy —
+runs only while no process of the revision that the run started is alive, and
+a build's products are checked again before the launch. A process the run did
+not start, or one that left its group (A6 reports it and never signals it),
+is outside that bound.
+
+Every HTTP request the check sends to a port it claims to own is gated on
+that ownership immediately before it is sent — the transport table, stage T's
+single-rule control and its upstream-down request, A2's probes, and A6's
+probes after readiness. The first mismatch stops the probes, is reported, and
+sends nothing to the replacement listener.
+
+`--stage S` runs these refusals, the early-exit ownership wait, the per-request
+ownership gate and the script's own refused file operations (each after a
+simulated swap, with a sentinel outside the sandbox) against throwaway
+repositories only; it reads nothing from `--notebook`. It also runs the real
+entry script on a throwaway repository whose `frontend` is a regular file and
+checks that it ends with the documented refusal (exit 2, naming the ancestor,
+no stack trace). An interrupted run still prints the stage summary and exits 130.
 
 The offline guard is a Node preload. It also survives npm: it is passed as
 npm's `node-options` and the script shell is pinned through the environment,

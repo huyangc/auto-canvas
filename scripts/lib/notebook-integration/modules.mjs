@@ -3,6 +3,8 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
+import { PathRefused } from "./sandbox.mjs";
+
 /**
  * The source must be a real directory, not a symlink: the preserving copy
  * would copy the link itself. Returns a problem, or undefined.
@@ -39,7 +41,7 @@ export function prepareModules(sandbox, from, to) {
 
 /** Copy-on-write clone where the platform has one; internal symlinks preserved. */
 function copyModules(sandbox, from, to) {
-  fs.mkdirSync(path.dirname(to), { recursive: true });
+  sandbox.makeDir(path.dirname(to), { recursive: true });
   const attempts =
     process.platform === "darwin"
       ? [
@@ -53,10 +55,14 @@ function copyModules(sandbox, from, to) {
   let lastError;
   for (const [command, args] of attempts) {
     try {
-      fs.rmSync(to, { recursive: true, force: true });
-      execFileSync(command, args, { env: sandbox.env(), stdio: "pipe" });
+      // Validated removal of any earlier attempt, then the copy into a path
+      // that is absent under a real parent inside the sandbox.
+      sandbox.copyTree(to, () =>
+        execFileSync(command, args, { env: sandbox.env(), stdio: "pipe" }),
+      );
       return;
     } catch (error) {
+      if (error instanceof PathRefused) throw error;
       lastError = error;
     }
   }

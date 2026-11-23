@@ -1,6 +1,5 @@
 // Reporting, the raw HTTP client, the stub upstream, the rewrite-manifest reader
 // and the transport table shared by stages T and A.
-import fs from "node:fs";
 import { createServer, request } from "node:http";
 import path from "node:path";
 
@@ -130,11 +129,16 @@ export async function startStub(port) {
   };
 }
 
-/** The rewrites of a built app as ordered raw rule lists per phase. */
-export function readManifest(appDir) {
-  const manifest = JSON.parse(
-    fs.readFileSync(path.join(appDir, ".next", "routes-manifest.json"), "utf8"),
-  );
+/**
+ * The rewrites of a built app as ordered raw rule lists per phase. `read` is
+ * the sandbox's validated reader: the manifest is a file the build of the
+ * revision wrote, so it is never read through a link.
+ */
+export function readManifest(appDir, read) {
+  const file = path.join(appDir, ".next", "routes-manifest.json");
+  const text = read(file, "utf8");
+  if (text === undefined) throw new Error(`${file} does not exist`);
+  const manifest = JSON.parse(text);
   const raw = manifest.rewrites;
   if (Array.isArray(raw))
     return { beforeFiles: [], afterFiles: raw, fallback: [] };
@@ -252,7 +256,7 @@ const FORWARDED = [
 ];
 
 /** Thrown by a probe when the server no longer owns its port. */
-class OwnershipLost extends Error {}
+export class OwnershipLost extends Error {}
 
 /**
  * The transport table: what a Next server with the two canvas rules must do.

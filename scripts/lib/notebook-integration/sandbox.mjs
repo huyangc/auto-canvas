@@ -17,6 +17,12 @@ const STOP_ACK_MS = 10_000;
 /** Raised for a refusal that maps to exit status 2. */
 export class UsageError extends Error {}
 
+/**
+ * The script's own file operation would act outside the sandbox (or through
+ * a symlink): refused before anything is removed or written; exit status 2.
+ */
+export class PathRefused extends UsageError {}
+
 /** Raised by start() once disposal has begun: nothing new may be spawned. */
 class SandboxClosing extends Error {
   constructor(name) {
@@ -45,9 +51,20 @@ export async function waitFor(check, timeoutMs, intervalMs = 200) {
 const OFFLINE_GUARD = String.raw`"use strict";
 const net = require("net");
 const fs = require("fs");
+// The log files live under the sandbox root, which processes of the revision
+// under test can write to: a link planted at one of them would make this
+// append write outside (R8-1). O_NOFOLLOW makes the open fail instead; the
+// append is then skipped and the missing entry FAILs the step that reads it.
+function append(path, text) {
+  let fd;
+  try {
+    fd = fs.openSync(path, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_APPEND | fs.constants.O_NOFOLLOW, 0o644);
+    fs.writeSync(fd, text);
+  } catch {} finally { if (fd !== undefined) try { fs.closeSync(fd); } catch {} }
+}
 try {
   if (process.env.NB_CHECK_GUARD_LOADED)
-    fs.appendFileSync(process.env.NB_CHECK_GUARD_LOADED, JSON.stringify({ pid: process.pid, ppid: process.ppid, argv: process.argv }) + "\n");
+    append(process.env.NB_CHECK_GUARD_LOADED, JSON.stringify({ pid: process.pid, ppid: process.ppid, argv: process.argv }) + "\n");
 } catch {}
 const original = net.Socket.prototype.connect;
 const LOOPBACK = new Set(["127.0.0.1", "::1"]);
@@ -91,7 +108,7 @@ net.Socket.prototype.connect = function guardedConnect(...args) {
   }
   if (LOOPBACK.has(host)) return original.apply(this, args);
   try {
-    fs.appendFileSync(process.env.NB_CHECK_OFFLINE_LOG, host + " " + String(options.port).trim() + "\n");
+    append(process.env.NB_CHECK_OFFLINE_LOG, host + " " + String(options.port).trim() + "\n");
   } catch {}
   const error = new Error("offline guard refused " + host + ":" + options.port);
   error.code = "ENETUNREACH";
@@ -321,6 +338,196 @@ export function createSandbox(notebook, { keep }) {
     }
   }
 
+  // ---- The script's own file operations (R8-1) ---------------------------
+  //
+  // Every removal, directory creation, file write, log-file open, tree copy
+  // and read the script itself performs under the sandbox root goes through
+  // one of the helpers below, which validate and act in one call:
+  //   - the path lies under the root;
+  //   - every ancestor from the root down is a real directory (lstat: never a
+  //     symlink, never a file) whose real path is inside the root's;
+  //   - the target itself is not a symlink either; a removal refuses one
+  //     instead of unlinking it, so a redirected write path is never quietly
+  //     replaced;
+  //   - writes and reads open the target with O_NOFOLLOW, so a link created
+  //     between the check and the open fails the open instead of being
+  //     followed.
+  // A violation throws PathRefused (exit status 2 for the run, the path named
+  // relative to the clone or the sandbox) before anything is removed or
+  // written. Paths under the root can be changed by code of the revision that
+  // ran (a build, a server, the launcher), so nothing here trusts a check made
+  // earlier. Remaining window: a check followed by the operation is not
+  // atomic against a process that is still running; see the T160 section of
+  // docs/testing/README.md for which operations can run while one is.
+  const realRoot = fs.realpathSync(root);
+  const inside = (base, target) => {
+    const rel = path.relative(base, target);
+    return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+  };
+  const clone = path.join(root, "nb");
+  function label(target) {
+    const resolved = path.resolve(target);
+    if (resolved === clone) return "<clone>";
+    if (inside(clone, resolved)) return path.relative(clone, resolved);
+    if (inside(root, resolved))
+      return `<sandbox>/${path.relative(root, resolved)}`;
+    return resolved;
+  }
+  function refuse(target, why) {
+    throw new PathRefused(
+      `refused: ${label(target)} ${why} (nothing removed or written)`,
+    );
+  }
+
+  /**
+   * The validation shared by every helper. Returns `{ stat }` (lstat of the
+   * target, or undefined when it does not exist) or `{ missing }` (the first
+   * ancestor that does not exist; nothing below it exists either).
+   */
+  function checkChain(target) {
+    const resolved = path.resolve(target);
+    if (resolved === root || !inside(root, resolved))
+      refuse(target, "is not inside the sandbox root");
+    const rootStat = fs.lstatSync(root);
+    if (
+      rootStat.isSymbolicLink() ||
+      !rootStat.isDirectory() ||
+      fs.realpathSync(root) !== realRoot
+    )
+      refuse(root, "is no longer the sandbox root this run created");
+    const parts = path.relative(root, resolved).split(path.sep);
+    let current = root;
+    for (const part of parts.slice(0, -1)) {
+      current = path.join(current, part);
+      let stat;
+      try {
+        stat = fs.lstatSync(current);
+      } catch (error) {
+        if (error.code === "ENOENT") return { missing: current };
+        refuse(current, `cannot be checked: ${error.code ?? error.message}`);
+      }
+      if (stat.isSymbolicLink()) refuse(current, "is a symlink");
+      if (!stat.isDirectory()) refuse(current, "is not a directory");
+      if (!inside(realRoot, fs.realpathSync(current)))
+        refuse(current, "resolves outside the sandbox root");
+    }
+    try {
+      return { stat: fs.lstatSync(resolved) };
+    } catch (error) {
+      if (error.code === "ENOENT") return { stat: undefined };
+      refuse(target, `cannot be checked: ${error.code ?? error.message}`);
+    }
+  }
+
+  /** Remove a file or a tree; absent is fine, a symlink target is refused. */
+  function removePath(target) {
+    const { missing, stat } = checkChain(target);
+    if (missing || !stat) return;
+    if (stat.isSymbolicLink()) refuse(target, "is a symlink");
+    fs.rmSync(target, { recursive: true, force: true });
+  }
+
+  /** Create a directory (and, with `recursive`, its missing ancestors). */
+  function makeDir(target, { recursive = false } = {}) {
+    const resolved = path.resolve(target);
+    const { missing, stat } = checkChain(resolved);
+    if (missing) {
+      if (!recursive) refuse(missing, "does not exist");
+      makeDir(path.dirname(resolved), { recursive: true });
+      return makeDir(resolved);
+    }
+    if (stat) {
+      if (stat.isSymbolicLink()) refuse(resolved, "is a symlink");
+      if (!stat.isDirectory())
+        refuse(resolved, "exists and is not a directory");
+      return;
+    }
+    fs.mkdirSync(resolved);
+  }
+
+  const { O_WRONLY, O_RDONLY, O_CREAT, O_TRUNC, O_NOFOLLOW } = fs.constants;
+
+  /** Open a regular file for writing (created or truncated); returns an fd. */
+  function openForWrite(target, mode = 0o644) {
+    const { missing, stat } = checkChain(target);
+    if (missing) refuse(missing, "does not exist");
+    if (stat?.isSymbolicLink()) refuse(target, "is a symlink");
+    if (stat && !stat.isFile()) refuse(target, "is not a regular file");
+    try {
+      return fs.openSync(
+        target,
+        O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW,
+        mode,
+      );
+    } catch (error) {
+      if (error.code === "ELOOP") refuse(target, "became a symlink");
+      throw error;
+    }
+  }
+
+  function writeFile(target, content, mode) {
+    const fd = openForWrite(target, mode);
+    try {
+      fs.writeFileSync(fd, content);
+    } finally {
+      fs.closeSync(fd);
+    }
+  }
+
+  /**
+   * Read a regular file; undefined when it does not exist. A link is refused
+   * (a revision could point a log at a file outside and have it printed).
+   */
+  function readFile(target, encoding) {
+    const { missing, stat } = checkChain(target);
+    if (missing || !stat) return undefined;
+    if (stat.isSymbolicLink()) refuse(target, "is a symlink");
+    if (!stat.isFile()) refuse(target, "is not a regular file");
+    let fd;
+    try {
+      fd = fs.openSync(target, O_RDONLY | O_NOFOLLOW);
+    } catch (error) {
+      if (error.code === "ELOOP") refuse(target, "became a symlink");
+      if (error.code === "ENOENT") return undefined;
+      throw error;
+    }
+    try {
+      return fs.readFileSync(fd, encoding);
+    } finally {
+      fs.closeSync(fd);
+    }
+  }
+
+  /** The entries of a real directory inside the root; [] when absent. */
+  function listDir(target) {
+    const { missing, stat } = checkChain(target);
+    if (missing || !stat) return [];
+    if (stat.isSymbolicLink()) refuse(target, "is a symlink");
+    if (!stat.isDirectory()) refuse(target, "is not a directory");
+    return fs.readdirSync(target, { withFileTypes: true });
+  }
+
+  /** `target` is an existing real directory inside the root (or the root). */
+  function assertRealDir(target) {
+    if (path.resolve(target) === root) return;
+    const { missing, stat } = checkChain(target);
+    if (missing) refuse(missing, "does not exist");
+    if (!stat) refuse(target, "does not exist");
+    if (stat.isSymbolicLink()) refuse(target, "is a symlink");
+    if (!stat.isDirectory()) refuse(target, "is not a directory");
+  }
+
+  /**
+   * Copy a tree to `to` (replacing it) with the given command; `to` is
+   * removed through removePath and must then be absent under a real parent.
+   */
+  function copyTree(to, run) {
+    removePath(to);
+    const { missing, stat } = checkChain(to);
+    if (missing) refuse(missing, "does not exist");
+    if (stat) refuse(to, "still exists after its removal");
+    run();
+  }
   function env(extra = {}) {
     const nodeOptions = `--require ${guardPath} --dns-result-order=ipv4first`;
     const base = {
@@ -357,22 +564,18 @@ export function createSandbox(notebook, { keep }) {
 
   /** The current end of the marker log; pass it to guardedSince later. */
   function guardMark() {
-    try {
-      return fs.statSync(guardLoadedLog).size;
-    } catch {
-      return 0;
-    }
+    // A validated read: a revision's process could have replaced the marker
+    // with a link, and a link is refused rather than followed.
+    return readFile(guardLoadedLog)?.length ?? 0;
   }
 
   /** The processes that loaded the guard since `mark`: { pid, ppid, argv }. */
   function guardedSince(mark, log = guardLoadedLog) {
-    let text;
-    try {
-      const buffer = fs.readFileSync(log);
-      text = buffer.subarray(mark).toString("utf8");
-    } catch {
-      return [];
-    }
+    // A revision's processes write this file: read it without following a
+    // link (a refusal propagates; it is not "no entries").
+    const buffer = readFile(log);
+    if (buffer === undefined) return [];
+    const text = buffer.subarray(mark).toString("utf8");
     const entries = [];
     for (const line of text.split("\n")) {
       if (!line) continue;
@@ -432,11 +635,14 @@ export function createSandbox(notebook, { keep }) {
    */
   function start(command, args, { cwd, env: childEnv, name, testHooks = {} }) {
     ensureOpen(name);
+    // A command started in a swapped directory would act wherever the link
+    // points: its working directory gets the same check as a write.
+    if (cwd !== undefined) assertRealDir(cwd);
     const logFile = path.join(
       logs,
       `${String(++counter).padStart(2, "0")}-${name}.log`,
     );
-    const fd = fs.openSync(logFile, "w");
+    const fd = openForWrite(logFile);
     const child = spawn(process.execPath, ["-e", SUPERVISOR], {
       cwd,
       env: { PATH: process.env.PATH ?? "" },
@@ -635,7 +841,7 @@ export function createSandbox(notebook, { keep }) {
     await handle.done;
     clearTimeout(timer);
     const gone = handle.pgid === undefined || (await stopGroup(handle.pgid));
-    const output = fs.readFileSync(handle.logFile, "utf8");
+    const output = readFile(handle.logFile, "utf8") ?? "";
     return {
       status: handle.error ? -1 : (handle.status ?? -1),
       signal: handle.signal,
@@ -766,6 +972,15 @@ export function createSandbox(notebook, { keep }) {
     guardedSince,
     ensureOpen,
     assertInsideSandbox,
+    removePath,
+    makeDir,
+    openForWrite,
+    writeFile,
+    readFile,
+    listDir,
+    assertRealDir,
+    copyTree,
+    label,
     start,
     run,
     stopGroup,
