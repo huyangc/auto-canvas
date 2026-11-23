@@ -199,6 +199,11 @@ export class AgentSessionDO {
     if (request.method === "POST" && url.pathname === "/create") {
       return this.create(request, allowedOrigin);
     }
+    // Replacement changes the public response, but owner termination must
+    // still drain transports opened before the project was replaced.
+    if (request.method === "POST" && url.pathname === "/account-ended") {
+      return this.endPairing(await this.loadMachine(), allowedOrigin);
+    }
     if (this.replacedUntil > Date.now()) {
       return jsonResponse(
         errorBody("PROJECT_REPLACED", errorMessage("PROJECT_REPLACED")),
@@ -216,9 +221,6 @@ export class AgentSessionDO {
       );
     }
 
-    // Internal-only dispatch. The public relay router has no such resource.
-    if (request.method === "POST" && url.pathname === "/account-ended")
-      return this.endPairing(machine, allowedOrigin);
     if (request.method === "POST" && url.pathname === "/claim") {
       return this.claim(request, machine, allowedOrigin);
     }
@@ -794,6 +796,12 @@ export class AgentSessionDO {
         })();
     if (!opened)
       return jsonResponse({ error: "WebSocket upgrade required" }, 426);
+    // Logout or expiry may have won while the host awaited the upgrade.
+    const currentStatus = machine.statusAt(Date.now());
+    if (currentStatus === "revoked" || currentStatus === "expired") {
+      opened.socket.close(1000, "Session ended");
+      return opened.response;
+    }
     const previousSockets = this.state.getWebSockets?.(EDITOR_SOCKET_TAG) ?? [];
     this.state.acceptWebSocket(opened.socket, [EDITOR_SOCKET_TAG]);
     this.emit({ type: "editor.online", sessionId: machine.sessionId });
@@ -807,7 +815,7 @@ export class AgentSessionDO {
       sessionId: machine.sessionId,
       expiresAt: new Date(machine.expiresAt).toISOString(),
     });
-    if (status === "paused") {
+    if (currentStatus === "paused") {
       opened.socket.send(
         editorEventMessage({
           type: "session.paused",
@@ -1476,21 +1484,25 @@ export class AgentSessionDO {
   }
 
   private async endPairing(
-    machine: AgentSessionMachine,
+    machine: AgentSessionMachine | null,
     allowedOrigin: string | null,
   ) {
-    machine.revoke();
-    this.emit({ type: "session.revoked", sessionId: machine.sessionId });
-    this.notifyEditor({
-      type: "session.revoked",
-      sessionId: machine.sessionId,
-    });
+    if (machine) {
+      machine.revoke();
+      const event: AgentSessionEvent = {
+        type: "session.revoked",
+        sessionId: machine.sessionId,
+      };
+      this.emit(event);
+      this.notifyEditor(event);
+    }
     this.endSubscribers("SESSION_REVOKED");
     for (const socket of this.state.getWebSockets?.(EDITOR_SOCKET_TAG) ?? []) {
       if (socket.readyState === WebSocket.OPEN)
         socket.close(1000, "Session revoked");
     }
-    await this.clearStoredSession();
+    // The replacement marker retains its original deadline and public semantics.
+    if (!this.replacedUntil) await this.clearStoredSession();
     return new Response(null, {
       status: 204,
       headers: relayHeaders(allowedOrigin),
