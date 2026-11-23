@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   createEmptyProject,
-  createSimulationFolder,
   type CircuitProject,
   type SchematicDocument,
 } from "@icm/model";
+import { createSimulationFolder } from "../../model/src/simulation-folder.test-support.js";
 import {
   subcircuitDescriptor,
   builtInModelContract,

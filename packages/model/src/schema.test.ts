@@ -1,4 +1,4 @@
-import { createSimulationFolder } from "./simulation-source-authoring.js";
+import { createSimulationFolder } from "./simulation-folder.test-support.js";
 import { describe, expect, it } from "vitest";
 
 import { createEmptyDocument, createEmptyProject } from "./factories.js";

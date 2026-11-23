@@ -3,7 +3,8 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createEmptyProject, createSimulationFolder } from "@icm/model";
+import { createEmptyProject } from "@icm/model";
+import { createSimulationFolder } from "../../model/src/simulation-folder.test-support.js";
 import {
   subcircuitDescriptor,
   builtInSubcircuitDescriptors,
@@ -12,10 +13,7 @@ import {
 import { generatedBehavioralModel } from "./generated-models.js";
 import { compileSourceSimulation } from "./simulation-source-compile.js";
 import { compileNgspiceSourceSimulation } from "./simulation-source-ngspice.js";
-import {
-  generateCircuitSource,
-  planCircuitSourceEdit,
-} from "./simulation-circuit-source.js";
+import { generateCircuitSource } from "./simulation-circuit-source.js";
 import { parseVacaskRawfile } from "./test-support/vacask-rawfile.js";
 import { analyzeDesignNetlist, SIMULATION_DECK_GROUND } from "./extract.js";
 import { printVacaskWithLocations } from "./vacask-printer.js";
@@ -466,7 +464,7 @@ describe("shared built-in model acceptance", () => {
     },
   );
   it.each(["ngspice", "vacask"] as const)(
-    "round-trips gain and refuses generated-body edits in %s",
+    "maps the gain parameter and prints the generated body in %s",
     (engine) => {
       const { project, folder, document } = fixture("opamp", { gain: "123" });
       const source = generateCircuitSource(
@@ -486,23 +484,12 @@ describe("shared built-in model acceptance", () => {
       const span = source.source.parameters.find(
         (p) => p.parameter === "gain",
       )!;
-      const edit = planCircuitSourceEdit(
-        source.source,
-        source.source.text.slice(0, span.startOffset) +
-          "456" +
-          source.source.text.slice(span.endOffset),
+      expect(span).toMatchObject({ instanceId: "block", rawValue: "123" });
+      expect(source.source.text.slice(span.startOffset, span.endOffset)).toBe(
+        "123",
       );
-      expect(edit.ok && edit.changes).toMatchObject([
-        { instanceId: "block", parameter: "gain", value: "456" },
-      ]);
       // The op-amp's body is generated; VACASK writes its sources lower case.
       expect(source.source.text).toMatch(/^bcore /imu);
-      expect(
-        planCircuitSourceEdit(
-          source.source,
-          source.source.text.replace(/^bcore /imu, "Bbroken "),
-        ).ok,
-      ).toBe(false);
     },
   );
 

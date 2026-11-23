@@ -4,10 +4,10 @@ import {
   createEmptyDocument,
   createEmptyProject,
   createRoutePath,
-  createSimulationFolder,
   routeEndpoints,
   type CircuitProject,
 } from "@icm/model";
+import { createSimulationFolder } from "../../../packages/model/src/simulation-folder.test-support.js";
 import {
   hierarchicalSymbolId,
   withProjectComponentDefinitions,

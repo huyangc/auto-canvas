@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentSessionStatusResponse } from "@icm/agent-adapter";
-import { createSimulationFolder } from "@icm/model";
+import { createSimulationFolder } from "../../../../packages/model/src/simulation-folder.test-support.js";
 import { describe, expect, it, vi } from "vitest";
 import { ConnectorStore } from "../../../../packages/agent-client/src/connector-store";
 import { AgentSessionError } from "../../../../packages/agent-client/src/errors";

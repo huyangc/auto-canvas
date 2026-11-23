@@ -6,8 +6,8 @@ import {
   createEmptyDocument,
   createEmptyProject,
   createRoutePath,
-  createSimulationFolder,
 } from "@icm/model";
+import { createSimulationFolder } from "../../model/src/simulation-folder.test-support.js";
 import { parseProject } from "@icm/project-protocol";
 import type { CircuitProject } from "@icm/model";
 import {

@@ -6,14 +6,10 @@ import type {
 } from "@icm/model";
 import {
   instanceParameterContract,
-  parameterExpressionBody,
   type DeviceParameterDefinition,
 } from "@icm/devices";
-import { parseSpiceNumber } from "@icm/spice";
-import { parseNgspiceSourceParameters } from "./simulation-ngspice-source-parameters.js";
 import {
   printedParameterConversion,
-  restorePrintedParameter,
   type PrintedParameterConversion,
 } from "./parameter-projection.js";
 import {
@@ -23,7 +19,6 @@ import {
 import { printVacaskWithLocations } from "./vacask-printer.js";
 import { printSpiceWithLocations } from "./printers.js";
 import { inspectVacaskSource } from "./vacask-source.js";
-import { vacaskValueToProject } from "./vacask-values.js";
 import { compileSourceSimulation } from "./simulation-source-compile.js";
 import { compileNgspiceSourceSimulation } from "./simulation-source-ngspice.js";
 import {
@@ -31,7 +26,6 @@ import {
   appendProjectModelSources,
   projectModelDefinitionIds,
   renderProjectModelSource,
-  planMappedProjectModelEdit,
   type ProjectModelSourceLocation,
 } from "./project-model-source.js";
 import type {
@@ -42,7 +36,6 @@ import type { NetlistDiagnostic } from "./ir.js";
 import { normalizeIndependentSource } from "./source-waveform.js";
 import { directObjectLocator } from "@icm/derived";
 import type { SimulationSourceDiagnostic } from "./source-file-graph.js";
-import { parseEditableSourceParameters } from "./simulation-source-parameters.js";
 
 interface EditableSourceBody {
   documentId: string;
@@ -389,293 +382,5 @@ export function generateCircuitSource(
         : {}),
     },
     warnings: analysis.diagnostics,
-  };
-}
-
-export interface CircuitParameterChange {
-  documentId: string;
-  expectedRevision: number;
-  instanceId: string;
-  parameter: string;
-  value: string;
-  unset?: true;
-}
-/** Plan exact parameter-only changes. The service checks the generation digest and commits typed edits atomically. */
-export function planCircuitSourceEdit(
-  source: GeneratedCircuitSource,
-  nextText: string,
-):
-  | {
-      ok: true;
-      changes: CircuitParameterChange[];
-      modelUpdates?: ProjectModelSource[];
-    }
-  | {
-      ok: false;
-      code: string;
-      message: string;
-      range?: { from: number; to: number };
-    } {
-  const mappedModel = planMappedProjectModelEdit(
-    source.text,
-    nextText,
-    source.modelLocations ?? [],
-    source.modelSnapshots ?? [],
-  );
-  if (mappedModel.matched)
-    return mappedModel.ok
-      ? { ok: true, changes: [], modelUpdates: mappedModel.modelUpdates }
-      : { ok: false, code: mappedModel.code, message: mappedModel.message };
-  const parseParameters =
-    source.engine === "ngspice"
-      ? parseNgspiceSourceParameters
-      : parseEditableSourceParameters;
-  let parameterRange: { from: number; to: number } | undefined;
-  const fail = (code: string, message: string) => ({
-    ok: false as const,
-    code,
-    message,
-    ...(code === "SIMULATION_PARAMETER_INVALID" && parameterRange
-      ? { range: parameterRange }
-      : {}),
-  });
-  const bodies = source.sourceBodies ?? [];
-  const spans = [
-    ...source.parameters.filter(
-      (p) =>
-        !bodies.some(
-          (body) =>
-            p.startOffset >= body.startOffset && p.endOffset <= body.endOffset,
-        ),
-    ),
-    ...bodies,
-  ].sort((a, b) => a.startOffset - b.startOffset);
-  const changes = new Map<string, CircuitParameterChange>();
-  const sourceAppearances = new Map<string, string>();
-  let invalid: ReturnType<typeof fail> | undefined;
-  let originalOffset = 0;
-  let nextOffset = 0;
-  for (let index = 0; index < spans.length; index++) {
-    const span = spans[index]!;
-    const fixed = source.text.slice(originalOffset, span.startOffset);
-    if (!nextText.startsWith(fixed, nextOffset))
-      return fail(
-        "SIMULATION_CIRCUIT_STRUCTURE_LOCKED",
-        "Only highlighted parameter values or expressions can change; edit topology, references and model identity on Canvas",
-      );
-    nextOffset += fixed.length;
-    const nextStart = spans[index + 1]?.startOffset ?? source.text.length;
-    const after = source.text.slice(span.endOffset, nextStart);
-    if (!after)
-      return fail(
-        "SIMULATION_PARAMETER_MAPPING",
-        "Adjacent parameter spans have no reversible boundary",
-      );
-    const end = nextText.indexOf(after, nextOffset);
-    if (end < 0)
-      return fail(
-        "SIMULATION_CIRCUIT_STRUCTURE_LOCKED",
-        "The edited text changes a protected Circuit boundary",
-      );
-    const raw = nextText.slice(nextOffset, end);
-    parameterRange = { from: nextOffset, to: end };
-    if ("sourceParameters" in span) {
-      if (raw && !/^\s/u.test(raw))
-        return fail(
-          "SIMULATION_CIRCUIT_STRUCTURE_LOCKED",
-          "Keep source nodes separate from their parameter clauses.",
-        );
-      const identity = JSON.stringify([span.documentId, span.instanceId]);
-      const priorText = sourceAppearances.get(identity);
-      if (priorText !== undefined && priorText !== raw)
-        return fail(
-          "SIMULATION_PARAMETER_CONFLICT",
-          "Repeated appearances of a source must agree.",
-        );
-      sourceAppearances.set(identity, raw);
-      if (raw !== span.rawValue) {
-        const parsed = parseParameters(raw);
-        if (!parsed.ok)
-          invalid ??= fail("SIMULATION_PARAMETER_INVALID", parsed.message);
-        else {
-          const previous = parseParameters(span.rawValue);
-          const names = new Set([
-            ...Object.keys(
-              previous.ok ? previous.parameters : span.sourceParameters,
-            ),
-            ...Object.keys(parsed.parameters),
-          ]);
-          for (const name of names) {
-            const originalName =
-              Object.keys(span.sourceParameters).find(
-                (key) => key.toLowerCase() === name.toLowerCase(),
-              ) ?? name;
-            const value = parsed.parameters[name];
-            if (span.sourceParameters[originalName] === value) continue;
-            const key = JSON.stringify([
-              span.documentId,
-              span.instanceId,
-              originalName,
-            ]);
-            const change: CircuitParameterChange = {
-              documentId: span.documentId,
-              expectedRevision: span.documentRevision,
-              instanceId: span.instanceId,
-              parameter: originalName,
-              value: value ?? "",
-              ...(value === undefined ? { unset: true as const } : {}),
-            };
-            const prior = changes.get(key);
-            if (
-              prior &&
-              (prior.value !== change.value || prior.unset !== change.unset)
-            )
-              return fail(
-                "SIMULATION_PARAMETER_CONFLICT",
-                `Repeated appearances of ${originalName} must agree`,
-              );
-            changes.set(key, change);
-          }
-        }
-      }
-      originalOffset = span.endOffset;
-      nextOffset = end;
-      continue;
-    }
-    const key = JSON.stringify([
-      span.documentId,
-      span.instanceId,
-      span.parameter,
-    ]);
-    // Preserve repeated-appearance agreement without validating untouched slots.
-    if (raw === span.rawValue) {
-      const prior = changes.get(key);
-      if (prior && prior.value !== span.originalValue)
-        return fail(
-          "SIMULATION_PARAMETER_CONFLICT",
-          `Repeated appearances of ${span.parameter} must agree`,
-        );
-      changes.set(key, {
-        documentId: span.documentId,
-        expectedRevision: span.documentRevision,
-        instanceId: span.instanceId,
-        parameter: span.parameter,
-        value: span.originalValue,
-      });
-      originalOffset = span.endOffset;
-      nextOffset = end;
-      continue;
-    }
-    let projectValue: string;
-    try {
-      projectValue =
-        source.engine === "ngspice" ? raw : vacaskValueToProject(raw);
-    } catch (error) {
-      invalid ??= fail(
-        "SIMULATION_PARAMETER_INVALID",
-        error instanceof Error ? error.message : String(error),
-      );
-      originalOffset = span.endOffset;
-      nextOffset = end;
-      continue;
-    }
-    const number = parseSpiceNumber(projectValue);
-    const expression = parameterExpressionBody(projectValue);
-    if (
-      expression === undefined &&
-      (!number || !Number.isFinite(number.value) || /\s/u.test(raw))
-    ) {
-      invalid ??= fail(
-        "SIMULATION_PARAMETER_INVALID",
-        `Finish the native number or parenthesized expression for ${span.descriptor.label} before applying`,
-      );
-      originalOffset = span.endOffset;
-      nextOffset = end;
-      continue;
-    }
-    if (
-      ["width", "length", "multiplier", "finger-count"].includes(
-        span.descriptor.displayRole,
-      ) &&
-      number &&
-      number.value <= 0
-    ) {
-      invalid ??= fail(
-        "SIMULATION_PARAMETER_INVALID",
-        `${span.descriptor.label} must be positive`,
-      );
-      originalOffset = span.endOffset;
-      nextOffset = end;
-      continue;
-    }
-    if (
-      span.descriptor.displayRole === "finger-count" &&
-      number &&
-      !Number.isInteger(number.value)
-    ) {
-      invalid ??= fail(
-        "SIMULATION_PARAMETER_INVALID",
-        "Finger count must be an integer",
-      );
-      originalOffset = span.endOffset;
-      nextOffset = end;
-      continue;
-    }
-    let value = projectValue;
-    try {
-      if (span.conversion === "sky130-micrometres") {
-        if (
-          number &&
-          !/^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/iu.test(raw.trim())
-        )
-          throw Error(
-            "Reviewed SKY130 geometry uses plain micrometre numbers, not an SI-suffixed value.",
-          );
-        value = restorePrintedParameter(projectValue, span.conversion);
-      }
-    } catch (error) {
-      invalid ??= fail(
-        "SIMULATION_PARAMETER_INVALID",
-        error instanceof Error ? error.message : String(error),
-      );
-      originalOffset = span.endOffset;
-      nextOffset = end;
-      continue;
-    }
-    const prior = changes.get(key);
-    if (prior && prior.value !== value)
-      return fail(
-        "SIMULATION_PARAMETER_CONFLICT",
-        `Repeated appearances of ${span.parameter} must agree`,
-      );
-    changes.set(key, {
-      documentId: span.documentId,
-      expectedRevision: span.documentRevision,
-      instanceId: span.instanceId,
-      parameter: span.parameter,
-      value,
-    });
-    originalOffset = span.endOffset;
-    nextOffset = end;
-  }
-  if (nextText.slice(nextOffset) !== source.text.slice(originalOffset))
-    return fail(
-      "SIMULATION_CIRCUIT_STRUCTURE_LOCKED",
-      "The edited text changes protected Circuit content",
-    );
-  if (invalid) return invalid;
-  return {
-    ok: true,
-    changes: [...changes.values()].filter(
-      (change) =>
-        !source.parameters.some(
-          (s) =>
-            s.documentId === change.documentId &&
-            s.instanceId === change.instanceId &&
-            s.parameter === change.parameter &&
-            s.originalValue === change.value &&
-            !change.unset,
-        ),
-    ),
   };
 }

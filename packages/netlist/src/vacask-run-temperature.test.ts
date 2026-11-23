@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  createEmptyProject,
-  createSimulationFolder,
-  type SimulationRunVariant,
-} from "@icm/model";
+import { createEmptyProject, type SimulationRunVariant } from "@icm/model";
+import { createSimulationFolder } from "../../model/src/simulation-folder.test-support.js";
 import { compileSourceSimulation } from "./simulation-source-compile.js";
 import { locateSimulationText } from "./simulation-source-map.js";
 

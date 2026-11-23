@@ -1,12 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { createSimulationFolder } from "@icm/model";
+import { createSimulationFolder } from "../../model/src/simulation-folder.test-support.js";
 import { externalModelFixture } from "./external-model-fixture.test-support.js";
 import { compileSourceSimulation } from "./simulation-source-compile.js";
-import {
-  generateCircuitSource,
-  planCircuitSourceEdit,
-} from "./simulation-circuit-source.js";
+import { generateCircuitSource } from "./simulation-circuit-source.js";
 import { locateSimulationText } from "./simulation-source-map.js";
+import { planMappedProjectModelEdit } from "./project-model-source.js";
 import { transformProjectModelSource } from "./model-source-transform.js";
 
 function fixture() {
@@ -345,11 +343,20 @@ describe("Project external models in native VACASK", () => {
       expect(preview.source.text).toBe(file.text);
       expect(preview.source.modelLocations?.length).toBeGreaterThan(0);
       expect(
-        planCircuitSourceEdit(
-          preview.source,
+        planMappedProjectModelEdit(
+          preview.source.text,
           preview.source.text.replace("r=1000000", "r=2000000"),
+          preview.source.modelLocations ?? [],
+          preview.source.modelSnapshots ?? [],
         ),
-      ).toMatchObject({ ok: false, code: "MODEL_SOURCE_EDIT_REQUIRES_OWNER" });
+      ).toMatchObject({
+        matched: true,
+        ok: false,
+        code: "MODEL_SOURCE_EDIT_REQUIRES_OWNER",
+        message: expect.stringContaining(
+          "Converted model text requires an edit at its native owner",
+        ),
+      });
     }
     expect({ project, folder }).toEqual(before);
   });

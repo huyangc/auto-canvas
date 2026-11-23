@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createEmptyProject, createSimulationFolder } from "@icm/model";
+import { createEmptyProject } from "@icm/model";
+import { createSimulationFolder } from "../../model/src/simulation-folder.test-support.js";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -9,15 +10,10 @@ import {
   compileNativeDeviceOperatingPoints,
   nativeDeviceOpAcquisitions,
   nativeSimulationDevices,
-  nativeTerminalCurrent,
 } from "./simulation-native-devices.js";
-import { nativeAcquisitionEdit } from "./simulation-native-save-edit.js";
 import { compileSourceSimulation } from "./simulation-source-compile.js";
 import { parseVacaskRawfile } from "./test-support/vacask-rawfile.js";
-import {
-  inspectNativeModelLibrarySymbols,
-  type NativeModelLibrarySymbols,
-} from "./vacask-model-symbols.js";
+import type { NativeModelLibrarySymbols } from "./vacask-model-symbols.js";
 import { sha256Hex } from "@icm/derived";
 
 // Illustrative default BSIM4, not a substitute for any foundry model.
@@ -151,16 +147,52 @@ describe("native Canvas device acquisitions", () => {
         save: `p('${device.reference}',gm)`,
         semantics: "model-native",
       });
-      expect(nativeTerminalCurrent(device, "D")).toMatchObject({
-        ok: true,
-        vectors: [device.currentSenses.find((s) => s.pinName === "D")!.save],
-      });
-      expect(nativeTerminalCurrent(device, "G").ok).toBe(true);
     }
     expect({ project, folder }).toEqual(before);
     const compiled = compileSourceSimulation(project, folder);
     if (!compiled.ok) throw Error(JSON.stringify(compiled.diagnostics));
     expect(compiled.vectors).toHaveLength(18);
+    // Exactly one D and one G sense per occurrence, each a saved model-native
+    // current that resolves to that Canvas terminal. The four are named here,
+    // not taken from what the implementation returned, so a missing sense
+    // fails instead of removing its own assertion.
+    const expected = [
+      { reference: "X1:M1", pinName: "D" },
+      { reference: "X1:M1", pinName: "G" },
+      { reference: "x1:M1", pinName: "D" },
+      { reference: "x1:M1", pinName: "G" },
+    ].map(({ reference, pinName }) => {
+      const found = devices
+        .filter((d) => d.reference === reference)
+        .flatMap((d) => d.currentSenses.filter((s) => s.pinName === pinName));
+      expect(found, `${reference}.${pinName}`).toHaveLength(1);
+      return { reference, pinName, sense: found[0]! };
+    });
+    const source = folder.input.files.find(
+      (f) => f.path === folder.input.entry,
+    )!;
+    const originalText = source.text;
+    source.text = originalText.replace(
+      "save default",
+      `save ${expected.map(({ sense }) => sense.save).join(" ")}`,
+    );
+    const saved = compileSourceSimulation(project, folder);
+    if (!saved.ok) throw Error(JSON.stringify(saved.diagnostics));
+    for (const { reference, pinName, sense } of expected) {
+      const signal = saved.signals[sense.vector];
+      expect(signal, `${reference}.${pinName}`).toBeDefined();
+      expect(signal!.label).toBe(
+        `I(${reference.replace(":", "/")}.${pinName})`,
+      );
+      expect(signal!.targets).toEqual([
+        expect.objectContaining({
+          documentId: "dut",
+          occurrence: [],
+          terminal: { instanceId: "mos", pinName },
+        }),
+      ]);
+    }
+    source.text = originalText;
     expect(compiled.deviceOperatingPoints.map((d) => d.reference)).toEqual([
       "X1:M1",
       "x1:M1",
@@ -283,20 +315,50 @@ include "dut.inc"`,
     const device = nativeSimulationDevices(project, folder.input).find(
       (d) => d.instanceId === "mos",
     )!;
-    expect(nativeTerminalCurrent(device, "+")).toEqual({
-      ok: true,
-      vectors: ["i('X1:V1')"],
-      directives: [],
+    // A unit factor reads the native branch current itself.
+    const source = folder.input.files.find(
+      (f) => f.path === folder.input.entry,
+    )!;
+    const original = source.text;
+    const compiledWith = (selectors: string) => {
+      source.text = original.replace("save default", `save ${selectors}`);
+      const compiled = compileSourceSimulation(project, folder);
+      if (!compiled.ok) throw Error(JSON.stringify(compiled.diagnostics));
+      return compiled;
+    };
+    const unit = compiledWith("i('X1:V1')");
+    expect(unit.signals["X1:V1:flow(br)"]).toMatchObject({
+      targets: [
+        expect.objectContaining({
+          terminal: expect.objectContaining({ pinName: "+" }),
+        }),
+      ],
     });
-    expect(nativeTerminalCurrent(device, "-")).toMatchObject({
-      ok: true,
-      vectors: [device.currentSenses.find((s) => s.pinName === "-")!.save],
+    expect(unit.generated[0]!.text).not.toContain("__icm_sense_");
+    // The negative terminal is a terminal-total current: a zero-volt sense.
+    const minus = device.currentSenses.find((s) => s.pinName === "-")!;
+    const sensedMinus = compiledWith(minus.save);
+    expect(sensedMinus.signals[minus.vector]).toMatchObject({
+      targets: [
+        expect.objectContaining({
+          terminal: expect.objectContaining({ pinName: "-" }),
+        }),
+      ],
     });
-    device.card.parameters.push({ name: "m", rawValue: "3" });
-    expect(nativeTerminalCurrent(device, "+")).toMatchObject({
-      ok: true,
-      vectors: [device.currentSenses.find((s) => s.pinName === "+")!.save],
+    // Any explicit factor forces a sense on the positive terminal too.
+    instance.netlist!.parameters.m = "3";
+    const plus = nativeSimulationDevices(project, folder.input)
+      .find((d) => d.instanceId === "mos")!
+      .currentSenses.find((s) => s.pinName === "+")!;
+    const sensedPlus = compiledWith(plus.save);
+    expect(sensedPlus.signals[plus.vector]).toMatchObject({
+      targets: [
+        expect.objectContaining({
+          terminal: expect.objectContaining({ pinName: "+" }),
+        }),
+      ],
     });
+    source.text = original;
   });
 });
 
@@ -326,26 +388,13 @@ it.skipIf(!process.env.VACASK_BIN || !process.env.VACASK_MODULES)(
         sha256: sha256Hex(libraryText),
         mountPath: "models.inc",
       };
-      const libraryInput = {
-        ...folder.input,
-        entry: "inspect.sim",
-        circuitBindings: [],
-        files: [
-          {
-            path: "inspect.sim",
-            text: 'Library inspection\ninclude "models.inc"\n',
-          },
-          { path: "models.inc", text: libraryText },
-        ],
-      };
-      const inspected = inspectNativeModelLibrarySymbols(libraryInput, [
-        "core",
-      ]);
-      expect(inspected.diagnostics).toEqual([]);
+      // The library summary an offline inspection of libraryText produces.
       const library: NativeModelLibrarySymbols = {
         dependencyId: dependency.id,
         sha256: dependency.sha256,
-        masters: inspected.masters,
+        masters: [
+          { name: "core", primitives: [{ path: [], module: "sp_bsim4v8" }] },
+        ],
       };
       source.text = source.text.replace(
         libraryText.trim(),
@@ -356,17 +405,16 @@ it.skipIf(!process.env.VACASK_BIN || !process.env.VACASK_MODULES)(
         library,
       ]).flatMap(nativeDeviceOpAcquisitions);
       expect(acquisitions).toHaveLength(18);
-      const edit = nativeAcquisitionEdit(
-        source.text,
-        source.text.indexOf("analysis proof"),
-        acquisitions.map((a) => a.save),
-        true,
-      );
-      if (!edit.ok) throw Error(edit.error.message);
-      source.text = edit.text.replace(
-        "analysis proof op",
-        "analysis proof op\nanalysis repeated op\nclear saves\nanalysis uncaptured op",
-      );
+      // Authored saves at the top of the control block.
+      source.text = source.text
+        .replace(
+          "control\n",
+          `control\nsave ${acquisitions.map((a) => a.save).join(" ")}\n`,
+        )
+        .replace(
+          "analysis proof op",
+          "analysis proof op\nanalysis repeated op\nclear saves\nanalysis uncaptured op",
+        );
       // The standalone compiler resolves the same model bytes as a Project file.
       folder.input.dependencies = [];
       folder.input.files.push({

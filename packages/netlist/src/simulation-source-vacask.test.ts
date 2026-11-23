@@ -1,20 +1,13 @@
 import { describe, expect, it } from "vitest";
-import {
-  createEmptyProject,
-  createEmptyDocument,
-  createSimulationFolder,
-} from "@icm/model";
+import { createEmptyProject, createEmptyDocument } from "@icm/model";
+import { createSimulationFolder } from "../../model/src/simulation-folder.test-support.js";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { compileSourceSimulation } from "./simulation-source-compile.js";
-import {
-  generateCircuitSource,
-  planCircuitSourceEdit,
-} from "./simulation-circuit-source.js";
+import { generateCircuitSource } from "./simulation-circuit-source.js";
 import { parseVacaskRawfile } from "./test-support/vacask-rawfile.js";
-import { nativeParameterDeclarationEdit } from "./simulation-native-parameter-edit.js";
 import { locateSimulationText } from "./simulation-source-map.js";
 
 function fixture() {
@@ -299,7 +292,7 @@ describe("public native source compilation", () => {
     });
   });
 
-  it("shows the exact compiled multi-binding files and reverses mega without SPICE milli interpretation", () => {
+  it("shows the exact compiled multi-binding files", () => {
     const { project, folder } = fixture();
     const compiled = compileSourceSimulation(project, folder);
     if (!compiled.ok) throw Error(JSON.stringify(compiled.diagnostics));
@@ -309,17 +302,17 @@ describe("public native source compilation", () => {
       expect(generated.source.text).toBe(
         compiled.generated.find((f) => f.bindingId === binding.id)!.text,
       );
+      // Each binding's resistor value range names its own Document and Instance.
       const span = generated.source.parameters.find(
         (p) => p.parameter === "value",
       )!;
-      const next =
-        generated.source.text.slice(0, span.startOffset) +
-        "1M" +
-        generated.source.text.slice(span.endOffset);
-      expect(planCircuitSourceEdit(generated.source, next)).toMatchObject({
-        ok: true,
-        changes: [{ parameter: "value", value: "1000000" }],
+      expect(span).toMatchObject({
+        documentId: binding.documentId,
+        instanceId: "R",
       });
+      expect(
+        generated.source.text.slice(span.startOffset, span.endOffset),
+      ).toBe(binding.documentId === "a" ? "1000" : "2000");
     }
   });
   it("shares generated primitive definitions across bindings without changing source bytes or the Project", () => {
@@ -446,11 +439,12 @@ it.skipIf(!process.env.VACASK_BIN || !process.env.VACASK_MODULES).each([
     const entry = folder.input.files.find(
       (f) => f.path === folder.input.entry,
     )!;
-    const declaration = nativeParameterDeclarationEdit(entry.text, true);
+    // An authored declaration right after the entry file's title line.
+    const title = entry.text.indexOf("\n") + 1;
     entry.text = (
-      declaration.text.slice(0, declaration.anchor) +
-      "VBIAS=1" +
-      declaration.text.slice(declaration.anchor)
+      entry.text.slice(0, title) +
+      "parameters VBIAS=1\n" +
+      entry.text.slice(title)
     ).replace("voltage dc=1", "voltage dc=VBIAS");
     const preview = generateCircuitSource(
       project,
@@ -461,18 +455,12 @@ it.skipIf(!process.env.VACASK_BIN || !process.env.VACASK_MODULES).each([
     const span = preview.source.parameters.find(
       (p) => p.parameter === "value",
     )!;
-    const next =
-      preview.source.text.slice(0, span.startOffset) +
-      "1M" +
-      preview.source.text.slice(span.endOffset);
-    const planned = planCircuitSourceEdit(preview.source, next);
-    if (!planned.ok) throw Error(planned.message);
-    for (const change of planned.changes)
-      project.documents
-        .find((d) => d.id === change.documentId)!
-        .instances.find((i) => i.id === change.instanceId)!.netlist!.parameters[
-        change.parameter
-      ] = change.value;
+    // 1M on the VACASK source is mega: the Canvas value it stands for.
+    project.documents
+      .find((d) => d.id === span.documentId)!
+      .instances.find(
+        (i) => i.id === span.instanceId,
+      )!.netlist!.parameters.value = "1000000";
     if (bias) {
       // Exact Canvas points win over a native variable referenced by the same
       // nominal parameter, without changing either saved authority.

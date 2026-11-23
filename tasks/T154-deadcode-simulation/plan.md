@@ -132,8 +132,8 @@ Verified on `a97ce3d` (this worktree; trial applied, measured and reverted).
   (847); **8,801 tests passed, 117 skipped (8,918)**; `pnpm deadcode` 1; agent-api hashes match; `--check` exits 1
   with the message above.
 - **Trial (all steps applied to `a97ce3d`, then reverted).** Both knip passes exit 0 with no output. Diff:
-  **+536 / −5,665 lines in 85 files** — 27 files deleted (−4,076: 13 source modules, 12 test files, 2 JSON
-  fixtures), 3 new files (+198: one test-support fixture, two tests), 55 edited (+338 / −1,589):
+  **+528 / −5,628 lines in 85 files** — 27 files deleted (−4,076: 13 source modules, 12 test files, 2 JSON
+  fixtures), 3 new files (+207: one test-support fixture, two tests), 55 edited (+321 / −1,552):
 
   | Area                                                 | Source       | Tests         |
   | ---------------------------------------------------- | ------------ | ------------- |
@@ -149,7 +149,7 @@ Verified on `a97ce3d` (this worktree; trial applied, measured and reverted).
   Of the 55 edited files, 25 change only the fixture import (one line); 30 change behaviour (the deletions, the
   re-expressed assertions and the CI step). Tests (by title; `it.each` counts once): **61 deleted, 35 kept and
   rewritten, 465 untouched** (untouched counted per file) in 50 test files — see [`test-ledger.md`](test-ledger.md).
-  `pnpm test:local`: 834 files passed, 3 skipped (837); **8,681 tests passed, 116 skipped (8,797)** — 120 fewer
+  `pnpm test:local`: 834 files passed, 3 skipped (837); **8,682 tests passed, 116 skipped (8,798)** — 119 fewer
   passing and 1 fewer skipped than `main` (`it.each` rows counted). Every Acceptance command exited 0.
 
 ## Scope
@@ -291,7 +291,7 @@ pnpm docs:check
 pnpm typecheck
 pnpm lint                                      # 0 errors
 pnpm build
-pnpm test:local                                # trial: 834 files passed, 3 skipped (837); 8,681 passed, 116 skipped (8,797)
+pnpm test:local                                # trial: 834 files passed, 3 skipped (837); 8,682 passed, 116 skipped (8,798)
 pnpm deadcode
 out=$(pnpm exec knip --no-progress 2>&1); s=$?; test "$s" = 0 && test -z "$out"                  # default pass: status 0, no output
 out=$(pnpm exec knip --production --no-progress 2>&1); s=$?; test "$s" = 0 && test -z "$out"     # production pass: status 0, no output

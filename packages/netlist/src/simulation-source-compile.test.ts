@@ -1,8 +1,8 @@
 import { LegacyProjectSimulationSetupSchema } from "@icm/model";
+import { createSimulationFolder } from "../../model/src/simulation-folder.test-support.js";
 import { describe, expect, it } from "vitest";
 import {
   createEmptyProject,
-  createSimulationFolder,
   CircuitProjectSchema,
   ProjectSimulationFolderSchema,
   type ProjectSimulationFolder,

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createEmptyProject, createSimulationFolder } from "@icm/model";
+import { createEmptyProject } from "@icm/model";
+import { createSimulationFolder } from "../../model/src/simulation-folder.test-support.js";
 import { parseProject, serializeProject } from "./index.js";
 
 describe("source folder migration", () => {

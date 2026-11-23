@@ -89,7 +89,7 @@ Totals (test cases by title; an `it.each` counts once): **61 deleted, 35 kept an
 | `packages/netlist/src/built-in-subcircuits.test.ts`                  | edited  | 0       | 0                                | 28        |
 | `packages/netlist/src/canonical-design-netlist.test.ts`              | edited  | 0       | 0                                | 4         |
 | `packages/netlist/src/delay-cell-acceptance.test.ts`                 | edited  | 0       | 0                                | 2         |
-| `packages/netlist/src/equivalence.test.ts`                           | edited  | 4       | 3 (2 retitled in place, 1 moved) | 10        |
+| `packages/netlist/src/equivalence.test.ts`                           | edited  | 4       | 2 (1 retitled in place, 1 moved) | 10        |
 | `packages/netlist/src/export.test.ts`                                | edited  | 2       | 9                                | 19        |
 | `packages/netlist/src/gate-cell.test.ts`                             | edited  | 0       | 0                                | 12        |
 | `packages/netlist/src/generic-bjt-model.test.ts`                     | edited  | 0       | 1                                | 4         |

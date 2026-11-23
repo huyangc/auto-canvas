@@ -3,11 +3,12 @@ import { importSpiceSources } from "@icm/spice";
 import { createDesignNetlistExport, type NetlistFormat } from "@icm/netlist";
 import { executeProjectTransaction } from "@icm/edit-engine";
 import { createExternalSubcircuitInstance } from "@icm/edit-engine";
-import { createEmptyProject, createSimulationFolder } from "@icm/model";
+import { createEmptyProject } from "@icm/model";
+import { createSimulationFolder } from "../../../../../packages/model/src/simulation-folder.test-support.js";
 import {
   generateCircuitSource,
-  planCircuitSourceEdit,
   compileNgspiceSourceSimulation,
+  planMappedProjectModelEdit,
 } from "@icm/netlist";
 import {
   planNetlistCodeEdit,
@@ -103,19 +104,23 @@ it("writes a mapped model-body edit to the shared owner used by every experiment
     expect(view.ok, JSON.stringify(view)).toBe(true);
     if (!view.ok) return;
     expect(view.source.text).toContain("3*gain*v(A)");
-    const mapped = planCircuitSourceEdit(
-      view.source,
-      view.source.text.replace("3*gain", "4*gain"),
-    );
-    expect(mapped.ok, JSON.stringify(mapped)).toBe(true);
-    if (mapped.ok)
-      expect(mapped.modelUpdates?.[0]?.files[0]?.text).toContain("4*gain");
+    const mapped = (next: string) =>
+      planMappedProjectModelEdit(
+        view.source.text,
+        next,
+        view.source.modelLocations ?? [],
+        view.source.modelSnapshots ?? [],
+      );
+    const body = mapped(view.source.text.replace("3*gain", "4*gain"));
+    expect(body, JSON.stringify(body)).toMatchObject({
+      matched: true,
+      ok: true,
+    });
+    if (body.matched && body.ok)
+      expect(body.modelUpdates[0]?.files[0]?.text).toContain("4*gain");
     expect(
-      planCircuitSourceEdit(
-        view.source,
-        view.source.text.replace("amp A B", "amp B A"),
-      ).ok,
-    ).toBe(false);
+      mapped(view.source.text.replace("amp A B", "amp B A")),
+    ).toMatchObject({ matched: true, ok: false });
   }
 });
 

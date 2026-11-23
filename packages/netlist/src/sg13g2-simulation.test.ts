@@ -1,9 +1,9 @@
-import { createEmptyProject, createSimulationFolder } from "@icm/model";
+import { createEmptyProject } from "@icm/model";
+import { createSimulationFolder } from "../../model/src/simulation-folder.test-support.js";
 import { expect, it } from "vitest";
 import {
   ngspiceSimulationDevices,
-  nativeDeviceOpVectors,
-  nativeTerminalCurrent,
+  nativeDeviceOpFields,
 } from "./simulation-ngspice-devices.js";
 import { compileNgspiceSourceSimulation } from "./simulation-source-ngspice.js";
 import { createDesignNetlistExport } from "./export.js";
@@ -116,15 +116,11 @@ it.each(["nmos", "pmos"] as const)(
     });
     const [device] = ngspiceSimulationDevices(project, folder.input);
     expect(device!.nativeDevice).toBe(`n.xm1.nsg13_lv_${polarity}`);
-    expect(nativeDeviceOpVectors(device!)).toEqual([
+    expect(nativeDeviceOpFields(device!).map(({ vector }) => vector)).toEqual([
       `@n.xm1.nsg13_lv_${polarity}[ide]`,
       `@n.xm1.nsg13_lv_${polarity}[vgs]`,
       `@n.xm1.nsg13_lv_${polarity}[vds]`,
     ]);
-    if (polarity === "pmos")
-      expect(
-        nativeTerminalCurrent({ ...device!, reference: "xdut.xm1" }, "D").ok,
-      ).toBe(false);
     const compiled = compileNgspiceSourceSimulation(project, folder);
     expect(compiled.ok, JSON.stringify(compiled)).toBe(true);
     if (!compiled.ok) return;

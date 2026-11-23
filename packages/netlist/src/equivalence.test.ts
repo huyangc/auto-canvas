@@ -3,8 +3,6 @@ import { createEmptyProject } from "@icm/model";
 import type { DesignNetlistIR, DesignNetlistInstance } from "./ir.js";
 import {
   compareElectricalGraphs,
-  compareElectricalTopologies,
-  electricalGraphTopologySimilarity,
   electricalGraphFromIR,
   projectElectricalGraph,
   type ElectricalGraphResult,
@@ -369,10 +367,9 @@ describe("electrical duplicate comparison", () => {
     b.cells[0]!.instances[0]!.parameters[0]!.rawValue = "2k";
     expect(compareElectricalGraphs(graph(a), graph(b))).toBe("different");
   });
-});
 
-describe("electrical topology similarity", () => {
-  it("matches reviewed SKY130 MOS wrappers to primitives without confusing polarity or pin roles", () => {
+  it("exact comparison tells a reviewed SKY130 MOS wrapper from its primitive", () => {
+    // Moved from the retired topology comparison: its exact-graph assertion.
     const primitive = circuit(
       [mos("M1", "NMOS", "d", "g", "s", "b")],
       ["d", "g", "s", "b"],
@@ -384,96 +381,11 @@ describe("electrical topology similarity", () => {
     instance.target = "sky130_fd_pr__nfet_01v8_lvt";
     const a = ready(electricalGraphFromIR(primitive));
     const b = ready(electricalGraphFromIR(wrapped));
+    // A wrapper call and a primitive card are different exact netlists.
     expect(compareElectricalGraphs(a, b)).toBe("different");
-    expect(compareElectricalTopologies(a, b)).toBe("equal");
-    wrapped.externalMasters = [
-      {
-        id: "owned",
-        name: instance.target!,
-        implementationKind: "source",
-        terminals: [],
-        formalParameters: [],
-      },
-    ];
-    expect(
-      compareElectricalTopologies(a, ready(electricalGraphFromIR(wrapped))),
-    ).toBe("different");
-    delete wrapped.externalMasters;
-    instance.target = "sky130_fd_pr__pfet_01v8";
-    expect(
-      compareElectricalTopologies(a, ready(electricalGraphFromIR(wrapped))),
-    ).toBe("different");
-    // An arbitrary four-pin external block is not evidence of a MOS device.
-    instance.target = "custom_four_pin_block";
-    expect(
-      compareElectricalTopologies(a, ready(electricalGraphFromIR(wrapped))),
-    ).toBe("different");
   });
 
-  it("keeps unknown black-box identities distinct even with identical interfaces", () => {
-    const block = (target: string) =>
-      ready(
-        electricalGraphFromIR(
-          circuit([
-            {
-              id: "X1",
-              reference: "X1",
-              invocationKind: "subcircuit",
-              deviceClass: "hierarchical",
-              target,
-              nodes: ["VDD", "VSS", "IN", "OUT"].map((pinName) => ({
-                pinName,
-                netName: pinName,
-              })),
-              parameters: [],
-            },
-          ]),
-        ),
-      );
-    expect(
-      compareElectricalTopologies(block("amplifier"), block("comparator")),
-    ).toBe("different");
-    expect(
-      compareElectricalTopologies(block("amplifier"), block("amplifier")),
-    ).toBe("equal");
-  });
-
-  it("uses the authored MOS polarity with arbitrary process model names", () => {
-    const project = createEmptyProject("process", "Process");
-    const document = project.documents[0]!;
-    document.instances = ["M1", "M2"].map((id) => ({
-      id,
-      reference: id,
-      symbolId: "nmos",
-      placement: null,
-      netlist: {
-        binding: { kind: "model", deviceClass: "mos", name: "custom_n_lvt" },
-        parameters: { w: "1u", l: "100n" },
-      },
-    }));
-    document.nets = ["D", "G", "S", "B"].map((pinName) => ({
-      id: pinName,
-      terminals: document.instances.map(({ id }) => ({
-        instanceId: id,
-        pinName,
-      })),
-    }));
-    const a = ready(projectElectricalGraph(project));
-    document.instances[0]!.netlist!.binding = {
-      kind: "model",
-      deviceClass: "mos",
-      name: "another_n_model",
-    };
-    expect(
-      compareElectricalTopologies(a, ready(projectElectricalGraph(project))),
-    ).toBe("equal");
-    document.instances[0]!.symbolId = "pmos";
-    expect(
-      compareElectricalTopologies(a, ready(projectElectricalGraph(project))),
-    ).toBe("different");
-  });
-
-  it("finds the same five-transistor OTA across renamed, reordered, and global supply terminals", () => {
+  it("keeps exact identity strict across renamed, reordered, and global supply terminals", () => {
     const ota = circuit(
       [
         mos("M1", "NMOS", "mirror", "vin", "tail", "vss"),
@@ -497,97 +409,9 @@ describe("electrical topology similarity", () => {
     for (const rail of ["high", "low"]) {
       renamed.cells[0]!.nets.find((net) => net.name === rail)!.scope = "global";
     }
-    const a = ready(electricalGraphFromIR(ota));
-    const b = ready(electricalGraphFromIR(renamed));
-
-    expect(compareElectricalGraphs(a, b)).toBe("different");
-    expect(compareElectricalTopologies(a, b)).toBe("equal");
-    expect(electricalGraphTopologySimilarity(a, b)).toBe(1);
-  });
-
-  it("ranks the same topology above a partial or unrelated circuit without treating values as structure", () => {
-    const reference = ready(
-      electricalGraphFromIR(
-        circuit(
-          [resistor("R1", "in", "n"), resistor("R2", "n", "out")],
-          ["in", "out"],
-        ),
-      ),
-    );
-    const differentValues = ready(
-      electricalGraphFromIR(
-        circuit(
-          [
-            resistor("A", "start", "middle", "2k"),
-            resistor("B", "middle", "end", "3k"),
-          ],
-          ["start", "end"],
-        ),
-      ),
-    );
-    const partial = ready(
-      electricalGraphFromIR(
-        circuit([resistor("R1", "in", "out")], ["in", "out"]),
-      ),
-    );
-    const unrelated = ready(
-      electricalGraphFromIR(
-        circuit(
-          [
-            {
-              id: "M1",
-              reference: "M1",
-              deviceClass: "mos",
-              invocationKind: "primitive",
-              target: "NMOS",
-              nodes: ["D", "G", "S", "B"].map((pinName) => ({
-                pinName,
-                netName: pinName,
-              })),
-              parameters: [],
-            },
-          ],
-          ["D", "G", "S", "B"],
-        ),
-      ),
-    );
-
-    expect(electricalGraphTopologySimilarity(reference, differentValues)).toBe(
-      1,
-    );
-    expect(
-      electricalGraphTopologySimilarity(reference, partial),
-    ).toBeGreaterThan(electricalGraphTopologySimilarity(reference, unrelated));
-    expect(electricalGraphTopologySimilarity(reference, partial)).toBeLessThan(
-      1,
-    );
-  });
-
-  it("retains recognizable transistor polarity while ignoring model spelling", () => {
-    const mos = (target: string) =>
-      ready(
-        electricalGraphFromIR(
-          circuit([
-            {
-              id: "M1",
-              reference: "M1",
-              deviceClass: "mos",
-              invocationKind: "primitive",
-              target,
-              nodes: ["D", "G", "S", "B"].map((pinName) => ({
-                pinName,
-                netName: pinName,
-              })),
-              parameters: [{ name: "w", rawValue: "1u" }],
-            },
-          ]),
-        ),
-      );
-    expect(
-      electricalGraphTopologySimilarity(mos("NMOS"), mos("nfet_01v8")),
-    ).toBe(1);
-    expect(
-      electricalGraphTopologySimilarity(mos("NMOS"), mos("PMOS")),
-    ).toBeLessThan(1);
+    // The exact graph reads labels, edges, bucket and cards only: renaming,
+    // reordering and global rails stay differences, and a copy is equal.
+    expect(compare(ota, renamed)).toBe("different");
+    expect(compare(ota, structuredClone(ota))).toBe("equal");
   });
 });

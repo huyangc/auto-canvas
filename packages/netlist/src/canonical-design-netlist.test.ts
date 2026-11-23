@@ -1,8 +1,5 @@
-import {
-  createEmptyProject,
-  createSimulationFolder,
-  freezeSnapshot,
-} from "@icm/model";
+import { createEmptyProject, freezeSnapshot } from "@icm/model";
+import { createSimulationFolder } from "../../model/src/simulation-folder.test-support.js";
 import { describe, expect, it } from "vitest";
 
 import { createDesignNetlistExport } from "./export.js";

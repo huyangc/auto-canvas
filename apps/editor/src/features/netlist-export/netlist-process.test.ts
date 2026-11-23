@@ -1,11 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import * as engine from "@icm/edit-engine";
 import * as devices from "@icm/devices";
-import {
-  createEmptyProject,
-  createSimulationFolder,
-  type CircuitProject,
-} from "@icm/model";
+import { createEmptyProject, type CircuitProject } from "@icm/model";
+import { createSimulationFolder } from "../../../../../packages/model/src/simulation-folder.test-support.js";
 import {
   executeProjectTransaction,
   type ProjectStructureEdit,

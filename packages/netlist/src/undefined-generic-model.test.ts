@@ -1,12 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  createEmptyDocument,
-  createEmptyProject,
-  createSimulationFolder,
-} from "@icm/model";
+import { createEmptyDocument, createEmptyProject } from "@icm/model";
+import { createSimulationFolder } from "../../model/src/simulation-folder.test-support.js";
 
-import { createDesignNetlistExport, designExtractsNetlist } from "./export.js";
+import { createDesignNetlistExport } from "./export.js";
 import { compileNgspiceSourceSimulation } from "./simulation-source-ngspice.js";
 
 /** A Cell `dut` of transistors in parallel, bound to the given targets. */
@@ -114,7 +111,6 @@ describe("a generic target the netlist does not define (#1420)", () => {
           "M1 and M2 name NMOS and M3 names PMOS, which the netlist defines with stand-in models, BSIM4 with its defaults rather than any real device, so it reads back and runs in ngspice and Spectre; set a model for a real device before simulating",
       }),
     ]);
-    expect(designExtractsNetlist(project)).toBe(true);
     // Spectre has its own BSIM4.
     const spectre = createDesignNetlistExport(project, { format: "spectre" });
     expect(spectre.status === "ready" && spectre.file.text).toContain(

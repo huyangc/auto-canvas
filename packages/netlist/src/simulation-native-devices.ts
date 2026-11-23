@@ -20,7 +20,6 @@ import {
   type NativeCurrentSense,
 } from "./simulation-native-current.js";
 import { vacaskIdentifier } from "./vacask-printer.js";
-export { nativeTerminalCurrent } from "./simulation-native-current.js";
 import {
   resolveNativeModelLibraries,
   type NativeModelLibrarySymbols,

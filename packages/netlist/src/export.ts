@@ -139,15 +139,9 @@ function applyPortCase(ir: DesignNetlistIR, portCase: NetlistPortCase): void {
 }
 
 /**
- * Whether this Cell extracts far enough to write a netlist file.
- *
- * Missing model targets and required device parameters are blocking errors.
- * A structural netlist never substitutes an undefined token for an electrical
- * fact. One definition serves the editor, the Gallery badge and any report, so
- * a circuit is never called extractable in one place and not in another.
- */
-/**
- * What answer `designExtractsNetlist` is currently giving.
+ * Which version of the extractability rule a stored mark reflects: a Cell
+ * extracts when `createDesignNetlistExport` is ready and
+ * `unfinishedDrawingDiagnostics` finds nothing (`eda/snapshot.mjs` records it).
  *
  * A stored mark is only as good as the rule that produced it, and the rule
  * moves: a body that now follows the drawn supply, a dead-end node that now
@@ -189,20 +183,6 @@ function applyPortCase(ir: DesignNetlistIR, portCase: NetlistPortCase): void {
  * declarations whose original model bodies are absent from the Project.
  */
 export const NETLIST_MARK_RULE_VERSION = 15;
-
-export function designExtractsNetlist(
-  project: CircuitProject,
-  options: DesignNetlistAnalysisOptions = {},
-): boolean {
-  const result = createDesignNetlistExport(project, {
-    format: "spice",
-    ...options,
-  });
-  return (
-    result.status === "ready" &&
-    unfinishedDrawingDiagnostics(result.diagnostics).length === 0
-  );
-}
 
 /**
  * Export the circuit exactly as its persisted netlist bindings describe it.

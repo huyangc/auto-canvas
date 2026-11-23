@@ -1,11 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { createEmptyProject, createSimulationFolder } from "@icm/model";
-import {
-  nativeSimulationDevices,
-  nativeTerminalCurrent,
-} from "./simulation-native-devices.js";
+import { createEmptyProject } from "@icm/model";
+import { createSimulationFolder } from "../../model/src/simulation-folder.test-support.js";
+import { nativeSimulationDevices } from "./simulation-native-devices.js";
 import { compileSourceSimulation } from "./simulation-source-compile.js";
-import { nativeAcquisitionEdit } from "./simulation-native-save-edit.js";
 import { generateCircuitSource } from "./simulation-circuit-source.js";
 import {
   mkdtempSync,
@@ -86,14 +83,11 @@ function choose(f: ReturnType<typeof fixture>) {
   if (!baseline.ok) throw Error(JSON.stringify(baseline.diagnostics));
   const devices = nativeSimulationDevices(f.project, f.folder.input);
   const senses = devices.flatMap((d) => d.currentSenses);
-  const edited = nativeAcquisitionEdit(
-    f.entry.text,
-    f.entry.text.indexOf("analysis bias"),
-    senses.map((s) => s.save),
-    true,
+  // Authored saves at the top of the control block select every sense.
+  f.entry.text = f.entry.text.replace(
+    "control\n",
+    `control\nsave ${senses.map((s) => s.save).join(" ")}\n`,
   );
-  if (!edited.ok) throw Error(edited.error.message);
-  f.entry.text = edited.text;
   return senses;
 }
 
@@ -199,10 +193,14 @@ describe("native terminal sense compilation", () => {
     f.doc.netlist!.terminals[0]!.name = sense.senseNode;
     const changed = nativeSimulationDevices(f.project, f.folder.input)[0]!;
     expect(changed.currentSenses[0]!.reference).toBe(sense.reference);
-    expect(nativeTerminalCurrent(changed, "1").ok).toBe(false);
     f.entry.text = f.entry.text.replace("save default", `save ${sense.save}`);
     const compiled = compileSourceSimulation(f.project, f.folder);
+    // The renamed terminal leaves the generated branch unresolved.
     expect(compiled.ok).toBe(false);
+    if (!compiled.ok)
+      expect(compiled.diagnostics.map((d) => d.code)).toContain(
+        "SIMULATION_CURRENT_SENSE_UNRESOLVED",
+      );
   });
   it("accepts the native unknown alias and detects a global private-node collision", () => {
     const f = fixture();
