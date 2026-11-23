@@ -338,6 +338,7 @@ export function useAgentSession(
             "x-editor-secret": live.editorSecret,
           },
           body: JSON.stringify({ action }),
+          keepalive: action === "revoke",
           signal,
         },
       );

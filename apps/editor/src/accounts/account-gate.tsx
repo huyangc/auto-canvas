@@ -284,6 +284,7 @@ export function mountAccountGate(
         try {
           const result = await fetch(apiUrl("auth/logout"), { method: "POST" });
           if (!result.ok) throw Error();
+          window.dispatchEvent(new Event(ACCOUNT_SESSION_ENDING));
           announce();
           reload();
         } catch {
