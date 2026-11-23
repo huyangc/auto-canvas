@@ -173,30 +173,17 @@ export async function stageT({ sandbox, report, notebook }) {
         // straight to its cleanup.
         if (!transportOk) continue;
         if (configuration.host === "127.0.0.1") {
-          // Every request to the port goes through the ownership gate (R8-2);
-          // a port that changed hands is reported and the request is not sent.
-          // The gate refuses before it sends, so its OwnershipLost is thrown
-          // synchronously, not as a rejected promise: caught here, never a
-          // stack trace through the stage.
-          const get = ownershipGate(sandbox, nextPort, server.pid);
+          // The upstream goes away, then the probe: the freed upstream port
+          // must be vacant before it is sent (R19-4), and every request goes
+          // through the ownership gate (R8-2).
           await stub.close();
-          let res;
-          try {
-            res = await get("/canvas");
-          } catch (error) {
-            if (error instanceof OwnershipLost) {
-              report.fail(
-                `${prefix}the server owned its port before the upstream-down request`,
-                error.message,
-              );
-            } else res = { status: error.message };
-          }
-          if (res)
-            report.check(
-              `${prefix}GET /canvas with the upstream down -> 500`,
-              res.status === 500,
-              `status ${res.status}`,
-            );
+          await upstreamDownProbe({
+            sandbox,
+            report,
+            prefix,
+            get: ownershipGate(sandbox, nextPort, server.pid),
+            stubPort,
+          });
         }
       } else {
         await singleRuleControl({
@@ -230,6 +217,60 @@ export async function stageT({ sandbox, report, notebook }) {
       }
     }
   }
+}
+
+/**
+ * R19-4: the upstream-down probe. After the stub's listener is closed, the
+ * released port must still be vacant. Next answers a failed upstream with 500,
+ * so a probe forwarded to a different process that took the port would have
+ * that process's answer read as the check's own — a 500 would pass. The
+ * vacancy is required immediately before the request; when a listener holds
+ * the port the check fails and nothing is sent. The request itself goes
+ * through `get`, the stage's ownership gate for the server's port.
+ *
+ * Returns whether the 500 was observed.
+ */
+export async function upstreamDownProbe({
+  sandbox,
+  report,
+  prefix,
+  get,
+  stubPort,
+}) {
+  const name = `${prefix}the upstream port ${stubPort} is vacant after the stub closed`;
+  let listeners;
+  try {
+    listeners = sandbox.listenerPids(stubPort);
+  } catch (error) {
+    report.fail(name, `${error.message}; the probe was not sent`);
+    return false;
+  }
+  if (listeners.length) {
+    report.fail(
+      name,
+      `listener(s) ${listeners.join(", ")} took the port; the probe was not sent`,
+    );
+    return false;
+  }
+  report.ok(name);
+  let res;
+  try {
+    res = await get("/canvas");
+  } catch (error) {
+    if (error instanceof OwnershipLost) {
+      report.fail(
+        `${prefix}the server owned its port before the upstream-down request`,
+        error.message,
+      );
+      return false;
+    }
+    res = { status: error.message };
+  }
+  return report.check(
+    `${prefix}GET /canvas with the upstream down -> 500`,
+    res.status === 500,
+    `status ${res.status}`,
+  );
 }
 
 /**

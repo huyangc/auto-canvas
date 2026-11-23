@@ -27,8 +27,13 @@ import {
   removeNext,
   survivingPids,
 } from "./stage-a.mjs";
-import { removeAppNext, singleRuleControl, writeApp } from "./stage-t.mjs";
-import { startStub, transportAssertions } from "./transport.mjs";
+import {
+  removeAppNext,
+  singleRuleControl,
+  upstreamDownProbe,
+  writeApp,
+} from "./stage-t.mjs";
+import { rawRequest, startStub, transportAssertions } from "./transport.mjs";
 import {
   abnormalEnd,
   awaitOwnership,
@@ -38,6 +43,8 @@ import {
   OwnershipLost,
   proxiedGate,
   StageAborted,
+  startNext,
+  stopServer,
   tail,
   writePackage,
 } from "./steps.mjs";
@@ -310,6 +317,9 @@ export async function stageS({ sandbox, report }) {
   await rewriteDestinationControl(sandbox, report);
   await swcPreflightControls(sandbox, report);
   await listenerBudgetControl(sandbox, report);
+  await startupDeadlineControl(sandbox, report);
+  await preflightCwdControl(sandbox, report);
+  await upstreamVacancyControl(sandbox, report);
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -1634,4 +1644,224 @@ async function listenerBudgetControl(sandbox, report) {
       /whole 0 ms budget/.test(exhaustedProxied.message),
     `bounded lsof: ${bounded?.message ?? "not bounded"} after ${elapsed} ms (the stand-in sleeps 5 s); gate with a 0 ms budget: ${exhausted?.message ?? "sent"}; proxied gate: ${exhaustedProxied?.message ?? "sent"}`,
   );
+}
+
+// ---- R19-2: the startup listener checks share the wait's deadline --------
+
+/**
+ * R19-2: `startNext`'s listener enumerations are bounded by the time their
+ * wait has left, and the readiness request is issued only with what remains
+ * after the enumeration. A stand-in `lsof` that sleeps 5 s is cut off at the
+ * 1.2 s the control gives the wait: `startNext` reports the listener check as
+ * its failure within a few seconds instead of blocking, and no request is
+ * sent to the server it started. That the server would have logged one is
+ * shown directly afterwards.
+ */
+async function startupDeadlineControl(sandbox, report) {
+  // The real lsof, resolved before the stand-in goes on PATH (the stand-in
+  // must not find itself).
+  let realLsof = "";
+  try {
+    realLsof = execFileSync("sh", ["-c", "command -v lsof"], {
+      encoding: "utf8",
+      env: { PATH: process.env.PATH ?? "" },
+    }).trim();
+  } catch {
+    realLsof = "";
+  }
+  if (!realLsof) {
+    report.fail(
+      "S R19-2: a slow listener check in startNext ends at the wait's deadline and sends nothing",
+      "no lsof to stand in for",
+    );
+    return;
+  }
+  const base = path.join(sandbox.root, "self-check", "r19-2");
+  const app = path.join(base, "app");
+  const bin = path.join(base, "bin");
+  const requests = path.join(base, "requests.log");
+  sandbox.makeDir(bin, { recursive: true });
+  // A slow but correct enumeration: after 5 s it answers as the real lsof
+  // would, so the deadline is the only thing between it and a request.
+  sandbox.writeFile(
+    path.join(bin, "lsof"),
+    `#!/bin/sh\n/bin/sleep 5\nexec ${realLsof} "$@"\n`,
+    0o755,
+  );
+  sandbox.writeFile(requests, "");
+  const fakeNext = `"use strict";
+const fs = require("fs");
+const http = require("http");
+const args = process.argv.slice(2);
+if (args[0] !== "start") process.exit(2);
+const port = Number(args[args.indexOf("-p") + 1]);
+const server = http.createServer((req, res) => {
+  fs.appendFileSync(${JSON.stringify(requests)}, req.url + "\\n");
+  res.writeHead(200, { "content-type": "text/html" });
+  res.end("<main>fake</main>");
+});
+server.listen(port, "127.0.0.1");
+`;
+  const binDir = path.join(app, "node_modules/next/dist/bin");
+  sandbox.makeDir(binDir, { recursive: true });
+  sandbox.writeFile(path.join(binDir, "next"), fakeNext);
+  const port = await sandbox.freePort();
+  const savedPath = process.env.PATH;
+  let result;
+  let elapsed = 0;
+  try {
+    process.env.PATH = `${bin}:${savedPath ?? ""}`;
+    const started = Date.now();
+    result = await startNext(sandbox, {
+      dir: app,
+      port,
+      env: sandbox.env(),
+      name: "self-r19-start",
+      timeoutMs: 1200,
+    });
+    elapsed = Date.now() - started;
+  } finally {
+    process.env.PATH = savedPath;
+  }
+  const sentDuringCheck = (sandbox.readFile(requests, "utf8") ?? "").trim();
+  // The server is still up: a direct request now reaches it and is logged,
+  // so the empty log above is a fact about the check, not about a server
+  // that never ran.
+  let reachable = false;
+  try {
+    reachable = await waitFor(
+      () => sandbox.listenerState(port, result.handle.pid).state !== "none",
+      5000,
+      50,
+    );
+    await rawRequest(port, "/direct");
+    reachable =
+      reachable &&
+      (sandbox.readFile(requests, "utf8") ?? "").trim() === "/direct";
+  } catch {
+    reachable = false;
+  }
+  report.check(
+    "S R19-2: a slow listener check in startNext ends at the wait's deadline and sends nothing",
+    typeof result.error === "string" &&
+      new RegExp(
+        `the listener check for port ${port} did not finish within the 1200 ms`,
+      ).test(result.error) &&
+      elapsed < 4000 &&
+      sentDuringCheck === "" &&
+      reachable,
+    `error ${JSON.stringify(result.error?.split("\n")[0])} after ${elapsed} ms (the stand-in lsof sleeps 5 s); requests the fake server saw during the check: ${JSON.stringify(sentDuringCheck)}; a direct request afterwards is logged: ${reachable}`,
+  );
+  await stopServer(sandbox, report, "S R19-2 fake next start", result.handle);
+}
+
+// ---- R19-3: the SWC preflight runs inside the sandbox ---------------------
+
+/**
+ * R19-3: the native SWC preflight's child runs with the sandbox root as its
+ * working directory. A binding that writes `./<name>` lands inside the
+ * throwaway root; nothing appears beside the caller's working directory (the
+ * previous code inherited it).
+ */
+async function preflightCwdControl(sandbox, report) {
+  const modules = path.join(
+    sandbox.root,
+    "self-check",
+    "r19-3",
+    "node_modules",
+  );
+  const name = `escaped-${sandbox.randomToken()}.txt`;
+  const files = {
+    "next/package.json": '{"name":"next","version":"15.5.18"}\n',
+    "typescript/lib/typescript.js": "",
+    "@types/react/index.d.ts": "",
+    "@types/node/index.d.ts": "",
+    "@next/swc-fake/package.json":
+      '{"name":"@next/swc-fake","main":"index.js"}\n',
+    "@next/swc-fake/index.js":
+      `require("fs").writeFileSync(${JSON.stringify(`./${name}`)}, "written by the binding");\n` +
+      "module.exports = {};\n",
+  };
+  for (const [relative, content] of Object.entries(files)) {
+    const file = path.join(modules, relative);
+    sandbox.makeDir(path.dirname(file), { recursive: true });
+    sandbox.writeFile(file, content);
+  }
+  const inside = path.join(sandbox.root, name);
+  const nearCaller = path.join(process.cwd(), name);
+  const result = await preflightModules(sandbox, modules, {
+    timeoutMs: 60_000,
+  });
+  const written = sandbox.readFile(inside, "utf8");
+  report.check(
+    "S R19-3: a binding's relative write lands inside the sandbox, not beside the caller's cwd",
+    result.problems.length === 0 &&
+      written === "written by the binding" &&
+      !exists(nearCaller),
+    `problems ${JSON.stringify(result.problems)}; ${inside} ${written === undefined ? "does not exist" : "holds the binding's file"}; beside the caller's cwd (${process.cwd()}): ${exists(nearCaller)}`,
+  );
+}
+
+// ---- R19-4: the upstream port is vacant before the probe ------------------
+
+/**
+ * R19-4: after the stub closes, the upstream-down probe requires the freed
+ * port to have no listener. A stand-in that took the port makes the probe
+ * fail without a request; with the port vacant the request is sent and its
+ * 500 is accepted (the previous code sent it in both cases).
+ */
+async function upstreamVacancyControl(sandbox, report) {
+  const frontPort = await sandbox.freePort();
+  const upstreamPort = await sandbox.freePort();
+  const requests = [];
+  const front = createServer((req, res) => {
+    requests.push(req.url);
+    res.writeHead(500);
+    res.end("upstream down");
+  });
+  await new Promise((resolve, reject) => {
+    front.once("error", reject);
+    front.listen(frontPort, "127.0.0.1", resolve);
+  });
+  const { failures, report: quiet } = quietReporter();
+  const intruder = createServer((req, res) => {
+    res.writeHead(500);
+    res.end("took the port");
+  });
+  await new Promise((resolve) =>
+    intruder.listen(upstreamPort, "127.0.0.1", resolve),
+  );
+  let taken;
+  try {
+    taken = await upstreamDownProbe({
+      sandbox,
+      report: quiet,
+      prefix: "",
+      get: ownershipGate(sandbox, frontPort, process.pid),
+      stubPort: upstreamPort,
+    });
+  } finally {
+    await new Promise((resolve) => intruder.close(resolve));
+  }
+  const sentWhileTaken = requests.length;
+  const vacant = await upstreamDownProbe({
+    sandbox,
+    report: quiet,
+    prefix: "",
+    get: ownershipGate(sandbox, frontPort, process.pid),
+    stubPort: upstreamPort,
+  });
+  report.check(
+    "S R19-4: the upstream-down probe is sent only while the freed upstream port is vacant",
+    taken === false &&
+      failures.length === 1 &&
+      /vacant after the stub closed/.test(failures[0]) &&
+      /took the port/.test(failures[0]) &&
+      sentWhileTaken === 0 &&
+      vacant === true &&
+      requests.length === 1 &&
+      requests[0] === "/canvas",
+    `stand-in on the freed port: returned ${taken}, ${JSON.stringify(failures)}, ${sentWhileTaken} request(s) reached the frontend; vacant: returned ${vacant}, requests ${JSON.stringify(requests)}`,
+  );
+  await new Promise((resolve) => front.close(resolve));
 }

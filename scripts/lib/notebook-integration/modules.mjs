@@ -174,10 +174,14 @@ export async function preflightModules(
     if (!fs.existsSync(path.join(modules, file)))
       problems.push(`${file} is missing`);
   if (problems.length) return { problems, version };
+  // The binding's own entry point runs with the sandbox root as its working
+  // directory (R19-3): a package that writes a relative file lands inside the
+  // throwaway root, never beside whatever directory this script was started
+  // from. `sandbox.run` validates the directory like any other path it acts on.
   const result = await sandbox.run(
     process.execPath,
     ["-e", LOAD_NATIVE, modules],
-    { env: sandbox.env(), name: "swc-preflight", timeoutMs },
+    { cwd: sandbox.root, env: sandbox.env(), name: "swc-preflight", timeoutMs },
   );
   // After an interrupt the sandbox is gone: the killed check says nothing
   // about the copy, and the stage is stopping anyway.

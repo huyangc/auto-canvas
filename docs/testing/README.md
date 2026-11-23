@@ -186,7 +186,14 @@ the probe: a stalled server can neither extend the limit nor have a late
 success accepted. The listener enumeration of that readiness probe is bounded
 by the same deadline as the request it precedes, and the remaining time is
 recomputed after it, so a slow `lsof` cannot make the request outlive the
-limit.
+limit. The same holds for the two startup waits — `next start`'s listener poll
+and A6's ownership wait: each enumeration takes the time its wait has left,
+with the time recomputed between the two ports, and a check that used up the
+wait is reported as that wait's failure with nothing further sent. Stage T's
+upstream-down control also requires the freed upstream port to have no
+listener immediately before its request: if another process took the port,
+Next would forward the request to it and a 500 would be read as the check's
+own, so that check fails and nothing is sent.
 
 Before a built app is started or probed, the check reads that build's own
 `.next/routes-manifest.json` and requires every rewrite destination to be one
@@ -198,10 +205,18 @@ the developer's backend on port 8000 — and requests would reach it while the
 check watched a temporary port. A build whose destinations are not the run's
 is reported and never started; the A4 negative control still runs, because the
 base revision's two rules do point at the temporary backend (only its canvas
-rules are missing, which is the failure the control is for). The native SWC
-preflight runs as a supervised child with a finite timeout, so a binding that
-stalls is a failure of the check within the bound and an interrupt still
-reaches the cleanup instead of blocking it.
+rules are missing, which is the failure the control is for). While A4 starts
+and probes its build, both destinations it must not use — the temporary
+backend and the runtime canvas target it hands to `next start` — are bound by
+tripwire listeners of the run, so no other local process can take either and
+receive a forwarded request; a request that still reaches a tripwire fails
+`A4 no request reached …` and its answer is never read as the stub's. The
+native SWC preflight runs as a supervised child with a finite timeout, with
+the sandbox root as its working directory, so a binding that stalls is a
+failure of the check within the bound, an interrupt still reaches the cleanup
+instead of blocking it, and a binding that writes a relative file writes
+inside the throwaway root rather than beside the directory the check was
+started from.
 
 A shutdown that leaves a process group present is reported and ends the stage
 there: nothing after it runs, so no later step reads build output, removes
@@ -215,8 +230,10 @@ cleans up instead of attempting the upstream-down probe.
 
 `--stage S` runs these refusals, the early-exit ownership wait, the per-request
 ownership gate (including the two-listener gate for a proxied request and the
-readiness loop's deadline), the abort of a stage after a failed shutdown and
-the script's own refused file operations (each after a
+readiness loop's deadline), the deadline of `next start`'s listener checks with
+a stand-in `lsof` that sleeps past it, the upstream-down probe's vacancy check,
+the SWC preflight's working directory, the abort of a stage after a failed
+shutdown and the script's own refused file operations (each after a
 simulated swap, with a sentinel outside the sandbox) against throwaway
 repositories only; it reads nothing from `--notebook`. It also runs the real
 entry script on a throwaway repository whose `frontend` is a regular file and

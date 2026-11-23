@@ -3,7 +3,7 @@
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 
-import { waitFor, waitForWithin } from "./sandbox.mjs";
+import { waitForWithin } from "./sandbox.mjs";
 import { OwnershipLost, rawRequest } from "./transport.mjs";
 
 export { OwnershipLost };
@@ -289,8 +289,17 @@ export function observeSource(sandbox, report, notebook) {
  * port. Another pid on the port fails at once (it is never signalled), and
  * ownership is checked again before every readiness request and right after
  * the readiness answer.
+ *
+ * Both waits share one limit (`timeoutMs`, the stage's 60 s; a control passes
+ * a smaller one). Each listener enumeration is bounded by the time its wait
+ * has left, and the readiness request is issued only with what is left after
+ * the enumeration (R19-2, the R11-3 shape): a slow `lsof` is a failure within
+ * the limit, and a request never outlives it.
  */
-export async function startNext(sandbox, { dir, port, env, name, marker }) {
+export async function startNext(
+  sandbox,
+  { dir, port, env, name, marker, timeoutMs = 60_000 },
+) {
   const bin = path.join(dir, "node_modules/next/dist/bin/next");
   const mark = sandbox.guardMark();
   const handle = sandbox.start(
@@ -309,13 +318,26 @@ export async function startNext(sandbox, { dir, port, env, name, marker }) {
     error: `${detail}\n${tail(sandbox.readFile(handle.logFile, "utf8") ?? "")}`,
   });
   if (pid === undefined) return fail("next start did not spawn");
+  const enumerationFailed = (error) =>
+    fail(
+      `the listener check for port ${port} did not finish within the ` +
+        `${timeoutMs} ms its wait had: ${error.message}`,
+    );
   let foreign;
-  const settled = await waitFor(() => {
+  let listenerError;
+  const settled = await waitForWithin((remaining) => {
     if (handle.exited) return true;
-    const listener = sandbox.listenerState(port, pid);
+    let listener;
+    try {
+      listener = sandbox.listenerState(port, pid, { timeoutMs: remaining });
+    } catch (error) {
+      listenerError = error;
+      return true;
+    }
     if (listener.state === "foreign") foreign = listener.pids;
     return listener.state !== "none";
-  }, 60_000);
+  }, timeoutMs);
+  if (listenerError) return enumerationFailed(listenerError);
   if (foreign)
     return fail(
       `port ${port} is held by another process (listeners ${foreign.join(", ")}; want ${pid})`,
@@ -331,26 +353,39 @@ export async function startNext(sandbox, { dir, port, env, name, marker }) {
   // it still holds (another pid, or no listener any more, fails at once).
   // Each probe is capped at the time the loop has left and the deadline holds
   // after it (R9-3), so a stalled server cannot stretch the limit or have a
-  // late success accepted.
+  // late success accepted. The listener enumeration takes its budget from the
+  // same clock (R19-2): the time is recomputed after it, and a check that used
+  // up what was left means the request is not sent at all.
   let lost;
+  let exhausted;
   const home = await waitForWithin(async (remaining) => {
-    const now = sandbox.listenerState(port, pid);
+    const started = Date.now();
+    let now;
+    try {
+      now = sandbox.listenerState(port, pid, { timeoutMs: remaining });
+    } catch (error) {
+      listenerError = error;
+      return true;
+    }
     if (now.state !== "owned") {
       lost = now;
       return true;
     }
+    const left = remaining - (Date.now() - started);
+    if (left <= 0) {
+      exhausted = `the listener check used the whole ${remaining} ms the readiness wait had left`;
+      return true;
+    }
     try {
-      const res = await rawRequest(
-        port,
-        "/",
-        "GET",
-        Math.min(remaining, 30_000),
-      );
+      const res = await rawRequest(port, "/", "GET", Math.min(left, 30_000));
       return res.status === 200 ? res : false;
     } catch {
       return false;
     }
-  }, 60_000);
+  }, timeoutMs);
+  if (listenerError) return enumerationFailed(listenerError);
+  if (exhausted)
+    return fail(`${exhausted} before GET / (nothing sent to port ${port})`);
   if (lost)
     return fail(
       `port ${port} changed owner during readiness (${lost.state}, listeners ${lost.pids.join(", ") || "none"}; want ${pid})`,
@@ -517,20 +552,48 @@ const pidAlive = (pid) => {
  * reported. Ends at once when another pid holds a port (never signalled) or a
  * reported service has exited, whichever happens first; otherwise at the
  * timeout. Returns `{ ok, seen, reason }`.
+ *
+ * The two listener enumerations of a poll take their budgets from the time the
+ * wait has left, with the time recomputed between them (R19-2): a slow `lsof`
+ * is a failure at the limit (`reason` says so, `ok` is false) instead of a
+ * block that outlives it.
  */
 export async function awaitOwnership(
   sandbox,
   { apiPort, webPort, backendPid, frontendPid, timeoutMs = 120_000 },
 ) {
-  const state = () => ({
-    api: sandbox.listenerState(apiPort, backendPid),
-    web: sandbox.listenerState(webPort, frontendPid),
-  });
-  let seen = state();
+  const state = (remaining) => {
+    const started = Date.now();
+    const left = () => {
+      const value = remaining - (Date.now() - started);
+      if (value <= 0)
+        throw new Error(
+          `the listener checks used the whole ${remaining} ms the ownership wait had`,
+        );
+      return value;
+    };
+    const api = sandbox.listenerState(apiPort, backendPid, {
+      timeoutMs: left(),
+    });
+    const web = sandbox.listenerState(webPort, frontendPid, {
+      timeoutMs: left(),
+    });
+    return { api, web };
+  };
+  let seen = {
+    api: { state: "none", pids: [] },
+    web: { state: "none", pids: [] },
+  };
   let reason = "";
-  await waitFor(
-    () => {
-      seen = state();
+  let listenerError;
+  await waitForWithin(
+    (remaining) => {
+      try {
+        seen = state(remaining);
+      } catch (error) {
+        listenerError = error;
+        return true;
+      }
       if (seen.api.state === "owned" && seen.web.state === "owned") return true;
       if (seen.api.state === "foreign" || seen.web.state === "foreign") {
         reason = "another process holds a port";
@@ -549,6 +612,12 @@ export async function awaitOwnership(
     timeoutMs,
     500,
   );
+  if (listenerError)
+    return {
+      ok: false,
+      seen,
+      reason: `the listener checks did not finish within ${timeoutMs} ms: ${listenerError.message}`,
+    };
   return {
     ok: seen.api.state === "owned" && seen.web.state === "owned",
     seen,

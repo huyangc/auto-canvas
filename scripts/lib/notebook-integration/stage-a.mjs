@@ -93,6 +93,74 @@ export function launchLogTail(sandbox, nb, launcherLog) {
   return parts.join("\n");
 }
 
+// R19-1: a port a rewrite must never send a request to is held, for as long as
+// a step runs, by this small listener of the run: every request it receives is
+// printed (the step's log file keeps it) and answered with a plain 200. A
+// request there means a probe left the destinations this run watches, and the
+// step fails for it instead of reading that answer as the stub's.
+const TRIPWIRE = String.raw`"use strict";
+const http = require("http");
+const port = Number(process.argv[1]);
+const server = http.createServer((req, res) => {
+  console.log("request " + req.method + " " + req.url);
+  req.resume();
+  req.on("end", () => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end("{}");
+  });
+});
+server.listen(port, "127.0.0.1");
+process.on("SIGTERM", () => server.close(() => process.exit(0)));
+`;
+
+/**
+ * Start a tripwire on a loopback port as a child of the sandbox (its own
+ * owned group, recorded, stopped by the caller with `stopServer`), and wait
+ * until it listens there. Returns `{ handle, bound, pid, error }`: a port held
+ * by another process, a child that exited, or a listener that never appeared
+ * is `bound: false` with `error` saying so — nothing of this run is signalled
+ * but its own child.
+ */
+async function startTripwire(sandbox, port, name) {
+  const handle = sandbox.start(
+    process.execPath,
+    ["-e", TRIPWIRE, String(port)],
+    { cwd: sandbox.root, name },
+  );
+  await handle.ready;
+  const pid = handle.pid;
+  if (pid === undefined)
+    return { handle, bound: false, error: "the tripwire did not spawn" };
+  let foreign = [];
+  const settled = await waitFor(() => {
+    if (handle.exited) return true;
+    const listener = sandbox.listenerState(port, pid);
+    if (listener.state === "foreign") foreign = listener.pids;
+    return listener.state !== "none";
+  }, 15_000);
+  if (foreign.length)
+    return {
+      handle,
+      bound: false,
+      error: `port ${port} is held by another process (listeners ${foreign.join(", ")})`,
+    };
+  if (!settled || handle.exited)
+    return {
+      handle,
+      bound: false,
+      error: handle.exited
+        ? `the tripwire exited before binding port ${port}`
+        : `port ${port} was not bound by the tripwire`,
+    };
+  return { handle, bound: true, pid };
+}
+
+/** The requests a bound tripwire recorded (its own log file, never a link). */
+const tripwireRequests = (sandbox, handle) =>
+  (sandbox.readFile(handle.logFile, "utf8") ?? "")
+    .split("\n")
+    .filter((line) => line.startsWith("request "));
+
 export async function stageA(context) {
   try {
     await stageABody(context);
@@ -450,40 +518,97 @@ async function stageABody({ sandbox, report, notebook, options }) {
           [backend, target],
         )
       : false;
+    // R19-1: the two destinations a rewrite must never use are held by
+    // tripwires of this run while A4 starts and probes: the temporary backend
+    // (A2's port, where the build's `/api` and `/mcp` rules point) and the
+    // runtime canvas target handed to `next start` below. A port another
+    // process took would otherwise receive a forwarded probe — a bad rewrite
+    // would reach it while the frontend's ownership check still passed, and
+    // an answer from it could stand in for the stub's. The tripwires are
+    // children of the sandbox like the stub, stopped in the finally.
     if (a4Destinations) {
       const web = await sandbox.freePort();
       const wrong = await sandbox.freePort();
-      const server = await startNext(sandbox, {
-        dir: frontend,
-        port: web,
-        env: sandbox.env({ CANVAS_PROXY_TARGET: `http://127.0.0.1:${wrong}` }),
-        name: "a4-start",
-      });
+      const destinations = [
+        ["the temporary backend", apiPort],
+        ["the runtime canvas target", wrong],
+      ];
+      const tripwires = [];
+      let probed = false;
       try {
-        if (
-          report.check(
-            "A4 next start owns its port and serves /",
-            !server.error,
-            () => server.error,
-          )
-        ) {
-          await transportAssertions({
-            nextPort: web,
-            stub,
-            report,
-            prefix: "A4 ",
-            owner: () => sandbox.listenerState(web, server.pid),
+        for (const [kind, port] of destinations)
+          tripwires.push({
+            kind,
+            port,
+            ...(await startTripwire(sandbox, port, `a4-tripwire-${port}`)),
           });
-          ownershipHeld(
-            sandbox,
-            report,
-            "A4 next start still owns its port after the last probe",
-            web,
-            server.pid,
+        const unbound = tripwires.filter((tripwire) => !tripwire.bound);
+        if (unbound.length) {
+          for (const tripwire of unbound)
+            report.fail(
+              `A4 the tripwire on ${tripwire.kind} is bound (port ${tripwire.port})`,
+              tripwire.error,
+            );
+          report.fail(
+            "A4 real build passes the transport table",
+            "a tripwire could not be bound, so a probe could reach another process; nothing started",
           );
+        } else {
+          const server = await startNext(sandbox, {
+            dir: frontend,
+            port: web,
+            env: sandbox.env({
+              CANVAS_PROXY_TARGET: `http://127.0.0.1:${wrong}`,
+            }),
+            name: "a4-start",
+          });
+          try {
+            if (
+              report.check(
+                "A4 next start owns its port and serves /",
+                !server.error,
+                () => server.error,
+              )
+            ) {
+              probed = true;
+              await transportAssertions({
+                nextPort: web,
+                stub,
+                report,
+                prefix: "A4 ",
+                owner: () => sandbox.listenerState(web, server.pid),
+              });
+              ownershipHeld(
+                sandbox,
+                report,
+                "A4 next start still owns its port after the last probe",
+                web,
+                server.pid,
+              );
+            }
+          } finally {
+            await stopServer(sandbox, report, "A4 next start", server.handle);
+          }
         }
       } finally {
-        await stopServer(sandbox, report, "A4 next start", server.handle);
+        for (const tripwire of tripwires) {
+          // A request here is a probe that left the destinations this run
+          // watches; the answer it got is never read as the stub's.
+          if (tripwire.bound && probed) {
+            const requests = tripwireRequests(sandbox, tripwire.handle);
+            report.check(
+              `A4 no request reached ${tripwire.kind} (port ${tripwire.port})`,
+              requests.length === 0,
+              `${requests.length} request(s): ${JSON.stringify(requests.slice(0, 5))}`,
+            );
+          }
+          await stopServer(
+            sandbox,
+            report,
+            `A4 tripwire on ${tripwire.kind}`,
+            tripwire.handle,
+          );
+        }
       }
     } else
       report.fail(
