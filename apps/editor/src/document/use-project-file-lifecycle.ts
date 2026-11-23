@@ -226,6 +226,10 @@ export function useProjectFileLifecycle({
   const publishedSnapshotTokenRef = useRef<string | null>(null);
   const [persistenceState, setPersistenceState] =
     useState<PersistenceState>("unbound");
+  // The guard asks for the live state: an import reads its files for a while,
+  // and an edit committed meanwhile must still be seen as unsaved work.
+  const persistenceStateRef = useRef(persistenceState);
+  persistenceStateRef.current = persistenceState;
   const [cloudBinding, setCloudBinding] = useState<CloudProjectBinding | null>(
     null,
   );
@@ -251,13 +255,14 @@ export function useProjectFileLifecycle({
   ] = useState<string | null>(null);
 
   function isDirtyWork(): boolean {
+    const state = persistenceStateRef.current;
     return (
       hasPendingEdits?.() === true ||
-      persistenceState === "dirty" ||
-      persistenceState === "saving" ||
-      persistenceState === "offline" ||
-      persistenceState === "conflict" ||
-      persistenceState === "failed"
+      state === "dirty" ||
+      state === "saving" ||
+      state === "offline" ||
+      state === "conflict" ||
+      state === "failed"
     );
   }
 
@@ -890,6 +895,12 @@ export function useProjectFileLifecycle({
       allowExactCurrentReplacement?: boolean;
       inTab?: boolean;
       nativeBinding?: NativeFileBinding;
+      /**
+       * Read once the file has been read, before the replacement: what keeps
+       * the Project from being replaced holds now (a draft begun during the
+       * read, another tab, a save). Only a drop passes one.
+       */
+      replacementBlocker?: () => string | null;
     } = {},
   ): Promise<boolean> {
     if (!file) return false;
@@ -961,6 +972,11 @@ export function useProjectFileLifecycle({
     ) {
       await performOpen();
       return applied;
+    }
+    const blocker = options.replacementBlocker?.();
+    if (blocker) {
+      setStatus(`Can't open a Project yet: ${blocker}`);
+      return false;
     }
     await guardDirtyReplacement(`Open ${file.name}`, performOpen);
     return applied;

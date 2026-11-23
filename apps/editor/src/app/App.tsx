@@ -4482,28 +4482,36 @@ function WorkspaceEditor({
   });
   // A file dropped from outside does what its menu command does, in both
   // modes: a netlist imports (and lays itself out), a Project file opens.
-  // The tab guard's blocker holds a drop back as it holds an open back: the
-  // import commands replace the Project, and the replace guard cannot see an
-  // unapplied code draft, which the replacement unmounts.
-  const dropBlocked = (): boolean => {
-    const blocker = projectSwitchBlockerRef.current();
+  // The tab guard's blocker holds a drop back as it holds an open back, and
+  // the files are read for a while first: the block is asked again at the
+  // replacement boundary, when a draft begun meanwhile, another tab or a
+  // save may now hold the Project.
+  const boundaryBlocker = (session: string) => (): string | null =>
+    editorDocumentController.projectSessionId !== session
+      ? "another Project is active"
+      : projectSwitchBlockerRef.current();
+  const holdDrop = (blocker: string | null): boolean => {
     if (!blocker) return false;
     setStatus(`Can't open a Project yet: ${blocker}`);
     return true;
   };
   const { dragActive: fileDropActive } = useFileDrop({
     importNetlist: (files) => {
-      if (dropBlocked()) return Promise.resolve();
-      // Read again once the files are in: a draft begun while reading must
-      // not be replaced away. Only the drop adds this; the choosers keep
-      // their own flow.
+      const blocker = boundaryBlocker(
+        editorDocumentController.projectSessionId,
+      );
+      if (holdDrop(blocker())) return Promise.resolve();
+      // Only the drop adds the second check; the choosers keep their flow.
       return importSpiceFiles(files, "native", {
-        replacementBlocker: () => projectSwitchBlockerRef.current(),
+        replacementBlocker: blocker,
       });
     },
     openProjectFile: (file) => {
-      if (dropBlocked()) return Promise.resolve();
-      return openProjectFile(file);
+      const blocker = boundaryBlocker(
+        editorDocumentController.projectSessionId,
+      );
+      if (holdDrop(blocker())) return Promise.resolve();
+      return openProjectFile(file, { replacementBlocker: blocker });
     },
     setStatus,
   });
