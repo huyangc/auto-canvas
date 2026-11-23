@@ -91,8 +91,18 @@ function finish(context) {
 // An interrupt only starts the shutdown. The running stage ends because its
 // processes stop and the sandbox refuses new ones; cleanup runs exactly once
 // (the shared disposal) and then the normal path below reports and exits.
+// The handlers stay installed (R10-2): a further signal while that shutdown
+// runs is a no-op, never Node's default termination, which would skip the
+// summary line and leave the temporary directory behind. The 60-second hard
+// stop still ends a shutdown that does not finish.
+let shuttingDown = false;
 for (const signal of ["SIGINT", "SIGTERM"])
-  process.once(signal, () => {
+  process.on(signal, () => {
+    if (shuttingDown) {
+      console.log(`interrupted (${signal}) again; cleanup is already running`);
+      return;
+    }
+    shuttingDown = true;
     interrupted = true;
     console.log(`interrupted (${signal}); cleaning up`);
     void sandbox.dispose().catch(() => {});
@@ -132,12 +142,12 @@ try {
       error.message,
     );
   } else if (error instanceof StageAborted) {
-    // R9-1: a shutdown left a process group present. That step's FAIL is the
-    // report; the stage stops here so no later step reads or writes beside a
-    // live process of the revision. The final disposal retries the groups.
-    report.note(
-      `the stage stopped after the shutdown failure: ${error.message}`,
-    );
+    // A shutdown left a process group present (R9-1), or the private modules
+    // copy failed validation (R10-1). That step's FAIL is the report; the
+    // stage stops here so no later step reads or writes beside a live process
+    // of the revision, or runs from an unvalidated copy. The final disposal
+    // retries the groups.
+    report.note(`the stage stopped: ${error.message}`);
   } else if (!interrupted)
     report.fail(options.stage, `unexpected error: ${error.stack ?? error}`);
   else report.note(`stage stopped after the interrupt: ${error.message}`);

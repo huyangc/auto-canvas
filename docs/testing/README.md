@@ -187,7 +187,13 @@ success accepted.
 
 A shutdown that leaves a process group present is reported and ends the stage
 there: nothing after it runs, so no later step reads build output, removes
-`.next` or starts a build beside a process that is still alive.
+`.next` or starts a build beside a process that is still alive. Stage T
+validates its private `node_modules` copy before every use — before each
+build and before each `next start` — and ends the stage when the copy fails,
+so no build or server ever runs from a copy that an earlier one replaced or
+linked out of the sandbox. After the transport table stops at a listener
+mismatch, no further request goes to that port: the configuration ends and
+cleans up instead of attempting the upstream-down probe.
 
 `--stage S` runs these refusals, the early-exit ownership wait, the per-request
 ownership gate (including the two-listener gate for a proxied request and the
@@ -198,6 +204,9 @@ repositories only; it reads nothing from `--notebook`. It also runs the real
 entry script on a throwaway repository whose `frontend` is a regular file and
 checks that it ends with the documented refusal (exit 2, naming the ancestor,
 no stack trace). An interrupted run still prints the stage summary and exits 130.
+The signal handlers stay installed: a further signal while the cleanup runs is
+a no-op, so a second Ctrl-C cannot terminate the run without its summary, and
+a hard stop ends a shutdown that has not finished 60 seconds after the first.
 
 The offline guard is a Node preload. It also survives npm: it is passed as
 npm's `node-options` and the script shell is pinned through the environment,

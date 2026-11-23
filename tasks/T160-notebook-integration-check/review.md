@@ -375,3 +375,41 @@ pnpm typecheck / lint / format:check / docs:check → 0
 
 The owner's listeners on 3000, 8000 and 4310 kept their PIDs; the notebook
 checkout's `git status` was unchanged.
+
+## Round 16 — changes-requested
+
+Reviewed: codex `gpt-6.2-sol` PR review round 10 of PR 113 at `63cfb10` (two
+P2, one P3; no blocking finding), each checked and found valid.
+
+| #     | Severity   | Where                                     | Finding                                                                                                                                                                                                                       | Expected fix                                                                                                                     |
+| ----- | ---------- | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| R10-1 | should-fix | `stage-t.mjs` (~122–128)                  | A stage-T build can replace `node_modules` or introduce an escaping symlink: the post-build check fails but `continue` runs the next build from the same copy, and `next start`'s changes go unchecked before the next build. | Abort the stage when the copy fails validation, and validate it before **each** reuse, so nothing runs from an unvalidated copy. |
+| R10-2 | should-fix | `notebook-integration-check.mjs` (~94–98) | The first SIGINT removes the one-shot handler, so a second Ctrl-C while cleanup waits on a child takes Node's default termination: no summary, temporary directory left. Reproduced by the reviewer.                          | Keep the handlers installed; later signals are no-ops while disposal runs.                                                       |
+| R10-3 | should-fix | `stage-t.mjs` (~145–152)                  | `transportAssertions()` returns `false` after a listener mismatch, and stage T still attempts the upstream-down probe; the second gate blocks only while the mismatch persists.                                               | Honour the return value and go straight to cleanup.                                                                              |
+
+## Round 17 — accepted
+
+Reviewed: the working tree after round 16, on 2026-11-23. Read by the
+reviewer: the diff of `stage-t.mjs` (`requireModules()`), `steps.mjs`
+(`StageAborted` generalized) and `notebook-integration-check.mjs` (persistent
+signal handlers); acceptance rerun by the reviewer.
+
+| #     | Severity | Where                            | Finding                                                                                                                                                                                                                                                                                                  | Expected fix                                                                                                                                                                                                                   |
+| ----- | -------- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| R10-1 | fixed    | `stage-t.mjs` `requireModules()` | The private module copy is validated and, on a problem, the stage aborts — before each build, after each build and before each start, so nothing runs from an unvalidated copy.                                                                                                                          | Controls with a stand-in `next`: a build that replaces the copy with a link — before, two later builds ran through the link; now the stage stops after one build. Same for a `next start` that corrupts the copy.              |
+| R10-2 | fixed    | `notebook-integration-check.mjs` | The handlers stay installed; while cleanup runs, a further signal is a no-op that says so, and the 60-second hard stop remains.                                                                                                                                                                          | Double-interrupt control: before, exit by SIGINT after 1 s, no summary, the temporary root left; now exit 130, the summary printed, no root.                                                                                   |
+| R10-3 | fixed    | `stage-t.mjs`                    | The transport table's `false` ends the configuration instead of attempting the upstream-down probe. Found by the control: the ownership gate refuses synchronously, so its throw escaped the old `.then` handler as an unexpected error; the step now reports `OwnershipLost` as its documented failure. | Controls with a stand-in `next` that closes its listener after three requests: before, the configuration ended with an escaped gate error; now the table's FAIL is the last line for that configuration and the stage goes on. |
+
+Acceptance rerun by the reviewer:
+
+```text
+stage S → 0; 59 passed, 0 failed
+stage T → 0; 140 passed, 0 failed (six new per-use module checks)
+stage A, candidate → 0; 101 passed, 0 failed
+stage A, negative control (--ref = --base) → 1; 92 passed, 9 failed: A3 (1), A4 (6), A5 (2)
+--stage X → 2; the three TMPDIR refusals → 2
+pnpm typecheck / lint / format:check / docs:check → 0
+```
+
+The owner's listeners on 3000, 8000 and 4310 kept their PIDs; the notebook
+checkout's `git status` was unchanged.

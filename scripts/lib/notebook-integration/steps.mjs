@@ -371,14 +371,16 @@ export async function startNext(sandbox, { dir, port, env, name, marker }) {
 }
 
 /**
- * A step's process group survived its shutdown (R9-1). The failure is already
- * reported; the stage stops here so no later step acts beside a process of
- * the revision that is still running (stage T would remove `.next` of a live
- * server, stage A would read build output or start another build).
+ * A step left the stage in a state no later step may run from: a process group
+ * survived its shutdown (R9-1), or the private modules copy failed validation
+ * (R10-1). The failure is already reported; the stage stops here so no later
+ * step acts beside a process of the revision that is still running (stage T
+ * would remove `.next` of a live server, stage A would read build output or
+ * start another build) or runs from an unvalidated copy.
  */
 export class StageAborted extends Error {
-  constructor(step, pgid) {
-    super(`${step}: process group ${pgid} is still present; the stage stops`);
+  constructor(detail) {
+    super(`${detail}; the stage stops`);
   }
 }
 
@@ -386,7 +388,7 @@ export class StageAborted extends Error {
 export function checkStopped(report, step, pgid, gone) {
   if (gone) return true;
   report.fail(step, `process group ${pgid} still present`);
-  throw new StageAborted(step, pgid);
+  throw new StageAborted(`${step}: process group ${pgid} is still present`);
 }
 
 /**

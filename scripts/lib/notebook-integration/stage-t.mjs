@@ -9,6 +9,7 @@ import {
   ownershipGate,
   OwnershipLost,
   ownershipHeld,
+  StageAborted,
   startNext,
   stopServer,
   tail,
@@ -57,6 +58,23 @@ export function writeApp(sandbox, app, { config, marker }) {
 export const removeAppNext = (sandbox, app) =>
   sandbox.removePath(path.join(app, ".next"));
 
+/**
+ * The private copy is validated before **every** use (R10-1): the preflight
+ * before the first build, and this check before each build and each `next
+ * start`. A copy that fails is a FAIL for this step and ends the stage, so no
+ * later build or server runs from a copy an earlier one replaced or relinked.
+ */
+export function requireModules(sandbox, report, prefix, modules, when) {
+  // A disposal has removed the copy already: this is an interrupt, not a
+  // statement about the modules.
+  sandbox.ensureOpen(`the private modules ${when}`);
+  const problems = modulesInClone(sandbox, modules);
+  const name = `${prefix}the private modules are usable ${when}`;
+  if (!problems.length) return report.ok(name);
+  report.fail(name, problems.slice(0, 10).join("; "));
+  throw new StageAborted(`${name}: ${problems[0]}`);
+}
+
 export async function stageT({ sandbox, report, notebook }) {
   const app = path.join(sandbox.root, "app");
   const modules = path.join(app, "node_modules");
@@ -95,6 +113,9 @@ export async function stageT({ sandbox, report, notebook }) {
     });
     let server;
     try {
+      // R10-1: nothing runs from a copy that a previous build or server may
+      // have replaced or relinked.
+      requireModules(sandbox, report, prefix, modules, "before next build");
       removeAppNext(sandbox, app);
       const mark = sandbox.guardMark();
       const build = await sandbox.run(
@@ -112,21 +133,17 @@ export async function stageT({ sandbox, report, notebook }) {
         mark,
         nextCommand("build"),
       );
-      // R6-3: the build may not replace or relink the private modules.
-      const shape = modulesInClone(sandbox, modules);
-      report.check(
-        `${prefix}the private modules are unchanged in shape after the build`,
-        shape.length === 0,
-        () => shape.slice(0, 10).join("; "),
-      );
+      // R6-3, R10-1: the build may not replace or relink the private modules,
+      // and a copy that fails this check is never used again.
+      requireModules(sandbox, report, prefix, modules, "after next build");
       if (
         !report.check(`${prefix}next build`, build.status === 0, () =>
           tail(build.output),
-        ) ||
-        shape.length
+        )
       )
         continue;
       const nextPort = await sandbox.freePort();
+      requireModules(sandbox, report, prefix, modules, "before next start");
       server = await startNext(sandbox, {
         dir: app,
         port: nextPort,
@@ -143,31 +160,37 @@ export async function stageT({ sandbox, report, notebook }) {
       )
         continue;
       if (configuration.rules === "two") {
-        await transportAssertions({
+        const transportOk = await transportAssertions({
           nextPort,
           stub,
           report,
           prefix,
           owner: () => sandbox.listenerState(nextPort, server.pid),
         });
+        // R10-3: the transport table stopped because the server no longer
+        // owned its port. No further request is sent — the second gate only
+        // blocks while the mismatch persists — and this configuration goes
+        // straight to its cleanup.
+        if (!transportOk) continue;
         if (configuration.host === "127.0.0.1") {
           // Every request to the port goes through the ownership gate (R8-2);
           // a port that changed hands is reported and the request is not sent.
+          // The gate refuses before it sends, so its OwnershipLost is thrown
+          // synchronously, not as a rejected promise: caught here, never a
+          // stack trace through the stage.
           const get = ownershipGate(sandbox, nextPort, server.pid);
           await stub.close();
-          const res = await get("/canvas").then(
-            (value) => value,
-            (error) => {
-              if (error instanceof OwnershipLost) {
-                report.fail(
-                  `${prefix}the server owned its port before the upstream-down request`,
-                  error.message,
-                );
-                return undefined;
-              }
-              return { status: error.message };
-            },
-          );
+          let res;
+          try {
+            res = await get("/canvas");
+          } catch (error) {
+            if (error instanceof OwnershipLost) {
+              report.fail(
+                `${prefix}the server owned its port before the upstream-down request`,
+                error.message,
+              );
+            } else res = { status: error.message };
+          }
           if (res)
             report.check(
               `${prefix}GET /canvas with the upstream down -> 500`,
