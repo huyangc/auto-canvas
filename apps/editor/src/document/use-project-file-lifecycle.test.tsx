@@ -519,6 +519,10 @@ it("refuses a second command during a dialog and admits it after Stay", async ()
   ).toBeNull();
   await act(async () => editor.file.cancelReplaceGuard());
   expect(editor.file.replaceGuard).toBeNull();
+  // Stay keeps the drawing and the staged recovery copy.
+  expect(editor.current.doc.project.name).toBe("Unsaved A");
+  expect(editor.cancelPending).not.toHaveBeenCalled();
+  expect(editor.deletedSessions).toEqual([]);
   expect(editor.file.beginReplacementCommand("After Stay")).not.toBeNull();
 });
 
