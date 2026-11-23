@@ -106,7 +106,7 @@ test("N11d seed control: the standard editor's recovery reader accepts the singl
   }
 });
 
-test("N11b the standard build keeps its recovery prompt with the API unreachable", async ({
+test("N11b the standard build needs its account server, and shows no recovery content without it", async ({
   browser,
 }) => {
   // The standard editor in single-user mode, on its own origin.
@@ -135,17 +135,23 @@ test("N11b the standard build keeps its recovery prompt with the API unreachable
     await expect(page.getByTestId("revision")).toHaveText("3");
     await expectRecovered(page, '"revision": 3');
 
-    // The API is unreachable from here on.
+    // The API is unreachable from here on. The standard editor's account
+    // gate needs it before anything else: the page shows that screen and
+    // none of the saved drawing comes up. (The parent plan's C-1 asked for
+    // the recovery prompt here; the account gate of main's accounts work
+    // supersedes it, and recovery now needs the account server.)
     const aborted: string[] = [];
     await page.route("**/api/**", async (route) => {
       aborted.push(new URL(route.request().url()).pathname);
       await route.abort();
     });
     await page.goto("/editor?recovery=meaningful");
-    const banner = page.getByTestId("startup-recovery-banner");
-    await expect(banner).toBeVisible();
-    await expect(banner).toContainText("New Circuit");
-    await expect(banner.getByRole("button", { name: "Restore" })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Account server unavailable" }),
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
+    await expect(page.getByTestId("startup-recovery-banner")).toHaveCount(0);
+    await expect(page.getByTestId("schematic-canvas")).toHaveCount(0);
     expect(aborted.length).toBeGreaterThanOrEqual(1);
     test.info().annotations.push({
       type: "N11b aborted API requests",

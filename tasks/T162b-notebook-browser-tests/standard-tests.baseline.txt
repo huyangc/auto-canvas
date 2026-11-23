@@ -16,6 +16,7 @@
 	chrome-isolation.spec.ts	compacts the editor header at half width without GitHub, credit or account controls
 	chrome-isolation.spec.ts	keeps Library Netlist and Project Code together on the left at full and half width
 	chrome-isolation.spec.ts	keeps editor chrome typography from suppressing SVG italics
+	chrome-isolation.spec.ts	reads the change log without leaving the canvas
 	chrome-isolation.spec.ts	shows no account fallback when auth providers are unavailable
 	circuit-authoring.spec.ts	No Connect can be found by NC or noconn and activates a tool, not an Instance
 	circuit-authoring.spec.ts	No Connect clears a stale hover on zoom and keeps the snap reach in screen pixels
@@ -195,6 +196,19 @@
 	editor-shell.spec.ts	keeps the command surface compact, its menus dismissable, and publishes PWA metadata
 	editor-shell.spec.ts	right-drag frames a region and fits the camera to it transiently
 	editor-shell.spec.ts	shows the complete Project Code and protects an invalid or stale draft
+	file-drop.spec.ts	a file dropped onto the window in Auto › Chromium's own drag pipeline delivers the file without navigating
+	file-drop.spec.ts	a file dropped onto the window in Auto › a Project file dropped on the window opens, with no layout after
+	file-drop.spec.ts	a file dropped onto the window in Auto › a dropped Project file asks before replacing unsaved work
+	file-drop.spec.ts	a file dropped onto the window in Auto › a malformed Project file is refused before the guard
+	file-drop.spec.ts	a file dropped onto the window in Auto › a netlist dropped behind the unsaved-work guard waits its answer
+	file-drop.spec.ts	a file dropped onto the window in Auto › a netlist dropped on the empty card is imported and laid out
+	file-drop.spec.ts	a file dropped onto the window in Auto › a netlist dropped on the top bar imports
+	file-drop.spec.ts	a file dropped onto the window in Auto › an entry dropped with its local include reaches the importer
+	file-drop.spec.ts	a file dropped onto the window in Auto › the frame follows the file across elements
+	file-drop.spec.ts	a file dropped onto the window in Auto › two Project files together are refused
+	file-drop.spec.ts	a file dropped onto the window in Draw › a drop holds back while an unapplied code draft would be lost
+	file-drop.spec.ts	a file dropped onto the window in Draw › a netlist dropped on the canvas imports and keeps Draw's chrome
+	file-drop.spec.ts	a file dropped onto the window in Draw › a netlist dropped on the code editor is imported, never inserted
 	group-mirror.spec.ts	a free wire mirrors from its context menu; one held by an unselected part says why it stays
 	hierarchy.spec.ts	Cell layout composes additive and framed pin selection, spacing, arrangement and Wire
 	hierarchy.spec.ts	Cell layout reconciles a selected pin removed by an HTTP Agent
@@ -236,6 +250,9 @@
 	hierarchy.spec.ts	starts a whole bus by default and optionally chooses a member without committing cancelled drafts
 	hierarchy.spec.ts	starts an external model with English comments and copies only its applied complete definition
 	instance-table.spec.ts	bulk edits instance JSON in the sidebar with atomic undo and live netlist updates
+	intranet-http.spec.ts	generates the rich SPICE netlist over HTTP
+	intranet-http.spec.ts	imports a SPICE file and applies automatic layout over HTTP
+	intranet-http.spec.ts	rejects changed RNL package bytes over HTTP
 	label-editing.spec.ts	Alt selects an attached label without its host, and the label then drags alone
 	label-editing.spec.ts	L labels a selected wire or snaps near an unselectable wire
 	label-editing.spec.ts	canvas text editor cancels explicitly and commits on Escape or outside click

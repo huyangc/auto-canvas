@@ -137,3 +137,33 @@ N11c changes, the validators; acceptance rerun by the reviewer.
 | 26  | fixed    | `baseUrlOf()`, `checkStandardOutput()` | Every reference is resolved against the effective base URL; the resolved origin and pathname are checked before any fetch.                                                                           | Cases: `<base href="https://elsewhere.example/">` reported; `/assets/../index.html` reported; the valid index still passes.                                               |
 | 27  | fixed    | N11c                                   | `page.on("websocket")` armed before the navigation; no socket in the agent window; a control opens `/canvas/api/agent/sessions/control/editor` and must be caught.                                   | Annotations `N11c websockets {"attempted":[],"observed":[]}` and the control's one socket.                                                                                |
 | 28  | fixed    | the three validators, docs             | `port` refused with `host`, `socket`, `db`, `dbname` and `database`.                                                                                                                                 | Refusal cases in both check scripts and the config loop.                                                                                                                  |
+
+## Rebase repair on the accounts-era main — by the reviewer
+
+`main` moved while this branch was in review: the standalone server now
+defaults to an accounts mode (`AUTO_CANVAS_AUTH` unset or `accounts`; `local`
+is the legacy single-user mode), and the standard editor gained an account
+gate. Rebasing this branch onto it (`origin/main` `d8c86d1`) needed three
+repairs, all made by the reviewer:
+
+1. **`playwright.config.ts`**: the notebook mode is added to main's new
+   mode selection (prefix, accounts, standard) and refuses
+   `AUTO_CANVAS_E2E_ACCOUNTS` as well.
+2. **The standard baseline** (`tasks/T162b-notebook-browser-tests/standard-tests.baseline.txt`)
+   gained the 17 tests main added (`chrome-isolation`, `file-drop`,
+   `intranet-http`): 459 → 476, a pure addition.
+3. **The fixture's sibling server** now passes `AUTO_CANVAS_AUTH=local`
+   explicitly (it used to inherit the default, which was single-user). Without
+   it the sibling ran in accounts mode and N11d/N11b failed.
+4. **N11b re-scoped** — the standard build's account gate needs the API
+   before anything else, so with the API unreachable the editor shows
+   "Account server unavailable" and no recovery content, instead of the
+   recovery prompt the parent plan's C-1 asked for. The case now asserts the
+   gate screen, Retry, and the absence of the banner and the canvas, with the
+   reason in the case. This supersedes that clause of C-1; the owner should
+   know the standalone editor no longer boots without its account server.
+
+Acceptance after the repairs, by the reviewer: fixture check passed (39
+refusals), 31 notebook tests passed, the notebook selection check passed, the
+standard listing equal to the new baseline; builds, typecheck, lint, format,
+docs 0.

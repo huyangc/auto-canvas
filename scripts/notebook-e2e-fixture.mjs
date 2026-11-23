@@ -424,11 +424,13 @@ function startServer(stubPort, schema) {
 }
 
 /**
- * The standalone sibling: single-user mode (no AUTO_CANVAS_AUTH), no base
- * path, the standard build, on AUTO_CANVAS_E2E_API_PORT.
+ * The standalone sibling: the legacy single-user mode (AUTO_CANVAS_AUTH=local
+ * explicitly: the server's default is now the accounts mode), no base path,
+ * the standard build, on AUTO_CANVAS_E2E_API_PORT.
  */
 function startSibling(schema) {
   return startCli("sibling", schema, {
+    AUTO_CANVAS_AUTH: "local",
     EDITOR_ROOT: standardRoot,
     PORT: String(apiPort),
   });

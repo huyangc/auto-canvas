@@ -49,7 +49,7 @@ const NOTEBOOK_MANIFEST = {
   ],
   "notebook\tnotebook-evidence.spec.ts": [
     "N11d seed control: the standard editor's recovery reader accepts the single-user seed",
-    "N11b the standard build keeps its recovery prompt with the API unreachable",
+    "N11b the standard build needs its account server, and shows no recovery content without it",
     "N11c the notebook build keeps the Agent off with a saved Agent session and ?agent=pair",
   ],
 };
