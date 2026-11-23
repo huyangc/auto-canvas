@@ -16,6 +16,7 @@ import {
   mkdtemp,
   readFile,
   rm,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { createServer } from "node:net";
@@ -185,6 +186,18 @@ try {
         "<!doctype html>\n",
       );
     }
+    // A checkout has apps/server with the driver's parser; the copy reads
+    // the installed package the same way.
+    await mkdir(join(copyRoot, "apps/server"), { recursive: true });
+    await copyFile(
+      join(root, "apps/server/package.json"),
+      join(copyRoot, "apps/server/package.json"),
+    );
+    await symlink(
+      join(root, "apps/server/node_modules"),
+      join(copyRoot, "apps/server/node_modules"),
+      "dir",
+    );
   };
   const bound = createServer();
   bound.listen(0, "127.0.0.1");
@@ -244,13 +257,41 @@ try {
       "a dbname parameter",
       withDatabase("postgresql:///auto_canvas_test?dbname=auto_canvas"),
       null,
-      "dbname or db parameter",
+      "host, socket, db, dbname or database parameter",
     ],
     [
       "a db parameter",
       withDatabase("postgresql:///auto_canvas_test?db=auto_canvas"),
       null,
-      "dbname or db parameter",
+      "host, socket, db, dbname or database parameter",
+    ],
+    [
+      "a database parameter",
+      withDatabase("postgresql:///auto_canvas_test?database=auto_canvas"),
+      null,
+      "host, socket, db, dbname or database parameter",
+    ],
+    [
+      "a host parameter",
+      withDatabase("postgresql:///auto_canvas_test_2?host=/tmp"),
+      null,
+      "host, socket, db, dbname or database parameter",
+    ],
+    [
+      "a socket parameter",
+      withDatabase("postgresql:///auto_canvas_test_2?socket=/tmp"),
+      null,
+      "host, socket, db, dbname or database parameter",
+    ],
+    [
+      // The WHATWG pathname says auto_canvas_test_2, but with the host
+      // parameter the driver prepends the encoded socket host to the path.
+      "an encoded socket host with a host parameter",
+      withDatabase("postgresql://%2Ftmp/auto_canvas_test_2?host=/tmp"),
+      null,
+      // The effective name, from pg-connection-string: the proof that the
+      // driver's own parse is what is checked.
+      'resolves the database "%2Ftmp/auto_canvas_test_2"',
     ],
     [
       "a socket: URL",
@@ -297,6 +338,49 @@ try {
     databaseUrl,
     ...extra,
   ];
+
+  // C-4: each reference's content type is checked against its use (the
+  // server sends nosniff). A script served as text/css and a stylesheet
+  // served as JavaScript are reported, and the run still cleans up.
+  {
+    const mismatchRoot = await mkdtemp(
+      join(tmpdir(), "standalone-evidence-mismatch-"),
+    );
+    try {
+      await mkdir(join(mismatchRoot, "assets"));
+      await writeFile(
+        join(mismatchRoot, "index.html"),
+        '<!doctype html><script type="module" src="/assets/a.css"></script><link rel="stylesheet" href="/assets/a.js">\n',
+      );
+      await writeFile(join(mismatchRoot, "assets/a.js"), "export {};\n");
+      await writeFile(join(mismatchRoot, "assets/a.css"), "body {}\n");
+      await withRun(
+        script,
+        await args(),
+        { ...env, STANDALONE_EVIDENCE_EDITOR_ROOT: mismatchRoot },
+        async (run) => {
+          const { code } = await run.exited;
+          assert.equal(code, 1, `C-4 types: exit ${code}\n${run.output}`);
+          assert.match(run.output, /C-4 failed/u);
+          assert.match(
+            run.output,
+            /script \/assets\/a\.css: content type text\/css, a JavaScript MIME type is required/u,
+          );
+          assert.match(
+            run.output,
+            /stylesheet \/assets\/a\.js: content type text\/javascript, text\/css is required/u,
+          );
+          assert.match(run.output, /cleanup ok/u);
+          await expectClean(run, "C-4 types");
+          console.log(
+            "ok C-4 content types: a script served as text/css and a stylesheet served as JavaScript are reported",
+          );
+        },
+      );
+    } finally {
+      await rm(mismatchRoot, { recursive: true, force: true });
+    }
+  }
 
   // (i) SIGINT as soon as the server's pid is printed (during startup).
   await withRun(script, await args(), env, async (run) => {
@@ -423,6 +507,113 @@ try {
       );
     },
   );
+  // (via) A descendant that leaves the run's group and loses its parent
+  // before any scan: a node child in a session of its own whose parent exits
+  // at once. Only the run's marker can find it (`ps` shows a node process's
+  // environment here); where `ps` shows no environment the script says so
+  // and the check kills the orphan itself.
+  {
+    const orphanFile = join(copyRoot, "orphan.pid");
+    let orphan = null;
+    try {
+      await withRun(
+        script,
+        await args([
+          "--run",
+          `node -e 'const c=require("child_process").spawn(process.execPath,["-e","setTimeout(()=>{},60000)"],{detached:true,stdio:"ignore"});c.unref();require("fs").writeFileSync(${JSON.stringify(orphanFile)},String(c.pid));process.exit(0)'`,
+        ]),
+        env,
+        async (run) => {
+          await until(async () => {
+            try {
+              return (await readFile(orphanFile, "utf8")).length > 0;
+            } catch {
+              return false;
+            }
+          }, "the orphan's pid file");
+          orphan = Number(await readFile(orphanFile, "utf8"));
+          const { code } = await run.exited;
+          assert.equal(code, 0, `orphan: exit ${code}\n${run.output}`);
+          assert.match(run.output, /cleanup ok/u);
+          if (run.output.includes("resource marker=active")) {
+            await until(
+              () => run.runProcesses.includes(orphan),
+              "the marker records the orphan",
+            );
+            await until(() => gone(orphan), "the orphan is stopped");
+            console.log(
+              `ok orphan without a group or a parent: pid ${orphan} found by the run's marker and stopped, exit 0`,
+            );
+          } else {
+            assert.match(
+              run.output,
+              /ps showed no environment of another process/u,
+            );
+            console.log(
+              "ok orphan without a group or a parent: the environment is not readable here, the limit is stated",
+            );
+          }
+        },
+      );
+    } finally {
+      if (orphan !== null && !gone(orphan))
+        try {
+          process.kill(orphan, "SIGKILL");
+        } catch {
+          // Gone in the meantime.
+        }
+    }
+  }
+
+  // (vib) A process that leaves the run's group on purpose (setpgrp) while
+  // its parent lives: the group rule misses it, the parent rule finds it.
+  {
+    const groupFile = join(copyRoot, "left-group.pid");
+    let left = null;
+    try {
+      await withRun(
+        script,
+        await args([
+          "--run",
+          `perl -e 'setpgrp(0, 0); sleep 60' & echo $! > '${groupFile}'; wait`,
+        ]),
+        env,
+        async (run) => {
+          await until(async () => {
+            try {
+              return (await readFile(groupFile, "utf8")).trim().length > 0;
+            } catch {
+              return false;
+            }
+          }, "the left-group pid file");
+          left = Number((await readFile(groupFile, "utf8")).trim());
+          assert.ok(
+            !groupMembers(run.pgid).includes(left),
+            `pid ${left} stayed in the run's group`,
+          );
+          await until(
+            () => run.runProcesses.includes(left),
+            "the script records the process that left the group",
+          );
+          run.child.kill("SIGINT");
+          const { code } = await run.exited;
+          assert.equal(code, 130, `left group: exit ${code}\n${run.output}`);
+          await until(() => gone(left), "the process that left the group");
+          console.log(
+            `ok process that left the group: pid ${left} recorded and stopped, exit 130`,
+          );
+        },
+      );
+    } finally {
+      if (left !== null && !gone(left))
+        try {
+          process.kill(left, "SIGKILL");
+        } catch {
+          // Gone in the meantime.
+        }
+    }
+  }
+
   // (vii) A server spawn that fails before any process exists: `error`
   // without `exit`; cleanup still finishes promptly and completely.
   await withRun(

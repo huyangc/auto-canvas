@@ -674,6 +674,42 @@ try {
     ],
     [
       "AUTO_CANVAS_TEST_DATABASE_URL",
+      {
+        AUTO_CANVAS_TEST_DATABASE_URL:
+          "postgresql:///auto_canvas_test?db=auto_canvas",
+      },
+    ],
+    [
+      "AUTO_CANVAS_TEST_DATABASE_URL",
+      {
+        AUTO_CANVAS_TEST_DATABASE_URL:
+          "postgresql:///auto_canvas_test?database=auto_canvas",
+      },
+    ],
+    [
+      "AUTO_CANVAS_TEST_DATABASE_URL",
+      {
+        AUTO_CANVAS_TEST_DATABASE_URL:
+          "postgresql:///auto_canvas_test_2?host=/tmp",
+      },
+    ],
+    [
+      "AUTO_CANVAS_TEST_DATABASE_URL",
+      {
+        AUTO_CANVAS_TEST_DATABASE_URL:
+          "postgresql:///auto_canvas_test_2?socket=/tmp",
+      },
+    ],
+    [
+      "AUTO_CANVAS_TEST_DATABASE_URL",
+      {
+        AUTO_CANVAS_TEST_DATABASE_URL:
+          "postgresql://%2Ftmp/auto_canvas_test_2?host=/tmp",
+      },
+      'resolves the database "%2Ftmp/auto_canvas_test_2"',
+    ],
+    [
+      "AUTO_CANVAS_TEST_DATABASE_URL",
       { AUTO_CANVAS_TEST_DATABASE_URL: `mysql:///auto_canvas_test` },
     ],
     // pg-connection-string would select `uto_canvas_test` here.
@@ -690,7 +726,7 @@ try {
     ],
   ];
   try {
-    for (const [name, overrides] of refusals) {
+    for (const [name, overrides, reason] of refusals) {
       const env = baseEnv(editorRoot, { ...ports, ...overrides });
       for (const [key, value] of Object.entries(overrides))
         if (value === null) delete env[key];
@@ -699,6 +735,8 @@ try {
       const label = `${name}=${JSON.stringify(overrides[name] ?? overrides)}`;
       assert.equal(code, 2, `${label}: exit ${code}\n${run.output}`);
       assert.ok(run.output.includes(name), `${label}: ${run.output}`);
+      if (reason !== undefined)
+        assert.ok(run.output.includes(reason), `${label}: ${run.output}`);
       assert.ok(!run.output.includes(SECRET), `${label}: value echoed`);
       assert.equal(run.output.trim().split("\n").length, 1, run.output);
       assert.deepEqual(run.schemas, [], `${label}: a schema was made`);

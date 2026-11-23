@@ -73,11 +73,14 @@ function workerState(
 /**
  * Opens the editor, waits for the service worker to be active and reloads,
  * so the document is controlled from then on (the worker never claims
- * clients). Returns the window of installation and the controlled reload.
+ * clients). Returns the window of installation and the controlled reload;
+ * `onControlled` runs just before the reload, when it is certain to be
+ * controlled.
  */
 async function controlEditor(
   page: Page,
   recorder: RequestRecorder,
+  onControlled?: () => void,
 ): Promise<{ from: Mark; to: Mark }> {
   const from = await recorder.mark("install");
   await openNotebookEditor(page);
@@ -86,6 +89,7 @@ async function controlEditor(
       async () => (await navigator.serviceWorker.ready).scope,
     ),
   ).toBe(scope);
+  onControlled?.();
   await page.reload();
   await page.getByTestId("schematic-canvas").waitFor();
   expect(await workerState(page)).toEqual({
@@ -200,9 +204,27 @@ test("N7 previews never come from the HTTP cache or the service worker, and Bob 
   });
   const recorder = recordRequests(context);
   const responses: Response[] = [];
+  // Every `/canvas/api` response of the controlled phases (C, A and B): the
+  // worker never handles an API request, so one it answered is a failure of
+  // its own, whatever the response says. The seed phase is before control.
+  const apiResponses: {
+    phase: string;
+    url: string;
+    fromServiceWorker: boolean;
+  }[] = [];
+  let apiPhase: string | null = null;
   context.on("response", (response) => {
     if (/\/preview\.svg(?:\?|$)/u.test(response.url()))
       responses.push(response);
+    if (
+      apiPhase !== null &&
+      new URL(response.url()).pathname.startsWith("/canvas/api")
+    )
+      apiResponses.push({
+        phase: apiPhase,
+        url: response.url(),
+        fromServiceWorker: response.fromServiceWorker(),
+      });
   });
   await signIn(page, alice);
   const seedFrom = await recorder.mark("seed");
@@ -250,7 +272,9 @@ test("N7 previews never come from the HTTP cache or the service worker, and Bob 
 
   // C: a controlled editor document. The native fetch with the product's
   // settings except the cache mode takes the seed from the HTTP cache.
-  const install = await controlEditor(page, recorder);
+  const install = await controlEditor(page, recorder, () => {
+    apiPhase = "control";
+  });
   const controlFrom = await recorder.mark("control");
   const control = await page.evaluate(
     async ({ sources, bearer, marker }) => {
@@ -330,6 +354,7 @@ test("N7 previews never come from the HTTP cache or the service worker, and Bob 
 
   // A: the product's Shelf and Version history, with a new boundary.
   const aliceFrom = await recorder.mark("alice");
+  apiPhase = "alice";
   const alicePreviews = responses.length;
   await openShelfWall(page);
   const tileImage = page.getByTestId(`shelf-tile-${projectId}`).locator("img");
@@ -511,6 +536,7 @@ test("N7 previews never come from the HTTP cache or the service worker, and Bob 
   });
 
   // B: Bob signs in from another page; the editor reloads into his account.
+  apiPhase = "bob";
   const other = await context.newPage();
   await other.goto("/");
   const loaded = nextLoad(page);
@@ -551,6 +577,28 @@ test("N7 previews never come from the HTTP cache or the service worker, and Bob 
         entry.authorization === alice.bearer,
     ),
   ).toEqual([]);
+  // No API response of a controlled document came from the worker: the page
+  // is controlled from phase C on, so every API response there is measured.
+  const perPhase: Record<string, number> = {};
+  for (const response of apiResponses)
+    perPhase[response.phase] = (perPhase[response.phase] ?? 0) + 1;
+  test.info().annotations.push({
+    type: "N7 API responses",
+    description: JSON.stringify({
+      perPhase,
+      fromServiceWorker: apiResponses
+        .filter((response) => response.fromServiceWorker)
+        .map((response) => `${response.phase} ${response.url}`),
+    }),
+  });
+  expect(
+    apiResponses.filter((response) => response.fromServiceWorker),
+    "API responses the service worker answered",
+  ).toEqual([]);
+  expect(
+    apiResponses.length,
+    "API responses observed in the controlled phases",
+  ).toBeGreaterThan(0);
   expectNoForeignOrigin(recorder.records);
 });
 

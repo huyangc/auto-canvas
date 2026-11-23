@@ -17,12 +17,26 @@ import { createHash, randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { existsSync, readFileSync } from "node:fs";
 import { createServer, request as httpRequest } from "node:http";
+import { createRequire } from "node:module";
 import { connect, createServer as createNetServer } from "node:net";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const PREFIX = "notebook-e2e-fixture";
+/**
+ * The parser `pg` itself uses, reached through apps/server (the package that
+ * depends on it; the root does not): the database checked below is the one
+ * the driver connects to, which is not always the WHATWG pathname.
+ */
+const parseConnectionString = createRequire(
+  createRequire(join(root, "apps/server/package.json")).resolve("pg"),
+)("pg-connection-string").parse;
+/**
+ * Parameters that redirect the connection or rename its database, so the URL
+ * no longer names one database on the server it appears to.
+ */
+const DATABASE_PARAMETERS = ["host", "socket", "db", "dbname", "database"];
 
 /** Ports the developer's own servers use; never bound or contacted. */
 const RESERVED_PORTS = new Set([3000, 8000, 4310]);
@@ -87,20 +101,24 @@ function testDatabaseUrl() {
   }
   if (url.protocol !== "postgres:" && url.protocol !== "postgresql:")
     refuse(`${name} must be a postgres: or postgresql: URL`);
-  if (url.searchParams.has("dbname"))
-    refuse(`${name} must not have a dbname parameter`);
-  // pg-connection-string drops the path's first character as the slash: a
-  // slash-less `postgresql:auto_canvas_test` would select `uto_canvas_test`.
-  if (!url.pathname.startsWith("/"))
-    refuse(`${name} must name auto_canvas_test or auto_canvas_test_<digits>`);
-  let database;
+  // The name the driver resolves, not the WHATWG pathname: a slash-less path
+  // drops its first character (pg-connection-string), and an encoded socket
+  // host next to a host parameter prepends the host to the path.
+  let database = null;
   try {
-    database = decodeURIComponent(url.pathname.slice(1));
+    database = parseConnectionString(value).database ?? null;
   } catch {
-    refuse(`${name} has an unreadable database name`);
+    refuse(`${name} is not a connection string the driver reads`);
   }
-  if (!/^auto_canvas_test(?:_\d+)?$/u.test(database))
-    refuse(`${name} must name auto_canvas_test or auto_canvas_test_<digits>`);
+  if (!/^auto_canvas_test(?:_\d+)?$/u.test(database ?? ""))
+    refuse(
+      `${name} resolves the database ${JSON.stringify(database)}: it must name auto_canvas_test or auto_canvas_test_<digits>`,
+    );
+  for (const parameter of DATABASE_PARAMETERS)
+    if (url.searchParams.has(parameter))
+      refuse(
+        `${name} must not have a host, socket, db, dbname or database parameter`,
+      );
   return url;
 }
 

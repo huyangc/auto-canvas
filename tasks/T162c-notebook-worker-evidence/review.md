@@ -74,3 +74,41 @@ no standalone_evidence_ or prefix_test_ schema before or after; port 4273 free a
 
 No product finding. With this, the browser half of work package W3 is
 complete: T162 (merged), T162b and this task.
+
+## Round 5 — accepted
+
+Reviewed: the working tree after the round-4 fixes, on 2026-11-23. The
+implementer worked on a copy branch (`review/t162c-round4` at the same head,
+because the task branch is checked out in another worktree); the work was read
+and the acceptance rerun by the reviewer.
+
+| #   | Severity | Where                                                                                                                 | Finding                                                                                        | Expected fix                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| --- | -------- | --------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 21  | fixed    | `scripts/notebook-e2e-fixture.mjs` `testDatabaseUrl()`, the evidence script's validator, `checkNotebookEnvironment()` | The database checked was the WHATWG pathname, which is not always what the driver connects to. | All three resolve the name with the driver's own parser (`pg-connection-string`, reached through `apps/server`) and refuse the parameters that redirect the connection (`host`, `socket`, `db`, `dbname`, `database`), quoting the resolved name. Cases: `?host=/tmp`, `?socket=/tmp`, `?database=`, `?db=`, `postgresql://%2Ftmp/auto_canvas_test_2?host=/tmp` (resolves `%2Ftmp/auto_canvas_test_2`), and the slash-less form (resolves `uto_canvas_test`). Refusals: fixture 33 → 38, evidence script 20 → 24, config loop 6 new forms. |
+| 22  | fixed    | `apps/editor/e2e/notebook-worker.spec.ts` N7                                                                          | Only the two SVG responses were checked for `fromServiceWorker()`.                             | Every `/canvas/api` response during the controlled phases is recorded with its phase; after phase B none may come from the worker, with a positive control (`apiResponses.length > 0`); observed `{"perPhase":{"control":5,"alice":5,"bob":5},"fromServiceWorker":[]}`.                                                                                                                                                                                                                                                                    |
+| 23  | fixed    | `scripts/standalone-build-evidence.mjs`                                                                               | A detached Chromium reparented between two scans matched neither group nor parent.             | A per-run UUID in the run children's environment; `ps eww` marks every process carrying it, added to the group and parent rules, so `cleanup ok` prints only when none survives. New check cases: an orphan in its own session whose parent exits at once (found by the marker) and a process that left the group. Stated limit: `ps` shows no environment for Apple's own binaries (verified on this macOS), so a system binary that also left the group and lost its parent is found by neither rule; `resource marker=active            | inert` reports whether the marker reaches our processes. |
+| 24  | fixed    | `scripts/standalone-build-evidence.mjs` C-4                                                                           | Any script or style reference was accepted with either a JavaScript or a CSS type.             | The type must match the use (JavaScript for scripts and module preloads, `text/css` for stylesheets; an empty type is a problem); check case with a module script served as CSS and a stylesheet served as JavaScript.                                                                                                                                                                                                                                                                                                                     |
+
+Acceptance rerun by the reviewer on this tree (lane 2, `AUTO_CANVAS_API_URL`
+for Playwright only):
+
+```text
+pnpm build → 0; pnpm build:notebook-editor → 0
+standard listing → 459 tests equal the baseline; notebook listing → 31 tests
+4 database-URL forms (host, database, encoded socket host, slash-less) → each refused by the config, naming the variable
+node scripts/notebook-e2e-fixture-check.mjs → 0; 38 refusals
+node scripts/standalone-build-evidence-check.mjs → 0; 24 refusals; the C-4 type case, the marker orphan and the left-group case ok
+pnpm test:local scripts/launcher.test.mjs → 22 passed
+AUTO_CANVAS_E2E_NOTEBOOK=1 pnpm exec playwright test → 31 passed (50.4s)
+both printed schemas gone, all three printed PIDs gone, the schema list before = after
+env -u AUTO_CANVAS_API_URL pnpm test:local → 8868 passed, 117 skipped
+pnpm typecheck / lint / format:check / docs:check → 0
+lanes free afterwards
+```
+
+Note: a first combined run of the same script reported the evidence check and
+the notebook run as failed; both pass alone and in an immediate rerun of the
+same script, and the first run's servers had already exited, so the reviewer
+attributes it to the two steps overlapping on the lane rather than to a
+reproducible defect. Recorded for honesty; the rerun above is the result of
+record.

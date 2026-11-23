@@ -13,18 +13,43 @@
 //   node scripts/standalone-build-evidence.mjs --port <n> --database <url> [--run "<command>"]
 //
 // Prints `resource schema=`, `resource pid=` (the server), `resource
-// run-pgid=` and `resource run-process=` (each process of the run's group
-// or below it, as it is seen), `C-4 ok: <n> references` and `cleanup ok`.
+// run-pgid=` and `resource run-process=` (each process of the run's group,
+// below a recorded one, or carrying the run's marker, as it is seen),
+// `resource marker=`, `C-4 ok: <n> references` and `cleanup ok`.
+//
+// The run's children are identified by three rules: the run's process group,
+// descent from a recorded process, and a per-run marker (a UUID variable set
+// only in the run's environment). The marker covers a child that left the
+// group and lost its parent between two scans (Playwright starts its browser
+// in a session of its own). Limit: `ps` prints no environment for Apple's
+// own binaries (verified on macOS 27: `ps eww` shows that of node and of
+// Chromium, none of `/bin/sh` or `/bin/sleep`), so a system binary that also
+// left the group and lost its parent is found by neither rule; `resource
+// marker=` says whether the marker reaches our processes at all here.
 import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { existsSync, readdirSync } from "node:fs";
+import { createRequire } from "node:module";
 import { createServer } from "node:net";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const PREFIX = "standalone-build-evidence";
+/**
+ * The parser `pg` itself uses, reached through apps/server (the package that
+ * depends on it; the root does not): the database checked below is the one
+ * the driver connects to, which is not always the WHATWG pathname.
+ */
+const parseConnectionString = createRequire(
+  createRequire(join(root, "apps/server/package.json")).resolve("pg"),
+)("pg-connection-string").parse;
+/**
+ * Parameters that redirect the connection or rename its database, so the URL
+ * no longer names one database on the server it appears to.
+ */
+const DATABASE_PARAMETERS = ["host", "socket", "db", "dbname", "database"];
 /** Ports the developer's own servers use; never bound or contacted. */
 const RESERVED_PORTS = new Set([3000, 8000, 4310]);
 /** Variables the server gets from this script only. */
@@ -35,6 +60,8 @@ const KILL_AFTER_MS = 10_000;
 const DB_TIMEOUT_MS = 10_000;
 const TRACK_INTERVAL_MS = 200;
 const SIGNAL_CODES = { SIGINT: 130, SIGTERM: 143, SIGHUP: 129 };
+/** The per-run marker, set only in the environment of the run's children. */
+const RUN_MARKER = "STANDALONE_EVIDENCE_RUN_MARKER";
 
 function refuse(message) {
   console.error(`${PREFIX} refused: ${message}`);
@@ -91,23 +118,24 @@ if (
   databaseUrl.protocol !== "postgresql:"
 )
   refuse("--database must be a postgres: or postgresql: URL");
-if (
-  databaseUrl.searchParams.has("dbname") ||
-  databaseUrl.searchParams.has("db")
-)
-  refuse("--database must not have a dbname or db parameter");
-// pg-connection-string drops the path's first character as the slash: a
-// slash-less `postgresql:auto_canvas_test` would select `uto_canvas_test`.
-if (!databaseUrl.pathname.startsWith("/"))
-  refuse("--database must name auto_canvas_test or auto_canvas_test_<digits>");
-let databaseName;
+// The name the driver resolves, not the WHATWG pathname: a slash-less path
+// drops its first character (pg-connection-string), and an encoded socket
+// host next to a host parameter prepends the host to the path.
+let databaseName = null;
 try {
-  databaseName = decodeURIComponent(databaseUrl.pathname.slice(1));
+  databaseName = parseConnectionString(databaseText).database ?? null;
 } catch {
-  refuse("--database has an unreadable database name");
+  refuse("--database is not a connection string the driver reads");
 }
-if (!/^auto_canvas_test(?:_\d+)?$/u.test(databaseName))
-  refuse("--database must name auto_canvas_test or auto_canvas_test_<digits>");
+if (!/^auto_canvas_test(?:_\d+)?$/u.test(databaseName ?? ""))
+  refuse(
+    `--database resolves the database ${JSON.stringify(databaseName)}: it must name auto_canvas_test or auto_canvas_test_<digits>`,
+  );
+for (const parameter of DATABASE_PARAMETERS)
+  if (databaseUrl.searchParams.has(parameter))
+    refuse(
+      "--database must not have a host, socket, db, dbname or database parameter",
+    );
 
 const editorRoot = resolve(
   root,
@@ -141,7 +169,9 @@ let schema = null;
 let schemaCreated = Promise.resolve();
 let server = null;
 let run = null;
-/** pid -> start time of every process seen in the run's group or below. */
+/** The marker probe child, stopped by cleanup like everything else. */
+let probe = null;
+/** pid -> start time of every process seen as one of the run's. */
 const runProcesses = new Map();
 let trackTimer = null;
 let closing = null;
@@ -178,10 +208,64 @@ function processTable() {
 }
 
 /**
- * Records every live process of the run's group and every descendant of a
- * recorded one (Playwright starts its browser in another group). A process
- * is recorded with its start time, so a reused pid is never mistaken for it.
- * One scan at a time; a caller during a scan gets that scan.
+ * The pids whose environment carries exactly this marker (a UUID minted for
+ * one run), from `ps eww`. An empty set where `ps` hides the environment
+ * (see the module comment); the group and parent rules still apply there.
+ */
+function markedPids(marker) {
+  const token = `${RUN_MARKER}=${marker}`;
+  return new Promise((done, fail) => {
+    execFile(
+      "ps",
+      ["eww", "-A", "-o", "pid=,command="],
+      { maxBuffer: 64 * 1024 * 1024 },
+      (error, stdout) => {
+        // Without this scan the other rules still hold: never fail on it.
+        if (error) return fail(error);
+        const pids = new Set();
+        for (const line of stdout.split("\n")) {
+          // The pid is the first field, the environment follows the command
+          // line; the marker must be a value of its own, not a substring of
+          // another variable or of an argument.
+          if (!line.split(/\s+/u).includes(token)) continue;
+          const pid = /^\s*(\d+)\s/u.exec(line)?.[1];
+          if (pid !== undefined) pids.add(Number(pid));
+        }
+        done(pids);
+      },
+    );
+  });
+}
+
+/** Whether `ps` shows our own children's environment here (the marker rule). */
+async function markerVisible(marker) {
+  const token = `${marker}-probe`;
+  const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 3000)"], {
+    env: { ...process.env, [RUN_MARKER]: token },
+    stdio: "ignore",
+  });
+  probe = child;
+  try {
+    if (child.pid === undefined) return false;
+    const deadline = Date.now() + 2_000;
+    for (;;) {
+      if ((await markedPids(token)).has(child.pid)) return true;
+      if (child.exitCode !== null || child.signalCode !== null) return false;
+      if (Date.now() > deadline) return false;
+      await new Promise((resume) => setTimeout(resume, 100));
+    }
+  } finally {
+    child.kill("SIGKILL");
+    if (probe === child) probe = null;
+  }
+}
+
+/**
+ * Records every live process of the run's group, every descendant of a
+ * recorded one (Playwright starts its browser in another group) and every
+ * process whose environment carries the run's marker. A process is recorded
+ * with its start time, so a reused pid is never mistaken for it. One scan at
+ * a time; a caller during a scan gets that scan.
  */
 let tracking = null;
 function trackRun() {
@@ -194,6 +278,9 @@ function trackRun() {
 
 async function scanRun() {
   const table = await processTable();
+  // The marker rule: a child that left the run's group and lost its parent
+  // between two scans still carries this run's marker.
+  const marked = await markedPids(run.marker).catch(() => new Set());
   let grew = true;
   while (grew) {
     grew = false;
@@ -204,6 +291,7 @@ async function scanRun() {
       const ours =
         info.pgid === run.pgid ||
         pid === run.pgid ||
+        marked.has(pid) ||
         (parent !== undefined &&
           runProcesses.get(info.ppid) === parent.started);
       if (ours) {
@@ -301,6 +389,12 @@ function cleanup(reason, code) {
       incomplete.push("run processes");
     }
     if (!(await stopServer())) incomplete.push(`server ${server.child.pid}`);
+    // The probe of the marker rule (a child of this script, never of the
+    // run) lives two seconds at most; a signal during it stops it here.
+    if (probe !== null) {
+      probe.kill("SIGKILL");
+      probe = null;
+    }
     // A CREATE still running past this is cancelled by the pool's
     // statement timeout; the schema is looked up after the drop.
     await settlesWithin(schemaCreated, DB_TIMEOUT_MS);
@@ -436,6 +530,47 @@ async function health(origin) {
 }
 
 // ---- C-4: the standard output is intact and servable. ----
+/** The HTML spec's JavaScript MIME types (what a module is run as). */
+const JAVASCRIPT_TYPES = new Set([
+  "application/ecmascript",
+  "application/javascript",
+  "application/x-ecmascript",
+  "application/x-javascript",
+  "text/ecmascript",
+  "text/javascript",
+  "text/javascript1.0",
+  "text/javascript1.1",
+  "text/javascript1.2",
+  "text/javascript1.3",
+  "text/javascript1.4",
+  "text/javascript1.5",
+  "text/jscript",
+  "text/livescript",
+  "text/x-ecmascript",
+  "text/x-javascript",
+]);
+
+/**
+ * The content types a reference may be served with, by its use; null where
+ * the use does not fix one (a preload of a font, an image, ...). The server
+ * sends `nosniff`, so a script served as text/css or a stylesheet served as
+ * JavaScript does not run at all: each reference's type must match its use.
+ */
+function expectedTypes({ kind, as }) {
+  if (kind === "stylesheet" || (kind === "preload" && as === "style"))
+    return { types: ["text/css"], expected: "text/css" };
+  if (
+    kind === "script" ||
+    kind === "modulepreload" ||
+    (kind === "preload" && as === "script")
+  )
+    return {
+      types: [...JAVASCRIPT_TYPES],
+      expected: "a JavaScript MIME type",
+    };
+  return null;
+}
+
 async function checkStandardOutput(origin) {
   const { JSDOM } = await import("jsdom");
   const page = await fetch(`${origin}/`);
@@ -446,18 +581,21 @@ async function checkStandardOutput(origin) {
     references.push({ kind: "script", value: script.getAttribute("src") });
   for (const link of document.querySelectorAll("link")) {
     const rel = (link.getAttribute("rel") ?? "").toLowerCase().split(/\s+/u);
-    if (
-      rel.some((token) =>
-        ["stylesheet", "modulepreload", "preload"].includes(token),
-      )
-    )
+    const value = link.getAttribute("href");
+    if (rel.includes("stylesheet"))
+      references.push({ kind: "stylesheet", value });
+    else if (rel.includes("modulepreload"))
+      references.push({ kind: "modulepreload", value });
+    else if (rel.includes("preload"))
       references.push({
-        kind: rel.includes("stylesheet") ? "stylesheet" : "preload",
-        value: link.getAttribute("href"),
+        kind: "preload",
+        as: (link.getAttribute("as") ?? "").toLowerCase(),
+        value,
       });
   }
   const problems = [];
-  for (const { kind, value } of references) {
+  for (const reference of references) {
+    const { kind, value } = reference;
     if (
       typeof value !== "string" ||
       !value.startsWith("/assets/") ||
@@ -469,11 +607,18 @@ async function checkStandardOutput(origin) {
     }
     const response = await fetch(`${origin}${value}`);
     await response.arrayBuffer();
-    const type = response.headers.get("content-type") ?? "";
+    const type = (response.headers.get("content-type") ?? "")
+      .split(";")[0]
+      .trim()
+      .toLowerCase();
+    const expected = expectedTypes(reference);
     if (response.status !== 200)
       problems.push(`${kind} ${value}: status ${response.status}`);
-    else if (!/javascript|text\/css/iu.test(type))
-      problems.push(`${kind} ${value}: content type ${type}`);
+    else if (type === "") problems.push(`${kind} ${value}: no content type`);
+    else if (expected && !expected.types.includes(type))
+      problems.push(
+        `${kind} ${value}: content type ${type}, ${expected.expected} is required`,
+      );
   }
   if (!references.some((item) => item.kind === "script"))
     problems.push("no script");
@@ -484,7 +629,17 @@ async function checkStandardOutput(origin) {
 }
 
 // ---- --run: a command against the owned server, in its own group. ----
-function startRun(command, origin) {
+async function startRun(command, origin) {
+  const marker = randomUUID();
+  // Whether this machine's `ps` shows a child's environment: without it the
+  // marker rule reaches nothing (the group and parent rules still hold).
+  const visible = await markerVisible(`${marker}-probe`);
+  console.log(`${PREFIX} resource marker=${visible ? "active" : "inert"}`);
+  if (!visible)
+    console.log(
+      `${PREFIX} ps showed no environment of another process here: the run's processes are found by its group and by their parents only`,
+    );
+  goOn();
   const child = spawn("sh", ["-c", command], {
     cwd: root,
     detached: true,
@@ -494,12 +649,15 @@ function startRun(command, origin) {
       ICM_E2E_BASE_URL: origin,
       AUTO_CANVAS_API_URL: origin,
       ICM_E2E_ISOLATED: "1",
+      // Only the run's children inherit the marker: not the script, not the
+      // server, not the check that started it.
+      [RUN_MARKER]: marker,
     },
   });
   // A spawn that failed has no process group to track or stop.
   if (child.pid === undefined)
     return new Promise((done, fail) => child.once("error", fail));
-  run = { child, pgid: child.pid };
+  run = { child, pgid: child.pid, marker };
   console.log(`${PREFIX} resource run-pgid=${child.pid}`);
   // A failed scan in between is retried by the next one; cleanup's own
   // scans fail loudly.

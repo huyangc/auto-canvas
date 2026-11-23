@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { createRequire } from "node:module";
 
 // Keep Playwright's readiness probe on loopback even when the development
 // machine exports a system HTTP proxy.
@@ -7,6 +8,23 @@ process.env.NO_PROXY = [process.env.NO_PROXY, "127.0.0.1", "localhost"]
   .join(",");
 
 const accountsTest = process.env.AUTO_CANVAS_E2E_ACCOUNTS === "1";
+/**
+ * The parser `pg` itself uses, reached through apps/server (the package that
+ * depends on it; the root does not): the database checked here is the one the
+ * driver connects to, which is not always the WHATWG pathname. A slash-less
+ * path drops its first character, and an encoded socket host next to a host
+ * parameter prepends the host to the path.
+ */
+const parseConnectionString = createRequire(
+  createRequire(new URL("./apps/server/package.json", import.meta.url)).resolve(
+    "pg",
+  ),
+)("pg-connection-string").parse as (value: string) => {
+  database?: string | null;
+};
+/** Parameters that redirect the connection or rename its database. */
+const DATABASE_PARAMETERS = ["host", "socket", "db", "dbname", "database"];
+
 const prefixTest = process.env.AUTO_CANVAS_E2E_BASE_PATH === "1";
 // The notebook build behind a stand-in for silicon-notebook
 // (scripts/notebook-e2e-fixture.mjs): its own run, never part of the others.
@@ -91,24 +109,25 @@ function checkNotebookEnvironment(): void {
   } catch {
     databaseUrl = null;
   }
-  let databaseName = "";
-  try {
-    // pg-connection-string drops the path's first character as the slash,
-    // so a slash-less path would select a different database.
-    databaseName = databaseUrl?.pathname.startsWith("/")
-      ? decodeURIComponent(databaseUrl.pathname.slice(1))
-      : "";
-  } catch {
-    databaseName = "";
-  }
+  // The name the driver resolves, not the WHATWG pathname (see
+  // parseConnectionString above).
+  let databaseName: string | null = null;
+  if (database !== undefined && databaseUrl)
+    try {
+      databaseName = parseConnectionString(database).database ?? null;
+    } catch {
+      databaseName = null;
+    }
   if (
     !databaseUrl ||
     !["postgres:", "postgresql:"].includes(databaseUrl.protocol) ||
-    databaseUrl.searchParams.has("dbname") ||
-    !/^auto_canvas_test(?:_\d+)?$/u.test(databaseName)
+    !/^auto_canvas_test(?:_\d+)?$/u.test(databaseName ?? "") ||
+    DATABASE_PARAMETERS.some((parameter) =>
+      databaseUrl!.searchParams.has(parameter),
+    )
   )
     refuse(
-      "AUTO_CANVAS_TEST_DATABASE_URL must name auto_canvas_test or auto_canvas_test_<digits>",
+      "AUTO_CANVAS_TEST_DATABASE_URL must name auto_canvas_test or auto_canvas_test_<digits> on the server the driver reaches, without a host, socket, db, dbname or database parameter",
     );
   // Nothing in the notebook run uses it today; set, it closes the editor dev
   // proxies' default (the developer's port 4310) for any Vite server a
