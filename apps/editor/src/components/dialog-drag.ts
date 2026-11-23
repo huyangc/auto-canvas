@@ -84,9 +84,50 @@ export function clampDragOffset(
 }
 
 /**
+ * The dialog's layout box, i.e. `getBoundingClientRect()` minus the offset a
+ * drag has already applied.
+ */
+function layoutRect(element: HTMLElement, offset: DragOffset): DragRect {
+  const rect = element.getBoundingClientRect();
+  return {
+    left: rect.left - offset.x,
+    top: rect.top - offset.y,
+    right: rect.right - offset.x,
+    bottom: rect.bottom - offset.y,
+  };
+}
+
+/**
+ * Stop the browser centering the dialog and give it an explicit layout
+ * position. A drag moves that position (`left`/`top`) rather than the
+ * transform: a transform would become the containing block of the tile menu's
+ * fixed positioning, and the layout box would still recenter when the wall
+ * finishes loading — moving the header away after a drag.
+ */
+function pin(element: HTMLElement, rect: DragRect) {
+  if (element.style.position === "fixed") return;
+  const { style } = element;
+  style.position = "fixed";
+  style.inset = "auto";
+  style.margin = "0";
+  style.left = `${rect.left}px`;
+  style.top = `${rect.top}px`;
+}
+
+function place(element: HTMLElement, rect: DragRect, offset: DragOffset) {
+  element.style.left = `${rect.left + offset.x}px`;
+  element.style.top = `${rect.top + offset.y}px`;
+}
+
+function viewportSize(): DragViewport {
+  return { width: window.innerWidth, height: window.innerHeight };
+}
+
+/**
  * The header's `onPointerDown`: a primary-button pointerdown on the header,
  * outside its interactive children, drags `dialogRef`'s element. The drag ends
- * on pointer up or cancel, on unmount, or at the next pointerdown.
+ * when that pointer is released or cancelled, on unmount, or at the next
+ * pointerdown.
  */
 export function useDialogDrag(
   dialogRef: RefObject<HTMLElement | null>,
@@ -98,6 +139,31 @@ export function useDialogDrag(
   const stopDrag = useRef<(() => void) | null>(null);
   // A dialog unmounted mid-drag (Escape) takes its listeners with it.
   useEffect(() => () => stopDrag.current?.(), []);
+
+  // A pinned dialog keeps its place when the window resizes, so bring it back
+  // inside the viewport if the viewport shrank around it.
+  useEffect(() => {
+    const reclamp = () => {
+      const dialog = dialogRef.current;
+      if (
+        !dialog ||
+        dialog !== dragged.current ||
+        dialog.style.position !== "fixed"
+      )
+        return;
+      const baseRect = layoutRect(dialog, offset.current);
+      const next = clampDragOffset(
+        offset.current,
+        baseRect,
+        viewportSize(),
+        margin,
+      );
+      offset.current = next;
+      place(dialog, baseRect, next);
+    };
+    window.addEventListener("resize", reclamp);
+    return () => window.removeEventListener("resize", reclamp);
+  }, [dialogRef, margin]);
 
   return useCallback(
     (event: PointerEvent<HTMLElement>) => {
@@ -115,14 +181,8 @@ export function useDialogDrag(
       }
 
       const header = event.currentTarget;
-      const rect = dialog.getBoundingClientRect();
-      // The layout box the transform starts from, not the dragged position.
-      const baseRect: DragRect = {
-        left: rect.left - offset.current.x,
-        top: rect.top - offset.current.y,
-        right: rect.right - offset.current.x,
-        bottom: rect.bottom - offset.current.y,
-      };
+      const baseRect = layoutRect(dialog, offset.current);
+      pin(dialog, baseRect);
       const origin = offset.current;
       const startX = event.clientX;
       const startY = event.clientY;
@@ -136,20 +196,24 @@ export function useDialogDrag(
             y: origin.y + moveEvent.clientY - startY,
           },
           baseRect,
-          { width: window.innerWidth, height: window.innerHeight },
+          viewportSize(),
           margin,
         );
         offset.current = next;
-        dialog.style.transform = `translate(${next.x}px, ${next.y}px)`;
+        place(dialog, baseRect, next);
       };
       const stop = () => {
         stopDrag.current = null;
         window.removeEventListener("pointermove", move);
-        window.removeEventListener("pointerup", stop);
-        window.removeEventListener("pointercancel", stop);
+        window.removeEventListener("pointerup", finish);
+        window.removeEventListener("pointercancel", finish);
         if (header.hasPointerCapture?.(pointerId))
           header.releasePointerCapture(pointerId);
         dialog.classList.remove("is-dragging");
+      };
+      // A second finger lifting elsewhere must not end the first one's drag.
+      const finish = (upEvent: globalThis.PointerEvent) => {
+        if (upEvent.pointerId === pointerId) stop();
       };
 
       try {
@@ -158,8 +222,8 @@ export function useDialogDrag(
         // Not every pointer can be captured; the drag still follows the window.
       }
       window.addEventListener("pointermove", move);
-      window.addEventListener("pointerup", stop);
-      window.addEventListener("pointercancel", stop);
+      window.addEventListener("pointerup", finish);
+      window.addEventListener("pointercancel", finish);
       dialog.classList.add("is-dragging");
       stopDrag.current = stop;
     },

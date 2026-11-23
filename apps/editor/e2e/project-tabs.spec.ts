@@ -1660,6 +1660,23 @@ test("the Browse dialog tiles its cards evenly, closes from its × and drags by 
   expect(Math.round(dragged.x - dialogBox.x)).toBe(40);
   expect(Math.round(dragged.y - dialogBox.y)).toBe(30);
 
+  // The drag moves layout, not a transform, so a tile's menu still opens at
+  // its button rather than at a dialog-relative place or off the edge.
+  const actions = dialog.getByTestId("shelf-actions-cloud-alpha");
+  await actions.click();
+  const menu = page.getByRole("menu", { name: "Actions for Alpha" });
+  await expect(menu).toBeVisible();
+  const actionsBox = (await actions.boundingBox())!;
+  const menuBox = (await menu.boundingBox())!;
+  expect(Math.abs(menuBox.x - actionsBox.x)).toBeLessThanOrEqual(1);
+  expect(
+    Math.abs(menuBox.y - (actionsBox.y + actionsBox.height)),
+  ).toBeLessThanOrEqual(1);
+  // Closing the menu by clicking the wall, not Escape: Escape also closes
+  // the dialog (its cancel), which the steps below still need open.
+  await dialog.getByText("only you can see these").click();
+  await expect(menu).toHaveCount(0);
+
   // Dragged far past the corner, the window stops 8px inside the viewport.
   const again = await grip();
   await page.mouse.move(again.x, again.y);

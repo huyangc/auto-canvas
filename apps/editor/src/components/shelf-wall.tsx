@@ -541,6 +541,10 @@ export function ShelfWall() {
             {menu.project.favorite ? "Remove favorite" : "Favorite"}
           </button>
           <InlineConfirm
+            // Keyed by Project: switching the menu to another tile (a keyboard
+            // activation, with no outside pointerdown) must not carry an open
+            // "Really delete" over to it.
+            key={menu.project.id}
             role="menuitem"
             className="shelf-menu-delete"
             data-testid={`shelf-delete-${menu.project.id}`}
