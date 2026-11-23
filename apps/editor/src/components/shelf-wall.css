@@ -128,6 +128,29 @@
   color: var(--icm-text);
   cursor: pointer;
 }
+
+/* Opened from the File menu, the wall sits inside the command popover, whose
+ * `button` rule (styles/editor-chrome.css) stretches this badge into a
+ * full-width bar with menu fonts. The dialog-qualified selector wins and
+ * restores the small round button the strip-hosted dialog shows. */
+.cloud-shelf-dialog .shelf-tile-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  width: auto;
+  min-height: 0;
+  height: auto;
+  padding: 4px 10px;
+  border: 1px solid var(--icm-border);
+  border-radius: 6px;
+  box-shadow: none;
+  font-family: inherit;
+  font-size: var(--icm-font-sm);
+  font-weight: 400;
+  line-height: 1.2;
+  text-align: center;
+  white-space: nowrap;
+}
 .shelf-context-menu {
   position: fixed;
   z-index: 800;
