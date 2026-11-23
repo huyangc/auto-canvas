@@ -30,7 +30,11 @@ export async function componentLibraryHarness() {
   });
   await admin.query(`CREATE SCHEMA ${schema}`);
   await migrate(db);
-  const app = createApp({ db, user: { displayName: "local" } });
+  const app = createApp({
+    auth: { mode: "local" },
+    db,
+    user: { displayName: "local" },
+  });
   const route = (
     method = "GET",
     suffix = "",

@@ -1,3 +1,4 @@
+import { accountKey } from "../../accounts/storage";
 import { z } from "zod";
 import { parseSharedComponentPayload } from "@icm/component-library";
 import { parseSharedComponentEntry } from "@icm/component-library";
@@ -49,7 +50,7 @@ async function database() {
       "Publication recovery storage is unavailable. No write was sent.",
     );
   }
-  const request = factory.open(DATABASE, 1);
+  const request = factory.open(accountKey(DATABASE), 1);
   request.onupgradeneeded = () => {
     request.result
       .createObjectStore(STORE)

@@ -1,3 +1,4 @@
+import { accountKey } from "../accounts/storage";
 // The startup recovery peek runs on every editor load; the scope subpath
 // keeps the Agent adapter off that load (#1673).
 import {
@@ -60,11 +61,14 @@ export function writeAgentSessionRecovery(
   storage: BrowserStorageLike,
   record: AgentSessionRecoveryRecord,
 ): void {
-  storage.setItem(AGENT_SESSION_RECOVERY_STORAGE_KEY, JSON.stringify(record));
+  storage.setItem(
+    accountKey(AGENT_SESSION_RECOVERY_STORAGE_KEY),
+    JSON.stringify(record),
+  );
 }
 
 export function clearAgentSessionRecovery(storage: BrowserStorageLike): void {
-  storage.removeItem(AGENT_SESSION_RECOVERY_STORAGE_KEY);
+  storage.removeItem(accountKey(AGENT_SESSION_RECOVERY_STORAGE_KEY));
 }
 
 /** Local recovery evidence, not an observation of relay availability. */
@@ -73,7 +77,10 @@ export function peekAgentSessionRecovery(
 ): AgentSessionRecoveryRecord | null {
   try {
     return parseRecord(
-      JSON.parse(storage.getItem(AGENT_SESSION_RECOVERY_STORAGE_KEY) ?? "null"),
+      JSON.parse(
+        storage.getItem(accountKey(AGENT_SESSION_RECOVERY_STORAGE_KEY)) ??
+          "null",
+      ),
     );
   } catch {
     return null;
@@ -89,7 +96,7 @@ export function readAgentSessionRecovery(
   storage: BrowserStorageLike,
   _target: RecoveryTarget,
 ): AgentSessionRecoveryRecord | null {
-  const raw = storage.getItem(AGENT_SESSION_RECOVERY_STORAGE_KEY);
+  const raw = storage.getItem(accountKey(AGENT_SESSION_RECOVERY_STORAGE_KEY));
   if (raw === null) return null;
   let candidate: unknown;
   try {

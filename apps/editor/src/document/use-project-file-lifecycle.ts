@@ -1,3 +1,4 @@
+import { accountKey } from "../accounts/storage";
 import type { EditorExportDelivery } from "../hosts/export-delivery";
 import type { CloudProjectStore } from "../services/editor-services";
 import type {
@@ -188,13 +189,15 @@ export function useProjectFileLifecycle({
       !externalWorkspaceRestored &&
       typeof window !== "undefined" &&
       (restoreWorkingSession ||
-        window.sessionStorage.getItem(REFRESH_RESTORE_STORAGE_KEY) === "true"),
+        window.sessionStorage.getItem(
+          accountKey(REFRESH_RESTORE_STORAGE_KEY),
+        ) === "true"),
   );
   const [startupRestoreReady, setStartupRestoreReady] =
     useState(!restoreAfterRefresh);
   useEffect(() => {
     if (restoreAfterRefresh) {
-      window.sessionStorage.removeItem(REFRESH_RESTORE_STORAGE_KEY);
+      window.sessionStorage.removeItem(accountKey(REFRESH_RESTORE_STORAGE_KEY));
     }
   }, [restoreAfterRefresh]);
   const [startupCloudProjectId] = useState(() =>
@@ -879,7 +882,10 @@ export function useProjectFileLifecycle({
         cloudBinding,
       });
       await recovery.flushNow();
-      window.sessionStorage.setItem(REFRESH_RESTORE_STORAGE_KEY, "true");
+      window.sessionStorage.setItem(
+        accountKey(REFRESH_RESTORE_STORAGE_KEY),
+        "true",
+      );
       window.location.reload();
     })();
   }

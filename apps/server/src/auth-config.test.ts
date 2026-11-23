@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 import { readAuthConfig } from "./auth-config.js";
 
 describe("readAuthConfig", () => {
-  it.each([{}, { AUTO_CANVAS_AUTH: "local" }])("is local for %j", (env) =>
+  it.each([{}, { AUTO_CANVAS_AUTH: "accounts" }])(
+    "uses standalone accounts for %j",
+    (env) => expect(readAuthConfig(env)).toEqual({ mode: "accounts" }),
+  );
+  it.each([{ AUTO_CANVAS_AUTH: "local" }])("is local for %j", (env) =>
     expect(readAuthConfig(env)).toEqual({ mode: "local" }),
   );
   it.each([

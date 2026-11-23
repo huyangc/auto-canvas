@@ -28,7 +28,7 @@ auto-canvas 基于 cascode-ai 的 Analog Canvas：
 
 - **浏览器里的原理图编辑器**：器件摆放；区分连接点和交叉的连线；网络标签；
   层次化 Cell；撤销；结构化 SPICE/Spectre 导入导出；SVG/PDF/PNG 导出。
-- **单用户服务端**（`apps/server`，PostgreSQL）：
+- **支持独立账号的服务端**（`apps/server`，PostgreSQL）：
   - 云端工程：版本号冲突检测、保留 3 个历史版本、恢复、SVG 预览图；
   - 自定义器件库：目录、发布、删除和恢复。
 - **Agent 编辑接口**（MCP 和 HTTP）：和界面操作使用同一套带类型的编辑模型；另有
@@ -67,6 +67,8 @@ pnpm start
 日志追加到 `.local/logs/server.log`。安装了 PostgreSQL 命令行工具时，启动脚本会
 创建缺失的 `auto_canvas` 数据库；运行测试前请单独创建 `auto_canvas_test`。
 
+首次使用时选择 **Create an account** 注册。用户名为一个英文字母加八位数字，例如 `A12345678`，字母不区分大小写。用 **File → Save** 把图纸保存到账号。下次在任意浏览器登录同一台服务，选择 **File → Open Shelf project in tab** 即可打开。未保存的草稿保留在当前浏览器。升级前的单用户工程仍可通过显式设置 `AUTO_CANVAS_AUTH=local` 访问。
+
 开发时运行 `pnpm dev`：API 在后台启动，Vite 在 <http://localhost:5173> 提供编辑器
 热更新，Ctrl+C 会停止两者。API 日志追加到 `.local/logs/server-dev.log`。
 `pnpm dev:editor` 仅启动 Vite，可连接已经运行的服务端。
@@ -103,7 +105,7 @@ pnpm start
 ```text
 apps/
   editor/       React 原理图编辑器（网页版，也是桌面版的界面）
-  server/       单用户 Node 服务端：登录状态、云端工程、自定义器件库
+  server/       Node 服务端：登录状态、云端工程、自定义器件库
   desktop/      Electron 桌面预览版
   mcp-server/   供 Agent 使用的 MCP 适配层
   local-host/   托管编译好的编辑器的最小静态服务

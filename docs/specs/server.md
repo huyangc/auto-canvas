@@ -1,4 +1,4 @@
-# Single-user PostgreSQL server
+# PostgreSQL server
 
 Status: `accepted`
 
@@ -9,9 +9,15 @@ consumed by the web editor. Project file semantics belong to
 [Project file format](project-file-format.md); browser recovery belongs to
 [persistence and recovery](persistence-and-recovery.md).
 
-## Rules
+## Standalone accounts
 
-- One persisted user, `local`, owns all API operations. Its session has
+The default identity mode is `accounts`. The web editor reads `GET /api/session` to select the sign-in form or a signed-in workspace. In this mode the response is `{mode:"accounts", user}`, with a null user when signed out. A new user supplies a username of one ASCII letter and eight digits (case-insensitive) and a password of 8–128 characters. JSON requests to `POST /api/auth/register` and `POST /api/auth/login` establish a 30-day HttpOnly, SameSite=Strict cookie scoped to the deployment path. HTTPS sets Secure. Logout revokes the current session. PostgreSQL stores a salted scrypt password hash and a digest of each session token.
+
+Private Projects, their revisions and previews use the signed-in user's ID. The editor binds API requests and browser recovery storage to that account. File → Save writes to PostgreSQL. File → Open Shelf project in tab lists the account's saved drawings across browsers. Unsaved drafts are per account and browser. The migration preserves the legacy local profile and its Projects.
+
+## Legacy local identity and Project rules
+
+- With explicit `AUTO_CANVAS_AUTH=local`, one persisted user, `local`, owns all API operations. Its session has
   `provider: "local"`, `email: null`, `role: "user"`, `isAdmin: true`.
   No cookies, credentials, rate limiting or third-party sign-in are required.
 - All queries scope Projects by user. Versions cascade on Project deletion.
@@ -91,16 +97,14 @@ All history responses use `private, no-store`. Current previews use
 revision, otherwise `private, no-cache`.
 
 Configuration and commands are in the [server README](../../apps/server/README.md).
-Vite dev and preview forward `/api/auth`, `/api/projects`, `/api/components`,
+Vite dev and preview forward `/api/session`, `/api/auth`, `/api/projects`, `/api/components`,
 `/api/health` and `/api/agent/` (HTTP and WebSocket) while retaining the browser's
 Host/Origin. Gallery, simulation execution and account deletion are deliberately
 unimplemented by this server.
 
 ## Notebook identity mode
 
-`AUTO_CANVAS_AUTH` selects who the server's users are. Unset or exactly
-`local` keeps the single-user behaviour described above, unchanged in every
-route, header, query and migration. Exactly `notebook` makes the server use
+`AUTO_CANVAS_AUTH` selects who the server's users are. Unset or `accounts` selects standalone accounts. Explicit `local` selects the original single-user mode. Exactly `notebook` makes the server use
 silicon-notebook's users instead; every other value, including the empty
 string, fails startup with an error that names the variable without echoing
 its value. Notebook mode needs `AUTO_CANVAS_NOTEBOOK_API`: an `http:` or

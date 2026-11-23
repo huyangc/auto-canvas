@@ -1,3 +1,4 @@
+import { accountKey } from "../accounts/storage";
 // Transactional IndexedDB adapter for bounded browser recovery records.
 //
 // This module owns storage only. Every limit, rotation, deduplication, and
@@ -219,7 +220,7 @@ export function createBrowserRecoveryStore(
     }
     opening = new Promise<IDBDatabase>((resolve, reject) => {
       const request = factory.open(
-        BROWSER_RECOVERY_DATABASE_NAME,
+        accountKey(BROWSER_RECOVERY_DATABASE_NAME),
         BROWSER_RECOVERY_DATABASE_VERSION,
       );
       request.onupgradeneeded = () => {
@@ -521,7 +522,7 @@ export async function migrateLegacyProjectRecovery(
   if (storage === null || storage === undefined) {
     return { status: "not-needed" };
   }
-  const legacyText = storage.getItem(PROJECT_RECOVERY_KEY);
+  const legacyText = storage.getItem(accountKey(PROJECT_RECOVERY_KEY));
   if (legacyText === null || legacyText.length === 0) {
     return { status: "not-needed" };
   }
@@ -572,7 +573,7 @@ export async function migrateLegacyProjectRecovery(
 
   const outcome = await seams.store.writeRecord(record);
   if (outcome.status === "stored" || outcome.status === "unchanged") {
-    storage.removeItem(PROJECT_RECOVERY_KEY);
+    storage.removeItem(accountKey(PROJECT_RECOVERY_KEY));
     return { status: "migrated", workingCopyId, recordId };
   }
   if (outcome.status === "rejected-too-large") {

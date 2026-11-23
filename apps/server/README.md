@@ -1,4 +1,4 @@
-# Single-user server
+# Auto Canvas server
 
 Node 24+ and PostgreSQL 16. From the repository root, after
 `pnpm install --frozen-lockfile`:
@@ -58,12 +58,12 @@ build the server and its workspace dependencies.
 | `DATABASE_URL`                  | `postgresql:///auto_canvas`      | PostgreSQL connection URL                                         |
 | `HOST`                          | `127.0.0.1`                      | Bind address                                                      |
 | `PORT`                          | `4310`                           | HTTP port                                                         |
-| `AUTO_CANVAS_USER_NAME`         | `Local user`                     | Initial display name; persisted profile takes precedence          |
-| `AUTO_CANVAS_PROJECT_LIMIT`     | `200`                            | Positive integer, maximum Projects for the local user             |
+| `AUTO_CANVAS_USER_NAME`         | `Local user`                     | Initial display name of the legacy local profile          |
+| `AUTO_CANVAS_PROJECT_LIMIT`     | `200`                            | Positive integer, maximum Projects per user             |
 | `AUTO_CANVAS_AGENT_IDLE_MS`     | `300000`                         | Agent session idle timeout in milliseconds                        |
 | `AGENT_ALLOWED_ORIGIN`          | request origin                   | Optional allowed browser origin for Agent HTTP/WebSocket requests |
 | `EDITOR_ROOT`                   | unset                            | Built editor directory; enables static assets and SPA fallback    |
-| `AUTO_CANVAS_AUTH`              | unset (`local`)                  | `local` or `notebook`: whose users own Projects and Components    |
+| `AUTO_CANVAS_AUTH`              | `accounts`                  | `accounts`, legacy `local`, or `notebook` identity    |
 | `AUTO_CANVAS_NOTEBOOK_API`      | unset                            | Notebook mode only: loopback notebook origin for `GET /api/me`    |
 | `AUTO_CANVAS_API_URL`           | `http://127.0.0.1:4310`          | Vite dev/preview proxy target; configured in the editor process   |
 | `AUTO_CANVAS_TEST_DATABASE_URL` | `postgresql:///auto_canvas_test` | Contract and browser test database                                |
@@ -76,14 +76,14 @@ build the server and its workspace dependencies.
 and defaults `AUTO_CANVAS_API_URL` to the configured server URL.
 
 For a built editor, run `EDITOR_ROOT=apps/editor/dist node apps/server/dist/cli.js`.
-Unknown `/api/*` requests never fall back to HTML. The server is intended for a
-single local user: it has no authentication challenge, cookies or sign-in
-providers. See the [HTTP contract](../../docs/specs/server.md).
+Unknown `/api/*` requests never fall back to HTML. Standalone users register with one English letter followed by eight digits and a password of 8–128 characters. Saved Projects belong to the signed-in account. Use HTTPS when serving credentials over a network. Explicit `AUTO_CANVAS_AUTH=local` gives every visitor access to the original shared profile and its Projects. Keep that mode on a trusted single-user installation. See the [HTTP contract](../../docs/specs/server.md).
 
 ```bash
 pnpm exec vitest run apps/server packages/component-library
 pnpm exec playwright test apps/editor/e2e/cloud-projects-server.spec.ts apps/editor/e2e/user-components-server.spec.ts --workers=1
 ```
+
+Run `AUTO_CANVAS_E2E_ACCOUNTS=1 pnpm exec playwright test` to exercise standalone registration, private drafts and cross-browser reopening against the test database.
 
 Contract tests create and remove an isolated schema in the test database and
 fail with its URL when PostgreSQL is unreachable. Browser tests start a server
@@ -93,7 +93,7 @@ The Vite dev/preview proxy forwards `/api/components` to this server. User
 Components support browsing, catalog filters, revision-bound identity/preview,
 publishing complete native circuit packages, idempotent publication retries,
 updates, promotion, soft deletion and restoration. Every new record belongs to
-the persisted local profile; the local user is an admin. Definitions, receipts,
+its publishing user. The legacy local profile is an admin. Definitions, receipts,
 lifecycle history and derived catalog/content indexes live in PostgreSQL.
 Migration `002-component-library.sql` creates these tables and catalog triggers.
 
@@ -174,13 +174,12 @@ notebook backend's loopback origin (for example `http://127.0.0.1:8000`), the
 server uses silicon-notebook's users: each API request carries a notebook
 session token, which the server checks with notebook's `GET /api/me`. The
 server then answers only under `/@notebook/<base path>/`, the Agent relay is
-off, and `GET /api/integration/ready.json` reports readiness. Unset or `local`
-keeps the single-user server unchanged. Use one canvas database per notebook
+off, and `GET /api/integration/ready.json` reports readiness. Explicit `local` selects the legacy single-user server. Use one canvas database per notebook
 installation: every installation's seeded administrator has the id
 `user-local`. The rules, including the 60-second authorization lag, are in the
 [notebook identity section](../../docs/specs/server.md#notebook-identity-mode)
 of the HTTP contract. After `pnpm build`, `node scripts/server-mode-check.mjs`
-checks both modes against the built server on isolated schemas of
+checks the identity modes against the built server on isolated schemas of
 `AUTO_CANVAS_TEST_DATABASE_URL`.
 
 Run the built-server proxy integration and the opt-in browser workflow with:

@@ -34,7 +34,7 @@ Works today:
 - **Schematic editor** in the browser: device placement, wiring with
   connectivity-aware junctions and crossings, net labels, hierarchical Cells,
   undo, structural SPICE/Spectre import and export, SVG/PDF/PNG export.
-- **Single-user server** (`apps/server`, PostgreSQL): Cloud Projects with
+- **Standalone account server** (`apps/server`, PostgreSQL): Cloud Projects with
   optimistic revisions, three history versions, restore and SVG previews; the
   User Components library with catalog, publishing, deletion and restore.
 - **Agent editing API** (MCP and HTTP) over the same typed edit model the GUI
@@ -76,6 +76,8 @@ rebuilds and replaces the running server. Logs append to
 `.local/logs/server.log`.
 The launcher creates a missing `auto_canvas` database when PostgreSQL CLI tools
 are available; create `auto_canvas_test` separately before running tests.
+
+Choose **Create an account** on first use. Usernames contain one English letter and eight digits (for example `A12345678`) and ignore letter case. **File → Save** writes the drawing to your account in PostgreSQL. Sign in on another browser and choose **File → Open Shelf project in tab** to reopen it. Unsaved drafts stay in the current browser. Existing single-user projects remain accessible in explicit `AUTO_CANVAS_AUTH=local` mode.
 
 For development, run `pnpm dev`: the API starts in the background and Vite
 serves the editor with hot reload on <http://localhost:5173>. Ctrl+C stops both.
@@ -119,7 +121,7 @@ Set `AUTO_CANVAS_BASE_PATH=/canvas` to build and serve every editor/API URL unde
 ```text
 apps/
   editor/       React schematic editor (web, and the desktop renderer)
-  server/       Single-user Node server: identity, Cloud Projects, User Components
+  server/       Node server: identity, Cloud Projects, User Components
   desktop/      Electron desktop preview
   mcp-server/   MCP adapter for Agents
   local-host/   Minimal static host for a built editor

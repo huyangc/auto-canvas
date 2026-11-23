@@ -1,5 +1,5 @@
 import { lazy, StrictMode, Suspense } from "react";
-import { createRoot } from "react-dom/client";
+import { mountAccountGate } from "../accounts/account-gate";
 import { EditorErrorBoundary } from "../components/editor-error-boundary";
 import { guardedRouteChunk } from "../components/route-chunk-loader";
 import { AccountStatePreload, loadAccountState } from "../components/account";
@@ -9,7 +9,7 @@ import { configureWebServiceWorker } from "./web-service-worker";
 export function mountWebEditor() {
   const container = document.getElementById("root");
   if (!container) throw new Error("Editor root element is missing");
-  const initialAccountState = loadAccountState();
+
   const EditorWorkspace = lazy(
     guardedRouteChunk(() =>
       Promise.all([
@@ -29,17 +29,17 @@ export function mountWebEditor() {
       })),
     ),
   );
-  createRoot(container).render(
+  mountAccountGate(container, () => (
     <StrictMode>
       <EditorErrorBoundary>
         <Suspense fallback={<div>Loading editor…</div>}>
-          <AccountStatePreload value={initialAccountState}>
+          <AccountStatePreload value={loadAccountState()}>
             <EditorWorkspace />
           </AccountStatePreload>
         </Suspense>
       </EditorErrorBoundary>
-    </StrictMode>,
-  );
+    </StrictMode>
+  ));
   void configureWebServiceWorker(
     import.meta.env.PROD,
     import.meta.env.BASE_URL,

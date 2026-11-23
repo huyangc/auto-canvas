@@ -52,6 +52,7 @@ try {
     env: {
       ...process.env,
       DATABASE_URL: connection.href,
+      AUTO_CANVAS_AUTH: "local",
       AUTO_CANVAS_BASE_PATH: "/canvas",
       HOST: "127.0.0.1",
       PORT: "0",

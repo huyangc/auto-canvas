@@ -1,0 +1,36 @@
+.canvas-account-screen {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  background: var(--icm-surface-muted);
+  color: var(--icm-text);
+}
+.canvas-account-form {
+  display: grid;
+  gap: 0.85rem;
+  width: min(22rem, calc(100% - 2rem));
+  box-sizing: border-box;
+  padding: 1.75rem;
+  background: var(--icm-surface);
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-lg);
+}
+.canvas-account-form h1 {
+  margin: 0 0 0.5rem;
+  font-size: 1.5rem;
+}
+.canvas-account-form label {
+  display: grid;
+  gap: 0.35rem;
+}
+.canvas-account-form input,
+.canvas-account-form button {
+  min-height: 2.5rem;
+}
+.canvas-account-form small {
+  color: var(--icm-text-muted);
+}
+.canvas-account-form button[type="submit"] {
+  background: var(--icm-accent);
+  color: white;
+}

@@ -1,3 +1,4 @@
+import { accountKey } from "../accounts/storage";
 /** A whole browser-window workspace. Independent from bounded crash recovery:
  * no tab can evict another tab's unsaved Project. Never writes Cloud Projects. */
 export interface ProjectWorkspace<T = unknown> {
@@ -19,8 +20,8 @@ export function workspaceWindowId(preferredId?: string): string {
   try {
     identity =
       preferredId ??
-      (sessionStorage.getItem(WINDOW_KEY) || crypto.randomUUID());
-    sessionStorage.setItem(WINDOW_KEY, identity);
+      (sessionStorage.getItem(accountKey(WINDOW_KEY)) || crypto.randomUUID());
+    sessionStorage.setItem(accountKey(WINDOW_KEY), identity);
   } catch {
     identity = undefined;
     throw new Error("Browser session storage is unavailable");
@@ -134,7 +135,7 @@ export function createProjectWorkspaceStore(factory: IDBFactory = indexedDB) {
   let database: Promise<IDBDatabase> | undefined;
   const open = () =>
     (database ??= new Promise((resolve, reject) => {
-      const request = factory.open(DATABASE, 1);
+      const request = factory.open(accountKey(DATABASE), 1);
       request.onupgradeneeded = () =>
         request.result.createObjectStore(STORE, { keyPath: "windowId" });
       request.onsuccess = () => resolve(request.result);
@@ -161,7 +162,7 @@ export function createProjectWorkspaceStore(factory: IDBFactory = indexedDB) {
       let journal: ProjectWorkspace | null = null;
       try {
         journal = decode(
-          JSON.parse(sessionStorage.getItem(JOURNAL_KEY) || "null"),
+          JSON.parse(sessionStorage.getItem(accountKey(JOURNAL_KEY)) || "null"),
           id,
           url,
           options.allowRouteChange,
@@ -248,5 +249,5 @@ export function browserWorkspaceStore() {
 /** Synchronous final snapshot covers immediate refresh, before IDB can commit.
  * Quota failure leaves the preceding durable snapshot intact and is reported. */
 export function journalProjectWorkspace(record: ProjectWorkspace): void {
-  sessionStorage.setItem(JOURNAL_KEY, JSON.stringify(record));
+  sessionStorage.setItem(accountKey(JOURNAL_KEY), JSON.stringify(record));
 }
