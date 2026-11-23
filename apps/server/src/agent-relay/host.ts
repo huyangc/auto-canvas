@@ -425,28 +425,34 @@ export class AgentRelayHost implements AgentSessionNamespaceLike {
     return object;
   }
 
-  async fetch(request: Request): Promise<Response> {
+  async fetch(request: Request, accountEditor = false): Promise<Response> {
+    const url = new URL(request.url);
+    const editorOrigin =
+      accountEditor && request.headers.get("origin") === url.origin;
+    // Same-origin editors create pairings and authenticate with editor secrets.
+    const allowedOrigin = editorOrigin ? url.origin : this.allowedOrigin;
     return (
       (await routeAgentSessionRequest(request, {
         AGENT_SESSION: this,
         AUTO_CANVAS_BASE_PATH: this.basePath,
-        ...(this.allowedOrigin
-          ? { AGENT_ALLOWED_ORIGIN: this.allowedOrigin }
-          : {}),
+        ...(allowedOrigin ? { AGENT_ALLOWED_ORIGIN: allowedOrigin } : {}),
       })) ?? new Response("Not found", { status: 404 })
     );
   }
 
-  attach(server: {
-    on(
-      event: "upgrade",
-      listener: (
-        request: IncomingMessage,
-        socket: Duplex,
-        head: Buffer,
-      ) => void,
-    ): unknown;
-  }): void {
+  attach(
+    server: {
+      on(
+        event: "upgrade",
+        listener: (
+          request: IncomingMessage,
+          socket: Duplex,
+          head: Buffer,
+        ) => void,
+      ): unknown;
+    },
+    accountEditor = false,
+  ): void {
     server.on("upgrade", (request, socket, head) => {
       const upgrade = { request, socket, head, upgraded: false };
       void this.upgrades.run(upgrade, async () => {
@@ -471,7 +477,7 @@ export class AgentRelayHost implements AgentSessionNamespaceLike {
             /^\/api\/agent\/sessions\/[^/]+\/editor$/u.test(
               url.pathname.slice(this.basePath.length),
             )
-              ? await this.fetch(new Request(url, { headers }))
+              ? await this.fetch(new Request(url, { headers }), accountEditor)
               : new Response("Not found", { status: 404 });
           if (!upgrade.upgraded) {
             const body = Buffer.from(await response.text());

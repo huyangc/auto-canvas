@@ -101,7 +101,7 @@ export async function startServer({
         listening(info);
       },
     );
-    if (agentRelay) agentRelay.attach(server);
+    if (agentRelay) agentRelay.attach(server, auth.mode === "accounts");
     else
       server.on("upgrade", (_request, socket) => {
         // A handed-off socket has no error handler left: a peer that resets

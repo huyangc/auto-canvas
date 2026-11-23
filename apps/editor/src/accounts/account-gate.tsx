@@ -192,19 +192,42 @@ export function mountAccountGate(
         }
         return response;
       };
+      let prepare: (() => Promise<void>) | null = null;
       async function logout() {
+        if (container.inert || closing) return;
+        container.inert = true;
+        try {
+          if (!prepare) throw Error("The workspace is still opening.");
+          await prepare();
+        } catch (error) {
+          container.inert = false;
+          window.alert(
+            "Sign out paused. " +
+              (error instanceof Error
+                ? error.message
+                : "Save or export your work before leaving."),
+          );
+          return;
+        }
         try {
           const result = await fetch(apiUrl("auth/logout"), { method: "POST" });
           if (!result.ok) throw Error();
           announce();
           reload();
         } catch {
+          container.inert = false;
           window.alert("Sign out failed. Please try again.");
         }
       }
       root.render(
         <AccountContext.Provider
-          value={{ username: displayName, logout: () => void logout() }}
+          value={{
+            username: displayName,
+            prepareLogout: (check) => {
+              prepare = check;
+            },
+            logout: () => void logout(),
+          }}
         >
           {editor()}
         </AccountContext.Provider>,
