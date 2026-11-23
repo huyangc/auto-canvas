@@ -7,7 +7,7 @@ a circuit netlist, place and route the devices automatically, let an engineer
 fine-tune the drawing interactively in the browser, and hand the result to EDA
 tools.
 
-auto-canvas is built on [Analog Canvas](https://github.com/cascode-ai/analog-canvas)
+auto-canvas is built on Analog Canvas
 by cascode-ai: the editor, its data model and its netlist interchange come from
 an Analog Canvas snapshot. See [Built on Analog Canvas](#built-on-analog-canvas).
 
@@ -156,7 +156,6 @@ a pull request that needs passing CI and a posted codex review. See
 auto-canvas is a modified version of **Analog Canvas**, an open-source,
 connectivity-aware schematic editor by cascode-ai.
 
-- Repository: <https://github.com/cascode-ai/analog-canvas>
 - Hosted editor and Community Gallery: <https://analog-canvas.tokenzhang.com/>
 - Snapshot: commit `3d32c76` (version 0.9.2, 2026-11-05), recorded in
   [UPSTREAM.md](UPSTREAM.md)

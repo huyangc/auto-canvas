@@ -458,15 +458,19 @@ describe("public Agent session routes", () => {
         openApiUrl: "https://editor.example/api/agent/openapi.json",
       },
     });
-    expect(manifest.launch.args.join(" ")).toContain(
-      mcpDistribution.release.asset,
-    );
-    expect(manifest.installation.command).toContain(
-      '--install --origin "https://editor.example" --host config',
-    );
-    expect(manifest.hosts.codex.command).toContain(
-      '--origin "https://editor.example" --host codex',
-    );
+    expect(manifest.installation).toMatchObject({
+      available: false,
+      command: "",
+    });
+    expect(manifest.distribution).toMatchObject({
+      downloadUrl: null,
+      sha256: null,
+    });
+    expect(manifest.launch).toMatchObject({
+      command: mcpDistribution.binaryName,
+      args: [],
+    });
+    expect(manifest.hosts.codex.command).toContain(mcpDistribution.binaryName);
     expect(manifest.launch.env.ANALOG_CANVAS_API_URL).toBe(
       "https://editor.example",
     );

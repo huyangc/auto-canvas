@@ -80,7 +80,7 @@ await writeFile(
 );
 await writeFile(
   resolve(output, "README.md"),
-  `# Analog Canvas MCP\n\nLocal stdio MCP adapter for Analog Canvas. The package embeds the compact tools and their execution Resources, keeps the revocable connector in the user's profile, and never exposes the short-lived bearer to the model.\n\nConfigure an MCP host to run \`${distribution.binaryName}\` from this package. Set \`ANALOG_CANVAS_API_URL\` only for a non-production deployment. The public bootstrap manifest is available at \`https://analog-canvas.tokenzhang.com/api/agent/mcp-manifest.json\`.\n`,
+  `# Analog Canvas MCP\n\nLocal stdio MCP adapter for Analog Canvas. The package embeds the compact tools and their execution Resources, keeps the revocable connector in the user's profile, and never exposes the short-lived bearer to the model.\n\nConfigure an MCP host to run \`${distribution.binaryName}\` from this package. Set \`ANALOG_CANVAS_API_URL\` to the editor server URL. Read its bootstrap manifest at \`<editor-server-url>/api/agent/mcp-manifest.json\`.\n`,
 );
 
 const packCommand =

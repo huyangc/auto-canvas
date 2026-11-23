@@ -52,6 +52,7 @@ export function installationDeclaration(value: unknown) {
     format?: string;
     version?: string;
     requirements?: { node?: string };
+    installation?: { available?: boolean };
     distribution?: { downloadUrl?: string; sha256?: string };
   };
   if (
@@ -66,8 +67,15 @@ export function installationDeclaration(value: unknown) {
       "Unsupported MCP manifest or runtime requirement",
       "stop",
     );
+  if (m.installation?.available === false)
+    throw new InstallationFailure(
+      "manifest",
+      "INSTALLATION_UNAVAILABLE",
+      "This server uses a locally built MCP adapter. See the manifest for setup.",
+      "use-http-kit",
+    );
   const version = m.version!;
-  const url = `https://github.com/cascode-ai/analog-canvas/releases/download/mcp-v${version}/analog-canvas-mcp-server-${version}.tgz`;
+  const url = `https://github.com/huyangc/auto-canvas/releases/download/mcp-v${version}/analog-canvas-mcp-server-${version}.tgz`;
   if (
     m.distribution?.downloadUrl !== url ||
     !/^[a-f0-9]{64}$/u.test(m.distribution.sha256 ?? "")

@@ -318,44 +318,6 @@ body {
   margin-left: auto;
 }
 
-.bug-report-link {
-  box-sizing: border-box;
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  gap: var(--icm-space-1);
-  height: var(--icm-control-h);
-  padding: 0 10px;
-  border: 1px solid var(--icm-border);
-  border-radius: var(--icm-radius-sm);
-  color: var(--icm-text-muted);
-  background: transparent;
-  font-size: var(--icm-font-md);
-  font-weight: 500;
-  line-height: var(--icm-line-tight);
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.bug-report-link:hover {
-  border-color: var(--icm-border-hover);
-  color: var(--icm-text);
-  background: var(--icm-surface-hover);
-}
-
-.bug-report-mark {
-  display: inline-grid;
-  width: 1rem;
-  height: 1rem;
-  place-items: center;
-  border: 1px solid currentcolor;
-  border-radius: 999px;
-  color: var(--icm-error);
-  font-size: 0.7rem;
-  font-weight: 750;
-  line-height: 1;
-}
 @media (max-width: 900px) {
   /* Narrow windows keep the verb; the tooltip still says where. */
   .publish-label-long {

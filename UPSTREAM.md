@@ -1,7 +1,7 @@
 # Upstream
 
 auto-canvas starts from a snapshot of
-[cascode-ai/analog-canvas](https://github.com/cascode-ai/analog-canvas),
+Analog Canvas by cascode-ai,
 licensed AGPL-3.0 (see LICENSE.md). This repository does not carry upstream git
 history.
 

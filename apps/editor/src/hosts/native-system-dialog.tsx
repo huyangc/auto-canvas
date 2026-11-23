@@ -92,7 +92,7 @@ export function NativeSystemDialog({ onClose }: { onClose(): void }) {
           <p>
             <a
               data-native-external-link="source"
-              href={`https://github.com/cascode-ai/analog-canvas/commit/${info.commit}`}
+              href={`https://github.com/huyangc/auto-canvas/commit/${info.commit}`}
               onClick={(event) => {
                 event.preventDefault();
                 void openNativeExternalLink("source").catch((error) =>

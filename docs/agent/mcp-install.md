@@ -1,8 +1,10 @@
 # Install the Analog Canvas MCP adapter
 
-Use `/api/agent/mcp-manifest.json` from the **exact editor origin**. It owns
-the version, runtime requirement, immutable archive, SHA-256 and host setup
-commands; no source checkout is needed.
+Use `/api/agent/mcp-manifest.json` from the **exact editor origin**. For auto-canvas,
+the manifest specifies a locally built adapter. Run `pnpm mcp:package` from
+the checkout and install the tarball from `output/mcp/` on the MCP host with
+`npm install --global /absolute/path/to/archive.tgz`. Ensure
+`analog-canvas-mcp` is on the host's PATH before using its registration command.
 
 Prefer already-callable tools for the exact origin. Missing tools are normal
 on a new machine. Install only with evidence that this conversation's actual

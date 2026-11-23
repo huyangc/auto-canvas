@@ -33,8 +33,26 @@ test("keeps editor chrome typography from suppressing SVG italics", async ({
   ).not.toBe("none");
 });
 
-// The GitHub, change log and credit links are App.test's ("links GitHub and
-// the change log directly without a Help surface").
+test("reads the change log without leaving the canvas", async ({
+  page,
+  context,
+}) => {
+  await page.goto("/editor");
+  const trigger = page.getByRole("button", { name: "Change Log" });
+  await trigger.click();
+  const dialog = page.getByRole("dialog", { name: "Change Log" });
+  await expect(dialog.getByText("Open the editor over LAN HTTP")).toBeVisible();
+  await expect(dialog.getByRole("link")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+  await trigger.click();
+  await dialog.getByRole("button", { name: "Close" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page).toHaveURL(/\/editor$/);
+  expect(context.pages()).toHaveLength(1);
+});
+
 test("keeps Library Netlist and Project Code together on the left at full and half width", async ({
   page,
 }) => {

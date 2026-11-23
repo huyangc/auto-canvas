@@ -10,8 +10,7 @@ reference policy and dialect output.
 
 - A child Document is a definition, each caller an occurrence; the formal
   interface derives from Cell-Pin declarations, so equal names never merge.
-- An authored external circuit binds to a Project-owned native model source
-  ([#1401](https://github.com/cascode-ai/analog-canvas/issues/1401)), keeping
+- An authored external circuit binds to a Project-owned native model source, keeping
   expressions and behavioral models; model knowledge is never inferred from
   artwork.
 - A renamed custom pin creates an immutable captured artwork variant and remaps

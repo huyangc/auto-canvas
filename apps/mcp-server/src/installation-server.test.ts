@@ -31,7 +31,11 @@ it.skipIf(!process.env.AUTO_CANVAS_MCP_INSTALL_TEST_URL)(
           const manifest = await response.json();
           expect(manifest.launch.env.ANALOG_CANVAS_API_URL).toBe(serverUrl);
           expect(manifest.version).toBe(AGENT_MCP_VERSION);
-          releaseUrl = manifest.distribution.downloadUrl;
+          expect(manifest.installation.available).toBe(false);
+          expect(manifest.distribution.downloadUrl).toBeNull();
+          releaseUrl = `https://github.com/huyangc/auto-canvas/releases/download/mcp-v${manifest.version}/analog-canvas-mcp-server-${manifest.version}.tgz`;
+          manifest.installation.available = true;
+          manifest.distribution.downloadUrl = releaseUrl;
           // External release hosting is the only substituted boundary: the
           // development tarball is not the published Linux archive. Pin its
           // digest here so the real integrity check and stdio probe still run.

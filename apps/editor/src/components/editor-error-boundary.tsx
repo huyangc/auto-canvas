@@ -1,7 +1,6 @@
 import { Component } from "react";
 import type { ErrorInfo, ReactNode } from "react";
 
-import { BugReportLink } from "./bug-report-link";
 import {
   browserStaleBuildRecovery,
   isStaleBuildFailure,
@@ -130,10 +129,6 @@ export function EditorCrashScreen({
               Reload with a clean copy
             </button>
           ) : null}
-          <BugReportLink
-            testId="crash-report-bug"
-            surface="Unexpected problem screen"
-          />
         </div>
         <p className="editor-crash-note">
           After reloading, use File / Recover Unsaved Work… if your latest

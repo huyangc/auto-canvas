@@ -31,6 +31,32 @@ const launch = {
   },
 };
 describe("verified offline MCP installation", () => {
+  it("stops after the manifest when the server requires a local bundle", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({
+        format: "analog-canvas-mcp-bootstrap-v1",
+        version: "1.2.3",
+        requirements: { node: ">=24.0.0" },
+        installation: { available: false },
+        distribution: { downloadUrl: null, sha256: null },
+      }),
+    );
+    try {
+      await expect(
+        installMcp(["--origin", "https://editor.example"]),
+      ).rejects.toMatchObject({
+        diagnostic: {
+          stage: "manifest",
+          code: "INSTALLATION_UNAVAILABLE",
+          nextAction: "use-http-kit",
+        },
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
   it.each([
     "ERR_TLS_CERT_ALTNAME_INVALID",
     "UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
@@ -73,7 +99,7 @@ describe("verified offline MCP installation", () => {
               requirements: { node: ">=24.0.0" },
               distribution: {
                 downloadUrl:
-                  "https://github.com/cascode-ai/analog-canvas/releases/download/mcp-v1.2.3/analog-canvas-mcp-server-1.2.3.tgz",
+                  "https://github.com/huyangc/auto-canvas/releases/download/mcp-v1.2.3/analog-canvas-mcp-server-1.2.3.tgz",
                 sha256: createHash("sha256").update(bytes).digest("hex"),
               },
             })
@@ -138,7 +164,7 @@ describe("verified offline MCP installation", () => {
       requirements: { node: ">=24.0.0" },
       distribution: {
         downloadUrl:
-          "https://github.com/cascode-ai/analog-canvas/releases/download/mcp-v1.2.3/analog-canvas-mcp-server-1.2.3.tgz",
+          "https://github.com/huyangc/auto-canvas/releases/download/mcp-v1.2.3/analog-canvas-mcp-server-1.2.3.tgz",
         sha256: createHash("sha256").update("expected").digest("hex"),
       },
     };
@@ -222,7 +248,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');
           requirements: { node: ">=24.0.0" },
           distribution: {
             downloadUrl:
-              "https://github.com/cascode-ai/analog-canvas/releases/download/mcp-v1.2.3/analog-canvas-mcp-server-1.2.3.tgz",
+              "https://github.com/huyangc/auto-canvas/releases/download/mcp-v1.2.3/analog-canvas-mcp-server-1.2.3.tgz",
             sha256: createHash("sha256").update(bytes).digest("hex"),
           },
         };

@@ -1,7 +1,7 @@
 import type { WireCornerOrder, WireRoutingMode } from "@icm/edit-engine";
 
 import type { EditorTool } from "../../interaction/interaction-state";
-import { SITE_CHANGE_LOG_URL } from "../../components/site-resource-links";
+import { ChangeLog } from "./change-log";
 import { ToolIcon } from "./tool-icon";
 import {
   autoLayoutChipLabel,
@@ -96,7 +96,7 @@ export interface AutoLayoutChip extends AutoLayoutRunView {
 }
 
 export function EditorStatusbar({
-  externalLinksEnabled = true,
+  showChangeLog = true,
   status,
   tool,
   vddRailMode,
@@ -122,7 +122,7 @@ export function EditorStatusbar({
   onZoomIn,
   onFitView,
 }: {
-  externalLinksEnabled?: boolean;
+  showChangeLog?: boolean;
   status: string;
   tool: EditorTool;
   vddRailMode: boolean;
@@ -301,19 +301,7 @@ export function EditorStatusbar({
         </div>
       </div>
       <div className="statusbar-view-controls">
-        {externalLinksEnabled ? (
-          <>
-            <a
-              className="statusbar-change-log"
-              data-testid="statusbar-change-log"
-              href={SITE_CHANGE_LOG_URL}
-              target="_blank"
-              rel="noreferrer"
-            >
-              Change Log
-            </a>
-          </>
-        ) : null}
+        {showChangeLog ? <ChangeLog /> : null}
         <button
           type="button"
           className="statusbar-hints-toggle"

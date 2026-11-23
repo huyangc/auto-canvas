@@ -32,7 +32,7 @@ no editor overlays in formal export.
 
 Visio export, MATLAB palette, coarse grid, jumpers/line width, Q property form,
 power devices, AGND/DGND, signing, installer, auto-update, macOS, Web
-local-file Save; see the [last migration plan](https://github.com/cascode-ai/analog-canvas/blob/378eff4707ab0ea56cda4f3558eff9b0c4610b15/docs/roadmap/desktop-fork/05-local-merge-plan.md).
+local-file Save.
 
 ## Deferred desktop preview work
 
@@ -50,7 +50,7 @@ is recorded in the
 | Layout test for that choice          | If the name is to show: one tab, widths 721, 761, 801, 901, 941 and 1001 px, the name, File and `⋯` all on screen                                                                                                     |
 | One open command in the desktop File | `Open file in new tab` and `Open Project…` call the same handler; owner decides whether the desktop keeps both                                                                                                        |
 | Product name in the shell            | The window title, the About dialog and the product name say `Analog Canvas`; the page says `Auto Canvas`. Owner decides which texts change; executable and data directory names need a migration and are separate     |
-| Release workflows                    | The desktop README names `desktop-preview.yml` and `desktop-release.yml`; neither exists here, so no CI packages or accepts the preview                                                                               |
+| Release workflows                    | Windows x64 packaging and acceptance run locally. There is no release workflow in this repository.                                                                               |
 
 ## Deferred contract questions
 

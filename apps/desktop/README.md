@@ -128,18 +128,8 @@ The shell is adapted from **LXY-freshman / Schematic Draft** under AGPL-3.0-only
 
 ## Preview distribution
 
-Download the Windows x64 ZIP from a **Desktop Preview** entry in
-[GitHub Releases](https://github.com/cascode-ai/analog-canvas/releases), following
-the extraction instructions above. No Node.js, pnpm or developer tools are
-required. The executable needs its sibling resources; distributing the `.exe`
-alone will not work. GitHub's generated source archives are not the application.
-
-The [Windows packaging and acceptance workflow](../../.github/workflows/desktop-preview.yml) runs when a preview is released, not on every merge: no merge ships the desktop preview, so the Web merge queue does not package it. It checks the real packaged executable before anything is uploaded.
-
-After merging, run [Desktop preview release](../../.github/workflows/desktop-release.yml) from Actions with the merged commit as `ref`. Keep `publish` off to inspect an unpublished Actions artifact, or enable it to publish the accepted ZIP as a GitHub prerelease. The workflow rejects commits outside `main`, rebuilds and validates the exact selected commit, and uses a `desktop-preview-…` tag that does not match the Web deployment's `v*` tags. It does not replace existing releases or mark the preview as Latest.
-
-The ZIP includes `ACCEPTANCE.json` and `preview.png` from the packaged run,
-corresponding source and attribution. Signing, an installer and automatic updates
-remain outside this minimum desktop scope.
-
-Before either Actions artifact upload or prerelease publication, the same workflow rejects private/configuration paths and scans runtime files plus nested source for credentials. Successful packages include `SECURITY.json`. Desktop builds do not load local `.env` files or expose `VITE_*` environment values. See the [credential audit and distribution boundary](../../docs/desktop-distribution-security.md) for evidence, scanner limitations and the server-side administrator model.
+Use the locally assembled Windows x64 ZIP and follow the extraction instructions
+above. Distribute the executable together with its sibling resources, corresponding
+source, and attribution. The ZIP includes `ACCEPTANCE.json`, `preview.png` and
+`SECURITY.json`. Desktop builds exclude local `.env` files and `VITE_*`
+environment values. See the [credential audit and distribution boundary](../../docs/desktop-distribution-security.md).
