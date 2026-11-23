@@ -1,3 +1,4 @@
+import { digestSha256Hex } from "@icm/model";
 import {
   parseSharedComponentPayload,
   type SharedDefinitionPayload,
@@ -73,12 +74,6 @@ export function componentPublicationContent(
   );
 }
 
-export async function componentContentDigest(content: string): Promise<string> {
-  return [
-    ...new Uint8Array(
-      await crypto.subtle.digest("SHA-256", new TextEncoder().encode(content)),
-    ),
-  ]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
+export function componentContentDigest(content: string): Promise<string> {
+  return digestSha256Hex(content);
 }

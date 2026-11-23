@@ -1,3 +1,4 @@
+import { digestSha256Hex } from "@icm/model/sha256";
 import lock from "./rnl-canvas-package.lock.json" with { type: "json" };
 
 /** Every version the editor ships, so a file written with any of them reads. */
@@ -17,10 +18,7 @@ export async function decodeCanvasPackage(
 ): Promise<string> {
   const pinned = lock.versions.find((item) => item.version === version);
   if (!pinned) throw new Error(`Canvas package ${version} is not locked`);
-  const digest = await crypto.subtle.digest("SHA-256", new Uint8Array(bytes));
-  const hash = Array.from(new Uint8Array(digest), (byte) =>
-    byte.toString(16).padStart(2, "0"),
-  ).join("");
+  const hash = await digestSha256Hex(bytes);
   if (hash !== pinned.sha256)
     throw new Error(
       `Canvas package SHA-256 mismatch: expected ${pinned.sha256} for ${version}, received ${hash}`,

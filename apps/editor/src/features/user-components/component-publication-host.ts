@@ -1,3 +1,4 @@
+import { digestSha256Hex } from "@icm/model";
 import { saveNativeComponent } from "../../hosts/native-component-library";
 import { componentLibraryCapture } from "./component-library-origin";
 import { executeComponentPublication } from "./component-publication-operation";
@@ -14,22 +15,15 @@ export async function saveLibraryComponent(request: {
 }) {
   if (!import.meta.env?.ICM_DESKTOP)
     return executeComponentPublication(request);
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(
-      JSON.stringify([request.componentId, request.revision, request.payload]),
-    ),
+  const idempotencyKey = await digestSha256Hex(
+    JSON.stringify([request.componentId, request.revision, request.payload]),
   );
   const entry = await saveNativeComponent(
     request.componentId,
     request.revision,
     request.payload.definition,
     request.payload.circuit,
-    {
-      idempotencyKey: [...new Uint8Array(digest)]
-        .map((byte) => byte.toString(16).padStart(2, "0"))
-        .join(""),
-    },
+    { idempotencyKey },
   );
   return {
     entry,

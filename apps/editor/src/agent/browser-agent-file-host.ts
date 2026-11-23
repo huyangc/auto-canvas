@@ -15,7 +15,11 @@ import type {
 import { planProjectCellBodyImport } from "@icm/edit-engine";
 import { createBrowserFormalExportSource } from "@icm/exporters";
 import { parseProject, serializeProject } from "@icm/project-protocol";
-import type { CircuitProject, SchematicDocument } from "@icm/model";
+import {
+  digestSha256Hex,
+  type CircuitProject,
+  type SchematicDocument,
+} from "@icm/model";
 import { findBuiltInBodies } from "@icm/netlist";
 import { importSpiceSources } from "@icm/spice";
 import { withImportedInstanceDisplays } from "../features/instance-display/imported-instance-displays";
@@ -526,7 +530,7 @@ export class BrowserAgentFileHost {
           code: "FILE_TOO_LARGE",
           message: "Combined staged files exceed the File Resource limit",
         };
-      if ((await sha256(bytes)) !== file.sha256)
+      if ((await digestSha256Hex(bytes)) !== file.sha256)
         return {
           ok: false,
           code: "FILE_INTEGRITY_MISMATCH",
@@ -560,7 +564,7 @@ export class BrowserAgentFileHost {
         encoding: "base64",
         data: base64EncodeBytes(bytes),
         byteLength: bytes.byteLength,
-        sha256: await sha256(bytes),
+        sha256: await digestSha256Hex(bytes),
       },
     };
   }
@@ -600,14 +604,4 @@ function isVirtualSourcePath(value: string): boolean {
     .every(
       (segment) => segment.length > 0 && segment !== "." && segment !== "..",
     );
-}
-
-async function sha256(bytes: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new Uint8Array(bytes).buffer,
-  );
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
 }

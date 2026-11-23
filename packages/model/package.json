@@ -8,6 +8,11 @@
       "development": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./sha256": {
+      "development": "./src/sha256.ts",
+      "types": "./dist/sha256.d.ts",
+      "default": "./dist/sha256.js"
     }
   },
   "scripts": {
