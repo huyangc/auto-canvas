@@ -170,6 +170,22 @@ and the [server contract](server.md).
   (saved Projects revert, others close, the last yields to a blank circuit)
   before the page leaves. Other replacements keep the outgoing Project in
   recovery; the incoming Project gets its own working-copy id.
+- A replacement is bound to the session it started in. It captures an
+  activation identity before its first await and revalidates after each await
+  (file read, Cloud fetch, staging, recovery flush, save, deletion); a stale
+  command's late result is discarded silently — no install, status, Import
+  Review or recovery cancellation reaches the tab that is open by then. One
+  replacement holds the slot from entry until its dialog is answered, and a
+  second is refused at once with `Another replacement is waiting for your
+  answer`. The confirmation stores the command it answers and the working copy
+  id staged for it, so **Continue without saving** deletes only that copy even
+  if the live working copy changed in the same session; a failed deletion
+  keeps the copy, the dialog and the slot for a retry. A session restore
+  retires the dialog and every command it started. The refresh restore asks
+  the live open-blocker and the controller's content token before reserving
+  the slot and before installing; a slot held by the person's own import makes
+  it stand down silently, and only a settle of `restored` for the matching
+  working copy enables the Agent's automatic reconnection.
 - Startup offers the tab's latest valid record non-modally (Restore,
   Download backup, Ignore) only when it says `unsavedAtSnapshot: true`, the
   foreground is clean and this is not a refresh-restore. Pending writes stay

@@ -437,14 +437,40 @@ one undo, reporting the exact affected count (also in dry run).
   one replacement boundary (not an Edit Engine transaction) that cancels pending
   recovery and ends the Agent session; files are upgraded
   ([file format](project-file-format.md)) and marked as needing save.
-- Selection, viewport, tool, previews, Agent tokens and approval UI never enter
-  Project JSON; recovery runs only after a transaction or replacement and stores
-  no bearer token.
+- **A replacement belongs to the session it was started in.** Every operation
+  that replaces the open Project — a netlist or Project file import (menu or
+  drop), Open Project File, an example, New Project, Revert, a Cloud open, an
+  Agent candidate, a recovery restore, a refresh restore — captures an
+  activation identity at its entry, before its first await, and checks it after
+  every await on the way to replacing (file read, fetch, staging, recovery
+  write, save, deletion). A command that no longer matches **discards its late
+  result silently**: no replacement, status line, Import Review, dock change,
+  Auto Layout request or recovery cancellation lands on another tab. Switching
+  tabs, restoring another tab's file state or installing another Project retires
+  the outgoing command, its dialog and its busy state at once. Identity is an
+  activation counter, never a Project id or controller session string, because
+  two tabs can read equal.
+- **One replacement at a time.** A replacement holds the single replacement slot
+  from its entry until its dialog is answered or it ends; another is refused at
+  once with `Another replacement is waiting for your answer`. Intentional tab
+  opens take no slot: a Cloud open into a new tab, selecting an already-open
+  tab, a background open and the `inTab` file openers.
 - With unsaved work, Back, Refresh and close use the browser leave prompt; New,
   Open, Revert, restore and staged replacement use one in-app dialog whose Cloud
   limit is the shared limit the Shelf counts. Startup recovery never silently
   replaces the Project. Same-site product links go through this guard without a
   second native prompt.
+- The confirmation stores the command it answers and the working copy staged
+  for it: **Continue without saving** deletes only that staged copy, never the
+  working copy that is live by then. A failed deletion leaves everything in
+  place, says so, and allows a retry. **Save and continue** may save, export or
+  acknowledge only for the session that asked; a joined save whose activation
+  went stale writes no binding, baseline, recovery or status. A session restore
+  invalidates the dialog at once, and the tab switch's own status is the only
+  one shown.
+- Selection, viewport, tool, previews, Agent tokens and approval UI never enter
+  Project JSON; recovery runs only after a transaction or replacement and stores
+  no bearer token.
 
 ## Modes
 
@@ -496,12 +522,15 @@ it does.
   follows every imported Cell with a part. A Project file (`.json`) dropped
   the same way opens as by **File → Import → Project File…** — the same
   entry rule, the same guard, into the current tab, with its own drawing and
-  no Auto Layout after it. While a file is over the window the page shows a
-  drop frame; behind a modal dialog a dropped file does nothing, a folder is
-  refused with a status line, a set of files containing a `.json` must be
-  that one file, and every other set follows the chooser's existing entry and
-  include rules. A dropped file is never displayed by the browser and never
-  inserted into a code editor.
+  no Auto Layout after it. The drop takes the replacement slot before it reads
+  anything, so a second drop is refused at once and the files it carries never
+  take over the first drop's confirmation; the read is bound to that command,
+  and a switch while it is pending discards the result silently. While a file
+  is over the window the page shows a drop frame; behind a modal dialog a
+  dropped file does nothing, a folder is refused with a status line, a set of
+  files containing a `.json` must be that one file, and every other set follows
+  the chooser's existing entry and include rules. A dropped file is never
+  displayed by the browser and never inserted into a code editor.
 - **Remembered only when chosen.** The switch (and the card's **Draw it
   yourself →**) stores the mode for this browser; the first open is Auto. A
   drawing key (`B`, `W`, `T`, `I`, `P`, `L`) or Insert component… / Place Cell

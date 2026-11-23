@@ -19,6 +19,8 @@ import {
   exportedProject,
   openEditor,
   openProjectFile,
+  placeComponentAt,
+  projectTabAction,
   showNetlistPanel,
 } from "./editor-fixtures";
 
@@ -83,6 +85,54 @@ const drawing = (project: any) =>
       position: instance.placement.position,
     })),
   }));
+
+/**
+ * Hold the page's own file reads: a drop's read stays pending until the test
+ * releases it, so a tab switch or a second drop lands while it is in flight.
+ */
+async function gateFileReads(
+  page: Page,
+  method: "arrayBuffer" | "text",
+): Promise<void> {
+  await page.evaluate((name) => {
+    const proto = File.prototype as unknown as Record<
+      string,
+      (this: File) => Promise<unknown>
+    >;
+    const original = proto[name]!;
+    const gate: { entered: number; release: null | (() => void) } = {
+      entered: 0,
+      release: null,
+    };
+    (window as unknown as Record<string, unknown>).__fileReadGate = gate;
+    proto[name] = function (this: File) {
+      gate.entered += 1;
+      return new Promise((resolve, reject) => {
+        gate.release = () => {
+          try {
+            resolve(original.call(this));
+          } catch (error) {
+            reject(error);
+          }
+        };
+      });
+    };
+  }, method);
+}
+
+const readEntered = (page: Page) =>
+  page.waitForFunction(
+    () =>
+      ((window as unknown as { __fileReadGate?: { entered: number } })
+        .__fileReadGate?.entered ?? 0) > 0,
+  );
+
+const releaseFileRead = (page: Page) =>
+  page.evaluate(() => {
+    (
+      window as unknown as { __fileReadGate?: { release: null | (() => void) } }
+    ).__fileReadGate?.release?.();
+  });
 
 test.describe("a file dropped onto the window in Auto", () => {
   test.use({ storageState: AUTO_MODE_STORAGE });
@@ -342,6 +392,117 @@ R2 vdd out 10k
     const names = after.documents.map((document: any) => document.name);
     expect(names).toContain("stage");
     expect(names).not.toContain("chain");
+  });
+
+  test("a netlist drop whose read settles after a tab switch changes nothing in either tab", async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await openEditor(page);
+    // A second tab with a drawing of its own.
+    await projectTabAction(page, "New project tab");
+    // Placing a part in Auto brings up Draw for this session; the tabs share
+    // the mode, so everything below stays on the canvas.
+    await placeComponentAt(page, "nmos", { x: 240, y: 220 });
+    await expect(page.getByTestId("active-instance-count")).toHaveText("1");
+    // Back to the empty first tab, which is where the drop lands.
+    await page.getByRole("tab").nth(0).click();
+    await expect(page.getByTestId("active-instance-count")).toHaveText("0");
+    const canvas = page.getByTestId("schematic-canvas");
+    const revisionA = await revision(page).textContent();
+
+    await gateFileReads(page, "arrayBuffer");
+    await dropFiles(page, canvas, netlist(NETLIST_A));
+    await readEntered(page);
+    await page.getByRole("tab").nth(1).click();
+    await expect(page.getByTestId("active-instance-count")).toHaveText("1");
+    const statusB = await page.getByTestId("status").textContent();
+    const revisionB = await revision(page).textContent();
+
+    await releaseFileRead(page);
+    await page.waitForTimeout(2000);
+    await expect(
+      page.getByRole("dialog", { name: "Unsaved changes" }),
+    ).toHaveCount(0);
+    await expect(page.getByTestId("status")).toHaveText(statusB!);
+    await expect(revision(page)).toHaveText(revisionB!);
+    await expect(page.getByTestId("active-instance-count")).toHaveText("1");
+
+    await page.getByRole("tab").nth(0).click();
+    await expect(page.getByTestId("active-instance-count")).toHaveText("0");
+    await expect(revision(page)).toHaveText(revisionA!);
+  });
+
+  test("a second drop while the first is reading is refused and the first installs once", async ({
+    page,
+  }) => {
+    test.setTimeout(180_000);
+    await openEditor(page);
+    await openProjectFile(page, PROJECT_TEXT, PROJECT_NAME);
+    await expect(page.getByTestId("status")).toContainText(
+      `Opened ${PROJECT_NAME}`,
+    );
+    // Unsaved work makes the first drop ask before it replaces.
+    const opened = await revision(page).textContent();
+    await page.locator("body").press("ControlOrMeta+a");
+    await page.locator("body").press("r");
+    await expect(revision(page)).not.toHaveText(opened!);
+
+    await gateFileReads(page, "arrayBuffer");
+    const canvas = page.getByTestId("schematic-canvas");
+    await dropFiles(page, canvas, netlist(NETLIST_A));
+    await readEntered(page);
+    await dropFiles(page, canvas, netlist(NETLIST_B));
+    await expect(page.getByTestId("status")).toHaveText(
+      "Another replacement is waiting for your answer",
+    );
+
+    await releaseFileRead(page);
+    const guard = page.getByRole("dialog", { name: "Unsaved changes" });
+    await expect(guard).toBeVisible();
+    await guard
+      .getByRole("button", { name: "Continue without saving" })
+      .click();
+    await expect(page.getByTestId("status")).toContainText(FINAL, {
+      timeout: 60_000,
+    });
+    const after = await exportedProject(page);
+    const names = after.documents.map((document: any) => document.name);
+    expect(names).toEqual(["cs"]);
+  });
+
+  test("a Project-file drop whose read settles after a tab switch shows nothing", async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await openEditor(page);
+    await projectTabAction(page, "New project tab");
+    await placeComponentAt(page, "nmos", { x: 240, y: 220 });
+    await expect(page.getByTestId("active-instance-count")).toHaveText("1");
+    await page.getByRole("tab").nth(0).click();
+    await expect(page.getByTestId("active-instance-count")).toHaveText("0");
+    const canvas = page.getByTestId("schematic-canvas");
+    const revisionA = await revision(page).textContent();
+
+    await gateFileReads(page, "text");
+    await dropFiles(page, canvas, [{ name: PROJECT_NAME, text: PROJECT_TEXT }]);
+    await readEntered(page);
+    await page.getByRole("tab").nth(1).click();
+    await expect(page.getByTestId("active-instance-count")).toHaveText("1");
+    const statusB = await page.getByTestId("status").textContent();
+    const revisionB = await revision(page).textContent();
+
+    await releaseFileRead(page);
+    await page.waitForTimeout(2000);
+    await expect(
+      page.getByRole("dialog", { name: "Unsaved changes" }),
+    ).toHaveCount(0);
+    await expect(page.getByTestId("status")).toHaveText(statusB!);
+    await expect(revision(page)).toHaveText(revisionB!);
+
+    await page.getByRole("tab").nth(0).click();
+    await expect(page.getByTestId("active-instance-count")).toHaveText("0");
+    await expect(revision(page)).toHaveText(revisionA!);
   });
 
   test("Chromium's own drag pipeline delivers the file without navigating", async ({
