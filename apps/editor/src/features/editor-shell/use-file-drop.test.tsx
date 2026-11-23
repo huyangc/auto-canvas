@@ -139,11 +139,15 @@ it("opens one Project file and refuses several, or a Project file with others", 
   }
 });
 
-it("counts the elements a file is over, and drops the count at a drop", async () => {
+it("keeps the frame while the file moves, and hides it after a leave", async () => {
   const { latest, delivered, dispatch } = await mount();
   const data = transfer([new File(["* a\n"], "a.sp")]);
   const child = document.createElement("span");
   document.body.append(child);
+  const settle = () =>
+    act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 220));
+    });
 
   const entered = await dispatch("dragenter", data);
   expect(entered.defaultPrevented).toBe(true);
@@ -154,38 +158,25 @@ it("counts the elements a file is over, and drops the count at a drop", async ()
   expect(over.defaultPrevented).toBe(true);
   expect(data.dropEffect).toBe("copy");
 
-  // A second element entered, then one left: the file is still over another.
-  await dispatch("dragenter", data, child);
+  // A move between elements: the leave names no destination in older Safari,
+  // so only the enter that follows it keeps the frame.
   await dispatch("dragleave", data);
+  await dispatch("dragenter", data, child);
+  await settle();
   expect(latest.dragActive).toBe(true);
-  await dispatch("dragleave", data, child);
+
+  // A leave with nothing after it, as leaving the window or a cancel.
+  const leaving = await dispatch("dragleave", data, child);
+  expect(leaving.defaultPrevented).toBe(true);
+  await settle();
   expect(latest.dragActive).toBe(false);
 
-  // A drop ends the drag whatever the count was.
+  // A drop ends the drag at once, a dragend too.
   await dispatch("dragenter", data);
-  await dispatch("dragenter", data, child);
   expect(latest.dragActive).toBe(true);
   await dispatch("drop", data);
   expect(latest.dragActive).toBe(false);
-
-  // Leaving the window clears counts whose leaving events were lost with an
-  // element that unmounted under the file. jsdom's Event has no
-  // relatedTarget, so say so on each.
-  await dispatch("dragenter", data);
-  await dispatch("dragenter", data, child);
-  await dispatch("dragenter", data, child);
-  expect(latest.dragActive).toBe(true);
-  const leaving = new Event("dragleave", { bubbles: true, cancelable: true });
-  Object.defineProperty(leaving, "dataTransfer", { value: data });
-  Object.defineProperty(leaving, "relatedTarget", { value: null });
-  await act(async () => {
-    child.dispatchEvent(leaving);
-  });
-  expect(latest.dragActive).toBe(false);
-  expect(leaving.defaultPrevented).toBe(true);
-
-  // A drag this page started ends on dragend.
-  await dispatch("dragenter", data);
+  await dispatch("dragover", data);
   expect(latest.dragActive).toBe(true);
   await dispatch("dragend", data);
   expect(latest.dragActive).toBe(false);
