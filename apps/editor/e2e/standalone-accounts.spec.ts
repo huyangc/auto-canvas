@@ -42,7 +42,38 @@ test("accounts reopen their saved drawing in another browser and isolate local d
   await renameProject(page, name);
   await page.keyboard.press("ControlOrMeta+s");
   await expect(page.getByTestId("status")).toHaveText(`Saved ${name} to Cloud`);
+  await page.evaluate(() => {
+    const put = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (...args: Parameters<typeof put>) {
+      if (this.name === "windows")
+        throw new DOMException("Quota", "QuotaExceededError");
+      return put.apply(this, args);
+    };
+    window.addEventListener(
+      "test-restore-idb",
+      () => {
+        IDBObjectStore.prototype.put = put;
+      },
+      { once: true },
+    );
+  });
   await renameProject(page, draft);
+  const menu = await openMenu(page, "File");
+  const warning = page.waitForEvent("dialog").then(async (dialog) => {
+    const message = dialog.message();
+    await dialog.accept();
+    return message;
+  });
+  await menu.getByRole("button", { name: /Sign out/ }).click();
+  expect(await warning).toMatch(/Sign out paused/);
+  await expect(page.locator(".app-project-name-text")).toHaveText(draft);
+  expect(
+    (await (await page.request.get("/api/session")).json()).user.displayName,
+  ).toBe(alice.toLowerCase());
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event("test-restore-idb")),
+  );
+  await page.keyboard.press("Escape");
   const sibling = await page.context().newPage();
   await sibling.goto(page.url());
   await expect(sibling.getByTestId("schematic-canvas")).toBeVisible();

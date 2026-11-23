@@ -60,7 +60,9 @@ export function registerAccounts(
     const needsBinding =
       (c.req.method !== "GET" && c.req.method !== "HEAD") ||
       path === "/api/projects" ||
-      path.startsWith("/api/projects/");
+      path.startsWith("/api/projects/") ||
+      path === "/api/components" ||
+      path.startsWith("/api/components/");
     if (
       !row ||
       ((needsBinding || expected !== undefined) && expected !== row.id)
@@ -77,11 +79,16 @@ export function registerAccounts(
   }
   // Capability clients authenticate with relay tokens and use its configured origin.
   // Only creating an editor pairing uses the cookie and the same-origin guard.
-  app.all("/api/agent/*", (c, next) =>
-    c.req.path === base + "/api/agent/sessions" && c.req.method === "POST"
-      ? next()
-      : relay.fetch(c.req.raw),
-  );
+  app.all("/api/agent/*", (c, next) => {
+    const path = c.req.path.slice(base.length);
+    if (path === "/api/agent/sessions" && c.req.method === "POST")
+      return next();
+    const editorSecretRoute =
+      c.req.header("x-editor-secret") !== undefined &&
+      /^\/api\/agent\/sessions\/[^/]+(?:\/(?:status|control))?$/u.test(path) &&
+      !c.req.header("Authorization");
+    return relay.fetch(c.req.raw, editorSecretRoute);
+  });
   app.use("/api/*", async (c, next) => {
     c.header("Cache-Control", "private, no-store");
     const origin = c.req.header("Origin");
@@ -222,7 +229,7 @@ export function registerAccounts(
     c.set("sessionUser", user);
     await next();
   });
-  app.post("/api/agent/sessions", (c) => relay.fetch(c.req.raw));
+  app.post("/api/agent/sessions", (c) => relay.fetch(c.req.raw, true));
   app.post("/api/auth/logout", async (c) => {
     await db.query("DELETE FROM standalone_sessions WHERE token_hash=$1", [
       digest(getCookie(c, sessionCookie(c, base))!),

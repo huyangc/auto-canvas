@@ -648,10 +648,11 @@ describe("standalone accounts", () => {
   });
   it("lets the relay check capability origins and keeps pairing same-origin", async () => {
     const allowed = "https://capability.test";
+    const relay = new AgentRelayHost(db, allowed);
     app = createApp({
       db,
       auth: { mode: "accounts" },
-      agentRelay: new AgentRelayHost(db, allowed),
+      agentRelay: relay,
     });
     const preflight = await request("/api/agent/claims", "OPTIONS", undefined, {
       Origin: allowed,
@@ -662,6 +663,26 @@ describe("standalone accounts", () => {
       (await request("/api/agent/sessions", "POST", {}, { Origin: allowed }))
         .status,
     ).toBe(403);
+    try {
+      const headers = await boundCookie(
+        await credentials("register", "A12345678"),
+      );
+      const pairing = await request(
+        "/api/agent/sessions",
+        "POST",
+        {
+          projectSessionId: "p:tab",
+          projectId: "p",
+          documentIds: ["doc"],
+          scopes: ["circuit.snapshot"],
+        },
+        headers,
+      );
+      expect(pairing.status).toBe(200);
+      expect((await pairing.json()).session.claimCode).toBeTruthy();
+    } finally {
+      await relay.close();
+    }
   });
   it("isolates failed guesses by network peer and username", async () => {
     app = createApp({ db, auth: { mode: "accounts" } });
@@ -803,6 +824,14 @@ describe("standalone accounts", () => {
       (await request("/api/projects", "POST", body, { Cookie: b.Cookie }))
         .status,
     ).toBe(401);
+    for (const path of [
+      "/api/components?status=deleted",
+      "/api/components/private",
+    ]) {
+      expect(
+        (await request(path, "GET", undefined, { Cookie: b.Cookie })).status,
+      ).toBe(401);
+    }
     const created = await request("/api/projects", "POST", body, a);
     expect(created.status).toBe(201);
     const { project } = await created.json();

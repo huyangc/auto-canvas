@@ -16,6 +16,7 @@ import {
   type RefObject,
   type SetStateAction,
 } from "react";
+import { useBeforeAccountLogout } from "../accounts/account-context";
 import { flushSync } from "react-dom";
 import type { CameraRectInput } from "../canvas/fit-view";
 import type { CameraRuntime } from "../canvas/camera-runtime";
@@ -991,6 +992,17 @@ export function useProjectTabSessions({
     if (workspaceWriteError.current)
       throw new Error(workspaceWriteError.current);
   }
+  useBeforeAccountLogout(async () => {
+    const blocker = projectSwitchBlocker();
+    if (blocker || projectTabs.busy)
+      throw new Error(blocker || "A project tab operation is in progress.");
+    if (
+      projectTabs
+        .entries()
+        .some(({ session }) => session.dirty || session.unsafe)
+    )
+      await flushNativeWorkspace();
+  });
   return {
     flushNativeWorkspace,
     cloudManagementBusy,
