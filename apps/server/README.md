@@ -76,7 +76,7 @@ build the server and its workspace dependencies.
 and defaults `AUTO_CANVAS_API_URL` to the configured server URL.
 
 For a built editor, run `EDITOR_ROOT=apps/editor/dist node apps/server/dist/cli.js`.
-Unknown `/api/*` requests never fall back to HTML. Standalone users register with one English letter followed by eight digits and a password of 8–128 characters. Saved Projects belong to the signed-in account. Use HTTPS when serving credentials over a network. Explicit `AUTO_CANVAS_AUTH=local` gives every visitor access to the original shared profile and its Projects. Keep that mode on a trusted single-user installation. See the [HTTP contract](../../docs/specs/server.md).
+Unknown `/api/*` requests never fall back to HTML. Standalone users register with one English letter followed by eight digits and a password of 8–128 characters. Saved Projects belong to the signed-in account. Use HTTPS when serving credentials over a network. Explicit `AUTO_CANVAS_AUTH=local` gives every visitor access to the original shared profile and its Projects. Keep that mode on a trusted single-user installation. Build with `AUTO_CANVAS_AUTH=local` for offline browser recovery in this mode. The default account build requires the session service to open the editor. See the [HTTP contract](../../docs/specs/server.md).
 
 ```bash
 pnpm exec vitest run apps/server packages/component-library

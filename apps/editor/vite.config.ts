@@ -51,7 +51,13 @@ function notebookBuildSwitch(): Plugin {
         );
       const notebook = command === "build" && value === "notebook";
       return {
-        define: { "import.meta.env.ICM_NOTEBOOK": notebook ? "true" : "false" },
+        define: {
+          "import.meta.env.ICM_NOTEBOOK": notebook ? "true" : "false",
+          "import.meta.env.ICM_OFFLINE_LOCAL":
+            command === "build" &&
+            !notebook &&
+            (value === "local" || process.env.AUTO_CANVAS_AUTH === "local"),
+        },
       };
     },
   };

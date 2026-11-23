@@ -1,4 +1,6 @@
+import { AccountContext } from "../accounts/account-context";
 import {
+  useContext,
   useEffect,
   useRef,
   useState,
@@ -18,7 +20,7 @@ type ImageState =
 const LAZY_ROOT_MARGIN = "100% 0px";
 
 /**
- * An API image in the notebook build. An <img src> cannot carry the
+ * An authenticated Project preview. An <img src> cannot carry the
  * session's header, so the image is fetched through the page's (scoped)
  * fetch and shown from an object URL. While it loads, and after it fails,
  * a placeholder <img> without a source takes its place, with the same
@@ -150,4 +152,14 @@ function failureEvent(): SyntheticEvent<HTMLImageElement, Event> {
     preventDefault: () => {},
     stopPropagation: () => {},
   } as unknown as SyntheticEvent<HTMLImageElement, Event>;
+}
+
+/** Local and desktop previews can use the native image loader directly. */
+export function ProjectPreviewImage(props: ApiImageProps) {
+  const account = useContext(AccountContext);
+  return import.meta.env.ICM_NOTEBOOK || account ? (
+    <ApiImage {...props} />
+  ) : (
+    <img {...props} />
+  );
 }

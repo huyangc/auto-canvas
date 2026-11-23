@@ -2,7 +2,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { ApiImage } from "./api-image";
+import { ApiImage } from "../components/api-image";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 

@@ -5,6 +5,7 @@ import {
   scrypt,
   timingSafeEqual,
 } from "node:crypto";
+import { LoginAttempts } from "./login-attempts.js";
 import { promisify } from "node:util";
 import type { HttpBindings } from "@hono/node-server";
 import type { Context, Hono } from "hono";
@@ -55,7 +56,11 @@ export function registerAccounts(
     const row = result.rows[0];
     const expected = c.req.header("X-Canvas-Account");
     // Old editor tabs share the current cookie but cannot name its owner.
-    const needsBinding = c.req.method !== "GET" && c.req.method !== "HEAD";
+    const path = c.req.path.slice(base.length);
+    const needsBinding =
+      (c.req.method !== "GET" && c.req.method !== "HEAD") ||
+      path === "/api/projects" ||
+      path.startsWith("/api/projects/");
     if (
       !row ||
       ((needsBinding || expected !== undefined) && expected !== row.id)
@@ -106,7 +111,7 @@ export function registerAccounts(
 
   // Bound concurrent password work and throttle repeated guesses against a name.
   let active = 0;
-  const attempts = new Map<string, { count: number; until: number }>();
+  const attempts = new LoginAttempts();
   for (const action of ["register", "login"] as const) {
     app.post(`/api/auth/${action}`, bodyLimit({ maxSize: 4096 }), async (c) => {
       if (c.req.header("content-type")?.split(";")[0] !== "application/json")
@@ -129,27 +134,12 @@ export function registerAccounts(
         password.length > 128
       )
         return c.json({ error: "Use a password of 8–128 characters." }, 400);
-      const now = Date.now();
-      // Trust the transport peer only. Requests behind a proxy share its address,
-      // so key by both peer and username. Expiry order follows insertion order.
+      // The transport peer is authoritative. Proxy users have separate usernames.
       const bindings = c.env as Partial<HttpBindings> | undefined;
       const peer = bindings?.incoming?.socket.remoteAddress ?? "local";
-      const key = peer + "/" + username;
-      for (const [oldKey, entry] of attempts) {
-        if (entry.until > now) break;
-        attempts.delete(oldKey);
-      }
-      const attempt = attempts.get(key);
-      if (active >= 8 || (attempt?.count ?? 0) >= 12)
+      const attempt = attempts.forPair(peer, username);
+      if (active >= 8 || attempt.limited())
         return c.json({ error: "Too many attempts. Try again later." }, 429);
-      if (!attempt && attempts.size >= 4096) {
-        const oldest = attempts.keys().next();
-        if (!oldest.done) attempts.delete(oldest.value);
-      }
-      attempts.set(key, {
-        count: (attempt?.count ?? 0) + 1,
-        until: attempt?.until ?? now + 300_000,
-      });
       active++;
       try {
         let userId: string;
@@ -173,8 +163,10 @@ export function registerAccounts(
             row?.salt ?? dummySalt,
             64,
           )) as Buffer;
-          if (!row || !timingSafeEqual(hash, row.password_hash))
+          if (!row || !timingSafeEqual(hash, row.password_hash)) {
+            attempt.failed();
             return c.json({ error: "Incorrect username or password." }, 401);
+          }
           userId = row.user_id;
         }
         const token = randomBytes(32).toString("hex");
@@ -191,6 +183,7 @@ export function registerAccounts(
               [username, userId, salt, passwordHash],
             );
             if (!inserted.rowCount) {
+              attempt.failed();
               await conn.query("ROLLBACK");
               return c.json(
                 { error: "That username is already registered." },
@@ -213,7 +206,6 @@ export function registerAccounts(
         } finally {
           conn.release();
         }
-        attempts.delete(key);
         issueCookie(c, token, lifetime);
         return c.json({ ok: true }, action === "register" ? 201 : 200);
       } finally {
