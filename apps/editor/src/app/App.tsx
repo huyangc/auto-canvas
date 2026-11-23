@@ -4486,6 +4486,12 @@ function WorkspaceEditor({
   // the files are read for a while first: the block is asked again at the
   // replacement boundary, when a draft begun meanwhile, another tab or a
   // save may now hold the Project.
+  //
+  // Known, and left to a task of its own (T171): a tab switch between the
+  // boundary check and the recovery write, or before a failed import's
+  // report, still lands on the tab that is now open. The choosers and the
+  // File menu have the same race; it belongs in the replacement guard, not
+  // in one caller of it.
   const boundaryBlocker = (session: string) => (): string | null =>
     editorDocumentController.projectSessionId !== session
       ? "another Project is active"
