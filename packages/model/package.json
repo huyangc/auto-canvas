@@ -8,8 +8,7 @@
       "development": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    },
-    "./sha256": "./src/sha256.ts"
+    }
   },
   "scripts": {
     "build": "tsc -p tsconfig.json"

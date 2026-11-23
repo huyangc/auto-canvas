@@ -1,5 +1,5 @@
 // Vite config and the standalone lock verifier load this before workspace packages are built.
-import { digestSha256Hex } from "@icm/model/sha256";
+import { digestSha256Hex } from "../../../../../packages/model/src/sha256.ts";
 import lock from "./rnl-canvas-package.lock.json" with { type: "json" };
 
 /** Every version the editor ships, so a file written with any of them reads. */
