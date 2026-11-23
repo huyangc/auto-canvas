@@ -4479,6 +4479,9 @@ function WorkspaceEditor({
     setStatus,
     onChunkLoadFailure: setChunkLoadFailure,
     onImported: autoLayout.requestAfterImport,
+    // Read again once the dropped or chosen files are read: a draft begun
+    // meanwhile must not be replaced away.
+    replacementBlocker: () => projectSwitchBlockerRef.current(),
   });
   // A file dropped from outside does what its menu command does, in both
   // modes: a netlist imports (and lays itself out), a Project file opens.

@@ -440,6 +440,21 @@ C1 out 0 1p
     expect(cancelled).not.toHaveBeenCalled();
   });
 
+  it("rechecks what holds the Project once the files are read", async () => {
+    // A draft begun while the bytes were read: the earlier check missed it,
+    // and the replacement would unmount it.
+    const target = commands({
+      guardDirtyReplacement: performing(),
+      replacementBlocker: () => "an unapplied Netlist code draft",
+    });
+    await target.importSpiceFiles(files(NETLIST));
+    expect(target.dependencies.replaceActiveProject).not.toHaveBeenCalled();
+    expect(target.dependencies.setImportReport).not.toHaveBeenCalled();
+    expect(target.dependencies.setStatus).toHaveBeenLastCalledWith(
+      "Can't open a Project yet: an unapplied Netlist code draft",
+    );
+  });
+
   it("keeps the canvas clear after a successful import in Auto mode", async () => {
     for (const mode of ["auto", "draw"] as const) {
       const target = commands({

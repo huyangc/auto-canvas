@@ -69,6 +69,13 @@ export interface EditorFileCommandDependencies {
    */
   projectPanelHoldsDraft?: () => boolean;
   /**
+   * Read at the replacement boundary, after the files have been read: what
+   * keeps the Project from being replaced holds now (an unapplied code draft
+   * begun during the read, a save in flight). A drop checks it earlier too,
+   * for a quicker answer, but only this check is race-free.
+   */
+  replacementBlocker?: () => string | null;
+  /**
    * The editor mode when the import lands. Auto keeps the canvas clear after
    * a successful import: the review waits in Properties until opened.
    */
@@ -101,6 +108,7 @@ export function createEditorFileCommands({
   setSelectionOpen,
   clearProjectPanel,
   projectPanelHoldsDraft,
+  replacementBlocker,
   getEditorMode,
   setStatus,
   onChunkLoadFailure,
@@ -301,6 +309,13 @@ export function createEditorFileCommands({
     report: SpiceImportReport,
     layout: boolean,
   ) => {
+    // The files are read by now: a draft begun while reading is unsaved work
+    // the dirty-work guard cannot see, and the replacement unmounts it.
+    const blocker = replacementBlocker?.();
+    if (blocker) {
+      setStatus(`Can't open a Project yet: ${blocker}`);
+      return;
+    }
     const instanceCount = importedProject.documents.reduce(
       (count, candidate) => count + candidate.instances.length,
       0,
