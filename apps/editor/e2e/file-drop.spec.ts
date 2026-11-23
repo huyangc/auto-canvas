@@ -124,13 +124,23 @@ test.describe("a file dropped onto the window in Auto", () => {
     const overlay = page.getByTestId("file-drop-overlay");
 
     const data = await droppedFiles(page, netlist(NETLIST_A));
+    const headerElement = await header.elementHandle();
+    const cardElement = await card.elementHandle();
     await card.dispatchEvent("dragenter", { dataTransfer: data });
     await header.dispatchEvent("dragenter", { dataTransfer: data });
     await expect(overlay).toBeVisible();
-    // Still over the header, whatever the card saw.
-    await card.dispatchEvent("dragleave", { dataTransfer: data });
+    // Still over the header, whatever the card saw: a move between elements
+    // names its destination, unlike a leave of the window (relatedTarget
+    // null, which clears the frame).
+    await card.dispatchEvent("dragleave", {
+      dataTransfer: data,
+      relatedTarget: headerElement,
+    });
     await expect(overlay).toBeVisible();
-    await header.dispatchEvent("dragleave", { dataTransfer: data });
+    await header.dispatchEvent("dragleave", {
+      dataTransfer: data,
+      relatedTarget: cardElement,
+    });
     await expect(overlay).toHaveCount(0);
     await expect(card).toBeVisible();
     await expect(page.getByTestId("status")).not.toContainText("Imported");
@@ -383,6 +393,7 @@ test.describe("a file dropped onto the window in Draw", () => {
     const status = page.getByTestId("status");
     await expect(status).toContainText(FINAL, { timeout: 60_000 });
     expect(await status.textContent()).toContain("Imported 1 Document");
+    await expect(status).toContainText("Auto Layout applied");
     await expect(toolbar).toBeVisible();
   });
 
