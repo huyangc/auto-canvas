@@ -43,6 +43,15 @@ const NOTEBOOK_MANIFEST = {
     "N6c control: a plain page is restored from the back/forward cache",
     "N6c sign-out then Back: the restored editor is cleared at pageshow",
   ],
+  "notebook\tnotebook-worker.spec.ts": [
+    "N7 previews never come from the HTTP cache or the service worker, and Bob never sees Alice's previews",
+    "N9 offline: the cached shell stops at the gate and opens no editor storage",
+  ],
+  "notebook\tnotebook-evidence.spec.ts": [
+    "N11d seed control: the standard editor's recovery reader accepts the single-user seed",
+    "N11b the standard build keeps its recovery prompt with the API unreachable",
+    "N11c the notebook build keeps the Agent off with a saved Agent session and ?agent=pair",
+  ],
 };
 
 const SEPARATOR = " › ";

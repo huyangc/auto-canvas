@@ -42,6 +42,11 @@ full-search checks, including the T013 crossing limits, run in the slow suite.
 
 `pnpm test:e2e:local` runs browser workflows;
 run `pnpm setup:e2e` once per machine or Playwright version when needed.
+`apps/editor/e2e/web-agent-session.spec.ts` starts a Vite server inside the
+Playwright worker, whose development proxies default `AUTO_CANVAS_API_URL` to
+`http://127.0.0.1:4310`: a full-suite run must export `AUTO_CANVAS_API_URL`
+itself (the lane's API origin, for example `http://127.0.0.1:4321`); the unit
+suite runs without it.
 `pnpm test:desktop-build`, `pnpm mcp:package` and `pnpm headless:package` check
 local packaging. Golden and performance scripts remain available for changes
 that affect their contracts.
@@ -50,15 +55,30 @@ The notebook build's browser tests (`apps/editor/e2e/notebook-*.spec.ts`) are
 their own run, excluded from the standard one: after `pnpm build` and
 `pnpm build:notebook-editor`, `AUTO_CANVAS_E2E_NOTEBOOK=1 pnpm exec playwright test`
 starts `scripts/notebook-e2e-fixture.mjs` (a stub silicon-notebook, the built
-server in notebook mode on a throwaway schema, and a proxy that rewrites
-`/canvas` as silicon-notebook does) and runs the cases with one worker in
-Chrome. The run refuses to start unless `AUTO_CANVAS_TEST_DATABASE_URL` names
+server in notebook mode on a throwaway schema, a proxy that rewrites
+`/canvas` as silicon-notebook does, and beside them a standalone sibling: the
+built server in single-user mode serving the standard build `apps/editor/dist`
+on its own schema at `AUTO_CANVAS_E2E_API_PORT`) and runs the cases with one
+worker in Chrome. The run refuses to start unless `AUTO_CANVAS_TEST_DATABASE_URL` names
 an `auto_canvas_test` or `auto_canvas_test_<digits>` database and
 `AUTO_CANVAS_API_URL` is an `http://127.0.0.1:<port>` origin, and never uses
 ports 3000, 8000 or 4310. `node scripts/notebook-e2e-fixture-check.mjs` checks
 the fixture's refusals and cleanup (after `pnpm build`), and
 `scripts/notebook-e2e-selection-check.mjs` checks which tests each run
 collects from `playwright test --list --reporter=json`.
+
+`scripts/standalone-build-evidence.mjs --port <n> --database <url> [--run "<command>"]`
+is the standalone build evidence, for a disposable checkout only (it reads the
+build output there, and the builds that precede it overwrite
+`apps/editor/dist`): it starts, as its own child, the server the launcher
+runs (`node apps/server/dist/cli.js` with `EDITOR_ROOT=apps/editor/dist`) on a
+throwaway schema, checks that every script and stylesheet reference of the
+standard output is a `/assets/` path the server answers, and with `--run`
+runs a command (the Agent browser cases) against that server. It refuses a
+checkout with `.env` files, ports 3000, 8000 and 4310, a bound port and any
+database but `auto_canvas_test…`, and stops everything it started on every
+exit path. `node scripts/standalone-build-evidence-check.mjs` checks its
+refusals and cleanup (after `pnpm build` and `pnpm build:notebook-editor`).
 
 ## Environment-dependent execution
 

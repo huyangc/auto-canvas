@@ -93,9 +93,11 @@ function checkNotebookEnvironment(): void {
   }
   let databaseName = "";
   try {
-    databaseName = decodeURIComponent(
-      databaseUrl?.pathname.replace(/^\//u, "") ?? "",
-    );
+    // pg-connection-string drops the path's first character as the slash,
+    // so a slash-less path would select a different database.
+    databaseName = databaseUrl?.pathname.startsWith("/")
+      ? decodeURIComponent(databaseUrl.pathname.slice(1))
+      : "";
   } catch {
     databaseName = "";
   }
@@ -134,7 +136,10 @@ const notebookWebServer = [
       AUTO_CANVAS_E2E_API_PORT: String(apiPort),
       AUTO_CANVAS_TEST_DATABASE_URL: process.env.AUTO_CANVAS_TEST_DATABASE_URL!,
     },
-    url: `${e2eBaseUrl}/canvas/api/health`,
+    // Ready when the fixture says so. No `url`: Playwright would probe it
+    // before starting the command, sending a request to whatever already
+    // listens on the port before the fixture's own bind check refuses it.
+    wait: { stdout: /notebook-e2e-fixture ready http:\/\/127\.0\.0\.1:\d+\// },
     gracefulShutdown: { signal: "SIGTERM" as const, timeout: 30_000 },
     reuseExistingServer: false,
     timeout: 120_000,

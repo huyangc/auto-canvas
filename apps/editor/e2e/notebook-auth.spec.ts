@@ -15,6 +15,7 @@ import { placeComponent } from "./manual-editor-fixtures.js";
 import {
   createProjectAs,
   expectBearers,
+  expectNoApiRequest,
   expectNoForeignOrigin,
   fixture,
   instrumentStorage,
@@ -472,10 +473,12 @@ test("N3 an account switch in another tab reloads into the new account without t
 
   const loaded = nextLoad(page);
   const identified = nextAuthMe(page, bob);
-  const switched = await recorder.mark("bob");
+  const reloaded = recorder.markAtNavigation(page, "bob");
+  const switched = await recorder.mark("switch");
   await writeTokenFrom(other, bob);
   await loaded;
   expect((await identified).status()).toBe(200);
+  const bobPhase = await reloaded;
   await page.getByTestId("schematic-canvas").waitFor();
   const wall = await openShelfWall(page);
   await expect(wall.getByTestId("shelf-empty")).toBeVisible();
@@ -493,8 +496,9 @@ test("N3 an account switch in another tab reloads into the new account without t
   }
   expect(await requestsWithBearer(recorder, switched, alice)).toEqual([]);
   expect(await projectNamesOf(bob)).toEqual([]);
+  await expectNoApiRequest(recorder, { from: switched, to: bobPhase, page });
   await expectBearers(recorder, {
-    from: switched,
+    from: bobPhase,
     to: end,
     source: page,
     user: bob,
@@ -593,12 +597,10 @@ test("N4a a save issued before the switch stays the old account's", async ({
     source: a,
     user: alice,
   });
-  await expectBearers(recorder, {
+  await expectNoApiRequest(recorder, {
     from: switched,
     to: bobPhase,
-    source: a,
-    user: alice,
-    log: [bob],
+    page: a,
   });
   await expectBearers(recorder, {
     from: bobPhase,
@@ -769,9 +771,7 @@ test("N5a unsaved work: the switch reloads without a beforeunload prompt", async
   await page.getByTestId("schematic-canvas").waitFor();
   expect(dialogs.types.slice(before)).toEqual([]);
   const end = await recorder.mark("end");
-  expect(
-    recorder.between(switched, bobPhase).filter((record) => isApi(record.url)),
-  ).toEqual([]);
+  await expectNoApiRequest(recorder, { from: switched, to: bobPhase, page });
   await expectBearers(recorder, {
     from: bobPhase,
     to: end,
@@ -1482,6 +1482,7 @@ test("N10f measurement: version list observer root and requests before scrolling
   await signIn(page, alice);
   const measurements: unknown[] = [];
   for (const height of [200, 420]) {
+    const viewport = await recorder.mark(`1280x${height} open`);
     await page.setViewportSize({ width: 1280, height });
     await openNotebookEditor(page);
     await openShelfWall(page);
@@ -1572,6 +1573,15 @@ test("N10f measurement: version list observer root and requests before scrolling
     // A measurement: the count is recorded, not required.
     expect(requested.length).toBeGreaterThanOrEqual(0);
     expect(requested.length).toBeLessThanOrEqual(3);
+    // Whatever was requested carried exactly Alice's bearer (browser and
+    // wire), as did everything else this viewport's phase sent.
+    const end = await recorder.mark(`1280x${height} end`);
+    await expectBearers(recorder, {
+      from: viewport,
+      to: end,
+      source: page,
+      user: alice,
+    });
     measurements.push({
       viewport: `1280x${height}`,
       ...layout,

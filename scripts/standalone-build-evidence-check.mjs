@@ -1,0 +1,551 @@
+#!/usr/bin/env node
+// Build-backed check of scripts/standalone-build-evidence.mjs: each refusal
+// exits 2 before anything is made (copies of the script in a temporary
+// root), and every exit path of the real script (a signal during startup or
+// during --run, the server dying during --run, a normal --run, a --run that
+// fails, a run descendant in a process group of its own) leaves no server,
+// no run process and no schema behind. Run after `pnpm build` and
+// `pnpm build:notebook-editor`; not a *.test.mjs, so Vitest does not
+// collect it. Exits non-zero on the first failed assertion.
+import assert from "node:assert/strict";
+import { execFileSync, spawn } from "node:child_process";
+import { once } from "node:events";
+import {
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import { createServer } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { createDb } from "../apps/server/dist/db.js";
+
+const root = fileURLToPath(new URL("../", import.meta.url));
+const script = join(root, "scripts/standalone-build-evidence.mjs");
+const databaseUrl =
+  process.env.AUTO_CANVAS_TEST_DATABASE_URL ?? "postgresql:///auto_canvas_test";
+const admin = createDb(databaseUrl);
+
+async function freePort() {
+  for (;;) {
+    const server = createServer();
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const { port } = server.address();
+    await new Promise((done) => server.close(done));
+    if (![3000, 8000, 4310].includes(port)) return port;
+  }
+}
+
+async function evidenceSchemas() {
+  const { rows } = await admin.query(
+    "select nspname from pg_namespace where nspname like 'standalone\\_evidence\\_%'",
+  );
+  return new Set(rows.map((row) => row.nspname));
+}
+
+function childEnv(overrides = {}) {
+  const env = { ...process.env };
+  delete env.STANDALONE_EVIDENCE_EDITOR_ROOT;
+  delete env.STANDALONE_EVIDENCE_NODE;
+  return { ...env, ...overrides };
+}
+
+/** Starts the script; collects its output and the resources it prints. */
+function start(scriptPath, args, env) {
+  const child = spawn(process.execPath, [scriptPath, ...args], {
+    env,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const run = { child, output: "" };
+  const read = (pattern) => Number(pattern.exec(run.output)?.[1]) || null;
+  const update = () => {
+    run.schema = /resource schema=([a-z0-9_]+)/u.exec(run.output)?.[1] ?? null;
+    run.serverPid = read(/resource pid=(\d+)/u);
+    run.pgid = read(/resource run-pgid=(\d+)/u);
+    run.runProcesses = [
+      ...run.output.matchAll(/resource run-process=(\d+)/gu),
+    ].map((match) => Number(match[1]));
+  };
+  const collect = (data) => {
+    run.output += data;
+    update();
+  };
+  child.stdout.on("data", collect);
+  child.stderr.on("data", collect);
+  run.exited = new Promise((done) => {
+    const timer = setTimeout(() => child.kill("SIGKILL"), 120_000);
+    // `close`, not `exit`: only then has all of its output been read.
+    child.once("close", (code, signal) => {
+      clearTimeout(timer);
+      done({ code, signal });
+    });
+  });
+  run.printed = (pattern) =>
+    new Promise((done, fail) => {
+      const check = () => {
+        if (pattern.test(run.output)) done();
+      };
+      check();
+      child.stdout.on("data", check);
+      run.exited.then(() =>
+        fail(new Error(`exited before ${pattern}:\n${run.output}`)),
+      );
+    });
+  return run;
+}
+
+function gone(pid) {
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (error) {
+    return error.code === "ESRCH";
+  }
+}
+
+function groupGone(pgid) {
+  try {
+    process.kill(-pgid, 0);
+    return false;
+  } catch (error) {
+    return error.code === "ESRCH";
+  }
+}
+
+/** The pids in this process group, from ps. */
+function groupMembers(pgid) {
+  return execFileSync("ps", ["-A", "-o", "pid=,pgid="], { encoding: "utf8" })
+    .split("\n")
+    .map((line) => line.trim().split(/\s+/u).map(Number))
+    .filter(([, group]) => group === pgid)
+    .map(([pid]) => pid);
+}
+
+async function until(condition, label) {
+  for (let tries = 0; !(await condition()); tries += 1) {
+    assert.ok(tries < 300, `timed out: ${label}`);
+    await new Promise((resume) => setTimeout(resume, 100));
+  }
+}
+
+async function expectClean(run, label, extraPids = []) {
+  const present = await evidenceSchemas();
+  if (run.schema)
+    assert.ok(!present.has(run.schema), `${label}: schema ${run.schema} left`);
+  if (run.serverPid)
+    assert.ok(gone(run.serverPid), `${label}: server ${run.serverPid} alive`);
+  if (run.pgid)
+    assert.ok(groupGone(run.pgid), `${label}: run group ${run.pgid} alive`);
+  for (const pid of [...run.runProcesses, ...extraPids])
+    assert.ok(gone(pid), `${label}: run process ${pid} alive`);
+}
+
+/** Runs one case; whatever its assertions do, the script is stopped. */
+async function withRun(scriptPath, args, env, body) {
+  const run = start(scriptPath, args, env);
+  try {
+    await body(run);
+  } finally {
+    if (run.child.exitCode === null && run.child.signalCode === null)
+      run.child.kill("SIGINT");
+    await run.exited;
+  }
+}
+
+const editorRoot = await mkdtemp(join(tmpdir(), "standalone-evidence-root-"));
+const copyRoot = await mkdtemp(join(tmpdir(), "standalone-evidence-copy-"));
+let failed = false;
+try {
+  await mkdir(join(editorRoot, "assets"));
+  await writeFile(
+    join(editorRoot, "index.html"),
+    '<!doctype html><title>evidence check</title><script type="module" src="/assets/a.js"></script><link rel="stylesheet" href="/assets/a.css">\n',
+  );
+  await writeFile(join(editorRoot, "assets/a.js"), "export {};\n");
+  await writeFile(join(editorRoot, "assets/a.css"), "body {}\n");
+  const env = childEnv({ STANDALONE_EVIDENCE_EDITOR_ROOT: editorRoot });
+
+  // (a) Refusals, in a copy of the script in a temporary root: exit 2, the
+  // reason named, no schema made.
+  const copy = join(copyRoot, "scripts/standalone-build-evidence.mjs");
+  await mkdir(join(copyRoot, "scripts"), { recursive: true });
+  await copyFile(script, copy);
+  const resetCopyRoot = async () => {
+    for (const path of [".env", "apps"])
+      await rm(join(copyRoot, path), { recursive: true, force: true });
+    for (const directory of ["apps/editor/dist", "apps/editor/dist-notebook"]) {
+      await mkdir(join(copyRoot, directory), { recursive: true });
+      await writeFile(
+        join(copyRoot, directory, "index.html"),
+        "<!doctype html>\n",
+      );
+    }
+  };
+  const bound = createServer();
+  bound.listen(0, "127.0.0.1");
+  await once(bound, "listening");
+  const boundPort = String(bound.address().port);
+  const port = String(await freePort());
+  const valid = ["--port", port, "--database", databaseUrl];
+  const withDatabase = (value) => ["--port", port, "--database", value];
+  const before = await evidenceSchemas();
+  const refusals = [
+    [
+      "a root .env",
+      valid,
+      async () => writeFile(join(copyRoot, ".env"), "X=1\n"),
+      ".env present",
+    ],
+    [
+      "apps/editor/.env.local",
+      valid,
+      async () => writeFile(join(copyRoot, "apps/editor/.env.local"), "X=1\n"),
+      "apps/editor/.env.local present",
+    ],
+    ...["3000", "8000", "4310"].map((reserved) => [
+      `port ${reserved}`,
+      ["--port", reserved, "--database", databaseUrl],
+      null,
+      "reserved for the developer's servers",
+    ]),
+    ...["80", "70000", "04273", "x"].map((value) => [
+      `port ${value}`,
+      ["--port", value, "--database", databaseUrl],
+      null,
+      "--port must be an integer",
+    ]),
+    [
+      "a bound port",
+      ["--port", boundPort, "--database", databaseUrl],
+      null,
+      "already in use",
+    ],
+    ["no port", ["--database", databaseUrl], null, "--port is required"],
+    ["no database", ["--port", port], null, "--database is required"],
+    [
+      "database auto_canvas",
+      withDatabase("postgresql:///auto_canvas"),
+      null,
+      "must name auto_canvas_test",
+    ],
+    [
+      // pg-connection-string would select `uto_canvas_test` here.
+      "a slash-less database path",
+      withDatabase("postgresql:auto_canvas_test"),
+      null,
+      "must name auto_canvas_test",
+    ],
+    [
+      "a dbname parameter",
+      withDatabase("postgresql:///auto_canvas_test?dbname=auto_canvas"),
+      null,
+      "dbname or db parameter",
+    ],
+    [
+      "a db parameter",
+      withDatabase("postgresql:///auto_canvas_test?db=auto_canvas"),
+      null,
+      "dbname or db parameter",
+    ],
+    [
+      "a socket: URL",
+      withDatabase("socket:/tmp?db=auto_canvas"),
+      null,
+      "postgres: or postgresql:",
+    ],
+    ["an unknown argument", [...valid, "--other", "x"], null, "usage"],
+    [
+      "missing dist",
+      valid,
+      async () => rm(join(copyRoot, "apps/editor/dist"), { recursive: true }),
+      "apps/editor/dist/index.html is missing",
+    ],
+    [
+      "missing dist-notebook",
+      valid,
+      async () =>
+        rm(join(copyRoot, "apps/editor/dist-notebook"), { recursive: true }),
+      "apps/editor/dist-notebook/index.html is missing",
+    ],
+  ];
+  try {
+    for (const [label, args, prepare, reason] of refusals) {
+      await resetCopyRoot();
+      await prepare?.();
+      const run = start(copy, args, childEnv());
+      const { code } = await run.exited;
+      assert.equal(code, 2, `${label}: exit ${code}\n${run.output}`);
+      assert.ok(run.output.includes(reason), `${label}: ${run.output}`);
+      assert.equal(run.output.trim().split("\n").length, 1, run.output);
+      assert.equal(run.schema, null, `${label}: a schema was printed`);
+    }
+  } finally {
+    await new Promise((done) => bound.close(done));
+  }
+  assert.deepEqual(await evidenceSchemas(), before, "a refusal made a schema");
+  console.log(`ok ${refusals.length} refusals: exit 2, nothing made`);
+
+  const args = async (extra = []) => [
+    "--port",
+    String(await freePort()),
+    "--database",
+    databaseUrl,
+    ...extra,
+  ];
+
+  // (i) SIGINT as soon as the server's pid is printed (during startup).
+  await withRun(script, await args(), env, async (run) => {
+    await run.printed(/resource pid=\d+/u);
+    run.child.kill("SIGINT");
+    const { code } = await run.exited;
+    assert.equal(
+      code,
+      130,
+      `SIGINT during startup: exit ${code}\n${run.output}`,
+    );
+    assert.match(run.output, /cleanup ok/u);
+    await expectClean(run, "SIGINT during startup");
+    console.log(
+      `ok SIGINT during startup: exit 130, server ${run.serverPid} and schema ${run.schema} gone`,
+    );
+  });
+
+  // (ii) SIGINT during --run: the whole run group goes too.
+  await withRun(
+    script,
+    await args(["--run", "sleep 60 & sleep 60; wait"]),
+    env,
+    async (run) => {
+      await run.printed(/resource run-pgid=\d+/u);
+      await until(() => groupMembers(run.pgid).length >= 3, "the sleeps");
+      const members = groupMembers(run.pgid);
+      run.child.kill("SIGINT");
+      const { code } = await run.exited;
+      assert.equal(
+        code,
+        130,
+        `SIGINT during --run: exit ${code}\n${run.output}`,
+      );
+      assert.match(run.output, /C-4 ok: 2 references/u);
+      assert.match(run.output, /cleanup ok/u);
+      await expectClean(run, "SIGINT during --run", members);
+      console.log(
+        `ok SIGINT during --run: exit 130, group ${run.pgid} (${members.join(" ")}), server ${run.serverPid} and schema ${run.schema} gone`,
+      );
+    },
+  );
+
+  // (iii) The server dies during --run: cleanup, exit 1.
+  await withRun(
+    script,
+    await args(["--run", "sleep 60 & sleep 60; wait"]),
+    env,
+    async (run) => {
+      await run.printed(/resource run-pgid=\d+/u);
+      await until(() => groupMembers(run.pgid).length >= 3, "the sleeps");
+      const members = groupMembers(run.pgid);
+      process.kill(run.serverPid, "SIGKILL");
+      const { code } = await run.exited;
+      assert.equal(code, 1, `server SIGKILL: exit ${code}\n${run.output}`);
+      assert.match(run.output, /stopped \(server exited/u);
+      await expectClean(run, "server SIGKILL", members);
+      console.log(
+        `ok server SIGKILL during --run: exit 1, group ${run.pgid}, schema ${run.schema} gone`,
+      );
+    },
+  );
+
+  // (iv) A normal --run: C-4 ok, the run's status, everything gone.
+  await withRun(script, await args(["--run", "true"]), env, async (run) => {
+    const { code } = await run.exited;
+    assert.equal(code, 0, `--run true: exit ${code}\n${run.output}`);
+    assert.match(run.output, /C-4 ok: 2 references/u);
+    assert.match(run.output, /cleanup ok/u);
+    await expectClean(run, "--run true");
+    console.log(`ok --run true: exit 0, C-4 ok, schema ${run.schema} gone`);
+  });
+
+  // (v) A failing --run: its status is the script's; the run sees the
+  // owned server's origin and the isolation flag.
+  await withRun(
+    script,
+    await args([
+      "--run",
+      'test "$ICM_E2E_BASE_URL" = "$AUTO_CANVAS_API_URL" && test "$ICM_E2E_ISOLATED" = 1 && curl -fsS "$AUTO_CANVAS_API_URL/api/health" >/dev/null && exit 3',
+    ]),
+    env,
+    async (run) => {
+      const { code } = await run.exited;
+      assert.equal(code, 3, `--run exit 3: exit ${code}\n${run.output}`);
+      assert.match(run.output, /cleanup ok/u);
+      await expectClean(run, "--run exit 3");
+      console.log(
+        "ok --run exit 3: exit 3, the run saw the owned origin, cleaned",
+      );
+    },
+  );
+
+  // (vi) A run descendant in a process group of its own (as Playwright
+  // starts its browser) is stopped too.
+  const pidFile = join(copyRoot, "descendant.pid");
+  await withRun(
+    script,
+    await args([
+      "--run",
+      `node -e 'const c=require("child_process").spawn("sleep",["60"],{detached:true,stdio:"ignore"});require("fs").writeFileSync(${JSON.stringify(pidFile)},String(c.pid));setInterval(()=>{},1000)'`,
+    ]),
+    env,
+    async (run) => {
+      await until(async () => {
+        try {
+          return (await readFile(pidFile, "utf8")).length > 0;
+        } catch {
+          return false;
+        }
+      }, "the descendant's pid file");
+      const descendant = Number(await readFile(pidFile, "utf8"));
+      assert.ok(!groupMembers(run.pgid).includes(descendant));
+      await until(
+        () => run.runProcesses.includes(descendant),
+        "the script records the descendant",
+      );
+      run.child.kill("SIGINT");
+      const { code } = await run.exited;
+      assert.equal(code, 130, `descendant: exit ${code}\n${run.output}`);
+      await expectClean(run, "descendant", [descendant]);
+      console.log(
+        `ok descendant in its own group: pid ${descendant} recorded and stopped, exit 130`,
+      );
+    },
+  );
+  // (vii) A server spawn that fails before any process exists: `error`
+  // without `exit`; cleanup still finishes promptly and completely.
+  await withRun(
+    script,
+    await args(),
+    { ...env, STANDALONE_EVIDENCE_NODE: join(copyRoot, "no-such-node") },
+    async (run) => {
+      const started = Date.now();
+      const { code } = await run.exited;
+      const took = Date.now() - started;
+      assert.equal(code, 1, `failed spawn: exit ${code}\n${run.output}`);
+      assert.equal(run.serverPid, null, run.output);
+      assert.match(run.output, /failed: .*ENOENT/u);
+      assert.match(run.output, /cleanup ok/u);
+      assert.ok(took < 5_000, `failed spawn: cleanup took ${took} ms`);
+      await expectClean(run, "failed spawn");
+      console.log(
+        `ok failed server spawn: exit 1 in ${took} ms, schema ${run.schema} gone`,
+      );
+    },
+  );
+
+  // (viii) A DROP SCHEMA that stalls (this check holds a lock on a table of
+  // the server's schema): cleanup gives up after its database timeout,
+  // still stops the run and the server, names the schema and exits
+  // non-zero. The check then releases the lock and drops it.
+  {
+    const lock = await admin.connect();
+    let schema = null;
+    try {
+      await withRun(
+        script,
+        await args(["--run", "sleep 60"]),
+        env,
+        async (run) => {
+          await run.printed(/resource run-pgid=\d+/u);
+          schema = run.schema;
+          const { rows } = await lock.query(
+            "select tablename from pg_tables where schemaname = $1 order by 1 limit 1",
+            [schema],
+          );
+          assert.equal(rows.length, 1, `no table in ${schema}`);
+          await lock.query("BEGIN");
+          await lock.query(
+            `LOCK TABLE ${schema}."${rows[0].tablename}" IN ACCESS SHARE MODE`,
+          );
+          const started = Date.now();
+          run.child.kill("SIGINT");
+          const { code } = await run.exited;
+          const took = Date.now() - started;
+          assert.equal(code, 130, `stalled drop: exit ${code}\n${run.output}`);
+          assert.match(
+            run.output,
+            new RegExp(`cleanup incomplete: .*schema ${schema}`, "u"),
+          );
+          assert.doesNotMatch(run.output, /cleanup ok/u);
+          assert.ok(gone(run.serverPid), "stalled drop: server alive");
+          assert.ok(groupGone(run.pgid), "stalled drop: run group alive");
+          console.log(
+            `ok stalled DROP SCHEMA: exit 130 after ${took} ms, "cleanup incomplete" names ${schema}, server and run gone`,
+          );
+        },
+      );
+    } finally {
+      await lock.query("ROLLBACK").catch(() => {});
+      lock.release();
+      if (schema) await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+    }
+    assert.ok(!(await evidenceSchemas()).has(schema), "schema left by check");
+  }
+  // (ix) PostgreSQL accepts the connection and then says nothing, so the
+  // CREATE never finishes: every wait is bounded, the schema is named, the
+  // exit is non-zero.
+  {
+    const silentSockets = new Set();
+    const silent = createServer((socket) => {
+      silentSockets.add(socket);
+      socket.on("error", () => {});
+      socket.on("data", () => {});
+    });
+    silent.listen(0, "127.0.0.1");
+    await once(silent, "listening");
+    try {
+      await withRun(
+        script,
+        [
+          "--port",
+          String(await freePort()),
+          "--database",
+          `postgresql://127.0.0.1:${silent.address().port}/auto_canvas_test`,
+        ],
+        env,
+        async (run) => {
+          await run.printed(/resource schema=/u);
+          const started = Date.now();
+          run.child.kill("SIGTERM");
+          const { code } = await run.exited;
+          const took = Date.now() - started;
+          assert.equal(code, 143, `silent: exit ${code}\n${run.output}`);
+          assert.ok(silentSockets.size > 0, "silent: never connected");
+          assert.ok(
+            run.output.includes(`cleanup incomplete: schema ${run.schema}`),
+            run.output,
+          );
+          assert.equal(run.serverPid, null, "silent: startup went on");
+          assert.ok(took < 40_000, `silent: took ${took} ms`);
+          console.log(
+            `ok silent PostgreSQL, SIGTERM: exit 143 after ${took} ms, "cleanup incomplete" names the schema`,
+          );
+        },
+      );
+    } finally {
+      for (const socket of silentSockets) socket.destroy();
+      await new Promise((done) => silent.close(done));
+    }
+  }
+  console.log("standalone build evidence check passed");
+} catch (error) {
+  failed = true;
+  console.error(error);
+} finally {
+  await rm(editorRoot, { recursive: true, force: true });
+  await rm(copyRoot, { recursive: true, force: true });
+  await admin.end();
+}
+process.exitCode = failed ? 1 : 0;

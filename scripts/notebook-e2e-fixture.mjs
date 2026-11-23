@@ -4,14 +4,18 @@
 // schema, and a proxy on ICM_E2E_PORT that rewrites `/canvas/…` to the
 // server's `/@notebook/canvas/…` as silicon-notebook's Next.js rewrite does.
 // The proxy keeps a request log and answers control requests under
-// `/__fixture/` (never forwarded, never logged). Run after `pnpm build` and
-// `pnpm build:notebook-editor`; playwright.config.ts starts it for
-// AUTO_CANVAS_E2E_NOTEBOOK=1. scripts/notebook-e2e-fixture-check.mjs checks
-// its refusals and its cleanup.
+// `/__fixture/` (never forwarded, never logged), among them seeds: answers
+// the proxy gives itself for one exact path and query. Beside it, on
+// AUTO_CANVAS_E2E_API_PORT, a standalone sibling: the built server in
+// single-user mode serving the standard build (apps/editor/dist) on its own
+// schema, for the cases that need the standard editor. Run after
+// `pnpm build` and `pnpm build:notebook-editor`; playwright.config.ts starts
+// it for AUTO_CANVAS_E2E_NOTEBOOK=1. scripts/notebook-e2e-fixture-check.mjs
+// checks its refusals and its cleanup.
 import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createServer, request as httpRequest } from "node:http";
 import { connect, createServer as createNetServer } from "node:net";
 import { join, resolve } from "node:path";
@@ -39,6 +43,13 @@ const SERVER_OWN_VARIABLES = [
 const USER_ID = /^[a-z0-9-]{1,64}$/u;
 const READY_TIMEOUT_MS = 30_000;
 const KILL_AFTER_MS = 5_000;
+/**
+ * The fixture's own database work (its pool's query and statement timeout,
+ * and each cleanup wait): the worst cleanup, 6 s for a step in flight, 7 s
+ * for the processes, 6 s for the drop, 6 s to look up what is left and 2 s
+ * to end the pool, stays inside Playwright's 30 s shutdown budget.
+ */
+const DB_TIMEOUT_MS = 6_000;
 
 function refuse(message) {
   console.error(`${PREFIX} refused: ${message}`);
@@ -78,9 +89,13 @@ function testDatabaseUrl() {
     refuse(`${name} must be a postgres: or postgresql: URL`);
   if (url.searchParams.has("dbname"))
     refuse(`${name} must not have a dbname parameter`);
+  // pg-connection-string drops the path's first character as the slash: a
+  // slash-less `postgresql:auto_canvas_test` would select `uto_canvas_test`.
+  if (!url.pathname.startsWith("/"))
+    refuse(`${name} must name auto_canvas_test or auto_canvas_test_<digits>`);
   let database;
   try {
-    database = decodeURIComponent(url.pathname.replace(/^\//u, ""));
+    database = decodeURIComponent(url.pathname.slice(1));
   } catch {
     refuse(`${name} has an unreadable database name`);
   }
@@ -122,7 +137,21 @@ if (!existsSync(join(editorRoot, "index.html")))
   refuse(
     "apps/editor/dist-notebook/index.html is missing: run pnpm build:notebook-editor",
   );
+const standardRoot = resolve(
+  root,
+  process.env.NOTEBOOK_E2E_STANDARD_ROOT ?? "apps/editor/dist",
+);
+const standardIndex = join(standardRoot, "index.html");
+if (!existsSync(standardIndex))
+  refuse("apps/editor/dist/index.html is missing: run pnpm build");
+// A /canvas build there (C-5's base-path build) is not the standard editor.
+if (readFileSync(standardIndex, "utf8").includes("/canvas/assets/"))
+  refuse(
+    "apps/editor/dist/index.html is a /canvas build: run pnpm build without AUTO_CANVAS_BASE_PATH",
+  );
 if (!(await portIsFree(proxyPort))) refuse("ICM_E2E_PORT is already in use");
+if (!(await portIsFree(apiPort)))
+  refuse("AUTO_CANVAS_E2E_API_PORT is already in use");
 const failAt = process.env.NOTEBOOK_E2E_FAIL_AT;
 
 // ---- Resources and the one cleanup every exit path takes. ----
@@ -138,13 +167,40 @@ let pending = null;
 /** Resumes a NOTEBOOK_E2E_PAUSE_AT pause. */
 let releasePause = null;
 
+/**
+ * Settles with `true` once `promise` settles, or `false` after `ms`: no step
+ * of the cleanup waits without a deadline (Playwright kills the fixture 30 s
+ * after its SIGTERM).
+ */
+function settlesWithin(promise, ms) {
+  let timer;
+  return Promise.race([
+    Promise.resolve(promise).then(
+      () => true,
+      () => true,
+    ),
+    new Promise((done) => {
+      timer = setTimeout(() => done(false), ms);
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
 function cleanup(reason, code) {
   if (closing) return closing;
   closing = (async () => {
+    /** What could not be cleaned, each named in one line at the end. */
+    const incomplete = [];
     // Let a paused stage go on, then wait for the allocation in flight: its
     // resource exists (or has failed) before anything is torn down.
     releasePause?.();
-    while (pending) await pending;
+    const pendingDeadline = Date.now() + DB_TIMEOUT_MS;
+    // Past the deadline cleanup goes on: a process in flight is in
+    // `children` already, and a CREATE still running is cancelled by the
+    // pool's statement timeout; the schemas are checked after the drop.
+    while (pending) {
+      const left = pendingDeadline - Date.now();
+      if (left <= 0 || !(await settlesWithin(pending, left))) break;
+    }
     for (const socket of sockets) socket.destroy();
     await Promise.all(
       servers.map(
@@ -161,21 +217,51 @@ function cleanup(reason, code) {
         const exited = once(child, "exit");
         child.kill("SIGTERM");
         const timer = setTimeout(() => child.kill("SIGKILL"), KILL_AFTER_MS);
-        await exited;
+        const ended = await settlesWithin(exited, KILL_AFTER_MS + 2_000);
         clearTimeout(timer);
+        if (!ended) incomplete.push(`process ${child.pid}`);
       }),
     );
-    if (pool) {
-      for (const schema of schemas)
-        try {
-          await pool.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
-        } catch (error) {
-          console.error(`${PREFIX} could not drop schema ${schema}: ${error}`);
-          code = code || 1;
-        }
-      await pool.end().catch(() => {});
+    if (pool && schemas.length) {
+      // One statement, one deadline; then what is left is looked up, so a
+      // stalled or failed drop names exactly the schemas still there.
+      let error = null;
+      const dropped = await settlesWithin(
+        pool
+          .query(`DROP SCHEMA IF EXISTS ${schemas.join(", ")} CASCADE`)
+          .catch((failure) => {
+            error = failure;
+          }),
+        DB_TIMEOUT_MS,
+      );
+      if (!dropped) console.error(`${PREFIX} DROP SCHEMA did not finish`);
+      if (error) console.error(`${PREFIX} DROP SCHEMA: ${error.message}`);
+      let left = schemas;
+      if (dropped && !error) {
+        let rows = null;
+        const looked = await settlesWithin(
+          pool
+            .query("select nspname from pg_namespace where nspname = any($1)", [
+              schemas,
+            ])
+            .then(
+              (result) => {
+                rows = result.rows;
+              },
+              () => {},
+            ),
+          DB_TIMEOUT_MS,
+        );
+        if (looked && rows) left = rows.map((row) => row.nspname);
+      }
+      for (const schema of left) incomplete.push(`schema ${schema}`);
     }
+    if (pool) await settlesWithin(pool.end(), 2_000);
     console.log(`${PREFIX} stopped (${reason})`);
+    if (incomplete.length) {
+      console.log(`${PREFIX} cleanup incomplete: ${incomplete.join(", ")}`);
+      process.exit(code || 1);
+    }
     process.exit(code);
   })();
   return closing;
@@ -242,34 +328,37 @@ function startStub() {
   return once(stub, "listening").then(() => stub.address().port);
 }
 
-// ---- The canvas server. ----
-function startServer(stubPort, schema) {
+// ---- The canvas servers. ----
+/**
+ * Spawns the built server with the inherited environment minus what this
+ * script sets itself, plus `own`; resolves with its port once it listens.
+ * An exit after that stops the fixture.
+ */
+function startCli(role, schema, own) {
   const env = { ...process.env };
   for (const name of SERVER_OWN_VARIABLES) delete env[name];
   const url = new URL(databaseUrl);
   url.searchParams.set("options", `-c search_path=${schema}`);
-  const child = spawn(process.execPath, ["apps/server/dist/cli.js"], {
+  // Test-only (the fixture check): NOTEBOOK_E2E_NODE names another
+  // executable, so a spawn that fails before a process exists can be made.
+  const executable = process.env.NOTEBOOK_E2E_NODE ?? process.execPath;
+  const child = spawn(executable, ["apps/server/dist/cli.js"], {
     cwd: root,
-    env: {
-      ...env,
-      DATABASE_URL: url.href,
-      AUTO_CANVAS_AUTH: "notebook",
-      AUTO_CANVAS_NOTEBOOK_API: `http://127.0.0.1:${stubPort}`,
-      AUTO_CANVAS_BASE_PATH: "/canvas",
-      EDITOR_ROOT: editorRoot,
-      HOST: "127.0.0.1",
-      PORT: "0",
-    },
+    env: { ...env, DATABASE_URL: url.href, HOST: "127.0.0.1", ...own },
     stdio: ["ignore", "pipe", "pipe"],
   });
-  children.add(child);
-  if (child.pid !== undefined)
-    console.log(`${PREFIX} resource pid=${child.pid} role=server`);
+  // Only a process that exists is tracked: a failed spawn emits `error`,
+  // has no pid, and may never emit `exit`.
+  if (child.pid !== undefined) {
+    children.add(child);
+    console.log(`${PREFIX} resource pid=${child.pid} role=${role}`);
+  }
+  child.once("error", () => children.delete(child));
   let output = "";
   let listening = false;
   return new Promise((resolvePort, reject) => {
     const timer = setTimeout(
-      () => reject(new Error("canvas server readiness timed out")),
+      () => reject(new Error(`${role} readiness timed out`)),
       READY_TIMEOUT_MS,
     );
     child.once("error", (error) => {
@@ -279,7 +368,7 @@ function startServer(stubPort, schema) {
     child.once("exit", (code, signal) => {
       children.delete(child);
       clearTimeout(timer);
-      const message = `canvas server exited (${signal ?? code})`;
+      const message = `${role} exited (${signal ?? code})`;
       if (listening) void cleanup(message, 1);
       else reject(new Error(`${message}: ${output.slice(-2000)}`));
     });
@@ -298,11 +387,35 @@ function startServer(stubPort, schema) {
   });
 }
 
+/** The canvas server in notebook mode, behind the proxy. */
+function startServer(stubPort, schema) {
+  return startCli("server", schema, {
+    AUTO_CANVAS_AUTH: "notebook",
+    AUTO_CANVAS_NOTEBOOK_API: `http://127.0.0.1:${stubPort}`,
+    AUTO_CANVAS_BASE_PATH: "/canvas",
+    EDITOR_ROOT: editorRoot,
+    PORT: "0",
+  });
+}
+
+/**
+ * The standalone sibling: single-user mode (no AUTO_CANVAS_AUTH), no base
+ * path, the standard build, on AUTO_CANVAS_E2E_API_PORT.
+ */
+function startSibling(schema) {
+  return startCli("sibling", schema, {
+    EDITOR_ROOT: standardRoot,
+    PORT: String(apiPort),
+  });
+}
+
 // ---- The proxy, its log and its control endpoints. ----
 let seq = 0;
 let log = [];
 let holds = [];
 let held = [];
+/** Seeded answers by exact path and query (see POST /__fixture/seed). */
+let seeds = new Map();
 /** Moves on at each reset; a hold started before it belongs to no test. */
 let generation = 0;
 
@@ -357,6 +470,18 @@ function forward(upstreamPort, request, body) {
 
 function relay(entry, upstream, response) {
   entry.status = upstream.statusCode;
+  // What the browser was sent, measured on the wire (the server compresses
+  // nothing): a page may compare what it shows with it.
+  const hash = createHash("sha256");
+  let bytes = 0;
+  upstream.on("data", (chunk) => {
+    hash.update(chunk);
+    bytes += chunk.length;
+  });
+  upstream.once("end", () => {
+    entry.responseBytes = bytes;
+    entry.responseSha256 = hash.digest("hex");
+  });
   if (response.destroyed || response.writableEnded) {
     upstream.resume();
     return;
@@ -389,6 +514,9 @@ async function control(request, response, path) {
             marker,
             status,
             held: wasHeld,
+            seeded,
+            responseBytes,
+            responseSha256,
           }) => ({
             seq: number,
             method,
@@ -397,6 +525,9 @@ async function control(request, response, path) {
             marker,
             status,
             held: wasHeld,
+            seeded,
+            responseBytes,
+            responseSha256,
           }),
         ),
     );
@@ -410,6 +541,7 @@ async function control(request, response, path) {
     held = [];
     log = [];
     holds = [];
+    seeds = new Map();
     notebookMode = "up";
     return json(response, 200, { seq, discarded });
   }
@@ -463,6 +595,32 @@ async function control(request, response, path) {
     );
     return json(response, 200, results);
   }
+  if (route === "POST /__fixture/seed") {
+    // A stand-in for what another server once answered at this URL (a
+    // single-user canvas's immutable preview): the proxy answers it itself,
+    // with exactly this body and these headers, until unseed or reset.
+    const key = seedKey(input.url);
+    if (
+      key === null ||
+      typeof input.body !== "string" ||
+      typeof input.contentType !== "string" ||
+      typeof input.cacheControl !== "string"
+    )
+      return json(response, 400, {
+        error: "url, body, contentType and cacheControl required",
+      });
+    seeds.set(key, {
+      body: Buffer.from(input.body, "utf8"),
+      contentType: input.contentType,
+      cacheControl: input.cacheControl,
+    });
+    return json(response, 200, { seeded: key });
+  }
+  if (route === "POST /__fixture/unseed") {
+    const key = seedKey(input.url);
+    if (key === null) return json(response, 400, { error: "url required" });
+    return json(response, 200, { unseeded: seeds.delete(key) });
+  }
   if (route === "POST /__fixture/notebook") {
     if (input.mode !== "up" && input.mode !== "error")
       return json(response, 400, { error: "mode must be up or error" });
@@ -470,6 +628,19 @@ async function control(request, response, path) {
     return json(response, 200, { mode: notebookMode });
   }
   return json(response, 404, { error: "unknown control" });
+}
+
+/** A seed's key: the path and query of a same-origin URL, or null. */
+function seedKey(value) {
+  if (typeof value !== "string" || value === "") return null;
+  try {
+    const url = new URL(value, "http://proxy.invalid");
+    return url.pathname.startsWith("/__fixture/")
+      ? null
+      : `${url.pathname}${url.search}`;
+  } catch {
+    return null;
+  }
 }
 
 let proxyUpstreamPort;
@@ -493,8 +664,27 @@ function createProxy(upstreamPort) {
       marker: request.headers["x-notebook-e2e"] ?? null,
       status: null,
       held: false,
+      seeded: false,
+      responseBytes: null,
+      responseSha256: null,
     };
     log.push(entry);
+    const seed = seeds.get(`${path}${url.search}`);
+    if (seed && (request.method === "GET" || request.method === "HEAD")) {
+      entry.seeded = true;
+      entry.status = 200;
+      const sent = request.method === "HEAD" ? Buffer.alloc(0) : seed.body;
+      entry.responseBytes = sent.length;
+      entry.responseSha256 = createHash("sha256").update(sent).digest("hex");
+      request.resume();
+      response.writeHead(200, {
+        "content-type": seed.contentType,
+        "cache-control": seed.cacheControl,
+        "content-length": seed.body.length,
+      });
+      response.end(request.method === "HEAD" ? undefined : seed.body);
+      return;
+    }
     if (path !== "/canvas" && !path.startsWith("/canvas/")) {
       entry.status = 200;
       // No `no-store`: Chrome keeps such a page out of the back/forward
@@ -604,7 +794,19 @@ try {
   console.log(`${PREFIX} resource pid=${process.pid} role=fixture`);
   const { createDb } = await import("../apps/server/dist/db.js");
   if (closing) throw new StartupAborted("shutdown began");
-  pool = createDb(databaseUrl.href);
+  // The fixture's own connection only (the servers get the plain URL): a
+  // stalled statement is cancelled by the server and abandoned by the
+  // client after DB_TIMEOUT_MS.
+  const adminUrl = new URL(databaseUrl);
+  adminUrl.searchParams.set("statement_timeout", String(DB_TIMEOUT_MS));
+  adminUrl.searchParams.set("query_timeout", String(DB_TIMEOUT_MS));
+  pool = createDb(adminUrl.href);
+  // Read by the pool at each connect; `createDb` takes only a URL, and the
+  // URL's connect_timeout is not honoured by this driver.
+  pool.options.connectionTimeoutMillis = DB_TIMEOUT_MS;
+  // An idle connection's failure is not the fixture's crash: the next
+  // query (or cleanup's lookup) reports it.
+  pool.on("error", () => {});
   const schema = `notebook_e2e_${randomUUID().replaceAll("-", "")}`;
   await allocate(async () => {
     // Tracked and printed before the CREATE is sent: from then on it may
@@ -625,6 +827,20 @@ try {
     return listening;
   });
   failIf("after-server");
+  const siblingSchema = `notebook_e2e_${randomUUID().replaceAll("-", "")}`;
+  await allocate(async () => {
+    schemas.push(siblingSchema);
+    console.log(`${PREFIX} resource schema=${siblingSchema}`);
+    await pool.query(`CREATE SCHEMA ${siblingSchema}`);
+  });
+  const siblingPort = await allocate(async () => {
+    const listening = startSibling(siblingSchema);
+    listening.catch(() => {});
+    return listening;
+  });
+  if (siblingPort !== apiPort)
+    throw new Error(`the sibling listens on ${siblingPort}, not ${apiPort}`);
+  failIf("after-sibling");
   const proxy = createProxy(upstreamPort);
   failIf("before-listen");
   await allocate(
@@ -639,7 +855,9 @@ try {
   );
   proxy.on("error", (error) => void cleanup(`proxy error: ${error.code}`, 1));
   ready = true;
-  console.log(`${PREFIX} ready http://127.0.0.1:${proxyPort}/canvas/`);
+  console.log(
+    `${PREFIX} ready http://127.0.0.1:${proxyPort}/canvas/ sibling http://127.0.0.1:${apiPort}/`,
+  );
 } catch (error) {
   if (!(error instanceof StartupAborted))
     console.error(`${PREFIX} startup failed: ${error?.message ?? error}`);

@@ -1,12 +1,18 @@
 // Helpers of the notebook browser tests (notebook-auth.spec.ts,
-// notebook-bfcache.spec.ts): the fixture's control client, notebook users,
+// notebook-bfcache.spec.ts, notebook-worker.spec.ts,
+// notebook-evidence.spec.ts): the fixture's control client, notebook users,
 // storage and request recorders, and the bearer rule every case checks.
 // The run is selected by AUTO_CANVAS_E2E_NOTEBOOK=1 (playwright.config.ts);
 // scripts/notebook-e2e-fixture.mjs is the stub notebook, the canvas server
-// in notebook mode and the rewriting proxy in front of them.
+// in notebook mode and the rewriting proxy in front of them, and the
+// standalone sibling (the standard build in single-user mode) beside them.
 import { randomBytes } from "node:crypto";
 import { createEmptyProject } from "@icm/model";
-import { serializeProject } from "@icm/project-protocol";
+import {
+  CURRENT_PROJECT_FILE_VERSION,
+  parseProject,
+  serializeProject,
+} from "@icm/project-protocol";
 import {
   expect,
   test,
@@ -22,6 +28,8 @@ export const TOKEN_KEY = "silicon_notebook_token";
 export const WORKING_COPY_KEY = "icm.working-copy.v1";
 export const RECOVERY_DATABASE = "analog-canvas-recovery";
 export const WORKSPACE_DATABASE = "analog-canvas-workspaces";
+/** The Project name of `seedSingleUserRecovery`'s draft. */
+export const SINGLE_USER_DRAFT = "Single-user draft";
 const RECOVERY_STORE = "browser-recovery-v2";
 /** The API's two public probes: never carry a bearer, never need one. */
 const PUBLIC_PATHS = new Set([
@@ -33,11 +41,14 @@ const SPEC_MARKER = { "x-notebook-e2e": "spec" };
 // The notebook run refuses a non-canonical port (playwright.config.ts), so
 // this spells the origin exactly as Playwright and the browser do.
 export const origin = `http://127.0.0.1:${process.env.ICM_E2E_PORT ?? "4173"}`;
+/** The fixture's standalone sibling: the standard build, single-user mode. */
+export const siblingOrigin = `http://127.0.0.1:${process.env.AUTO_CANVAS_E2E_API_PORT ?? "4311"}`;
 
 /**
  * Registers the notebook run's per-file hooks: one worker (the cases share
  * the fixture's request log) and a fresh log for each case. Each spec file
- * also sets `serviceWorkers: "block"` (T162c covers the service worker) and
+ * also sets `serviceWorkers: "block"` (notebook-worker.spec.ts, which covers
+ * the service worker, sets "allow") and
  * `trace: "off"`: Playwright's trace recorder fetches the resources it
  * snapshots again, outside the page and without its headers, so with tracing
  * on the fixture log holds requests no page sent (observed: each preview
@@ -62,6 +73,11 @@ export interface LogEntry {
   marker: string | null;
   status: number | null;
   held: boolean;
+  /** Answered by the proxy itself from a seed (`fixture.seed`). */
+  seeded: boolean;
+  /** The body the browser was sent, measured as relayed (null until done). */
+  responseBytes: number | null;
+  responseSha256: string | null;
 }
 
 export interface HeldRequest {
@@ -114,6 +130,21 @@ export const fixture = {
   },
   async notebook(mode: "up" | "error"): Promise<void> {
     await control("POST", "notebook", { mode });
+  },
+  /**
+   * From now on the proxy answers exactly this path and query itself, with
+   * this body and these headers (logged `seeded`), until unseed or reset.
+   */
+  async seed(seed: {
+    url: string;
+    body: string;
+    contentType: string;
+    cacheControl: string;
+  }): Promise<void> {
+    await control("POST", "seed", seed);
+  },
+  async unseed(url: string): Promise<void> {
+    await control("POST", "unseed", { url });
   },
 };
 
@@ -345,25 +376,34 @@ export interface SingleUserRecovery {
  * Seeds what a single-user editor left in this tab: a recovery record in
  * IndexedDB (the database and store document/browser-recovery-store.ts
  * opens, version 1, out-of-line keys) and the tab's working-copy id in
- * sessionStorage. Run on `/` of the tab that then opens the editor.
+ * sessionStorage. Run on a page of the origin, in the tab that then opens
+ * the editor. The record is the one the editor itself writes
+ * (`recoveryRecordOf` in document/recovery-coordinator.ts, rebuilt here from
+ * the packages, since that module's imports are not safe to load in
+ * Playwright): the current Project File version, the Project's own top
+ * document and revisions, and three resistors, so the standard editor
+ * offers it (N11d is the control that its reader accepts this seed).
  */
 export async function seedSingleUserRecovery(
   page: Page,
 ): Promise<SingleUserRecovery> {
   const workingCopyId = `seed-${randomBytes(4).toString("hex")}`;
-  const projectText = serializeProject(
-    createEmptyProject(`seed-${workingCopyId}`, "Single-user draft"),
-  );
+  const project = parseProject(threeResistorProject(SINGLE_USER_DRAFT));
+  const projectText = serializeProject(project);
+  const documentRevisions: Record<string, number> = {};
+  for (const document of project.documents)
+    documentRevisions[document.id] = document.revision;
   const record = {
     format: "analog-canvas-browser-recovery-v2",
     recordId: `${workingCopyId}-1`,
     workingCopyId,
     generation: "latest",
-    projectId: `seed-${workingCopyId}`,
-    projectName: "Single-user draft",
-    projectSchemaVersion: 1,
-    topDocumentId: "doc",
-    documentRevisions: {},
+    projectId: project.id,
+    projectName: project.name,
+    projectSchemaVersion: CURRENT_PROJECT_FILE_VERSION,
+    topDocumentId: project.topDocumentId,
+    documentRevisions,
+    structureRevision: project.structureRevision,
     source: "new",
     updatedAt: new Date().toISOString(),
     byteLength: Buffer.byteLength(projectText, "utf8"),
@@ -463,6 +503,8 @@ export interface Mark {
 
 export interface RequestRecorder {
   records: RequestRecord[];
+  /** The origin this recorder's pages use: the proxy's, or the sibling's. */
+  origin: string;
   /** Starts a phase; requests from now on carry its label. */
   mark(label: string): Promise<Mark>;
   /**
@@ -478,16 +520,20 @@ export interface RequestRecorder {
  * Records every request of this context: pages, popups and workers, also
  * those a route fulfils or aborts. A request's page comes from its frame
  * when it has one; a service worker's and an early frameless navigation's
- * (a popup's first request) do not.
+ * (a popup's first request) do not. With `origin` the sibling's, the
+ * context is a standalone one: `expectStandaloneRequests` checks it.
  */
-export function recordRequests(context: BrowserContext): RequestRecorder {
+export function recordRequests(
+  context: BrowserContext,
+  options: { origin?: string } = {},
+): RequestRecorder {
   const records: RequestRecord[] = [];
   let phase = "start";
   let lastSeq = 0;
   const navigationWaiters: {
     page: Page;
     label: string;
-    resolve: (index: number, url: string) => void;
+    resolve: (index: number, url: string, after: number) => void;
   }[] = [];
   context.on("request", (request) => {
     let source: RequestSource = "page";
@@ -507,7 +553,7 @@ export function recordRequests(context: BrowserContext): RequestRecorder {
       if (at >= 0) {
         const [waiter] = navigationWaiters.splice(at, 1);
         phase = waiter!.label;
-        waiter!.resolve(records.length, request.url());
+        waiter!.resolve(records.length, request.url(), lastSeq);
       }
     }
     records.push({
@@ -522,6 +568,7 @@ export function recordRequests(context: BrowserContext): RequestRecorder {
   });
   return {
     records,
+    origin: options.origin ?? origin,
     async mark(label) {
       phase = label;
       const index = records.length;
@@ -530,16 +577,21 @@ export function recordRequests(context: BrowserContext): RequestRecorder {
     },
     async markAtNavigation(page, label) {
       // Registered before the first await: armed when this is called.
-      const navigation = new Promise<{ index: number; url: string }>(
-        (resolve) =>
-          navigationWaiters.push({
-            page,
-            label,
-            resolve: (index, url) => resolve({ index, url }),
-          }),
+      // `after` is the last mark's log position when the navigation fires,
+      // not when this is called: an earlier navigation to the same path
+      // must not be taken for this one.
+      const navigation = new Promise<{
+        index: number;
+        url: string;
+        after: number;
+      }>((resolve) =>
+        navigationWaiters.push({
+          page,
+          label,
+          resolve: (index, url, after) => resolve({ index, url, after }),
+        }),
       );
-      const after = lastSeq;
-      const { index, url } = await navigation;
+      const { index, url, after } = await navigation;
       const path = new URL(url).pathname + new URL(url).search;
       let entry: LogEntry | undefined;
       await expect
@@ -575,12 +627,21 @@ function expectedAuthorization(
     : null;
 }
 
+/** A window and a URL `expectBearers` leaves out (a seed's own requests). */
+export interface Exemption {
+  from: Mark;
+  to: Mark;
+  /** The full URL (browser records) whose path and query the log shows. */
+  url: string;
+}
+
 /**
  * The bearer rule, for one phase and source: every browser request under
  * `/canvas/api/` other than the public probes carries exactly this user's
  * bearer (none for null), every other request none. The fixture log of the
  * same window (the spec's own requests excluded) obeys it too, or with
  * `log` an array, any of those bearers (several tabs share the log).
+ * Requests for an exempted URL inside its window are not checked.
  */
 export async function expectBearers(
   recorder: RequestRecorder,
@@ -590,22 +651,43 @@ export async function expectBearers(
     source,
     user,
     log = true,
+    exempt = [],
   }: {
     from: Mark;
     to?: Mark;
     source: Page | RequestSource;
     user: NotebookUser | null;
     log?: boolean | (NotebookUser | null)[];
+    exempt?: Exemption[];
   },
 ): Promise<void> {
   const bearer = user?.bearer ?? null;
+  const exemptRecord = (record: RequestRecord) => {
+    const index = recorder.records.indexOf(record);
+    return exempt.some(
+      (item) =>
+        record.url === item.url &&
+        index >= item.from.index &&
+        index < item.to.index,
+    );
+  };
+  const exemptEntry = (entry: LogEntry) =>
+    exempt.some((item) => {
+      const url = new URL(item.url, origin);
+      return (
+        entry.path === url.pathname + url.search &&
+        entry.seq > item.from.seq &&
+        entry.seq <= item.to.seq
+      );
+    });
   const records = recorder
     .between(from, to)
     .filter((record) =>
       typeof source === "string"
         ? record.source === source
         : record.page === source,
-    );
+    )
+    .filter((record) => !exemptRecord(record));
   const wrong = records
     .filter(
       (record) =>
@@ -625,7 +707,7 @@ export async function expectBearers(
     (item) => item?.bearer ?? null,
   );
   const entries = (await fixture.log(from.seq + 1, to?.seq)).filter(
-    (entry) => entry.marker !== "spec",
+    (entry) => entry.marker !== "spec" && !exemptEntry(entry),
   );
   const wrongLog = entries
     .filter((entry) => {
@@ -644,6 +726,41 @@ export async function expectBearers(
   ).toEqual([]);
 }
 
+/**
+ * The standalone rule, for a recorder of the sibling's origin: no request
+ * of that context carries any `authorization`, and none goes to the
+ * notebook proxy's origin.
+ */
+export function expectStandaloneRequests(recorder: RequestRecorder): void {
+  expect(recorder.origin, "a standalone recorder").not.toBe(origin);
+  expect(recorder.records.length, "standalone requests").toBeGreaterThan(0);
+  expect(
+    recorder.records
+      .filter((record) => record.authorization !== undefined)
+      .map((record) => `${record.method} ${record.url}`),
+    "standalone requests carrying authorization",
+  ).toEqual([]);
+  expect(
+    recorder.records
+      .map((record) => record.url)
+      .filter((url) => /^(?:https?|wss?):/u.test(url))
+      .filter((url) => new URL(url).origin === origin),
+    "standalone requests to the notebook proxy",
+  ).toEqual([]);
+}
+
+/** Every URL in this page's Cache Storage, per cache. */
+export function cacheStorageUrls(page: Page): Promise<string[]> {
+  return page.evaluate(async () => {
+    const urls: string[] = [];
+    for (const name of await caches.keys()) {
+      const cache = await caches.open(name);
+      for (const request of await cache.keys()) urls.push(request.url);
+    }
+    return urls;
+  });
+}
+
 /** No request leaves this origin except to the declared prefixes. */
 export function expectNoForeignOrigin(
   records: RequestRecord[],
@@ -658,6 +775,50 @@ export function expectNoForeignOrigin(
         !allowed.some((prefix) => url.startsWith(prefix)),
     );
   expect(foreign, "requests to a foreign origin").toEqual([]);
+}
+
+/**
+ * The interval between a switch and the new document's navigation: the old
+ * document sends no API request at all, with any bearer or none. Neither the
+ * page nor the worker records one, and none reaches the proxy (the spec's
+ * own requests excluded).
+ */
+export async function expectNoApiRequest(
+  recorder: RequestRecorder,
+  { from, to, page }: { from: Mark; to: Mark; page: Page },
+): Promise<void> {
+  expect(to.seq, "a transition's end after its start").toBeGreaterThanOrEqual(
+    from.seq,
+  );
+  const isApi = (url: string) => {
+    const parsed = new URL(url, origin);
+    return (
+      parsed.origin === origin && parsed.pathname.startsWith("/canvas/api")
+    );
+  };
+  expect(
+    recorder
+      .between(from, to)
+      .filter(
+        (record) =>
+          isApi(record.url) &&
+          (record.page === page || record.source !== "page"),
+      )
+      .map(
+        (record) =>
+          `${record.method} ${record.url} ${record.authorization ?? "no authorization"}`,
+      ),
+    "API requests of the old document during the transition",
+  ).toEqual([]);
+  expect(
+    (await fixture.log(from.seq + 1, to.seq))
+      .filter((entry) => entry.marker !== "spec" && isApi(entry.path))
+      .map(
+        (entry) =>
+          `#${entry.seq} ${entry.method} ${entry.path} ${entry.authorization ?? "no authorization"}`,
+      ),
+    "API requests on the wire during the transition",
+  ).toEqual([]);
 }
 
 /** Requests (browser records and log entries) carrying this user's bearer. */

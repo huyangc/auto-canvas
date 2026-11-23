@@ -258,6 +258,18 @@ then, drafts and preferences in this browser are shared by every notebook user
 who signs in on it), and the user's display name or a way back to
 silicon-notebook in the editor's own chrome.
 
+Deploying the notebook build, two separate rules:
+
+- **Permanent.** An origin that has ever served a single-user (standalone)
+  canvas, at its root or at `/canvas/`, must not serve the notebook canvas
+  until its users have exported their unsaved work and cleared the origin's
+  site data. A service worker the single-user canvas left there can serve its
+  old shell offline, and that shell opens the old browser recovery data before
+  any notebook gate runs. A fresh origin needs nothing.
+- **Temporary, until T163.** Until browser storage is per user, drafts and
+  preferences in one browser are shared by every notebook user who signs in on
+  it.
+
 [Gate tests](../../apps/editor/src/notebook/gate.test.ts),
 [scoped fetch tests](../../apps/editor/src/notebook/scoped-fetch.test.ts),
 [session tests](../../apps/editor/src/notebook/session.test.ts),
@@ -265,8 +277,12 @@ silicon-notebook in the editor's own chrome.
 [build test](../../scripts/notebook-editor-build.test.mjs), which builds both
 editors and checks that no executable reference of the notebook build leaves
 `/canvas/`.
-The browser tests are [notebook-auth.spec.ts](../../apps/editor/e2e/notebook-auth.spec.ts) and
-[notebook-bfcache.spec.ts](../../apps/editor/e2e/notebook-bfcache.spec.ts).
+The browser tests are [notebook-auth.spec.ts](../../apps/editor/e2e/notebook-auth.spec.ts),
+[notebook-bfcache.spec.ts](../../apps/editor/e2e/notebook-bfcache.spec.ts),
+[notebook-worker.spec.ts](../../apps/editor/e2e/notebook-worker.spec.ts)
+(service worker, HTTP cache, offline) and
+[notebook-evidence.spec.ts](../../apps/editor/e2e/notebook-evidence.spec.ts)
+(the standard build's recovery prompt, the notebook build's Agent).
 
 ## Agent relay
 
