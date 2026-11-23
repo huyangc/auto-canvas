@@ -269,6 +269,12 @@ R2 vdd out 10k
     await expect(page.getByTestId("status")).toContainText(
       `Opened ${PROJECT_NAME}`,
     );
+    // An edit leaves unsaved work, so a guard that ran before the file was
+    // read would show. The refusal must come first.
+    const opened = await revision(page).textContent();
+    await page.locator("body").press("ControlOrMeta+a");
+    await page.locator("body").press("r");
+    await expect(revision(page)).not.toHaveText(opened!);
     const before = await revision(page).textContent();
     await dropFiles(page, page.getByTestId("schematic-canvas"), [
       { name: "broken.json", text: "{ nope" },

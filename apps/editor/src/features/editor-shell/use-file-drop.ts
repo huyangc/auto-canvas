@@ -24,10 +24,11 @@ export function useFileDrop(options: {
   setStatus: (status: string) => void;
 }): { dragActive: boolean } {
   const optionsRef = useRef(options);
-  // Files over the window, counted per element entered: a drag over a child
-  // fires dragenter on it after dragenter on its parent without a dragleave
-  // for the parent first.
-  const depthRef = useRef(0);
+  // The frame follows the drag's latest event rather than counting paired
+  // enters and leaves: an element that unmounts under the file can swallow
+  // its own dragleave, and a leave that names no destination (the window,
+  // and every in-page move in older Safari) cannot be told from one.
+  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [dragActive, setDragActive] = useState(false);
 
   useEffect(() => {
@@ -35,16 +36,32 @@ export function useFileDrop(options: {
   });
 
   useEffect(() => {
-    const refresh = () => {
-      setDragActive(depthRef.current > 0 && !modalDialogOpen());
+    const cancelHide = (): void => {
+      if (hideTimerRef.current !== null) {
+        clearTimeout(hideTimerRef.current);
+        hideTimerRef.current = null;
+      }
+    };
+    const show = (): void => {
+      cancelHide();
+      setDragActive(!modalDialogOpen());
+    };
+    // A leave hides the frame only if no enter or over follows it, so a move
+    // between elements in one breathing room keeps it and leaving the
+    // window drops it.
+    const hideSoon = (): void => {
+      cancelHide();
+      hideTimerRef.current = setTimeout(() => {
+        hideTimerRef.current = null;
+        setDragActive(false);
+      }, 150);
     };
 
     const onDragEnter = (event: DragEvent): void => {
       if (!carriesFiles(event)) return;
       event.preventDefault();
       event.stopPropagation();
-      depthRef.current += 1;
-      refresh();
+      show();
     };
 
     const onDragOver = (event: DragEvent): void => {
@@ -53,25 +70,21 @@ export function useFileDrop(options: {
       event.stopPropagation();
       if (event.dataTransfer)
         event.dataTransfer.dropEffect = modalDialogOpen() ? "none" : "copy";
-      refresh();
+      show();
     };
 
     const onDragLeave = (event: DragEvent): void => {
       if (!carriesFiles(event)) return;
       event.preventDefault();
       event.stopPropagation();
-      // Leaving the window clears whatever pairing was lost: an element
-      // that unmounted under the file takes its own dragleave with it.
-      depthRef.current =
-        event.relatedTarget === null ? 0 : Math.max(0, depthRef.current - 1);
-      refresh();
+      hideSoon();
     };
 
     const onDrop = (event: DragEvent): void => {
       if (!carriesFiles(event)) return;
       event.preventDefault();
       event.stopPropagation();
-      depthRef.current = 0;
+      cancelHide();
       setDragActive(false);
       // A button behind a modal starts nothing either.
       if (modalDialogOpen()) return;
@@ -99,9 +112,9 @@ export function useFileDrop(options: {
     };
 
     // A drag the page started itself ends here; an outside drag's dragend
-    // belongs to the OS source, so the leave reset above covers it.
+    // belongs to the OS source, so the leave timer above covers it.
     const onDragEnd = (): void => {
-      depthRef.current = 0;
+      cancelHide();
       setDragActive(false);
     };
 
@@ -117,6 +130,7 @@ export function useFileDrop(options: {
     return () => {
       for (const [type, listener] of listeners)
         window.removeEventListener(type, listener as EventListener, true);
+      cancelHide();
     };
   }, []);
 
