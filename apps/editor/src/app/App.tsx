@@ -7354,7 +7354,7 @@ function WorkspaceEditor({
         onClose={() => setSelectionFilterOpen(false)}
       />
       <EditorStatusbar
-        externalLinksEnabled={capabilities.externalLinks}
+        showChangeLog={capabilities.externalLinks}
         status={status}
         tool={tool}
         vddRailMode={vddRailMode}

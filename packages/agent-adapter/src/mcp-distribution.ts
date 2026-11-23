@@ -16,13 +16,13 @@ export interface AgentMcpBootstrapManifest {
   transport: "stdio";
   requirements: { node: string };
   installation: {
-    mode: "verified-local-bundle";
+    mode: "local-bundle";
     available: boolean;
     command: string;
     note: string;
   };
   launch: {
-    command: "npx";
+    command: string;
     args: readonly string[];
     env: { ANALOG_CANVAS_API_URL: string };
   };
@@ -45,8 +45,8 @@ export interface AgentMcpBootstrapManifest {
   distribution: {
     packageName: string;
     npmPublished: boolean;
-    downloadUrl: string;
-    sha256: string;
+    downloadUrl: null;
+    sha256: null;
   };
   documentationUrl: string;
   fallback: {
@@ -59,22 +59,13 @@ export function agentMcpBootstrapManifest(
   publicOrigin: string,
 ): AgentMcpBootstrapManifest {
   const origin = publicOrigin.replace(/\/$/u, "");
-  const releaseBase = `https://github.com/${distribution.release.repository}/releases/download/${distribution.release.tag}`;
-  const downloadUrl = `${releaseBase}/${distribution.release.asset}`;
-  const packageSpec = distribution.npmPublished
-    ? `${distribution.packageName}@${distribution.version}`
-    : downloadUrl;
-  const launchArgs = distribution.npmPublished
-    ? ["--yes", packageSpec]
-    : ["--yes", `--package=${packageSpec}`, distribution.binaryName];
-  const launchText = ["npx", ...launchArgs].join(" ");
-  // Immutable <=0.15.1 packages do not contain --install. Publishing a newer
-  // package enables its entry point; never advertise unsupported old binaries.
-  const [major = 0, minor = 0, patch = 0] = distribution.version
-    .split(".")
-    .map(Number);
-  const localInstallation =
-    major > 0 || minor > 15 || (minor === 15 && patch >= 2);
+  const launch = {
+    command: distribution.binaryName,
+    args: [],
+    env: { ANALOG_CANVAS_API_URL: origin },
+  };
+  const serverEnv = `ANALOG_CANVAS_API_URL=${JSON.stringify(origin)}`;
+  const claudeRegistration = `claude mcp add ${distribution.name} --scope user --env ${serverEnv} --`;
 
   return {
     format: AGENT_MCP_BOOTSTRAP_FORMAT,
@@ -83,47 +74,27 @@ export function agentMcpBootstrapManifest(
     transport: "stdio",
     requirements: { node: distribution.node },
     installation: {
-      mode: "verified-local-bundle",
-      available: localInstallation,
-      command: `${launchText} --install --origin ${JSON.stringify(origin)} --host config`,
-      note: "Install only with evidence of this conversation's actual stdio host and effective configuration. Check the launching Node first and verify the archive SHA-256 before executing. Generic installation returns a local launch object; use hosts.codex only for a confirmed Codex host. Installation does not prove callable tools. When the user's handoff authorizes fallback, bootstrap/environment failures can use the raw HTTP Kit without Node; integrity/identity failures stop. Keep any completed installation if host loading needs another conversation.",
+      mode: "local-bundle",
+      available: false,
+      command: "",
+      note: "Build the adapter in the auto-canvas checkout with pnpm mcp:package. Install the resulting tarball on the MCP host and make its binary available on PATH before registering it.",
     },
-    launch: {
-      command: "npx",
-      args: launchArgs,
-      env: { ANALOG_CANVAS_API_URL: origin },
-    },
+    launch,
     hosts: {
       codex: {
-        command: localInstallation
-          ? `${launchText} --install --origin ${JSON.stringify(origin)} --host codex`
-          : `codex mcp add ${distribution.name} --env ANALOG_CANVAS_API_URL=${origin} -- ${launchText}`,
+        command: `codex mcp add ${distribution.name} --env ${serverEnv} -- ${launch.command}`,
       },
       claudeCode: {
-        command: localInstallation
-          ? `${launchText} --install --origin ${JSON.stringify(origin)} --host config`
-          : `claude mcp add ${distribution.name} --scope user --env ANALOG_CANVAS_API_URL=${origin} -- ${launchText}`,
-        windowsCommand: localInstallation
-          ? `${launchText} --install --origin ${JSON.stringify(origin)} --host config`
-          : `claude mcp add ${distribution.name} --scope user --env ANALOG_CANVAS_API_URL=${origin} -- cmd /c ${launchText}`,
+        command: `${claudeRegistration} ${launch.command}`,
+        windowsCommand: `${claudeRegistration} cmd /c ${launch.command}`,
       },
-      cursor: {
-        config: {
-          mcpServers: {
-            [distribution.name]: {
-              command: "npx",
-              args: launchArgs,
-              env: { ANALOG_CANVAS_API_URL: origin },
-            },
-          },
-        },
-      },
+      cursor: { config: { mcpServers: { [distribution.name]: launch } } },
     },
     distribution: {
       packageName: distribution.packageName,
       npmPublished: distribution.npmPublished,
-      downloadUrl,
-      sha256: distribution.release.sha256,
+      downloadUrl: null,
+      sha256: null,
     },
     documentationUrl: `https://github.com/${distribution.release.repository}/blob/main/docs/agent/mcp-install.md`,
     fallback: {

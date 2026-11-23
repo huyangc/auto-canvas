@@ -330,7 +330,7 @@ function createEditorShortcutHandler({
     if (
       event.target instanceof Element &&
       (event.target.closest(".project-tab-name-input") ||
-        event.target.closest(".cloud-shelf-dialog") ||
+        event.target.closest(".cloud-shelf-dialog, .change-log-dialog") ||
         // An open File or ⋯ scrolls and closes itself; Escape returns focus
         // to its button, and no arrow pans (File's submenus still take Left
         // and Right). Closed, its focused button leaves the keys to the

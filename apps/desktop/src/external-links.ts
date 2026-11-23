@@ -7,7 +7,7 @@ export function createExternalLinkHandler(
   commit: string,
 ) {
   const targets = {
-    source: `https://github.com/cascode-ai/analog-canvas/commit/${commit}`,
+    source: `https://github.com/huyangc/auto-canvas/commit/${commit}`,
     rnl: "https://rich-netlist.github.io/rnl/en/",
   };
   return async (request: Request): Promise<Response> => {

@@ -1125,6 +1125,10 @@
 }
 
 .statusbar-change-log {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
   flex: 0 0 auto;
   color: var(--icm-text-muted);
   font-size: var(--icm-font-xs);

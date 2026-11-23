@@ -27,7 +27,7 @@ dependencies; no EDA session is contacted.
 
 ```sh
 python eda/export.py \
-  --canvas-source /work/Analog-Canvas --runtime /work/node-runtime \
+  --canvas-source /work/auto-canvas --runtime /work/node-runtime \
   --snapshot /work/gallery-snapshot --circuit gallery-id:ota \
   --backend aether --library canvas_demo --output /work/ota-bundle
 ```
@@ -80,7 +80,7 @@ On Linux with the real Bridge package (and Pillow for report tests):
 ```sh
 PYTHONPATH=eda python -m unittest discover -s eda/tests
 node --test eda/tests/analog-canvas-aether-names.test.mjs
-python eda/tests/integration.py --canvas-source /work/Analog-Canvas \
+python eda/tests/integration.py --canvas-source /work/auto-canvas \
   --runtime /work/node-runtime
 ```
 

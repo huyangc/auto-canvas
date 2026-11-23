@@ -5,7 +5,7 @@
 auto-canvas 是一个面向模拟电路的 Web 原理图画布。目标是：输入电路网表，自动完成
 器件摆放和绕线，让工程师在浏览器里交互式地微调图纸，再把结果交给 EDA 工具。
 
-auto-canvas 基于 cascode-ai 的 [Analog Canvas](https://github.com/cascode-ai/analog-canvas)：
+auto-canvas 基于 cascode-ai 的 Analog Canvas：
 编辑器、数据模型和网表互转都来自 Analog Canvas 的一个快照。详见
 [基于 Analog Canvas](#基于-analog-canvas)。
 
@@ -140,7 +140,6 @@ Opus 亲自重跑验收命令并阅读代码改动来审查。审查通过的改
 auto-canvas 是 **Analog Canvas** 的修改版本。Analog Canvas 是 cascode-ai 开发的
 开源原理图编辑器，能够识别电气连接关系。
 
-- 代码仓库：<https://github.com/cascode-ai/analog-canvas>
 - 在线编辑器和社区 Gallery：<https://analog-canvas.tokenzhang.com/>
 - 使用的快照：提交 `3d32c76`（版本 0.9.2，2026-11-05），记录在
   [UPSTREAM.md](UPSTREAM.md)

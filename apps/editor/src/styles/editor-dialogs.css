@@ -1383,3 +1383,13 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.change-log-dialog time {
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-xs);
+}
+
+.change-log-dialog h3 {
+  margin: var(--icm-space-1) 0;
+  font-size: var(--icm-font-md);
+}

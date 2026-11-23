@@ -14,8 +14,7 @@ describe("EditorCrashScreen", () => {
     expect(html).toContain("The editor hit an unexpected problem");
     expect(html).toContain("boom in scene build");
     expect(html).toContain("Reload editor");
-    expect(html).toContain('data-testid="crash-report-bug"');
-    expect(html).toContain("Report bug");
+    expect(html).not.toContain("<a ");
     expect(html).toContain("Recover Unsaved Work");
   });
 

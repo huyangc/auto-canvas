@@ -207,7 +207,7 @@ export async function acceptLocalComponents({
   const opened = await running.evaluate(() => globalThis.__openedProductLinks);
   assert.match(
     opened[0],
-    /^https:\/\/github\.com\/cascode-ai\/analog-canvas\/commit\/[a-f0-9]{40}$/u,
+    /^https:\/\/github\.com\/huyangc\/auto-canvas\/commit\/[a-f0-9]{40}$/u,
   );
   await page
     .getByRole("dialog", { name: "About Analog Canvas" })

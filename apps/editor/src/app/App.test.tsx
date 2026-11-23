@@ -368,9 +368,7 @@ describe("editor shell", () => {
     expect(markup).not.toContain('href="https://tokenzhang.com"');
     expect(markup).not.toContain('data-testid="app-more-menu"');
     expect(markup).toContain('data-testid="statusbar-change-log"');
-    expect(markup).toContain(
-      'href="https://github.com/cascode-ai/analog-canvas/commits/main"',
-    );
+    expect(markup).toContain('aria-haspopup="dialog">Change Log</button>');
     expect(markup).toContain('data-testid="statusbar-shortcut-hints"');
     expect(markup).toContain("Hints</button>");
     expect(markup).not.toContain('data-testid="canvas-shortcut-hints"');

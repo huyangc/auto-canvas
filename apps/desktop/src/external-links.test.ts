@@ -13,7 +13,7 @@ it("opens fixed product links in the system browser and refuses arbitrary destin
     });
   expect((await handle(request({ target: "source" }))).ok).toBe(true);
   expect(open).toHaveBeenLastCalledWith(
-    `https://github.com/cascode-ai/analog-canvas/commit/${"a".repeat(40)}`,
+    `https://github.com/huyangc/auto-canvas/commit/${"a".repeat(40)}`,
   );
   expect((await handle(request({ target: "rnl" }))).ok).toBe(true);
   expect(open).toHaveBeenLastCalledWith(
