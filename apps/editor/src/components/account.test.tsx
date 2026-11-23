@@ -3,8 +3,6 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import {
-  cacheSessionUser,
-  deleteAccount,
   fetchSessionUser,
   loadAccountState,
   requestEmailCode,
@@ -74,34 +72,6 @@ describe("AccountMenuView", () => {
     expect(markup).not.toContain('href="/account"');
   });
 
-  it("reads each answer the server gives to an account deletion", async () => {
-    const reply =
-      (status: number, body: unknown = {}): typeof fetch =>
-      async () =>
-        Response.json(body, { status });
-    const deleted = { circuits: 2, likes: 0, projects: 1, components: 0 };
-    expect(await deleteAccount(reply(200, { deleted }))).toEqual({
-      ok: true,
-      deleted,
-    });
-    expect(await deleteAccount(reply(401))).toEqual({
-      ok: false,
-      message: "You are signed out. Sign in again.",
-    });
-    expect(await deleteAccount(reply(503))).toMatchObject({
-      ok: false,
-      message: expect.stringContaining("You are still signed in"),
-    });
-    expect(
-      await deleteAccount(async () => {
-        throw new TypeError("offline");
-      }),
-    ).toMatchObject({
-      ok: false,
-      message: expect.stringContaining("Could not reach the site"),
-    });
-  });
-
   it("asks for a code and reads each answer the server gives", async () => {
     const reply =
       (status: number, body: unknown = {}): typeof fetch =>
@@ -161,7 +131,7 @@ describe("AccountMenuView", () => {
     expect(await account).toEqual({ providers, user: null });
   });
 
-  it("shares the session with other readers and uses an updated account on refresh", async () => {
+  it("shares the session with other readers", async () => {
     const providers = { github: true, google: false, email: false };
     const user = {
       id: "u1",
@@ -186,18 +156,6 @@ describe("AccountMenuView", () => {
     expect(account).toEqual({ providers, user });
     expect(session).toEqual(user);
     expect(requests).toEqual(["/api/auth/providers", "/api/auth/me"]);
-
-    const renamed = { ...user, displayName: "Ada Lovelace" };
-    cacheSessionUser(fetchLike, renamed);
-    expect(await loadAccountState(fetchLike)).toEqual({
-      providers,
-      user: renamed,
-    });
-    expect(requests).toEqual([
-      "/api/auth/providers",
-      "/api/auth/me",
-      "/api/auth/providers",
-    ]);
   });
 
   it.each(["disabled", "http-error", "invalid-json", "offline"])(

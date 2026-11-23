@@ -70,8 +70,7 @@ export interface PasteProposal {
 }
 
 /** How a paste says its geometry is off the target Document's grid. */
-export const GRID_INCOMPATIBLE =
-  "Source geometry is incompatible with target grid";
+const GRID_INCOMPATIBLE = "Source geometry is incompatible with target grid";
 
 export function proposePaste(
   document: SchematicDocument,

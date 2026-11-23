@@ -8,7 +8,7 @@ import { compareIds } from "./recognize.js";
 import { validatePartition } from "./partition.js";
 import type { LayoutPartition } from "./types.js";
 
-/** @internal Oracle probe: threshold is a multiple of median device ink span. */
+/** Oracle probe: threshold is a multiple of median device ink span. */
 export function partitionFromPlacement(
   document: SchematicDocument,
   resolver: SymbolResolver,

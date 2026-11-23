@@ -114,7 +114,7 @@ export function canonicalOrder(
   return visit(rank(labels), []).order;
 }
 
-/** @internal Shared canonical aliases for the prompt and unit numbering. */
+/** Shared canonical aliases for the prompt and unit numbering. */
 export function canonicalDevices(
   document: SchematicDocument,
   resolver: SymbolResolver,
@@ -325,7 +325,7 @@ function pairCandidates(
   return result;
 }
 
-/** @internal R110/R143: union stage-local relations and atomic coupled pairs. */
+/** R110/R143: union stage-local relations and atomic coupled pairs. */
 export function recognitionUnits(
   document: SchematicDocument,
   resolver: SymbolResolver,
@@ -517,7 +517,7 @@ export function recognitionUnits(
   });
 }
 
-/** @internal R111/R113 electrical evidence, shared by inference and soft checks. */
+/** R111/R113 electrical evidence, shared by inference and soft checks. */
 export function roleEvidence(
   document: SchematicDocument,
   resolver: SymbolResolver,
@@ -644,7 +644,7 @@ const titles: Record<BlockRole, string> = {
   logic: "Logic",
   other: "Other",
 };
-/** @internal Shared rule block construction. */
+/** Shared rule block construction. */
 export function ruleBlock(
   document: SchematicDocument,
   resolver: SymbolResolver,
@@ -696,7 +696,7 @@ function connectedUnitGroups(
   return [...groups.values()];
 }
 
-/** @internal R111: connected components of stages merged through atomic units. */
+/** R111: connected components of stages merged through atomic units. */
 export function rulePartition(
   document: SchematicDocument,
   resolver: SymbolResolver,

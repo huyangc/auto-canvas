@@ -231,8 +231,7 @@ file; invalid or future-version files leave your work unchanged.
 
 **Privacy** (status bar) explains what the site keeps;
 **Stop counting me**, Do Not Track or Global Privacy Control refuse the visitor
-cookie. **Delete account…** removes your account, Cloud Projects, published
-circuits, shared components and likes and cannot be undone; export first.
+cookie.
 
 SPICE files are import inputs: a saved Project keeps the schematic and source
 provenance, not `.spi`, `.lib` or `.inc` contents. Keep the originals.

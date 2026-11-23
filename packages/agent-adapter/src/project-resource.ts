@@ -225,7 +225,7 @@ const AgentReusableCellSummarySchema = z.strictObject({
   ),
 });
 
-export const AgentGalleryEntrySummarySchema = z.strictObject({
+const AgentGalleryEntrySummarySchema = z.strictObject({
   id: StableIdSchema,
   name: z.string().min(1),
   author: z.string(),
@@ -268,7 +268,7 @@ export const AgentNetlistCellReadSchema = z.strictObject({
 export type AgentNetlistCellRead = z.infer<typeof AgentNetlistCellReadSchema>;
 
 /** A drawing as the formal exporter writes it, carried inline. */
-export const AgentGalleryFigureSchema = z.strictObject({
+const AgentGalleryFigureSchema = z.strictObject({
   documentId: StableIdSchema,
   mediaType: z.enum(["image/svg+xml", "image/png"]),
   encoding: z.literal("base64"),
@@ -276,9 +276,8 @@ export const AgentGalleryFigureSchema = z.strictObject({
   byteLength: z.number().int().positive(),
   sha256: z.string().regex(/^[0-9a-f]{64}$/u),
 });
-export type AgentGalleryFigure = z.infer<typeof AgentGalleryFigureSchema>;
 
-export const AgentGalleryEntryReadSchema = z.strictObject({
+const AgentGalleryEntryReadSchema = z.strictObject({
   entry: AgentGalleryEntrySummarySchema,
   projectCode: ProjectTextSchema,
   netlist: AgentNetlistReadSchema.nullable(),
@@ -471,8 +470,4 @@ export type AgentProjectResourceRequest = z.infer<
 export type AgentProjectResourceResponse = z.infer<
   typeof AgentProjectResourceResponseSchema
 >;
-export type AgentGalleryEntrySummary = z.infer<
-  typeof AgentGalleryEntrySummarySchema
->;
-export type AgentGalleryEntryRead = z.infer<typeof AgentGalleryEntryReadSchema>;
 export type AgentNetlistRead = z.infer<typeof AgentNetlistReadSchema>;

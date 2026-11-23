@@ -56,7 +56,7 @@ const measurements = new WeakMap<
     blockIntrusion?: number;
   }
 >();
-/** @internal Review tooling measures the bounded search without changing the API. */
+/** Review tooling measures the bounded search without changing the API. */
 export function refinementMetrics(result: AutoLayoutResult) {
   return measurements.get(result);
 }
@@ -109,7 +109,7 @@ export function selectRoutingAlternative(
   });
   return selected.result;
 }
-/** @internal Shared by refinement and its behavioral tests. */
+/** Shared by refinement and its behavioral tests. */
 export function routedScore(run: LayoutRun, resolver: SymbolResolver): number {
   if (!run.final || run.result.diagnostics.some((d) => d.severity === "error"))
     return Infinity;

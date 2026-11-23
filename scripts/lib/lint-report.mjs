@@ -1,5 +1,21 @@
 /** What `pnpm lint` prints from oxlint's JSON report. */
-import { changedLines } from "./verify-pr-selection.mjs";
+/**
+ * Line numbers, in the new file, that a unified diff with `-U0` touches. A
+ * pure deletion counts as the line it followed.
+ */
+function changedLines(diffText) {
+  const lines = [];
+  for (const match of diffText.matchAll(
+    /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/gmu,
+  )) {
+    const start = Number(match[1]);
+    const count = match[2] === undefined ? 1 : Number(match[2]);
+    if (count === 0) lines.push(Math.max(start, 1));
+    else
+      for (let line = start; line < start + count; line += 1) lines.push(line);
+  }
+  return lines;
+}
 
 const lineOf = (item) => item.labels?.[0]?.span.line ?? 0;
 

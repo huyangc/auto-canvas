@@ -111,8 +111,9 @@ function exitOf(pair: Pair, pose: Pose): Point | undefined {
 const sameExit = (a: Point | undefined, b: Point | undefined) =>
   !!a && !!b && a.x === b.x && a.y === b.y;
 
-/** R169: whether `to` draws this block in a different input order than `from`.
- * Exported for the tests only; the choke needs `keepsOrder`, not this. */
+/** @internal polarity-order.test.ts pins R169's reversal rule through this.
+ * R169: whether `to` draws this block in a different input order than `from`.
+ * The choke needs `keepsOrder`, not this. */
 export function reverses(
   instance: Instance | undefined,
   resolver: SymbolResolver,

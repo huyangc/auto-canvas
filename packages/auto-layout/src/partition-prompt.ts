@@ -9,9 +9,9 @@ import { reconcilePartition } from "./partition-reconcile.js";
 import type { FingerprintEntry } from "./fingerprint.js";
 import type { BlockRole } from "./types.js";
 
-/** @internal Frozen experiment prompt; bump whenever instructions change. */
+/** Frozen experiment prompt; bump whenever instructions change. */
 export const PROMPT_VERSION = "5";
-/** @internal Shared with the script's strict structured-output schema. */
+/** Shared with the script's strict structured-output schema. */
 export const BLOCK_ROLES = [
   "bias",
   "input",
@@ -26,7 +26,7 @@ export const BLOCK_ROLES = [
   "logic",
   "other",
 ] as const satisfies readonly BlockRole[];
-/** @internal Only the offline experiment script sends this prompt. */
+/** Only the offline experiment script sends this prompt. */
 export const PARTITION_SYSTEM_PROMPT = `Partition this analog circuit into functional sub-components by grouping the supplied atomic units.
 Return blocks (id, title, role, units, reason) and uncertain (unit ids).
 Roles: bias supplies operating currents/voltages; input receives signals; gain amplifies;
@@ -46,7 +46,7 @@ Infer function from connectivity and device classes. Never change connectivity o
 Reply with one JSON object and nothing else, in exactly this shape:
 {"blocks":[{"id":"b1","title":"Short name","role":"bias","units":["U1"],"reason":"Why these units belong together"}],"uncertain":[]}`;
 
-/** @internal The evaluator recreates this exact payload to locate a cached sample. */
+/** The evaluator recreates this exact payload to locate a cached sample. */
 export function describeCircuit(
   document: SchematicDocument,
   resolver: SymbolResolver,
@@ -193,7 +193,7 @@ export function describeCircuit(
   };
 }
 
-/** @internal SDK-independent structured output contract. */
+/** SDK-independent structured output contract. */
 export interface LlmPartitionResult {
   blocks: {
     id: string;
@@ -205,7 +205,7 @@ export interface LlmPartitionResult {
   uncertain: string[];
 }
 
-/** @internal Shape-valid proposals may be incomplete; graph reconciliation repairs them. */
+/** Shape-valid proposals may be incomplete; graph reconciliation repairs them. */
 export function llmResultToPartition(
   document: SchematicDocument,
   resolver: SymbolResolver,

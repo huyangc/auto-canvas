@@ -30,13 +30,13 @@ import {
   type AgentOperatingKit,
 } from "@icm/agent-adapter/kit";
 
+import { AgentSessionDO } from "./agent-session-do.js";
 import {
-  AgentSessionDO,
   redeemClaimResponse,
   relayHeaders,
   routeAgentSessionRequest,
   type AgentSessionNamespaceLike,
-} from "./agent-session.js";
+} from "./agent-session-runtime.js";
 
 const limits: Partial<AgentSessionLimits> = {
   claimTtlMs: 60_000,

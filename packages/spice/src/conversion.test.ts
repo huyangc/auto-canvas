@@ -279,6 +279,35 @@ describe("netlist-crawler structural conversion", () => {
       expect(result.issues[0]?.line).toBeGreaterThan(0);
     },
   );
+  it("accepts ngspice as an alias of the SPICE target", () => {
+    const spectre = convertNetlist({
+      text: "R1 a 0 1Meg",
+      source: "spice",
+      target: "spectre",
+    });
+    if (spectre.status !== "converted") throw new Error("blocked");
+    expect(spectre.text).toContain("resistor r=1000000");
+    const back = convertNetlist({
+      text: spectre.text,
+      source: "spectre",
+      target: "ngspice",
+    });
+    expect(back).toMatchObject({ status: "converted", target: "ngspice" });
+    if (back.status !== "converted") throw new Error("blocked");
+    expect(back.text).toContain("R1 a 0 1000000");
+  });
+  it("names the unsupported-parameter code and its line without partial output", () => {
+    const result = convertNetlist({
+      text: "// input\nR1 (a 0) resistor r=1k tc1=1",
+      source: "spectre",
+      target: "spice",
+    });
+    expect(result).toMatchObject({
+      status: "blocked",
+      issues: [{ line: 2, code: "UNSUPPORTED_PARAMETER" }],
+    });
+    expect(result).not.toHaveProperty("text");
+  });
   it("reads Spectre's escapes in names, so the SPICE it becomes names the net Vin+", () => {
     const spice = converted(
       [

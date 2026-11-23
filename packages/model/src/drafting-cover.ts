@@ -1,4 +1,4 @@
-import type { CircuitProject, DraftingObject } from "./schema.js";
+import type { DraftingObject } from "./schema.js";
 
 /**
  * Whether a drafting color is the sheet's own: white or so nearly that no
@@ -25,18 +25,6 @@ export function draftingCoverColor(
   const { color, fillColor } = object?.styleOverride ?? {};
   if (sheetColored(color)) return color!;
   if (sheetColored(fillColor)) return fillColor!;
-  return null;
-}
-
-/** The first drafting object in a Project that would cover its drawing. */
-export function projectDraftingCover(
-  project: Pick<CircuitProject, "documents">,
-): { documentId: string; objectId: string; color: string } | null {
-  for (const document of project.documents)
-    for (const object of document.drafting?.objects ?? []) {
-      const color = draftingCoverColor(object);
-      if (color) return { documentId: document.id, objectId: object.id, color };
-    }
   return null;
 }
 

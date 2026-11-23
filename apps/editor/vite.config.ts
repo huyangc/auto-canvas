@@ -6,7 +6,6 @@ import { resolve } from "node:path";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
 
-import { localNetlistConversion } from "./dev/netlist-conversion";
 import { apiServerProxy } from "./dev/api-server-proxy.js";
 import { localAgentRelay } from "./dev/agent-relay";
 import { lockedCanvasPackage } from "./build/rnl-canvas-package";
@@ -69,7 +68,6 @@ export default defineConfig({
     react(),
     localAgentRelay(),
     apiServerProxy(),
-    localNetlistConversion(),
     versionStaticServiceWorker(),
   ],
 });

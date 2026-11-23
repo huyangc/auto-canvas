@@ -48,8 +48,22 @@ export default {
         "tools/**/*.mjs!",
         // The batch runner's scripted Agent, run as a command (#1498).
         "scripts/lib/draw-batch-script-agent.mjs!",
+        // `scripts/dev.sh` runs the editor under it.
+        "scripts/lib/editor-supervisor.mjs!",
+        // Commands that load packages by name or from dist/: the EDA export
+        // tools, circuit acceptance scripts and task scripts.
+        "eda/{build,export,snapshot}.mjs!",
+        "netlists/*/verify.mjs!",
+        "tasks/*/*.mjs!",
       ],
-      project: ["scripts/**/*.mjs!", "tools/**/*.mjs!", ...testSupport],
+      project: [
+        "scripts/**/*.mjs!",
+        "tools/**/*.mjs!",
+        "eda/**/*.mjs!",
+        "netlists/**/*.{mjs,ts}!",
+        "tasks/**/*.mjs!",
+        ...testSupport,
+      ],
       paths: builtPackageSources,
     },
     "apps/editor": {
@@ -63,8 +77,6 @@ export default {
         "vite.config.ts!",
         "vite.desktop.config.ts!",
         "e2e/**/*.spec.ts",
-        // Specs load these by URL (e2e/helpers/page-modules.ts).
-        "e2e/helpers/*-harness.tsx",
       ],
       project: [
         "src/**/*.{ts,tsx}!",

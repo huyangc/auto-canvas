@@ -1,7 +1,7 @@
 import type { SchematicDocument } from "@icm/model";
 import type { LayoutPartition, BlockRole } from "./types.js";
 
-/** @internal LOADBench adapter for converted documents; never used by the planner. */
+/** LOADBench adapter for converted documents; never used by the planner. */
 export function partitionFromLoadbench(
   document: SchematicDocument,
   xml: string,
