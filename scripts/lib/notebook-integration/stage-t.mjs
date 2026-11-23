@@ -191,9 +191,20 @@ export async function stageT({ sandbox, report, notebook }) {
         server.pid,
       );
     } finally {
-      if (server)
-        await stopServer(sandbox, report, `${prefix}next start`, server.handle);
-      await stub.close();
+      // A server group that survived its shutdown ends the stage (R9-1): the
+      // next configuration must not remove `.next` beside a live server. The
+      // stub still closes, so nothing of this configuration holds a port.
+      try {
+        if (server)
+          await stopServer(
+            sandbox,
+            report,
+            `${prefix}next start`,
+            server.handle,
+          );
+      } finally {
+        await stub.close();
+      }
     }
   }
 }

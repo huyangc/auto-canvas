@@ -10,7 +10,13 @@ import { fileURLToPath } from "node:url";
 
 import { cloneTreeProblems } from "./clone-safety.mjs";
 import { modulesInClone, prepareModules } from "./modules.mjs";
-import { PathRefused, UsageError, lsofLines, waitFor } from "./sandbox.mjs";
+import {
+  PathRefused,
+  UsageError,
+  lsofLines,
+  waitFor,
+  waitForWithin,
+} from "./sandbox.mjs";
 import {
   dependencyManifests,
   makeLocal,
@@ -22,9 +28,12 @@ import { startStub, transportAssertions } from "./transport.mjs";
 import {
   abnormalEnd,
   awaitOwnership,
+  checkStopped,
   guardLoaded,
   ownershipGate,
   OwnershipLost,
+  proxiedGate,
+  StageAborted,
   tail,
   writePackage,
 } from "./steps.mjs";
@@ -287,9 +296,12 @@ export async function stageS({ sandbox, report }) {
   await ownershipBeforeProbeControl(sandbox, report);
   await ownershipGateControls(sandbox, report);
   await movedServiceControl(sandbox, report);
+  await shutdownAbortControl(sandbox, report);
   dependencyManifestControl(report);
   lsofFailureControl(sandbox, report);
   ownOperationControls(sandbox, report);
+  await proxiedProbeControl(sandbox, report);
+  await readinessDeadlineControl(report);
   await frontendNotADirectoryControl(sandbox, report);
 }
 
@@ -521,6 +533,75 @@ async function movedServiceControl(sandbox, report) {
   } catch {
     // already gone
   }
+}
+
+/**
+ * R9-1: a step whose process group survived its shutdown ends the stage. A
+ * group that outlives its shutdown cannot be built for a control: SIGKILL is
+ * neither catchable nor ignorable, and a process that left the group is never
+ * signalled with it — so the survival is injected into the function the
+ * stages call, with a real live group standing for the one still there. The
+ * statement after the step must not run; the shape the stages had before
+ * (record the failure, continue) runs it, which is what the finding names.
+ */
+async function shutdownAbortControl(sandbox, report) {
+  const live = sandbox.start(
+    process.execPath,
+    ["-e", "setInterval(()=>{},1000)"],
+    { cwd: sandbox.root, name: "self-shutdown-abort" },
+  );
+  await live.ready;
+  const groupPresent = () => {
+    try {
+      process.kill(-live.pgid, 0);
+      return true;
+    } catch (error) {
+      return error.code === "EPERM";
+    }
+  };
+  const wasPresent = groupPresent();
+  // The step, and whether the statement after it ran.
+  const ranAfter = (step) => {
+    let ran = false;
+    try {
+      step();
+      ran = true;
+    } catch {
+      // the step ends the stage
+    }
+    return ran;
+  };
+  const { failures, report: quiet } = quietReporter();
+  let thrown;
+  const currentRanAfter = ranAfter(() => {
+    try {
+      checkStopped(quiet, "the step's shutdown", live.pgid, false);
+    } catch (error) {
+      thrown = error;
+      throw error;
+    }
+  });
+  const { failures: oldFailures, report: oldQuiet } = quietReporter();
+  const recordOnly = (report, step, pgid, gone) => {
+    if (!gone) report.fail(step, `process group ${pgid} still present`);
+    return gone;
+  };
+  const oldRanAfter = ranAfter(() =>
+    recordOnly(oldQuiet, "the step's shutdown", live.pgid, false),
+  );
+  const gone = await sandbox.stopGroup(live.pgid);
+  report.check(
+    "S R9-1: a step whose group survived its shutdown stops the stage",
+    wasPresent &&
+      failures.length === 1 &&
+      oldFailures.length === 1 &&
+      oldRanAfter &&
+      !currentRanAfter &&
+      thrown instanceof StageAborted &&
+      /still present/.test(thrown.message) &&
+      gone,
+    `live group ${wasPresent}; the FAIL ${JSON.stringify(failures)}; the next statement ran ${currentRanAfter} (the record-only shape's did ${oldRanAfter}); error ${thrown?.name ?? "none"}; group stopped afterwards ${gone}`,
+  );
 }
 
 /** R7-4: A1 protects the exact manifests, not any package.json. */
@@ -1051,6 +1132,146 @@ async function ownershipGateControls(sandbox, report) {
   } finally {
     await stub.close();
   }
+}
+
+// ---- R9-2: a proxied request needs both listeners ------------------------
+
+/**
+ * R9-2: a request to the frontend that Next forwards to the backend is sent
+ * only while both listeners are owned. The frontend is stood in by a stub
+ * this process listens on (so its port is owned by the control's pid) and the
+ * backend by a free port with no listener, then by a stub whose listener is
+ * not the pid the control expects. The request must reach the stand-in
+ * frontend in neither case; the previous shape (the frontend's port only)
+ * sends it while the backend's port is held by someone else.
+ */
+async function proxiedProbeControl(sandbox, report) {
+  const webPort = await sandbox.freePort();
+  const apiPort = await sandbox.freePort();
+  const web = await startStub(webPort);
+  const attempt = async (gate) => {
+    try {
+      return { res: await gate("/api/health") };
+    } catch (error) {
+      return { error };
+    }
+  };
+  let api;
+  try {
+    // The backend's port has no listener at all.
+    const down = await attempt(
+      proxiedGate(sandbox, {
+        webPort,
+        webPid: process.pid,
+        apiPort,
+        apiPid: process.pid,
+      }),
+    );
+    const sentWhileDown = web.records.length;
+    // The backend's port is held by a process that is not the expected one.
+    api = await startStub(apiPort);
+    const foreignGate = proxiedGate(sandbox, {
+      webPort,
+      webPid: process.pid,
+      apiPort,
+      apiPid: process.pid + 1,
+    });
+    const foreign = await attempt(foreignGate);
+    const sentWhileForeign = web.records.length;
+    // The previous shape asked only about the frontend's port, and sends.
+    const oldShape = await attempt(
+      ownershipGate(sandbox, webPort, process.pid),
+    );
+    const sentByTheOldShape = web.records.length - sentWhileForeign;
+    // Both owned: the request goes through.
+    const owned = await attempt(
+      proxiedGate(sandbox, {
+        webPort,
+        webPid: process.pid,
+        apiPort,
+        apiPid: process.pid,
+      }),
+    );
+    const sentWhenOwned = web.records.length - sentWhileForeign;
+    report.check(
+      "S R9-2: a request the frontend forwards is sent only while both ports are owned",
+      down.error instanceof OwnershipLost &&
+        /api .* is none/.test(down.error.message) &&
+        sentWhileDown === 0 &&
+        foreign.error instanceof OwnershipLost &&
+        /api .* is foreign/.test(foreign.error.message) &&
+        sentWhileForeign === 0 &&
+        !oldShape.error &&
+        sentByTheOldShape === 1 &&
+        !owned.error &&
+        owned.res.status === 404 &&
+        sentWhenOwned === 2,
+      `backend port down: ${down.error?.message ?? "sent"} (${sentWhileDown} reached the frontend); foreign backend: ${foreign.error?.message ?? "sent"} (${sentWhileForeign}); the frontend-only gate sent ${sentByTheOldShape}; both owned: ${owned.error?.message ?? `status ${owned.res.status}`} (${sentWhenOwned} reached the frontend)`,
+    );
+  } finally {
+    await api?.close();
+    await web.close();
+  }
+}
+
+/**
+ * R9-3: the readiness loop's deadline holds. A probe that answers after the
+ * deadline is not accepted (the previous `waitFor` accepted it, ~as late as
+ * the probe took), and each probe is handed the time left, so a probe that
+ * ignores it still cannot stretch the limit.
+ */
+async function readinessDeadlineControl(report) {
+  const started = Date.now();
+  // The stage's shape: the probe is capped at the time left, plus a margin
+  // that crosses the deadline.
+  let remainingSeen;
+  const capped = await waitForWithin(
+    async (remaining) => {
+      remainingSeen = remaining;
+      await sleep(Math.min(remaining, 300) + 25);
+      return true;
+    },
+    100,
+    10,
+  );
+  const cappedMs = Date.now() - started;
+  // A stalled probe that ignores the remaining time.
+  const stalledStart = Date.now();
+  const stalled = await waitForWithin(
+    async () => {
+      await sleep(300);
+      return true;
+    },
+    100,
+    10,
+  );
+  const stalledMs = Date.now() - stalledStart;
+  // The previous loop, with the same stalled probe: the false success.
+  const oldStart = Date.now();
+  const oldAccepted = await waitFor(
+    async () => {
+      await sleep(300);
+      return true;
+    },
+    100,
+    10,
+  );
+  const oldMs = Date.now() - oldStart;
+  // A prompt success is still accepted.
+  const prompt = await waitForWithin(async () => true, 1000, 10);
+  report.check(
+    "S R9-3: a readiness probe that answers after the deadline is not accepted",
+    capped === false &&
+      remainingSeen > 0 &&
+      remainingSeen <= 100 &&
+      cappedMs < 800 &&
+      stalled === false &&
+      stalledMs < 1500 &&
+      oldAccepted === true &&
+      oldMs >= 300 &&
+      prompt === true,
+    `capped probe: ${capped} after ${cappedMs} ms with ${remainingSeen} ms left; stalled probe: ${stalled} after ${stalledMs} ms; the previous loop accepted ${oldAccepted} after ${oldMs} ms; a prompt success ${prompt}`,
+  );
 }
 
 // ---- R8-4: frontend is not a directory -----------------------------------

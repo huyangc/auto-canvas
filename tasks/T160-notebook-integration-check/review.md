@@ -330,3 +330,48 @@ pnpm typecheck / lint / format:check / docs:check → 0
 
 The owner's listeners on 3000, 8000 and 4310 kept their PIDs; the notebook
 checkout's `git status` was unchanged.
+
+## Round 14 — changes-requested
+
+Reviewed: codex `gpt-6.2-sol` PR review round 9 of PR 113 at `a8c3ead` (two
+P2, one P3; no blocking finding), each checked and found valid and small.
+`Check` passes on this head.
+
+| #    | Severity   | Where                                                  | Finding                                                                                                                                                                                                      | Expected fix                                                 |
+| ---- | ---------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------ |
+| R9-1 | should-fix | `stage-a.mjs` (~300–302), stage T's configuration loop | When a process group survives shutdown, the callers record a failure and keep going: stage A can inspect build output or start another build, stage T can remove `.next` while the previous server is alive. | Abort the stage on a failed shutdown.                        |
+| R9-2 | should-fix | `stage-a.mjs` A6 (~744–749)                            | The frontend health probe checks only the frontend's PID; an owned frontend forwards `/api/health` to a replacement backend, and the loss is detected only after the request reached it.                     | Check both listeners immediately before the proxied request. |
+| R9-3 | should-fix | `stage-a.mjs` (~713–715)                               | `waitFor()` waits for an in-flight request before checking the deadline, so the readiness loop can run ~30 s past its 120-second limit and accept a late success.                                            | Cap each probe at the remaining readiness time.              |
+
+## Round 15 — accepted
+
+Reviewed: the working tree after round 14, on 2026-11-23. Read by the
+reviewer: the diff of `steps.mjs` (`StageAborted`, `checkStopped()`,
+`proxiedGate()`, `startNext()`), `sandbox.mjs` (`waitForWithin()`) and
+`stage-a.mjs` (A6); acceptance rerun by the reviewer.
+
+| #    | Severity | Where                                                                         | Finding                                                                                                                                                                                                                                                                         | Expected fix                                                                                                                                                                   |
+| ---- | -------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| R9-1 | fixed    | `steps.mjs` `checkStopped()`, `stopServer()`; the entry script                | A shutdown that leaves its process group records the failure and then throws `StageAborted`; the entry prints only a note (the failure is already reported) and the stage stops, so no later step reuses the tree. Stage T's per-configuration `finally` still closes its stub. | Stage S control: a real live owned group, the survival injected, one FAIL, the abort thrown, the next statement not run; against the previous helpers the next statement runs. |
+| R9-2 | fixed    | `steps.mjs` `proxiedGate()`; A6's `/api/ready` and forwarded `/api/health`    | Both listeners are checked immediately before a request the frontend forwards; the refusal names both states.                                                                                                                                                                   | Stage S control: a backend port with no listener and one held by another pid are both refused before any request (the old frontend-only gate sent one); both owned is sent.    |
+| R9-3 | fixed    | `sandbox.mjs` `waitForWithin()`; A6's readiness loop and `startNext()`'s loop | Each probe is capped at the remaining time, and the deadline is tested again before a success is accepted.                                                                                                                                                                      | Stage S control: a probe answering after the deadline is not accepted; the old `waitFor` accepted it.                                                                          |
+
+Note (accepted): a stage aborted by R9-1 skips the run-level outbound
+verdict and the source-checkout observation, as an interrupted run does; the
+exit status is 1 either way. A6's own final shutdown check still records and
+continues because only the survivor report follows it, and the final disposal
+retries the group.
+
+Acceptance rerun by the reviewer:
+
+```text
+stage S → 0; 59 passed, 0 failed
+stage T → 0; 134 passed, 0 failed
+stage A, candidate → 0; 101 passed, 0 failed
+stage A, negative control (--ref = --base) → 1; 92 passed, 9 failed: A3 (1), A4 (6), A5 (2)
+--stage X → 2; the three TMPDIR refusals → 2; no nb-check-* directory left
+pnpm typecheck / lint / format:check / docs:check → 0
+```
+
+The owner's listeners on 3000, 8000 and 4310 kept their PIDs; the notebook
+checkout's `git status` was unchanged.

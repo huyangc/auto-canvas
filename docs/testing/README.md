@@ -176,10 +176,23 @@ Every HTTP request the check sends to a port it claims to own is gated on
 that ownership immediately before it is sent — the transport table, stage T's
 single-rule control and its upstream-down request, A2's probes, and A6's
 probes after readiness. The first mismatch stops the probes, is reported, and
-sends nothing to the replacement listener.
+sends nothing to the replacement listener. A6's requests through the frontend
+that Next forwards to the backend (`/api/ready` and `/api/health` through the
+frontend) require both listeners immediately before they are sent, so a
+backend that lost its port is caught before a replacement receives the
+request. The readiness probes of `next start` and of A6's `/api/ready` loop
+cap each probe at the time they have left and test their deadline again after
+the probe: a stalled server can neither extend the limit nor have a late
+success accepted.
+
+A shutdown that leaves a process group present is reported and ends the stage
+there: nothing after it runs, so no later step reads build output, removes
+`.next` or starts a build beside a process that is still alive.
 
 `--stage S` runs these refusals, the early-exit ownership wait, the per-request
-ownership gate and the script's own refused file operations (each after a
+ownership gate (including the two-listener gate for a proxied request and the
+readiness loop's deadline), the abort of a stage after a failed shutdown and
+the script's own refused file operations (each after a
 simulated swap, with a sentinel outside the sandbox) against throwaway
 repositories only; it reads nothing from `--notebook`. It also runs the real
 entry script on a throwaway repository whose `frontend` is a regular file and

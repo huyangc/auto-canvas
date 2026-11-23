@@ -42,6 +42,25 @@ export async function waitFor(check, timeoutMs, intervalMs = 200) {
   }
 }
 
+/**
+ * `waitFor` for a loop whose check is a slow probe (R9-3). The check gets the
+ * time left, so the probe it sends can be capped at it, and the deadline is
+ * tested again after the check, so a success that arrives after the deadline
+ * is not accepted. A probe that ignores the remaining time still cannot push
+ * the loop past its limit.
+ */
+export async function waitForWithin(check, timeoutMs, intervalMs = 200) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return false;
+    const value = await check(remaining);
+    if (Date.now() >= deadline) return false;
+    if (value) return value;
+    await sleep(intervalMs);
+  }
+}
+
 // The preload: every Node child of the check loads it through NODE_OPTIONS
 // (and, for npm lifecycle scripts, through npm_config_node_options, which
 // outranks any .npmrc of the revision under test). Its first act is the

@@ -21,6 +21,7 @@ import {
   offlineControl,
   offlineVerdict,
   observeSource,
+  StageAborted,
 } from "./lib/notebook-integration/steps.mjs";
 import { createReporter } from "./lib/notebook-integration/transport.mjs";
 
@@ -129,6 +130,13 @@ try {
     report.fail(
       "the script's own file operations stay in the sandbox",
       error.message,
+    );
+  } else if (error instanceof StageAborted) {
+    // R9-1: a shutdown left a process group present. That step's FAIL is the
+    // report; the stage stops here so no later step reads or writes beside a
+    // live process of the revision. The final disposal retries the groups.
+    report.note(
+      `the stage stopped after the shutdown failure: ${error.message}`,
     );
   } else if (!interrupted)
     report.fail(options.stage, `unexpected error: ${error.stack ?? error}`);

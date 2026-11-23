@@ -3,7 +3,7 @@
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 
-import { waitFor } from "./sandbox.mjs";
+import { waitFor, waitForWithin } from "./sandbox.mjs";
 import { OwnershipLost, rawRequest } from "./transport.mjs";
 
 export { OwnershipLost };
@@ -56,14 +56,15 @@ export async function offlineControl(sandbox, report) {
       timeoutMs: 30_000,
     });
     const name = `offline guard active (${mechanism})`;
-    const stopped = checkStopped(report, name, result.pgid, result.gone);
+    // A group that outlived its shutdown ends the stage (R9-1).
+    checkStopped(report, name, result.pgid, result.gone);
     const ok = report.check(
       name,
       result.status === 0 && refusedOnly(sandbox, log),
       () =>
         `exit ${result.status}, log ${JSON.stringify(readLines(sandbox, log))}\n${tail(result.output, 5)}`,
     );
-    allOk = allOk && ok && stopped;
+    allOk = allOk && ok;
   }
   for (const control of NPM_CONTROLS) {
     const ok = await npmLifecycleControl(sandbox, report, control);
@@ -174,7 +175,7 @@ async function npmLifecycleControl(sandbox, report, control) {
     timeoutMs: 60_000,
   });
   const name = `offline guard survives npm (${control.name})`;
-  const stopped = checkStopped(report, name, result.pgid, result.gone);
+  checkStopped(report, name, result.pgid, result.gone);
   const guarded = sandbox.guardedSince(mark).some(ranScript("probe.cjs"));
   const ok = report.check(
     name,
@@ -182,7 +183,7 @@ async function npmLifecycleControl(sandbox, report, control) {
     () =>
       `exit ${result.status}, log ${JSON.stringify(readLines(sandbox, log))}, probe in the guard marker: ${guarded}\n${tail(result.output, 5)}`,
   );
-  return ok && stopped;
+  return ok;
 }
 
 /** A guard-marker entry for `next <subcommand>` (the bin, however reached). */
@@ -328,15 +329,23 @@ export async function startNext(sandbox, { dir, port, env, name, marker }) {
   }
   // Ownership is established now; each readiness request is sent only while
   // it still holds (another pid, or no listener any more, fails at once).
+  // Each probe is capped at the time the loop has left and the deadline holds
+  // after it (R9-3), so a stalled server cannot stretch the limit or have a
+  // late success accepted.
   let lost;
-  const home = await waitFor(async () => {
+  const home = await waitForWithin(async (remaining) => {
     const now = sandbox.listenerState(port, pid);
     if (now.state !== "owned") {
       lost = now;
       return true;
     }
     try {
-      const res = await rawRequest(port, "/");
+      const res = await rawRequest(
+        port,
+        "/",
+        "GET",
+        Math.min(remaining, 30_000),
+      );
       return res.status === 200 ? res : false;
     } catch {
       return false;
@@ -361,10 +370,23 @@ export async function startNext(sandbox, { dir, port, env, name, marker }) {
   return { handle, port, pid };
 }
 
-/** Turns a group that outlived its shutdown into a FAIL for the step. */
+/**
+ * A step's process group survived its shutdown (R9-1). The failure is already
+ * reported; the stage stops here so no later step acts beside a process of
+ * the revision that is still running (stage T would remove `.next` of a live
+ * server, stage A would read build output or start another build).
+ */
+export class StageAborted extends Error {
+  constructor(step, pgid) {
+    super(`${step}: process group ${pgid} is still present; the stage stops`);
+  }
+}
+
+/** Turns a group that outlived its shutdown into a FAIL for the step, then stops the stage. */
 export function checkStopped(report, step, pgid, gone) {
-  if (!gone) report.fail(step, `process group ${pgid} still present`);
-  return gone;
+  if (gone) return true;
+  report.fail(step, `process group ${pgid} still present`);
+  throw new StageAborted(step, pgid);
 }
 
 /**
@@ -381,7 +403,7 @@ export function abnormalEnd(result) {
   return "";
 }
 
-/** Stop a server's group and report a group that is still present. */
+/** Stop a server's group; a group still present is a FAIL and ends the stage. */
 export async function stopServer(sandbox, report, step, handle) {
   if (!handle || handle.pgid === undefined) return true;
   return checkStopped(
@@ -410,16 +432,38 @@ export function ownershipHeld(sandbox, report, name, port, pid) {
  * ownership is asked immediately before each request, and anything but
  * "owned" throws OwnershipLost (defined in transport.mjs) before it is sent,
  * so a caller stops at the first mismatch and a replacement listener never
- * receives a request.
+ * receives a request. A third argument caps the request itself (R9-3).
  */
 export function ownershipGate(sandbox, port, pid) {
-  return (rawPath, method) => {
+  return (rawPath, method, deadlineMs) => {
     const { state, pids } = sandbox.listenerState(port, pid);
     if (state !== "owned")
       throw new OwnershipLost(
         `port ${port} is ${state} (listeners ${pids.join(", ") || "none"}; want ${pid}) before ${method ?? "GET"} ${JSON.stringify(rawPath)}`,
       );
-    return rawRequest(port, rawPath, method);
+    return rawRequest(port, rawPath, method, deadlineMs);
+  };
+}
+
+/**
+ * The gate for a request to the frontend that Next forwards to the backend
+ * (R9-2, the `/api/:path*` rewrite): both listeners must be owned immediately
+ * before it is sent — the frontend's, because the request goes to it, and the
+ * backend's, because the frontend proxies it there. Checking only the
+ * frontend would let a backend that lost its port receive the request at the
+ * replacement.
+ */
+export function proxiedGate(sandbox, { webPort, webPid, apiPort, apiPid }) {
+  return (rawPath, method, deadlineMs) => {
+    const web = sandbox.listenerState(webPort, webPid);
+    const api = sandbox.listenerState(apiPort, apiPid);
+    if (web.state !== "owned" || api.state !== "owned")
+      throw new OwnershipLost(
+        `before ${method ?? "GET"} ${JSON.stringify(rawPath)} (forwarded through the frontend to the backend): ` +
+          `web ${webPort} is ${web.state} (listeners ${web.pids.join(", ") || "none"}; want ${webPid}); ` +
+          `api ${apiPort} is ${api.state} (listeners ${api.pids.join(", ") || "none"}; want ${apiPid})`,
+      );
+    return rawRequest(webPort, rawPath, method, deadlineMs);
   };
 }
 

@@ -14,11 +14,12 @@ import {
   ownershipGate,
   OwnershipLost,
   ownershipHeld,
+  proxiedGate,
   startNext,
   stopServer,
   tail,
 } from "./steps.mjs";
-import { waitFor } from "./sandbox.mjs";
+import { waitFor, waitForWithin } from "./sandbox.mjs";
 import {
   expectRewrites,
   readManifest,
@@ -678,40 +679,51 @@ async function stageA6({
         return false;
       }
     };
-    // Every request to a port this run claims goes through the ownership gate
+    // Every request to a port this run claims goes through an ownership gate
     // (R8-2); the gate asks again immediately before each request, so a port
     // that changes hands stops the probes instead of reaching a replacement.
+    // Requests the frontend forwards to the backend (`/api/...`) go through
+    // the proxied gate, which requires both listeners (R9-2): the backend's
+    // port can change hands without the frontend noticing.
     const getWeb = ownershipGate(sandbox, webPort, frontendPid);
     const getApi = ownershipGate(sandbox, apiPort, backendPid);
+    const getProxied = proxiedGate(sandbox, {
+      webPort,
+      webPid: frontendPid,
+      apiPort,
+      apiPid: backendPid,
+    });
     // A request that fails after the gate passed (the server died between the
     // two) is reported as its status, not as a stack trace; a lost port still
-    // stops the probes.
-    const send = async (get, rawPath) => {
+    // stops the probes. The deadline caps the request itself (R9-3).
+    const send = async (get, rawPath, deadlineMs) => {
       try {
-        return await get(rawPath);
+        return await get(rawPath, undefined, deadlineMs);
       } catch (error) {
         if (error instanceof OwnershipLost) throw error;
         return { status: `error ${error.message}` };
       }
     };
     // The services are up once the anonymous readiness probe says so. Each
-    // request is sent only while both ports are still owned: another pid, or
-    // a port that lost its listener, fails at once.
+    // probe is capped at the time the loop has left, and the loop's deadline
+    // holds after it (R9-3), so a stalled frontend cannot stretch the 120 s
+    // limit or have a late success accepted. The request is sent only while
+    // both ports are still owned: another pid, or a port that lost its
+    // listener, fails at once.
     let dead = "";
     let lost = "";
-    const ready = await waitFor(
-      async () => {
+    const ready = await waitForWithin(
+      async (remaining) => {
         if (!alive(backendPid) || !alive(frontendPid)) {
           dead = `pid ${alive(backendPid) ? frontendPid : backendPid} died`;
           return true;
         }
-        const now = ownership();
-        if (!bothOwned(now)) {
-          lost = `ownership lost during readiness: ${describeOwnership(now)}`;
-          return true;
-        }
         try {
-          const res = await getWeb("/api/ready");
+          const res = await send(
+            getProxied,
+            "/api/ready",
+            Math.min(remaining, 30_000),
+          );
           return res.status === 200 && JSON.parse(res.body).ready === true;
         } catch (error) {
           if (error instanceof OwnershipLost) {
@@ -739,12 +751,14 @@ async function stageA6({
     // The safety property comes first. The frontend listens on every
     // interface (the launcher gives `next start` no -H, and `next start`
     // reads no variable for its host), so without a session the clone must
-    // answer 401, through the frontend and on the backend port. On failure
-    // A6 stops here and the finally below stops the services.
+    // answer 401, through the frontend and on the backend port. The frontend
+    // request is proxied to the backend, so both listeners are checked
+    // immediately before it (R9-2). On failure A6 stops here and the finally
+    // below stops the services.
     let unauthenticated;
     try {
       unauthenticated = [
-        await send(getWeb, "/api/health"),
+        await send(getProxied, "/api/health"),
         await send(getApi, "/api/health"),
       ];
     } catch (error) {
