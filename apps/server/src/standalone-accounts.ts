@@ -37,13 +37,13 @@ export function registerAccounts(
   limit: number,
   relay: AgentRelayHost,
 ) {
-  function issueCookie(c: Context, token: string, maxAge: number) {
+  function issueCookie(c: Context, token: string) {
     setCookie(c, sessionCookie(c, base), token, {
       path: base || "/",
       httpOnly: true,
       sameSite: "Strict",
       secure: new URL(c.req.url).protocol === "https:",
-      maxAge,
+      maxAge: lifetime,
     });
   }
   async function session(c: Context): Promise<SessionUser | null> {
@@ -119,6 +119,7 @@ export function registerAccounts(
   // Bound concurrent password work and throttle repeated guesses against a name.
   let active = 0;
   const attempts = new LoginAttempts();
+  const accountAttempts = new LoginAttempts(60);
   for (const action of ["register", "login"] as const) {
     app.post(`/api/auth/${action}`, bodyLimit({ maxSize: 4096 }), async (c) => {
       if (c.req.header("content-type")?.split(";")[0] !== "application/json")
@@ -144,8 +145,10 @@ export function registerAccounts(
       // The transport peer is authoritative. Proxy users have separate usernames.
       const bindings = c.env as Partial<HttpBindings> | undefined;
       const peer = bindings?.incoming?.socket.remoteAddress ?? "local";
-      const attempt = attempts.forPair(peer, username);
-      if (active >= 8 || attempt.limited())
+      const attempt = attempts.forKey(peer + "/" + username);
+      const accountAttempt =
+        action === "login" ? accountAttempts.forKey(username) : null;
+      if (active >= 8 || attempt.limited() || accountAttempt?.limited())
         return c.json({ error: "Too many attempts. Try again later." }, 429);
       active++;
       try {
@@ -172,6 +175,7 @@ export function registerAccounts(
           )) as Buffer;
           if (!row || !timingSafeEqual(hash, row.password_hash)) {
             attempt.failed();
+            if (row) accountAttempt?.failed();
             return c.json({ error: "Incorrect username or password." }, 401);
           }
           userId = row.user_id;
@@ -213,7 +217,7 @@ export function registerAccounts(
         } finally {
           conn.release();
         }
-        issueCookie(c, token, lifetime);
+        issueCookie(c, token);
         return c.json({ ok: true }, action === "register" ? 201 : 200);
       } finally {
         active--;
@@ -234,7 +238,8 @@ export function registerAccounts(
     await db.query("DELETE FROM standalone_sessions WHERE token_hash=$1", [
       digest(getCookie(c, sessionCookie(c, base))!),
     ]);
-    issueCookie(c, "", 0);
+    // A later sign-in may already have replaced the shared cookie. Revoking
+    // this request's token ends its session without clearing the newer one.
     return c.json({ ok: true });
   });
   registerComponents(app, db, async (c) => c.get("sessionUser"), base);

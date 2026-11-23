@@ -7,15 +7,16 @@ export class LoginAttempts {
   private readonly counts = new Uint8Array(2 * 65536);
   private readonly expires = new Float64Array(2 * 65536);
 
-  forPair(peer: string, username: string) {
-    const digest = createHmac("sha256", this.secret)
-      .update(peer + "/" + username)
-      .digest();
+  constructor(private readonly threshold = 12) {}
+
+  forKey(key: string) {
+    const digest = createHmac("sha256", this.secret).update(key).digest();
     const slots = [digest.readUInt16BE(0), 65536 + digest.readUInt16BE(2)];
     return {
       limited: (now = Date.now()) =>
         slots.every(
-          (slot) => this.expires[slot]! > now && this.counts[slot]! >= 12,
+          (slot) =>
+            this.expires[slot]! > now && this.counts[slot]! >= this.threshold,
         ),
       failed: (now = Date.now()) => {
         for (const slot of slots) {
@@ -23,7 +24,7 @@ export class LoginAttempts {
             this.expires[slot] = now + 300_000;
             this.counts[slot] = 0;
           }
-          this.counts[slot] = Math.min(12, this.counts[slot]! + 1);
+          this.counts[slot] = Math.min(this.threshold, this.counts[slot]! + 1);
         }
       },
     };

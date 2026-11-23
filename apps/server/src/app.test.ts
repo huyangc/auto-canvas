@@ -704,6 +704,28 @@ describe("standalone accounts", () => {
     expect((await attempt("192.0.2.1")).status).toBe(429);
     expect((await attempt("192.0.2.2")).status).toBe(401);
   });
+  it("bounds failed logins for a registered account across peers", async () => {
+    app = createApp({ db, auth: { mode: "accounts" } });
+    await credentials("register", "A12345678");
+    await credentials("register", "B12345678");
+    for (let peer = 0; peer < 60; peer++) {
+      const res = await app.request(
+        origin + "/api/auth/login",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            username: "A12345678",
+            password: "wrong-guess",
+          }),
+        },
+        { incoming: { socket: { remoteAddress: "192.0.2." + peer } } },
+      );
+      expect(res.status).toBe(401);
+    }
+    expect((await credentials("login", "A12345678")).status).toBe(429);
+    expect((await credentials("login", "B12345678")).status).toBe(200);
+  });
   it("validates names, authenticates case-insensitively and expires or revokes sessions", async () => {
     app = createApp({ db, auth: { mode: "accounts" } });
     for (const invalid of [
@@ -746,9 +768,16 @@ describe("standalone accounts", () => {
     const firstCookie = await boundCookie(first),
       otherCookie = await boundCookie(again);
     expect(firstCookie).not.toEqual(otherCookie);
+    const logout = await request(
+      "/api/auth/logout",
+      "POST",
+      undefined,
+      firstCookie,
+    );
+    expect(logout.status).toBe(200);
+    expect(logout.headers.has("set-cookie")).toBe(false);
     expect(
-      (await request("/api/auth/logout", "POST", undefined, firstCookie))
-        .status,
+      (await request("/api/projects", "GET", undefined, otherCookie)).status,
     ).toBe(200);
     expect(
       (await request("/api/projects", "GET", undefined, firstCookie)).status,
