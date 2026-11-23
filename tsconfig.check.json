@@ -3,6 +3,7 @@
   "compilerOptions": {
     "jsx": "react-jsx",
     "noEmit": true,
+    "allowImportingTsExtensions": true,
     "paths": {
       "@icm/component-library": ["./packages/component-library/src/index.ts"],
       "@icm/agent-adapter": ["./packages/agent-adapter/src/index.ts"],
