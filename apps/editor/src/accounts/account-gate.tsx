@@ -1,7 +1,7 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { apiUrl } from "../lib/app-url";
-import { bindAccountStorage } from "./storage";
+import { ACCOUNT_SESSION_ENDING, bindAccountStorage } from "./storage";
 import { AccountContext } from "./account-context";
 import "./accounts.css";
 
@@ -118,17 +118,91 @@ export function mountAccountGate(
   let generation = 0;
   let active: string | undefined;
   let closing = false;
+  let prepare: (() => Promise<void>) | null = null;
+  let lockedScreen: HTMLElement | undefined;
   const nativeFetch = window.fetch.bind(window);
   const reload = () => {
     // Unmount first to flush this account's workspace and release unload guards.
-    if (closing) return;
     closing = true;
     active = undefined;
     root.unmount();
     window.location.reload();
   };
+  // The editor also listens on window for export and clipboard shortcuts.
+  window.addEventListener(
+    "keydown",
+    (event) => {
+      if (closing) event.stopImmediatePropagation();
+    },
+    true,
+  );
+  const resumeOwner = async () => {
+    const screen = lockedScreen;
+    const verification = ++generation;
+    if (!screen || !active) return;
+    try {
+      const res = await nativeFetch(apiUrl("session"), {
+        cache: "no-store",
+        redirect: "error",
+      });
+      if (
+        !res.ok ||
+        (await res.json()).user?.id !== active ||
+        lockedScreen !== screen ||
+        verification !== generation
+      )
+        return;
+      screen.remove();
+      lockedScreen = undefined;
+      container.hidden = false;
+      container.inert = false;
+      closing = false;
+    } catch {
+      /* Keep this tab locked until its owner authenticates again. */
+    }
+  };
+  const sessionChanged = async () => {
+    if (lockedScreen) return resumeOwner();
+    if (closing) return;
+    if (!active || !prepare) return reload();
+    // Hide the old drawing and stop its account requests immediately. Retain the
+    // live workspace if persistence fails, so its owner can return and export it.
+    window.dispatchEvent(new Event(ACCOUNT_SESSION_ENDING));
+    closing = true;
+    container.inert = true;
+    container.hidden = true;
+    try {
+      await prepare();
+      reload();
+    } catch {
+      const screen = document.createElement("dialog");
+      screen.className = "canvas-account-screen";
+      const section = document.createElement("section");
+      section.className = "canvas-account-form";
+      const title = document.createElement("h1");
+      title.textContent = "Workspace locked";
+      const message = document.createElement("p");
+      message.textContent =
+        "This tab could not save your latest work. Keep it open and sign back in to the original account in another tab to recover or export your drawing.";
+      const link = document.createElement("a");
+      link.href = new URL(import.meta.env.BASE_URL, location.origin).href;
+      link.target = "_blank";
+      link.rel = "noopener";
+      link.textContent = "Open Auto Canvas in another tab";
+      const retry = document.createElement("button");
+      retry.textContent = "Check sign-in";
+      retry.onclick = () => void resumeOwner();
+      section.append(title, message, link, retry);
+      screen.append(section);
+      container.after(screen);
+      lockedScreen = screen;
+      screen.addEventListener("cancel", (e) => e.preventDefault());
+      screen.showModal();
+      void resumeOwner();
+    }
+  };
   window.addEventListener("storage", (event) => {
-    if (event.key === eventKey()) reload();
+    if (event.key === eventKey()) void sessionChanged();
   });
   const check = async () => {
     const current = ++generation;
@@ -187,12 +261,10 @@ export function mountAccountGate(
           response.headers.get("X-Canvas-Session") === "expired" &&
           active
         ) {
-          active = undefined;
-          reload();
+          void sessionChanged();
         }
         return response;
       };
-      let prepare: (() => Promise<void>) | null = null;
       async function logout() {
         if (container.inert || closing) return;
         container.inert = true;
@@ -245,14 +317,15 @@ export function mountAccountGate(
     }
   };
   const recheck = async () => {
-    if (!active) return;
+    if (lockedScreen) return resumeOwner();
+    if (!active || closing) return;
     try {
       const res = await nativeFetch(apiUrl("auth/me"), { cache: "no-store" });
       if (
         res.status === 401 ||
         (res.ok && (await res.json()).user?.id !== active)
       )
-        reload();
+        void sessionChanged();
     } catch {
       /* Retry when the window next receives focus. */
     }

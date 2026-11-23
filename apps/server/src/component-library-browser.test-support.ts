@@ -16,7 +16,11 @@ export async function componentLibraryStorage() {
   });
   await admin.query(`CREATE SCHEMA ${schema}`);
   await migrate(db);
-  const app = createApp({ db, user: { displayName: "alice" } });
+  const app = createApp({
+    db,
+    auth: { mode: "local" },
+    user: { displayName: "alice" },
+  });
   return {
     app,
     db,

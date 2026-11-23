@@ -42,21 +42,26 @@ test("accounts reopen their saved drawing in another browser and isolate local d
   await renameProject(page, name);
   await page.keyboard.press("ControlOrMeta+s");
   await expect(page.getByTestId("status")).toHaveText(`Saved ${name} to Cloud`);
-  await page.evaluate(() => {
-    const put = IDBObjectStore.prototype.put;
-    IDBObjectStore.prototype.put = function (...args: Parameters<typeof put>) {
-      if (this.name === "windows")
-        throw new DOMException("Quota", "QuotaExceededError");
-      return put.apply(this, args);
-    };
-    window.addEventListener(
-      "test-restore-idb",
-      () => {
-        IDBObjectStore.prototype.put = put;
-      },
-      { once: true },
-    );
-  });
+  async function failStorage(tab: Page) {
+    await tab.evaluate(() => {
+      const put = IDBObjectStore.prototype.put;
+      IDBObjectStore.prototype.put = function (
+        ...args: Parameters<typeof put>
+      ) {
+        if (this.name === "windows")
+          throw new DOMException("Quota", "QuotaExceededError");
+        return put.apply(this, args);
+      };
+      window.addEventListener(
+        "test-restore-idb",
+        () => {
+          IDBObjectStore.prototype.put = put;
+        },
+        { once: true },
+      );
+    });
+  }
+  await failStorage(page);
   await renameProject(page, draft);
   const menu = await openMenu(page, "File");
   const warning = page.waitForEvent("dialog").then(async (dialog) => {
@@ -77,10 +82,19 @@ test("accounts reopen their saved drawing in another browser and isolate local d
   const sibling = await page.context().newPage();
   await sibling.goto(page.url());
   await expect(sibling.getByTestId("schematic-canvas")).toBeVisible();
+  await failStorage(sibling);
+  const siblingDraft = "Sibling " + suffix;
+  await renameProject(sibling, siblingDraft);
   await signOut(page);
-  await expect(sibling.getByRole("heading", { name: "Sign in" })).toBeVisible();
-  await sibling.close();
+  await expect(
+    sibling.getByRole("heading", { name: "Workspace locked" }),
+  ).toBeVisible();
+  await expect(sibling.getByTestId("schematic-canvas")).toBeHidden();
   await enter(page, bob, true);
+  await sibling.getByRole("button", { name: "Check sign-in" }).click();
+  await expect(
+    sibling.getByRole("heading", { name: "Workspace locked" }),
+  ).toBeVisible();
   await expect(page.locator(".app-project-name-text")).toHaveText(
     "New Circuit",
   );
@@ -89,6 +103,14 @@ test("accounts reopen their saved drawing in another browser and isolate local d
   await page.keyboard.press("Escape");
   await signOut(page);
   await enter(page, alice, false);
+  await expect(sibling.locator(".app-project-name-text")).toBeVisible();
+  await expect(sibling.locator(".app-project-name-text")).toHaveText(
+    siblingDraft,
+  );
+  await sibling.evaluate(() =>
+    window.dispatchEvent(new Event("test-restore-idb")),
+  );
+  await sibling.close();
   await expect(page.locator(".app-project-name-text")).toHaveText(draft);
 
   const fresh = await browser.newPage();

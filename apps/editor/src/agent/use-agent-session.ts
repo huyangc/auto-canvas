@@ -1,3 +1,4 @@
+import { ACCOUNT_SESSION_ENDING } from "../accounts/storage";
 import { apiUrl } from "../lib/app-url";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -397,6 +398,14 @@ export function useAgentSession(
     retire,
     update,
   ]);
+
+  useEffect(() => {
+    const disconnect = () => {
+      void revoke();
+    };
+    window.addEventListener(ACCOUNT_SESSION_ENDING, disconnect);
+    return () => window.removeEventListener(ACCOUNT_SESSION_ENDING, disconnect);
+  }, [revoke]);
 
   const grant = useCallback(
     async (
