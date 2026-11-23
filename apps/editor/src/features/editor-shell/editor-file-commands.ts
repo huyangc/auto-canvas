@@ -403,10 +403,14 @@ export function createEditorFileCommands({
           () => import("../netlist-export/rnl-import"),
         );
         if (!command.isCurrent()) return;
+        // The runtime is shared: a retired import must not submit its files
+        // to it after a tab switch.
+        const runtime = await loadRnlRuntime();
+        if (!command.isCurrent()) return;
         const plan = await planRnlImport({
           inputs: sources.sourceInputs,
           entryPath,
-          runtime: await loadRnlRuntime(),
+          runtime,
         });
         if (!command.isCurrent()) return;
         const report = { entryPath, diagnostics: plan.diagnostics };

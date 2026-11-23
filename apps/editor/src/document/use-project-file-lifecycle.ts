@@ -1469,7 +1469,15 @@ export function useProjectFileLifecycle({
           // Agent gate pending for the rest of this activation.
           return settleStartupOutcome("unsuccessful");
         }
-        if (!command.isCurrent()) return settleStartupOutcome("unsuccessful");
+        // The working copy can move on without an activation change while
+        // the read was pending: the old snapshot must not install then.
+        if (
+          !command.isCurrent() ||
+          readCurrentWorkingCopyId() !== refreshRestorePlan.workingCopyId
+        ) {
+          command.release();
+          return settleStartupOutcome("unsuccessful");
+        }
         if (read.status !== "valid") {
           setStatus("No restorable recovery was found for this refresh");
           return settleStartupOutcome("unsuccessful");
@@ -1488,9 +1496,12 @@ export function useProjectFileLifecycle({
           hasPendingEdits?.() ||
           projectChangeToken(readCurrentProject()) !==
             refreshRestorePlan.changeToken ||
-          describeOpenBlocker?.()
-        )
+          describeOpenBlocker?.() ||
+          readCurrentWorkingCopyId() !== refreshRestorePlan.workingCopyId
+        ) {
+          command.release();
           return settleStartupOutcome("unsuccessful");
+        }
         const restoredDocument = replaceActiveProject(
           read.project,
           defaultViewBox,
