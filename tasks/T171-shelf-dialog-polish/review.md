@@ -48,3 +48,20 @@ Known limits carried to the PR:
 - Wheel scrolling, ≤700 px one-column layout and many-Project balance are
   reasoned, not automated; the tile-top/no-overflow geometry is asserted.
 - Drag is pointer-only and cosmetic by design; the dialog stays modal.
+
+## Round 2 — accepted (codex PR review findings fixed by Opus)
+
+codex PR review round 1 on `12442f1` reported P0/P1; all four findings were
+verified against the code and fixed.
+
+| # | Severity | Where | Finding | Fix |
+| --- | --- | --- | --- | --- |
+| 1 | P1 | `shelf-wall.tsx` menu Delete | A keyboard activation of another tile's ••• fires no outside pointerdown, so React reused the unkeyed `InlineConfirm` and an open "Really delete" retargeted the second Project, skipping its first step. | `key={menu.project.id}` on the menu's Delete confirm; unit test opens Source's confirm, switches the menu with a `.click()` (no pointerdown), and asserts the new Project's confirm is closed. |
+| 2 | P2 | `dialog-drag.ts` | The drag wrote `transform`, which made the dialog the containing block of the tile menu's fixed positioning (menu opened at a dialog-relative spot, clipped by `overflow: hidden`) and left the layout box recentering as the lazy wall loaded. | The drag now pins the dialog (`position: fixed`, explicit `left`/`top`, `inset: auto`, `margin: 0`) and moves layout instead of the transform; a resize listener re-clamps the pinned dialog. The e2e asserts the tile menu still opens at its button after a drag. |
+| 3 | P2 | `dialog-drag.ts` | Dragging while the wall was still loading could leave the header offscreen once the tiles grew the dialog. | Follows from fix 2 (top-left stays put as content grows); the reopen-then-drag e2e already waits for the settled wall. |
+| 4 | P3 | `dialog-drag.ts` | Window-level `pointerup`/`pointercancel` ended the drag for any pointer. | `finish` ignores events whose `pointerId` is not the dragging one. |
+
+Acceptance rerun after round 2: `pnpm format:check` exit 0, `pnpm typecheck`
+exit 0, `pnpm lint` exit 0 (0 errors), targeted vitest exit 0 (7 tests),
+`pnpm test:e2e apps/editor/e2e/project-tabs.spec.ts` exit 0 (23 passed),
+`pnpm test:local` rerun before commit.

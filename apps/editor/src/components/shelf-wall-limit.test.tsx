@@ -68,8 +68,22 @@ it("keeps the server limit in counts and duplicate failures after shelf mutation
   expect(count()).toContain("2 of 37 saved");
   await action("Favorite");
   expect(count()).toContain("2 of 37 saved");
-  // Delete is one of the tile's ••• actions now, and still asks twice.
+  // A keyboard activation of another tile's ••• fires no outside pointerdown:
+  // the open "Really delete" must not carry over to that other Project.
+  await click('[data-testid="shelf-actions-source"]');
+  await click('[data-testid="shelf-delete-source"]');
+  expect(
+    container.querySelector(
+      '[aria-label="Delete Source from your shelf"] .inline-confirm-danger',
+    ),
+  ).not.toBeNull();
   await click('[data-testid="shelf-actions-other"]');
+  expect(
+    container.querySelector(
+      '[aria-label="Delete Other from your shelf"] .inline-confirm-danger',
+    ),
+  ).toBeNull();
+  // Delete is one of the tile's ••• actions now, and still asks twice.
   await click('[data-testid="shelf-delete-other"]');
   await click(
     '[aria-label="Delete Other from your shelf"] .inline-confirm-danger',
