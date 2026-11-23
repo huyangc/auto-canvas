@@ -284,6 +284,37 @@ export function useAgentProjectResources({
   };
 }
 
+/** What the startup restore settled to, as the lifecycle reports it. */
+export type StartupRestoreOutcome = "pending" | "restored" | "unsuccessful";
+
+/**
+ * Whether the Agent session may work, and whether it may reconnect on its own.
+ * Automatic reconnection resumes the stored Agent proof, which belongs to the
+ * Project the restore was asked for: only a settled, successful restore of
+ * that Project may use it. An unsuccessful restore still leaves manual
+ * connection available; a pending one waits, because the Project on screen is
+ * about to be replaced.
+ */
+export function agentConnectionGate({
+  publicAgentUiEnabled,
+  restoringWorkspace,
+  startupRestoreOutcome,
+  workspaceRestoreOutcome,
+}: {
+  publicAgentUiEnabled: boolean;
+  restoringWorkspace: boolean;
+  startupRestoreOutcome: StartupRestoreOutcome;
+  /** The workspace records' own result, when this window restored some. */
+  workspaceRestoreOutcome: "restored" | "unsuccessful" | null;
+}): { enabled: boolean; recover: boolean } {
+  const outcome = workspaceRestoreOutcome ?? startupRestoreOutcome;
+  return {
+    enabled:
+      publicAgentUiEnabled && !restoringWorkspace && outcome !== "pending",
+    recover: outcome === "restored",
+  };
+}
+
 /** The Agent session the editor connects through, and its file approvals. */
 export function useEditorAgentConnection({
   publicAgentUiEnabled,
@@ -294,7 +325,6 @@ export function useEditorAgentConnection({
   recoveryWorkingCopyId,
   stageRecovery,
   flushRecovery,
-  agentStartupRecovery,
   project,
   browserAgentHost,
   agentFileCandidate,
@@ -303,7 +333,8 @@ export function useEditorAgentConnection({
   browserAgentProjectHost,
   captureAuthoredProject,
   cloudBinding,
-  startupRestoreReady,
+  startupRestoreOutcome,
+  workspaceRestoreOutcome,
   isDirtyWork,
   replaceActiveProject,
   guardDirtyReplacement,
@@ -316,7 +347,6 @@ export function useEditorAgentConnection({
   recoveryWorkingCopyId: UseRecoveryCoordinatorResult["workingCopyId"];
   stageRecovery: UseRecoveryCoordinatorResult["stage"];
   flushRecovery: UseRecoveryCoordinatorResult["flushNow"];
-  agentStartupRecovery: ReturnType<typeof useAgentStartupRecovery>;
   project: CircuitProject;
   browserAgentHost: BrowserAgentHost | null;
   agentFileCandidate: AgentFileCandidateSummary | null;
@@ -327,7 +357,9 @@ export function useEditorAgentConnection({
   browserAgentProjectHost: BrowserAgentProjectHost | null;
   captureAuthoredProject: () => Promise<CircuitProject | null>;
   cloudBinding: ProjectFileLifecycle["cloudBinding"];
-  startupRestoreReady: ProjectFileLifecycle["startupRestoreReady"];
+  startupRestoreOutcome: StartupRestoreOutcome;
+  /** Asked while rendering: the workspace hook settles after the lifecycle. */
+  workspaceRestoreOutcome(): "restored" | "unsuccessful" | null;
   isDirtyWork: ProjectFileLifecycle["isDirtyWork"];
   replaceActiveProject: ProjectFileLifecycle["replaceActiveProject"];
   guardDirtyReplacement: ProjectFileLifecycle["guardDirtyReplacement"];
@@ -346,6 +378,12 @@ export function useEditorAgentConnection({
       }
     >(),
   );
+  const agentConnection = agentConnectionGate({
+    publicAgentUiEnabled,
+    restoringWorkspace,
+    startupRestoreOutcome,
+    workspaceRestoreOutcome: workspaceRestoreOutcome(),
+  });
   const agentSession = useHostAgentSession(
     !import.meta.env?.ICM_DESKTOP &&
       browserAgentHost &&
@@ -353,8 +391,11 @@ export function useEditorAgentConnection({
       browserAgentProjectHost
       ? {
           // A restored workspace is already the requested circuit. Resume its
-          // matching Agent only after the active Project and working copy are installed.
-          recover: true,
+          // matching Agent only once the active Project and working copy are
+          // installed, and only when that restore succeeded: a superseded or
+          // mismatched restore must not reconnect with the previous tab's
+          // proof, and a failed one leaves manual connection available.
+          recover: agentConnection.recover,
           beforeConnect: async () => {
             const snapshot = await captureAuthoredProject();
             if (snapshot) {
@@ -365,11 +406,7 @@ export function useEditorAgentConnection({
               await flushRecovery();
             }
           },
-          enabled:
-            publicAgentUiEnabled &&
-            !restoringWorkspace &&
-            (startupRestoreReady ||
-              recoveryWorkingCopyId !== agentStartupRecovery?.projectSessionId),
+          enabled: agentConnection.enabled,
           project,
           projectSessionId: recoveryWorkingCopyId,
           host: browserAgentHost,

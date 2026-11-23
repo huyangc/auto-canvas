@@ -1070,6 +1070,18 @@ export function useProjectTabSessions({
     deleteShelfProject,
     createTabSession,
     restoredTabs,
+    /**
+     * Whether this window's saved tabs were installed, for the Agent's
+     * reconnect gate: only an installed workspace is `restored`, and a tab
+     * that could not be deserialized is `unsuccessful` even if the stored
+     * working-copy id still matches.
+     */
+    workspaceRestoreOutcome:
+      restoredWorkspace === null
+        ? null
+        : restoredTabs.value !== null
+          ? ("restored" as const)
+          : ("unsuccessful" as const),
     currentEditBlocker,
     projectSwitchBlocker,
     projectTabs,
