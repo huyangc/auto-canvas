@@ -65,3 +65,23 @@ Acceptance rerun after round 2: `pnpm format:check` exit 0, `pnpm typecheck`
 exit 0, `pnpm lint` exit 0 (0 errors), targeted vitest exit 0 (7 tests),
 `pnpm test:e2e apps/editor/e2e/project-tabs.spec.ts` exit 0 (23 passed),
 `pnpm test:local` rerun before commit.
+
+## Round 3 — accepted (codex PR round-2 findings fixed by Opus)
+
+codex PR review round 2 on `c45563d` passed with P2/P3 only; all four were
+verified against the code and fixed rather than rebutted.
+
+| # | Severity | Where | Finding | Fix |
+| --- | --- | --- | --- | --- |
+| 1 | P2 | `dialog-drag.ts` | A dialog dragged near the bottom edge while the wall was still loading grew below the viewport once the tiles arrived; only a window resize re-clamped it. | The pinned dialog is observed with a `ResizeObserver` that re-clamps against the current viewport on growth (and on window resize); the e2e shrinks the viewport around the pinned dialog and asserts it comes back inside. |
+| 2 | P2 | `shelf-wall.css` menu | On a very short viewport the clamped menu (seven rows plus the two-step confirm) could extend below the screen, putting Delete out of reach. | `max-height: calc(100dvh - 16px)` with `overflow-y: auto` on the menu. |
+| 3 | P3 | `shelf-wall.tsx`/`project-shelf.css` | At a 700px viewport the shelf's 92vw dialog left room for two 250px masonry columns, contradicting the plan's "one column at ≤700px". | `useSingleColumn` (matchMedia `(max-width: 700px)`, guarded for jsdom) passes `minColumnWidth` 701, so the wall falls to one column below the breakpoint; the e2e checks the one-column layout at 700px. |
+| 4 | P3 | `shelf-wall.tsx` Delete confirm | The unconditional `setMenu(null)` after a delete closed whichever menu was open, not necessarily the one that asked. | The confirm closes the menu only when it still shows the same Project (functional `setMenu`). |
+
+Also fixed in this round: the `reclamp` callback was missing from the
+`useDialogDrag` callback's dependency list (one new lint warning).
+
+Acceptance rerun after round 3: `pnpm format:check` exit 0, `pnpm typecheck`
+exit 0, `pnpm lint` exit 0 (0 errors, 3906 pre-existing warnings), targeted
+vitest exit 0 (7 tests), `pnpm test:e2e apps/editor/e2e/project-tabs.spec.ts`
+exit 0 (23 passed), `pnpm test:local` rerun before commit.
