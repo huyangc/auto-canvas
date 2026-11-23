@@ -6,6 +6,7 @@ import {
   timingSafeEqual,
 } from "node:crypto";
 import { promisify } from "node:util";
+import type { HttpBindings } from "@hono/node-server";
 import type { Context, Hono } from "hono";
 import { getCookie, setCookie } from "hono/cookie";
 import { bodyLimit } from "hono/body-limit";
@@ -17,7 +18,14 @@ import type { AgentRelayHost } from "./agent-relay/host.js";
 
 const derive = promisify(scrypt);
 const lifetime = 30 * 24 * 60 * 60;
-const cookie = "auto_canvas_session";
+// Browsers share cookie slots across ports; name each public deployment separately.
+function sessionCookie(c: Context, base: string) {
+  const deployment = new URL(c.req.url).origin + base;
+  return (
+    "auto_canvas_session_" +
+    createHash("sha256").update(deployment).digest("hex").slice(0, 24)
+  );
+}
 const digest = (token: string) => createHash("sha256").update(token).digest();
 const dummySalt = randomBytes(16);
 
@@ -29,7 +37,7 @@ export function registerAccounts(
   relay: AgentRelayHost,
 ) {
   function issueCookie(c: Context, token: string, maxAge: number) {
-    setCookie(c, cookie, token, {
+    setCookie(c, sessionCookie(c, base), token, {
       path: base || "/",
       httpOnly: true,
       sameSite: "Strict",
@@ -38,17 +46,19 @@ export function registerAccounts(
     });
   }
   async function session(c: Context): Promise<SessionUser | null> {
-    const token = getCookie(c, cookie);
+    const token = getCookie(c, sessionCookie(c, base));
     if (!token || !/^[a-f0-9]{64}$/u.test(token)) return null;
     const result = await db.query<{ id: string; display_name: string }>(
       "SELECT u.id,u.display_name FROM standalone_sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>now()",
       [digest(token)],
     );
     const row = result.rows[0];
+    const expected = c.req.header("X-Canvas-Account");
+    // Old editor tabs share the current cookie but cannot name its owner.
+    const needsBinding = c.req.method !== "GET" && c.req.method !== "HEAD";
     if (
       !row ||
-      (c.req.header("X-Canvas-Account") &&
-        c.req.header("X-Canvas-Account") !== row.id)
+      ((needsBinding || expected !== undefined) && expected !== row.id)
     )
       return null;
     return {
@@ -60,6 +70,13 @@ export function registerAccounts(
       isAdmin: false,
     };
   }
+  // Capability clients authenticate with relay tokens and use its configured origin.
+  // Only creating an editor pairing uses the cookie and the same-origin guard.
+  app.all("/api/agent/*", (c, next) =>
+    c.req.path === base + "/api/agent/sessions" && c.req.method === "POST"
+      ? next()
+      : relay.fetch(c.req.raw),
+  );
   app.use("/api/*", async (c, next) => {
     c.header("Cache-Control", "private, no-store");
     const origin = c.req.header("Origin");
@@ -113,16 +130,23 @@ export function registerAccounts(
       )
         return c.json({ error: "Use a password of 8–128 characters." }, 400);
       const now = Date.now();
-      for (const [name, entry] of attempts)
-        if (entry.until <= now) attempts.delete(name);
-      const attempt = attempts.get(username);
-      if (
-        active >= 8 ||
-        (attempt?.count ?? 0) >= 12 ||
-        (!attempt && attempts.size >= 4096)
-      )
+      // Trust the transport peer only. Requests behind a proxy share its address,
+      // so key by both peer and username. Expiry order follows insertion order.
+      const bindings = c.env as Partial<HttpBindings> | undefined;
+      const peer = bindings?.incoming?.socket.remoteAddress ?? "local";
+      const key = peer + "/" + username;
+      for (const [oldKey, entry] of attempts) {
+        if (entry.until > now) break;
+        attempts.delete(oldKey);
+      }
+      const attempt = attempts.get(key);
+      if (active >= 8 || (attempt?.count ?? 0) >= 12)
         return c.json({ error: "Too many attempts. Try again later." }, 429);
-      attempts.set(username, {
+      if (!attempt && attempts.size >= 4096) {
+        const oldest = attempts.keys().next();
+        if (!oldest.done) attempts.delete(oldest.value);
+      }
+      attempts.set(key, {
         count: (attempt?.count ?? 0) + 1,
         until: attempt?.until ?? now + 300_000,
       });
@@ -176,7 +200,7 @@ export function registerAccounts(
           }
           await conn.query(
             "DELETE FROM standalone_sessions WHERE expires_at<=now() OR token_hash=$1",
-            [digest(getCookie(c, cookie) ?? "")],
+            [digest(getCookie(c, sessionCookie(c, base)) ?? "")],
           );
           await conn.query(
             "INSERT INTO standalone_sessions(token_hash,user_id,expires_at) VALUES ($1,$2,now()+ interval '30 days')",
@@ -189,7 +213,7 @@ export function registerAccounts(
         } finally {
           conn.release();
         }
-        attempts.delete(username);
+        attempts.delete(key);
         issueCookie(c, token, lifetime);
         return c.json({ ok: true }, action === "register" ? 201 : 200);
       } finally {
@@ -197,17 +221,6 @@ export function registerAccounts(
       }
     });
   }
-  // MCP clients use the relay's own claim and capability tokens. Only a
-  // signed-in editor may start a new pairing.
-  app.all("/api/agent/*", async (c) => {
-    if (
-      c.req.path === base + "/api/agent/sessions" &&
-      c.req.method === "POST" &&
-      !(await session(c))
-    )
-      return c.json({ error: "unauthorized" }, 401);
-    return relay.fetch(c.req.raw);
-  });
   app.use("/api/*", async (c, next) => {
     const user = await session(c);
     if (!user) {
@@ -217,9 +230,10 @@ export function registerAccounts(
     c.set("sessionUser", user);
     await next();
   });
+  app.post("/api/agent/sessions", (c) => relay.fetch(c.req.raw));
   app.post("/api/auth/logout", async (c) => {
     await db.query("DELETE FROM standalone_sessions WHERE token_hash=$1", [
-      digest(getCookie(c, cookie)!),
+      digest(getCookie(c, sessionCookie(c, base))!),
     ]);
     issueCookie(c, "", 0);
     return c.json({ ok: true });
