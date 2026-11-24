@@ -388,7 +388,7 @@ One canonical reducer owns the canvas: `Idle`, `SymbolPlacement`,
 
 - The tab strip shows with two or more project tabs. With one, the row is
   hidden in both modes and the canvas takes its height. File's **New project
-  tab**, **Open file in new tab**, (with Cloud) **Open Shelf project in tab ›**
+  tab**, **Open file in new tab**, (with Cloud) **Open Cloud Project… ›**
   and **Close tab** are there with any number of tabs; Close tab is the
   active tab's ×, with the same decision about unsaved work and the same
   result (the closed work stays a recovery copy). The one project's name is
@@ -521,15 +521,24 @@ it does.
   good.
 - **Top bar.** In both modes it reads: the brand, the project's name, Undo and
   Redo, the switch, **Import netlist…** (Auto only), **Auto Layout**, **File**,
-  **Agent** and **⋯**. The name is read-only, cut with an ellipsis, with File's
+  **Agent** and **⋯**; an accounts-mode editor ends the row with the signed-in
+  account (below). The name is read-only, cut with an ellipsis, with File's
   unsaved-work dot; a click opens Project Info. Below 720 px it is hidden and
   the header stays one row. **⋯** holds what the Edit and Circuit menus held,
   in the groups **Edit**, **Hierarchy**, **Netlist** and **Layout**, with the
   same commands; it closes like File (Escape, an outside click, a command),
-  and only one of the two is open at a time. A long ⋯ scrolls inside the
+  and only one header menu is open at a time. A long ⋯ scrolls inside the
   window; as in File, the arrow keys, Home and End on one of its items never
   pan the canvas (Left and Right included; File's submenus use them), they
   scroll the menu as the browser does, and Escape returns focus to its button.
+- **Account menu.** An accounts-mode editor ends the top bar's row with the
+  signed-in account's menu: a round mark with the name's first letter and the
+  username (the mark alone below 760 px), which names the account and holds
+  **Sign out**. Signing out runs the same save check first, warning **Sign out
+  paused…** when unsaved work cannot be kept, and then returns to the sign-in
+  screen; File carries no Sign out. It closes on an outside click, and Escape
+  returns focus to its summary. Local mode and the desktop build have no
+  account menu.
 
 ## Automatic layout
 

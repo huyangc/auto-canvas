@@ -1757,6 +1757,108 @@
   }
 }
 
+/* The signed-in account (T172) ends the action group: the summary is a header
+   pill carrying the round first-letter mark from `.account-name` and the
+   username, and its popover opens leftwards from the trigger. */
+.app-chrome-actions .header-account-menu {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.app-chrome-actions .header-account-menu > summary {
+  height: var(--icm-control-h);
+  padding: 0 8px;
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-sm);
+  background: var(--icm-surface);
+  font-size: var(--icm-font-sm);
+  font-weight: 600;
+  max-width: 10rem;
+  list-style: none;
+}
+
+.header-account-menu .account-name-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.header-account-popover {
+  top: calc(100% + 6px);
+  right: 0;
+  left: auto;
+  z-index: 60;
+  min-width: 14rem;
+}
+
+.header-account-identity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px 2px;
+}
+
+.header-account-avatar {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  color: var(--icm-accent);
+  background: var(--icm-accent-soft);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.header-account-copy {
+  display: grid;
+  min-width: 0;
+}
+
+.header-account-copy strong {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.header-account-copy small {
+  margin: 0;
+}
+
+.command-separator {
+  height: 1px;
+  margin: 4px;
+  border: 0;
+  background: var(--icm-border);
+}
+
+/* A phone-width bar keeps the avatar alone; the mark's 11px letter stays. */
+@media (max-width: 760px) {
+  .app-chrome-actions .header-account-menu > summary {
+    padding-inline: 4px;
+    font-size: 0;
+  }
+}
+
+/* As File and ⋯ do at phone widths, the popover hangs from the window's
+   right edge so it stays on screen. */
+@media (max-width: 720px) {
+  .app-chrome-actions .header-account-popover {
+    position: fixed;
+    top: calc(var(--icm-menubar-h) + 4px);
+    right: 12px;
+    left: auto;
+    box-sizing: border-box;
+    max-width: calc(100vw - 24px);
+    max-height: calc(100dvh - var(--icm-menubar-h) - 16px);
+    overflow: auto;
+  }
+}
+
 /* The project name (T150c): the one top-bar item that gives way to a narrow
    window. It shrinks to an ellipsis, down to 3rem, before anything else
    moves, and below 720 px it goes; File → Project Info still has it. The
@@ -1787,6 +1889,41 @@
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+}
+
+/* The signed-in account's pill (T172) is the row's other compressible name:
+   above the phone bands every label is back, and after the project's name
+   has given way the username ellipsizes before the actions would run off
+   the row. Without this the pill sat about 90 px past the row at 761 px.
+   The pill keeps its mark and caret; a mode other than `accounts` draws no
+   pill, and this band changes nothing there. */
+@media (width > 720px) and (width <= 1040px) {
+  .app-chrome-main:not([data-host-controls])
+    .app-chrome-actions:has(> .header-account-menu):not(
+      :has(.auto-layout-control[data-running="true"])
+    ) {
+    flex-shrink: 1;
+  }
+
+  .app-chrome-actions > .header-account-menu {
+    flex-shrink: 1;
+    min-width: 0;
+  }
+
+  /* The username gives way first; the Auto Layout label keeps whole, and
+     shrinks only while a run already lets it (the base rules above). Only a
+     header that draws the pill takes this, so the host bar keeps its own
+     last-resort shrink. */
+  .app-chrome-actions:has(> .header-account-menu):not(
+      :has(.auto-layout-control[data-running="true"])
+    )
+    > .auto-layout-control {
+    flex-shrink: 0;
+  }
+
+  .app-chrome-actions .header-account-menu > summary {
+    min-width: 0;
   }
 }
 

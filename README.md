@@ -77,7 +77,7 @@ rebuilds and replaces the running server. Logs append to
 The launcher creates a missing `auto_canvas` database when PostgreSQL CLI tools
 are available; create `auto_canvas_test` separately before running tests.
 
-Choose **Create an account** on first use. Usernames contain one English letter and eight digits (for example `A12345678`) and ignore letter case. **File → Save** writes the drawing to your account in PostgreSQL. Sign in on another browser and choose **File → Open Shelf project in tab** to reopen it. Unsaved drafts stay in the current browser. Existing single-user projects remain accessible in explicit `AUTO_CANVAS_AUTH=local` mode.
+Choose **Create an account** on first use. Usernames contain one English letter and eight digits (for example `A12345678`) and ignore letter case. **File → Save** writes the drawing to your account in PostgreSQL. Sign in on another browser and choose **File → Open Cloud Project…** to reopen it. Unsaved drafts stay in the current browser. Existing single-user projects remain accessible in explicit `AUTO_CANVAS_AUTH=local` mode.
 
 For development, run `pnpm dev`: the API starts in the background and Vite
 serves the editor with hot reload on <http://localhost:5173>. Ctrl+C stops both.

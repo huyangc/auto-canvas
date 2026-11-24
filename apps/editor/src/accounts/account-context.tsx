@@ -14,11 +14,3 @@ export function useBeforeAccountLogout(check: () => Promise<void>) {
     return () => account.prepareLogout(null);
   }, [account]);
 }
-export function SignOutCommand() {
-  const account = useContext(AccountContext);
-  return account ? (
-    <button type="button" onClick={account.logout}>
-      Sign out ({account.username})
-    </button>
-  ) : null;
-}

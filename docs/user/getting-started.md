@@ -47,7 +47,9 @@ to open that Cell.
 
 The header has the project's name, **Undo** and **Redo**, the mode switch,
 **Import netlist…** (Auto only), **Auto Layout**, the **File** menu, the
-**Agent** action and the **⋯** menu.
+**Agent** action and the **⋯** menu. When signed in, its last control is the
+account menu: the round mark with your first letter and your username, which
+names the account and holds **Sign out** (below 760 px only the mark shows).
 The name is read-only there; click it to open Project Info, where it is
 changed (below 720 px it is hidden; File → Project Info still has it).
 **File** holds Project Info (circuit and Cell names) and the file commands;
@@ -57,8 +59,8 @@ work. **⋯** holds **Edit** (insert, find, the selection's commands),
 
 Each project tab is an independent circuit with its own view, selection, undo
 history and Cloud binding. With one project the tab bar is hidden, and **File**
-has **New project tab**, **Open file in new tab**, **Open Shelf project in
-tab** and **Close tab**; with two or more the tab bar shows, with the same
+has **New project tab**, **Open file in new tab**, **Open Cloud Project…**
+and **Close tab**; with two or more the tab bar shows, with the same
 actions (**+** is New project tab, **×** closes a tab). With one project rename it in Project Info; in the tab bar,
 double-click a tab's name to rename it and right-click it for **Close**,
 **Close Others** and **Close All**. Refresh
@@ -218,8 +220,9 @@ choices have a dropdown. Shapes are drawing only.
 **File → Save** (`Ctrl+S`) saves to one private Cloud Project, updating it on
 each save; a new or imported drawing creates its Cloud Project on first save.
 A dot beside the name means unsaved changes, and leaving the page warns. Your
-Cloud Projects are on your account page and in File → **Open Shelf project in
-tab** (and the tab bar's ▾ Shelf).
+Cloud Projects are on your account page and in File → **Open Cloud Project…**
+(and the tab bar's ▾ picker). Sign out from the account menu at the top bar's
+right; if unsaved work cannot be kept, it pauses with **Sign out paused…**.
 
 Edits are also kept as a browser recovery copy (not a save; clearing site data
 loses it). If a newer unsaved copy is found at start, a banner offers

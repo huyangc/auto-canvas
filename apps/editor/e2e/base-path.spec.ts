@@ -87,7 +87,7 @@ test("a prefixed editor saves and reopens a Cloud circuit beside notebook", asyn
     watch(fresh);
     try {
       await fresh.goto(`${origin}/canvas/?new=1`);
-      const shelf = await projectTabAction(fresh, "Open Shelf project in tab");
+      const shelf = await projectTabAction(fresh, "Open Cloud Project…");
       await shelf.getByRole("button", { name, exact: true }).click();
       await expect(fresh.getByTestId("hit-R1")).toBeVisible();
       await expect(fresh.getByTestId("active-instance-count")).toHaveText("1");

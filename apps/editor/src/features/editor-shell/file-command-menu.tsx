@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -11,7 +12,6 @@ import {
 
 import type { RecentProjectFile } from "../../hosts/native-project-store";
 import type { CloudProjectSummary } from "./cloud-projects";
-import { SignOutCommand } from "../../accounts/account-context";
 import { ProjectShelf } from "./project-shelf";
 
 /**
@@ -218,18 +218,30 @@ export function FileCommandMenu({
     event.currentTarget.querySelector("input")?.click();
   };
   // Private Cloud Projects are listed on the account page and in the
-  // project tabs' Shelf, which Open Shelf project in tab shows here too.
-  const commands = (
-    <>
-      {onOpenInfo ? (
-        <button type="button" aria-haspopup="dialog" onClick={onOpenInfo}>
-          Project Info
+  // project tabs' Shelf, which Open Cloud Project… shows here too.
+  // The rows read as groups — project, tabs, save, transfer, and the saved
+  // copy's own commands — and a separator falls only between two groups that
+  // are drawn.
+  const groups: { key: string; content: ReactNode }[] = [];
+  groups.push({
+    key: "project",
+    content: (
+      <>
+        {onOpenInfo ? (
+          <button type="button" aria-haspopup="dialog" onClick={onOpenInfo}>
+            Project Info
+          </button>
+        ) : null}
+        <button type="button" onClick={onNewProject}>
+          New Project
         </button>
-      ) : null}
-      <button type="button" onClick={onNewProject}>
-        New Project
-      </button>
-      {projectTabs ? (
+      </>
+    ),
+  });
+  if (projectTabs)
+    groups.push({
+      key: "tabs",
+      content: (
         <>
           <button
             type="button"
@@ -245,82 +257,85 @@ export function FileCommandMenu({
           >
             Open file in new tab
           </button>
-        </>
-      ) : null}
-      {shelf ? (
-        <div>
-          <CommandSubmenu
-            id="file-shelf-options"
-            title="Open Shelf project in tab"
-            // The strip's picker has the title as its name.
-            label="Shelf projects"
-            open={openSubmenu === "shelf"}
-            onToggle={() => {
-              if (openSubmenu !== "shelf") shelf.onOpened();
-              setOpenSubmenu((current) =>
-                current === "shelf" ? null : "shelf",
-              );
-            }}
-            onClose={() => setOpenSubmenu(null)}
-          >
-            <div
-              className="file-shelf"
-              // The Shelf's own controls (rename, delete, browse) keep File
-              // open, as they keep the strip's picker open; opening a
-              // project closes the menu itself.
-              onClick={(event) => event.stopPropagation()}
-              onKeyDown={(event) => {
-                // Every key typed in the Shelf's own fields, its inline
-                // decisions or its Browse dialog stays there, as in the
-                // strip's picker: the submenu's Left (collapse) and File's
-                // Escape (close) would hide a field or an open modal.
-                if (
-                  (event.target as Element).closest(
-                    "input, textarea, select, dialog, .inline-confirm",
-                  )
-                )
-                  event.stopPropagation();
-              }}
-            >
-              <ProjectShelf
-                projects={shelf.projects}
-                busy={projectTabs?.busy ?? false}
-                onOpen={shelf.onOpen}
-                onRename={shelf.onRename}
-                onDelete={shelf.onDelete}
-              />
+          {shelf ? (
+            <div>
+              <CommandSubmenu
+                id="file-shelf-options"
+                title="Open Cloud Project…"
+                // The strip's picker has the title as its name.
+                label="Cloud Projects"
+                open={openSubmenu === "shelf"}
+                onToggle={() => {
+                  if (openSubmenu !== "shelf") shelf.onOpened();
+                  setOpenSubmenu((current) =>
+                    current === "shelf" ? null : "shelf",
+                  );
+                }}
+                onClose={() => setOpenSubmenu(null)}
+              >
+                <div
+                  className="file-shelf"
+                  // The Shelf's own controls (rename, delete, browse) keep
+                  // File open, as they keep the strip's picker open; opening
+                  // a project closes the menu itself.
+                  onClick={(event) => event.stopPropagation()}
+                  onKeyDown={(event) => {
+                    // Every key typed in the Shelf's own fields, its inline
+                    // decisions or its Browse dialog stays there, as in the
+                    // strip's picker: the submenu's Left (collapse) and
+                    // File's Escape (close) would hide a field or an open
+                    // modal.
+                    if (
+                      (event.target as Element).closest(
+                        "input, textarea, select, dialog, .inline-confirm",
+                      )
+                    )
+                      event.stopPropagation();
+                  }}
+                >
+                  <ProjectShelf
+                    projects={shelf.projects}
+                    busy={projectTabs.busy}
+                    onOpen={shelf.onOpen}
+                    onRename={shelf.onRename}
+                    onDelete={shelf.onDelete}
+                  />
+                </div>
+              </CommandSubmenu>
             </div>
-          </CommandSubmenu>
-        </div>
-      ) : null}
-      {projectTabs ? (
+          ) : null}
+          <button
+            type="button"
+            disabled={projectTabs.busy}
+            onClick={(event) =>
+              projectTabs.onClose(
+                event.currentTarget
+                  .closest("details")
+                  ?.querySelector("summary") ?? null,
+              )
+            }
+          >
+            Close tab
+          </button>
+        </>
+      ),
+    });
+  groups.push({
+    key: "save",
+    content: (
+      <>
         <button
           type="button"
-          disabled={projectTabs.busy}
-          onClick={(event) =>
-            projectTabs.onClose(
-              event.currentTarget
-                .closest("details")
-                ?.querySelector("summary") ?? null,
-            )
-          }
+          data-testid="save-cloud-project"
+          onClick={onSave}
+          disabled={nativeFiles?.busy}
         >
-          Close tab
+          {cloudEnabled || nativeFiles ? "Save" : "Export Project File…"}
         </button>
-      ) : null}
-      <button
-        type="button"
-        data-testid="save-cloud-project"
-        onClick={onSave}
-        disabled={nativeFiles?.busy}
-      >
-        {cloudEnabled || nativeFiles ? "Save" : "Export Project File…"}
-      </button>
-      {nativeFiles && NativeFileCommands ? (
-        <NativeFileCommands {...nativeFiles} newProject={onNewProject} />
-      ) : null}
-      {cloudEnabled ? (
-        <>
+        {nativeFiles && NativeFileCommands ? (
+          <NativeFileCommands {...nativeFiles} newProject={onNewProject} />
+        ) : null}
+        {cloudEnabled ? (
           <button
             type="button"
             data-testid="check-and-save"
@@ -330,8 +345,13 @@ export function FileCommandMenu({
           >
             Check and Save
           </button>
-        </>
-      ) : null}
+        ) : null}
+      </>
+    ),
+  });
+  groups.push({
+    key: "import",
+    content: (
       <div>
         <CommandSubmenu
           id="file-import-options"
@@ -408,6 +428,11 @@ export function FileCommandMenu({
           ) : null}
         </CommandSubmenu>
       </div>
+    ),
+  });
+  groups.push({
+    key: "export",
+    content: (
       <div>
         <CommandSubmenu
           id="file-export-options"
@@ -453,17 +478,36 @@ export function FileCommandMenu({
           </button>
         </CommandSubmenu>
       </div>
-      {canRevert ? (
-        <button type="button" onClick={onRevert}>
-          Revert to Last Saved
-        </button>
-      ) : null}
-      {hasRecoverySessions ? (
-        <button type="button" onClick={onOpenRecovery}>
-          Recover Unsaved Work…
-        </button>
-      ) : null}
-      <SignOutCommand />
+    ),
+  });
+  if (canRevert || hasRecoverySessions)
+    groups.push({
+      key: "recovery",
+      content: (
+        <>
+          {canRevert ? (
+            <button type="button" onClick={onRevert}>
+              Revert to Last Saved
+            </button>
+          ) : null}
+          {hasRecoverySessions ? (
+            <button type="button" onClick={onOpenRecovery}>
+              Recover Unsaved Work…
+            </button>
+          ) : null}
+        </>
+      ),
+    });
+  const commands = (
+    <>
+      {groups.map((group, index) => (
+        <Fragment key={group.key}>
+          {index > 0 ? (
+            <div className="command-separator" role="separator" />
+          ) : null}
+          {group.content}
+        </Fragment>
+      ))}
     </>
   );
   if (embedded)
