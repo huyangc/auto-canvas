@@ -23,8 +23,9 @@ type RetiredSessions =
  * rolls back.
  *
  * Called in a transaction, after its `users` and `standalone_accounts` locks.
- * Liveness uses `clock_timestamp()`, not the transaction's `now()`: a request
- * that waited for a lock past its session's expiry is not kept.
+ * Liveness is checked after the locks are held, in its own statement, with
+ * `clock_timestamp()` rather than the transaction's `now()`: a request that
+ * waited for a lock past its session's expiry is not kept.
  * Every session row a transaction touches is locked here, in one statement
  * ordered by hash, so no two transactions lock sessions in different orders.
  * Locking them before reading their pairings includes pairings admitted
@@ -37,12 +38,8 @@ export async function removeSessions(
 ): Promise<{ kept: boolean; pairings: string[] }> {
   const byToken = retire && "token" in retire ? retire : null;
   const byUser = retire && "userId" in retire ? retire.userId : null;
-  const { rows } = await conn.query<{
-    token_hash: Buffer;
-    user_id: string;
-    live: boolean;
-  }>(
-    `SELECT token_hash, user_id, expires_at>clock_timestamp() AS live FROM standalone_sessions
+  const { rows } = await conn.query<{ token_hash: Buffer }>(
+    `SELECT token_hash FROM standalone_sessions
     WHERE token_hash=$1::bytea OR ($2 AND expires_at<=now()) OR user_id=$3::text
       OR token_hash=$4::bytea
     ORDER BY token_hash FOR UPDATE`,
@@ -55,11 +52,15 @@ export async function removeSessions(
   );
   const kept = (row: { token_hash: Buffer }) =>
     keep !== undefined && row.token_hash.equals(keep.token);
-  if (
-    keep &&
-    !rows.some((row) => kept(row) && row.user_id === keep.userId && row.live)
-  )
-    return { kept: false, pairings: [] };
+  if (keep) {
+    // A separate statement after the row locks are held, on the current
+    // clock: a session that expired while this request waited is not kept.
+    const live = await conn.query(
+      "SELECT 1 FROM standalone_sessions WHERE token_hash=$1 AND user_id=$2 AND expires_at>clock_timestamp()",
+      [keep.token, keep.userId],
+    );
+    if (!live.rowCount) return { kept: false, pairings: [] };
+  }
   const hashes = rows.filter((row) => !kept(row)).map((row) => row.token_hash);
   if (!hashes.length) return { kept: true, pairings: [] };
   const pairings = await conn.query<{ pairing_id: string }>(
