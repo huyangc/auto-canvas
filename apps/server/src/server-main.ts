@@ -5,7 +5,7 @@ import { serve, type ServerType } from "@hono/node-server";
 import type { ClientBase, Pool } from "pg";
 import { AgentRelayHost } from "./agent-relay/host.js";
 import { createApp } from "./app.js";
-import { readAuthConfig } from "./auth-config.js";
+import { readAuthConfig, type AuthConfig } from "./auth-config.js";
 import { normalizeBasePath } from "./base-path.js";
 import { createDb as defaultCreateDb } from "./db.js";
 import {
@@ -40,6 +40,9 @@ interface RunningServer {
  * start of a silicon-notebook companion service (`guardedStart`): the first
  * serves only an existing canvas database, the second only initialises an
  * empty one and returns null.
+ *
+ * `--grant-admin <username>` (accounts mode) migrates, makes that account an
+ * enabled administrator and returns null without listening.
  */
 export async function startServer({
   env = process.env,
@@ -50,6 +53,7 @@ export async function startServer({
   // Configuration errors surface before any database connection is attempted.
   const auth = readAuthConfig(env);
   const basePath = normalizeBasePath(env.AUTO_CANVAS_BASE_PATH);
+  const grantee = grantAdminTarget(auth.mode, argv);
   const guard = await guardedStart(env, argv);
   let db = createDb(env.DATABASE_URL);
   let agentRelay: AgentRelayHost | null = null;
@@ -65,7 +69,11 @@ export async function startServer({
       db = createDb(env.DATABASE_URL, (client) => pinSchema(client, schema));
     } else {
       await migrate(db);
-      if (argv.includes("--migrate")) {
+      if (grantee !== null) {
+        await grantAdmin(db, grantee);
+        log(`Granted the administrator role to ${grantee}`);
+      }
+      if (argv.includes("--migrate") || grantee !== null) {
         await db.end();
         return null;
       }
@@ -178,6 +186,56 @@ export async function startServer({
 
 const REQUIRE_CANVAS = "--require-canvas-database";
 const INIT_EMPTY = "--init-empty-database";
+const GRANT_ADMIN = "--grant-admin";
+
+/**
+ * The username `--grant-admin <username>` names, or null without the flag.
+ * Every refusal here happens before a pool exists.
+ */
+function grantAdminTarget(
+  mode: AuthConfig["mode"],
+  argv: readonly string[],
+): string | null {
+  const index = argv.indexOf(GRANT_ADMIN);
+  if (index === -1) return null;
+  if (mode !== "accounts")
+    throw new Error(`${GRANT_ADMIN} requires AUTO_CANVAS_AUTH=accounts`);
+  for (const flag of ["--migrate", REQUIRE_CANVAS, INIT_EMPTY])
+    if (argv.includes(flag))
+      throw new Error(`${GRANT_ADMIN} and ${flag} exclude each other`);
+  const username = argv[index + 1];
+  if (
+    username === undefined ||
+    argv.indexOf(GRANT_ADMIN, index + 1) !== -1 ||
+    !/^[A-Za-z][0-9]{8}$/u.test(username)
+  )
+    throw new Error(
+      `${GRANT_ADMIN} needs one username: one letter followed by eight digits`,
+    );
+  return username.toLowerCase();
+}
+
+/** Makes the named account an enabled administrator; idempotent. */
+async function grantAdmin(db: Pool, username: string): Promise<void> {
+  const connection = await db.connect();
+  try {
+    await connection.query("BEGIN");
+    // The lock administrative account mutations take (account-administration.ts).
+    await connection.query("SELECT pg_advisory_xact_lock(4310, 3)");
+    const granted = await connection.query(
+      "UPDATE standalone_accounts SET role='admin', disabled=false WHERE username=$1",
+      [username],
+    );
+    if (!granted.rowCount)
+      throw new Error(`${GRANT_ADMIN}: no account has that username`);
+    await connection.query("COMMIT");
+  } catch (error) {
+    await connection.query("ROLLBACK");
+    throw error;
+  } finally {
+    connection.release();
+  }
+}
 
 /**
  * The guard a flagged start migrates under, or null without a flag. Every

@@ -186,6 +186,7 @@ describe("startServer", () => {
       "003-agent-relay.sql",
       "004-standalone-accounts.sql",
       "005-account-agent-pairings.sql",
+      "006-account-administration.sql",
     ]);
   });
 
@@ -360,6 +361,149 @@ describe("startServer", () => {
     ]);
     socket.destroy();
     expect(closed).toBe("closed");
+  });
+
+  describe("--grant-admin", () => {
+    const account = async (username: string) =>
+      (
+        await admin.query(
+          `SELECT role, disabled FROM ${schema}.standalone_accounts WHERE username=$1`,
+          [username],
+        )
+      ).rows[0];
+
+    it("makes a registered account an enabled administrator, idempotently", async () => {
+      const server = await startServer({
+        env: listen,
+        argv: [],
+        createDb,
+        log: quiet,
+      });
+      try {
+        for (const username of ["G12345678", "h12345678"]) {
+          const registered = await fetch(
+            `http://127.0.0.1:${server!.address.port}/api/auth/register`,
+            {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ username, password: "passphrase" }),
+            },
+          );
+          expect(registered.status).toBe(201);
+        }
+      } finally {
+        await server!.close();
+      }
+      expect(await account("g12345678")).toEqual({
+        role: "user",
+        disabled: false,
+      });
+      await admin.query(
+        `UPDATE ${schema}.standalone_accounts SET disabled=true WHERE username='g12345678'`,
+      );
+      for (let run = 0; run < 2; run++) {
+        const pools: pg.Pool[] = [];
+        const log = vi.fn();
+        expect(
+          await startServer({
+            env: {},
+            argv: ["node", "cli.js", "--grant-admin", "G12345678"],
+            createDb: () => {
+              const pool = createDb();
+              pools.push(pool);
+              return pool;
+            },
+            log,
+          }),
+        ).toBeNull();
+        expect(pools).toHaveLength(1);
+        expect(pools[0]!.ended).toBe(true);
+        expect(log).toHaveBeenCalledWith(
+          "Granted the administrator role to g12345678",
+        );
+        expect(await account("g12345678")).toEqual({
+          role: "admin",
+          disabled: false,
+        });
+      }
+      expect(await account("h12345678")).toEqual({
+        role: "user",
+        disabled: false,
+      });
+    });
+
+    it("refuses an unknown username without naming any account", async () => {
+      const pools: pg.Pool[] = [];
+      const failure = await startServer({
+        env: {},
+        argv: ["node", "cli.js", "--grant-admin", "z99999999"],
+        createDb: () => {
+          const pool = createDb();
+          pools.push(pool);
+          return pool;
+        },
+        log: quiet,
+      }).catch((error: Error) => error);
+      expect(failure).toBeInstanceOf(Error);
+      expect((failure as Error).message).toBe(
+        "--grant-admin: no account has that username",
+      );
+      expect(pools[0]!.ended).toBe(true);
+    });
+
+    it.each([
+      [{}, ["--grant-admin"], "needs one username"],
+      [{}, ["--grant-admin", "--migrate"], "exclude each other"],
+      [{}, ["--grant-admin", "not-a-name"], "needs one username"],
+      [{}, ["--grant-admin", "a1234567"], "needs one username"],
+      [
+        {},
+        ["--grant-admin", "a12345678", "--grant-admin", "b12345678"],
+        "needs one username",
+      ],
+      [
+        {},
+        ["--grant-admin", "a12345678", "--migrate"],
+        "--grant-admin and --migrate exclude each other",
+      ],
+      [
+        {},
+        ["--grant-admin", "a12345678", "--require-canvas-database"],
+        "--grant-admin and --require-canvas-database exclude each other",
+      ],
+      [
+        {},
+        ["--init-empty-database", "--grant-admin", "a12345678"],
+        "--grant-admin and --init-empty-database exclude each other",
+      ],
+      [
+        { AUTO_CANVAS_AUTH: "local" },
+        ["--grant-admin", "a12345678"],
+        "--grant-admin requires AUTO_CANVAS_AUTH=accounts",
+      ],
+      [
+        {
+          AUTO_CANVAS_AUTH: "notebook",
+          AUTO_CANVAS_NOTEBOOK_API: "http://127.0.0.1:9",
+        },
+        ["--grant-admin", "a12345678"],
+        "--grant-admin requires AUTO_CANVAS_AUTH=accounts",
+      ],
+    ])(
+      "refuses %j %j before connecting to the database",
+      async (env, flags, message) => {
+        const neverCalled = vi.fn(() => createDb());
+        await expect(
+          startServer({
+            env,
+            argv: ["node", "cli.js", ...flags],
+            createDb: neverCalled,
+            log: quiet,
+          }),
+        ).rejects.toThrow(message);
+        expect(neverCalled).not.toHaveBeenCalled();
+      },
+    );
   });
 
   it("starts local mode and serves health as before", async () => {
