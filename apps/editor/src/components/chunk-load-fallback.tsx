@@ -1,3 +1,4 @@
+import { DialogCloseButton } from "./dialog-close-button";
 import { accountKey } from "../accounts/storage";
 import { lazy, type ComponentType } from "react";
 
@@ -75,11 +76,14 @@ function createChunkLoadFallback(
           aria-labelledby="chunk-load-fallback-title"
           data-testid="dialog-chunk-load-fallback"
         >
-          <header className="editor-action-dialog-header">
-            <p>Dialog unavailable</p>
-            <h2 id="chunk-load-fallback-title">
-              This dialog could not be loaded
-            </h2>
+          <header className="editor-action-dialog-header dialog-header-with-close">
+            <div>
+              <p>Dialog unavailable</p>
+              <h2 id="chunk-load-fallback-title">
+                This dialog could not be loaded
+              </h2>
+            </div>
+            {close ? <DialogCloseButton onClick={() => close()} /> : null}
           </header>
           <div className="editor-action-dialog-body">
             <p>
@@ -92,11 +96,6 @@ function createChunkLoadFallback(
             </p>
           </div>
           <footer className="editor-action-dialog-actions">
-            {close ? (
-              <button type="button" onClick={() => close()}>
-                Close
-              </button>
-            ) : null}
             <button
               type="button"
               className="primary"

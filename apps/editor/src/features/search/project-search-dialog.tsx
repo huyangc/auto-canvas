@@ -1,3 +1,4 @@
+import { DialogCloseButton } from "../../components/dialog-close-button";
 import type { SearchResult } from "@icm/derived";
 import { useEffect, useRef } from "react";
 import { deferFocus } from "../../interaction/deferred-focus";
@@ -43,9 +44,7 @@ export function ProjectSearchDialog({
             <p className="help-kicker">Project navigation</p>
             <h2 id="project-search-title">Find in Circuit</h2>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close search">
-            Close
-          </button>
+          <DialogCloseButton aria-label="Close search" onClick={onClose} />
         </header>
         <input
           dir="auto"

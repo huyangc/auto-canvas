@@ -1,3 +1,4 @@
+import { DialogCloseButton } from "../../components/dialog-close-button";
 import {
   createDesignNetlistExport,
   unfinishedDrawingDiagnostics,
@@ -106,6 +107,10 @@ export function NetlistPreflightDialog({
             <p>Canonical design-netlist analysis</p>
             <h2 id="netlist-preflight-title">Check Report</h2>
           </div>
+          <DialogCloseButton
+            data-testid="check-report-close"
+            onClick={onClose}
+          />
         </header>
         <section className="netlist-preflight-summary" aria-label="Readiness">
           <h3>{readiness}</h3>
@@ -213,15 +218,6 @@ export function NetlistPreflightDialog({
             </aside>
           ) : null}
         </div>
-        <footer className="netlist-preflight-actions">
-          <button
-            type="button"
-            data-testid="check-report-close"
-            onClick={onClose}
-          >
-            Close
-          </button>
-        </footer>
       </section>
     </div>
   );

@@ -21,10 +21,10 @@
   background: rgb(0 0 0 / 30%);
 }
 
-/* The dialog is rendered inside the File menu's popover, whose `button` rule
- * (`width: 100%; min-height: 32px; padding: 0 10px …`) outranks a single
- * class. The dialog-qualified selectors below win, and the close button
- * restates every property that rule sets. */
+/* The dialog opens from inside File's popover or the strip's Shelf picker;
+ * their button and text rules stop at `.cloud-shelf-dialog` (see
+ * styles/editor-chrome.css and project-tabs.css). The close button is the
+ * shared DialogCloseButton. */
 
 .cloud-shelf-dialog .cloud-shelf-header {
   display: flex;
@@ -47,38 +47,6 @@
 .cloud-shelf-dialog .cloud-shelf-header h2 {
   margin: 0;
   font-size: 1.1rem;
-}
-
-.cloud-shelf-dialog .cloud-shelf-close {
-  display: grid;
-  flex: none;
-  place-items: center;
-  width: 28px;
-  min-height: 28px;
-  height: 28px;
-  padding: 0;
-  border: 0;
-  border-radius: var(--icm-radius-sm);
-  box-shadow: none;
-  color: var(--icm-text-muted);
-  background: none;
-  font: inherit;
-  font-size: 18px;
-  font-weight: 400;
-  line-height: 1;
-  text-align: center;
-  white-space: normal;
-  cursor: pointer;
-}
-
-.cloud-shelf-dialog .cloud-shelf-close:hover {
-  color: var(--icm-text);
-  background: var(--icm-accent-soft);
-}
-
-.cloud-shelf-dialog .cloud-shelf-close:focus-visible {
-  outline: 2px solid var(--icm-accent);
-  outline-offset: 1px;
 }
 
 /* The only part that scrolls: the header stays put while the wall moves. */

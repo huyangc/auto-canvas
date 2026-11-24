@@ -34,7 +34,7 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-async function renderDialog() {
+async function renderDialog(onClose: () => void = () => {}) {
   vi.resetModules();
   const { VersionHistoryDialog } =
     await import("../components/version-history-dialog");
@@ -60,7 +60,7 @@ async function renderDialog() {
         entryId="e1"
         entryName="Entry"
         onRestored={() => {}}
-        onClose={() => {}}
+        onClose={onClose}
       />,
     ),
   );
@@ -101,4 +101,18 @@ it("shows the fetched preview in the same cell", async () => {
   const image = await previewCell();
   expect(image.getAttribute("alt")).toBe("Version 1 preview");
   expect(image.getAttribute("loading")).toBe("lazy");
+});
+
+it("dismisses from the × at the top of its header, with no text Close", async () => {
+  const onClose = vi.fn();
+  await renderDialog(onClose);
+  await previewCell();
+  const buttons = [...container.querySelectorAll("button")];
+  expect(buttons.map((button) => button.textContent)).not.toContain("Close");
+  const dismiss = container.querySelector<HTMLButtonElement>(
+    'header button[aria-label="Close version history"]',
+  )!;
+  expect(dismiss.textContent).toBe("×");
+  await act(async () => dismiss.click());
+  expect(onClose).toHaveBeenCalledTimes(1);
 });

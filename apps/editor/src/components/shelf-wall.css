@@ -10,7 +10,11 @@
 }
 
 .shelf-tile {
-  display: block;
+  display: grid;
+  grid-column: 1 / -1;
+  grid-row: 1 / 4;
+  grid-template-columns: subgrid;
+  grid-template-rows: subgrid;
   border: 1px solid var(--icm-border);
   border-radius: var(--icm-radius-md, 10px);
   background: var(--icm-surface);
@@ -22,8 +26,16 @@
     box-shadow 120ms ease;
 }
 
+/* The card's link and its heart share one grid: the link spans every row
+ * and column (its children land on the wrap's rows through subgrid), and the
+ * heart, a sibling the link cannot contain, sits over the name's row in the
+ * last column. The name keeps the first column, so a long name wraps before
+ * the heart instead of running under it. Rows: preview, name, meta, rename. */
 .shelf-tile-wrap {
   position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto auto auto;
 }
 
 .shelf-tile:hover {
@@ -33,6 +45,7 @@
 
 .shelf-tile-preview {
   display: block;
+  grid-column: 1 / -1;
   background: #fff;
   border-bottom: 1px solid var(--icm-border);
   padding: 10px;
@@ -59,18 +72,18 @@
   object-fit: contain;
 }
 
-.shelf-tile-copy {
-  display: grid;
-  gap: 2px;
-  padding: 10px 12px 12px;
-}
-
 .shelf-tile-name {
+  grid-column: 1;
+  min-width: 0;
+  padding: 10px 4px 0 12px;
   font-size: 14px;
   font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 .shelf-tile-meta {
+  grid-column: 1 / -1;
+  padding: 2px 12px 12px;
   display: -webkit-box;
   overflow: hidden;
   -webkit-box-orient: vertical;
@@ -80,10 +93,90 @@
   color: var(--icm-text-muted);
 }
 
-.shelf-count {
+.shelf-tile-favorite {
+  z-index: 1;
+  grid-column: 2;
+  grid-row: 2;
+  align-self: start;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  margin: 6px 8px 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--icm-radius-sm);
+  color: var(--icm-text-muted);
+  background: none;
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.shelf-tile-favorite[aria-pressed="true"] {
+  border: 0;
+  color: var(--icm-error);
+  background: none;
+  box-shadow: none;
+}
+
+.shelf-tile-favorite:hover:not(:disabled) {
+  color: var(--icm-error);
+  background: var(--icm-accent-soft);
+}
+
+.shelf-tile-favorite:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.shelf-count-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
   margin: 0 0 12px;
+}
+
+.shelf-count {
+  margin: 0;
   color: var(--icm-text-muted);
   font-size: 0.85rem;
+}
+
+/* All | ♥ Favorites: one segmented control, the shown view pressed. */
+.shelf-filter {
+  display: inline-flex;
+  flex: none;
+  border: 1px solid var(--icm-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.shelf-filter button {
+  padding: 3px 10px;
+  border: 0;
+  border-radius: 0;
+  color: var(--icm-text-muted);
+  background: var(--icm-surface);
+  box-shadow: none;
+  font-size: 12px;
+}
+
+.shelf-filter button + button {
+  border-left: 1px solid var(--icm-border);
+}
+
+.shelf-filter button[aria-pressed="true"] {
+  border-color: var(--icm-border);
+  color: var(--icm-text);
+  background: var(--icm-accent-soft);
+  box-shadow: none;
+}
+
+.shelf-filter button[aria-pressed="true"] span {
+  color: var(--icm-error);
 }
 
 .shelf-tile-revision {
@@ -91,8 +184,9 @@
 }
 
 .shelf-rename-form {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-column: 1 / -1;
+  grid-row: 4;
   gap: 6px;
   padding-block: 8px;
   min-width: 0;
@@ -108,13 +202,34 @@
   border-radius: 4px;
   font: inherit;
 }
-.shelf-rename-form button {
-  padding: 4px 8px;
-  border: 1px solid var(--icm-border);
-  border-radius: 4px;
+/* Save and Cancel: compact buttons side by side under the field. */
+.shelf-rename-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.shelf-rename-actions button {
+  min-height: 28px;
+  padding: 3px 12px;
+  border: 1px solid var(--icm-border-strong);
+  border-radius: 6px;
   background: var(--icm-surface);
   color: var(--icm-text);
+  font-size: 13px;
   cursor: pointer;
+}
+.shelf-rename-actions .shelf-rename-save {
+  border-color: var(--icm-accent);
+  color: #fff;
+  background: var(--icm-accent);
+}
+.shelf-rename-actions .shelf-rename-save:hover:not(:disabled) {
+  border-color: var(--icm-accent);
+  background: rgb(var(--icm-accent-rgb) / 88%);
+}
+.shelf-rename-actions .shelf-rename-save:disabled {
+  color: #fff;
+  opacity: 0.55;
 }
 
 .shelf-tile-actions {
@@ -129,28 +244,6 @@
   cursor: pointer;
 }
 
-/* Opened from the File menu, the wall sits inside the command popover, whose
- * `button` rule (styles/editor-chrome.css) stretches this badge into a
- * full-width bar with menu fonts. The dialog-qualified selector wins and
- * restores the small round button the strip-hosted dialog shows. */
-.cloud-shelf-dialog .shelf-tile-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 0;
-  width: auto;
-  min-height: 0;
-  height: auto;
-  padding: 4px 10px;
-  border: 1px solid var(--icm-border);
-  border-radius: 6px;
-  box-shadow: none;
-  font-family: inherit;
-  font-size: var(--icm-font-sm);
-  font-weight: 400;
-  line-height: 1.2;
-  text-align: center;
-  white-space: nowrap;
-}
 .shelf-context-menu {
   position: fixed;
   z-index: 800;

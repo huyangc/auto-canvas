@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useRef, useState } from "react";
 import { useDialogDrag } from "../../components/dialog-drag";
+import { DialogCloseButton } from "../../components/dialog-close-button";
 import type { CloudProjectSummary } from "./cloud-projects";
 import "./project-shelf.css";
 
@@ -87,15 +88,7 @@ export function ProjectShelf({
             onPointerDown={onHeaderPointerDown}
           >
             <h2 id="cloud-shelf-title">Cloud Projects</h2>
-            <button
-              type="button"
-              className="cloud-shelf-close"
-              aria-label="Close"
-              title="Close"
-              onClick={() => setShelfOpen(false)}
-            >
-              ×
-            </button>
+            <DialogCloseButton onClick={() => setShelfOpen(false)} />
           </header>
           <div className="cloud-shelf-body">
             <Suspense fallback={<p>Loading Cloud Projects…</p>}>

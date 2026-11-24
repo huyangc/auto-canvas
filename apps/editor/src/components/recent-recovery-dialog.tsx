@@ -1,3 +1,4 @@
+import { DialogCloseButton } from "./dialog-close-button";
 import { useEffect, useRef } from "react";
 
 import type {
@@ -136,14 +137,11 @@ export function RecentRecoveryDialog({
             <p className="help-kicker">Browser safety copies</p>
             <h2 id="recent-recovery-title">Recover recent work</h2>
           </div>
-          <button
-            type="button"
+          <DialogCloseButton
             ref={closeRef}
-            onClick={onClose}
             aria-label="Close recent work recovery"
-          >
-            Close
-          </button>
+            onClick={onClose}
+          />
         </header>
         <div className="help-dialog-content">
           <p>

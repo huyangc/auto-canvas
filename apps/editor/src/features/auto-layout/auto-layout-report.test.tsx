@@ -41,6 +41,8 @@ describe("Auto Layout report", () => {
     expect(markup).toContain("Warning");
     expect(markup).toContain("R10: net-a left unrouted");
     expect(markup).toContain('data-testid="auto-layout-report-close"');
+    // Dismissed by the header's ×, not a footer Close.
+    expect(markup).not.toMatch(/>\s*Close\s*</u);
     // A manual run has one Cell: no section heading.
     expect(markup).not.toContain("<h3>");
   });

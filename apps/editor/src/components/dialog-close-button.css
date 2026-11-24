@@ -1,0 +1,52 @@
+/* The shared dialog ×. Loaded last from styles/editor-entry.css: the
+ * `button.` prefix and the load order let it win over a dialog's own
+ * `<dialog> button` rule, which would otherwise pad and border it. */
+
+.dialog-header-with-close {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--icm-space-3);
+}
+
+.dialog-header-with-close > :first-child {
+  min-width: 0;
+}
+
+button.dialog-close-button {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--icm-radius-sm);
+  box-shadow: none;
+  color: var(--icm-text-muted);
+  background: none;
+  font: inherit;
+  font-size: 18px;
+  font-weight: 400;
+  line-height: 1;
+  text-align: center;
+  white-space: normal;
+  cursor: pointer;
+}
+
+button.dialog-close-button:hover:not(:disabled) {
+  color: var(--icm-text);
+  background: var(--icm-accent-soft);
+}
+
+button.dialog-close-button:focus-visible {
+  outline: 2px solid var(--icm-accent);
+  outline-offset: 1px;
+}
+
+button.dialog-close-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

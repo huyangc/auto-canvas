@@ -189,8 +189,7 @@
   box-shadow: var(--icm-shadow-lg);
 }
 
-.netlist-preflight-header,
-.netlist-preflight-actions {
+.netlist-preflight-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -575,8 +574,7 @@
 }
 
 .netlist-preflight-export-controls select,
-.netlist-preflight-export-controls button,
-.netlist-preflight-actions button {
+.netlist-preflight-export-controls button {
   min-height: var(--icm-control-h-lg);
 }
 
@@ -761,7 +759,11 @@
   width: 100%;
 }
 
-.command-popover button,
+/* The Cloud Projects dialog opens from inside File's popover and stays its
+   DOM descendant (the top layer does not change ancestry). The popover's menu
+   look stops at the dialog: `:where` keeps these selectors' specificity, so
+   the overrides below still win. */
+.command-popover button:not(:where(.cloud-shelf-dialog *)),
 .command-popover .file-import {
   display: inline-flex;
   align-items: center;
@@ -926,7 +928,7 @@
   color: var(--icm-text-muted);
 }
 
-.document-nav .command-popover button {
+.document-nav .command-popover button:not(:where(.cloud-shelf-dialog *)) {
   height: auto;
 }
 
@@ -1029,7 +1031,7 @@
   color: var(--icm-text-muted);
 }
 
-.command-popover button:disabled {
+.command-popover button:disabled:not(:where(.cloud-shelf-dialog *)) {
   opacity: 0.45;
 }
 
@@ -1037,7 +1039,7 @@
   opacity: 0.85;
 }
 
-.command-popover small {
+.command-popover small:not(:where(.cloud-shelf-dialog *)) {
   display: block;
   margin: 4px 6px 2px;
   color: var(--icm-text-muted);
