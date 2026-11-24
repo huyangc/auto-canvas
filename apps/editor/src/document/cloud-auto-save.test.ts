@@ -333,6 +333,22 @@ describe("cloudSaveIndicator", () => {
     revision: 4,
   });
 
+  it("asks for Ctrl+S after a pending draft when auto-save is off", () => {
+    expect(
+      cloudSaveIndicator({ ...base, pendingDraft: true, enabled: false }),
+    ).toMatchObject({
+      label: "Unsaved",
+      title: "Apply the edit, then press Ctrl+S to save to Cloud",
+    });
+  });
+
+  it("says a write without an answer may have been saved", () => {
+    const indicator = cloudSaveIndicator({ ...base, hold: held("timeout") });
+    expect(indicator?.label).toBe("Auto-save paused");
+    expect(indicator?.title).toContain("may have saved");
+    expect(indicator?.title).toContain("Ctrl+S");
+  });
+
   it("promises an upload when back online only if auto-save will make one", () => {
     const offline = { ...base, hold: held("offline") };
     expect(cloudSaveIndicator(offline)?.title).toContain(

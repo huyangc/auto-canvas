@@ -34,6 +34,7 @@ import {
   type ReplacementCommand,
   type UseProjectFileLifecycleOptions,
 } from "./use-project-file-lifecycle";
+import { CLOUD_AUTO_SAVE_DEADLINE_MS } from "./cloud-auto-save";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 const view = { x: 0, y: 0, width: 1000, height: 800 };
@@ -1580,6 +1581,9 @@ describe("Cloud auto-save", () => {
     editor.configure({ beforeSnapshot: prepare });
     await editor.rename("B");
     editor.commitEditInPlace("Committed before the timer");
+    // The unrendered commit restarts the quiet period once.
+    await advance(3000);
+    expect(cloud.writes).toHaveLength(0);
     await advance(3000);
     expect(prepare).not.toHaveBeenCalled();
     expect(cloud.writes[0]!.project.name).toBe("Committed before the timer");
@@ -1608,6 +1612,76 @@ describe("Cloud auto-save", () => {
     await advance(3000);
     expect(cloud.writes).toHaveLength(1);
     expect(cloud.writes[0]!.project.name).toBe("Agent edit");
+  });
+
+  it("waits 3 s again for an edit committed just before the timer fires", async () => {
+    const { editor, cloud, advance } = await mountAuto();
+    await editor.rename("B");
+    await advance(2999);
+    // Committed, not yet rendered: the effect has not restarted the clock.
+    editor.commitEditInPlace("C");
+    await advance(1);
+    expect(cloud.writes).toHaveLength(0);
+    await advance(2998);
+    expect(cloud.writes).toHaveLength(0);
+    await advance(2);
+    expect(cloud.writes).toHaveLength(1);
+    expect(cloud.writes[0]!.project.name).toBe("C");
+  });
+
+  it("leaves a tab clean when an Agent batch rolls back before its first render", async () => {
+    const { editor, cloud, advance } = await mountAuto();
+    const saved = editor.current.doc.controller.project;
+    const clean: Partial<ProjectFileSession> = {
+      ...bound,
+      savedBaseline: { project: saved, viewBox: view },
+    };
+    await editor.switchTo(structuredClone(saved), clean);
+    let afterRollback: ProjectFileSession | undefined;
+    await editor.switchTo(
+      structuredClone(saved),
+      clean,
+      (controller, outgoing) => {
+        const original = controller.project;
+        const edited = structuredClone(original);
+        edited.name = "Agent edit";
+        edited.structureRevision++;
+        controller.commitProjectStructure(edited);
+        outgoing.noteExternalCommit(controller.project);
+        // The batch fails and rolls back to the saved content.
+        const rolledBack = structuredClone(original);
+        rolledBack.structureRevision = edited.structureRevision + 1;
+        controller.commitProjectStructure(rolledBack);
+        outgoing.noteExternalCommit(controller.project);
+        afterRollback = outgoing.captureFileSession();
+      },
+    );
+    expect(afterRollback?.persistenceState).toBe("clean");
+    expect(afterRollback?.autoSaveArmed).not.toBe(true);
+    await advance(10_000);
+    expect(cloud.writes).toHaveLength(0);
+  });
+
+  it("gives up waiting for an automatic write that never answers", async () => {
+    const { editor, cloud, advance } = await mountAuto();
+    cloud.defer(true);
+    await editor.rename("B");
+    await advance(3000);
+    expect(cloud.writes).toHaveLength(1);
+    expect(editor.file.isSaveInFlight()).toBe(true);
+    await advance(CLOUD_AUTO_SAVE_DEADLINE_MS);
+    // Released: tab switches, replacement and a manual Save can go ahead.
+    expect(editor.file.isSaveInFlight()).toBe(false);
+    expect(editor.file.cloudAutoSave.saving).toBe(false);
+    expect(editor.file.persistenceState).toBe("failed");
+    expect(editor.file.cloudAutoSave.hold?.kind).toBe("timeout");
+    expect(editor.statuses.at(-1)).toContain("may have been saved");
+    const command = editor.file.beginReplacementCommand("Open B");
+    expect(command).not.toBeNull();
+    command?.release();
+    cloud.defer(false);
+    await editor.run(editor.file.saveProjectToCloud());
+    expect(cloud.writes).toHaveLength(2);
   });
 
   it("reports a pending manual write as saving even after an edit lands", async () => {
