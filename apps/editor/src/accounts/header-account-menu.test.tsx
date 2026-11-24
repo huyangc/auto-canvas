@@ -223,4 +223,34 @@ describe("HeaderAccountMenu", () => {
     await act(async () => button(host, "My Cloud Projects")!.click());
     expect(projects.onOpened).toHaveBeenCalledTimes(2);
   });
+
+  it("lets Left and Escape through from an idle Delete button", async () => {
+    const host = await mount(account(), library());
+    const menu = host.querySelector<HTMLDetailsElement>(
+      '[data-testid="header-account-menu"]',
+    )!;
+    await act(async () => {
+      menu.open = true;
+    });
+    await act(async () => button(host, "My Cloud Projects")!.click());
+    const options = host.querySelector<HTMLElement>(
+      '[role="group"][aria-label="Cloud Projects"]',
+    )!;
+    const remove = () => button(options, "Delete Amp")!;
+    const press = (key: string) =>
+      act(async () => {
+        remove().focus();
+        remove().dispatchEvent(
+          new KeyboardEvent("keydown", { key, bubbles: true }),
+        );
+      });
+    // Left collapses My Cloud Projects; the menu stays open.
+    await press("ArrowLeft");
+    expect(options.hidden).toBe(true);
+    expect(menu.open).toBe(true);
+    await act(async () => button(host, "My Cloud Projects")!.click());
+    // Escape closes the menu.
+    await press("Escape");
+    expect(menu.open).toBe(false);
+  });
 });
