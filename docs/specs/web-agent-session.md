@@ -103,9 +103,10 @@ compare a browser Origin header with a prefixed URL.
   never replay a write against a newly selected Project. Cell switches keep
   context. Readiness waits for the matching heartbeat ack.
 - Reconnect credentials live in the tab's sessionStorage; refresh, Project
-  switches and Gallery return keep the pairing. A stored proof belongs to the
-  working copy that wrote it: another tab's proof is never adopted, and
-  ending one tab's session retires only its own. In the Gallery the roster is
+  switches and Gallery return keep the pairing. A stored proof names the
+  working copy it belongs to, and the Gallery keeps the last one it named:
+  another tab's proof is never adopted, and ending a session retires that
+  session's proof only, whichever tab is shown. In the Gallery the roster is
   empty and circuit operations return `NO_ACTIVE_PROJECT`. Manual pause stays
   authoritative across completion, recovery and renewal; transport failure
   never revokes.

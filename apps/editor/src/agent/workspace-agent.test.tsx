@@ -4,6 +4,7 @@
 // React runs against a minimal stand-in for the page's DOM.
 import { act, useMemo } from "react";
 import type { Root } from "react-dom/client";
+import { AGENT_SESSION_PROTOCOL_VERSION } from "@icm/agent-adapter";
 import { createEmptyProject } from "@icm/model";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EditorDocumentController } from "../document/document-controller";
@@ -39,19 +40,81 @@ class MemoryStorage {
   }
 }
 
-/** A relay socket that never opens: the tests stop at the claim. */
+/**
+ * A relay socket that never opens by itself: most tests stop at the claim.
+ * A test that needs the relay opens it and delivers frames.
+ */
 class ClosedSocket {
   static readonly CONNECTING = 0;
   static readonly OPEN = 1;
   static readonly CLOSING = 2;
   static readonly CLOSED = 3;
+  static instances: ClosedSocket[] = [];
   readyState = 0;
-  addEventListener() {}
+  readonly sent: string[] = [];
+  private readonly listeners = new Map<string, ((event: unknown) => void)[]>();
+  constructor() {
+    ClosedSocket.instances.push(this);
+  }
+  addEventListener(type: string, listener: (event: unknown) => void) {
+    this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
+  }
   removeEventListener() {}
-  send() {}
+  send(data: string) {
+    this.sent.push(data);
+  }
   close() {
     this.readyState = 3;
   }
+  emit(type: string, event: unknown = {}) {
+    for (const listener of this.listeners.get(type) ?? []) listener(event);
+  }
+}
+
+/** The newest relay socket, opened, as the relay accepting the editor. */
+async function openRelay(): Promise<ClosedSocket> {
+  const socket = ClosedSocket.instances.at(-1)!;
+  await act(async () => {
+    socket.readyState = 1;
+    socket.emit("open");
+  });
+  return socket;
+}
+
+/** The relay acknowledging the editor's latest heartbeat. */
+async function acknowledge(socket: ClosedSocket) {
+  const heartbeat = JSON.parse(socket.sent.at(-1)!);
+  await act(async () =>
+    socket.emit("message", {
+      data: JSON.stringify({
+        protocolVersion: AGENT_SESSION_PROTOCOL_VERSION,
+        sessionId: heartbeat.sessionId,
+        kind: "heartbeat-ack",
+        nonce: heartbeat.nonce,
+        contextRevision: heartbeat.contextRevision,
+      }),
+    }),
+  );
+}
+
+/** A relay session event, as the relay pushes it to the editor. */
+async function relayEvent(
+  socket: ClosedSocket,
+  payload: { type: string; sessionId: string; expiresAt?: string },
+) {
+  await act(async () =>
+    socket.emit("message", {
+      data: JSON.stringify({
+        protocolVersion: AGENT_SESSION_PROTOCOL_VERSION,
+        sessionId: payload.sessionId,
+        messageId: `message-${Math.random().toString(36).slice(2)}`,
+        requestId: `event-${payload.type}`,
+        sentAt: new Date().toISOString(),
+        kind: "event",
+        payload,
+      }),
+    }),
+  );
 }
 
 let storage: MemoryStorage;
@@ -62,6 +125,9 @@ let seen: { session: UseAgentSessionResult | null };
 let boundWorkingCopy: string;
 /** Whether the editor has built its hosts from the loaded runtime. */
 let bound: boolean;
+/** The relay's answer to a status check; tests may hold it. */
+let statusReply: () => Promise<Response>;
+let statusRequests: number;
 
 function relay(input: RequestInfo | URL, init?: RequestInit) {
   const url = String(input);
@@ -86,16 +152,8 @@ function relay(input: RequestInfo | URL, init?: RequestInit) {
   // A recovered session past its deadline asks the server before it
   // connects; the answer renews the proof.
   if (url.endsWith("/status")) {
-    return Promise.resolve(
-      new Response(
-        JSON.stringify({
-          ok: true,
-          authorization: "active",
-          expiresAt: Date.now() + 7_200_000,
-        }),
-        { status: 200 },
-      ),
-    );
+    statusRequests += 1;
+    return statusReply();
   }
   return Promise.resolve(new Response("{}", { status: 503 }));
 }
@@ -105,6 +163,19 @@ beforeEach(() => {
   sessionCreations = 0;
   boundWorkingCopy = "tab-1";
   bound = false;
+  statusRequests = 0;
+  ClosedSocket.instances = [];
+  statusReply = () =>
+    Promise.resolve(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          authorization: "active",
+          expiresAt: Date.now() + 7_200_000,
+        }),
+        { status: 200 },
+      ),
+    );
   seen = { session: null };
   root = null;
   const page = {
@@ -144,12 +215,15 @@ afterEach(async () => {
 /** The editor's part: build hosts once the runtime is there, and bind them. */
 function Editor() {
   const runtime = useWorkspaceAgentRuntime();
+  const workingCopy = boundWorkingCopy;
+  // A tab switch brings its own host, as the editor's tabs do.
   const host = useMemo(
     () =>
       runtime
         ? new runtime.BrowserAgentHost(new EditorDocumentController(project))
         : null,
-    [runtime],
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- a new working copy is a new host
+    [runtime, workingCopy],
   );
   bound = host !== null;
   seen.session = useEditorAgentSession(
@@ -158,13 +232,48 @@ function Editor() {
           enabled: true,
           recover: true,
           project,
-          projectSessionId: boundWorkingCopy,
+          projectSessionId: workingCopy,
           host,
         }
       : null,
   );
   return null;
 }
+
+/** Re-render the page: with the editor (as `workingCopy`) or without (Gallery). */
+async function showPage(editor: boolean) {
+  await act(async () =>
+    root!.render(
+      <WorkspaceAgentProvider enabled>
+        {editor ? <Editor /> : null}
+      </WorkspaceAgentProvider>,
+    ),
+  );
+}
+
+async function switchTab(workingCopy: string) {
+  boundWorkingCopy = workingCopy;
+  await showPage(true);
+}
+
+async function reloadPage() {
+  await act(async () => root!.unmount());
+  root = null;
+  await openEditor();
+}
+
+const storedProof = () =>
+  JSON.parse(storage.getItem(AGENT_SESSION_RECOVERY_STORAGE_KEY) ?? "null");
+
+const proofFor = (workingCopy: string, expiresAt = Date.now() + 3_600_000) => ({
+  version: 1,
+  sessionId: `saved-${workingCopy}`,
+  editorSecret: "editor-secret",
+  projectId: "project-main",
+  projectSessionId: workingCopy,
+  scopes: ["circuit.snapshot"],
+  expiresAt,
+});
 
 async function openEditor() {
   const container = {
@@ -382,5 +491,110 @@ describe("workspace Agent provider (#1673)", () => {
       sessionId: "saved-session",
       projectSessionId: "tab-other",
     });
+  });
+  it("keeps the working copy in the proof while the Gallery holds the session", async () => {
+    storage.setItem(
+      AGENT_SESSION_RECOVERY_STORAGE_KEY,
+      JSON.stringify(proofFor("tab-1")),
+    );
+    vi.mocked(loadAgentRuntime).mockImplementation(realRuntime);
+    await openEditor();
+    await settle(() => expect(ClosedSocket.instances.length).toBe(1));
+    const socket = await openRelay();
+    await acknowledge(socket);
+    await settle(() => expect(seen.session!.status).toBe("connected"));
+
+    // To the Gallery: the placeholder context serves no working copy.
+    await showPage(false);
+    await acknowledge(socket);
+    const renewedAt = Date.now() + 9_000_000;
+    await relayEvent(socket, {
+      type: "session.renewed",
+      sessionId: "saved-tab-1",
+      expiresAt: new Date(renewedAt).toISOString(),
+    });
+    expect(storedProof()).toMatchObject({
+      sessionId: "saved-tab-1",
+      projectId: "project-main",
+      projectSessionId: "tab-1",
+      expiresAt: renewedAt,
+    });
+
+    // A reload on that working copy resumes the pairing rather than replacing it.
+    await reloadPage();
+    await settle(() => expect(seen.session!.status).toBe("reconnecting"));
+    for (let tick = 0; tick < 3; tick++) await settle(() => {});
+    expect(sessionCreations).toBe(0);
+    expect(storedProof()).toMatchObject({ sessionId: "saved-tab-1" });
+  });
+
+  it("a disconnect retires only the session it ends", async () => {
+    // A keeps a saved proof; B starts a new connection; back on A, the person
+    // disconnects B's session.
+    storage.setItem(
+      AGENT_SESSION_RECOVERY_STORAGE_KEY,
+      JSON.stringify(proofFor("tab-A")),
+    );
+    boundWorkingCopy = "tab-B";
+    vi.mocked(loadAgentRuntime).mockImplementation(realRuntime);
+    await openEditor();
+    await settle(() => expect(bound).toBe(true));
+    await clickConnect();
+    await settle(() => expect(seen.session!.claimCode).toBe("CLAIM-1"));
+    await switchTab("tab-A");
+    await act(async () => void seen.session!.revoke());
+    await settle(() => expect(seen.session!.status).toBe("revoked"));
+    expect(storedProof()).toMatchObject({
+      sessionId: "saved-tab-A",
+      projectSessionId: "tab-A",
+    });
+  });
+
+  it("a session the relay ends takes its own proof, whichever tab is shown", async () => {
+    // A's session resumes and asks the relay whether it still stands; the
+    // person switches to B before the answer, which is that it was revoked.
+    storage.setItem(
+      AGENT_SESSION_RECOVERY_STORAGE_KEY,
+      JSON.stringify(proofFor("tab-A", Date.now() - 1_000)),
+    );
+    let answer!: (response: Response) => void;
+    statusReply = () =>
+      new Promise<Response>((resolve) => {
+        answer = resolve;
+      });
+    boundWorkingCopy = "tab-A";
+    vi.mocked(loadAgentRuntime).mockImplementation(realRuntime);
+    await openEditor();
+    await settle(() => expect(statusRequests).toBe(1));
+    await switchTab("tab-B");
+    await act(async () =>
+      answer(
+        new Response(
+          JSON.stringify({ ok: false, error: { code: "SESSION_REVOKED" } }),
+          { status: 410 },
+        ),
+      ),
+    );
+    await settle(() => expect(seen.session!.status).toBe("revoked"));
+    expect(storedProof()).toBeNull();
+  });
+
+  it("a relay revocation event takes its own proof, whichever tab is shown", async () => {
+    storage.setItem(
+      AGENT_SESSION_RECOVERY_STORAGE_KEY,
+      JSON.stringify(proofFor("tab-A")),
+    );
+    boundWorkingCopy = "tab-A";
+    vi.mocked(loadAgentRuntime).mockImplementation(realRuntime);
+    await openEditor();
+    await settle(() => expect(ClosedSocket.instances.length).toBe(1));
+    const socket = await openRelay();
+    await switchTab("tab-B");
+    await relayEvent(socket, {
+      type: "session.revoked",
+      sessionId: "saved-tab-A",
+    });
+    await settle(() => expect(seen.session!.status).toBe("revoked"));
+    expect(storedProof()).toBeNull();
   });
 });

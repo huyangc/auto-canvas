@@ -273,6 +273,22 @@ export function useAgentSession(
     projectSessionId: options.recoverySessionId ?? options.projectSessionId,
     now: Date.now(),
   });
+  // The working copy a stored proof names. The placeholder binding (the
+  // Gallery, the moment before an editor binds) is no working copy: while
+  // its context is not ready a proof keeps the last real identity, so a
+  // return to that Project, or a refresh, can still resume the pairing.
+  const proofIdentityRef = useRef<{
+    projectId: string;
+    projectSessionId: string;
+  } | null>(null);
+  const proofIdentity = () => {
+    if (options.contextReady !== false)
+      proofIdentityRef.current = {
+        projectId: options.project.id,
+        projectSessionId: options.recoverySessionId ?? options.projectSessionId,
+      };
+    return proofIdentityRef.current;
+  };
   const liveRef = useRef<LiveSession | null>(null);
   const operationRef = useRef<ConnectionOperation | null>(null);
   const recoveryAttemptedForProjectRef = useRef<string | null>(null);
@@ -380,10 +396,11 @@ export function useAgentSession(
     if (live) {
       stopReconnect(live);
       // The proof belongs to the session being ended, not to whichever tab
-      // is on screen: a disconnect must not leave its credentials behind.
+      // is on screen: a disconnect retires that session's credentials and
+      // never another session's.
       clearAgentSessionRecoveryOf(window.sessionStorage, live.sessionId);
-    }
-    clearAgentSessionRecoveryFor(window.sessionStorage, ownRecoveryTarget());
+    } else
+      clearAgentSessionRecoveryFor(window.sessionStorage, ownRecoveryTarget());
     options.fileHost?.clear?.();
     return live;
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- the target is read through the stable options proxy
@@ -545,17 +562,24 @@ export function useAgentSession(
           claimCode: live.claimCode,
           claimExpiresAt: live.claimExpiresAt,
         });
+        // A resumed proof names its working copy: keep it until a real
+        // binding names another.
+        if (recovery)
+          proofIdentityRef.current = {
+            projectId: recovery.projectId,
+            projectSessionId: recovery.projectSessionId,
+          };
+        else proofIdentity();
         const syncDeadline = (expiresAt: number) => {
           live.expiresAt = expiresAt;
           update({ expiresAt });
-          if (live.claimed) {
+          const identity = proofIdentity();
+          if (live.claimed && identity) {
             writeAgentSessionRecovery(window.sessionStorage, {
               version: 1,
               sessionId: live.sessionId,
               editorSecret: live.editorSecret,
-              projectId: options.project.id,
-              projectSessionId:
-                options.recoverySessionId ?? options.projectSessionId,
+              ...identity,
               scopes: live.scopes,
               expiresAt,
             });
@@ -632,17 +656,19 @@ export function useAgentSession(
                   const stored = peekAgentSessionRecovery(
                     window.sessionStorage,
                   );
-                  if (stored !== null && stored.sessionId === live.sessionId) {
-                    const { projectSessionId, ...rest } = stored;
-                    const bound =
-                      options.recoverySessionId ?? options.projectSessionId;
-                    if (projectSessionId !== bound)
-                      writeAgentSessionRecovery(window.sessionStorage, {
-                        ...rest,
-                        projectId: options.project.id,
-                        projectSessionId: bound,
-                      });
-                  }
+                  // The placeholder context keeps the last real identity.
+                  const identity = proofIdentity();
+                  if (
+                    identity !== null &&
+                    stored !== null &&
+                    stored.sessionId === live.sessionId &&
+                    (stored.projectSessionId !== identity.projectSessionId ||
+                      stored.projectId !== identity.projectId)
+                  )
+                    writeAgentSessionRecovery(window.sessionStorage, {
+                      ...stored,
+                      ...identity,
+                    });
                 }
                 update({
                   status: live.paused
@@ -716,9 +742,10 @@ export function useAgentSession(
                   sessionEvent.data.type === "session.expired")
               ) {
                 stopReconnect(live);
-                clearAgentSessionRecoveryFor(
+                // The revoked session's own proof, whichever tab is shown.
+                clearAgentSessionRecoveryOf(
                   window.sessionStorage,
-                  ownRecoveryTarget(),
+                  live.sessionId,
                 );
                 options.fileHost?.clear?.();
                 socket.close(1000, "session revoked");
@@ -1188,9 +1215,9 @@ export function useAgentSession(
               ].includes(result.error?.code)
             ) {
               stopReconnect(live);
-              clearAgentSessionRecoveryFor(
+              clearAgentSessionRecoveryOf(
                 window.sessionStorage,
-                ownRecoveryTarget(),
+                live.sessionId,
               );
               options.fileHost?.clear?.();
               liveRef.current = null;
@@ -1578,10 +1605,7 @@ export function useAgentSession(
       if (live) {
         stopReconnect(live);
         if (!live.claimed) {
-          clearAgentSessionRecoveryFor(
-            window.sessionStorage,
-            ownRecoveryTarget(),
-          );
+          clearAgentSessionRecoveryOf(window.sessionStorage, live.sessionId);
           void fetch(apiUrl(`agent/sessions/${live.sessionId}`), {
             method: "DELETE",
             headers: { "x-editor-secret": live.editorSecret },

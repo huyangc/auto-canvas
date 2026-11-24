@@ -1,5 +1,11 @@
 // @vitest-environment jsdom
-import { act, createElement, useState } from "react";
+import {
+  act,
+  createElement,
+  useEffect,
+  useLayoutEffect,
+  useState,
+} from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import { createEmptyProject, type CircuitProject } from "@icm/model";
@@ -114,6 +120,15 @@ async function mount(
     workingCopyId?: string;
     exportDelivery?: EditorExportDelivery;
     describeCloudSaveBlocker?: () => string | null;
+    /**
+     * Runs after each commit, before (`layout`) and after (`passive`) the
+     * lifecycle's own effects: the windows between an edit's render and the
+     * persistence state catching up.
+     */
+    probe?: {
+      layout?: (file: ReturnType<typeof useProjectFileLifecycle>) => void;
+      passive?: (file: ReturnType<typeof useProjectFileLifecycle>) => void;
+    };
   } = {},
 ) {
   if (initial.restoreAfterRefresh)
@@ -212,6 +227,8 @@ async function mount(
       onCloudProjectSaved: () => {},
     });
     current = { doc, file };
+    useLayoutEffect(() => initial.probe?.layout?.(file));
+    useEffect(() => initial.probe?.passive?.(file));
     return null;
   }
   root = createRoot(document.createElement("div"));
@@ -1081,3 +1098,32 @@ it("does not prompt for an unrendered edit that put the saved version back", asy
   expect(editor.file.replaceGuard).toBeNull();
   expect(editor.current.doc.controller.project.name).toBe("B");
 });
+
+it.each(["layout", "passive"] as const)(
+  "treats a rendered edit as unsaved before the state follows it (%s window)",
+  async (window) => {
+    // `layout`: the edit has rendered, the persistence effect has not run.
+    // `passive`: that effect has moved its baseline, the dirty state has not
+    // rendered yet. A replacement reaching the guard in either must ask.
+    let armed = false;
+    const seen: boolean[] = [];
+    let guarded: Promise<boolean> | null = null;
+    const probe = (file: ReturnType<typeof useProjectFileLifecycle>) => {
+      if (!armed) return;
+      armed = false;
+      seen.push(file.hasUnsafeWork());
+      guarded = file.guardDirtyReplacement("Open B", () => {
+        file.replaceActiveProject(project("B"));
+      });
+    };
+    const editor = await mount({
+      probe: window === "layout" ? { layout: probe } : { passive: probe },
+    });
+    armed = true;
+    await editor.rename("Edited");
+    expect(seen).toEqual([true]);
+    await editor.run(guarded!);
+    expect(editor.file.replaceGuard).not.toBeNull();
+    expect(editor.current.doc.project.name).toBe("Edited");
+  },
+);
