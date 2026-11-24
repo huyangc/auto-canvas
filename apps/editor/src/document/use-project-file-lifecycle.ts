@@ -193,8 +193,9 @@ export function useProjectFileLifecycle({
           accountKey(REFRESH_RESTORE_STORAGE_KEY),
         ) === "true"),
   );
-  const [startupRestoreReady, setStartupRestoreReady] =
-    useState(!restoreAfterRefresh);
+  const [startupRestore, setStartupRestore] = useState<
+    "pending" | "ready" | "failed"
+  >(restoreAfterRefresh ? "pending" : "ready");
   useEffect(() => {
     if (restoreAfterRefresh) {
       window.sessionStorage.removeItem(accountKey(REFRESH_RESTORE_STORAGE_KEY));
@@ -1099,6 +1100,7 @@ export function useProjectFileLifecycle({
         "latest",
       );
       if (read.status !== "valid") {
+        setStartupRestore("failed");
         setStatus("No restorable recovery was found for this refresh");
         return;
       }
@@ -1107,6 +1109,7 @@ export function useProjectFileLifecycle({
         builtInSymbols,
       );
       if (unsupported.length > 0) {
+        setStartupRestore("failed");
         setStatus(
           `Recovery uses unsupported non-Razavi symbols: ${unsupported.join(", ")}`,
         );
@@ -1135,8 +1138,11 @@ export function useProjectFileLifecycle({
         },
       );
       setStatus(`Restored recovery revision ${restoredDocument.revision}`);
-      setStartupRestoreReady(true);
-    })();
+      setStartupRestore("ready");
+    })().catch(() => {
+      setStartupRestore("failed");
+      setStatus("The recovery snapshot could not be opened");
+    });
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- the recovery coordinator methods are stable for one mounted editor
   }, [restoreAfterRefresh, recovery.ready, recovery.workingCopyId]);
 
@@ -1225,7 +1231,8 @@ export function useProjectFileLifecycle({
         rememberRecentCloudProject(session.cloudBinding.id);
       else forgetRecentCloudProject();
     },
-    startupRestoreReady,
+    startupRestoreReady: startupRestore === "ready",
+    startupRestorePending: startupRestore === "pending",
     persistenceState,
     cloudBinding,
     nativeBinding,

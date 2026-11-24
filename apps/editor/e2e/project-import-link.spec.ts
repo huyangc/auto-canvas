@@ -1,9 +1,11 @@
+import { gzipSync } from "node:zlib";
 import { expect, test } from "@playwright/test";
 import {
   exampleProject,
   exportedProject,
   expectStatus,
   openMenu,
+  openProjectInfo,
   openEditor,
   openProject,
   renameProject,
@@ -52,4 +54,29 @@ test("a link opens an independent editable snapshot beside the recipient's work"
   } finally {
     await recipient.close();
   }
+});
+
+test("a link can be retried after missing recovery, a broken fragment and a blocked tab switch", async ({
+  page,
+}) => {
+  await page.addInitScript(() =>
+    sessionStorage.setItem("icm.restore-after-refresh.v1", "true"),
+  );
+  await openEditor(page, "/editor?import=1#invalid");
+  await expectStatus(page, "Project link could not be imported");
+  const dialog = await openProjectInfo(page);
+  const project = exampleProject("two-stage-op-amp.icproj.json");
+  project.name = "Retried import";
+  const fragment = gzipSync(JSON.stringify(project)).toString("base64url");
+  await page.evaluate((hash) => {
+    window.location.hash = hash;
+  }, fragment);
+  await expectStatus(page, /Project Info/i);
+  expect(new URL(page.url()).hash.slice(1)).toBe(fragment);
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await page.reload();
+  await expect(
+    page.getByRole("tab", { name: /Retried import/, selected: true }),
+  ).toBeVisible();
+  await expect(page).toHaveURL(/\/editor$/);
 });

@@ -1,5 +1,11 @@
 import { projectFileFromImportLink } from "../document/project-import-link";
-import { useEffect, useRef, type Dispatch, type SetStateAction } from "react";
+import {
+  useEffect,
+  useEffectEvent,
+  useRef,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import type { CircuitProject } from "@icm/model";
 import type { ProjectWorkspace } from "../document/project-workspace";
 import type { useProjectFileLifecycle } from "../document/use-project-file-lifecycle";
@@ -166,38 +172,51 @@ export function useRestoredTabLinks({
   restoredNewLink: BootLink["restoredNewLink"];
   restoredTabs: ProjectTabSessions["restoredTabs"];
 }) {
-  const importLinkHandled = useRef(false);
+  const openImportFile = useEffectEvent((file: File) =>
+    openProjectFile(file, { inTab: true, independentCopy: true }),
+  );
   useEffect(() => {
     if (
       import.meta.env.ICM_NOTEBOOK ||
       import.meta.env.ICM_DESKTOP ||
       restoringWorkspace ||
-      !importReady ||
-      importLinkHandled.current
+      !importReady
     )
       return;
-    const url = new URL(window.location.href);
-    if (url.searchParams.get("import") !== "1") return;
-    importLinkHandled.current = true;
-    void (async () => {
-      try {
-        const file = await projectFileFromImportLink(url.hash);
-        await openProjectFile(file, { inTab: true, independentCopy: true });
-      } catch (error) {
-        setStatus(
-          `Project link could not be imported: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      } finally {
-        // Consume even a rejected request so the next link navigates normally.
-        url.searchParams.delete("import");
-        window.history.replaceState(
-          window.history.state,
-          "",
-          url.pathname + url.search,
-        );
-      }
-    })();
-  }, [restoringWorkspace, importReady, openProjectFile, setStatus]);
+    let live = true;
+    let queue = Promise.resolve();
+    const enqueue = () => {
+      const url = new URL(window.location.href);
+      if (url.searchParams.get("import") !== "1") return;
+      const current = () => live && window.location.href === url.href;
+      // Two links can differ only by fragment. Finish any tab transition
+      // already underway, then handle the address the recipient is visiting.
+      queue = queue.then(async () => {
+        if (!current()) return;
+        try {
+          const file = await projectFileFromImportLink(url.hash);
+          if (!current() || !(await openImportFile(file)) || !current()) return;
+          url.searchParams.delete("import");
+          window.history.replaceState(
+            window.history.state,
+            "",
+            url.pathname + url.search,
+          );
+        } catch (error) {
+          if (current())
+            setStatus(
+              `Project link could not be imported: ${error instanceof Error ? error.message : String(error)}`,
+            );
+        }
+      });
+    };
+    enqueue();
+    window.addEventListener("hashchange", enqueue);
+    return () => {
+      live = false;
+      window.removeEventListener("hashchange", enqueue);
+    };
+  }, [restoringWorkspace, importReady, setStatus]);
   useEffect(() => {
     const cloudId = restoredCloudLink.current;
     if (restoringWorkspace || !cloudId) return;
