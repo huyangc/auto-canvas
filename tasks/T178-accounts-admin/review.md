@@ -63,3 +63,19 @@ against the code; all hold and are cheap, so fix them before merge.
    no row.
 
 Update `docs/specs/server.md` where the contract changes (items 1, 3, 4).
+
+## Round 2 — accepted
+
+Implementer: Opus subagent, commit `c40d5ee`. All six findings fixed; each
+new race test held deterministically and, per the implementer, fails without
+its fix (finding 6 was a coverage gap; the code was already correct).
+
+Reviewer rerun on lane 2: vitest 409/409; typecheck 0; lint 0 errors;
+format, docs, deadcode 0; build 0; server-mode-check 0; accounts Playwright
+3/3. Lock order read: account row before session everywhere; admin mutations
+additionally under advisory lock (4310, 3).
+
+Note: the unreleased migration 006 was edited (added `credentials_version`).
+Only `auto_canvas_test_2` had applied the earlier 006; the implementer added
+the column there by hand. `auto_canvas`, `auto_canvas_test` and
+`auto_canvas_test_3` never applied 006.
