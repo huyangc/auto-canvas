@@ -168,6 +168,8 @@ export function routeAgentCommit(
   controller: EditorDocumentController,
   tabs: {
     activeController: EditorDocumentController;
+    /** The controller the latest render shows: the synchronizer's own. */
+    renderedController: EditorDocumentController;
     activeId: string;
     entries: readonly {
       id: string;
@@ -180,7 +182,9 @@ export function routeAgentCommit(
       };
     }[];
     synchronizeExternalCommit(): void;
-    noteExternalCommit(): void;
+    /** Shows `controller`'s Project now (re-reads its snapshot). */
+    activateDocumentSession(controller: EditorDocumentController): void;
+    noteExternalCommit(committed: EditorDocumentController["project"]): void;
     writeRecoverySessionSnapshot: RecoverySnapshotWriter;
     changed(): void;
   },
@@ -206,8 +210,11 @@ export function routeAgentCommit(
     return "background";
   }
   if (controller !== tabs.activeController) return "closed";
-  tabs.synchronizeExternalCommit();
-  tabs.noteExternalCommit();
+  // Between a switch and its first render the latest synchronizer is the
+  // outgoing tab's and would do nothing: re-read the committing controller.
+  if (controller === tabs.renderedController) tabs.synchronizeExternalCommit();
+  else tabs.activateDocumentSession(controller);
+  tabs.noteExternalCommit(controller.project);
   return "active";
 }
 
@@ -1185,6 +1192,8 @@ export function useProjectTabSessions({
   ): "active" | "background" | "closed" {
     return routeAgentCommit(controller, {
       activeController: activeControllerRef.current,
+      renderedController: editorDocumentController,
+      activateDocumentSession,
       activeId: projectTabs.currentId(),
       entries: projectTabs.entries(),
       synchronizeExternalCommit,

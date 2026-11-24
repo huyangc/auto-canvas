@@ -334,6 +334,8 @@ test("Ctrl+S during an automatic save waits, then saves the newer edit", async (
     await expect.poll(() => writes.puts().length, { timeout: 8000 }).toBe(1);
     await expect(chip(page)).toHaveText("Saving…");
     await edit(page, 520);
+    // The request is still pending: the chip says so after the edit too.
+    await expect(chip(page)).toHaveText("Saving…");
     await page.keyboard.press("ControlOrMeta+s");
     await page.waitForTimeout(500);
     expect(writes.puts()).toHaveLength(1);

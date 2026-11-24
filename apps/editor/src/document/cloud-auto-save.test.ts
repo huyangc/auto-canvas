@@ -333,6 +333,37 @@ describe("cloudSaveIndicator", () => {
     revision: 4,
   });
 
+  it("promises an upload when back online only if auto-save will make one", () => {
+    const offline = { ...base, hold: held("offline") };
+    expect(cloudSaveIndicator(offline)?.title).toContain(
+      "Saves when the browser is back online",
+    );
+    for (const quiet of [
+      { ...offline, enabled: false },
+      { ...offline, armed: false },
+    ]) {
+      const indicator = cloudSaveIndicator(quiet);
+      expect(indicator?.label).toBe("Cloud offline");
+      expect(indicator?.title).not.toContain("Saves when");
+      expect(indicator?.title).toContain("Ctrl+S");
+    }
+  });
+
+  it("keeps saying Saving… while a write is in flight, even after an edit lands", () => {
+    // The persistence state follows the edit to dirty; the request is pending.
+    expect(
+      cloudSaveIndicator({ ...base, persistenceState: "dirty", saving: true }),
+    ).toMatchObject({ label: "Saving…", tone: "saving" });
+    // A state of saving with no in-flight flag still reads Saving….
+    expect(
+      cloudSaveIndicator({
+        ...base,
+        persistenceState: "saving",
+        saving: false,
+      }),
+    ).toMatchObject({ label: "Saving…", tone: "saving" });
+  });
+
   it("shows nothing when hidden or unbound", () => {
     expect(cloudSaveIndicator({ ...base, visible: false })).toBeNull();
     expect(cloudSaveIndicator({ ...base, binding: null })).toBeNull();

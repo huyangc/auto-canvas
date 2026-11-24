@@ -245,13 +245,14 @@ export function cloudSaveIndicator(input: {
   enabled: boolean;
   binding: CloudProjectBinding | null;
   persistenceState: PersistenceState;
+  /** A Cloud write of this copy is in flight, whatever the state says. */
   saving: boolean;
   armed: boolean;
   hold: CloudAutoSaveHold | null;
   pendingDraft: boolean;
 }): CloudSaveIndicator | null {
   if (!input.visible || !input.binding) return null;
-  if (input.saving)
+  if (input.saving || input.persistenceState === "saving")
     return { label: "Saving…", title: "Saving to Cloud", tone: "saving" };
   const { hold } = input;
   if (hold?.kind === "conflict")
@@ -264,7 +265,11 @@ export function cloudSaveIndicator(input: {
   if (hold?.kind === "offline")
     return {
       label: "Cloud offline",
-      title: "Saves when the browser is back online; Ctrl+S retries now",
+      // Only an enabled, armed copy uploads by itself once back online.
+      title:
+        input.enabled && input.armed
+          ? "Saves when the browser is back online; Ctrl+S retries now"
+          : "Cloud is unreachable; press Ctrl+S to retry",
       tone: "offline",
     };
   if (hold)

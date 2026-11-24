@@ -76,6 +76,7 @@ function workspace() {
     ["b", tab("B", { id: "cloud-B", revision: 1 })],
   ]);
   let active = "a";
+  let rendered = "a";
   let transitioning = false;
   const pending: {
     project: CircuitProject;
@@ -101,8 +102,9 @@ function workspace() {
     return () => reserved.delete(id);
   });
   const projectTabs = {
+    // The active tab of the render that made the handler.
     get activeId() {
-      return "a";
+      return rendered;
     },
     currentId: () => active,
     isTransitioning: () => transitioning,
@@ -155,8 +157,21 @@ function workspace() {
     options,
     saveIn,
     settle,
+    /** A switch: the tab is active, its render has not happened. */
     activate(id: string) {
       active = id;
+    },
+    /** The render that follows a switch. */
+    render(id: string) {
+      rendered = id;
+    },
+    rename(workspaceId: string, name: string) {
+      return handler({
+        apiVersion: "3.0",
+        requestId: `r${++request}`,
+        operation: "workspace",
+        request: { action: "rename", workspaceId, name },
+      } as never);
     },
     setTransitioning(value: boolean) {
       transitioning = value;
@@ -221,15 +236,78 @@ describe("the Agent's background Cloud save", () => {
     expect(editor.save).not.toHaveBeenCalled();
   });
 
-  it("routes by the tab active now, not the one it was made in", async () => {
+  it("refuses a save for a tab that became active before its first render", async () => {
+    const editor = workspace();
+    // B became active during the handler's import; the foreground save still
+    // belongs to A's render and would write A's drawing against B.
+    editor.activate("b");
+    expect(await editor.saveIn("b")).toMatchObject({
+      ok: false,
+      error: { code: "WORKSPACE_BUSY" },
+    });
+    expect(editor.options.saveProjectToCloud).not.toHaveBeenCalled();
+    expect(editor.save).not.toHaveBeenCalled();
+  });
+
+  it("saves a tab in the foreground once its render has happened", async () => {
     const editor = workspace();
     editor.activate("b");
-    // B became active: its save is the foreground one.
+    editor.render("b");
     expect(await editor.saveIn("b")).toMatchObject({ ok: true });
     expect(editor.options.saveProjectToCloud).toHaveBeenCalledTimes(1);
     expect(editor.save).not.toHaveBeenCalled();
   });
+});
 
+describe("the Agent's rename", () => {
+  it("refuses to rename a tab activated before its first render", async () => {
+    const editor = workspace();
+    const a = editor.tabs.get("a")!.controller;
+    const b = editor.tabs.get("b")!.controller;
+    // B is active, the render still shows A: B's live entry would carry A's
+    // controller.
+    editor.activate("b");
+    expect(await editor.rename("b", "Renamed B")).toMatchObject({
+      ok: false,
+      error: { code: "WORKSPACE_BUSY" },
+    });
+    expect(a.project.name).toBe("A");
+    expect(b.project.name).toBe("B");
+    expect(editor.options.renameProject).not.toHaveBeenCalled();
+    expect(editor.options.noteAgentCommitRef.current).not.toHaveBeenCalled();
+  });
+  it("arms the renamed tab when the person switched away during the request", async () => {
+    const editor = workspace();
+    const a = editor.tabs.get("a")!.controller;
+    // A was on screen when the handler was made; B is active now.
+    editor.activate("b");
+    expect(await editor.rename("a", "Renamed A")).toMatchObject({ ok: true });
+    expect(a.project.name).toBe("Renamed A");
+    expect(editor.options.renameProject).not.toHaveBeenCalled();
+    expect(editor.options.noteAgentCommitRef.current).toHaveBeenCalledWith(a);
+  });
+
+  it("notes a foreground rename as an Agent commit too", async () => {
+    const editor = workspace();
+    const a = editor.tabs.get("a")!.controller;
+    (
+      editor.options.renameProject as ReturnType<typeof vi.fn>
+    ).mockImplementation((name: string) =>
+      a.dispatchProjectTransaction({
+        transactionId: "foreground-rename",
+        projectId: a.project.id,
+        expectedStructureRevision: a.project.structureRevision,
+        actor: { kind: "human", id: "editor" },
+        edits: [{ kind: "rename_project", name }],
+      }),
+    );
+    expect(await editor.rename("a", "Renamed A")).toMatchObject({ ok: true });
+    expect(editor.options.renameProject).toHaveBeenCalledWith("Renamed A");
+    expect(editor.options.noteAgentCommitRef.current).toHaveBeenCalledWith(a);
+  });
+});
+
+describe("the Agent's background Cloud save, continued", () => {
   it("applies no late receipt to a binding that changed meanwhile", async () => {
     const editor = workspace();
     const saving = editor.saveIn("b");
@@ -305,14 +383,19 @@ describe("routeAgentCommit", () => {
       noteExternalCommit: vi.fn(),
       writeRecoverySessionSnapshot: vi.fn(),
       changed: vi.fn(),
+      activateDocumentSession: vi.fn(),
     };
     return {
       a,
       b,
       calls,
-      route: (controller: EditorDocumentController) =>
+      route: (
+        controller: EditorDocumentController,
+        rendered: EditorDocumentController = a.controller,
+      ) =>
         routeAgentCommit(controller, {
           activeController: a.controller,
+          renderedController: rendered,
           activeId: "a",
           entries: [
             { id: "a", session: a },
@@ -343,8 +426,28 @@ describe("routeAgentCommit", () => {
     const { a, calls, route } = tabs();
     expect(route(a.controller)).toBe("active");
     expect(calls.synchronizeExternalCommit).toHaveBeenCalledTimes(1);
-    expect(calls.noteExternalCommit).toHaveBeenCalledTimes(1);
+    expect(calls.noteExternalCommit).toHaveBeenCalledWith(a.controller.project);
+    expect(calls.activateDocumentSession).not.toHaveBeenCalled();
     expect(calls.writeRecoverySessionSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("resynchronizes the committing controller when the render still shows the tab before", () => {
+    // B was just activated; the router and its synchronizer are A's render's.
+    const { a, b, calls } = tabs();
+    const result = routeAgentCommit(b.controller, {
+      activeController: b.controller,
+      renderedController: a.controller,
+      activeId: "b",
+      entries: [
+        { id: "a", session: a },
+        { id: "b", session: b },
+      ],
+      ...calls,
+    });
+    expect(result).toBe("active");
+    expect(calls.synchronizeExternalCommit).not.toHaveBeenCalled();
+    expect(calls.activateDocumentSession).toHaveBeenCalledWith(b.controller);
+    expect(calls.noteExternalCommit).toHaveBeenCalledWith(b.controller.project);
   });
 
   it("leaves a closed tab's controller alone", () => {
