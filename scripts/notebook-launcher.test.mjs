@@ -265,6 +265,59 @@ describe("serve.sh", () => {
     ]);
   });
 
+  test("runs node from a relative PATH entry after changing to the root", async () => {
+    const root = makeRoot();
+    const start = makeTemp("auto-canvas-notebook-start-");
+    mkdirSync(join(start, "bin"));
+    cpSync(standin, join(start, "bin/node"));
+    chmodSync(join(start, "bin/node"), 0o755);
+    const env = without(
+      serveEnv({ PATH: `./bin:${tools}` }),
+      "AUTO_CANVAS_NODE",
+    );
+    const result = await run(serve(root), [], env, start);
+    expect(result.code).toBe(0);
+    expect(recorded().argv).toEqual([
+      "apps/server/dist/cli.js",
+      "--require-canvas-database",
+    ]);
+    expect(recorded().cwd).toBe(realpathSync(root));
+  });
+
+  test.each([
+    ["naming a directory", () => work, "AUTO_CANVAS_LOG_FILE"],
+    [
+      "naming a file without write permission",
+      () => {
+        const file = join(work, "read-only.log");
+        writeFileSync(file, "");
+        chmodSync(file, 0o444);
+        return file;
+      },
+      "AUTO_CANVAS_LOG_FILE",
+    ],
+  ])("refuses AUTO_CANVAS_LOG_FILE %s", async (_case, file, name) => {
+    const root = makeRoot();
+    const log = file();
+    const result = await run(
+      serve(root),
+      [],
+      serveEnv({ AUTO_CANVAS_LOG_FILE: log }),
+    );
+    expectRefused(result, [name]);
+    expect(result.stderr).not.toContain(log);
+  });
+
+  test("refuses an unusable default log file without naming its path", async () => {
+    const root = makeRoot();
+    mkdirSync(join(root, ".local/logs/notebook-canvas.log"), {
+      recursive: true,
+    });
+    const result = await run(serve(root), [], serveEnv());
+    expectRefused(result, ["the default log file"]);
+    expect(result.stderr).not.toContain("notebook-canvas.log");
+  });
+
   test.each([
     [
       "AUTO_CANVAS_DATABASE_URL missing",
@@ -571,6 +624,26 @@ describe("init-db.sh", () => {
     ],
   ])("refuses %s", async (_case, args) => {
     expectRefused(await run(initDb(root), args(), env), ["--notebook-root"]);
+  });
+
+  test("runs node from a relative PATH entry after changing to the root", async () => {
+    const start = makeTemp("auto-canvas-notebook-start-");
+    mkdirSync(join(start, "bin"));
+    cpSync(standin, join(start, "bin/node"));
+    chmodSync(join(start, "bin/node"), 0o755);
+    const result = await run(
+      initDb(root),
+      ["--notebook-root", notebook],
+      without({ ...env, PATH: `./bin:${tools}` }, "AUTO_CANVAS_NODE"),
+      start,
+    );
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("initialised");
+    expect(recorded().argv).toEqual([
+      "apps/server/dist/cli.js",
+      "--init-empty-database",
+    ]);
+    expect(recorded().cwd).toBe(realpathSync(root));
   });
 
   test("exits with the server's status and prints no success line", async () => {

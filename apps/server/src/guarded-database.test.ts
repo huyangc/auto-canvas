@@ -49,8 +49,27 @@ describe("guardedPostgresUrl", () => {
       "postgresql://%E0%A4%A@h/db",
     ],
     ["a bracketed host with too few groups", "postgresql://[1:2:3]/db"],
+    ["a password that decodes to a NUL", "postgresql://u:p%00w@h/db"],
+    ["a user name that decodes to a NUL", "postgresql://u%00x:p@h/db"],
   ])("refuses %s", (_case, value) => {
     expect(() => guardedPostgresUrl(value)).toThrow(GuardedConfigurationError);
+  });
+
+  it("names neither credential when one decodes to a NUL", () => {
+    for (const value of [
+      "postgresql://Us3rName:S3cr%00tPw@h/db",
+      "postgresql://Us3r%00Name:S3cretPw@h/db",
+    ]) {
+      let message = "";
+      try {
+        guardedPostgresUrl(value);
+      } catch (error) {
+        message = (error as Error).message;
+      }
+      expect(message).toContain("NUL");
+      for (const part of ["Us3r", "Name", "S3cr", "tPw"])
+        expect(message).not.toContain(part);
+    }
   });
 
   it("never names the password of a refused value", () => {

@@ -379,7 +379,10 @@ a name starting with `pg_`, which also refuses a temporary schema first in the
 (`no-ledger`, `no-users`, `no-projects`) and the applied migrations, sorted,
 are a non-empty prefix of the shipped ones (`ledger-mismatch`), after which
 the pending ones are applied; for `--init-empty-database`, no schema other
-than the system ones holds a relation of any kind (`not-empty`).
+than the system ones holds a relation of any kind (`not-empty`). Once the
+guard has passed, the transaction's `search_path` is set to the schema it
+checked (transaction-local), so the migration's unqualified statements go
+there even if another session creates a schema ahead of it meanwhile.
 
 With `--require-canvas-database` the migration pool is ended and the server
 serves from a second pool whose every new connection first sets its
@@ -400,7 +403,11 @@ not replace a PostgreSQL role of the canvas's own.
 [Guard unit tests](../../apps/server/src/guarded-database.test.ts),
 [migration guard tests](../../apps/server/src/migration-guard.test.ts) (real
 PostgreSQL, databases of their own) and the
-[launcher tests](../../scripts/notebook-launcher.test.mjs).
+[launcher tests](../../scripts/notebook-launcher.test.mjs). A managed start
+inside a real silicon-notebook clone (two users, sign-out, stop, the external
+mode and the rollbacks) is
+[stage M of the integration check](../testing/README.md#stage-m-a-managed-start-in-a-silicon-notebook-clone),
+run on demand.
 
 ## Agent relay
 

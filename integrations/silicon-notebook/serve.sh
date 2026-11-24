@@ -50,6 +50,9 @@ if [[ -n "${AUTO_CANVAS_NODE+set}" ]]; then
 else
   node=$(type -P node || true)
   [[ -n "$node" ]] || fail "node is not on PATH; set AUTO_CANVAS_NODE."
+  # A relative PATH entry gives a relative result, which names a file below
+  # the directory the script started in; the cd further down leaves it.
+  [[ "$node" == /* ]] || node="$(pwd)/$node"
 fi
 
 # 4. The canvas root and its builds.
@@ -68,6 +71,11 @@ else
 fi
 mkdir -p -- "$(dirname -- "$log")" 2>/dev/null ||
   fail "The directory of the log file cannot be created."
+if [[ -n "${AUTO_CANVAS_LOG_FILE+set}" ]]; then
+  log_name=AUTO_CANVAS_LOG_FILE
+else
+  log_name="the default log file"
+fi
 
 # The inherited DATABASE_URL, PORT and libpq variables are silicon-notebook's.
 export DATABASE_URL="$AUTO_CANVAS_DATABASE_URL"
@@ -79,4 +87,9 @@ export EDITOR_ROOT="$root/apps/editor/dist-notebook"
 unset AGENT_ALLOWED_ORIGIN AGENT_SESSION AUTO_CANVAS_USER_NAME ANALOG_CANVAS_API_URL
 unset PGDATABASE PGHOST PGHOSTADDR PGPORT PGUSER PGPASSWORD PGSERVICE PGSERVICEFILE PGOPTIONS
 cd -- "$root"
+# The redirection of the exec below would fail with Bash's own message and
+# status 1; an unusable log file is a configuration error like the others.
+if ! : 2>/dev/null >>"$log"; then
+  fail "$log_name cannot be opened for appending (a directory, or not writable)."
+fi
 exec "$node" apps/server/dist/cli.js --require-canvas-database >>"$log" 2>&1

@@ -21,12 +21,14 @@ import {
   waitFor,
   waitForWithin,
 } from "./sandbox.mjs";
+import { dependencyManifests } from "./stage-a.mjs";
 import {
-  dependencyManifests,
+  cloneGuards,
   makeLocal,
   removeNext,
+  sha256,
   survivingPids,
-} from "./stage-a.mjs";
+} from "./notebook-clone.mjs";
 import {
   removeAppNext,
   singleRuleControl,
@@ -46,6 +48,7 @@ import {
   startNext,
   stopServer,
   tail,
+  tripleGate,
   writePackage,
 } from "./steps.mjs";
 
@@ -320,6 +323,7 @@ export async function stageS({ sandbox, report }) {
   await startupDeadlineControl(sandbox, report);
   await preflightCwdControl(sandbox, report);
   await upstreamVacancyControl(sandbox, report);
+  await stageMSharedControls(sandbox, report);
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -1864,4 +1868,206 @@ async function upstreamVacancyControl(sandbox, report) {
     `stand-in on the freed port: returned ${taken}, ${JSON.stringify(failures)}, ${sentWhileTaken} request(s) reached the frontend; vacant: returned ${vacant}, requests ${JSON.stringify(requests)}`,
   );
   await new Promise((resolve) => front.close(resolve));
+}
+
+// ---- T164b: the pieces stage M adds to the shared machinery ----------------
+
+/** The shared pieces stage M uses, each against throwaway material. */
+async function stageMSharedControls(sandbox, report) {
+  envFileOptionControl(sandbox, report);
+  await ownDotenvControl(sandbox, report);
+  await requestInitControl(sandbox, report);
+  await tripleGateControl(sandbox, report);
+}
+
+/** `sandbox.env(…, { envFile: false })` leaves the key out; the default keeps it. */
+function envFileOptionControl(sandbox, report) {
+  const plain = sandbox.env({ X_CHECK: "1" });
+  const without = sandbox.env({ X_CHECK: "1" }, { envFile: false });
+  const explicit = sandbox.env({ X_CHECK: "1" }, { envFile: true });
+  report.check(
+    "S T164b: sandbox.env leaves SILICON_NOTEBOOK_ENV_FILE out only with { envFile: false }",
+    plain.SILICON_NOTEBOOK_ENV_FILE === "" &&
+      explicit.SILICON_NOTEBOOK_ENV_FILE === "" &&
+      !("SILICON_NOTEBOOK_ENV_FILE" in without) &&
+      without.X_CHECK === "1" &&
+      without.NODE_OPTIONS === plain.NODE_OPTIONS,
+    `default ${JSON.stringify(plain.SILICON_NOTEBOOK_ENV_FILE)}, explicit ${JSON.stringify(explicit.SILICON_NOTEBOOK_ENV_FILE)}, without the file: key present ${"SILICON_NOTEBOOK_ENV_FILE" in without}`,
+  );
+}
+
+/**
+ * The stage's own `<clone>/.env` is accepted while it is the regular file the
+ * stage wrote, with that hash; a byte changed, a symlink in its place (to an
+ * identical file inside the clone) and another dotenv file each refuse.
+ */
+async function ownDotenvControl(sandbox, report) {
+  const clone = await makeClone(sandbox, "own-dotenv", {
+    files: { "README.md": "x\n", "frontend/a.txt": "x\n" },
+  });
+  const text = "DATABASE_URL=sqlite:///.local/x.db\nSOME_KEY=value\n";
+  const envFile = path.join(clone, ".env");
+  const written = [];
+  const { cloneProblems } = cloneGuards({
+    sandbox,
+    report: quietReporter().report,
+    nb: clone,
+    written,
+  });
+  const dotenvProblems = () =>
+    cloneProblems([clone]).filter((problem) => problem.includes("dotenv"));
+  sandbox.writeFile(envFile, text, 0o600);
+  const unrecorded = dotenvProblems();
+  written.push({ relative: ".env", sha256: sha256(text) });
+  const recorded = dotenvProblems();
+  sandbox.writeFile(envFile, text.replace("value", "valuf"), 0o600);
+  const changed = dotenvProblems();
+  sandbox.removePath(envFile);
+  sandbox.writeFile(path.join(clone, "env-copy"), text);
+  // The scenario plants the link directly (the validated writer refuses one).
+  fs.symlinkSync("env-copy", envFile);
+  const linked = dotenvProblems();
+  fs.unlinkSync(envFile);
+  sandbox.writeFile(envFile, text, 0o600);
+  const restored = dotenvProblems();
+  sandbox.writeFile(path.join(clone, "frontend/.env.local"), "X=1\n");
+  const other = dotenvProblems();
+  report.check(
+    "S T164b: the stage's own .env is accepted with its recorded hash, and nothing else is",
+    unrecorded.length === 1 &&
+      recorded.length === 0 &&
+      changed.length === 1 &&
+      /content changed/.test(changed[0]) &&
+      linked.length === 1 &&
+      /now a symlink/.test(linked[0]) &&
+      restored.length === 0 &&
+      other.length === 1 &&
+      other[0] === "dotenv file(s) in the clone: frontend/.env.local",
+    JSON.stringify({ unrecorded, recorded, changed, linked, restored, other }),
+  );
+}
+
+/** `rawRequest` with headers and a body: everything arrives as sent. */
+async function requestInitControl(sandbox, report) {
+  const port = await sandbox.freePort();
+  const seen = [];
+  const server = createServer((req, res) => {
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => {
+      seen.push({
+        method: req.method,
+        url: req.url,
+        headers: req.headers,
+        body: Buffer.concat(chunks).toString("utf8"),
+      });
+      res.writeHead(201, { "content-type": "application/json" });
+      res.end('{"answer":"ü"}');
+    });
+  });
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, "127.0.0.1", resolve);
+  });
+  try {
+    const body = JSON.stringify({ name: "Grüße", n: 3 });
+    const res = await rawRequest(port, "/x/y?z=1", "PUT", 10_000, {
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer t164b-control",
+        "if-match": "revision-1",
+      },
+      body,
+    });
+    const bare = await rawRequest(port, "/bare", "GET", 10_000);
+    const [sent, plain] = seen;
+    report.check(
+      "S T164b: rawRequest sends its method, headers and body (with content-length) as given",
+      res.status === 201 &&
+        res.body === '{"answer":"ü"}' &&
+        sent?.method === "PUT" &&
+        sent.url === "/x/y?z=1" &&
+        sent.headers["content-type"] === "application/json" &&
+        sent.headers.authorization === "Bearer t164b-control" &&
+        sent.headers["if-match"] === "revision-1" &&
+        sent.headers["content-length"] === String(Buffer.byteLength(body)) &&
+        Buffer.byteLength(body) !== body.length &&
+        sent.body === body &&
+        bare.status === 201 &&
+        plain?.method === "GET" &&
+        plain.body === "" &&
+        plain.headers["content-length"] === undefined &&
+        plain.headers.authorization === undefined,
+      `answer ${res.status} ${JSON.stringify(res.body)}; received ${JSON.stringify(seen)}`,
+    );
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+}
+
+/**
+ * `tripleGate` sends nothing when any one of the three listeners is not the
+ * recorded pid (or, with `canvasPid: null`, when the canvas port has a
+ * listener); with all three as recorded the request goes through.
+ */
+async function tripleGateControl(sandbox, report) {
+  const webPort = await sandbox.freePort();
+  const apiPort = await sandbox.freePort();
+  const canvasPort = await sandbox.freePort();
+  const vacantPort = await sandbox.freePort();
+  const web = await startStub(webPort);
+  const api = await startStub(apiPort);
+  const canvas = await startStub(canvasPort);
+  const mine = process.pid;
+  const other = process.pid + 1;
+  const attempt = async (pids, canvasAt = canvasPort) => {
+    const before = web.records.length;
+    try {
+      const res = await tripleGate(sandbox, {
+        webPort,
+        apiPort,
+        canvasPort: canvasAt,
+        webPid: pids[0],
+        apiPid: pids[1],
+        canvasPid: pids[2],
+      })("/canvas/api/projects", "POST", 10_000, {
+        headers: { authorization: "Bearer t164b" },
+        body: "{}",
+      });
+      return { sent: web.records.length - before, status: res.status };
+    } catch (error) {
+      return {
+        sent: web.records.length - before,
+        lost: error instanceof OwnershipLost,
+        message: error.message,
+      };
+    }
+  };
+  try {
+    const refused = [
+      await attempt([other, mine, mine]),
+      await attempt([mine, other, mine]),
+      await attempt([mine, mine, other]),
+      await attempt([mine, mine, null]),
+    ];
+    const owned = await attempt([mine, mine, mine]);
+    const vacant = await attempt([mine, mine, null], vacantPort);
+    report.check(
+      "S T164b: tripleGate sends nothing unless web, api and canvas are each the recorded listener",
+      refused.every((result) => result.lost && result.sent === 0) &&
+        /web \d+ is foreign/.test(refused[0].message) &&
+        /api \d+ is foreign/.test(refused[1].message) &&
+        /canvas \d+ is foreign/.test(refused[2].message) &&
+        /canvas \d+ is foreign .*want no listener/.test(refused[3].message) &&
+        owned.sent === 1 &&
+        owned.status === 404 &&
+        vacant.sent === 1 &&
+        vacant.status === 404,
+      JSON.stringify({ refused, owned, vacant }),
+    );
+  } finally {
+    await canvas.close();
+    await api.close();
+    await web.close();
+  }
 }

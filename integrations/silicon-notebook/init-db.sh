@@ -48,6 +48,9 @@ if [[ -n "${AUTO_CANVAS_NODE+set}" ]]; then
 else
   node=$(type -P node || true)
   [[ -n "$node" ]] || fail "node is not on PATH; set AUTO_CANVAS_NODE."
+  # A relative PATH entry gives a relative result, which names a file below
+  # the directory the script started in; the cd further down leaves it.
+  [[ "$node" == /* ]] || node="$(pwd)/$node"
 fi
 
 root=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)

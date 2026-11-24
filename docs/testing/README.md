@@ -222,11 +222,16 @@ rules that serve auto-canvas under silicon-notebook's Next.js server at
   a build with `CANVAS_PROXY_TARGET` adds exactly two frozen rules that pass
   the stage T table, that invalid values fail the build, and that the notebook
   starts without auto-canvas.
+- Stage M starts this checkout's canvas as a managed companion service of a
+  silicon-notebook clone, with two notebook users, and observes the external
+  mode and the rollbacks ([below](#stage-m-a-managed-start-in-a-silicon-notebook-clone)).
 
 ```bash
 node scripts/notebook-integration-check.mjs --stage T --notebook <notebook checkout>
 node scripts/notebook-integration-check.mjs --stage A --notebook <notebook checkout> \
   --ref <branch or commit> --base <commit without the change> --python <interpreter with the backend dependencies>
+node scripts/notebook-integration-check.mjs --stage M --notebook <notebook checkout> \
+  --ref <full commit SHA> --python <interpreter with the backend dependencies>
 ```
 
 Everything is built and started in a temporary directory the script creates
@@ -328,7 +333,10 @@ ownership gate (including the two-listener gate for a proxied request and the
 readiness loop's deadline), the deadline of `next start`'s listener checks with
 a stand-in `lsof` that sleeps past it, the upstream-down probe's vacancy check,
 the SWC preflight's working directory, the abort of a stage after a failed
-shutdown and the script's own refused file operations (each after a
+shutdown, the pieces stage M adds (the child environment without
+`SILICON_NOTEBOOK_ENV_FILE`, the stage's own `.env` accepted only with the hash
+it was written with, requests with headers and a body, and the three-listener
+gate) and the script's own refused file operations (each after a
 simulated swap, with a sentinel outside the sandbox) against throwaway
 repositories only; it reads nothing from `--notebook`. It also runs the real
 entry script on a throwaway repository whose `frontend` is a regular file and
@@ -356,3 +364,73 @@ top of `scripts/lib/notebook-integration/sandbox.mjs`. Stage S exercises it
 unanswered stop, a refused release), along with the transport table's
 ownership check before every probe, the A6 check that both service PIDs are
 gone, A1's exact manifest list and the handling of a failing `lsof`.
+
+### Stage M: a managed start in a silicon-notebook clone
+
+Stage M proves on real processes that a silicon-notebook built with the
+`/canvas` rewrite and configured with the auto-canvas plugin starts this
+checkout's canvas as a managed companion service, and that two notebook users
+get separate, authenticated canvases through the notebook's origin.
+
+```bash
+NB=<notebook checkout>
+node scripts/notebook-integration-check.mjs --stage M --notebook "$NB" \
+  --ref "$(git -C "$NB" rev-parse origin/master)" --python <interpreter>
+```
+
+It needs: `pnpm build` and `pnpm build:notebook-editor` in this checkout (it
+refuses with exit status 2, before allocating anything, when
+`apps/server/dist/cli.js`, `apps/editor/dist/index.html` or
+`apps/editor/dist-notebook/index.html` is missing); a Python 3.13 or newer
+with silicon-notebook's backend dependencies (`--python`); a revision of
+silicon-notebook with the `/canvas` rewrite (`--ref`, a full commit SHA works
+even when only a remote-tracking branch of the checkout holds it); and a
+PostgreSQL role that may create databases on the server
+`AUTO_CANVAS_TEST_DATABASE_URL` names (default `postgresql:///auto_canvas_test`)
+and log in over loopback without a password. A run takes about three
+minutes (five launches of the clone and two `next build`s; the sign-out check
+alone waits up to the canvas's 60-second token window).
+
+What it does, in a sandbox like stage A's (the clone, the modules copy, the
+refusals and the builds are stage A's steps): it creates the databases
+`auto_canvas_it_m_<12 hex>` (the canvas) and `…_s`, writes the clone's `.env`
+(literal lines: SQLite for the notebook, the canvas URL, the plugin on
+`PYTHONPATH`, `EXTENSIONS_CONFIG`, a random administrator password; the clone
+refusals accept exactly this file, by its hash) and an extensions TOML derived
+from the shipped examples, runs `init-db.sh`, and builds the clone with
+`BACKEND_PROXY_TARGET` and `CANVAS_PROXY_TARGET` on ports of the run. Every
+notebook and canvas process gets the sandbox's environment without
+`SILICON_NOTEBOOK_ENV_FILE`. Then, each with a fresh `.local`:
+
+- **managed** (M2–M9): `npm run start` exits 0 with the service ready; the
+  canvas port is held by `node apps/server/dist/cli.js --require-canvas-database`
+  with the offline guard loaded, outside the launcher's group; through the
+  frontend the canvas is ready, refuses an anonymous API request and serves
+  the notebook editor; two registered users each create, save and reopen
+  projects the other cannot see; a signed-out user is refused within the
+  canvas's 60-second token window while the other is not; the stop (the
+  launcher's group, then the clone's `extension_services.py stop`) leaves no
+  companion process and no listener;
+- **external** (M-ext): the stage starts `serve.sh` itself and the notebook
+  only checks it; then a standalone canvas with a seeded project takes the
+  canvas port, and no request through the notebook, with or without a token,
+  answers JSON or shows that project or its user;
+- **partial and full rollback**: without the plugin entry but with the build
+  target (M-a), `/canvas` answers 500 and the notebook works; with the entry
+  but a build without the target (M-b), the canvas runs and answers on its own
+  port while `/canvas` is 404; with both removed (M-full), `/canvas` is 404
+  and `/` is 200.
+
+Requests through `/canvas` are sent only while the frontend, the notebook
+backend and the canvas are the recorded listeners (`canvasPid: null` in the
+rollbacks: the canvas port must have no listener). The companion processes
+leave the launcher's process group by design, so the stage never relies on
+the group for them: it stops them with the clone's `extension_services.py
+stop` and, in its cleanup, signals by pid only the supervisor, worker and
+canvas processes it recorded that still have the start time and command line
+it recorded — never by port or name, and never with silicon-notebook's `npm run
+stop`, which kills by port. The cleanup (that stop, the stage's process groups,
+the recorded pids, then `DROP DATABASE … WITH (FORCE)` and a check that both
+databases are gone) runs at the end of the stage and, after an interrupt,
+before the sandbox is removed; the run then exits 130. No token, password or
+database URL appears in the output.

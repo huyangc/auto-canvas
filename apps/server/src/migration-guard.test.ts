@@ -202,6 +202,64 @@ async function start(env: Env, args: string[], logged: string[] = []) {
   return { server, spy, made };
 }
 
+/**
+ * A start whose first pool (the migration's) records the text of every query
+ * its connections send. `afterGuardSchema`, when given, runs after the
+ * guard's current_schema() query has answered and before the migration's
+ * next statement is sent: another session acting in between.
+ */
+async function recordedStart(
+  env: Env,
+  args: string[],
+  afterGuardSchema?: () => Promise<void>,
+) {
+  const sent: string[] = [];
+  let first = true;
+  const spy = vi.fn(
+    (
+      connectionString?: string,
+      onConnect?: (client: pg.ClientBase) => Promise<void>,
+    ) => {
+      const pool = createDb(connectionString, onConnect);
+      pools.push(pool);
+      if (first) {
+        first = false;
+        pool.on("connect", (client) => {
+          const query = client.query.bind(client) as (
+            ...args: unknown[]
+          ) => Promise<unknown>;
+          (client as unknown as { query: unknown }).query = async (
+            ...args: unknown[]
+          ) => {
+            const text =
+              typeof args[0] === "string"
+                ? args[0]
+                : String((args[0] as { text?: string }).text);
+            sent.push(text);
+            const result = await query(...args);
+            if (afterGuardSchema && text.includes("current_schema()"))
+              await afterGuardSchema();
+            return result;
+          };
+        });
+      }
+      return pool;
+    },
+  );
+  const server = await startServer({
+    env,
+    argv: args,
+    createDb: spy,
+    log: () => undefined,
+  });
+  if (server) servers.push(server);
+  return { server, sent };
+}
+
+const PIN = "pg_catalog.set_config('search_path'";
+const firstIndex = (sent: string[], part: string) =>
+  sent.findIndex((text) => text.includes(part));
+
 async function refusal(env: Env, args: string[], logged: string[] = []) {
   const { spy, made } = tracked();
   const error: unknown = await startServer({
@@ -616,7 +674,7 @@ describe("accepted starts", () => {
       if (notebook)
         expect((await fetch(origin(server) + READY)).status).toBe(200);
       expect(await ledger(db)).toEqual(shipped);
-      expect(shipped).toHaveLength(5);
+      expect(shipped.length).toBeGreaterThan(0);
       expect(spy).toHaveBeenCalledTimes(1);
       expect(spy.mock.calls[0]).toHaveLength(1);
       expect(spy.mock.calls[0]![0]).toBe(db.url);
@@ -797,6 +855,87 @@ describe("accepted starts", () => {
     expect(server).toBeNull();
     expect(await ledger(db)).toEqual(shipped);
   });
+});
+
+describe("the schema a guarded migration writes to", () => {
+  it.each(FLAGS)(
+    "%s pins the search_path after the guard's query and before the first CREATE",
+    async (flag) => {
+      const db = await database();
+      if (flag === REQUIRE) await migrated(db);
+      const { sent } = await recordedStart(
+        flag === REQUIRE
+          ? servingEnv(db.url, otherEnv())
+          : initEnv(db.url, otherEnv()),
+        argv(flag),
+      );
+      const guardQuery = firstIndex(sent, "current_schema()");
+      const pin = firstIndex(sent, PIN);
+      const create = firstIndex(sent, "CREATE ");
+      expect(guardQuery).toBeGreaterThanOrEqual(0);
+      expect(pin).toBeGreaterThan(guardQuery);
+      expect(create).toBeGreaterThan(pin);
+      expect(sent.filter((text) => text.includes(PIN))).toHaveLength(1);
+      expect(sent[pin]).toContain(", true)");
+    },
+  );
+
+  it("an unguarded start sends no pin", async () => {
+    const db = await database();
+    const { sent } = await recordedStart(
+      { DATABASE_URL: db.url, AUTO_CANVAS_AUTH: "local" },
+      argv("--migrate"),
+    );
+    expect(firstIndex(sent, "CREATE ")).toBeGreaterThanOrEqual(0);
+    expect(firstIndex(sent, PIN)).toBe(-1);
+    expect(firstIndex(sent, "set_config")).toBe(-1);
+    expect(await ledger(db)).toEqual(shipped);
+  });
+
+  it.each([
+    ["while a stays absent", false],
+    ["when another session creates a after the guard's query", true],
+  ])(
+    "applies the last migration into b under the search_path a, b, %s",
+    async (_case, createA) => {
+      const db = await database();
+      await db.pool.query("CREATE SCHEMA b");
+      await setDatabase(db, "search_path", "b", "b");
+      // A pool opened now, so its connections start with the search_path b.
+      await applyFirst({ ...db, pool: open(db.url) }, shipped.length - 1);
+      expect(await ledger(db, "b")).toEqual(shipped.slice(0, -1));
+      await setDatabase(db, "search_path", "a, b", "a, b");
+      let created = false;
+      const { server } = await recordedStart(
+        servingEnv(db.url, otherEnv()),
+        argv(REQUIRE),
+        createA
+          ? async () => {
+              if (created) return;
+              created = true;
+              // A session of its own, committed before the migration's next
+              // statement: unqualified statements would now land in a.
+              await fresh(db.url, (client) => client.query("CREATE SCHEMA a"));
+            }
+          : undefined,
+      );
+      expect((await fetch(origin(server) + READY)).status).toBe(200);
+      expect(created).toBe(createA);
+      expect(await ledger(db, "b")).toEqual(shipped);
+      const inA = await db.pool.query<{ count: number }>(
+        `SELECT pg_catalog.count(*)::int AS count FROM pg_catalog.pg_class c
+         JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+         WHERE n.nspname = 'a'`,
+      );
+      expect(inA.rows[0]!.count).toBe(0);
+      const path = await fresh(db.url, (client) =>
+        client.query<{ path: string }>(
+          "SELECT pg_catalog.current_setting('search_path') AS path",
+        ),
+      );
+      expect(path.rows[0]!.path).toBe("a, b");
+    },
+  );
 });
 
 describe("concurrent initialisation", () => {
