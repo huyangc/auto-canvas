@@ -1,3 +1,4 @@
+import { isVisibleEndpoint } from "@icm/derived";
 import type { Instance, SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import { hasTransistor } from "./feedback-rows.js";
@@ -19,7 +20,20 @@ import type { AutoLayoutOptions } from "./types.js";
  * (the R63 template limit) and devices (the corpus has none above 10, so
  * neither limit removes a corpus case; they bound the search for others). */
 const MAX_INSTANCES = 40;
-const MAX_DEVICES = 12;
+const MAX_DEVICES = 18;
+
+export const isConventionPin = (
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  instance: Instance,
+  pinName: string,
+) =>
+  !isMosBulk(instance.symbolId, pinName) &&
+  isVisibleEndpoint(document, resolver, {
+    kind: "terminal",
+    instanceId: instance.id,
+    pinName,
+  });
 
 export interface Terminal {
   id: string;
@@ -75,12 +89,18 @@ export function conventionRelations(
     .filter((i) => !isMarker(i))
     .sort((a, b) => compareIds(a.id, b.id));
   const net = (id: string, pin: string) => roles.pinNet(id, pin);
-  // Every non-bulk pin by Net, devices and markers apart.
+  // Every visible non-bulk pin by Net, devices and markers apart.
   const terminals = new Map<string, Terminal[]>();
   const markerNets = new Set<string>();
-  for (const instance of document.instances)
+  const visible = new Map<string, Set<string>>();
+  for (const instance of [...document.instances].sort((a, b) =>
+    compareIds(a.id, b.id),
+  )) {
+    const names = new Set<string>();
+    visible.set(instance.id, names);
     for (const pin of devicePins(instance, resolver)) {
-      if (isMosBulk(instance.symbolId, pin.name)) continue;
+      if (!isConventionPin(document, resolver, instance, pin.name)) continue;
+      names.add(pin.name);
       const n = net(instance.id, pin.name);
       if (!n) continue;
       if (isMarker(instance)) markerNets.add(n);
@@ -90,10 +110,11 @@ export function conventionRelations(
           { id: instance.id, pin: pin.name },
         ]);
     }
+  }
   const levels: Level[] = [];
   for (const device of devices) {
     const channel = channelPins(device.symbolId);
-    if (!channel) continue;
+    if (!channel || !visible.get(device.id)?.has(channel.gate)) continue;
     const n = net(device.id, channel.gate);
     if (!n || isRailNet(roles, n)) continue;
     const others = (terminals.get(n) ?? []).filter((t) => t.id !== device.id);
@@ -109,7 +130,9 @@ export function conventionRelations(
       : n;
   const transistors = devices.filter((d) => channelPins(d.symbolId));
   const pin = (d: Instance, which: "drain" | "gate" | "source") =>
-    net(d.id, channelPins(d.symbolId)![which]);
+    visible.get(d.id)?.has(channelPins(d.symbolId)![which])
+      ? net(d.id, channelPins(d.symbolId)![which])
+      : undefined;
   const group = (key: (d: Instance) => string | undefined) => {
     const groups = new Map<string, Instance[]>();
     for (const d of transistors) {
@@ -153,7 +176,9 @@ export function conventionRelations(
   ];
   const parts = new Map<string, string[]>();
   for (const device of devices) {
-    const pins = devicePins(device, resolver);
+    const pins = devicePins(device, resolver).filter((p) =>
+      visible.get(device.id)?.has(p.name),
+    );
     if (channelPins(device.symbolId) || pins.length !== 2) continue;
     const nets = pins.map((p) => source(net(device.id, p.name)));
     if (nets.some((n) => !n) || nets[0] === nets[1]) continue;
@@ -164,28 +189,25 @@ export function conventionRelations(
     .filter((g) => g.length >= SHUNT_GROUP.min && g.length <= SHUNT_GROUP.max)
     .flatMap((g) => g.map((id) => ({ id, group: g })));
   return {
-    stacks: stackPairs(devices, resolver, roles),
+    stacks: stackPairs(devices, resolver, roles).filter(
+      ({ a, b }) =>
+        visible.get(a.id)?.has(a.pin.name) &&
+        visible.get(b.id)?.has(b.pin.name),
+    ),
     levels,
     pairs,
     shunts,
   };
 }
 
-/**
- * R168 recognition: a part that carries signal direction or hierarchy (an
- * output-role or hierarchical-port pin) keeps the Document out; R164 and
- * the hierarchy have their own conventions.
- */
-const isBlock = (instance: Instance, resolver: SymbolResolver) =>
+const hasHierarchicalPin = (instance: Instance, resolver: SymbolResolver) =>
   !isMarker(instance) &&
   !channelPins(instance.symbolId) &&
-  devicePins(instance, resolver).some(
-    (p) => p.role.includes("output") || p.role.includes("hierarchical"),
-  );
+  devicePins(instance, resolver).some((p) => p.role.includes("hierarchical"));
 
 /**
  * R168: the convention-solved draft joins the portfolio only for small,
- * unpinned, unpartitioned transistor Documents without blocks in which the
+ * unpinned, unpartitioned flat Documents in which the
  * planner's symmetry topology (R94/R140, as placement computes it) finds no
  * component: symmetric circuits keep their template drafts.
  */
@@ -198,12 +220,15 @@ export function conventionDraftEligible(
     document.instances.length > MAX_INSTANCES ||
     options.partition ||
     new Set(options.fixedInstanceIds).size ||
-    [...document.layoutGroups, ...document.constraints].some((o) => o.locked) ||
-    !hasTransistor(document)
+    [...document.layoutGroups, ...document.constraints].some((o) => o.locked)
   )
     return false;
   const devices = document.instances.filter((i) => !isMarker(i));
-  if (devices.length > MAX_DEVICES || devices.some((i) => isBlock(i, resolver)))
+  if (
+    devices.length > MAX_DEVICES ||
+    (devices.length < 4 && !hasTransistor(document)) ||
+    devices.some((i) => hasHierarchicalPin(i, resolver))
+  )
     return false;
   const roles = classifyNets(document, resolver);
   return !stageComponents(

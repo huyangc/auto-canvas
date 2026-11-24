@@ -25,7 +25,12 @@ import {
   partitionSymmetry,
   validatePartition,
 } from "../src/partition.js";
-import { terminalPartition } from "../src/transaction.js";
+import {
+  auditRouting,
+  floatingPins,
+  missingConnections,
+} from "../src/routing-audit.js";
+import { preview, terminalPartition } from "../src/transaction.js";
 import type { LayoutPartition } from "../src/types.js";
 import { circuit } from "./document-fixture.js";
 
@@ -206,12 +211,23 @@ it("clusters only through non-rail Nets and uses enclosing drafting rectangles",
   expect(partitionFromPlacement(d, resolver, 1)).toEqual(partition);
 });
 it("keeps no-partition quick output byte-identical to the approved base", () => {
-  const plan = planAutoLayout(sample(), resolver, {
+  const document = sample();
+  const plan = planAutoLayout(document, resolver, {
     search: { seed: 1, evaluations: 0 },
   });
-  // Captured from f8f15fe before the experimental hooks were introduced.
+  expect(plan.diagnostics).toEqual([]);
+  const applied = preview(document, resolver, plan.edits);
+  if (!applied.ok) throw new Error("Transaction refused");
+  expect(applied.document.instances.every((i) => i.placement)).toBe(true);
+  expect(terminalPartition(applied.document, resolver)).toBe(
+    terminalPartition(document, resolver),
+  );
+  expect(missingConnections(applied.document, resolver)).toBe(0);
+  expect(floatingPins(applied.document, resolver)).toEqual([]);
+  expect(auditRouting(applied.document, resolver).unsafeProblems).toEqual([]);
+  // Captured from T181, which admits this four-device circuit to R168.
   expect(createHash("sha256").update(JSON.stringify(plan)).digest("hex")).toBe(
-    "ba140966571e32b95d7889af40b4f3e4dfb4e875c137e7f140044e2dd90a1683",
+    "8ae10651b1d0af4260f1005c64f5c6138a9c1648b1ad2c53df3582f5c841a5ac",
   );
 }, 60_000);
 

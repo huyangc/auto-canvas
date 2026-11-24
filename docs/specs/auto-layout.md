@@ -1160,57 +1160,56 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   experiment on `65075a0`; their case counts were not recounted for the
   shipped rule.
 
-- **R168 — Convention-solved draft (T138).** A Document is in the subset when
-  it has at most 40 instances and 12 devices (no corpus Document has more than
-  10, so neither limit removes one), at least one MOS or BJT, no partition,
-  fixed instance or locked owner, no part with an output-role or
-  hierarchical-port pin (R164's directed blocks plus hierarchical symbols; the
-  latter removes one corpus Document), and the symmetry topology that
-  placement uses (R94 `symmetryTopology` followed by R140 `stageComponents`,
-  on `classifyNets` roles) finds no component: symmetric circuits keep their
-  template drafts. The corpus has 278 such Documents; the symmetry test
-  removes 123 of the 401 that pass the other tests. For the subset only, R63
+- **R168 — Convention-solved draft (T138, T181).** A Document is in the
+  subset when it has at most 40 instances and 18 devices, and either contains
+  a MOS or BJT or has at least four devices. Partitions, fixed instances,
+  locked layout groups and constraints, and hierarchical symbols are
+  ineligible. Symmetric circuits keep their template drafts when the
+  placement symmetry topology (R94 `symmetryTopology` followed by R140
+  `stageComponents` on `classifyNets` roles) finds a component. R63
   also routes a `convention` draft that places every device at once,
   minimising violated drawing conventions; markers, ports, labels,
   collisions, attachments, routing, refinement, search and finishing are the
   existing rules, and its devices are outside R21. The draft reads
-  connectivity (`classifyNets` Nets) and symbol geometry only.
+  connectivity (`classifyNets` Nets) and symbol geometry. Only visible,
+  non-bulk pins participate in the convention and wire costs.
   - Conventions (one object each, from connectivity): STACK is R166's stack
-    (it excludes two-pin-only stacks, 29 objects in 26 subset Documents);
+    and excludes two-pin-only stacks.
     LEVEL is a transistor gate (or base) on a non-rail Net that reaches
     another device pin, held when another pin of the Net lies straight out of
     the gate on its exit side or the gate line T-joins a straight segment of
     two of them, and counted as held when the Net also reaches a port or rail
-    marker, which is seated later (187 subset Documents); SHUNT is each part
+    marker, which is seated later. SHUNT is each part
     of a group of two to four two-pin non-transistor parts on the same two
     Nets (rail Nets compared by kind), held when a group partner with a
     parallel axis is aligned beside it with no device centre between. An
     exactly-two mirror (same gate Net and source, different drains) or
     differential pair (same non-rail source Net, different gates and drains)
     of one polarity whose members are in no other pair is one rigid unit, its
-    members one column pitch (120) apart and facing as the corpus drawings
-    do: a differential pair gates outward (107 of 123 drawn pairs), a mirror
-    gates inward (103 of 107) (65 subset Documents). A soft term for other
-    pairs was dropped: no subset Document has one.
+    members one column pitch (120) apart. A differential pair faces its
+    gates outward and a mirror faces its gates inward.
   - Hard: a transistor is upright, never inverted (channel vertical, gate
     sideways, the drain or collector of an n device and the source or emitter
     of a p device on top; human drawings invert 0.5%); one pose per distinct
     pin layout; two-pin parts take the four rotations, other parts the
-    distinct ones of all eight poses; device bodies stay at least 40 apart in
-    x or 30 in y.
-  - Cost, weights per violated object, with the subset Documents whose draft
-    changes when the term is dropped (plans changed, where measured): STACK 1
-    (157), LEVEL 1 (113), SHUNT 1 (26; 6 plans); inputs left of outputs, 4
-    shared by every (input Net, output Net) pair of `classifyNets` roles,
-    violated when the mean device-pin x of the input Net is not below the
-    output Net's (58; 21 plans); rail side 1 per rail pin of a non-transistor
-    part not above (supply) or below (ground) its other pins (114); supply
-    above ground, 2 shared by every pair of supply and ground device pins of
-    different devices (29; 15 plans); wire, 1/150 per unit of half-perimeter
-    of each non-rail Net with two or more device pins (208); shape, 1/200 per
-    unit of the larger side of the device outline (171). No crossing term.
-    These are the pre-test's values; only the input weight changed (from 3 per
-    pair, because a differential pair makes two pairs unavoidable).
+    distinct ones of all eight poses. Free R164 directed blocks keep R169
+    input polarity and exclude poses with any left-facing output. When a
+    valid pose has an output exiting right, only poses with a right-facing
+    output are allowed. Device bodies stay at least 40 apart in x or 30 in y.
+  - Cost, weights per violated object: STACK 1, LEVEL 1, SHUNT 1; inputs
+    left of outputs, 4 shared by the input/output Net pairs of
+    `classifyNets` roles and violated when the input mean device-pin x is at
+    or to the right of the output mean; `blockFlow`, 2 per free R164
+    directed block, shared by its non-feedback signal driver and load
+    terminals. Drivers must lie left of the block's visible pin mean x
+    and loads right of its output pin mean x. Devices that also touch the
+    opposite side's signal Nets are treated as feedback. Rail side is
+    1 per rail pin of a non-transistor part that is at or below its other
+    pins for supply, or at or above them for ground. Supply above ground
+    is 2 shared by the supply/ground pin pairs of different devices. Wire
+    costs 1/150 per unit of half-perimeter of each non-rail Net with at
+    least two device pins, and shape costs 1/200 per unit of the longer
+    side of the device outline.
   - Search: each unit's reference point (a transistor's channel line and gate
     level, a two-pin part's pin axis and midpoint, otherwise its body centre)
     takes half-column (60) and row (50) lattice values within four steps of a
@@ -1221,25 +1220,30 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
     connected to those placed; depth-first branch and bound over the children
     sorted by cost, pose, x and y, with limited-discrepancy rounds (0, 1, 2, 4,
     ...), ends when the tree is exhausted or after 60 000 evaluated
-    placements; a polish then moves one unit at a time to its best candidate
-    while that lowers the cost, for at most a quarter of the limit more (at
-    least 5 000). There is no clock: the same Document always gets the same
-    draft. On the corpus the limit ends 213 of 278 searches; one solve takes
-    at most about 0.4 s and is made once per planning call.
+    placements. Polish uses a shared budget of an additional quarter of
+    the search limit, with a minimum of 5 000 evaluations. It first
+    relocates units while convention cost improves. If the resulting
+    placement has R54 estimated crossings, up to two further passes
+    estimate the best 24 relocations per unit by convention cost and try
+    swapping compatible single-device units at each other's positions.
+    Compatible units have the same symbol or are both two-pin passives.
+    Each accepted change lowers convention cost plus 1.5 per estimated
+    crossing and 0.0005 per unit of estimated wire length without adding
+    crossings. This stage uses at most 1 500 estimator calls including the
+    initial estimate. The search and polish are deterministic.
   - Offer: the draft joins only when it is valid and its edit list differs
     from every original and R166 candidate; a solver failure, a draft that
     misses a device or a refused run is not offered. It ranks within the
     portfolio R166 left (ties keep the earlier draft), so it can take a
-    refinement slot from an original. It is selected only when refinement
-    selects it and its refined run also compares better than the refined
-    choice planning makes without it. Otherwise planning continues exactly
-    as without R168: the annealer's alternative starts and the
-    crossing-reroute portfolio contain none of its runs. When it is selected,
-    that portfolio, the draft included, replaces the other. The comparison
-    with the refined choice made without the draft (T138 round 2) returned 2
-    of the 100 changed corpus plans to main's; both were judged needs-improvement
-    before and after.
-    Evaluation reports `conventionDraft` (`eligible`, `selected`; report-only).
+    refinement slot from an original. It wins provisionally only when
+    refinement selects it and its refined run also compares better than
+    the refined choice planning makes without it. When an original wins provisionally,
+    its annealer and crossing-reroute portfolio use the original
+    candidates. A complete, distinct and competitive convention draft can
+    still enter `FinalistPass` through `shouldFinishRunner`. It can win via
+    `selectFinishedLayout` only when it strictly improves the finished
+    comparison and passes the readability and visual/routing guards.
+    Evaluation reports `conventionDraft` (`eligible`, `selected`).
 
 - **R169 — Input polarity of directed blocks (T142).** A polarity block is a
   symbol with an input-role pin and an output-role pin plus one pin named `+`
