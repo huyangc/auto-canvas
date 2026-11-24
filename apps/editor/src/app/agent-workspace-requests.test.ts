@@ -3,6 +3,7 @@ import { createEmptyProject, type CircuitProject } from "@icm/model";
 import { CURRENT_PROJECT_FILE_VERSION } from "@icm/project-protocol";
 
 import { EditorDocumentController } from "../document/document-controller";
+import { CLOUD_AUTO_SAVE_DEADLINE_MS } from "../document/cloud-auto-save";
 import type { ProjectFileSession } from "../document/use-project-file-lifecycle";
 import type {
   CloudProjectBinding,
@@ -402,6 +403,43 @@ describe("the Agent's background Cloud save, continued", () => {
     editor.pending[1]!.resolve(receipt({ id: "cloud-B", revision: 1 }, "B"));
     expect(await second).toMatchObject({ ok: true });
     expect(session.file.autoSaveHold).toBeNull();
+  });
+
+  it("stops waiting for a background PUT that never answers", async () => {
+    const editor = workspace();
+    const session = editor.tabs.get("b")!;
+    // Loaded once, so the handler's import resolves under fake timers.
+    await import("../agent/workspace-copy");
+    vi.useFakeTimers();
+    try {
+      const saving = editor.saveIn("b");
+      for (let hop = 0; hop < 10; hop++) await vi.advanceTimersByTimeAsync(0);
+      expect(editor.save).toHaveBeenCalledTimes(1);
+      expect(editor.reserved.has("b")).toBe(true);
+      await vi.advanceTimersByTimeAsync(CLOUD_AUTO_SAVE_DEADLINE_MS);
+      expect(await saving).toMatchObject({
+        ok: false,
+        error: { code: "CLOUD_SAVE_TIMEOUT" },
+      });
+      // Tab switches, sign-out and auto-save are no longer held.
+      expect(editor.reserved.has("b")).toBe(false);
+      expect(session.file.persistenceState).toBe("failed");
+      expect(session.file.autoSaveHold).toMatchObject({
+        kind: "timeout",
+        bindingId: "cloud-B",
+        revision: 1,
+      });
+      // A late receipt on the unchanged binding is still applied.
+      editor.pending[0]!.resolve(receipt({ id: "cloud-B", revision: 1 }, "B"));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(session.file.cloudBinding).toMatchObject({
+        id: "cloud-B",
+        revision: 2,
+      });
+      expect(session.file.autoSaveHold).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("leaves a tab whose save threw failed and held", async () => {

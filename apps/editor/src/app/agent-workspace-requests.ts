@@ -11,7 +11,11 @@ import {
   EDITOR_PROJECT_TRANSACTION_OPTIONS,
   type EditorDocumentController,
 } from "../document/document-controller";
-import { holdAfterFailure, onlineEpoch } from "../document/cloud-auto-save";
+import {
+  CLOUD_AUTO_SAVE_DEADLINE_MS,
+  holdAfterFailure,
+  onlineEpoch,
+} from "../document/cloud-auto-save";
 import { captureProjectSaveSnapshot } from "../document/project-save-coordinator";
 import type { UseRecoveryCoordinatorResult } from "../document/recovery-coordinator";
 import type { useProjectFileLifecycle } from "../document/use-project-file-lifecycle";
@@ -211,131 +215,181 @@ export function createAgentWorkspaceHandler({
             target.session.file.persistenceState = "saving";
             projectTabs.changed();
             const epochAtStart = onlineEpoch();
-            let outcome: CloudProjectSaveOutcome;
-            try {
-              outcome = await projectStore.save(candidate, writeBinding);
-            } catch (error) {
-              const live = findLive();
+            // The PUT and its receipt; the receipt applies only to the
+            // binding the write started from, even when it comes after the
+            // deadline below.
+            const finish = async (): Promise<ReturnType<typeof fail>> => {
+              let outcome: CloudProjectSaveOutcome;
+              try {
+                outcome = await projectStore.save(candidate, writeBinding);
+              } catch (error) {
+                const live = findLive();
+                if (
+                  live &&
+                  sameBinding(live.session.file.cloudBinding, startBinding)
+                ) {
+                  live.session.file = {
+                    ...live.session.file,
+                    persistenceState: "failed",
+                    ...(writeBinding
+                      ? {
+                          autoSaveHold: holdAfterFailure(
+                            live.session.file.autoSaveHold ?? null,
+                            writeBinding,
+                            "threw",
+                            epochAtStart,
+                          ),
+                        }
+                      : {}),
+                  };
+                  if (targetWorkspaceId === projectTabs.currentId())
+                    restoreFileSession(live.session.file);
+                  projectTabs.changed();
+                }
+                throw error;
+              }
+              const liveTarget = findLive();
+              if (!liveTarget)
+                return fail(
+                  "WORKSPACE_NOT_FOUND",
+                  "Working copy closed while Cloud save was in flight; check the Cloud Project shelf",
+                );
+              // A receipt belongs to the binding it was written against: one
+              // that changed meanwhile keeps its own state.
               if (
-                live &&
-                sameBinding(live.session.file.cloudBinding, startBinding)
+                !sameBinding(liveTarget.session.file.cloudBinding, startBinding)
               ) {
-                live.session.file = {
-                  ...live.session.file,
-                  persistenceState: "failed",
-                  ...(writeBinding
-                    ? {
-                        autoSaveHold: holdAfterFailure(
-                          live.session.file.autoSaveHold ?? null,
-                          writeBinding,
-                          "threw",
-                          epochAtStart,
-                        ),
-                      }
-                    : {}),
+                if (liveTarget.session.file.persistenceState === "saving") {
+                  liveTarget.session.file.persistenceState = "dirty";
+                  projectTabs.changed();
+                }
+                return fail(
+                  "CLOUD_SAVE_SUPERSEDED",
+                  "This working copy's Cloud Project changed while the save was in flight; its receipt was not applied",
+                );
+              }
+              if (outcome.status === "saved") {
+                const stillCurrent =
+                  snapshot.matchesCurrentProject() &&
+                  (targetWorkspaceId !== projectTabs.currentId() ||
+                    !codeDraftDirty);
+                const file = liveTarget.session.file;
+                liveTarget.session.file = {
+                  ...file,
+                  cloudBinding: {
+                    id: outcome.project.id,
+                    revision: outcome.project.revision,
+                    galleryEntryId: outcome.project.galleryEntryId ?? null,
+                  },
+                  savedBaseline: {
+                    project: candidate,
+                    viewBox: { ...liveTarget.session.view },
+                  },
+                  persistenceState: stillCurrent ? "clean" : "dirty",
+                  // A success clears any hold; edits made meanwhile stay armed
+                  // for when the tab is active.
+                  autoSaveHold: null,
+                  autoSaveArmed: !stillCurrent && file.autoSaveArmed === true,
                 };
-                if (targetWorkspaceId === projectTabs.currentId())
-                  restoreFileSession(live.session.file);
+                liveTarget.session.dirty = !stillCurrent;
+                liveTarget.session.unsafe = !stillCurrent;
+                if (targetWorkspaceId === projectTabs.currentId()) {
+                  restoreFileSession(liveTarget.session.file);
+                  stageRecovery(controller.project, {
+                    cloudBinding: liveTarget.session.file.cloudBinding,
+                    unsavedAtSnapshot: !stillCurrent,
+                  });
+                  void flushRecovery();
+                }
+                cloudListMutationRef.current += 1;
+                setCloudProjects((current) => [
+                  outcome.project,
+                  ...current.filter((item) => item.id !== outcome.project.id),
+                ]);
                 projectTabs.changed();
-              }
-              throw error;
-            }
-            const liveTarget = findLive();
-            if (!liveTarget)
-              return fail(
-                "WORKSPACE_NOT_FOUND",
-                "Working copy closed while Cloud save was in flight; check the Cloud Project shelf",
-              );
-            // A receipt belongs to the binding it was written against: one
-            // that changed meanwhile keeps its own state.
-            if (
-              !sameBinding(liveTarget.session.file.cloudBinding, startBinding)
-            ) {
-              if (liveTarget.session.file.persistenceState === "saving") {
-                liveTarget.session.file.persistenceState = "dirty";
-                projectTabs.changed();
-              }
-              return fail(
-                "CLOUD_SAVE_SUPERSEDED",
-                "This working copy's Cloud Project changed while the save was in flight; its receipt was not applied",
-              );
-            }
-            if (outcome.status === "saved") {
-              const stillCurrent =
-                snapshot.matchesCurrentProject() &&
-                (targetWorkspaceId !== projectTabs.currentId() ||
-                  !codeDraftDirty);
-              const file = liveTarget.session.file;
-              liveTarget.session.file = {
-                ...file,
-                cloudBinding: {
-                  id: outcome.project.id,
-                  revision: outcome.project.revision,
-                  galleryEntryId: outcome.project.galleryEntryId ?? null,
-                },
-                savedBaseline: {
-                  project: candidate,
-                  viewBox: { ...liveTarget.session.view },
-                },
-                persistenceState: stillCurrent ? "clean" : "dirty",
-                // A success clears any hold; edits made meanwhile stay armed
-                // for when the tab is active.
-                autoSaveHold: null,
-                autoSaveArmed: !stillCurrent && file.autoSaveArmed === true,
-              };
-              liveTarget.session.dirty = !stillCurrent;
-              liveTarget.session.unsafe = !stillCurrent;
-              if (targetWorkspaceId === projectTabs.currentId()) {
-                restoreFileSession(liveTarget.session.file);
-                stageRecovery(controller.project, {
-                  cloudBinding: liveTarget.session.file.cloudBinding,
-                  unsavedAtSnapshot: !stillCurrent,
+                const { id, name, revision, updatedAt, schemaVersion } =
+                  outcome.project;
+                return success({
+                  action: "save",
+                  project: { id, name, revision, updatedAt, schemaVersion },
                 });
-                void flushRecovery();
               }
-              cloudListMutationRef.current += 1;
-              setCloudProjects((current) => [
-                outcome.project,
-                ...current.filter((item) => item.id !== outcome.project.id),
-              ]);
+              liveTarget.session.file = {
+                ...liveTarget.session.file,
+                persistenceState:
+                  outcome.status === "conflict"
+                    ? "conflict"
+                    : outcome.status === "unreachable"
+                      ? "offline"
+                      : "failed",
+                ...(writeBinding
+                  ? {
+                      autoSaveHold: holdAfterFailure(
+                        liveTarget.session.file.autoSaveHold ?? null,
+                        writeBinding,
+                        outcome,
+                        epochAtStart,
+                      ),
+                    }
+                  : {}),
+              };
+              if (targetWorkspaceId === projectTabs.currentId())
+                restoreFileSession(liveTarget.session.file);
               projectTabs.changed();
-              const { id, name, revision, updatedAt, schemaVersion } =
-                outcome.project;
-              return success({
-                action: "save",
-                project: { id, name, revision, updatedAt, schemaVersion },
-              });
-            }
-            liveTarget.session.file = {
-              ...liveTarget.session.file,
-              persistenceState:
+              return fail(
+                `CLOUD_SAVE_${outcome.status.toUpperCase().replaceAll("-", "_")}`,
                 outcome.status === "conflict"
-                  ? "conflict"
-                  : outcome.status === "unreachable"
-                    ? "offline"
-                    : "failed",
-              ...(writeBinding
-                ? {
-                    autoSaveHold: holdAfterFailure(
-                      liveTarget.session.file.autoSaveHold ?? null,
-                      writeBinding,
-                      outcome,
-                      epochAtStart,
-                    ),
-                  }
-                : {}),
+                  ? `Cloud revision ${outcome.project.revision} conflicts with this working copy; nothing overwritten`
+                  : "message" in outcome
+                    ? outcome.message
+                    : `Cloud save ${outcome.status}; local work retained`,
+              );
             };
-            if (targetWorkspaceId === projectTabs.currentId())
-              restoreFileSession(liveTarget.session.file);
-            projectTabs.changed();
-            return fail(
-              `CLOUD_SAVE_${outcome.status.toUpperCase().replaceAll("-", "_")}`,
-              outcome.status === "conflict"
-                ? `Cloud revision ${outcome.project.revision} conflicts with this working copy; nothing overwritten`
-                : "message" in outcome
-                  ? outcome.message
-                  : `Cloud save ${outcome.status}; local work retained`,
-            );
+            // A PUT with no answer must not hold the tabs, sign-out and
+            // auto-save for good: the reservation ends at the deadline and
+            // the copy holds as a possible save.
+            const finishing = finish();
+            finishing.catch(() => {});
+            let deadline: ReturnType<typeof setTimeout> | undefined;
+            const expired = new Promise<ReturnType<typeof fail>>((resolve) => {
+              deadline = setTimeout(() => {
+                const live = findLive();
+                if (
+                  live &&
+                  live.session.file.persistenceState === "saving" &&
+                  sameBinding(live.session.file.cloudBinding, startBinding)
+                ) {
+                  live.session.file = {
+                    ...live.session.file,
+                    persistenceState: "failed",
+                    ...(writeBinding
+                      ? {
+                          autoSaveHold: holdAfterFailure(
+                            live.session.file.autoSaveHold ?? null,
+                            writeBinding,
+                            "timeout",
+                            epochAtStart,
+                          ),
+                        }
+                      : {}),
+                  };
+                  if (targetWorkspaceId === projectTabs.currentId())
+                    restoreFileSession(live.session.file);
+                  projectTabs.changed();
+                }
+                resolve(
+                  fail(
+                    "CLOUD_SAVE_TIMEOUT",
+                    "The Cloud did not answer in time; the working copy may have been saved. Retry the save.",
+                  ),
+                );
+              }, CLOUD_AUTO_SAVE_DEADLINE_MS);
+            });
+            try {
+              return await Promise.race([finishing, expired]);
+            } finally {
+              clearTimeout(deadline);
+            }
           } finally {
             release();
           }

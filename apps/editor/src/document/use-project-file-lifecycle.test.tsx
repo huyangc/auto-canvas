@@ -1662,6 +1662,41 @@ describe("Cloud auto-save", () => {
     expect(cloud.writes).toHaveLength(0);
   });
 
+  it("applies no late receipt of a timed-out write after a Save As rebound the copy", async () => {
+    const { editor, cloud, advance } = await mountAuto();
+    cloud.defer(true);
+    await editor.rename("B");
+    await advance(3000);
+    expect(cloud.writes).toHaveLength(1);
+    await advance(CLOUD_AUTO_SAVE_DEADLINE_MS);
+    // Save As binds the copy to a new Cloud Project.
+    cloud.defer(false);
+    cloud.respond((written) => ({
+      status: "saved",
+      project: {
+        id: "cloud-B",
+        revision: 1,
+        name: written.name,
+        galleryEntryId: null,
+        schemaVersion: CURRENT_PROJECT_FILE_VERSION,
+        updatedAt: "2026-11-24T00:00:00Z",
+      },
+    }));
+    await editor.run(editor.file.saveProjectToCloud(undefined, true));
+    expect(editor.file.cloudBinding).toMatchObject({
+      id: "cloud-B",
+      revision: 1,
+    });
+    const baseline = editor.file.savedProjectBaseline;
+    // The timed-out write to cloud-A answers at last.
+    await cloud.release();
+    expect(editor.file.cloudBinding).toMatchObject({
+      id: "cloud-B",
+      revision: 1,
+    });
+    expect(editor.file.savedProjectBaseline).toBe(baseline);
+  });
+
   it("gives up waiting for an automatic write that never answers", async () => {
     const { editor, cloud, advance } = await mountAuto();
     cloud.defer(true);
