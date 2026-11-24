@@ -152,7 +152,9 @@ it("places two recognized pairs adjacent with their shared tail centred", () => 
   const plan = planAutoLayout(d, resolver);
   expect(plan.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
 }, 60_000);
-it.each([60, 85])(
+// The 85-device case, the only one above 80 (no refinement candidates), is in
+// layered.slow.test.ts.
+it.each([60])(
   "accepts a synthetic %i-device document deterministically within the large search budget",
   (count) => {
     const d = circuit(

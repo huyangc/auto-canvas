@@ -1,4 +1,5 @@
 import { globSync, readFileSync } from "node:fs";
+import { availableParallelism } from "node:os";
 import { configDefaults, defineConfig } from "vitest/config";
 
 const moduleTests = [
@@ -30,8 +31,19 @@ const isolatedTests = moduleTests
       file.endsWith(".tsx") || ownsRegistry.test(readFileSync(file, "utf8")),
   );
 
+// Worker count for every project. It is set at the root because Vitest 4.1
+// gives a project its own maxWorkers only when the project sets one, and
+// otherwise uses the root value, which a --maxWorkers flag on the command
+// line replaces. Locally use half the cores, since docs/workflow.md allows up
+// to three task lanes on one machine and the others need room to run; CI
+// runs one job per runner, so it uses every core.
+const maxWorkers = process.env.CI
+  ? availableParallelism()
+  : Math.max(2, Math.floor(availableParallelism() / 2));
+
 export default defineConfig(({ mode }) => ({
   test: {
+    maxWorkers,
     coverage: {
       enabled: false,
     },
