@@ -18,3 +18,21 @@ playwright … web-agent-session.spec.ts → 0 (11 passed)
 pnpm format:check → 0
 pnpm lint → 0 (0 errors)
 ```
+
+## Round 2 — accepted (codex PR review round 1, P2)
+
+Finding: the `detached` poll could pass before the new tab had decided whether
+to recover. A wrong adoption with a slow handshake could then satisfy the final
+`attached()`. Fix (small, by Opus): record every `/api/agent/` request and
+WebSocket from the reload on. Wait for `networkidle` on the new tab and assert
+none. After selecting the paired tab, assert some. Any resume starts with a
+relay request, so the new tab's settled network shows its decision. No Agent
+status exists outside the panel, and opening the panel would itself connect.
+
+Acceptance rerun (lane 3, `AUTO_CANVAS_API_URL=http://127.0.0.1:4331`):
+
+```text
+playwright … -g "keeps one paired working copy" --repeat-each=5 → 0 (5 passed)
+playwright … web-agent-session.spec.ts → 0 (11 passed)
+pnpm format:check → 0
+```
