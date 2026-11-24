@@ -10,8 +10,8 @@ import type { BrowserAgentProjectHost } from "../agent/browser-agent-project-hos
 import {
   EDITOR_PROJECT_TRANSACTION_OPTIONS,
   type EditorDocumentController,
-  type useDocumentController,
 } from "../document/document-controller";
+import { holdAfterFailure, onlineEpoch } from "../document/cloud-auto-save";
 import { captureProjectSaveSnapshot } from "../document/project-save-coordinator";
 import type { UseRecoveryCoordinatorResult } from "../document/recovery-coordinator";
 import type { useProjectFileLifecycle } from "../document/use-project-file-lifecycle";
@@ -20,7 +20,11 @@ import {
   captureProjectCopy,
   planProjectCopyPlacement,
 } from "../features/clipboard/project-copy";
-import type { CloudProjectSummary } from "../features/editor-shell/cloud-projects";
+import type {
+  CloudProjectBinding,
+  CloudProjectSaveOutcome,
+  CloudProjectSummary,
+} from "../features/editor-shell/cloud-projects";
 import type { createProjectStructureCommands } from "../features/hierarchy/project-structure-commands";
 import type { EditorServices } from "../services/editor-services";
 import { DEFAULT_VIEWBOX } from "./default-view-box";
@@ -31,7 +35,6 @@ import type {
 } from "./use-agent-hosts";
 import type { useProjectTabSessions } from "./use-project-tab-sessions";
 
-type DocumentControllerState = ReturnType<typeof useDocumentController>;
 type ProjectFileLifecycle = ReturnType<typeof useProjectFileLifecycle>;
 type ProjectStructureCommands = ReturnType<
   typeof createProjectStructureCommands
@@ -44,38 +47,51 @@ type AgentProjectResourcesOptions = Parameters<
 >[0];
 type AgentConnection = ReturnType<typeof useEditorAgentConnection>;
 
+/** Whether two bindings name the same Cloud Project at the same revision. */
+function sameBinding(
+  a: CloudProjectBinding | null,
+  b: CloudProjectBinding | null,
+): boolean {
+  return a === b || (a?.id === b?.id && a?.revision === b?.revision);
+}
+
 /** Serves the Agent's `workspace` requests from the open project tabs. */
 export function createAgentWorkspaceHandler({
   projectStore,
   stageRecovery,
   flushRecovery,
   editorDocumentController,
-  synchronizeExternalCommit,
+  noteAgentCommitRef,
   setCloudProjects,
   cloudListMutationRef,
   codeDraftDirty,
   restoreFileSession,
   saveProjectToCloud,
+  isSaveInFlight,
   openCloudProjectById,
   renameProject,
   createTabSession,
   projectSwitchBlocker,
+  reserveBackgroundCloudSave,
   projectTabs,
 }: {
   projectStore: EditorServices["projectStore"];
   stageRecovery: UseRecoveryCoordinatorResult["stage"];
   flushRecovery: UseRecoveryCoordinatorResult["flushNow"];
   editorDocumentController: EditorDocumentController;
-  synchronizeExternalCommit: DocumentControllerState["synchronizeExternalCommit"];
+  /** The latest render's routing of an Agent commit to its own tab. */
+  noteAgentCommitRef: RefObject<ProjectTabSessions["noteAgentCommit"]>;
   setCloudProjects: Dispatch<SetStateAction<readonly CloudProjectSummary[]>>;
   cloudListMutationRef: RefObject<number>;
   codeDraftDirty: boolean;
   restoreFileSession: ProjectFileLifecycle["restoreFileSession"];
   saveProjectToCloud: ProjectFileLifecycle["saveProjectToCloud"];
+  isSaveInFlight: ProjectFileLifecycle["isSaveInFlight"];
   openCloudProjectById: ProjectFileLifecycle["openCloudProjectById"];
   renameProject: ProjectStructureCommands["renameProject"];
   createTabSession: ProjectTabSessions["createTabSession"];
   projectSwitchBlocker: ProjectTabSessions["projectSwitchBlocker"];
+  reserveBackgroundCloudSave: ProjectTabSessions["reserveBackgroundCloudSave"];
   projectTabs: ProjectTabSessions["projectTabs"];
 }): AgentProjectResources["agentWorkspaceRef"]["current"] {
   return async (envelope, targetWorkspaceId) => {
@@ -128,108 +144,201 @@ export function createAgentWorkspaceHandler({
       if (request.action === "save") {
         if (!projectStore)
           return fail("INVALID_REQUEST", "Cloud storage is unavailable");
-        if (targetWorkspaceId && targetWorkspaceId !== projectTabs.activeId) {
-          const target = entries.find((item) => item.id === targetWorkspaceId);
+        // Routed by the tab active now, not the one this handler was made
+        // in: the import above may have let a switch through.
+        if (
+          targetWorkspaceId &&
+          targetWorkspaceId !== projectTabs.currentId()
+        ) {
+          if (projectTabs.isTransitioning())
+            return fail(
+              "WORKSPACE_BUSY",
+              "Can't save yet: a project tab is switching",
+            );
+          const target = projectTabs
+            .entries()
+            .find((item) => item.id === targetWorkspaceId);
           if (!target)
             return fail(
               "WORKSPACE_NOT_FOUND",
               "Working copy is no longer open",
             );
-          const controller = target.session.controller;
-          const snapshot = captureProjectSaveSnapshot(
-            controller.project,
-            controller.projectSessionId,
-            () => {
-              const live = projectTabs
+          const startBinding = target.session.file.cloudBinding;
+          const writeBinding = request.asNew ? null : startBinding;
+          // Two writes to one Cloud Project at once would let the later
+          // receipt undo the earlier one.
+          const activeBinding = projectTabs
+            .entries()
+            .find((item) => item.id === projectTabs.currentId())?.session
+            .file.cloudBinding;
+          if (
+            writeBinding &&
+            activeBinding?.id === writeBinding.id &&
+            isSaveInFlight()
+          )
+            return fail(
+              "WORKSPACE_BUSY",
+              "Can't save yet: this Cloud Project is saving in another tab",
+            );
+          const release = reserveBackgroundCloudSave(targetWorkspaceId);
+          if (!release)
+            return fail(
+              "WORKSPACE_BUSY",
+              "Can't save yet: a Cloud save of this working copy is still running",
+            );
+          try {
+            const controller = target.session.controller;
+            const findLive = () =>
+              projectTabs
                 .entries()
                 .find(
                   (item) =>
                     item.id === targetWorkspaceId &&
                     item.session.controller === controller,
                 );
-              return live
-                ? {
-                    id: controller.projectSessionId,
-                    project: controller.project,
-                  }
-                : null;
-            },
-          );
-          const candidate = snapshot.project;
-          target.session.file.persistenceState = "saving";
-          projectTabs.changed();
-          const outcome = await projectStore.save(
-            candidate,
-            request.asNew ? null : target.session.file.cloudBinding,
-          );
-          const liveTarget = projectTabs
-            .entries()
-            .find(
-              (item) =>
-                item.id === targetWorkspaceId &&
-                item.session.controller === controller,
+            const snapshot = captureProjectSaveSnapshot(
+              controller.project,
+              controller.projectSessionId,
+              () =>
+                findLive()
+                  ? {
+                      id: controller.projectSessionId,
+                      project: controller.project,
+                    }
+                  : null,
             );
-          if (!liveTarget)
-            return fail(
-              "WORKSPACE_NOT_FOUND",
-              "Working copy closed while Cloud save was in flight; check the Cloud Project shelf",
-            );
-          if (outcome.status === "saved") {
-            const stillCurrent =
-              snapshot.matchesCurrentProject() &&
-              (targetWorkspaceId !== projectTabs.activeId || !codeDraftDirty);
-            liveTarget.session.file.cloudBinding = {
-              id: outcome.project.id,
-              revision: outcome.project.revision,
-              galleryEntryId: outcome.project.galleryEntryId ?? null,
-            };
-            liveTarget.session.file.savedBaseline = {
-              project: candidate,
-              viewBox: { ...liveTarget.session.view },
-            };
-            liveTarget.session.file.persistenceState = stillCurrent
-              ? "clean"
-              : "dirty";
-            liveTarget.session.dirty = !stillCurrent;
-            liveTarget.session.unsafe = !stillCurrent;
-            if (targetWorkspaceId === projectTabs.activeId) {
-              restoreFileSession(liveTarget.session.file);
-              stageRecovery(controller.project, {
-                cloudBinding: liveTarget.session.file.cloudBinding,
-                unsavedAtSnapshot: !stillCurrent,
-              });
-              void flushRecovery();
-            }
-            cloudListMutationRef.current += 1;
-            setCloudProjects((current) => [
-              outcome.project,
-              ...current.filter((item) => item.id !== outcome.project.id),
-            ]);
+            const candidate = snapshot.project;
+            target.session.file.persistenceState = "saving";
             projectTabs.changed();
-            const { id, name, revision, updatedAt, schemaVersion } =
-              outcome.project;
-            return success({
-              action: "save",
-              project: { id, name, revision, updatedAt, schemaVersion },
-            });
+            const epochAtStart = onlineEpoch();
+            let outcome: CloudProjectSaveOutcome;
+            try {
+              outcome = await projectStore.save(candidate, writeBinding);
+            } catch (error) {
+              const live = findLive();
+              if (
+                live &&
+                sameBinding(live.session.file.cloudBinding, startBinding)
+              ) {
+                live.session.file = {
+                  ...live.session.file,
+                  persistenceState: "failed",
+                  ...(writeBinding
+                    ? {
+                        autoSaveHold: holdAfterFailure(
+                          live.session.file.autoSaveHold ?? null,
+                          writeBinding,
+                          "threw",
+                          epochAtStart,
+                        ),
+                      }
+                    : {}),
+                };
+                if (targetWorkspaceId === projectTabs.currentId())
+                  restoreFileSession(live.session.file);
+                projectTabs.changed();
+              }
+              throw error;
+            }
+            const liveTarget = findLive();
+            if (!liveTarget)
+              return fail(
+                "WORKSPACE_NOT_FOUND",
+                "Working copy closed while Cloud save was in flight; check the Cloud Project shelf",
+              );
+            // A receipt belongs to the binding it was written against: one
+            // that changed meanwhile keeps its own state.
+            if (
+              !sameBinding(liveTarget.session.file.cloudBinding, startBinding)
+            ) {
+              if (liveTarget.session.file.persistenceState === "saving") {
+                liveTarget.session.file.persistenceState = "dirty";
+                projectTabs.changed();
+              }
+              return fail(
+                "CLOUD_SAVE_SUPERSEDED",
+                "This working copy's Cloud Project changed while the save was in flight; its receipt was not applied",
+              );
+            }
+            if (outcome.status === "saved") {
+              const stillCurrent =
+                snapshot.matchesCurrentProject() &&
+                (targetWorkspaceId !== projectTabs.currentId() ||
+                  !codeDraftDirty);
+              const file = liveTarget.session.file;
+              liveTarget.session.file = {
+                ...file,
+                cloudBinding: {
+                  id: outcome.project.id,
+                  revision: outcome.project.revision,
+                  galleryEntryId: outcome.project.galleryEntryId ?? null,
+                },
+                savedBaseline: {
+                  project: candidate,
+                  viewBox: { ...liveTarget.session.view },
+                },
+                persistenceState: stillCurrent ? "clean" : "dirty",
+                // A success clears any hold; edits made meanwhile stay armed
+                // for when the tab is active.
+                autoSaveHold: null,
+                autoSaveArmed: !stillCurrent && file.autoSaveArmed === true,
+              };
+              liveTarget.session.dirty = !stillCurrent;
+              liveTarget.session.unsafe = !stillCurrent;
+              if (targetWorkspaceId === projectTabs.currentId()) {
+                restoreFileSession(liveTarget.session.file);
+                stageRecovery(controller.project, {
+                  cloudBinding: liveTarget.session.file.cloudBinding,
+                  unsavedAtSnapshot: !stillCurrent,
+                });
+                void flushRecovery();
+              }
+              cloudListMutationRef.current += 1;
+              setCloudProjects((current) => [
+                outcome.project,
+                ...current.filter((item) => item.id !== outcome.project.id),
+              ]);
+              projectTabs.changed();
+              const { id, name, revision, updatedAt, schemaVersion } =
+                outcome.project;
+              return success({
+                action: "save",
+                project: { id, name, revision, updatedAt, schemaVersion },
+              });
+            }
+            liveTarget.session.file = {
+              ...liveTarget.session.file,
+              persistenceState:
+                outcome.status === "conflict"
+                  ? "conflict"
+                  : outcome.status === "unreachable"
+                    ? "offline"
+                    : "failed",
+              ...(writeBinding
+                ? {
+                    autoSaveHold: holdAfterFailure(
+                      liveTarget.session.file.autoSaveHold ?? null,
+                      writeBinding,
+                      outcome,
+                      epochAtStart,
+                    ),
+                  }
+                : {}),
+            };
+            if (targetWorkspaceId === projectTabs.currentId())
+              restoreFileSession(liveTarget.session.file);
+            projectTabs.changed();
+            return fail(
+              `CLOUD_SAVE_${outcome.status.toUpperCase().replaceAll("-", "_")}`,
+              outcome.status === "conflict"
+                ? `Cloud revision ${outcome.project.revision} conflicts with this working copy; nothing overwritten`
+                : "message" in outcome
+                  ? outcome.message
+                  : `Cloud save ${outcome.status}; local work retained`,
+            );
+          } finally {
+            release();
           }
-          liveTarget.session.file.persistenceState =
-            outcome.status === "conflict"
-              ? "conflict"
-              : outcome.status === "unreachable"
-                ? "offline"
-                : "failed";
-          if (targetWorkspaceId === projectTabs.activeId)
-            restoreFileSession(liveTarget.session.file);
-          projectTabs.changed();
-          return fail(
-            `CLOUD_SAVE_${outcome.status.toUpperCase().replaceAll("-", "_")}`,
-            outcome.status === "conflict"
-              ? `Cloud revision ${outcome.project.revision} conflicts with this working copy; nothing overwritten`
-              : "message" in outcome
-                ? outcome.message
-                : `Cloud save ${outcome.status}; local work retained`,
-          );
         }
         const outcome = await saveProjectToCloud(
           undefined,
@@ -299,10 +408,7 @@ export function createAgentWorkspaceHandler({
           });
           if (!result.ok || !result.applied)
             return fail("RENAME_REJECTED", "The Project name was not changed");
-          target.session.dirty = true;
-          if (target.session.file.persistenceState === "clean")
-            target.session.file.persistenceState = "dirty";
-          projectTabs.changed();
+          noteAgentCommitRef.current(controller);
         }
         controller.noteAgentEdit();
         return success({ action: "rename", applied: true, workspaceId });
@@ -329,14 +435,8 @@ export function createAgentWorkspaceHandler({
       );
       if ("error" in copied)
         return fail(copied.error.code, copied.error.message);
-      if (target.id === projectTabs.activeId) {
-        synchronizeExternalCommit();
+      if (noteAgentCommitRef.current(target.session.controller) === "active")
         void flushRecovery();
-      } else {
-        target.session.dirty = true;
-        target.session.unsafe = true;
-        target.session.file.persistenceState = "dirty";
-      }
       projectTabs.changed();
       return success(copied.result);
     } catch (error) {
@@ -352,7 +452,7 @@ export function createAgentWorkspaceHandler({
 export function createAgentWorkspaceTargets({
   runtime,
   flushRecovery,
-  synchronizeExternalCommit,
+  noteAgentCommitRef,
   agentPlanning,
   browserAgentHost,
   projectSwitchBlockerRef,
@@ -368,7 +468,8 @@ export function createAgentWorkspaceTargets({
   /** The loaded Agent runtime a background tab's hosts are built from. */
   runtime: AgentRuntime;
   flushRecovery: UseRecoveryCoordinatorResult["flushNow"];
-  synchronizeExternalCommit: DocumentControllerState["synchronizeExternalCommit"];
+  /** The latest render's routing of an Agent commit to its own tab. */
+  noteAgentCommitRef: RefObject<ProjectTabSessions["noteAgentCommit"]>;
   agentPlanning: BrowserAgentHostState["agentPlanning"];
   browserAgentHost: BrowserAgentHost;
   projectSwitchBlockerRef: AgentProjectResourcesOptions["projectSwitchBlockerRef"];
@@ -401,22 +502,10 @@ export function createAgentWorkspaceTargets({
     const cached = backgroundAgentHosts.current.get(controller);
     if (cached?.sessionId === controller.projectSessionId) return cached;
     const committed = () => {
-      const current = projectTabs
-        .entries()
-        .find(
-          (item) =>
-            item.id === workspaceId && item.session.controller === controller,
-        );
-      if (!current) return;
-      if (workspaceId === projectTabs.activeId) {
-        synchronizeExternalCommit();
+      // Routed to the controller's own tab as it is now: the tab may have
+      // become the active one since this host was built.
+      if (noteAgentCommitRef.current(controller) === "active")
         void flushRecovery();
-      } else {
-        current.session.dirty = true;
-        current.session.unsafe = true;
-        current.session.file.persistenceState = "dirty";
-      }
-      projectTabs.changed();
     };
     const host = new runtime.BrowserAgentHost(
       controller,

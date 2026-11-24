@@ -192,3 +192,20 @@ and the [server contract](server.md).
   silent; failures surface while dirty.
 - Only an explicit human **Replace Project** installs an Agent-staged
   candidate, ending the old Agent session.
+- **Cloud auto-save** (web editors with Cloud storage). The active tab's
+  Project, once it has a Cloud binding, saves itself about 3 s after the last
+  live edit, through the same save coordinator as Ctrl+S; auto-save never
+  creates a Cloud Project. Only a committed live edit arms it, by the person or
+  the Agent; an Agent edit to an inactive tab marks that tab unsaved and armed,
+  and it saves once that tab is active and idle. A refresh, a reopened window,
+  a recovery restore or any other installed Project uploads nothing until the
+  next edit. A due save waits while a gesture, draft, dialog, tab close
+  question, replacement, tab switch, sign-out or other save is in progress, and
+  a replacement is refused while an automatic save runs; a person's Save during
+  one waits, then saves what is newer. A failed write holds auto-save on that
+  binding's revision until a save succeeds: a conflict stays held (Revert does
+  not release it), an offline failure ends at the browser's next `online` event,
+  and holds other than offline survive a refresh. The preference is on by
+  default and stored in the browser (`icm.cloud-auto-save.v1`); only the
+  accounts-mode account menu shows its toggle. Auto-save writes no routine
+  status line; the statusbar chip reports the bound Project's state.

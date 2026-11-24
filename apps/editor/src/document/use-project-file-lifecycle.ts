@@ -50,6 +50,15 @@ import {
   rememberRecentCloudProject,
 } from "./cloud-project-session";
 import { CLOUD_PROJECT_COPY } from "./cloud-project-copy";
+import {
+  CLOUD_AUTO_SAVE_DELAY_MS,
+  CLOUD_AUTO_SAVE_POLL_MS,
+  applicableHold,
+  holdAfterFailure,
+  onlineEpoch,
+  useOnlineEpoch,
+  type CloudAutoSaveHold,
+} from "./cloud-auto-save";
 
 export const REFRESH_RESTORE_STORAGE_KEY = "icm.restore-after-refresh.v1";
 
@@ -60,6 +69,10 @@ export interface ProjectFileSession {
   safeSnapshotToken: string | null;
   /** Absent in tabs saved before publications were tracked. */
   publishedSnapshotToken?: string | null;
+  /** A live edit since the last matching receipt: auto-save may send it. */
+  autoSaveArmed?: boolean;
+  /** What a failed Cloud write left; auto-save waits while it applies. */
+  autoSaveHold?: CloudAutoSaveHold | null;
 }
 
 export interface SavedProjectBaseline {
@@ -179,6 +192,12 @@ export interface UseProjectFileLifecycleOptions {
   describeOpenBlocker?(): string | null;
   /** Management of a Cloud resource shares the save acknowledgement boundary. */
   describeCloudSaveBlocker?(): string | null;
+  /**
+   * Cloud auto-save for the bound active Project: `enabled` is the person's
+   * preference, `blocker` names what defers a due save now. Absent, nothing
+   * saves itself (desktop, and any editor without Cloud storage).
+   */
+  autoSave?: { enabled: boolean; blocker(): string | null };
   /** Feature-local drafts follow an explicit recovery fork, never an arbitrary import. */
   onRecoverBuffers?(
     from: string,
@@ -211,7 +230,10 @@ export function useProjectFileLifecycle({
   onRecoverBuffers,
   describeOpenBlocker,
   describeCloudSaveBlocker,
+  autoSave,
 }: UseProjectFileLifecycleOptions) {
+  const autoSaveRef = useRef(autoSave);
+  autoSaveRef.current = autoSave;
   // The synchronous identity of "the session a replacement was started in".
   // A Project id or a controller's session string can read equal across two
   // tabs, so only this counter decides whether a late command still belongs.
@@ -306,9 +328,36 @@ export function useProjectFileLifecycle({
     persistenceStateRef.current = next;
     setPersistenceStateValue(next);
   };
-  const [cloudBinding, setCloudBinding] = useState<CloudProjectBinding | null>(
+  const [cloudBinding, setCloudBindingState] =
+    useState<CloudProjectBinding | null>(null);
+  // Written with the state: a save that starts after a receipt but before the
+  // render that shows it must send the acknowledged revision.
+  const cloudBindingRef = useRef(cloudBinding);
+  const setCloudBinding = (binding: CloudProjectBinding | null) => {
+    cloudBindingRef.current = binding;
+    setCloudBindingState(binding);
+  };
+  const [autoSaveArmed, setAutoSaveArmedState] = useState(false);
+  const autoSaveArmedRef = useRef(autoSaveArmed);
+  const setAutoSaveArmed = (armed: boolean) => {
+    autoSaveArmedRef.current = armed;
+    setAutoSaveArmedState(armed);
+  };
+  const [autoSaveHold, setAutoSaveHoldState] =
+    useState<CloudAutoSaveHold | null>(null);
+  const autoSaveHoldRef = useRef(autoSaveHold);
+  const setAutoSaveHold = (hold: CloudAutoSaveHold | null) => {
+    autoSaveHoldRef.current = hold;
+    setAutoSaveHoldState(hold);
+  };
+  /** The automatic save in flight, from admission until it settles. */
+  const autoSaveInFlightRef = useRef<Promise<CloudProjectSaveOutcome> | null>(
     null,
   );
+  const [autoSaving, setAutoSaving] = useState(false);
+  /** Manual saves waiting for an automatic one to settle first. */
+  const manualSaveWaitingRef = useRef(0);
+  const [autoSaveRetryTick, setAutoSaveRetryTick] = useState(0);
   const [savedProjectBaseline, setSavedProjectBaselineState] =
     useState<SavedProjectBaseline | null>(null);
   const savedProjectBaselineRef = useRef(savedProjectBaseline);
@@ -361,6 +410,14 @@ export function useProjectFileLifecycle({
   ): ReplacementCommand | null {
     if (replacementSlotRef.current !== null) {
       if (announce) setStatus("Another replacement is waiting for your answer");
+      return null;
+    }
+    // An automatic save's receipt must land on the Project it sent.
+    if (autoSaveInFlightRef.current !== null) {
+      if (announce)
+        setStatus(
+          "Wait for the Cloud auto-save to finish before replacing this Project",
+        );
       return null;
     }
     const owner = captureReplacementOwner();
@@ -546,6 +603,9 @@ export function useProjectFileLifecycle({
     const nextCloudBinding = options.cloudBinding ?? null;
     setCloudBinding(nextCloudBinding);
     setSavedProjectBaseline(options.savedBaseline ?? null);
+    // An install is not an edit. A hold stays with its binding and revision:
+    // Revert stays held, and a new binding is free of it.
+    setAutoSaveArmed(false);
     if (nextCloudBinding) {
       rememberRecentCloudProject(nextCloudBinding.id);
     } else {
@@ -559,9 +619,25 @@ export function useProjectFileLifecycle({
     return nextDocument;
   }
 
+  /**
+   * Leaves the hold a failed write with `binding` earned, merged with the one
+   * already held; a Save As (no binding to hold) records nothing.
+   */
+  function recordAutoSaveHold(
+    binding: CloudProjectBinding | null,
+    outcome: CloudProjectSaveOutcome | "threw",
+    epochAtStart: number,
+  ): void {
+    if (!binding) return;
+    setAutoSaveHold(
+      holdAfterFailure(autoSaveHoldRef.current, binding, outcome, epochAtStart),
+    );
+  }
+
   async function performProjectSaveToCloud(
     snapshot: ProjectSaveSnapshot,
     asNew = false,
+    auto = false,
   ): Promise<CloudProjectSaveOutcome> {
     if (!projectStore)
       return {
@@ -569,19 +645,37 @@ export function useProjectFileLifecycle({
         message: "Use Export Project File in this preview",
       };
     const savedCandidate = snapshot.project;
+    const binding = cloudBindingRef.current;
+    const writeBinding = asNew ? null : binding;
+    // An offline hold belongs to the epoch its attempt started in: an
+    // `online` event during the attempt already releases it.
+    const epochAtStart = onlineEpoch();
     setPersistenceState("saving");
-    setStatus(
-      `Saving ${savedCandidate.name} to ${CLOUD_PROJECT_COPY.destination}`,
-    );
-    recovery.stage(savedCandidate, { unsavedAtSnapshot: true, cloudBinding });
+    if (!auto)
+      setStatus(
+        `Saving ${savedCandidate.name} to ${CLOUD_PROJECT_COPY.destination}`,
+      );
+    recovery.stage(savedCandidate, {
+      unsavedAtSnapshot: true,
+      cloudBinding: binding,
+    });
     void recovery.flushNow();
-    const outcome = await projectStore.save(
-      savedCandidate,
-      asNew ? null : cloudBinding,
-      galleryEntryId,
-    );
+    let outcome: CloudProjectSaveOutcome;
+    try {
+      outcome = await projectStore.save(
+        savedCandidate,
+        writeBinding,
+        galleryEntryId,
+      );
+    } catch (error) {
+      if (snapshot.isCurrent())
+        recordAutoSaveHold(writeBinding, "threw", epochAtStart);
+      throw error;
+    }
     // A joined request that outlived its session acknowledges nothing.
     if (!snapshot.isCurrent()) return outcome;
+    if (outcome.status !== "saved")
+      recordAutoSaveHold(writeBinding, outcome, epochAtStart);
     if (outcome.status === "saved") {
       const nextBinding = {
         id: outcome.project.id,
@@ -604,12 +698,16 @@ export function useProjectFileLifecycle({
       if (!snapshot.isCurrent()) return outcome;
       stillMatchesSavedCandidate = snapshot.matchesCurrentProject();
       setPersistenceState(stillMatchesSavedCandidate ? "clean" : "dirty");
+      setAutoSaveHold(null);
+      // Edits made during the write, an undo included, keep it armed.
+      if (stillMatchesSavedCandidate) setAutoSaveArmed(false);
       onCloudProjectSaved(outcome.project);
-      setStatus(
-        stillMatchesSavedCandidate
-          ? `Saved ${savedCandidate.name} to ${CLOUD_PROJECT_COPY.destination}`
-          : `Saved ${savedCandidate.name} to ${CLOUD_PROJECT_COPY.destination}; newer edits remain unsaved`,
-      );
+      if (!auto)
+        setStatus(
+          stillMatchesSavedCandidate
+            ? `Saved ${savedCandidate.name} to ${CLOUD_PROJECT_COPY.destination}`
+            : `Saved ${savedCandidate.name} to ${CLOUD_PROJECT_COPY.destination}; newer edits remain unsaved`,
+        );
       return outcome;
     }
     if (outcome.status === "unreachable") {
@@ -653,8 +751,53 @@ export function useProjectFileLifecycle({
     // Every request belongs to the session it was made in: a request a dialog
     // joins must not acknowledge into another tab before the dialog checks it.
     const owner = captureReplacementOwner();
+    const sessionId = projectSessionId;
+    const automatic = autoSaveInFlightRef.current;
+    // A Save asked for during an automatic one would join it and miss the
+    // edits made since; it waits, then saves whatever is newer. Save As keeps
+    // the coordinator's busy answer.
+    if (automatic && !asNew) {
+      manualSaveWaitingRef.current++;
+      const settled = (
+        outcome: CloudProjectSaveOutcome,
+      ): CloudProjectSaveOutcome | Promise<CloudProjectSaveOutcome> => {
+        manualSaveWaitingRef.current--;
+        if (!isActivationCurrent(owner))
+          return {
+            status: "rejected",
+            message:
+              "Project changed before Cloud save; no new save was started",
+          };
+        const target = candidate ?? readCurrentProject();
+        const baseline = savedProjectBaselineRef.current;
+        if (
+          baseline !== null &&
+          sameProjectContent(target, baseline.project) &&
+          !isDirtyWork()
+        ) {
+          if (outcome.status === "saved")
+            setStatus(
+              `Saved ${target.name} to ${CLOUD_PROJECT_COPY.destination}`,
+            );
+          return outcome;
+        }
+        return startCloudSave(owner, sessionId, candidate, false);
+      };
+      return automatic.then(settled, () =>
+        settled({ status: "rejected", message: "Save failed" }),
+      );
+    }
+    return startCloudSave(owner, sessionId, candidate, asNew);
+  }
+
+  function startCloudSave(
+    owner: ReplacementOwner,
+    sessionId: string,
+    candidate: CircuitProject | undefined,
+    asNew: boolean,
+  ): Promise<CloudProjectSaveOutcome> {
     return saveCoordinator.save({
-      sessionId: projectSessionId,
+      sessionId,
       current: () =>
         isActivationCurrent(owner)
           ? { id: liveSessionRef.current, project: readCurrentProject() }
@@ -681,6 +824,54 @@ export function useProjectFileLifecycle({
         return { status: "rejected", message };
       },
     });
+  }
+
+  /**
+   * The automatic save of the bound active Project: no snapshot preparation
+   * and no candidate, so the coordinator sends the controller's Project at
+   * admission with no await before the write. It never joins another save.
+   */
+  function saveProjectToCloudAutomatically(): Promise<CloudProjectSaveOutcome> {
+    const owner = captureReplacementOwner();
+    const operation = saveCoordinator.save({
+      sessionId: liveSessionRef.current,
+      current: () =>
+        isActivationCurrent(owner)
+          ? { id: liveSessionRef.current, project: readCurrentProject() }
+          : null,
+      write: (snapshot) => performProjectSaveToCloud(snapshot, false, true),
+      rejected: () => ({
+        status: "rejected",
+        message: "Project changed before Cloud auto-save",
+      }),
+      failed: (error, stillCurrent) => {
+        const message = error instanceof Error ? error.message : "Save failed";
+        if (stillCurrent) {
+          setPersistenceState("failed");
+          setStatus(`Cloud auto-save failed; work remains local (${message})`);
+        }
+        return { status: "rejected", message };
+      },
+    });
+    autoSaveInFlightRef.current = operation;
+    setAutoSaving(true);
+    const settle = () => {
+      if (autoSaveInFlightRef.current !== operation) return;
+      autoSaveInFlightRef.current = null;
+      if (!mountedRef.current) return;
+      setAutoSaving(false);
+      setAutoSaveRetryTick((tick) => tick + 1);
+    };
+    void operation.then(settle, settle);
+    return operation;
+  }
+
+  /** Whether a save the person (or the Agent) asked for is running. */
+  function isUserSaveInFlight(): boolean {
+    return (
+      (saveCoordinator.isSaving() && autoSaveInFlightRef.current === null) ||
+      manualSaveWaitingRef.current > 0
+    );
   }
 
   /** A Cloud Save the person asked for (File, shortcut, or Check and save). */
@@ -927,12 +1118,12 @@ export function useProjectFileLifecycle({
   /** Puts the last saved version of this Project back, without asking;
    * null when it has none. */
   function restoreSavedProjectBaseline(): SchematicDocument | null {
-    const baseline = savedProjectBaseline;
+    const baseline = savedProjectBaselineRef.current;
     if (!baseline) return null;
     return replaceActiveProject(baseline.project, baseline.viewBox, {
       source: "cloud-project",
       persistenceState: "clean",
-      cloudBinding,
+      cloudBinding: cloudBindingRef.current,
       savedBaseline: baseline,
     });
   }
@@ -1476,11 +1667,95 @@ export function useProjectFileLifecycle({
       savedProjectBaseline !== null &&
       sameProjectContent(savedProjectBaseline.project, project);
     setPersistenceState(matchesSavedProject ? "clean" : "dirty");
+    // A live committed edit, never a restore: only this arms auto-save. An
+    // undo back to the saved content stays armed, since a write in flight may
+    // acknowledge other content.
+    setAutoSaveArmed(true);
   }, [
     currentProjectChangeToken,
     projectSessionId,
     savedProjectBaseline,
     project,
+  ]);
+
+  /**
+   * An Agent commit to this Project that may land before the render that
+   * shows it (between a tab's activation and its first render, where the
+   * change-token effect only adopts a reference): it is a live edit.
+   */
+  function noteExternalCommit(): void {
+    setAutoSaveArmed(true);
+    const state = persistenceStateRef.current;
+    if (state !== "clean" && state !== "unbound") return;
+    const saved = savedProjectBaselineRef.current;
+    if (
+      saved === null ||
+      !sameProjectContent(readCurrentProject(), saved.project)
+    )
+      setPersistenceState("dirty");
+  }
+
+  const currentOnlineEpoch = useOnlineEpoch();
+  const autoSaveEnabled = autoSave?.enabled === true;
+  const applicableAutoSaveHold = applicableHold(
+    autoSaveHold,
+    cloudBinding,
+    currentOnlineEpoch,
+  );
+  function autoSaveEligible(): boolean {
+    if (autoSaveRef.current?.enabled !== true) return false;
+    const binding = cloudBindingRef.current;
+    if (!binding || !autoSaveArmedRef.current) return false;
+    const state = persistenceStateRef.current;
+    if (
+      state !== "dirty" &&
+      state !== "offline" &&
+      state !== "failed" &&
+      state !== "conflict"
+    )
+      return false;
+    return (
+      applicableHold(autoSaveHoldRef.current, binding, onlineEpoch()) === null
+    );
+  }
+  function autoSaveBlocked(): boolean {
+    return (
+      saveCoordinator.isSaving() ||
+      manualSaveWaitingRef.current > 0 ||
+      replacementInFlight() ||
+      (autoSaveRef.current?.blocker() ?? null) !== null
+    );
+  }
+  // About three seconds after the last committed edit, the bound active
+  // Project saves itself; anything in progress defers it and it asks again.
+  useEffect(() => {
+    if (!autoSaveEligible()) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const fire = () => {
+      timer = null;
+      if (!mountedRef.current || !autoSaveEligible()) return;
+      if (autoSaveBlocked()) {
+        timer = setTimeout(fire, CLOUD_AUTO_SAVE_POLL_MS);
+        return;
+      }
+      void saveProjectToCloudAutomatically();
+    };
+    timer = setTimeout(fire, CLOUD_AUTO_SAVE_DELAY_MS);
+    return () => {
+      if (timer !== null) clearTimeout(timer);
+    };
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- the timer reads live refs; these keys restart it
+  }, [
+    autoSaveEnabled,
+    autoSaveArmed,
+    persistenceState,
+    cloudBinding?.id,
+    cloudBinding?.revision,
+    applicableAutoSaveHold,
+    currentProjectChangeToken,
+    projectSessionId,
+    currentOnlineEpoch,
+    autoSaveRetryTick,
   ]);
 
   const startupRecovery =
@@ -1519,10 +1794,14 @@ export function useProjectFileLifecycle({
     captureFileSession: (): ProjectFileSession => ({
       // The live state: a tab captured right after an edit keeps its mark.
       persistenceState: persistenceStateRef.current,
-      cloudBinding,
-      savedBaseline: savedProjectBaseline,
+      cloudBinding: cloudBindingRef.current,
+      savedBaseline: savedProjectBaselineRef.current,
       safeSnapshotToken: safeSnapshotTokenRef.current,
       publishedSnapshotToken: publishedSnapshotTokenRef.current,
+      ...(autoSaveArmedRef.current ? { autoSaveArmed: true } : {}),
+      ...(autoSaveHoldRef.current
+        ? { autoSaveHold: autoSaveHoldRef.current }
+        : {}),
     }),
     restoreFileSession: (session: ProjectFileSession) => {
       replacementEpochRef.current++;
@@ -1532,6 +1811,8 @@ export function useProjectFileLifecycle({
       setPersistenceState(session.persistenceState);
       setCloudBinding(session.cloudBinding);
       setSavedProjectBaseline(session.savedBaseline);
+      setAutoSaveArmed(session.autoSaveArmed === true);
+      setAutoSaveHold(session.autoSaveHold ?? null);
       safeSnapshotTokenRef.current = session.safeSnapshotToken;
       publishedSnapshotTokenRef.current =
         session.publishedSnapshotToken ?? null;
@@ -1546,10 +1827,16 @@ export function useProjectFileLifecycle({
     startupRestorePending: startupOutcomeRef.current === "pending",
     persistenceState,
     cloudBinding,
-    noteGalleryPublication: (id: string | null) =>
-      setCloudBinding((current) =>
-        current ? { ...current, galleryEntryId: id } : current,
-      ),
+    noteGalleryPublication: (id: string | null) => {
+      const current = cloudBindingRef.current;
+      if (current) setCloudBinding({ ...current, galleryEntryId: id });
+    },
+    noteExternalCommit,
+    cloudAutoSave: {
+      armed: autoSaveArmed,
+      hold: applicableAutoSaveHold,
+      saving: autoSaving,
+    },
     savedProjectBaseline,
     replaceGuard:
       replaceGuardState !== null &&
@@ -1580,7 +1867,10 @@ export function useProjectFileLifecycle({
     saveProjectToCloudByHand,
     saveByHand,
     isSaveInFlight: () => saveCoordinator.isSaving(),
-    saveBusy: persistenceState === "saving",
+    isUserSaveInFlight,
+    // An automatic save keeps the person's Save commands available: they
+    // wait for it, then save what is newer.
+    saveBusy: persistenceState === "saving" && !autoSaving,
     exportProjectFile,
     downloadCurrentProjectBackup,
     guardDirtyReplacement,

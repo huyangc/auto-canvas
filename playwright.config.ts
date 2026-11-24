@@ -243,6 +243,9 @@ export default defineConfig({
           localStorage: [
             { name: "icm.editor-mode.v1", value: "draw" },
             { name: "icm.editor-mode-coach.v1", value: "seen" },
+            // Cloud auto-save off: a bound Project's saves stay the ones a
+            // spec makes. The specs that test auto-save turn it on.
+            { name: "icm.cloud-auto-save.v1", value: "off" },
           ],
         },
       ],

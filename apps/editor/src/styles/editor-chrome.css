@@ -1842,6 +1842,18 @@
   margin: 0;
 }
 
+/* Auto-save to Cloud: the row reads its state at the right edge. */
+.header-account-toggle-state {
+  margin-left: auto;
+  color: var(--icm-text-muted);
+  font-size: var(--icm-font-sm);
+}
+
+.header-account-toggle[aria-pressed="true"] .header-account-toggle-state {
+  color: var(--icm-accent);
+  font-weight: 600;
+}
+
 .command-separator {
   height: 1px;
   margin: 4px;

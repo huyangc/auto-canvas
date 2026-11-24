@@ -407,7 +407,8 @@ One canonical reducer owns the canvas: `Idle`, `SymbolPlacement`,
 - Project renames (tab double-click, or Project Info which also renames the
   on-screen Cell via `rename_project` + `rename_document` in one undo) commit only
   a changed nonempty name, ≤120 characters (longer old names are never
-  truncated). Renames mark dirty but never save, rebind or republish.
+  truncated). Renames mark dirty; they reach the Cloud through Save or
+  auto-save, and never rebind or republish.
 - Tab menu: Close, Close Others, Close All; dirty tabs need one decision; Close
   All leaves one blank tab.
 - Opening, activating and replacing are distinct session operations, not
@@ -571,14 +572,22 @@ it does.
 - **Account menu.** An accounts-mode editor ends the top bar's row with the
   signed-in account's menu: a round mark with the name's first letter and the
   username (the mark alone below 760 px), which names the account and holds,
-  in order, the identity, **My Cloud Projects ›** and **Sign out**. My Cloud
+  in order, the identity, **My Cloud Projects ›**, **Auto-save to Cloud**
+  (On/Off) and **Sign out**. My Cloud
   Projects expands in place to the same Shelf the tab strip's ▾ picker shows
   (open, rename, delete, **Browse Cloud Projects…**); opening a project
   closes the menu, and the menu stays open while Browse is open. Signing out runs the same save check first, warning **Sign out
   paused…** when unsaved work cannot be kept, and then returns to the sign-in
   screen; File carries no Sign out. It closes on an outside click, and Escape
-  returns focus to its summary. Local mode and the desktop build have no
-  account menu.
+  returns focus to its summary. Auto-save to Cloud toggles in place and
+  keeps the menu open; the choice is this browser's
+  ([Cloud auto-save](persistence-and-recovery.md#working-copy-transitions)).
+  Local mode and the desktop build have no account menu.
+- **Cloud save chip.** For the active tab's bound Cloud Project the
+  statusbar shows its save state after the recovery state: **Saving…**,
+  **Saved**, **Unsaved**, **Auto-save off**, **Cloud offline**, **Auto-save
+  paused** (a conflict or another held failure, its tooltip naming the way
+  out) or **Save failed**. A drawing with no Cloud Project shows none.
 
 ## Automatic layout
 

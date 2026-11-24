@@ -221,6 +221,9 @@ choices have a dropdown. Shapes are drawing only.
 
 **File → Save** (`Ctrl+S`) saves to one private Cloud Project, updating it on
 each save; a new or imported drawing creates its Cloud Project on first save.
+Once it has one, it also saves itself a few seconds after you stop editing;
+the status bar shows **Saving…**, **Saved** or why it is waiting, and the
+account menu's **Auto-save to Cloud** turns this off or on for this browser.
 A dot beside the name means unsaved changes, and leaving the page warns. Your
 Cloud Projects are on your account page and in the account menu at the top
 bar's right → **My Cloud Projects** (and the tab bar's ▾ picker). Sign out from the account menu at the top bar's

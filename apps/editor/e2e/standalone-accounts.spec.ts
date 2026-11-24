@@ -1,6 +1,10 @@
 import { randomInt } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
-import { projectTabAction, renameProject } from "./editor-fixtures.js";
+import {
+  placeComponentAt,
+  projectTabAction,
+  renameProject,
+} from "./editor-fixtures.js";
 
 import { placeComponent } from "./manual-editor-fixtures.js";
 
@@ -234,4 +238,113 @@ test("the account pill keeps its mark and caret on the row from 721 to 1041 px",
         .toBeLessThanOrEqual(width);
     }
   }
+});
+
+test.describe("Auto-save to Cloud in the account menu", () => {
+  const origin = new URL(
+    process.env.ICM_E2E_BASE_URL ??
+      `http://127.0.0.1:${process.env.ICM_E2E_PORT ?? "4173"}`,
+  ).origin;
+  test.use({
+    storageState: {
+      cookies: [],
+      origins: [
+        {
+          origin,
+          localStorage: [
+            { name: "icm.editor-mode.v1", value: "draw" },
+            { name: "icm.editor-mode-coach.v1", value: "seen" },
+            { name: "icm.cloud-auto-save.v1", value: "on" },
+          ],
+        },
+      ],
+    },
+  });
+
+  test("turns auto-save off and on, keeps the choice, and uploads nothing a reload restored", async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    const suffix = randomInt(100_000_000).toString().padStart(8, "0");
+    const puts: string[] = [];
+    page.on("request", (request) => {
+      if (
+        request.method() === "PUT" &&
+        /^\/api\/projects\/[^/]+$/u.test(new URL(request.url()).pathname)
+      )
+        puts.push(request.postData() ?? "");
+    });
+    await page.goto("/editor");
+    await page.getByRole("button", { name: "Create an account" }).click();
+    await page.getByLabel("Username").fill("S" + suffix);
+    await page.getByLabel("Password").fill("test-password");
+    await page.getByRole("button", { name: "Register", exact: true }).click();
+    await expect(page.getByTestId("schematic-canvas")).toBeVisible();
+    await placeComponent(page, "resistor", { x: 320, y: 200 });
+    const name = "Auto " + suffix;
+    await renameProject(page, name);
+    await page.keyboard.press("ControlOrMeta+s");
+    await expect(page.getByTestId("status")).toHaveText(
+      `Saved ${name} to Cloud`,
+    );
+    const chip = page.getByTestId("cloud-save-state");
+    await expect(chip).toHaveText("Saved");
+
+    const toggle = page.getByTestId("cloud-auto-save-toggle");
+    async function setAutoSave(on: boolean) {
+      const menu = page.getByTestId("header-account-menu");
+      if ((await menu.getAttribute("open")) === null)
+        await page.getByTestId("account-name").click();
+      // The menu reads identity, My Cloud Projects, Auto-save, Sign out.
+      expect(
+        await menu.evaluate((root) =>
+          [
+            ...root.querySelectorAll(
+              ".header-account-popover > div > .export-submenu > button, .header-account-popover > button",
+            ),
+          ].map((row) => row.getAttribute("data-testid") ?? row.textContent),
+        ),
+      ).toEqual([
+        expect.stringContaining("My Cloud Projects"),
+        "cloud-auto-save-toggle",
+        "sign-out",
+      ]);
+      if ((await toggle.getAttribute("aria-pressed")) !== String(on))
+        await toggle.click();
+      await expect(toggle).toHaveAttribute("aria-pressed", String(on));
+      await expect(toggle).toContainText(on ? "On" : "Off");
+      // Toggling keeps the menu open; Escape closes it.
+      await expect(menu).toHaveAttribute("open", "");
+      await page.keyboard.press("Escape");
+      await expect(menu).not.toHaveAttribute("open", "");
+    }
+
+    // Off: an edit stays local.
+    await setAutoSave(false);
+    await placeComponentAt(page, "resistor", { x: 420, y: 320 });
+    await expect(chip).toHaveText("Auto-save off");
+    await page.waitForTimeout(6000);
+    expect(puts).toHaveLength(0);
+    // On again: the edit made while it was off saves with no new edit.
+    await setAutoSave(true);
+    await expect.poll(() => puts.length, { timeout: 8000 }).toBe(1);
+    await expect(chip).toHaveText("Saved");
+
+    // An edit made while off and restored by a reload uploads nothing...
+    await setAutoSave(false);
+    await placeComponentAt(page, "resistor", { x: 520, y: 320 });
+    await page.reload();
+    await expect(page.getByTestId("active-instance-count")).toHaveText("3");
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+    await setAutoSave(true);
+    await page.waitForTimeout(6000);
+    expect(puts).toHaveLength(1);
+    // ...until the next edit.
+    await placeComponentAt(page, "resistor", { x: 620, y: 320 });
+    await expect.poll(() => puts.length, { timeout: 8000 }).toBe(2);
+
+    await page.reload();
+    await expect(page.getByTestId("schematic-canvas")).toBeVisible();
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  });
 });
