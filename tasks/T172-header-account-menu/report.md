@@ -32,11 +32,25 @@ Committed as `59202b3` on `task/T172-header-account-menu` (22 files).
 
 ## Review findings addressed
 
-Round 1; no earlier review.
+### Codex PR review round 1 (PR 127, head `8b158f6`) — P2, non-blocking
+
+- **P2 — a running Auto Layout on a phone-width row.** Measured at 320 px in
+  accounts mode: the pill pushed the Auto Layout control 13 px further left,
+  where the Draw button already covers its first 16 px (that overlap exists
+  on `main` without any account). Fixed: below 721 px a running
+  `.auto-layout-control[data-running="true"]` hides the account menu, so a
+  signed-in row during a run is laid out exactly as an anonymous one
+  (measured after the fix: Auto Layout button 126–154, Cancel 158–218, ⋯
+  284–312 at 320 px, identical to local mode). New regression test
+  `standalone-accounts.spec.ts › "a running Auto Layout clears the account
+  menu from a phone-width row"`.
+- The Draw over Auto Layout coverage at 320 px is pre-existing and not
+  changed here; it is reported as a follow-up.
 
 ## Acceptance results
 
-Rerun by Opus on `59202b3`, e2e with lane 1
+Rerun by Opus on `59202b3` (review fix: the commit that follows, same
+commands for the two affected suites), e2e with lane 1
 (`ICM_E2E_PORT=4173 AUTO_CANVAS_E2E_API_PORT=4311
 AUTO_CANVAS_TEST_DATABASE_URL=postgresql:///auto_canvas_test`).
 

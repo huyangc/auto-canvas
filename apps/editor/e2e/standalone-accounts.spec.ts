@@ -133,3 +133,33 @@ test("accounts reopen their saved drawing in another browser and isolate local d
     await fresh.close();
   }
 });
+
+// A running Auto Layout needs the phone-width row for its elapsed time and
+// Cancel; the account menu yields for the run instead of pushing that
+// control over the row's start (codex review of PR 127).
+test("a running Auto Layout clears the account menu from a phone-width row", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const suffix = randomInt(100_000_000).toString().padStart(8, "0");
+  await page.goto("/editor?example=two-stage-op-amp");
+  await page.getByRole("button", { name: "Create an account" }).click();
+  await page.getByLabel("Username").fill("M" + suffix);
+  await page.getByLabel("Password").fill("test-password");
+  await page.getByRole("button", { name: "Register", exact: true }).click();
+  await expect(page.getByTestId("schematic-canvas")).toBeVisible();
+
+  await page.setViewportSize({ width: 320, height: 800 });
+  await expect(page.getByTestId("account-name")).toBeVisible();
+  await page.getByTestId("auto-layout-button").click();
+  const cancel = page.getByTestId("auto-layout-cancel");
+  await expect(cancel).toBeVisible();
+  await expect(page.getByTestId("header-account-menu")).toBeHidden();
+  const box = (await cancel.boundingBox())!;
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(320);
+
+  await cancel.click();
+  await expect(cancel).toHaveCount(0);
+  await expect(page.getByTestId("account-name")).toBeVisible();
+});
