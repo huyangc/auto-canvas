@@ -137,6 +137,46 @@ a managed start has not yet been run against a real silicon-notebook (T164b).
    build). Then start silicon-notebook with its own start scripts; it starts
    the canvas.
 
+## Offline package
+
+For a site without network or package manager, a build machine with a
+checkout makes one self-contained package:
+
+```bash
+AUTO_CANVAS_PACKAGE_PYTHON=/path/to/python pnpm notebook:package
+```
+
+It runs `pnpm build` and `pnpm build:notebook-editor`, then
+`scripts/package-notebook-canvas.mjs`, which writes
+`output/notebook-canvas/auto-canvas-notebook-<version>/` and the tarball
+`auto-canvas-notebook-<version>.tar.gz` of it (`<version>` is the root
+version and the commit, `-dirty` for a changed working tree; the tarball is
+deterministic: sorted entries, owner root, the commit time as every mtime).
+`AUTO_CANVAS_PACKAGE_PYTHON` names a Python with pip and setuptools 68 or
+newer, which builds the plugin wheel offline (`pip wheel --no-index`).
+`--out <dir>` (after the command) writes elsewhere.
+
+The package keeps this checkout's paths, so the launchers run unchanged:
+
+- `apps/server/dist/cli.js` — the server bundled into one module with every
+  dependency (pure JavaScript; `pg-native`, `bufferutil` and `utf-8-validate`
+  stay optional, as in a checkout), with `apps/server/dist/migrations/` and
+  `apps/server/package.json`;
+- `apps/editor/dist-notebook/` — the notebook build of the editor;
+- `integrations/silicon-notebook/` — `serve.sh`, `init-db.sh`, this file
+  and the two TOML examples (and `ui/` once it exists);
+- `wheels/silicon_notebook_auto_canvas-<version>-py3-none-any.whl` — the
+  plugin, installed instead of the `plugin/` directory of step 6;
+- `env.example` — the `AUTO_CANVAS_DATABASE_URL` line for silicon-notebook's
+  `.env`; `VERSION`; `THIRD-PARTY-NOTICES.txt` — the licences of the
+  packages bundled into the server.
+
+Node is not shipped: the site runs the package with silicon-notebook's own
+Node, named by `AUTO_CANVAS_NODE`. The offline installation steps at a site
+are described separately (T167). `node scripts/package-notebook-canvas-check.mjs`
+proves a built package in an empty directory (see
+[docs/testing/README.md](../../docs/testing/README.md#local-validation)).
+
 ## What `serve.sh` reads, sets and removes
 
 Reads (each failure exits with status 2 and one line on stderr naming the

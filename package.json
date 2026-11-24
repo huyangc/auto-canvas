@@ -33,6 +33,7 @@
     "agent-kit:catalog": "node scripts/generate-agent-authoring-catalog.mjs",
     "agent-kit:catalog:check": "node scripts/generate-agent-authoring-catalog.mjs --check",
     "headless:package": "node scripts/package-headless.mjs",
+    "notebook:package": "pnpm build && pnpm build:notebook-editor && node scripts/package-notebook-canvas.mjs --python \"$AUTO_CANVAS_PACKAGE_PYTHON\"",
     "mcp:package": "pnpm build && node scripts/package-mcp.mjs",
     "start": "bash scripts/start.sh",
     "stop": "bash scripts/stop.sh",

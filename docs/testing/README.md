@@ -76,6 +76,27 @@ the fixture's refusals and cleanup (after `pnpm build`), and
 `scripts/notebook-e2e-selection-check.mjs` checks which tests each run
 collects from `playwright test --list --reporter=json`.
 
+`node scripts/package-notebook-canvas-check.mjs [--tarball <path>]` is the
+on-demand check of the offline silicon-notebook package
+([Offline package](../../integrations/silicon-notebook/README.md#offline-package)),
+run after `pnpm notebook:package` (by default on the newest tarball in
+`output/notebook-canvas/`). It needs `AUTO_CANVAS_TEST_DATABASE_URL` (an
+`auto_canvas_test` or `auto_canvas_test_<digits>` database, on a role that may
+create databases and reach `127.0.0.1` over TCP) and
+`AUTO_CANVAS_PACKAGE_PYTHON` (a Python with pip). It unpacks the tarball into
+a fresh temporary directory and, with a `PATH` of system directories only
+and `AUTO_CANVAS_NODE` set to the Node running it, checks the layout (regular
+files and directories only, executable launchers, nothing else), runs
+`init-db.sh` and `serve.sh` on a database `auto_canvas_it_pkg_<12 hex>` and a
+stub notebook `/api/me` on a free port, then readiness, the editor, a
+project with a formula and its preview, a 401 without the token, that the
+server loaded no module outside the unpacked tree but `node:` builtins (a
+`module.registerHooks` trace), the plugin wheel's offline install and import,
+and that SIGTERM stops the server within 15 s. The database and the temporary
+directories are removed at the end, also after a failure or an interrupt.
+`scripts/package-notebook-canvas.test.mjs` (in `pnpm test:local`) covers the
+packaging's pure helpers without a build.
+
 `scripts/standalone-build-evidence.mjs --port <n> --database <url> [--run "<command>"]`
 is the standalone build evidence, for a disposable checkout only (it reads the
 build output there, and the builds that precede it overwrite
