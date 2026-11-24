@@ -1,6 +1,13 @@
 import { apiUrl, appUrl } from "../lib/app-url";
 import "./shelf-wall.css";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { TilePreview } from "./tile-preview";
 import { InlineConfirm } from "./inline-confirm";
 
@@ -96,6 +103,35 @@ export function ShelfWall() {
   const singleColumn = useSingleColumn();
   const [history, setHistory] = useState<CloudProjectSummary | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const favoriteButtons = useRef(new Map<string, HTMLButtonElement>());
+  const favoritesFilter = useRef<HTMLButtonElement>(null);
+  const pendingFavoriteFocus = useRef<string | null>(null);
+
+  useEffect(() => {
+    const cancelOnFocusChange = (event: FocusEvent) => {
+      const id = pendingFavoriteFocus.current;
+      // Disabling the heart can drop focus to the body. Only a move to
+      // another control cancels restoration, even if that control later blurs.
+      if (
+        id !== null &&
+        event.target !== document.body &&
+        event.target !== favoriteButtons.current.get(id)
+      )
+        pendingFavoriteFocus.current = null;
+    };
+    document.addEventListener("focusin", cancelOnFocusChange, true);
+    return () =>
+      document.removeEventListener("focusin", cancelOnFocusChange, true);
+  }, []);
+
+  useLayoutEffect(() => {
+    const id = pendingFavoriteFocus.current;
+    if (busyId !== null || id === null) return;
+    pendingFavoriteFocus.current = null;
+    const heart = favoriteButtons.current.get(id);
+    (heart && !heart.disabled ? heart : favoritesFilter.current)?.focus();
+  });
+
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(
     null,
   );
@@ -230,6 +266,11 @@ export function ShelfWall() {
       setRenaming(null);
       return;
     }
+    if (
+      action === "favorite" &&
+      document.activeElement === favoriteButtons.current.get(project.id)
+    )
+      pendingFavoriteFocus.current = project.id;
     setBusyId(project.id);
     setError(null);
     try {
@@ -377,6 +418,7 @@ export function ShelfWall() {
           <button
             type="button"
             aria-pressed={filter === "favorites"}
+            ref={favoritesFilter}
             data-testid="shelf-filter-favorites"
             onClick={() => showFilter("favorites")}
           >
@@ -430,6 +472,11 @@ export function ShelfWall() {
                     shelf-wall.css places it at the end of the name's row. */}
                   <button
                     type="button"
+                    ref={(button) => {
+                      if (button)
+                        favoriteButtons.current.set(project.id, button);
+                      else favoriteButtons.current.delete(project.id);
+                    }}
                     className="shelf-tile-favorite"
                     aria-label={`Favorite ${project.name}`}
                     aria-pressed={!!project.favorite}

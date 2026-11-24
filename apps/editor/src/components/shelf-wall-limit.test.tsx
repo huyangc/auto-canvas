@@ -235,3 +235,100 @@ it("renames with a compact Save and Cancel under the name field", async () => {
   );
   expect(container.querySelector("form.shelf-rename-form")).toBeNull();
 });
+
+async function startFavoriteToggle(inFavorites = false) {
+  const summary = {
+    id: "bias",
+    name: "Bias",
+    updatedAt: "2026-11-06T00:00:00Z",
+    revision: 1,
+    schemaVersion: createEmptyProject("bias", "Bias").schemaVersion,
+    favorite: inFavorites,
+  };
+  let finishPatch!: (response: Response) => void;
+  const patch = new Promise<Response>((resolve) => {
+    finishPatch = resolve;
+  });
+  vi.stubGlobal(
+    "fetch",
+    vi.fn<typeof fetch>(async (_url, init) =>
+      init?.method === "PATCH"
+        ? patch
+        : Response.json({
+            projects: [
+              { ...summary, id: "amp", name: "Amp", favorite: false },
+              summary,
+            ],
+            limit: 200,
+          }),
+    ),
+  );
+  container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  await act(async () => root!.render(createElement(ShelfWall)));
+
+  const heart = () =>
+    container.querySelector<HTMLButtonElement>(
+      '[data-testid="shelf-favorite-bias"]',
+    );
+  const filter = container.querySelector<HTMLButtonElement>(
+    '[data-testid="shelf-filter-favorites"]',
+  )!;
+  if (inFavorites) await act(async () => filter.click());
+  const button = heart()!;
+  button.focus();
+  await act(async () => button.click());
+  expect(button.disabled).toBe(true);
+  // jsdom can keep focus on a disabled button. Reproduce Chromium's blur.
+  document.body.tabIndex = -1;
+  document.body.focus();
+  document.body.removeAttribute("tabindex");
+  expect(document.activeElement).toBe(document.body);
+
+  const settle = (
+    response = Response.json({
+      project: { ...summary, favorite: !inFavorites },
+    }),
+  ) => act(async () => finishPatch(response));
+  return { heart, filter, settle };
+}
+
+it("restores focus to the enabled heart after it moves to the front of All", async () => {
+  const { heart, settle } = await startFavoriteToggle();
+  const firstHeart = () => container.querySelector(".shelf-tile-favorite");
+  expect(firstHeart()).not.toBe(heart());
+  await settle();
+  expect(firstHeart()).toBe(heart());
+  expect(heart()!.disabled).toBe(false);
+  expect(document.activeElement).toBe(heart());
+});
+
+it("focuses the Favorites filter after the focused project's tile disappears", async () => {
+  const { heart, filter, settle } = await startFavoriteToggle(true);
+  await settle();
+  expect(container.querySelector('[data-testid="shelf-tile-bias"]')).toBeNull();
+  expect(heart()).toBeNull();
+  expect(document.activeElement).toBe(filter);
+});
+
+it.each([false, true])(
+  "preserves a subsequent focus change (control blurred: %s)",
+  async (blur) => {
+    const { filter, settle } = await startFavoriteToggle();
+    filter.focus();
+    if (blur) filter.blur();
+    await settle();
+    expect(document.activeElement).toBe(blur ? document.body : filter);
+  },
+);
+
+it("restores focus to the enabled heart when the PATCH fails", async () => {
+  const { heart, settle } = await startFavoriteToggle();
+  await settle(new Response(null, { status: 500 }));
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+    "500",
+  );
+  expect(heart()!.disabled).toBe(false);
+  expect(document.activeElement).toBe(heart());
+});
