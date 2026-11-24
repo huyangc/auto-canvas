@@ -168,16 +168,20 @@ beforeEach(() => {
     standin,
     `#!${process.execPath}
 const fs = require("node:fs");
-fs.writeFileSync(process.env.STANDIN_RECORD, JSON.stringify({
+// The handler is in place before the record appears, so a test that signals
+// once it sees the record never meets the default SIGTERM action.
+if (process.env.STANDIN_STAY) process.on("SIGTERM", () => process.exit(0));
+const partial = process.env.STANDIN_RECORD + ".partial";
+fs.writeFileSync(partial, JSON.stringify({
   pid: process.pid,
   argv: process.argv.slice(2),
   cwd: process.cwd(),
   env: process.env,
 }));
+fs.renameSync(partial, process.env.STANDIN_RECORD);
 process.stdout.write(${JSON.stringify(STDOUT_MARKER)} + "\\n");
 process.stderr.write(${JSON.stringify(STDERR_MARKER)} + "\\n");
 if (process.env.STANDIN_STAY) {
-  process.on("SIGTERM", () => process.exit(0));
   setInterval(() => {}, 1000);
 } else process.exitCode = Number(process.env.STANDIN_EXIT ?? 0);
 `,
