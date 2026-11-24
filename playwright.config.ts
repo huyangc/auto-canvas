@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { createRequire } from "node:module";
 
 // Keep Playwright's readiness probe on loopback even when the development
 // machine exports a system HTTP proxy.
@@ -7,7 +8,38 @@ process.env.NO_PROXY = [process.env.NO_PROXY, "127.0.0.1", "localhost"]
   .join(",");
 
 const accountsTest = process.env.AUTO_CANVAS_E2E_ACCOUNTS === "1";
+/**
+ * The parser `pg` itself uses, reached through apps/server (the package that
+ * depends on it; the root does not): the database checked here is the one the
+ * driver connects to, which is not always the WHATWG pathname. A slash-less
+ * path drops its first character, and an encoded socket host next to a host
+ * parameter prepends the host to the path.
+ */
+const parseConnectionString = createRequire(
+  createRequire(new URL("./apps/server/package.json", import.meta.url)).resolve(
+    "pg",
+  ),
+)("pg-connection-string").parse as (value: string) => {
+  database?: string | null;
+};
+/** Parameters that redirect the connection or rename its database. */
+const DATABASE_PARAMETERS = [
+  "host",
+  "port",
+  "socket",
+  "db",
+  "dbname",
+  "database",
+];
+
 const prefixTest = process.env.AUTO_CANVAS_E2E_BASE_PATH === "1";
+// The notebook build behind a stand-in for silicon-notebook
+// (scripts/notebook-e2e-fixture.mjs): its own run, never part of the others.
+const notebookTest = process.env.AUTO_CANVAS_E2E_NOTEBOOK === "1";
+if (prefixTest && notebookTest)
+  throw new Error(
+    "AUTO_CANVAS_E2E_BASE_PATH and AUTO_CANVAS_E2E_NOTEBOOK cannot both be set",
+  );
 const e2ePort = Number(process.env.ICM_E2E_PORT ?? "4173");
 const e2eBaseUrl = `http://127.0.0.1:${e2ePort}`;
 // Parallel task worktrees each use their own ports and test database
@@ -15,6 +47,7 @@ const e2eBaseUrl = `http://127.0.0.1:${e2ePort}`;
 const apiPort = Number(process.env.AUTO_CANVAS_E2E_API_PORT ?? "4311");
 const apiUrl = `http://127.0.0.1:${apiPort}`;
 const chromiumExecutablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
+if (notebookTest) checkNotebookEnvironment();
 // A running editor to test instead of starting one: a live check of the
 // deployed site (editor-only cases: anything a case does reaches that
 // server), or one server shared by several runs.
@@ -30,25 +63,160 @@ const editorServer = serveSource
   : "node scripts/build-e2e-editor.mjs && " +
     `pnpm --filter @icm/editor exec vite preview --outDir dist-e2e --host 127.0.0.1 --port ${e2ePort} --strictPort`;
 
+const launchOptions = chromiumExecutablePath
+  ? { executablePath: chromiumExecutablePath }
+  : undefined;
+
+/**
+ * The notebook run's refusals: a developer's own servers run on this
+ * machine, so the run starts nothing that could reach them, and it never
+ * runs against another editor or a non-test database.
+ */
+function checkNotebookEnvironment(): void {
+  const refuse = (message: string) => {
+    throw new Error(`AUTO_CANVAS_E2E_NOTEBOOK=1: ${message}`);
+  };
+  for (const name of [
+    "ICM_E2E_BASE_URL",
+    "ICM_E2E_SERVER",
+    "AUTO_CANVAS_E2E_ACCOUNTS",
+  ])
+    if (process.env[name] !== undefined) refuse(`${name} must not be set`);
+  for (const name of [
+    "VITE_AUTO_CANVAS_AUTH",
+    "AUTO_CANVAS_AUTH",
+    "AUTO_CANVAS_BASE_PATH",
+  ])
+    if (name in process.env) refuse(`${name} must not be set`);
+  const reserved = new Set([3000, 8000, 4310]);
+  for (const [name, port] of [
+    ["ICM_E2E_PORT", e2ePort],
+    ["AUTO_CANVAS_E2E_API_PORT", apiPort],
+  ] as const)
+    // Canonical decimal only, as the fixture requires: the helpers and the
+    // fixture spell the port as the variable does, the browser as a number.
+    if (
+      (process.env[name] !== undefined &&
+        !/^[1-9]\d*$/u.test(process.env[name])) ||
+      !Number.isInteger(port) ||
+      port < 1024 ||
+      port > 65535
+    )
+      refuse(
+        `${name} must be an integer from 1024 to 65535, without leading zeros`,
+      );
+    else if (reserved.has(port))
+      refuse(`${name} is reserved for the developer's servers`);
+  if (e2ePort === apiPort)
+    refuse("ICM_E2E_PORT and AUTO_CANVAS_E2E_API_PORT must differ");
+  const database = process.env.AUTO_CANVAS_TEST_DATABASE_URL;
+  let databaseUrl: URL | null = null;
+  try {
+    databaseUrl = database ? new URL(database) : null;
+  } catch {
+    databaseUrl = null;
+  }
+  // The name the driver resolves, not the WHATWG pathname (see
+  // parseConnectionString above).
+  let databaseName: string | null = null;
+  if (database !== undefined && databaseUrl)
+    try {
+      databaseName = parseConnectionString(database).database ?? null;
+    } catch {
+      databaseName = null;
+    }
+  if (
+    !databaseUrl ||
+    !["postgres:", "postgresql:"].includes(databaseUrl.protocol) ||
+    !/^auto_canvas_test(?:_\d+)?$/u.test(databaseName ?? "") ||
+    DATABASE_PARAMETERS.some((parameter) =>
+      databaseUrl!.searchParams.has(parameter),
+    )
+  )
+    refuse(
+      "AUTO_CANVAS_TEST_DATABASE_URL must name auto_canvas_test or auto_canvas_test_<digits> on the server the driver reaches, without a host, port, socket, db, dbname or database parameter",
+    );
+  // Nothing in the notebook run uses it today; set, it closes the editor dev
+  // proxies' default (the developer's port 4310) for any Vite server a
+  // worker might start.
+  const api = process.env.AUTO_CANVAS_API_URL;
+  const apiMatch = /^http:\/\/127\.0\.0\.1:(\d+)$/u.exec(api ?? "");
+  const apiUrlPort = apiMatch ? Number(apiMatch[1]) : NaN;
+  if (
+    !apiMatch ||
+    apiUrlPort < 1 ||
+    apiUrlPort > 65535 ||
+    reserved.has(apiUrlPort)
+  )
+    refuse(
+      "AUTO_CANVAS_API_URL must be an http://127.0.0.1:<port> origin outside 3000, 8000 and 4310",
+    );
+}
+
+// Needs `pnpm build` and `pnpm build:notebook-editor` first.
+const notebookWebServer = [
+  {
+    command: "node scripts/notebook-e2e-fixture.mjs",
+    env: {
+      ICM_E2E_PORT: String(e2ePort),
+      AUTO_CANVAS_E2E_API_PORT: String(apiPort),
+      AUTO_CANVAS_TEST_DATABASE_URL: process.env.AUTO_CANVAS_TEST_DATABASE_URL!,
+    },
+    // Ready when the fixture says so. No `url`: Playwright would probe it
+    // before starting the command, sending a request to whatever already
+    // listens on the port before the fixture's own bind check refuses it.
+    wait: { stdout: /notebook-e2e-fixture ready http:\/\/127\.0\.0\.1:\d+\// },
+    gracefulShutdown: { signal: "SIGTERM" as const, timeout: 30_000 },
+    reuseExistingServer: false,
+    timeout: 120_000,
+    // The fixture prints the schema and the processes it made.
+    stdout: "pipe" as const,
+  },
+];
+
 export default defineConfig({
   testDir: "apps/editor/e2e",
-  ...(prefixTest
-    ? { testMatch: "**/base-path.spec.ts" }
-    : accountsTest
-      ? { testMatch: "**/standalone-accounts.spec.ts" }
-      : {
-          testIgnore: [
-            "**/base-path.spec.ts",
-            "**/standalone-accounts.spec.ts",
-          ],
-        }),
+  ...(notebookTest
+    ? {
+        projects: [
+          {
+            name: "notebook",
+            testMatch: "**/notebook-*.spec.ts",
+            testIgnore: "**/notebook-bfcache.spec.ts",
+          },
+          {
+            // Playwright launches Chromium without the back/forward cache;
+            // this project's own browser keeps it.
+            name: "notebook-bfcache",
+            testMatch: "**/notebook-bfcache.spec.ts",
+            use: {
+              launchOptions: {
+                ...launchOptions,
+                ignoreDefaultArgs: ["--disable-back-forward-cache"],
+              },
+            },
+          },
+        ],
+      }
+    : prefixTest
+      ? { testMatch: "**/base-path.spec.ts" }
+      : accountsTest
+        ? { testMatch: "**/standalone-accounts.spec.ts" }
+        : {
+            testIgnore: [
+              "**/base-path.spec.ts",
+              "**/standalone-accounts.spec.ts",
+              "**/notebook-*.spec.ts",
+            ],
+          }),
   // Each scenario owns an isolated browser context. Test-level parallelism
   // lets CI shards balance cases instead of assigning the entire suite to one
-  // shard based on the three large spec files.
-  fullyParallel: true,
+  // shard based on the three large spec files. The notebook run shares one
+  // fixture's request log, so it runs one test at a time.
+  fullyParallel: !notebookTest,
   // A local run shares the machine it runs on, so it takes one worker unless
   // `--workers` asks for more. CI passes its own count per shard.
-  workers: process.env.CI ? undefined : 1,
+  workers: notebookTest ? 1 : process.env.CI ? undefined : 1,
   // The per-test budget catches a hung test, not a slow machine. The longest
   // editor flows take 10-14 s alone and two to three times that while other
   // workers load the same machine, which failed them at the old 30 s default.
@@ -82,8 +250,8 @@ export default defineConfig({
     screenshot: "only-on-failure",
     trace: "retain-on-failure",
     ...devices["Desktop Chrome"],
-    ...(chromiumExecutablePath
-      ? { launchOptions: { executablePath: chromiumExecutablePath } }
+    ...(launchOptions
+      ? { launchOptions }
       : process.env.CI
         ? {}
         : { channel: "chrome" }),
@@ -132,4 +300,6 @@ export default defineConfig({
               },
             ],
       }),
+  // The notebook run refuses ICM_E2E_BASE_URL, so it always starts its own.
+  ...(notebookTest ? { webServer: notebookWebServer } : {}),
 });

@@ -1,0 +1,203 @@
+# T162c review
+
+## Round 1 — accepted with one correction
+
+Reviewed: the working tree on `task/T162c-notebook-worker-evidence` (on the
+T162b head `bfcf72e`) on 2026-11-23. The plan had five rounds of codex
+`gpt-6.2-astra` review (verdict approve). Implementation by a Claude Opus
+subagent.
+
+| #   | Severity | Where                                          | Finding                                                                                                                                                                                                                                            | Expected fix                                                                                                                                                                                               |
+| --- | -------- | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | note     | `apps/editor/e2e/notebook-worker.spec.ts` (N7) | Playwright's `response.body()` returned the seed for the no-store preview fetches while the response headers, the wire and the shown image were the server's. The comment stated the cause (the HTTP cache entry) as a fact; it was an inference.  | Corrected by the reviewer: the comment says what was observed and that the cause was not established. The measured response is the fixture's hash of the bytes on the wire, compared with the shown image. |
+| 2   | note     | the implementer's round-1 report               | "Lane 2 only" was not exact: the evidence script was run by hand twice on port 4399 (cleaned up; nothing touched 3000, 8000 or 4310). The round-1 acceptance was not on one frozen tree (the evidence script was edited while the full suite ran). | Corrected by the implementer in its round-2 report. The reviewer's rerun below is on one committed tree.                                                                                                   |
+| 3   | note     | section B                                      | The disposable-checkout evidence (C-4, C-1(d), C-5) is the reviewer's to run.                                                                                                                                                                      | Run by the reviewer: below.                                                                                                                                                                                |
+
+## Round 2 — changes-requested
+
+Reviewed: two codex `gpt-6.2-sol` PR reviews of PR 117 (T162b) at `bfcf72e`
+(four P2, five P3; no blocking finding), each checked and found valid. They
+concern the fixture, the helpers, the configuration and two session cases —
+files this task has already extended — so they are fixed on this branch; for
+that this task's owned paths were widened by `playwright.config.ts`,
+`notebook-auth.spec.ts` and `notebook-bfcache.spec.ts`.
+
+| #   | Severity   | Where                                          | Finding                                                                                                                                        | Expected fix                                                                    |
+| --- | ---------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| 13  | should-fix | the three database-URL validators              | `postgresql:auto_canvas_test` (no slash) passed validation, but the driver strips the first character of the path: database `uto_canvas_test`. | Require the leading slash; refusal cases.                                       |
+| 14  | should-fix | fixture and evidence script, cleanup           | A stalled `CREATE` or `DROP SCHEMA` made cleanup wait without a deadline.                                                                      | Bounded database work; `cleanup incomplete: schema <name>` and a non-zero exit. |
+| 15  | should-fix | both check scripts                             | Output was inspected at the child's `exit`, before its streams had drained.                                                                    | Wait for `close`.                                                               |
+| 16  | should-fix | N10f                                           | The measurement did not check the bearer of the version-preview requests.                                                                      | `expectBearers` per viewport phase.                                             |
+| 17  | should-fix | `seedSingleUserRecovery`                       | The seeded single-user recovery record was one the real reader classifies as corrupt.                                                          | A record the production reader accepts, with a positive control.                |
+| 18  | should-fix | notebook `webServer` in `playwright.config.ts` | Playwright probed the port before launching the fixture, so an occupant received a request before the fixture's bind check could refuse.       | Wait for the fixture's own `ready` line.                                        |
+| 19  | should-fix | fixture and evidence script, child tracking    | A spawn that fails before a PID exists left cleanup waiting for an exit.                                                                       | Track a child once it has a PID; remove on `error`.                             |
+| 20  | should-fix | N4a and similar windows                        | Between the switch and the new document's navigation the log rule allowed Bob's bearer.                                                        | No API request at all in that window.                                           |
+
+## Round 3 — accepted
+
+Reviewed: the working tree after round 2, then the branch restacked on `main`
+(`2542db6`, after T162 was merged) on 2026-11-23.
+
+| #     | Severity | Where     | Finding                                                                                                                                                                                                                                                                                                                                                        | Expected fix                           |
+| ----- | -------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| 13–20 | fixed    | as listed | All eight fixed as asked. For 17 a new case, N11d, shows the standard production build offering the seeded draft and restoring it; with the old seed that case fails. For 18 a listener on the lane port received no request (it received `GET /canvas/api/health` with the old configuration). For 14 a silent PostgreSQL and a held lock are both exercised. | The check scripts and the 31 cases.    |
+| 4     | note     | N4b       | Its window contains Alice's deliberate save, and its rule already requires every API request there to carry Alice's bearer; silence between the synthetic `focus` and the reload is not asserted there (N5b asserts it for the real `storage` event).                                                                                                          | Accepted as argued by the implementer. |
+| 5     | note     | `main`    | `main` gained `entries/web-uuid` (a `crypto.randomUUID` fallback for plain-HTTP LAN origins), loaded first by `main.tsx`, so by the notebook build too. It touches neither storage nor the network.                                                                                                                                                            | The cases pass with it.                |
+
+Acceptance on the restacked, committed tree, by the reviewer (lane 2;
+`AUTO_CANVAS_API_URL` set for Playwright commands only):
+
+```text
+pnpm build → 0; pnpm build:notebook-editor → 0
+standard listing → 459 tests equal the baseline; prefix listing → exactly the base-path case; notebook listing → 31 tests
+13 configuration refusals → each fails and names its variable
+node scripts/notebook-e2e-fixture-check.mjs → 0; five fail-at stages, ready, SIGINT, two SIGKILLs, four in-flight signals, reset, seed, failed spawn, stalled DROP, silent PostgreSQL twice, 33 refusals
+node scripts/standalone-build-evidence-check.mjs → 0; 20 refusals, three interrupts, exit statuses, a descendant in its own group, failed spawn, stalled DROP, silent PostgreSQL
+pnpm test:local scripts/launcher.test.mjs → 22 passed
+AUTO_CANVAS_E2E_NOTEBOOK=1 pnpm exec playwright test → 31 passed (50.3s); the report check: every one passed
+C-1(a): the token key in 0 files of apps/editor/dist; the build test → 6 passed
+env -u AUTO_CANVAS_API_URL pnpm test:local → 853 files passed, 3 skipped; 8868 tests passed, 117 skipped
+pnpm typecheck / lint / format:check / docs:check → 0; changed paths only owned files
+N12, pnpm test:e2e:local → 457 passed, 2 skipped by design (18.2m)
+```
+
+Section B, in a disposable checkout of the committed candidate (`1138788`),
+by the reviewer:
+
+```text
+C-4: standard build, then notebook build → "C-4 ok: 5 references", "cleanup ok", exit 0
+C-1(d): Agent-enabled standard production build on the owned server, the four Agent spec files without "a render crash" → 14 passed (28.3s), "cleanup ok", exit 0
+interrupt of a real Playwright run after its browser had launched → exit 130; all 6 recorded processes gone, the browser included; "cleanup ok"; the schema gone
+C-5: AUTO_CANVAS_BASE_PATH=/canvas pnpm build; node scripts/base-path-proxy.mjs --check → "Prefix proxy integration passed"; the base-path browser test → 1 passed
+no standalone_evidence_ or prefix_test_ schema before or after; port 4273 free after each step
+```
+
+No product finding. With this, the browser half of work package W3 is
+complete: T162 (merged), T162b and this task.
+
+## Round 5 — accepted
+
+Reviewed: the working tree after the round-4 fixes, on 2026-11-23. The
+implementer worked on a copy branch (`review/t162c-round4` at the same head,
+because the task branch is checked out in another worktree); the work was read
+and the acceptance rerun by the reviewer.
+
+| #   | Severity | Where                                                                                                                 | Finding                                                                                        | Expected fix                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| --- | -------- | --------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 21  | fixed    | `scripts/notebook-e2e-fixture.mjs` `testDatabaseUrl()`, the evidence script's validator, `checkNotebookEnvironment()` | The database checked was the WHATWG pathname, which is not always what the driver connects to. | All three resolve the name with the driver's own parser (`pg-connection-string`, reached through `apps/server`) and refuse the parameters that redirect the connection (`host`, `socket`, `db`, `dbname`, `database`), quoting the resolved name. Cases: `?host=/tmp`, `?socket=/tmp`, `?database=`, `?db=`, `postgresql://%2Ftmp/auto_canvas_test_2?host=/tmp` (resolves `%2Ftmp/auto_canvas_test_2`), and the slash-less form (resolves `uto_canvas_test`). Refusals: fixture 33 → 38, evidence script 20 → 24, config loop 6 new forms. |
+| 22  | fixed    | `apps/editor/e2e/notebook-worker.spec.ts` N7                                                                          | Only the two SVG responses were checked for `fromServiceWorker()`.                             | Every `/canvas/api` response during the controlled phases is recorded with its phase; after phase B none may come from the worker, with a positive control (`apiResponses.length > 0`); observed `{"perPhase":{"control":5,"alice":5,"bob":5},"fromServiceWorker":[]}`.                                                                                                                                                                                                                                                                    |
+| 23  | fixed    | `scripts/standalone-build-evidence.mjs`                                                                               | A detached Chromium reparented between two scans matched neither group nor parent.             | A per-run UUID in the run children's environment; `ps eww` marks every process carrying it, added to the group and parent rules, so `cleanup ok` prints only when none survives. New check cases: an orphan in its own session whose parent exits at once (found by the marker) and a process that left the group. Stated limit: `ps` shows no environment for Apple's own binaries (verified on this macOS), so a system binary that also left the group and lost its parent is found by neither rule; `resource marker=active            | inert` reports whether the marker reaches our processes. |
+| 24  | fixed    | `scripts/standalone-build-evidence.mjs` C-4                                                                           | Any script or style reference was accepted with either a JavaScript or a CSS type.             | The type must match the use (JavaScript for scripts and module preloads, `text/css` for stylesheets; an empty type is a problem); check case with a module script served as CSS and a stylesheet served as JavaScript.                                                                                                                                                                                                                                                                                                                     |
+
+Acceptance rerun by the reviewer on this tree (lane 2, `AUTO_CANVAS_API_URL`
+for Playwright only):
+
+```text
+pnpm build → 0; pnpm build:notebook-editor → 0
+standard listing → 459 tests equal the baseline; notebook listing → 31 tests
+4 database-URL forms (host, database, encoded socket host, slash-less) → each refused by the config, naming the variable
+node scripts/notebook-e2e-fixture-check.mjs → 0; 38 refusals
+node scripts/standalone-build-evidence-check.mjs → 0; 24 refusals; the C-4 type case, the marker orphan and the left-group case ok
+pnpm test:local scripts/launcher.test.mjs → 22 passed
+AUTO_CANVAS_E2E_NOTEBOOK=1 pnpm exec playwright test → 31 passed (50.4s)
+both printed schemas gone, all three printed PIDs gone, the schema list before = after
+env -u AUTO_CANVAS_API_URL pnpm test:local → 8868 passed, 117 skipped
+pnpm typecheck / lint / format:check / docs:check → 0
+lanes free afterwards
+```
+
+Note: a first combined run of the same script reported the evidence check and
+the notebook run as failed; both pass alone and in an immediate rerun of the
+same script, and the first run's servers had already exited, so the reviewer
+attributes it to the two steps overlapping on the lane rather than to a
+reproducible defect. Recorded for honesty; the rerun above is the result of
+record.
+
+## Round 6 — changes-requested
+
+Reviewed: codex `gpt-6.2-sol` PR review round 4 of PR 117 at `b67523e` (three
+P2, one P3; no blocking finding), each checked and found valid.
+
+| #   | Severity   | Where                                               | Finding                                                                                                                                | Expected fix                                                                                                                                                         |
+| --- | ---------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 25  | should-fix | `scripts/standalone-build-evidence.mjs` `scanRun()` | A failed marker scan was treated as "no marked processes": a reparented Chromium could survive while `cleanup ok` printed.             | Retry the scan within the shutdown deadline; if the marker of a live run still cannot be read, `cleanup incomplete: … marker could not be read` and a non-zero exit. |
+| 26  | should-fix | same file, C-4                                      | References were fetched as raw attributes: a `<base href>` or a path normalizing outside `/assets/` could point the browser elsewhere. | Resolve against the document's effective base URL; require the resolved origin to be the server's and the resolved pathname under `/assets/`; fetch only that.       |
+| 27  | should-fix | `notebook-evidence.spec.ts` N11c                    | Playwright reports WebSockets separately and the proxy logs no upgrades, so an Agent WebSocket the server rejected went unnoticed.     | A WebSocket observer armed before the navigation; no socket in the agent window; a control that opens one and must be caught.                                        |
+| 28  | should-fix | the three validators                                | A `port` query parameter overrides the authority's port.                                                                               | Refuse `port` with the others; refusal cases.                                                                                                                        |
+
+## Round 7 — accepted
+
+Reviewed: the working tree after round 5, on 2026-11-23. Read by the reviewer:
+the diff of the evidence script (marker retry, base URL, resolved fetches), the
+N11c changes, the validators; acceptance rerun by the reviewer.
+
+| #   | Severity | Where                                  | Finding                                                                                                                                                                                              | Expected fix                                                                                                                                                              |
+| --- | -------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 25  | fixed    | `scanRun()`, `cleanup()`               | Three attempts, 100 ms apart; a live run whose marker stays unreadable is added to `incomplete`, so the script names it and exits non-zero; an inert marker adds nothing (the startup line says so). | Test hook `STANDALONE_EVIDENCE_MARKER_SCAN=fail`; case: marker active, exit 1, `cleanup incomplete: … marker could not be read`, no `cleanup ok`, server and schema gone. |
+| 26  | fixed    | `baseUrlOf()`, `checkStandardOutput()` | Every reference is resolved against the effective base URL; the resolved origin and pathname are checked before any fetch.                                                                           | Cases: `<base href="https://elsewhere.example/">` reported; `/assets/../index.html` reported; the valid index still passes.                                               |
+| 27  | fixed    | N11c                                   | `page.on("websocket")` armed before the navigation; no socket in the agent window; a control opens `/canvas/api/agent/sessions/control/editor` and must be caught.                                   | Annotations `N11c websockets {"attempted":[],"observed":[]}` and the control's one socket.                                                                                |
+| 28  | fixed    | the three validators, docs             | `port` refused with `host`, `socket`, `db`, `dbname` and `database`.                                                                                                                                 | Refusal cases in both check scripts and the config loop.                                                                                                                  |
+
+## Rebase repair on the accounts-era main — by the reviewer
+
+`main` moved while this branch was in review: the standalone server now
+defaults to an accounts mode (`AUTO_CANVAS_AUTH` unset or `accounts`; `local`
+is the legacy single-user mode), and the standard editor gained an account
+gate. Rebasing this branch onto it (`origin/main` `d8c86d1`) needed three
+repairs, all made by the reviewer:
+
+1. **`playwright.config.ts`**: the notebook mode is added to main's new
+   mode selection (prefix, accounts, standard) and refuses
+   `AUTO_CANVAS_E2E_ACCOUNTS` as well.
+2. **The standard baseline** (`tasks/T162b-notebook-browser-tests/standard-tests.baseline.txt`)
+   gained the 17 tests main added (`chrome-isolation`, `file-drop`,
+   `intranet-http`): 459 → 476, a pure addition.
+3. **The fixture's sibling server** now passes `AUTO_CANVAS_AUTH=local`
+   explicitly (it used to inherit the default, which was single-user). Without
+   it the sibling ran in accounts mode and N11d/N11b failed.
+4. **N11b re-scoped** — the standard build's account gate needs the API
+   before anything else, so with the API unreachable the editor shows
+   "Account server unavailable" and no recovery content, instead of the
+   recovery prompt the parent plan's C-1 asked for. The case now asserts the
+   gate screen, Retry, and the absence of the banner and the canvas, with the
+   reason in the case. This supersedes that clause of C-1; the owner should
+   know the standalone editor no longer boots without its account server.
+
+Acceptance after the repairs, by the reviewer: fixture check passed (39
+refusals), 31 notebook tests passed, the notebook selection check passed, the
+standard listing equal to the new baseline; builds, typecheck, lint, format,
+docs 0.
+
+## Round 6 — codex round 5 findings (three P2) — accepted
+
+Reviewed: codex `gpt-6.2-sol` PR review round 5 of PR 117 at `22133ec`, the
+three P2 findings; the implementer's round-6 diff; the reviewer reran the
+fixture check, the evidence check, the notebook suite and both listings.
+
+| #   | Severity | Where                                | Finding                                                                                                                                                                     | Fix / evidence                                                                                                                                                                                                                                                                                                            |
+| --- | -------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 29  | fixed    | `standalone-build-evidence.mjs`      | A `ps` failure at shutdown rejected before any signal: the detached `--run` command survived its known group leader.                                                         | Shutdown scans retry (`TABLE_SCAN_ATTEMPTS`); an unreadable table routes to `stopRunUninspected()`, which signals the run's own group from the leader this script spawned (SIGTERM, SIGKILL after the deadline) and reports the descendants as unverified. Hook `STANDALONE_EVIDENCE_PROCESS_TABLE=fail`; case (vid): exit 130, group `(pid pid pid) stopped from its leader, descendants reported unverified`. |
+| 30  | fixed    | `checkStandardOutput()` (C-4)        | Only the resolved URL was checked, so `assets/main.js` fetched from `/` and an absolute URL to the verification server passed.                                              | The raw attribute must start with `/assets/` before the resolved checks; cases: `C-4 relative attribute` and `C-4 absolute attribute` both reported, the valid index passes.                                                                                                                                               |
+| 31  | fixed    | N7 (`notebook-worker.spec.ts`)       | The no-store fallback was chosen from the current preview's cache reuse only; a non-reused history seed could be fetched with the default cache mode and still pass.        | `reused` is per URL, `fallback` lists the URLs whose own seed was not reused; the wrapper records `{url, cache}` and each fallback URL must have its product request(s) with `no-store`, plus the aggregate. The fallback branch is unreachable on this machine (Chrome reuses both seeds); it was verified with a scratch tweak (`reused {current:true, history:false}`, history recorded `no-store`) and the file restored byte-identically. |
+
+Rerun by the reviewer on this tree: `notebook-e2e-fixture-check` passed
+(39 refusals), `standalone-build-evidence-check` passed (25 refusals, all C-4
+cases, the unread-table case), standard listing equal to the 476-line
+baseline, notebook listing 31, notebook suite 31 passed.
+
+## Round 7 — codex round 6 findings (1 P1, 2 P2, 2 P3) — P1 and two findings fixed, one rebutted
+
+Reviewed: codex `gpt-6.2-sol` PR review round 6 of PR 117 at `0e80171`; each
+finding checked against the accounts-era base.
+
+| #   | Severity | Where                                    | Finding                                                                                                                                       | Outcome                                                                                                                                                                                                                                       |
+| --- | -------- | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 32  | P1 fixed | `standalone-build-evidence.mjs` startServer | The server is spawned with `AUTO_CANVAS_*` stripped, so on the accounts-era base it defaults to accounts mode and the C-1(d) Agent specs (fresh contexts, no sign-in) land on the account gate. | `AUTO_CANVAS_AUTH: "local"` is set explicitly (as the notebook fixture's sibling does). The evidence check passes (25 refusals, all cases). The C-1(d) command needs a live Agent-enabled build and PostgreSQL; it runs in the reviewer's disposable checkout, not here. |
+| 33  | P2 fixed | `notebook-evidence.spec.ts` N11c, build | The notebook artifact was built with `VITE_ICM_AGENT_UI` unset, so the production default alone suppressed the Agent and the notebook gate was untested. | `PUBLIC_AGENT_UI_ENABLED` now requires `!ICM_NOTEBOOK`, and `build:notebook-editor` builds with `VITE_ICM_AGENT_UI=enabled`; the notebook suite (31 cases) passes against that artifact, so N11c proves the notebook gate suppresses Agent even when the flag says enabled. |
+| 34  | P2 rebutted | `stopRunUninspected()`                 | After the leader exits unnoticed a same-group child could ignore SIGTERM, and no SIGKILL follows. | With the process table unreadable and the leader gone, addressing the group id risks signalling a foreign process (a reused pgid); the script deliberately signals only the group it can still identify and reports the descendants as unverified with a non-zero exit. Reason posted on the PR. |
+| 35  | P3 fixed | `processTable()`, `markedPids()`        | The `ps` scans had no timeout: a stalled scan delayed cleanup before any signal. | Both scans carry `SCAN_TIMEOUT_MS` (10 s); a timeout rejects like an unreadable scan and takes the existing retry/unread path. |
+| 36  | P3 fixed | `health()`                              | A server that listens but stalls `/api/health` could hold the readiness loop past its 30 s limit. | The fetch and the body read share the remaining budget through `AbortSignal.timeout`. |
+
+Rerun by the reviewer: evidence check passed; notebook suite 31 passed against
+the enabled-flag artifact; `pnpm build`/`build:notebook-editor` 0; agent unit
+tests 369 passed; typecheck/lint/format 0.

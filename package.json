@@ -86,7 +86,7 @@
     "test:e2e": "playwright test",
     "test:e2e:local": "pnpm --filter \"@icm/editor^...\" --filter \"@icm/mcp-server...\" --if-present build && playwright test",
     "build:e2e": "node scripts/build-e2e-editor.mjs",
-    "build:notebook-editor": "AUTO_CANVAS_BASE_PATH=/canvas VITE_AUTO_CANVAS_AUTH=notebook pnpm --filter @icm/editor exec vite build --outDir dist-notebook --emptyOutDir",
+    "build:notebook-editor": "AUTO_CANVAS_BASE_PATH=/canvas VITE_AUTO_CANVAS_AUTH=notebook VITE_ICM_AGENT_UI=enabled pnpm --filter @icm/editor exec vite build --outDir dist-notebook --emptyOutDir",
     "typecheck": "tsc -p tsconfig.check.json --noEmit",
     "deadcode": "knip --no-progress && knip --production --no-progress",
     "symbols:razavi-signal-flow": "node scripts/generate-razavi-signal-flow-assets.mjs",
