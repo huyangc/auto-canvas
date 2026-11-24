@@ -109,6 +109,12 @@ export function ShelfWall() {
     y: number;
   } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  // A filter change can hide the tile whose menu is open (a keyboard switch
+  // fires no outside pointerdown), so it closes the menu too.
+  function showFilter(next: "all" | "favorites") {
+    setMenu(null);
+    setFilter(next);
+  }
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
     if (!menu) return;
@@ -364,7 +370,7 @@ export function ShelfWall() {
           <button
             type="button"
             aria-pressed={filter === "all"}
-            onClick={() => setFilter("all")}
+            onClick={() => showFilter("all")}
           >
             All
           </button>
@@ -372,7 +378,7 @@ export function ShelfWall() {
             type="button"
             aria-pressed={filter === "favorites"}
             data-testid="shelf-filter-favorites"
-            onClick={() => setFilter("favorites")}
+            onClick={() => showFilter("favorites")}
           >
             <span aria-hidden="true">♥</span> Favorites
           </button>

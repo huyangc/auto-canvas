@@ -166,8 +166,15 @@ it("toggles a favorite from the heart beside the name and filters the wall to fa
     container.querySelector<HTMLElement>('[data-testid="shelf-actions-amp"]')!,
   );
 
+  // A keyboard switch (click, no outside pointerdown) to Favorites hides Bias,
+  // so its open menu must close with it.
+  await press(
+    container.querySelector<HTMLElement>('[data-testid="shelf-actions-bias"]')!,
+  );
+  expect(container.querySelector('[role="menu"]')).not.toBeNull();
   expect(filterButton("All").getAttribute("aria-pressed")).toBe("true");
   await press(filterButton("♥ Favorites"));
+  expect(container.querySelector('[role="menu"]')).toBeNull();
   expect(filterButton("♥ Favorites").getAttribute("aria-pressed")).toBe("true");
   expect(tiles()).toEqual(["shelf-tile-amp"]);
   // The count still describes the whole shelf.
