@@ -227,8 +227,14 @@ function buildWheel(python, epoch) {
       2,
       `remove the setuptools leftovers in the plugin tree first: ${before.map((path) => relative(root, path)).join(", ")}`,
     );
-  const out = mkdtempSync(join(tmpdir(), "auto-canvas-wheel-"));
+  // The build runs in a temporary copy: the checkout's plugin tree is never
+  // written to.
+  const scratch = mkdtempSync(join(tmpdir(), "auto-canvas-wheel-"));
+  const out = join(scratch, "out");
+  const source = join(scratch, "plugin");
   try {
+    mkdirSync(out);
+    cpSync(join(root, PLUGIN), source, { recursive: true });
     const result = spawnSync(
       python,
       [
@@ -241,10 +247,10 @@ function buildWheel(python, epoch) {
         "--disable-pip-version-check",
         "-w",
         out,
-        join(root, PLUGIN),
+        source,
       ],
       {
-        cwd: root,
+        cwd: scratch,
         encoding: "utf8",
         env: {
           PATH: process.env.PATH ?? "/usr/bin:/bin",
@@ -258,21 +264,20 @@ function buildWheel(python, epoch) {
     );
     if (result.error || result.status !== 0)
       throw new Error(
-        `pip wheel failed (${result.error?.message ?? `exit ${result.status}`}):\n${result.stdout}${result.stderr}`,
+        `pip wheel failed (${result.error?.message ?? `exit ${result.status}`}):
+${result.stdout}${result.stderr}`,
       );
     const wheels = readdirSync(out).filter((name) => name.endsWith(".whl"));
     if (wheels.length !== 1)
       throw new Error(`pip wheel wrote ${wheels.length} wheels`);
     return { name: wheels[0], data: readFileSync(join(out, wheels[0])) };
   } finally {
-    rmSync(out, { recursive: true, force: true });
-    for (const path of pluginLeftovers())
-      rmSync(path, { recursive: true, force: true });
-    const left = pluginLeftovers();
-    if (left.length)
+    rmSync(scratch, { recursive: true, force: true });
+    const after = pluginLeftovers();
+    if (after.length)
       fail(
         1,
-        `could not remove ${left.map((path) => relative(root, path)).join(", ")}`,
+        `the plugin tree has setuptools leftovers after the build: ${after.map((path) => relative(root, path)).join(", ")}`,
       );
   }
 }

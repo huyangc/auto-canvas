@@ -28,3 +28,20 @@ vitest run scripts/launcher.test.mjs (twice)            → 0   22 passed each
 pnpm typecheck / lint / format:check / docs:check / deadcode → 0
 databases named auto_canvas_it_* afterwards             → 0
 ```
+
+## Round 2 — accepted
+
+Reviewed: codex `gpt-6.2-sol` PR review round 1 of PR 139 at `28a8b61` (four
+P2, one P3, no blocking finding) and the fixes a sonnet subagent made for four
+of them; acceptance rerun by Opus.
+
+| #   | Severity | Where                               | Finding                                                                                                                       | Outcome                                                                                                                                                                                                                                                   |
+| --- | -------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 4   | fixed    | `package-notebook-canvas-check.mjs` | A tarball with `index.html` but without its scripts passed.                                                                   | `checkEntryAssets`: every module script and stylesheet of the served page is fetched through the mount (200, the right content type). Negative control: the entry script removed → 20 of 21, failing exactly there.                                       |
+| 5   | fixed    | `checkLayout`, `main`               | A rejected layout still went on to create a database and run the launchers.                                                   | `checkLayout` returns whether the layout is acceptable; `main` stops before allocating anything. A tarball with `init-db.sh` as a symlink stops at the layout and creates no database.                                                                    |
+| 6   | fixed    | the check's cleanup                 | Signalling `init-db.sh` alone could leave its Node child running while the database was dropped.                              | Launchers run in their own process groups; cleanup stops each group (SIGTERM, SIGKILL after 15 s) before dropping and removing. An interrupt during a slow `init-db.sh` left no process of the group.                                                     |
+| 7   | fixed    | `buildWheel`                        | An interrupted packaging run could leave `build/` or `*.egg-info` in the checkout.                                            | The wheel is built from a temporary copy; the checkout's plugin tree is only checked, before and after. The wheel's content is unchanged (`diff -r` of the unzipped wheels clean); its sha256 follows the commit time it is stamped with.                 |
+| 8   | rebutted | `scanBundle`                        | The guard scans text with regular expressions; a string could trip it and a comment between `import` and `(` could slip past. | Kept. The guard is a second line on the bundler's own output, which has no such comments; the authority on what the server loads is the check's module trace (only the bundle and `node:` builtins). A parser would add a dependency. Answered on the PR. |
+
+Rerun: packaging exit 0 (bundle sha256 unchanged); the check 21 of 21; unit
+tests 9; typecheck, lint, format, deadcode 0.
