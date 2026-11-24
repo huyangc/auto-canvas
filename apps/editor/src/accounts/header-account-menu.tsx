@@ -115,7 +115,7 @@ export function HeaderAccountMenu({
                     // Left and the menu's Escape would hide them.
                     if (
                       (event.target as Element).closest(
-                        "input, textarea, select, dialog, .inline-confirm",
+                        "input, textarea, select, dialog, .inline-confirm-decision",
                       )
                     )
                       event.stopPropagation();

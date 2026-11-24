@@ -215,7 +215,7 @@ export function FileCommandMenu({
                     // modal.
                     if (
                       (event.target as Element).closest(
-                        "input, textarea, select, dialog, .inline-confirm",
+                        "input, textarea, select, dialog, .inline-confirm-decision",
                       )
                     )
                       event.stopPropagation();
