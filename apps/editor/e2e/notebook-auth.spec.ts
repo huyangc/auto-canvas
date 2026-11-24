@@ -718,7 +718,7 @@ test("N4c a 401 on a mounted document reloads the page", async ({
   const identified = nextAuthMe(page, alice);
   const reloaded = recorder.markAtNavigation(page, "reloaded");
   // Opening the Shelf asks for the Project list: the 401 ends the page.
-  await projectTabAction(page, "Open Shelf project in tab");
+  await projectTabAction(page, "Open Cloud Project…");
   await loaded;
   expect(bearers).toEqual([alice.bearer]);
   expect((await identified).status()).toBe(200);
