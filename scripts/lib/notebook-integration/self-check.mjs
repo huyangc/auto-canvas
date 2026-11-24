@@ -2,9 +2,11 @@
 // (a throwaway local git repository cloned inside the sandbox, never the
 // notebook checkout). Each negative control also proves that the file outside
 // the clone is byte-identical afterwards.
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import fs from "node:fs";
+import net from "node:net";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -23,11 +25,20 @@ import {
 } from "./sandbox.mjs";
 import { dependencyManifests } from "./stage-a.mjs";
 import {
+  adminSession,
+  cleanUp,
   databaseLedger,
   dropDatabases,
   firstRefusal,
+  identityOf,
   managedCanvas,
+  managedCompanions,
+  misroutedAnswer,
   misroutingProblems,
+  observedLaunch,
+  openAdmin,
+  projectList,
+  runExtensionStop,
 } from "./stage-m.mjs";
 import {
   cloneGuards,
@@ -1113,6 +1124,25 @@ const quietReporter = () => {
   };
 };
 
+/** A reporter that keeps its ok and fail lines (`name: detail`). */
+const recordingReporter = () => {
+  const lines = { ok: [], fail: [] };
+  return {
+    lines,
+    report: {
+      ok: (name) => lines.ok.push(name),
+      fail: (name, detail) => lines.fail.push(`${name}: ${detail}`),
+      note() {},
+      info() {},
+      check(name, condition, detail) {
+        if (condition) this.ok(name);
+        else this.fail(name, typeof detail === "function" ? detail() : detail);
+        return Boolean(condition);
+      },
+    },
+  };
+};
+
 /**
  * R8-2: the one gate refuses before a request is sent to a port this run no
  * longer owns (or never owned), so the single-rule control and the stage-A
@@ -1889,6 +1919,12 @@ async function stageMSharedControls(sandbox, report) {
   await databaseShutdownControl(report);
   misroutingVerdictControl(report);
   await signOutDeadlineControl(report);
+  await extensionStopControl(sandbox, report);
+  await companionOwnershipControl(sandbox, report);
+  await unresponsivePostgresControl(sandbox, report);
+  await dropEachControl(report);
+  await readinessFromLaunchControl(report);
+  projectListControl(report);
 }
 
 /** `sandbox.env(…, { envFile: false })` leaves the key out; the default keeps it. */
@@ -2218,32 +2254,15 @@ async function canvasOwnershipControl(sandbox, report) {
  * stand in for PostgreSQL.
  */
 async function databaseShutdownControl(report) {
-  const fakeAdmin =
-    (issued, onCancel = () => undefined) =>
-    async (work) =>
-      work({
-        async query(sql, params) {
-          issued.push({ sql, params });
-          if (/pg_cancel_backend/u.test(sql)) onCancel(params[0]);
-          return { rows: [] };
-        },
-      });
-  const recorder = () => {
-    const lines = { ok: [], fail: [] };
-    return {
-      lines,
-      report: {
-        ok: (name) => lines.ok.push(name),
-        fail: (name, detail) => lines.fail.push(`${name}: ${detail}`),
-        check(name, condition, detail) {
-          if (condition) this.ok(name);
-          else
-            this.fail(name, typeof detail === "function" ? detail() : detail);
-          return Boolean(condition);
-        },
-      },
-    };
-  };
+  const fakeAdmin = (issued, onCancel = () => undefined) => ({
+    async query(sql, params) {
+      issued.push({ sql, params });
+      if (/pg_cancel_backend/u.test(sql)) onCancel(params[0]);
+      return { rows: [] };
+    },
+    async close() {},
+  });
+  const recorder = recordingReporter;
 
   // 1. A create held for 400 ms when the cleanup begins.
   const ledger = databaseLedger({ settleMs: 3000 });
@@ -2263,7 +2282,7 @@ async function databaseShutdownControl(report) {
   const held1 = recorder();
   const dropping = dropDatabases({
     databases: ledger,
-    withAdmin: fakeAdmin(issued),
+    admin: fakeAdmin(issued),
     report: held1.report,
   });
   let late;
@@ -2307,7 +2326,7 @@ async function databaseShutdownControl(report) {
     const out = recorder();
     await dropDatabases({
       databases: ledger2,
-      withAdmin: fakeAdmin(issued2, () => {
+      admin: fakeAdmin(issued2, () => {
         if (cancellable)
           fail(new Error("canceling statement due to user request"));
       }),
@@ -2397,6 +2416,41 @@ function misroutingVerdictControl(report) {
       ),
     JSON.stringify({ clean, problems }),
   );
+  // PR 140 R3-1: JSON is recognised by its body as well as by any casing of
+  // its media type.
+  const names = ["p-seeded", "Seeded x", "Standalone y"];
+  const of = (rawPath, res) =>
+    misroutedAnswer({ rawPath, token: true, res, names });
+  const verdicts = misroutingProblems([
+    of("/canvas/api/projects", {
+      status: 200,
+      headers: {},
+      body: ' {"projects":[]}\n',
+    }),
+    of("/canvas/api/auth/me", {
+      status: 200,
+      headers: { "content-type": "Application/JSON; charset=utf-8" },
+      body: "not parsed",
+    }),
+    of("/canvas", {
+      status: 200,
+      headers: { "content-type": "text/html" },
+      body: "<!doctype html><title>x</title>",
+    }),
+    of("/canvas/../api/projects", {
+      status: 404,
+      headers: { "content-type": "application/json" },
+      body: '{"error":"not-found"}',
+    }),
+  ]);
+  report.check(
+    "S PR 140 R3-1: a misrouted 200 is JSON by its body without a content type, and by an Application/JSON type",
+    verdicts.length === 2 &&
+      verdicts[0] ===
+        "with the token GET /canvas/api/projects: 200 with JSON" &&
+      verdicts[1] === "with the token GET /canvas/api/auth/me: 200 with JSON",
+    JSON.stringify(verdicts),
+  );
 }
 
 /**
@@ -2456,5 +2510,565 @@ async function signOutDeadlineControl(report) {
       silent.starts.length === 1 &&
       silent.elapsed < 700,
     JSON.stringify({ within, late, silent }),
+  );
+}
+
+// ---- PR 140 review round 2: the stop script, pids, PostgreSQL, readiness ----
+
+/** A sleeping Node process, this script's own child outside any owned group. */
+function looseSleeper() {
+  const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1e9)"], {
+    detached: true,
+    stdio: "ignore",
+    env: { PATH: process.env.PATH ?? "" },
+  });
+  child.unref();
+  return child.pid;
+}
+
+/** Ends a process this control started, by its pid, if it is still alive. */
+function endOwn(pid) {
+  if (pid > 0 && pidAlive(pid))
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      // gone meanwhile
+    }
+}
+
+/**
+ * The clone's stop script is checked immediately before it runs. Throwaway
+ * "clones": one whose scripts/extension_services.py is a symlink to a script
+ * outside the sandbox that writes a marker when run, one whose scripts/ is a
+ * symlink to the directory holding it, and one with a regular script that
+ * writes a marker inside. The first goes through the stage's whole cleanup
+ * (`cleanUp`): the stop is refused, named, the marker never written, and the
+ * cleanup goes on (the stage's group stopped, the recorded companion ended
+ * by pid, the recorded database dropped). The second is refused too; the
+ * third runs (its marker appears), so a run would have been seen. Node stands
+ * in for the interpreter.
+ */
+async function extensionStopControl(sandbox, report) {
+  const base = path.join(sandbox.root, "self-check", "ext-stop");
+  const outside = fs.mkdtempSync(
+    path.join(fs.realpathSync(os.tmpdir()), "t164b-outside-"),
+  );
+  const outsideMarker = path.join(outside, "ran.txt");
+  fs.writeFileSync(
+    path.join(outside, "extension_services.py"),
+    `require("fs").writeFileSync(${JSON.stringify(outsideMarker)}, process.argv.slice(2).join(" "));\n`,
+  );
+  const cloneAt = (name) => {
+    const nb = path.join(base, name, "nb");
+    sandbox.makeDir(nb, { recursive: true });
+    return nb;
+  };
+  const linkedFile = cloneAt("linked-file");
+  sandbox.makeDir(path.join(linkedFile, "scripts"));
+  // The scenario plants the links directly (the validated writer refuses one).
+  fs.symlinkSync(
+    path.join(outside, "extension_services.py"),
+    path.join(linkedFile, "scripts/extension_services.py"),
+  );
+  const linkedDir = cloneAt("linked-dir");
+  fs.symlinkSync(outside, path.join(linkedDir, "scripts"));
+  const real = cloneAt("real");
+  const insideMarker = path.join(base, "real", "ran.txt");
+  sandbox.makeDir(path.join(real, "scripts"));
+  sandbox.writeFile(
+    path.join(real, "scripts/extension_services.py"),
+    `require("fs").writeFileSync(${JSON.stringify(insideMarker)}, process.argv.slice(2).join(" "));\n`,
+  );
+  const stopIn = (nb, rec, label) =>
+    runExtensionStop({
+      sandbox,
+      report: rec.report,
+      nb,
+      python: process.execPath,
+      label,
+      timeoutMs: 10_000,
+    });
+
+  const group = sandbox.start(
+    process.execPath,
+    ["-e", "setInterval(() => {}, 1e9)"],
+    { cwd: base, name: "ext-stop-group", env: sandbox.env() },
+  );
+  await group.ready;
+  const loose = looseSleeper();
+  let result;
+  try {
+    const ledger = databaseLedger({ settleMs: 100 });
+    await ledger.create(
+      { processID: 1, query: async () => ({ rows: [] }) },
+      "auto_canvas_it_ctl_extstop",
+    );
+    const issued = [];
+    const rec = recordingReporter();
+    await waitFor(() => identityOf(loose) !== undefined, 2000, 20);
+    await cleanUp({
+      sandbox,
+      report: rec.report,
+      nb: linkedFile,
+      launched: true,
+      groups: [group.pgid],
+      companions: new Map([
+        [loose, { name: "worker", pid: loose, identity: identityOf(loose) }],
+      ]),
+      databases: ledger,
+      admin: {
+        async query(sql) {
+          issued.push(sql);
+          return { rows: [] };
+        },
+        async close() {},
+      },
+      extensionStop: (label) => stopIn(linkedFile, rec, label),
+    });
+    const dirRec = recordingReporter();
+    const dirRan = await stopIn(linkedDir, dirRec, "linked-dir:");
+    const realRec = recordingReporter();
+    const realRan = await stopIn(real, realRec, "real:");
+    const groupGone = await waitFor(
+      () => {
+        try {
+          process.kill(-group.pgid, 0);
+          return false;
+        } catch (error) {
+          return error.code === "ESRCH";
+        }
+      },
+      2000,
+      20,
+    );
+    const looseGone = await waitFor(() => !pidAlive(loose), 2000, 20);
+    result = {
+      fail: rec.lines.fail,
+      ok: rec.lines.ok,
+      outsideMarker: fs.existsSync(outsideMarker),
+      groupAlive: !groupGone,
+      looseAlive: !looseGone,
+      drops: issued.filter((sql) => sql.startsWith("DROP DATABASE")),
+      dirRan,
+      dirFail: dirRec.lines.fail,
+      realRan,
+      realMarker: sandbox.readFile(insideMarker, "utf8"),
+    };
+  } finally {
+    endOwn(loose);
+    await sandbox.stopGroup(group.pgid);
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+  report.check(
+    "S PR 140 R2-1: a stop script that is a symlink (or under a linked scripts/) is never run, the refusal is reported and the cleanup goes on",
+    result.fail.length === 1 &&
+      /^cleanup: extension_services\.py stop ends the companion services: not run: refused: <sandbox>\/self-check\/ext-stop\/linked-file\/nb\/scripts\/extension_services\.py is a symlink/u.test(
+        result.fail[0],
+      ) &&
+      !result.outsideMarker &&
+      !result.groupAlive &&
+      !result.looseAlive &&
+      result.ok.some((line) =>
+        line.includes("(1 recorded, 1 signalled by pid)"),
+      ) &&
+      result.drops.length === 1 &&
+      result.drops[0].includes("auto_canvas_it_ctl_extstop") &&
+      result.ok.some((line) => line.includes("databases are dropped")) &&
+      result.dirRan === false &&
+      result.dirFail.length === 1 &&
+      /linked-dir\/nb\/scripts is a symlink/u.test(result.dirFail[0]) &&
+      result.realRan === true &&
+      result.realMarker === "stop",
+    JSON.stringify(result),
+  );
+}
+
+/**
+ * The supervisor and the worker named in silicon-notebook's state are
+ * recorded only when they are this clone's: throwaway "clones" whose
+ * scripts/extension_services.py (run as `_supervise --state-dir …`) starts
+ * scripts/extension_service_worker.py <its pid>. A genuine pair is recorded;
+ * a supervisor pid now held by another process (and its worker with it), a
+ * worker that is not the supervisor's child, a worker run from another
+ * clone, and a supervisor run from another clone are not. Node stands in for
+ * the interpreter.
+ */
+async function companionOwnershipControl(sandbox, report) {
+  const base = path.join(sandbox.root, "self-check", "companions");
+  const supervisorCode =
+    'const { spawn } = require("child_process");' +
+    'const worker = spawn(process.execPath, [process.env.STUB_WORKER, String(process.pid)], { stdio: "ignore" });' +
+    'require("fs").writeFileSync(process.env.STUB_PID_FILE, String(worker.pid));' +
+    "setInterval(() => {}, 1e9);\n";
+  const clones = {};
+  for (const name of ["nb", "other"]) {
+    const scripts = path.join(base, name, "scripts");
+    sandbox.makeDir(scripts, { recursive: true });
+    sandbox.writeFile(
+      path.join(scripts, "extension_services.py"),
+      supervisorCode,
+    );
+    sandbox.writeFile(
+      path.join(scripts, "extension_service_worker.py"),
+      "setInterval(() => {}, 1e9);\n",
+    );
+    clones[name] = path.join(base, name);
+  }
+  const { nb, other } = clones;
+  const handles = [];
+  const start = async (name, args, extra = {}) => {
+    const handle = sandbox.start(process.execPath, args, {
+      cwd: base,
+      name: `companions-${name}`,
+      env: sandbox.env(extra),
+    });
+    handles.push(handle);
+    await handle.ready;
+    return handle.pid;
+  };
+  const supervise = async (name, clone, workerClone = clone) => {
+    const pidFile = path.join(base, `${name}.pid`);
+    const pid = await start(
+      name,
+      [
+        path.join(clone, "scripts/extension_services.py"),
+        "_supervise",
+        "--state-dir",
+        path.join(clone, ".local/run/extensions"),
+      ],
+      {
+        STUB_WORKER: path.join(
+          workerClone,
+          "scripts/extension_service_worker.py",
+        ),
+        STUB_PID_FILE: pidFile,
+      },
+    );
+    await waitFor(() => sandbox.readFile(pidFile, "utf8"), 5000, 20);
+    const worker = Number(sandbox.readFile(pidFile, "utf8"));
+    await waitFor(
+      () => /extension_service_worker/u.test(identityOf(worker) ?? ""),
+      5000,
+      20,
+    );
+    return { pid, worker };
+  };
+  const results = {};
+  try {
+    const genuine = await supervise("genuine", nb);
+    const foreignWorker = await supervise("foreign-worker", nb, other);
+    const otherClone = await supervise("other-clone", other);
+    const sleeper = await start("reused", ["-e", "setInterval(() => {}, 1e9)"]);
+    const stray = await start("stray", [
+      path.join(nb, "scripts/extension_service_worker.py"),
+      String(genuine.pid),
+    ]);
+    const attempt = (supervisorPid, workerPid) => {
+      const recorded = [];
+      const result = managedCompanions({
+        nb,
+        supervisorPid,
+        workerPid,
+        record: (...entry) => recorded.push(entry.slice(0, 2)),
+      });
+      return { ...result, recorded };
+    };
+    Object.assign(results, {
+      genuine: attempt(genuine.pid, genuine.worker),
+      reused: attempt(sleeper, genuine.worker),
+      notAChild: attempt(genuine.pid, stray),
+      foreignWorker: attempt(foreignWorker.pid, foreignWorker.worker),
+      otherClone: attempt(otherClone.pid, otherClone.worker),
+      external: attempt(genuine.pid, undefined),
+      pids: { genuine, sleeper, stray, foreignWorker, otherClone },
+    });
+  } finally {
+    for (const handle of handles) await sandbox.stopGroup(handle.pgid);
+  }
+  const { genuine, reused, notAChild, foreignWorker, otherClone, external } =
+    results;
+  const p = results.pids ?? {};
+  const refused = (result, pattern) =>
+    result.problems.length === 1 && pattern.test(result.problems[0]);
+  report.check(
+    "S PR 140 R2-2: the state's supervisor and worker are recorded only when they are this clone's extension_services.py _supervise and its extension_service_worker.py child",
+    genuine?.supervisorPid === p.genuine?.pid &&
+      genuine.workerPid === p.genuine.worker &&
+      genuine.problems.length === 0 &&
+      JSON.stringify(genuine.recorded) ===
+        JSON.stringify([
+          ["supervisor", p.genuine.pid],
+          ["worker", p.genuine.worker],
+        ]) &&
+      reused.recorded.length === 0 &&
+      reused.problems.length === 2 &&
+      /^supervisor \d+ runs ".*", not this clone's extension_services\.py _supervise: not recorded, never signalled$/u.test(
+        reused.problems[0],
+      ) &&
+      /^worker \d+ is not checked without a verified supervisor/u.test(
+        reused.problems[1],
+      ) &&
+      notAChild.recorded.length === 1 &&
+      notAChild.workerPid === 0 &&
+      refused(
+        notAChild,
+        /^worker \d+ is a child of \d+, not of the supervisor \d+/u,
+      ) &&
+      foreignWorker.recorded.length === 1 &&
+      foreignWorker.workerPid === 0 &&
+      refused(
+        foreignWorker,
+        /^worker \d+ runs ".*other\/scripts\/extension_service_worker\.py \d+", not this clone's/u,
+      ) &&
+      otherClone.recorded.length === 0 &&
+      otherClone.problems.length === 2 &&
+      /^supervisor \d+ runs ".*other\/scripts\/extension_services\.py _supervise/u.test(
+        otherClone.problems[0],
+      ) &&
+      external.supervisorPid === p.genuine.pid &&
+      external.recorded.length === 1 &&
+      external.problems.length === 0,
+    JSON.stringify(results),
+  );
+}
+
+/**
+ * The cleanup's PostgreSQL steps are bounded: against a TCP listener that
+ * accepts connections and never answers (on a free port, as the admin URL),
+ * with two databases recorded and a create that never settles, the database
+ * cleanup ends within its budget, reports the straggler and each database by
+ * name, and still reports the check of what remains. The stage's own
+ * parameters are scaled down here (1.5 s per step, 4 s in all, 0.3 s
+ * settling); the control gives up after 15 s, so a cleanup that waits on the
+ * server fails it instead of hanging the stage.
+ */
+async function unresponsivePostgresControl(sandbox, report) {
+  const port = await sandbox.freePort();
+  const sockets = new Set();
+  const server = net.createServer((socket) => {
+    sockets.add(socket);
+    socket.on("error", () => undefined);
+    socket.on("close", () => sockets.delete(socket));
+  });
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, "127.0.0.1", resolve);
+  });
+  let result;
+  try {
+    const ledger = databaseLedger({ settleMs: 300 });
+    for (const name of [
+      "auto_canvas_it_ctl_slow_a",
+      "auto_canvas_it_ctl_slow_b",
+    ])
+      await ledger.create(
+        { processID: 1, query: async () => ({ rows: [] }) },
+        name,
+      );
+    ledger
+      .create(
+        { processID: 4545, query: () => new Promise(() => undefined) },
+        "auto_canvas_it_ctl_slow_c",
+      )
+      .catch(() => undefined);
+    const rec = recordingReporter();
+    const started = Date.now();
+    const outcome = await Promise.race([
+      dropDatabases({
+        databases: ledger,
+        admin: adminSession({
+          open: openAdmin(`postgresql://check@127.0.0.1:${port}/check`),
+          stepMs: 1500,
+          budgetMs: 4000,
+        }),
+        report: rec.report,
+      }).then(() => "ended"),
+      sleep(15_000).then(() => "still waiting after 15 s"),
+    ]);
+    result = {
+      outcome,
+      ms: Date.now() - started,
+      fail: rec.lines.fail,
+      connections: sockets.size,
+    };
+  } finally {
+    for (const socket of sockets) socket.destroy();
+    await new Promise((resolve) => server.close(resolve));
+  }
+  const failed = (pattern) => result.fail.some((line) => pattern.test(line));
+  report.check(
+    `S PR 140 R2-3: against a PostgreSQL that never answers, the database cleanup ends within its budget (${(result.ms / 1000).toFixed(1)} s of 4 s) and names every database it could not drop`,
+    result.outcome === "ended" &&
+      result.ms < 5000 &&
+      result.fail.length === 4 &&
+      failed(
+        /still running after its cancellation: auto_canvas_it_ctl_slow_c/u,
+      ) &&
+      failed(
+        /^cleanup: database auto_canvas_it_ctl_slow_a is dropped: the drop failed: no connection to PostgreSQL within 1\.5 s/u,
+      ) &&
+      failed(
+        /^cleanup: database auto_canvas_it_ctl_slow_b is dropped: the drop failed/u,
+      ) &&
+      failed(
+        /^cleanup: the stage's databases are dropped \(auto_canvas_it_ctl_slow_a, auto_canvas_it_ctl_slow_b\): still present: \(which remain could not be read/u,
+      ),
+    JSON.stringify(result),
+  );
+}
+
+/**
+ * Every recorded database's drop is attempted on its own: the first drop
+ * failing does not keep the second from being sent, and the names still
+ * present afterwards are read and reported.
+ */
+async function dropEachControl(report) {
+  const ledger = databaseLedger({ settleMs: 100 });
+  for (const name of ["auto_canvas_it_ctl_each_a", "auto_canvas_it_ctl_each_b"])
+    await ledger.create(
+      { processID: 1, query: async () => ({ rows: [] }) },
+      name,
+    );
+  const issued = [];
+  const rec = recordingReporter();
+  await dropDatabases({
+    databases: ledger,
+    admin: {
+      async query(sql) {
+        issued.push(sql);
+        if (sql.includes("auto_canvas_it_ctl_each_a WITH"))
+          throw new Error("database is being accessed by other users");
+        if (sql.startsWith("SELECT datname"))
+          return { rows: [{ datname: "auto_canvas_it_ctl_each_a" }] };
+        return { rows: [] };
+      },
+      async close() {},
+    },
+    report: rec.report,
+  });
+  const drops = issued.filter((sql) => sql.startsWith("DROP DATABASE"));
+  report.check(
+    "S PR 140 R2-4: a failing drop does not stop the next one, and the databases still present are reported by name",
+    drops.length === 2 &&
+      drops[1] ===
+        "DROP DATABASE IF EXISTS auto_canvas_it_ctl_each_b WITH (FORCE)" &&
+      issued.some((sql) => sql.startsWith("SELECT datname")) &&
+      rec.lines.fail.length === 2 &&
+      rec.lines.fail[0] ===
+        "cleanup: database auto_canvas_it_ctl_each_a is dropped: the drop failed: database is being accessed by other users" &&
+      /dropped \(auto_canvas_it_ctl_each_a, auto_canvas_it_ctl_each_b\): still present: auto_canvas_it_ctl_each_a$/u.test(
+        rec.lines.fail[1],
+      ),
+    JSON.stringify({ issued, fail: rec.lines.fail }),
+  );
+}
+
+/**
+ * The managed readiness deadline runs from the launch, scaled down (limit
+ * 300 ms, a launcher wait of 450 ms, the state read every 20 ms): a service
+ * ready 100 ms after the launch counts with that time although the launcher
+ * wait ends later; one ready only at 380 ms, or never, fails, and its
+ * observation ends at the limit, not with the launcher wait.
+ */
+async function readinessFromLaunchControl(report) {
+  const run = async (readyFrom) => {
+    const since = Date.now();
+    const launched = await observedLaunch({
+      launch: () => sleep(450).then(() => ({ up: true })),
+      read: () => ({ ready: Date.now() - since >= readyFrom }),
+      isReady: (state) => state?.ready === true,
+      since,
+      limitMs: 300,
+      intervalMs: 20,
+    });
+    const verdict = await launched.readiness;
+    return {
+      readyAfter: verdict.readyAfter,
+      problem: verdict.problem,
+      up: Boolean(launched.up),
+    };
+  };
+  const early = await run(100);
+  const late = await run(380);
+  const never = await run(Infinity);
+  const stopped = await (async () => {
+    const launched = await observedLaunch({
+      launch: async () => undefined,
+      read: () => null,
+      isReady: () => false,
+      since: Date.now(),
+      limitMs: 300,
+      intervalMs: 20,
+    });
+    return (await launched.readiness).problem;
+  })();
+  report.check(
+    "S PR 140 R2-5: the managed service counts as ready only when its state said so within the limit after the launch, observed from the launch on",
+    early.up &&
+      early.readyAfter >= 100 &&
+      early.readyAfter < 300 &&
+      early.problem === "" &&
+      late.readyAfter === undefined &&
+      /not ready within 0\.3 s of the launch/u.test(late.problem) &&
+      never.readyAfter === undefined &&
+      /not ready within/u.test(never.problem) &&
+      /stopped before the service was ready/u.test(stopped),
+    JSON.stringify({ early, late, never, stopped }),
+  );
+}
+
+/**
+ * A list read in M7, M8 or M-ext counts only as a valid project list: HTTP
+ * 200, the JSON media type, an object with a `projects` array of entries
+ * with ids. An HTML page, an error object, JSON with another media type and
+ * an error status each fail, named; a valid list gives its ids.
+ */
+function projectListControl(report) {
+  const json = { "content-type": "application/json; charset=utf-8" };
+  const valid = projectList({
+    status: 200,
+    headers: json,
+    body: '{"projects":[{"id":"p-1","name":"x"},{"id":"p-2"}],"limit":50}',
+  });
+  const invalid = [
+    {
+      status: 200,
+      headers: { "content-type": "text/html" },
+      body: "<!doctype html>",
+    },
+    { status: 200, headers: json, body: '{"error":"nope"}' },
+    { status: 200, headers: json, body: '{"projects":{}}' },
+    { status: 200, headers: json, body: '{"projects":[{"name":"no id"}]}' },
+    {
+      status: 200,
+      headers: { "content-type": "text/plain" },
+      body: '{"projects":[]}',
+    },
+    { status: 401, headers: json, body: '{"projects":[]}' },
+    { status: "error socket hang up", headers: {}, body: "" },
+  ].map((res) => {
+    try {
+      return projectList(res);
+    } catch (error) {
+      return { ids: [], problem: `threw ${error.message}` };
+    }
+  });
+  report.check(
+    "S PR 140 R2-6: a project list must be a 200 JSON object with a projects array; anything else fails, named",
+    valid.problem === "" &&
+      JSON.stringify(valid.ids) === '["p-1","p-2"]' &&
+      invalid.every(
+        (result) =>
+          result.ids.length === 0 &&
+          /^not a project list: /u.test(result.problem),
+      ) &&
+      /not the JSON media type/u.test(invalid[0].problem) &&
+      /not an object with a projects array/u.test(invalid[1].problem) &&
+      /not an object with a projects array/u.test(invalid[2].problem) &&
+      /has no id/u.test(invalid[3].problem) &&
+      /not the JSON media type/u.test(invalid[4].problem) &&
+      /status 401/u.test(invalid[5].problem) &&
+      /status error socket hang up/u.test(invalid[6].problem),
+    JSON.stringify({ valid, invalid }),
   );
 }

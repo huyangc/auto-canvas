@@ -119,6 +119,56 @@ const parsed = (res) => {
     return undefined;
   }
 };
+const contentTypeOf = (res) => String(res.headers?.["content-type"] ?? "");
+
+/**
+ * A response that must be the canvas's project list (`GET
+ * /canvas/api/projects`): HTTP 200, the JSON media type, and a body that
+ * parses to an object with a `projects` array whose entries each carry a
+ * string id. Returns `{ ids, problem }`: the ids and "", or [] and a problem
+ * naming the response (an HTML page or an error answer never counts as an
+ * empty list).
+ */
+export function projectList(res) {
+  const type = contentTypeOf(res);
+  const body = parsed(res);
+  const why =
+    res.status !== 200
+      ? `status ${res.status}`
+      : !/^application\/json\s*(?:;|$)/iu.test(type.trim())
+        ? "not the JSON media type"
+        : body === null ||
+            typeof body !== "object" ||
+            !Array.isArray(body.projects)
+          ? "the body is not an object with a projects array"
+          : body.projects.some(
+                (project) => typeof project?.id !== "string" || !project.id,
+              )
+            ? "a project entry has no id"
+            : "";
+  if (!why)
+    return { ids: body.projects.map((project) => project.id), problem: "" };
+  return {
+    ids: [],
+    problem: `not a project list: ${why} (status ${res.status}, content-type ${JSON.stringify(type)}, body ${JSON.stringify(String(res.body ?? "").slice(0, 80))})`,
+  };
+}
+
+/**
+ * An answer counts as JSON when its media type names JSON (any case) or its
+ * body, whatever the header says, parses as JSON once trimmed.
+ */
+function answersJson(res) {
+  if (/json/iu.test(contentTypeOf(res))) return true;
+  const text = String(res.body ?? "").trim();
+  if (!text) return false;
+  try {
+    JSON.parse(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /** One `ps -o <field>=…` reading of a pid, or undefined when it is gone. */
 function psOf(fields, pid) {
@@ -137,7 +187,7 @@ function psOf(fields, pid) {
 }
 
 /** `ps -o lstart= -o command=`: a pid's identity, or undefined when it is gone. */
-const identityOf = (pid) => psOf(["lstart", "command"], pid);
+export const identityOf = (pid) => psOf(["lstart", "command"], pid);
 
 /** The managed canvas's command line, as serve.sh starts it. */
 const CANVAS_COMMAND =
@@ -206,6 +256,95 @@ export function managedCanvas({ sandbox, canvasPort, workerPid, record }) {
   return { canvasPid: pid, listeners, problem: "" };
 }
 
+/** `text` as a literal inside a regular expression. */
+const literally = (text) => text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+
+/**
+ * The command lines silicon-notebook gives its companion processes, for a
+ * clone at `nb` (scripts/extension_services.py and
+ * scripts/extension_service_runtime.py at b5850d6): the supervisor is
+ * `<python> <nb>/scripts/extension_services.py _supervise --state-dir
+ * <nb>/.local/run/extensions`, a service worker `<python>
+ * <nb>/scripts/extension_service_worker.py <supervisor pid>`, started by the
+ * supervisor. Both script paths are absolute (the scripts resolve their own).
+ */
+function companionCommands(nb) {
+  const scripts = path.join(nb, "scripts");
+  const supervisor = new RegExp(
+    `^\\S.* ${literally(path.join(scripts, "extension_services.py"))} _supervise --state-dir ${literally(path.join(nb, ".local/run/extensions"))}$`,
+    "u",
+  );
+  const worker = (supervisorPid) =>
+    new RegExp(
+      `^\\S.* ${literally(path.join(scripts, "extension_service_worker.py"))} ${supervisorPid}$`,
+      "u",
+    );
+  return { supervisor, worker };
+}
+
+/**
+ * The supervisor and the service worker that silicon-notebook's state names,
+ * verified before anything records them (a pid in state.json may have been
+ * reused since the process it named exited): the supervisor only when its
+ * command line is this clone's `extension_services.py _supervise`, the worker
+ * only when its parent is that verified supervisor and its command line is
+ * this clone's `extension_service_worker.py <supervisor pid>`; each must keep
+ * its `ps` identity while it is checked. `record(name, pid, identity)` is
+ * called for each verified one; anything else is never recorded (so never
+ * signalled) and named in `problems`. Without `workerPid` (the external
+ * mode) only the supervisor is checked. Returns `{ supervisorPid, workerPid,
+ * problems, commands }`, a pid 0 unless recorded.
+ */
+export function managedCompanions({ nb, supervisorPid, workerPid, record }) {
+  const expected = companionCommands(nb);
+  const problems = [];
+  const commands = {};
+  const verify = (name, pid, problemOf) => {
+    if (!(pid > 0)) {
+      problems.push(`silicon-notebook's state names no ${name} pid`);
+      return 0;
+    }
+    const identity = identityOf(pid);
+    if (identity === undefined) {
+      problems.push(`${name} ${pid} is gone: not recorded`);
+      return 0;
+    }
+    const command = psOf(["command"], pid) ?? "";
+    commands[name] = command;
+    const problem =
+      problemOf(pid, command) ||
+      (identityOf(pid) === identity ? "" : "changed while it was checked");
+    if (problem) {
+      problems.push(`${name} ${pid} ${problem}: not recorded, never signalled`);
+      return 0;
+    }
+    record(name, pid, identity);
+    return pid;
+  };
+  const supervisor = verify("supervisor", supervisorPid, (_pid, command) =>
+    expected.supervisor.test(command)
+      ? ""
+      : `runs ${JSON.stringify(command)}, not this clone's extension_services.py _supervise`,
+  );
+  if (workerPid === undefined)
+    return { supervisorPid: supervisor, workerPid: 0, problems, commands };
+  if (!(supervisor > 0)) {
+    problems.push(
+      `worker ${workerPid} is not checked without a verified supervisor: not recorded, never signalled`,
+    );
+    return { supervisorPid: 0, workerPid: 0, problems, commands };
+  }
+  const worker = verify("worker", workerPid, (pid, command) => {
+    const parent = Number(psOf(["ppid"], pid));
+    if (parent !== supervisor)
+      return `is a child of ${parent}, not of the supervisor ${supervisor}`;
+    return expected.worker(supervisor).test(command)
+      ? ""
+      : `runs ${JSON.stringify(command)}, not this clone's extension_service_worker.py ${supervisor}`;
+  });
+  return { supervisorPid: supervisor, workerPid: worker, problems, commands };
+}
+
 /** A probe of a process group (signal 0 sends nothing). */
 function groupAlive(pgid) {
   try {
@@ -252,6 +391,51 @@ function runBounded(command, args, { cwd, env, timeoutMs }) {
       resolve({ status, signal, output, timedOut });
     });
   });
+}
+
+/**
+ * The clone's own `scripts/extension_services.py stop`, bounded, run only
+ * after the sandbox's own checks passed immediately before it: the clone,
+ * its `scripts` directory and the script are real entries (never a symlink)
+ * inside the sandbox. A link there would make Python resolve the script's
+ * root, and so the companions it stops, in another checkout. The
+ * interpreter gets the absolute path inside the clone, with the clone as its
+ * working directory. A refused check runs nothing and is reported as a
+ * failure; the caller goes on with the rest of its cleanup. Resolves true
+ * when the stop ran and ended with exit status 0.
+ */
+export async function runExtensionStop({
+  sandbox,
+  report,
+  nb,
+  python,
+  label,
+  timeoutMs = 40_000,
+}) {
+  const name = `${label} extension_services.py stop ends the companion services`;
+  const scripts = path.join(nb, "scripts");
+  const script = path.join(scripts, "extension_services.py");
+  try {
+    sandbox.assertRealDir(nb);
+    sandbox.assertRealDir(scripts);
+    sandbox.assertRealFile(script);
+  } catch (error) {
+    // PathRefused names the entry; any other error (the root gone) is a
+    // refusal too: nothing is run on an unchecked path.
+    report.fail(name, `not run: ${error.message}`);
+    return false;
+  }
+  const result = await runBounded(python, [script, "stop"], {
+    cwd: nb,
+    env: sandbox.env({ PYTHON_BIN: python }, { envFile: false }),
+    timeoutMs,
+  });
+  return report.check(
+    name,
+    result.status === 0 && !result.timedOut,
+    () =>
+      `${result.timedOut ? `timed out after ${timeoutMs / 1000} s` : `exit ${result.status ?? result.signal}`}\n${tail(result.output, 8)}`,
+  );
 }
 
 /** Builds a three-resistor Project text with the canvas's own packages. */
@@ -462,39 +646,17 @@ function stageState({ sandbox, report, secrets, notebook, options }) {
       "postgresql:///auto_canvas_test",
   };
   secrets.push(m.adminUrl);
+  // The cleanup's PostgreSQL access: every step bounded (adminSession).
+  m.admin = adminSession({ open: openAdmin(m.adminUrl) });
   m.recordCompanion = (name, pid, identity = identityOf(pid)) => {
     if (!(pid > 0) || m.companions.has(pid)) return;
     m.companions.set(pid, { name, pid, identity });
   };
-  const pg = createRequire(path.join(repo, "apps/server/package.json"))("pg");
-  m.withClient = async (connectionString, work) => {
-    const client = new pg.Client({ connectionString });
-    await client.connect();
-    try {
-      return await work(client);
-    } finally {
-      await client.end().catch(() => undefined);
-    }
-  };
-  // The clone's own stop command, bounded; it also works while the sandbox
-  // is closing (after an interrupt).
-  m.extensionStop = async (label) => {
-    const result = await runBounded(
-      options.python,
-      [path.join(nb, "scripts/extension_services.py"), "stop"],
-      {
-        cwd: nb,
-        env: sandbox.env({ PYTHON_BIN: options.python }, { envFile: false }),
-        timeoutMs: 40_000,
-      },
-    );
-    return report.check(
-      `${label} extension_services.py stop ends the companion services`,
-      result.status === 0 && !result.timedOut,
-      () =>
-        `${result.timedOut ? "timed out after 40 s" : `exit ${result.status ?? result.signal}`}\n${tail(result.output, 8)}`,
-    );
-  };
+  m.withClient = withClient;
+  // The clone's own stop command, checked and bounded; it also works while
+  // the sandbox is closing (after an interrupt).
+  m.extensionStop = (label) =>
+    runExtensionStop({ sandbox, report, nb, python: options.python, label });
   // The cleanup: once, in this order, each step bounded and reported; it runs
   // from the stage's finally and, after an interrupt, from the sandbox's
   // disposal before any group is stopped or the root removed.
@@ -507,14 +669,151 @@ function stageState({ sandbox, report, secrets, notebook, options }) {
 const stillRecorded = (entry) =>
   entry.identity !== undefined && identityOf(entry.pid) === entry.identity;
 
-async function cleanUp(m) {
-  const { sandbox, report } = m;
+// ---- PostgreSQL ----------------------------------------------------------------
+
+/** One step of the stage's PostgreSQL access: a connection or a statement. */
+const PG_STEP_MS = 10_000;
+
+let pgModule;
+/** A pg client, from the canvas server's dependencies (loaded on first use). */
+function pgClient(config) {
+  pgModule ??= createRequire(path.join(repo, "apps/server/package.json"))("pg");
+  return new pgModule.Client(config);
+}
+
+/** Ends a client without waiting on a server that does not answer. */
+async function closeClient(client) {
+  await Promise.race([client.end().catch(() => undefined), sleep(1000)]);
+  client.connection?.stream?.destroy?.();
+}
+
+/**
+ * A connection for the set-up's queries: the connection attempt and every
+ * statement (statement_timeout, on the server) are bounded by `timeoutMs`.
+ * No client-side query deadline: a CREATE DATABASE whose answer is still on
+ * its way must not be given up as failed (the ledger awaits it, and cancels
+ * it in the cleanup).
+ */
+async function withClient(
+  connectionString,
+  work,
+  { timeoutMs = PG_STEP_MS } = {},
+) {
+  const client = pgClient({
+    connectionString,
+    connectionTimeoutMillis: timeoutMs,
+    statement_timeout: timeoutMs,
+  });
+  try {
+    await client.connect();
+    return await work(client);
+  } finally {
+    await closeClient(client);
+  }
+}
+
+/** Opens a cleanup connection on `url` within `ms`. */
+export const openAdmin = (url) => async (ms) => {
+  const client = pgClient({
+    connectionString: url,
+    connectionTimeoutMillis: ms,
+    statement_timeout: PG_STEP_MS,
+  });
+  try {
+    await client.connect();
+    return client;
+  } catch (error) {
+    void closeClient(client);
+    throw error;
+  }
+};
+
+/**
+ * The cleanup's PostgreSQL access, bounded so that the cleanup ends well
+ * within the entry script's 60 s hard stop after an interrupt: one admin
+ * connection, opened by `open(ms)` on first use and reused. Each use gets at
+ * most `stepMs` for the connection attempt and at most `stepMs` for its query
+ * (client side; the connection also carries statement_timeout), and all uses
+ * together at most `budgetMs` from the first. A connection attempt that
+ * failed is not repeated: later uses fail at once with its reason. A
+ * connection whose query timed out is closed; the next use opens another.
+ * `query(sql, params)` rejects with the reason; `close()` ends the session.
+ */
+export function adminSession({
+  open,
+  budgetMs = 25_000,
+  stepMs = PG_STEP_MS,
+  now = Date.now,
+}) {
+  let deadline;
+  let client;
+  let unreachable;
+  const timeLeft = () => {
+    deadline ??= now() + budgetMs;
+    return Math.min(stepMs, deadline - now());
+  };
+  const usedUp = () =>
+    new Error(
+      `not attempted: the database cleanup's ${budgetMs / 1000} s are used up`,
+    );
+  return {
+    async query(sql, params) {
+      if (unreachable) throw unreachable;
+      let ms = timeLeft();
+      if (ms <= 0) throw usedUp();
+      if (!client) {
+        try {
+          client = await open(ms);
+        } catch (error) {
+          unreachable = new Error(
+            `no connection to PostgreSQL within ${(ms / 1000).toFixed(1)} s: ${error.message}`,
+          );
+          throw unreachable;
+        }
+        ms = timeLeft();
+        if (ms <= 0) throw usedUp();
+      }
+      try {
+        return await client.query({
+          text: sql,
+          values: params,
+          query_timeout: ms,
+        });
+      } catch (error) {
+        if (/timeout/iu.test(error.message)) {
+          const stale = client;
+          client = undefined;
+          void closeClient(stale);
+          throw new Error(
+            `no answer within ${(ms / 1000).toFixed(1)} s: ${error.message}`,
+          );
+        }
+        throw error;
+      }
+    },
+    async close() {
+      const open = client;
+      client = undefined;
+      if (open) await closeClient(open);
+    },
+  };
+}
+
+/**
+ * The cleanup: once, in this order, each step bounded and reported. Every
+ * step runs whatever the one before it reported. `m` holds the sandbox and
+ * the report, the clone (`nb`, `launched`), the stage's process groups, the
+ * recorded companions, the database ledger, `extensionStop(label)` and the
+ * cleanup's PostgreSQL session (`admin`).
+ */
+export async function cleanUp(m) {
+  const { sandbox, report, admin } = m;
   // First, synchronously: no CREATE DATABASE starts from here on (the drop
   // at the end waits for those in flight).
-  const withAdmin = (work) => m.withClient(m.adminUrl, work);
-  void m.databases.shutdown(cancelCreates(withAdmin));
-  if (m.launched && fs.existsSync(path.join(m.nb, "scripts")))
-    await m.extensionStop("cleanup:");
+  void m.databases.shutdown(cancelCreates(admin));
+  // The stop is checked before it runs (runExtensionStop); a refusal is
+  // reported and the cleanup goes on.
+  if (m.launched) await m.extensionStop("cleanup:");
   for (const pgid of m.groups)
     if (!(await sandbox.stopGroup(pgid)))
       report.fail(
@@ -542,60 +841,66 @@ async function cleanUp(m) {
     left.length === 0,
     () => left.map((entry) => `${entry.name} ${entry.pid}`).join(", "),
   );
-  await dropDatabases({
-    databases: m.databases,
-    withAdmin,
-    report,
-  });
+  await dropDatabases({ databases: m.databases, admin, report });
 }
 
 /** The ledger's way to cancel the creates still running: by backend pid. */
-const cancelCreates = (withAdmin) => async (pids) => {
+const cancelCreates = (admin) => async (pids) => {
   const backends = pids.filter((pid) => Number.isInteger(pid) && pid > 0);
   if (backends.length)
-    await withAdmin((client) =>
-      client.query(
-        "SELECT pg_catalog.pg_cancel_backend(pid) FROM unnest($1::int[]) AS pid",
-        [backends],
-      ),
+    await admin.query(
+      "SELECT pg_catalog.pg_cancel_backend(pid) FROM unnest($1::int[]) AS pid",
+      [backends],
     );
 };
 
 /**
  * The database part of the cleanup: the ledger's shutdown (no new create;
- * every create in flight settled, a straggler cancelled through `withAdmin`),
+ * every create in flight settled, a straggler cancelled through `admin`),
  * then every database a create recorded is dropped `WITH (FORCE)`, a create
- * that succeeded after the shutdown began included, and the result reported.
+ * that succeeded after the shutdown began included. Each drop is attempted on
+ * its own: one that fails or times out is reported, naming its database, and
+ * the next is still sent. Afterwards the names still present are read and
+ * reported. `admin` is the cleanup's session (`adminSession`), closed here.
  */
-export async function dropDatabases({ databases, withAdmin, report }) {
-  const { created, unsettled } = await databases.shutdown(
-    cancelCreates(withAdmin),
-  );
-  if (unsettled.length)
-    report.fail(
-      "cleanup: every CREATE DATABASE in flight settled before the drop",
-      `still running after its cancellation: ${unsettled.join(", ")} (it may be left behind)`,
-    );
-  if (!created.length) return;
-  let remaining;
+export async function dropDatabases({ databases, admin, report }) {
   try {
-    remaining = await withAdmin(async (client) => {
-      for (const name of created)
-        await client.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
-      const rows = await client.query(
+    const { created, unsettled } = await databases.shutdown(
+      cancelCreates(admin),
+    );
+    if (unsettled.length)
+      report.fail(
+        "cleanup: every CREATE DATABASE in flight settled before the drop",
+        `still running after its cancellation: ${unsettled.join(", ")} (it may be left behind)`,
+      );
+    if (!created.length) return;
+    for (const name of created)
+      try {
+        await admin.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+      } catch (error) {
+        report.fail(
+          `cleanup: database ${name} is dropped`,
+          `the drop failed: ${error.message}`,
+        );
+      }
+    let remaining;
+    try {
+      const rows = await admin.query(
         "SELECT datname FROM pg_catalog.pg_database WHERE datname = ANY ($1::text[])",
         [created],
       );
-      return rows.rows.map((row) => row.datname);
-    });
-  } catch (error) {
-    remaining = [`(the drop failed: ${error.message})`];
+      remaining = rows.rows.map((row) => row.datname);
+    } catch (error) {
+      remaining = [`(which remain could not be read: ${error.message})`];
+    }
+    report.check(
+      `cleanup: the stage's databases are dropped (${created.join(", ")})`,
+      remaining.length === 0,
+      () => `still present: ${remaining.join(", ")}`,
+    );
+  } finally {
+    await admin.close?.();
   }
-  report.check(
-    `cleanup: the stage's databases are dropped (${created.join(", ")})`,
-    remaining.length === 0,
-    () => `still present: ${remaining.join(", ")}`,
-  );
 }
 
 // ---- M0 and M1: the clone, the databases, the files, the first build --------
@@ -817,6 +1122,76 @@ const canvasLogTail = (m) =>
 
 const vacant = (m, port) => m.sandbox.listenerPids(port).length === 0;
 
+/** silicon-notebook's state says the canvas service is ready. */
+const serviceReady = (state) =>
+  state?.state === "ready" && state?.services?.[SERVICE_KEY]?.state === "ready";
+
+/**
+ * Observes `read()` every `intervalMs` from now until `isReady` holds or
+ * `limitMs` after `since` have passed, whichever comes first. `result`
+ * resolves to `{ readyAfter, state, problem }`: `readyAfter` the ms from
+ * `since` to the first ready observation within the limit (undefined if
+ * none), `state` the last one read, `problem` "" or why it failed. `stop()`
+ * ends the observation early (its result then has a problem).
+ */
+function readinessWatch({
+  read,
+  since,
+  limitMs = 90_000,
+  intervalMs = 250,
+  isReady = serviceReady,
+  now = Date.now,
+}) {
+  let stopped = false;
+  let state = null;
+  const result = (async () => {
+    for (;;) {
+      if (stopped)
+        return {
+          readyAfter: undefined,
+          state,
+          problem: "the observation was stopped before the service was ready",
+        };
+      if (now() - since > limitMs) break;
+      state = read();
+      const at = now() - since;
+      if (at > limitMs) break;
+      if (isReady(state)) return { readyAfter: at, state, problem: "" };
+      await sleep(Math.max(1, Math.min(intervalMs, limitMs - at)));
+    }
+    return {
+      readyAfter: undefined,
+      state,
+      problem: `not ready within ${limitMs / 1000} s of the launch`,
+    };
+  })();
+  return {
+    result,
+    stop: () => {
+      stopped = true;
+    },
+  };
+}
+
+/**
+ * A launch whose readiness deadline runs from the launch itself: the
+ * observation (`readinessWatch` from `since`) starts before `launch()` is
+ * awaited and runs in parallel with it, so a slow launch wait cannot move or
+ * stretch the deadline. Resolves to `{ up, readiness }` once `launch()` has:
+ * `readiness` is the watch's result promise; without `up` the watch is
+ * stopped.
+ */
+export async function observedLaunch({ launch, ...watch }) {
+  const watcher = readinessWatch(watch);
+  let up;
+  try {
+    up = await launch();
+  } finally {
+    if (!up) watcher.stop();
+  }
+  return { up, readiness: watcher.result, stopWatch: watcher.stop };
+}
+
 /**
  * `.local` and the release manifest a launch writes are runtime state:
  * removed (validated) only while nothing of the clone runs — every stop ends
@@ -866,45 +1241,51 @@ async function launchClone(m, label, kind) {
   m.launched = true;
   m.groups.push(launcher.pgid);
   const launch = { launcher, services: [] };
-  const up = await awaitLaunch({
-    sandbox,
-    report,
-    label,
-    nb,
-    launch,
-    apiPort: m.apiPort,
-    webPort: m.webPort,
+  const awaitUp = () =>
+    awaitLaunch({
+      sandbox,
+      report,
+      label,
+      nb,
+      launch,
+      apiPort: m.apiPort,
+      webPort: m.webPort,
+    });
+  if (kind !== "managed") {
+    const up = await awaitUp();
+    return { launch, up, mark, launchedAt };
+  }
+  // The managed service's 90 s run from the launch: its state is observed
+  // from now on, while the launcher's own readiness is awaited.
+  const { up, readiness, stopWatch } = await observedLaunch({
+    launch: awaitUp,
+    read: () => readState(m),
+    since: launchedAt,
+    limitMs: 90_000,
   });
-  return { launch, up, mark, launchedAt };
+  return { launch, up, mark, launchedAt, readiness, stopWatch };
 }
 
 /**
- * The managed service of a launch: waits (within 90 s of the launch) for
- * silicon-notebook's state to say ready, and records the supervisor, the
- * worker and the canvas listener as companions.
+ * The managed service of a launch: the first ready state silicon-notebook
+ * reported within 90 s of the launch (observed since the launch), and the
+ * supervisor, the worker and the canvas listener it names, each verified
+ * before it is recorded as a companion.
  */
 async function managedService(m, run) {
-  let state;
-  let readyAfter;
-  await waitFor(
-    () => {
-      state = readState(m);
-      if (state?.state === "ready") {
-        readyAfter ??= Date.now() - run.launchedAt;
-        return true;
-      }
-      return Date.now() - run.launchedAt > 90_000;
-    },
-    Math.max(0, 90_000 - (Date.now() - run.launchedAt)),
-    250,
-  );
+  const { readyAfter, state, problem: readyProblem } = await run.readiness;
   const service = state?.services?.[SERVICE_KEY];
-  const supervisorPid = Number(state?.pid);
-  const workerPid = Number(service?.pid);
-  m.recordCompanion("supervisor", supervisorPid);
-  m.recordCompanion("worker", workerPid);
-  // The listener is recorded (and so may be signalled by the cleanup) only
-  // once it is proven to be the worker's canvas.
+  // Only processes proven to be this clone's supervisor and its worker are
+  // recorded (and so may be signalled by the cleanup).
+  const companions = managedCompanions({
+    nb: m.nb,
+    supervisorPid: Number(state?.pid),
+    workerPid: Number(service?.pid),
+    record: m.recordCompanion,
+  });
+  const { supervisorPid, workerPid } = companions;
+  // The listener is recorded only once it is proven to be the worker's
+  // canvas.
   const { canvasPid, listeners, problem } = managedCanvas({
     sandbox: m.sandbox,
     canvasPort: m.canvasPort,
@@ -916,8 +1297,11 @@ async function managedService(m, run) {
     state,
     service,
     readyAfter,
+    readyProblem,
     supervisorPid,
     workerPid,
+    companionProblems: companions.problems,
+    companionCommands: companions.commands,
     listeners,
     canvasPid,
     canvasProblem: problem,
@@ -1067,15 +1451,26 @@ async function managedRun(m) {
     const { supervisorPid, workerPid, canvasPid, canvasGroup } = service;
     if (
       !report.check(
-        `M2 within 90 s of the launch silicon-notebook's state reports the canvas service ready${service.readyAfter === undefined ? "" : ` (seen after ${(service.readyAfter / 1000).toFixed(1)} s)`}; supervisor and worker pids recorded`,
-        service.readyAfter !== undefined &&
-          service.service?.state === "ready" &&
-          supervisorPid > 0 &&
-          workerPid > 0,
-        () => `state ${JSON.stringify(service.state)}\n${canvasLogTail(m)}`,
+        `M2 within 90 s of the launch silicon-notebook's state reports the canvas service ready${service.readyAfter === undefined ? "" : ` (first seen ${(service.readyAfter / 1000).toFixed(1)} s after the launch)`}`,
+        service.readyAfter !== undefined && !service.readyProblem,
+        () =>
+          `${service.readyProblem}; state ${JSON.stringify(service.state)}\n${canvasLogTail(m)}`,
       )
     )
       return false;
+    if (
+      !report.check(
+        "M2 the state's supervisor and worker are this clone's extension_services.py _supervise and its extension_service_worker.py child (verified before they are recorded)",
+        supervisorPid > 0 &&
+          workerPid > 0 &&
+          service.companionProblems.length === 0,
+        () => service.companionProblems.join("; "),
+      )
+    )
+      return false;
+    report.info(
+      `M2 supervisor command: ${service.companionCommands.supervisor}; worker command: ${service.companionCommands.worker}`,
+    );
     const command = canvasPid > 0 ? (commandOf(canvasPid) ?? "") : "";
     if (
       !report.check(
@@ -1110,6 +1505,7 @@ async function managedRun(m) {
     );
     return true;
   } finally {
+    run.stopWatch?.();
     await stopAll(m, "M9", stopInfo);
   }
 }
@@ -1207,20 +1603,21 @@ async function signedInUsers(m, { getCanvas, getProxied }) {
       typeof reopenedProject?.projectText === "string",
     `status ${reopened.status}, revision ${reopenedProject?.revision}`,
   );
-  // M7 separation.
-  const idsOf = (res) =>
-    (parsed(res)?.projects ?? []).map((project) => project.id);
+  // M7 separation. A list counts only as a valid project list (projectList).
   const foreign = await request(getCanvas, projectOfA, { token: b.token });
   report.check(
     "M7 B reading A's project -> 404",
     foreign.status === 404,
     `status ${foreign.status}`,
   );
-  const listB = await request(getCanvas, projects, { token: b.token });
+  const listB = projectList(
+    await request(getCanvas, projects, { token: b.token }),
+  );
   report.check(
-    "M7 B's list does not hold A's project",
-    listB.status === 200 && !idsOf(listB).includes(projectA.id),
-    `status ${listB.status}, ${idsOf(listB).length} project(s)`,
+    "M7 B's list is a valid project list and does not hold A's project",
+    !listB.problem && !listB.ids.includes(projectA.id),
+    () =>
+      listB.problem || `it holds A's project (${listB.ids.length} project(s))`,
   );
   const nameB = `M7 project ${hex(3)}`;
   const createdB = await request(getCanvas, projects, {
@@ -1234,13 +1631,17 @@ async function signedInUsers(m, { getCanvas, getProxied }) {
     createdB.status === 201 && projectB?.id,
     `status ${createdB.status}`,
   );
-  const listA = await request(getCanvas, projects, { token: a.token });
+  const listA = projectList(
+    await request(getCanvas, projects, { token: a.token }),
+  );
   report.check(
-    "M7 A's list holds A's project and not B's",
-    listA.status === 200 &&
-      idsOf(listA).includes(projectA.id) &&
-      !idsOf(listA).includes(projectB?.id),
-    `status ${listA.status}, ${idsOf(listA).length} project(s)`,
+    "M7 A's list is a valid project list holding A's project and not B's",
+    !listA.problem &&
+      listA.ids.includes(projectA.id) &&
+      !listA.ids.includes(projectB?.id),
+    () =>
+      listA.problem ||
+      `${listA.ids.length} project(s): A's ${listA.ids.includes(projectA.id) ? "present" : "missing"}, B's ${listA.ids.includes(projectB?.id) ? "present" : "absent"}`,
   );
   // M8 sign-out: the canvas trusts a validated token for 60 s. The 75 s are
   // measured from the moment the sign-out's response arrived.
@@ -1283,11 +1684,13 @@ async function signedInUsers(m, { getCanvas, getProxied }) {
           ? `the first 401 came ${(refusal.late / 1000).toFixed(1)} s after the sign-out, past 75 s`
           : `no 401 within 75 s; last status ${refusal.last?.status}`,
   );
-  const stillB = await request(getCanvas, projects, { token: b.token });
+  const stillB = projectList(
+    await request(getCanvas, projects, { token: b.token }),
+  );
   report.check(
-    "M8 B's token still -> 200 afterwards",
-    stillB.status === 200,
-    `status ${stillB.status}`,
+    "M8 B's token still gets a valid project list afterwards",
+    !stillB.problem,
+    () => stillB.problem,
   );
   return true;
 }
@@ -1353,8 +1756,13 @@ async function externalRun(m) {
   try {
     if (!run.up) return false;
     const state = readState(m);
-    supervisorPid = Number(state?.pid);
-    m.recordCompanion("supervisor", supervisorPid);
+    // Recorded only once proven to be this clone's supervisor.
+    const companions = managedCompanions({
+      nb: m.nb,
+      supervisorPid: Number(state?.pid),
+      record: m.recordCompanion,
+    });
+    supervisorPid = companions.supervisorPid;
     const service = state?.services?.[SERVICE_KEY];
     report.check(
       "M-ext silicon-notebook reports the external service ready, without a worker of its own",
@@ -1362,6 +1770,11 @@ async function externalRun(m) {
         service?.state === "ready" &&
         service.pid === null,
       `state ${JSON.stringify(state)}`,
+    );
+    report.check(
+      "M-ext the state's supervisor is this clone's extension_services.py _supervise (verified before it is recorded)",
+      supervisorPid > 0 && companions.problems.length === 0,
+      () => companions.problems.join("; "),
     );
     const user = await probing(m, "M-ext", async () => {
       const fresh = await register(m, run.up.getProxied, "c");
@@ -1373,15 +1786,17 @@ async function externalRun(m) {
         )
       )
         return false;
-      const list = await request(
-        throughCanvas(m, run.up, serve.pid),
-        "/canvas/api/projects",
-        { token: fresh.token },
+      const list = projectList(
+        await request(
+          throughCanvas(m, run.up, serve.pid),
+          "/canvas/api/projects",
+          { token: fresh.token },
+        ),
       );
       report.check(
-        "M-ext /canvas/api/projects with that user's token -> 200",
-        list.status === 200,
-        `status ${list.status}`,
+        "M-ext /canvas/api/projects with that user's token -> 200 with a valid project list",
+        !list.problem,
+        () => list.problem,
       );
       return fresh;
     });
@@ -1487,15 +1902,14 @@ async function misroutedUpstream(
       "/canvas/%2e%2e/api/projects",
     ]) {
       const res = await request(misrouted, rawPath, { token: bearer });
-      answers.push({
-        rawPath,
-        token: Boolean(bearer),
-        status: res.status,
-        json: /json/u.test(String(res.headers["content-type"] ?? "")),
-        leaked: [seededId, seededName, standaloneUser].filter((text) =>
-          res.body.includes(text),
-        ),
-      });
+      answers.push(
+        misroutedAnswer({
+          rawPath,
+          token: Boolean(bearer),
+          res,
+          names: [seededId, seededName, standaloneUser],
+        }),
+      );
     }
   const bad = misroutingProblems(answers);
   report.check(
@@ -1507,6 +1921,22 @@ async function misroutedUpstream(
     `M-ext answers: ${answers.map((answer) => `${answer.token ? "token" : "none"} ${answer.rawPath} ${answer.status}${answer.json ? " json" : ""}`).join("; ")}`,
   );
   return true;
+}
+
+/**
+ * One M-ext probe's answer for `misroutingProblems`: `json` when the answer
+ * is JSON by its media type (any case) or by its body (`answersJson`),
+ * `leaked` the standalone canvas's `names` its body shows.
+ */
+export function misroutedAnswer({ rawPath, token, res, names }) {
+  const body = String(res.body ?? "");
+  return {
+    rawPath,
+    token,
+    status: res.status,
+    json: answersJson(res),
+    leaked: names.filter((text) => text && body.includes(text)),
+  };
 }
 
 /**
@@ -1642,12 +2072,16 @@ async function targetlessRun(m) {
     const { canvasPid } = service;
     if (
       !report.check(
-        "M-b silicon-notebook starts the canvas (state ready, the canvas port held by the service worker's verified canvas)",
+        `M-b silicon-notebook starts the canvas (state ready within 90 s of the launch${service.readyAfter === undefined ? "" : `, first seen after ${(service.readyAfter / 1000).toFixed(1)} s`}; the supervisor, the worker and the canvas port's listener verified)`,
         service.readyAfter !== undefined &&
+          !service.readyProblem &&
+          service.supervisorPid > 0 &&
+          service.workerPid > 0 &&
+          service.companionProblems.length === 0 &&
           canvasPid > 0 &&
           !service.canvasProblem,
         () =>
-          `${service.canvasProblem}; state ${JSON.stringify(service.state)}, listeners [${service.listeners}]`,
+          `${[service.readyProblem, ...service.companionProblems, service.canvasProblem].filter(Boolean).join("; ")}; state ${JSON.stringify(service.state)}, listeners [${service.listeners}]`,
       )
     )
       return false;
@@ -1674,6 +2108,7 @@ async function targetlessRun(m) {
     });
     return true;
   } finally {
+    run.stopWatch?.();
     await stopAll(m, "M-b", stopInfo);
   }
 }
