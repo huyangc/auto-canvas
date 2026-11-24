@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   clearAgentSessionRecovery,
   clearAgentSessionRecoveryFor,
+  clearAgentSessionRecoveryOf,
+  peekAgentSessionRecovery,
   readAgentSessionRecovery,
   writeAgentSessionRecovery,
 } from "./session-recovery";
@@ -53,6 +55,16 @@ function record() {
 }
 
 describe("Agent same-browser session recovery", () => {
+  it("retires a proof by the session that wrote it, whichever tab is shown", () => {
+    const storage = new MemoryStorage();
+    writeAgentSessionRecovery(storage, record());
+    // Another session's id leaves this proof in place.
+    clearAgentSessionRecoveryOf(storage, "another-session");
+    expect(peekAgentSessionRecovery(storage)).toEqual(record());
+    clearAgentSessionRecoveryOf(storage, record().sessionId);
+    expect(peekAgentSessionRecovery(storage)).toBeNull();
+  });
+
   it("round-trips only the bounded browser reconnect proof", () => {
     const storage = new MemoryStorage();
     writeAgentSessionRecovery(storage, record());

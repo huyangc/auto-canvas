@@ -426,16 +426,14 @@ export function useProjectFileLifecycle({
     // The controller commits synchronously and the render follows: an edit
     // made in that interval is unsaved work even before the state notices,
     // unless it put the saved version back.
+    const current = readCurrentProject();
     if (
       (state === "unbound" || state === "clean") &&
-      projectChangeToken(readCurrentProject()) !==
-        projectChangeToken(liveProjectRef.current)
+      current !== liveProjectRef.current &&
+      projectChangeToken(current) !== projectChangeToken(liveProjectRef.current)
     ) {
       const saved = savedProjectBaselineRef.current;
-      if (
-        saved === null ||
-        !sameProjectContent(readCurrentProject(), saved.project)
-      )
+      if (saved === null || !sameProjectContent(current, saved.project))
         return true;
     }
     return (

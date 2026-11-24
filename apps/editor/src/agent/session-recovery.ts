@@ -84,6 +84,20 @@ export function clearAgentSessionRecoveryFor(
     clearAgentSessionRecovery(storage);
 }
 
+/**
+ * Retires the proof of one relay session, whichever tab is displayed now: a
+ * disconnect ends the session that wrote it, so its credentials must not come
+ * back after a tab switch. Another session's proof is left in place.
+ */
+export function clearAgentSessionRecoveryOf(
+  storage: BrowserStorageLike,
+  sessionId: string,
+): void {
+  const record = peekAgentSessionRecovery(storage);
+  if (record !== null && record.sessionId === sessionId)
+    clearAgentSessionRecovery(storage);
+}
+
 /** Local recovery evidence, not an observation of relay availability. */
 export function peekAgentSessionRecovery(
   storage: BrowserStorageLike,
