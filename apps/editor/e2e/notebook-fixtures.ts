@@ -164,7 +164,7 @@ export function newUser(label: string): NotebookUser {
 }
 
 /** The canvas API as this user, from the spec itself (marked in the log). */
-export function apiAs(
+function apiAs(
   user: NotebookUser,
   path: string,
   init: RequestInit = {},
@@ -188,7 +188,7 @@ export async function projectNamesOf(user: NotebookUser): Promise<string[]> {
 }
 
 /** A Project text with three resistors, so its preview is not empty. */
-export function threeResistorProject(name: string): string {
+function threeResistorProject(name: string): string {
   const project = createEmptyProject(
     `nb-${randomBytes(4).toString("hex")}`,
     name,
@@ -292,11 +292,6 @@ export async function openVersionHistory(
   await page
     .getByRole("menuitem", { name: "Version history", exact: true })
     .click();
-}
-
-/** The source attribute of an image, or null without one. */
-export function imageSource(image: Locator): Promise<string | null> {
-  return image.getAttribute("src");
 }
 
 // ---- Storage. ----
