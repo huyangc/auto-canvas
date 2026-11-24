@@ -1859,6 +1859,14 @@
     max-height: calc(100dvh - var(--icm-menubar-h) - 16px);
     overflow: auto;
   }
+
+  /* A running Auto Layout needs this row for its elapsed time and Cancel;
+     the account menu yields until the run ends, as it would otherwise push
+     the control over the row's start. */
+  .app-chrome-actions:has(> .auto-layout-control[data-running="true"])
+    > .header-account-menu {
+    display: none;
+  }
 }
 
 /* The project name (T150c): the one top-bar item that gives way to a narrow
