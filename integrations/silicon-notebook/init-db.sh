@@ -6,6 +6,9 @@
 # Usage: init-db.sh --notebook-root <dir>
 # Requires Bash 3.2+ (including macOS). See README.md in this directory.
 set -euo pipefail
+# An inherited BASHOPTS can turn nocasematch on; the checks below compare
+# the spelling of variable names and must stay case-sensitive.
+shopt -u nocasematch
 
 fail() {
   printf 'auto-canvas init-db.sh: %s\n' "$1" >&2
@@ -27,7 +30,8 @@ notebook_root=$(CDPATH='' cd -- "$notebook_root" && pwd -P)
 [[ -n "${AUTO_CANVAS_DATABASE_URL:-}" ]] ||
   fail "AUTO_CANVAS_DATABASE_URL must be set and not empty."
 while IFS= read -r name; do
-  if [[ "$name" == [Dd][Aa][Tt][Aa][Bb][Aa][Ss][Ee]_[Uu][Rr][Ll] && "$name" != DATABASE_URL ]]; then
+  # `[` compares strings exactly, also under nocasematch.
+  if [[ "$name" == [Dd][Aa][Tt][Aa][Bb][Aa][Ss][Ee]_[Uu][Rr][Ll] ]] && [ "$name" != DATABASE_URL ]; then
     fail "A differently-cased spelling of DATABASE_URL is set in the environment; remove it."
   fi
 done < <(compgen -e)

@@ -32,6 +32,10 @@ export function guardedPostgresUrl(value: string | undefined): string {
     throw new GuardedConfigurationError(
       "is not postgresql://[user[:password]@]host[:port]/name with a host, a database name of at most 63 letters, digits, _ or - and no query or fragment",
     );
+  // The lexical form admits a bracketed host that is no IPv6 address
+  // (`[:::]`); `pg` would refuse it only when it connects.
+  if (!URL.canParse(value))
+    throw new GuardedConfigurationError("has a host that is not valid");
   const port = match[1];
   if (port !== undefined && (Number(port) < 1 || Number(port) > 65535))
     throw new GuardedConfigurationError("has a port outside 1-65535");

@@ -438,6 +438,11 @@ describe("serve.sh and init-db.sh", () => {
     ["database_url", { database_url: "x" }, "DATABASE_URL"],
     ["Database_Url", { Database_Url: "x" }, "DATABASE_URL"],
     [
+      "database_url with nocasematch inherited through BASHOPTS",
+      { database_url: "x", BASHOPTS: "nocasematch" },
+      "DATABASE_URL",
+    ],
+    [
       "SILICON_NOTEBOOK_ENV_FILE with a path",
       { SILICON_NOTEBOOK_ENV_FILE: "/tmp/x.env" },
       "SILICON_NOTEBOOK_ENV_FILE",

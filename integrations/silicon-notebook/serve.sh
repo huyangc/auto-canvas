@@ -5,6 +5,9 @@
 # options and never initialises a database (that is init-db.sh).
 # Requires Bash 3.2+ (including macOS). See README.md in this directory.
 set -euo pipefail
+# An inherited BASHOPTS can turn nocasematch on; the checks below compare
+# the spelling of variable names and must stay case-sensitive.
+shopt -u nocasematch
 
 fail() {
   printf 'auto-canvas serve.sh: %s\n' "$1" >&2
@@ -21,7 +24,8 @@ done
 [[ -f "$AUTO_CANVAS_NOTEBOOK_ENV_FILE" ]] ||
   fail "AUTO_CANVAS_NOTEBOOK_ENV_FILE must name an existing regular file."
 while IFS= read -r name; do
-  if [[ "$name" == [Dd][Aa][Tt][Aa][Bb][Aa][Ss][Ee]_[Uu][Rr][Ll] && "$name" != DATABASE_URL ]]; then
+  # `[` compares strings exactly, also under nocasematch.
+  if [[ "$name" == [Dd][Aa][Tt][Aa][Bb][Aa][Ss][Ee]_[Uu][Rr][Ll] ]] && [ "$name" != DATABASE_URL ]; then
     fail "A differently-cased spelling of DATABASE_URL is set in the environment; remove it."
   fi
 done < <(compgen -e)
