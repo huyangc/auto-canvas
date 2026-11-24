@@ -1,4 +1,5 @@
 import { compareRuns } from "./refine.js";
+import { isVisibleEndpoint } from "@icm/derived";
 import { MAX_SCHEMATIC_EDITS_PER_TRANSACTION } from "@icm/edit-engine";
 import type { Instance, SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
@@ -154,6 +155,11 @@ export function localRailMarkers(
       return (
         !isMarker(i) &&
         !isMosBulk(i.symbolId, p.pinName) &&
+        isVisibleEndpoint(document, resolver, {
+          kind: "terminal",
+          instanceId: p.instanceId,
+          pinName: p.pinName,
+        }) &&
         currentRoles.pinNet(p.instanceId, p.pinName) === net
       );
     });
