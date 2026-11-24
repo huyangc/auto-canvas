@@ -3,7 +3,7 @@
 auto-canvas is a web schematic canvas for automatic analog placement and
 routing (APR) with human fine-tuning, starting from an analog-canvas snapshot
 (UPSTREAM.md). Subagents implement; you plan and review, and codex reviews
-the plan and the code.
+the code (and the plan only when the user asks).
 
 This file loads in every session, so it holds only standing rules specific to
 Claude Code. Feature details belong in the documents listed under
@@ -32,8 +32,8 @@ with one of them, correct the entry file.
   their confirmation: say what will run, about how many calls and the expected
   cost. This holds inside delegated and autonomous runs, and for runs a plan
   would hand to an implementer. One confirmation covers the run described. Codex
-  rounds and PR reviews (when run) and subagents are the workflow's own tools
-  and are not such runs. See [the workflow rules](docs/workflow.md#规则).
+  rounds, codex plan reviews the user asked for, codex PR reviews and subagents
+  are the workflow's own tools and are not such runs. See [the workflow rules](docs/workflow.md#规则).
 
 The PR process is the one in `docs/workflow.md`; analog-canvas's upstream
 Issue/deploy process does not apply.
