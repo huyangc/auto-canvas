@@ -437,9 +437,22 @@ export function createAgentWorkspaceHandler({
         controller.noteAgentEdit();
         return success({ action: "rename", applied: true, workspaceId });
       }
-      const source = entries.find((e) => e.id === request.sourceWorkspaceId)
+      // As rename: a tab activated since this handler's render is listed
+      // with that render's controller, so either endpoint waits for its own
+      // render; the others resolve from the tabs as they are now.
+      if (
+        [request.sourceWorkspaceId, request.targetWorkspaceId].some(
+          (id) => id === projectTabs.currentId() && id !== projectTabs.activeId,
+        )
+      )
+        return fail(
+          "WORKSPACE_BUSY",
+          "Can't copy yet: the project tab just switched; retry",
+        );
+      const live = projectTabs.entries();
+      const source = live.find((e) => e.id === request.sourceWorkspaceId)
         ?.session.controller;
-      const target = entries.find((e) => e.id === request.targetWorkspaceId);
+      const target = live.find((e) => e.id === request.targetWorkspaceId);
       if (!target)
         return fail("WORKSPACE_NOT_FOUND", "Target Project is no longer open");
       const copied = copyWorkspaceCell(
