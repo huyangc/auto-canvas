@@ -153,8 +153,7 @@ export function useBootLink({
 /** Opens the link a window was given into the tabs it brought back. */
 export function useRestoredTabLinks({
   importReady,
-  openImportTab,
-  openProjectFile,
+  openImportFile,
   restoringWorkspace,
   bootRequestsNewProject,
   setStatus,
@@ -164,8 +163,7 @@ export function useRestoredTabLinks({
   restoredTabs,
 }: {
   importReady: boolean;
-  openImportTab: ProjectTabSessions["openImportTab"];
-  openProjectFile: ProjectFileLifecycle["openProjectFile"];
+  openImportFile: ProjectTabSessions["openImportFile"];
   restoringWorkspace: boolean;
   bootRequestsNewProject: boolean;
   setStatus: Dispatch<SetStateAction<string>>;
@@ -174,14 +172,7 @@ export function useRestoredTabLinks({
   restoredNewLink: BootLink["restoredNewLink"];
   restoredTabs: ProjectTabSessions["restoredTabs"];
 }) {
-  const openImportFile = useEffectEvent(
-    (file: File, isCurrent: () => boolean) =>
-      openProjectFile(file, {
-        isCurrent,
-        openIndependentCopy: (project, view, options) =>
-          openImportTab(project, view, options, isCurrent),
-      }),
-  );
+  const importFile = useEffectEvent(openImportFile);
   useEffect(() => {
     if (
       import.meta.env.ICM_NOTEBOOK ||
@@ -202,18 +193,12 @@ export function useRestoredTabLinks({
         if (!current()) return;
         try {
           const file = await projectFileFromImportLink(url.hash);
-          if (
-            !current() ||
-            !(await openImportFile(file, current)) ||
-            !current()
-          )
+          if (!current() || !(await importFile(file, current)) || !current())
             return;
           url.searchParams.delete("import");
-          window.history.replaceState(
-            window.history.state,
-            "",
-            url.pathname + url.search,
-          );
+          const state = { ...window.history.state };
+          delete state.projectImportTab;
+          window.history.replaceState(state, "", url.pathname + url.search);
         } catch (error) {
           if (current())
             setStatus(

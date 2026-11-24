@@ -124,6 +124,7 @@ type AgentProjectResourcesOptions = Parameters<
 >[0];
 
 interface ProjectTabSessionsOptions {
+  openProjectFile: ProjectFileLifecycle["openProjectFile"];
   projectStore: CloudProjectStore | null;
   onCloudProjectSaved(project: CloudProjectSummary): void;
   onCloudProjectsDeleted(projects: readonly CloudProjectSummary[]): void;
@@ -224,6 +225,7 @@ interface ProjectTabSessionsOptions {
 
 /** The window's project tabs: one session per tab, saved with the window. */
 export function useProjectTabSessions({
+  openProjectFile,
   projectStore,
   onCloudProjectSaved,
   onCloudProjectsDeleted,
@@ -992,6 +994,53 @@ export function useProjectTabSessions({
     if (workspaceWriteError.current)
       throw new Error(workspaceWriteError.current);
   }
+  async function openImportFile(file: File, isCurrent: () => boolean) {
+    async function keepImport(
+      workspace?: Parameters<typeof flushWorkspace>[0],
+    ) {
+      try {
+        await flushWorkspace(workspace);
+        return isCurrent();
+      } catch {
+        if (isCurrent())
+          setStatus(
+            "Project opened in memory. Keep the import link and export the Project before leaving.",
+          );
+        return false;
+      }
+    }
+
+    // History state belongs to this navigation, survives reload, and does
+    // not travel with a copied link. A journal or a later autosave can have
+    // recovered the tab (including edits) despite the first failed write.
+    const pending = window.history.state?.projectImportTab;
+    if (
+      pending?.href === window.location.href &&
+      projectTabs.tabs.some((tab) => tab.id === pending.id)
+    ) {
+      return keepImport();
+    }
+    return openProjectFile(file, {
+      isCurrent,
+      openIndependentCopy: (project, view, options) =>
+        projectTabs.open(() => createTabSession(project, view, options), null, {
+          isCurrent,
+          persistOpened(workspace) {
+            window.history.replaceState(
+              {
+                ...window.history.state,
+                projectImportTab: {
+                  href: window.location.href,
+                  id: workspace.activeId,
+                },
+              },
+              "",
+            );
+            return keepImport(workspace);
+          },
+        }),
+    });
+  }
   useBeforeAccountLogout(async () => {
     const blocker = projectSwitchBlocker();
     if (blocker || projectTabs.busy)
@@ -1005,27 +1054,7 @@ export function useProjectTabSessions({
   });
   return {
     flushNativeWorkspace: flushWorkspace,
-    openImportTab: (
-      project: CircuitProject,
-      view: GridRect,
-      options: ReplaceProjectOptions,
-      isCurrent: () => boolean,
-    ) =>
-      projectTabs.open(() => createTabSession(project, view, options), null, {
-        isCurrent,
-        async persistOpened(workspace) {
-          try {
-            await flushWorkspace(workspace);
-            return isCurrent();
-          } catch {
-            if (isCurrent())
-              setStatus(
-                "Project opened in memory. Keep the import link and export the Project before leaving.",
-              );
-            return false;
-          }
-        },
-      }),
+    openImportFile,
     cloudManagementBusy,
     isCloudManagementInFlight: () => cloudMutation.current,
     renameShelfProject,
