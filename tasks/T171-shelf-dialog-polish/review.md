@@ -115,3 +115,15 @@ Acceptance rerun after round 5: `pnpm format:check` exit 0, `pnpm typecheck`
 exit 0, `pnpm lint` exit 0 (0 errors, 3906 warnings), targeted vitest exit 0
 (7 tests), `pnpm test:e2e apps/editor/e2e/project-tabs.spec.ts` exit 0 (23
 passed, ports 4398/4399).
+
+## Round 6 — accepted (codex PR round-5 finding fixed by Opus)
+
+codex PR review round 5 on `d431e41` passed with one P3, which was fixed.
+
+| # | Severity | Where | Finding | Fix |
+| --- | --- | --- | --- | --- |
+| 1 | P3 | `dialog-drag.ts` pointerdown | Touch reports `button === 0` for a second contact too, so a second finger on the header took the drag from the first and its lift ended the gesture. | A pointerdown while a drag is active is ignored (`stopDrag.current` set). No automated test: jsdom has no pointer capture, and Playwright drives one mouse; recorded as a known limit instead. |
+
+Acceptance rerun after round 6: `pnpm format:check` exit 0, `pnpm typecheck`
+exit 0, `pnpm lint` exit 0 (0 errors, 3906 warnings), targeted vitest exit 0
+(7 tests).
