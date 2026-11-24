@@ -47,6 +47,24 @@ a managed start has not yet been run against a real silicon-notebook (T164b).
    CREATE DATABASE auto_canvas OWNER auto_canvas;
    ```
 
+   A new role can still connect to silicon-notebook's database: PostgreSQL
+   grants `CONNECT` on every database to `PUBLIC` by default. To make the
+   separation real, take that away on silicon-notebook's database and give
+   it back to the roles that need it (silicon-notebook's own role first, or
+   it locks itself out), then check it:
+
+   ```sql
+   REVOKE CONNECT ON DATABASE silicon_notebook FROM PUBLIC;
+   GRANT CONNECT ON DATABASE silicon_notebook TO silicon_app;
+   SELECT has_database_privilege('auto_canvas', 'silicon_notebook', 'CONNECT');  -- f
+   ```
+
+   (`silicon_notebook` and `silicon_app` are the names of
+   silicon-notebook's `.env.example`; use the deployment's own. A superuser
+   or the database's owner can always connect, and `pg_hba.conf` may
+   restrict access further.) Without this, or an equivalent existing
+   policy, the separation rests on the guards below alone.
+
 3. **Name it in silicon-notebook's `.env`** as `AUTO_CANVAS_DATABASE_URL`, in
    the guarded form: `postgresql://` (or `postgres://`), an optional
    `user[:password]@`, a host (a name, an IPv4 address or a bracketed IPv6

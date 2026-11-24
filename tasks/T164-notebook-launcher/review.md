@@ -38,3 +38,19 @@ Not rerun: the reviewer-only prefixed standalone check, which overwrites
 on that path (no flag, one pool, no hook), which the unflagged cases of
 `migration-guard.test.ts` and the unchanged `server-main.test.ts` and
 `standalone-mode.test.ts` cover.
+
+## Round 2 — accepted (fixes by the reviewer)
+
+Reviewed: codex `gpt-6.2-sol` PR review round 1 of PR 135 at `5032eeb` (three
+P2, no blocking finding), each checked and found valid. The fixes are a few
+lines each and were made by the reviewer.
+
+| #   | Severity | Where                                     | Finding                                                                                                                                                                           | Fix                                                                                                                                                                                                           |
+| --- | -------- | ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 5   | fixed    | `serve.sh`, `init-db.sh`                  | Under an inherited `nocasematch`, `[[ "$name" != DATABASE_URL ]]` compares without case, so a differently-cased spelling was accepted (reproduced with `bash -O nocasematch`).    | Both scripts turn `nocasematch` off and compare the canonical spelling with `[`, which is exact. A launcher case passes `BASHOPTS=nocasematch` (effective on Bash 4.1+; the macOS 3.2 check was run by hand). |
+| 6   | fixed    | `guarded-database.ts`                     | A bracketed host that is no IPv6 address (`[:::]`) passed the lexical form; `pg` would refuse it only when connecting, and in the notebook `.env` it was accepted as an identity. | A value must also parse (`URL.canParse`); two unit cases.                                                                                                                                                     |
+| 7   | fixed    | `integrations/silicon-notebook/README.md` | A role of its own can still connect to silicon-notebook's database: `PUBLIC` has `CONNECT` by default.                                                                            | The step shows the `REVOKE`/`GRANT` pair, the check with `has_database_privilege`, and says what holds without it.                                                                                            |
+
+Rerun: the three new files 165 passed, none skipped; typecheck, lint, format,
+docs, deadcode 0; the behavioural script 40 checks passed, its databases
+dropped.
