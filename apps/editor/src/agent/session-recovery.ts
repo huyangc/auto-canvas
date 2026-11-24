@@ -71,6 +71,19 @@ export function clearAgentSessionRecovery(storage: BrowserStorageLike): void {
   storage.removeItem(accountKey(AGENT_SESSION_RECOVERY_STORAGE_KEY));
 }
 
+/**
+ * Removes the stored proof when it belongs to `target`'s working copy. One
+ * storage slot serves every tab, so a proof another tab wrote is that tab's
+ * to resume or retire: ending this session must not take it away.
+ */
+export function clearAgentSessionRecoveryFor(
+  storage: BrowserStorageLike,
+  target: RecoveryTarget,
+): void {
+  if (readAgentSessionRecovery(storage, target) !== null)
+    clearAgentSessionRecovery(storage);
+}
+
 /** Local recovery evidence, not an observation of relay availability. */
 export function peekAgentSessionRecovery(
   storage: BrowserStorageLike,
