@@ -64,6 +64,7 @@ export interface FileCommandMenuProps {
   /** SPICE or Spectre with RNL: the netlist, drawn as its RNL draws it. */
   onImportRnl?: (files: FileList | null) => void;
   onExportProject: () => void;
+  onCopyImportLink?: () => void;
   onExportSvg: () => void;
   onExportRaster: (format: "png" | "pdf") => void;
   /**
@@ -178,6 +179,7 @@ export function FileCommandMenu({
   onImportSpice,
   onImportRnl,
   onExportProject,
+  onCopyImportLink,
   onExportSvg,
   onExportRaster,
   onExportNetlist,
@@ -427,6 +429,11 @@ export function FileCommandMenu({
           >
             Project File…
           </button>
+          {onCopyImportLink && (
+            <button type="button" onClick={onCopyImportLink}>
+              Copy project import link
+            </button>
+          )}
           <button type="button" aria-label="Export SVG" onClick={onExportSvg}>
             Drawing as SVG
           </button>

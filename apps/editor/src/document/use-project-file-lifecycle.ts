@@ -900,6 +900,7 @@ export function useProjectFileLifecycle({
     options: {
       allowExactCurrentReplacement?: boolean;
       inTab?: boolean;
+      independentCopy?: boolean;
       nativeBinding?: NativeFileBinding;
       /**
        * Read once the file has been read, before the replacement: what keeps
@@ -923,7 +924,9 @@ export function useProjectFileLifecycle({
       staged.project,
       createProjectSymbolResolver(staged.project, builtInSymbols),
     );
-    const openedProject = normalized.project;
+    const openedProject = options.independentCopy
+      ? { ...normalized.project, id: createId("project") }
+      : normalized.project;
     const normalizedDocumentCount = normalized.changedDocumentIds.length;
     const drawn = normalized.drawnInstanceCount;
     const drawnNote =

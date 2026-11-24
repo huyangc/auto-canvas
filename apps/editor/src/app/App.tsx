@@ -502,7 +502,8 @@ export function App(props: AppProps) {
           // target beside them: a Cloud Project or a new
           // circuit. Returning from the account resumes this window's
           // workspace without selecting its former deep-link target.
-          new URLSearchParams(window.location.search).has("project") ||
+          new URLSearchParams(window.location.search).get("import") === "1" ||
+            new URLSearchParams(window.location.search).has("project") ||
             new URLSearchParams(window.location.search).get("new") === "1" ||
             new URLSearchParams(window.location.search).get("resume") === "1",
         );
@@ -1142,7 +1143,11 @@ function WorkspaceEditor({
       (typeof window !== "undefined" &&
         (() => {
           const search = new URLSearchParams(window.location.search);
-          return search.has("project") || search.has("example");
+          return (
+            search.get("import") === "1" ||
+            search.has("project") ||
+            search.has("example")
+          );
         })()),
   );
   useEffect(() => {
@@ -4920,6 +4925,8 @@ function WorkspaceEditor({
     },
   });
   useRestoredTabLinks({
+    importReady: recoveryReady && startupRestoreReady,
+    openProjectFile,
     restoringWorkspace,
     bootRequestsNewProject,
     setStatus,

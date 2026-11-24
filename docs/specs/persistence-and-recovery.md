@@ -11,6 +11,13 @@ Both use the one Project protocol; compatibility and migration belong to the
 [file format](project-file-format.md). Persistence validates the complete
 current schema before import or Cloud Save.
 
+In the standalone web editor, **File → Export → Copy project import link**
+puts the current Project file in the URL fragment, compressed with gzip.
+Anyone with the complete link and access to the editor can import that version.
+Opening it validates the file and adds an independent Project in a new tab.
+The link accepts up to 128 KiB of encoded payload and 2 MiB of uncompressed
+Project data. Larger Projects can be shared as `.icproj.json` files.
+
 ## Protocol-level rules
 
 - Portable component interfaces validate with the Project: missing,
