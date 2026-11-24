@@ -1727,6 +1727,28 @@ function planAutoLayoutMeasured(
     ...runner,
     run: { ...runner.run, result: copyResult(runner.run.result) },
   };
+  const conventionFinalist = (() => {
+    if (
+      !options.finalists ||
+      options.finalists.alternate ||
+      !solved ||
+      selected.strategy === "convention"
+    )
+      return;
+    const candidate =
+      withSolved?.refined.find((c) => c.strategy === "convention") ?? solved;
+    if (
+      candidate.run.final &&
+      Number.isFinite(routedScore(candidate.run, resolver)) &&
+      !floatingPins(candidate.run.final, resolver).length &&
+      !missingConnections(candidate.run.final, resolver) &&
+      shouldFinishRunner(selected.run, candidate.run, resolver)
+    )
+      return {
+        ...candidate,
+        run: { ...candidate.run, result: copyResult(candidate.run.result) },
+      };
+  })();
   // The local-loop placement never participates in provisional strategy
   // selection. Keep it alongside T078's incumbent and runner-up, and apply
   // the same distinct-placement/completeness/score-margin gate.
@@ -2410,6 +2432,7 @@ function planAutoLayoutMeasured(
     const snapshot = copyResult(base);
     for (const [kind, candidate] of [
       ["runner", alternateFinalist],
+      ["convention", conventionFinalist],
       ["localLoop", localFinalist],
       ["attachment", attachmentFinalist],
       ["gateRow", gateRowFinalist],
@@ -2430,6 +2453,9 @@ function planAutoLayoutMeasured(
         : () => copyResult(snapshot),
       runner: alternateFinalist
         ? () => finishFinalist(alternateFinalist, false)
+        : () => copyResult(snapshot),
+      convention: conventionFinalist
+        ? () => finishFinalist(conventionFinalist, false)
         : () => copyResult(snapshot),
       attachment: attachmentFinalist
         ? () => finishFinalist(attachmentFinalist, false, false, true)

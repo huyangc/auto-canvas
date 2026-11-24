@@ -17,7 +17,12 @@ import { preview } from "./transaction.js";
 import type { AutoLayoutResult, LayoutPartition } from "./types.js";
 
 type FinalistKind =
-  "runner" | "localLoop" | "attachment" | "gateRow" | "halfOrder";
+  | "runner"
+  | "convention"
+  | "localLoop"
+  | "attachment"
+  | "gateRow"
+  | "halfOrder";
 
 /** Per-call continuations finish additional placements without repeating
  * ranking, refinement or annealing. Outer drafting and rail passes still run. */
@@ -135,7 +140,14 @@ export function movesReadabilityParticipant(
 export function rankedFinalists(pass: FinalistPass, resolver: SymbolResolver) {
   void resolver;
   return (
-    ["runner", "localLoop", "attachment", "gateRow", "halfOrder"] as const
+    [
+      "runner",
+      "convention",
+      "localLoop",
+      "attachment",
+      "gateRow",
+      "halfOrder",
+    ] as const
   ).filter((kind) => pass.available.has(kind));
 }
 

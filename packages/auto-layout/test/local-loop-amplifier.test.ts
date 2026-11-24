@@ -1,4 +1,5 @@
 import * as attachments from "../src/attachment-seat.js";
+import * as conventionRelations from "../src/convention-relations.js";
 import * as selection from "../src/finished-selection.js";
 import * as relocations from "../src/device-relocation-search.js";
 import * as ports from "../src/port-seat-search.js";
@@ -568,17 +569,21 @@ it.each([false])(
   "rejects a separately finished local-loop variant that loses the shared comparison (cascode=%s)",
   (cascode) => {
     const { d } = regulator(cascode);
-    // Isolate this finalist: the attachment finalist has its own comparison test.
+    // Isolate the local-loop finalist from attachment and R168 competition.
     const attachment = vi
       .spyOn(attachments, "nodeAttachments")
       .mockReturnValue([]);
+    const eligible = vi
+      .spyOn(conventionRelations, "conventionDraftEligible")
+      .mockReturnValue(false);
     const recognize = vi
       .spyOn(loops, "localLoopAmplifiers")
       .mockReturnValue([]);
-    const baseline = planAutoLayout(d, resolver);
-    recognize.mockRestore();
     const choose = vi.spyOn(selection, "selectFinishedLayout");
     try {
+      const baseline = planAutoLayout(d, resolver);
+      recognize.mockRestore();
+      choose.mockClear();
       const result = planAutoLayout(d, resolver);
       const score = (plan: typeof result) => {
         const applied = preview(d, resolver, plan.edits);
@@ -596,6 +601,8 @@ it.each([false])(
       expect(score(result)).toBeLessThanOrEqual(score(baseline));
     } finally {
       choose.mockRestore();
+      recognize.mockRestore();
+      eligible.mockRestore();
       attachment.mockRestore();
     }
   },
@@ -604,6 +611,10 @@ it.each([false])(
 
 it("finishes runner and local-loop finalists at full budget and the attachment variant at half budget", () => {
   const { d } = regulator();
+  // Keep R168 out of the R156 finalist budget comparison.
+  const eligible = vi
+    .spyOn(conventionRelations, "conventionDraftEligible")
+    .mockReturnValue(false);
   const rank = vi.spyOn(selection, "rankedFinalists");
   const choose = vi.spyOn(selection, "selectFinishedLayout");
   const portSearch = vi.spyOn(ports, "searchPortSeats");
@@ -642,5 +653,6 @@ it("finishes runner and local-loop finalists at full budget and the attachment v
     portSearch.mockRestore();
     railSearch.mockRestore();
     relocationSearch.mockRestore();
+    eligible.mockRestore();
   }
 }, 60_000);

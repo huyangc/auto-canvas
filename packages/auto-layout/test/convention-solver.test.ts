@@ -2,9 +2,12 @@ import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import type { SchematicDocument } from "@icm/model";
 import { InMemorySymbolResolver, builtInSymbols } from "@icm/symbols";
+import * as finished from "../src/finished-selection.js";
+import * as estimate from "../src/estimate.js";
+import { keepsOrder } from "../src/polarity-order.js";
 import { conventionDraftEligible } from "../src/convention-relations.js";
 import * as solver from "../src/convention-solver.js";
-import { pinPoints, withPlacements } from "../src/geometry.js";
+import { pinExit, pinPoints, withPlacements } from "../src/geometry.js";
 import { planAutoLayout } from "../src/index.js";
 import { channelPins, classifyNets, polarity } from "../src/net-roles.js";
 import { isMarker } from "../src/placement-connectivity.js";
@@ -322,22 +325,6 @@ describe("R168 convention-solved draft", () => {
       "0c275368f5cf389ab8be609b2758b3a4aa14adca4a6e46a2cbe5927517ac0fc8",
     ],
     [
-      "with a directed block",
-      () => {
-        const d = twoStage();
-        d.instances.push({ id: "b1", symbolId: "buffer", placement: null });
-        d.nets
-          .find((n) => n.id === "out")!
-          .terminals.push({ instanceId: "b1", pinName: "A" });
-        d.nets.push({
-          id: "y",
-          terminals: [{ instanceId: "b1", pinName: "Y" }],
-        });
-        return [d, quick];
-      },
-      "749bd3ef11561633a8644c73d5b1875b785bd0a4280275130a31c9147deeb412",
-    ],
-    [
       "without a transistor",
       () => [
         withPorts(
@@ -394,8 +381,8 @@ describe("R168 convention-solved draft", () => {
     ],
     [
       "above the device limit",
-      () => [chain(6, true), quick],
-      "9837c13767f86f6ff674be6ac8b977f248c1194a67928880c0870fb5707ed7cb",
+      () => [chain(9, true), quick],
+      "d26dc0f1eb6fcd25088c0135d3163e88a6a09931c39c9c915332de5652fb6c46",
     ],
   ])("does not offer the draft to a Document %s", (_, make, base) => {
     const [d, options] = make();
@@ -412,13 +399,23 @@ describe("R168 convention-solved draft", () => {
   it("leaves the original portfolio alone when the draft is not selected", () => {
     const d = mirrorLoad();
     const solve = vi.spyOn(solver, "solveConventionDraft");
+    const finalist = vi.spyOn(finished, "rankedFinalists");
+    const select = vi.spyOn(finished, "selectFinishedLayout");
     const anneal = vi.spyOn(search, "annealLayout");
     const polish = vi.spyOn(reroute, "reroutePortfolio");
     try {
       const plan = planAutoLayout(d, resolver, {
         search: { seed: 1, evaluations: 40 },
       });
-      // The draft was built and refined, and lost to the layered draft.
+      expect(finalist.mock.results.map((r) => r.value).flat()).toContain(
+        "convention",
+      );
+      expect(
+        select.mock.calls.map(
+          ([, , , candidate]) => refinementMetrics(candidate)?.strategy,
+        ),
+      ).toContain("convention");
+      // The convention finalist competed and the layered plan held its place.
       expect(solve).toHaveBeenCalled();
       expect(refinementMetrics(plan)?.strategy).toBe("layered");
       expect(anneal).toHaveBeenCalled();
@@ -434,6 +431,8 @@ describe("R168 convention-solved draft", () => {
       );
     } finally {
       solve.mockRestore();
+      finalist.mockRestore();
+      select.mockRestore();
       anneal.mockRestore();
       polish.mockRestore();
     }
@@ -457,6 +456,11 @@ describe("R168 convention-solved draft", () => {
       resolver,
     );
     const d = twoStage();
+    d.instances.push({ id: "b1", symbolId: "buffer", placement: null });
+    d.nets
+      .find((n) => n.id === "out")!
+      .terminals.push({ instanceId: "b1", pinName: "A" });
+    d.nets.push({ id: "y", terminals: [{ instanceId: "b1", pinName: "Y" }] });
     expect(conventionDraftEligible(d, library, {})).toBe(true);
     d.instances.push({ id: "x1", symbolId: "sub-block", placement: null });
     d.nets
@@ -466,6 +470,115 @@ describe("R168 convention-solved draft", () => {
       .find((n) => n.id === "gnd")!
       .terminals.push({ instanceId: "x1", pinName: "2" });
     expect(conventionDraftEligible(d, library, {})).toBe(false);
+  });
+
+  it("keeps an opamp right-facing and in polarity order with implicit supply pins", () => {
+    const d = withPorts(
+      circuit(
+        { X1: "opamp", m1: "nmos", r1: "resistor", v: "vdd-port", g: "ground" },
+        {
+          in: ["m1.G"],
+          mid: ["m1.D", "r1.2", "X1.IN+"],
+          out: ["X1.OUT", "X1.IN-"],
+          vdd: ["v.P", "r1.1", "X1.VDD"],
+          gnd: ["g.0", "m1.S", "X1.VSS"],
+        },
+      ),
+    );
+    const block = d.instances.find((i) => i.id === "X1")!;
+    block.symbolVariantId = "signal-pins";
+    expect(conventionDraftEligible(d, resolver, {})).toBe(true);
+    const { draft } = solved(d);
+    const pose = draft.placements!.get(block.id)!;
+    const output = resolver
+      .resolve(block.symbolId)!
+      .definition.pins.find((p) => p.name === "OUT")!;
+    expect(pinExit(output, pose).x).toBe(1);
+    expect(keepsOrder(block, resolver, pose)).toBe(true);
+
+    const hiddenDisconnected = structuredClone(d);
+    for (const net of hiddenDisconnected.nets)
+      net.terminals = net.terminals.filter(
+        (t) => t.instanceId !== "X1" || !["VDD", "VSS"].includes(t.pinName),
+      );
+    expect(solved(hiddenDisconnected).draft).toEqual(draft);
+
+    // An implicit terminal on a signal Net must also leave signal costs alone.
+    hiddenDisconnected.nets
+      .find((n) => n.id === "mid")!
+      .terminals.push({
+        instanceId: "X1",
+        pinName: "VDD",
+      });
+    expect(solved(hiddenDisconnected).draft).toEqual(draft);
+  });
+
+  it("offers a convention draft for a four-device switch and passive network", () => {
+    const d = withPorts(
+      circuit(
+        {
+          s: "closed-switch",
+          r1: "resistor",
+          r2: "resistor",
+          c: "capacitor",
+          g: "ground",
+        },
+        {
+          in: ["s.1"],
+          mid: ["s.2", "r1.1"],
+          out: ["r1.2", "r2.1", "c.1"],
+          gnd: ["r2.2", "c.2", "g.0"],
+        },
+      ),
+    );
+    expect(conventionDraftEligible(d, resolver, {})).toBe(true);
+    expect(solved(d).draft.placements?.size).toBe(4);
+    const plan = planAutoLayout(d, resolver, quick);
+    const after = preview(d, resolver, plan.edits);
+    expect(after.ok).toBe(true);
+    expect(equivalentTerminals(d, after.document!, resolver)).toBe(true);
+  }, 60_000);
+
+  it("swaps two compatible units to eliminate estimated crossings", () => {
+    const d = circuit(
+      { d0: "resistor", d1: "buffer", d2: "nmos", d3: "nmos", d4: "nmos" },
+      {
+        n0: ["d0.2", "d1.Y"],
+        n1: ["d2.S"],
+        n3: ["d1.A", "d3.G", "d4.G"],
+        n4: ["d2.D", "d3.D", "d4.S"],
+        n5: ["d2.G", "d3.S", "d4.D"],
+        n6: ["d0.1"],
+      },
+    );
+    const estimator = estimate.createPlacementEstimator(
+      d.instances,
+      resolver,
+      classifyNets(d, resolver),
+    );
+    const conventionOnly = vi
+      .spyOn(estimate, "createPlacementEstimator")
+      .mockReturnValue(() => ({ crossings: 0, length: 0, score: 0 }));
+    const before = (() => {
+      try {
+        return solved(d, 30_000).draft;
+      } finally {
+        conventionOnly.mockRestore();
+      }
+    })();
+    const after = solved(d, 30_000).draft;
+    const a = estimator(before.placements!);
+    const b = estimator(after.placements!);
+    expect(a.crossings).toBe(2);
+    expect(b.crossings).toBe(0);
+    expect(b.length).toBe(a.length);
+    expect(after.cost!).toBeLessThan(before.cost! + 1.5 * a.crossings);
+    const swapped = new Map(before.placements);
+    swapped.set("d2", before.placements!.get("d4")!);
+    swapped.set("d4", before.placements!.get("d2")!);
+    expect(after.placements).toEqual(swapped);
+    const reversed = { ...d, instances: [...d.instances].reverse() };
+    expect(solved(reversed, 30_000).draft).toEqual(after);
   });
 
   it("keeps a Document above 40 instances out, whatever its device count", () => {

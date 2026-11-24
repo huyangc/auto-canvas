@@ -8,6 +8,7 @@ import {
   planLayoutOnce,
 } from "../src/auto-layout.js";
 import { contactPolicy } from "../src/contact-placement.js";
+import * as conventionRelations from "../src/convention-relations.js";
 import {
   relocationCandidates,
   searchDeviceRelocations,
@@ -576,15 +577,23 @@ it("R147 alignment may still move a feedback part that is not in its row", () =>
       o: ["ro.2"],
     },
   );
-  const calls = alignmentCalls(() => planAutoLayout(document, resolver));
-  const offset = (run: LayoutRun) =>
-    pose(run, "cf")!.position.y - pose(run, "a")!.position.y;
-  expect(
-    calls.some(
-      ({ initial, result }) =>
-        result !== initial && offset(result) !== offset(initial),
-    ),
-  ).toBe(true);
+  // Isolate R147 feedback-row alignment from the R168 convention draft.
+  const eligible = vi
+    .spyOn(conventionRelations, "conventionDraftEligible")
+    .mockReturnValue(false);
+  try {
+    const calls = alignmentCalls(() => planAutoLayout(document, resolver));
+    const offset = (run: LayoutRun) =>
+      pose(run, "cf")!.position.y - pose(run, "a")!.position.y;
+    expect(
+      calls.some(
+        ({ initial, result }) =>
+          result !== initial && offset(result) !== offset(initial),
+      ),
+    ).toBe(true);
+  } finally {
+    eligible.mockRestore();
+  }
 }, 60_000);
 
 /** Op-amp a with part p across its output and inverting input. */

@@ -5,6 +5,7 @@ import { visibleInstanceBounds } from "@icm/derived";
 import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
 import { classifyNets } from "../src/net-roles.js";
 import * as compaction from "../src/compact.js";
+import * as conventionRelations from "../src/convention-relations.js";
 import { planAutoLayout } from "../src/auto-layout.js";
 import {
   enclosingBox,
@@ -193,6 +194,10 @@ it("R97 compacts the routed finalist only for a strict score decrease and repeat
       n3: ["d.IN-"],
     },
   );
+  // Isolate R97 compaction from the R168 convention draft.
+  const eligible = vi
+    .spyOn(conventionRelations, "conventionDraftEligible")
+    .mockReturnValue(false);
   const spy = vi.spyOn(compaction, "compactPlacements");
   try {
     const result = planAutoLayout(document, resolver, {
@@ -222,6 +227,7 @@ it("R97 compacts the routed finalist only for a strict score decrease and repeat
     ).toEqual([]);
   } finally {
     spy.mockRestore();
+    eligible.mockRestore();
   }
 }, 30000);
 
