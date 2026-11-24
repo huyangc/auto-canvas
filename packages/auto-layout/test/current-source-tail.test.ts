@@ -6,6 +6,7 @@ import {
 import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
 import { expect, it } from "vitest";
 import { planAutoLayout } from "../src/auto-layout.js";
+import { pinPoints } from "../src/geometry.js";
 import { netlistPresentation } from "../src/netlist-presentation.js";
 import { auditRouting } from "../src/routing-audit.js";
 import { equivalentTerminals, preview } from "../src/transaction.js";
@@ -20,11 +21,12 @@ const quick = { seed: 1, evaluations: 0 };
 
 // The full-search geometry of these four inputs is checked in
 // current-source-tail.slow.test.ts. Quick planning keeps the validity, Net and
-// routing-safety checks, plus the geometry that holds for every input here.
+// routing-safety checks, plus the original geometry that quick planning still
+// satisfies, for the inputs where it does.
 it.each([false, true])(
   "quick planning draws the source-resistor tail validly (reverse=%s)",
   (reverse) => {
-    const { doc } = sourceResistorTail(reverse);
+    const { doc, tailPin } = sourceResistorTail(reverse);
     const plan = planAutoLayout(doc, resolver, {
       presentation: "netlist",
       search: quick,
@@ -34,6 +36,22 @@ it.each([false, true])(
     if (!result.ok) throw Error("layout transaction must replay");
     expect(equivalentTerminals(doc, result.document, resolver)).toBe(true);
     expect(auditRouting(result.document, resolver).unsafeProblems).toEqual([]);
+    const drawing = result.document,
+      pins = pinPoints(drawing, resolver);
+    const point = (id: string, pin = "P") =>
+      pins.find((x) => x.instanceId === id && x.pinName === pin)!.point;
+    if (reverse) {
+      const a = point("a"),
+        axis = (a.x + point("b").x) / 2;
+      expect((point("v").x - axis) * (a.x - axis)).toBeGreaterThan(0);
+    } else {
+      const tail = drawing.instances.find(
+        (i) => i.symbolId === "current-source",
+      )!;
+      expect(tail.placement!.position.y).toBeGreaterThan(
+        point(tail.id, tailPin).y,
+      );
+    }
   },
   60_000,
 );
@@ -53,6 +71,23 @@ it.each(["feedback", "biased-follower"] as const)(
       point = (id: string) =>
         d.instances.find((i) => i.id === id)!.placement!.position;
     const axis = (point("a").x + point("b").x) / 2;
+    if (!follower) {
+      const bodies = visibleInstanceBounds(d, resolver).filter((b) =>
+        doc.instances.some(
+          (i) =>
+            i.id === b.id &&
+            !["port", "vdd-port", "ground", "current-source"].includes(
+              i.symbolId,
+            ),
+        ),
+      );
+      expect(Math.min(point("u").x, point("v").x)).toBeLessThan(
+        Math.min(...bodies.map((b) => b.bounds.x)),
+      );
+      expect(Math.max(point("u").x, point("v").x)).toBeGreaterThan(
+        Math.max(...bodies.map((b) => b.bounds.x + b.bounds.width)),
+      );
+    }
     expect((point("u").x - axis) * (point("b").x - axis)).toBeGreaterThan(0);
     expect(point("bias").x).toBe(axis);
     expect(
