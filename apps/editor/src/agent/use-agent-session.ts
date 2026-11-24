@@ -38,9 +38,12 @@ import {
 } from "./connection-operation";
 import {
   clearAgentSessionRecoveryFor,
+  clearAgentSessionRecoveryOf,
+  peekAgentSessionRecovery,
   readAgentSessionRecovery,
   writeAgentSessionRecovery,
   type AgentSessionRecoveryRecord,
+  type RecoveryTarget,
 } from "./session-recovery";
 import { createHeartbeat, isHeartbeatAck } from "./transport-liveness";
 import type {
@@ -374,7 +377,12 @@ export function useAgentSession(
   const detach = useCallback(() => {
     const live = liveRef.current;
     liveRef.current = null;
-    if (live) stopReconnect(live);
+    if (live) {
+      stopReconnect(live);
+      // The proof belongs to the session being ended, not to whichever tab
+      // is on screen: a disconnect must not leave its credentials behind.
+      clearAgentSessionRecoveryOf(window.sessionStorage, live.sessionId);
+    }
     clearAgentSessionRecoveryFor(window.sessionStorage, ownRecoveryTarget());
     options.fileHost?.clear?.();
     return live;
@@ -437,6 +445,8 @@ export function useAgentSession(
       scopes: readonly AgentSessionScope[],
       operation: ConnectionOperation,
       recovery?: AgentSessionRecoveryRecord,
+      /** The working copy `recovery` belongs to; a switch aborts the attach. */
+      recoveryTarget?: RecoveryTarget,
     ) => {
       if (!options.enabled) return;
       operation.signal.throwIfAborted();
@@ -451,6 +461,17 @@ export function useAgentSession(
         // Transport is only needed after an explicit connection or recovery.
         const { SessionTransport } = await import("./session-transport");
         operation.signal.throwIfAborted();
+        // A proof is evidence for one working copy only: if the session was
+        // bound elsewhere while the transport loaded, attaching would join A's
+        // credentials to B's project. The operation then ends quietly.
+        if (
+          recoveryTarget &&
+          (options.recoverySessionId ?? options.projectSessionId) !==
+            recoveryTarget.projectSessionId
+        ) {
+          update({ status: "idle", error: null, scopes: [] });
+          return;
+        }
         let created: CreatedSessionResponse | null = null;
         let claimExpiresAt: number | null = null;
         if (!recovery) {
@@ -603,7 +624,26 @@ export function useAgentSession(
               live.acknowledgedContext = (
                 raw as { contextRevision?: string }
               ).contextRevision;
-              if (live.acknowledgedContext === options.contextRevision)
+              if (live.acknowledgedContext === options.contextRevision) {
+                // The live pairing follows the newly bound working copy: its
+                // proof must name that one too, or a refresh of this tab
+                // could not resume it. The expiry is unchanged.
+                if (live.claimed) {
+                  const stored = peekAgentSessionRecovery(
+                    window.sessionStorage,
+                  );
+                  if (stored !== null && stored.sessionId === live.sessionId) {
+                    const { projectSessionId, ...rest } = stored;
+                    const bound =
+                      options.recoverySessionId ?? options.projectSessionId;
+                    if (projectSessionId !== bound)
+                      writeAgentSessionRecovery(window.sessionStorage, {
+                        ...rest,
+                        projectId: options.project.id,
+                        projectSessionId: bound,
+                      });
+                  }
+                }
                 update({
                   status: live.paused
                     ? "paused"
@@ -611,6 +651,7 @@ export function useAgentSession(
                       ? "connected"
                       : "waiting-for-agent",
                 });
+              }
               return;
             }
             const parsed = AgentSessionMessageSchema.safeParse(raw);
@@ -1221,16 +1262,13 @@ export function useAgentSession(
     // keeps the old proof out of it: a person's Connect starts afresh.
     if (options.recover === false) return false;
     if (operationRef.current || liveRef.current) return true;
-    const recovery = readAgentSessionRecovery(window.sessionStorage, {
-      projectId: options.project.id,
-      projectSessionId: options.recoverySessionId ?? options.projectSessionId,
-      now: Date.now(),
-    });
+    const target = ownRecoveryTarget();
+    const recovery = readAgentSessionRecovery(window.sessionStorage, target);
     if (!recovery) return false;
     recoveryAttemptedForProjectRef.current = options.projectSessionId;
     const operation = beginOperation("creating");
     void operation
-      .wait(grant(recovery.scopes, operation, recovery))
+      .wait(grant(recovery.scopes, operation, recovery, target))
       .catch((error) => {
         if (operationRef.current === operation)
           update({ status: "idle", error: String(error) });
