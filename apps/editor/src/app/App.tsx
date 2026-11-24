@@ -4835,7 +4835,7 @@ function WorkspaceEditor({
   const nativeWorkspaceSaving = useRef(false);
   const {
     createTabSession,
-    openImportTab,
+    openImportFile,
     flushNativeWorkspace,
     restoredTabs,
     currentEditBlocker,
@@ -4849,6 +4849,7 @@ function WorkspaceEditor({
     renameShelfProject,
     deleteShelfProject,
   } = useProjectTabSessions({
+    openProjectFile,
     projectStore,
     onCloudProjectSaved: noteCloudProjectSaved,
     onCloudProjectsDeleted: noteCloudProjectsDeleted,
@@ -4937,9 +4938,8 @@ function WorkspaceEditor({
     },
   });
   useRestoredTabLinks({
-    openImportTab,
+    openImportFile,
     importReady: recoveryReady && !startupRestorePending,
-    openProjectFile,
     restoringWorkspace,
     bootRequestsNewProject,
     setStatus,

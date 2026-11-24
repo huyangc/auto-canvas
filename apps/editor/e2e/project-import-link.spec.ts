@@ -95,6 +95,7 @@ for (const failure of ["open", "write"] as const) {
     page,
   }) => {
     await page.addInitScript((failure) => {
+      if (sessionStorage.getItem("test-workspace-available")) return;
       const dbName = "analog-canvas-workspaces";
       if (failure === "open") {
         const open = IDBFactory.prototype.open;
@@ -121,6 +122,21 @@ for (const failure of ["open", "write"] as const) {
     await expectStatus(page, /export.*project.*link|link.*export/i);
     expect(new URL(page.url()).hash).toBe(new URL(url, page.url()).hash);
     expect((await exportedProject(page)).name).toBe("In-memory drawing");
+    if (failure === "write") {
+      await renameProject(page, "Edited while storage failed");
+      await page.evaluate(() =>
+        sessionStorage.setItem("test-workspace-available", "1"),
+      );
+      await page.reload();
+      await expect(page).toHaveURL(/\/editor$/);
+      await expect(
+        page.getByRole("tab", { selected: true }),
+      ).toHaveAccessibleName(/Edited while storage failed/);
+      await expect(page.getByRole("tab")).toHaveCount(2);
+      expect((await exportedProject(page)).name).toBe(
+        "Edited while storage failed",
+      );
+    }
   });
 }
 
