@@ -312,7 +312,8 @@ export function EditorMenuBar({
     null,
   );
   // The project tab strip's actions. File offers them too: the strip hides
-  // with one project.
+  // with one project. Its Shelf is File's in modes without an account and
+  // the user menu's in accounts mode.
   const tabActions = {
     busy:
       projectTabs.busy ||
@@ -415,7 +416,16 @@ export function EditorMenuBar({
       }
       projectName={project.name}
       hasUnsavedWork={hasUnsavedChanges()}
-
+      // Accounts mode lists the Shelf in the user menu instead of File.
+      {...(projectStore
+        ? {
+            accountCloudProjects: {
+              projects: cloudProjects,
+              busy: tabActions.busy,
+              ...shelfActions,
+            },
+          }
+        : {})}
       fileCommands={{
         ...(NativeFileCommands ? { NativeFileCommands } : {}),
         ...(nativeProjectStore

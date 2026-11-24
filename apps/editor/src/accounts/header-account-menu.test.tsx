@@ -5,7 +5,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AccountContext } from "./account-context";
-import { HeaderAccountMenu } from "./header-account-menu";
+import {
+  HeaderAccountMenu,
+  type HeaderAccountCloudProjects,
+} from "./header-account-menu";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
@@ -24,19 +27,55 @@ afterEach(async () => {
   document.body.innerHTML = "";
 });
 
-async function mount(value: ReturnType<typeof account>) {
+function library(): HeaderAccountCloudProjects {
+  return {
+    projects: [
+      {
+        id: "amp",
+        name: "Amp",
+        updatedAt: "2026-11-21T00:00:00.000Z",
+        revision: 1,
+        schemaVersion: 1,
+      },
+      {
+        id: "bias",
+        name: "Bias",
+        updatedAt: "2026-11-22T00:00:00.000Z",
+        revision: 2,
+        schemaVersion: 1,
+      },
+    ],
+    busy: false,
+    onOpened: vi.fn(),
+    onOpen: vi.fn(),
+    onRename: vi.fn(async () => {}),
+    onDelete: vi.fn(async () => {}),
+  };
+}
+
+async function mount(
+  value: ReturnType<typeof account>,
+  cloudProjects?: HeaderAccountCloudProjects,
+) {
   const host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
   await act(async () =>
     root!.render(
       <AccountContext.Provider value={value}>
-        <HeaderAccountMenu />
+        <HeaderAccountMenu {...(cloudProjects ? { cloudProjects } : {})} />
       </AccountContext.Provider>,
     ),
   );
   return host;
 }
+
+const button = (host: ParentNode, name: string) =>
+  [...host.querySelectorAll("button")].find(
+    (item) =>
+      (item.getAttribute("aria-label") ??
+        item.textContent?.replace("›", "")) === name,
+  );
 
 describe("HeaderAccountMenu", () => {
   it("carries the account's mark, name and a Sign out command", () => {
@@ -96,5 +135,92 @@ describe("HeaderAccountMenu", () => {
     );
     expect(menu.open).toBe(false);
     expect(document.activeElement).toBe(summary);
+  });
+
+  it("has no Cloud Projects submenu without a library", () => {
+    const markup = renderToStaticMarkup(
+      <AccountContext.Provider value={account()}>
+        <HeaderAccountMenu />
+      </AccountContext.Provider>,
+    );
+    expect(markup).not.toContain("My Cloud Projects");
+    expect(markup).not.toContain('aria-label="Cloud Projects"');
+    // Identity, one separator, Sign out: as before.
+    expect(markup.match(/class="command-separator"/gu)).toHaveLength(1);
+  });
+
+  it("lists My Cloud Projects between the identity and Sign out", () => {
+    const markup = renderToStaticMarkup(
+      <AccountContext.Provider value={account()}>
+        <HeaderAccountMenu cloudProjects={library()} />
+      </AccountContext.Provider>,
+    );
+    const identity = markup.indexOf("Auto Canvas account");
+    const projects = markup.indexOf(">My Cloud Projects<");
+    const signOut = markup.indexOf(">Sign out<");
+    expect(identity).toBeGreaterThan(0);
+    expect(projects).toBeGreaterThan(identity);
+    expect(signOut).toBeGreaterThan(projects);
+    expect(markup.match(/class="command-separator"/gu)).toHaveLength(2);
+  });
+
+  it("expands the library, reloads it once, and opens a project", async () => {
+    const projects = library();
+    const host = await mount(account(), projects);
+    const menu = host.querySelector<HTMLDetailsElement>(
+      '[data-testid="header-account-menu"]',
+    )!;
+    await act(async () => {
+      menu.open = true;
+    });
+    const options = host.querySelector<HTMLElement>(
+      '[role="group"][aria-label="Cloud Projects"]',
+    )!;
+    expect(options.hidden).toBe(true);
+    await act(async () => button(host, "My Cloud Projects")!.click());
+    expect(options.hidden).toBe(false);
+    expect(projects.onOpened).toHaveBeenCalledTimes(1);
+    expect(button(options, "Amp")).toBeDefined();
+    expect(button(options, "Bias")).toBeDefined();
+    expect(button(options, "Browse Cloud Projects…")).toBeDefined();
+    // Expanding keeps the menu open.
+    expect(menu.open).toBe(true);
+    await act(async () => button(options, "Bias")!.click());
+    expect(projects.onOpen).toHaveBeenCalledWith("bias");
+    expect(menu.open).toBe(false);
+    expect(projects.onOpened).toHaveBeenCalledTimes(1);
+  });
+
+  it("collapses the library when it closes, but stays open under a dialog", async () => {
+    const projects = library();
+    const host = await mount(account(), projects);
+    const menu = host.querySelector<HTMLDetailsElement>(
+      '[data-testid="header-account-menu"]',
+    )!;
+    const toggleMenu = (open: boolean) =>
+      act(async () => {
+        menu.open = open;
+        menu.dispatchEvent(new Event("toggle"));
+      });
+    await toggleMenu(true);
+    await act(async () => button(host, "My Cloud Projects")!.click());
+    const options = host.querySelector<HTMLElement>(
+      '[role="group"][aria-label="Cloud Projects"]',
+    )!;
+    // The Shelf's Browse dialog (a double: jsdom has no showModal).
+    const modal = document.createElement("dialog");
+    modal.setAttribute("open", "");
+    options.querySelector(".file-shelf")!.append(modal);
+    await toggleMenu(false);
+    expect(menu.open).toBe(true);
+    expect(options.hidden).toBe(false);
+    modal.remove();
+    await toggleMenu(false);
+    expect(menu.open).toBe(false);
+    expect(options.hidden).toBe(true);
+    // So the next open reads the list again.
+    await toggleMenu(true);
+    await act(async () => button(host, "My Cloud Projects")!.click());
+    expect(projects.onOpened).toHaveBeenCalledTimes(2);
   });
 });

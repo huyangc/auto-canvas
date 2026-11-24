@@ -35,6 +35,22 @@ test("accounts reopen their saved drawing in another browser and isolate local d
   }
   await page.goto("/editor");
   await enter(page, alice, true);
+  // The account's Cloud Projects are in the user menu, not File; File
+  // keeps Save and Check and Save.
+  await page.getByTestId("project-menu-toggle").click();
+  const file = page
+    .getByTestId("project-menu")
+    .getByRole("group", { name: "File", exact: true });
+  await expect(file.getByTestId("save-cloud-project")).toBeVisible();
+  await expect(file.getByTestId("check-and-save")).toBeVisible();
+  await expect(
+    file.getByRole("button", { name: "Open Cloud Project…" }),
+  ).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("project-menu")).not.toHaveAttribute(
+    "open",
+    "",
+  );
   await placeComponent(page, "resistor", { x: 320, y: 200 });
   await renameProject(page, name);
   await page.keyboard.press("ControlOrMeta+s");

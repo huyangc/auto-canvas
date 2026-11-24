@@ -1,7 +1,7 @@
 import {
   Fragment,
+  useContext,
   useEffect,
-  useLayoutEffect,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -10,7 +10,9 @@ import {
   type RefObject,
 } from "react";
 
+import { AccountContext } from "../../accounts/account-context";
 import type { RecentProjectFile } from "../../hosts/native-project-store";
+import { CommandSubmenu } from "./command-submenu";
 import type { CloudProjectSummary } from "./cloud-projects";
 import { ProjectShelf } from "./project-shelf";
 
@@ -85,86 +87,6 @@ export interface FileCommandMenuProps {
   embedded?: boolean;
 }
 
-function CommandSubmenu({
-  id,
-  title,
-  label = title,
-  open,
-  onToggle,
-  onClose,
-  children,
-}: {
-  id: string;
-  title: string;
-  /** The options' accessible name, when it is not the title. */
-  label?: string;
-  open: boolean;
-  onToggle: () => void;
-  onClose: () => void;
-  children: ReactNode;
-}) {
-  const trigger = useRef<HTMLButtonElement>(null);
-  const options = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const menu = options.current?.closest<HTMLElement>(
-      ".file-command-popover, .project-menu-popover",
-    );
-    if (!open || !menu || getComputedStyle(menu).overflowY !== "auto") return;
-    const bottom = options.current!.getBoundingClientRect().bottom;
-    menu.scrollTop += Math.max(0, bottom - menu.getBoundingClientRect().bottom);
-  }, [open]);
-  return (
-    <div
-      className="export-submenu"
-      onKeyDown={(event) => {
-        if (open && event.key === "ArrowLeft") {
-          event.preventDefault();
-          event.stopPropagation();
-          onClose();
-          trigger.current?.focus();
-        }
-      }}
-    >
-      <button
-        ref={trigger}
-        type="button"
-        aria-expanded={open}
-        aria-controls={id}
-        onClick={(event) => {
-          event.stopPropagation();
-          onToggle();
-        }}
-        onKeyDown={(event) => {
-          if (event.key === "ArrowRight" || event.key === "ArrowDown") {
-            event.preventDefault();
-            if (!open) onToggle();
-            requestAnimationFrame(() =>
-              trigger.current?.parentElement
-                ?.querySelector<HTMLElement>(
-                  ".export-submenu-options button, .export-submenu-options .file-import",
-                )
-                ?.focus(),
-            );
-          }
-        }}
-      >
-        {title}
-        <span aria-hidden="true">›</span>
-      </button>
-      <div
-        ref={options}
-        className="export-submenu-options"
-        id={id}
-        role="group"
-        aria-label={label}
-        hidden={!open}
-      >
-        {children}
-      </div>
-    </div>
-  );
-}
-
 export function FileCommandMenu({
   NativeFileCommands,
   nativeFiles,
@@ -192,7 +114,10 @@ export function FileCommandMenu({
   const [openSubmenu, setOpenSubmenu] = useState<
     "import" | "export" | "shelf" | null
   >(null);
-  const shelf = cloudEnabled ? projectTabs?.shelf : undefined;
+  // An accounts-mode editor lists the account's Cloud Projects in the user
+  // menu, so File leaves them out there.
+  const account = useContext(AccountContext);
+  const shelf = cloudEnabled && !account ? projectTabs?.shelf : undefined;
   // Drawn inside the header's File menu, which stays mounted while closed:
   // its submenus collapse when it closes, so the Shelf reloads on each open.
   const embeddedGroup = useRef<HTMLDivElement>(null);
@@ -219,8 +144,9 @@ export function FileCommandMenu({
     event.preventDefault();
     event.currentTarget.querySelector("input")?.click();
   };
-  // Private Cloud Projects are listed on the account page and in the
-  // project tabs' Shelf, which Open Cloud Project… shows here too.
+  // Private Cloud Projects are listed in the project tabs' Shelf. An
+  // accounts-mode editor shows it in the user menu (My Cloud Projects); a
+  // no-account editor shows it here too, as Open Cloud Project….
   // The rows read as groups — project, tabs, save, transfer, and the saved
   // copy's own commands — and a separator falls only between two groups that
   // are drawn.
