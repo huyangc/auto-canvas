@@ -897,13 +897,17 @@ describe("secrets", () => {
     const withPassword = url.href;
     const logged: string[] = [];
     const messages: string[] = [];
+    // A refusal before the pool never connects, so its URL can carry a
+    // password no message could hold by coincidence.
+    const unmistakable = new URL(db.url);
+    unmistakable.password = "T164-Recognisable-Secret";
     const prePool = await refusal(
-      servingEnv(`${withPassword}?dbname=other`, otherEnv()),
+      servingEnv(`${unmistakable.href}?dbname=other`, otherEnv()),
       argv(REQUIRE),
       logged,
     );
     expect(prePool.error).toBeInstanceOf(GuardedConfigurationError);
-    messages.push(String(prePool.error));
+    expect(String(prePool.error)).not.toContain("T164-Recognisable-Secret");
     const catalog = await refusal(
       servingEnv(withPassword, otherEnv()),
       argv(REQUIRE),
@@ -931,7 +935,13 @@ describe("secrets", () => {
     );
     expect((await fetch(origin(server) + READY)).status).toBe(200);
     expect(logged.length).toBeGreaterThan(0);
-    for (const text of [...messages, ...logged])
-      expect(text).not.toContain(password);
+    // The configured password can be a word the messages use (CI's is
+    // "postgres", as in "postgresql://"), so look for it where a URL holds
+    // it, and for the URL itself.
+    for (const text of [...messages, ...logged]) {
+      expect(text).not.toContain(`:${password}@`);
+      expect(text).not.toContain(`:${url.password}@`);
+      expect(text).not.toContain(withPassword);
+    }
   });
 });
