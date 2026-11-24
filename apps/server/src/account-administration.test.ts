@@ -1339,7 +1339,10 @@ describe("own password", () => {
     );
     const { temporaryPassword } = await reset.json();
     hold.release();
-    expect((await change).status).toBe(401);
+    const refused = await change;
+    expect(refused.status).toBe(401);
+    // The reset ended this session: the editor must end it too.
+    expect(refused.headers.get("X-Canvas-Session")).toBe("expired");
     const { rows } = await db.query(
       "SELECT must_change_password FROM standalone_accounts WHERE user_id=$1",
       [idOf(target)],
@@ -1376,6 +1379,101 @@ describe("own password", () => {
     expect(refused.status).toBe(401);
     expect(await refused.json()).toEqual({ error: "unauthorized" });
     expect(refused.headers.get("X-Canvas-Session")).toBe("expired");
+  });
+});
+
+describe("own password after its credential read", () => {
+  it("ends the editor's session when the account is deleted before the account lock", async () => {
+    const { send, register } = accounts();
+    const administrator = await register("a00000001");
+    await promote(administrator);
+    const target = await register("b00000002");
+    const hold = holdNextTransaction();
+    const change = send(
+      "/api/auth/password",
+      "POST",
+      { currentPassword: "passphrase", newPassword: "new passphrase" },
+      target,
+    );
+    await hold.held;
+    expect(
+      (
+        await send(
+          "/api/admin/users/" + idOf(target),
+          "DELETE",
+          { username: "b00000002" },
+          administrator,
+        )
+      ).status,
+    ).toBe(200);
+    hold.release();
+    const refused = await change;
+    expect(refused.status).toBe(401);
+    expect(await refused.json()).toEqual({ error: "unauthorized" });
+    expect(refused.headers.get("X-Canvas-Session")).toBe("expired");
+  });
+
+  it("answers a wrong password when the same session changed it meanwhile", async () => {
+    const { send, register } = accounts();
+    const user = await register("b00000002");
+    const hold = holdNextTransaction();
+    const first = send(
+      "/api/auth/password",
+      "POST",
+      { currentPassword: "passphrase", newPassword: "first passphrase" },
+      user,
+    );
+    await hold.held;
+    // The same session changes the password while the first change waits.
+    expect(
+      (
+        await send(
+          "/api/auth/password",
+          "POST",
+          { currentPassword: "passphrase", newPassword: "second passphrase" },
+          user,
+        )
+      ).status,
+    ).toBe(200);
+    hold.release();
+    const refused = await first;
+    expect(refused.status).toBe(401);
+    expect(await refused.json()).toEqual({ error: "incorrect-password" });
+    expect(refused.headers.get("X-Canvas-Session")).toBeNull();
+    expect((await send("/api/auth/me", "GET", undefined, user)).status).toBe(
+      200,
+    );
+  });
+});
+
+describe("session expiry while waiting for locks", () => {
+  it("refuses an administrator mutation whose session expired after its transaction began", async () => {
+    const { send, register } = accounts();
+    const administrator = await register("a00000001");
+    await promote(administrator);
+    const target = await register("b00000002");
+    const hold = holdBeforeStatement(/ORDER BY token_hash FOR UPDATE/u);
+    const mutation = send(
+      "/api/admin/users/" + idOf(target),
+      "PATCH",
+      { disabled: true },
+      administrator,
+    );
+    await hold.held;
+    // Expire the session after the mutation's BEGIN, so the transaction's
+    // now() still predates the expiry.
+    await db.query(
+      "UPDATE standalone_sessions SET expires_at=clock_timestamp() WHERE user_id=$1",
+      [idOf(administrator)],
+    );
+    hold.release();
+    const refused = await mutation;
+    expect(refused.status).toBe(403);
+    const { rows } = await db.query(
+      "SELECT disabled FROM standalone_accounts WHERE user_id=$1",
+      [idOf(target)],
+    );
+    expect(rows[0].disabled).toBe(false);
   });
 });
 
