@@ -177,8 +177,10 @@ Token changes are written from T162b's non-editor page `/` in the same context (
   Unchanged-session variant: Back with the same token → the late listener sees body revealed
   and the editor present; no reload. Claimed: the DOM state at those moments; not claimed:
   pixels a browser may show from its own snapshot.
-- **Standard build unchanged**: the standard listing equals
-  `tasks/T162b-notebook-browser-tests/standard-tests.baseline.txt`, and the three specs of
+- **Standard build unchanged**: capture the standard JSON listing at `git merge-base HEAD origin/main`
+  using the same Playwright configuration and environment as the task listing. Compare
+  both with `node scripts/notebook-e2e-selection-check.mjs --standard head.json --base-listing base.json`.
+  Refresh `tasks/T162b-notebook-browser-tests/standard-tests.baseline.txt` from the base listing when it changes. The listings match, and the three specs of
   T163's own acceptance pass (`recovery-dialog`, `recovery-hardening`, `project-tabs`).
   Not `pnpm test:e2e:local`: `web-agent-session.spec.ts` starts a Vite server whose proxy
   defaults to port 4310.
