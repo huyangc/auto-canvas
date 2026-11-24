@@ -229,6 +229,89 @@ async function blockedBy(pid: number) {
   }
 }
 
+/**
+ * Holds the next promise-style `db.connect()` client before its first
+ * statement matching `pattern`, until `release` is called. `held` resolves
+ * with that client's backend pid, so the locks it took before stay held.
+ */
+function holdBeforeStatement(pattern: RegExp, pool = db) {
+  const connect = pool.connect.bind(pool) as (...args: unknown[]) => unknown;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  let reached!: (pid: number) => void;
+  const held = new Promise<number>((resolve) => (reached = resolve));
+  let holding = true;
+  const holdConnect = async (...args: unknown[]): Promise<unknown> => {
+    if (args.length || !holding) return connect(...args);
+    holding = false;
+    const client = (await connect()) as pg.PoolClient;
+    const query = client.query.bind(client) as (
+      ...args: unknown[]
+    ) => Promise<unknown>;
+    let waiting = true;
+    vi.spyOn(client, "query").mockImplementation((async (
+      ...args: unknown[]
+    ) => {
+      if (waiting && typeof args[0] === "string" && pattern.test(args[0])) {
+        waiting = false;
+        const { rows } = (await query("SELECT pg_backend_pid() AS pid")) as {
+          rows: { pid: number }[];
+        };
+        reached(rows[0]!.pid);
+        await gate;
+      }
+      return query(...args);
+    }) as never);
+    return client;
+  };
+  vi.spyOn(pool, "connect").mockImplementation(holdConnect as never);
+  return { held, release };
+}
+
+/** Holds the next `db.query` whose text matches `pattern` until `release`. */
+function holdNextQuery(pattern: RegExp, pool = db) {
+  const query = pool.query.bind(pool) as (...args: unknown[]) => unknown;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  let reached!: () => void;
+  const held = new Promise<void>((resolve) => (reached = resolve));
+  let holding = true;
+  vi.spyOn(pool, "query").mockImplementation(((...args: unknown[]) => {
+    if (holding && typeof args[0] === "string" && pattern.test(args[0])) {
+      holding = false;
+      reached();
+      return gate.then(() => query(...args));
+    }
+    return query(...args);
+  }) as never);
+  return { held, release };
+}
+
+/** Resolves once `request` has settled or waits for a lock `pid` holds. */
+async function settledOrBlockedBy(request: Promise<unknown>, pid: number) {
+  let settled = false;
+  const done = () => (settled = true);
+  void request.then(done, done);
+  for (;;) {
+    const { rowCount } = await admin.query(
+      "SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))",
+      [pid],
+    );
+    if (settled || rowCount) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+/**
+ * An expired session of `headers`' account whose hash sorts before every
+ * real one, so a sign-in's sweep of expired sessions locks it first.
+ */
+const expiredFirst = (headers: Bound) =>
+  db.query(
+    "INSERT INTO standalone_sessions(token_hash,user_id,expires_at) VALUES ($1,$2,now() - interval '1 day')",
+    [Buffer.alloc(32), idOf(headers)],
+  );
+
 describe("migration 006", () => {
   it("keeps an account registered at migration 005 a plain user with an unknown registration time", async () => {
     const legacy = `account_admin_legacy_${randomUUID().replaceAll("-", "")}`;
@@ -1263,5 +1346,147 @@ describe("own password", () => {
     );
     expect(rows[0].must_change_password).toBe(true);
     expect(typeof temporaryPassword).toBe("string");
+  });
+
+  it("ends the editor's session when the account was deleted after authentication", async () => {
+    const { send, register } = accounts();
+    const administrator = await register("a00000001");
+    await promote(administrator);
+    const target = await register("b00000002");
+    const hold = holdNextQuery(/^SELECT username,salt/u);
+    const change = send(
+      "/api/auth/password",
+      "POST",
+      { currentPassword: "passphrase", newPassword: "new passphrase" },
+      target,
+    );
+    await hold.held;
+    expect(
+      (
+        await send(
+          "/api/admin/users/" + idOf(target),
+          "DELETE",
+          { username: "b00000002" },
+          administrator,
+        )
+      ).status,
+    ).toBe(200);
+    hold.release();
+    const refused = await change;
+    expect(refused.status).toBe(401);
+    expect(await refused.json()).toEqual({ error: "unauthorized" });
+    expect(refused.headers.get("X-Canvas-Session")).toBe("expired");
+  });
+});
+
+describe("lock order", () => {
+  it("lets a sign-in in the browser of an administrator and that administrator's mutation of the account both finish", async () => {
+    const { send, register } = accounts();
+    const administrator = await register("a00000001");
+    await promote(administrator);
+    const target = await register("b00000002");
+    // The sign-in, presenting the administrator's cookie, has locked the
+    // target's account and is about to lock the sessions it replaces.
+    const hold = holdBeforeStatement(/ORDER BY token_hash FOR UPDATE/u);
+    const signIn = send(
+      "/api/auth/login",
+      "POST",
+      { username: "b00000002", password: "passphrase" },
+      { Cookie: administrator.Cookie },
+    );
+    const pid = await hold.held;
+    const mutation = send(
+      "/api/admin/users/" + idOf(target),
+      "PATCH",
+      { disabled: true },
+      administrator,
+    );
+    // It waits for the target's account, before touching any session.
+    await blockedBy(pid);
+    hold.release();
+    // The sign-in replaced the administrator's session in that browser.
+    expect((await signIn).status).toBe(200);
+    const refused = await mutation;
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toEqual({ error: "forbidden" });
+    const { rows } = await db.query(
+      "SELECT disabled FROM standalone_accounts WHERE user_id=$1",
+      [idOf(target)],
+    );
+    expect(rows[0].disabled).toBe(false);
+  });
+
+  it("locks a password change's sessions in hash order with a sign-in sweeping expired ones", async () => {
+    const { send, register } = accounts();
+    const current = await register("a00000001");
+    await register("b00000002");
+    await expiredFirst(current);
+    const before = await db.query(
+      "SELECT password_hash FROM standalone_accounts WHERE user_id=$1",
+      [idOf(current)],
+    );
+    const hold = holdBeforeStatement(/ORDER BY token_hash FOR UPDATE/u);
+    const change = send(
+      "/api/auth/password",
+      "POST",
+      { currentPassword: "passphrase", newPassword: "new passphrase" },
+      current,
+    );
+    const pid = await hold.held;
+    // Another account signs in in the same browser: it ends the presented
+    // session and sweeps the expired one, which sorts first.
+    const signIn = send(
+      "/api/auth/login",
+      "POST",
+      { username: "b00000002", password: "passphrase" },
+      { Cookie: current.Cookie },
+    );
+    await settledOrBlockedBy(signIn, pid);
+    hold.release();
+    expect((await signIn).status).toBe(200);
+    const refused = await change;
+    expect(refused.status).toBe(401);
+    expect(refused.headers.get("X-Canvas-Session")).toBe("expired");
+    const after = await db.query(
+      "SELECT password_hash FROM standalone_accounts WHERE user_id=$1",
+      [idOf(current)],
+    );
+    expect(after.rows[0].password_hash).toEqual(before.rows[0].password_hash);
+  });
+
+  it("locks an administrator's sessions in hash order with a sign-in sweeping expired ones", async () => {
+    const { send, register } = accounts();
+    const administrator = await register("a00000001");
+    await promote(administrator);
+    const target = await register("b00000002");
+    await register("c00000003");
+    await expiredFirst(target);
+    const hold = holdBeforeStatement(/ORDER BY token_hash FOR UPDATE/u);
+    const reset = send(
+      `/api/admin/users/${idOf(target)}/reset-password`,
+      "POST",
+      undefined,
+      administrator,
+    );
+    const pid = await hold.held;
+    // A third account signs in in the administrator's browser: it ends the
+    // acting session and sweeps the target's expired one, which sorts first.
+    const signIn = send(
+      "/api/auth/login",
+      "POST",
+      { username: "c00000003", password: "passphrase" },
+      { Cookie: administrator.Cookie },
+    );
+    await settledOrBlockedBy(signIn, pid);
+    hold.release();
+    expect((await signIn).status).toBe(200);
+    const refused = await reset;
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toEqual({ error: "forbidden" });
+    const { rows } = await db.query(
+      "SELECT must_change_password FROM standalone_accounts WHERE user_id=$1",
+      [idOf(target)],
+    );
+    expect(rows[0].must_change_password).toBe(false);
   });
 });
