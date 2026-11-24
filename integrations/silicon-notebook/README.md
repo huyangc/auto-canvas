@@ -159,10 +159,14 @@ after an upgrade, reinstall the plugin and rebuild, or the button does not
 render.
 
 The package is built into silicon-notebook's frontend, never loaded at run
-time. Add it to step 8's build environment with its absolute path:
+time. Add its absolute path to `SILICON_NOTEBOOK_UI_PLUGINS` in step 8's
+build environment. The variable is a `:`-separated list of UI packages: when
+it already names others, append the canvas's path and keep them; otherwise
+set it to the path alone.
 
 ```bash
-SILICON_NOTEBOOK_UI_PLUGINS=/opt/auto-canvas/integrations/silicon-notebook/ui/auto-canvas
+CANVAS_UI=/opt/auto-canvas/integrations/silicon-notebook/ui/auto-canvas
+export SILICON_NOTEBOOK_UI_PLUGINS="${SILICON_NOTEBOOK_UI_PLUGINS:+$SILICON_NOTEBOOK_UI_PLUGINS:}$CANVAS_UI"
 ```
 
 silicon-notebook's `npm run build` copies the package to
@@ -177,9 +181,19 @@ browser bundle's `NEXT_PUBLIC_API_BASE_URL` must be the same-origin `/api`
 (silicon-notebook's documented proxied deployment), as for any build behind
 `BACKEND_PROXY_TARGET`.
 
-To remove the entry, rebuild silicon-notebook without
-`SILICON_NOTEBOOK_UI_PLUGINS`: the build deletes `ext-auto-canvas` and writes
-the empty registry, and the button is gone while the canvas, the plugin and
+To remove the entry, take only the canvas's path out of
+`SILICON_NOTEBOOK_UI_PLUGINS` and rebuild silicon-notebook; the other UI
+packages the list names stay. Unset the variable only when the canvas's path
+was its only entry:
+
+```bash
+CANVAS_UI=/opt/auto-canvas/integrations/silicon-notebook/ui/auto-canvas
+rest=$(printf '%s' "${SILICON_NOTEBOOK_UI_PLUGINS-}" | tr ':' '\n' | grep -vxF "$CANVAS_UI" | paste -sd: -)
+if [ -n "$rest" ]; then export SILICON_NOTEBOOK_UI_PLUGINS="$rest"; else unset SILICON_NOTEBOOK_UI_PLUGINS; fi
+```
+
+The build deletes `ext-auto-canvas` and writes the registry without it (the
+empty registry when no package is left), and the button is gone while the canvas, the plugin and
 `/canvas` stay as they were. The [rollback](#rollback) below removes it with
 everything else.
 
@@ -307,8 +321,11 @@ pinned to that schema. The limits:
    started it.)
 2. Remove the `[extensions."auto_canvas.integration"…]` tables from the
    extensions TOML (or the whole file from `EXTENSIONS_CONFIG` when it held
-   nothing else) and remove `CANVAS_PROXY_TARGET` and
-   `SILICON_NOTEBOOK_UI_PLUGINS` from silicon-notebook's build environment.
+   nothing else), remove `CANVAS_PROXY_TARGET` from silicon-notebook's
+   build environment, and take the canvas's path out of
+   `SILICON_NOTEBOOK_UI_PLUGINS` as in
+   [the entry link](#the-entry-link-in-a-notebook) (other UI packages stay;
+   the variable goes only when the canvas's path was its only entry).
    **Keep an existing `BACKEND_PROXY_TARGET`**: it is silicon-notebook's own
    API rewrite.
 3. Rebuild silicon-notebook and start it.

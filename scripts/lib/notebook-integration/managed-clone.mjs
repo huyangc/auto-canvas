@@ -534,13 +534,14 @@ function tomlVariants({ apiPort, canvasPort, envFile, logFile }) {
  * succeeded, also when that is after the shutdown began. A create that
  * failed without PostgreSQL's own refusal (an `ERROR` with its SQLSTATE: a
  * duplicate name, a cancellation) — its connection broke before the answer
- * arrived — has an unknown outcome: the name is kept in `unknown` for the
- * cleanup to reconcile (T165 follow-up 5); a refused name is never kept.
- * `shutdown(cancel)` marks the shutdown at once and resolves when every
+ * arrived — has an unknown outcome: it is kept in `unknown` as `{ name,
+ * backendPid, statement }` (the backend that ran it may still be running it)
+ * for the cleanup to reconcile (T165 follow-up 5); a refused name is never
+ * kept. `shutdown(cancel)` marks the shutdown at once and resolves when every
  * create in flight has settled: it waits `settleMs`, asks
  * `cancel(backendPids)` to cancel the creates still running, and waits
  * `settleMs` again. It resolves to `{ created, unknown, unsettled }`: every
- * name to drop, the names whose outcome is unknown, and the names whose
+ * name to drop, the creates whose outcome is unknown, and the names whose
  * create had still not settled.
  */
 export function databaseLedger({ settleMs = 10_000 } = {}) {
@@ -560,16 +561,19 @@ export function databaseLedger({ settleMs = 10_000 } = {}) {
         throw new StageAborted(
           `the shutdown has begun: database ${name} is not created`,
         );
-      const attempt = client.query(`CREATE DATABASE ${name}`).then(
+      const statement = `CREATE DATABASE ${name}`;
+      const backendPid = client.processID;
+      const attempt = client.query(statement).then(
         () => {
           created.push(name);
         },
         (error) => {
-          if (!refusedByPostgres(error)) unknown.push(name);
+          if (!refusedByPostgres(error))
+            unknown.push({ name, backendPid, statement });
           throw error;
         },
       );
-      pending.set(attempt, { name, backendPid: client.processID });
+      pending.set(attempt, { name, backendPid });
       try {
         await attempt;
       } finally {
@@ -939,7 +943,41 @@ export async function cleanUp(m) {
     left.length === 0,
     () => left.map((entry) => `${entry.name} ${entry.pid}`).join(", "),
   );
-  await dropDatabases({ databases: m.databases, admin, report });
+  // A create whose answer was lost may still be running: it is waited for
+  // until shortly before the database reserve's end, leaving time for the
+  // drops and the report of what remains.
+  const databasesEnd = end - budget.removalMs;
+  await dropDatabases({
+    databases: m.databases,
+    admin,
+    report,
+    lostBy: databasesEnd - Math.min(5000, budget.databaseMs / 4),
+  });
+}
+
+/**
+ * The lost creates whose backend still runs them, polled until none does or
+ * `until` passes: a row of `pg_stat_activity` that is not idle and runs the
+ * create's statement on its recorded backend pid (any backend when the pid is
+ * unknown). Resolves to the creates still running; a read that fails rejects.
+ */
+async function lostCreatesRunning(admin, creates, until) {
+  for (;;) {
+    const { rows } = await admin.query(
+      "SELECT pid, query FROM pg_catalog.pg_stat_activity WHERE state IS DISTINCT FROM 'idle' AND query = ANY ($1::text[])",
+      [creates.map((entry) => entry.statement)],
+    );
+    const running = creates.filter((entry) =>
+      rows.some(
+        (row) =>
+          row.query === entry.statement &&
+          (!(entry.backendPid > 0) || row.pid === entry.backendPid),
+      ),
+    );
+    const left = until - Date.now();
+    if (running.length === 0 || left <= 0) return running;
+    await sleep(Math.min(200, left));
+  }
 }
 
 /** The ledger's way to cancel the creates still running: by backend pid. */
@@ -957,14 +995,24 @@ const cancelCreates = (admin) => async (pids) => {
  * every create in flight settled, a straggler cancelled through `admin`),
  * then every database a create recorded is dropped `WITH (FORCE)`, a create
  * that succeeded after the shutdown began included. A create whose outcome is
- * unknown (its answer was lost) is reconciled first: its name — this run's
- * own, never one PostgreSQL refused — is dropped when it exists. Each drop
+ * unknown (its answer was lost) is reconciled first: its backend may still be
+ * running the statement and commit later, so the cleanup waits (until
+ * `lostBy`) until no backend runs it any more (`pg_stat_activity`: its
+ * recorded backend pid with that statement, not idle), then looks the name —
+ * this run's own, never one PostgreSQL refused — up and drops it when it
+ * exists. One still running at `lostBy` is reported as unresolved and not
+ * looked up (it may commit after the look-up). Each drop
  * is attempted on its own: one that fails or times out is reported, naming
  * its database, and the next is still sent. Afterwards the names still
  * present are read and reported. `admin` is the cleanup's session
  * (`adminSession`), closed here.
  */
-export async function dropDatabases({ databases, admin, report }) {
+export async function dropDatabases({
+  databases,
+  admin,
+  report,
+  lostBy = Date.now() + 10_000,
+}) {
   try {
     const { created, unknown, unsettled } = await databases.shutdown(
       cancelCreates(admin),
@@ -974,7 +1022,27 @@ export async function dropDatabases({ databases, admin, report }) {
         "cleanup: every CREATE DATABASE in flight settled before the drop",
         `still running after its cancellation: ${unsettled.join(", ")} (it may be left behind)`,
       );
-    const lost = unknown.filter((name) => !created.includes(name));
+    const unresolved = unknown.filter((entry) => !created.includes(entry.name));
+    let lost = [];
+    if (unresolved.length) {
+      const names = (entries) => entries.map((entry) => entry.name).join(", ");
+      try {
+        const running = await lostCreatesRunning(admin, unresolved, lostBy);
+        if (running.length)
+          report.fail(
+            "cleanup: the CREATE DATABASE whose answer was lost has ended",
+            `unresolved: ${names(running)} still being created when the time for it ran out (it may be left behind)`,
+          );
+        lost = unresolved
+          .filter((entry) => !running.includes(entry))
+          .map((entry) => entry.name);
+      } catch (error) {
+        report.fail(
+          "cleanup: the CREATE DATABASE whose answer was lost has ended",
+          `unresolved: whether a backend still runs ${names(unresolved)} could not be read: ${error.message} (it may be left behind)`,
+        );
+      }
+    }
     let found = [];
     if (lost.length) {
       try {
