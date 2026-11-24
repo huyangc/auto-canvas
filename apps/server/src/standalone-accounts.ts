@@ -11,11 +11,15 @@ import type { HttpBindings } from "@hono/node-server";
 import type { Context, Hono } from "hono";
 import { getCookie, setCookie } from "hono/cookie";
 import { bodyLimit } from "hono/body-limit";
-import type { Pool, PoolClient } from "pg";
+import type { Pool } from "pg";
 import type { SessionUser } from "./identity.js";
 import { registerProjects } from "./projects.js";
 import { registerComponents } from "./components.js";
 import type { AgentRelayHost } from "./agent-relay/host.js";
+import {
+  registerAccountAdministration,
+  removeSessions,
+} from "./account-administration.js";
 
 const derive = promisify(scrypt);
 const lifetime = 30 * 24 * 60 * 60;
@@ -29,30 +33,6 @@ function sessionCookie(c: Context, base: string) {
 }
 const digest = (token: string) => createHash("sha256").update(token).digest();
 const dummySalt = randomBytes(16);
-
-// Called in a transaction. Locking session rows before reading their pairings
-// includes pairings admitted concurrently just before revocation.
-async function removeSessions(
-  conn: PoolClient,
-  presented: Buffer,
-  includeExpired = false,
-): Promise<string[]> {
-  const { rows } = await conn.query<{ token_hash: Buffer }>(
-    "SELECT token_hash FROM standalone_sessions WHERE token_hash=$1 OR ($2 AND expires_at<=now()) ORDER BY token_hash FOR UPDATE",
-    [presented, includeExpired],
-  );
-  if (!rows.length) return [];
-  const hashes = rows.map((row) => row.token_hash);
-  const pairings = await conn.query<{ pairing_id: string }>(
-    "SELECT pairing_id FROM account_agent_pairings WHERE session_hash=ANY($1::bytea[])",
-    [hashes],
-  );
-  await conn.query(
-    "DELETE FROM standalone_sessions WHERE token_hash=ANY($1::bytea[])",
-    [hashes],
-  );
-  return pairings.rows.map((row) => row.pairing_id);
-}
 
 export function registerAccounts(
   app: Hono,
@@ -70,11 +50,19 @@ export function registerAccounts(
       maxAge: lifetime,
     });
   }
+  const presented = (c: Context) =>
+    digest(getCookie(c, sessionCookie(c, base)) ?? "");
   async function session(c: Context): Promise<SessionUser | null> {
     const token = getCookie(c, sessionCookie(c, base));
     if (!token || !/^[a-f0-9]{64}$/u.test(token)) return null;
-    const result = await db.query<{ id: string; display_name: string }>(
-      "SELECT u.id,u.display_name FROM standalone_sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>now()",
+    // A disabled account has no live session.
+    const result = await db.query<{
+      id: string;
+      display_name: string;
+      role: "user" | "admin";
+      must_change_password: boolean;
+    }>(
+      "SELECT u.id,u.display_name,a.role,a.must_change_password FROM standalone_sessions s JOIN standalone_accounts a ON a.user_id=s.user_id JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>now() AND NOT a.disabled",
       [digest(token)],
     );
     const row = result.rows[0];
@@ -86,7 +74,9 @@ export function registerAccounts(
       path === "/api/projects" ||
       path.startsWith("/api/projects/") ||
       path === "/api/components" ||
-      path.startsWith("/api/components/");
+      path.startsWith("/api/components/") ||
+      path === "/api/admin" ||
+      path.startsWith("/api/admin/");
     if (
       !row ||
       ((needsBinding || expected !== undefined) && expected !== row.id)
@@ -97,8 +87,9 @@ export function registerAccounts(
       displayName: row.display_name,
       email: null,
       provider: "account",
-      role: "user",
-      isAdmin: false,
+      role: row.role,
+      isAdmin: row.role === "admin",
+      mustChangePassword: row.must_change_password,
     };
   }
   // Capability clients authenticate with relay tokens and use its configured origin.
@@ -144,6 +135,10 @@ export function registerAccounts(
   let active = 0;
   const attempts = new LoginAttempts();
   const accountAttempts = new LoginAttempts(60);
+  // The transport peer is authoritative. Proxy users have separate usernames.
+  const peerOf = (c: Context) =>
+    (c.env as Partial<HttpBindings> | undefined)?.incoming?.socket
+      .remoteAddress ?? "local";
   for (const action of ["register", "login"] as const) {
     app.post(`/api/auth/${action}`, bodyLimit({ maxSize: 4096 }), async (c) => {
       if (c.req.header("content-type")?.split(";")[0] !== "application/json")
@@ -166,10 +161,7 @@ export function registerAccounts(
         password.length > 128
       )
         return c.json({ error: "Use a password of 8–128 characters." }, 400);
-      // The transport peer is authoritative. Proxy users have separate usernames.
-      const bindings = c.env as Partial<HttpBindings> | undefined;
-      const peer = bindings?.incoming?.socket.remoteAddress ?? "local";
-      const attempt = attempts.forKey(peer + "/" + username);
+      const attempt = attempts.forKey(peerOf(c) + "/" + username);
       const accountAttempt =
         action === "login" ? accountAttempts.forKey(username) : null;
       if (active >= 8 || attempt.limited() || accountAttempt?.limited())
@@ -179,6 +171,11 @@ export function registerAccounts(
         let userId: string;
         const salt = randomBytes(16);
         let passwordHash: Buffer | undefined;
+        const rejected = () => {
+          attempt.failed();
+          accountAttempt?.failed();
+          return c.json({ error: "Incorrect username or password." }, 401);
+        };
         if (action === "register") {
           userId = "account:" + randomUUID();
           passwordHash = (await derive(password, salt, 64)) as Buffer;
@@ -187,8 +184,9 @@ export function registerAccounts(
             user_id: string;
             salt: Buffer;
             password_hash: Buffer;
+            disabled: boolean;
           }>(
-            "SELECT user_id,salt,password_hash FROM standalone_accounts WHERE username=$1",
+            "SELECT user_id,salt,password_hash,disabled FROM standalone_accounts WHERE username=$1",
             [username],
           );
           const row = rows[0];
@@ -202,7 +200,10 @@ export function registerAccounts(
             if (row) accountAttempt?.failed();
             return c.json({ error: "Incorrect username or password." }, 401);
           }
+          // A disabled account answers as a wrong password does.
+          if (row.disabled) return rejected();
           userId = row.user_id;
+          passwordHash = row.password_hash;
         }
         const token = randomBytes(32).toString("hex");
         let retired: string[];
@@ -226,12 +227,22 @@ export function registerAccounts(
                 409,
               );
             }
+          } else {
+            // The hash was verified outside this transaction. A disable,
+            // reset or deletion that committed since then wins.
+            const current = await conn.query(
+              "SELECT 1 FROM standalone_accounts WHERE user_id=$1 AND password_hash=$2 AND NOT disabled FOR SHARE",
+              [userId, passwordHash],
+            );
+            if (!current.rowCount) {
+              await conn.query("ROLLBACK");
+              return rejected();
+            }
           }
-          retired = await removeSessions(
-            conn,
-            digest(getCookie(c, sessionCookie(c, base)) ?? ""),
-            true,
-          );
+          retired = await removeSessions(conn, {
+            token: presented(c),
+            includeExpired: true,
+          });
           await conn.query(
             "INSERT INTO standalone_sessions(token_hash,user_id,expires_at) VALUES ($1,$2,now()+ interval '30 days')",
             [digest(token), userId],
@@ -259,13 +270,22 @@ export function registerAccounts(
       c.header("X-Canvas-Session", "expired");
       return c.json({ error: "unauthorized" }, 401);
     }
+    const path = c.req.path.slice(base.length);
+    if (
+      user.mustChangePassword &&
+      !(
+        c.req.method === "POST" &&
+        (path === "/api/auth/password" || path === "/api/auth/logout")
+      )
+    )
+      return c.json({ error: "password-change-required" }, 403);
     c.set("sessionUser", user);
     await next();
   });
   app.post("/api/agent/sessions", (c) =>
     relay.fetch(c.req.raw, {
       editor: true,
-      creatingFor: digest(getCookie(c, sessionCookie(c, base))!),
+      creatingFor: presented(c),
     }),
   );
   app.post("/api/auth/logout", async (c) => {
@@ -273,10 +293,7 @@ export function registerAccounts(
     let retired: string[];
     try {
       await conn.query("BEGIN");
-      retired = await removeSessions(
-        conn,
-        digest(getCookie(c, sessionCookie(c, base))!),
-      );
+      retired = await removeSessions(conn, { token: presented(c) });
       await conn.query("COMMIT");
     } catch (error) {
       await conn.query("ROLLBACK");
@@ -289,6 +306,86 @@ export function registerAccounts(
     // this request's token ends its session without clearing the newer one.
     return c.json({ ok: true });
   });
+  app.post("/api/auth/password", bodyLimit({ maxSize: 4096 }), async (c) => {
+    if (c.req.header("content-type")?.split(";")[0] !== "application/json")
+      return c.json({ error: "Expected JSON" }, 415);
+    const body = await c.req.json().catch(() => null);
+    const currentPassword: unknown = body?.currentPassword;
+    const newPassword: unknown = body?.newPassword;
+    if (
+      typeof currentPassword !== "string" ||
+      currentPassword.length > 128 ||
+      typeof newPassword !== "string" ||
+      newPassword.length < 8 ||
+      newPassword.length > 128
+    )
+      return c.json({ error: "invalid-fields" }, 400);
+    if (currentPassword === newPassword)
+      return c.json({ error: "password-unchanged" }, 400);
+    const userId = c.get("sessionUser").id;
+    const { rows } = await db.query<{
+      username: string;
+      salt: Buffer;
+      password_hash: Buffer;
+    }>(
+      "SELECT username,salt,password_hash FROM standalone_accounts WHERE user_id=$1",
+      [userId],
+    );
+    const row = rows[0];
+    if (!row) return c.json({ error: "unauthorized" }, 401);
+    // Guesses here count against the same limits as sign-in.
+    const attempt = attempts.forKey(peerOf(c) + "/" + row.username);
+    const accountAttempt = accountAttempts.forKey(row.username);
+    if (active >= 8 || attempt.limited() || accountAttempt.limited())
+      return c.json({ error: "Too many attempts. Try again later." }, 429);
+    // Not X-Canvas-Session: expired, which would end the editor's session.
+    const incorrect = () => c.json({ error: "incorrect-password" }, 401);
+    active++;
+    try {
+      const hash = (await derive(currentPassword, row.salt, 64)) as Buffer;
+      if (!timingSafeEqual(hash, row.password_hash)) {
+        attempt.failed();
+        accountAttempt.failed();
+        return incorrect();
+      }
+      const salt = randomBytes(16);
+      const replacement = (await derive(newPassword, salt, 64)) as Buffer;
+      let retired: string[];
+      const conn = await db.connect();
+      try {
+        await conn.query("BEGIN");
+        // The verified hash must still be current: a reset, disable or
+        // another change committed since the check wins.
+        const locked = await conn.query(
+          "SELECT 1 FROM standalone_accounts WHERE user_id=$1 AND password_hash=$2 AND NOT disabled FOR UPDATE",
+          [userId, row.password_hash],
+        );
+        if (!locked.rowCount) {
+          await conn.query("ROLLBACK");
+          return incorrect();
+        }
+        await conn.query(
+          "UPDATE standalone_accounts SET salt=$2,password_hash=$3,must_change_password=false WHERE user_id=$1",
+          [userId, salt, replacement],
+        );
+        retired = await removeSessions(conn, {
+          userId,
+          except: presented(c),
+        });
+        await conn.query("COMMIT");
+      } catch (error) {
+        await conn.query("ROLLBACK");
+        throw error;
+      } finally {
+        conn.release();
+      }
+      await relay.endAccountPairings(retired);
+      return c.json({ ok: true });
+    } finally {
+      active--;
+    }
+  });
+  registerAccountAdministration(app, db, relay, presented);
   registerComponents(app, db, async (c) => c.get("sessionUser"), base);
   registerProjects(app, db, (c) => c.get("sessionUser").id, limit);
 }

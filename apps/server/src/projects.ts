@@ -122,9 +122,12 @@ async function save(
   return transaction(db, async (connection) => {
     if (!id) {
       // The user row serializes creates so simultaneous requests cannot exceed the limit.
-      await connection.query("SELECT id FROM users WHERE id = $1 FOR UPDATE", [
-        userId,
-      ]);
+      // An account deleted since its session was checked owns nothing.
+      const owner = await connection.query(
+        "SELECT id FROM users WHERE id = $1 FOR UPDATE",
+        [userId],
+      );
+      if (!owner.rowCount) return c.json({ error: "unauthorized" }, 401);
       const count = await connection.query<{ count: string }>(
         "SELECT count(*) FROM cloud_projects WHERE user_id = $1",
         [userId],

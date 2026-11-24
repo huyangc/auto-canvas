@@ -58,12 +58,12 @@ build the server and its workspace dependencies.
 | `DATABASE_URL`                  | `postgresql:///auto_canvas`      | PostgreSQL connection URL                                         |
 | `HOST`                          | `127.0.0.1`                      | Bind address                                                      |
 | `PORT`                          | `4310`                           | HTTP port                                                         |
-| `AUTO_CANVAS_USER_NAME`         | `Local user`                     | Initial display name of the legacy local profile          |
-| `AUTO_CANVAS_PROJECT_LIMIT`     | `200`                            | Positive integer, maximum Projects per user             |
+| `AUTO_CANVAS_USER_NAME`         | `Local user`                     | Initial display name of the legacy local profile                  |
+| `AUTO_CANVAS_PROJECT_LIMIT`     | `200`                            | Positive integer, maximum Projects per user                       |
 | `AUTO_CANVAS_AGENT_IDLE_MS`     | `300000`                         | Agent session idle timeout in milliseconds                        |
 | `AGENT_ALLOWED_ORIGIN`          | request origin                   | Optional allowed browser origin for Agent HTTP/WebSocket requests |
 | `EDITOR_ROOT`                   | unset                            | Built editor directory; enables static assets and SPA fallback    |
-| `AUTO_CANVAS_AUTH`              | `accounts`                  | `accounts`, legacy `local`, or `notebook` identity    |
+| `AUTO_CANVAS_AUTH`              | `accounts`                       | `accounts`, legacy `local`, or `notebook` identity                |
 | `AUTO_CANVAS_NOTEBOOK_API`      | unset                            | Notebook mode only: loopback notebook origin for `GET /api/me`    |
 | `AUTO_CANVAS_API_URL`           | `http://127.0.0.1:4310`          | Vite dev/preview proxy target; configured in the editor process   |
 | `AUTO_CANVAS_TEST_DATABASE_URL` | `postgresql:///auto_canvas_test` | Contract and browser test database                                |
@@ -84,6 +84,28 @@ pnpm exec playwright test apps/editor/e2e/cloud-projects-server.spec.ts apps/edi
 ```
 
 Run `AUTO_CANVAS_E2E_ACCOUNTS=1 pnpm exec playwright test` to exercise standalone registration, private drafts and cross-browser reopening against the test database.
+
+### Administrators
+
+In accounts mode, name the first administrator on the server after that
+account has registered:
+
+```bash
+node apps/server/dist/cli.js --grant-admin a12345678
+```
+
+The command applies the migrations, makes the account an enabled
+administrator and exits without listening; running it again changes nothing.
+It needs accounts mode and cannot be combined with `--migrate`,
+`--require-canvas-database` or `--init-empty-database`. An unknown or
+malformed username is an error that names no other account. Administrators
+then grant and revoke the role, disable and enable accounts, reset passwords
+and delete accounts through `/api/admin` (see the
+[HTTP contract](../../docs/specs/server.md#administrators-and-passwords)).
+Nobody can disable, demote, reset or delete their own account, so one enabled
+administrator always remains. A reset shows a temporary password once; the
+account must change it before anything but signing out works. Deleting an
+account deletes its private Projects and keeps its published User Components.
 
 Contract tests create and remove an isolated schema in the test database and
 fail with its URL when PostgreSQL is unreachable. Browser tests start a server
