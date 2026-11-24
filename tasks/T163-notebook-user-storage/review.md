@@ -63,3 +63,30 @@ P2, one P3; no blocking finding), each checked and found valid.
 
 Rerun by the reviewer: notebook unit and build tests 11 files, 144 tests;
 typecheck, lint, format, docs 0.
+
+## Round 3 — rebase on the base holding T162b/T162c; contract corrections (by the reviewer)
+
+Rebased onto `main` `c5f1678` (one conflict, the test-link sentence of
+`docs/specs/server.md`: both sides kept). After the rebase the reviewer ran the
+31 notebook browser cases of `main` against this build: **13 passed, 18
+failed**, none a product defect — each relies on the shared storage this task
+replaces (the unprefixed Draw-mode seed of `playwright.config.ts`: N3, N4a,
+N4b, N5a, N5b, N6a, N6b, N6c; a case's own `indexedDB.databases()` before
+sign-in: N2a–N2f, N9; the probe's area test and the bare working-copy key:
+N1a, N1b, N11c). They are T163b's work, and T163 does not merge before they
+pass.
+
+Reviewed: codex `gpt-6.2-sol` PR review round 4 of PR 116 at `220a590` (one
+P1, two P2, one P3), each checked and found valid.
+
+| #   | Severity | Where                        | Finding                                                                                                                                                                                             | Fix                                                                                                                                                                                                                                      |
+| --- | -------- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 7   | P1 fixed | `browser-contract.md`, scope | The follow-up covered `notebook-auth.spec.ts` only; `notebook-bfcache.spec.ts` (test records in `sessionStorage` after a signed-out reload) and `notebook-evidence.spec.ts` (bare-key seeds) break. | The contract owns every notebook spec, the helpers and the selection manifest, with the rules of the adaptation (native storage for test-owned records, prefixed user-owned seeds, raw inspection through the handle, nothing weakened). |
+| 8   | P2 fixed | `browser-contract.md`, R3    | The calibration reload ran before edit 1, when no `beforeunload` listener is installed.                                                                                                             | Edit 1 and its writes first, then the calibration.                                                                                                                                                                                       |
+| 9   | P2 fixed | `browser-contract.md`        | The command lacked `AUTO_CANVAS_API_URL`, which the configuration requires.                                                                                                                         | The whole notebook run with the lane's API origin; the standard-suite line no longer names `pnpm test:e2e:local`.                                                                                                                        |
+| 10  | P3 fixed | `docs/specs/server.md`       | The deployment paragraph still said storage is shared until T163.                                                                                                                                   | The temporary rule is removed; the permanent export-and-clear rule stays.                                                                                                                                                                |
+
+Rerun by the reviewer on the rebased tree: `pnpm build`,
+`pnpm build:notebook-editor` 0; notebook unit and build tests 144 passed; the
+unit suite 8853 passed; typecheck, lint, format, docs, deadcode 0; no changed
+path outside the owned list.

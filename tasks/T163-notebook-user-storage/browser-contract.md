@@ -14,6 +14,29 @@ below, `docs/testing/README.md` if it lists the notebook cases, its task directo
 owned: all product code (`apps/editor/src/**`, `apps/server/**`, `packages/**`). A product
 defect found by a case is reported, not fixed.
 
+**Every existing notebook spec is part of the migration, not only
+`notebook-auth.spec.ts`** (added after the rebase onto the base that holds T162b and
+T162c; measured there: 18 of the 31 notebook cases fail against T163, none of them a
+product defect). Also owned, for that adaptation: `apps/editor/e2e/notebook-fixtures.ts`,
+`apps/editor/e2e/notebook-bfcache.spec.ts`, `apps/editor/e2e/notebook-worker.spec.ts`,
+`apps/editor/e2e/notebook-evidence.spec.ts` and `scripts/notebook-e2e-selection-check.mjs`
+(the manifest of required titles). The rules of the adaptation:
+
+- **Test-owned records** (`recordPageShows` / `readPageShows`, `readRestored` and the
+  restore marker of `notebook-bfcache.spec.ts`, the storage probe, the trace) are written
+  and read through the saved native storage of the raw-inspection handle: the page's
+  `sessionStorage`, `localStorage` and `indexedDB` throw before sign-in and after a
+  signed-out reload, and are namespaced after it.
+- **User-owned seeds and expectations** carry the mounted user's prefix: the Draw-mode
+  preference and coach mark every drawing case needs (the unprefixed pair in
+  `playwright.config.ts`'s `storageState` is ignored by T163, so the editor opens in Auto
+  mode), N11c's saved Agent session and its working-copy positive control. A seed under
+  the bare key no longer exercises the case it was written for.
+- **Raw inspection** (`indexedDB.databases()` in N1, N2 and N9) goes through the saved
+  native `IDBFactory.prototype.databases`.
+- No existing assertion is dropped or weakened, and no title is removed; the whole notebook
+  run (both projects, every spec) must pass before T163 and T163b merge.
+
 ## What the product provides (from T163)
 
 - `performance.mark("auto-canvas:notebook-commit")` right after the namespace is fixed, and
@@ -109,10 +132,13 @@ Token changes are written from T162b's non-editor page `/` in the same context (
   Recover dialog lists it (discovery published), close the dialog, then assert
   `startup-recovery-banner` has count 0. Token → Alice; reload at the same URL; the banner
   shows her project (the positive leg of the same mechanism); Restore gives revision 3.
-- **R3 Account change with unsaved work (the drain).** Calibration first, in the same page:
-  a `location.reload()` attempt raises the `beforeunload` dialog (dismissed), proving the
-  dirty-work prompt is armed (T162b N5a). Then Alice makes edit 1 and waits until its
-  workspace and recovery puts are complete (trace). Through the handle the test holds a
+- **R3 Account change with unsaved work (the drain).** Alice first makes edit 1 through
+  the UI and waits until its workspace and recovery puts are complete (trace): a fresh
+  editor installs no `beforeunload` listener until the drawing is dirty. Calibration then,
+  in the same page: a `location.reload()` attempt raises the `beforeunload` dialog
+  (dismissed), proving the dirty-work prompt is armed (T162b N5a); because edit 1 is
+  already written, the calibration cannot flush the revision the drain is to protect.
+  Through the handle the test holds a
   readwrite transaction on Alice's workspace store (re-issuing `get` in `onsuccess`). Alice
   makes edit 2 (revision R2) and, within 400 ms, the token changes. The trace must show no
   `visibilitychange`→hidden and no recovery `put` with R2 before the `storage` event (if the
@@ -151,13 +177,20 @@ Token changes are written from T162b's non-editor page `/` in the same context (
   Unchanged-session variant: Back with the same token → the late listener sees body revealed
   and the editor present; no reload. Claimed: the DOM state at those moments; not claimed:
   pixels a browser may show from its own snapshot.
-- **Standard build unchanged**: the full standard suite (`pnpm test:e2e:local`) once
-  T162b's `project-file.spec.ts` fix is in the base.
+- **Standard build unchanged**: the standard listing equals
+  `tasks/T162b-notebook-browser-tests/standard-tests.baseline.txt`, and the three specs of
+  T163's own acceptance pass (`recovery-dialog`, `recovery-hardening`, `project-tabs`).
+  Not `pnpm test:e2e:local`: `web-agent-session.spec.ts` starts a Vite server whose proxy
+  defaults to port 4310.
 
 ## Commands
 
+The whole notebook run (two projects: `notebook`, and `notebook-bfcache` for R6 and N6c),
+after `pnpm build` and `pnpm build:notebook-editor`. `AUTO_CANVAS_API_URL` is required by
+the configuration, independently of `AUTO_CANVAS_E2E_API_PORT`:
+
 ```bash
-AUTO_CANVAS_E2E_NOTEBOOK=1 ICM_E2E_PORT=4273 AUTO_CANVAS_E2E_API_PORT=4321 AUTO_CANVAS_TEST_DATABASE_URL=postgresql:///auto_canvas_test_2 pnpm exec playwright test apps/editor/e2e/notebook-auth.spec.ts --workers=1
+AUTO_CANVAS_E2E_NOTEBOOK=1 ICM_E2E_ISOLATED=1 ICM_E2E_PORT=4273 AUTO_CANVAS_E2E_API_PORT=4321 AUTO_CANVAS_API_URL=http://127.0.0.1:4321 AUTO_CANVAS_TEST_DATABASE_URL=postgresql:///auto_canvas_test_2 pnpm exec playwright test
 ```
 
 The report shows, from Playwright's JSON reporter, that every case named here ran (count
