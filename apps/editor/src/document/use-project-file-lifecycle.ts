@@ -306,12 +306,18 @@ export function useProjectFileLifecycle({
   const safeSnapshotTokenRef = useRef<string | null>(null);
   /** Change token of the last snapshot published; see hasUnsavedChanges. */
   const publishedSnapshotTokenRef = useRef<string | null>(null);
-  const [persistenceState, setPersistenceState] =
+  const [persistenceState, setPersistenceStateValue] =
     useState<PersistenceState>("unbound");
   // The guard asks for the live state: an import reads its files for a while,
-  // and an edit committed meanwhile must still be seen as unsaved work.
+  // and an edit committed meanwhile must still be seen as unsaved work. The
+  // ref is written with every state change, never from a render: a render
+  // that runs before a lower-priority update lands would carry the old value
+  // and reopen the window in which an edit reads as clean.
   const persistenceStateRef = useRef(persistenceState);
-  persistenceStateRef.current = persistenceState;
+  const setPersistenceState = (next: PersistenceState) => {
+    persistenceStateRef.current = next;
+    setPersistenceStateValue(next);
+  };
   const [cloudBinding, setCloudBinding] = useState<CloudProjectBinding | null>(
     null,
   );
@@ -322,9 +328,17 @@ export function useProjectFileLifecycle({
     savedProjectBaselineRef.current = baseline;
     setSavedProjectBaselineState(baseline);
   };
+  /**
+   * The Project the current clean/unbound state was established against:
+   * an edit is unsaved work as soon as the controller holds anything else,
+   * whether or not React has rendered it or the state has followed. A null
+   * `session` marks a Project this lifecycle installed itself, adopted by the
+   * next render's session.
+   */
   const persistenceChangeRef = useRef<{
-    session: string;
+    session: string | null;
     token: string;
+    project: CircuitProject;
   } | null>(null);
   const [replaceGuardState, setReplaceGuardState] =
     useState<ReplaceGuardState | null>(null);
@@ -426,15 +440,30 @@ export function useProjectFileLifecycle({
     // The controller commits synchronously and the render follows: an edit
     // made in that interval is unsaved work even before the state notices,
     // unless it put the saved version back.
-    const current = readCurrentProject();
-    if (
-      (state === "unbound" || state === "clean") &&
-      current !== liveProjectRef.current &&
-      projectChangeToken(current) !== projectChangeToken(liveProjectRef.current)
-    ) {
-      const saved = savedProjectBaselineRef.current;
-      if (saved === null || !sameProjectContent(current, saved.project))
-        return true;
+    if (state === "unbound" || state === "clean") {
+      const current = readCurrentProject();
+      const baseline = persistenceChangeRef.current;
+      // Compared with the snapshot that established the clean state, not
+      // the latest render: once an edit has rendered, the render matches it
+      // while the state is still catching up. Identity first, so an
+      // unchanged Project builds no tokens.
+      const reference =
+        baseline !== null &&
+        (baseline.session === null ||
+          baseline.session === liveSessionRef.current)
+          ? baseline
+          : null;
+      const changed = reference
+        ? current !== reference.project &&
+          projectChangeToken(current) !== reference.token
+        : current !== liveProjectRef.current &&
+          projectChangeToken(current) !==
+            projectChangeToken(liveProjectRef.current);
+      if (changed) {
+        const saved = savedProjectBaselineRef.current;
+        if (saved === null || !sameProjectContent(current, saved.project))
+          return true;
+      }
     }
     return (
       state === "dirty" ||
@@ -512,6 +541,15 @@ export function useProjectFileLifecycle({
     safeSnapshotTokenRef.current = null;
     publishedSnapshotTokenRef.current = null;
     const nextDocument = installProject(prepared.project, nextViewBox, options);
+    // The installed Project is the clean/unbound reference until the next
+    // render adopts it under the new session: an edit before that render is
+    // already unsaved work.
+    const installed = readCurrentProject();
+    persistenceChangeRef.current = {
+      session: null,
+      token: projectChangeToken(installed),
+      project: installed,
+    };
     const nextPersistenceState =
       options.persistenceState ??
       (options.source === "spice-import" || options.source === "recovered"
@@ -707,7 +745,7 @@ export function useProjectFileLifecycle({
             store: nativeProjectStore,
             workingCopyId: readCurrentWorkingCopyId(),
             binding,
-            previousState: persistenceState,
+            previousState: persistenceStateRef.current,
             recovery,
             view: viewBox,
             currentProject: () => readCurrentProject(),
@@ -1538,24 +1576,39 @@ export function useProjectFileLifecycle({
 
   const currentProjectChangeToken = projectChangeToken(project);
   useEffect(() => {
-    const baseline = persistenceChangeRef.current;
+    let baseline = persistenceChangeRef.current;
+    // A Project installed here is this session's reference: an edit made
+    // before this render is compared with it rather than absorbed.
+    if (baseline !== null && baseline.session === null)
+      baseline = persistenceChangeRef.current = {
+        ...baseline,
+        session: projectSessionId,
+      };
     if (baseline === null || baseline.session !== projectSessionId) {
       persistenceChangeRef.current = {
         session: projectSessionId,
         token: currentProjectChangeToken,
+        project,
       };
       return;
     }
-    if (baseline.token !== currentProjectChangeToken) {
-      persistenceChangeRef.current = {
-        session: projectSessionId,
-        token: currentProjectChangeToken,
-      };
-      const matchesSavedProject =
-        savedProjectBaseline !== null &&
-        sameProjectContent(savedProjectBaseline.project, project);
-      setPersistenceState(matchesSavedProject ? "clean" : "dirty");
+    if (baseline.token === currentProjectChangeToken) {
+      // Same content under a new object: keep the identity check cheap.
+      if (baseline.project !== project)
+        persistenceChangeRef.current = { ...baseline, project };
+      return;
     }
+    persistenceChangeRef.current = {
+      session: projectSessionId,
+      token: currentProjectChangeToken,
+      project,
+    };
+    // Written to the ref at once, so the moved baseline never meets a state
+    // that has not yet caught up with the edit.
+    const matchesSavedProject =
+      savedProjectBaseline !== null &&
+      sameProjectContent(savedProjectBaseline.project, project);
+    setPersistenceState(matchesSavedProject ? "clean" : "dirty");
   }, [
     currentProjectChangeToken,
     projectSessionId,
@@ -1598,7 +1651,8 @@ export function useProjectFileLifecycle({
     },
     captureFileSession: (): ProjectFileSession => ({
       nativeBinding: nativeBindingRef.current,
-      persistenceState,
+      // The live state: a tab captured right after an edit keeps its mark.
+      persistenceState: persistenceStateRef.current,
       cloudBinding,
       savedBaseline: savedProjectBaseline,
       safeSnapshotToken: safeSnapshotTokenRef.current,
