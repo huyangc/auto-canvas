@@ -320,6 +320,88 @@ The browser tests are [notebook-auth.spec.ts](../../apps/editor/e2e/notebook-aut
 [notebook-evidence.spec.ts](../../apps/editor/e2e/notebook-evidence.spec.ts)
 (the standard build's recovery prompt, the notebook build's Agent).
 
+### Running as a silicon-notebook companion service
+
+silicon-notebook starts the canvas as one of its companion services with
+`integrations/silicon-notebook/serve.sh`; `init-db.sh` in the same directory
+initialises the canvas database once. Deployment, configuration and rollback
+are in [the integration's README](../../integrations/silicon-notebook/README.md).
+A managed child inherits silicon-notebook's whole environment, including its
+`DATABASE_URL` and `PORT`, so the start is guarded by command-line flags, not
+by environment switches. Without either flag the server migrates and starts
+exactly as above.
+
+- `--require-canvas-database` serves only an existing canvas database.
+  `serve.sh` always passes it and nothing else: notebook mode, base path
+  `/canvas`, host `127.0.0.1`, `DATABASE_URL` set from
+  `AUTO_CANVAS_DATABASE_URL`, and libpq's own variables (`PGHOST`, `PGUSER`,
+  `PGDATABASE`, …) removed.
+- `--init-empty-database` migrates only an empty database, ends its pool and
+  exits as `--migrate` does. `init-db.sh` passes it.
+
+Before any pool exists, a flagged start refuses: both flags together, or a
+flag with `--migrate` (a configuration error naming the two flags); a
+`DATABASE_URL` outside the guarded form; an `AUTO_CANVAS_NOTEBOOK_ENV_FILE`
+that is not the absolute path of a readable regular file, or whose text the
+`.env` grammar below refuses. Messages name the variable, the reason and, for
+the file, the line number, never a value.
+
+**The guarded URL form** is exactly `postgresql://` or `postgres://`, an
+optional `user[:password]@`, a non-empty host (a name, an IPv4 address or a
+bracketed IPv6 address), an optional port from 1 to 65535, `/` and a database
+name of 1–63 characters from `A–Z a–z 0–9 _ -`: no query string, no fragment,
+no percent sign in the host or the name. In this form libpq and `pg` resolve
+the same host and database; there is no default URL.
+
+**silicon-notebook's `.env`** is read as text and never executed. The whole
+file must fit a grammar Bash cannot reinterpret: no control character but tab
+and LF anywhere (a carriage return or a NUL refuses the file); every line is
+blank, a comment (`#` first), or `[export ]KEY=value` with optional blanks
+around, where the value is empty, unquoted without whitespace or any of
+``$ ` \ " ' ; & | < > ( ) { } * ? [ ] ~ # !``, single-quoted without `'`, or
+double-quoted without ``$ ` \ "``. A key that changes how Bash reads the file
+(`BASH*`, `HIST*`, `COMP_*`, `READLINE_*`, `PROMPT_*`, `IFS`, `OPTIND`,
+`PS1`, … — the list is in `apps/server/src/guarded-database.ts`) or
+`SILICON_NOTEBOOK_ENV_FILE` refuses the file. Exactly one line assigns the key
+`DATABASE_URL`; none, a second, or a key equal to it only when case is ignored
+refuses. Its value is either `sqlite:///<path>` (nothing to compare) or a URL
+in the guarded form, whose database name the guard keeps.
+
+**The catalog guards** run in the migration transaction (opened with
+`BEGIN ISOLATION LEVEL READ COMMITTED`), after the advisory lock and before
+the first statement of the migration; a refusal is `MigrationRefused` with a
+reason, rolls back and leaves the database as it was. In order:
+`current_schema()` exists and is not a system schema (`information_schema` or
+a name starting with `pg_`, which also refuses a temporary schema first in the
+`search_path`; `no-schema`); `current_database()` is not the database the
+`.env` names (`notebook-database`); then, for `--require-canvas-database`,
+`schema_migrations`, `users` and `cloud_projects` are tables in that schema
+(`no-ledger`, `no-users`, `no-projects`) and the applied migrations, sorted,
+are a non-empty prefix of the shipped ones (`ledger-mismatch`), after which
+the pending ones are applied; for `--init-empty-database`, no schema other
+than the system ones holds a relation of any kind (`not-empty`).
+
+With `--require-canvas-database` the migration pool is ended and the server
+serves from a second pool whose every new connection first sets its
+`search_path` to the schema the guard checked and requires
+`current_schema()` to equal it; a connection that fails that is discarded, so
+a later change of the role's or database's default `search_path` cannot move
+the serving connections.
+
+The guards compare database names, so both products must connect to
+PostgreSQL directly (no proxy that maps database names), and two databases of
+the same name on different servers are refused. They rely on silicon-notebook
+being started by its own start scripts, which load its `.env`, from an
+environment without another spelling of `DATABASE_URL` and without
+`SILICON_NOTEBOOK_ENV_FILE` (both scripts refuse such an environment), and on
+both products being (re)started from the same revision of that file. They do
+not replace a PostgreSQL role of the canvas's own.
+
+[Guard unit tests](../../apps/server/src/guarded-database.test.ts),
+[migration guard tests](../../apps/server/src/migration-guard.test.ts) (real
+PostgreSQL, databases of their own) and the
+[launcher tests](../../scripts/notebook-launcher.test.mjs).
+
 ## Agent relay
 
 The [Agent session contract](web-agent-session.md) and [Agent API](agent-api.md)

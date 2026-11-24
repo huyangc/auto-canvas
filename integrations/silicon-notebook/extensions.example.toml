@@ -1,0 +1,19 @@
+[extensions."auto_canvas.integration"]
+bundle = "silicon_notebook_auto_canvas.bundle:BUNDLE"
+enabled = true
+
+[extensions."auto_canvas.integration".services.canvas]
+mode = "managed"
+# The canvas installation, outside silicon-notebook's directory. A path
+# relative to this file works too, for example "../auto-canvas".
+cwd = "/opt/auto-canvas"
+command = ["./integrations/silicon-notebook/serve.sh"]
+healthcheck_url = "http://127.0.0.1:4310/@notebook/canvas/api/integration/ready.json"
+
+[extensions."auto_canvas.integration".services.canvas.env]
+AUTO_CANVAS_NOTEBOOK_API = "http://127.0.0.1:8000"
+AUTO_CANVAS_NOTEBOOK_ENV_FILE = "/opt/silicon-notebook/.env"
+AUTO_CANVAS_PORT = "4310"
+
+[extensions."auto_canvas.integration".services.canvas.env_from]
+AUTO_CANVAS_DATABASE_URL = "AUTO_CANVAS_DATABASE_URL"

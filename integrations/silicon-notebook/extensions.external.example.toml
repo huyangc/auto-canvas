@@ -1,0 +1,11 @@
+[extensions."auto_canvas.integration"]
+bundle = "silicon_notebook_auto_canvas.bundle:BUNDLE"
+enabled = true
+
+# The operator starts and stops the canvas: the same
+# integrations/silicon-notebook/serve.sh, with the same three required
+# variables (AUTO_CANVAS_DATABASE_URL, AUTO_CANVAS_NOTEBOOK_API,
+# AUTO_CANVAS_NOTEBOOK_ENV_FILE). silicon-notebook only checks its health.
+[extensions."auto_canvas.integration".services.canvas]
+mode = "external"
+healthcheck_url = "http://127.0.0.1:4310/@notebook/canvas/api/integration/ready.json"
