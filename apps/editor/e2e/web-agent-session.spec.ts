@@ -739,6 +739,15 @@ test("keeps one paired working copy through Cell switches, a render crash, refre
   });
   await page.goto("/editor?new=1");
   await expect(page.getByTestId("active-instance-count")).toHaveText("0");
+  // The reconnect proof belongs to the paired working copy: the new tab does
+  // not adopt it, and showing the paired tab again resumes the same session.
+  await expect.poll(async () => (await agent.status()).editor).toBe("detached");
+  await page
+    .getByRole("tablist", { name: "Open projects" })
+    .getByRole("tab")
+    .first()
+    .click();
+  await expect(page.getByTestId("active-instance-count")).toHaveText("1");
   await attached();
   expect(sessionCreates).toBe(1);
 });
