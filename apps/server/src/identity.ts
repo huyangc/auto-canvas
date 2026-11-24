@@ -6,6 +6,12 @@ export interface SessionUser {
   provider: "local" | "notebook" | "account";
   role: "user" | "admin";
   isAdmin: boolean;
+  /**
+   * Accounts mode only: an administrator reset the password, and every route
+   * but session reads, password change and sign-out answers 403 until it is
+   * changed.
+   */
+  mustChangePassword?: boolean;
 }
 
 declare module "hono" {

@@ -15,6 +15,24 @@ The default identity mode is `accounts`. The web editor reads `GET /api/session`
 
 Private Projects, their revisions and previews use the signed-in user's ID. The editor binds API requests and browser recovery storage to that account. Private Project reads (including previews) and cookie-authenticated mutations require the signed-in user ID in `X-Canvas-Account`. Session cookies use a separate name for each public origin and deployment path. File → Save writes to PostgreSQL. The account menu's My Cloud Projects (top right) lists the account's saved drawings across browsers; File carries no Open Cloud Project… in this mode. Unsaved drafts are per account and browser. Every standalone Agent pairing belongs to the login session that created it. Claim redemption, connector resume, capability calls and editor upgrades require that session to remain live. Signing out ends its pairings, including when the browser cannot send a cleanup request. The top bar's last control is the signed-in account's menu, which names the account and holds Sign out; File carries no Sign out. The migrations preserve the legacy local profile and its Projects.
 
+### Administrators and passwords
+
+An account is a plain user or an administrator (`role`, `isAdmin` in the session user). The first administrator is named on the server with `--grant-admin <username>` (see the [server README](../../apps/server/README.md)); administrators grant the role to others. An administrator manages every account's User Components as the Component Library allows administrators. Accounts registered before migration `006-account-administration.sql` have no registration time (`createdAt: null`).
+
+A disabled account has no session and signs in with the same 401 answer as a wrong password. Disabling, resetting the password of and deleting an account end all its sessions and their Agent pairings at once, and a sign-in whose password was verified before the change gets no session. A reset issues a 16-character temporary password, shown once, and marks the account `mustChangePassword`; until it is changed every authenticated route other than `GET /api/session`, `GET /api/auth/me`, `POST /api/auth/password` and `POST /api/auth/logout` (the Agent pairing route included) answers 403 `password-change-required`. Deleting an account deletes its private Projects with their versions and its `users` row; its published User Components stay with their author name, and the username can register again as a new user without the old data. A Project create for a deleted account answers 401 `unauthorized`.
+
+Every user changes their own password with `POST /api/auth/password`. It has sign-in's JSON, body size, concurrency and attempt limits (shared with sign-in), keeps the presented session and ends the user's other sessions and their pairings.
+
+Administration routes live under `/api/admin`. They need a signed-in, account-bound (`X-Canvas-Account`) administrator: 401 otherwise, 403 `forbidden` for a plain user. Every mutation re-reads the acting administrator under one advisory lock, so two administrators demoting each other leave exactly one; an administrator cannot disable, demote, reset or delete their own account (409 `own-account`), so at least one enabled administrator remains. Ids that name no account (including the legacy `local` user and notebook users) answer 404 `not-found`. Local and notebook mode have no administration routes. All answers carry `Cache-Control: private, no-store`.
+
+| Endpoint (accounts mode)                   | Result                                                                                                                                                                                                                                  |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /api/auth/password`                  | `{currentPassword, newPassword}` → `{ok:true}`; 400 `invalid-fields` (new password not 8–128 characters), 400 `password-unchanged`, 401 `incorrect-password` (without `X-Canvas-Session: expired`), 415 not JSON, 429 too many attempts |
+| `GET /api/admin/users?q=&cursor=&limit=`   | `{users, nextCursor}` ordered by username; `q` a case-insensitive substring, `limit` 1–200 (default 50); a user is `{id, username, role, disabled, mustChangePassword, createdAt, projectCount}`; 400 `invalid-fields`                  |
+| `PATCH /api/admin/users/:id`               | `{role?: "user"\|"admin", disabled?: boolean}`, at least one and nothing else → `{user}`; 400 `invalid-fields`                                                                                                                          |
+| `POST /api/admin/users/:id/reset-password` | No body → `{temporaryPassword}`                                                                                                                                                                                                         |
+| `DELETE /api/admin/users/:id`              | `{username}` naming the account (case-insensitive) → `{deleted: id}`; 400 `confirmation-mismatch`                                                                                                                                       |
+
 ## Legacy local identity and Project rules
 
 - With explicit `AUTO_CANVAS_AUTH=local`, one persisted user, `local`, owns all API operations. Its session has
@@ -99,8 +117,9 @@ revision, otherwise `private, no-cache`.
 Configuration and commands are in the [server README](../../apps/server/README.md).
 Vite dev and preview forward `/api/session`, `/api/auth`, `/api/projects`, `/api/components`,
 `/api/health` and `/api/agent/` (HTTP and WebSocket) while retaining the browser's
-Host/Origin. Gallery, simulation execution and account deletion are deliberately
-unimplemented by this server.
+Host/Origin. Gallery, simulation execution and self-service account deletion
+are deliberately unimplemented by this server; administrators delete accounts
+(see [Administrators and passwords](#administrators-and-passwords)).
 
 ## Notebook identity mode
 
