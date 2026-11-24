@@ -17,7 +17,8 @@ export interface PrintedNetlistParameter extends PrintedNetlistInstance {
 
 /** Editable fields in a design export, tied to stable schematic identities. */
 export interface PrintedNetlistField extends PrintedNetlistInstance {
-  kind: "reference" | "target" | "parameter";
+  kind: "reference" | "target" | "parameter" | "node";
+  pinName?: string;
   parameter?: string;
   rawValue: string;
   /** Optional for identity projections and existing callers. */

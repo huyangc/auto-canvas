@@ -1,0 +1,30 @@
+* Paper3 CLQC three-stage amplifier (Electronics 2019, 8, 572) - schematic-level CDL
+* Frozen topology: 1:1 from analog_data/paper3/topology.json (Fig.8). Do NOT alter connections.
+* First stage folded cascode M1-M9; second stage current-mirror M10-M14;
+* third stage common-source M16; feedforward M15; Cm1 (n_fold2 to vo), Cm2 (n_gma2 to v3);
+* CL (vo to VSS) - output load drawn on Fig.8 (paper sweeps 4pF..1.5nF).
+.SUBCKT clqc3 vdd vss vin_p vin_n vbp1 vbn2 vbn3 vb1 vo
+* --- first stage: folded cascode ---
+M1  n_tailp vbp1  vdd    vdd     p18 w=1u   l=2u    m=2
+M2  n_fold1 vin_n n_tailp n_tailp p18 w=4u   l=2u    m=2
+M3  n_fold2 vin_p n_tailp n_tailp p18 w=4u   l=2u    m=2
+M4  n_fold1 vbn2  vss    vss     n18 w=0.4u l=3u    m=3
+M5  n_fold2 vbn2  vss    vss     n18 w=0.4u l=3u    m=3
+M6  n_gma2  vbn3  n_fold1 vss    n18 w=1u   l=0.8u  m=1
+M7  v1      vbn3  n_fold2 vss    n18 w=1u   l=0.8u  m=1
+M8  n_gma2  n_gma2 vdd   vdd     p18 w=2u   l=1u    m=1
+M9  v1      n_gma2 vdd   vdd     p18 w=2u   l=1u    m=1
+* --- second stage: current mirror non-inverting ---
+M10 n_a     vbn2  vss    vss     n18 w=0.4u l=3u    m=2
+M11 n_a     v1    vdd    vdd     p18 w=0.6u l=0.13u m=1
+M12 n_a     n_a   vss    vss     n18 w=0.6u l=0.13u m=3
+M13 v3      n_a   vss    vss     n18 w=2u   l=0.64u m=1
+M14 v3      vb1   vdd    vdd     p18 w=3u   l=1u    m=1
+* --- feedforward + third stage ---
+M15 vo      v1    vdd    vdd     p18 w=2u   l=0.64u m=10
+M16 vo      v3    vss    vss     n18 w=0.64u l=0.32u m=5
+* --- compensation + load (order = topology c1,c2) ---
+Cm1 n_fold2 vo   1p
+Cm2 n_gma2  v3   0.05p
+CL  vo      vss  1.5n
+.ENDS clqc3

@@ -296,7 +296,12 @@ export function printInstanceCard(
     ]);
   };
   const reference = owned(instance.reference, "reference");
-  const nodes = instance.nodes.map((n) => plain(n.netName));
+  const nodes = instance.nodes.map((node) => {
+    const token = owned(node.netName, "node");
+    for (const field of token.fields)
+      field.pinName = node.canvasPinName ?? node.pinName;
+    return token;
+  });
   let master: Text | undefined;
   let values: Text[];
   switch (instance.deviceClass) {
@@ -358,7 +363,7 @@ export function printInstanceCard(
     format === "spectre"
       ? [
           reference,
-          plain(`(${instance.nodes.map((n) => n.netName).join(" ")})`),
+          join([plain("("), join(nodes, " "), plain(")")]),
           master!,
           ...values,
         ]

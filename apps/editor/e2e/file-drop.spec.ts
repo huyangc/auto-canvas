@@ -27,7 +27,7 @@ const FINAL =
   /· (Auto Layout (applied|left|cancelled|failed|could)|Already laid out|The (drawing|Project) changed)/u;
 
 const NO_ENTRY =
-  "Select one unambiguous .cir, .sp, .spi, or .scs entry and its local include files; found 0";
+  "Select one unambiguous .cir, .sp, .spi, .cdl, or .scs entry and its local include files; found 0";
 
 const PROJECT_NAME = "two-stage.icproj.json";
 const PROJECT_TEXT = serializeProject(

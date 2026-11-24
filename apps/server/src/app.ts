@@ -1,3 +1,4 @@
+import { registerUsageLog } from "./usage-log.js";
 import { registerAccounts } from "./standalone-accounts.js";
 import { Hono } from "hono";
 import { normalizeBasePath } from "./base-path.js";
@@ -20,6 +21,7 @@ interface AppOptions {
   notebookFetch?: typeof globalThis.fetch;
   now?: () => number;
   notebookTimeoutMs?: number;
+  log?: (line: string) => void;
 }
 
 /** The HTTP contract, also embedded directly by contract tests. */
@@ -35,6 +37,7 @@ export function createApp({
   notebookFetch,
   now,
   notebookTimeoutMs,
+  log = console.info,
 }: AppOptions): Hono {
   // Local mode constructs its default relay before anything else, as it always
   // has; notebook mode has no relay and never evaluates that default.
@@ -46,6 +49,7 @@ export function createApp({
   if (!Number.isSafeInteger(limits.projectLimit) || limits.projectLimit < 1)
     throw new Error("AUTO_CANVAS_PROJECT_LIMIT must be a positive integer");
   const app = new Hono();
+  const registerUsageEndpoint = registerUsageLog(app, auth.mode, log);
   if (relay && auth.mode === "accounts")
     registerAccounts(app, db, basePath, limits.projectLimit, relay);
   else if (relay)
@@ -59,6 +63,7 @@ export function createApp({
         ? {}
         : { timeoutMs: notebookTimeoutMs }),
     });
+  registerUsageEndpoint();
   app.notFound((c) => c.json({ error: "Not found" }, 404));
   if (!basePath) return app;
   const mounted = new Hono();

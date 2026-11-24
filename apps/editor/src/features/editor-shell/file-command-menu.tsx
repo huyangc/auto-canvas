@@ -369,7 +369,7 @@ export function FileCommandMenu({
             <input
               data-testid="spice-files"
               type="file"
-              accept=".spi,.cir,.sp,.scs,.inc,.lib"
+              accept=".spi,.cir,.sp,.cdl,.scs,.inc,.lib"
               multiple
               onChange={(event) => onImportSpice(event.currentTarget.files)}
             />
@@ -383,7 +383,7 @@ export function FileCommandMenu({
             <input
               data-testid="cadence-spice-files"
               type="file"
-              accept=".spi,.cir,.sp,.scs,.inc,.lib"
+              accept=".spi,.cir,.sp,.cdl,.scs,.inc,.lib"
               multiple
               onChange={(event) =>
                 onImportSpice(event.currentTarget.files, "cadence-bang")
@@ -400,7 +400,7 @@ export function FileCommandMenu({
               <input
                 data-testid="rnl-files"
                 type="file"
-                accept=".spi,.cir,.sp,.scs,.inc,.lib,.rnl"
+                accept=".spi,.cir,.sp,.cdl,.scs,.inc,.lib,.rnl"
                 multiple
                 onChange={(event) => onImportRnl(event.currentTarget.files)}
               />

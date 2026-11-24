@@ -53,6 +53,7 @@ export async function startServer({
     const app = createApp({
       db,
       basePath,
+      log,
       auth,
       ...(agentRelay ? { agentRelay } : {}),
     });

@@ -606,3 +606,69 @@ describe("readiness and identity routes", () => {
     ).toEqual({ github: false, google: false, email: false });
   });
 });
+
+it("logs editor outcomes and project requests under the verified user at a mounted base", async () => {
+  const lines: string[] = [];
+  const app = createApp({
+    db,
+    basePath: "/canvas",
+    auth: { mode: "notebook", notebookApi },
+    log: (line) => lines.push(line),
+  });
+  const event = "/canvas/api/usage/netlist.import/failed";
+  expect((await call(app, event, { method: "POST" })).status).toBe(401);
+  expect(
+    (
+      await call(app, "/canvas/api/usage/private-filename/ok", {
+        method: "POST",
+        token: "alice-token",
+      })
+    ).status,
+  ).toBe(400);
+  expect(lines).toEqual([]);
+  expect(
+    (
+      await call(app, event, {
+        method: "POST",
+        token: "alice-token",
+        body: { userId: "bob", text: "secret circuit" },
+      })
+    ).status,
+  ).toBe(204);
+  const saved = await call(app, "/canvas/api/projects", {
+    method: "POST",
+    token: "alice-token",
+    body: { name: "private-name", projectText: projectText("private-name") },
+  });
+  expect(saved.status).toBe(201);
+  expect(
+    (
+      await call(app, "/canvas/api/projects/private-id", {
+        token: "alice-token",
+      })
+    ).status,
+  ).toBe(404);
+  const common = {
+    type: "usage",
+    time: expect.any(String),
+    userId: "alice",
+    mode: "notebook",
+  };
+  expect(lines.map((line) => JSON.parse(line))).toEqual([
+    { ...common, source: "editor", action: "netlist.import", result: "failed" },
+    {
+      ...common,
+      source: "server",
+      action: "project.create",
+      result: "ok",
+      status: 201,
+    },
+    {
+      ...common,
+      source: "server",
+      action: "project.open",
+      result: "failed",
+      status: 404,
+    },
+  ]);
+});
