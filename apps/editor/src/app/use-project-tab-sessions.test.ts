@@ -1,11 +1,23 @@
+// @vitest-environment jsdom
+import { act, createElement } from "react";
+import { createRoot } from "react-dom/client";
 import { describe, expect, it } from "vitest";
+
+import {
+  AccountContext,
+  useBeforeAccountLogout,
+  type AccountLogoutCheck,
+} from "../accounts/account-context";
 
 import type { ProjectFileSession } from "../document/use-project-file-lifecycle";
 import {
   defaultTabDocks,
   resumedFileSession,
+  signingOutCheck,
   tabDocksFor,
 } from "./use-project-tab-sessions";
+
+Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
 describe("tab session docks per editor mode", () => {
   it("starts a new tab closed in Auto and with the Netlist in Draw", () => {
@@ -86,5 +98,58 @@ describe("resumedFileSession", () => {
     expect(held("offline")).toBeUndefined();
     expect(held("conflict")?.kind).toBe("conflict");
     expect(held("rejected")?.kind).toBe("rejected");
+  });
+});
+
+describe("signingOutCheck", () => {
+  async function registered(check: () => Promise<void>) {
+    const signingOut = { current: false };
+    let prepared: AccountLogoutCheck | null = null;
+    function Editor() {
+      useBeforeAccountLogout(signingOutCheck(signingOut, check));
+      return null;
+    }
+    const root = createRoot(document.createElement("div"));
+    await act(async () =>
+      root.render(
+        createElement(
+          AccountContext.Provider,
+          {
+            value: {
+              username: "a12345678",
+              prepareLogout: (next) => {
+                prepared = next;
+              },
+              logout: () => {},
+            },
+          },
+          createElement(Editor),
+        ),
+      ),
+    );
+    return { signingOut, prepare: () => prepared!(), root };
+  }
+
+  it("holds signing out through the check and releases it when the request fails", async () => {
+    let seenDuringCheck = false;
+    const { signingOut, prepare, root } = await registered(async () => {
+      seenDuringCheck = signingOut.current;
+    });
+    // The gate runs the check, then its logout request fails: no reload.
+    const abort = await prepare();
+    expect(seenDuringCheck).toBe(true);
+    expect(signingOut.current).toBe(true);
+    abort?.();
+    expect(signingOut.current).toBe(false);
+    await act(async () => root.unmount());
+  });
+
+  it("releases signing out when the check refuses", async () => {
+    const { signingOut, prepare, root } = await registered(async () => {
+      throw new Error("a save is still running");
+    });
+    await expect(prepare()).rejects.toThrow("a save is still running");
+    expect(signingOut.current).toBe(false);
+    await act(async () => root.unmount());
   });
 });

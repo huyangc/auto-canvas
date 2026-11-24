@@ -139,6 +139,7 @@ const STORAGE_CONSUMERS = [
   "apps/editor/src/components/chunk-load-fallback.tsx", // row 4
   "apps/editor/src/components/stale-build-recovery.ts", // row 17, Cache Storage
   "apps/editor/src/document/browser-recovery-store.ts", // rows 1, 1a
+  "apps/editor/src/document/cloud-auto-save.ts", // T176 auto-save preference; per-user like rows 10-15
   "apps/editor/src/document/cloud-project-session.ts", // rows 5, 6
   "apps/editor/src/document/project-workspace.ts", // rows 3, 3a-3c
   "apps/editor/src/document/recovery-coordinator.ts", // row 2
