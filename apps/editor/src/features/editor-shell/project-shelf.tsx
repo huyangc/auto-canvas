@@ -1,4 +1,4 @@
-import { lazy, Suspense, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useRef, useState } from "react";
 import { useDialogDrag } from "../../components/dialog-drag";
 import type { CloudProjectSummary } from "./cloud-projects";
 import "./project-shelf.css";
@@ -40,6 +40,20 @@ export function ProjectShelf({
   const dialogRef = useRef<HTMLDialogElement | null>(null);
   const { onPointerDown: onHeaderPointerDown, release } =
     useDialogDrag(dialogRef);
+  // Stable across renders: React re-runs an inline ref on every render (null,
+  // then the element), which would end a drag the shelf refresh interrupted.
+  const attachDialog = useCallback(
+    (dialog: HTMLDialogElement | null) => {
+      dialogRef.current = dialog;
+      if (!dialog) {
+        // The dialog unmounted; drop the drag it may still hold.
+        release();
+        return;
+      }
+      if (!dialog.open) dialog.showModal();
+    },
+    [release],
+  );
   const rename = async () => {
     if (!editing || busy) return;
     const name = editing.name.trim();
@@ -65,15 +79,7 @@ export function ProjectShelf({
         <dialog
           className="cloud-shelf-dialog"
           aria-labelledby="cloud-shelf-title"
-          ref={(dialog) => {
-            dialogRef.current = dialog;
-            if (!dialog) {
-              // The dialog unmounted; drop the drag it may still hold.
-              release();
-              return;
-            }
-            if (!dialog.open) dialog.showModal();
-          }}
+          ref={attachDialog}
           onCancel={() => setShelfOpen(false)}
         >
           <header

@@ -101,3 +101,17 @@ exit 0, `pnpm lint` exit 0 (0 errors, 3906 warnings), targeted vitest exit 0
 (7 tests), `pnpm test:e2e apps/editor/e2e/project-tabs.spec.ts` exit 0 (23
 passed, run on ports 4398/4399 because a stale e2e server held 4311),
 `pnpm test:local` rerun before commit.
+
+## Round 5 — accepted (codex PR round-4 finding fixed by Opus)
+
+codex PR review round 4 on `1b2ba7f` passed with one P2, which was real and
+fixed.
+
+| # | Severity | Where | Finding | Fix |
+| --- | --- | --- | --- | --- |
+| 1 | P2 | `project-shelf.tsx` dialog ref | The inline ref callback is a new function each render, so React detaches it (calls it with null) and reattaches on every `ProjectShelf` render; a shelf refresh mid-drag therefore ran `release()` and ended the drag, leaving a pinned dialog without clamping. | A stable `useCallback` `attachDialog` (depending on the hook's stable `release`) is passed as `ref`, so cleanup runs only when the dialog really detaches. |
+
+Acceptance rerun after round 5: `pnpm format:check` exit 0, `pnpm typecheck`
+exit 0, `pnpm lint` exit 0 (0 errors, 3906 warnings), targeted vitest exit 0
+(7 tests), `pnpm test:e2e apps/editor/e2e/project-tabs.spec.ts` exit 0 (23
+passed, ports 4398/4399).
