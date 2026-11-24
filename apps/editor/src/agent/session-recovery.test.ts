@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   clearAgentSessionRecovery,
+  clearAgentSessionRecoveryFor,
   readAgentSessionRecovery,
   writeAgentSessionRecovery,
 } from "./session-recovery";
@@ -109,6 +110,20 @@ describe("Agent same-browser session recovery", () => {
     const storage = new MemoryStorage();
     writeAgentSessionRecovery(storage, record());
     clearAgentSessionRecovery(storage);
+    expect(storage.getItem(AGENT_SESSION_RECOVERY_STORAGE_KEY)).toBeNull();
+  });
+
+  it("retires only the proof of the working copy that retires it", () => {
+    const storage = new MemoryStorage();
+    writeAgentSessionRecovery(storage, record());
+    // Another tab ending its session leaves this proof where its own tab can
+    // still resume it.
+    clearAgentSessionRecoveryFor(storage, {
+      ...target,
+      projectSessionId: "another-tab",
+    });
+    expect(readAgentSessionRecovery(storage, target)).toEqual(record());
+    clearAgentSessionRecoveryFor(storage, target);
     expect(storage.getItem(AGENT_SESSION_RECOVERY_STORAGE_KEY)).toBeNull();
   });
 });

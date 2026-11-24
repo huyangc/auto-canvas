@@ -58,6 +58,10 @@ let storage: MemoryStorage;
 let sessionCreations: number;
 let root: Root | null;
 let seen: { session: UseAgentSessionResult | null };
+/** The working copy the test's editor binds, as a tab supplies it. */
+let boundWorkingCopy: string;
+/** Whether the editor has built its hosts from the loaded runtime. */
+let bound: boolean;
 
 function relay(input: RequestInfo | URL, init?: RequestInit) {
   const url = String(input);
@@ -79,12 +83,28 @@ function relay(input: RequestInfo | URL, init?: RequestInit) {
       ),
     );
   }
+  // A recovered session past its deadline asks the server before it
+  // connects; the answer renews the proof.
+  if (url.endsWith("/status")) {
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          authorization: "active",
+          expiresAt: Date.now() + 7_200_000,
+        }),
+        { status: 200 },
+      ),
+    );
+  }
   return Promise.resolve(new Response("{}", { status: 503 }));
 }
 
 beforeEach(() => {
   storage = new MemoryStorage();
   sessionCreations = 0;
+  boundWorkingCopy = "tab-1";
+  bound = false;
   seen = { session: null };
   root = null;
   const page = {
@@ -131,13 +151,14 @@ function Editor() {
         : null,
     [runtime],
   );
+  bound = host !== null;
   seen.session = useEditorAgentSession(
     host
       ? {
           enabled: true,
           recover: true,
           project,
-          projectSessionId: "tab-1",
+          projectSessionId: boundWorkingCopy,
           host,
         }
       : null,
@@ -287,5 +308,79 @@ describe("workspace Agent provider (#1673)", () => {
     expect(
       JSON.parse(storage.getItem(AGENT_SESSION_RECOVERY_STORAGE_KEY)!),
     ).toMatchObject({ sessionId: "saved-session" });
+  });
+
+  it("writes a renewed proof under the working copy, not this mount's nonce", async () => {
+    // The next mount binds the same working copy under a new nonce. A proof
+    // kept under the nonce would never match again, so renewal must keep the
+    // working copy's id.
+    const saved = {
+      version: 1,
+      sessionId: "saved-session",
+      editorSecret: "editor-secret",
+      projectId: "project-main",
+      projectSessionId: "tab-1",
+      scopes: ["circuit.snapshot"],
+      expiresAt: Date.now() - 1_000,
+    };
+    storage.setItem(AGENT_SESSION_RECOVERY_STORAGE_KEY, JSON.stringify(saved));
+    vi.mocked(loadAgentRuntime).mockImplementation(realRuntime);
+    await openEditor();
+    await settle(() => expect(bound).toBe(true));
+    await settle(() => expect(seen.session!.status).toBe("reconnecting"));
+    // The deadline passed, so the transport renews it through /status and the
+    // proof is written back.
+    await settle(() =>
+      expect(
+        JSON.parse(storage.getItem(AGENT_SESSION_RECOVERY_STORAGE_KEY)!)
+          .expiresAt,
+      ).toBeGreaterThan(saved.expiresAt),
+    );
+    expect(
+      JSON.parse(storage.getItem(AGENT_SESSION_RECOVERY_STORAGE_KEY)!),
+    ).toMatchObject({
+      sessionId: "saved-session",
+      projectSessionId: "tab-1",
+    });
+  });
+
+  it("never resumes another working copy's saved session", async () => {
+    // ?new=1 beside restored tabs: the blank tab is active, so the editor
+    // binds under a working copy whose own proof does not exist, while the
+    // tab it was opened beside keeps one.
+    const otherTab = {
+      version: 1,
+      sessionId: "saved-session",
+      editorSecret: "editor-secret",
+      projectId: "project-main",
+      projectSessionId: "tab-other",
+      scopes: ["circuit.snapshot"],
+      expiresAt: Date.now() + 3_600_000,
+    };
+    storage.setItem(
+      AGENT_SESSION_RECOVERY_STORAGE_KEY,
+      JSON.stringify(otherTab),
+    );
+    boundWorkingCopy = "tab-new";
+    vi.mocked(loadAgentRuntime).mockImplementation(realRuntime);
+    await openEditor();
+    // The page loads the runtime for the stored proof, the editor binds
+    // under the new tab, and the automatic recovery finds nothing for it.
+    await settle(() => expect(bound).toBe(true));
+    expect(loadAgentRuntime).toHaveBeenCalled();
+    expect(seen.session).toMatchObject({ status: "idle" });
+    expect(sessionCreations).toBe(0);
+
+    // Connect creates a connection rather than adopting the other tab's proof.
+    await clickConnect();
+    await settle(() => expect(seen.session!.claimCode).toBe("CLAIM-1"));
+    expect(sessionCreations).toBe(1);
+    // The other tab's record is left where its own tab can still use it.
+    expect(
+      JSON.parse(storage.getItem(AGENT_SESSION_RECOVERY_STORAGE_KEY)!),
+    ).toMatchObject({
+      sessionId: "saved-session",
+      projectSessionId: "tab-other",
+    });
   });
 });

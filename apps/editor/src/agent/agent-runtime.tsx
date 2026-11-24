@@ -61,13 +61,18 @@ export const AgentSessionRuntime = memo(function AgentSessionRuntime({
   });
   // The click that loaded this runtime connects once the editor is bound,
   // as Connect Agent does: only when no connection is in place or being
-  // resumed. A saved session being recovered is kept, never replaced, so
-  // its record is not cleared and the old session is not orphaned.
+  // resumed. The proof belongs to the working copy the editor binds, so it is
+  // asked for synchronously — the session's own recovery effect publishes
+  // "reconnecting" a moment later, which would leave a create to start first
+  // and orphan the saved session.
   useEffect(() => {
     if (!connectRequested || !context) return;
     onConnectHandled();
-    if (["idle", "revoked", "expired"].includes(session.status))
-      void session.newConnection();
+    if (!["idle", "revoked", "expired"].includes(session.status)) return;
+    // A saved session being recovered is kept, never replaced, so its record
+    // is not cleared and the old session is not orphaned.
+    if (session.resumeSavedSession()) return;
+    void session.newConnection();
   }, [connectRequested, context, onConnectHandled, session]);
   return null;
 });

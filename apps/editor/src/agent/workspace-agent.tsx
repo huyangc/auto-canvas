@@ -100,6 +100,7 @@ function workspaceAgentSession({
     keepConnected: ignore,
     reconnect: ignore,
     newConnection: requestConnection,
+    resumeSavedSession: () => false,
     revoke: nothing,
   };
   return connectRequested && UNCONNECTED.includes(base.status)
@@ -245,6 +246,8 @@ export function useEditorAgentSession(
       beforeConnect: async () => latest.current?.beforeConnect?.(),
       contextRevision: revision,
       projectSessionId: revision,
+      // The proof belongs to the working copy, not to this mount's nonce.
+      recoverySessionId: options.projectSessionId,
     });
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- rebinds on the fields a context is made of, not on every new options object
   }, [

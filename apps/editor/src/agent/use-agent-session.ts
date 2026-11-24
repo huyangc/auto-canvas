@@ -37,7 +37,7 @@ import {
   type ConnectionOperationKind,
 } from "./connection-operation";
 import {
-  clearAgentSessionRecovery,
+  clearAgentSessionRecoveryFor,
   readAgentSessionRecovery,
   writeAgentSessionRecovery,
   type AgentSessionRecoveryRecord,
@@ -184,6 +184,13 @@ export interface UseAgentSessionOptions {
   beforeConnect?: () => Promise<void>;
   project: CircuitProject;
   projectSessionId: string;
+  /**
+   * The stable working copy the reconnect proof belongs to. Live context
+   * checks use `projectSessionId` (a mount-stable nonce in the workspace
+   * Agent); a proof written under the nonce would never match again, so
+   * storage uses this instead.
+   */
+  recoverySessionId?: string;
   host: AgentOperationHost;
   /** Resolve an open working copy without selecting its browser tab. */
   resolveWorkspace?: (
@@ -213,6 +220,14 @@ export interface UseAgentSessionResult extends AgentSessionViewModel {
   keepConnected: () => void;
   reconnect: () => void;
   newConnection: () => Promise<void>;
+  /**
+   * Resume the stored proof for the working copy this session is bound to
+   * now, answering whether a connection is being resumed (or is already
+   * starting). Connect asks this before creating: a proof written for another
+   * working copy is not one for this one, and creating over a live proof
+   * would orphan that session.
+   */
+  resumeSavedSession: () => boolean;
   revoke: () => Promise<void>;
 }
 
@@ -248,6 +263,13 @@ export function useAgentSession(
         get: (_target, key) => Reflect.get(latest.current, key),
       }),
   );
+  // A session retires only the proof that belongs to the working copy it is
+  // bound to; another tab's proof is that tab's to resume.
+  const ownRecoveryTarget = () => ({
+    projectId: options.project.id,
+    projectSessionId: options.recoverySessionId ?? options.projectSessionId,
+    now: Date.now(),
+  });
   const liveRef = useRef<LiveSession | null>(null);
   const operationRef = useRef<ConnectionOperation | null>(null);
   const recoveryAttemptedForProjectRef = useRef<string | null>(null);
@@ -271,7 +293,8 @@ export function useAgentSession(
         ? null
         : readAgentSessionRecovery(window.sessionStorage, {
             projectId: options.project.id,
-            projectSessionId: options.projectSessionId,
+            projectSessionId:
+              options.recoverySessionId ?? options.projectSessionId,
             now: Date.now(),
           });
     return {
@@ -352,9 +375,10 @@ export function useAgentSession(
     const live = liveRef.current;
     liveRef.current = null;
     if (live) stopReconnect(live);
-    clearAgentSessionRecovery(window.sessionStorage);
+    clearAgentSessionRecoveryFor(window.sessionStorage, ownRecoveryTarget());
     options.fileHost?.clear?.();
     return live;
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- the target is read through the stable options proxy
   }, [options.fileHost]);
 
   const retire = useCallback(
@@ -509,7 +533,8 @@ export function useAgentSession(
               sessionId: live.sessionId,
               editorSecret: live.editorSecret,
               projectId: options.project.id,
-              projectSessionId: options.projectSessionId,
+              projectSessionId:
+                options.recoverySessionId ?? options.projectSessionId,
               scopes: live.scopes,
               expiresAt,
             });
@@ -650,7 +675,10 @@ export function useAgentSession(
                   sessionEvent.data.type === "session.expired")
               ) {
                 stopReconnect(live);
-                clearAgentSessionRecovery(window.sessionStorage);
+                clearAgentSessionRecoveryFor(
+                  window.sessionStorage,
+                  ownRecoveryTarget(),
+                );
                 options.fileHost?.clear?.();
                 socket.close(1000, "session revoked");
                 if (liveRef.current === live) liveRef.current = null;
@@ -1119,7 +1147,10 @@ export function useAgentSession(
               ].includes(result.error?.code)
             ) {
               stopReconnect(live);
-              clearAgentSessionRecovery(window.sessionStorage);
+              clearAgentSessionRecoveryFor(
+                window.sessionStorage,
+                ownRecoveryTarget(),
+              );
               options.fileHost?.clear?.();
               liveRef.current = null;
               update({
@@ -1177,6 +1208,38 @@ export function useAgentSession(
     ],
   );
 
+  /**
+   * Resume the stored proof for the working copy this session is bound to
+   * now. The workspace Agent binds a per-mount nonce as `projectSessionId`
+   * for live context checks but writes and reads proofs under the stable
+   * working copy (`recoverySessionId`), so a proof survives the next mount
+   * and still belongs to exactly one tab.
+   */
+  const resumeSavedSession = useCallback((): boolean => {
+    if (!options.enabled) return false;
+    // An unsuccessful startup restore leaves manual connection available but
+    // keeps the old proof out of it: a person's Connect starts afresh.
+    if (options.recover === false) return false;
+    if (operationRef.current || liveRef.current) return true;
+    const recovery = readAgentSessionRecovery(window.sessionStorage, {
+      projectId: options.project.id,
+      projectSessionId: options.recoverySessionId ?? options.projectSessionId,
+      now: Date.now(),
+    });
+    if (!recovery) return false;
+    recoveryAttemptedForProjectRef.current = options.projectSessionId;
+    const operation = beginOperation("creating");
+    void operation
+      .wait(grant(recovery.scopes, operation, recovery))
+      .catch((error) => {
+        if (operationRef.current === operation)
+          update({ status: "idle", error: String(error) });
+      })
+      .finally(() => finishOperation(operation));
+    return true;
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- the target is read through the stable options proxy
+  }, [beginOperation, finishOperation, grant, options.enabled, update]);
+
   useEffect(() => {
     if (options.recover === false) return;
     if (!options.enabled) return;
@@ -1189,31 +1252,16 @@ export function useAgentSession(
     let cancelled = false;
     queueMicrotask(() => {
       if (cancelled) return;
+      if (recoveryAttemptedForProjectRef.current === options.projectSessionId)
+        return;
       recoveryAttemptedForProjectRef.current = options.projectSessionId;
-      const recovery = readAgentSessionRecovery(window.sessionStorage, {
-        projectId: options.project.id,
-        projectSessionId: options.projectSessionId,
-        now: Date.now(),
-      });
-      if (recovery && !operationRef.current) {
-        const operation = beginOperation("creating");
-        void operation
-          .wait(grant(recovery.scopes, operation, recovery))
-          .catch((error) => {
-            if (operationRef.current === operation)
-              update({ status: "idle", error: String(error) });
-          })
-          .finally(() => finishOperation(operation));
-      }
+      resumeSavedSession();
     });
     return () => {
       cancelled = true;
     };
   }, [
-    grant,
-    beginOperation,
-    finishOperation,
-    update,
+    resumeSavedSession,
     options.enabled,
     options.recover,
     options.project.id,
@@ -1443,12 +1491,13 @@ export function useAgentSession(
       ]),
     );
     agentRevisionRef.current.clear();
-    // Bootstrap activation is not a user Project replacement. Validate recovery
-    // against the restored identity in the recovery effect, without revoking it.
+    // Bootstrap activation is not a user Project replacement: it keeps the
+    // recovery effect's validation of the restored identity. Only a live
+    // session's Project change is one, and it takes no second proof.
     if (firstBinding) return;
-    recoveryAttemptedForProjectRef.current = options.projectSessionId;
     const live = liveRef.current;
     if (!live) return;
+    recoveryAttemptedForProjectRef.current = options.projectSessionId;
     live.projectId = options.project.id;
     update({ status: live.paused ? "paused" : "reconnecting" });
     if (live.socket) sendHeartbeat(live, live.socket);
@@ -1491,7 +1540,10 @@ export function useAgentSession(
       if (live) {
         stopReconnect(live);
         if (!live.claimed) {
-          clearAgentSessionRecovery(window.sessionStorage);
+          clearAgentSessionRecoveryFor(
+            window.sessionStorage,
+            ownRecoveryTarget(),
+          );
           void fetch(apiUrl(`agent/sessions/${live.sessionId}`), {
             method: "DELETE",
             headers: { "x-editor-secret": live.editorSecret },
@@ -1503,6 +1555,7 @@ export function useAgentSession(
         live.socket?.close(1000, "tab closed");
       }
     },
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- this is the unmount cleanup: it reads the options proxy and the target as they are then
     [],
   );
 
@@ -1558,6 +1611,7 @@ export function useAgentSession(
     keepConnected,
     reconnect,
     newConnection,
+    resumeSavedSession,
     revoke,
   };
 }
