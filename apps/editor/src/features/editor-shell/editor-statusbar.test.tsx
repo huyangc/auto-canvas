@@ -1,9 +1,61 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
+import type { CloudSaveIndicator } from "../../document/cloud-auto-save";
 import { EditorStatusbar, type AutoLayoutChip } from "./editor-statusbar";
 
 describe("editor statusbar", () => {
+  function renderCloudSave(cloudSave: CloudSaveIndicator | null) {
+    return renderToStaticMarkup(
+      <EditorStatusbar
+        status="Ready"
+        tool="pointer"
+        vddRailMode={false}
+        pendingSymbolId={null}
+        wireOptionsOpen={false}
+        wireRoutingMode="orthogonal"
+        wireCornerOrder="auto"
+        recoveryLabel="Saved locally"
+        cloudSave={cloudSave}
+        zoomPercent={100}
+        shortcutHintsVisible={false}
+        onToggleShortcutHints={vi.fn()}
+        gridVisible
+        onToggleGrid={vi.fn()}
+        selectionFilterSummary={null}
+        onOpenSelectionFilter={vi.fn()}
+        onToggleWireOptions={vi.fn()}
+        onWireRoutingModeChange={vi.fn()}
+        onWireCornerOrderChange={vi.fn()}
+        onZoomOut={vi.fn()}
+        onZoomIn={vi.fn()}
+        onFitView={vi.fn()}
+      />,
+    );
+  }
+
+  it("shows the Cloud save chip after the recovery state", () => {
+    const markup = renderCloudSave({
+      label: "Saved",
+      title: "All changes saved to Cloud",
+      tone: "saved",
+    });
+    const recovery = markup.indexOf('data-testid="recovery-state"');
+    const chip = markup.indexOf('data-testid="cloud-save-state"');
+    expect(recovery).toBeGreaterThan(0);
+    expect(chip).toBeGreaterThan(recovery);
+    expect(markup).toContain('data-tone="saved"');
+    expect(markup).toContain('title="All changes saved to Cloud"');
+    expect(markup).toContain('aria-label="Saved. All changes saved to Cloud"');
+    expect(markup).toContain(">Saved</output>");
+  });
+
+  it("shows no Cloud save chip for an unbound drawing", () => {
+    expect(renderCloudSave(null)).not.toContain(
+      'data-testid="cloud-save-state"',
+    );
+  });
+
   it("renders the active wire options and recovery state", () => {
     const markup = renderToStaticMarkup(
       <EditorStatusbar

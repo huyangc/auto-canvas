@@ -215,6 +215,7 @@ import {
   propertiesKeyActs,
 } from "../features/editor-shell/canvas-panel-buttons";
 import {
+  modalDialogOpen,
   useEditorMode,
   type EditorMode,
 } from "../features/editor-shell/editor-mode";
@@ -229,9 +230,15 @@ import {
 import {
   EDITOR_PROJECT_TRANSACTION_OPTIONS,
   useDocumentController,
+  type EditorDocumentController,
 } from "../document/document-controller";
 import { useProjectFileLifecycle } from "../document/use-project-file-lifecycle";
 import type { ReplaceProjectOptions } from "../document/use-project-file-lifecycle";
+import {
+  cloudSaveIndicator,
+  interactionHoldsAutoSave,
+  useCloudAutoSavePreference,
+} from "../document/cloud-auto-save";
 import { useUnsavedWorkGuard } from "../document/use-unsaved-work-guard";
 import { authoredObjectCount } from "../document/project-content";
 import { createDraftingCommands } from "../features/drafting/drafting-commands";
@@ -763,6 +770,13 @@ function WorkspaceEditor({
   usePageTitle(project.name, true);
   const definitionProjectRef = useRef({ project, projectSessionId });
   definitionProjectRef.current = { project, projectSessionId };
+  /**
+   * Routes an Agent commit to the committing controller's tab; assigned once
+   * the project tabs exist, read when a commit lands.
+   */
+  const noteAgentCommitRef = useRef<
+    (controller: EditorDocumentController) => "active" | "background" | "closed"
+  >(() => "closed");
   const projectConnectivityIndex = useMemo(
     () => editorSnapshotDerived.connectivity(project, resolver),
     [project, resolver],
@@ -776,7 +790,7 @@ function WorkspaceEditor({
     runtime: agentRuntime,
     editorDocumentController,
     projectSessionId,
-    synchronizeExternalCommit,
+    noteAgentCommitRef,
     flushRecovery,
   });
   const [documentStack, setDocumentStack] = useState<HierarchyFrame[]>([]);
@@ -1008,6 +1022,37 @@ function WorkspaceEditor({
     setCodeDraftDirty(dirty);
   }, []);
   const captureAuthoredProject = async () => editorDocumentController.project;
+  const cloudAutoSavePreference = useCloudAutoSavePreference();
+  /** What defers a due Cloud auto-save; assigned once the tabs exist. */
+  const autoSaveBlockerRef = useRef<() => string | null>(() => null);
+  // Any pointer button held over the page (a pan, a marquee, a drag) holds a
+  // due auto-save until it is released.
+  const pointerHeldRef = useRef(false);
+  useEffect(() => {
+    const down = (event: PointerEvent) => {
+      pointerHeldRef.current = event.buttons !== 0;
+    };
+    const up = () => {
+      pointerHeldRef.current = false;
+    };
+    window.addEventListener("pointerdown", down, true);
+    window.addEventListener("pointerup", up, true);
+    window.addEventListener("pointercancel", up, true);
+    window.addEventListener("blur", up);
+    return () => {
+      window.removeEventListener("pointerdown", down, true);
+      window.removeEventListener("pointerup", up, true);
+      window.removeEventListener("pointercancel", up, true);
+      window.removeEventListener("blur", up);
+    };
+  }, []);
+  // Every web editor with Cloud storage.
+  const cloudAutoSaveOption = projectStore
+    ? {
+        enabled: cloudAutoSavePreference.enabled,
+        blocker: () => autoSaveBlockerRef.current(),
+      }
+    : undefined;
   const {
     captureFileSession,
     restoreFileSession,
@@ -1031,7 +1076,11 @@ function WorkspaceEditor({
     saveProjectToCloudByHand,
     saveByHand,
     isSaveInFlight,
+    isUserSaveInFlight,
     saveBusy,
+    persistenceState,
+    cloudAutoSave,
+    noteExternalCommit,
     exportProjectFile,
     downloadCurrentProjectBackup,
     guardDirtyReplacement,
@@ -1066,6 +1115,7 @@ function WorkspaceEditor({
         : null;
     },
     restoreWorkingSession: agentStartupRecovery !== null,
+    ...(cloudAutoSaveOption ? { autoSave: cloudAutoSaveOption } : {}),
     externalWorkspaceRestored: restoredWorkspace !== null,
     beforeSnapshot: captureAuthoredProject,
     // A commit is visible on the controller before the render shows it.
@@ -1819,7 +1869,7 @@ function WorkspaceEditor({
     index: projectConnectivityIndex,
     save: saveProjectToCloudByHand,
     beforeCheck: captureAuthoredProject,
-    isSaving: isSaveInFlight,
+    isSaving: isUserSaveInFlight,
     openIssues: openIssuesPanel,
   });
   const checkedSnapshot = projectCheck.result?.snapshot ?? null;
@@ -4834,6 +4884,9 @@ function WorkspaceEditor({
     isCloudManagementInFlight,
     renameShelfProject,
     deleteShelfProject,
+    isSigningOut,
+    reserveBackgroundCloudSave,
+    noteAgentCommit,
   } = useProjectTabSessions({
     openProjectFile,
     projectStore,
@@ -4921,8 +4974,33 @@ function WorkspaceEditor({
     endDocksCarryOver: () => {
       docksCarriedRef.current = false;
     },
+    synchronizeExternalCommit,
+    noteExternalCommit,
   });
   workspaceRestoreOutcomeRef.current = workspaceRestoreOutcome;
+  noteAgentCommitRef.current = noteAgentCommit;
+  // What defers a due auto-save: anything that holds the tabs, a switch or
+  // sign-out under way, an Agent replacement awaiting approval, a gesture or
+  // pointer drag, a modal dialog, or a tab's close question on screen.
+  autoSaveBlockerRef.current = () => {
+    const held = projectSwitchBlockerRef.current();
+    if (held) return held;
+    if (projectTabs.isTransitioning()) return "a project tab is switching";
+    if (isSigningOut()) return "signing out";
+    if (agentFileCandidate !== null)
+      return "an Agent replacement is waiting for approval";
+    if (interactionHoldsAutoSave(getCurrentInteractionState()))
+      return "an edit is in progress";
+    if (pointerHeldRef.current) return "a pointer gesture is in progress";
+    if (modalDialogOpen()) return "a dialog is open";
+    if (
+      globalThis.document.querySelector(
+        '[data-testid="project-tab-close-decision"]',
+      )
+    )
+      return "a tab's close question is open";
+    return null;
+  };
   useRestoredTabLinks({
     openImportFile,
     importReady: recoveryReady && !startupRestorePending,
@@ -4939,16 +5017,18 @@ function WorkspaceEditor({
     stageRecovery,
     flushRecovery,
     editorDocumentController,
-    synchronizeExternalCommit,
+    noteAgentCommitRef,
     setCloudProjects,
     cloudListMutationRef,
     codeDraftDirty,
     restoreFileSession,
     saveProjectToCloud,
+    isSaveInFlight,
     openCloudProjectById,
     renameProject,
     createTabSession,
     projectSwitchBlocker,
+    reserveBackgroundCloudSave,
     projectTabs,
   });
   if (
@@ -4960,7 +5040,7 @@ function WorkspaceEditor({
     agentTargetRef.current = createAgentWorkspaceTargets({
       runtime: agentRuntime,
       flushRecovery,
-      synchronizeExternalCommit,
+      noteAgentCommitRef,
       agentPlanning,
       browserAgentHost,
       projectSwitchBlockerRef,
@@ -7344,6 +7424,16 @@ function WorkspaceEditor({
         wireRoutingMode={wireRoutingMode}
         wireCornerOrder={wireCornerOrder}
         recoveryLabel={isDirtyWork() ? recoveryStateLabel(recoveryState) : null}
+        cloudSave={cloudSaveIndicator({
+          visible: cloudAutoSaveOption !== undefined,
+          enabled: cloudAutoSavePreference.enabled,
+          binding: cloudBinding,
+          persistenceState,
+          saving: persistenceState === "saving",
+          armed: cloudAutoSave.armed,
+          hold: cloudAutoSave.hold,
+          pendingDraft: codeDraftDirty,
+        })}
         agentExpiring={
           agentSession &&
           agentSession.expiringSoon &&

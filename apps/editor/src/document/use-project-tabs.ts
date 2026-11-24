@@ -185,6 +185,8 @@ export function useProjectTabs<Session>(options: {
   return {
     activeId,
     currentId: () => active.current,
+    /** Live: a tab switch or close is between its preparation and install. */
+    isTransitioning: () => transitioning.current,
     busy,
     tabs: ids.map((id) => ({ id, ...describe(id) })),
     hasUnsafeTabs: ids.some((id) => describe(id).unsafe),

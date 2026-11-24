@@ -400,6 +400,26 @@
   color: #5f6b7a;
 }
 
+/* The active bound Cloud Project's save state; a pause or failure stands out. */
+.statusbar-cloud-save {
+  font-size: var(--icm-font-sm);
+  color: #5f6b7a;
+  white-space: nowrap;
+}
+
+.statusbar-cloud-save[data-tone="saved"] {
+  color: var(--icm-success, #2f855a);
+}
+
+.statusbar-cloud-save[data-tone="offline"],
+.statusbar-cloud-save[data-tone="paused"] {
+  color: var(--icm-warning, #b54708);
+}
+
+.statusbar-cloud-save[data-tone="failed"] {
+  color: var(--icm-danger, #b42318);
+}
+
 .help-dialog-content h3 {
   margin-bottom: 0.25rem;
   font-size: var(--icm-font-lg);

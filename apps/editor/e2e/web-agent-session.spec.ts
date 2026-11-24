@@ -13,10 +13,12 @@ import {
   setComponentParameter,
   openCellManager,
   openEditor,
+  placeComponentAt,
   projectTabAction,
   readAgentClaim,
+  renameProject,
 } from "./editor-fixtures.js";
-import { readComponentCode } from "./manual-editor-fixtures.js";
+import { placeComponent, readComponentCode } from "./manual-editor-fixtures.js";
 
 // The live-host cases open relay sockets and one test starts a sibling Vite
 // server. Keep this file in one worker while unrelated browser specs stay
@@ -1451,4 +1453,127 @@ test("keeps browser recovery on the renewed idle deadline and expires after inac
   await page.clock.runFor(15_100);
   await expect(page.getByTestId("agent-status")).toHaveText("Session expired");
   expect(await recovery()).toBeNull();
+});
+
+test.describe("Cloud auto-save with the Agent", () => {
+  const origin = new URL(
+    process.env.ICM_E2E_BASE_URL ??
+      `http://127.0.0.1:${process.env.ICM_E2E_PORT ?? "4173"}`,
+  ).origin;
+  test.use({
+    storageState: {
+      cookies: [],
+      origins: [
+        {
+          origin,
+          localStorage: [
+            { name: "icm.editor-mode.v1", value: "draw" },
+            { name: "icm.editor-mode-coach.v1", value: "seen" },
+            { name: "icm.cloud-auto-save.v1", value: "on" },
+          ],
+        },
+      ],
+    },
+  });
+
+  test("an Agent edit to a background tab waits for that tab, whose save then holds tab switches", async ({
+    page,
+    baseURL,
+  }) => {
+    test.setTimeout(120_000);
+    let projectId: string | undefined;
+    const puts: string[] = [];
+    page.on("request", (request) => {
+      if (
+        request.method() === "PUT" &&
+        /^\/api\/projects\/[^/]+$/u.test(new URL(request.url()).pathname)
+      )
+        puts.push(request.postData() ?? "");
+    });
+    try {
+      // Tab A: a bound Cloud Project.
+      await page.goto("/editor?new=1");
+      await placeComponent(page, "resistor", { x: 320, y: 200 });
+      const name = `Agent auto-save ${Date.now()}`;
+      await renameProject(page, name);
+      const created = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === "/api/projects" &&
+          response.request().method() === "POST",
+      );
+      await page.keyboard.press("ControlOrMeta+s");
+      projectId = (await (await created).json()).project.id;
+      await expect(page.getByTestId("cloud-save-state")).toHaveText("Saved");
+      // Tab B on screen.
+      await projectTabAction(page, "New project tab");
+      await expect(page.getByTestId("active-instance-count")).toHaveText("0");
+      const { panel, client, agent } = await pairAgent(page, baseURL!);
+      await panel.getByRole("button", { name: "Close Agent dialog" }).click();
+      const list = listed(
+        await agent.workspace("auto-save-list", { action: "list" }),
+      );
+      const tabA = list.projects.find(
+        (item) => item.workspaceId !== list.activeWorkspaceId,
+      )!;
+      const tabB = list.projects.find(
+        (item) => item.workspaceId === list.activeWorkspaceId,
+      )!;
+
+      // The Agent edits A in the background: A is marked, nothing uploads.
+      client.workspaceId = tabA.workspaceId;
+      expect(
+        await agent.circuit(
+          placeResistor(
+            tabA.cells[0]!.documentId,
+            "auto-save-background-edit",
+            "auto-save-background-R",
+            { expectedRevision: tabA.cells[0]!.revision, x: 500 },
+          ),
+        ),
+      ).toMatchObject({ ok: true, applied: true });
+      client.workspaceId = undefined;
+      await expect(
+        page.getByRole("tab").first().getByLabel("Unsaved"),
+      ).toBeVisible();
+      await page.waitForTimeout(6000);
+      expect(puts).toHaveLength(0);
+
+      // Selecting A saves it, Agent edit included.
+      await page.getByRole("tab").first().click();
+      await expect(page.getByTestId("active-instance-count")).toHaveText("2");
+      await expect.poll(() => puts.length, { timeout: 8000 }).toBe(1);
+      expect(puts[0]).toContain("auto-save-background-R");
+      await expect(page.getByTestId("cloud-save-state")).toHaveText("Saved");
+
+      // While A's next save is held, neither the Agent nor a click leaves A.
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await page.route(`**/api/projects/${projectId}`, async (route) => {
+        if (route.request().method() === "PUT") await gate;
+        await route.continue();
+      });
+      await placeComponentAt(page, "resistor", { x: 600, y: 320 });
+      await expect.poll(() => puts.length, { timeout: 8000 }).toBe(2);
+      const activate = await agent.workspace("auto-save-activate", {
+        action: "activate",
+        workspaceId: tabB.workspaceId,
+      });
+      expect(activate).toMatchObject({
+        ok: false,
+        error: { code: "WORKSPACE_BUSY" },
+      });
+      expect(JSON.stringify(activate)).toContain("a save is still running");
+      await page.getByRole("tab").nth(1).click();
+      await expect(page.getByTestId("status")).toContainText(
+        "a save is still running",
+      );
+      await expect(page.getByTestId("active-instance-count")).toHaveText("3");
+      release();
+      await expect(page.getByTestId("cloud-save-state")).toHaveText("Saved");
+    } finally {
+      if (projectId) await page.request.delete(`/api/projects/${projectId}`);
+    }
+  });
 });

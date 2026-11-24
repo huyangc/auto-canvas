@@ -145,8 +145,8 @@ describe("HeaderAccountMenu", () => {
     );
     expect(markup).not.toContain("My Cloud Projects");
     expect(markup).not.toContain('aria-label="Cloud Projects"');
-    // Identity, one separator, Sign out: as before.
-    expect(markup.match(/class="command-separator"/gu)).toHaveLength(1);
+    // Identity, a separator, Auto-save, a separator, Sign out.
+    expect(markup.match(/class="command-separator"/gu)).toHaveLength(2);
   });
 
   it("lists My Cloud Projects between the identity and Sign out", () => {
@@ -161,7 +161,7 @@ describe("HeaderAccountMenu", () => {
     expect(identity).toBeGreaterThan(0);
     expect(projects).toBeGreaterThan(identity);
     expect(signOut).toBeGreaterThan(projects);
-    expect(markup.match(/class="command-separator"/gu)).toHaveLength(2);
+    expect(markup.match(/class="command-separator"/gu)).toHaveLength(3);
   });
 
   it("expands the library, reloads it once, and opens a project", async () => {
@@ -252,5 +252,67 @@ describe("HeaderAccountMenu", () => {
     // Escape closes the menu.
     await press("Escape");
     expect(menu.open).toBe(false);
+  });
+
+  it("puts Auto-save to Cloud after My Cloud Projects and before Sign out, on by default", () => {
+    const markup = renderToStaticMarkup(
+      <AccountContext.Provider value={account()}>
+        <HeaderAccountMenu cloudProjects={library()} />
+      </AccountContext.Provider>,
+    );
+    const projects = markup.indexOf(">My Cloud Projects<");
+    const toggle = markup.indexOf('data-testid="cloud-auto-save-toggle"');
+    const signOut = markup.indexOf(">Sign out<");
+    expect(toggle).toBeGreaterThan(projects);
+    expect(signOut).toBeGreaterThan(toggle);
+    expect(markup).toMatch(
+      /aria-pressed="true"[^>]*data-testid="cloud-auto-save-toggle"|data-testid="cloud-auto-save-toggle"[^>]*aria-pressed="true"/u,
+    );
+    expect(markup).toContain("Auto-save to Cloud");
+  });
+
+  it("toggles Auto-save in place and keeps the menu open", async () => {
+    const host = await mount(account(), library());
+    const menu = host.querySelector<HTMLDetailsElement>(
+      '[data-testid="header-account-menu"]',
+    )!;
+    await act(async () => {
+      menu.open = true;
+    });
+    const toggle = () =>
+      host.querySelector<HTMLButtonElement>(
+        '[data-testid="cloud-auto-save-toggle"]',
+      )!;
+    expect(toggle().getAttribute("aria-pressed")).toBe("true");
+    await act(async () => toggle().click());
+    expect(toggle().getAttribute("aria-pressed")).toBe("false");
+    expect(toggle().textContent).toContain("Off");
+    expect(menu.open).toBe(true);
+    await act(async () => toggle().click());
+    expect(toggle().getAttribute("aria-pressed")).toBe("true");
+    expect(toggle().textContent).toContain("On");
+  });
+
+  it("still turns Auto-save off for the session when storage refuses the write", async () => {
+    const setItem = vi.fn(() => {
+      throw new Error("quota");
+    });
+    vi.stubGlobal("localStorage", { getItem: () => null, setItem });
+    try {
+      const host = await mount(account(), library());
+      const toggle = () =>
+        host.querySelector<HTMLButtonElement>(
+          '[data-testid="cloud-auto-save-toggle"]',
+        )!;
+      expect(toggle().getAttribute("aria-pressed")).toBe("true");
+      await act(async () => toggle().click());
+      expect(toggle().getAttribute("aria-pressed")).toBe("false");
+      expect(toggle().textContent).toContain("Off");
+      await act(async () => toggle().click());
+      expect(toggle().getAttribute("aria-pressed")).toBe("true");
+      expect(setItem).toHaveBeenCalledWith("icm.cloud-auto-save.v1", "off");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

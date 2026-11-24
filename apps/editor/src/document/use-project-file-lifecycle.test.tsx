@@ -8,11 +8,14 @@ import {
   useState,
 } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createEmptyProject, type CircuitProject } from "@icm/model";
 import { CURRENT_PROJECT_FILE_VERSION } from "@icm/project-protocol";
 import { serializeProject } from "@icm/project-protocol";
-import type { CloudProjectSaveOutcome } from "../features/editor-shell/cloud-projects";
+import type {
+  CloudProjectBinding,
+  CloudProjectSaveOutcome,
+} from "../features/editor-shell/cloud-projects";
 import type { CloudProjectStore } from "../services/editor-services";
 import type { EditorExportDelivery } from "../hosts/export-delivery";
 import {
@@ -122,6 +125,7 @@ async function mount(
     workingCopyId?: string;
     exportDelivery?: EditorExportDelivery;
     describeCloudSaveBlocker?: () => string | null;
+    autoSave?: UseProjectFileLifecycleOptions["autoSave"];
     /**
      * Runs after each commit, before (`layout`) and after (`passive`) the
      * lifecycle's own effects: the windows between an edit's render and the
@@ -224,6 +228,7 @@ async function mount(
       ...(initial.describeCloudSaveBlocker
         ? { describeCloudSaveBlocker: initial.describeCloudSaveBlocker }
         : {}),
+      ...(initial.autoSave ? { autoSave: initial.autoSave } : {}),
       installProject: (next) => doc.replaceProject(next),
       setStatus: (message) => statuses.push(message),
       onCloudProjectSaved: () => {},
@@ -266,6 +271,9 @@ async function mount(
     setWorkingCopy(value: string) {
       state.workingCopyId = value;
       forceRender?.();
+    },
+    async rerender() {
+      await act(async () => forceRender?.());
     },
     configure(next: {
       beforeSnapshot?: () => Promise<CircuitProject | null>;
@@ -1177,3 +1185,420 @@ it.each(["layout", "passive"] as const)(
     expect(editor.current.doc.project.name).toBe("Edited");
   },
 );
+
+describe("Cloud auto-save", () => {
+  type Respond = (
+    project: CircuitProject,
+    binding: CloudProjectBinding | null,
+  ) => CloudProjectSaveOutcome | Promise<CloudProjectSaveOutcome>;
+  const receipt: Respond = (written, binding) => ({
+    status: "saved",
+    project: {
+      id: binding?.id ?? "cloud-A",
+      revision: (binding?.revision ?? 0) + 1,
+      name: written.name,
+      galleryEntryId: null,
+      schemaVersion: CURRENT_PROJECT_FILE_VERSION,
+      updatedAt: "2026-11-23T00:00:00Z",
+    },
+  });
+  const conflict: Respond = (written, binding) => ({
+    status: "conflict",
+    project: {
+      id: binding?.id ?? "cloud-A",
+      revision: (binding?.revision ?? 0) + 5,
+      name: written.name,
+      schemaVersion: CURRENT_PROJECT_FILE_VERSION,
+      updatedAt: "2026-11-23T00:00:00Z",
+    },
+  });
+  const unreachable: Respond = () => ({
+    status: "unreachable",
+    message: "offline",
+  });
+
+  /** A Cloud store that records each write and answers as told. */
+  function fakeCloud() {
+    const writes: {
+      project: CircuitProject;
+      binding: CloudProjectBinding | null;
+    }[] = [];
+    const held: (() => void)[] = [];
+    let respond: Respond = receipt;
+    let defer = false;
+    const store = cloudStore({
+      save: vi.fn((written: CircuitProject, binding) => {
+        writes.push({ project: written, binding });
+        const answer = respond;
+        if (!defer)
+          return new Promise<CloudProjectSaveOutcome>((resolve) =>
+            resolve(answer(written, binding)),
+          );
+        return new Promise<CloudProjectSaveOutcome>((resolve) =>
+          held.push(() => resolve(answer(written, binding))),
+        );
+      }) as CloudProjectStore["save"],
+    });
+    return {
+      store,
+      writes,
+      respond(next: Respond) {
+        respond = next;
+      },
+      defer(value: boolean) {
+        defer = value;
+      },
+      async release() {
+        await act(async () => held.shift()!());
+        await flush();
+      },
+    };
+  }
+
+  const base = project("A");
+  const bound: Partial<ProjectFileSession> = {
+    persistenceState: "clean",
+    cloudBinding: { id: "cloud-A", revision: 1 },
+    savedBaseline: { project: base, viewBox: view },
+  };
+
+  async function mountAuto(
+    options: {
+      autoSave?: boolean;
+      enabled?: boolean;
+      bind?: Partial<ProjectFileSession> | null;
+    } = {},
+  ) {
+    vi.useFakeTimers();
+    const cloud = fakeCloud();
+    const control = {
+      enabled: options.enabled ?? true,
+      blocker: null as string | null,
+    };
+    const editor = await mount({
+      store: cloud.store,
+      ...(options.autoSave === false
+        ? {}
+        : {
+            autoSave: {
+              get enabled() {
+                return control.enabled;
+              },
+              blocker: () => control.blocker,
+            },
+          }),
+    });
+    if (options.bind !== null)
+      await editor.switchTo(structuredClone(base), options.bind ?? bound);
+    const advance = async (ms: number) => {
+      await act(async () => {
+        vi.advanceTimersByTime(ms);
+      });
+      await flush();
+    };
+    return { editor, cloud, control, advance };
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("saves a live edit 3 s after it, restarting with each edit", async () => {
+    const { editor, cloud, advance } = await mountAuto();
+    await editor.rename("A1");
+    await advance(2999);
+    expect(cloud.writes).toHaveLength(0);
+    await advance(1);
+    expect(cloud.writes).toHaveLength(1);
+    expect(cloud.writes[0]!.project.name).toBe("A1");
+    expect(cloud.writes[0]!.binding?.revision).toBe(1);
+    expect(editor.file.persistenceState).toBe("clean");
+    expect(editor.file.cloudAutoSave.armed).toBe(false);
+    // No routine status line.
+    expect(editor.statuses.some((line) => line.startsWith("Saving"))).toBe(
+      false,
+    );
+    expect(editor.statuses.some((line) => line.startsWith("Saved"))).toBe(
+      false,
+    );
+
+    await editor.rename("A2");
+    await advance(2000);
+    // A render with the same content keeps the clock.
+    await editor.rerender();
+    await advance(999);
+    expect(cloud.writes).toHaveLength(1);
+    await editor.rename("A3");
+    await advance(2000);
+    expect(cloud.writes).toHaveLength(1);
+    await advance(1000);
+    expect(cloud.writes).toHaveLength(2);
+    expect(cloud.writes[1]!.project.name).toBe("A3");
+    expect(cloud.writes[1]!.binding?.revision).toBe(2);
+  });
+
+  it.each([
+    ["without the option", { autoSave: false }],
+    ["when turned off", { enabled: false }],
+    ["for an unbound drawing", { bind: null }],
+  ] as const)("never saves %s", async (_case, options) => {
+    const { editor, cloud, advance } = await mountAuto(options);
+    await editor.rename("Edited");
+    await advance(10_000);
+    expect(cloud.writes).toHaveLength(0);
+  });
+
+  it("saves a restored copy only if it was armed", async () => {
+    const { editor, cloud, advance } = await mountAuto({
+      bind: { ...bound, persistenceState: "dirty" },
+    });
+    await advance(10_000);
+    expect(cloud.writes).toHaveLength(0);
+    await editor.switchTo(structuredClone(base), {
+      ...bound,
+      persistenceState: "dirty",
+      autoSaveArmed: true,
+    });
+    await advance(3000);
+    expect(cloud.writes).toHaveLength(1);
+    await advance(10_000);
+    expect(cloud.writes).toHaveLength(1);
+  });
+
+  it("defers while something blocks it and saves once it clears", async () => {
+    const { editor, cloud, control, advance } = await mountAuto();
+    control.blocker = "a wire is being drawn";
+    await editor.rename("Edited");
+    await advance(10_000);
+    expect(cloud.writes).toHaveLength(0);
+    control.blocker = null;
+    await advance(500);
+    expect(cloud.writes).toHaveLength(1);
+
+    // A held replacement slot defers it the same way.
+    const command = editor.command();
+    await editor.rename("Edited again");
+    await advance(10_000);
+    expect(cloud.writes).toHaveLength(1);
+    command.release();
+    await advance(500);
+    expect(cloud.writes).toHaveLength(2);
+  });
+
+  it("holds after a conflict, through edits and a manual retry", async () => {
+    const { editor, cloud, advance } = await mountAuto();
+    cloud.respond(conflict);
+    await editor.rename("Edited");
+    await advance(3000);
+    expect(cloud.writes).toHaveLength(1);
+    expect(editor.file.cloudAutoSave.hold?.kind).toBe("conflict");
+    expect(editor.file.persistenceState).toBe("conflict");
+    await editor.rename("Edited again");
+    await advance(6000);
+    expect(cloud.writes).toHaveLength(1);
+    await editor.run(editor.file.saveProjectToCloud());
+    expect(cloud.writes).toHaveLength(2);
+    expect(editor.file.cloudAutoSave.hold?.kind).toBe("conflict");
+    expect(editor.file.captureFileSession().autoSaveHold?.kind).toBe(
+      "conflict",
+    );
+  });
+
+  it("stays held after Revert puts the same binding back", async () => {
+    const { editor, cloud, advance } = await mountAuto();
+    cloud.respond(conflict);
+    await editor.rename("Edited");
+    await advance(3000);
+    expect(cloud.writes).toHaveLength(1);
+    await act(async () => editor.file.revertToSavedProjectBaseline());
+    await flush();
+    if (editor.file.replaceGuard) {
+      await act(async () => editor.file.confirmReplaceGuard());
+      await flush();
+    }
+    expect(editor.current.doc.project.name).toBe("A");
+    cloud.respond(receipt);
+    await editor.rename("After revert");
+    await advance(6000);
+    expect(cloud.writes).toHaveLength(1);
+  });
+
+  it("holds while offline and saves once at the next online event", async () => {
+    const { editor, cloud, advance } = await mountAuto();
+    cloud.respond(unreachable);
+    await editor.rename("Edited");
+    await advance(3000);
+    expect(cloud.writes).toHaveLength(1);
+    expect(editor.file.cloudAutoSave.hold?.kind).toBe("offline");
+    await editor.rename("Edited offline");
+    await advance(6000);
+    expect(cloud.writes).toHaveLength(1);
+    cloud.respond(receipt);
+    await act(async () => window.dispatchEvent(new Event("online")));
+    await advance(3000);
+    expect(cloud.writes).toHaveLength(2);
+    await advance(6000);
+    expect(cloud.writes).toHaveLength(2);
+    expect(editor.file.persistenceState).toBe("clean");
+  });
+
+  it("is not held by an offline failure the browser recovered from mid-write", async () => {
+    const { editor, cloud, advance } = await mountAuto();
+    cloud.respond(unreachable);
+    cloud.defer(true);
+    await editor.rename("Edited");
+    await advance(3000);
+    expect(cloud.writes).toHaveLength(1);
+    await act(async () => window.dispatchEvent(new Event("online")));
+    await cloud.release();
+    expect(editor.file.persistenceState).toBe("offline");
+    expect(editor.file.cloudAutoSave.hold).toBeNull();
+    cloud.defer(false);
+    cloud.respond(receipt);
+    await advance(3000);
+    expect(cloud.writes).toHaveLength(2);
+  });
+
+  it("saves edits made during the write, an undo to the saved content included", async () => {
+    const { editor, cloud, advance } = await mountAuto();
+    cloud.defer(true);
+    await editor.rename("B");
+    await advance(3000);
+    expect(cloud.writes).toHaveLength(1);
+    await editor.rename("C");
+    await cloud.release();
+    expect(editor.file.persistenceState).toBe("dirty");
+    await advance(3000);
+    expect(cloud.writes).toHaveLength(2);
+    expect(cloud.writes[1]!.project.name).toBe("C");
+    expect(cloud.writes[1]!.binding?.revision).toBe(2);
+    await cloud.release();
+
+    // Undo back to what revision 3 holds while revision 4 is being written.
+    await editor.rename("D");
+    await advance(3000);
+    expect(cloud.writes).toHaveLength(3);
+    await editor.rename("C");
+    await cloud.release();
+    await advance(3000);
+    expect(cloud.writes).toHaveLength(4);
+    expect(cloud.writes[3]!.project.name).toBe("C");
+    expect(cloud.writes[3]!.binding?.revision).toBe(4);
+    await cloud.release();
+  });
+
+  it("lets a manual Save wait for an automatic one, then save what is newer", async () => {
+    const { editor, cloud, advance } = await mountAuto();
+    cloud.defer(true);
+    await editor.rename("B");
+    await advance(3000);
+    expect(cloud.writes).toHaveLength(1);
+    expect(editor.file.isUserSaveInFlight()).toBe(false);
+    expect(editor.file.saveBusy).toBe(false);
+    expect(editor.file.cloudAutoSave.saving).toBe(true);
+    await editor.rename("C");
+    const manual = editor.file.saveProjectToCloud();
+    await flush();
+    expect(cloud.writes).toHaveLength(1);
+    expect(editor.file.isUserSaveInFlight()).toBe(true);
+    await cloud.release();
+    expect(cloud.writes).toHaveLength(2);
+    expect(cloud.writes[1]!.project.name).toBe("C");
+    expect(cloud.writes[1]!.binding?.revision).toBe(2);
+    await cloud.release();
+    expect((await editor.run(manual)).status).toBe("saved");
+    expect(editor.file.persistenceState).toBe("clean");
+
+    // With nothing newer, the automatic receipt answers the manual Save.
+    await editor.rename("D");
+    await advance(3000);
+    expect(cloud.writes).toHaveLength(3);
+    const again = editor.file.saveProjectToCloud();
+    await cloud.release();
+    expect((await editor.run(again)).status).toBe("saved");
+    expect(cloud.writes).toHaveLength(3);
+  });
+
+  it("refuses Save As during an automatic save", async () => {
+    const { editor, cloud, advance } = await mountAuto();
+    cloud.defer(true);
+    await editor.rename("B");
+    await advance(3000);
+    const outcome = await editor.run(
+      editor.file.saveProjectToCloud(undefined, true),
+    );
+    expect(outcome).toMatchObject({ status: "rejected" });
+    expect("message" in outcome && outcome.message).toContain(
+      "Another Cloud save is in progress",
+    );
+    expect(cloud.writes).toHaveLength(1);
+    await cloud.release();
+  });
+
+  it("refuses replacements, the exact-content shortcut included, during an automatic save", async () => {
+    const { editor, cloud, advance } = await mountAuto();
+    cloud.defer(true);
+    await editor.rename("B");
+    await advance(3000);
+    expect(editor.file.beginReplacementCommand("Open B")).toBeNull();
+    expect(editor.statuses.at(-1)).toBe(
+      "Wait for the Cloud auto-save to finish before replacing this Project",
+    );
+    const open = vi.fn(async () => ({
+      status: "opened" as const,
+      project: {
+        id: "cloud-A",
+        revision: 1,
+        name: "B",
+        galleryEntryId: null,
+        schemaVersion: CURRENT_PROJECT_FILE_VERSION,
+        updatedAt: "2026-11-23T00:00:00Z",
+        projectText: serializeProject(editor.current.doc.controller.project),
+      },
+    }));
+    cloud.store.open = open;
+    const result = await editor.run(
+      editor.file.openCloudProjectById("cloud-A"),
+    );
+    expect(result.applied).toBe(false);
+    expect(open).not.toHaveBeenCalled();
+    expect(editor.current.doc.project.name).toBe("B");
+    await cloud.release();
+  });
+
+  it("sends the controller's Project at admission without preparing a snapshot", async () => {
+    const { editor, cloud, advance } = await mountAuto();
+    const prepare = vi.fn(async () => editor.current.doc.controller.project);
+    editor.configure({ beforeSnapshot: prepare });
+    await editor.rename("B");
+    editor.commitEditInPlace("Committed before the timer");
+    await advance(3000);
+    expect(prepare).not.toHaveBeenCalled();
+    expect(cloud.writes[0]!.project.name).toBe("Committed before the timer");
+  });
+
+  it("holds after a thrown store call and does not retry", async () => {
+    const { editor, cloud, advance } = await mountAuto();
+    cloud.respond(() => {
+      throw new Error("network stack");
+    });
+    await editor.rename("B");
+    await advance(3000);
+    expect(cloud.writes).toHaveLength(1);
+    expect(editor.file.cloudAutoSave.hold?.kind).toBe("rejected");
+    expect(editor.file.persistenceState).toBe("failed");
+    await advance(10_000);
+    expect(cloud.writes).toHaveLength(1);
+  });
+
+  it("arms and marks a commit noted from outside the render", async () => {
+    const { editor, cloud, advance } = await mountAuto();
+    editor.commitEditInPlace("Agent edit");
+    await act(async () => editor.file.noteExternalCommit());
+    expect(editor.file.persistenceState).toBe("dirty");
+    expect(editor.file.cloudAutoSave.armed).toBe(true);
+    await advance(3000);
+    expect(cloud.writes).toHaveLength(1);
+    expect(cloud.writes[0]!.project.name).toBe("Agent edit");
+  });
+});

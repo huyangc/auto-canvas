@@ -28,10 +28,7 @@ import { peekAgentSessionRecovery } from "../agent/session-recovery";
 import { claimNow } from "../agent/claim-clock";
 import type { UseAgentSessionOptions } from "../agent/use-agent-session";
 import { useEditorAgentSession } from "../agent/workspace-agent";
-import type {
-  EditorDocumentController,
-  useDocumentController,
-} from "../document/document-controller";
+import type { EditorDocumentController } from "../document/document-controller";
 import type { ProjectWorkspace } from "../document/project-workspace";
 import type { UseRecoveryCoordinatorResult } from "../document/recovery-coordinator";
 import type {
@@ -48,7 +45,6 @@ import {
 import type { EditorServices } from "../services/editor-services";
 import { DEFAULT_VIEWBOX } from "./default-view-box";
 
-type DocumentControllerState = ReturnType<typeof useDocumentController>;
 type ProjectFileLifecycle = ReturnType<typeof useProjectFileLifecycle>;
 type EditorPanels = ReturnType<typeof useEditorPanels>;
 
@@ -89,14 +85,20 @@ export function useBrowserAgentHost({
   runtime,
   editorDocumentController,
   projectSessionId,
-  synchronizeExternalCommit,
+  noteAgentCommitRef,
   flushRecovery,
 }: {
   /** Null until the Agent runtime loads; there is no host before then. */
   runtime: AgentRuntime | null;
   editorDocumentController: EditorDocumentController;
   projectSessionId: string;
-  synchronizeExternalCommit: DocumentControllerState["synchronizeExternalCommit"];
+  /**
+   * Routes a commit to the committing controller's own tab, read when it
+   * lands: the person may have switched tabs while the Agent was working.
+   */
+  noteAgentCommitRef: RefObject<
+    (controller: EditorDocumentController) => unknown
+  >;
   flushRecovery: UseRecoveryCoordinatorResult["flushNow"];
 }) {
   const agentSemanticIntentRef = useRef<
@@ -140,15 +142,15 @@ export function useBrowserAgentHost({
     }),
     [],
   );
-  const commitCallbacks = useRef({ synchronizeExternalCommit, flushRecovery });
-  commitCallbacks.current = { synchronizeExternalCommit, flushRecovery };
+  const commitCallbacks = useRef({ flushRecovery });
+  commitCallbacks.current = { flushRecovery };
   const browserAgentHost = useMemo(
     () =>
       runtime
         ? new runtime.BrowserAgentHost(
             editorDocumentController,
             () => {
-              commitCallbacks.current.synchronizeExternalCommit();
+              noteAgentCommitRef.current(editorDocumentController);
               // Agent commits have already crossed a network boundary. Start the
               // durable write immediately so a following render crash cannot lose
               // the acknowledged transaction inside the debounce window.

@@ -3,6 +3,7 @@ import type { WireCornerOrder, WireRoutingMode } from "@icm/edit-engine";
 import type { EditorTool } from "../../interaction/interaction-state";
 import { ChangeLog } from "./change-log";
 import { ToolIcon } from "./tool-icon";
+import type { CloudSaveIndicator } from "../../document/cloud-auto-save";
 import {
   autoLayoutChipLabel,
   type AutoLayoutRunView,
@@ -105,6 +106,7 @@ export function EditorStatusbar({
   wireRoutingMode,
   wireCornerOrder,
   recoveryLabel,
+  cloudSave = null,
   zoomPercent,
   shortcutHintsVisible,
   gridVisible,
@@ -131,6 +133,8 @@ export function EditorStatusbar({
   wireRoutingMode: WireRoutingMode;
   wireCornerOrder: WireCornerOrder;
   recoveryLabel: string | null;
+  /** The active bound Cloud Project's save state; null shows no chip. */
+  cloudSave?: CloudSaveIndicator | null;
   zoomPercent: number;
   /** Whether the on-canvas keyboard reference is visible. */
   shortcutHintsVisible: boolean;
@@ -277,6 +281,17 @@ export function EditorStatusbar({
               aria-label="Browser recovery state"
             >
               {recoveryLabel}
+            </output>
+          ) : null}
+          {cloudSave ? (
+            <output
+              className="statusbar-cloud-save"
+              data-testid="cloud-save-state"
+              data-tone={cloudSave.tone}
+              title={cloudSave.title}
+              aria-label={`${cloudSave.label}. ${cloudSave.title}`}
+            >
+              {cloudSave.label}
             </output>
           ) : null}
           {issues

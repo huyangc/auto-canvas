@@ -35,6 +35,7 @@ import {
 } from "../document/project-workspace";
 import type { UseRecoveryCoordinatorResult } from "../document/recovery-coordinator";
 import type {
+  ProjectFileSession,
   ReplaceProjectOptions,
   useProjectFileLifecycle,
 } from "../document/use-project-file-lifecycle";
@@ -106,6 +107,81 @@ export function tabDocksFor(
   return (session.mode ?? "draw") === current
     ? { panel: session.panel, properties: session.properties }
     : defaultTabDocks(current);
+}
+
+/**
+ * A tab's file state as a refresh or reopen brings it back: a save that was
+ * running is unsaved work, nothing restored is armed to upload on its own,
+ * and an offline hold ends with the page that met it.
+ */
+export function resumedFileSession(
+  file: ProjectFileSession,
+): ProjectFileSession {
+  const { autoSaveArmed: _restoredNotArmed, autoSaveHold, ...rest } = file;
+  return {
+    ...rest,
+    persistenceState:
+      rest.persistenceState === "saving" ? "dirty" : rest.persistenceState,
+    ...(autoSaveHold && autoSaveHold.kind !== "offline"
+      ? { autoSaveHold }
+      : {}),
+  };
+}
+
+type RecoverySnapshotWriter =
+  UseRecoveryCoordinatorResult["writeSessionSnapshot"];
+
+/**
+ * An Agent commit to `controller`, wherever its tab is now. A tab in the
+ * background has its stored session marked unsaved and armed, and its
+ * recovery copy written; on screen the commit is synchronized and noted as a
+ * live edit. A controller no open tab holds is left alone.
+ */
+export function routeAgentCommit(
+  controller: EditorDocumentController,
+  tabs: {
+    activeController: EditorDocumentController;
+    activeId: string;
+    entries: readonly {
+      id: string;
+      session: {
+        controller: EditorDocumentController;
+        dirty: boolean;
+        unsafe: boolean;
+        file: ProjectFileSession;
+        recovery: Parameters<RecoverySnapshotWriter>[0];
+      };
+    }[];
+    synchronizeExternalCommit(): void;
+    noteExternalCommit(): void;
+    writeRecoverySessionSnapshot: RecoverySnapshotWriter;
+    changed(): void;
+  },
+): "active" | "background" | "closed" {
+  const stored = tabs.entries.find(
+    (entry) =>
+      entry.id !== tabs.activeId && entry.session.controller === controller,
+  );
+  if (stored) {
+    const session = stored.session;
+    session.dirty = true;
+    session.unsafe = true;
+    session.file = {
+      ...session.file,
+      persistenceState: "dirty",
+      autoSaveArmed: true,
+    };
+    tabs.writeRecoverySessionSnapshot(session.recovery, controller.project, {
+      cloudBinding: session.file.cloudBinding,
+      unsavedAtSnapshot: true,
+    });
+    tabs.changed();
+    return "background";
+  }
+  if (controller !== tabs.activeController) return "closed";
+  tabs.synchronizeExternalCommit();
+  tabs.noteExternalCommit();
+  return "active";
 }
 
 type DocumentControllerState = ReturnType<typeof useDocumentController>;
@@ -217,6 +293,9 @@ interface ProjectTabSessionsOptions {
   getCarriedOverDocks: () => TabDocks | null;
   /** A restored tab's docks are its own: no carry-over continues. */
   endDocksCarryOver: () => void;
+  /** The latest render's synchronizer for the active controller's commits. */
+  synchronizeExternalCommit: DocumentControllerState["synchronizeExternalCommit"];
+  noteExternalCommit: ProjectFileLifecycle["noteExternalCommit"];
 }
 
 /** The window's project tabs: one session per tab, saved with the window. */
@@ -293,7 +372,12 @@ export function useProjectTabSessions({
   getEditorMode,
   getCarriedOverDocks,
   endDocksCarryOver,
+  synchronizeExternalCommit,
+  noteExternalCommit,
 }: ProjectTabSessionsOptions) {
+  // The controller on screen now, set where a tab is restored: a commit can
+  // arrive between a switch and the render that shows it.
+  const activeControllerRef = useRef(editorDocumentController);
   function captureTabSession() {
     // Docks carried over for a draft are not this mode's choice: the tab
     // keeps the mode's own.
@@ -334,6 +418,7 @@ export function useProjectTabSessions({
     setNetlistFocusedInstance(null);
     setHighlightedNetOrigin(null);
     setNetlistPreflightOpen(false);
+    activeControllerRef.current = session.controller;
     activateDocumentSession(session.controller);
     restoreFileSession(session.file);
     resumeRecoverySession(session.recovery);
@@ -446,13 +531,7 @@ export function useProjectTabSessions({
       netlistEntry: saved.netlistEntry
         ? { ...saved.netlistEntry, sessionId: controller.projectSessionId }
         : null,
-      file: {
-        ...saved.file,
-        persistenceState:
-          saved.file.persistenceState === "saving"
-            ? "dirty"
-            : saved.file.persistenceState,
-      },
+      file: resumedFileSession(saved.file),
     };
     return session;
   }
@@ -661,10 +740,30 @@ export function useProjectTabSessions({
   });
   const [cloudManagementBusy, setCloudManagementBusy] = useState(false);
   const cloudMutation = useRef(false);
+  // Tabs whose Cloud save the Agent runs in the background: until each
+  // receipt is applied, no tab switch may make its target the active tab.
+  const backgroundCloudSaves = useRef(new Set<string>());
+  /** One background Cloud save per tab; null while that tab has one. */
+  function reserveBackgroundCloudSave(tabId: string): (() => void) | null {
+    if (backgroundCloudSaves.current.has(tabId)) return null;
+    backgroundCloudSaves.current.add(tabId);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      backgroundCloudSaves.current.delete(tabId);
+    };
+  }
+  // Set from the sign-out check until it throws; a sign-out that succeeds
+  // reloads the page.
+  const signingOut = useRef(false);
   const projectSwitchBlocker = () =>
     projectHoldReason({
       ...editInProgress(),
-      saving: isSaveInFlight() || cloudMutation.current,
+      saving:
+        isSaveInFlight() ||
+        cloudMutation.current ||
+        backgroundCloudSaves.current.size > 0,
       replaceGuard: !!replaceGuard,
       recoveryDialogOpen,
     });
@@ -1041,20 +1140,44 @@ export function useProjectTabSessions({
     });
   }
   useBeforeAccountLogout(async () => {
-    const blocker = projectSwitchBlocker();
-    if (blocker || projectTabs.busy)
-      throw new Error(blocker || "A project tab operation is in progress.");
-    if (
-      projectTabs
-        .entries()
-        .some(({ session }) => session.dirty || session.unsafe)
-    )
-      await flushWorkspace();
+    // Before the check: no automatic save may start during the flush.
+    signingOut.current = true;
+    try {
+      const blocker = projectSwitchBlocker();
+      if (blocker || projectTabs.busy)
+        throw new Error(blocker || "A project tab operation is in progress.");
+      if (
+        projectTabs
+          .entries()
+          .some(({ session }) => session.dirty || session.unsafe)
+      )
+        await flushWorkspace();
+    } catch (error) {
+      signingOut.current = false;
+      throw error;
+    }
   });
+  /** Where an Agent commit to `controller` landed; see routeAgentCommit. */
+  function noteAgentCommit(
+    controller: EditorDocumentController,
+  ): "active" | "background" | "closed" {
+    return routeAgentCommit(controller, {
+      activeController: activeControllerRef.current,
+      activeId: projectTabs.currentId(),
+      entries: projectTabs.entries(),
+      synchronizeExternalCommit,
+      noteExternalCommit,
+      writeRecoverySessionSnapshot,
+      changed: projectTabs.changed,
+    });
+  }
   return {
     openImportFile,
     cloudManagementBusy,
     isCloudManagementInFlight: () => cloudMutation.current,
+    isSigningOut: () => signingOut.current,
+    reserveBackgroundCloudSave,
+    noteAgentCommit,
     renameShelfProject,
     deleteShelfProject,
     createTabSession,

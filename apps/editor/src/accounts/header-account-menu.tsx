@@ -3,6 +3,7 @@ import { useContext, useRef, useState } from "react";
 import type { CloudProjectSummary } from "../features/editor-shell/cloud-projects";
 import { CommandSubmenu } from "../features/editor-shell/command-submenu";
 import { ProjectShelf } from "../features/editor-shell/project-shelf";
+import { useCloudAutoSavePreference } from "../document/cloud-auto-save";
 import { AccountContext } from "./account-context";
 
 /** The account's Cloud Projects (the project tabs' Shelf) and its handlers. */
@@ -28,6 +29,10 @@ export interface HeaderAccountCloudProjects {
  * With `cloudProjects`, the account's circuit library sits between the
  * identity and Sign out as My Cloud Projects, the Shelf File shows in modes
  * without an account.
+ *
+ * Auto-save to Cloud follows, before Sign out: the browser's preference that
+ * a bound Cloud Project saves itself a few seconds after editing stops. It
+ * toggles in place and keeps the menu open.
  */
 export function HeaderAccountMenu({
   cloudProjects,
@@ -37,6 +42,7 @@ export function HeaderAccountMenu({
   const account = useContext(AccountContext);
   const menu = useRef<HTMLDetailsElement>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const autoSave = useCloudAutoSavePreference();
   if (!account) return null;
   const initial = [...account.username.trim()][0]?.toUpperCase() ?? "?";
   return (
@@ -134,6 +140,21 @@ export function HeaderAccountMenu({
             <div className="command-separator" role="separator" />
           </>
         ) : null}
+        {/* Kept in this browser; every web editor with Cloud storage reads it. */}
+        <button
+          type="button"
+          className="header-account-toggle"
+          data-testid="cloud-auto-save-toggle"
+          aria-pressed={autoSave.enabled}
+          title="Save bound Cloud Projects a few seconds after you stop editing"
+          onClick={() => autoSave.setEnabled(!autoSave.enabled)}
+        >
+          Auto-save to Cloud
+          <span className="header-account-toggle-state">
+            {autoSave.enabled ? "On" : "Off"}
+          </span>
+        </button>
+        <div className="command-separator" role="separator" />
         <button
           type="button"
           data-testid="sign-out"
