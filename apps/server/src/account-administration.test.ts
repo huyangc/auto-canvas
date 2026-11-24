@@ -178,6 +178,57 @@ function holdNextTransaction(pool = db) {
   return { held, release };
 }
 
+/**
+ * Holds the next promise-style `db.connect()` client at its `COMMIT` until
+ * `release` is called. `held` resolves with that client's backend pid once
+ * the transaction has done all its work and is about to commit.
+ */
+function holdNextCommit(pool = db) {
+  const connect = pool.connect.bind(pool) as (...args: unknown[]) => unknown;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  let reached!: (pid: number) => void;
+  const held = new Promise<number>((resolve) => (reached = resolve));
+  let holding = true;
+  const holdConnect = async (...args: unknown[]): Promise<unknown> => {
+    if (args.length || !holding) return connect(...args);
+    holding = false;
+    const client = (await connect()) as pg.PoolClient;
+    const query = client.query.bind(client) as (
+      ...args: unknown[]
+    ) => Promise<unknown>;
+    let waiting = true;
+    vi.spyOn(client, "query").mockImplementation((async (
+      ...args: unknown[]
+    ) => {
+      if (waiting && args[0] === "COMMIT") {
+        waiting = false;
+        const { rows } = (await query("SELECT pg_backend_pid() AS pid")) as {
+          rows: { pid: number }[];
+        };
+        reached(rows[0]!.pid);
+        await gate;
+      }
+      return query(...args);
+    }) as never);
+    return client;
+  };
+  vi.spyOn(pool, "connect").mockImplementation(holdConnect as never);
+  return { held, release };
+}
+
+/** Resolves once some backend waits for a lock `pid` holds. */
+async function blockedBy(pid: number) {
+  for (;;) {
+    const { rowCount } = await admin.query(
+      "SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))",
+      [pid],
+    );
+    if (rowCount) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
 describe("migration 006", () => {
   it("keeps an account registered at migration 005 a plain user with an unknown registration time", async () => {
     const legacy = `account_admin_legacy_${randomUUID().replaceAll("-", "")}`;
@@ -407,12 +458,23 @@ describe("administration routes", () => {
     const last = await list("?limit=2&cursor=" + second.body.nextCursor);
     expect(last.body).toMatchObject({ nextCursor: null });
     expect(last.body.users).toHaveLength(1);
-    for (const bad of ["?limit=0", "?limit=201", "?limit=x", "?limit=1.5"])
+    for (const bad of [
+      "?limit=0",
+      "?limit=201",
+      "?limit=x",
+      "?limit=1.5",
+      "?q=a%00",
+      "?cursor=a%00",
+    ])
       expect(await list(bad), bad).toEqual({
         status: 400,
         body: { error: "invalid-fields" },
       });
     expect((await list("?limit=200")).status).toBe(200);
+    // Only ASCII letters fold: a Kelvin sign is not a "k".
+    await register("k00000005");
+    expect((await list("?q=K0000")).body.users).toHaveLength(1);
+    expect((await list("?q=%E2%84%AA0000")).body.users).toHaveLength(0);
   });
 
   it("validate bodies, refuse unknown ids and the acting account", async () => {
@@ -462,6 +524,21 @@ describe("administration routes", () => {
         expect(response.status, `${method} ${id}`).toBe(404);
         expect(await response.json()).toEqual({ error: "not-found" });
       }
+    }
+    // PostgreSQL text cannot hold NUL; such an id is not a valid field.
+    for (const [method, suffix, body] of [
+      ["PATCH", "", { disabled: true }],
+      ["POST", "/reset-password", undefined],
+      ["DELETE", "", { username: "b00000002" }],
+    ] as const) {
+      const response = await send(
+        `/api/admin/users/${encodeURIComponent(idOf(other) + "\u0000")}${suffix}`,
+        method,
+        body,
+        administrator,
+      );
+      expect(response.status, `${method} NUL`).toBe(400);
+      expect(await response.json()).toEqual({ error: "invalid-fields" });
     }
     const own = "/api/admin/users/" + idOf(administrator);
     for (const [method, suffix, body] of [
@@ -553,6 +630,45 @@ describe("administrator role", () => {
   });
 });
 
+describe("revoked acting session", () => {
+  it("refuses a mutation whose session the administrator's own password change ends meanwhile", async () => {
+    const { send, register, login } = accounts();
+    const administrator = await register("a00000001");
+    await promote(administrator);
+    const elsewhere = await login("a00000001");
+    const target = await register("b00000002");
+    // The change has locked the account and removed `administrator`'s
+    // session, and waits to commit.
+    const hold = holdNextCommit();
+    const change = send(
+      "/api/auth/password",
+      "POST",
+      { currentPassword: "passphrase", newPassword: "new passphrase" },
+      elsewhere,
+    );
+    const pid = await hold.held;
+    // The mutation's session was valid when it was authenticated; it now
+    // waits for the account lock the change holds.
+    const mutation = send(
+      "/api/admin/users/" + idOf(target),
+      "PATCH",
+      { disabled: true },
+      administrator,
+    );
+    await blockedBy(pid);
+    hold.release();
+    expect((await change).status).toBe(200);
+    const refused = await mutation;
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toEqual({ error: "forbidden" });
+    const { rows } = await db.query(
+      "SELECT disabled FROM standalone_accounts WHERE user_id=$1",
+      [idOf(target)],
+    );
+    expect(rows[0].disabled).toBe(false);
+  });
+});
+
 describe("disable, reset and delete", () => {
   const actions: Record<
     "disable" | "reset" | "delete",
@@ -625,6 +741,27 @@ describe("disable, reset and delete", () => {
       }
     },
   );
+
+  it("refuses a sign-in verified before a disable that was enabled again", async () => {
+    const { send, register, credentials } = accounts();
+    const administrator = await register("a00000001");
+    await promote(administrator);
+    const target = await register("b00000002");
+    const path = "/api/admin/users/" + idOf(target);
+    const hold = holdNextTransaction();
+    const signIn = credentials("login", "b00000002");
+    await hold.held;
+    for (const disabled of [true, false])
+      expect(
+        (await send(path, "PATCH", { disabled }, administrator)).status,
+      ).toBe(200);
+    hold.release();
+    const late = await signIn;
+    expect(late.status).toBe(401);
+    expect(late.headers.get("set-cookie")).toBeNull();
+    // The account itself signs in again.
+    expect((await credentials("login", "b00000002")).status).toBe(200);
+  });
 
   it("forces a password change after a reset", async () => {
     const { send, register, login, credentials, pair } = accounts();
@@ -921,6 +1058,48 @@ describe("disable, reset and delete", () => {
     expect(refused.status).toBe(404);
     expect(await refused.json()).toEqual({ error: "not-found" });
   });
+
+  it("answers 404 to a version restore whose version was read before deletion", async () => {
+    const { send, register } = accounts();
+    const administrator = await register("a00000001");
+    await promote(administrator);
+    const target = await register("b00000002");
+    const { project } = await (
+      await send("/api/projects", "POST", projectBody("One"), target)
+    ).json();
+    await send("/api/projects/" + project.id, "PUT", projectBody("Two"), {
+      ...target,
+      "If-Match": "revision-1",
+    });
+    // The version is read outside the save transaction, which is held.
+    const hold = holdNextTransaction();
+    const restore = send(
+      `/api/projects/${project.id}/versions/${project.id}:1/restore`,
+      "POST",
+      undefined,
+      { ...target, "If-Match": "revision-2" },
+    );
+    await hold.held;
+    expect(
+      (
+        await send(
+          "/api/admin/users/" + idOf(target),
+          "DELETE",
+          { username: "b00000002" },
+          administrator,
+        )
+      ).status,
+    ).toBe(200);
+    hold.release();
+    const refused = await restore;
+    expect(refused.status).toBe(404);
+    expect(await refused.json()).toEqual({ error: "not-found" });
+    const { rows } = await db.query(
+      "SELECT (SELECT count(*)::int FROM cloud_projects WHERE id=$1) AS projects, (SELECT count(*)::int FROM cloud_project_versions WHERE project_id=$1) AS versions",
+      [project.id],
+    );
+    expect(rows[0]).toEqual({ projects: 0, versions: 0 });
+  });
 });
 
 describe("own password", () => {
@@ -1020,6 +1199,40 @@ describe("own password", () => {
     expect(
       (await send("/api/projects", "GET", undefined, current)).status,
     ).toBe(200);
+  });
+
+  it("refuses a change whose session was signed out meanwhile", async () => {
+    const { send, register, login } = accounts();
+    const current = await register("a00000001");
+    const other = await login("a00000001");
+    const before = await db.query(
+      "SELECT password_hash FROM standalone_accounts WHERE user_id=$1",
+      [idOf(current)],
+    );
+    const hold = holdNextTransaction();
+    const change = send(
+      "/api/auth/password",
+      "POST",
+      { currentPassword: "passphrase", newPassword: "new passphrase" },
+      current,
+    );
+    await hold.held;
+    expect(
+      (await send("/api/auth/logout", "POST", undefined, current)).status,
+    ).toBe(200);
+    hold.release();
+    const refused = await change;
+    expect(refused.status).toBe(401);
+    expect(await refused.json()).toEqual({ error: "unauthorized" });
+    expect(refused.headers.get("X-Canvas-Session")).toBe("expired");
+    const after = await db.query(
+      "SELECT password_hash FROM standalone_accounts WHERE user_id=$1",
+      [idOf(current)],
+    );
+    expect(after.rows[0].password_hash).toEqual(before.rows[0].password_hash);
+    expect((await send("/api/projects", "GET", undefined, other)).status).toBe(
+      200,
+    );
   });
 
   it("refuses a change whose verified password was reset meanwhile", async () => {
