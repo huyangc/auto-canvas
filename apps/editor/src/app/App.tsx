@@ -1034,6 +1034,7 @@ function WorkspaceEditor({
     canRestoreStartupCloudProject,
     restoreAfterRefresh,
     startupRestoreReady,
+    startupRestorePending,
     setRecoveryDialogOpen,
     isDirtyWork,
     hasUnsavedChanges,
@@ -4925,7 +4926,7 @@ function WorkspaceEditor({
     },
   });
   useRestoredTabLinks({
-    importReady: recoveryReady && startupRestoreReady,
+    importReady: recoveryReady && !startupRestorePending,
     openProjectFile,
     restoringWorkspace,
     bootRequestsNewProject,
