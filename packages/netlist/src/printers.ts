@@ -507,6 +507,7 @@ function cardRecorder(
 export function printDesignNetlistWithLocations(
   format: NetlistFormat,
   ir: DesignNetlistIR,
+  includeNodes = false,
 ): { file: NetlistFileDescriptor; locations: DesignNetlistLocations } {
   const printed =
     format === "spice" ? renderSpice(ir, false, true) : renderSpectre(ir, true);
@@ -519,7 +520,9 @@ export function printDesignNetlistWithLocations(
     },
     locations: {
       instances: printed.instances,
-      fields: printed.fields.toSorted((a, b) => a.startOffset - b.startOffset),
+      fields: printed.fields
+        .filter((field) => includeNodes || field.kind !== "node")
+        .toSorted((a, b) => a.startOffset - b.startOffset),
     },
   };
 }

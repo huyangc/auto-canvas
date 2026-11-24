@@ -1,3 +1,7 @@
+import { readFileSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
+import { serializeProject } from "@icm/project-protocol";
+import type { CircuitProject } from "@icm/model";
 import { expect, test, type Page } from "@playwright/test";
 
 import {
@@ -5,7 +9,12 @@ import {
   NETLIST_B,
   resistorChainNetlist,
 } from "../src/features/auto-layout/auto-layout-fixture.test-support";
-import { exportedProject, openEditor } from "./editor-fixtures";
+import {
+  exportedProject,
+  openEditor,
+  showNetlistPanel,
+  downloadBytes,
+} from "./editor-fixtures";
 
 /** The last status of an import's Auto Layout run (never "planning"). */
 const FINAL =
@@ -127,4 +136,80 @@ test("a Cell over the size limit keeps its shelf; the other is laid out", async 
   await expect(section).toContainText("AUTO_LAYOUT_TOO_LARGE");
   await page.keyboard.press("Escape");
   await expect(report).toHaveCount(0);
+});
+
+test("Draw updates the CLQC connection after a netlist edit and preserves placement", async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(420_000);
+  await openEditor(page);
+  const text = readFileSync("netlists/paper3-clqc/clqc3.cdl", "utf8");
+  await page.getByTestId("spice-files").setInputFiles({
+    name: "clqc3.cdl",
+    mimeType: "text/plain",
+    buffer: Buffer.from(text),
+  });
+  await expect(page.getByTestId("status")).toContainText(FINAL, {
+    timeout: 360_000,
+  });
+  await expect(page.getByTestId("status")).toContainText("Auto Layout applied");
+  const before: CircuitProject = await exportedProject(page);
+  const svg = testInfo.outputPath("clqc3.svg");
+  await writeFile(svg, await downloadBytes(page, "File", "Export SVG"));
+  await testInfo.attach("CLQC schematic", { path: svg });
+  await writeFile(
+    testInfo.outputPath("clqc3.icproj.json"),
+    serializeProject(before),
+  );
+  const cell = before.documents.find((d) => d.id === before.topDocumentId)!;
+  await showNetlistPanel(page);
+  await page.getByLabel("Netlist format").selectOption("spice");
+  const code = page.getByLabel("Netlist code", { exact: true });
+  await expect(code).toContainText(/Cm2\s+n_gma2\s+v3/i);
+  const loggedEdit = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname.endsWith("/api/usage/netlist.edit/ok") &&
+      response.request().method() === "POST",
+  );
+  const original = await code.innerText();
+  await code.fill(original.replace(/(Cm2\s+n_gma2\s+)v3/i, "$1vo"));
+  expect((await loggedEdit).status()).toBe(204);
+  // The debounce must apply even while the editor still has focus.
+  await expect(page.getByTestId("copy-netlist-panel")).toBeEnabled();
+  const after: CircuitProject = await exportedProject(page);
+  const changed = after.documents.find((d) => d.id === cell.id)!;
+  expect(changed.instances.map((i) => [i.id, i.placement])).toEqual(
+    cell.instances.map((i) => [i.id, i.placement]),
+  );
+  expect(changed.routes).not.toEqual(cell.routes);
+  await page.getByTestId("draw-tool-undo").click();
+  await expect(code).toContainText(/Cm2\s+n_gma2\s+v3/i);
+  await page.getByTestId("draw-tool-redo").click();
+  await expect(code).toContainText(/Cm2\s+n_gma2\s+vo/i);
+});
+
+test("chooses a drawing symbol for an undeclared MOS model", async ({
+  page,
+}) => {
+  await openEditor(page);
+  await page.getByTestId("spice-files").setInputFiles({
+    name: "unknown.cdl",
+    mimeType: "text/plain",
+    buffer: Buffer.from(
+      ".subckt amp d g s b\nM1 d g s b mystery w=1u l=1u\n.ends amp\n",
+    ),
+  });
+  const dialog = page.getByRole("dialog", { name: /symbol.*mystery/i });
+  await dialog.getByRole("button", { name: "PMOS" }).click();
+  await expect(page.getByTestId("status")).toContainText(FINAL, {
+    timeout: 60_000,
+  });
+  const project: CircuitProject = await exportedProject(page);
+  const mos = project.documents
+    .flatMap((d) => d.instances)
+    .find((i) => i.reference === "M1");
+  expect(mos).toMatchObject({
+    symbolId: "pmos",
+    netlist: { binding: { name: "mystery" } },
+  });
 });

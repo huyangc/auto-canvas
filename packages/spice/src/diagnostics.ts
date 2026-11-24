@@ -15,6 +15,7 @@ export interface SpiceDiagnostic {
   message: string;
   sourceRef?: SourceSpan;
   related?: SpiceRelatedLocation[];
+  undeclaredMosModel?: string;
 }
 
 export function diagnostic(

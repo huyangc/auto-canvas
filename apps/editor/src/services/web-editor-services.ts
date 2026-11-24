@@ -1,3 +1,4 @@
+import { apiUrl } from "../lib/app-url";
 import { fetchSessionUser } from "../components/account";
 import {
   CLOUD_PROJECT_LIMIT,
@@ -22,6 +23,11 @@ export function createWebEditorServices(
   let projectLimit = CLOUD_PROJECT_LIMIT;
   return {
     projectSerializer,
+    recordUsage(action, result) {
+      void (fetchLike ?? fetch)(apiUrl(`usage/${action}/${result}`), {
+        method: "POST",
+      }).catch(() => {});
+    },
     identity: { getSessionUser: () => fetchSessionUser(fetchLike) },
     projectStore: {
       kind: "cloud",

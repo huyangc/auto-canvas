@@ -4,6 +4,7 @@ import {
   type ReactNode,
   type ComponentType,
 } from "react";
+import type { RecordEditorUsage } from "@icm/project-protocol";
 import type { NativeProjectHomeProps } from "../hosts/native-project-home";
 import type { CircuitProject } from "@icm/model";
 import type { SessionUser } from "../components/account";
@@ -37,6 +38,7 @@ export interface CloudProjectStore {
 
 /** First composition seam. Other online features still own their dependencies. */
 export interface EditorServices {
+  readonly recordUsage?: RecordEditorUsage | undefined;
   /** Shared by local recovery and Cloud transport; never a second file format. */
   readonly projectSerializer?: ReturnType<
     typeof createProjectSnapshotSerializer

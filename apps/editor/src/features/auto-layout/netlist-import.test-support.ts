@@ -2,12 +2,11 @@
 // Kept apart from the fixtures so browser specs do not load the editor's
 // controller.
 import type { CircuitProject } from "@icm/model";
-import { importSpiceSources } from "@icm/spice";
 
 import { EditorDocumentController } from "../../document/document-controller";
 import { materializeRazaviProjectBulkConnections } from "../../presentation/razavi-presentation";
 import { withImportedInstanceDisplays } from "../instance-display/imported-instance-displays";
-import { prepareImportSources } from "../netlist-export/convert-import-sources";
+import { importSchematic } from "../netlist-export/import-schematic";
 
 /**
  * The Project the editor installs after File → Import → SPICE: the import
@@ -19,17 +18,7 @@ export async function importNetlistProject(
   path = "netlist.sp",
 ): Promise<CircuitProject> {
   const inputs = [{ path, bytes: new TextEncoder().encode(text) }];
-  const prepared = prepareImportSources(inputs);
-  const result = await importSpiceSources(
-    prepared.inputs,
-    path,
-    {},
-    {
-      namingProfile: "native",
-      originalSources: inputs,
-      builtInBodies: prepared.builtInBodies,
-    },
-  );
+  const result = await importSchematic(inputs, path, "native");
   const errors = result.diagnostics.filter((d) => d.severity === "error");
   if (!result.project || !result.successful || errors.length > 0)
     throw new Error(`Import failed: ${JSON.stringify(errors)}`);

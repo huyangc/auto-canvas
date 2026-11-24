@@ -98,6 +98,7 @@ export function netlistIssueTarget(
 
 /** Live structural output. Diagnostics belong outside the copyable code. */
 export function NetlistCodePanel({
+  recordUsage,
   project,
   onDirtyChange,
   rootDocumentId,
@@ -121,6 +122,7 @@ export function NetlistCodePanel({
   onProcessChange,
   onDeviceTargetChange,
 }: {
+  recordUsage?: import("@icm/project-protocol").RecordEditorUsage | undefined;
   onDirtyChange?(dirty: boolean): void;
   project: CircuitProject;
   rootDocumentId?: string | undefined;
@@ -202,7 +204,7 @@ export function NetlistCodePanel({
         : createDesignNetlistExport(project, {
             format,
             namingProfile,
-            includeLocations: true,
+            includeLocations: "connections",
             ...(rootDocumentId ? { rootDocumentId } : {}),
           }),
     [
@@ -289,7 +291,7 @@ export function NetlistCodePanel({
     let writesDraft = dirty;
     // The netlist is generated from the circuit, never the other way round.
     // Refresh drops a draft it cannot write back (added or deleted lines,
-    // changed wiring, text written against a circuit that has since changed):
+    // text written against a circuit that has since changed):
     // it never reached the circuit, and the circuit's netlist replaces it.
     if (
       writesDraft &&
@@ -311,6 +313,7 @@ export function NetlistCodePanel({
       if (result?.status !== "ready") return false;
       const plan = editSession!.plan(draftRef.current);
       if (!plan.ok) {
+        recordUsage?.("netlist.edit", "failed");
         setApplyError(plan.message);
         return false;
       }
@@ -351,12 +354,14 @@ export function NetlistCodePanel({
     }
     ownApply.current = true;
     if (!onApply(edits)) {
+      if (writesDraft) recordUsage?.("netlist.edit", "failed");
       ownApply.current = false;
       setApplyError(
         "Edit rejected. Check the device prefix and duplicate names; the circuit keeps the last valid values.",
       );
       return false;
     }
+    if (writesDraft) recordUsage?.("netlist.edit", "ok");
     setApplyError(null);
     return true;
   }
@@ -371,11 +376,16 @@ export function NetlistCodePanel({
   const hasModelSources = Boolean(
     result?.status === "ready" && result.locations.modelSources?.length,
   );
+  const modelDraft =
+    hasModelSources && dirty ? editSession?.analyze(draft) : null;
+  const manualApply = Boolean(
+    modelDraft && (!modelDraft.ok || modelDraft.modelUpdates),
+  );
   useEffect(() => {
-    if (!dirty || conflict || hasModelSources) return;
+    if (!dirty || conflict || manualApply) return;
     const timer = setTimeout(() => applyRef.current(), 500);
     return () => clearTimeout(timer);
-  }, [draft, dirty, conflict, hasModelSources]);
+  }, [draft, dirty, conflict, manualApply]);
   function focus(position: number) {
     if (draftPreview)
       return focusInstance(
@@ -487,7 +497,7 @@ export function NetlistCodePanel({
           />
         </div>
         <div className="netlist-code-actions">
-          {hasModelSources && dirty ? (
+          {manualApply ? (
             <button
               type="button"
               aria-label="Apply model edits"
@@ -608,11 +618,11 @@ export function NetlistCodePanel({
                 setApplyError(null);
               }}
               onEnter={() => {
-                if (!hasModelSources) apply();
+                if (!manualApply) apply();
               }}
               onModEnter={apply}
               onBlur={() => {
-                if (!hasModelSources) applyRef.current();
+                if (!manualApply) applyRef.current();
               }}
               onCursorChange={focus}
               highlightedRanges={highlightedRanges}

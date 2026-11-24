@@ -194,7 +194,7 @@ export function createDesignNetlistExport(
   options: DesignNetlistAnalysisOptions & {
     portCase?: NetlistPortCase;
     /** Only interactive source editors need field-level locations. */
-    includeLocations?: boolean;
+    includeLocations?: boolean | "connections";
     /**
      * Print the bodies the netlist writes itself with their ports in another
      * order (`withBodyPortOrder`). Only the RNL export modes ask for it.
@@ -258,7 +258,11 @@ export function createDesignNetlistExport(
     ? withBodyPortOrder(ir, options.bodyPortOrder)
     : ir;
   const printed = options.includeLocations
-    ? printDesignNetlistWithLocations(format, printedIr)
+    ? printDesignNetlistWithLocations(
+        format,
+        printedIr,
+        options.includeLocations === "connections",
+      )
     : null;
   const file = printed?.file ?? printDesignNetlist(format, printedIr);
   const originalLength = file.text.length;
@@ -281,7 +285,9 @@ export function createDesignNetlistExport(
     locations,
     cellCount: ir.cells.length,
     externalMasterCount: ir.externalMasters?.length ?? 0,
-    ...(options.includeIr ? { ir: printedIr } : {}),
+    ...(options.includeIr || options.includeLocations === "connections"
+      ? { ir: printedIr }
+      : {}),
   };
 }
 

@@ -98,6 +98,16 @@ A missing `.env` uses defaults. `.env` is ignored by Git.
 
 Set `AUTO_CANVAS_BASE_PATH=/canvas` to build and serve every editor/API URL under `/canvas/` beside another app; the default is the domain root. See [prefix deployment](apps/server/README.md#deploying-beside-silicon-notebook).
 
+### User activity logs
+
+The web editor reports opening the editor, switching Auto/Draw modes, and netlist import and edit outcomes. The server also records cloud project creation, opening, saving, favorite changes, deletion and version restoration. Each JSON line contains a UTC timestamp, authentication mode, server-resolved user ID, source, action and result. Server-side project operations include the HTTP status. Local mode uses the shared ID `local`. Circuit contents, filenames and credentials are excluded.
+
+```sh
+rg '"type":"usage"' .local/logs/server.log | tail -50
+```
+
+For development, read `.local/logs/server-dev.log`. Containers emit these lines to standard output. Editor events use best-effort delivery. The offline desktop preview does not send events.
+
 ## Commands
 
 | Command                   | What it does                                                              |

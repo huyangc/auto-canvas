@@ -11,6 +11,7 @@ export function apiServerProxy(): Plugin {
       const proxy = Object.fromEntries(
         [
           "/api/session",
+          "/api/usage",
           "/api/auth",
           "/api/projects",
           "/api/components",

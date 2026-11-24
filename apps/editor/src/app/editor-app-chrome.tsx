@@ -295,7 +295,7 @@ export function EditorAppChrome({
             hidden
             type="file"
             multiple
-            accept=".spi,.cir,.sp,.scs,.inc,.lib"
+            accept=".spi,.cir,.sp,.cdl,.scs,.inc,.lib"
             data-testid="import-netlist-file"
             onChange={(event) => {
               // The import reads the live FileList at once; clearing after

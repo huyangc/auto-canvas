@@ -1,7 +1,8 @@
-import { prepareImportSources } from "../netlist-export/convert-import-sources";
+import { chooseMosSymbol } from "./choose-mos-symbol";
+import { importSchematic } from "../netlist-export/import-schematic";
 import type { NetlistNamingProfile } from "@icm/netlist";
 import type { CircuitProject, GridRect, SchematicDocument } from "@icm/model";
-import { importSpiceSources } from "@icm/spice";
+
 import type { SymbolResolver } from "@icm/symbols";
 import { safeExportBaseName } from "@icm/exporters";
 import type { EditorExportDelivery } from "../../hosts/export-delivery";
@@ -31,7 +32,7 @@ import {
 const CLIPBOARD_FALLBACK =
   "Clipboard unavailable; select the netlist in the sidebar and copy it";
 
-type SpiceImportResult = Awaited<ReturnType<typeof importSpiceSources>>;
+type SpiceImportResult = Awaited<ReturnType<typeof importSchematic>>;
 export interface SpiceImportReport {
   entryPath: string;
   diagnostics: SpiceImportResult["diagnostics"];
@@ -40,6 +41,7 @@ export interface SpiceImportReport {
 }
 
 export interface EditorFileCommandDependencies {
+  recordUsage?: import("@icm/project-protocol").RecordEditorUsage | undefined;
   project: CircuitProject;
   document: SchematicDocument;
   resolver: SymbolResolver;
@@ -85,6 +87,7 @@ export interface EditorFileCommandDependencies {
 
 /** File import/export commands and their user-facing gate/status policy. */
 export function createEditorFileCommands({
+  recordUsage,
   project,
   document,
   resolver,
@@ -272,7 +275,7 @@ export function createEditorFileCommands({
       })),
     );
     const conventionalEntries = sourceInputs.filter((input) =>
-      /\.(?:cir|sp|spi|scs)$/iu.test(input.path),
+      /\.(?:cir|sp|spi|scs|cdl)$/iu.test(input.path),
     );
     const namedCircuitEntries = conventionalEntries.filter((input) =>
       /^circuit\.(?:spi|scs)$/iu.test(input.path.split("/").at(-1) ?? ""),
@@ -282,8 +285,9 @@ export function createEditorFileCommands({
         ? namedCircuitEntries
         : conventionalEntries;
     if (entryCandidates.length !== 1) {
+      recordUsage?.("netlist.import", "failed");
       setStatus(
-        `Select one unambiguous .cir, .sp, .spi, or .scs entry and its local include files; found ${entryCandidates.length}`,
+        `Select one unambiguous .cir, .sp, .spi, .cdl, or .scs entry and its local include files; found ${entryCandidates.length}`,
       );
       return null;
     }
@@ -324,12 +328,14 @@ export function createEditorFileCommands({
       const documents = importedProject.documents.length;
       const headline = `Imported ${documents} ${documents === 1 ? "Document" : "Documents"} and ${instanceCount} structural ${instanceCount === 1 ? "instance" : "instances"}`;
       setStatus(headline);
+      recordUsage?.("netlist.import", "ok");
       if (layout) onImported?.(headline);
     });
   };
 
   /** Show an import that failed, with its findings. */
   const reportFailedImport = (report: SpiceImportReport, message: string) => {
+    recordUsage?.("netlist.import", "failed");
     setImportReport(report);
     setImportReviewOpen(true);
     if (!projectPanelHoldsDraft?.()) {
@@ -364,6 +370,7 @@ export function createEditorFileCommands({
       }
       await installImport("Import RNL sources", plan.project, report, false);
     } catch (error) {
+      recordUsage?.("netlist.import", "failed");
       if (error instanceof ChunkLoadError) {
         setStatus(chunkLoadStatus(error.feature));
         onChunkLoadFailure?.(error.feature);
@@ -383,16 +390,11 @@ export function createEditorFileCommands({
     const { sourceInputs, entryCandidates } = sources;
     setStatus("Importing SPICE sources");
     try {
-      const prepared = prepareImportSources(sourceInputs);
-      const result = await importSpiceSources(
-        prepared.inputs,
+      const result = await importSchematic(
+        sourceInputs,
         entryCandidates[0]!.path,
-        {},
-        {
-          namingProfile,
-          originalSources: sourceInputs,
-          builtInBodies: prepared.builtInBodies,
-        },
+        namingProfile,
+        chooseMosSymbol,
       );
       const nextImportReport: SpiceImportReport = {
         entryPath: entryCandidates[0]!.path,
@@ -423,6 +425,7 @@ export function createEditorFileCommands({
         options.replacementBlocker,
       );
     } catch (error) {
+      recordUsage?.("netlist.import", "failed");
       setStatus(error instanceof Error ? error.message : "SPICE import failed");
     }
   };

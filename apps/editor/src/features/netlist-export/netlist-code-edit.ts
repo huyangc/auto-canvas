@@ -14,10 +14,13 @@ import type {
 } from "@icm/netlist";
 import { expressionIsStructurallyValid } from "@icm/spice";
 import {
+  encodedNetNameCollisionKey,
   restorePrintedParameter,
   planMappedProjectModelEdit,
 } from "@icm/netlist";
 import type { z } from "zod";
+
+import { planNodeEdits, type NodeChange } from "./netlist-node-edit";
 
 type ReadyExport = Extract<DesignNetlistExportResult, { status: "ready" }>;
 type Assignment = z.infer<
@@ -40,6 +43,7 @@ type NetlistCodeEditAnalysis =
         expectedRevision: number;
         assignments: Assignment[];
       }[];
+      nodeChanges?: NodeChange[];
       modelUpdates?: ProjectModelSource[];
     }
   | { ok: false; message: string };
@@ -74,7 +78,7 @@ function compilePrintedFields(baseline: ReadyExport) {
       const fixed = baseline.file.text.slice(cursor, field.startOffset);
       pattern.push(
         literal(fieldIndex === firstField ? fixed.trimStart() : fixed),
-        "([^\\n\\r]*?)",
+        field.kind === "parameter" ? "([^\\n\\r]*?)" : "(\\S+?)",
       );
       cursor = field.endOffset;
       fieldIndex++;
@@ -194,8 +198,10 @@ export function createNetlistCodeEditSession(
       return {
         ok: false,
         message:
-          "Edit device names, models and parameter values here. Change connections, ports or device structure on the canvas or in Project Code; Refresh regenerates the netlist from the circuit.",
+          "Edit device names, connected nets, models and parameter values here. Change ports or device structure on the canvas or in Project Code; Refresh regenerates the netlist from the circuit.",
       };
+    const nodeChanges: NodeChange[] = [];
+    const format = baseline.file.extension === ".spi" ? "spice" : "spectre";
     const documents = new Map<string, Map<string, Assignment>>();
     const seen = new Map<string, string>();
     for (let index = 0; index < fields.length; index++) {
@@ -205,7 +211,7 @@ export function createNetlistCodeEditSession(
         field.documentId,
         field.instanceId,
         field.kind,
-        field.parameter,
+        field.pinName ?? field.parameter,
       ]);
       if (seen.has(key) && seen.get(key) !== value)
         return {
@@ -227,6 +233,24 @@ export function createNetlistCodeEditSession(
           ok: false,
           message: `Enter a ${field.parameter ?? field.kind} for ${instance.reference}.`,
         };
+      if (field.kind === "node") {
+        const cell = baseline.ir?.cells.find((c) => c.id === document.id);
+        const fold = (name: string) => encodedNetNameCollisionKey(name, format);
+        const target = cell?.nets.find((n) => fold(n.name) === fold(value));
+        if (!target || !field.pinName)
+          return {
+            ok: false,
+            message: `Choose an existing net in this Cell for ${instance.reference}.${field.pinName ?? ""}.`,
+          };
+        if (fold(value) !== fold(field.rawValue))
+          nodeChanges.push({
+            documentId: document.id,
+            instanceId: instance.id,
+            pinName: field.pinName,
+            targetId: target.id,
+          });
+        continue;
+      }
       let assignments = documents.get(document.id);
       if (!assignments) documents.set(document.id, (assignments = new Map()));
       let assignment = assignments.get(instance.id);
@@ -357,7 +381,7 @@ export function createNetlistCodeEditSession(
         endOffset: newline < 0 ? source.length : newline,
       };
     });
-    return { ok: true, updates, instances };
+    return { ok: true, updates, instances, nodeChanges };
   }
   function plan(source: string): NetlistCodeEditPlan {
     const analysis = analyze(source);
@@ -394,6 +418,23 @@ export function createNetlistCodeEditSession(
           ],
         }
       : analysis;
+    if (lastPlan.ok && analysis.ok && analysis.nodeChanges?.length) {
+      try {
+        lastPlan.edits = planNodeEdits(
+          project,
+          analysis.nodeChanges,
+          lastPlan.edits,
+        );
+      } catch (error) {
+        lastPlan = {
+          ok: false,
+          message:
+            error instanceof Error
+              ? error.message
+              : "Could not change the connection.",
+        };
+      }
+    }
     return lastPlan;
   }
   return { analyze, plan };

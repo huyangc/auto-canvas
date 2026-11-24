@@ -83,6 +83,18 @@ pnpm start
 
 设置 `AUTO_CANVAS_BASE_PATH=/canvas` 可将编辑器与 API 部署在 `/canvas/`，与其他应用共用域名；默认仍使用根路径。参见[前缀部署](apps/server/README.md#deploying-beside-silicon-notebook)。
 
+### 用户使用日志
+
+Web 编辑器记录打开编辑器、切换 Auto / Draw、网表导入和网表编辑的结果。服务端另外记录云项目的创建、打开、保存、收藏设置、删除和版本恢复。每条 JSON 日志包含 UTC 时间、认证模式、服务端识别的用户 ID、事件来源、操作和结果。云项目操作还包含 HTTP 状态码。单用户模式统一使用 `local`。记录字段不包含电路内容、文件名或会话凭据。
+
+在服务主机查看最近的使用记录：
+
+```sh
+rg '"type":"usage"' .local/logs/server.log | tail -50
+```
+
+开发模式使用 `.local/logs/server-dev.log`，容器部署读取服务的标准输出。编辑器事件是尽力上报，离线桌面预览不向服务端发送事件。
+
 ## 常用命令
 
 | 命令                      | 作用                                                                    |

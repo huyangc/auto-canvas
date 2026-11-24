@@ -584,12 +584,20 @@ function WorkspaceEditor({
     projectSerializer,
     projectStore,
     nativeProjectStore,
+    recordUsage,
     NativeFileCommands,
     NativeProjectHome,
     exportDelivery,
     capabilities,
     openExternalLink,
   } = useEditorServices();
+  const opened = useRef(false);
+  useEffect(() => {
+    if (!opened.current) {
+      opened.current = true;
+      recordUsage?.("editor.open", "ok");
+    }
+  }, [recordUsage]);
   const publicAgentUiEnabled =
     !import.meta.env?.ICM_DESKTOP && capabilities.agent && requestedAgentUi;
   const [restoringWorkspace, setRestoringWorkspace] = useState(
@@ -3778,6 +3786,7 @@ function WorkspaceEditor({
     options: { persist: boolean; status?: string },
   ): void {
     if (next !== editorMode) {
+      recordUsage?.(next === "draw" ? "mode.draw" : "mode.auto", "ok");
       if (!docksCarriedRef.current)
         modePanelsRef.current[editorMode] = {
           projectPanel,
@@ -4448,6 +4457,7 @@ function WorkspaceEditor({
     importSpiceFiles,
     importRnlFiles,
   } = createEditorFileCommands({
+    recordUsage,
     project,
     document,
     resolver,
@@ -5382,6 +5392,7 @@ function WorkspaceEditor({
                   />
                 ) : projectPanel === "netlist" ? (
                   <NetlistCodePanel
+                    recordUsage={recordUsage}
                     onDirtyChange={noteCodeDraftDirty}
                     key={projectSessionId}
                     onApply={(edits) =>

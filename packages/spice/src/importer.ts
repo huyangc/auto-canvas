@@ -608,16 +608,22 @@ function importInstance(
   if (body) return importBuiltInBlock(instance, body, diagnostics);
   const mapping = symbolFor(instance, modelTypeByName, symbolMappings);
   if (!mapping) {
-    diagnostics.push(
-      diagnostic(
-        "SPICE_IMPORT_UNSUPPORTED_SYMBOL",
-        "error",
-        "import",
-        undeclaredModelMessage(instance, modelTypeByName, spectre) ??
-          `Unsupported SPICE device ${instance.name} (${targetDescription(instance, symbolMappings)}): the approved Razavi catalog has no symbol. Add and review a Razavi symbol mapping before importing.`,
-        instance.sourceRef,
-      ),
+    const issue = diagnostic(
+      "SPICE_IMPORT_UNSUPPORTED_SYMBOL",
+      "error",
+      "import",
+      undeclaredModelMessage(instance, modelTypeByName, spectre) ??
+        `Unsupported SPICE device ${instance.name} (${targetDescription(instance, symbolMappings)}): the approved Razavi catalog has no symbol. Add and review a Razavi symbol mapping before importing.`,
+      instance.sourceRef,
     );
+    if (
+      instance.target.kind === "model" &&
+      /^m/i.test(instance.name) &&
+      instance.terminals.length === 4 &&
+      !modelTypeByName.has(instance.target.modelName.toLowerCase())
+    )
+      issue.undeclaredMosModel = instance.target.modelName;
+    diagnostics.push(issue);
     return null;
   }
   const netlistBinding = importedNetlistBinding(instance, mapping);
