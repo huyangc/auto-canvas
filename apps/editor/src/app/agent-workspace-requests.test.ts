@@ -173,6 +173,28 @@ function workspace() {
         request: { action: "rename", workspaceId, name },
       } as never);
     },
+    /** Copies the source tab's top Cell into the target tab's top Cell. */
+    copy(sourceWorkspaceId: string, targetWorkspaceId: string) {
+      const source = tabs.get(sourceWorkspaceId)!.controller.project;
+      const target = tabs.get(targetWorkspaceId)!.controller.project;
+      return handler({
+        apiVersion: "3.0",
+        requestId: `r${++request}`,
+        operation: "workspace",
+        request: {
+          action: "copy",
+          sourceWorkspaceId,
+          sourceDocumentId: source.documents[0]!.id,
+          sourceRevision: source.documents[0]!.revision,
+          sourceStructureRevision: source.structureRevision,
+          targetWorkspaceId,
+          targetDocumentId: target.documents[0]!.id,
+          expectedRevision: target.documents[0]!.revision,
+          expectedStructureRevision: target.structureRevision,
+          offset: { x: 100, y: 100 },
+        },
+      } as never);
+    },
     setTransitioning(value: boolean) {
       transitioning = value;
     },
@@ -256,6 +278,33 @@ describe("the Agent's background Cloud save", () => {
     expect(await editor.saveIn("b")).toMatchObject({ ok: true });
     expect(editor.options.saveProjectToCloud).toHaveBeenCalledTimes(1);
     expect(editor.save).not.toHaveBeenCalled();
+  });
+});
+
+describe("the Agent's copy", () => {
+  it("refuses a copy into a tab activated before its first render", async () => {
+    const editor = workspace();
+    const a = editor.tabs.get("a")!.controller;
+    const b = editor.tabs.get("b")!.controller;
+    const before = { a: a.project, b: b.project };
+    // B is active, the render still shows A: B's live entry would carry A's
+    // controller, so the copy would land in A.
+    editor.activate("b");
+    expect(await editor.copy("a", "b")).toMatchObject({
+      ok: false,
+      error: { code: "WORKSPACE_BUSY" },
+    });
+    expect(a.project).toBe(before.a);
+    expect(b.project).toBe(before.b);
+    expect(editor.options.noteAgentCommitRef.current).not.toHaveBeenCalled();
+  });
+
+  it("copies between tabs and notes the target's commit once renders agree", async () => {
+    const editor = workspace();
+    const b = editor.tabs.get("b")!.controller;
+    expect(await editor.copy("a", "b")).toMatchObject({ ok: true });
+    expect(b.project.documents[0]!.instances).toHaveLength(2);
+    expect(editor.options.noteAgentCommitRef.current).toHaveBeenCalledWith(b);
   });
 });
 
@@ -405,6 +454,24 @@ describe("routeAgentCommit", () => {
         }),
     };
   }
+
+  it("leaves a background tab clean when a rolled-back batch restored its saved content", () => {
+    const { b, calls, route } = tabs();
+    b.file.savedBaseline = {
+      project: structuredClone(b.controller.project),
+      viewBox: b.view,
+    };
+    expect(route(b.controller)).toBe("background");
+    expect(b.dirty).toBe(false);
+    expect(b.unsafe).toBe(false);
+    expect(b.file.persistenceState).toBe("clean");
+    expect(b.file.autoSaveArmed).not.toBe(true);
+    expect(calls.writeRecoverySessionSnapshot).toHaveBeenCalledWith(
+      b.recovery,
+      b.controller.project,
+      { cloudBinding: b.file.cloudBinding, unsavedAtSnapshot: false },
+    );
+  });
 
   it("marks a background tab unsaved and armed and journals it", () => {
     const { b, calls, route } = tabs();

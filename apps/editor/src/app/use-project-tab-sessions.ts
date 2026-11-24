@@ -42,6 +42,7 @@ import type {
   ReplaceProjectOptions,
   useProjectFileLifecycle,
 } from "../document/use-project-file-lifecycle";
+import { sameProjectContent } from "../document/project-session-lifecycle";
 import { useProjectTabs } from "../document/use-project-tabs";
 import {
   findWorkspaceReopenOffer,
@@ -195,16 +196,21 @@ export function routeAgentCommit(
   );
   if (stored) {
     const session = stored.session;
-    session.dirty = true;
-    session.unsafe = true;
+    // A batch rolled back to the saved content is not an edit: uploading it
+    // would only advance the Cloud revision.
+    const saved = session.file.savedBaseline;
+    const unsaved =
+      saved === null || !sameProjectContent(controller.project, saved.project);
+    session.dirty = unsaved;
+    session.unsafe = unsaved;
     session.file = {
       ...session.file,
-      persistenceState: "dirty",
-      autoSaveArmed: true,
+      persistenceState: unsaved ? "dirty" : "clean",
+      autoSaveArmed: unsaved,
     };
     tabs.writeRecoverySessionSnapshot(session.recovery, controller.project, {
       cloudBinding: session.file.cloudBinding,
-      unsavedAtSnapshot: true,
+      unsavedAtSnapshot: unsaved,
     });
     tabs.changed();
     return "background";
