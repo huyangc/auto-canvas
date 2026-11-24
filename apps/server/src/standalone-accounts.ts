@@ -356,6 +356,14 @@ export function registerAccounts(
     try {
       const hash = (await derive(currentPassword, row.salt, 64)) as Buffer;
       if (!timingSafeEqual(hash, row.password_hash)) {
+        // A reset (or another revocation) that committed after this request
+        // was authenticated replaced the hash and ended the session: the
+        // editor must end it, and it was no guess.
+        const live = await db.query(
+          "SELECT 1 FROM standalone_sessions WHERE token_hash=$1 AND user_id=$2 AND expires_at>clock_timestamp()",
+          [presented(c), userId],
+        );
+        if (!live.rowCount) return expired();
         attempt.failed();
         accountAttempt.failed();
         return incorrect();

@@ -145,3 +145,24 @@ The three tests that cover a fix fail on `ccc0a29` (checked by swapping the
 two source files back). Rerun on lane 2: vitest 416/416; typecheck 0; lint 0
 errors; format, docs, deadcode 0; build 0; server-mode-check 0; accounts
 Playwright 3/3.
+
+## Reviewer fix after codex PR review round 4 (owner's decision)
+
+Codex round 4 on `4545512`: no P0/P1, three P3, all fixed by the reviewer.
+The owner decided that later P3-only codex rounds on this PR are answered
+with a rebuttal on the PR, not further fixes.
+
+1. `removeSessions` checks the kept session's expiry in its own statement
+   after the row locks are held (`clock_timestamp()`), not in the locking
+   statement's projection. Test: "refuses an administrator mutation whose
+   session expired while it waited for the session row".
+2. `POST /api/auth/password` answers the expired response instead of
+   `incorrect-password` when the presented session is no longer live (a
+   reset between authentication and the credential read). Test: "own
+   password after a reset before its credential read".
+3. A Project create for a deleted account adds `X-Canvas-Session: expired`.
+   Test: the deletion race test checks the header.
+
+All three tests fail on `4545512` (source files swapped back). Rerun on lane
+2: vitest 416 → 418/418; typecheck 0; lint 0 errors; format, docs, deadcode 0;
+build 0; server-mode-check 0; accounts Playwright 3/3.

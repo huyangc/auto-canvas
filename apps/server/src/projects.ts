@@ -127,7 +127,11 @@ async function save(
         "SELECT id FROM users WHERE id = $1 FOR UPDATE",
         [userId],
       );
-      if (!owner.rowCount) return c.json({ error: "unauthorized" }, 401);
+      if (!owner.rowCount) {
+        // As the authentication step answers, so the editor ends the session.
+        c.header("X-Canvas-Session", "expired");
+        return c.json({ error: "unauthorized" }, 401);
+      }
       const count = await connection.query<{ count: string }>(
         "SELECT count(*) FROM cloud_projects WHERE user_id = $1",
         [userId],
