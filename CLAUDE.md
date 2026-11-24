@@ -14,9 +14,9 @@ with one of them, correct the entry file.
 
 - Turn a request into a task under `tasks/` with the `plan-task` skill. Ground
   every plan in the code you read: real paths, real commands, the actual
-  coupling. Have codex (`gpt-6.2-astra`, read-only) review the plan until a
-  round reports no P0/P1, then confirm scope decisions with the user before
-  dispatch.
+  coupling. Review the plan against the code yourself, then confirm the goal,
+  scope and product decisions with the user before dispatch. Run a codex plan
+  review only when the user asks for one.
 - Dispatch and review with the `run-task` skill. Rerun the acceptance
   commands yourself and read the diff; the implementer's report is a claim,
   not evidence.
@@ -32,8 +32,8 @@ with one of them, correct the entry file.
   their confirmation: say what will run, about how many calls and the expected
   cost. This holds inside delegated and autonomous runs, and for runs a plan
   would hand to an implementer. One confirmation covers the run described. Codex
-  rounds, the codex plan and PR reviews and subagents are the workflow's own
-  tools and are not such runs. See [the workflow rules](docs/workflow.md#规则).
+  rounds and PR reviews (when run) and subagents are the workflow's own tools
+  and are not such runs. See [the workflow rules](docs/workflow.md#规则).
 
 The PR process is the one in `docs/workflow.md`; analog-canvas's upstream
 Issue/deploy process does not apply.

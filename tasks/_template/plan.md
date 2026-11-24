@@ -3,7 +3,7 @@
 - Branch: `task/T000-<slug>`
 - Base: `main` at `<commit>`
 - Status: draft | approved
-- Plan review: <codex gpt-6.2-astra: rounds, verdict>
+- Plan review: <self-checked against the code; or, when the owner asked, codex gpt-6.2-astra: rounds, verdict>
 
 ## Goal
 

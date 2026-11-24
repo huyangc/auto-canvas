@@ -134,7 +134,8 @@ tasks/          每个开发任务一个目录：方案、报告、审查记录
 
 ## 开发方式
 
-每个任务由 Opus（Claude Code）写方案，codex 评审方案，Claude Code 子代理实现，
+每个任务由 Opus（Claude Code）写方案并对照代码自查，用户要求时再经 codex 评审方案，
+Claude Code 子代理实现，
 Opus 亲自重跑验收命令并阅读代码改动来审查。审查通过的改动经 PR 合入 `main`，合入前
 要求 CI 通过，并且 PR 上已贴出 codex 评审。详见 [docs/workflow.md](docs/workflow.md)、
 [AGENTS.md](AGENTS.md) 和 [CLAUDE.md](CLAUDE.md)。
