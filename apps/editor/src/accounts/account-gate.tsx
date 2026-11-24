@@ -2,7 +2,7 @@ import { useState, type FormEvent, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { apiUrl } from "../lib/app-url";
 import { ACCOUNT_SESSION_ENDING, bindAccountStorage } from "./storage";
-import { AccountContext } from "./account-context";
+import { AccountContext, type AccountLogoutCheck } from "./account-context";
 import "./accounts.css";
 
 import { identify } from "./session";
@@ -118,7 +118,7 @@ export function mountAccountGate(
   let generation = 0;
   let active: string | undefined;
   let closing = false;
-  let prepare: (() => Promise<void>) | null = null;
+  let prepare: AccountLogoutCheck | null = null;
   let lockedScreen: HTMLElement | undefined;
   const nativeFetch = window.fetch.bind(window);
   const reload = () => {
@@ -273,9 +273,10 @@ export function mountAccountGate(
         container.inert = true;
         // Detach the Agent transport synchronously before capturing edits.
         window.dispatchEvent(new Event(ACCOUNT_SESSION_ENDING));
+        let abort: (() => void) | void;
         try {
           if (!prepare) throw Error("The workspace is still opening.");
-          await prepare();
+          abort = await prepare();
         } catch (error) {
           container.inert = false;
           window.alert(
@@ -292,6 +293,8 @@ export function mountAccountGate(
           announce();
           reload();
         } catch {
+          // The page stays: what the check set up for leaving is undone.
+          abort?.();
           container.inert = false;
           window.alert("Sign out failed. Please try again.");
         }

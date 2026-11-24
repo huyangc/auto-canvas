@@ -39,7 +39,9 @@ function readStoredEnabled(): boolean {
 }
 
 // The session's value wins over storage: a browser that refuses the write
-// still turns auto-save off (or on) until the page leaves.
+// still turns auto-save off (or on) until the page leaves. Every reader in
+// this window follows a change at once; another window reads the stored
+// choice on its next load (storage events belong to the notebook gate).
 let enabledValue: boolean | null = null;
 const preferenceListeners = new Set<() => void>();
 
@@ -52,22 +54,10 @@ function notifyPreference(): void {
   for (const listener of preferenceListeners) listener();
 }
 
-function onStorage(event: StorageEvent): void {
-  if (event.key !== null && event.key !== CLOUD_AUTO_SAVE_STORAGE_KEY) return;
-  const next = event.key === null ? true : event.newValue !== "off";
-  if (next === readEnabled()) return;
-  enabledValue = next;
-  notifyPreference();
-}
-
 function subscribePreference(listener: () => void): () => void {
-  if (preferenceListeners.size === 0 && typeof window !== "undefined")
-    window.addEventListener("storage", onStorage);
   preferenceListeners.add(listener);
   return () => {
     preferenceListeners.delete(listener);
-    if (preferenceListeners.size === 0 && typeof window !== "undefined")
-      window.removeEventListener("storage", onStorage);
   };
 }
 

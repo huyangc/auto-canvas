@@ -16,7 +16,10 @@ import {
   type RefObject,
   type SetStateAction,
 } from "react";
-import { useBeforeAccountLogout } from "../accounts/account-context";
+import {
+  useBeforeAccountLogout,
+  type AccountLogoutCheck,
+} from "../accounts/account-context";
 import { flushSync } from "react-dom";
 import type { CameraRectInput } from "../canvas/fit-view";
 import type { CameraRuntime } from "../canvas/camera-runtime";
@@ -130,6 +133,30 @@ export function resumedFileSession(
 
 type RecoverySnapshotWriter =
   UseRecoveryCoordinatorResult["writeSessionSnapshot"];
+
+/**
+ * The sign-out check with `signingOut` held from before it runs (no
+ * automatic save may start during the flush) until the sign-out is over: a
+ * check that throws clears it, and so does a sign-out that does not end in
+ * a reload (the gate calls the returned undo).
+ */
+export function signingOutCheck(
+  signingOut: { current: boolean },
+  check: () => Promise<void>,
+): AccountLogoutCheck {
+  return async () => {
+    signingOut.current = true;
+    try {
+      await check();
+    } catch (error) {
+      signingOut.current = false;
+      throw error;
+    }
+    return () => {
+      signingOut.current = false;
+    };
+  };
+}
 
 /**
  * An Agent commit to `controller`, wherever its tab is now. A tab in the
@@ -1139,10 +1166,8 @@ export function useProjectTabSessions({
         }),
     });
   }
-  useBeforeAccountLogout(async () => {
-    // Before the check: no automatic save may start during the flush.
-    signingOut.current = true;
-    try {
+  useBeforeAccountLogout(
+    signingOutCheck(signingOut, async () => {
       const blocker = projectSwitchBlocker();
       if (blocker || projectTabs.busy)
         throw new Error(blocker || "A project tab operation is in progress.");
@@ -1152,11 +1177,8 @@ export function useProjectTabSessions({
           .some(({ session }) => session.dirty || session.unsafe)
       )
         await flushWorkspace();
-    } catch (error) {
-      signingOut.current = false;
-      throw error;
-    }
-  });
+    }),
+  );
   /** Where an Agent commit to `controller` landed; see routeAgentCommit. */
   function noteAgentCommit(
     controller: EditorDocumentController,

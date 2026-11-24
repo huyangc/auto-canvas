@@ -25,23 +25,30 @@ afterEach(async () => {
 });
 
 /** A fresh module, so its in-memory value is seeded from `storage`. */
-async function freshPreference(storage: Pick<Storage, "getItem" | "setItem">) {
+async function freshPreference(
+  storage: Pick<Storage, "getItem" | "setItem">,
+  readers = 1,
+) {
   vi.stubGlobal("localStorage", storage);
   vi.resetModules();
   const module = await import("./cloud-auto-save");
-  const seen: boolean[] = [];
+  const seen: boolean[][] = Array.from({ length: readers }, () => []);
   let setEnabled: (next: boolean) => void = () => {};
-  function Probe() {
+  function Probe({ index }: { index: number }) {
     const preference = module.useCloudAutoSavePreference();
-    seen.push(preference.enabled);
-    setEnabled = preference.setEnabled;
+    seen[index]!.push(preference.enabled);
+    if (index === 0) setEnabled = preference.setEnabled;
     return null;
   }
   const host = document.createElement("div");
   root = createRoot(host);
-  await act(async () => root!.render(createElement(Probe)));
+  await act(async () =>
+    root!.render(
+      seen.map((_, index) => createElement(Probe, { key: index, index })),
+    ),
+  );
   return {
-    current: () => seen.at(-1),
+    current: (index = 0) => seen[index]!.at(-1),
     setEnabled: (next: boolean) => act(async () => setEnabled(next)),
   };
 }
@@ -83,7 +90,27 @@ describe("useCloudAutoSavePreference", () => {
     expect(preference.current()).toBe(false);
   });
 
-  it("follows another window's change", async () => {
+  it("keeps every reader in this window in step", async () => {
+    // The account menu and the editor each read it: a toggle reaches both,
+    // even when storage refuses the write.
+    const preference = await freshPreference(
+      {
+        getItem: () => null,
+        setItem: () => {
+          throw new Error("quota");
+        },
+      },
+      2,
+    );
+    expect(preference.current(1)).toBe(true);
+    await preference.setEnabled(false);
+    expect(preference.current(0)).toBe(false);
+    expect(preference.current(1)).toBe(false);
+    await preference.setEnabled(true);
+    expect(preference.current(1)).toBe(true);
+  });
+
+  it("does not listen for other windows' storage events", async () => {
     const preference = await freshPreference({
       getItem: () => null,
       setItem: vi.fn(),
@@ -96,7 +123,9 @@ describe("useCloudAutoSavePreference", () => {
         }),
       ),
     );
-    expect(preference.current()).toBe(false);
+    // The notebook gate owns storage events; another window's choice is
+    // read on this window's next load.
+    expect(preference.current()).toBe(true);
   });
 });
 
