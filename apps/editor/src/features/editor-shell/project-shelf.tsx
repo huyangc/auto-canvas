@@ -38,7 +38,8 @@ export function ProjectShelf({
   );
   const [error, setError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDialogElement | null>(null);
-  const onHeaderPointerDown = useDialogDrag(dialogRef);
+  const { onPointerDown: onHeaderPointerDown, release } =
+    useDialogDrag(dialogRef);
   const rename = async () => {
     if (!editing || busy) return;
     const name = editing.name.trim();
@@ -66,7 +67,12 @@ export function ProjectShelf({
           aria-labelledby="cloud-shelf-title"
           ref={(dialog) => {
             dialogRef.current = dialog;
-            if (dialog && !dialog.open) dialog.showModal();
+            if (!dialog) {
+              // The dialog unmounted; drop the drag it may still hold.
+              release();
+              return;
+            }
+            if (!dialog.open) dialog.showModal();
           }}
           onCancel={() => setShelfOpen(false)}
         >

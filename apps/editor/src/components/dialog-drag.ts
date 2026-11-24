@@ -124,21 +124,40 @@ function viewportSize(): DragViewport {
 }
 
 /**
- * The header's `onPointerDown`: a primary-button pointerdown on the header,
- * outside its interactive children, drags `dialogRef`'s element. The drag ends
- * when that pointer is released or cancelled, on unmount, or at the next
- * pointerdown.
+ * The header's `onPointerDown` drags `dialogRef`'s element, and `release`
+ * drops everything the drag holds — the host calls it when the dialog
+ * unmounts (the element then still is the only thing keeping it alive).
+ */
+export interface DialogDrag {
+  onPointerDown(event: PointerEvent<HTMLElement>): void;
+  release(): void;
+}
+
+/**
+ * Turns the header into a drag handle. The drag ends when its pointer is
+ * released or cancelled, at the next pointerdown, or when `release` runs.
  */
 export function useDialogDrag(
   dialogRef: RefObject<HTMLElement | null>,
   margin: number = DRAG_MARGIN,
-): (event: PointerEvent<HTMLElement>) => void {
+): DialogDrag {
   const offset = useRef<DragOffset>({ x: 0, y: 0 });
   /** The element `offset` belongs to; a reopened dialog is a new one. */
   const dragged = useRef<HTMLElement | null>(null);
   const stopDrag = useRef<(() => void) | null>(null);
+  /** Observes a pinned dialog so growth re-clamps it; replaced per drag. */
+  const resizeObserver = useRef<ResizeObserver | null>(null);
+
+  const release = useCallback(() => {
+    stopDrag.current?.();
+    resizeObserver.current?.disconnect();
+    resizeObserver.current = null;
+    dragged.current = null;
+    offset.current = { x: 0, y: 0 };
+  }, []);
+
   // A dialog unmounted mid-drag (Escape) takes its listeners with it.
-  useEffect(() => () => stopDrag.current?.(), []);
+  useEffect(() => () => release(), [release]);
 
   // A pinned dialog keeps its place. Bring it back inside the viewport when
   // the window shrinks around it, and when its own content grows it (the wall
@@ -165,11 +184,8 @@ export function useDialogDrag(
     window.addEventListener("resize", reclamp);
     return () => window.removeEventListener("resize", reclamp);
   }, [reclamp]);
-  /** Observes a pinned dialog so growth re-clamps it; replaced per drag. */
-  const resizeObserver = useRef<ResizeObserver | null>(null);
-  useEffect(() => () => resizeObserver.current?.disconnect(), []);
 
-  return useCallback(
+  const onPointerDown = useCallback(
     (event: PointerEvent<HTMLElement>) => {
       const dialog = dialogRef.current;
       if (event.button !== 0 || !dialog) return;
@@ -201,17 +217,20 @@ export function useDialogDrag(
 
       const move = (moveEvent: globalThis.PointerEvent) => {
         if (moveEvent.pointerId !== pointerId) return;
+        // Content can grow mid-drag (the wall arrives), so clamp against the
+        // dialog's box as it is now, not the one at pointerdown.
+        const current = layoutRect(dialog, offset.current);
         const next = clampDragOffset(
           {
             x: origin.x + moveEvent.clientX - startX,
             y: origin.y + moveEvent.clientY - startY,
           },
-          baseRect,
+          current,
           viewportSize(),
           margin,
         );
         offset.current = next;
-        place(dialog, baseRect, next);
+        place(dialog, current, next);
       };
       const stop = () => {
         stopDrag.current = null;
@@ -240,4 +259,6 @@ export function useDialogDrag(
     },
     [dialogRef, margin, reclamp],
   );
+
+  return { onPointerDown, release };
 }
