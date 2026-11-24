@@ -1087,6 +1087,7 @@ describe("disable, reset and delete", () => {
     const refused = await create;
     expect(refused.status).toBe(401);
     expect(await refused.json()).toEqual({ error: "unauthorized" });
+    expect(refused.headers.get("X-Canvas-Session")).toBe("expired");
     expect(await projectsOf(late)).toBe(0);
 
     // Racing freely, whichever wins.
@@ -1446,6 +1447,38 @@ describe("own password after its credential read", () => {
   });
 });
 
+describe("own password after a reset before its credential read", () => {
+  it("ends the editor's session instead of reporting a wrong password", async () => {
+    const { send, register } = accounts();
+    const administrator = await register("a00000001");
+    await promote(administrator);
+    const target = await register("b00000002");
+    const hold = holdNextQuery(/^SELECT username,salt/u);
+    const change = send(
+      "/api/auth/password",
+      "POST",
+      { currentPassword: "passphrase", newPassword: "new passphrase" },
+      target,
+    );
+    await hold.held;
+    expect(
+      (
+        await send(
+          `/api/admin/users/${idOf(target)}/reset-password`,
+          "POST",
+          undefined,
+          administrator,
+        )
+      ).status,
+    ).toBe(200);
+    hold.release();
+    const refused = await change;
+    expect(refused.status).toBe(401);
+    expect(await refused.json()).toEqual({ error: "unauthorized" });
+    expect(refused.headers.get("X-Canvas-Session")).toBe("expired");
+  });
+});
+
 describe("session expiry while waiting for locks", () => {
   it("refuses an administrator mutation whose session expired after its transaction began", async () => {
     const { send, register } = accounts();
@@ -1474,6 +1507,48 @@ describe("session expiry while waiting for locks", () => {
       [idOf(target)],
     );
     expect(rows[0].disabled).toBe(false);
+  });
+
+  it("refuses an administrator mutation whose session expired while it waited for the session row", async () => {
+    const { send, register } = accounts();
+    const administrator = await register("a00000001");
+    await promote(administrator);
+    const target = await register("b00000002");
+    // Another transaction holds the session row without changing it; the
+    // session expires while the mutation waits for that lock.
+    const holder = await db.connect();
+    try {
+      await holder.query("BEGIN");
+      await holder.query(
+        "UPDATE standalone_sessions SET expires_at=clock_timestamp() + interval '300 milliseconds' WHERE user_id=$1",
+        [idOf(administrator)],
+      );
+      await holder.query("COMMIT");
+      await holder.query("BEGIN");
+      const { rows } = await holder.query(
+        "SELECT pg_backend_pid() AS pid FROM standalone_sessions WHERE user_id=$1 FOR UPDATE",
+        [idOf(administrator)],
+      );
+      const mutation = send(
+        "/api/admin/users/" + idOf(target),
+        "PATCH",
+        { disabled: true },
+        administrator,
+      );
+      await blockedBy(rows[0].pid as number);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      await holder.query("COMMIT");
+      const refused = await mutation;
+      expect(refused.status).toBe(403);
+      const after = await db.query(
+        "SELECT disabled FROM standalone_accounts WHERE user_id=$1",
+        [idOf(target)],
+      );
+      expect(after.rows[0].disabled).toBe(false);
+    } finally {
+      await holder.query("ROLLBACK").catch(() => undefined);
+      holder.release();
+    }
   });
 });
 
