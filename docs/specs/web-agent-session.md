@@ -103,7 +103,8 @@ compare a browser Origin header with a prefixed URL.
   never replay a write against a newly selected Project. Cell switches keep
   context. Readiness waits for the matching heartbeat ack.
 - Reconnect credentials live in the tab's sessionStorage; refresh, Project
-  switches and Gallery return keep the pairing. A stored proof names the
+  switches and Gallery return keep the pairing. Claiming a pairing in another
+  working copy preserves the first copy's proof. A stored proof names the
   working copy it belongs to, and the Gallery keeps the last one it named:
   another tab's proof is never adopted, and ending a session retires that
   session's proof only, whichever tab is shown. In the Gallery the roster is

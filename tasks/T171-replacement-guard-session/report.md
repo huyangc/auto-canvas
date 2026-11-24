@@ -77,3 +77,26 @@ recovery, the refresh restore, Agent acceptance — carries a
 ## Rounds
 
 - Implementation: one round, accepted after the reviewer's rerun.
+
+## PR #126 review round 7
+
+All three findings are addressed on the rebased task branch.
+
+| Finding | Status | Change and regression coverage |
+| --- | --- | --- |
+| P1 editor unmount | Done | Layout-effect cleanup makes replacement ownership stale on unmount while StrictMode setup preserves the original refresh owner. A gated file read finishes after unmount without installing, starting a working copy, staging recovery or cancelling a write. |
+| P2 Agent reconnect proofs | Done | Store independent proofs by relay session and working copy, keeping the legacy v1 object for a single proof. Startup selects the working copy and heartbeat acknowledgements select the live session. The workspace test claims B, moves it on heartbeat, disconnects it, reloads A and reconnects to A's original relay session. |
+| P2 stalled refresh | Done | A working-copy or activation mismatch releases the refresh command and settles startup immediately. A gated read completed after the ID switches back leaves the drawing and the next import's slot intact. |
+
+### Acceptance results
+
+| Command | Exit | Result |
+| --- | --- | --- |
+| `pnpm format:check` | 0 | All matched files passed |
+| `pnpm typecheck` | 0 | Passed |
+| `pnpm lint` | 0 | 0 errors, 3,851 warnings |
+| `pnpm test:local apps/editor/src/document apps/editor/src/agent apps/editor/src/app` | 0 | 674 tests in 81 files passed with lane 2 database access. The initial sandbox run passed 668 and failed six on PostgreSQL socket permissions. |
+| `pnpm test:local apps/editor/src/document/project-import-link.test.ts` | 0 | Both tests passed |
+| `pnpm build`, `pnpm deadcode`, `pnpm docs:check` | 0 each | Build and both Knip passes completed. Local Markdown links validated in 75 files. |
+
+The reviewer owns full-suite and Playwright verification per the round brief.

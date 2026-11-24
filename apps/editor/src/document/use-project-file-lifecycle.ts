@@ -6,7 +6,7 @@ import type {
   NativeProjectStore,
   NativeSaveOutcome,
 } from "../hosts/native-project-store";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { createEmptyProject, createId } from "@icm/model";
 import type { CircuitProject, GridRect, SchematicDocument } from "@icm/model";
@@ -225,6 +225,14 @@ export function useProjectFileLifecycle({
   // A Project id or a controller's session string can read equal across two
   // tabs, so only this counter decides whether a late command still belongs.
   const activationEpochRef = useRef(0);
+  const mountedRef = useRef(true);
+  useLayoutEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  const refreshRestoreCommandRef = useRef<ReplacementCommand | null>(null);
   const replacementSlotRef = useRef<{
     owner: ReplacementOwner;
     intent: string;
@@ -354,7 +362,9 @@ export function useProjectFileLifecycle({
   }
 
   function isActivationCurrent(owner: ReplacementOwner): boolean {
-    return activationEpochRef.current === owner.activation;
+    return (
+      mountedRef.current && activationEpochRef.current === owner.activation
+    );
   }
 
   /**
@@ -1246,7 +1256,8 @@ export function useProjectFileLifecycle({
         findUnsupportedProjectSymbolIds(candidate, builtInSymbols),
       );
       if (options.isCurrent && !options.isCurrent()) return false;
-      if (command && !command.isCurrent()) return false;
+      if (!mountedRef.current || (command && !command.isCurrent()))
+        return false;
       if (staged.status === "rejected") {
         if (!command || command.isCurrent())
           setStatus(
@@ -1366,7 +1377,8 @@ export function useProjectFileLifecycle({
     let handedOff = false;
     try {
       const fetched = await projectStore.open(projectId);
-      if (command && !command.isCurrent()) return { applied: false };
+      if (!mountedRef.current || (command && !command.isCurrent()))
+        return { applied: false };
       if (fetched.status !== "opened") {
         if (fetched.status === "not-found") forgetRecentCloudProject();
         setStatus(
@@ -1387,7 +1399,8 @@ export function useProjectFileLifecycle({
         (candidate) =>
           findUnsupportedProjectSymbolIds(candidate, builtInSymbols),
       );
-      if (command && !command.isCurrent()) return { applied: false };
+      if (!mountedRef.current || (command && !command.isCurrent()))
+        return { applied: false };
       if (staged.status === "rejected") {
         setStatus(
           `Cloud Project not opened — ${formatProjectOpenDiagnostics(staged.diagnostics)}`,
@@ -1461,10 +1474,14 @@ export function useProjectFileLifecycle({
   useEffect(() => {
     if (startupOutcomeRef.current !== "pending") return;
     if (refreshRestorePlan === null) return;
-    if (!isActivationCurrent(refreshRestorePlan.owner))
+    if (
+      !isActivationCurrent(refreshRestorePlan.owner) ||
+      readCurrentWorkingCopyId() !== refreshRestorePlan.workingCopyId
+    ) {
+      refreshRestoreCommandRef.current?.release();
+      refreshRestoreCommandRef.current = null;
       settleStartupOutcome("unsuccessful");
-    else if (readCurrentWorkingCopyId() !== refreshRestorePlan.workingCopyId)
-      settleStartupOutcome("unsuccessful");
+    }
   });
 
   useEffect(() => {
@@ -1492,6 +1509,7 @@ export function useProjectFileLifecycle({
       false,
     );
     if (!command) return settleStartupOutcome("unsuccessful");
+    refreshRestoreCommandRef.current = command;
     void (async () => {
       try {
         let read: Awaited<ReturnType<typeof recovery.readSessionProject>>;
@@ -1566,6 +1584,8 @@ export function useProjectFileLifecycle({
         settleStartupOutcome("restored");
       } finally {
         command.release();
+        if (refreshRestoreCommandRef.current === command)
+          refreshRestoreCommandRef.current = null;
       }
     })().catch(() => {
       settleStartupOutcome("unsuccessful");

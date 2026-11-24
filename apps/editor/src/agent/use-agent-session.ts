@@ -655,13 +655,13 @@ export function useAgentSession(
                 if (live.claimed) {
                   const stored = peekAgentSessionRecovery(
                     window.sessionStorage,
+                    (record) => record.sessionId === live.sessionId,
                   );
                   // The placeholder context keeps the last real identity.
                   const identity = proofIdentity();
                   if (
                     identity !== null &&
                     stored !== null &&
-                    stored.sessionId === live.sessionId &&
                     (stored.projectSessionId !== identity.projectSessionId ||
                       stored.projectId !== identity.projectId)
                   )

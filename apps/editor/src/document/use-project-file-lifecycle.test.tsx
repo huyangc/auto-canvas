@@ -2,6 +2,7 @@
 import {
   act,
   createElement,
+  StrictMode,
   useEffect,
   useLayoutEffect,
   useState,
@@ -117,6 +118,7 @@ async function mount(
     openProjectInTab?: UseProjectFileLifecycleOptions["openProjectInTab"];
     selectOpenCloudProject?: UseProjectFileLifecycleOptions["selectOpenCloudProject"];
     restoreAfterRefresh?: boolean;
+    strictMode?: boolean;
     workingCopyId?: string;
     exportDelivery?: EditorExportDelivery;
     describeCloudSaveBlocker?: () => string | null;
@@ -232,7 +234,12 @@ async function mount(
     return null;
   }
   root = createRoot(document.createElement("div"));
-  await act(async () => root!.render(createElement(Harness)));
+  const element = createElement(Harness);
+  await act(async () =>
+    root!.render(
+      initial.strictMode ? createElement(StrictMode, null, element) : element,
+    ),
+  );
 
   const harness = {
     get current() {
@@ -543,6 +550,24 @@ it("refuses a second command during a dialog and admits it after Stay", async ()
   expect(editor.file.beginReplacementCommand("After Stay")).not.toBeNull();
 });
 
+it("discards a clean Project file read that finishes after the editor unmounts", async () => {
+  const editor = await mount({ strictMode: true });
+  const read = deferred<string>();
+  const text = vi.fn(() => read.promise);
+  const file = { name: "late.icproj.json", text } as unknown as File;
+  const controller = editor.current.doc.controller;
+  const opening = editor.file.openProjectFile(file);
+  expect(text).toHaveBeenCalledOnce();
+  await editor.unmount();
+  read.resolve(serializeProject(project("Late")));
+  expect(await opening).toBe(false);
+  expect(controller.project.name).toBe("A");
+  expect(editor.beginWorkingCopy).not.toHaveBeenCalled();
+  expect(editor.stage).not.toHaveBeenCalled();
+  expect(editor.cancelPending).not.toHaveBeenCalled();
+  expect(editor.statuses).toEqual([]);
+});
+
 it("admits the next command after a malformed file, a rejected read and a clean install", async () => {
   const editor = await mount();
   // A malformed Project file changes nothing and frees the slot.
@@ -665,6 +690,31 @@ it("stands the refresh restore down and reports unsuccessful after a switch", as
   expect(editor.current.doc.project.name).toBe("C");
 });
 
+it("releases a stalled refresh when its working copy changes and never revives it", async () => {
+  const read = deferred<RecoveryProjectRead>();
+  const editor = await mount({ restoreAfterRefresh: true });
+  editor.configure({ readSessionProject: () => read.promise });
+  await act(async () => editor.setReady(true));
+  expect(editor.file.replacementInFlight()).toBe(true);
+
+  await act(async () => editor.setWorkingCopy("other-copy"));
+  expect(editor.file.startupRestoreOutcome).toBe("unsuccessful");
+  const next = editor.file.beginReplacementCommand("Import SPICE");
+  expect(next?.isCurrent()).toBe(true);
+  await act(async () => editor.setWorkingCopy("working-copy"));
+  read.resolve({
+    status: "valid",
+    project: project("Late"),
+    record: recoveryRecord("working-copy", serializeProject(project("Late"))),
+  });
+  await flush();
+  expect(editor.current.doc.project.name).toBe("A");
+  expect(editor.file.startupRestoreOutcome).toBe("unsuccessful");
+  expect(next?.isCurrent()).toBe(true);
+  expect(editor.statuses).toEqual([]);
+  next?.release();
+});
+
 it("attributes a refresh requested before recovery was ready to its own tab", async () => {
   const editor = await mount({ restoreAfterRefresh: true });
   await editor.switchTo(project("C"));
@@ -676,7 +726,7 @@ it("attributes a refresh requested before recovery was ready to its own tab", as
 
 it("settles a successful refresh restore as restored", async () => {
   const recovered = project("Recovered");
-  const editor = await mount({ restoreAfterRefresh: true });
+  const editor = await mount({ restoreAfterRefresh: true, strictMode: true });
   editor.configure({
     readSessionProject: async () => ({
       status: "valid",
