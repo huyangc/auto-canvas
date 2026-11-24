@@ -6,6 +6,7 @@ import {
   expectStatus,
   openMenu,
   openProjectInfo,
+  openProjectFile,
   openEditor,
   openProject,
   renameProject,
@@ -90,8 +91,12 @@ function importUrl(name: string) {
   );
 }
 
-for (const failure of ["open", "write"] as const) {
-  test(`an import keeps its link if workspace storage fails to ${failure}`, async ({
+for (const [failure, replaceProject] of [
+  ["open", false],
+  ["write", false],
+  ["write", true],
+] as const) {
+  test(`an import keeps its link if workspace storage fails to ${failure}${replaceProject ? " and its tab is reused" : ""}`, async ({
     page,
   }) => {
     await page.addInitScript((failure) => {
@@ -123,19 +128,31 @@ for (const failure of ["open", "write"] as const) {
     expect(new URL(page.url()).hash).toBe(new URL(url, page.url()).hash);
     expect((await exportedProject(page)).name).toBe("In-memory drawing");
     if (failure === "write") {
-      await renameProject(page, "Edited while storage failed");
+      if (replaceProject) {
+        const replacement = exampleProject("two-stage-op-amp.icproj.json");
+        replacement.name = "Replacement drawing";
+        await openProjectFile(page, replacement);
+        await expect(
+          page.getByRole("tab", { selected: true }),
+        ).toHaveAccessibleName(/Replacement drawing/);
+      } else await renameProject(page, "Edited while storage failed");
       await page.evaluate(() =>
         sessionStorage.setItem("test-workspace-available", "1"),
       );
       await page.reload();
       await expect(page).toHaveURL(/\/editor$/);
+      const expectedName = replaceProject
+        ? "In-memory drawing"
+        : "Edited while storage failed";
       await expect(
         page.getByRole("tab", { selected: true }),
-      ).toHaveAccessibleName(/Edited while storage failed/);
-      await expect(page.getByRole("tab")).toHaveCount(2);
-      expect((await exportedProject(page)).name).toBe(
-        "Edited while storage failed",
-      );
+      ).toHaveAccessibleName(new RegExp(expectedName));
+      await expect(page.getByRole("tab")).toHaveCount(replaceProject ? 3 : 2);
+      if (replaceProject)
+        await expect(
+          page.getByRole("tab", { name: /Replacement drawing/ }),
+        ).toBeVisible();
+      expect((await exportedProject(page)).name).toBe(expectedName);
     }
   });
 }
