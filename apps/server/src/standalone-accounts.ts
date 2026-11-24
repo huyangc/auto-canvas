@@ -243,10 +243,10 @@ export function registerAccounts(
               return rejected();
             }
           }
-          retired = await removeSessions(conn, {
+          ({ pairings: retired } = await removeSessions(conn, {
             token: presented(c),
             includeExpired: true,
-          });
+          }));
           await conn.query(
             "INSERT INTO standalone_sessions(token_hash,user_id,expires_at) VALUES ($1,$2,now()+ interval '30 days')",
             [digest(token), userId],
@@ -297,7 +297,9 @@ export function registerAccounts(
     let retired: string[];
     try {
       await conn.query("BEGIN");
-      retired = await removeSessions(conn, { token: presented(c) });
+      ({ pairings: retired } = await removeSessions(conn, {
+        token: presented(c),
+      }));
       await conn.query("COMMIT");
     } catch (error) {
       await conn.query("ROLLBACK");
@@ -327,6 +329,10 @@ export function registerAccounts(
     if (currentPassword === newPassword)
       return c.json({ error: "password-unchanged" }, 400);
     const userId = c.get("sessionUser").id;
+    const expired = () => {
+      c.header("X-Canvas-Session", "expired");
+      return c.json({ error: "unauthorized" }, 401);
+    };
     const { rows } = await db.query<{
       username: string;
       salt: Buffer;
@@ -337,7 +343,8 @@ export function registerAccounts(
       [userId],
     );
     const row = rows[0];
-    if (!row) return c.json({ error: "unauthorized" }, 401);
+    // Deleted since this request was authenticated.
+    if (!row) return expired();
     // Guesses here count against the same limits as sign-in.
     const attempt = attempts.forKey(peerOf(c) + "/" + row.username);
     const accountAttempt = accountAttempts.forKey(row.username);
@@ -369,25 +376,23 @@ export function registerAccounts(
           await conn.query("ROLLBACK");
           return incorrect();
         }
-        // Read after the account lock (account before session): a sign-out
-        // or revocation of this session that committed first ends it.
-        const live = await conn.query(
-          "SELECT 1 FROM standalone_sessions WHERE token_hash=$1 AND user_id=$2 AND expires_at>now() FOR UPDATE",
-          [presented(c), userId],
+        // One statement after the account lock locks this session with the
+        // others it ends: a sign-out or revocation of this session that
+        // committed first ends the request.
+        const sessions = await removeSessions(
+          conn,
+          { userId },
+          { token: presented(c), userId },
         );
-        if (!live.rowCount) {
+        if (!sessions.kept) {
           await conn.query("ROLLBACK");
-          c.header("X-Canvas-Session", "expired");
-          return c.json({ error: "unauthorized" }, 401);
+          return expired();
         }
+        retired = sessions.pairings;
         await conn.query(
           "UPDATE standalone_accounts SET salt=$2,password_hash=$3,must_change_password=false,credentials_version=credentials_version+1 WHERE user_id=$1",
           [userId, salt, replacement],
         );
-        retired = await removeSessions(conn, {
-          userId,
-          except: presented(c),
-        });
         await conn.query("COMMIT");
       } catch (error) {
         await conn.query("ROLLBACK");
