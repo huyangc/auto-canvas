@@ -1603,7 +1603,7 @@ test("the Browse dialog tiles its cards evenly, closes from its × and drags by 
     }),
   );
   await openEditor(page, "/editor?new=1");
-  const shelf = await projectTabAction(page, "Open Shelf project in tab");
+  const shelf = await projectTabAction(page, "Open Cloud Project…");
   await shelf.getByRole("button", { name: "Browse Cloud Projects…" }).click();
   const dialog = page.getByRole("dialog", { name: "Cloud Projects" });
   await expect(dialog).toBeVisible();
