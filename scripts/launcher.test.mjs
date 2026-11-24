@@ -562,6 +562,43 @@ test("editor supervisor kills a process group that ignores SIGTERM after STOP_TI
     .toBe(1);
 }, 15_000);
 
+test("DIAG supervisor loop", async () => {
+  const outcomes = [];
+  for (let i = 0; i < 30; i++) {
+    const supervisor = spawn(
+      process.execPath,
+      [
+        join(scripts, "lib/editor-supervisor.mjs"),
+        "sh",
+        "-c",
+        'trap "" TERM; echo $$; sleep 30',
+      ],
+      {
+        env: { ...process.env, STOP_TIMEOUT: "1" },
+        stdio: ["ignore", "pipe", "inherit"],
+      },
+    );
+    const [line] = await once(supervisor.stdout, "data");
+    const group = Number(String(line).trim());
+    const started = Date.now();
+    supervisor.kill("SIGTERM");
+    const [code, signal] = await once(supervisor, "exit");
+    const elapsed = Date.now() - started;
+    const groupAfter = spawnSync(
+      "ps",
+      ["-o", "pid=,stat=,comm=", "-g", String(group)],
+      { encoding: "utf8" },
+    )
+      .stdout.trim()
+      .replace(/\s+/g, " ");
+    try {
+      process.kill(-group, "SIGKILL");
+    } catch {}
+    outcomes.push(`${elapsed}ms ${code}/${signal} [${groupAfter}]`);
+  }
+  console.log("DIAG loop\n" + outcomes.join("\n"));
+}, 60_000);
+
 test("launchers normalize, export and probe the configured base path", async () => {
   const started = await launch("start", { AUTO_CANVAS_BASE_PATH: "/canvas/" })
     .result;
