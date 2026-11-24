@@ -70,6 +70,12 @@ const RESERVED_PORTS = new Set([3000, 8000, 4310]);
 const SERVER_OWN = new Set(["EDITOR_ROOT", "DATABASE_URL", "PORT", "HOST"]);
 const READY_TIMEOUT_MS = 30_000;
 const KILL_AFTER_MS = 10_000;
+/**
+ * A `ps` scan that outlives this is taken for an unreadable one (R7): the
+ * shutdown retries and then stops the run's own group, instead of waiting on
+ * a stalled scan before any signal is sent.
+ */
+const SCAN_TIMEOUT_MS = 10_000;
 /** The script's own database work: statement, query and cleanup waits. */
 const DB_TIMEOUT_MS = 10_000;
 const TRACK_INTERVAL_MS = 200;
@@ -216,7 +222,7 @@ function processTable() {
     execFile(
       "ps",
       ["-A", "-o", "pid=,ppid=,pgid=,stat=,lstart="],
-      { maxBuffer: 16 * 1024 * 1024 },
+      { maxBuffer: 16 * 1024 * 1024, timeout: SCAN_TIMEOUT_MS },
       (error, stdout) => {
         // Without a table nothing could be told apart: never guess.
         if (error) return fail(error);
@@ -270,7 +276,7 @@ function markedPids(marker) {
     execFile(
       "ps",
       ["eww", "-A", "-o", "pid=,command="],
-      { maxBuffer: 64 * 1024 * 1024 },
+      { maxBuffer: 64 * 1024 * 1024, timeout: SCAN_TIMEOUT_MS },
       (error, stdout) => {
         // Without this scan the other rules still hold: never fail on it.
         if (error) return fail(error);
@@ -627,6 +633,10 @@ function startServer(databaseHref) {
     cwd: root,
     env: {
       ...env,
+      // The legacy single-user mode, as the notebook fixture's sibling runs
+      // it: the server's default is now the accounts mode, and the C-1(d)
+      // Agent specs open fresh contexts without signing in to an account.
+      AUTO_CANVAS_AUTH: "local",
       HOST: "127.0.0.1",
       PORT: String(port),
       DATABASE_URL: databaseHref,
@@ -675,8 +685,14 @@ async function health(origin) {
   const deadline = Date.now() + READY_TIMEOUT_MS;
   for (;;) {
     goOn();
+    // The request and its body share what the readiness limit has left
+    // (R7): a server that listens but stalls the answer (a database query
+    // that never replies) cannot hold cleanup past the deadline.
+    const left = Math.max(1, deadline - Date.now());
     try {
-      const response = await fetch(`${origin}/api/health`);
+      const response = await fetch(`${origin}/api/health`, {
+        signal: AbortSignal.timeout(left),
+      });
       const body = await response.json();
       if (response.ok && body?.ok === true) return;
     } catch {

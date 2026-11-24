@@ -184,3 +184,20 @@ Rerun by the reviewer on this tree: `notebook-e2e-fixture-check` passed
 (39 refusals), `standalone-build-evidence-check` passed (25 refusals, all C-4
 cases, the unread-table case), standard listing equal to the 476-line
 baseline, notebook listing 31, notebook suite 31 passed.
+
+## Round 7 — codex round 6 findings (1 P1, 2 P2, 2 P3) — P1 and two findings fixed, one rebutted
+
+Reviewed: codex `gpt-6.2-sol` PR review round 6 of PR 117 at `0e80171`; each
+finding checked against the accounts-era base.
+
+| #   | Severity | Where                                    | Finding                                                                                                                                       | Outcome                                                                                                                                                                                                                                       |
+| --- | -------- | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 32  | P1 fixed | `standalone-build-evidence.mjs` startServer | The server is spawned with `AUTO_CANVAS_*` stripped, so on the accounts-era base it defaults to accounts mode and the C-1(d) Agent specs (fresh contexts, no sign-in) land on the account gate. | `AUTO_CANVAS_AUTH: "local"` is set explicitly (as the notebook fixture's sibling does). The evidence check passes (25 refusals, all cases). The C-1(d) command needs a live Agent-enabled build and PostgreSQL; it runs in the reviewer's disposable checkout, not here. |
+| 33  | P2 fixed | `notebook-evidence.spec.ts` N11c, build | The notebook artifact was built with `VITE_ICM_AGENT_UI` unset, so the production default alone suppressed the Agent and the notebook gate was untested. | `PUBLIC_AGENT_UI_ENABLED` now requires `!ICM_NOTEBOOK`, and `build:notebook-editor` builds with `VITE_ICM_AGENT_UI=enabled`; the notebook suite (31 cases) passes against that artifact, so N11c proves the notebook gate suppresses Agent even when the flag says enabled. |
+| 34  | P2 rebutted | `stopRunUninspected()`                 | After the leader exits unnoticed a same-group child could ignore SIGTERM, and no SIGKILL follows. | With the process table unreadable and the leader gone, addressing the group id risks signalling a foreign process (a reused pgid); the script deliberately signals only the group it can still identify and reports the descendants as unverified with a non-zero exit. Reason posted on the PR. |
+| 35  | P3 fixed | `processTable()`, `markedPids()`        | The `ps` scans had no timeout: a stalled scan delayed cleanup before any signal. | Both scans carry `SCAN_TIMEOUT_MS` (10 s); a timeout rejects like an unreadable scan and takes the existing retry/unread path. |
+| 36  | P3 fixed | `health()`                              | A server that listens but stalls `/api/health` could hold the readiness loop past its 30 s limit. | The fetch and the body read share the remaining budget through `AbortSignal.timeout`. |
+
+Rerun by the reviewer: evidence check passed; notebook suite 31 passed against
+the enabled-flag artifact; `pnpm build`/`build:notebook-editor` 0; agent unit
+tests 369 passed; typecheck/lint/format 0.
