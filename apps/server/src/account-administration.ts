@@ -118,13 +118,18 @@ export function registerAccountAdministration(
   app.use("/api/admin/*", guard);
 
   app.get("/api/admin/users", async (c) => {
-    const q = c.req.query("q") ?? "";
+    // Usernames are ASCII; lower the term as registration does, not with
+    // the database's locale-dependent lower().
+    const q = (c.req.query("q") ?? "").replace(/[A-Z]/gu, (letter) =>
+      letter.toLowerCase(),
+    );
     const cursor = c.req.query("cursor") ?? null;
     const limitText = c.req.query("limit");
     const limit = limitText === undefined ? 50 : Number(limitText);
     if (
       q.length > 100 ||
-      (cursor !== null && cursor.length > 100) ||
+      q.includes("\u0000") ||
+      (cursor !== null && (cursor.length > 100 || cursor.includes("\u0000"))) ||
       !/^\d{1,3}$/u.test(limitText ?? "50") ||
       limit < 1 ||
       limit > 200
@@ -132,7 +137,7 @@ export function registerAccountAdministration(
       return c.json({ error: "invalid-fields" }, 400);
     const { rows } = await db.query<AccountRow>(
       `SELECT ${ACCOUNT_COLUMNS} FROM standalone_accounts a
-      WHERE strpos(a.username, lower($1)) > 0 AND ($2::text IS NULL OR a.username > $2)
+      WHERE strpos(a.username, $1) > 0 AND ($2::text IS NULL OR a.username > $2)
       ORDER BY a.username LIMIT $3`,
       [q, cursor, limit + 1],
     );
@@ -145,9 +150,10 @@ export function registerAccountAdministration(
 
   /**
    * Runs one mutation of another account: takes the administration lock,
-   * re-reads the acting administrator, then locks the target's `users` and
-   * `standalone_accounts` rows (in that order). Pairings of the sessions the
-   * mutation removed end after commit.
+   * re-reads the acting administrator's account row and then its presented
+   * session (account before session, as everywhere), then locks the target's
+   * `users` and `standalone_accounts` rows (in that order). Pairings of the
+   * sessions the mutation removed end after commit.
    */
   async function mutate<T>(
     c: Context,
@@ -158,6 +164,9 @@ export function registerAccountAdministration(
   ): Promise<Response> {
     const actor = c.get("sessionUser").id;
     const targetId = c.req.param("id") ?? "";
+    // PostgreSQL text cannot hold NUL.
+    if (targetId.includes("\u0000"))
+      return c.json({ error: "invalid-fields" }, 400);
     const conn = await db.connect();
     let outcome: { result: T; retired: string[] } | Refusal;
     try {
@@ -167,13 +176,19 @@ export function registerAccountAdministration(
         // Read after the lock: a demotion, disable, reset or deletion of the
         // acting account that committed first is seen here.
         const acting = await conn.query(
-          `SELECT 1 FROM standalone_accounts a JOIN standalone_sessions s ON s.user_id=a.user_id
-          WHERE a.user_id=$1 AND s.token_hash=$2 AND s.expires_at>now()
-            AND a.role='admin' AND NOT a.disabled AND NOT a.must_change_password
-          FOR SHARE OF a`,
-          [actor, presented(c)],
+          `SELECT 1 FROM standalone_accounts WHERE user_id=$1
+            AND role='admin' AND NOT disabled AND NOT must_change_password
+          FOR SHARE`,
+          [actor],
         );
         if (!acting.rowCount) return new Refusal(403, "forbidden");
+        // A separate statement, so its snapshot is taken after the account
+        // lock: a session revoked by a change that held that lock is gone.
+        const session = await conn.query(
+          "SELECT 1 FROM standalone_sessions WHERE token_hash=$1 AND user_id=$2 AND expires_at>now() FOR SHARE",
+          [presented(c), actor],
+        );
+        if (!session.rowCount) return new Refusal(403, "forbidden");
         if (targetId === actor) return new Refusal(409, "own-account");
         await conn.query("SELECT id FROM users WHERE id=$1 FOR UPDATE", [
           targetId,
@@ -222,7 +237,8 @@ export function registerAccountAdministration(
     };
     return mutate(c, async (conn, target) => {
       const { rows } = await conn.query<AccountRow>(
-        `UPDATE standalone_accounts a SET role=coalesce($2, a.role), disabled=coalesce($3, a.disabled)
+        `UPDATE standalone_accounts a SET role=coalesce($2, a.role), disabled=coalesce($3, a.disabled),
+          credentials_version=a.credentials_version + CASE WHEN $3 THEN 1 ELSE 0 END
         WHERE a.user_id=$1 RETURNING ${ACCOUNT_COLUMNS}`,
         [target.id, role ?? null, disabled ?? null],
       );
@@ -242,7 +258,7 @@ export function registerAccountAdministration(
     const hash = (await derive(password, salt, 64)) as Buffer;
     return mutate(c, async (conn, target) => {
       await conn.query(
-        "UPDATE standalone_accounts SET salt=$2, password_hash=$3, must_change_password=true WHERE user_id=$1",
+        "UPDATE standalone_accounts SET salt=$2, password_hash=$3, must_change_password=true, credentials_version=credentials_version+1 WHERE user_id=$1",
         [target.id, salt, hash],
       );
       const retired = await removeSessions(conn, { userId: target.id });
@@ -258,6 +274,10 @@ export function registerAccountAdministration(
     return mutate(c, async (conn, target) => {
       if (confirmation !== target.username)
         return new Refusal(400, "confirmation-mismatch");
+      await conn.query(
+        "UPDATE standalone_accounts SET credentials_version=credentials_version+1 WHERE user_id=$1",
+        [target.id],
+      );
       const retired = await removeSessions(conn, { userId: target.id });
       // Versions cascade from their Project; Projects do not cascade from users.
       await conn.query("DELETE FROM cloud_projects WHERE user_id=$1", [

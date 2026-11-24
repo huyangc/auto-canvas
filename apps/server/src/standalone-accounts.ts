@@ -171,6 +171,7 @@ export function registerAccounts(
         let userId: string;
         const salt = randomBytes(16);
         let passwordHash: Buffer | undefined;
+        let credentialsVersion = 0;
         const rejected = () => {
           attempt.failed();
           accountAttempt?.failed();
@@ -185,8 +186,9 @@ export function registerAccounts(
             salt: Buffer;
             password_hash: Buffer;
             disabled: boolean;
+            credentials_version: number;
           }>(
-            "SELECT user_id,salt,password_hash,disabled FROM standalone_accounts WHERE username=$1",
+            "SELECT user_id,salt,password_hash,disabled,credentials_version FROM standalone_accounts WHERE username=$1",
             [username],
           );
           const row = rows[0];
@@ -204,6 +206,7 @@ export function registerAccounts(
           if (row.disabled) return rejected();
           userId = row.user_id;
           passwordHash = row.password_hash;
+          credentialsVersion = row.credentials_version;
         }
         const token = randomBytes(32).toString("hex");
         let retired: string[];
@@ -228,11 +231,12 @@ export function registerAccounts(
               );
             }
           } else {
-            // The hash was verified outside this transaction. A disable,
-            // reset or deletion that committed since then wins.
+            // The hash was verified outside this transaction. A disable
+            // (even one enabled again), reset, deletion or password change
+            // that committed since then wins.
             const current = await conn.query(
-              "SELECT 1 FROM standalone_accounts WHERE user_id=$1 AND password_hash=$2 AND NOT disabled FOR SHARE",
-              [userId, passwordHash],
+              "SELECT 1 FROM standalone_accounts WHERE user_id=$1 AND password_hash=$2 AND credentials_version=$3 AND NOT disabled FOR SHARE",
+              [userId, passwordHash, credentialsVersion],
             );
             if (!current.rowCount) {
               await conn.query("ROLLBACK");
@@ -327,8 +331,9 @@ export function registerAccounts(
       username: string;
       salt: Buffer;
       password_hash: Buffer;
+      credentials_version: number;
     }>(
-      "SELECT username,salt,password_hash FROM standalone_accounts WHERE user_id=$1",
+      "SELECT username,salt,password_hash,credentials_version FROM standalone_accounts WHERE user_id=$1",
       [userId],
     );
     const row = rows[0];
@@ -357,15 +362,26 @@ export function registerAccounts(
         // The verified hash must still be current: a reset, disable or
         // another change committed since the check wins.
         const locked = await conn.query(
-          "SELECT 1 FROM standalone_accounts WHERE user_id=$1 AND password_hash=$2 AND NOT disabled FOR UPDATE",
-          [userId, row.password_hash],
+          "SELECT 1 FROM standalone_accounts WHERE user_id=$1 AND password_hash=$2 AND credentials_version=$3 AND NOT disabled FOR UPDATE",
+          [userId, row.password_hash, row.credentials_version],
         );
         if (!locked.rowCount) {
           await conn.query("ROLLBACK");
           return incorrect();
         }
+        // Read after the account lock (account before session): a sign-out
+        // or revocation of this session that committed first ends it.
+        const live = await conn.query(
+          "SELECT 1 FROM standalone_sessions WHERE token_hash=$1 AND user_id=$2 AND expires_at>now() FOR UPDATE",
+          [presented(c), userId],
+        );
+        if (!live.rowCount) {
+          await conn.query("ROLLBACK");
+          c.header("X-Canvas-Session", "expired");
+          return c.json({ error: "unauthorized" }, 401);
+        }
         await conn.query(
-          "UPDATE standalone_accounts SET salt=$2,password_hash=$3,must_change_password=false WHERE user_id=$1",
+          "UPDATE standalone_accounts SET salt=$2,password_hash=$3,must_change_password=false,credentials_version=credentials_version+1 WHERE user_id=$1",
           [userId, salt, replacement],
         );
         retired = await removeSessions(conn, {
