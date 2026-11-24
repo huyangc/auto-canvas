@@ -658,10 +658,34 @@ function checkWheel(tree, wheel) {
   mkdirSync(join(stubRoot, "app/extension_sdk"), { recursive: true });
   writeFileSync(join(stubRoot, "app/__init__.py"), "");
   writeFileSync(
+    join(stubRoot, "app/extension_sdk/ui.py"),
+    `from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class UiContributionDeclaration:
+    id: str
+    slot: str
+    capability: str
+`,
+  );
+  writeFileSync(
     join(stubRoot, "app/extension_sdk/__init__.py"),
     `from dataclasses import dataclass
 
+from . import ui
+
 EXTENSION_API_VERSION = "pkg-check"
+
+
+@dataclass(frozen=True)
+class Availability:
+    status: str
+    reason: str | None = None
+
+    @classmethod
+    def available(cls):
+        return cls("available")
 
 
 @dataclass(frozen=True)

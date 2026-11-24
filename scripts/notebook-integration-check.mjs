@@ -2,7 +2,7 @@
 // Repeatable integration check for serving auto-canvas under silicon-notebook's
 // Next.js server at /canvas. Run on demand; never part of CI.
 //
-//   node scripts/notebook-integration-check.mjs --stage <T|A|S|M> --notebook <dir>
+//   node scripts/notebook-integration-check.mjs --stage <T|A|S|M|L> --notebook <dir>
 //     [--ref <git ref>] [--base <commit>] [--python <interpreter>] [--keep]
 //
 // Everything it builds or starts lives in a temporary directory it creates;
@@ -15,10 +15,12 @@ import {
   UsageError,
 } from "./lib/notebook-integration/sandbox.mjs";
 import { stageA } from "./lib/notebook-integration/stage-a.mjs";
+import { managedPrerequisites } from "./lib/notebook-integration/managed-clone.mjs";
 import {
-  stageM,
-  stageMPrerequisites,
-} from "./lib/notebook-integration/stage-m.mjs";
+  stageL,
+  stageLPrerequisites,
+} from "./lib/notebook-integration/stage-l.mjs";
+import { stageM } from "./lib/notebook-integration/stage-m.mjs";
 import { stageS } from "./lib/notebook-integration/self-check.mjs";
 import { stageT } from "./lib/notebook-integration/stage-t.mjs";
 import {
@@ -30,11 +32,11 @@ import {
 import { createReporter } from "./lib/notebook-integration/transport.mjs";
 
 const USAGE =
-  "usage: node scripts/notebook-integration-check.mjs --stage <T|A|S|M> --notebook <dir>\n" +
+  "usage: node scripts/notebook-integration-check.mjs --stage <T|A|S|M|L> --notebook <dir>\n" +
   "         [--ref <git ref>] [--base <commit>] [--python <interpreter>] [--keep]\n" +
-  "  stage A needs --ref, --base and --python; stage M needs --ref and --python\n" +
-  "  (and the canvas builds of this checkout); stage S runs the script's own\n" +
-  "  refusal self-checks on throwaway material";
+  "  stage A needs --ref, --base and --python; stages M and L need --ref and\n" +
+  "  --python (and the canvas builds of this checkout); stage S runs the\n" +
+  "  script's own refusal self-checks on throwaway material";
 
 function parseArgs(argv) {
   const options = { keep: false };
@@ -49,16 +51,18 @@ function parseArgs(argv) {
       options[flag.slice(2)] = value;
     } else throw new UsageError(`unknown argument ${flag}`);
   }
-  if (!["T", "A", "S", "M"].includes(options.stage))
-    throw new UsageError("--stage must be T, A, S or M");
+  if (!["T", "A", "S", "M", "L"].includes(options.stage))
+    throw new UsageError("--stage must be T, A, S, M or L");
   if (!options.notebook) throw new UsageError("--notebook is required");
   if (options.stage === "A")
     for (const name of ["ref", "base", "python"])
       if (!options[name]) throw new UsageError(`stage A needs --${name}`);
-  if (options.stage === "M") {
+  if (options.stage === "M" || options.stage === "L") {
     for (const name of ["ref", "python"])
-      if (!options[name]) throw new UsageError(`stage M needs --${name}`);
-    if (options.base) throw new UsageError("stage M takes no --base");
+      if (!options[name])
+        throw new UsageError(`stage ${options.stage} needs --${name}`);
+    if (options.base)
+      throw new UsageError(`stage ${options.stage} takes no --base`);
   }
   return options;
 }
@@ -72,10 +76,13 @@ try {
   process.exit(2);
 }
 
-// Stage M runs this checkout's canvas: its builds must exist before anything
-// is allocated.
-if (options.stage === "M") {
-  const problems = stageMPrerequisites();
+// Stages M and L run this checkout's canvas: its builds (and, for stage L,
+// the UI package and Playwright) must exist before anything is allocated.
+if (options.stage === "M" || options.stage === "L") {
+  const problems = [
+    ...managedPrerequisites(options.stage),
+    ...(options.stage === "L" ? stageLPrerequisites() : []),
+  ];
   if (problems.length) {
     console.error(problems.join("\n"));
     process.exit(2);
@@ -142,6 +149,7 @@ try {
     if (options.stage === "T") await stageT(context);
     else if (options.stage === "S") await stageS(context);
     else if (options.stage === "M") await stageM(context);
+    else if (options.stage === "L") await stageL(context);
     else await stageA(context);
     offlineVerdict(sandbox, report);
   }

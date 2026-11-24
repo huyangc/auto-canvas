@@ -8,8 +8,12 @@ canvas beside it, under silicon-notebook's `/canvas` path:
 - `init-db.sh` — the one-time initialisation of the canvas database;
 - `plugin/` — the Python plugin package `silicon-notebook-auto-canvas`
   (bundle `silicon_notebook_auto_canvas.bundle:BUNDLE`, id
-  `auto_canvas.integration`). It has no contributions yet; it exists so that
-  the extensions TOML can declare the canvas as the plugin's service;
+  `auto_canvas.integration`, version 0.2.0). It has no backend
+  contributions; the extensions TOML declares the canvas as its service, and
+  it provides the capability `auto_canvas.integration.available` (always
+  available, decided without I/O) that the workspace entry is gated on;
+- `ui/auto-canvas/` — the UI package of that entry: the side-panel button
+  **打开电路画布** ([below](#the-entry-link-in-a-notebook));
 - `extensions.example.toml` (managed mode) and
   `extensions.external.example.toml` (external mode).
 
@@ -22,7 +26,8 @@ are specified in [docs/specs/server.md](../../docs/specs/server.md#running-as-a-
 
 Not yet covered: an offline installation is described separately (T167). A
 managed start against a real silicon-notebook clone is checked by stage M of
-the [integration check](../../docs/testing/README.md#stage-m-a-managed-start-in-a-silicon-notebook-clone).
+the [integration check](../../docs/testing/README.md#stage-m-a-managed-start-in-a-silicon-notebook-clone),
+the entry link in a browser by [stage L](../../docs/testing/README.md#stage-l-the-entry-link-in-a-browser).
 
 ## Source deployment, step by step
 
@@ -137,6 +142,46 @@ the [integration check](../../docs/testing/README.md#stage-m-a-managed-start-in-
    appends `/@notebook/canvas…` itself, and a value with a path fails its
    build). Then start silicon-notebook with its own start scripts; it starts
    the canvas.
+
+## The entry link in a notebook
+
+The UI package [`ui/auto-canvas/`](ui/auto-canvas) adds one button,
+**打开电路画布**, to silicon-notebook's workspace side panel: a signed-in user
+who opens a notebook sees it in the Sources panel's tool row (beside
+补全论文信息), and its click takes them to `/canvas`, where the canvas editor
+opens as that same user. Nothing of the notebook or its sources is passed to
+the canvas. silicon-notebook shows the button only to users who may read the
+notebook, and only while its backend reports the plugin's entry available:
+with the plugin package installed and configured as in steps 6 and 7. The
+two halves are matched by plugin id, version and entry id: build with the UI
+package of the same checkout whose plugin package is installed (both 0.2.0);
+after an upgrade, reinstall the plugin and rebuild, or the button does not
+render.
+
+The package is built into silicon-notebook's frontend, never loaded at run
+time. Add it to step 8's build environment with its absolute path:
+
+```bash
+SILICON_NOTEBOOK_UI_PLUGINS=/opt/auto-canvas/integrations/silicon-notebook/ui/auto-canvas
+```
+
+silicon-notebook's `npm run build` copies the package to
+`frontend/features/ext-auto-canvas/` (with a `.ui-plugin-origin` marker),
+writes `frontend/features/extension-sdk/registry.local.ts` and its contract
+`frontend/.local/ui-extension-contract.json`; none of them is committed.
+silicon-notebook's own checks of a plugin (its node test lane,
+`scripts/check_ui_vocabulary.py`, `npm run typecheck` with the variable set,
+`scripts/cli.sh extensions check` and `scripts/check_deployment_extension_parity.py`)
+pass on it; stage L of the integration check runs them in a clone. The
+browser bundle's `NEXT_PUBLIC_API_BASE_URL` must be the same-origin `/api`
+(silicon-notebook's documented proxied deployment), as for any build behind
+`BACKEND_PROXY_TARGET`.
+
+To remove the entry, rebuild silicon-notebook without
+`SILICON_NOTEBOOK_UI_PLUGINS`: the build deletes `ext-auto-canvas` and writes
+the empty registry, and the button is gone while the canvas, the plugin and
+`/canvas` stay as they were. The [rollback](#rollback) below removes it with
+everything else.
 
 ## Offline package
 
@@ -262,9 +307,10 @@ pinned to that schema. The limits:
    started it.)
 2. Remove the `[extensions."auto_canvas.integration"…]` tables from the
    extensions TOML (or the whole file from `EXTENSIONS_CONFIG` when it held
-   nothing else) and remove `CANVAS_PROXY_TARGET` from silicon-notebook's
-   build environment. **Keep an existing `BACKEND_PROXY_TARGET`**: it is
-   silicon-notebook's own API rewrite.
+   nothing else) and remove `CANVAS_PROXY_TARGET` and
+   `SILICON_NOTEBOOK_UI_PLUGINS` from silicon-notebook's build environment.
+   **Keep an existing `BACKEND_PROXY_TARGET`**: it is silicon-notebook's own
+   API rewrite.
 3. Rebuild silicon-notebook and start it.
 4. Optionally uninstall the plugin package (`pip uninstall
 silicon-notebook-auto-canvas`). The canvas database is left as it is.

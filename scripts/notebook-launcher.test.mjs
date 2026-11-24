@@ -680,9 +680,10 @@ function findPython() {
 }
 
 // Runs in Python: imports the bundle under an audit hook that records every
-// write, process, socket and thread, then reads the two TOML files.
+// write, process, socket and thread, calls each capability decision under the
+// same hook, then reads the two TOML files.
 const HARNESS = String.raw`
-import dataclasses, importlib, json, os, sys, threading, tomllib
+import collections.abc, dataclasses, importlib, json, os, sys, threading, tomllib
 from pathlib import Path
 import app.extension_sdk
 
@@ -733,13 +734,27 @@ result = {
         "contributions": list(manifest.contributions),
         "requires": list(manifest.requires),
         "provides": list(manifest.provides),
-        "ui_contributions": list(manifest.ui_contributions),
+        "ui_contributions": [dataclasses.asdict(item) for item in manifest.ui_contributions],
+        "ui_declarations": all(
+            isinstance(item, app.extension_sdk.ui.UiContributionDeclaration)
+            for item in manifest.ui_contributions),
         "tuples": all(isinstance(getattr(manifest, f), tuple) for f in
                       ("contributions", "requires", "provides", "ui_contributions")),
     },
     "register": repr(BUNDLE.register(object())),
     "controls": {name: recorded(name)[1] for name in
                  ("control_write_text", "control_os_open", "control_thread")},
+}
+decisions = BUNDLE.capability_decisions
+bucket = []
+answers = {name: probe(None) for name, probe in decisions.items()}
+decision_events, bucket = bucket, []
+result["decisions"] = {
+    "mapping": isinstance(decisions, collections.abc.Mapping),
+    "answers": {name: {"status": answer.status, "reason": answer.reason,
+                       "type": type(answer).__name__}
+                for name, answer in answers.items()},
+    "events": decision_events,
 }
 integration = Path(os.environ["T164_INTEGRATION"])
 for name, file in (("managed", "extensions.example.toml"),
@@ -751,7 +766,19 @@ print(json.dumps(result))
 
 const STUB = `from dataclasses import dataclass
 
+from . import ui
+
 EXTENSION_API_VERSION = "t164-sentinel"
+
+
+@dataclass(frozen=True)
+class Availability:
+    status: str
+    reason: str | None = None
+
+    @classmethod
+    def available(cls):
+        return cls("available")
 
 
 @dataclass(frozen=True)
@@ -767,6 +794,17 @@ class ExtensionManifest:
     ui_contributions: tuple
 `;
 
+// silicon-notebook's app.extension_sdk.ui at b5850d6, field for field.
+const UI_STUB = `from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class UiContributionDeclaration:
+    id: str
+    slot: str
+    capability: str
+`;
+
 describe("the plugin package and the TOML examples", () => {
   test("import without side effects and match the documented configuration", () => {
     const python = findPython();
@@ -774,6 +812,7 @@ describe("the plugin package and the TOML examples", () => {
     mkdirSync(join(stub, "app/extension_sdk"), { recursive: true });
     writeFileSync(join(stub, "app/__init__.py"), "");
     writeFileSync(join(stub, "app/extension_sdk/__init__.py"), STUB);
+    writeFileSync(join(stub, "app/extension_sdk/ui.py"), UI_STUB);
     const targets = makeTemp("auto-canvas-notebook-targets-");
     writeFileSync(
       join(stub, "control_write_text.py"),
@@ -809,17 +848,61 @@ describe("the plugin package and the TOML examples", () => {
     expect(result.cwd_entries).toEqual([]);
     expect(readdirSync(cwd)).toEqual([]);
     expect(result.frozen).toBe(true);
+    // The UI package's one contribution and the bundle are one triple:
+    // (plugin_id, version, contribution_id), the slot and the capability
+    // match character for character, and the capability is the one the
+    // bundle provides and decides.
+    const uiPackage = JSON.parse(
+      readFileSync(join(integration, "ui/auto-canvas/ui-plugin.json"), "utf8"),
+    );
+    expect(uiPackage.api_version).toBe("1");
+    expect(uiPackage.contributions).toHaveLength(1);
+    const [entry] = uiPackage.contributions;
+    expect(entry).toEqual({
+      id: "auto_canvas.integration.entry",
+      plugin_id: "auto_canvas.integration",
+      version: "0.2.0",
+      capability: "auto_canvas.integration.available",
+      slot: "workspace.side_panel",
+      permission: "notebook:read",
+      mode: "all",
+      component: "AutoCanvasEntry",
+    });
     expect(result.manifest).toEqual({
-      id: "auto_canvas.integration",
-      version: "0.1.0",
+      id: entry.plugin_id,
+      version: entry.version,
       api_version: "t164-sentinel",
       display_name: "电路画布",
       trust: "deployment",
       contributions: [],
       requires: [],
-      provides: [],
-      ui_contributions: [],
+      provides: [entry.capability],
+      ui_contributions: [
+        { id: entry.id, slot: entry.slot, capability: entry.capability },
+      ],
+      ui_declarations: true,
       tuples: true,
+    });
+    expect(
+      readFileSync(
+        join(integration, "ui/auto-canvas/workspace-plugin.tsx"),
+        "utf8",
+      ),
+    ).toMatch(new RegExp(`export function ${entry.component}\\(`, "u"));
+    expect(
+      readFileSync(join(integration, "plugin/pyproject.toml"), "utf8"),
+    ).toContain(`version = "${entry.version}"`);
+    // The decision answers available, from the SDK's own type, without I/O.
+    expect(result.decisions).toEqual({
+      mapping: true,
+      answers: {
+        [entry.capability]: {
+          status: "available",
+          reason: null,
+          type: "Availability",
+        },
+      },
+      events: [],
     });
     expect(result.register).toBe("None");
     expect(result.controls.control_write_text).toEqual([

@@ -29,16 +29,20 @@ import {
   cleanUp,
   databaseLedger,
   dropDatabases,
-  firstRefusal,
   identityOf,
   managedCanvas,
   managedCompanions,
-  misroutedAnswer,
-  misroutingProblems,
   observedLaunch,
   openAdmin,
-  projectList,
   runExtensionStop,
+} from "./managed-clone.mjs";
+import {
+  firstRefusal,
+  listProblem,
+  misroutedAnswer,
+  misroutingProblems,
+  projectList,
+  reopenedProblem,
 } from "./stage-m.mjs";
 import {
   cloneGuards,
@@ -233,6 +237,18 @@ export async function stageS({ sandbox, report }) {
       links: { frontend: "real.txt" },
       phase: "start",
       refused: "frontend is a symlink on a path the run writes",
+    },
+    // T165: the UI plugin sync's outputs are write paths too: a link there,
+    // even one inside the clone, is refused.
+    {
+      name: "sync-output-is-a-link",
+      files: { "frontend/features/extension-sdk/other.ts": "x\n" },
+      links: {
+        "frontend/features/extension-sdk/registry.local.ts": "other.ts",
+      },
+      phase: "start",
+      refused:
+        "frontend/features/extension-sdk/registry.local.ts is a symlink on a path the run writes",
     },
   ];
   for (const scenario of scenarios) {
@@ -1925,6 +1941,7 @@ async function stageMSharedControls(sandbox, report) {
   await dropEachControl(report);
   await readinessFromLaunchControl(report);
   projectListControl(report);
+  await t165FollowUpControls(sandbox, report);
 }
 
 /** `sandbox.env(…, { envFile: false })` leaves the key out; the default keeps it. */
@@ -3070,5 +3087,465 @@ function projectListControl(report) {
       /status 401/u.test(invalid[5].problem) &&
       /status error socket hang up/u.test(invalid[6].problem),
     JSON.stringify({ valid, invalid }),
+  );
+}
+
+// ---- T165: the follow-ups of PR 140's review rounds 4 and 5 ----------------
+
+/** The seven follow-ups, each against stand-ins (no live PostgreSQL). */
+async function t165FollowUpControls(sandbox, report) {
+  await brokenConnectionControl(sandbox, report);
+  await cleanupDeadlineControl(sandbox, report);
+  reopenedSchematicControl(report);
+  listHoldsControl(report);
+  await lostAnswerControl(report);
+  await inheritedPipesControl(sandbox, report);
+  redactBeforeCutControl(report);
+}
+
+/**
+ * A stand-in PostgreSQL: answers the startup message (no SSL request, no
+ * password) and each simple query with an empty result. `plan(index)` says
+ * what the index-th connection does with a query: "answer", "close" (the
+ * connection drops before the answer: the answer is lost), or "answer, then
+ * close" (an established, idle connection breaks).
+ */
+async function standInPostgres(sandbox, plan) {
+  const port = await sandbox.freePort();
+  const sockets = new Set();
+  let connections = 0;
+  const message = (type, body) => {
+    const head = Buffer.alloc(5);
+    head.write(type, 0, "latin1");
+    head.writeInt32BE(body.length + 4, 1);
+    return Buffer.concat([head, body]);
+  };
+  const int32 = (value) => {
+    const buffer = Buffer.alloc(4);
+    buffer.writeInt32BE(value);
+    return buffer;
+  };
+  const ready = message("Z", Buffer.from("I"));
+  const server = net.createServer((socket) => {
+    const index = connections;
+    connections += 1;
+    sockets.add(socket);
+    socket.on("error", () => undefined);
+    socket.on("close", () => sockets.delete(socket));
+    let buffered = Buffer.alloc(0);
+    let started = false;
+    socket.on("data", (chunk) => {
+      buffered = Buffer.concat([buffered, chunk]);
+      for (;;) {
+        if (!started) {
+          if (buffered.length < 4) return;
+          const length = buffered.readInt32BE(0);
+          if (buffered.length < length) return;
+          buffered = buffered.subarray(length);
+          started = true;
+          socket.write(
+            Buffer.concat([
+              message("R", int32(0)),
+              message("K", Buffer.concat([int32(4242), int32(1)])),
+              ready,
+            ]),
+          );
+          continue;
+        }
+        if (buffered.length < 5) return;
+        const type = String.fromCharCode(buffered[0]);
+        const length = buffered.readInt32BE(1);
+        if (buffered.length < length + 1) return;
+        buffered = buffered.subarray(length + 1);
+        if (type === "X") return void socket.end();
+        if (type !== "Q") continue;
+        const what = plan(index);
+        if (what === "close") return void socket.destroy();
+        socket.write(
+          Buffer.concat([message("C", Buffer.from("SELECT 0\0")), ready]),
+        );
+        if (what === "answer, then close")
+          setTimeout(() => socket.destroy(), 150);
+      }
+    });
+  });
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, "127.0.0.1", resolve);
+  });
+  return {
+    url: `postgresql://check@127.0.0.1:${port}/check`,
+    connections: () => connections,
+    close: () =>
+      new Promise((resolve) => {
+        for (const socket of sockets) socket.destroy();
+        server.close(() => resolve());
+      }),
+  };
+}
+
+/** Runs `code` (an ES module) in a child Node; resolves to its result. */
+function childNode(code, { timeoutMs = 20_000 } = {}) {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, ["--input-type=module", "-e", code], {
+      env: { PATH: process.env.PATH ?? "" },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => (stdout += chunk));
+    child.stderr.on("data", (chunk) => (stderr += chunk));
+    const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
+    child.once("close", (status, signal) => {
+      clearTimeout(timer);
+      resolve({ status, signal, stdout, stderr });
+    });
+  });
+}
+
+/**
+ * Follow-up 1: a PostgreSQL connection that breaks after it was established
+ * neither ends the process nor stalls the cleanup. In a child process (an
+ * unhandled `error` event would end it): the set-up's `withClient` whose
+ * query loses its connection rejects (the set-up's error path); the
+ * cleanup's session, whose idle connection breaks after its first answer,
+ * opens another for its second query; the child then exits 0 with both
+ * results.
+ */
+async function brokenConnectionControl(sandbox, report) {
+  const setUpServer = await standInPostgres(sandbox, () => "close");
+  const cleanupServer = await standInPostgres(sandbox, (index) =>
+    index === 0 ? "answer, then close" : "answer",
+  );
+  const module = new URL("./managed-clone.mjs", import.meta.url).href;
+  const code = [
+    `import { adminSession, openAdmin, withClient } from ${JSON.stringify(module)};`,
+    "const out = {};",
+    `out.setUp = await withClient(${JSON.stringify(setUpServer.url)}, (client) => client.query("SELECT 1"), { timeoutMs: 3000 }).then(() => "resolved", (error) => "rejected: " + error.message);`,
+    `const admin = adminSession({ open: openAdmin(${JSON.stringify(cleanupServer.url)}), stepMs: 3000, budgetMs: 9000 });`,
+    'out.first = await admin.query("SELECT 1").then(() => "answered", (error) => "rejected: " + error.message);',
+    "await new Promise((resolve) => setTimeout(resolve, 600));",
+    'out.second = await admin.query("SELECT 1").then(() => "answered", (error) => "rejected: " + error.message);',
+    "await admin.close();",
+    "console.log(JSON.stringify(out));",
+  ].join("\n");
+  let result;
+  try {
+    result = await childNode(code);
+  } finally {
+    await setUpServer.close();
+    await cleanupServer.close();
+  }
+  let out;
+  try {
+    out = JSON.parse(result.stdout.trim().split("\n").at(-1));
+  } catch {
+    out = undefined;
+  }
+  report.check(
+    "S T165 follow-up 1: a PostgreSQL connection that breaks after it was established rejects the set-up's query and makes the cleanup reconnect; the process does not end",
+    result.status === 0 &&
+      /^rejected: .*Connection terminated/u.test(out?.setUp ?? "") &&
+      out.first === "answered" &&
+      out.second === "answered" &&
+      cleanupServer.connections() === 2,
+    JSON.stringify({
+      status: result.status,
+      signal: result.signal,
+      out,
+      cleanupConnections: cleanupServer.connections(),
+      stderr: tail(result.stderr, 4),
+    }),
+  );
+}
+
+/**
+ * Follow-up 2: the cleanup keeps one deadline. Scaled down (3 s in all, 0.3 s
+ * for the removal, 1 s for the databases, 0.5 s for groups and pids), with
+ * an extension stop that never ends (a throwaway clone's stop script that
+ * sleeps): the stop gets only what is left before the database reserve and
+ * reports its time-out, the recorded database is still dropped before the
+ * removal's reserve, and the cleanup ends within its 3 s. The control gives
+ * up after 10 s.
+ */
+async function cleanupDeadlineControl(sandbox, report) {
+  const nb = path.join(sandbox.root, "self-check", "deadline", "nb");
+  sandbox.makeDir(path.join(nb, "scripts"), { recursive: true });
+  sandbox.writeFile(
+    path.join(nb, "scripts/extension_services.py"),
+    "setInterval(() => {}, 1e9);\n",
+  );
+  const ledger = databaseLedger({ settleMs: 100 });
+  await ledger.create(
+    { processID: 1, query: async () => ({ rows: [] }) },
+    "auto_canvas_it_ctl_deadline",
+  );
+  const rec = recordingReporter();
+  const issued = [];
+  const stops = [];
+  const started = Date.now();
+  const outcome = await Promise.race([
+    cleanUp({
+      sandbox,
+      report: rec.report,
+      nb,
+      launched: true,
+      groups: [],
+      companions: new Map(),
+      databases: ledger,
+      cleanupBudget: {
+        totalMs: 3000,
+        removalMs: 300,
+        databaseMs: 1000,
+        processMs: 500,
+      },
+      admin: {
+        async query(sql) {
+          issued.push({ sql, at: Date.now() - started });
+          return { rows: [] };
+        },
+        async close() {},
+      },
+      extensionStop: (label, timeoutMs) => {
+        stops.push(timeoutMs);
+        return runExtensionStop({
+          sandbox,
+          report: rec.report,
+          nb,
+          python: process.execPath,
+          label,
+          timeoutMs,
+        });
+      },
+    }).then(() => "ended"),
+    sleep(10_000).then(() => "still running after 10 s"),
+  ]);
+  const ms = Date.now() - started;
+  const drop = issued.find((entry) => entry.sql.startsWith("DROP DATABASE"));
+  report.check(
+    `S T165 follow-up 2: the cleanup keeps one deadline: a stop that never ends gets what is left before the database reserve, the drop is still sent in time (cleanup ${(ms / 1000).toFixed(1)} s of 3 s)`,
+    outcome === "ended" &&
+      ms < 3000 &&
+      stops.length === 1 &&
+      stops[0] > 0 &&
+      stops[0] <= 1200 &&
+      rec.lines.fail.length === 1 &&
+      /^cleanup: extension_services\.py stop ends the companion services: timed out after/u.test(
+        rec.lines.fail[0],
+      ) &&
+      drop?.sql ===
+        "DROP DATABASE IF EXISTS auto_canvas_it_ctl_deadline WITH (FORCE)" &&
+      drop.at < 2700 &&
+      rec.lines.ok.some((line) => line.includes("databases are dropped")),
+    JSON.stringify({ outcome, ms, stops, issued, lines: rec.lines }),
+  );
+}
+
+/**
+ * Follow-up 3: M6's reopen counts only when the schematic is the one saved,
+ * compared as canonical JSON (key order does not matter); a reopen that
+ * kept the earlier schematic, or a text that is not JSON, fails.
+ */
+function reopenedSchematicControl(report) {
+  const saved = '{"name":"x saved","documents":[{"instances":[1,2,3,4]}]}';
+  const reordered = '{"documents":[{"instances":[1,2,3,4]}],"name":"x saved"}';
+  const earlier = '{"name":"x saved","documents":[{"instances":[1,2,3]}]}';
+  const answer = (projectText, extra = {}) => ({
+    status: 200,
+    headers: {},
+    body: JSON.stringify({
+      project: { revision: 2, name: "x saved", projectText, ...extra },
+    }),
+  });
+  const expected = { revision: 2, name: "x saved", projectText: saved };
+  const verdicts = {
+    same: reopenedProblem(answer(reordered), expected),
+    earlier: reopenedProblem(answer(earlier), expected),
+    notJson: reopenedProblem(answer("<svg/>"), expected),
+    revision: reopenedProblem(answer(saved, { revision: 1 }), expected),
+  };
+  report.check(
+    "S T165 follow-up 3: M6 compares the reopened schematic with the saved one (canonical JSON), not only that it is text",
+    verdicts.same === "" &&
+      /not the one saved/u.test(verdicts.earlier) &&
+      /not JSON/u.test(verdicts.notJson) &&
+      /revision 1, expected 2/u.test(verdicts.revision),
+    JSON.stringify(verdicts),
+  );
+}
+
+/**
+ * Follow-up 4: B's list after A's sign-out must hold B's project and not
+ * A's: an always-empty list fails, as do a list with A's project and one
+ * that is not a project list.
+ */
+function listHoldsControl(report) {
+  const json = { "content-type": "application/json" };
+  const list = (body) => projectList({ status: 200, headers: json, body });
+  const want = { holds: ["p-b"], lacks: ["p-a"] };
+  const verdicts = {
+    right: listProblem(list('{"projects":[{"id":"p-b"}]}'), want),
+    empty: listProblem(list('{"projects":[]}'), want),
+    both: listProblem(list('{"projects":[{"id":"p-b"},{"id":"p-a"}]}'), want),
+    notAList: listProblem(list('{"error":"x"}'), want),
+  };
+  report.check(
+    "S T165 follow-up 4: B's list after the sign-out must hold B's project and not A's (an empty list fails)",
+    verdicts.right === "" &&
+      /expected project\(s\) missing/u.test(verdicts.empty) &&
+      /of the other user present/u.test(verdicts.both) &&
+      /^not a project list/u.test(verdicts.notAList),
+    JSON.stringify(verdicts),
+  );
+}
+
+/**
+ * Follow-up 5: a CREATE DATABASE whose answer is lost (its connection broke)
+ * is reconciled by the cleanup: dropped because it exists; one PostgreSQL
+ * refused as a duplicate is never dropped, nor is one whose cancellation
+ * PostgreSQL confirmed.
+ */
+async function lostAnswerControl(report) {
+  const ledger = databaseLedger({ settleMs: 100 });
+  const failing = (error) => ({
+    processID: 1,
+    query: () => Promise.reject(error),
+  });
+  const refusal = (code, text) =>
+    Object.assign(new Error(text), { severity: "ERROR", code });
+  const outcomes = {};
+  for (const [name, error] of [
+    [
+      "auto_canvas_it_ctl_lost",
+      new Error("Connection terminated unexpectedly"),
+    ],
+    [
+      "auto_canvas_it_ctl_dup",
+      refusal("42P04", 'database "auto_canvas_it_ctl_dup" already exists'),
+    ],
+    [
+      "auto_canvas_it_ctl_cancelled",
+      refusal("57014", "canceling statement due to user request"),
+    ],
+  ])
+    outcomes[name] = await ledger.create(failing(error), name).then(
+      () => "created",
+      () => "rejected",
+    );
+  const issued = [];
+  const rec = recordingReporter();
+  await dropDatabases({
+    databases: ledger,
+    admin: {
+      async query(sql, params) {
+        issued.push({ sql, params });
+        // Every name the reconciliation asks about exists.
+        if (sql.startsWith("SELECT datname") && issued.length === 1)
+          return { rows: params[0].map((datname) => ({ datname })) };
+        return { rows: [] };
+      },
+      async close() {},
+    },
+    report: rec.report,
+  });
+  const drops = issued
+    .map((entry) => entry.sql)
+    .filter((sql) => sql.startsWith("DROP DATABASE"));
+  report.check(
+    "S T165 follow-up 5: a CREATE DATABASE whose answer was lost is reconciled and dropped; a name PostgreSQL refused is never dropped",
+    Object.values(outcomes).every((value) => value === "rejected") &&
+      JSON.stringify(issued[0]?.params) === '[["auto_canvas_it_ctl_lost"]]' &&
+      drops.length === 1 &&
+      drops[0] ===
+        "DROP DATABASE IF EXISTS auto_canvas_it_ctl_lost WITH (FORCE)" &&
+      rec.lines.fail.length === 0 &&
+      rec.lines.ok.some((line) =>
+        line.includes("whose answer was lost is reconciled"),
+      ) &&
+      rec.lines.ok.some((line) =>
+        line.includes("databases are dropped (auto_canvas_it_ctl_lost)"),
+      ),
+    JSON.stringify({ outcomes, issued, lines: rec.lines }),
+  );
+}
+
+/**
+ * Follow-up 6: the bounded stop settles at its deadline although a
+ * grandchild holds the inherited stdout and stderr: a throwaway clone's stop
+ * script starts a sleeper (4 s) with inherited pipes, then exits 0 at once
+ * or never exits (a 0.4 s limit). Both stops settle within 1.5 s. The
+ * sleepers, started by this control, end by their recorded pids.
+ */
+async function inheritedPipesControl(sandbox, report) {
+  const base = path.join(sandbox.root, "self-check", "pipes");
+  const scriptFor = (pidFile, exits) =>
+    'const { spawn } = require("child_process");' +
+    'const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 4000)"], { stdio: "inherit" });' +
+    `require("fs").writeFileSync(${JSON.stringify(pidFile)}, String(child.pid));` +
+    'console.log("stopping");' +
+    (exits ? "process.exit(0);" : "setInterval(() => {}, 1e9);") +
+    "\n";
+  const results = {};
+  const sleepers = [];
+  try {
+    for (const [name, exits, timeoutMs] of [
+      ["exits", true, 10_000],
+      ["hangs", false, 400],
+    ]) {
+      const nb = path.join(base, name, "nb");
+      const pidFile = path.join(base, `${name}.pid`);
+      sandbox.makeDir(path.join(nb, "scripts"), { recursive: true });
+      sandbox.writeFile(
+        path.join(nb, "scripts/extension_services.py"),
+        scriptFor(pidFile, exits),
+      );
+      const rec = recordingReporter();
+      const started = Date.now();
+      const ran = await runExtensionStop({
+        sandbox,
+        report: rec.report,
+        nb,
+        python: process.execPath,
+        label: `${name}:`,
+        timeoutMs,
+      });
+      results[name] = { ran, ms: Date.now() - started, fail: rec.lines.fail };
+      const sleeper = Number(sandbox.readFile(pidFile, "utf8") ?? 0);
+      if (sleeper > 0) sleepers.push(sleeper);
+    }
+  } finally {
+    for (const pid of sleepers) endOwn(pid);
+  }
+  report.check(
+    "S T165 follow-up 6: the bounded stop settles although a grandchild holds its pipes (at the command's exit, and at the limit)",
+    results.exits?.ran === true &&
+      results.exits.ms < 1500 &&
+      results.hangs?.ran === false &&
+      results.hangs.ms < 1500 &&
+      /timed out after 0\.4 s/u.test(results.hangs.fail[0] ?? "") &&
+      sleepers.length === 2,
+    JSON.stringify(results),
+  );
+}
+
+/**
+ * Follow-up 7: a body is redacted before it is cut for a diagnostic: a
+ * secret that straddles the 80-character excerpt never shows in part.
+ */
+function redactBeforeCutControl(report) {
+  const secret = `tok-${"s3cr3t".repeat(4)}`;
+  const clean = (text) => text.split(secret).join("<redacted>");
+  const { problem } = projectList(
+    {
+      status: 200,
+      headers: { "content-type": "text/html" },
+      body: `${"x".repeat(70)}${secret} after`,
+    },
+    clean,
+  );
+  report.check(
+    "S T165 follow-up 7: a response body is redacted before it is cut for a diagnostic (no part of a secret on the boundary is printed)",
+    !problem.includes(secret.slice(0, 6)) && problem.includes("<redacted>"),
+    JSON.stringify(problem),
   );
 }

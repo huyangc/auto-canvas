@@ -347,6 +347,10 @@ silicon-notebook starts the canvas as one of its companion services with
 `integrations/silicon-notebook/serve.sh`; `init-db.sh` in the same directory
 initialises the canvas database once. Deployment, configuration and rollback
 are in [the integration's README](../../integrations/silicon-notebook/README.md).
+Built into silicon-notebook with its UI package, the side-panel entry
+**打开电路画布** takes a signed-in user from an opened notebook to `/canvas`,
+where this mode's editor opens as that user; it passes no notebook context
+([the entry link](../../integrations/silicon-notebook/README.md#the-entry-link-in-a-notebook)).
 A managed child inherits silicon-notebook's whole environment, including its
 `DATABASE_URL` and `PORT`, so the start is guarded by command-line flags, not
 by environment switches. Without either flag the server migrates and starts
