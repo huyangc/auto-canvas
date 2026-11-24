@@ -376,6 +376,8 @@ export function useProjectFileLifecycle({
   }
   /** Manual saves waiting for an automatic one to settle first. */
   const manualSaveWaitingRef = useRef(0);
+  /** Counts this copy's Cloud writes; only the latest may acknowledge. */
+  const cloudWriteSequenceRef = useRef(0);
   const [autoSaveRetryTick, setAutoSaveRetryTick] = useState(0);
   const [savedProjectBaseline, setSavedProjectBaselineState] =
     useState<SavedProjectBaseline | null>(null);
@@ -669,6 +671,14 @@ export function useProjectFileLifecycle({
     const savedCandidate = snapshot.project;
     const binding = cloudBindingRef.current;
     const writeBinding = asNew ? null : binding;
+    // A write that outlives its wait (the automatic deadline) may answer
+    // after a newer write or a Save As: only the latest write, on the binding
+    // it started from, may acknowledge.
+    const writeSequence = ++cloudWriteSequenceRef.current;
+    const superseded = () =>
+      cloudWriteSequenceRef.current !== writeSequence ||
+      cloudBindingRef.current?.id !== binding?.id ||
+      cloudBindingRef.current?.revision !== binding?.revision;
     // An offline hold belongs to the epoch its attempt started in: an
     // `online` event during the attempt already releases it.
     const epochAtStart = onlineEpoch();
@@ -690,12 +700,17 @@ export function useProjectFileLifecycle({
         galleryEntryId,
       );
     } catch (error) {
-      if (snapshot.isCurrent())
+      if (snapshot.isCurrent() && !superseded())
         recordAutoSaveHold(writeBinding, "threw", epochAtStart);
       throw error;
     }
     // A joined request that outlived its session acknowledges nothing.
     if (!snapshot.isCurrent()) return outcome;
+    if (superseded())
+      return {
+        status: "rejected",
+        message: "A newer Cloud save superseded this one",
+      };
     if (outcome.status !== "saved")
       recordAutoSaveHold(writeBinding, outcome, epochAtStart);
     if (outcome.status === "saved") {

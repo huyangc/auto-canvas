@@ -205,10 +205,12 @@ and the [server contract](server.md).
   one waits, then saves what is newer. A failed write holds auto-save on that
   binding's revision until a save succeeds: a conflict stays held (Revert does
   not release it), an offline failure ends at the browser's next `online` event,
-  and holds other than offline survive a refresh. An automatic write with no
-  answer within 30 s stops being waited for and holds as a possible save (a late
-  receipt still applies; otherwise the next save meets the change as a
-  conflict). The preference is on by default and stored in the browser
-  (`icm.cloud-auto-save.v1`; a window open elsewhere reads a change on its next
-  load); only the accounts-mode account menu shows its toggle. Auto-save writes
-  no routine status line; the statusbar chip reports the bound Project's state.
+  and holds other than offline survive a refresh. An automatic write, or an
+  Agent's background save, with no answer within 30 s stops being waited for
+  and holds as a possible save (a late receipt still applies if the copy is
+  still on the binding it was written against and no newer write started;
+  otherwise the next save meets the change as a conflict). The preference is on
+  by default and stored in the browser (`icm.cloud-auto-save.v1`; a window open
+  elsewhere reads a change on its next load); only the accounts-mode account
+  menu shows its toggle. Auto-save writes no routine status line; the statusbar
+  chip reports the bound Project's state.
