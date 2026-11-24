@@ -136,7 +136,9 @@ for (const tool of ["/usr/bin/tar", "/bin/bash"])
 
 // ---- Resources and the one cleanup every exit path takes. ----
 const work = realpathSync(mkdtempSync(join(tmpdir(), "auto-canvas-pkg-")));
-const children = new Set();
+// Process groups of the launchers this script started (each child leads its
+// own group, so the Node the shell runs is reached too).
+const groups = new Set();
 let admin = null;
 let database = null;
 let stub = null;
@@ -159,19 +161,40 @@ function check(name, condition, detail, success = "") {
   return condition;
 }
 
-async function stopChild(child) {
-  if (child.exitCode !== null || child.signalCode !== null) return;
-  const exited = once(child, "exit");
-  child.kill("SIGTERM");
-  const timer = setTimeout(() => child.kill("SIGKILL"), STOP_TIMEOUT_MS);
-  await exited;
-  clearTimeout(timer);
+function groupAlive(pgid) {
+  try {
+    process.kill(-pgid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Signals a process group this script started: SIGTERM, SIGKILL after a bound. */
+async function stopGroup(pgid) {
+  if (!groupAlive(pgid)) return;
+  try {
+    process.kill(-pgid, "SIGTERM");
+  } catch {
+    return;
+  }
+  const deadline = Date.now() + STOP_TIMEOUT_MS;
+  while (groupAlive(pgid) && Date.now() < deadline)
+    await new Promise((done) => setTimeout(done, 50));
+  if (groupAlive(pgid)) {
+    try {
+      process.kill(-pgid, "SIGKILL");
+    } catch {
+      return;
+    }
+    while (groupAlive(pgid)) await new Promise((done) => setTimeout(done, 50));
+  }
 }
 
 function cleanup(reason, code) {
   closing ??= (async () => {
     const incomplete = [];
-    for (const child of children) await stopChild(child);
+    for (const pgid of groups) await stopGroup(pgid);
     if (stub?.listening) await new Promise((done) => stub.close(done));
     if (admin && database) {
       try {
@@ -317,7 +340,13 @@ function checkLayout(tree) {
     notExecutable.length === 0,
     notExecutable.join(", "),
   );
-  return wheels[0]?.path;
+  const acceptable =
+    odd.length === 0 &&
+    outside.length === 0 &&
+    missing.length === 0 &&
+    wheels.length === 1 &&
+    notExecutable.length === 0;
+  return { acceptable, wheel: wheels[0]?.path };
 }
 
 async function freePort() {
@@ -407,9 +436,8 @@ function siteEnv(extra) {
 }
 
 function spawnTracked(command, args, options) {
-  const child = spawn(command, args, options);
-  if (child.pid !== undefined) children.add(child);
-  child.once("exit", () => children.delete(child));
+  const child = spawn(command, args, { ...options, detached: true });
+  if (child.pid !== undefined) groups.add(child.pid);
   return child;
 }
 
@@ -465,6 +493,56 @@ async function waitReady(base, child) {
   return null;
 }
 
+/** The module scripts and stylesheets index.html names are served. */
+async function checkEntryAssets(base, html) {
+  const attribute = (tag, name) =>
+    new RegExp(`\\s${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, "iu")
+      .exec(tag)
+      ?.slice(1)
+      .find((value) => value !== undefined);
+  const tags = html.match(/<(?:script|link)\b[^>]*>/giu) ?? [];
+  const scripts = [];
+  const styles = [];
+  for (const tag of tags) {
+    if (/^<script/iu.test(tag) && attribute(tag, "type") === "module") {
+      const src = attribute(tag, "src");
+      if (src !== undefined) scripts.push(src);
+    } else if (
+      /^<link/iu.test(tag) &&
+      attribute(tag, "rel")?.toLowerCase() === "stylesheet"
+    ) {
+      const href = attribute(tag, "href");
+      if (href !== undefined) styles.push(href);
+    }
+  }
+  check(
+    "index.html names at least one module script and one stylesheet",
+    scripts.length > 0 && styles.length > 0,
+    `${scripts.length} scripts, ${styles.length} stylesheets`,
+    `${scripts.length} scripts, ${styles.length} stylesheets`,
+  );
+  const assets = [
+    ...scripts.map((url) => ({ url, kind: "script", type: /javascript/iu })),
+    ...styles.map((url) => ({ url, kind: "stylesheet", type: /^text\/css/iu })),
+  ];
+  for (const { url, kind, type } of assets) {
+    const name = `the ${kind} ${url} is served`;
+    if (!url.startsWith("/canvas/assets/")) {
+      bad(name, "the URL does not start with /canvas/assets/");
+      continue;
+    }
+    const response = await fetch(`${base}/@notebook${url}`);
+    const body = await response.arrayBuffer();
+    const contentType = response.headers.get("content-type") ?? "";
+    check(
+      name,
+      response.status === 200 && type.test(contentType) && body.byteLength > 0,
+      `status ${response.status}, content-type ${JSON.stringify(contentType)}, ${body.byteLength} bytes`,
+      `${contentType}, ${body.byteLength} bytes`,
+    );
+  }
+}
+
 async function exerciseServer(base, token, tree) {
   const index = await fetch(`${base}${MOUNT}/`);
   const html = await index.text();
@@ -478,6 +556,7 @@ async function exerciseServer(base, token, tree) {
         ),
     `status ${index.status}, ${html.length} characters`,
   );
+  await checkEntryAssets(base, html);
   const { createEmptyProject } = await import("@icm/model");
   const { serializeProject } = await import("@icm/project-protocol");
   const project = createEmptyProject("package-check", "Package check");
@@ -631,7 +710,13 @@ class ExtensionManifest:
 async function main() {
   console.log(`${PREFIX}: checking ${relative(root, tarball)}`);
   const { site, tree } = unpack();
-  const wheel = checkLayout(tree);
+  const { acceptable, wheel } = checkLayout(tree);
+  if (!acceptable) {
+    console.log(
+      `${PREFIX}: the layout is not acceptable; nothing from the package is run`,
+    );
+    return;
+  }
 
   const databaseUrl = await createDatabase();
   const notebook = join(work, "notebook");
