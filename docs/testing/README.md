@@ -338,7 +338,12 @@ shutdown, the pieces stage M adds (the child environment without
 it was written with, requests with headers and a body, the three-listener
 gate, the managed canvas's ownership check before it is recorded, the
 database bookkeeping across a shutdown, M-ext's misrouting verdict and M8's
-sign-out deadline) and the script's own refused file operations (each after a
+sign-out deadline; and, from the second review round, the refusal of a
+linked stop script with the cleanup going on, the supervisor and worker
+ownership checks, the database cleanup against a PostgreSQL that never
+answers, one drop failing without stopping the next, the readiness deadline
+counted from the launch and the project-list validation) and the script's
+own refused file operations (each after a
 simulated swap, with a sentinel outside the sandbox) against throwaway
 repositories only; it reads nothing from `--notebook`. It also runs the real
 entry script on a throwaway repository whose `frontend` is a regular file and
@@ -404,7 +409,13 @@ from the shipped examples, runs `init-db.sh`, and builds the clone with
 notebook and canvas process gets the sandbox's environment without
 `SILICON_NOTEBOOK_ENV_FILE`. Then, each with a fresh `.local`:
 
-- **managed** (M2–M9): `npm run start` exits 0 with the service ready; the
+- **managed** (M2–M9): `npm run start` exits 0, and silicon-notebook's state,
+  observed from the launch on (in parallel with the launcher's own readiness
+  wait), first says the service is ready within 90 seconds of the launch; the
+  state's supervisor is recorded only when its command line is the clone's
+  `extension_services.py _supervise --state-dir <clone>/.local/run/extensions`
+  and the worker only when it is that supervisor's child running the clone's
+  `extension_service_worker.py <supervisor pid>`; the
   canvas port is held by `node apps/server/dist/cli.js --require-canvas-database`,
   a descendant of the service worker in the worker's process group (verified
   before the stage records it; any other listener is never recorded or
@@ -412,7 +423,9 @@ notebook and canvas process gets the sandbox's environment without
   launcher's group; through the
   frontend the canvas is ready, refuses an anonymous API request and serves
   the notebook editor; two registered users each create, save and reopen
-  projects the other cannot see; a signed-out user is refused within 75
+  projects the other cannot see (each list must be a 200 JSON object with a
+  `projects` array: a page or an error answer never counts as an empty list);
+  a signed-out user is refused within 75
   seconds of the sign-out's response (the canvas's 60-second token window;
   each poll's deadline is the time left) while the other is not; the stop (the
   launcher's group, then the clone's `extension_services.py stop`) leaves no
@@ -421,7 +434,9 @@ notebook and canvas process gets the sandbox's environment without
   only checks it; then a standalone canvas with a seeded project takes the
   canvas port, and every request through the notebook, with or without a
   token, gets an HTTP answer (a timeout or socket error fails the step) that
-  is not JSON and does not show that project or its user;
+  is not a 200 with JSON (by a media type naming JSON in any case, or by a
+  body that parses as JSON whatever the header says) and does not show that
+  project or its user;
 - **partial and full rollback**: without the plugin entry but with the build
   target (M-a), `/canvas` answers 500 and the notebook works; with the entry
   but a build without the target (M-b), the canvas runs and answers on its own
@@ -436,10 +451,20 @@ the group for them: it stops them with the clone's `extension_services.py
 stop` and, in its cleanup, signals by pid only the supervisor, worker and
 canvas processes it recorded that still have the start time and command line
 it recorded — never by port or name, and never with silicon-notebook's `npm run
-stop`, which kills by port. The cleanup (that stop, the stage's process groups,
-the recorded pids, then `DROP DATABASE … WITH (FORCE)` and a check that both
-databases are gone) runs at the end of the stage and, after an interrupt,
-before the sandbox is removed; the run then exits 130. Once the cleanup has
-begun no `CREATE DATABASE` starts; one already in flight is waited for
-(cancelled by its backend pid if it does not settle) and its database dropped
-if it succeeded. No token, password or database URL appears in the output.
+stop`, which kills by port. The stop command runs only after the sandbox's
+own checks, immediately before it, find the clone, its `scripts` directory
+and `scripts/extension_services.py` to be real entries (never a symlink)
+inside the sandbox; otherwise it is not run, the step fails naming the entry,
+and the cleanup goes on. The cleanup (that stop, the stage's process groups,
+the recorded pids, then `DROP DATABASE … WITH (FORCE)` for each database on
+its own and a check of which remain) runs at the end of the stage and, after
+an interrupt, before the sandbox is removed; the run then exits 130. Once the
+cleanup has begun no `CREATE DATABASE` starts; one already in flight is
+waited for (cancelled by its backend pid if it does not settle) and its
+database dropped if it succeeded. Every PostgreSQL step of the cleanup is
+bounded (10 seconds for a connection, 10 for each statement, 25 for all of
+them; a connection that could not be opened is not retried), so a server
+that stops answering costs the cleanup about 10 seconds (about 30 with a
+`CREATE DATABASE` in flight), well within the 60-second hard stop, and each
+database it could not drop is named. No token, password or database URL
+appears in the output.

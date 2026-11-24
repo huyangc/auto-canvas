@@ -537,6 +537,19 @@ export function createSandbox(notebook, { keep }) {
   }
 
   /**
+   * `target` is an existing regular file (never a symlink) inside the root,
+   * every directory above it a real directory inside the root: the check a
+   * command gets before the script runs it from the sandbox.
+   */
+  function assertRealFile(target) {
+    const { missing, stat } = checkChain(target);
+    if (missing) refuse(missing, "does not exist");
+    if (!stat) refuse(target, "does not exist");
+    if (stat.isSymbolicLink()) refuse(target, "is a symlink");
+    if (!stat.isFile()) refuse(target, "is not a regular file");
+  }
+
+  /**
    * Copy a tree to `to` (replacing it) with the given command; `to` is
    * removed through removePath and must then be absent under a real parent.
    */
@@ -1031,6 +1044,7 @@ export function createSandbox(notebook, { keep }) {
     readFile,
     listDir,
     assertRealDir,
+    assertRealFile,
     copyTree,
     label,
     start,
