@@ -325,7 +325,9 @@ it("mines real synthetic caches offline, renders highlights, and runs explicit C
   const withLibrary = cli([folder, "--samples", "1"]);
   expect(withLibrary.status, withLibrary.stderr).toBe(0);
   expect(JSON.parse(readFileSync(output, "utf8"))).toEqual(result);
-});
+  // Several CLI child processes: about a second on a development machine,
+  // over the 5 s default on a shared CI runner with every core busy.
+}, 60_000);
 
 it("counts matcher support beyond mined blocks and reports exhausted budgets", () => {
   const unseen = record("unmined");

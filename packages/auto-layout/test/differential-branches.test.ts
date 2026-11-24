@@ -173,6 +173,8 @@ it("locates mirrored output pins from connectivity and keeps their axis independ
   });
 });
 
+// A planner run: about a second on a development machine, several on a
+// shared CI runner with every core busy, where the 5 s default timed out.
 it("keeps a symmetric differential output beside each branch during side selection", () => {
   const d = cascode();
   for (const n of d.nets) n.id = "net-" + n.id;
@@ -262,7 +264,7 @@ it("keeps a symmetric differential output beside each branch during side selecti
   if (!replay.ok) throw Error("expected the paired port edits to replay");
   expect(output(replay.document)).toMatchObject({ offset: 0, arms: 0 });
   expect(connectionsIntact(replay.document, resolver)).toBe(true);
-});
+}, 60_000);
 
 it("keeps both traced stages and their private wires on their input side, with mirrored outputs above the stack", () => {
   const source = cascode();
@@ -357,6 +359,8 @@ it.each([
 ])(
   "places single-stage outputs above their own branch through the netlist planner (rename=$rename, shuffle=$shuffle)",
   checkSingleStage,
+  // The time limit of the quick-planning cases below, for the same reason.
+  60_000,
 );
 // The full-search version of these two inputs is in
 // differential-branches.slow.test.ts.
