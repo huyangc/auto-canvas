@@ -148,3 +148,124 @@ removed.
 - No stage M interrupt test after the refactor (same cleanup as stage L's).
 - One orphan from the revert harness (pid 56746, the reverted follow-up 2
   stop script) was ended by its own pid after its command line was checked.
+
+# T165 report, round 2
+
+Implementer: Opus subagent, in place on `task/T165-notebook-entry-link`
+(head `a9fca64`), changes uncommitted. Scratch harnesses and logs are in the
+worktree's ignored `tmp/r2/`.
+
+## Per finding
+
+1. **P1, every hop through a layer the run controls** (`stage-l.mjs`).
+   Chrome is launched with `proxy: { server }` (no `bypass`) and
+   `args: ["--proxy-bypass-list=<-loopback>"]`, so loopback goes through the
+   run's proxy. The recording proxy is now `forwardingProxy`: it forwards a
+   plain HTTP request in absolute form only to `127.0.0.1:<web port>`, opens a
+   CONNECT tunnel only to that origin, and does either only while the
+   listener gate holds. Everything else is answered 403 or closed and
+   recorded as origin, gate or websocket: another host, another 127.0.0.1
+   port, an origin-form request, an upgrade. `context.route` stays as the
+   second layer. `context.on("request")` also records page requests to other
+   origins, a redirect's hops included. The init script writes the token only
+   when `location.origin` is the web origin. `networkChecks` fails on a page
+   request elsewhere, on any proxy refusal other than Chrome's own background
+   hosts (a DNS name, never an IP literal or a loopback name), and on a refusal
+   because a listener changed. It requires the proxy to have forwarded the
+   page's requests. Background hosts stay info-only.
+   _Control:_ stage S "S T165 round 2: a redirect from the web origin to
+   another port of 127.0.0.1 …" runs real headless Chrome, launched as
+   stage L does, against two listeners of the run. A stand-in web origin's
+   `/hop` returns 302 to the other port. The checks: the hop never arrives
+   there, the token is set on the web origin and absent on the other, both
+   network verdicts fail naming the port, and the proxy forwarded the page.
+   _Reverted:_ with round 1's launch options (`bypass: "127.0.0.1"`) the
+   control FAILs: the hop arrived (`arrived: ["/landing"]`, forwarded 0). With
+   the init script's origin check removed it FAILs: the token was on the other
+   origin.
+   _Live:_ stage L L4 forwarded 117 requests and L7 forwarded 50 through the
+   proxy, so 127.0.0.1 traffic does arrive at the proxy. Playwright's route
+   did not see the redirect hop in the control (`blocked: []`); the request
+   observer and the proxy did.
+2. **P2, interrupt during the start** (`browserSessions`). `open` starts the
+   start (the proxy, then the launch, then the record) as `session.starting`.
+   It returns no session when the shutdown began during the start, and
+   launches nothing once `closeOpen` ran. The start stops before the launch
+   when the session was closed while the proxy started. `close` waits for a
+   start in flight within its time, then closes the context and the proxy and
+   SIGKILLs the recorded process. A context that arrives after a close gave up
+   is closed. The process watcher keeps recording after a close, so a launch
+   cut short is still ended by pid. A `launching the browser` note marks the
+   launch. `browserSessions` takes an injectable `launch` and profile `dir`
+   for the control.
+   _Control:_ stage S "S T165 round 2: a shutdown during the browser's launch
+   …" uses a stand-in launch: a process naming the profile, settling after
+   1.5 s. When `closeOpen` comes during the launch, the control expects no
+   session, the start awaited, the context closed and the process gone. When
+   `closeOpen` comes while the proxy starts, and for a later `open`, it
+   expects 0 launches.
+   _Reverted_ (no wait, no shutdown checks): it FAILs, because `open` returned
+   a session after the shutdown, the close did not wait, and there were 2
+   launches.
+3. **P2, lost-reply reconcile** (`managed-clone.mjs`). The ledger keeps
+   `{ name, backendPid, statement }` for an unknown-outcome create.
+   `dropDatabases` polls `pg_stat_activity` with `lostCreatesRunning`: a
+   non-idle row with that statement on that backend pid. It polls until no
+   such row is left or until `lostBy`, which `cleanUp` sets to the database
+   reserve's end minus min(5 s, a quarter of it). Only then does it look the
+   name up and drop it. A create still running at `lostBy`, or one whose
+   activity could not be read, is reported as "unresolved … (it may be left
+   behind)" and is not looked up.
+   _Control:_ follow-up 5 is extended. `…_lost` runs on backend 4101 for two
+   polls and is in the catalog only after that. `…_hung` never stops. A
+   same-text row on another pid is ignored. The lookup must come after the
+   wait and name only `…_lost`, which is dropped. `…_hung` is reported
+   unresolved and neither looked up nor dropped. Refused names are never
+   touched.
+   _Reverted_ (round 1's `managed-clone.mjs`): it FAILs, because the lookup
+   came at once with both names, 0 activity polls, nothing was dropped and
+   nothing was reported unresolved.
+4. **P2, list variable** (`integrations/silicon-notebook/README.md`). The
+   setup appends the path to an existing `:`-separated list
+   (`${VAR:+$VAR:}$CANVAS_UI`). Removal takes out only that path
+   (`tr`/`grep -vxF`/`paste`) and unsets the variable only when the list
+   becomes empty. Rollback step 2 points to it. The snippets were run in bash
+   on a three-entry list, a list holding only the path, and a list without
+   it.
+
+`docs/testing/README.md` was updated for the stage S list, the lost-create
+reconcile, L3–L5's init script, and the browser-network and shutdown
+paragraph.
+
+## Acceptance (final code; environment as the plan, `REF=b5850d6f0ef4003211ebfd8abc52e6063b62d52a`)
+
+```text
+pnpm typecheck / lint / format:check / docs:check / deadcode   → 0 (lint: 0 errors, no warning in notebook-integration)
+pnpm exec vitest run scripts/notebook-launcher.test.mjs        → 0 (47 passed)
+--stage S                                                      → 0 (91 passed; was 89)
+--stage M                                                      → 0 (114 passed)
+--stage L                                                      → 0 (89 passed; was 85: +2 per browser session)
+leftover auto_canvas_it_* databases                            → 0
+notebook checkout git status --porcelain=v2 --branch           → identical before and after
+interrupt of stage L right after "L4 launching the browser"    → exit 130 after 5 s; "cleanup: the browser is closed" ok; 0 processes naming the sandbox; sandbox removed; 0 databases
+```
+
+## Deviations
+
+- `browserSessions(m, { launch, dir })` and `guardNetwork(session, { token })`,
+  `networkChecks(report, session, label)` and `TOKEN_KEY` are exported for the
+  stage S controls; the gate moved into `open(label, { webPort, held })`.
+- Besides the proxy, the stage now also fails on a page request to another
+  origin seen by the request observer (redirect hops included).
+- A refused proxy target counts as Chrome's background (info) only when it is
+  a DNS name with a dot that is not `localhost`/`.localhost`; any IP literal
+  fails, not just loopback.
+- Stage S now needs the system Chrome (the redirect control runs it).
+
+## Could not verify
+
+- A real PostgreSQL lost-reply race (the control uses a stand-in admin).
+- The owner's ports were not snapshotted (the rule forbids looking at them).
+- `pnpm test:local`, `pnpm build`, `pnpm build:notebook-editor` and the
+  package checks were not rerun (not in this round's acceptance; no file
+  they cover changed besides the scripts above).

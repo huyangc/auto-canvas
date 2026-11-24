@@ -52,6 +52,12 @@ import {
   survivingPids,
 } from "./notebook-clone.mjs";
 import {
+  TOKEN_KEY,
+  browserSessions,
+  guardNetwork,
+  networkChecks,
+} from "./stage-l.mjs";
+import {
   removeAppNext,
   singleRuleControl,
   upstreamDownProbe,
@@ -1942,6 +1948,7 @@ async function stageMSharedControls(sandbox, report) {
   await readinessFromLaunchControl(report);
   projectListControl(report);
   await t165FollowUpControls(sandbox, report);
+  await t165BrowserControls(sandbox, report);
 }
 
 /** `sandbox.env(…, { envFile: false })` leaves the key out; the default keeps it. */
@@ -3401,47 +3408,84 @@ function listHoldsControl(report) {
 
 /**
  * Follow-up 5: a CREATE DATABASE whose answer is lost (its connection broke)
- * is reconciled by the cleanup: dropped because it exists; one PostgreSQL
- * refused as a duplicate is never dropped, nor is one whose cancellation
- * PostgreSQL confirmed.
+ * is reconciled by the cleanup; one PostgreSQL refused as a duplicate is
+ * never dropped, nor is one whose cancellation PostgreSQL confirmed. Round 2:
+ * the backend may still be running the lost create and commit it later. The
+ * stand-in shows `…_lost` running on its backend (pid 4101) for two polls of
+ * `pg_stat_activity`, and its database only once it stopped: the look-up
+ * must wait for that, then drop it. `…_hung` never stops running (pid 4102):
+ * at the deadline it is reported unresolved, and neither looked up nor
+ * dropped.
  */
 async function lostAnswerControl(report) {
   const ledger = databaseLedger({ settleMs: 100 });
-  const failing = (error) => ({
-    processID: 1,
+  const failing = (error, processID) => ({
+    processID,
     query: () => Promise.reject(error),
   });
   const refusal = (code, text) =>
     Object.assign(new Error(text), { severity: "ERROR", code });
+  const lostName = "auto_canvas_it_ctl_lost";
+  const hungName = "auto_canvas_it_ctl_hung";
   const outcomes = {};
-  for (const [name, error] of [
-    [
-      "auto_canvas_it_ctl_lost",
-      new Error("Connection terminated unexpectedly"),
-    ],
+  for (const [name, error, pid] of [
+    [lostName, new Error("Connection terminated unexpectedly"), 4101],
+    [hungName, new Error("Connection terminated unexpectedly"), 4102],
     [
       "auto_canvas_it_ctl_dup",
       refusal("42P04", 'database "auto_canvas_it_ctl_dup" already exists'),
+      4103,
     ],
     [
       "auto_canvas_it_ctl_cancelled",
       refusal("57014", "canceling statement due to user request"),
+      4104,
     ],
   ])
-    outcomes[name] = await ledger.create(failing(error), name).then(
+    outcomes[name] = await ledger.create(failing(error, pid), name).then(
       () => "created",
       () => "rejected",
     );
   const issued = [];
+  let activityPolls = 0;
+  let lostCommitted = false;
   const rec = recordingReporter();
+  const started = Date.now();
   await dropDatabases({
     databases: ledger,
+    lostBy: started + 1200,
     admin: {
       async query(sql, params) {
-        issued.push({ sql, params });
-        // Every name the reconciliation asks about exists.
-        if (sql.startsWith("SELECT datname") && issued.length === 1)
-          return { rows: params[0].map((datname) => ({ datname })) };
+        issued.push({ sql, params, at: Date.now() - started });
+        if (sql.includes("pg_stat_activity")) {
+          activityPolls += 1;
+          const rows = [
+            {
+              pid: 4102,
+              query: `CREATE DATABASE ${hungName}`,
+            },
+            // A row of another backend with the same text is not the one.
+            { pid: 9999, query: `CREATE DATABASE ${lostName}` },
+          ];
+          if (activityPolls <= 2)
+            rows.push({ pid: 4101, query: `CREATE DATABASE ${lostName}` });
+          else lostCommitted = true;
+          return {
+            rows: rows.filter((row) => params[0].includes(row.query)),
+          };
+        }
+        // The catalog holds the lost name once its create committed, until
+        // it is dropped; the hung one would commit later.
+        if (sql.startsWith("SELECT datname")) {
+          const dropped = issued.some((entry) =>
+            entry.sql.startsWith("DROP DATABASE"),
+          );
+          return {
+            rows: params[0]
+              .filter((name) => name === lostName && lostCommitted && !dropped)
+              .map((datname) => ({ datname })),
+          };
+        }
         return { rows: [] };
       },
       async close() {},
@@ -3451,21 +3495,32 @@ async function lostAnswerControl(report) {
   const drops = issued
     .map((entry) => entry.sql)
     .filter((sql) => sql.startsWith("DROP DATABASE"));
+  const lookups = issued.filter((entry) =>
+    entry.sql.startsWith("SELECT datname"),
+  );
   report.check(
-    "S T165 follow-up 5: a CREATE DATABASE whose answer was lost is reconciled and dropped; a name PostgreSQL refused is never dropped",
+    "S T165 follow-up 5: a CREATE DATABASE whose answer was lost is waited for until its backend no longer runs it, then reconciled and dropped; one still running at the deadline is reported unresolved; a name PostgreSQL refused is never dropped",
     Object.values(outcomes).every((value) => value === "rejected") &&
-      JSON.stringify(issued[0]?.params) === '[["auto_canvas_it_ctl_lost"]]' &&
+      activityPolls >= 3 &&
+      JSON.stringify(lookups[0]?.params) === `[["${lostName}"]]` &&
       drops.length === 1 &&
-      drops[0] ===
-        "DROP DATABASE IF EXISTS auto_canvas_it_ctl_lost WITH (FORCE)" &&
-      rec.lines.fail.length === 0 &&
-      rec.lines.ok.some((line) =>
-        line.includes("whose answer was lost is reconciled"),
+      drops[0] === `DROP DATABASE IF EXISTS ${lostName} WITH (FORCE)` &&
+      !issued.some((entry) =>
+        JSON.stringify(entry.params ?? []).includes("ctl_dup"),
+      ) &&
+      rec.lines.fail.length === 1 &&
+      /^cleanup: the CREATE DATABASE whose answer was lost has ended: unresolved: auto_canvas_it_ctl_hung still being created/u.test(
+        rec.lines.fail[0],
       ) &&
       rec.lines.ok.some((line) =>
-        line.includes("databases are dropped (auto_canvas_it_ctl_lost)"),
+        line.includes(
+          `whose answer was lost is reconciled (${lostName}: ${lostName} exists`,
+        ),
+      ) &&
+      rec.lines.ok.some((line) =>
+        line.includes(`databases are dropped (${lostName})`),
       ),
-    JSON.stringify({ outcomes, issued, lines: rec.lines }),
+    JSON.stringify({ outcomes, activityPolls, issued, lines: rec.lines }),
   );
 }
 
@@ -3547,5 +3602,235 @@ function redactBeforeCutControl(report) {
     "S T165 follow-up 7: a response body is redacted before it is cut for a diagnostic (no part of a secret on the boundary is printed)",
     !problem.includes(secret.slice(0, 6)) && problem.includes("<redacted>"),
     JSON.stringify(problem),
+  );
+}
+
+// ---- T165 round 2: the browser's network and a launch under shutdown ------
+
+/** Round 2 of PR 143's review: stage L's browser, against stand-ins. */
+async function t165BrowserControls(sandbox, report) {
+  await redirectHopControl(sandbox, report);
+  await launchShutdownControl(sandbox, report);
+}
+
+/** A listener of this control on 127.0.0.1 (a free port of the run's own). */
+async function standInServer(sandbox, handler) {
+  const port = await sandbox.freePort();
+  const server = createServer(handler);
+  const sockets = new Set();
+  server.on("connection", (socket) => {
+    sockets.add(socket);
+    socket.on("close", () => sockets.delete(socket));
+  });
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, "127.0.0.1", resolve);
+  });
+  return {
+    port,
+    close: () =>
+      new Promise((resolve) => {
+        for (const socket of sockets) socket.destroy();
+        server.close(() => resolve());
+      }),
+  };
+}
+
+/**
+ * Round 2, finding 1: every hop goes through the run's proxy. Real headless
+ * Chrome, as stage L launches it, against two listeners of this control: a
+ * stand-in web origin whose `/hop` redirects (302) to another port of
+ * 127.0.0.1 that this control also listens on. The page's requests to the
+ * web origin arrive through the proxy (it forwarded them), the token is in
+ * `localStorage` there; the redirect's hop never arrives at the other port
+ * (the proxy refuses it), no token is written on that origin, and stage L's
+ * network verdicts fail it, the proxy's naming the port.
+ */
+async function redirectHopControl(sandbox, report) {
+  const arrived = [];
+  const other = await standInServer(sandbox, (req, res) => {
+    arrived.push(req.url);
+    res.end("reached\n");
+  });
+  const web = await standInServer(sandbox, (req, res) => {
+    if (req.url === "/hop") {
+      res.writeHead(302, {
+        location: `http://127.0.0.1:${other.port}/landing`,
+      });
+      return void res.end();
+    }
+    res.writeHead(200, { "content-type": "text/html" });
+    res.end("<!doctype html><title>web</title><p>web</p>\n");
+  });
+  const rec = recordingReporter();
+  const browsers = browserSessions(
+    { sandbox, report: rec.report },
+    { dir: path.join(sandbox.root, "self-check", "redirect") },
+  );
+  const token = `tok-${sandbox.randomToken()}`;
+  const seen = {};
+  let session;
+  try {
+    session = await browsers.open("S redirect:", {
+      webPort: web.port,
+      held: () => true,
+    });
+    if (session) {
+      await guardNetwork(session, { token });
+      const page =
+        session.context.pages()[0] ?? (await session.context.newPage());
+      page.setDefaultTimeout(30_000);
+      const tokenHere = () =>
+        page
+          .evaluate((key) => window.localStorage.getItem(key), TOKEN_KEY)
+          .then((value) => (value === token ? "the token" : String(value)))
+          .catch((error) => `unreadable: ${error.message.split("\n")[0]}`);
+      await page.goto(`http://127.0.0.1:${web.port}/`);
+      seen.onWeb = await tokenHere();
+      seen.hop = await page.goto(`http://127.0.0.1:${web.port}/hop`).then(
+        (response) => `status ${response?.status()}`,
+        (error) => error.message.split("\n")[0],
+      );
+      seen.landed = new URL(page.url()).port === String(other.port);
+      seen.onOther = await tokenHere();
+    }
+  } finally {
+    if (session) await browsers.close(session, 10_000, "S redirect:");
+    await web.close();
+    await other.close();
+  }
+  if (session) networkChecks(rec.report, session, "S redirect:");
+  const failed = (text) =>
+    rec.lines.fail.some(
+      (line) => line.includes(text) && line.includes(`127.0.0.1:${other.port}`),
+    );
+  report.check(
+    "S T165 round 2: a redirect from the web origin to another port of 127.0.0.1 that the run listens on goes through the run's proxy, which refuses it: the hop never arrives there, no token is written on that origin, and stage L's verdicts fail it",
+    Boolean(session) &&
+      seen.onWeb === "the token" &&
+      seen.landed === true &&
+      seen.onOther === "null" &&
+      arrived.length === 0 &&
+      session.proxy.forwarded > 0 &&
+      failed("through the run's proxy went nowhere but") &&
+      failed("the page requested nothing but") &&
+      rec.lines.ok.some((line) =>
+        line.includes("reached the web origin through the run's proxy"),
+      ) &&
+      rec.lines.ok.some((line) => line.includes("the browser is closed")),
+    () =>
+      JSON.stringify({
+        seen,
+        arrived,
+        forwarded: session?.proxy?.forwarded,
+        lines: rec.lines,
+      }),
+  );
+}
+
+/**
+ * Round 2, finding 2: a shutdown during a browser's start. A stand-in launch
+ * starts a process that names the profile on its command line and settles
+ * 1.5 s later with a context whose close ends it. The cleanup's `closeOpen`
+ * while that launch is pending waits for it and disposes what it produced
+ * (the context closed, the process gone) and `open` returns no session; a
+ * `closeOpen` while the proxy is still starting leaves the launch unmade;
+ * once the shutdown began, `open` launches nothing.
+ */
+async function launchShutdownControl(sandbox, report) {
+  const started = [];
+  const results = {};
+  const gate = { webPort: 1, held: () => false }; // never forwards
+  try {
+    {
+      let closedContext = false;
+      let exited = false;
+      let settledAt;
+      const launch = ({ profile }) => {
+        const child = spawn(
+          process.execPath,
+          [
+            "-e",
+            "setInterval(() => {}, 1e9)",
+            "--",
+            `--user-data-dir=${profile}`,
+          ],
+          { stdio: "ignore", env: { PATH: process.env.PATH ?? "" } },
+        );
+        started.push(child.pid);
+        child.once("exit", () => (exited = true));
+        return sleep(1500).then(() => {
+          settledAt = Date.now();
+          return {
+            pages: () => [],
+            close: async () => {
+              closedContext = true;
+              endOwn(child.pid);
+            },
+          };
+        });
+      };
+      const rec = recordingReporter();
+      const browsers = browserSessions(
+        { sandbox, report: rec.report },
+        { launch, dir: path.join(sandbox.root, "self-check", "launching") },
+      );
+      const opening = browsers.open("S launching:", gate);
+      await waitFor(() => started.length === 1, 10_000, 20);
+      await sleep(300); // the launch is connecting
+      await browsers.closeOpen(8000);
+      const closedAt = Date.now();
+      const opened = await opening;
+      results.launching = {
+        session: opened === undefined ? "none" : "returned",
+        closedContext,
+        waitedForTheStart: settledAt !== undefined && closedAt >= settledAt,
+        // Its exit, seen by this process (a killed child stays a zombie
+        // until it is reaped).
+        processGone: await waitFor(() => exited, 3000, 50),
+        lines: rec.lines,
+      };
+    }
+    {
+      let launches = 0;
+      const launch = async () => {
+        launches += 1;
+        return { pages: () => [], close: async () => undefined };
+      };
+      const rec = recordingReporter();
+      const browsers = browserSessions(
+        { sandbox, report: rec.report },
+        { launch, dir: path.join(sandbox.root, "self-check", "early") },
+      );
+      const opening = browsers.open("S early:", gate);
+      await browsers.closeOpen(8000);
+      const opened = await opening;
+      const later = await browsers.open("S later:", gate);
+      results.early = {
+        session: opened === undefined ? "none" : "returned",
+        later: later === undefined ? "none" : "returned",
+        launches,
+        lines: rec.lines,
+      };
+    }
+  } finally {
+    for (const pid of started) endOwn(pid);
+  }
+  const { launching, early } = results;
+  report.check(
+    "S T165 round 2: a shutdown during the browser's launch waits for it and closes what it made (no session, the context closed, its process gone); one while the proxy starts, or after, launches nothing",
+    launching?.session === "none" &&
+      launching.closedContext &&
+      launching.waitedForTheStart &&
+      launching.processGone &&
+      launching.lines.fail.length === 0 &&
+      launching.lines.ok.some((line) =>
+        line.includes("the browser is closed"),
+      ) &&
+      early?.session === "none" &&
+      early.later === "none" &&
+      early.launches === 0 &&
+      early.lines.fail.length === 0,
+    () => JSON.stringify(results),
   );
 }

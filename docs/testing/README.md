@@ -356,7 +356,11 @@ server, in a child process), the cleanup's one deadline with a stop script
 that never ends, M6's schematic comparison, M8's list of B, a
 `CREATE DATABASE` whose answer was lost, a stop whose grandchild holds its
 pipes, the redaction of a body before it is cut, and a link on a UI plugin
-sync output) and the script's
+sync output; and, from T165's second review round, a `CREATE DATABASE`
+whose answer was lost while its backend still runs it, a redirect from a
+stand-in web origin to another port of `127.0.0.1` the check listens on, in
+real headless Chrome behind the run's proxy, and a shutdown during a
+browser's start, with a stand-in launch) and the script's
 own refused file operations (each after a
 simulated swap, with a sentinel outside the sandbox) against throwaway
 repositories only; it reads nothing from `--notebook`. It also runs the real
@@ -479,9 +483,13 @@ an interrupt, before the sandbox is removed; the run then exits 130. Once the
 cleanup has begun no `CREATE DATABASE` starts; one already in flight is
 waited for (cancelled by its backend pid if it does not settle) and its
 database dropped if it succeeded. A `CREATE DATABASE` whose answer was lost
-(its connection broke) has an unknown outcome: the cleanup looks the name up
-and drops it if it exists; a name PostgreSQL refused (a duplicate, a
-cancellation) is never dropped. The whole cleanup keeps one deadline, 50
+(its connection broke) has an unknown outcome, and its backend may still be
+running it: the cleanup first waits until `pg_stat_activity` no longer shows
+that backend (its pid, recorded with the create) running the statement, then
+looks the name up and drops it if it exists. One still running when that wait
+ends (shortly before the database reserve's end) is reported as unresolved
+and not looked up. A name PostgreSQL refused (a duplicate, a cancellation) is
+never dropped. The whole cleanup keeps one deadline, 50
 seconds from its start, inside the entry script's 60-second hard stop: the
 last 5 are left for the sandbox's own disposal, the 20 before them are
 reserved for the databases, and the stop script, the process groups and the
@@ -542,8 +550,8 @@ rollback's launch finds the same user and notebook. In order:
   notebook through `POST /api/notebooks`. In headless Chrome with a fresh
   profile in the sandbox (its process recorded by that profile on its command
   line), an init script puts A's token into `localStorage` before any page
-  script; `http://127.0.0.1:<web>/#notebook=<id>` shows the button, the
-  page's `GET /api/system/extensions` holds the entry's row available; the
+  script (on the web origin only); `http://127.0.0.1:<web>/#notebook=<id>`
+  shows the button, the page's `GET /api/system/extensions` holds the entry's row available; the
   Sources panel's first-visit hint, which covers the button, is dismissed with
   its own 知道了; the click navigates to `/canvas`, the editor mounts
   (`[data-testid="schematic-canvas"]`), and a request to `/canvas/api/…`
@@ -555,15 +563,25 @@ rollback's launch finds the same user and notebook. In order:
   shows, `/api/system/extensions` still holds the row available (only the UI
   package went), and 打开电路画布 stays absent for 3 seconds; the stop.
 
-The browser may reach only the clone's web origin: every page request
-elsewhere (another host, or another port of `127.0.0.1` such as the owner's)
-is aborted, recorded and fails the stage, and a request to the web origin is
-sent only while the web, api and canvas listeners are the recorded pids.
-WebSockets are refused. Chrome's own background connections (its update and
-account services) go to a proxy of the run on `127.0.0.1` that records them
-and closes each connection, so nothing leaves the machine; they are listed,
-not failed. Screenshots and the console are written into the sandbox only
-when a browser check fails (`--keep` keeps them). The browser is closed in
-the cleanup too, before the clone is stopped: after an interrupt while it is
-open the run exits 130 with no browser process, companion or
-`auto_canvas_it_*` database left.
+The browser may reach only the clone's web origin. Every connection Chrome
+makes, loopback included, goes through a proxy of the run on `127.0.0.1`
+(Chrome is launched with `--proxy-bypass-list=<-loopback>` and no bypass, so
+the hops of a redirect go there too): it forwards a request only to
+`127.0.0.1:<web>` and only while the web, api and canvas listeners are the
+recorded pids, opens a `CONNECT` tunnel only to that origin, and refuses and
+records everything else. Behind it, every page request elsewhere is aborted
+and recorded, every request the page makes (a redirect's hops included) is
+observed, and WebSockets are refused. A page request elsewhere, anything the
+proxy refused that is not one of Chrome's own background hosts (another port
+of `127.0.0.1` such as the owner's, any IP literal or loopback name), and a
+request refused because a listener changed each fail the stage; the proxy
+must have forwarded the page's requests. Chrome's own background connections
+(its update and account services, outside hosts by name) are refused by the
+proxy, so nothing leaves the machine; they are listed, not failed. The token
+goes into `localStorage` only on the web origin. Screenshots and the console
+are written into the sandbox only when a browser check fails (`--keep` keeps
+them). The browser is closed in the cleanup too, before the clone is
+stopped; a start still in flight (the proxy or Chrome's launch) is awaited
+and what it made closed, and no browser starts once the shutdown began.
+After an interrupt while the browser launches or is open, the run exits 130
+with no browser process, companion or `auto_canvas_it_*` database left.

@@ -8,14 +8,18 @@
 // The set-up, the launch, the managed service's checks, the stop and the
 // cleanup are stage M's (managed-clone.mjs). The browser is Chrome (the
 // system channel) driven by `@playwright/test`'s chromium, headless, with a
-// fresh profile inside the sandbox for each use; every request it makes to
-// anything but the clone's web port is aborted and fails the stage, and a
-// proxy that only records (a listener of the run) catches whatever would
-// leave 127.0.0.1 outside the page's own requests. The browser is closed in
-// the cleanup too, and only a process this run started and recorded (by its
-// profile on the command line) is ever signalled.
+// fresh profile inside the sandbox for each use. Every connection it makes,
+// loopback included, goes through a proxy of the run (a listener on
+// 127.0.0.1) that forwards only to the clone's web port while the listener
+// gate holds and refuses and records everything else, a redirect's hops
+// included; behind it, a page request to anything but the web origin is
+// aborted. Either fails the stage. The browser is closed in the cleanup too
+// (a launch in flight is awaited and disposed), and only a process this run
+// started and recorded (by its profile on the command line) is ever
+// signalled.
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import http from "node:http";
 import { createRequire } from "node:module";
 import net from "node:net";
 import path from "node:path";
@@ -47,7 +51,7 @@ import { tail } from "./steps.mjs";
 const UI_PACKAGE = path.join(integration, "ui/auto-canvas");
 const UI_MANIFEST = path.join(UI_PACKAGE, "ui-plugin.json");
 /** silicon-notebook's token key (frontend/app/auth-session.ts). */
-const TOKEN_KEY = "silicon_notebook_token";
+export const TOKEN_KEY = "silicon_notebook_token";
 const ENTRY_NAME = "打开电路画布";
 /** The empty registry the sync script writes without a package. */
 const EMPTY_REGISTRY =
@@ -314,41 +318,164 @@ function processTable() {
 const profileProcesses = (profile) =>
   processTable()?.filter((entry) => entry.command.includes(profile));
 
+/** Headers that belong to one connection, never forwarded by the proxy. */
+const HOP_HEADERS = [
+  "connection",
+  "proxy-connection",
+  "keep-alive",
+  "proxy-authorization",
+  "proxy-authenticate",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+];
+const withoutHopHeaders = (headers) => {
+  const out = { ...headers };
+  for (const name of HOP_HEADERS) delete out[name];
+  return out;
+};
+
 /**
- * A listener of the run that browsers use as their proxy: Chrome sends it
- * whatever would leave 127.0.0.1 (127.0.0.1 itself bypasses the proxy), and
- * it only records the attempt and closes the connection.
+ * A host Chrome's own background services use (its update and account
+ * services): a DNS name with a dot that is not a loopback name. An IP literal
+ * of any kind, `localhost` or a `.localhost` name is never one.
  */
-async function tripwire(m) {
-  const port = await m.sandbox.freePort();
-  const attempts = [];
+const backgroundHost = (host) => {
+  const name = String(host)
+    .replace(/^\[|\]$/gu, "")
+    .toLowerCase();
+  return (
+    net.isIP(name) === 0 &&
+    name.includes(".") &&
+    name !== "localhost" &&
+    !name.endsWith(".localhost")
+  );
+};
+
+/**
+ * The run's proxy for one browser, a listener of the run on 127.0.0.1: Chrome
+ * sends it every connection, loopback included (no bypass), so it sees every
+ * hop of a redirect too. It forwards a plain HTTP request (absolute form) only
+ * to `127.0.0.1:<webPort>` and only while `held()` (the listener gate) holds,
+ * and opens a CONNECT tunnel only to that same origin under the same gate.
+ * Everything else — another host, another port of 127.0.0.1, a request in
+ * origin form, an upgrade — is refused (403, or the connection closed) and
+ * recorded as `{ target, host, why }`, `why` being "origin" (not the web
+ * origin), "gate" (a listener changed) or "websocket". `forwarded` counts what
+ * went through.
+ */
+async function forwardingProxy(sandbox, { webPort, held }) {
+  const port = await sandbox.freePort();
+  const refused = [];
   const sockets = new Set();
-  const server = net.createServer((socket) => {
+  const state = { port, refused, forwarded: 0 };
+  const track = (socket) => {
     sockets.add(socket);
     socket.on("error", () => undefined);
-    socket.once("data", (chunk) => {
-      const line = chunk.toString("latin1").split("\r\n")[0] ?? "";
-      // "CONNECT host:port HTTP/1.1" or "GET http://host/… HTTP/1.1": only
-      // the host is kept.
-      const target = line.split(" ")[1] ?? "";
-      attempts.push(target.replace(/^[a-z]+:\/\//iu, "").split("/")[0]);
-      socket.destroy();
-    });
     socket.on("close", () => sockets.delete(socket));
+  };
+  const verdict = (toWeb) => (!toWeb ? "origin" : held() ? "" : "gate");
+  const server = http.createServer((req, res) => {
+    let url;
+    try {
+      url = new URL(req.url ?? "");
+    } catch {
+      url = undefined;
+    }
+    const why = verdict(
+      url?.protocol === "http:" &&
+        url.hostname === "127.0.0.1" &&
+        url.port === String(webPort),
+    );
+    if (why) {
+      refused.push({
+        target: url
+          ? `${url.protocol}//${url.host}`
+          : `${req.headers.host ?? "(no host)"} (not a proxy request)`,
+        host: url?.hostname ?? String(req.headers.host ?? ""),
+        why,
+      });
+      req.resume();
+      res.writeHead(403, {
+        "content-type": "text/plain; charset=utf-8",
+        connection: "close",
+      });
+      res.end(
+        why === "gate"
+          ? "refused by the integration check's proxy: a listener of the clone changed\n"
+          : "refused by the integration check's proxy: not the clone's web origin\n",
+      );
+      return;
+    }
+    state.forwarded += 1;
+    const upstream = http.request(
+      {
+        host: "127.0.0.1",
+        port: webPort,
+        method: req.method,
+        path: `${url.pathname}${url.search}`,
+        headers: withoutHopHeaders(req.headers),
+        agent: false,
+      },
+      (answer) => {
+        res.writeHead(
+          answer.statusCode ?? 502,
+          withoutHopHeaders(answer.headers),
+        );
+        answer.on("error", () => res.destroy());
+        answer.pipe(res);
+      },
+    );
+    upstream.on("socket", track);
+    upstream.on("error", () => {
+      if (res.headersSent) res.destroy();
+      else {
+        res.writeHead(502, { connection: "close" });
+        res.end();
+      }
+    });
+    req.pipe(upstream);
+  });
+  server.on("connection", track);
+  server.on("connect", (req, socket, head) => {
+    const authority = req.url ?? "";
+    const parts = /^\[?([^\]]*?)\]?:(\d+)$/u.exec(authority);
+    const host = parts?.[1] ?? authority;
+    const why = verdict(host === "127.0.0.1" && parts?.[2] === String(webPort));
+    if (why) {
+      refused.push({ target: `CONNECT ${authority}`, host, why });
+      socket.end("HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n");
+      return;
+    }
+    state.forwarded += 1;
+    const upstream = net.connect(webPort, "127.0.0.1", () => {
+      socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+      if (head?.length) upstream.write(head);
+      upstream.pipe(socket);
+      socket.pipe(upstream);
+    });
+    track(upstream);
+    upstream.on("close", () => socket.destroy());
+    socket.on("close", () => upstream.destroy());
+  });
+  // A WebSocket sent to the proxy as an upgrade: the page's are refused before
+  // the network (routeWebSocket); one that arrives here is refused too.
+  server.on("upgrade", (req, socket) => {
+    refused.push({ target: `upgrade ${req.url}`, host: "", why: "websocket" });
+    socket.destroy();
   });
   await new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(port, "127.0.0.1", resolve);
   });
-  return {
-    port,
-    attempts,
-    close: () =>
-      new Promise((resolve) => {
-        for (const socket of sockets) socket.destroy();
-        server.close(() => resolve());
-      }),
-  };
+  let closing;
+  state.close = () =>
+    (closing ??= new Promise((resolve) => {
+      for (const socket of sockets) socket.destroy();
+      server.close(() => resolve());
+    }));
+  return state;
 }
 
 let chromiumModule;
@@ -358,27 +485,66 @@ const chromium = () =>
   ).chromium);
 
 /**
- * The stage's browsers: each `open(label)` launches Chrome with a fresh
- * profile `<sandbox>/browser-<n>` and records its process (this script's
- * child whose command line names the profile) before anything else happens.
- * `close(session, ms)` closes it within `ms`, then ends a recorded process
- * that is still the one recorded (its group, which it leads, by SIGKILL), and
- * reports whether any process of the profile is left. `closeOpen(ms)` does
- * that for the one still open, for the cleanup.
+ * Chrome (the system channel, headless) with `profile`, every connection —
+ * loopback included — through the run's proxy on `proxyPort`. Chrome bypasses
+ * a proxy for loopback by default; `<-loopback>` removes that implicit rule,
+ * and no `bypass` is given (the switch is last on the command line, so it is
+ * the list Chrome uses).
  */
-function browserSessions(m) {
+const launchChrome = ({ profile, proxyPort, sandbox }) =>
+  chromium().launchPersistentContext(profile, {
+    channel: "chrome",
+    headless: true,
+    handleSIGINT: false,
+    handleSIGTERM: false,
+    handleSIGHUP: false,
+    timeout: 60_000,
+    viewport: { width: 1440, height: 900 },
+    serviceWorkers: "block",
+    proxy: { server: `http://127.0.0.1:${proxyPort}` },
+    args: ["--proxy-bypass-list=<-loopback>"],
+    env: {
+      PATH: process.env.PATH ?? "",
+      HOME: path.join(sandbox.root, "home"),
+      TMPDIR: path.join(sandbox.root, "t"),
+    },
+  });
+
+/**
+ * The stage's browsers: each `open(label, gate)` starts the run's proxy for
+ * `gate` (`{ webPort, held }`), then launches Chrome (`launch`, Chrome by
+ * default) with a fresh profile `<dir>/browser-<n>` (`dir` the sandbox's root
+ * by default) and records its
+ * process (this script's child whose command line names the profile) while
+ * the launch is still connecting. `close(session, ms)` first waits (within
+ * `ms`) for a start still in flight, then closes what it produced — the
+ * context, the proxy, a recorded process that is still the one recorded (its
+ * group, which it leads, by SIGKILL) — and reports whether any process of the
+ * profile is left. `closeOpen(ms)` does that for the one still open, for the
+ * cleanup; from then on `open` launches nothing, and a start that sees the
+ * shutdown stops before the launch.
+ */
+export function browserSessions(
+  m,
+  { launch = launchChrome, dir = m.sandbox.root } = {},
+) {
   const { sandbox, report } = m;
   let count = 0;
   let open;
+  let stopping = false;
   const close = async (session, ms, label) => {
     if (!session || session.closed) return;
     session.closed = true;
     if (open === session) open = undefined;
+    const deadline = Date.now() + Math.max(0, ms);
+    const left = () => Math.max(0, deadline - Date.now());
+    await Promise.race([session.starting, sleep(left())]);
     await Promise.race([
       session.context?.close().catch(() => undefined),
-      sleep(Math.max(0, ms)),
+      sleep(left()),
     ]);
     await session.proxy?.close();
+    session.disposed = true;
     const { recorded } = session;
     if (recorded && identityOf(recorded.pid) === recorded.identity) {
       try {
@@ -402,60 +568,67 @@ function browserSessions(m) {
         `still running: ${(profileProcesses(session.profile) ?? []).map((entry) => entry.pid).join(", ") || "(the process table could not be read)"}`,
     );
   };
+  /** The proxy, the launch and the record; stops before the launch once closed. */
+  const start = async (session, label, gate) => {
+    const proxy = await forwardingProxy(sandbox, gate);
+    session.proxy = proxy;
+    // The shutdown began while the proxy started: no browser is launched.
+    if (session.closed) {
+      if (session.disposed) await proxy.close();
+      return;
+    }
+    const { profile } = session;
+    // The interrupt check of a launch waits for this line.
+    report.note(
+      `${label} launching the browser (profile ${sandbox.label(profile)})`,
+    );
+    const launching = launch({ profile, proxyPort: proxy.port, sandbox });
+    // Recorded as soon as it exists, while the launch is still connecting,
+    // also when the shutdown began meanwhile (the close ends it by pid).
+    void waitFor(
+      () => {
+        const child = processTable()?.find(
+          (entry) =>
+            entry.ppid === process.pid &&
+            entry.command.includes(`--user-data-dir=${profile}`),
+        );
+        if (child && !session.recorded) {
+          const identity = identityOf(child.pid);
+          if (identity?.includes(profile))
+            session.recorded = { pid: child.pid, identity };
+        }
+        return (
+          Boolean(session.recorded) ||
+          Boolean(session.launchError) ||
+          Boolean(session.gaveUp)
+        );
+      },
+      60_000,
+      100,
+    );
+    session.context = await launching.catch((error) => {
+      session.launchError = String(error?.message ?? error).split("\n")[0];
+      return undefined;
+    });
+    // A close that gave up waiting for this start: what it produced goes now.
+    if (session.disposed) await session.context?.close().catch(() => undefined);
+    await waitFor(() => session.recorded || session.launchError, 5000, 50);
+    session.gaveUp = true;
+  };
   return {
-    async open(label) {
+    async open(label, gate) {
+      if (stopping) return undefined;
       count += 1;
-      const profile = path.join(sandbox.root, `browser-${count}`);
-      sandbox.makeDir(profile);
-      const session = { profile, blocked: [], lost: [], closed: false };
+      const profile = path.join(dir, `browser-${count}`);
+      sandbox.makeDir(profile, { recursive: true });
+      const session = { profile, gate, blocked: [], lost: [], closed: false };
       open = session;
-      session.proxy = await tripwire(m);
-      const launching = chromium().launchPersistentContext(profile, {
-        channel: "chrome",
-        headless: true,
-        handleSIGINT: false,
-        handleSIGTERM: false,
-        handleSIGHUP: false,
-        timeout: 60_000,
-        viewport: { width: 1440, height: 900 },
-        serviceWorkers: "block",
-        proxy: {
-          server: `http://127.0.0.1:${session.proxy.port}`,
-          bypass: "127.0.0.1",
-        },
-        env: {
-          PATH: process.env.PATH ?? "",
-          HOME: path.join(sandbox.root, "home"),
-          TMPDIR: path.join(sandbox.root, "t"),
-        },
+      session.starting = start(session, label, gate).catch((error) => {
+        session.launchError ??= String(error?.message ?? error).split("\n")[0];
       });
-      // Recorded as soon as it exists, while the launch is still connecting.
-      void waitFor(
-        () => {
-          const child = processTable()?.find(
-            (entry) =>
-              entry.ppid === process.pid &&
-              entry.command.includes(`--user-data-dir=${profile}`),
-          );
-          if (child && !session.recorded) {
-            const identity = identityOf(child.pid);
-            if (identity?.includes(profile))
-              session.recorded = { pid: child.pid, identity };
-          }
-          return (
-            Boolean(session.recorded) ||
-            session.closed ||
-            Boolean(session.launchError)
-          );
-        },
-        60_000,
-        100,
-      );
-      session.context = await launching.catch((error) => {
-        session.launchError = String(error?.message ?? error).split("\n")[0];
-        return undefined;
-      });
-      await waitFor(() => session.recorded || session.launchError, 5000, 50);
+      await session.starting;
+      // The shutdown began during the start: its close disposes what it made.
+      if (session.closed) return undefined;
       if (
         !report.check(
           `${label} Chrome (headless, the system channel) runs with a fresh profile in the sandbox, its process recorded`,
@@ -475,36 +648,54 @@ function browserSessions(m) {
       return session;
     },
     close,
-    closeOpen: (ms) => close(open, Math.min(ms, 10_000), "cleanup:"),
+    closeOpen: (ms) => {
+      stopping = true;
+      return close(open, Math.min(ms, 10_000), "cleanup:");
+    },
   };
 }
 
 /**
- * The page's network for one session: every request to anything but the
- * clone's web origin is aborted and recorded; a request to it is sent only
- * while the web, api and canvas listeners are the recorded pids (the gate
- * every request of the stage goes through). WebSockets are refused and
- * recorded. Every request to `/canvas/api/` is kept with whether it carried
- * `Authorization: Bearer <token>` (compared, never printed).
+ * The gate for one launch: the clone's web port, and whether the web, api and
+ * canvas listeners are still the recorded pids (the gate every request of the
+ * stage goes through).
  */
-async function guardNetwork(m, session, { up, canvasPid, token }) {
-  const { context } = session;
-  const origin = `http://127.0.0.1:${m.webPort}`;
-  const held = () =>
+const webGate = (m, up, canvasPid) => ({
+  webPort: m.webPort,
+  held: () =>
     [
       [m.webPort, up.frontendPid],
       [m.apiPort, up.backendPid],
       [m.canvasPort, canvasPid],
     ].every(
       ([port, pid]) => m.sandbox.listenerState(port, pid).state === "owned",
-    );
+    ),
+});
+
+/** Whether a request leaves the page (not data:, blob: or about:). */
+const networked = (url) => !["data:", "blob:", "about:"].includes(url.protocol);
+
+/**
+ * The page's network for one session, the second layer behind the run's
+ * proxy: every request to anything but the clone's web origin is aborted and
+ * recorded; a request to it is sent only while the gate holds. WebSockets are
+ * refused and recorded. Every request the page makes is observed, a
+ * redirect's hops included (the route does not see those; the proxy refuses
+ * them), and one to another origin recorded. Every request to `/canvas/api/`
+ * is kept with whether it carried `Authorization: Bearer <token>` (compared,
+ * never printed). The init script writes the token into `localStorage` only
+ * on the web origin.
+ */
+export async function guardNetwork(session, { token }) {
+  const { context, gate } = session;
+  const origin = `http://127.0.0.1:${gate.webPort}`;
   await context.route("**/*", async (route) => {
     const url = new URL(route.request().url());
     if (url.origin !== origin) {
       session.blocked.push(`${url.protocol}//${url.host}`);
       return route.abort("blockedbyclient");
     }
-    if (!held()) {
+    if (!gate.held()) {
       session.lost.push(url.pathname);
       return route.abort("blockedbyclient");
     }
@@ -519,9 +710,14 @@ async function guardNetwork(m, session, { up, canvasPid, token }) {
     },
   );
   session.canvasApi = [];
+  session.strays = [];
   context.on("request", (req) => {
     const url = new URL(req.url());
-    if (url.origin === origin && url.pathname.startsWith("/canvas/api/"))
+    if (url.origin !== origin) {
+      if (networked(url)) session.strays.push(`${url.protocol}//${url.host}`);
+      return;
+    }
+    if (url.pathname.startsWith("/canvas/api/"))
       session.canvasApi.push(
         req
           .allHeaders()
@@ -534,38 +730,67 @@ async function guardNetwork(m, session, { up, canvasPid, token }) {
     session.console.push(`${message.type()}: ${message.text()}`),
   );
   await context.addInitScript(
-    ({ key, value }) => {
+    ({ key, value, webOrigin }) => {
+      if (window.location.origin !== webOrigin) return;
       try {
         window.localStorage.setItem(key, value);
       } catch {
         // the page reports a missing session itself
       }
     },
-    { key: TOKEN_KEY, value: token },
+    { key: TOKEN_KEY, value: token, webOrigin: origin },
   );
 }
 
 /**
- * The session's network verdicts. A page request to anything but the clone's
- * web origin fails the stage. The browser's own background connections
- * (Chrome's update and account services) went to the run's recording proxy,
- * which refuses them and forwards nothing; they are listed, not failed.
+ * The session's network verdicts. A page request (a redirect's hop included)
+ * to anything but the clone's web origin fails the stage, as does anything
+ * the run's proxy refused that is not one of Chrome's own background hosts
+ * (a loopback address or any IP literal, a WebSocket) or that it refused at
+ * the web origin because a listener had changed. Chrome's own background
+ * connections (its update and account services, outside hosts by name) are
+ * refused by the proxy, which forwards nothing there; they are listed, not
+ * failed. The page's requests must have gone through the proxy (it forwarded
+ * some): loopback is not bypassed.
  */
-function networkChecks(m, session, label) {
-  const { report } = m;
+export function networkChecks(report, session, label) {
+  const { proxy } = session;
+  const strays = [...new Set([...session.blocked, ...(session.strays ?? [])])];
   report.check(
-    `${label} the page requested nothing but the clone's web origin (any other request aborted and recorded)`,
-    session.blocked.length === 0,
-    () => `aborted: ${[...new Set(session.blocked)].join(", ")}`,
+    `${label} the page requested nothing but the clone's web origin (a redirect's hops included; any other request aborted or refused, and recorded)`,
+    strays.length === 0,
+    () => `elsewhere: ${strays.join(", ")}`,
+  );
+  const outside = proxy.refused.filter(
+    (entry) => entry.why === "origin" && backgroundHost(entry.host),
+  );
+  const refused = proxy.refused.filter(
+    (entry) => !outside.includes(entry) && entry.why !== "gate",
+  );
+  report.check(
+    `${label} the browser's connections through the run's proxy went nowhere but the clone's web origin (127.0.0.1 included; any other refused and recorded)`,
+    refused.length === 0,
+    () =>
+      `refused: ${[...new Set(refused.map((entry) => `${entry.target} (${entry.why})`))].join(", ")}`,
   );
   report.info(
-    `${label} the browser's own connections outside 127.0.0.1, refused by the run's recording proxy (nothing forwarded): ${[...new Set(session.proxy.attempts)].join(", ") || "none"}`,
+    `${label} the browser's own connections to outside hosts, refused by the run's proxy (nothing forwarded): ${[...new Set(outside.map((entry) => entry.host))].join(", ") || "none"}`,
   );
   report.check(
+    `${label} the page's requests reached the web origin through the run's proxy (${proxy.forwarded} forwarded; loopback is not bypassed)`,
+    proxy.forwarded > 0,
+    "the proxy forwarded nothing",
+  );
+  const lost = [
+    ...session.lost,
+    ...proxy.refused
+      .filter((entry) => entry.why === "gate")
+      .map((entry) => `${entry.target} (at the proxy)`),
+  ];
+  report.check(
     `${label} every request to the web origin was sent while the web, api and canvas listeners were the recorded ones`,
-    session.lost.length === 0,
-    () =>
-      `aborted with a changed listener: ${session.lost.slice(0, 5).join(", ")}`,
+    lost.length === 0,
+    () => `refused with a changed listener: ${lost.slice(0, 5).join(", ")}`,
   );
 }
 
@@ -671,16 +896,11 @@ async function entryRun(m, browsers, contribution) {
       return { ...a, notebookId };
     });
     if (!user) return false;
-    session = await browsers.open("L4");
+    session = await browsers.open("L4", webGate(m, run.up, service.canvasPid));
     if (!session) return false;
-    const verdict = await entryInBrowser(m, session, {
-      up: run.up,
-      canvasPid: service.canvasPid,
-      user,
-      contribution,
-    });
+    const verdict = await entryInBrowser(m, session, { user, contribution });
     await browsers.close(session, 10_000, "L4");
-    networkChecks(m, session, "L4");
+    networkChecks(report, session, "L4");
     if (verdict.failed) {
       keepConsole(m, session, "l4");
       for (const file of verdict.screenshots)
@@ -702,13 +922,9 @@ async function entryRun(m, browsers, contribution) {
  * click navigates to /canvas, the editor mounts, and a request to
  * `/canvas/api/…` carried A's token.
  */
-async function entryInBrowser(
-  m,
-  session,
-  { up, canvasPid, user, contribution },
-) {
+async function entryInBrowser(m, session, { user, contribution }) {
   const { report } = m;
-  await guardNetwork(m, session, { up, canvasPid, token: user.token });
+  await guardNetwork(session, { token: user.token });
   const page = session.context.pages()[0] ?? (await session.context.newPage());
   page.setDefaultTimeout(60_000);
   let failed = false;
@@ -888,13 +1104,9 @@ async function rollbackRun(m, browsers, contribution, user) {
       )
     )
       return false;
-    session = await browsers.open("L7");
+    session = await browsers.open("L7", webGate(m, run.up, service.canvasPid));
     if (!session) return false;
-    await guardNetwork(m, session, {
-      up: run.up,
-      canvasPid: service.canvasPid,
-      token: user.token,
-    });
+    await guardNetwork(session, { token: user.token });
     const page =
       session.context.pages()[0] ?? (await session.context.newPage());
     page.setDefaultTimeout(60_000);
@@ -956,7 +1168,7 @@ async function rollbackRun(m, browsers, contribution, user) {
         `L7 screenshot (in the sandbox; kept with --keep): ${await keepScreenshot(m, page, "l7-side-panel")}`,
       );
     await browsers.close(session, 10_000, "L7");
-    networkChecks(m, session, "L7");
+    networkChecks(report, session, "L7");
     if (failed) keepConsole(m, session, "l7");
     return true;
   } finally {
