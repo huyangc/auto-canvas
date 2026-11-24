@@ -38,8 +38,13 @@ if (mode === "--check" && base !== undefined) {
     if (config) throw new Error(`format configuration changed: ${config}`);
     paths = changed.filter(
       (path) =>
-        patterns.some((pattern) => matchesGlob(path, pattern)) &&
-        lstatSync(path, { throwIfNoEntry: false })?.isFile(),
+        patterns.some(
+          (pattern) =>
+            matchesGlob(path, pattern) ||
+            // path.matchesGlob skips dot segments; Prettier's own glob
+            // expansion for the full check does not, so match them too.
+            matchesGlob(path.replace(/(^|\/)\.+/gu, "$1"), pattern),
+        ) && lstatSync(path, { throwIfNoEntry: false })?.isFile(),
     );
     // Config lookup errors must never turn into a trusted partial check.
     for (const path of paths) await resolveConfig(path, { editorconfig: true });

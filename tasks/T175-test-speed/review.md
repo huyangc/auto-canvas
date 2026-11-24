@@ -24,3 +24,22 @@ pnpm test:local → 0 (858 files passed, 3 skipped; 8939 passed, 116 skipped of 
 pnpm test:slow → 0 (6 files, 16 passed; real 64.31 s)
 pnpm exec vitest run packages/auto-layout/test/stages.test.ts (after fix) → 0 (21 passed)
 ```
+
+## Round 2 — accepted (codex PR review round 1 findings, fixed by Opus)
+
+Codex `gpt-6.2-sol` reviewed `bcb64b7` (PR 134 comment 7126190022): three P2,
+all verified and fixed in review (each a few lines).
+
+| #   | Severity | Where                                                                 | Finding                                                                                                                       | Fix                                                                                                                                                                                                                        |
+| --- | -------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | P2       | `scripts/format.mjs:39`                                               | `path.matchesGlob` skips dot segments, so a PR changing only `.oxlintrc.json` checked 0 files while the full check covers it. | Also match the path with leading dots stripped from each segment; two regression cases in `scripts/format.test.mjs` (fail on the old script, pass now). `scripts/format.*` added to the task's touched paths for this fix. |
+| 2   | P2       | `packages/auto-layout/test/corpus.test-support.ts:95`                 | The removed R22 replay compared the whole plan; the corpus replay compares only edits.                                        | The corpus replay now also asserts `toEqual(plan)` on the same re-plan (no extra planner call); R22 comment updated.                                                                                                       |
+| 3   | P2       | `packages/auto-layout/test/differential-branches.test-support.ts:112` | Quick cases checked routing but not terminal membership.                                                                      | Adds `equivalentTerminals(netlistPresentation(source).document, doc)`.                                                                                                                                                     |
+
+Acceptance rerun:
+
+```text
+pnpm format:check && pnpm docs:check && pnpm typecheck && pnpm lint --quiet && pnpm deadcode → 0
+pnpm test:local → 0 (858 files passed, 3 skipped; 8941 passed, 116 skipped of 9057; real 50.8 s)
+pnpm test:slow → 0 (6 files, 16 passed; real 69.9 s)
+```

@@ -92,9 +92,11 @@ export function checkRealTransactions(
   expect(
     plan.diagnostics.filter((d) => d.code === "AUTO_LAYOUT_NET_UNROUTED"),
   ).toEqual([]);
-  expect(JSON.stringify(plan.edits)).toBe(
-    JSON.stringify(planAutoLayout(document, resolver).edits),
-  );
+  // The one determinism replay for the corpus: quality.test.ts's R22 relies
+  // on it, so it compares the whole result as well as the serialized edits.
+  const replanned = planAutoLayout(document, resolver);
+  expect(JSON.stringify(plan.edits)).toBe(JSON.stringify(replanned.edits));
+  expect(replanned).toEqual(plan);
   expect(
     plan.groups.map((g) => [g.kind, ...[...g.members].sort()]).sort(),
   ).toEqual([...fixture.groups].sort());
