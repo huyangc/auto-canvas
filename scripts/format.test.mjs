@@ -90,6 +90,7 @@ it("leaves a dot directory outside the format domain unchecked", () => {
 it.each([
   ".prettierrc",
   ".gitattributes",
+  "scripts/format.mjs",
   "apps/editor/prettier.config.mjs",
   ".prettierignore",
   ".editorconfig",

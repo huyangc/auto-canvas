@@ -63,3 +63,19 @@ pnpm test:local → 0 (858 files passed, 3 skipped; 8944 passed, 116 skipped of 
 ```
 
 `test:slow` is unchanged by this round (no slow file or shared helper touched).
+
+## Round 4 — accepted (codex PR review round 3 finding, fixed by Opus)
+
+Codex `gpt-6.2-sol` reviewed `d2225ee` (PR 134 comment 7126852962): one P2.
+
+| #   | Severity | Where                   | Finding                                                                          | Fix                                                                        |
+| --- | -------- | ----------------------- | -------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| 1   | P2       | `scripts/format.mjs:34` | A PR that widens `patterns` passes PR mode while the full check on `main` fails. | `scripts/format.mjs` joins the full-check triggers; regression case added. |
+
+Acceptance rerun:
+
+```text
+pnpm format:check → 0
+pnpm exec vitest run scripts/format.test.mjs → 0 (23 passed)
+pnpm lint -- scripts/format.mjs scripts/format.test.mjs → 0 errors, 0 warnings
+```

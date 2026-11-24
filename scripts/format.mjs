@@ -31,7 +31,7 @@ if (mode === "--check" && base !== undefined) {
       .split("\0")
       .filter(Boolean);
     const config = changed.find((path) =>
-      /(?:^|\/)(?:\.prettierrc(?:\..+)?|prettier\.config\..+|\.prettierignore|\.editorconfig|\.gitignore|\.gitattributes|package\.(?:json|yaml)|pnpm-lock\.yaml|pnpm-workspace\.yaml)$/u.test(
+      /(?:^|\/)(?:\.prettierrc(?:\..+)?|prettier\.config\..+|\.prettierignore|\.editorconfig|\.gitignore|\.gitattributes|scripts\/format\.mjs|package\.(?:json|yaml)|pnpm-lock\.yaml|pnpm-workspace\.yaml)$/u.test(
         path,
       ),
     );
