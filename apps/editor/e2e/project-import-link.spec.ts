@@ -1,5 +1,5 @@
 import { gzipSync } from "node:zlib";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import {
   exampleProject,
   exportedProject,
@@ -91,6 +91,29 @@ function importUrl(name: string) {
   );
 }
 
+async function failWorkspaceStorage(page: Page, failure: "open" | "write") {
+  await page.addInitScript((failure) => {
+    if (sessionStorage.getItem("test-workspace-available")) return;
+    const dbName = "analog-canvas-workspaces";
+    if (failure === "open") {
+      const open = IDBFactory.prototype.open;
+      IDBFactory.prototype.open = function (name, version) {
+        if (name === dbName)
+          throw new DOMException("Workspace unavailable", "SecurityError");
+        return open.call(this, name, version);
+      };
+    } else {
+      const put = IDBObjectStore.prototype.put;
+      IDBObjectStore.prototype.put = function (value, key) {
+        if (this.transaction.db.name === dbName) {
+          this.transaction.abort();
+        }
+        return put.call(this, value, key);
+      };
+    }
+  }, failure);
+}
+
 for (const [failure, replaceProject] of [
   ["open", false],
   ["write", false],
@@ -99,26 +122,7 @@ for (const [failure, replaceProject] of [
   test(`an import keeps its link if workspace storage fails to ${failure}${replaceProject ? " and its tab is reused" : ""}`, async ({
     page,
   }) => {
-    await page.addInitScript((failure) => {
-      if (sessionStorage.getItem("test-workspace-available")) return;
-      const dbName = "analog-canvas-workspaces";
-      if (failure === "open") {
-        const open = IDBFactory.prototype.open;
-        IDBFactory.prototype.open = function (name, version) {
-          if (name === dbName)
-            throw new DOMException("Workspace unavailable", "SecurityError");
-          return open.call(this, name, version);
-        };
-      } else {
-        const put = IDBObjectStore.prototype.put;
-        IDBObjectStore.prototype.put = function (value, key) {
-          if (this.transaction.db.name === dbName) {
-            this.transaction.abort();
-          }
-          return put.call(this, value, key);
-        };
-      }
-    }, failure);
+    await failWorkspaceStorage(page, failure);
     const url = importUrl("In-memory drawing");
     await openEditor(page, url);
     await expect(
@@ -180,4 +184,37 @@ test("changing the fragment during file staging never opens the obsolete project
   await expect(page.getByRole("tab", { name: /Obsolete import/ })).toHaveCount(
     0,
   );
+});
+
+test("returning to an earlier entry with the same URL cancels a staged import", async ({
+  page,
+}) => {
+  await failWorkspaceStorage(page, "write");
+  const url = importUrl("Original snapshot");
+  await openEditor(page, url);
+  await expectStatus(page, /link.*export/i);
+  await renameProject(page, "Edited in first entry");
+  await page.goto("/editor?import=1#invalid");
+  await expectStatus(page, "Project link could not be imported");
+  // A → invalid → A. While the second A is being read, go straight back to
+  // the first A. The address matches, but only the first entry owns the edit.
+  await page.evaluate(() => {
+    const text = File.prototype.text;
+    File.prototype.text = async function () {
+      if (this.name === "Shared project.icproj.json") {
+        File.prototype.text = text;
+        await new Promise<void>((resolve) => {
+          window.addEventListener("popstate", () => resolve(), { once: true });
+          history.go(-2);
+        });
+      }
+      return text.call(this);
+    };
+  });
+  await page.goto(url);
+  await expectStatus(page, /link.*export/i);
+  await expect(page.getByRole("tab", { selected: true })).toHaveAccessibleName(
+    /Edited in first entry/,
+  );
+  await expect(page.getByRole("tab")).toHaveCount(2);
 });

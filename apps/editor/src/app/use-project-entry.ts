@@ -183,10 +183,15 @@ export function useRestoredTabLinks({
       return;
     let live = true;
     let queue = Promise.resolve();
+    let navigation = 0;
     const enqueue = () => {
+      const request = ++navigation;
       const url = new URL(window.location.href);
       if (url.searchParams.get("import") !== "1") return;
-      const current = () => live && window.location.href === url.href;
+      // Traversing history can return to an identical URL with a different
+      // saved tab. Each navigation invalidates work from the previous entry.
+      const current = () =>
+        live && navigation === request && window.location.href === url.href;
       // Two links can differ only by fragment. Finish any tab transition
       // already underway, then handle the address the recipient is visiting.
       queue = queue.then(async () => {
@@ -208,9 +213,11 @@ export function useRestoredTabLinks({
       });
     };
     enqueue();
+    window.addEventListener("popstate", enqueue);
     window.addEventListener("hashchange", enqueue);
     return () => {
       live = false;
+      window.removeEventListener("popstate", enqueue);
       window.removeEventListener("hashchange", enqueue);
     };
   }, [restoringWorkspace, importReady, setStatus]);
