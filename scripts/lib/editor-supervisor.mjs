@@ -5,6 +5,10 @@
 // exited within STOP_TIMEOUT seconds, the supervisor sends SIGKILL to the
 // group itself. The launcher's own SIGKILL can only reach this supervisor, so
 // the escalation has to happen here, slightly before the launcher's deadline.
+//
+// The signal handlers are installed before the editor is spawned: a signal
+// that arrives right after the child starts would otherwise hit the default
+// action and kill the supervisor, orphaning the group.
 import { spawn } from "node:child_process";
 
 const [command, ...args] = process.argv.slice(2);
@@ -15,13 +19,10 @@ if (!command) {
 const graceSeconds = Number(process.env.STOP_TIMEOUT ?? "10");
 const graceMs = Math.max(0, graceSeconds * 1000 - 500);
 
-const child = spawn(command, args, {
-  detached: true,
-  stdio: "inherit",
-  env: process.env,
-});
+let child = null;
 let stopping = false;
 const killGroup = (signal) => {
+  if (!child?.pid) return;
   try {
     process.kill(-child.pid, signal);
   } catch {
@@ -37,6 +38,12 @@ for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
     setTimeout(() => killGroup("SIGKILL"), graceMs).unref();
   });
 }
+
+child = spawn(command, args, {
+  detached: true,
+  stdio: "inherit",
+  env: process.env,
+});
 child.on("error", (error) => {
   console.error(error);
   process.exitCode = 1;
