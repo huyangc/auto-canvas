@@ -10,12 +10,14 @@ import { feedbackRowCircuit, hasTransistor } from "./feedback-rows.js";
 import { conventionDraftEligible } from "./convention-relations.js";
 import { netlistMirrorSeats } from "./netlist-mirror-seats.js";
 import { netlistSymmetry } from "./readability-netlist-symmetry.js";
+
 import { symmetricHalfParts } from "./symmetric-half-order.js";
 import { amplifierGateRows } from "./amp-gate-row.js";
 import { nodeAttachments } from "./attachment-seat.js";
 import { localLoopAmplifiers } from "./local-loop-amplifier.js";
 import {
   selectFinishedLayout,
+  distinctPlacements,
   movesReadabilityParticipant,
   rankedFinalists,
   shouldFinishRunner,
@@ -155,7 +157,11 @@ import {
 } from "./search-bounds.js";
 import { annealLayout } from "./search.js";
 import { compactPlacements, compactRows } from "./compact.js";
-import { symmetryTopology } from "./symmetry.js";
+import {
+  mirrorSymmetryTopology,
+  resolvedSymmetry,
+  symmetryTopology,
+} from "./symmetry.js";
 import { searchDeviceRelocations } from "./device-relocation-search.js";
 import { straightenPinJogs } from "./pin-jogs.js";
 import { searchRailSeats } from "./rail-seat-search.js";
@@ -207,6 +213,8 @@ interface LevelOptions extends AutoLayoutOptions {
   attachmentDraft?: boolean;
   gateRowDraft?: boolean;
   symmetricHalfOrder?: boolean;
+  unsplitSymmetry?: boolean;
+  mirrorSymmetry?: boolean;
 }
 
 /** T079: the attachment variant is finished only for small documents. */
@@ -784,6 +792,7 @@ function selectFinalLayout(
         best,
         candidate,
         options.partition,
+        kind,
       ),
       candidate,
     );
@@ -1357,6 +1366,7 @@ function planAutoLayoutMeasured(
     run: LayoutRun,
     strategy: LayoutStrategy,
     signalTrunks: boolean,
+    finishOptions: LevelOptions,
   ) =>
     repairBlockers(run, resolver, fixed, (placements) =>
       repairBounds && spanProblem(document, resolver, placements, repairBounds)
@@ -1365,7 +1375,7 @@ function planAutoLayoutMeasured(
             draftingTranslation(run.result),
             document,
             resolver,
-            options,
+            finishOptions,
             emptyOverrides(),
             strategy,
             signalTrunks,
@@ -1379,13 +1389,14 @@ function planAutoLayoutMeasured(
     run: LayoutRun,
     strategy: LayoutStrategy,
     signalTrunks: boolean,
+    finishOptions: LevelOptions,
   ) => {
     if (!run.final || !Number.isFinite(routedScore(run, resolver))) return run;
     const candidate = planFrom(
       draftingTranslation(run.result),
       document,
       resolver,
-      options,
+      finishOptions,
       emptyOverrides(),
       strategy,
       signalTrunks,
@@ -1406,6 +1417,7 @@ function planAutoLayoutMeasured(
     run: LayoutRun,
     strategy: LayoutStrategy,
     signalTrunks: boolean,
+    finishOptions: LevelOptions,
   ) => {
     if (
       (options.partition &&
@@ -1418,7 +1430,11 @@ function planAutoLayoutMeasured(
       !Number.isFinite(routedScore(run, resolver))
     )
       return run;
-    const roles = classifyNets(run.final, resolver);
+    const roles = {
+      ...classifyNets(run.final, resolver),
+      unsplitSymmetry: finishOptions.unsplitSymmetry ?? false,
+      mirrorSymmetry: finishOptions.mirrorSymmetry ?? false,
+    };
     const groups = recognizeStructures(
       { ...run.final, layoutGroups: [] },
       roles,
@@ -1432,19 +1448,22 @@ function planAutoLayoutMeasured(
         ...(group.tailInstanceId ? [group.tailInstanceId] : []),
         ...(group.diodeInstanceId ? [group.diodeInstanceId] : []),
       ]),
-      ...stageComponents(
+      ...resolvedSymmetry(
         run.final,
         resolver,
         roles,
-        symmetryTopology(run.final, resolver, roles).components,
-      ).map((component) => [...component.pairs.flat(), ...component.axis]),
+        options.partition,
+      ).components.map((component) => [
+        ...component.pairs.flat(),
+        ...component.axis,
+      ]),
     ];
     const replan = (exact: ReadonlyMap<string, Placement>) =>
       planFrom(
         draftingTranslation(run.result),
         document,
         resolver,
-        options,
+        finishOptions,
         emptyOverrides(),
         strategy,
         signalTrunks,
@@ -1481,6 +1500,7 @@ function planAutoLayoutMeasured(
     run: LayoutRun,
     strategy: LayoutStrategy,
     signalTrunks: boolean,
+    finishOptions: LevelOptions,
   ) => {
     if (
       fixed.size ||
@@ -1497,7 +1517,7 @@ function planAutoLayoutMeasured(
       draftingTranslation(run.result),
       document,
       resolver,
-      options,
+      finishOptions,
       emptyOverrides(),
       strategy,
       signalTrunks,
@@ -1521,30 +1541,37 @@ function planAutoLayoutMeasured(
     alternative: LayoutRun,
     strategy: LayoutStrategy,
     signalTrunks: boolean,
-    refined = run.result,
+    finishOptions: LevelOptions,
   ) =>
     timePhase("finishing", () => {
       const current = ripUpFinalist(
-        repair(run, strategy, signalTrunks),
+        repair(run, strategy, signalTrunks, finishOptions),
         strategy,
         signalTrunks,
+        finishOptions,
       );
-      const other = repair(alternative, strategy, false);
+      const other = repair(alternative, strategy, false, finishOptions);
       const otherWins = compareRuns(other, current, resolver) < 0;
       return selectRoutingAlternative(
         otherWins
           ? current
           : crossCoupled(
-              compact(current, strategy, signalTrunks),
+              compact(current, strategy, signalTrunks, finishOptions),
               strategy,
               signalTrunks,
+              finishOptions,
             ),
         otherWins
-          ? crossCoupled(compact(other, strategy, false), strategy, false)
+          ? crossCoupled(
+              compact(other, strategy, false, finishOptions),
+              strategy,
+              false,
+              finishOptions,
+            )
           : other,
         resolver,
         strategy,
-        refined,
+        run.result,
       );
     });
   const route = (strategy: LayoutStrategy, overrides: LayoutOverrides) => {
@@ -1749,6 +1776,81 @@ function planAutoLayoutMeasured(
         run: { ...candidate.run, result: copyResult(candidate.run.result) },
       };
   })();
+  const symmetryFinalist = (() => {
+    if (
+      !options.finalists ||
+      options.finalists.alternate ||
+      options.partition ||
+      stopped()
+    )
+      return;
+    const roles = classifyNets(document, resolver);
+    const rawSym = symmetryTopology(document, resolver, roles).components;
+    const unsplit =
+      stageComponents(document, resolver, roles, rawSym).length > rawSym.length;
+    if (
+      !unsplit &&
+      (rawSym.length ||
+        !mirrorSymmetryTopology(document, resolver, roles).components.length)
+    )
+      return;
+    const candidateOptions = unsplit
+      ? { ...options, unsplitSymmetry: true }
+      : { ...options, mirrorSymmetry: true };
+    const draft = (
+      strategy: LayoutStrategy,
+      overrides: LayoutOverrides,
+    ): Candidate => ({
+      strategy,
+      overrides,
+      run: plan(document, resolver, candidateOptions, overrides, strategy),
+    });
+    const firstStrategy = unsplit ? selected.strategy : "template";
+    let candidate = draft(
+      firstStrategy,
+      unsplit ? selected.overrides : emptyOverrides(),
+    );
+    for (const strategy of ["layered", "template"] as const) {
+      if (strategy === firstStrategy) continue;
+      const next = draft(strategy, emptyOverrides());
+      if (compareRuns(next.run, candidate.run, resolver) < 0) candidate = next;
+    }
+    const final = candidate.run.final;
+    const score = routedScore(candidate.run, resolver);
+    const incumbent = selected.run.final;
+    if (
+      !final ||
+      !incumbent ||
+      !distinctPlacements(incumbent, final) ||
+      !Number.isFinite(score) ||
+      floatingPins(final, resolver).length ||
+      missingConnections(final, resolver)
+    )
+      return;
+    if (!shouldFinishRunner(selected.run, candidate.run, resolver)) {
+      const before = auditRouting(incumbent, resolver).crossings;
+      const after = auditRouting(final, resolver).crossings;
+      if (
+        after >= before &&
+        !(
+          after === before &&
+          score <= routedScore(selected.run, resolver) * 2.2 &&
+          netlistSymmetry(final, resolver).violations <
+            netlistSymmetry(incumbent, resolver).violations
+        )
+      )
+        return;
+    }
+    return {
+      kind: unsplit
+        ? ("unsplitSymmetry" as const)
+        : ("mirrorSymmetry" as const),
+      candidate: {
+        ...candidate,
+        run: { ...candidate.run, result: copyResult(candidate.run.result) },
+      },
+    };
+  })();
   // The local-loop placement never participates in provisional strategy
   // selection. Keep it alongside T078's incumbent and runner-up, and apply
   // the same distinct-placement/completeness/score-margin gate.
@@ -1838,26 +1940,20 @@ function planAutoLayoutMeasured(
           run: { ...halfOrderRun, result: copyResult(halfOrderRun.result) },
         }
       : undefined;
+  const baseOptions = options;
   const finishFinalist = (
-    selected: (typeof ranked)[number],
+    selected: Candidate,
     searchFinalist: boolean,
-    localLoopDraft = false,
-    attachmentDraft = false,
-    gateRowDraft = false,
-    symmetricHalfOrder = false,
+    draft: Partial<LevelOptions> = {},
   ): AutoLayoutResult => {
+    const options = { ...baseOptions, ...draft };
+    const symmetryDraft = options.unsplitSymmetry || options.mirrorSymmetry;
     repairBounds = undefined;
     // Reuse the selected placement and refinement choices; do not search again.
     const alternative = plan(
       document,
       resolver,
-      {
-        ...options,
-        localLoopDraft,
-        attachmentDraft,
-        gateRowDraft,
-        symmetricHalfOrder,
-      },
+      options,
       selected.overrides,
       selected.strategy,
       false,
@@ -1900,7 +1996,7 @@ function planAutoLayoutMeasured(
       document,
       resolver,
       options,
-      finish(selected.run, alternative, selected.strategy, true),
+      finish(selected.run, alternative, selected.strategy, true, options),
     );
 
     const selectFinished = () => {
@@ -1918,6 +2014,7 @@ function planAutoLayoutMeasured(
           best.alternative ?? best.run,
           best.strategy,
           best.run !== alternative,
+          options,
         ),
       );
       const before = preview(document, resolver, quickResult.edits);
@@ -2024,10 +2121,12 @@ function planAutoLayoutMeasured(
                   (portfolio !== chosen.portfolio ||
                     run.strategy !== "convention"),
               ),
-              fixed.size || document.instances.length > 40 ? 0 : 2,
+              symmetryDraft || fixed.size || document.instances.length > 40
+                ? 0
+                : 2,
               stopped,
               (run, strategy) => {
-                const trial = compact(run, strategy, true);
+                const trial = compact(run, strategy, true, options);
                 return finalizeFacing(
                   document,
                   resolver,
@@ -2104,14 +2203,49 @@ function planAutoLayoutMeasured(
         "finished-seats",
         () => new Map<string, LayoutRun>(),
       );
+      const rigidSymmetry = symmetryDraft
+        ? resolvedSymmetry(initial.final, resolver, {
+            ...classifyNets(initial.final, resolver),
+            unsplitSymmetry: options.unsplitSymmetry ?? false,
+            mirrorSymmetry: options.mirrorSymmetry ?? false,
+          }).components.map(({ pairs, axis }) => [...pairs.flat(), ...axis])
+        : [];
+      const initialSeats = new Map(
+        initial.final.instances.map((instance) => [
+          instance.id,
+          instance.placement!,
+        ]),
+      );
+      // R147's single-unit moves cannot split a finalist's whole component.
+      const preservesSymmetry = (placements: ReadonlyMap<string, Placement>) =>
+        rigidSymmetry.every((ids) => {
+          const first = ids[0]!;
+          const before = initialSeats.get(first)!;
+          const after = placements.get(first)!;
+          const dx = after.position.x - before.position.x;
+          const dy = after.position.y - before.position.y;
+          return ids.every((id) => {
+            const old = initialSeats.get(id)!;
+            const next = placements.get(id)!;
+            return (
+              next.rotation === old.rotation &&
+              next.mirror === old.mirror &&
+              next.position.x - old.position.x === dx &&
+              next.position.y - old.position.y === dy
+            );
+          });
+        });
       const finishPlacement = (
         placements: ReadonlyMap<string, Placement>,
         contacts?: ReturnType<typeof contactPolicy>,
         translation = draftingTranslation(incumbent),
       ) => {
+        if (!preservesSymmetry(placements)) return initial;
         const cache = finishedSeats;
         const key = JSON.stringify([
           strategy,
+          options.unsplitSymmetry,
+          options.mirrorSymmetry,
           translation,
           contacts ? [...contacts.allowed].sort(compareIds) : null,
           document.instances.map((i) => [i.id, placements.get(i.id)]),
@@ -2144,7 +2278,13 @@ function planAutoLayoutMeasured(
               document,
               resolver,
               options,
-              finish(routeSeat(true), routeSeat(false), strategy, true),
+              finish(
+                routeSeat(true),
+                routeSeat(false),
+                strategy,
+                true,
+                options,
+              ),
             ),
             stopped,
           ),
@@ -2158,7 +2298,7 @@ function planAutoLayoutMeasured(
         cache.set(key, run);
         return run;
       };
-      const reducedBudget = attachmentDraft;
+      const reducedBudget = options.attachmentDraft ?? false;
       const relocationBudget = {
         remaining: finishingTrialBudget(
           document.instances.length,
@@ -2433,6 +2573,18 @@ function planAutoLayoutMeasured(
     for (const [kind, candidate] of [
       ["runner", alternateFinalist],
       ["convention", conventionFinalist],
+      [
+        "unsplitSymmetry",
+        symmetryFinalist?.kind === "unsplitSymmetry"
+          ? symmetryFinalist.candidate
+          : undefined,
+      ],
+      [
+        "mirrorSymmetry",
+        symmetryFinalist?.kind === "mirrorSymmetry"
+          ? symmetryFinalist.candidate
+          : undefined,
+      ],
       ["localLoop", localFinalist],
       ["attachment", attachmentFinalist],
       ["gateRow", gateRowFinalist],
@@ -2444,12 +2596,28 @@ function planAutoLayoutMeasured(
         options.finalists.available.set(kind, candidate.run);
     }
     pending.set(finalistKey, {
+      unsplitSymmetry:
+        symmetryFinalist?.kind === "unsplitSymmetry"
+          ? () =>
+              finishFinalist(symmetryFinalist.candidate, false, {
+                unsplitSymmetry: true,
+              })
+          : () => copyResult(snapshot),
+      mirrorSymmetry:
+        symmetryFinalist?.kind === "mirrorSymmetry"
+          ? () =>
+              finishFinalist(symmetryFinalist.candidate, false, {
+                mirrorSymmetry: true,
+              })
+          : () => copyResult(snapshot),
       halfOrder: halfOrderFinalist
         ? () =>
-            finishFinalist(halfOrderFinalist, false, false, false, false, true)
+            finishFinalist(halfOrderFinalist, false, {
+              symmetricHalfOrder: true,
+            })
         : () => copyResult(snapshot),
       gateRow: gateRowFinalist
-        ? () => finishFinalist(gateRowFinalist, false, false, false, true)
+        ? () => finishFinalist(gateRowFinalist, false, { gateRowDraft: true })
         : () => copyResult(snapshot),
       runner: alternateFinalist
         ? () => finishFinalist(alternateFinalist, false)
@@ -2458,10 +2626,11 @@ function planAutoLayoutMeasured(
         ? () => finishFinalist(conventionFinalist, false)
         : () => copyResult(snapshot),
       attachment: attachmentFinalist
-        ? () => finishFinalist(attachmentFinalist, false, false, true)
+        ? () =>
+            finishFinalist(attachmentFinalist, false, { attachmentDraft: true })
         : () => copyResult(snapshot),
       localLoop: localFinalist
-        ? () => finishFinalist(localFinalist, false, true)
+        ? () => finishFinalist(localFinalist, false, { localLoopDraft: true })
         : () => copyResult(snapshot),
     });
   }
@@ -2655,6 +2824,8 @@ function buildPlan(
     ...classifyNets(document, resolver),
     seriesLevels: options.seriesLevels ?? true,
     symmetricHalfOrder: options.symmetricHalfOrder ?? false,
+    unsplitSymmetry: options.unsplitSymmetry ?? false,
+    mirrorSymmetry: options.mirrorSymmetry ?? false,
     ...(options.pitch ? { pitch: options.pitch } : {}),
   };
   const groups = partitionGroups(

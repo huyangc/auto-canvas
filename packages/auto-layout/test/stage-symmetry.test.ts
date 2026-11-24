@@ -1,8 +1,9 @@
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { visibleInstanceBounds } from "@icm/derived";
 import { executeTransaction } from "@icm/edit-engine";
 import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
 import { planAutoLayout } from "../src/auto-layout.js";
+import * as finishedSelection from "../src/finished-selection.js";
 import { pinPoints, withPlacements } from "../src/geometry.js";
 import { classifyNets } from "../src/net-roles.js";
 import { placeDocument } from "../src/place.js";
@@ -12,9 +13,10 @@ import {
   randomStream,
   type SearchState,
 } from "../src/search-moves.js";
+import { auditRouting } from "../src/routing-audit.js";
 import { stageComponents } from "../src/stage-symmetry.js";
 import { detectSymmetry, symmetryCounts } from "../src/symmetry.js";
-import { terminalPartition } from "../src/transaction.js";
+import { preview, terminalPartition } from "../src/transaction.js";
 import { circuit } from "./document-fixture.js";
 
 const resolver = new InMemorySymbolResolver(builtInSymbols);
@@ -342,3 +344,91 @@ it("keeps all stage pairs mirrored through seeded search and R97 finishing", () 
     orientationMirrored: 5,
   });
 }, 30000);
+
+it("finishes a concentric two-stage amplifier on one axis with fewer crossings", () => {
+  const document = circuit(
+    {
+      m1: "pmos",
+      m2: "pmos",
+      m3: "resistor",
+      m4: "resistor",
+      m5: "nmos",
+      m6: "nmos",
+      m7: "pmos",
+      m8: "pmos",
+      tail: "current-source",
+      g: "ground",
+      v: "vdd-port",
+      ip: "port",
+      im: "port",
+    },
+    {
+      common: ["m1.S", "m2.S", "tail.+"],
+      first: ["m1.D", "m3.1", "m5.G"],
+      second: ["m2.D", "m4.1", "m6.G"],
+      inputP: ["m1.G", "ip.P"],
+      inputM: ["m2.G", "im.P"],
+      bias2: ["m7.G", "m8.G"],
+      outP: ["m5.D", "m7.D"],
+      outM: ["m6.D", "m8.D"],
+      vdd: ["m3.2", "m4.2", "m5.S", "m6.S", "g.0"],
+      ground: ["m7.S", "m8.S", "tail.-", "v.P"],
+    },
+  );
+  document.netlist = {
+    name: "two-stage",
+    formalParameters: [],
+    terminals: [
+      ["ip", "inputP"],
+      ["im", "inputM"],
+    ].map(([id, netId]) => ({
+      id: id!,
+      name: netId!,
+      netId: netId!,
+      direction: "input",
+      interfaceInstanceIds: [id!],
+    })),
+  };
+  const { components, stages } = topology(document);
+  expect(components.map((c) => c.pairs.length)).toEqual([4]);
+  expect(stages.map((c) => c.pairs.length)).toEqual([2, 2]);
+  const rank = finishedSelection.rankedFinalists;
+  const finalist = vi.spyOn(finishedSelection, "rankedFinalists");
+  try {
+    const result = planAutoLayout(document, resolver);
+    expect(
+      finalist.mock.results.some(({ value }) =>
+        value.includes("unsplitSymmetry"),
+      ),
+    ).toBe(true);
+    expect(result.diagnostics.filter((d) => d.severity === "error")).toEqual(
+      [],
+    );
+    const finished = preview(document, resolver, result.edits);
+    if (!finished.ok) throw new Error("Unsplit layout must replay");
+    finalist.mockImplementation((pass, symbols) =>
+      rank(pass, symbols).filter((kind) => kind !== "unsplitSymmetry"),
+    );
+    const baseline = preview(
+      document,
+      resolver,
+      planAutoLayout(document, resolver).edits,
+    );
+    if (!baseline.ok) throw new Error("Split layout must replay");
+    expect(
+      symmetryCounts(finished.document, resolver, components),
+    ).toMatchObject({
+      pairs: 4,
+      mirrored: 4,
+      level: 4,
+    });
+    expect(auditRouting(finished.document, resolver).crossings).toBeLessThan(
+      auditRouting(baseline.document, resolver).crossings,
+    );
+    expect(terminalPartition(finished.document, resolver)).toBe(
+      terminalPartition(document, resolver),
+    );
+  } finally {
+    finalist.mockRestore();
+  }
+}, 60_000);

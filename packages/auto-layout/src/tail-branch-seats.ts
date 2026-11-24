@@ -135,18 +135,22 @@ export function* exteriorTailSeats(
   doc: SchematicDocument,
   s: StageStructure,
   t: Tail,
+  highSide: boolean,
 ) {
+  const tailDir = highSide ? -1 : 1;
   const base: Seats = new Map(doc.instances.map((i) => [i.id, i.placement!]));
   const left = base.get(t.drivers[0])!.position,
     right = base.get(t.drivers[1])!.position,
     g = src.presentation.grid;
   const axis = g * Math.round((left.x + right.x) / (2 * g)),
     y = g * Math.round((left.y + right.y) / (2 * g));
-  if (base.get(t.id)!.position.y < y) {
+  if (tailDir * (base.get(t.id)!.position.y - y) < 0) {
     const reflected: Seats = new Map();
     for (const [id, p] of base)
       reflected.set(id, {
-        ...reflectOrientation(p, "top-bottom"),
+        ...(highSide && s.channel(id)
+          ? p
+          : reflectOrientation(p, "top-bottom")),
         position: { x: p.position.x, y: 2 * y - p.position.y },
       });
     yield reflected;
@@ -176,7 +180,14 @@ export function* exteriorTailSeats(
       r,
     );
     return {
-      top: g * (Math.floor(Math.min(...bounds.map((v) => v.bounds.y)) / g) - 1),
+      outputY: highSide
+        ? g *
+          (Math.ceil(
+            Math.max(...bounds.map(({ bounds }) => bounds.y + bounds.height)) /
+              g,
+          ) +
+            1)
+        : g * (Math.floor(Math.min(...bounds.map((v) => v.bounds.y)) / g) - 1),
       reach:
         g *
         Math.ceil(
@@ -217,7 +228,7 @@ export function* exteriorTailSeats(
                 load,
                 s.channel(load)!.drain,
                 x,
-                y - pitch - rise,
+                y - tailDir * (pitch + rise),
                 mirror,
               );
               align(
@@ -225,14 +236,18 @@ export function* exteriorTailSeats(
                 follower,
                 s.channel(follower)!.source,
                 adjacent,
-                y - pitch,
+                y - tailDir * pitch,
                 mirror,
               );
               const control = s
                 .pins(leg)
                 .find((p) => net(leg, p.name) === bank.controls[k])!;
               const rotation =
-                control.at.y > 0 ? (turn === 90 ? 270 : 180) : turn;
+                (turn === 90 ? control.at.y : tailDir * control.at.y) > 0
+                  ? turn === 90
+                    ? 270
+                    : 180
+                  : turn;
               m.set(leg, placement(adjacent + dir * half, y, mirror, rotation));
             }
             align(
@@ -240,11 +255,11 @@ export function* exteriorTailSeats(
               t.id,
               t.entry.name,
               axis,
-              y + pitch + half + g,
+              y + tailDir * (pitch + half + g),
               "none",
-              t.entry.at.y < 0 ? 0 : 180,
+              tailDir * t.entry.at.y < 0 ? 0 : 180,
             );
-            const { top, reach } = portEnvelope(m);
+            const { outputY, reach } = portEnvelope(m);
             for (const drop of [3 * half, half, 0])
               for (const pad of [2 * half, half + g, half])
                 for (const margin of [g, half]) {
@@ -255,7 +270,7 @@ export function* exteriorTailSeats(
                       s.branches.inputs[k],
                       placement(
                         axis + dir * (reach + margin),
-                        y + drop,
+                        y + tailDir * drop,
                         k ? "horizontal" : "none",
                       ),
                     );
@@ -263,9 +278,9 @@ export function* exteriorTailSeats(
                       s.branches.outputs[k],
                       placement(
                         axis + dir * (radius + spacing + pad),
-                        top,
+                        outputY,
                         "none",
-                        90,
+                        highSide ? 270 : 90,
                       ),
                     );
                   }
@@ -287,14 +302,14 @@ export function* exteriorTailSeats(
                 inner = x - dir * lane * g,
                 id = t.drivers[k],
                 ch = s.channel(id)!;
-              const down = pin(id, ch.source).at.y < 0;
+              const flip = !highSide && pin(id, ch.source).at.y < 0;
               align(
                 m,
                 id,
                 ch.drain,
                 x,
                 y,
-                k ? (down ? "both" : "horizontal") : down ? "vertical" : "none",
+                k ? (flip ? "both" : "horizontal") : flip ? "vertical" : "none",
               );
               const load = bank.load[k];
               align(
@@ -302,7 +317,7 @@ export function* exteriorTailSeats(
                 load,
                 s.channel(load)!.drain,
                 x,
-                y - row * g,
+                y - tailDir * row * g,
                 k === Number(gatesInward) ? "none" : "horizontal",
               );
               const link = bank.link[k],
@@ -314,10 +329,10 @@ export function* exteriorTailSeats(
                   ? "none"
                   : "horizontal"
                 : k
-                  ? op.at.y < 0
+                  ? tailDir * op.at.y < 0
                     ? "both"
                     : "horizontal"
-                  : op.at.y < 0
+                  : tailDir * op.at.y < 0
                     ? "vertical"
                     : "none";
               align(
@@ -325,7 +340,7 @@ export function* exteriorTailSeats(
                 link,
                 op.name,
                 horizontal ? x : inner,
-                y - (row * g) / 2,
+                y - (tailDir * (row * g)) / 2,
                 mirror,
                 horizontal ? 90 : 0,
               );
@@ -339,12 +354,12 @@ export function* exteriorTailSeats(
                   id,
                   p.name,
                   inner,
-                  y - row * g,
+                  y - tailDir * row * g,
                   k
-                    ? p.at.y > 0
+                    ? tailDir * p.at.y > 0
                       ? "horizontal"
                       : "both"
-                    : p.at.y > 0
+                    : tailDir * p.at.y > 0
                       ? "none"
                       : "vertical",
                 );
@@ -355,11 +370,11 @@ export function* exteriorTailSeats(
               t.id,
               t.entry.name,
               axis,
-              y + (row + 1) * g,
+              y + tailDir * (row + 1) * g,
               "none",
-              t.entry.at.y < 0 ? 0 : 180,
+              tailDir * t.entry.at.y < 0 ? 0 : 180,
             );
-            const { top, reach } = portEnvelope(m);
+            const { outputY, reach } = portEnvelope(m);
             for (const pad of [0, 1, 2, 4]) {
               const a = new Map(m);
               for (const k of [0, 1] as const) {
@@ -382,7 +397,12 @@ export function* exteriorTailSeats(
                 );
                 a.set(
                   s.branches.outputs[k],
-                  placement(axis + dir * (radius + pad) * g, top, "none", 90),
+                  placement(
+                    axis + dir * (radius + pad) * g,
+                    outputY,
+                    "none",
+                    highSide ? 270 : 90,
+                  ),
                 );
               }
               yield a;

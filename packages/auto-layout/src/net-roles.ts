@@ -75,6 +75,8 @@ export interface NetRoles {
   instanceCount: number;
   /** Finished finalist: place local two-pin loads outside their half. */
   symmetricHalfOrder?: boolean;
+  unsplitSymmetry?: boolean;
+  mirrorSymmetry?: boolean;
   /** Internal finished-plan comparison can retain the legacy pitch. */
   pitch?: Readonly<PlacementPitch>;
   /** Internal R30 comparison policy; inherited by stages and folded halves. */
