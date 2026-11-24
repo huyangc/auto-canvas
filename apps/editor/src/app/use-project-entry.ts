@@ -153,6 +153,7 @@ export function useBootLink({
 /** Opens the link a window was given into the tabs it brought back. */
 export function useRestoredTabLinks({
   importReady,
+  openImportTab,
   openProjectFile,
   restoringWorkspace,
   bootRequestsNewProject,
@@ -163,6 +164,7 @@ export function useRestoredTabLinks({
   restoredTabs,
 }: {
   importReady: boolean;
+  openImportTab: ProjectTabSessions["openImportTab"];
   openProjectFile: ProjectFileLifecycle["openProjectFile"];
   restoringWorkspace: boolean;
   bootRequestsNewProject: boolean;
@@ -172,8 +174,13 @@ export function useRestoredTabLinks({
   restoredNewLink: BootLink["restoredNewLink"];
   restoredTabs: ProjectTabSessions["restoredTabs"];
 }) {
-  const openImportFile = useEffectEvent((file: File) =>
-    openProjectFile(file, { inTab: true, independentCopy: true }),
+  const openImportFile = useEffectEvent(
+    (file: File, isCurrent: () => boolean) =>
+      openProjectFile(file, {
+        isCurrent,
+        openIndependentCopy: (project, view, options) =>
+          openImportTab(project, view, options, isCurrent),
+      }),
   );
   useEffect(() => {
     if (
@@ -195,7 +202,12 @@ export function useRestoredTabLinks({
         if (!current()) return;
         try {
           const file = await projectFileFromImportLink(url.hash);
-          if (!current() || !(await openImportFile(file)) || !current()) return;
+          if (
+            !current() ||
+            !(await openImportFile(file, current)) ||
+            !current()
+          )
+            return;
           url.searchParams.delete("import");
           window.history.replaceState(
             window.history.state,
