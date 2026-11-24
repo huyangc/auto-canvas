@@ -191,7 +191,9 @@ export function useDialogDrag(
       if (event.button !== 0 || !dialog) return;
       const target = event.target;
       if (target instanceof Element && target.closest(INTERACTIVE)) return;
-      stopDrag.current?.();
+      // A second touch also arrives as button 0; it must not take the drag
+      // away from the finger that holds the header.
+      if (stopDrag.current) return;
       // Closing the dialog unmounts it while this hook keeps living, so a
       // reopened dialog carries no transform but the old offset would still
       // shift its first drag. The element is the owner of the offset.
