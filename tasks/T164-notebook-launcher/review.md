@@ -68,3 +68,38 @@ P2, one P3, no blocking finding).
 
 Rerun: the three new files 168 passed, none skipped; typecheck, lint, format,
 deadcode 0; the behavioural script 40 checks passed.
+
+## Codex round 3 — no blocking finding; follow-ups for T164b
+
+Codex `gpt-6.2-sol` PR review round 3 of PR 135 at `73e7790`: one P2, three
+P3. None is changed in this task; each is answered on the PR.
+
+- P2, `migrate.ts`: set a transaction-local `search_path` to the checked
+  schema before the table checks and the migration, so a schema created by
+  another session ahead of it in the `search_path` cannot receive the
+  migration's unqualified statements. Needs its own fixture: T164b.
+- P3, `guarded-database.ts`: refuse a NUL in decoded credentials. T164b.
+- P3, `migration-guard.test.ts`: fixture URLs drop the admin URL's query, so a
+  TLS-only test server needs `PGSSLMODE` in the environment. Not used by this
+  repository's lanes or CI.
+- P3, `serve.sh`: an unusable `AUTO_CANVAS_LOG_FILE` (a directory, or not
+  appendable) exits 1 with Bash's message instead of the status-2 diagnostic.
+  T164b.
+
+## Round 4 — CI failure of the secrets case (fixed by the reviewer)
+
+CI's `pnpm test:local` failed on `73e7790` and `08c7cee` in
+`migration-guard.test.ts`, "never gives the password to an error message or
+the log": CI's database password is `postgres`, and the refusal message
+contains `postgresql://`. The case passed locally because the lane URL has no
+password. Reproduced locally with
+`AUTO_CANVAS_TEST_DATABASE_URL=postgresql://<user>:postgres@127.0.0.1:5432/auto_canvas_test_2`
+(1 failed, 55 passed), then fixed in the test: the pre-pool refusal, which
+never connects, uses a password of its own that no message could contain by
+coincidence; the connecting cases look for the configured password where a URL
+holds it (`:<password>@`) and for the URL itself. With the CI-shaped URL 56
+passed; with the lane URL the three new files 168 passed.
+
+The same CI run also timed out six `packages/auto-layout` tests at 5000 ms
+(`differential-branches.test.ts`, `units.test.ts`); that run took 380 s
+against 247 s for the previous head, and neither file is touched here.
