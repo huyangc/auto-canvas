@@ -90,3 +90,10 @@ Rerun by the reviewer on the rebased tree: `pnpm build`,
 `pnpm build:notebook-editor` 0; notebook unit and build tests 144 passed; the
 unit suite 8853 passed; typecheck, lint, format, docs, deadcode 0; no changed
 path outside the owned list.
+
+### Round 3, addendum — codex round 5 (one P1, one P2)
+
+| #   | Severity    | Where                                       | Finding                                                                                                                                        | Outcome                                                                                                                                                                                                                                   |
+| --- | ----------- | ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 11  | P1 open     | the 18 failing notebook cases               | The existing notebook browser suite is red against this build until the cases are migrated.                                                    | Agreed, and it is this task's stated merge condition: T163b's branch is stacked on this one and merged into it before PR 116 merges. Nothing here is merged alone.                                                                        |
+| 12  | P2 repaired | `tasks/T162b-…/standard-tests.baseline.txt` | The baseline predates a standard test `main` gained at `c5f1678` (T171: the Browse dialog case of `project-tabs.spec.ts`), so the check fails. | A drift of `main`, not of this task: the baseline is regenerated from this base's listing, a pure addition of that one line (476 → 477); `standard listing: 477 tests equal the baseline`. Any later test added to `main` needs the same. |

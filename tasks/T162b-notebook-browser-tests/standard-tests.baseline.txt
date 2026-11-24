@@ -321,6 +321,7 @@
 	project-tabs.spec.ts	tab file opening is additive, and closing one tab, the others or all asks only for unsaved ones
 	project-tabs.spec.ts	tab names edit in place as one undoable change and commit to their own tab through activation, New, Close and blur
 	project-tabs.spec.ts	tab rename keeps header geometry and Project Info renames the circuit and its Cell
+	project-tabs.spec.ts	the Browse dialog tiles its cards evenly, closes from its × and drags by its header
 	project-tabs.spec.ts	the Shelf appends a Cloud Project tab, deduplicates and saves Cloud identities
 	project-tabs.spec.ts	unchanged imported or legacy names make no edit on Enter, blur or IME Enter, past the Cloud-length input limit
 	project-tabs.spec.ts	with one project File opens a file in a new tab and browses the Shelf
