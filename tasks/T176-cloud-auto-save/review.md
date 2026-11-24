@@ -152,3 +152,15 @@ Owner chose to fix in round 6 (2026-11-24).
 | --- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1   | must-fix (codex P1, confirmed: `use-project-file-lifecycle.ts:722-733` checks only `snapshot.isCurrent()` after the await) | `performProjectSaveToCloud`           | After the 30 s deadline releases the coordinator, a Save As binds the tab to B; the timed-out auto-save to A then succeeds and its receipt rebinds the tab to A and its baseline. | Apply any receipt (saved or failed hold) only if `cloudBindingRef.current` still equals the binding the write started with (same id and revision; for Save As, the binding at start), and no newer write has started for this copy since (a per-copy write sequence number taken at start and compared at receipt). A superseded receipt changes nothing and is reported as superseded. Unit test with a deferred receipt after a Save As: binding stays B. |
 | 2   | must-fix (codex P2)                                                                                                        | `agent-workspace-requests.ts:213-216` | A background Agent save with no response never releases its reservation, blocking tab switches, sign-out and auto-save until reload.                                              | Race the background PUT against `CLOUD_AUTO_SAVE_DEADLINE_MS`: on expiry release the reservation, mark the stored session `failed` with a `timeout` hold, and answer the Agent with a timeout error; a late receipt is applied only under the same binding check as row 1 (stored binding unchanged since start). Unit test with a never-settling store.                                                                                                    |
+
+Round 6 verdict: **accepted** at 6f869bb, rebased onto main 292fc2f as
+ea5cc5a. Opus verified on a copy of 97a07cc that both new tests fail there
+(a third, unchanged test fails only as a knock-on of the hung handler).
+Acceptance rerun by Opus (lane 2, on ea5cc5a):
+
+```text
+pnpm format:check / docs:check / typecheck / lint / deadcode / build / test:desktop-build → 0
+pnpm test:local → 1 (9222 passed, 1 failed: agent-relay, lane env only)
+pnpm test:e2e:local → 0 (500 passed)
+AUTO_CANVAS_E2E_ACCOUNTS=1 playwright test → 0 (4 passed)
+```
