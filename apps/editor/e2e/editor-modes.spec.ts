@@ -1737,6 +1737,31 @@ test("the ⋯ menu works from the keyboard and closes like the other menus", asy
   ).toBeVisible();
 });
 
+test("Delete or Backspace inside an open menu leaves the drawing alone", async ({
+  page,
+}) => {
+  await openEditor(page, "/editor?example=two-stage-op-amp");
+  await expectStatus(page, "Opened example: Two-Stage Op Amp");
+  await page.locator("body").press("ControlOrMeta+a");
+  const instances = JSON.stringify(
+    (await exportedProject(page)).documents[0].instances,
+  );
+  const more = page.getByTestId("more-menu");
+  await more.locator(":scope > summary").focus();
+  await page.keyboard.press("Enter");
+  await expect(more).toHaveAttribute("open", "");
+  await page.keyboard.press("Tab");
+  await expect(
+    more.getByRole("button", { name: "Insert component… (I)" }),
+  ).toBeFocused();
+  await page.keyboard.press("Delete");
+  await page.keyboard.press("Backspace");
+  await expect(more).toHaveAttribute("open", "");
+  expect(
+    JSON.stringify((await exportedProject(page)).documents[0].instances),
+  ).toBe(instances);
+});
+
 test("the top bar names the project on one row, in both modes", async ({
   page,
 }) => {
