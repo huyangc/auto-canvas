@@ -113,7 +113,7 @@ export function modulesInClone(sandbox, modules) {
  * the copy is used again (R6-3): a build that replaced the directory or
  * linked it to a shared tree would otherwise go unnoticed.
  */
-export function modulesShapeProblems(sandbox, modules) {
+function modulesShapeProblems(sandbox, modules) {
   const problems = [];
   let root;
   try {

@@ -64,7 +64,7 @@ export const removeAppNext = (sandbox, app) =>
  * start`. A copy that fails is a FAIL for this step and ends the stage, so no
  * later build or server runs from a copy an earlier one replaced or relinked.
  */
-export function requireModules(sandbox, report, prefix, modules, when) {
+function requireModules(sandbox, report, prefix, modules, when) {
   // A disposal has removed the copy already: this is an interrupt, not a
   // statement about the modules.
   sandbox.ensureOpen(`the private modules ${when}`);

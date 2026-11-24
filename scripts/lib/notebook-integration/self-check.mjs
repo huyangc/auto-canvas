@@ -342,7 +342,7 @@ const pidAlive = (pid) => {
  * delay (must be cancelled: nothing ever runs), and a stop after the command
  * has started (must be signalled).
  */
-export async function stopRaceControls(sandbox, report) {
+async function stopRaceControls(sandbox, report) {
   const dir = path.join(sandbox.root, "self-check", "stop-race");
   sandbox.makeDir(dir, { recursive: true });
   const code =

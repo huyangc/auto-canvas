@@ -82,7 +82,7 @@ export const makeLocal = (sandbox, nb) =>
   sandbox.makeDir(path.join(nb, ".local"));
 
 /** Reads of files a build or the launcher wrote, never through a link. */
-export function launchLogTail(sandbox, nb, launcherLog) {
+function launchLogTail(sandbox, nb, launcherLog) {
   const logs = path.join(nb, ".local/logs");
   const parts = [tail(sandbox.readFile(launcherLog, "utf8") ?? "", 15)];
   for (const entry of sandbox.listDir(logs))
