@@ -1,3 +1,5 @@
+import { createProjectImportLink } from "../document/project-import-link";
+import { serializeProject } from "@icm/project-protocol";
 import type { useCloudProjects } from "./use-cloud-projects";
 // The editor's menus bound to its commands: the header with its project tabs,
 // File and ⋯ menus and toolbars, and the canvas context menu.
@@ -282,7 +284,27 @@ export function EditorMenuBar({
   autoLayoutRun: AutoLayoutRunView;
   importNetlistInputRef: RefObject<HTMLInputElement | null>;
 }) {
-  const { NativeHeaderActions, openExternalLink } = useEditorServices();
+  const { NativeHeaderActions, openExternalLink, exportDelivery } =
+    useEditorServices();
+  async function copyImportLink() {
+    try {
+      const link = createProjectImportLink(serializeProject(project));
+      try {
+        await exportDelivery.copyText(link);
+        setStatus("Project import link copied");
+      } catch {
+        // Clipboard access can be unavailable on an intranet HTTP origin.
+        window.prompt(
+          "Copy this link to share an editable copy of the project.",
+          await link,
+        );
+      }
+    } catch (error) {
+      setStatus(
+        `Could not share project: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
   // A drawing command pressed in Auto brings up the drawing tools first.
   const drawing = (tool: string, run: () => void) =>
     editorMode === "auto" ? bringUpDraw(tool, run) : run();
@@ -440,6 +462,11 @@ export function EditorMenuBar({
           void importSpiceFiles(files, namingProfile),
         onImportRnl: (files) => void importRnlFiles(files),
         onExportProject: () => void exportProjectFile(),
+        ...(projectStore &&
+        !import.meta.env.ICM_NOTEBOOK &&
+        !import.meta.env.ICM_DESKTOP
+          ? { onCopyImportLink: () => void copyImportLink() }
+          : {}),
         onExportSvg: () => void exportSvg(),
         onExportRaster: (format) => void exportRaster(format),
         // The file the Netlist panel's Save writes, whichever format it shows.

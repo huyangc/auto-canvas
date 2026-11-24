@@ -1,3 +1,4 @@
+import { projectFileFromImportLink } from "../document/project-import-link";
 import { useEffect, useRef, type Dispatch, type SetStateAction } from "react";
 import type { CircuitProject } from "@icm/model";
 import type { ProjectWorkspace } from "../document/project-workspace";
@@ -145,6 +146,8 @@ export function useBootLink({
 
 /** Opens the link a window was given into the tabs it brought back. */
 export function useRestoredTabLinks({
+  importReady,
+  openProjectFile,
   restoringWorkspace,
   bootRequestsNewProject,
   setStatus,
@@ -153,6 +156,8 @@ export function useRestoredTabLinks({
   restoredNewLink,
   restoredTabs,
 }: {
+  importReady: boolean;
+  openProjectFile: ProjectFileLifecycle["openProjectFile"];
   restoringWorkspace: boolean;
   bootRequestsNewProject: boolean;
   setStatus: Dispatch<SetStateAction<string>>;
@@ -161,6 +166,38 @@ export function useRestoredTabLinks({
   restoredNewLink: BootLink["restoredNewLink"];
   restoredTabs: ProjectTabSessions["restoredTabs"];
 }) {
+  const importLinkHandled = useRef(false);
+  useEffect(() => {
+    if (
+      import.meta.env.ICM_NOTEBOOK ||
+      import.meta.env.ICM_DESKTOP ||
+      restoringWorkspace ||
+      !importReady ||
+      importLinkHandled.current
+    )
+      return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("import") !== "1") return;
+    importLinkHandled.current = true;
+    void (async () => {
+      try {
+        const file = await projectFileFromImportLink(url.hash);
+        await openProjectFile(file, { inTab: true, independentCopy: true });
+      } catch (error) {
+        setStatus(
+          `Project link could not be imported: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      } finally {
+        // Consume even a rejected request so the next link navigates normally.
+        url.searchParams.delete("import");
+        window.history.replaceState(
+          window.history.state,
+          "",
+          url.pathname + url.search,
+        );
+      }
+    })();
+  }, [restoringWorkspace, importReady, openProjectFile, setStatus]);
   useEffect(() => {
     const cloudId = restoredCloudLink.current;
     if (restoringWorkspace || !cloudId) return;
