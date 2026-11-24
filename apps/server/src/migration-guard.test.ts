@@ -616,7 +616,7 @@ describe("accepted starts", () => {
       if (notebook)
         expect((await fetch(origin(server) + READY)).status).toBe(200);
       expect(await ledger(db)).toEqual(shipped);
-      expect(shipped).toHaveLength(5);
+      expect(shipped).toHaveLength(6);
       expect(spy).toHaveBeenCalledTimes(1);
       expect(spy.mock.calls[0]).toHaveLength(1);
       expect(spy.mock.calls[0]![0]).toBe(db.url);
