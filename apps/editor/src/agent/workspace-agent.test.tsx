@@ -9,6 +9,7 @@ import { createEmptyProject } from "@icm/model";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EditorDocumentController } from "../document/document-controller";
 import { loadAgentRuntime, type AgentRuntime } from "./agent-runtime-loader";
+import { readAgentSessionRecovery } from "./session-recovery";
 import { AGENT_SESSION_RECOVERY_STORAGE_KEY } from "./session-recovery-presence";
 import type { UseAgentSessionResult } from "./use-agent-session";
 import {
@@ -541,6 +542,22 @@ describe("workspace Agent provider (#1673)", () => {
     await settle(() => expect(bound).toBe(true));
     await clickConnect();
     await settle(() => expect(seen.session!.claimCode).toBe("CLAIM-1"));
+    const socket = await openRelay();
+    await acknowledge(socket);
+    await relayEvent(socket, { type: "session.ready", sessionId: "session-1" });
+    expect(seen.session!.status).toBe("connected");
+    const proof = (projectSessionId: string) =>
+      readAgentSessionRecovery(storage, {
+        projectId: "project-main",
+        projectSessionId,
+        now: Date.now(),
+      });
+    expect(proof("tab-B")?.sessionId).toBe("session-1");
+    await switchTab("tab-C");
+    await acknowledge(socket);
+    expect(proof("tab-C")?.sessionId).toBe("session-1");
+    expect(proof("tab-B")).toBeNull();
+    expect(proof("tab-A")?.sessionId).toBe("saved-tab-A");
     await switchTab("tab-A");
     await act(async () => void seen.session!.revoke());
     await settle(() => expect(seen.session!.status).toBe("revoked"));
@@ -548,6 +565,15 @@ describe("workspace Agent provider (#1673)", () => {
       sessionId: "saved-tab-A",
       projectSessionId: "tab-A",
     });
+    await reloadPage();
+    await settle(() => expect(seen.session!.status).toBe("reconnecting"));
+    const resumed = await openRelay();
+    await acknowledge(resumed);
+    expect(JSON.parse(resumed.sent.at(-1)!)).toMatchObject({
+      sessionId: "saved-tab-A",
+    });
+    expect(seen.session!.status).toBe("connected");
+    expect(sessionCreations).toBe(1);
   });
 
   it("a session the relay ends takes its own proof, whichever tab is shown", async () => {

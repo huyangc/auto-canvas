@@ -85,8 +85,10 @@ export function useAgentStartupRecovery({
       search.get("new") === "1"
     )
       return null;
-    const saved = peekAgentSessionRecovery(window.sessionStorage);
-    return saved?.projectSessionId === recoveryWorkingCopyId ? saved : null;
+    return peekAgentSessionRecovery(
+      window.sessionStorage,
+      (record) => record.projectSessionId === recoveryWorkingCopyId,
+    );
   });
   return agentStartupRecovery;
 }

@@ -7,6 +7,7 @@ import {
 } from "@icm/agent-adapter/session-scope";
 import {
   AGENT_SESSION_RECOVERY_STORAGE_KEY,
+  recoveryCandidates,
   type BrowserStorageLike,
 } from "./session-recovery-presence";
 
@@ -57,91 +58,100 @@ function parseRecord(value: unknown): AgentSessionRecoveryRecord | null {
   };
 }
 
+function recordsFrom(raw: string | null): AgentSessionRecoveryRecord[] {
+  return recoveryCandidates(raw)
+    .map(parseRecord)
+    .filter((record) => record !== null);
+}
+
+function storeRecords(
+  storage: BrowserStorageLike,
+  records: AgentSessionRecoveryRecord[],
+) {
+  if (records.length === 0) return clearAgentSessionRecovery(storage);
+  storage.setItem(
+    accountKey(AGENT_SESSION_RECOVERY_STORAGE_KEY),
+    JSON.stringify(records.length === 1 ? records[0] : records),
+  );
+}
+
+function matchesTarget(
+  record: AgentSessionRecoveryRecord,
+  target: Pick<RecoveryTarget, "projectId" | "projectSessionId">,
+) {
+  return (
+    record.projectId === target.projectId &&
+    record.projectSessionId === target.projectSessionId
+  );
+}
+
 export function writeAgentSessionRecovery(
   storage: BrowserStorageLike,
   record: AgentSessionRecoveryRecord,
 ): void {
-  storage.setItem(
-    accountKey(AGENT_SESSION_RECOVERY_STORAGE_KEY),
-    JSON.stringify(record),
+  const records = recordsFrom(
+    storage.getItem(accountKey(AGENT_SESSION_RECOVERY_STORAGE_KEY)),
   );
+  storeRecords(storage, [
+    ...records.filter(
+      (saved) =>
+        saved.sessionId !== record.sessionId && !matchesTarget(saved, record),
+    ),
+    record,
+  ]);
 }
 
 export function clearAgentSessionRecovery(storage: BrowserStorageLike): void {
   storage.removeItem(accountKey(AGENT_SESSION_RECOVERY_STORAGE_KEY));
 }
 
-/**
- * Removes the stored proof when it belongs to `target`'s working copy. One
- * storage slot serves every tab, so a proof another tab wrote is that tab's
- * to resume or retire: ending this session must not take it away.
- */
+function removeMatching(
+  storage: BrowserStorageLike,
+  matches: (record: AgentSessionRecoveryRecord) => boolean,
+) {
+  const records = recordsFrom(
+    storage.getItem(accountKey(AGENT_SESSION_RECOVERY_STORAGE_KEY)),
+  );
+  const remaining = records.filter((record) => !matches(record));
+  if (remaining.length !== records.length) storeRecords(storage, remaining);
+}
+
 export function clearAgentSessionRecoveryFor(
   storage: BrowserStorageLike,
   target: RecoveryTarget,
 ): void {
-  if (readAgentSessionRecovery(storage, target) !== null)
-    clearAgentSessionRecovery(storage);
+  removeMatching(storage, (record) => matchesTarget(record, target));
 }
 
-/**
- * Retires the proof of one relay session, whichever tab is displayed now: a
- * disconnect ends the session that wrote it, so its credentials must not come
- * back after a tab switch. Another session's proof is left in place.
- */
 export function clearAgentSessionRecoveryOf(
   storage: BrowserStorageLike,
   sessionId: string,
 ): void {
-  const record = peekAgentSessionRecovery(storage);
-  if (record !== null && record.sessionId === sessionId)
-    clearAgentSessionRecovery(storage);
+  removeMatching(storage, (record) => record.sessionId === sessionId);
 }
 
-/** Local recovery evidence, not an observation of relay availability. */
+/** Read-only lookup for startup and for a live session following a tab switch. */
 export function peekAgentSessionRecovery(
   storage: BrowserStorageLike,
+  matches: (record: AgentSessionRecoveryRecord) => boolean,
 ): AgentSessionRecoveryRecord | null {
   try {
-    return parseRecord(
-      JSON.parse(
-        storage.getItem(accountKey(AGENT_SESSION_RECOVERY_STORAGE_KEY)) ??
-          "null",
-      ),
+    return (
+      recordsFrom(
+        storage.getItem(accountKey(AGENT_SESSION_RECOVERY_STORAGE_KEY)),
+      ).find(matches) ?? null
     );
   } catch {
     return null;
   }
 }
 
-/**
- * Reads the same-tab reconnect proof for `target`. A proof written for another
- * Project or another working copy (another tab, a replaced Project) is not
- * evidence for this one: it reconnects nothing and is left in place.
- * Malformed records are removed before they can reach the relay.
- */
 export function readAgentSessionRecovery(
   storage: BrowserStorageLike,
   target: RecoveryTarget,
 ): AgentSessionRecoveryRecord | null {
   const raw = storage.getItem(accountKey(AGENT_SESSION_RECOVERY_STORAGE_KEY));
-  if (raw === null) return null;
-  let candidate: unknown;
-  try {
-    candidate = JSON.parse(raw) as unknown;
-  } catch {
-    clearAgentSessionRecovery(storage);
-    return null;
-  }
-  const record = parseRecord(candidate);
-  if (record === null) {
-    clearAgentSessionRecovery(storage);
-    return null;
-  }
-  if (
-    record.projectId !== target.projectId ||
-    record.projectSessionId !== target.projectSessionId
-  )
-    return null;
-  return record;
+  const records = recordsFrom(raw);
+  if (raw !== null && records.length === 0) clearAgentSessionRecovery(storage);
+  return records.find((record) => matchesTarget(record, target)) ?? null;
 }

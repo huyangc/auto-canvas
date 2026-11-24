@@ -4,7 +4,6 @@ import {
   clearAgentSessionRecovery,
   clearAgentSessionRecoveryFor,
   clearAgentSessionRecoveryOf,
-  peekAgentSessionRecovery,
   readAgentSessionRecovery,
   writeAgentSessionRecovery,
 } from "./session-recovery";
@@ -60,9 +59,35 @@ describe("Agent same-browser session recovery", () => {
     writeAgentSessionRecovery(storage, record());
     // Another session's id leaves this proof in place.
     clearAgentSessionRecoveryOf(storage, "another-session");
-    expect(peekAgentSessionRecovery(storage)).toEqual(record());
+    expect(readAgentSessionRecovery(storage, target)).toEqual(record());
     clearAgentSessionRecoveryOf(storage, record().sessionId);
-    expect(peekAgentSessionRecovery(storage)).toBeNull();
+    expect(readAgentSessionRecovery(storage, target)).toBeNull();
+  });
+
+  it("moves one session between working copies and retires only the selected proof", () => {
+    const storage = new MemoryStorage();
+    const a = record();
+    const b = { ...a, sessionId: "session-b", projectSessionId: "copy-b" };
+    const moved = { ...a, projectSessionId: "copy-c" };
+    storage.setItem(AGENT_SESSION_RECOVERY_STORAGE_KEY, JSON.stringify(a));
+    writeAgentSessionRecovery(storage, b);
+    expect(hasAgentSessionRecovery(storage)).toBe(true);
+    writeAgentSessionRecovery(storage, moved);
+    expect(readAgentSessionRecovery(storage, target)).toBeNull();
+    expect(readAgentSessionRecovery(storage, { ...target, ...b })).toEqual(b);
+    const replacement = { ...moved, sessionId: "session-c" };
+    writeAgentSessionRecovery(storage, replacement);
+    expect(readAgentSessionRecovery(storage, { ...target, ...moved })).toEqual(
+      replacement,
+    );
+    clearAgentSessionRecoveryOf(storage, a.sessionId);
+    clearAgentSessionRecoveryFor(storage, { ...target, ...b });
+    expect(readAgentSessionRecovery(storage, { ...target, ...b })).toBeNull();
+    expect(readAgentSessionRecovery(storage, { ...target, ...moved })).toEqual(
+      replacement,
+    );
+    clearAgentSessionRecoveryOf(storage, replacement.sessionId);
+    expect(hasAgentSessionRecovery(storage)).toBe(false);
   });
 
   it("round-trips only the bounded browser reconnect proof", () => {
