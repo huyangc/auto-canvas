@@ -43,3 +43,23 @@ pnpm format:check && pnpm docs:check && pnpm typecheck && pnpm lint --quiet && p
 pnpm test:local → 0 (858 files passed, 3 skipped; 8941 passed, 116 skipped of 9057; real 50.8 s)
 pnpm test:slow → 0 (6 files, 16 passed; real 69.9 s)
 ```
+
+## Round 3 — accepted (codex PR review round 2 findings, fixed by Opus)
+
+Codex `gpt-6.2-sol` reviewed `550ff4c` (PR 134 comment 7126596553): two P2
+and one P3, all verified and fixed.
+
+| #   | Severity | Where                                                   | Finding                                                                       | Fix                                                                                                                                                                                             |
+| --- | -------- | ------------------------------------------------------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | P2       | `scripts/format.mjs:34`                                 | A `.gitattributes` change can alter checked-out bytes of unchanged files.     | `.gitattributes` joins the full-check triggers; regression case added.                                                                                                                          |
+| 2   | P2       | `scripts/format.mjs:39-46`                              | Stripping leading dots changed scope (`.json` skipped, `.apps/x.ts` checked). | Dot segments get a letter prefix instead, so wildcards match them as Prettier's glob does and literal segments stay distinct; cases for `.json` (checked) and `.apps/example.ts` (not checked). |
+| 3   | P3       | `packages/auto-layout/test/current-source-tail.test.ts` | Quick cases dropped geometry that holds for individual inputs.                | Asserted per input: tail below its foot (reverse=false), v on the a side (reverse=true), inputs outside both banks (feedback), as measured in report.md.                                        |
+
+Acceptance rerun:
+
+```text
+pnpm format:check && pnpm docs:check && pnpm typecheck && pnpm lint --quiet && pnpm deadcode → 0
+pnpm test:local → 0 (858 files passed, 3 skipped; 8944 passed, 116 skipped of 9060; real 45.9 s)
+```
+
+`test:slow` is unchanged by this round (no slow file or shared helper touched).

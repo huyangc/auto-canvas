@@ -31,19 +31,20 @@ if (mode === "--check" && base !== undefined) {
       .split("\0")
       .filter(Boolean);
     const config = changed.find((path) =>
-      /(?:^|\/)(?:\.prettierrc(?:\..+)?|prettier\.config\..+|\.prettierignore|\.editorconfig|\.gitignore|package\.(?:json|yaml)|pnpm-lock\.yaml|pnpm-workspace\.yaml)$/u.test(
+      /(?:^|\/)(?:\.prettierrc(?:\..+)?|prettier\.config\..+|\.prettierignore|\.editorconfig|\.gitignore|\.gitattributes|package\.(?:json|yaml)|pnpm-lock\.yaml|pnpm-workspace\.yaml)$/u.test(
         path,
       ),
     );
     if (config) throw new Error(`format configuration changed: ${config}`);
     paths = changed.filter(
       (path) =>
-        patterns.some(
-          (pattern) =>
-            matchesGlob(path, pattern) ||
-            // path.matchesGlob skips dot segments; Prettier's own glob
-            // expansion for the full check does not, so match them too.
-            matchesGlob(path.replace(/(^|\/)\.+/gu, "$1"), pattern),
+        patterns.some((pattern) =>
+          // path.matchesGlob never lets a wildcard match a segment that
+          // starts with a dot, while the full check's Prettier glob does.
+          // Prefixing such segments with a letter makes them ordinary
+          // without changing what a literal pattern segment matches (no
+          // pattern segment starts with "x.").
+          matchesGlob(path.replace(/(^|\/)(?=\.)/gu, "$1x"), pattern),
         ) && lstatSync(path, { throwIfNoEntry: false })?.isFile(),
     );
     // Config lookup errors must never turn into a trusted partial check.

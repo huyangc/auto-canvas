@@ -60,7 +60,7 @@ it("checks the changed file and leaves pre-existing formatting outside its scope
   expect(result.stdout + result.stderr).toContain("changed.ts");
 });
 
-it.each([".oxlintrc.json", "apps/editor/.hidden/changed.ts"])(
+it.each([".oxlintrc.json", ".json", "apps/editor/.hidden/changed.ts"])(
   "checks a changed dotfile path %s as the full check would",
   (path) => {
     const root = fixture();
@@ -77,8 +77,19 @@ it.each([".oxlintrc.json", "apps/editor/.hidden/changed.ts"])(
   },
 );
 
+it("leaves a dot directory outside the format domain unchecked", () => {
+  const root = fixture();
+  const base = commit(root);
+  put(root, ".apps/example.ts", "export const value=2\n");
+  commit(root);
+  const result = check(root, base);
+  expect(result.stdout).toContain("Formatting changed files: 0");
+  expect(result.status).toBe(0);
+});
+
 it.each([
   ".prettierrc",
+  ".gitattributes",
   "apps/editor/prettier.config.mjs",
   ".prettierignore",
   ".editorconfig",
