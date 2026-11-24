@@ -85,3 +85,19 @@ Acceptance rerun after round 3: `pnpm format:check` exit 0, `pnpm typecheck`
 exit 0, `pnpm lint` exit 0 (0 errors, 3906 pre-existing warnings), targeted
 vitest exit 0 (7 tests), `pnpm test:e2e apps/editor/e2e/project-tabs.spec.ts`
 exit 0 (23 passed), `pnpm test:local` rerun before commit.
+
+## Round 4 — accepted (codex PR round-3 findings fixed by Opus)
+
+codex PR review round 3 on `b345a4b` passed with P2/P3 only; both were real
+and fixed.
+
+| # | Severity | Where | Finding | Fix |
+| --- | --- | --- | --- | --- |
+| 1 | P2 | `dialog-drag.ts` move handler | A pointer move clamped against the box captured at pointerdown; if the wall finished loading mid-drag, the next move could push the grown dialog offscreen again, and releasing left it there. | Each move re-measures the dialog's current layout box (`layoutRect`) and clamps against it. |
+| 2 | P3 | `dialog-drag.ts` / `project-shelf.tsx` | Closing a dragged dialog left `dragged.current` and the resize observer holding the detached element (ProjectShelf stays mounted), and an Escape mid-drag left window listeners live. | `useDialogDrag` returns `{ onPointerDown, release }`; the dialog's ref callback calls `release()` when it is unmounted (React passes null), which stops the drag, disconnects the observer and clears the element and offset. |
+
+Acceptance rerun after round 4: `pnpm format:check` exit 0, `pnpm typecheck`
+exit 0, `pnpm lint` exit 0 (0 errors, 3906 warnings), targeted vitest exit 0
+(7 tests), `pnpm test:e2e apps/editor/e2e/project-tabs.spec.ts` exit 0 (23
+passed, run on ports 4398/4399 because a stale e2e server held 4311),
+`pnpm test:local` rerun before commit.
