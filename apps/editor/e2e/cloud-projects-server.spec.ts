@@ -31,7 +31,7 @@ test("local identity saves, reopens from the shelf and lists the earlier revisio
     const fresh = await browser.newPage();
     try {
       await fresh.goto(new URL("/editor?new=1", page.url()).href);
-      const shelf = await projectTabAction(fresh, "Open Shelf project in tab");
+      const shelf = await projectTabAction(fresh, "Open Cloud Project…");
       const opened = fresh.waitForResponse(
         (response) =>
           new URL(response.url()).pathname === `/api/projects/${projectId}` &&
@@ -53,7 +53,7 @@ test("local identity saves, reopens from the shelf and lists the earlier revisio
         `Saved ${name} updated to Cloud`,
       );
       await (
-        await projectTabAction(fresh, "Open Shelf project in tab")
+        await projectTabAction(fresh, "Open Cloud Project…")
       )
         .getByRole("button", { name: "Browse Cloud Projects…" })
         .click();

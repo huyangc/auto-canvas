@@ -126,7 +126,8 @@ test("compacts the editor header at half width without GitHub, credit or account
   );
   await expect(page.getByTestId("header-gallery-link")).toHaveCount(0);
   await expect(page.getByTestId("header-arena-link")).toHaveCount(0);
-  // Even signed in, the header offers no account control (T149).
+  // The default suite runs local mode, which mounts no account context, so
+  // the header draws no account module (T172); T149's requirement stays.
   await expect(page.getByTestId("account-name")).toHaveCount(0);
   await expect(page.getByTestId("account-owner")).toHaveCount(0);
 
@@ -172,7 +173,8 @@ test("compacts the editor header at half width without GitHub, credit or account
     expect(actionBounds.at(-1)!.right).toBeLessThanOrEqual(width);
     await expect(actions.getByTestId("publish-gallery-button")).toHaveCount(0);
     await expect(actions.getByTestId("open-agent")).toBeVisible();
-    // No GitHub, bug report, credit or account control at any width (T149).
+    // No GitHub, bug report or credit at any width, and no Gallery account
+    // menu; the account module needs an account context (T149, T172).
     for (const removed of [
       '[data-testid="editor-repository-link"]',
       '[data-testid="editor-report-bug"]',

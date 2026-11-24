@@ -10,6 +10,7 @@ import { describe, expect, it, vi } from "vitest";
 import * as derived from "@icm/derived";
 
 import { App } from "./App";
+import { AccountContext } from "../accounts/account-context";
 import { createWebEditorServices } from "../services/web-editor-services";
 import { createPreviewEditorServices } from "../services/preview-editor-services";
 import {
@@ -155,7 +156,7 @@ describe("editor shell", () => {
     );
     const actionRow = markup.slice(actionRowStart, actionRowEnd);
     expect(actionRow).not.toContain('data-testid="publish-gallery-button"');
-    // The header carries no account control (T149).
+    // Without an account context the header draws no account module (T172).
     expect(actionRow).not.toContain("account-");
     const netlistStart = markup.indexOf('aria-label="Netlist"');
     const netlistEnd = markup.indexOf("</div>", netlistStart);
@@ -205,6 +206,40 @@ describe("editor shell", () => {
     // person is asking; the Netlist menu carries the plain action.
     expect(markup).not.toContain("Preflight…");
     expect(markup).toContain('data-testid="save-cloud-project"');
+  });
+
+  it("ends the top bar with the signed-in account and takes Sign out out of File", () => {
+    const project = createEmptyProject("account-menu", "Account Menu");
+    const markup = renderToStaticMarkup(
+      <AccountContext.Provider
+        value={{
+          username: "A12345678",
+          prepareLogout: () => {},
+          logout: () => {},
+        }}
+      >
+        <App services={services} project={project} />
+      </AccountContext.Provider>,
+    );
+    const actionRowStart = markup.indexOf('class="app-chrome-actions"');
+    const actionRow = markup.slice(
+      actionRowStart,
+      markup.indexOf('<div class="toolbar-row', actionRowStart),
+    );
+    expect(actionRow).toContain('data-testid="header-account-menu"');
+    expect(actionRow).toContain('data-testid="account-name"');
+    expect(actionRow).toContain(">A12345678<");
+    // The row ends with it, after the ⋯ menu's popover.
+    expect(
+      actionRow.lastIndexOf('data-testid="header-account-menu"'),
+    ).toBeGreaterThan(actionRow.indexOf("command-popover header-menu-popover"));
+    const fileStart = markup.indexOf('data-testid="project-menu"');
+    const file = markup.slice(
+      fileStart,
+      markup.indexOf("</details>", fileStart),
+    );
+    expect(file).toContain(">New Project<");
+    expect(file).not.toContain("Sign out");
   });
 
   it("marks the top bar of a host with header controls of its own", () => {
@@ -353,7 +388,9 @@ describe("editor shell", () => {
       actionRowStart,
       markup.indexOf('<div class="toolbar-row', actionRowStart),
     );
-    // No GitHub, bug report, credit or account control in the header (T149).
+    // No GitHub, bug report or credit, and no account module without an
+    // account context; the account menu is the only account control (T149,
+    // T172).
     for (const removed of [
       'data-testid="editor-report-bug"',
       'data-testid="editor-repository-link"',

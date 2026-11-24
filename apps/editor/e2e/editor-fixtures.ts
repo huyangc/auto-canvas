@@ -186,17 +186,17 @@ export async function renameProject(page: Page, name: string): Promise<void> {
 
 /**
  * Run one of the tab strip's actions, `New project tab`, `Open file in new
- * tab`, `Open Shelf project in tab` or `Close tab` (the active tab's ×): on
+ * tab`, `Open Cloud Project…` or `Close tab` (the active tab's ×): on
  * the strip when it shows (two or more tabs), otherwise from File, which
  * holds them too. For the Shelf it returns the open picker that lists the
- * Shelf projects; a picker already open stays open.
+ * Cloud Projects; a picker already open stays open.
  */
 export async function projectTabAction(
   page: Page,
   name:
     | "New project tab"
     | "Open file in new tab"
-    | "Open Shelf project in tab"
+    | "Open Cloud Project…"
     | "Close tab",
 ): Promise<Locator> {
   const strip = page.getByTestId("project-tabs");
@@ -211,7 +211,7 @@ export async function projectTabAction(
   const file = await openMenu(page, "File");
   const item = file.getByRole("button", { name, exact: true });
   if ((await item.getAttribute("aria-expanded")) !== "true") await item.click();
-  return file.getByRole("group", { name: "Shelf projects", exact: true });
+  return file.getByRole("group", { name: "Cloud Projects", exact: true });
 }
 
 /** Rename a Shelf project with the Shelf's own Rename control. */
@@ -220,7 +220,7 @@ export async function renameShelfProject(
   from: string,
   to: string,
 ): Promise<void> {
-  const shelf = await projectTabAction(page, "Open Shelf project in tab");
+  const shelf = await projectTabAction(page, "Open Cloud Project…");
   await shelf.getByRole("button", { name: from, exact: true }).hover();
   await shelf
     .getByRole("button", { name: `Rename ${from}`, exact: true })

@@ -48,7 +48,7 @@ async function dropCopy(page: Page, x: number, y: number, count: string) {
 
 /** Open a Shelf project in a tab, which becomes the selected one. */
 async function openShelfProject(page: Page, name: string) {
-  const shelf = await projectTabAction(page, "Open Shelf project in tab");
+  const shelf = await projectTabAction(page, "Open Cloud Project…");
   await shelf.getByRole("button", { name, exact: true }).click();
   await expectSelected(page.getByRole("tab", { name: new RegExp(`${name}$`) }));
 }
@@ -464,7 +464,7 @@ test("the Shelf appends a Cloud Project tab, deduplicates and saves Cloud identi
     page.getByRole("tab", { name: /Alpha local$/ }).getByLabel("Unsaved"),
   ).toBeVisible();
   expect(stored(0).name).toBe("Alpha stored");
-  await page.getByLabel("Open Shelf project in tab", { exact: true }).click();
+  await page.getByLabel("Open Cloud Project…", { exact: true }).click();
   page.on("dialog", (dialog) => void dialog.accept());
   await page.goto("/");
   await openEditor(page, "/editor?project=cloud-1");
@@ -482,9 +482,9 @@ test("the Shelf appends a Cloud Project tab, deduplicates and saves Cloud identi
   ).toBeVisible();
   // Management of an inactive tab must preserve the selected circuit and its
   // recovery identity, while detaching the deleted tab from its Cloud resource.
-  await page.getByLabel("Open Shelf project in tab", { exact: true }).click();
+  await page.getByLabel("Open Cloud Project…", { exact: true }).click();
   await page.getByRole("tab", { name: /Alpha local$/ }).click();
-  await page.getByLabel("Open Shelf project in tab", { exact: true }).click();
+  await page.getByLabel("Open Cloud Project…", { exact: true }).click();
   await shelfPanel
     .getByRole("button", { name: "Beta renamed", exact: true })
     .hover();
@@ -517,7 +517,7 @@ test("the Shelf appends a Cloud Project tab, deduplicates and saves Cloud identi
   await expect(page.getByRole("tab", { name: /Beta renamed$/ })).toBeVisible();
   await expectSelected(page.getByRole("tab", { name: /Alpha local$/ }));
   await expect(page.getByTestId("active-instance-count")).toHaveText("1");
-  await page.getByLabel("Open Shelf project in tab", { exact: true }).click();
+  await page.getByLabel("Open Cloud Project…", { exact: true }).click();
   await page.reload();
   await awaitEditorReady(page);
   await expectSelected(page.getByRole("tab", { name: /Alpha local$/ }));
@@ -1310,13 +1310,13 @@ test("with one project File opens a file in a new tab and browses the Shelf", as
     ),
   });
   await expectSelected(page.getByRole("tab", { name: "Second circuit" }));
-  // Back to one project; File → Open Shelf project in tab lists the Shelf.
+  // Back to one project; File → Open Cloud Project… lists the Shelf.
   await page
     .getByRole("button", { name: "Close tab Second circuit", exact: true })
     .click();
   await expect(page.getByTestId("project-tabs")).toBeHidden();
   const file = page.getByTestId("project-menu");
-  const shelf = await projectTabAction(page, "Open Shelf project in tab");
+  const shelf = await projectTabAction(page, "Open Cloud Project…");
   await expect(shelf).toBeVisible();
   // Browse opens over the page, and File keeps the list behind it.
   await shelf.getByRole("button", { name: "Browse Cloud Projects…" }).click();
@@ -1408,7 +1408,7 @@ test("File's Shelf list collapses when File closes and reloads on the next open"
   });
   const file = page.getByTestId("project-menu");
   const shelfToggle = file.getByRole("button", {
-    name: "Open Shelf project in tab",
+    name: "Open Cloud Project…",
     exact: true,
   });
   for (const round of [1, 2]) {
@@ -1500,7 +1500,7 @@ for (const host of ["strip", "File"] as const)
       visible: host === "strip",
     });
     const file = page.getByTestId("project-menu");
-    const shelf = await projectTabAction(page, "Open Shelf project in tab");
+    const shelf = await projectTabAction(page, "Open Cloud Project…");
     // The picker that holds the Shelf is still open, and in File the
     // Shelf's submenu is still expanded.
     const pickerOpen = async (context: string) => {
@@ -1509,7 +1509,7 @@ for (const host of ["strip", "File"] as const)
         await expect(file, context).toHaveAttribute("open", "");
         await expect(
           file.getByRole("button", {
-            name: "Open Shelf project in tab",
+            name: "Open Cloud Project…",
             exact: true,
           }),
           context,

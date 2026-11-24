@@ -1332,7 +1332,7 @@ type Place =
   | {
       menu: "File" | "Edit" | "Hierarchy" | "Netlist" | "Layout";
       items: readonly string[];
-      submenu?: "Import" | "Export" | "Open Shelf project in tab";
+      submenu?: "Import" | "Export" | "Open Cloud Project…";
       /** Labels rather than buttons (File → Import's file pickers). */
       labels?: boolean;
       enabled?: boolean;
@@ -1370,7 +1370,7 @@ const fileTabActions: readonly Place[] = [
   },
   {
     menu: "File",
-    submenu: "Open Shelf project in tab",
+    submenu: "Open Cloud Project…",
     items: ["Browse Cloud Projects…"],
     enabled: true,
   },
@@ -1563,7 +1563,7 @@ const TWO_TAB_ROWS: readonly MenuTableRow[] = [
           "project-tabs",
           '.project-tabs > [aria-label="New project tab"]',
           '.project-tabs > [aria-label="Open file in new tab"]',
-          '.project-tabs-shelf > [aria-label="Open Shelf project in tab"]',
+          '.project-tabs-shelf > [aria-label="Open Cloud Project…"]',
           '.project-tab[data-active="true"] [data-tab-close]',
         ],
         enabled: true,

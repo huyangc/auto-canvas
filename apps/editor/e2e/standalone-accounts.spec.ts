@@ -1,10 +1,6 @@
 import { randomInt } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
-import {
-  openMenu,
-  projectTabAction,
-  renameProject,
-} from "./editor-fixtures.js";
+import { projectTabAction, renameProject } from "./editor-fixtures.js";
 
 import { placeComponent } from "./manual-editor-fixtures.js";
 
@@ -32,8 +28,9 @@ test("accounts reopen their saved drawing in another browser and isolate local d
     await expect(tab.getByTestId("schematic-canvas")).toBeVisible();
   }
   async function signOut(tab: Page) {
-    const menu = await openMenu(tab, "File");
-    await menu.getByRole("button", { name: /Sign out/ }).click();
+    // The top bar's account menu, not File: it shows who is signed in.
+    await tab.getByTestId("account-name").click();
+    await tab.getByRole("button", { name: "Sign out", exact: true }).click();
     await expect(tab.getByRole("heading", { name: "Sign in" })).toBeVisible();
   }
   await page.goto("/editor");
@@ -63,13 +60,13 @@ test("accounts reopen their saved drawing in another browser and isolate local d
   }
   await failStorage(page);
   await renameProject(page, draft);
-  const menu = await openMenu(page, "File");
   const warning = page.waitForEvent("dialog").then(async (dialog) => {
     const message = dialog.message();
     await dialog.accept();
     return message;
   });
-  await menu.getByRole("button", { name: /Sign out/ }).click();
+  await page.getByTestId("account-name").click();
+  await page.getByRole("button", { name: "Sign out", exact: true }).click();
   expect(await warning).toMatch(/Sign out paused/);
   await expect(page.locator(".app-project-name-text")).toHaveText(draft);
   expect(
@@ -98,7 +95,7 @@ test("accounts reopen their saved drawing in another browser and isolate local d
   await expect(page.locator(".app-project-name-text")).toHaveText(
     "New Circuit",
   );
-  const shelf = await projectTabAction(page, "Open Shelf project in tab");
+  const shelf = await projectTabAction(page, "Open Cloud Project…");
   await expect(shelf.getByRole("button", { name, exact: true })).toHaveCount(0);
   await page.keyboard.press("Escape");
   await signOut(page);
@@ -118,14 +115,14 @@ test("accounts reopen their saved drawing in another browser and isolate local d
     await fresh.goto(new URL("/editor", page.url()).href);
     await enter(fresh, alice.toLowerCase(), false);
     await (
-      await projectTabAction(fresh, "Open Shelf project in tab")
+      await projectTabAction(fresh, "Open Cloud Project…")
     )
       .getByRole("button", { name, exact: true })
       .click();
     await expect(fresh.locator(".app-project-name-text")).toHaveText(name);
     await expect(fresh.getByTestId("hit-R1")).toBeVisible();
     await (
-      await projectTabAction(fresh, "Open Shelf project in tab")
+      await projectTabAction(fresh, "Open Cloud Project…")
     )
       .getByRole("button", { name: "Browse Cloud Projects…" })
       .click();

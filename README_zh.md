@@ -67,7 +67,7 @@ pnpm start
 日志追加到 `.local/logs/server.log`。安装了 PostgreSQL 命令行工具时，启动脚本会
 创建缺失的 `auto_canvas` 数据库；运行测试前请单独创建 `auto_canvas_test`。
 
-首次使用时选择 **Create an account** 注册。用户名为一个英文字母加八位数字，例如 `A12345678`，字母不区分大小写。用 **File → Save** 把图纸保存到账号。下次在任意浏览器登录同一台服务，选择 **File → Open Shelf project in tab** 即可打开。未保存的草稿保留在当前浏览器。升级前的单用户工程仍可通过显式设置 `AUTO_CANVAS_AUTH=local` 访问。
+首次使用时选择 **Create an account** 注册。用户名为一个英文字母加八位数字，例如 `A12345678`，字母不区分大小写。用 **File → Save** 把图纸保存到账号。下次在任意浏览器登录同一台服务，选择 **File → Open Cloud Project…** 即可打开。未保存的草稿保留在当前浏览器。升级前的单用户工程仍可通过显式设置 `AUTO_CANVAS_AUTH=local` 访问。
 
 开发时运行 `pnpm dev`：API 在后台启动，Vite 在 <http://localhost:5173> 提供编辑器
 热更新，Ctrl+C 会停止两者。API 日志追加到 `.local/logs/server-dev.log`。

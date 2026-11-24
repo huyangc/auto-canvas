@@ -331,8 +331,8 @@ export function ProjectTabs({
             }}
           >
             <summary
-              title="Open Shelf project in tab"
-              aria-label="Open Shelf project in tab"
+              title="Open Cloud Project…"
+              aria-label="Open Cloud Project…"
             >
               ▾
             </summary>

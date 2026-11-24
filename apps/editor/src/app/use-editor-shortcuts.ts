@@ -331,11 +331,13 @@ function createEditorShortcutHandler({
       event.target instanceof Element &&
       (event.target.closest(".project-tab-name-input") ||
         event.target.closest(".cloud-shelf-dialog, .change-log-dialog") ||
-        // An open File or ⋯ scrolls and closes itself; Escape returns focus
-        // to its button, and no arrow pans (File's submenus still take Left
-        // and Right). Closed, its focused button leaves the keys to the
-        // canvas (Escape cancels a tool, arrows pan).
-        (event.target.closest(".project-menu[open], .more-menu[open]") &&
+        // An open File, ⋯ or account menu scrolls and closes itself; Escape
+        // returns focus to its button, and no arrow pans. Closed, its focused
+        // button leaves the keys to the canvas (Escape cancels a tool, arrows
+        // pan).
+        (event.target.closest(
+          ".project-menu[open], .more-menu[open], .header-account-menu[open]",
+        ) &&
           [
             "Escape",
             "ArrowUp",

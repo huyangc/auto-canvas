@@ -12,6 +12,7 @@ import {
   type RefObject,
 } from "react";
 
+import { HeaderAccountMenu } from "../accounts/header-account-menu";
 import { ProjectMenu } from "./project-menu";
 import { DrawingToolbar } from "../features/editor-shell/drawing-toolbar";
 import type { EditorMode } from "../features/editor-shell/editor-mode";
@@ -519,6 +520,9 @@ export function EditorAppChrome({
               <AutoLayoutMenuSection {...autoLayout} />
             </div>
           </details>
+          {/* The signed-in account ends the row; only an accounts-mode
+              editor provides it, so local mode and desktop render nothing. */}
+          <HeaderAccountMenu />
         </div>
       </div>
       {editorMode === "draw" ? <DrawingToolbar {...drawingToolbar} /> : null}
