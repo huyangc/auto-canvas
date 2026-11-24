@@ -60,6 +60,23 @@ it("checks the changed file and leaves pre-existing formatting outside its scope
   expect(result.stdout + result.stderr).toContain("changed.ts");
 });
 
+it.each([".oxlintrc.json", "apps/editor/.hidden/changed.ts"])(
+  "checks a changed dotfile path %s as the full check would",
+  (path) => {
+    const root = fixture();
+    const base = commit(root);
+    put(
+      root,
+      path,
+      path.endsWith(".json") ? '{"a":1,\n"b":2}\n' : "export const value=2\n",
+    );
+    commit(root);
+    const result = check(root, base);
+    expect(result.stdout).toContain("Formatting changed files: 1");
+    expect(result.status).toBe(1);
+  },
+);
+
 it.each([
   ".prettierrc",
   "apps/editor/prettier.config.mjs",

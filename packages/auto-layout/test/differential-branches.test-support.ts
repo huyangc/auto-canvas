@@ -3,7 +3,8 @@ import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
 import { expect } from "vitest";
 import { connectionsIntact, planAutoLayout } from "../src/auto-layout.js";
 import { auditRouting } from "../src/routing-audit.js";
-import { preview } from "../src/transaction.js";
+import { netlistPresentation } from "../src/netlist-presentation.js";
+import { equivalentTerminals, preview } from "../src/transaction.js";
 import { circuit } from "./document-fixture.js";
 
 // The single-stage check shared by differential-branches.test.ts and
@@ -110,6 +111,13 @@ export function checkSingleStage({
     ])
       expect(positions.get(named(a!))!.y).toBe(positions.get(named(b!))!.y);
     expect(connectionsIntact(doc, resolver)).toBe(true);
+    expect(
+      equivalentTerminals(
+        netlistPresentation(source, resolver).document,
+        doc,
+        resolver,
+      ),
+    ).toBe(true);
     expect(auditRouting(doc, resolver).unsafeProblems).toEqual([]);
     return;
   }

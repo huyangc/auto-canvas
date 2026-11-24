@@ -183,8 +183,8 @@ it.each(cases)(
     const { document, resolver, plan } = defaultPlan(fixture);
     const initial = planLayoutOnce(document, resolver, {}, emptyOverrides());
     // Determinism: corpus.test.ts and the files split from it re-plan every
-    // corpus fixture and compare the edits with the default plan, so that
-    // second full plan is not repeated here.
+    // corpus fixture and compare the whole result with the default plan, so
+    // that second full plan is not repeated here.
     const final = preview(document, resolver, plan.edits);
     expect(final.ok).toBe(true);
     if (!final.ok) return;
