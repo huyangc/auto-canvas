@@ -534,7 +534,11 @@ test("editor supervisor kills a process group that ignores SIGTERM after STOP_TI
   expect(Number.isInteger(group) && group > 0).toBe(true);
   const started = Date.now();
   supervisor.kill("SIGTERM");
-  await once(supervisor, "exit");
+  const [code, signal] = await once(supervisor, "exit");
+  // The supervisor must exit on its own after escalating, not die from the
+  // SIGTERM itself (which would mean its handlers were not installed yet).
+  expect(signal).toBeNull();
+  expect(code).toBe(1);
   // The group survived SIGTERM, so it is gone only because of the escalation.
   expect(Date.now() - started).toBeGreaterThanOrEqual(400);
   await expect
