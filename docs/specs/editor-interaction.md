@@ -388,14 +388,17 @@ One canonical reducer owns the canvas: `Idle`, `SymbolPlacement`,
 
 - The tab strip shows with two or more project tabs. With one, the row is
   hidden in both modes and the canvas takes its height. File's **New project
-  tab**, **Open file in new tab**, (with Cloud) **Open Cloud Project… ›**
-  and **Close tab** are there with any number of tabs; Close tab is the
+  tab**, **Open file in new tab**, (with Cloud and no account) **Open Cloud
+  Project… ›** and **Close tab** are there with any number of tabs; an
+  accounts-mode editor lists the Cloud Projects in the account menu as **My
+  Cloud Projects ›** instead of File; Close tab is the
   active tab's ×, with the same decision about unsaved work and the same
   result (the closed work stays a recovery copy). The one project's name is
   the top bar's. A rename in its tab ends as a blur would, keeping the typed
   name, when the strip hides under it; an open close decision stays on
-  screen and answerable. File's submenus collapse when File closes, so the
-  Shelf list is read again on each open.
+  screen and answerable. File's submenus, and the account menu's My Cloud
+  Projects, collapse when their menu closes, so the Shelf list is read again
+  on each open.
 - In Browse Cloud Projects each tile's ♡ beside its name favorites it (red ♥;
   click again to remove), and the wall's **All | ♥ Favorites** toggle shows
   every circuit or only favorites; the toggle is not saved.
@@ -567,8 +570,11 @@ it does.
   scroll the menu as the browser does, and Escape returns focus to its button.
 - **Account menu.** An accounts-mode editor ends the top bar's row with the
   signed-in account's menu: a round mark with the name's first letter and the
-  username (the mark alone below 760 px), which names the account and holds
-  **Sign out**. Signing out runs the same save check first, warning **Sign out
+  username (the mark alone below 760 px), which names the account and holds,
+  in order, the identity, **My Cloud Projects ›** and **Sign out**. My Cloud
+  Projects expands in place to the same Shelf the tab strip's ▾ picker shows
+  (open, rename, delete, **Browse Cloud Projects…**); opening a project
+  closes the menu, and the menu stays open while Browse is open. Signing out runs the same save check first, warning **Sign out
   paused…** when unsaved work cannot be kept, and then returns to the sign-in
   screen; File carries no Sign out. It closes on an outside click, and Escape
   returns focus to its summary. Local mode and the desktop build have no

@@ -12,7 +12,10 @@ import {
   type RefObject,
 } from "react";
 
-import { HeaderAccountMenu } from "../accounts/header-account-menu";
+import {
+  HeaderAccountMenu,
+  type HeaderAccountCloudProjects,
+} from "../accounts/header-account-menu";
 import { ProjectMenu } from "./project-menu";
 import { DrawingToolbar } from "../features/editor-shell/drawing-toolbar";
 import type { EditorMode } from "../features/editor-shell/editor-mode";
@@ -105,6 +108,11 @@ export interface EditorAppChromeProps {
   projectName: string;
   hasUnsavedWork: boolean;
   fileCommands: ComponentProps<typeof FileCommandMenu>;
+  /**
+   * The account's Cloud Projects, listed in the user menu as My Cloud
+   * Projects; only an accounts-mode editor draws that menu.
+   */
+  accountCloudProjects?: HeaderAccountCloudProjects;
   searchOpen: boolean;
   onInsertComponent: () => void;
   userComponentsOpen: boolean;
@@ -166,6 +174,7 @@ export function EditorAppChrome({
   projectName,
   hasUnsavedWork,
   fileCommands,
+  accountCloudProjects,
   searchOpen,
   onInsertComponent,
   userComponentsOpen,
@@ -520,9 +529,14 @@ export function EditorAppChrome({
               <AutoLayoutMenuSection {...autoLayout} />
             </div>
           </details>
-          {/* The signed-in account ends the row; only an accounts-mode
-              editor provides it, so local mode and desktop render nothing. */}
-          <HeaderAccountMenu />
+          {/* The signed-in account ends the row and holds its Cloud
+              Projects; only an accounts-mode editor provides it, so local
+              mode and desktop render nothing. */}
+          <HeaderAccountMenu
+            {...(accountCloudProjects
+              ? { cloudProjects: accountCloudProjects }
+              : {})}
+          />
         </div>
       </div>
       {editorMode === "draw" ? <DrawingToolbar {...drawingToolbar} /> : null}

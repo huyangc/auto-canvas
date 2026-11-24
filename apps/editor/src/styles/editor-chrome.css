@@ -834,9 +834,11 @@
   display: none;
 }
 
-/* In the header's one menu, which scrolls, Import and Export open in place
-   beneath their own row: a flyout would be clipped by that scroll. */
-.project-menu-popover .export-submenu-options {
+/* In the header's File menu and the account menu, which scroll, a submenu
+   (Import, Export, the Cloud Projects) opens in place beneath its own row: a
+   flyout would be clipped by that scroll. */
+.project-menu-popover .export-submenu-options,
+.header-account-popover .export-submenu-options {
   position: static;
   min-width: 0;
   margin: 2px 0 4px 12px;
@@ -847,12 +849,14 @@
   box-shadow: none;
 }
 
-.project-menu-popover .export-submenu > button[aria-expanded="true"] > span {
+.project-menu-popover .export-submenu > button[aria-expanded="true"] > span,
+.header-account-popover .export-submenu > button[aria-expanded="true"] > span {
   rotate: 90deg;
 }
 
-/* File's Shelf list scrolls in its own box, as the tab strip's picker does,
-   so a long Shelf does not push File's later commands away. */
+/* The Shelf list (File's, or the account menu's My Cloud Projects) scrolls
+   in its own box, as the tab strip's picker does, so a long Shelf does not
+   push the menu's later commands away. */
 .file-shelf {
   max-height: 280px;
   overflow: auto;
@@ -1787,12 +1791,19 @@
   white-space: nowrap;
 }
 
+/* As wide as File's popover, which holds the same Shelf rows (name, Rename,
+   Delete) under My Cloud Projects; an expanded library scrolls the popover
+   rather than running off the window's bottom. */
 .header-account-popover {
   top: calc(100% + 6px);
   right: 0;
   left: auto;
   z-index: 60;
-  min-width: 14rem;
+  box-sizing: border-box;
+  min-width: 22rem;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100dvh - var(--icm-menubar-h) - 16px);
+  overflow-y: auto;
 }
 
 .header-account-identity {

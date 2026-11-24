@@ -188,8 +188,10 @@ export async function renameProject(page: Page, name: string): Promise<void> {
  * Run one of the tab strip's actions, `New project tab`, `Open file in new
  * tab`, `Open Cloud Project…` or `Close tab` (the active tab's ×): on
  * the strip when it shows (two or more tabs), otherwise from File, which
- * holds them too. For the Shelf it returns the open picker that lists the
- * Cloud Projects; a picker already open stays open.
+ * holds them too. The Shelf is the exception in accounts mode: File leaves
+ * it to the header's user menu, as My Cloud Projects. For the Shelf it
+ * returns the open picker that lists the Cloud Projects; a picker already
+ * open stays open.
  */
 export async function projectTabAction(
   page: Page,
@@ -207,6 +209,18 @@ export async function projectTabAction(
         .click();
     else await strip.getByLabel(name, { exact: true }).click();
     return page.locator(".project-tabs-shelf");
+  }
+  const account = page.getByTestId("header-account-menu");
+  if (name === "Open Cloud Project…" && (await account.isVisible())) {
+    if ((await account.getAttribute("open")) === null)
+      await page.getByTestId("account-name").click();
+    const library = account.getByRole("button", {
+      name: "My Cloud Projects",
+      exact: true,
+    });
+    if ((await library.getAttribute("aria-expanded")) !== "true")
+      await library.click();
+    return account.getByRole("group", { name: "Cloud Projects", exact: true });
   }
   const file = await openMenu(page, "File");
   const item = file.getByRole("button", { name, exact: true });

@@ -352,6 +352,28 @@ describe("FileCommandMenu", () => {
     expect(markup).not.toContain("Sign out");
   });
 
+  it("leaves the Cloud Projects to the user menu in accounts mode", () => {
+    // The header's account menu lists them as My Cloud Projects; File keeps
+    // its other tab commands and Save.
+    const markup = renderToStaticMarkup(
+      <AccountContext.Provider
+        value={{
+          username: "A12345678",
+          prepareLogout: vi.fn(),
+          logout: vi.fn(),
+        }}
+      >
+        <FileCommandMenu {...baseProps()} projectTabs={tabActions()} />
+      </AccountContext.Provider>,
+    );
+    expect(markup).not.toContain("Open Cloud Project…");
+    expect(markup).not.toContain('aria-label="Cloud Projects"');
+    expect(markup).toContain(">New project tab<");
+    expect(markup).toContain(">Close tab<");
+    expect(markup).toContain('data-testid="save-cloud-project"');
+    expect(markup).toContain('data-testid="check-and-save"');
+  });
+
   it("presents one Cloud Save protocol and explicit local interchange", () => {
     const markup = renderToStaticMarkup(
       <FileCommandMenu
