@@ -360,7 +360,13 @@ sync output; and, from T165's second review round, a `CREATE DATABASE`
 whose answer was lost while its backend still runs it, a redirect from a
 stand-in web origin to another port of `127.0.0.1` the check listens on, in
 real headless Chrome behind the run's proxy, and a shutdown during a
-browser's start, with a stand-in launch) and the script's
+browser's start, with a stand-in launch; and, from its later rounds, a
+listener check at the run's proxy that throws or never answers, a bounded
+poll for a lost create, the README's removal and setup snippets under
+`set -euo pipefail` (the setup run twice), WebRTC's ICE gathering in real
+headless Chrome against a STUN server on a UDP port the check listens on, a
+control's browser closed by the sandbox's disposal, and an L2 guard that
+exits 0 while its process group outlived its stop) and the script's
 own refused file operations (each after a
 simulated swap, with a sentinel outside the sandbox) against throwaway
 repositories only; it reads nothing from `--notebook`. It also runs the real
@@ -546,10 +552,11 @@ rollback's launch finds the same user and notebook. In order:
   entry, its `.ui-plugin-origin` names the package, `registry.local.ts`
   imports it, and the frontend contract holds its row.
 - **L2**: silicon-notebook's guards in the clone, each one check: `npm run
-  test:node`, `scripts/check_ui_vocabulary.py`, `npm run typecheck` (with the
+test:node`, `scripts/check_ui_vocabulary.py`, `npm run typecheck` (with the
   variable set), `scripts/cli.sh extensions check` and
   `scripts/check_deployment_extension_parity.py` against the clone's contract,
-  the last two with the stage's managed TOML.
+  the last two with the stage's managed TOML. A guard whose process group
+  outlived its stop fails whatever its exit status, and the stage stops.
 - **L3–L5**: a managed launch checked as M2; user A registers and creates a
   notebook through `POST /api/notebooks`. In headless Chrome with a fresh
   profile in the sandbox (its process recorded by that profile on its command
@@ -573,10 +580,14 @@ makes, loopback included, goes through a proxy of the run on `127.0.0.1`
 the hops of a redirect go there too): it forwards a request only to
 `127.0.0.1:<web>` and only while the web, api and canvas listeners are the
 recorded pids, opens a `CONNECT` tunnel only to that origin, and refuses and
-records everything else. That listener check is bounded (5 seconds, each
+records everything else. The listener check is bounded (5 seconds, each
 `lsof` within what is left); one that fails or does not answer in time
 refuses the request like a changed listener, with its reason, and never ends
-the run. Behind it, every page request elsewhere is aborted
+the run. WebRTC, which neither the proxy nor the page's routes see, may use
+only proxied connections (Chrome is launched with
+`--webrtc-ip-handling-policy=disable_non_proxied_udp` and
+`--force-webrtc-ip-handling-policy=disable_non_proxied_udp`; the second alone
+is not honoured): it gathers no candidate and sends no UDP. Behind the proxy, every page request elsewhere is aborted
 and recorded, every request the page makes (a redirect's hops included) is
 observed, and WebSockets are refused. A page request elsewhere, anything the
 proxy refused that is not one of Chrome's own background hosts (another port

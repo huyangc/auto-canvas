@@ -162,11 +162,17 @@ The package is built into silicon-notebook's frontend, never loaded at run
 time. Add its absolute path to `SILICON_NOTEBOOK_UI_PLUGINS` in step 8's
 build environment. The variable is a `:`-separated list of UI packages: when
 it already names others, append the canvas's path and keep them; otherwise
-set it to the path alone.
+set it to the path alone. The snippet appends only when the path is not
+already an entry (silicon-notebook's sync refuses a package named twice), so
+running it again changes nothing; it also runs under `set -euo pipefail`:
 
 ```bash
 CANVAS_UI=/opt/auto-canvas/integrations/silicon-notebook/ui/auto-canvas
-export SILICON_NOTEBOOK_UI_PLUGINS="${SILICON_NOTEBOOK_UI_PLUGINS:+$SILICON_NOTEBOOK_UI_PLUGINS:}$CANVAS_UI"
+case ":${SILICON_NOTEBOOK_UI_PLUGINS-}:" in
+  *":$CANVAS_UI:"*) ;; # already an entry
+  *) SILICON_NOTEBOOK_UI_PLUGINS="${SILICON_NOTEBOOK_UI_PLUGINS:+$SILICON_NOTEBOOK_UI_PLUGINS:}$CANVAS_UI" ;;
+esac
+export SILICON_NOTEBOOK_UI_PLUGINS
 ```
 
 silicon-notebook's `npm run build` copies the package to

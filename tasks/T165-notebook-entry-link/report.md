@@ -416,3 +416,143 @@ notebook checkout git status --porcelain=v2 --branch           → identical bef
   `spawnSync` timeout path is the existing one, R11-3).
 - `pnpm test:local`, `pnpm build`, and the package checks were not rerun
   (not in this round's acceptance).
+
+# T165 report, round 6
+
+Implementer: an Opus subagent, working in place on
+`task/T165-notebook-entry-link` (head `7319f0e`). Nothing is committed. All
+four findings of review round 6 are fixed. Each has a stage S control, and
+each control was shown to FAIL with its fix reverted while every other check
+still passed (`tmp/r6/revert.py`, `tmp/r6/prove.sh`; logs
+`tmp/r6/s-<n>.log`, each run 97 passed and 1 failed).
+
+## Per finding
+
+1. **P1, WebRTC's UDP** (`stage-l.mjs` `launchChrome`). Chrome now starts
+   with `--force-webrtc-ip-handling-policy=disable_non_proxied_udp` and
+   `--webrtc-ip-handling-policy=disable_non_proxied_udp`
+   (`WEBRTC_POLICY_ARGS`). These come before `--proxy-bypass-list`, which
+   stays last. First I checked by hand in real headless Chrome 158 (the
+   system channel), launched exactly as `launchChrome` does
+   (`tmp/r6/webrtc-exp.mjs`). The page built an `RTCPeerConnection` whose
+   STUN server was a UDP socket the script bound on 127.0.0.1 (never an
+   owner's port). It created a data channel and an offer, set it as its
+   local description, and waited at most 8 s for ICE gathering:
+
+   | flags                                    | gathering              | candidates         | datagrams                       |
+   | ---------------------------------------- | ---------------------- | ------------------ | ------------------------------- |
+   | none                                     | still gathering at 8 s | 1 (host, `.local`) | 6 STUN requests (20 bytes each) |
+   | `--force-…=disable_non_proxied_udp` only | still gathering at 8 s | 1                  | 6                               |
+   | `--webrtc-ip-handling-policy=…` only     | complete               | 0                  | 0                               |
+   | both                                     | complete               | 0                  | 0                               |
+
+   So the `--force-…` switch alone, which the review names first, is not
+   honoured. The policy is taken from `--webrtc-ip-handling-policy`. Both
+   are given, and disabling WebRTC was not needed.
+   _Control:_ new, "S T165 round 6: WebRTC in headless Chrome launched as
+   stage L does sends no UDP of its own …". It goes through `browserSessions`
+   with its default launch (`launchChrome`, real Chrome) and opens a stand-in
+   web origin through the run's proxy, with the page guard. It then runs the
+   probe above against a UDP socket of the control, which rebinds if the
+   port is an owner's. It expects gathering to complete with no candidate,
+   no datagram within a further second, and the browser closed.
+   _Reverted_ (only the policy switches removed): it FAILs with
+   `{"state":"gathering","candidates":1}` and 6 datagrams.
+
+2. **P2, the redirect control's browser** (`self-check.mjs`). A new helper,
+   `controlBrowsers(sandbox, report, dir, options)`, makes a control's
+   `browserSessions`. Before any browser starts, it registers
+   `() => browsers.closeOpen(10_000)` with `sandbox.beforeDispose()`, as
+   stage L does. The redirect control and the new WebRTC control use it.
+   _Control:_ new, "S T165 round 6: a control's browser is closed by the
+   sandbox's disposal …". It gives `controlBrowsers` a stand-in sandbox
+   (the run's own, but the disposal's cleanups are kept by the control) and
+   a stand-in launch: a process that names the profile and settles after
+   1.5 s. It then runs the registered cleanups while the launch is pending,
+   as the sandbox's `dispose()` does first after an interrupt. It expects
+   one cleanup registered before `open`, `open` to return no session, the
+   context closed, the process gone and "the browser is closed" reported.
+   _Reverted_ (the `beforeDispose` line removed): it FAILs with
+   `registeredBeforeOpen: 0` and `session: "returned"`, so Chrome would
+   outlive the disposal.
+3. **P2, L2 guards** (`stage-l.mjs` `notebookGuards`, now exported). After
+   each guard's `sandbox.run()`, `checkStopped(report, "L2 silicon-notebook's
+<guard>", pgid, gone)` runs, as `makeBuild()` does. A surviving group
+   fails that guard and throws `StageAborted`. Then `sandbox.ensureOpen()`
+   runs before the result is read.
+   _Control:_ new, "S T165 round 6: an L2 guard that exits 0 while its
+   process group outlived the stop fails …". It runs `notebookGuards` over
+   a stand-in clone whose `run` returns status 0 with `gone: false`. It
+   expects `StageAborted`, exactly one guard run, no passing check, and one
+   failure naming "process group 424242 still present".
+   _Reverted_ (the `checkStopped` call removed): it FAILs, because all five
+   guards ran and passed and nothing was thrown.
+4. **P3, README setup snippet** (`integrations/silicon-notebook/README.md`).
+   The snippet appends only when the path is not already an entry:
+
+   ```bash
+   case ":${SILICON_NOTEBOOK_UI_PLUGINS-}:" in
+     *":$CANVAS_UI:"*) ;; # already an entry
+     *) SILICON_NOTEBOOK_UI_PLUGINS="${SILICON_NOTEBOOK_UI_PLUGINS:+$SILICON_NOTEBOOK_UI_PLUGINS:}$CANVAS_UI" ;;
+   esac
+   export SILICON_NOTEBOOK_UI_PLUGINS
+   ```
+
+   The text says why: silicon-notebook's `sync-ui-plugins.mjs` throws "ui
+   plugin package name is not unique". It also says that a rerun changes
+   nothing and that the snippet runs under `set -euo pipefail`. I also ran
+   it by hand in zsh, twice, from unset and from `/a/one`.
+   _Control:_ new, "S T165 round 6: the README's setup snippet, run once or
+   twice under set -euo pipefail …". It extracts the setup block (the
+   `CANVAS_UI=` bash block without `rest=`) and the removal block, and runs
+   bash under `set -euo pipefail` for nine cases:
+   - unset, once and twice;
+   - empty, twice;
+   - `/a/one`, once and twice;
+   - the path alone, twice;
+   - the path among two others, once;
+   - `/a/one:/b/two` set up twice, then removed;
+   - unset, set up twice, then removed.
+
+   Each case checks the exported value (`printenv`).
+   _Reverted_ (the README's old one-line snippet): it FAILs in five cases,
+   each a doubled path (for example `/a/one:<path>:<path>`).
+
+`docs/testing/README.md` now describes the WebRTC policy (and that the
+`--force-…` switch alone is not honoured), L2's surviving-group failure, and
+the controls stage S gained in the later review rounds.
+
+## Acceptance (environment as the brief, `REF=b5850d6f0ef4003211ebfd8abc52e6063b62d52a`)
+
+```text
+pnpm typecheck / lint / format:check / docs:check / deadcode   → 0 (lint: 0 errors, no warning in notebook-integration)
+pnpm exec vitest run scripts/notebook-launcher.test.mjs        → 0 (47 passed)
+--stage S                                                      → 0 (98 passed; was 94: four new controls), on the final tree
+--stage M                                                      → 0 (114 passed)
+--stage L                                                      → 0 (89 passed; Chrome with the WebRTC policy)
+leftover auto_canvas_it_* databases                            → 0
+notebook checkout git status --porcelain=v2 --branch           → identical before and after
+```
+
+## Deviations
+
+- Finding 1: the review lists `--force-webrtc-ip-handling-policy` first.
+  On its own, Chrome 158 does not honour it (table above); the plain
+  `--webrtc-ip-handling-policy` is what works. Both are passed.
+- Finding 2: the fix is in a shared helper (`controlBrowsers`), so that the
+  new WebRTC control registers its browser the same way. The control checks
+  the helper with a stand-in sandbox rather than interrupting the real
+  stage S run.
+- `notebookGuards` is now exported, for the control.
+
+## Could not verify
+
+- A TURN server over TCP (with the policy, WebRTC would reach it through
+  the run's proxy, which refuses a CONNECT that is not to the web origin).
+  It was not exercised. Nor was mDNS: no host candidate is gathered, so no
+  `.local` name is made, but multicast was not observed.
+- A Chrome other than 158.0.8127.88.
+- A real interrupt of stage S while the redirect control's Chrome starts.
+  The control runs the registered cleanups directly.
+- `pnpm test:local`, `pnpm build`, and the package checks were not rerun
+  (not in this round's acceptance).

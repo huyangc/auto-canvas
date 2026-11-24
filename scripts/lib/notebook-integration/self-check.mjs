@@ -3,6 +3,7 @@
 // notebook checkout). Each negative control also proves that the file outside
 // the clone is byte-identical afterwards.
 import { execFileSync, spawn, spawnSync } from "node:child_process";
+import dgram from "node:dgram";
 import { createServer } from "node:http";
 import fs from "node:fs";
 import net from "node:net";
@@ -58,6 +59,7 @@ import {
   forwardingProxy,
   guardNetwork,
   networkChecks,
+  notebookGuards,
 } from "./stage-l.mjs";
 import {
   removeAppNext,
@@ -1952,6 +1954,7 @@ async function stageMSharedControls(sandbox, report) {
   await t165FollowUpControls(sandbox, report);
   await t165BrowserControls(sandbox, report);
   await t165Round4Controls(sandbox, report);
+  await t165Round6Controls(sandbox, report);
 }
 
 /** `sandbox.env(…, { envFile: false })` leaves the key out; the default keeps it. */
@@ -3647,6 +3650,19 @@ async function t165BrowserControls(sandbox, report) {
   await launchShutdownControl(sandbox, report);
 }
 
+/**
+ * A control's browsers (stage L's `browserSessions`, profiles under `dir`),
+ * closed by the sandbox's disposal too: their `closeOpen` is registered with
+ * `sandbox.beforeDispose()` before any browser starts, as stage L does, so an
+ * interrupt while one starts or runs never lets the sandbox go with Chrome
+ * still running (round 6, finding 2).
+ */
+function controlBrowsers(sandbox, report, dir, options = {}) {
+  const browsers = browserSessions({ sandbox, report }, { ...options, dir });
+  sandbox.beforeDispose(() => browsers.closeOpen(10_000));
+  return browsers;
+}
+
 /** A listener of this control on 127.0.0.1 (a free port of the run's own). */
 async function standInServer(sandbox, handler) {
   const port = await sandbox.freePort();
@@ -3697,9 +3713,10 @@ async function redirectHopControl(sandbox, report) {
     res.end("<!doctype html><title>web</title><p>web</p>\n");
   });
   const rec = recordingReporter();
-  const browsers = browserSessions(
-    { sandbox, report: rec.report },
-    { dir: path.join(sandbox.root, "self-check", "redirect") },
+  const browsers = controlBrowsers(
+    sandbox,
+    rec.report,
+    path.join(sandbox.root, "self-check", "redirect"),
   );
   const token = `tok-${sandbox.randomToken()}`;
   const seen = {};
@@ -4195,5 +4212,318 @@ function removalSnippetControl(report) {
     "S T165 round 4: the README's removal snippet runs to its end under set -euo pipefail with the canvas's path as the only entry, among three, absent, twice, and with the variable unset",
     Boolean(block) && canvas !== "" && seen.every((entry) => entry.ok),
     () => JSON.stringify({ found: Boolean(block), seen }),
+  );
+}
+
+// ---- T165 round 6: WebRTC's UDP, a control's browser, L2's groups, setup ----
+
+/** Round 6 of PR 143's review (codex round 3). */
+async function t165Round6Controls(sandbox, report) {
+  await webrtcUdpControl(sandbox, report);
+  await controlBrowserDisposalControl(sandbox, report);
+  await guardGroupControl(report);
+  setupSnippetControl(report);
+}
+
+/** Ports a control never binds, on any protocol (the owner's). */
+const OWNER_PORTS = new Set([3000, 8000, 4310]);
+
+/** A UDP socket of this control on 127.0.0.1 that records every datagram. */
+async function udpListener() {
+  for (;;) {
+    const socket = dgram.createSocket("udp4");
+    const datagrams = [];
+    socket.on("message", (message, from) =>
+      datagrams.push({ bytes: message.length, from: from.port }),
+    );
+    await new Promise((resolve, reject) => {
+      socket.once("error", reject);
+      socket.bind(0, "127.0.0.1", resolve);
+    });
+    const { port } = socket.address();
+    if (!OWNER_PORTS.has(port))
+      return {
+        port,
+        datagrams,
+        close: () => new Promise((resolve) => socket.close(() => resolve())),
+      };
+    await new Promise((resolve) => socket.close(() => resolve()));
+  }
+}
+
+/**
+ * Round 6, finding 1: WebRTC sends no UDP of its own. Real headless Chrome,
+ * launched as stage L launches it (through `browserSessions`' default
+ * launch), opens a stand-in web origin through the run's proxy; the page
+ * builds an `RTCPeerConnection` whose STUN server is a UDP socket this
+ * control listens on (127.0.0.1, never an owner's port), creates a data
+ * channel and an offer, sets it as its local description and waits (8 s at
+ * most) for ICE gathering to complete. Gathering completes with no
+ * candidate, and no datagram arrives within a further second. Without the
+ * policy Chrome gathers a host candidate and sends STUN binding requests to
+ * the socket.
+ */
+async function webrtcUdpControl(sandbox, report) {
+  const udp = await udpListener();
+  const web = await standInServer(sandbox, (req, res) => {
+    res.writeHead(200, { "content-type": "text/html" });
+    res.end("<!doctype html><title>web</title><p>web</p>\n");
+  });
+  const rec = recordingReporter();
+  const browsers = controlBrowsers(
+    sandbox,
+    rec.report,
+    path.join(sandbox.root, "self-check", "webrtc"),
+  );
+  let session;
+  let gathered;
+  try {
+    session = await browsers.open("S webrtc:", {
+      webPort: web.port,
+      held: () => true,
+    });
+    if (session) {
+      await guardNetwork(session, { token: `tok-${sandbox.randomToken()}` });
+      const page =
+        session.context.pages()[0] ?? (await session.context.newPage());
+      page.setDefaultTimeout(30_000);
+      await page.goto(`http://127.0.0.1:${web.port}/`);
+      gathered = await page
+        .evaluate(async (port) => {
+          const peer = new RTCPeerConnection({
+            iceServers: [{ urls: `stun:127.0.0.1:${port}` }],
+          });
+          const candidates = [];
+          peer.addEventListener("icecandidate", (event) => {
+            if (event.candidate) candidates.push(event.candidate.candidate);
+          });
+          peer.createDataChannel("probe");
+          await peer.setLocalDescription(await peer.createOffer());
+          const state = await new Promise((resolve) => {
+            if (peer.iceGatheringState === "complete") resolve("complete");
+            peer.addEventListener("icegatheringstatechange", () => {
+              if (peer.iceGatheringState === "complete") resolve("complete");
+            });
+            setTimeout(() => resolve(peer.iceGatheringState), 8000);
+          });
+          peer.close();
+          return { state, candidates: candidates.length };
+        }, udp.port)
+        .catch((error) => ({ error: error.message.split("\n")[0] }));
+      await sleep(1000); // a datagram still on its way
+    }
+  } finally {
+    if (session) await browsers.close(session, 10_000, "S webrtc:");
+    await web.close();
+    await udp.close();
+  }
+  report.check(
+    "S T165 round 6: WebRTC in headless Chrome launched as stage L does sends no UDP of its own: ICE gathering with a STUN server on a UDP port the run listens on completes with no candidate, and no datagram arrives there",
+    Boolean(session) &&
+      gathered?.state === "complete" &&
+      gathered.candidates === 0 &&
+      udp.datagrams.length === 0 &&
+      rec.lines.fail.length === 0 &&
+      rec.lines.ok.some((line) => line.includes("the browser is closed")),
+    () =>
+      JSON.stringify({
+        gathered,
+        datagrams: udp.datagrams.length,
+        lines: rec.lines,
+      }),
+  );
+}
+
+/**
+ * Round 6, finding 2: a control's browser goes with the sandbox. A stand-in
+ * sandbox (the run's own, with its disposal's cleanups kept here) gets a
+ * control's browsers (`controlBrowsers`) and a stand-in launch that starts a
+ * process naming the profile and settles 1.5 s later. The disposal's
+ * cleanups run while that launch is pending, as an interrupt's would: they
+ * wait for it and close what it made (no session, the context closed, the
+ * process gone).
+ */
+async function controlBrowserDisposalControl(sandbox, report) {
+  const cleanups = [];
+  const standIn = {
+    ...sandbox,
+    beforeDispose: (cleanup) => cleanups.push(cleanup),
+  };
+  let pid;
+  let exited = false;
+  let closedContext = false;
+  const launch = ({ profile }) => {
+    const child = spawn(
+      process.execPath,
+      ["-e", "setInterval(() => {}, 1e9)", "--", `--user-data-dir=${profile}`],
+      { stdio: "ignore", env: { PATH: process.env.PATH ?? "" } },
+    );
+    pid = child.pid;
+    child.once("exit", () => (exited = true));
+    return sleep(1500).then(() => ({
+      pages: () => [],
+      close: async () => {
+        closedContext = true;
+        endOwn(child.pid);
+      },
+    }));
+  };
+  const rec = recordingReporter();
+  const seen = {};
+  try {
+    const browsers = controlBrowsers(
+      standIn,
+      rec.report,
+      path.join(sandbox.root, "self-check", "disposal"),
+      { launch },
+    );
+    seen.registeredBeforeOpen = cleanups.length;
+    const opening = browsers.open("S disposal:", {
+      webPort: 1,
+      held: () => false,
+    });
+    await waitFor(() => pid !== undefined, 10_000, 20);
+    await sleep(300); // the launch is connecting
+    // The sandbox's disposal runs its registered cleanups first.
+    for (const cleanup of cleanups) await cleanup();
+    const opened = await opening;
+    seen.session = opened === undefined ? "none" : "returned";
+    if (opened) await browsers.close(opened, 10_000, "S disposal:");
+    seen.closedContext = closedContext;
+    seen.processGone = await waitFor(() => exited, 3000, 50);
+  } finally {
+    if (pid !== undefined) endOwn(pid);
+  }
+  report.check(
+    "S T165 round 6: a control's browser is closed by the sandbox's disposal: its closeOpen is registered before the browser starts, and an interrupt during the launch closes what it made",
+    seen.registeredBeforeOpen === 1 &&
+      seen.session === "none" &&
+      seen.closedContext &&
+      seen.processGone &&
+      rec.lines.fail.length === 0 &&
+      rec.lines.ok.some((line) => line.includes("the browser is closed")),
+    () => JSON.stringify({ ...seen, lines: rec.lines }),
+  );
+}
+
+/**
+ * Round 6, finding 3: L2 accepts a guard's result only once its process
+ * group is gone. Stage L's `notebookGuards` over a stand-in clone whose
+ * first guard exits 0 while `sandbox.run()` could not stop its group: the
+ * guard fails ("process group … still present"), no guard passes, the stage
+ * stops (StageAborted) and no further guard runs.
+ */
+async function guardGroupControl(report) {
+  const runs = [];
+  const rec = recordingReporter();
+  const m = {
+    sandbox: {
+      env: (extra) => ({ ...extra }),
+      ensureOpen() {},
+      run: async (command, args, options) => {
+        runs.push(options.name);
+        return {
+          status: 0,
+          output: "ℹ pass 1\nℹ fail 0\n",
+          timedOut: false,
+          pgid: 424_242,
+          gone: false,
+        };
+      },
+    },
+    report: rec.report,
+    nb: "/nonexistent/clone",
+    frontend: "/nonexistent/clone/frontend",
+    options: { python: "python3" },
+    tomlFile: "/nonexistent/managed.toml",
+    writeToml() {},
+    refuseUnsafeClone() {},
+  };
+  let thrown;
+  try {
+    await notebookGuards(m);
+  } catch (error) {
+    thrown = error;
+  }
+  report.check(
+    "S T165 round 6: an L2 guard that exits 0 while its process group outlived the stop fails, and the stage stops before the next guard",
+    thrown instanceof StageAborted &&
+      runs.length === 1 &&
+      rec.lines.ok.length === 0 &&
+      rec.lines.fail.length === 1 &&
+      rec.lines.fail[0].includes("process group 424242 still present"),
+    () =>
+      JSON.stringify({
+        thrown: String(thrown?.message ?? thrown),
+        runs,
+        lines: rec.lines,
+      }),
+  );
+}
+
+/**
+ * Round 6, finding 4: the README's setup snippet (the bash block that adds
+ * the canvas's path to `SILICON_NOTEBOOK_UI_PLUGINS`), run by bash under
+ * `set -euo pipefail`: once and twice from unset, empty and another
+ * package's list, with the path already present (alone and among others),
+ * and twice followed by the removal snippet. The path is in the exported
+ * list exactly once, the other entries stay in their order, and the removal
+ * gives back the list it started from.
+ */
+function setupSnippetControl(report) {
+  const readme = fs.readFileSync(path.join(integration, "README.md"), "utf8");
+  // The bash blocks that start with CANVAS_UI=: the removal is the one that
+  // computes `rest`, the setup the other one.
+  const blocks = [
+    ...readme.matchAll(/```bash\n(CANVAS_UI=[^\n]*\n[\s\S]*?)```/gu),
+  ].map((match) => match[1]);
+  const setup = blocks.find((block) => !/^rest=/mu.test(block));
+  const removal = blocks.find((block) => /^rest=/mu.test(block));
+  const canvas = /^CANVAS_UI=(\S+)$/mu.exec(setup ?? "")?.[1] ?? "";
+  const cases = [
+    [undefined, [setup], canvas],
+    [undefined, [setup, setup], canvas],
+    ["", [setup, setup], canvas],
+    ["/a/one", [setup], `/a/one:${canvas}`],
+    ["/a/one", [setup, setup], `/a/one:${canvas}`],
+    [canvas, [setup, setup], canvas],
+    [`/a/one:${canvas}:/b/two`, [setup], `/a/one:${canvas}:/b/two`],
+    ["/a/one:/b/two", [setup, setup, removal], "/a/one:/b/two"],
+    [undefined, [setup, setup, removal], "<not exported>"],
+  ];
+  const seen = cases.map(([value, blocks, want]) => {
+    const run = spawnSync(
+      "bash",
+      [
+        "-c",
+        `set -euo pipefail\n${blocks.join("\n")}\nprintf 'end:%s' "$(printenv SILICON_NOTEBOOK_UI_PLUGINS || printf '<not exported>')"`,
+      ],
+      {
+        encoding: "utf8",
+        timeout: 10_000,
+        env: {
+          PATH: process.env.PATH ?? "",
+          ...(value === undefined
+            ? {}
+            : { SILICON_NOTEBOOK_UI_PLUGINS: value }),
+        },
+      },
+    );
+    return {
+      value: value ?? "(unset)",
+      runs: blocks.map((block) => (block === setup ? "setup" : "removal")),
+      want,
+      status: run.status,
+      out: run.stdout,
+      ok: run.status === 0 && run.stdout === `end:${want}`,
+    };
+  });
+  report.check(
+    "S T165 round 6: the README's setup snippet, run once or twice under set -euo pipefail, exports the canvas's path exactly once (unset, empty, another package's list, the path already there alone or among others), and the removal snippet then gives the list back",
+    Boolean(setup) &&
+      Boolean(removal) &&
+      canvas !== "" &&
+      seen.every((entry) => entry.ok),
+    () => JSON.stringify({ found: Boolean(setup), seen }),
   );
 }

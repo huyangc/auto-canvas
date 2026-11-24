@@ -13,7 +13,8 @@
 // 127.0.0.1) that forwards only to the clone's web port while the listener
 // gate holds and refuses and records everything else, a redirect's hops
 // included; behind it, a page request to anything but the web origin is
-// aborted. Either fails the stage. The browser is closed in the cleanup too
+// aborted. Either fails the stage. WebRTC may use only proxied connections,
+// so a page sends no UDP of its own. The browser is closed in the cleanup too
 // (a launch in flight is awaited and disposed), and only a process this run
 // started and recorded (by its profile on the command line) is ever
 // signalled.
@@ -45,7 +46,7 @@ import {
 } from "./managed-clone.mjs";
 import { groupOf, removeNext } from "./notebook-clone.mjs";
 import { waitFor } from "./sandbox.mjs";
-import { tail } from "./steps.mjs";
+import { checkStopped, tail } from "./steps.mjs";
 
 /** The canvas's UI package, as silicon-notebook's sync script gets it. */
 const UI_PACKAGE = path.join(integration, "ui/auto-canvas");
@@ -207,9 +208,11 @@ function syncedPackage(m, contribution) {
  * check: the node test lane, the UI vocabulary guard, the type check (its
  * pretypecheck re-syncs with the variable set), the CLI's extensions check
  * and the deployment parity script against the clone's contract, the last two
- * with the stage's managed TOML.
+ * with the stage's managed TOML. A guard whose process group outlived its
+ * shutdown fails, whatever its exit status, and stops the stage
+ * (`checkStopped`, as `makeBuild` does): nothing more runs beside it.
  */
-async function notebookGuards(m) {
+export async function notebookGuards(m) {
   const { sandbox, report, nb } = m;
   const python = m.options.python;
   const pluginSrc = path.join(integration, "plugin/src");
@@ -278,6 +281,14 @@ async function notebookGuards(m) {
       env: sandbox.env({ ...base, ...extra }, { envFile: false }),
       timeoutMs: 900_000,
     });
+    checkStopped(
+      report,
+      `L2 silicon-notebook's ${name}`,
+      result.pgid,
+      result.gone,
+    );
+    // After an interrupt the sandbox is gone: nothing below means anything.
+    sandbox.ensureOpen(`L2 ${name}: its result`);
     // node --test's own summary lines, e.g. "ℹ pass 3279".
     const counts = (result.output.match(/^\S+ (?:pass|fail) \d+$/gmu) ?? [])
       .map((line) => line.replace(/^\S+ /u, ""))
@@ -555,11 +566,27 @@ const chromium = () =>
   ).chromium);
 
 /**
+ * WebRTC's UDP (ICE, STUN) goes neither through Playwright's routes nor
+ * through an HTTP proxy, so a page could send datagrams to any host or port
+ * unseen. `disable_non_proxied_udp` leaves WebRTC only proxied connections
+ * (TCP through the run's proxy, which refuses them): no host candidate and
+ * no STUN datagram. Chrome takes the policy from
+ * `--webrtc-ip-handling-policy`; `--force-webrtc-ip-handling-policy=<policy>`
+ * alone is not honoured (Chrome 158 still sends STUN with it), so both are
+ * given. Stage S proves it in real headless Chrome launched as here.
+ */
+const WEBRTC_POLICY_ARGS = [
+  "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+  "--webrtc-ip-handling-policy=disable_non_proxied_udp",
+];
+
+/**
  * Chrome (the system channel, headless) with `profile`, every connection —
- * loopback included — through the run's proxy on `proxyPort`. Chrome bypasses
- * a proxy for loopback by default; `<-loopback>` removes that implicit rule,
- * and no `bypass` is given (the switch is last on the command line, so it is
- * the list Chrome uses).
+ * loopback included — through the run's proxy on `proxyPort`, and WebRTC
+ * without UDP of its own (`WEBRTC_POLICY_ARGS`). Chrome bypasses a proxy for
+ * loopback by default; `<-loopback>` removes that implicit rule, and no
+ * `bypass` is given (the switch is last on the command line, so it is the
+ * list Chrome uses).
  */
 const launchChrome = ({ profile, proxyPort, sandbox }) =>
   chromium().launchPersistentContext(profile, {
@@ -572,7 +599,7 @@ const launchChrome = ({ profile, proxyPort, sandbox }) =>
     viewport: { width: 1440, height: 900 },
     serviceWorkers: "block",
     proxy: { server: `http://127.0.0.1:${proxyPort}` },
-    args: ["--proxy-bypass-list=<-loopback>"],
+    args: [...WEBRTC_POLICY_ARGS, "--proxy-bypass-list=<-loopback>"],
     env: {
       PATH: process.env.PATH ?? "",
       HOME: path.join(sandbox.root, "home"),

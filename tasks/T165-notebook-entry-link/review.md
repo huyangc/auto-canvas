@@ -101,3 +101,37 @@ leftover auto_canvas_it_* databases                          → 0
 notebook checkout git status before/after                    → identical
 pnpm test:local                                              → 0 (862 files passed, 3 skipped)
 ```
+
+## Round 6 — changes-requested
+
+Reviewed: codex PR review round 3 on PR 143 (head `7319f0e`, gpt-6.2-sol),
+each finding checked against the code by Opus (continued under the owner's
+instruction, as round 4).
+
+| #   | Severity        | Where                                                   | Finding                                                                                                                                                   | Expected fix                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| --- | --------------- | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | must-fix (P1)   | `stage-l.mjs` `launchChrome`                            | WebRTC (ICE/STUN over UDP) is neither routed by Playwright nor sent to the HTTP proxy, so a page could reach another host or an owner port by UDP unseen. | Launch Chrome so WebRTC uses only proxied connections: `--force-webrtc-ip-handling-policy=disable_non_proxied_udp` (and `--webrtc-ip-handling-policy=disable_non_proxied_udp`), or disable WebRTC outright if that is not honoured. A stage S control in real headless Chrome launched as stage L does: a page that creates an `RTCPeerConnection` with a STUN server on a loopback UDP port the run listens on (never 3000/8000/4310) and gathers candidates → no datagram arrives within a bound; with the flag removed, one does. |
+| 2   | must-fix (P2)   | `self-check.mjs` redirect control                       | The control's browser is closed only in its local `finally`; an interrupt during `browsers.open()` lets the sandbox go while Chrome runs.                 | Register `browsers.closeOpen` with `sandbox.beforeDispose()` before starting Chrome, as stage L does.                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| 3   | must-fix (P2)   | `stage-l.mjs` `notebookGuards`                          | A guard that exits 0 while `sandbox.run()` could not stop its process group still passes, and the stage goes on using the clone.                          | Call `checkStopped()` (as `makeBuild()` does) before accepting each guard's result; a surviving group fails the check and stops the stage.                                                                                                                                                                                                                                                                                                                                                                                           |
+| 4   | should-fix (P3) | `integrations/silicon-notebook/README.md` setup snippet | Rerunning the setup appends the canvas's path again; silicon-notebook's sync refuses duplicate package names, so the next build fails.                    | Append only when the path is not already an entry; extend the README control to rerun the setup twice and with the path already present.                                                                                                                                                                                                                                                                                                                                                                                             |
+
+## Round 7 — accepted
+
+Reviewed: the round 6 diff (Opus implementer) against review round 6's four
+findings; acceptance rerun by Opus (`tmp/t165-review-r6.sh`, logs in
+`tmp/t165-review/r6/`). All four fixed, each with a stage S control that
+fails with its fix reverted (implementer's evidence). Finding 1: Chrome 158
+ignores `--force-webrtc-ip-handling-policy` alone and honours
+`--webrtc-ip-handling-policy`; both are passed, and stage S proves in real
+headless Chrome that no STUN datagram leaves.
+
+```text
+pnpm build / pnpm build:notebook-editor                      → 0
+launcher + package tests                                     → 0
+pnpm typecheck / lint / format:check / docs:check / deadcode → 0
+package build + check                                        → 0 (21 of 21)
+--stage S / M / L                                            → 0 (98 / 114 / 89 passed)
+leftover auto_canvas_it_* databases                          → 0
+notebook checkout git status before/after                    → identical
+pnpm test:local                                              → 0 (862 files passed, 3 skipped)
+```
