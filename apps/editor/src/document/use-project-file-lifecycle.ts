@@ -51,6 +51,7 @@ import {
 } from "./cloud-project-session";
 import { CLOUD_PROJECT_COPY } from "./cloud-project-copy";
 import {
+  CLOUD_AUTO_SAVE_DEADLINE_MS,
   CLOUD_AUTO_SAVE_DELAY_MS,
   CLOUD_AUTO_SAVE_POLL_MS,
   applicableHold,
@@ -646,7 +647,7 @@ export function useProjectFileLifecycle({
    */
   function recordAutoSaveHold(
     binding: CloudProjectBinding | null,
-    outcome: CloudProjectSaveOutcome | "threw",
+    outcome: CloudProjectSaveOutcome | "threw" | "timeout",
     epochAtStart: number,
   ): void {
     if (!binding) return;
@@ -863,7 +864,35 @@ export function useProjectFileLifecycle({
         isActivationCurrent(owner)
           ? { id: liveSessionRef.current, project: readCurrentProject() }
           : null,
-      write: (snapshot) => performProjectSaveToCloud(snapshot, false, true),
+      write: (snapshot) => {
+        const binding = cloudBindingRef.current;
+        const epochAtStart = onlineEpoch();
+        const writing = performProjectSaveToCloud(snapshot, false, true);
+        // A request with no answer must not hold the tabs, replacement,
+        // sign-out and Save for good. Only the wait ends: a late receipt is
+        // still applied, and otherwise the next save meets any change the
+        // server did commit as a conflict.
+        let deadline: ReturnType<typeof setTimeout> | undefined;
+        const expired = new Promise<CloudProjectSaveOutcome>((resolve) => {
+          deadline = setTimeout(() => {
+            if (snapshot.isCurrent()) {
+              setPersistenceState("failed");
+              recordAutoSaveHold(binding, "timeout", epochAtStart);
+              setStatus(
+                "The Cloud did not answer the auto-save; the Project may have been saved. Press Ctrl+S to retry",
+              );
+            }
+            resolve({
+              status: "rejected",
+              message: "The Cloud did not answer in time",
+            });
+          }, CLOUD_AUTO_SAVE_DEADLINE_MS);
+        });
+        writing.catch(() => {});
+        return Promise.race([writing, expired]).finally(() =>
+          clearTimeout(deadline),
+        );
+      },
       rejected: () => ({
         status: "rejected",
         message: "Project changed before Cloud auto-save",
@@ -1711,15 +1740,26 @@ export function useProjectFileLifecycle({
    * switch reads the outgoing tab's.
    */
   function noteExternalCommit(committed?: CircuitProject): void {
-    setAutoSaveArmed(true);
+    // A write in flight decides the state with its receipt; the copy stays
+    // armed so whatever differs from it saves next.
+    if (cloudWritesRef.current > 0) {
+      setAutoSaveArmed(true);
+      return;
+    }
     const state = persistenceStateRef.current;
-    if (state !== "clean" && state !== "unbound") return;
     const saved = savedProjectBaselineRef.current;
-    if (
-      saved === null ||
-      !sameProjectContent(committed ?? readCurrentProject(), saved.project)
-    )
-      setPersistenceState("dirty");
+    const matchesSaved =
+      saved !== null &&
+      sameProjectContent(committed ?? readCurrentProject(), saved.project);
+    // Every commit is reconciled, so a batch that rolls back to the saved
+    // content leaves nothing to upload.
+    if (matchesSaved) {
+      if (state === "dirty") setPersistenceState("clean");
+      setAutoSaveArmed(false);
+      return;
+    }
+    setAutoSaveArmed(true);
+    if (state === "clean" || state === "unbound") setPersistenceState("dirty");
   }
 
   const currentOnlineEpoch = useOnlineEpoch();
@@ -1760,10 +1800,19 @@ export function useProjectFileLifecycle({
     // The timer belongs to this activation: a switch retires it before its
     // closure could read the outgoing tab's Project.
     const owner = captureReplacementOwner();
+    // The content this delay is for: a commit React has not rendered yet
+    // restarts it rather than being sent at once.
+    let quietToken = projectChangeToken(readCurrentProject());
     let timer: ReturnType<typeof setTimeout> | null = null;
     const fire = () => {
       timer = null;
       if (!isActivationCurrent(owner) || !autoSaveEligible()) return;
+      const liveToken = projectChangeToken(readCurrentProject());
+      if (liveToken !== quietToken) {
+        quietToken = liveToken;
+        timer = setTimeout(fire, CLOUD_AUTO_SAVE_DELAY_MS);
+        return;
+      }
       if (autoSaveBlocked()) {
         timer = setTimeout(fire, CLOUD_AUTO_SAVE_POLL_MS);
         return;

@@ -188,6 +188,8 @@ export function routeAgentCommit(
     noteExternalCommit(committed: EditorDocumentController["project"]): void;
     writeRecoverySessionSnapshot: RecoverySnapshotWriter;
     changed(): void;
+    /** Whether the Agent's background Cloud save of this tab is in flight. */
+    backgroundSaving?(tabId: string): boolean;
   },
 ): "active" | "background" | "closed" {
   const stored = tabs.entries.find(
@@ -206,7 +208,9 @@ export function routeAgentCommit(
     session.file = {
       ...session.file,
       persistenceState: unsaved ? "dirty" : "clean",
-      autoSaveArmed: unsaved,
+      // A save in flight may acknowledge an intermediate version: the copy
+      // stays armed so its receipt leaves the newer content to save.
+      autoSaveArmed: unsaved || tabs.backgroundSaving?.(stored.id) === true,
     };
     tabs.writeRecoverySessionSnapshot(session.recovery, controller.project, {
       cloudBinding: session.file.cloudBinding,
@@ -1206,6 +1210,7 @@ export function useProjectTabSessions({
       noteExternalCommit,
       writeRecoverySessionSnapshot,
       changed: projectTabs.changed,
+      backgroundSaving: (tabId) => backgroundCloudSaves.current.has(tabId),
     });
   }
   return {

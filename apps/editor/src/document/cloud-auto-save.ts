@@ -18,6 +18,11 @@ export const CLOUD_AUTO_SAVE_STORAGE_KEY = "icm.cloud-auto-save.v1";
 export const CLOUD_AUTO_SAVE_DELAY_MS = 3000;
 /** How often a due save asks again while something holds it back. */
 export const CLOUD_AUTO_SAVE_POLL_MS = 500;
+/**
+ * How long an automatic write may go unanswered before auto-save stops
+ * waiting for it, so a stalled request never holds the tabs for good.
+ */
+export const CLOUD_AUTO_SAVE_DEADLINE_MS = 30_000;
 
 type PreferenceStorage = Pick<Storage, "getItem" | "setItem">;
 
@@ -125,7 +130,9 @@ export type CloudAutoSaveHoldKind =
   | "too-large"
   | "limit"
   | "not-found"
-  | "rejected";
+  | "rejected"
+  /** No answer before the deadline: the server may have saved it. */
+  | "timeout";
 
 /**
  * What a failed write left on one Cloud revision: auto-save stops for that
@@ -158,18 +165,20 @@ function holdsBinding(
 export function holdAfterFailure(
   existing: CloudAutoSaveHold | null,
   binding: CloudProjectBinding,
-  outcome: CloudProjectSaveOutcome | "threw",
+  outcome: CloudProjectSaveOutcome | "threw" | "timeout",
   epochAtStart: number,
 ): CloudAutoSaveHold | null {
-  if (outcome !== "threw" && outcome.status === "saved") return null;
+  if (typeof outcome !== "string" && outcome.status === "saved") return null;
   if (existing?.kind === "conflict" && holdsBinding(existing, binding))
     return existing;
   const kind: CloudAutoSaveHoldKind =
     outcome === "threw"
       ? "rejected"
-      : outcome.status === "unreachable"
-        ? "offline"
-        : outcome.status;
+      : outcome === "timeout"
+        ? "timeout"
+        : outcome.status === "unreachable"
+          ? "offline"
+          : outcome.status;
   return {
     kind,
     bindingId: binding.id,
@@ -230,6 +239,8 @@ export interface CloudSaveIndicator {
 }
 
 function pausedTitle(kind: CloudAutoSaveHoldKind): string {
+  if (kind === "timeout")
+    return "The Cloud did not answer; it may have saved. Ctrl+S retries, or reports a change made elsewhere";
   if (kind === "signed-out")
     return "Sign in again, then press Ctrl+S to save to Cloud";
   if (kind === "too-large")
@@ -281,7 +292,9 @@ export function cloudSaveIndicator(input: {
   if (input.pendingDraft)
     return {
       label: "Unsaved",
-      title: "Saves after the current edit is applied",
+      title: input.enabled
+        ? "Saves after the current edit is applied"
+        : "Apply the edit, then press Ctrl+S to save to Cloud",
       tone: "unsaved",
     };
   if (input.persistenceState === "clean")

@@ -455,6 +455,27 @@ describe("routeAgentCommit", () => {
     };
   }
 
+  it("keeps a background tab armed through an undo while its save is in flight", () => {
+    const { b, calls } = tabs();
+    // B's save of an intermediate version is pending; the Agent undoes back
+    // to the saved content. The receipt will make that version the baseline.
+    b.file.savedBaseline = {
+      project: structuredClone(b.controller.project),
+      viewBox: b.view,
+    };
+    b.file.persistenceState = "saving";
+    const result = routeAgentCommit(b.controller, {
+      activeController: tabs().a.controller,
+      renderedController: tabs().a.controller,
+      activeId: "a",
+      entries: [{ id: "b", session: b }],
+      backgroundSaving: (id) => id === "b",
+      ...calls,
+    });
+    expect(result).toBe("background");
+    expect(b.file.autoSaveArmed).toBe(true);
+  });
+
   it("leaves a background tab clean when a rolled-back batch restored its saved content", () => {
     const { b, calls, route } = tabs();
     b.file.savedBaseline = {
