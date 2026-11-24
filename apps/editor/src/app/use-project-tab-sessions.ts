@@ -1016,7 +1016,13 @@ export function useProjectTabSessions({
     const pending = window.history.state?.projectImportTab;
     if (
       pending?.href === window.location.href &&
-      projectTabs.tabs.some((tab) => tab.id === pending.id)
+      projectTabs
+        .entries()
+        .some(
+          ({ id, session }) =>
+            id === pending.id &&
+            session.recovery.workingCopyId === pending.workingCopyId,
+        )
     ) {
       return keepImport();
     }
@@ -1032,6 +1038,9 @@ export function useProjectTabSessions({
                 projectImportTab: {
                   href: window.location.href,
                   id: workspace.activeId,
+                  workingCopyId: workspace.tabs.find(
+                    (tab) => tab.id === workspace.activeId,
+                  )!.session.recovery.workingCopyId,
                 },
               },
               "",
