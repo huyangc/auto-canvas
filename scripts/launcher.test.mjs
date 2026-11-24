@@ -534,9 +534,13 @@ test("editor supervisor kills a process group that ignores SIGTERM after STOP_TI
   expect(Number.isInteger(group) && group > 0).toBe(true);
   const started = Date.now();
   supervisor.kill("SIGTERM");
-  await once(supervisor, "exit");
+  const [exitCode, exitSignal] = await once(supervisor, "exit");
+  const elapsed = Date.now() - started;
+  const groupAfter = spawnSync("ps", ["-o", "pid=,stat=,comm=", "-g", String(group)], { encoding: "utf8" }).stdout.trim();
+  console.log("DIAG supervisor", JSON.stringify({ elapsed, exitCode, exitSignal, groupAfter }));
+  if (elapsed < 400) { try { process.kill(-group, "SIGKILL"); } catch {} }
   // The group survived SIGTERM, so it is gone only because of the escalation.
-  expect(Date.now() - started).toBeGreaterThanOrEqual(400);
+  expect(elapsed, JSON.stringify({ exitCode, exitSignal, groupAfter })).toBeGreaterThanOrEqual(400);
   await expect
     .poll(() => spawnSync("pgrep", ["-g", String(group)]).status, {
       timeout: 3000,
