@@ -1,11 +1,18 @@
+import { readFile, stat } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
+import { isAbsolute } from "node:path";
 import { serve, type ServerType } from "@hono/node-server";
-import type { Pool } from "pg";
+import type { ClientBase, Pool } from "pg";
 import { AgentRelayHost } from "./agent-relay/host.js";
 import { createApp } from "./app.js";
 import { readAuthConfig } from "./auth-config.js";
 import { normalizeBasePath } from "./base-path.js";
 import { createDb as defaultCreateDb } from "./db.js";
+import {
+  GuardedConfigurationError,
+  guardedPostgresUrl,
+  notebookDatabase,
+} from "./guarded-database.js";
 import { stripIntegrationMount } from "./integration-mount.js";
 import { migrate } from "./migrate.js";
 import { publicUrl } from "./public-url.js";
@@ -14,7 +21,10 @@ import { serveEditor } from "./static-editor.js";
 interface StartOptions {
   env?: Readonly<Record<string, string | undefined>>;
   argv?: readonly string[];
-  createDb?: (connectionString?: string) => Pool;
+  createDb?: (
+    connectionString?: string,
+    onConnect?: (client: ClientBase) => Promise<void>,
+  ) => Pool;
   log?: (message: string) => void;
 }
 interface RunningServer {
@@ -25,6 +35,11 @@ interface RunningServer {
 /**
  * Migrates the database and, unless `--migrate` was given, serves the HTTP
  * API (and the editor when EDITOR_ROOT is set). Resolves once listening.
+ *
+ * `--require-canvas-database` and `--init-empty-database` select the guarded
+ * start of a silicon-notebook companion service (`guardedStart`): the first
+ * serves only an existing canvas database, the second only initialises an
+ * empty one and returns null.
  */
 export async function startServer({
   env = process.env,
@@ -35,15 +50,25 @@ export async function startServer({
   // Configuration errors surface before any database connection is attempted.
   const auth = readAuthConfig(env);
   const basePath = normalizeBasePath(env.AUTO_CANVAS_BASE_PATH);
-  const db = createDb(env.DATABASE_URL);
+  const guard = await guardedStart(env, argv);
+  let db = createDb(env.DATABASE_URL);
   let agentRelay: AgentRelayHost | null = null;
   let server: ServerType;
   let address: AddressInfo;
   try {
-    await migrate(db);
-    if (argv.includes("--migrate")) {
+    if (guard) {
+      const schema = await migrate(db, guard);
       await db.end();
-      return null;
+      if (guard.kind === "empty") return null;
+      // Every serving connection is pinned to the schema the guard checked,
+      // whatever the role's or database's default search_path becomes.
+      db = createDb(env.DATABASE_URL, (client) => pinSchema(client, schema));
+    } else {
+      await migrate(db);
+      if (argv.includes("--migrate")) {
+        await db.end();
+        return null;
+      }
     }
     // The relay gets the same resolved prefix as the HTTP app, whatever the
     // process environment says.
@@ -149,4 +174,71 @@ export async function startServer({
       return closing;
     },
   };
+}
+
+const REQUIRE_CANVAS = "--require-canvas-database";
+const INIT_EMPTY = "--init-empty-database";
+
+/**
+ * The guard a flagged start migrates under, or null without a flag. Every
+ * refusal here happens before a pool exists.
+ */
+async function guardedStart(
+  env: Readonly<Record<string, string | undefined>>,
+  argv: readonly string[],
+) {
+  const canvas = argv.includes(REQUIRE_CANVAS);
+  const empty = argv.includes(INIT_EMPTY);
+  if (!canvas && !empty) return null;
+  if (canvas && empty)
+    throw new Error(`${REQUIRE_CANVAS} and ${INIT_EMPTY} exclude each other`);
+  const flag = canvas ? REQUIRE_CANVAS : INIT_EMPTY;
+  if (argv.includes("--migrate"))
+    throw new Error(`${flag} and --migrate exclude each other`);
+  try {
+    guardedPostgresUrl(env.DATABASE_URL);
+  } catch (error) {
+    throw prefixed("DATABASE_URL", error);
+  }
+  const file = env.AUTO_CANVAS_NOTEBOOK_ENV_FILE;
+  if (file === undefined || file === "" || !isAbsolute(file))
+    throw new GuardedConfigurationError(
+      `AUTO_CANVAS_NOTEBOOK_ENV_FILE must be the absolute path of silicon-notebook's .env with ${flag}`,
+    );
+  let text: string;
+  try {
+    if (!(await stat(file)).isFile()) throw new Error("not a regular file");
+    text = await readFile(file, "utf8");
+  } catch {
+    throw new GuardedConfigurationError(
+      "AUTO_CANVAS_NOTEBOOK_ENV_FILE does not name a regular file that can be read",
+    );
+  }
+  let notDatabase: string | null;
+  try {
+    notDatabase = notebookDatabase(text);
+  } catch (error) {
+    throw prefixed("AUTO_CANVAS_NOTEBOOK_ENV_FILE", error);
+  }
+  return { kind: canvas ? "canvas" : "empty", notDatabase } as const;
+}
+
+function prefixed(variable: string, error: unknown): unknown {
+  return error instanceof GuardedConfigurationError
+    ? new GuardedConfigurationError(`${variable} ${error.message}`)
+    : error;
+}
+
+async function pinSchema(client: ClientBase, schema: string): Promise<void> {
+  await client.query(
+    "SELECT pg_catalog.set_config('search_path', pg_catalog.quote_ident($1), false)",
+    [schema],
+  );
+  const current = await client.query<{ schema: string | null }>(
+    "SELECT pg_catalog.current_schema() AS schema",
+  );
+  if (current.rows[0]?.schema !== schema)
+    throw new Error(
+      "The canvas schema checked at start is no longer the connection's current schema",
+    );
 }

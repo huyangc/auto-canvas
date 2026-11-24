@@ -96,6 +96,30 @@ readout it cannot make is reported as unverified rather than assumed clean.
 `node scripts/standalone-build-evidence-check.mjs` checks its
 refusals and cleanup (after `pnpm build` and `pnpm build:notebook-editor`).
 
+The silicon-notebook companion service
+([spec](../specs/server.md#running-as-a-silicon-notebook-companion-service))
+has three test files in the default suite:
+
+- `apps/server/src/guarded-database.test.ts`: unit tests of the guarded URL
+  form and of the grammar silicon-notebook's `.env` must fit.
+- `apps/server/src/migration-guard.test.ts`: the flagged starts on real
+  PostgreSQL. The `empty` guard looks at the whole database, so the file
+  creates databases named `auto_canvas_it_<12 hex>_<n>` on the server
+  `AUTO_CANVAS_TEST_DATABASE_URL` names (default
+  `postgresql:///auto_canvas_test`), drops them with `WITH (FORCE)` in
+  `afterAll`, also after a failed case, and asserts that they are gone. Its
+  role needs `CREATEDB`; the file fails at once when it lacks it. A hostless
+  test URL (the local lane form) is turned into one on `127.0.0.1` with the
+  connection's role, which must be able to log in over loopback. Settings a
+  case needs (`search_path`, default isolation) are set per database with
+  `ALTER DATABASE`, never per role.
+- `scripts/notebook-launcher.test.mjs`: `serve.sh` and `init-db.sh` in
+  temporary roots (one with a space in its path) with a recording stand-in
+  for Node, and the plugin package and TOML examples under Python. It uses
+  `AUTO_CANVAS_TEST_PYTHON` when set, otherwise the first of `python3.13`,
+  `python3.12` and `python3` on `PATH` that is 3.12 or newer, and fails
+  (it does not skip) with a message naming that variable when there is none.
+
 ## Environment-dependent execution
 
 The editor does not run simulations. Tests for inherited packages remain until
