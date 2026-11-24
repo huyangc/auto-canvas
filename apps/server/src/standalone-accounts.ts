@@ -366,18 +366,23 @@ export function registerAccounts(
       const conn = await db.connect();
       try {
         await conn.query("BEGIN");
-        // The verified hash must still be current: a reset, disable or
-        // another change committed since the check wins.
-        const locked = await conn.query(
-          "SELECT 1 FROM standalone_accounts WHERE user_id=$1 AND password_hash=$2 AND credentials_version=$3 AND NOT disabled FOR UPDATE",
-          [userId, row.password_hash, row.credentials_version],
+        const locked = await conn.query<{
+          password_hash: Buffer;
+          credentials_version: number;
+          disabled: boolean;
+        }>(
+          "SELECT password_hash,credentials_version,disabled FROM standalone_accounts WHERE user_id=$1 FOR UPDATE",
+          [userId],
         );
-        if (!locked.rowCount) {
+        const current = locked.rows[0];
+        // Deleted after the credential read: the session is gone with it.
+        if (!current) {
           await conn.query("ROLLBACK");
-          return incorrect();
+          return expired();
         }
         // One statement after the account lock locks this session with the
-        // others it ends: a sign-out or revocation of this session that
+        // others it ends: a sign-out or revocation of this session (by a
+        // disable, reset, deletion or a change from another session) that
         // committed first ends the request.
         const sessions = await removeSessions(
           conn,
@@ -387,6 +392,16 @@ export function registerAccounts(
         if (!sessions.kept) {
           await conn.query("ROLLBACK");
           return expired();
+        }
+        // The session survived, so only a change from this same session can
+        // have replaced the verified hash: that one is a wrong password now.
+        if (
+          current.disabled ||
+          current.credentials_version !== row.credentials_version ||
+          !current.password_hash.equals(row.password_hash)
+        ) {
+          await conn.query("ROLLBACK");
+          return incorrect();
         }
         retired = sessions.pairings;
         await conn.query(
