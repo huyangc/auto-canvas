@@ -23,6 +23,8 @@ type RetiredSessions =
  * rolls back.
  *
  * Called in a transaction, after its `users` and `standalone_accounts` locks.
+ * Liveness uses `clock_timestamp()`, not the transaction's `now()`: a request
+ * that waited for a lock past its session's expiry is not kept.
  * Every session row a transaction touches is locked here, in one statement
  * ordered by hash, so no two transactions lock sessions in different orders.
  * Locking them before reading their pairings includes pairings admitted
@@ -40,7 +42,7 @@ export async function removeSessions(
     user_id: string;
     live: boolean;
   }>(
-    `SELECT token_hash, user_id, expires_at>now() AS live FROM standalone_sessions
+    `SELECT token_hash, user_id, expires_at>clock_timestamp() AS live FROM standalone_sessions
     WHERE token_hash=$1::bytea OR ($2 AND expires_at<=now()) OR user_id=$3::text
       OR token_hash=$4::bytea
     ORDER BY token_hash FOR UPDATE`,

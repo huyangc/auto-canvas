@@ -123,3 +123,25 @@ before the acting account row (users → accounts strictly).
 Reviewer rerun on lane 2: vitest 413/413; typecheck 0; lint 0 errors;
 format, docs, deadcode 0; build 0; server-mode-check 0; accounts Playwright
 3/3.
+
+## Reviewer fix after codex PR review round 3 (owner's decision)
+
+Codex round 3 on `ccc0a29`: no P0/P1, two P3. The rounds are used up; the
+owner chose to have the reviewer fix both.
+
+1. Session liveness in `removeSessions` uses `clock_timestamp()` instead of
+   the transaction's `now()`, so a request that waited for a lock past its
+   session's expiry is refused. Test: "session expiry while waiting for
+   locks".
+2. `POST /api/auth/password` locks the account row by id, checks the kept
+   session, and only then compares the verified hash: a deleted account or a
+   session ended by a disable, reset, deletion or another session's change
+   answers 401 `unauthorized` with `X-Canvas-Session: expired`; a change from
+   the same session meanwhile still answers `incorrect-password`. Tests: the
+   reset test now expects the expired header; "own password after its
+   credential read" (deletion, same-session change).
+
+The three tests that cover a fix fail on `ccc0a29` (checked by swapping the
+two source files back). Rerun on lane 2: vitest 416/416; typecheck 0; lint 0
+errors; format, docs, deadcode 0; build 0; server-mode-check 0; accounts
+Playwright 3/3.
