@@ -27,7 +27,9 @@ for a capable engineer who has never seen this conversation.
    Acceptance lists exact commands with expected results, plus behavioral
    checks. Include the baseline commands that passed on `main`
    (`.baseline/status` and its logs) so regressions are visible.
-5. **Plan review.** Have codex review the plan read-only; commands and rules
+5. **Plan review.** By default, review the plan yourself against the code you
+   read and go on to step 6; do not run codex unless the user asks for a plan
+   review. When asked, have codex review the plan read-only; commands and rules
    are in [Plan review](../../../docs/workflow.md#方案评审). Verify each finding
    against the code, revise the plan, and repeat until a round reports no
    P0/P1. Record the rounds and verdict in the plan's `Plan review` line; raw

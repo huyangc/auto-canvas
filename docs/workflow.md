@@ -1,10 +1,11 @@
 # 工作流：Opus 出方案，子代理实现，codex 评审
 
 每项工作是 `tasks/` 下的一个任务目录。Opus（Claude Code 主会话）负责方案和审查，
-Claude Code 子代理负责实现，codex 评审方案和代码，人负责确认范围和最终验收。
+Claude Code 子代理负责实现，人负责确认范围和最终验收。方案评审按需：用户要求时
+由 codex 评审方案，默认由 Opus 自查代码后直接提交人确认；代码评审始终经过 codex。
 
 ```text
-需求 → ① Opus 方案 plan.md → codex 方案评审（gpt-6.2-astra，只读，到无 P0/P1）
+需求 → ① Opus 方案 plan.md →（用户要求时）codex 方案评审（gpt-6.2-astra，只读，到无 P0/P1）
      → 人确认范围
      → ② 实现子代理（Agent 工具，按难度选 model）→ 最终消息即报告，Opus 写 report.md
      → ③ Opus 审查：亲自重跑验收命令 + 读 diff
@@ -32,8 +33,8 @@ tasks/T001-<slug>/
 - **一个任务一个分支**：`task/T001-<slug>`，从 `main` 开出。实现者只在简报
   要求时提交，且只提交在任务分支上；不推送、不合并、不 rebase、不切分支。Codex
   轮次从不提交。PR 和合并由 Opus 在审查通过后进行。不直接推送 `main`。
-- **方案先经 codex 评审**：确认范围之前，方案要过一轮或多轮
-  [方案评审](#方案评审)。
+- **方案评审按需**：默认由 Opus 对照代码自查，然后直接交人确认范围；用户要求时，
+  确认范围之前方案要过一轮或多轮[方案评审](#方案评审)。
 - **方案要能直接执行**：写清目标、真实路径、要改的耦合点、步骤顺序、范围
   内外、可直接运行的验收命令及预期结果。方案不确定的地方先查代码，查不清就
   在方案里列为调查步骤，并写明调查结论放进 report。
@@ -47,7 +48,7 @@ tasks/T001-<slug>/
   得到用户确认后才运行。一次确认只对所说明的那一次运行有效，自主批量执行时
   也不例外。方案里遇到这类步骤要写明“先问用户”，实现者不自行运行。只读取
   已缓存结果、不发起 API 调用的运行不受限。Codex 轮次
-  （`scripts/codex-task.sh`）、codex 方案评审、codex PR 评审和 Claude Code
+  （`scripts/codex-task.sh`）、用户要求的方案评审、codex PR 评审和 Claude Code
   子代理是流程自带的工具，不属于这条规则。
 
 ## 并行任务
@@ -83,7 +84,8 @@ tasks/T001-<slug>/
 
 ## 方案评审
 
-方案写完、人确认范围之前，用 codex（model `gpt-6.2-astra`，只读沙箱）评审方案：
+默认不走这一节：Opus 自己对照代码检查方案，然后交人确认范围。用户要求方案评审时，
+在方案写完、人确认范围之前，用 codex（model `gpt-6.2-astra`，只读沙箱）评审方案：
 
 ```bash
 codex exec -m gpt-6.2-astra --sandbox read-only --ephemeral -c 'notify=[]' \
@@ -102,9 +104,9 @@ codex exec -m gpt-6.2-astra --sandbox read-only --ephemeral -c 'notify=[]' \
 Opus 对着代码核实每条意见，修改方案，再评审一轮，直到某一轮不再报告 P0/P1。
 方案里记录结论（轮数和判定），原始输出放在 `tasks/<id>/logs/`（不入库）。
 
-人确认范围时或之后的改动若改变了方案的范围或设计，改后的方案在派发前要重新过方案
-评审，并更新方案里的 `Plan review` 一行。重审后范围或产品决定又变了，要回到人那里；
-只有人确认了最终评审过的范围和产品决定，才把状态标为 approved。
+人确认范围时或之后的改动若改变了方案的范围或设计，且用户要求过方案评审，改后的方案
+在派发前要重新过方案评审，并更新方案里的 `Plan review` 一行。重审后范围或产品决定又变了，
+要回到人那里；只有人确认了最终的范围和产品决定，才把状态标为 approved。
 
 ## 派发实现子代理
 
@@ -221,6 +223,6 @@ codex exec review --base origin/main --ephemeral -m gpt-6.2-sol \
 
 ## Claude Code 技能
 
-- `plan-task`：调查代码，写 plan.md，过 codex 方案评审，开任务分支。
+- `plan-task`：调查代码，写 plan.md，自查（用户要求时加 codex 方案评审），开任务分支。
 - `run-task`：派发实现子代理（或按要求派发 Codex 轮次），审查，提交并开 PR，或写
   review.md 进入下一轮。

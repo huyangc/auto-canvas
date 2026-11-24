@@ -4,8 +4,8 @@ auto-canvas is a web schematic canvas for automatic analog placement and
 routing (APR) with human fine-tuning. It starts from an analog-canvas snapshot
 (UPSTREAM.md). The repository workflow is in [docs/workflow.md](docs/workflow.md):
 Opus plans and reviews, an implementer subagent implements (Codex when the
-owner asks), and codex reviews the plan and the code. These rules apply to
-whoever implements.
+owner asks), and codex reviews the code — and the plan when the owner asks for
+that. These rules apply to whoever implements.
 
 These rules replace the upstream analog-canvas process: there are no Issues,
 deployments or Production acceptance here. Opus delivers reviewed work through

@@ -148,8 +148,9 @@ tasks/          One directory per development task: plan, report, review
 
 ## How development works
 
-Opus (Claude Code) writes a plan for each task and codex reviews it. A Claude
-Code subagent implements it, and Opus reviews the result by rerunning the
+Opus (Claude Code) writes a plan for each task and reviews it against the code
+itself; codex reviews the plan when the owner asks for that. A Claude Code
+subagent implements it, and Opus reviews the result by rerunning the
 acceptance commands and reading the diff. Reviewed work reaches `main` through
 a pull request that needs passing CI and a posted codex review. See
 [docs/workflow.md](docs/workflow.md),
