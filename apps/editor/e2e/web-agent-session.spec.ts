@@ -737,10 +737,23 @@ test("keeps one paired working copy through Cell switches, a render crash, refre
     ok: true,
     revision: 1,
   });
-  await page.goto("/editor?new=1");
-  await expect(page.getByTestId("active-instance-count")).toHaveText("0");
   // The reconnect proof belongs to the paired working copy: the new tab does
   // not adopt it, and showing the paired tab again resumes the same session.
+  // Any resume would reach the relay, so the new tab's settled network shows
+  // its recovery decision.
+  const agentTraffic: string[] = [];
+  const isAgentUrl = (url: string) =>
+    new URL(url).pathname.startsWith("/api/agent/");
+  page.on("request", (request) => {
+    if (isAgentUrl(request.url())) agentTraffic.push(request.url());
+  });
+  page.on("websocket", (socket) => {
+    if (isAgentUrl(socket.url())) agentTraffic.push(socket.url());
+  });
+  await page.goto("/editor?new=1");
+  await expect(page.getByTestId("active-instance-count")).toHaveText("0");
+  await page.waitForLoadState("networkidle");
+  expect(agentTraffic).toEqual([]);
   await expect.poll(async () => (await agent.status()).editor).toBe("detached");
   await page
     .getByRole("tablist", { name: "Open projects" })
@@ -749,6 +762,7 @@ test("keeps one paired working copy through Cell switches, a render crash, refre
     .click();
   await expect(page.getByTestId("active-instance-count")).toHaveText("1");
   await attached();
+  expect(agentTraffic).not.toEqual([]);
   expect(sessionCreates).toBe(1);
 });
 
