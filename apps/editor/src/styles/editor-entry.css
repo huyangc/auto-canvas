@@ -18,3 +18,5 @@
 @import "./editor-context-menu.css";
 @import "../components/version-history-dialog.css";
 @import "../features/user-components/user-components.css";
+/* Last: the shared dialog × must win over each dialog's own button rule. */
+@import "../components/dialog-close-button.css";

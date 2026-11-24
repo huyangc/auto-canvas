@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { DialogCloseButton } from "../../components/dialog-close-button";
 
 const updates = [
   {
@@ -18,6 +19,7 @@ const updates = [
 
 export function ChangeLog() {
   const [open, setOpen] = useState(false);
+  const dialogRef = useRef<HTMLDialogElement | null>(null);
   return (
     <>
       <button
@@ -35,12 +37,14 @@ export function ChangeLog() {
             className="editor-action-dialog change-log-dialog"
             aria-labelledby="change-log-title"
             ref={(dialog) => {
+              dialogRef.current = dialog;
               if (dialog && !dialog.open) dialog.showModal();
             }}
             onClose={() => setOpen(false)}
           >
-            <header className="editor-action-dialog-header">
+            <header className="editor-action-dialog-header dialog-header-with-close">
               <h2 id="change-log-title">Change Log</h2>
+              <DialogCloseButton onClick={() => dialogRef.current?.close()} />
             </header>
             <div className="editor-action-dialog-body">
               {updates.map(({ date, title, detail }) => (
@@ -51,9 +55,6 @@ export function ChangeLog() {
                 </article>
               ))}
             </div>
-            <form method="dialog" className="editor-action-dialog-actions">
-              <button type="submit">Close</button>
-            </form>
           </dialog>,
           document.body,
         )}

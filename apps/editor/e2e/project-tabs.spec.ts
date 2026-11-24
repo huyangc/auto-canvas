@@ -1565,7 +1565,7 @@ for (const host of ["strip", "File"] as const)
       await pickerOpen(`tile name ${key}`);
     }
     await expect(tileName).toHaveValue("Amp ");
-    await dialog.getByRole("button", { name: "Keep it", exact: true }).click();
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
     if (host === "File") {
       // File cannot close under its open dialog: the dialog would be hidden
       // with the page still inert behind it.

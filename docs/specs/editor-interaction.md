@@ -396,6 +396,11 @@ One canonical reducer owns the canvas: `Idle`, `SymbolPlacement`,
   name, when the strip hides under it; an open close decision stays on
   screen and answerable. File's submenus collapse when File closes, so the
   Shelf list is read again on each open.
+- In Browse Cloud Projects each tile's ♡ beside its name favorites it (red ♥;
+  click again to remove), and the wall's **All | ♥ Favorites** toggle shows
+  every circuit or only favorites; the toggle is not saved.
+- Web dialogs dismiss with a small × at the top right of their header (plus
+  Escape where they had it), never a text or footer Close.
 - Project renames (tab double-click, or Project Info which also renames the
   on-screen Cell via `rename_project` + `rename_document` in one undo) commit only
   a changed nonempty name, ≤120 characters (longer old names are never

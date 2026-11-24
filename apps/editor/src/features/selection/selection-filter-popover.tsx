@@ -1,3 +1,4 @@
+import { DialogCloseButton } from "../../components/dialog-close-button";
 import { useEffect, useRef } from "react";
 
 import {
@@ -83,13 +84,10 @@ export function SelectionFilterPopover({
           <p className="selection-filter-kicker">Advanced selection</p>
           <h2 id="selection-filter-title">Choose Selectable Objects</h2>
         </div>
-        <button
-          type="button"
-          onClick={onClose}
+        <DialogCloseButton
           aria-label="Close selectable-object choices"
-        >
-          Close
-        </button>
+          onClick={onClose}
+        />
       </header>
       <div className="selection-filter-presets" aria-label="Filter presets">
         <button type="button" onClick={() => onChange(ALL_SELECTION_FILTER)}>

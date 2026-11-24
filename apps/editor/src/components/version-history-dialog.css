@@ -98,42 +98,24 @@
   overflow-wrap: anywhere;
 }
 
-.version-history-primary,
-.version-history-actions button {
-  padding: 0.5rem 1.1rem;
-  border: 1px solid var(--icm-border);
+.version-history-primary {
+  padding: 0.4rem 0.9rem;
+  border: 1px solid var(--icm-accent);
   border-radius: 8px;
-  color: var(--icm-text);
-  background: var(--icm-surface);
+  color: #fff;
+  background: var(--icm-accent);
   font-size: 0.85rem;
   font-weight: 500;
   cursor: pointer;
-}
-
-.version-history-primary {
-  padding: 0.4rem 0.9rem;
-  border-color: var(--icm-accent);
-  color: #fff;
-  background: var(--icm-accent);
 }
 
 .version-history-primary:hover:not(:disabled) {
   background: rgb(var(--icm-accent-rgb) / 88%);
 }
 
-.version-history-primary:disabled,
-.version-history-actions button:disabled {
+.version-history-primary:disabled {
   opacity: 0.55;
   cursor: default;
-}
-
-.version-history-actions {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.version-history-actions button:hover:not(:disabled) {
-  background: var(--icm-surface-hover);
 }
 
 @media (width <= 560px) {
@@ -281,19 +263,4 @@ dialog.version-history-backdrop:not([open]) {
   .version-compare-details {
     grid-template-columns: minmax(0, 1fr);
   }
-}
-
-.version-history-header {
-  position: relative;
-  padding-right: 32px;
-}
-.version-history-dismiss {
-  position: absolute;
-  right: 0;
-  top: 0;
-  border: 0;
-  background: transparent;
-  color: var(--icm-text);
-  font-size: 24px;
-  cursor: pointer;
 }

@@ -1,6 +1,7 @@
 // Details of the last Auto Layout run: every diagnostic, in the planner's own
 // words (rule ids included), one section per Cell after an import. Reuses the
 // editor's native-dialog shell.
+import { DialogCloseButton } from "../../components/dialog-close-button";
 import { useEffect, useRef } from "react";
 import type { AutoLayoutDiagnostic } from "@icm/auto-layout";
 
@@ -83,8 +84,12 @@ export function AutoLayoutReport({
       }}
       onKeyDown={(event) => event.stopPropagation()}
     >
-      <header className="editor-action-dialog-header">
+      <header className="editor-action-dialog-header dialog-header-with-close">
         <h2 id="auto-layout-report-title">Auto Layout</h2>
+        <DialogCloseButton
+          data-testid="auto-layout-report-close"
+          onClick={onClose}
+        />
       </header>
       <div className="editor-action-dialog-body">
         {manual ? (
@@ -124,15 +129,6 @@ export function AutoLayoutReport({
           </>
         )}
       </div>
-      <footer className="editor-action-dialog-actions">
-        <button
-          type="button"
-          data-testid="auto-layout-report-close"
-          onClick={onClose}
-        >
-          Close
-        </button>
-      </footer>
     </dialog>
   );
 }

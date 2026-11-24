@@ -4,6 +4,7 @@ import type { CircuitProject } from "@icm/model";
 import { VersionHistoryComparison } from "./version-history-comparison";
 
 import { ProjectPreviewImage } from "./api-image";
+import { DialogCloseButton } from "./dialog-close-button";
 
 export interface ProjectVersion {
   versionId: string;
@@ -127,18 +128,16 @@ export function VersionHistoryDialog({
         className={`version-history-dialog${comparison ? " is-comparing" : ""}`}
         data-testid="version-history-dialog"
       >
-        <header className="version-history-header">
-          <p>Latest 3 historical versions · current draft kept separately</p>
-          <h2 id="version-history-title">Version history — {entryName}</h2>
-          <button
-            type="button"
-            className="version-history-dismiss"
+        <header className="version-history-header dialog-header-with-close">
+          <div>
+            <p>Latest 3 historical versions · current draft kept separately</p>
+            <h2 id="version-history-title">Version history — {entryName}</h2>
+          </div>
+          <DialogCloseButton
             aria-label="Close version history"
             disabled={busy}
             onClick={onClose}
-          >
-            ×
-          </button>
+          />
         </header>
         {versions === null && !error ? (
           <p className="version-history-note">Loading history…</p>
@@ -227,11 +226,6 @@ export function VersionHistoryDialog({
             ) : null}
           </p>
         ) : null}
-        <div className="version-history-actions">
-          <button type="button" disabled={busy} onClick={onClose}>
-            Close
-          </button>
-        </div>
       </section>
     </dialog>
   );
