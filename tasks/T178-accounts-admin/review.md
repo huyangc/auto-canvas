@@ -108,3 +108,18 @@ Tests: a deterministic test for 1 (held transactions; expect no 500 and a
 consistent outcome), for 3, and for 2 where it can be made deterministic;
 otherwise state the ordering argument in the report. Update the lock-order
 notes in `docs/specs/server.md` if they change.
+
+## Round 3 — accepted
+
+Implementer: Opus subagent, commit `17e3a2b`. One lock order for every
+account transaction: advisory lock (admin only) → `users` → accounts → all
+touched sessions in one statement ordered by hash → pairings.
+`removeSessions(conn, retire, keep?)` locks retired and kept sessions
+together. Four new deterministic tests; per the implementer, three fail with
+`deadlock detected` (500) and one without the expired header on the previous
+code. Accepted deviation: the admin mutation locks the target `users` row
+before the acting account row (users → accounts strictly).
+
+Reviewer rerun on lane 2: vitest 413/413; typecheck 0; lint 0 errors;
+format, docs, deadcode 0; build 0; server-mode-check 0; accounts Playwright
+3/3.
