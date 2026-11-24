@@ -252,10 +252,11 @@ it("estimates one proper crossing, zero parallel crossings, and ignores rails an
   ).toBe(0);
 });
 
-// The 120-device run, which also expects no refinement candidates above the
-// 40-instance search budget, is in stages.slow.test.ts.
-it("is deterministic for a synthetic 40-device document through the public portfolio", () => {
-  const count = 40;
+// 41 devices is the smallest chain on the large-document search budget (more
+// than 40 instances), the budget the 120-device run in stages.slow.test.ts
+// uses; at 40 the full budget made this case about five times slower.
+it("is deterministic for a synthetic 41-device document through the public portfolio", () => {
+  const count = 41;
   const d = circuit(
     Object.fromEntries(
       Array.from({ length: count }, (_, i) => [`m${i}`, "nmos"]),
@@ -271,6 +272,7 @@ it("is deterministic for a synthetic 40-device document through the public portf
   const plan = planAutoLayout(d, resolver);
   expect(plan.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
   expect(planAutoLayout(d, resolver)).toEqual(plan);
+  expect(refinementMetrics(plan)?.candidates).toBe(0);
   expect(JSON.stringify(d)).toBe(before);
 }, 60000);
 it("mirrors a whole stage to remove a crossing without disturbing its stack", () => {
