@@ -199,11 +199,14 @@
 	editor-shell.spec.ts	shows the complete Project Code and protects an invalid or stale draft
 	file-drop.spec.ts	a file dropped onto the window in Auto › Chromium's own drag pipeline delivers the file without navigating
 	file-drop.spec.ts	a file dropped onto the window in Auto › a Project file dropped on the window opens, with no layout after
+	file-drop.spec.ts	a file dropped onto the window in Auto › a Project-file drop whose read settles after a tab switch shows nothing
 	file-drop.spec.ts	a file dropped onto the window in Auto › a dropped Project file asks before replacing unsaved work
 	file-drop.spec.ts	a file dropped onto the window in Auto › a malformed Project file is refused before the guard
+	file-drop.spec.ts	a file dropped onto the window in Auto › a netlist drop whose read settles after a tab switch changes nothing in either tab
 	file-drop.spec.ts	a file dropped onto the window in Auto › a netlist dropped behind the unsaved-work guard waits its answer
 	file-drop.spec.ts	a file dropped onto the window in Auto › a netlist dropped on the empty card is imported and laid out
 	file-drop.spec.ts	a file dropped onto the window in Auto › a netlist dropped on the top bar imports
+	file-drop.spec.ts	a file dropped onto the window in Auto › a second drop while the first is reading is refused and the first installs once
 	file-drop.spec.ts	a file dropped onto the window in Auto › an entry dropped with its local include reaches the importer
 	file-drop.spec.ts	a file dropped onto the window in Auto › the frame follows the file across elements
 	file-drop.spec.ts	a file dropped onto the window in Auto › two Project files together are refused

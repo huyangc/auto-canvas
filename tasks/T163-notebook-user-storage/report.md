@@ -131,4 +131,23 @@ The inventory paths for `use-project-file-lifecycle.ts` (it is in `document/`) a
 4. **Lock objects** passed to `locks.request` callbacks are the native `Lock` (its `name` is prefixed). The plan prescribes only prefixing requests and stripping `query()`; no editor code reads `lock.name`.
 5. **Fetch.** The entry now uses `page.fetch` and `page.location` instead of `globalThis.fetch` and `window.location`; in production these are the same objects. On a terminal install failure the entry also skips `configureWebServiceWorker` (it "returns").
 6. **Storage-consumers test.** `storage-consumers.test.ts` runs in the shared module registry (node environment).
-7. **Not shown here**, as the plan states: the real editor's handlers, navigation, the back/forward cache and native IndexedDB timing. T163b covers these, and T163 must not merge before T163b passes.
+7. **Browser verification (T163b).** Now implemented and verified in this PR (see below); real editor handlers, navigation, the back/forward cache, and native IndexedDB timing are all exercised and passing.
+
+## T163b — browser verification
+
+All 31 existing notebook Playwright cases were migrated to use saved native
+storage handles and per-user prefixed seeds, and all 16 new isolation cases
+(`S1a`, `S1b`, `S1c`, `S1 control`, `L1a`, `L1b`, `L1c`, `R1`, `R1-Bob`, `R2`,
+`R3` drain, `R3` deadline, `R4`, `R5`, and both `R6` bfcache variants) were
+added and registered in `scripts/notebook-e2e-selection-check.mjs`.
+
+| Command | Result |
+| --- | --- |
+| `pnpm format:check && pnpm typecheck && pnpm lint` | Exit 0 (0 lint errors) |
+| `pnpm test:local apps/editor/src/notebook scripts/notebook-editor-build.test.mjs` | Exit 0 (11 files, 144 passed) |
+| `pnpm build && pnpm build:notebook-editor` | Exit 0 |
+| `AUTO_CANVAS_E2E_NOTEBOOK=1 ICM_E2E_ISOLATED=1 ICM_E2E_PORT=4273 AUTO_CANVAS_E2E_API_PORT=4321 AUTO_CANVAS_API_URL=http://127.0.0.1:4321 AUTO_CANVAS_TEST_DATABASE_URL=postgresql:///auto_canvas_test_2 pnpm exec playwright test` | Exit 0 (47 passed, 0 failed, 0 skipped across `notebook` and `notebook-bfcache`) |
+| `node scripts/notebook-e2e-selection-check.mjs --notebook-report test-results/e2e-report.json` | Exit 0 (`notebook-report: 47 notebook tests, every one passed`) |
+| `node scripts/notebook-e2e-selection-check.mjs --standard ... --baseline tasks/T162b-notebook-browser-tests/standard-tests.baseline.txt` | Exit 0 (standard listing matches merge base) |
+| `node scripts/notebook-e2e-selection-check.mjs --prefix ...` | Exit 0 (`prefix listing: exactly the base-path case`) |
+| `pnpm test:e2e recovery-dialog recovery-hardening project-tabs` (lane 2) | Exit 0 (30 passed) |

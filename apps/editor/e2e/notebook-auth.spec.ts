@@ -1672,15 +1672,19 @@ async function expectMountedNamespace(page: Page, user: NotebookUser) {
   checkNamespace(await documentTrace(page), user);
 }
 
-async function drawCopy(page: Page, user: NotebookUser) {
-  await renameProject(page, user.id);
+async function drawCopy(
+  page: Page,
+  user: NotebookUser,
+  name: string = user.id,
+) {
+  await renameProject(page, name);
   await placeMeaningfulDrawing(page);
   await expect(page.getByTestId("revision")).toHaveText("3");
   await expect
     .poll(async () =>
       (await copies(page, user)).some(
         (r) =>
-          r.projectName === user.id &&
+          r.projectName === name &&
           r.generation === "latest" &&
           r.unsavedAtSnapshot &&
           r.documentRevisions[r.topDocumentId] === 3,
@@ -1843,6 +1847,40 @@ for (const [title, owner] of [
       bob = newUser("bob");
     await signIn(page, alice);
     await seedSingleUserRecovery(page);
+    const fallbackName = `unlocked-${hex()}`;
+    if (owner === "alice") {
+      // An older unlocked workspace gives L1a an observable reopen decision so
+      // suppression of the newer locked w-test cannot pass before the IDB read
+      // and React render settle.
+      const fallback = await context.newPage();
+      await fallback.goto("/");
+      await fallback.evaluate(
+        (p) =>
+          window.__nb.write(
+            window.__nb.session,
+            p + "icm.workspace-window.v1",
+            "w-fallback",
+          ),
+        prefix(alice),
+      );
+      await openNotebookEditor(fallback);
+      await drawCopy(fallback, alice, fallbackName);
+      await expect
+        .poll(() =>
+          rawRecords(fallback, prefix(alice) + WORKSPACE_DATABASE, "windows"),
+        )
+        .toContainEqual(
+          expect.objectContaining({
+            windowId: "w-fallback",
+            tabs: expect.arrayContaining([
+              expect.objectContaining({
+                session: expect.objectContaining({ dirty: true }),
+              }),
+            ]),
+          }),
+        );
+      await fallback.close({ runBeforeUnload: false });
+    }
     const old = await context.newPage();
     await old.goto("/");
     await old.evaluate(
@@ -1870,7 +1908,7 @@ for (const [title, owner] of [
           ]),
         }),
       );
-    await old.close();
+    await old.close({ runBeforeUnload: false });
     const logical = "analog-canvas-window:w-test";
     await holdLock(
       page,
@@ -1907,15 +1945,10 @@ for (const [title, owner] of [
     );
     const banner = editor.getByTestId("workspace-reopen-banner");
     if (owner === "alice") {
-      await expect
-        .poll(() => documentTrace(editor))
-        .toContainEqual(
-          expect.objectContaining({
-            op: "getAll",
-            name: prefix(alice) + WORKSPACE_DATABASE,
-          }),
-        );
-      await expect(banner).toHaveCount(0);
+      // Wait for the reopen decision to render the older unlocked workspace,
+      // then verify the newer locked w-test was excluded.
+      await expect(banner).toContainText(fallbackName);
+      await expect(banner).not.toContainText(alice.id);
     } else await expect(banner).toContainText(alice.id);
     // The facade returns logical database names; the raw origin also has
     // the single-user recovery database seeded in the helper tab.
