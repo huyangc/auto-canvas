@@ -9,6 +9,11 @@ import path from "node:path";
 // ref): Next rewrites frontend/next-env.d.ts and frontend/tsconfig.json and
 // writes frontend/.next; prod.sh writes release-manifest.json and everything
 // under .local (logs, run/extensions, the SQLite file, storage, diagnostics).
+// The build's prebuild step (frontend/scripts/sync-ui-plugins.mjs, also run
+// before `npm run typecheck`) writes the UI plugin copy
+// frontend/features/ext-<name>/ (stage L's package is auto-canvas), the
+// generated frontend/features/extension-sdk/registry.local.ts and
+// frontend/.local/ui-extension-contract.json.
 // A symlink on any of these, or inside them, is refused even when it points
 // inside the clone.
 const WRITE_PATHS = [
@@ -17,6 +22,25 @@ const WRITE_PATHS = [
   "frontend/.next",
   "release-manifest.json",
   ".local",
+  "frontend/features/ext-auto-canvas",
+  "frontend/features/extension-sdk/registry.local.ts",
+  "frontend/.local",
+];
+
+// The generated files among them: each must be a regular file when present.
+const GENERATED_FILES = [
+  "frontend/next-env.d.ts",
+  "frontend/tsconfig.json",
+  "frontend/features/extension-sdk/registry.local.ts",
+  "frontend/.local/ui-extension-contract.json",
+];
+
+// The generated directories among them: each must be a real directory once a
+// build may have written it.
+const GENERATED_DIRS = [
+  "frontend/.next",
+  "frontend/.local",
+  "frontend/features/ext-auto-canvas",
 ];
 
 // Never walked: git's own directory, and the dependency directory the script
@@ -138,7 +162,7 @@ export function cloneTreeProblems(clone, phase) {
   };
   // A write-path ancestor that is a symlink is caught above; here the
   // generated files themselves must be regular files.
-  for (const file of ["frontend/next-env.d.ts", "frontend/tsconfig.json"]) {
+  for (const file of GENERATED_FILES) {
     if (!usable(file) || !exists(path.join(clone, file))) continue;
     if (!fs.lstatSync(path.join(clone, file)).isFile())
       problems.push(`${file} is not a regular file`);
@@ -161,12 +185,14 @@ export function cloneTreeProblems(clone, phase) {
     else if (fs.readdirSync(local).length)
       problems.push(".local is not empty before the launch");
   }
-  if (phase !== "start" && usable("frontend/.next")) {
-    const next = fs.lstatSync(path.join(clone, "frontend/.next"), {
-      throwIfNoEntry: false,
-    });
-    if (next && !next.isDirectory())
-      problems.push("frontend/.next is not a real directory");
-  }
+  if (phase !== "start")
+    for (const dir of GENERATED_DIRS) {
+      if (!usable(dir)) continue;
+      const stat = fs.lstatSync(path.join(clone, dir), {
+        throwIfNoEntry: false,
+      });
+      if (stat && !stat.isDirectory())
+        problems.push(`${dir} is not a real directory`);
+    }
   return problems;
 }

@@ -225,12 +225,18 @@ rules that serve auto-canvas under silicon-notebook's Next.js server at
 - Stage M starts this checkout's canvas as a managed companion service of a
   silicon-notebook clone, with two notebook users, and observes the external
   mode and the rollbacks ([below](#stage-m-a-managed-start-in-a-silicon-notebook-clone)).
+- Stage L builds the clone with the canvas's UI package, runs
+  silicon-notebook's own plugin guards on it, and proves the entry link
+  **打开电路画布** in a browser, then its removal
+  ([below](#stage-l-the-entry-link-in-a-browser)).
 
 ```bash
 node scripts/notebook-integration-check.mjs --stage T --notebook <notebook checkout>
 node scripts/notebook-integration-check.mjs --stage A --notebook <notebook checkout> \
   --ref <branch or commit> --base <commit without the change> --python <interpreter with the backend dependencies>
 node scripts/notebook-integration-check.mjs --stage M --notebook <notebook checkout> \
+  --ref <full commit SHA> --python <interpreter with the backend dependencies>
+node scripts/notebook-integration-check.mjs --stage L --notebook <notebook checkout> \
   --ref <full commit SHA> --python <interpreter with the backend dependencies>
 ```
 
@@ -247,7 +253,9 @@ Stage A refuses (exit status 2 for the run, before any process starts) a
 revision whose clone holds a symlink that leaves the clone or dangles, a
 symlink on any path the build or launcher writes (`frontend/next-env.d.ts`,
 `frontend/tsconfig.json`, `frontend/.next`, `release-manifest.json`,
-`.local`), a dotenv file, or runtime state that must start fresh (`.local`,
+`.local`, and the UI plugin sync's `frontend/features/ext-auto-canvas`,
+`frontend/features/extension-sdk/registry.local.ts` and `frontend/.local`),
+a dotenv file, or runtime state that must start fresh (`.local`,
 `release-manifest.json`, `frontend/.next`, `frontend/node_modules`). It
 re-checks the clone, and that the private `frontend/node_modules` is still a
 real directory whose links stay inside it, after every build and before the
@@ -342,7 +350,13 @@ sign-out deadline; and, from the second review round, the refusal of a
 linked stop script with the cleanup going on, the supervisor and worker
 ownership checks, the database cleanup against a PostgreSQL that never
 answers, one drop failing without stopping the next, the readiness deadline
-counted from the launch and the project-list validation) and the script's
+counted from the launch and the project-list validation; and, from T165, a
+PostgreSQL connection that breaks after it was established (a stand-in
+server, in a child process), the cleanup's one deadline with a stop script
+that never ends, M6's schematic comparison, M8's list of B, a
+`CREATE DATABASE` whose answer was lost, a stop whose grandchild holds its
+pipes, the redaction of a body before it is cut, and a link on a UI plugin
+sync output) and the script's
 own refused file operations (each after a
 simulated swap, with a sentinel outside the sandbox) against throwaway
 repositories only; it reads nothing from `--notebook`. It also runs the real
@@ -423,11 +437,14 @@ notebook and canvas process gets the sandbox's environment without
   launcher's group; through the
   frontend the canvas is ready, refuses an anonymous API request and serves
   the notebook editor; two registered users each create, save and reopen
-  projects the other cannot see (each list must be a 200 JSON object with a
+  projects the other cannot see (the reopened project must show the
+  schematic that was saved, a different one from the first, compared as
+  canonical JSON; each list must be a 200 JSON object with a
   `projects` array: a page or an error answer never counts as an empty list);
   a signed-out user is refused within 75
   seconds of the sign-out's response (the canvas's 60-second token window;
-  each poll's deadline is the time left) while the other is not; the stop (the
+  each poll's deadline is the time left) while the other's list still holds
+  their own project and not the signed-out user's; the stop (the
   launcher's group, then the clone's `extension_services.py stop`) leaves no
   companion process and no listener;
 - **external** (M-ext): the stage starts `serve.sh` itself and the notebook
@@ -461,10 +478,92 @@ its own and a check of which remain) runs at the end of the stage and, after
 an interrupt, before the sandbox is removed; the run then exits 130. Once the
 cleanup has begun no `CREATE DATABASE` starts; one already in flight is
 waited for (cancelled by its backend pid if it does not settle) and its
-database dropped if it succeeded. Every PostgreSQL step of the cleanup is
+database dropped if it succeeded. A `CREATE DATABASE` whose answer was lost
+(its connection broke) has an unknown outcome: the cleanup looks the name up
+and drops it if it exists; a name PostgreSQL refused (a duplicate, a
+cancellation) is never dropped. The whole cleanup keeps one deadline, 50
+seconds from its start, inside the entry script's 60-second hard stop: the
+last 5 are left for the sandbox's own disposal, the 20 before them are
+reserved for the databases, and the stop script, the process groups and the
+recorded pids share what comes first (the stop at most what is left after 8
+seconds for the groups and pids); a step whose share is used up says so.
+Every PostgreSQL step of the cleanup is
 bounded (10 seconds for a connection, 10 for each statement, 25 for all of
-them; a connection that could not be opened is not retried), so a server
-that stops answering costs the cleanup about 10 seconds (about 30 with a
-`CREATE DATABASE` in flight), well within the 60-second hard stop, and each
-database it could not drop is named. No token, password or database URL
-appears in the output.
+them, and none past the start of the sandbox's 5 seconds; a connection that
+could not be opened is not retried), so a server that stops answering costs
+the cleanup about 10
+seconds (about 30 with a `CREATE DATABASE` in flight), and each database it
+could not drop is named. A connection that breaks after it was established
+fails the statement in flight (the set-up's or the cleanup's error path, not
+the end of the process), and the cleanup opens another for its next
+statement. The stop script runs as a direct child, bounded: it settles at its
+limit even when a process it started still holds its output pipes. No token,
+password or database URL appears in the output; a response body is redacted
+before it is cut for a diagnostic.
+
+### Stage L: the entry link in a browser
+
+Stage L proves the entry link of
+[the integration's README](../../integrations/silicon-notebook/README.md#the-entry-link-in-a-notebook)
+on real processes and in a real browser: a silicon-notebook clone built with
+the UI package shows **打开电路画布** to a signed-in user in an opened
+notebook, the click opens the canvas editor at `/canvas` as that user, and a
+rebuild without the package removes the entry.
+
+```bash
+NB=<notebook checkout>
+node scripts/notebook-integration-check.mjs --stage L --notebook "$NB" \
+  --ref "$(git -C "$NB" rev-parse origin/master)" --python <interpreter>
+```
+
+It needs what stage M needs, and the system Chrome (Playwright's `chrome`
+channel, driven by the root dev dependency `@playwright/test`); it refuses
+with exit status 2 when `@playwright/test` or the UI package is missing. A run
+takes about four minutes (five guard commands, two `next build`s, two
+launches of the clone). It reuses stage M's set-up, launch,
+managed-service checks, gates, stop and cleanup, with one difference: the
+notebook's own data (`DATABASE_URL`, `SILICON_NOTEBOOK_STORAGE_DIR`) lives in
+the sandbox outside `.local`, which every launch starts fresh, so the
+rollback's launch finds the same user and notebook. In order:
+
+- **L0–L1**: the set-up as M0, the database `auto_canvas_it_l_<12 hex>`, and
+  a build with both targets, `SILICON_NOTEBOOK_UI_PLUGINS=<checkout>/integrations/silicon-notebook/ui/auto-canvas`
+  and `NEXT_PUBLIC_API_BASE_URL=/api` (the browser bundle's same-origin API;
+  without it the bundle keeps the developer's port 8000). The clone's
+  `frontend/features/ext-auto-canvas/workspace-plugin.tsx` is the package's
+  entry, its `.ui-plugin-origin` names the package, `registry.local.ts`
+  imports it, and the frontend contract holds its row.
+- **L2**: silicon-notebook's guards in the clone, each one check: `npm run
+  test:node`, `scripts/check_ui_vocabulary.py`, `npm run typecheck` (with the
+  variable set), `scripts/cli.sh extensions check` and
+  `scripts/check_deployment_extension_parity.py` against the clone's contract,
+  the last two with the stage's managed TOML.
+- **L3–L5**: a managed launch checked as M2; user A registers and creates a
+  notebook through `POST /api/notebooks`. In headless Chrome with a fresh
+  profile in the sandbox (its process recorded by that profile on its command
+  line), an init script puts A's token into `localStorage` before any page
+  script; `http://127.0.0.1:<web>/#notebook=<id>` shows the button, the
+  page's `GET /api/system/extensions` holds the entry's row available; the
+  Sources panel's first-visit hint, which covers the button, is dismissed with
+  its own 知道了; the click navigates to `/canvas`, the editor mounts
+  (`[data-testid="schematic-canvas"]`), and a request to `/canvas/api/…`
+  carried A's token as its bearer (compared, never printed). The browser is
+  closed and no process of its profile may be left; then the stop as M9.
+- **L6–L8**: the rebuild without `SILICON_NOTEBOOK_UI_PLUGINS` removes the
+  copy, writes the empty registry and drops the row from the contract; after
+  a managed launch A's session still answers, the same notebook's 添加来源
+  shows, `/api/system/extensions` still holds the row available (only the UI
+  package went), and 打开电路画布 stays absent for 3 seconds; the stop.
+
+The browser may reach only the clone's web origin: every page request
+elsewhere (another host, or another port of `127.0.0.1` such as the owner's)
+is aborted, recorded and fails the stage, and a request to the web origin is
+sent only while the web, api and canvas listeners are the recorded pids.
+WebSockets are refused. Chrome's own background connections (its update and
+account services) go to a proxy of the run on `127.0.0.1` that records them
+and closes each connection, so nothing leaves the machine; they are listed,
+not failed. Screenshots and the console are written into the sandbox only
+when a browser check fails (`--keep` keeps them). The browser is closed in
+the cleanup too, before the clone is stopped: after an interrupt while it is
+open the run exits 130 with no browser process, companion or
+`auto_canvas_it_*` database left.
