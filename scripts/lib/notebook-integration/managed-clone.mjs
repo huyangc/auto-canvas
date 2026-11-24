@@ -763,8 +763,11 @@ export const openAdmin = (url) => async (ms) => {
  * with `limitTo(at)` (the cleanup's own deadline). A connection attempt that
  * failed is not repeated: later uses fail at once with its reason. A
  * connection whose query timed out, or that broke (its `error` event), is
- * closed; the next use opens another. `query(sql, params)` rejects with the
- * reason; `close()` ends the session.
+ * closed; the next use opens another. `query(sql, params, { timeoutMs })`
+ * rejects with the reason; `timeoutMs` bounds that one use further (its
+ * connection attempt and its query) without changing the bounds of the uses
+ * after it: a connection attempt that failed only because of it is retried
+ * by the next use. `close()` ends the session.
  */
 export function adminSession({
   open,
@@ -795,22 +798,28 @@ export function adminSession({
     limitTo(at) {
       ceiling = Math.min(ceiling, at);
     },
-    async query(sql, params) {
+    async query(sql, params, { timeoutMs = Infinity } = {}) {
       if (unreachable) throw unreachable;
       if (client?.broken) discard();
-      let ms = timeLeft();
-      if (ms <= 0) throw usedUp();
+      const by = now() + timeoutMs;
+      const ownBoundUsed = () =>
+        new Error(`not attempted: its own ${timeoutMs} ms are used up`);
+      let ms = Math.min(timeLeft(), by - now());
+      if (ms <= 0) throw by - now() <= 0 ? ownBoundUsed() : usedUp();
       if (!client) {
+        const full = ms >= timeLeft();
         try {
           client = await open(ms);
         } catch (error) {
-          unreachable = new Error(
+          const failure = new Error(
             `no connection to PostgreSQL within ${(ms / 1000).toFixed(1)} s: ${error.message}`,
           );
-          throw unreachable;
+          // Not retried, unless only this use's own bound cut it short.
+          if (full) unreachable = failure;
+          throw failure;
         }
-        ms = timeLeft();
-        if (ms <= 0) throw usedUp();
+        ms = Math.min(timeLeft(), by - now());
+        if (ms <= 0) throw by - now() <= 0 ? ownBoundUsed() : usedUp();
       }
       try {
         return await client.query({
@@ -955,27 +964,77 @@ export async function cleanUp(m) {
   });
 }
 
+/** A `pg_stat_activity` row whose activity this session cannot read. */
+const unreadableActivity = (row) =>
+  row.state == null ||
+  row.state === "disabled" || // track_activities off for that backend
+  !row.query ||
+  row.query === "<insufficient privilege>";
+
 /**
- * The lost creates whose backend still runs them, polled until none does or
- * `until` passes: a row of `pg_stat_activity` that is not idle and runs the
- * create's statement on its recorded backend pid (any backend when the pid is
- * unknown). Resolves to the creates still running; a read that fails rejects.
+ * Why a lost create may still be running, judged on the `pg_stat_activity`
+ * rows of one poll, or "" when it has ended. With its recorded backend pid,
+ * that backend's row decides, whatever its query and state: no row (the
+ * backend is gone) or `idle` is ended; a row whose activity cannot be read
+ * (no state or query: `track_activities` off, `<insufficient privilege>`) is
+ * still running; a readable row running another statement has ended it
+ * (CREATE DATABASE is one statement outside any transaction block, so a
+ * backend that shows another one is past it); one still showing the create
+ * and not idle is running. Without a pid, any client backend that runs the
+ * statement, or whose activity cannot be read, keeps it running.
+ */
+function stillRunning(entry, rows) {
+  if (Number.isInteger(entry.backendPid) && entry.backendPid > 0) {
+    const row = rows.find((candidate) => candidate.pid === entry.backendPid);
+    if (!row || row.state === "idle") return "";
+    if (unreadableActivity(row))
+      return `the activity of its backend ${entry.backendPid} cannot be read (state ${row.state ?? "unknown"})`;
+    return row.query === entry.statement
+      ? `its backend ${entry.backendPid} still runs it`
+      : "";
+  }
+  const busy = rows.filter((row) => row.state !== "idle");
+  if (busy.some((row) => row.query === entry.statement))
+    return "a backend still runs it";
+  return busy.some(unreadableActivity)
+    ? "its backend is unknown and the activity of another cannot be read"
+    : "";
+}
+
+/**
+ * The lost creates that may still be running, polled until none may or
+ * `until` passes: each poll reads the rows of `pg_stat_activity` of the
+ * recorded backend pids (every client backend's when a pid is unknown) and
+ * judges each create with `stillRunning`. Each poll's query is bounded by
+ * the time left until `until` (the session's other bounds are unchanged).
+ * Resolves to a Map of each create still possibly running to why; a read
+ * that fails, or does not answer by `until`, rejects.
  */
 async function lostCreatesRunning(admin, creates, until) {
+  const known = (entry) =>
+    Number.isInteger(entry.backendPid) && entry.backendPid > 0;
+  const pids = creates.filter(known).map((entry) => entry.backendPid);
+  const anyBackend = creates.some((entry) => !known(entry));
+  // Before the first poll every create may still be running.
+  let running = new Map(
+    creates.map((entry) => [entry, "its time ran out before it was read"]),
+  );
   for (;;) {
+    // The last poll's verdict stands once the time is up.
+    const room = until - Date.now();
+    if (room <= 0) return running;
     const { rows } = await admin.query(
-      "SELECT pid, query FROM pg_catalog.pg_stat_activity WHERE state IS DISTINCT FROM 'idle' AND query = ANY ($1::text[])",
-      [creates.map((entry) => entry.statement)],
+      "SELECT pid, state, query FROM pg_catalog.pg_stat_activity WHERE pid = ANY ($1::int[]) OR ($2::boolean AND backend_type = 'client backend')",
+      [pids, anyBackend],
+      { timeoutMs: room },
     );
-    const running = creates.filter((entry) =>
-      rows.some(
-        (row) =>
-          row.query === entry.statement &&
-          (!(entry.backendPid > 0) || row.pid === entry.backendPid),
-      ),
-    );
+    running = new Map();
+    for (const entry of creates) {
+      const why = stillRunning(entry, rows);
+      if (why) running.set(entry, why);
+    }
     const left = until - Date.now();
-    if (running.length === 0 || left <= 0) return running;
+    if (running.size === 0 || left <= 0) return running;
     await sleep(Math.min(200, left));
   }
 }
@@ -997,11 +1056,12 @@ const cancelCreates = (admin) => async (pids) => {
  * that succeeded after the shutdown began included. A create whose outcome is
  * unknown (its answer was lost) is reconciled first: its backend may still be
  * running the statement and commit later, so the cleanup waits (until
- * `lostBy`) until no backend runs it any more (`pg_stat_activity`: its
- * recorded backend pid with that statement, not idle), then looks the name —
- * this run's own, never one PostgreSQL refused — up and drops it when it
- * exists. One still running at `lostBy` is reported as unresolved and not
- * looked up (it may commit after the look-up). Each drop
+ * `lostBy`, each poll bounded by the time left) until its recorded backend
+ * is idle, gone or past the statement (`pg_stat_activity`, `stillRunning`;
+ * a backend whose activity cannot be read counts as still running), then
+ * looks the name — this run's own, never one PostgreSQL refused — up and
+ * drops it when it exists. One still running at `lostBy` is reported as
+ * unresolved and not looked up (it may commit after the look-up). Each drop
  * is attempted on its own: one that fails or times out is reported, naming
  * its database, and the next is still sent. Afterwards the names still
  * present are read and reported. `admin` is the cleanup's session
@@ -1028,13 +1088,13 @@ export async function dropDatabases({
       const names = (entries) => entries.map((entry) => entry.name).join(", ");
       try {
         const running = await lostCreatesRunning(admin, unresolved, lostBy);
-        if (running.length)
+        if (running.size)
           report.fail(
             "cleanup: the CREATE DATABASE whose answer was lost has ended",
-            `unresolved: ${names(running)} still being created when the time for it ran out (it may be left behind)`,
+            `unresolved: ${[...running].map(([entry, why]) => `${entry.name} (${why})`).join(", ")} when the time for it ran out (it may be left behind)`,
           );
         lost = unresolved
-          .filter((entry) => !running.includes(entry))
+          .filter((entry) => !running.has(entry))
           .map((entry) => entry.name);
       } catch (error) {
         report.fail(

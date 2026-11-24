@@ -65,3 +65,39 @@ leftover auto_canvas_it_* databases                          → 0
 notebook checkout git status before/after                    → identical
 pnpm test:local                                              → 0 (862 files passed, 3 skipped)
 ```
+
+## Round 4 — changes-requested
+
+Reviewed: codex PR review round 2 on PR 143 (head `eaeaae1`, gpt-6.2-sol),
+each finding checked against the code by Opus. Past the skill's three-round
+limit; continued under the owner's instruction of 2026-11-24 to finish the
+planned tasks without stopping (reported to the owner).
+
+| #   | Severity        | Where                                                     | Finding                                                                                                                                                                                                                                            | Expected fix                                                                                                                                                                                                                                                                                                                                      |
+| --- | --------------- | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | must-fix (P1)   | `stage-l.mjs` `forwardingProxy` / `webGate`               | `held()` calls `sandbox.listenerState()`, which can throw (an `lsof` failure) inside the proxy's request and CONNECT handlers: an uncaught exception ends Node before Chrome is stopped or the databases dropped. A stalled `lsof` can also block. | Every verification at the proxy boundary is caught: an error or a timeout counts as "gate not held" (refused and recorded with `why: "gate"`, detail kept); the listener check has a time bound. A stage S control: a `held` that throws and one that never answers → the request is refused, the process lives, the verdict fails.               |
+| 2   | must-fix (P2)   | `stage-l.mjs` `browserSessions.close` / `closeOpen`       | `close()` clears `open` before disposal ends, so an interrupt during a normal close makes `closeOpen()` return at once and the clone can be stopped while Chrome still runs.                                                                       | The session stays registered until disposal ends; `close()` returns one shared promise per session that both callers await. Extend the shutdown control: `closeOpen` during a normal close waits for it.                                                                                                                                          |
+| 3   | must-fix (P2)   | `managed-clone.mjs` `lostCreatesRunning`                  | A `pg_stat_activity` poll that starts just before `lostBy` can use up the whole database reserve.                                                                                                                                                  | Each poll's query is bounded by the time left until `lostBy` (statement timeout or a race with cancellation), without lowering the deadline for the drops after it.                                                                                                                                                                               |
+| 4   | must-fix (P2)   | same                                                      | With `track_activities` off, the query text does not match and an empty result is taken as "finished".                                                                                                                                             | Look up the recorded backend pid itself (any row with that pid, whatever its query and state); "finished" only when that backend is idle or gone; an unreadable or text-less row (`query` empty, `<insufficient privilege>`, `track_activities` off) counts as still running until the deadline, then unresolved. Extend the follow-up 5 control. |
+| 5   | should-fix (P3) | `integrations/silicon-notebook/README.md` removal snippet | With `set -eo pipefail`, `grep -vxF` exits 1 when it removes the only entry, so the snippet stops before `unset`.                                                                                                                                  | A filter that succeeds on empty output (e.g. `{ grep -vxF … \|\| true; }`, or a pure-Bash loop); test it under `set -euo pipefail` with one, three and no matching entries.                                                                                                                                                                       |
+
+## Round 5 — accepted
+
+Reviewed: the round 4 diff (Opus implementer) against review round 4's five
+findings; acceptance rerun by Opus (`tmp/t165-review-r4.sh`, logs in
+`tmp/t165-review/r4/`). All five fixed, each with a stage S control that
+fails with its fix reverted (implementer's evidence). Accepted deviation: a
+readable row on the recorded backend showing another statement counts as
+ended (`CREATE DATABASE` cannot run in a transaction, so the pid was
+reused); unreadable rows count as running until the deadline.
+
+```text
+pnpm build / pnpm build:notebook-editor                      → 0
+launcher + package tests                                     → 0
+pnpm typecheck / lint / format:check / docs:check / deadcode → 0
+package build + check                                        → 0 (21 of 21)
+--stage S / M / L                                            → 0 (94 / 114 / 89 passed)
+leftover auto_canvas_it_* databases                          → 0
+notebook checkout git status before/after                    → identical
+pnpm test:local                                              → 0 (862 files passed, 3 skipped)
+```
