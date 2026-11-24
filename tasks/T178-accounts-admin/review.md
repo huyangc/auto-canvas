@@ -79,3 +79,32 @@ Note: the unreleased migration 006 was edited (added `credentials_version`).
 Only `auto_canvas_test_2` had applied the earlier 006; the implementer added
 the column there by hand. `auto_canvas`, `auto_canvas_test` and
 `auto_canvas_test_3` never applied 006.
+
+## Round 3 — changes requested (codex PR review round 2 on `13cab1a`)
+
+No P0/P1. Verified against the code; all three hold. This is the task's last
+round under the three-round limit.
+
+1. **P2 — admin mutation vs sign-in deadlock.** `mutate()` locks the acting
+   session before the target account; a sign-in in the same browser as the
+   target holds the target account and waits for the admin's old session.
+   Fix: lock the acting account, then the target `users` and
+   `standalone_accounts` rows, and only then the sessions.
+2. **P3 — session locks out of hash order.** The password change pins the
+   presented session, then `removeSessions` locks the others; admin mutations
+   pin the acting session, then retire target sessions. A concurrent sign-in
+   sweep of expired rows can lock in a different order. Fix: in each
+   transaction, lock every session row it touches (presented/acting plus the
+   ones it retires) in one `ORDER BY token_hash FOR UPDATE` statement, then
+   check that the presented/acting row is among them and live, then delete
+   the retired ones. Generalise `removeSessions` (or add one helper) rather
+   than duplicating the locking.
+3. **P3 — missing expired header.** `POST /api/auth/password` answers 401
+   without `X-Canvas-Session: expired` when the account row is gone
+   (`standalone-accounts.ts` ~339). Return the same response as the later
+   session check.
+
+Tests: a deterministic test for 1 (held transactions; expect no 500 and a
+consistent outcome), for 3, and for 2 where it can be made deterministic;
+otherwise state the ordering argument in the report. Update the lock-order
+notes in `docs/specs/server.md` if they change.
