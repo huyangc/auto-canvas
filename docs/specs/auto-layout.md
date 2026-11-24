@@ -154,7 +154,10 @@ AutoLayoutDiagnostic[] }`. Fixed instances retain their exact placements;
   `fallbackPosition`, preserving all other fields; (b) `remove_route_geometry`
   for every Route; (c) `remove_junction` for every Junction left without a
   Route; (c2) restore frozen pin groups split by cleanup with `connect_endpoints`,
-  joining one pin per extra component to a pin of the first component;
+  joining one pin per extra component to a pin of the first component.
+  Rejoin excluded MOS bulk and non-visible pins (`!isVisibleEndpoint`) with
+  one edit per extra component that the visible-pin restoration did not join,
+  including Nets composed entirely of excluded pins;
   (d) add layout groups; (e) transform instances in id order; (f) route
   by R11–R13; (g) transfer removed power-marker name claims by R12;
   (h) re-anchor labels by R15. Place tray instances; for placed
@@ -280,8 +283,10 @@ AutoLayoutDiagnostic[] }`. Fixed instances retain their exact placements;
   Net name claims, then restore their anchors after restoring frozen pin groups.
   A transient split must not reassign a label's name to another pin of its device.
 - **R11 — Routing set.** Before any edit, freeze pin groups per input Base Net
-  with `deriveElectricalTopologyProjection`. Exclude MOS `B` pins and pins of
-  instances unplaced in the result. Route frozen `target: { kind: "pins",
+  with `deriveElectricalTopologyProjection`. Exclude MOS `B` pins, non-visible
+  pins (`!isVisibleEndpoint`, including variant `hiddenPinNames` and base
+  pins with `implicit` visibility), and pins of instances unplaced in the
+  result from physical routing targets. Route frozen `target: { kind: "pins",
 pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   component (Routes and contacts); a label-only connection never counts as joined.
 - **R12 — Power.** Each ground/VDD marker gets one straight stub to its R6a
@@ -295,7 +300,7 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   turns once.
   Singleton power stubs and R43 trunk offsets use the same document-size
   marker default.
-  R43 connects every remaining non-bulk rail member through a
+  R43 connects every remaining visible non-bulk rail member through a
   horizontal trunk, including one marker host to join the marker's drawing.
   If the trunk is refused or incomplete, compare a plain tree under R86.
   Members that all share one column have no span for a horizontal trunk and
@@ -556,7 +561,9 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   Locked poses can retain an already-safe contact without exploring moves.
 - **R39 — Signal trunks.** For signal Nets with at least three routable pins,
   compare the existing tree, a horizontal trunk spanning the pins at median y,
-  and a vertical trunk at median x. Discard candidates that throw. Minimize
+  and a vertical trunk at median x. Try the horizontal trunk only when pins
+  span distinct x coordinates and the vertical trunk only when they span
+  distinct y coordinates. Discard candidates that throw. Minimize
   unjoined components, then proper crossings with previously planned other
   Nets, then bends, then length;
   ties retain the listed candidate order.
@@ -567,16 +574,18 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
 - **R42 — Refinement scale.** R22's candidate budget is 24 per strategy up to
   40 instances, eight from 41 to 80, and zero above 80.
 
-- **R43 — No floating rail pins.** Every non-bulk rail pin is drawn connected.
-  Pins with their own marker keep their stubs. All remaining rail pins join
-  one horizontal trunk above the device rows for supply or below them for
-  ground, together with one marker host. This applies to both strategies and
+- **R43 — No floating rail pins.** Every visible non-bulk rail pin is drawn
+  connected. Non-visible pins retain electrical membership without drawn
+  wires. Pins with their own marker keep their stubs. All remaining visible
+  non-bulk rail pins join one horizontal trunk above the device rows for
+  supply or below them for ground, together with one marker host. This applies
+  to both strategies and
   every rail size. Only R155 may add marker instances and replace this trunk
   with local trees; R165 adds ground markers before planning, on netlist input
   only. A refused or incomplete trunk gets a
   tree fallback under R86. Remaining failures produce R14 warnings naming
-  the affected pins. A floating pin is the sole non-bulk pin in its physical
-  component while its Base Net has other non-bulk pins.
+  the affected pins. A floating pin is the sole visible non-bulk pin in its
+  physical component while its Base Net has other visible non-bulk pins.
 - **R44 — Routing alternative.** After R36 selects a plan, replan its placement
   and refinement choices once with R39 disabled, without another refinement.
   R96 replans the selected finalist with R95 after R72 repair. Keep the lower

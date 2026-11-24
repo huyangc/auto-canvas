@@ -57,6 +57,7 @@ import {
   createLabelClearanceContext,
   deriveElectricalTopologyProjection,
   endpointKey,
+  isVisibleEndpoint,
 } from "@icm/derived";
 import {
   routeEndpoints,
@@ -891,11 +892,16 @@ function drawSourceBodies(
     const pin = { instanceId: id, pinName: "B" };
     const group = frozen.find((g) => g.pins.some((p) => samePin(p, pin)));
     const peers = group?.pins.filter((p) => !samePin(p, pin)) ?? [];
-    const ordinary = peers.filter((p) => !isBody(p));
-    const targets = ordinary.length ? ordinary : peers;
+    const visiblePeers = peers.filter(
+      (p) =>
+        (p.pinName === "B" && bodies.has(p.instanceId)) ||
+        isVisibleEndpoint(final, resolver, { kind: "terminal", ...p }),
+    );
+    const ordinary = visiblePeers.filter((p) => !isBody(p));
+    const targets = ordinary.length ? ordinary : visiblePeers;
     if (!group || targets.some((p) => component(p) === component(pin)))
       continue;
-    if (!targets.length) continue;
+    if (!peers.length) continue;
     report.set(group.netId, [...(report.get(group.netId) ?? []), `${id}.B`]);
   }
   if (edits === result.edits && !report.size) return result;
