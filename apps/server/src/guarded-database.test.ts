@@ -40,6 +40,14 @@ describe("guardedPostgresUrl", () => {
     ["text before the scheme", " postgresql://h/db"],
     ["a socket directory as host", "postgresql://%2Fvar%2Frun/db"],
     ["a bracketed host that is no IPv6 address", "postgresql://[:::]/db"],
+    [
+      "a password that is not valid percent-encoding",
+      "postgresql://u:%FF@h/db",
+    ],
+    [
+      "a user name that is not valid percent-encoding",
+      "postgresql://%E0%A4%A@h/db",
+    ],
     ["a bracketed host with too few groups", "postgresql://[1:2:3]/db"],
   ])("refuses %s", (_case, value) => {
     expect(() => guardedPostgresUrl(value)).toThrow(GuardedConfigurationError);

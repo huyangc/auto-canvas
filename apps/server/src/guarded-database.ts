@@ -36,6 +36,17 @@ export function guardedPostgresUrl(value: string | undefined): string {
   // (`[:::]`); `pg` would refuse it only when it connects.
   if (!URL.canParse(value))
     throw new GuardedConfigurationError("has a host that is not valid");
+  // `pg` decodes the credentials when it connects; a stray percent sign
+  // would fail there, after the pool exists.
+  const { username, password } = new URL(value);
+  try {
+    decodeURIComponent(username);
+    decodeURIComponent(password);
+  } catch {
+    throw new GuardedConfigurationError(
+      "has a user name or password that is not valid percent-encoding",
+    );
+  }
   const port = match[1];
   if (port !== undefined && (Number(port) < 1 || Number(port) > 65535))
     throw new GuardedConfigurationError("has a port outside 1-65535");

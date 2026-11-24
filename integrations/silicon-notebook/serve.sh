@@ -4,6 +4,9 @@
 # database that is not the one silicon-notebook's .env names. It takes no
 # options and never initialises a database (that is init-db.sh).
 # Requires Bash 3.2+ (including macOS). See README.md in this directory.
+# Tracing (bash -x, or an inherited SHELLOPTS=xtrace) would print the
+# database URLs below, passwords included: off before anything expands.
+set +x
 set -euo pipefail
 # An inherited BASHOPTS can turn nocasematch on; the checks below compare
 # the spelling of variable names and must stay case-sensitive.

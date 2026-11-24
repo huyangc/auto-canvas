@@ -54,3 +54,17 @@ lines each and were made by the reviewer.
 Rerun: the three new files 165 passed, none skipped; typecheck, lint, format,
 docs, deadcode 0; the behavioural script 40 checks passed, its databases
 dropped.
+
+## Round 3 — accepted (fixes by the reviewer; one finding answered)
+
+Reviewed: codex `gpt-6.2-sol` PR review round 2 of PR 135 at `08c7cee` (two
+P2, one P3, no blocking finding).
+
+| #   | Severity | Where                     | Finding                                                                                                                                               | Outcome                                                                                                                                                                                                                                                                                                        |
+| --- | -------- | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 8   | answered | `server-main.ts`, the pin | If the host name resolves to another server between the migration and a serving checkout, the hook accepts a database with the same schema name.      | Not changed. Identity is compared by name by decision (plan, the limits at the head of the design): a second server with a database of the same name is indistinguishable to every check of this task, at start as well. Re-running the ledger check per connection would not change that. Answered on the PR. |
+| 9   | fixed    | `serve.sh`, `init-db.sh`  | With tracing on (`bash -x`, or an inherited `SHELLOPTS=xtrace`) the required-variable check printed the database URL, password included (reproduced). | Both scripts start with `set +x`; a launcher case runs them with `SHELLOPTS=xtrace` and finds no URL or password in their output.                                                                                                                                                                              |
+| 10  | fixed    | `guarded-database.ts`     | Credentials that are not valid percent-encoding passed the form and failed in `pg` at the first checkout.                                             | The user name and password must decode; two unit cases.                                                                                                                                                                                                                                                        |
+
+Rerun: the three new files 168 passed, none skipped; typecheck, lint, format,
+deadcode 0; the behavioural script 40 checks passed.
