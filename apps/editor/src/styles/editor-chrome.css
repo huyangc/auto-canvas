@@ -1900,38 +1900,27 @@
   }
 }
 
-/* The signed-in account's pill (T172) is the row's other compressible name:
-   above the phone bands every label is back, and after the project's name
-   has given way the username ellipsizes before the actions would run off
-   the row. Without this the pill sat about 90 px past the row at 761 px.
-   The pill keeps its mark and caret; a mode other than `accounts` draws no
-   pill, and this band changes nothing there. */
-@media (width > 720px) and (width <= 1040px) {
-  .app-chrome-main:not([data-host-controls])
-    .app-chrome-actions:has(> .header-account-menu):not(
-      :has(.auto-layout-control[data-running="true"])
-    ) {
-    flex-shrink: 1;
+/* The signed-in account's pill (T172) keeps its size: an account name is
+   one letter and eight digits, so the pill is as wide in every account, and
+   a squeezed pill lost its name and then its caret off the row. Auto mode's
+   row is the one that runs short: above 760 px every label is back, and
+   Import netlist… alone needs more than the project name can give. So a
+   header that draws the pill keeps that one action compact, its icon as at
+   phone widths (its tooltip and accessible name stay), up to the width where
+   the full row fits beside the whole pill. Draw has no Import action and
+   fits as it is; a mode other than `accounts` draws no pill, and this band
+   changes nothing there. */
+@media (width > 760px) and (width <= 1040px) {
+  .app-chrome-actions:has(> .header-account-menu) > .app-import-netlist {
+    width: 2.25rem;
+    padding-inline: 0;
+    justify-content: center;
   }
 
-  .app-chrome-actions > .header-account-menu {
-    flex-shrink: 1;
-    min-width: 0;
-  }
-
-  /* The username gives way first; the Auto Layout label keeps whole, and
-     shrinks only while a run already lets it (the base rules above). Only a
-     header that draws the pill takes this, so the host bar keeps its own
-     last-resort shrink. */
-  .app-chrome-actions:has(> .header-account-menu):not(
-      :has(.auto-layout-control[data-running="true"])
-    )
-    > .auto-layout-control {
-    flex-shrink: 0;
-  }
-
-  .app-chrome-actions .header-account-menu > summary {
-    min-width: 0;
+  .app-chrome-actions:has(> .header-account-menu)
+    > .app-import-netlist
+    .app-action-label {
+    display: none;
   }
 }
 

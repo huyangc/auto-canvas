@@ -163,3 +163,59 @@ test("a running Auto Layout clears the account menu from a phone-width row", asy
   await expect(cancel).toHaveCount(0);
   await expect(page.getByTestId("account-name")).toBeVisible();
 });
+
+// Just above 760 px every action label is back. In Auto, Import netlist… once
+// squeezed the pill below its mark and caret and pushed the row past the
+// window (codex review of PR 127); the pill keeps its size in both modes.
+test("the account pill keeps its mark and caret on the row from 721 to 1041 px", async ({
+  page,
+}) => {
+  const suffix = randomInt(100_000_000).toString().padStart(8, "0");
+  await page.goto("/editor?example=two-stage-op-amp");
+  await page.getByRole("button", { name: "Create an account" }).click();
+  await page.getByLabel("Username").fill("W" + suffix);
+  await page.getByLabel("Password").fill("test-password");
+  await page.getByRole("button", { name: "Register", exact: true }).click();
+  await expect(page.getByTestId("schematic-canvas")).toBeVisible();
+  await renameProject(page, "A long project name for the header " + suffix);
+  await expect(page.getByTestId("open-agent")).toBeVisible();
+
+  const widths = [721, 761, 765, 770, 780, 800, 901, 1041];
+  for (const mode of ["auto", "draw"] as const) {
+    // Name the mode outright: an example or a remembered choice may open
+    // either one.
+    await page.getByTestId(`mode-${mode}`).click();
+    await expect(page.getByTestId("import-netlist-button")).toHaveCount(
+      mode === "auto" ? 1 : 0,
+    );
+    for (const width of widths) {
+      await page.setViewportSize({ width, height: 800 });
+      const at = `${mode} at ${width}px`;
+      const row = await page.locator(".app-chrome-main").evaluate((main) => ({
+        scroll: main.scrollWidth,
+        client: main.clientWidth,
+      }));
+      expect
+        .soft(row.scroll, `row overflow, ${at}`)
+        .toBeLessThanOrEqual(row.client);
+      const pill = await page
+        .getByTestId("account-name")
+        .evaluate((summary) => {
+          const box = summary.getBoundingClientRect();
+          return {
+            right: box.right,
+            scroll: summary.scrollWidth,
+            client: summary.clientWidth,
+          };
+        });
+      // The name ellipsizes inside its own label; the mark and caret do not,
+      // so a pill narrower than them overflows itself.
+      expect
+        .soft(pill.scroll, `pill clipped, ${at}`)
+        .toBeLessThanOrEqual(pill.client);
+      expect
+        .soft(pill.right, `pill off the row, ${at}`)
+        .toBeLessThanOrEqual(width);
+    }
+  }
+});
