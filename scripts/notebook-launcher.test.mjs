@@ -434,6 +434,31 @@ describe("serve.sh", () => {
 });
 
 describe("serve.sh and init-db.sh", () => {
+  test("print no database URL when tracing is inherited through SHELLOPTS", async () => {
+    const secrets = [CANVAS_URL, NOTEBOOK_URL, "CanvasPw123", "NotebookPw456"];
+    const traced = { SHELLOPTS: "xtrace" };
+    const root = makeRoot();
+    const served = await run(serve(root), [], serveEnv(traced));
+    expect(served.code).toBe(0);
+    const refused = await run(
+      serve(root),
+      [],
+      without(serveEnv(traced), "AUTO_CANVAS_NOTEBOOK_API"),
+    );
+    expect(refused.code).toBe(2);
+    const notebook = makeTemp("auto-canvas-notebook-root-");
+    writeFileSync(join(notebook, ".env"), `DATABASE_URL=${NOTEBOOK_URL}\n`);
+    const initialised = await run(
+      initDb(root),
+      ["--notebook-root", notebook],
+      baseEnv({ AUTO_CANVAS_DATABASE_URL: CANVAS_URL, ...traced }),
+    );
+    expect(initialised.code).toBe(0);
+    for (const result of [served, refused, initialised])
+      for (const secret of secrets)
+        expect(result.stdout + result.stderr).not.toContain(secret);
+  });
+
   test.each([
     ["database_url", { database_url: "x" }, "DATABASE_URL"],
     ["Database_Url", { Database_Url: "x" }, "DATABASE_URL"],
