@@ -312,9 +312,16 @@ async function mount(
     async switchTo(
       nextProject: CircuitProject,
       file?: Partial<ProjectFileSession>,
+      /** Runs after the switch, before the incoming tab's first render. */
+      beforeRender?: (
+        controller: EditorDocumentController,
+        outgoing: ReturnType<typeof useProjectFileLifecycle>,
+      ) => void,
     ) {
       await act(async () => {
-        current.doc.activateSession(new EditorDocumentController(nextProject));
+        const outgoing = current.file;
+        const controller = new EditorDocumentController(nextProject);
+        current.doc.activateSession(controller);
         current.file.restoreFileSession({
           persistenceState: "dirty",
           cloudBinding: null,
@@ -322,6 +329,7 @@ async function mount(
           safeSnapshotToken: null,
           ...file,
         });
+        beforeRender?.(controller, outgoing);
       });
     },
     async guard(intent = "Open B") {
@@ -1600,5 +1608,87 @@ describe("Cloud auto-save", () => {
     await advance(3000);
     expect(cloud.writes).toHaveLength(1);
     expect(cloud.writes[0]!.project.name).toBe("Agent edit");
+  });
+
+  it("reports a pending manual write as saving even after an edit lands", async () => {
+    const { editor, cloud } = await mountAuto({ enabled: false });
+    cloud.defer(true);
+    await editor.rename("B");
+    const manual = editor.file.saveProjectToCloud();
+    await flush();
+    expect(cloud.writes).toHaveLength(1);
+    await editor.rename("C");
+    // The edit makes the state dirty; the write is still pending.
+    expect(editor.file.persistenceState).toBe("dirty");
+    expect(editor.file.cloudAutoSave.saving).toBe(true);
+    await cloud.release();
+    await editor.run(manual);
+    expect(editor.file.cloudAutoSave.saving).toBe(false);
+  });
+
+  it("drops a due save at a tab switch even when both tabs share session, token and binding", async () => {
+    // Two working copies of one Cloud revision (a recovery restore can make
+    // them), each with its own unsaved edit at the same revisions.
+    const tabA = structuredClone(base);
+    tabA.name = "Edited in A";
+    const tabB = structuredClone(base);
+    tabB.name = "Edited in B";
+    const armed: Partial<ProjectFileSession> = {
+      ...bound,
+      persistenceState: "dirty",
+      autoSaveArmed: true,
+    };
+    const { editor, cloud, advance } = await mountAuto({ bind: null });
+    await editor.switchTo(tabA, armed);
+    const sessionOfA = editor.current.doc.projectSessionId;
+    await advance(1500);
+    await editor.switchTo(tabB, armed);
+    expect(editor.current.doc.projectSessionId).toBe(sessionOfA);
+    // A's timer would have fired here, with A's drawing against B's binding.
+    await advance(1500);
+    expect(cloud.writes).toHaveLength(0);
+    await advance(1500);
+    expect(cloud.writes).toHaveLength(1);
+    expect(cloud.writes[0]!.project.name).toBe("Edited in B");
+  });
+
+  it("marks and saves an Agent commit that lands between a switch and its first render", async () => {
+    const { editor, cloud, advance } = await mountAuto();
+    // Both tabs hold exactly what the Cloud revision holds.
+    const saved = editor.current.doc.controller.project;
+    const clean: Partial<ProjectFileSession> = {
+      ...bound,
+      savedBaseline: { project: saved, viewBox: view },
+    };
+    await editor.switchTo(structuredClone(saved), clean);
+    expect(editor.file.persistenceState).toBe("clean");
+    let inCommit: ProjectFileSession | undefined;
+    let before: unknown;
+    await editor.switchTo(
+      structuredClone(saved),
+      clean,
+      (controller, outgoing) => {
+        before = [
+          outgoing.captureFileSession().persistenceState,
+          outgoing.isDirtyWork(),
+        ];
+        const next = structuredClone(controller.project);
+        next.name = "Agent edit in B";
+        next.structureRevision++;
+        controller.commitProjectStructure(next);
+        // The outgoing render's function, as the Agent's router holds it.
+        outgoing.noteExternalCommit(controller.project);
+        inCommit = outgoing.captureFileSession();
+      },
+    );
+    expect(before).toEqual(["clean", false]);
+    // Marked at the commit, not only once a later render notices.
+    expect(inCommit?.persistenceState).toBe("dirty");
+    expect(inCommit?.autoSaveArmed).toBe(true);
+    expect(editor.file.persistenceState).toBe("dirty");
+    expect(editor.file.cloudAutoSave.armed).toBe(true);
+    await advance(3000);
+    expect(cloud.writes).toHaveLength(1);
+    expect(cloud.writes[0]!.project.name).toBe("Agent edit in B");
   });
 });

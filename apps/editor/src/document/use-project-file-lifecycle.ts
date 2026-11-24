@@ -238,6 +238,7 @@ export function useProjectFileLifecycle({
   // A Project id or a controller's session string can read equal across two
   // tabs, so only this counter decides whether a late command still belongs.
   const activationEpochRef = useRef(0);
+  const [activationTick, setActivationTick] = useState(0);
   const mountedRef = useRef(true);
   useLayoutEffect(() => {
     mountedRef.current = true;
@@ -355,6 +356,23 @@ export function useProjectFileLifecycle({
     null,
   );
   const [autoSaving, setAutoSaving] = useState(false);
+  // Every Cloud write of this copy, the person's and the automatic ones:
+  // the chip says Saving… while one is pending, whatever the state says.
+  const cloudWritesRef = useRef(0);
+  const [cloudWriting, setCloudWriting] = useState(false);
+  function trackCloudWrite(
+    write: Promise<CloudProjectSaveOutcome>,
+  ): Promise<CloudProjectSaveOutcome> {
+    cloudWritesRef.current++;
+    setCloudWriting(true);
+    const settle = () => {
+      cloudWritesRef.current--;
+      if (cloudWritesRef.current === 0 && mountedRef.current)
+        setCloudWriting(false);
+    };
+    void write.then(settle, settle);
+    return write;
+  }
   /** Manual saves waiting for an automatic one to settle first. */
   const manualSaveWaitingRef = useRef(0);
   const [autoSaveRetryTick, setAutoSaveRetryTick] = useState(0);
@@ -457,6 +475,9 @@ export function useProjectFileLifecycle({
     if (updateState) {
       setReplaceGuardState(null);
       setReplaceGuardSaving(false);
+      // A new activation restarts the auto-save timer even when the incoming
+      // tab shares the outgoing one's session, token and binding.
+      setActivationTick((tick) => tick + 1);
     }
   }
 
@@ -796,34 +817,37 @@ export function useProjectFileLifecycle({
     candidate: CircuitProject | undefined,
     asNew: boolean,
   ): Promise<CloudProjectSaveOutcome> {
-    return saveCoordinator.save({
-      sessionId,
-      current: () =>
-        isActivationCurrent(owner)
-          ? { id: liveSessionRef.current, project: readCurrentProject() }
-          : null,
-      ...(candidate ? { candidate } : {}),
-      ...(beforeSnapshot ? { beforeSnapshot } : {}),
-      asNew,
-      write: (snapshot) => performProjectSaveToCloud(snapshot, asNew),
-      rejected: (reason) => ({
-        status: "rejected",
-        message:
-          reason === "busy"
-            ? "Another Cloud save is in progress; retry Save As after it completes"
-            : reason === "drafts"
-              ? "Source edits need attention; no work was discarded"
-              : "Project changed before Cloud save; no new save was started",
+    return trackCloudWrite(
+      saveCoordinator.save({
+        sessionId,
+        current: () =>
+          isActivationCurrent(owner)
+            ? { id: liveSessionRef.current, project: readCurrentProject() }
+            : null,
+        ...(candidate ? { candidate } : {}),
+        ...(beforeSnapshot ? { beforeSnapshot } : {}),
+        asNew,
+        write: (snapshot) => performProjectSaveToCloud(snapshot, asNew),
+        rejected: (reason) => ({
+          status: "rejected",
+          message:
+            reason === "busy"
+              ? "Another Cloud save is in progress; retry Save As after it completes"
+              : reason === "drafts"
+                ? "Source edits need attention; no work was discarded"
+                : "Project changed before Cloud save; no new save was started",
+        }),
+        failed: (error, stillCurrent) => {
+          const message =
+            error instanceof Error ? error.message : "Save failed";
+          if (stillCurrent) {
+            setPersistenceState("failed");
+            setStatus(`Save failed; work remains local (${message})`);
+          }
+          return { status: "rejected", message };
+        },
       }),
-      failed: (error, stillCurrent) => {
-        const message = error instanceof Error ? error.message : "Save failed";
-        if (stillCurrent) {
-          setPersistenceState("failed");
-          setStatus(`Save failed; work remains local (${message})`);
-        }
-        return { status: "rejected", message };
-      },
-    });
+    );
   }
 
   /**
@@ -853,6 +877,7 @@ export function useProjectFileLifecycle({
         return { status: "rejected", message };
       },
     });
+    void trackCloudWrite(operation);
     autoSaveInFlightRef.current = operation;
     setAutoSaving(true);
     const settle = () => {
@@ -1681,16 +1706,18 @@ export function useProjectFileLifecycle({
   /**
    * An Agent commit to this Project that may land before the render that
    * shows it (between a tab's activation and its first render, where the
-   * change-token effect only adopts a reference): it is a live edit.
+   * change-token effect only adopts a reference): it is a live edit. The
+   * committing controller's Project is compared, since a render before the
+   * switch reads the outgoing tab's.
    */
-  function noteExternalCommit(): void {
+  function noteExternalCommit(committed?: CircuitProject): void {
     setAutoSaveArmed(true);
     const state = persistenceStateRef.current;
     if (state !== "clean" && state !== "unbound") return;
     const saved = savedProjectBaselineRef.current;
     if (
       saved === null ||
-      !sameProjectContent(readCurrentProject(), saved.project)
+      !sameProjectContent(committed ?? readCurrentProject(), saved.project)
     )
       setPersistenceState("dirty");
   }
@@ -1730,10 +1757,13 @@ export function useProjectFileLifecycle({
   // Project saves itself; anything in progress defers it and it asks again.
   useEffect(() => {
     if (!autoSaveEligible()) return;
+    // The timer belongs to this activation: a switch retires it before its
+    // closure could read the outgoing tab's Project.
+    const owner = captureReplacementOwner();
     let timer: ReturnType<typeof setTimeout> | null = null;
     const fire = () => {
       timer = null;
-      if (!mountedRef.current || !autoSaveEligible()) return;
+      if (!isActivationCurrent(owner) || !autoSaveEligible()) return;
       if (autoSaveBlocked()) {
         timer = setTimeout(fire, CLOUD_AUTO_SAVE_POLL_MS);
         return;
@@ -1756,6 +1786,7 @@ export function useProjectFileLifecycle({
     projectSessionId,
     currentOnlineEpoch,
     autoSaveRetryTick,
+    activationTick,
   ]);
 
   const startupRecovery =
@@ -1835,7 +1866,7 @@ export function useProjectFileLifecycle({
     cloudAutoSave: {
       armed: autoSaveArmed,
       hold: applicableAutoSaveHold,
-      saving: autoSaving,
+      saving: autoSaving || cloudWriting,
     },
     savedProjectBaseline,
     replaceGuard:

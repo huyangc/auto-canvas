@@ -7429,7 +7429,8 @@ function WorkspaceEditor({
           enabled: cloudAutoSavePreference.enabled,
           binding: cloudBinding,
           persistenceState,
-          saving: persistenceState === "saving",
+          // The requests, not the state: an edit during one makes it dirty.
+          saving: cloudAutoSave.saving,
           armed: cloudAutoSave.armed,
           hold: cloudAutoSave.hold,
           pendingDraft: codeDraftDirty,

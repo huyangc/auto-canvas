@@ -340,6 +340,14 @@ export function createAgentWorkspaceHandler({
             release();
           }
         }
+        // The foreground save belongs to the render this handler was made in:
+        // a tab activated since then is not on screen there yet, and the save
+        // would read the outgoing tab's Project.
+        if (projectTabs.currentId() !== projectTabs.activeId)
+          return fail(
+            "WORKSPACE_BUSY",
+            "Can't save yet: the project tab just switched; retry",
+          );
         const outcome = await saveProjectToCloud(
           undefined,
           request.asNew === true,
@@ -384,7 +392,17 @@ export function createAgentWorkspaceHandler({
       if (request.action === "rename") {
         const name = request.name.trim();
         const workspaceId =
-          request.workspaceId ?? targetWorkspaceId ?? projectTabs.activeId;
+          request.workspaceId ?? targetWorkspaceId ?? projectTabs.currentId();
+        // A tab activated since this handler's render is listed with that
+        // render's controller: its rename waits for its own render.
+        if (
+          workspaceId === projectTabs.currentId() &&
+          workspaceId !== projectTabs.activeId
+        )
+          return fail(
+            "WORKSPACE_BUSY",
+            "Can't rename yet: the project tab just switched; retry",
+          );
         const target = entries.find((item) => item.id === workspaceId);
         if (!target)
           return fail("WORKSPACE_NOT_FOUND", "Working copy is no longer open");
@@ -393,11 +411,17 @@ export function createAgentWorkspaceHandler({
         const controller = target.session.controller;
         if (controller.project.name === name)
           return success({ action: "rename", applied: false, workspaceId });
-        if (workspaceId === projectTabs.activeId) {
+        // The Project menu's rename only on the tab this handler's render
+        // shows and that is still active; otherwise the tab's own controller.
+        if (
+          workspaceId === projectTabs.activeId &&
+          workspaceId === projectTabs.currentId()
+        ) {
           // The Project menu's own rename: one undoable Project edit.
           renameProject(name);
           if (editorDocumentController.project.name !== name)
             return fail("RENAME_REJECTED", "The Project name was not changed");
+          noteAgentCommitRef.current(editorDocumentController);
         } else {
           const result = controller.dispatchProjectTransaction({
             transactionId: `agent-rename-project-${envelope.requestId}`,
