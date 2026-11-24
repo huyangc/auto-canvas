@@ -295,17 +295,14 @@ unshown and unencrypted; signing out does not remove it. Not yet in this
 build: the user's display name or a way back to silicon-notebook in the
 editor's own chrome.
 
-Deploying the notebook build, two separate rules:
-
-- **Permanent.** An origin that has ever served a single-user (standalone)
-  canvas, at its root or at `/canvas/`, must not serve the notebook canvas
-  until its users have exported their unsaved work and cleared the origin's
-  site data. A service worker the single-user canvas left there can serve its
-  old shell offline, and that shell opens the old browser recovery data before
-  any notebook gate runs. A fresh origin needs nothing.
-- **Temporary, until T163.** Until browser storage is per user, drafts and
-  preferences in one browser are shared by every notebook user who signs in on
-  it.
+Deploying the notebook build: an origin that has ever served a single-user
+(standalone) canvas, at its root or at `/canvas/`, must not serve the notebook
+canvas until its users have exported their unsaved work and cleared the
+origin's site data. A service worker the single-user canvas left there can
+serve its old shell offline, and that shell opens the old browser recovery
+data before any notebook gate runs. A fresh origin needs nothing. This rule is
+permanent: per-user storage does not change what an old service worker
+serves.
 
 [Gate tests](../../apps/editor/src/notebook/gate.test.ts),
 [browser storage tests](../../apps/editor/src/notebook/browser-storage.test.ts),
