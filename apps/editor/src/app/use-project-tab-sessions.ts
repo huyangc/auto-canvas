@@ -976,15 +976,15 @@ export function useProjectTabSessions({
         session.unsafe = true;
       });
     });
-  async function flushNativeWorkspace() {
+  async function flushWorkspace(
+    workspace = {
+      activeId: projectTabs.currentId(),
+      tabs: projectTabs.entries(),
+    },
+  ) {
     const restorationError = workspaceError || restoredTabs.error;
     if (restorationError) throw new Error(restorationError);
-    if (
-      !persistTabs(
-        { activeId: projectTabs.currentId(), tabs: projectTabs.entries() },
-        false,
-      )
-    )
+    if (!persistTabs(workspace, false))
       throw new Error(
         workspaceWriteError.current ?? "Project tabs could not be captured",
       );
@@ -1001,10 +1001,31 @@ export function useProjectTabSessions({
         .entries()
         .some(({ session }) => session.dirty || session.unsafe)
     )
-      await flushNativeWorkspace();
+      await flushWorkspace();
   });
   return {
-    flushNativeWorkspace,
+    flushNativeWorkspace: flushWorkspace,
+    openImportTab: (
+      project: CircuitProject,
+      view: GridRect,
+      options: ReplaceProjectOptions,
+      isCurrent: () => boolean,
+    ) =>
+      projectTabs.open(() => createTabSession(project, view, options), null, {
+        isCurrent,
+        async persistOpened(workspace) {
+          try {
+            await flushWorkspace(workspace);
+            return isCurrent();
+          } catch {
+            if (isCurrent())
+              setStatus(
+                "Project opened in memory. Keep the import link and export the Project before leaving.",
+              );
+            return false;
+          }
+        },
+      }),
     cloudManagementBusy,
     isCloudManagementInFlight: () => cloudMutation.current,
     renameShelfProject,

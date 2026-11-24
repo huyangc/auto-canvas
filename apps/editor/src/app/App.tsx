@@ -4835,6 +4835,7 @@ function WorkspaceEditor({
   const nativeWorkspaceSaving = useRef(false);
   const {
     createTabSession,
+    openImportTab,
     flushNativeWorkspace,
     restoredTabs,
     currentEditBlocker,
@@ -4936,6 +4937,7 @@ function WorkspaceEditor({
     },
   });
   useRestoredTabLinks({
+    openImportTab,
     importReady: recoveryReady && !startupRestorePending,
     openProjectFile,
     restoringWorkspace,

@@ -901,7 +901,12 @@ export function useProjectFileLifecycle({
     options: {
       allowExactCurrentReplacement?: boolean;
       inTab?: boolean;
-      independentCopy?: boolean;
+      openIndependentCopy?: (
+        project: CircuitProject,
+        view: GridRect,
+        options: ReplaceProjectOptions,
+      ) => Promise<boolean>;
+      isCurrent?: () => boolean;
       nativeBinding?: NativeFileBinding;
       /**
        * Read once the file has been read, before the replacement: what keeps
@@ -915,6 +920,7 @@ export function useProjectFileLifecycle({
     const staged = await stageProjectFile(file, (candidate) =>
       findUnsupportedProjectSymbolIds(candidate, builtInSymbols),
     );
+    if (options.isCurrent && !options.isCurrent()) return false;
     if (staged.status === "rejected") {
       setStatus(
         `Project not opened — ${formatProjectOpenDiagnostics(staged.diagnostics)}`,
@@ -925,7 +931,7 @@ export function useProjectFileLifecycle({
       staged.project,
       createProjectSymbolResolver(staged.project, builtInSymbols),
     );
-    const openedProject = options.independentCopy
+    const openedProject = options.openIndependentCopy
       ? { ...normalized.project, id: createId("project") }
       : normalized.project;
     const normalizedDocumentCount = normalized.changedDocumentIds.length;
@@ -955,12 +961,13 @@ export function useProjectFileLifecycle({
               ? "dirty"
               : "unbound",
     };
+    const openInTab =
+      options.openIndependentCopy ??
+      (options.inTab ? openProjectInTab : undefined);
     let applied = false;
     const performOpen = async () => {
-      if (options.inTab && openProjectInTab) {
-        if (
-          !(await openProjectInTab(openedProject, defaultViewBox, openOptions))
-        )
+      if (openInTab) {
+        if (!(await openInTab(openedProject, defaultViewBox, openOptions)))
           return;
       } else replaceActiveProject(openedProject, defaultViewBox, openOptions);
       applied = true;
@@ -972,7 +979,7 @@ export function useProjectFileLifecycle({
             : `Opened ${staged.fileName} at revision ${staged.topDocumentRevision}`,
       );
     };
-    if (options.inTab && openProjectInTab) {
+    if (openInTab) {
       await performOpen();
       return applied;
     }

@@ -116,12 +116,16 @@ export function useProjectTabs<Session>(options: {
   }, []);
   const describe = (id: string) =>
     options.describe(id === activeId ? live : sessions.current.get(id)!);
-  const transition = async (operation: () => void) => {
+  const transition = async (
+    operation: () => void,
+    isCurrent?: () => boolean,
+  ) => {
     if (transitioning.current) return false;
     transitioning.current = true;
     setBusy(true);
     try {
       if (!(await current.current.prepare())) return false;
+      if (isCurrent && !isCurrent()) return false;
       sessions.current.set(active.current, current.current.capture());
       operation();
       return true;
@@ -197,17 +201,41 @@ export function useProjectTabs<Session>(options: {
       setIds((previous) => [...previous]);
       persistenceRef.current(false);
     },
-    open: (create: () => Session, cloudId?: string | null) => {
+    open: async (
+      create: () => Session,
+      cloudId?: string | null,
+      request?: {
+        isCurrent(): boolean;
+        persistOpened(workspace: {
+          activeId: string;
+          tabs: { id: string; session: Session }[];
+        }): Promise<boolean>;
+      },
+    ) => {
       const existing = ids.find(
         (id) => cloudId && describe(id).cloudId === cloudId,
       );
       if (existing) return select(existing);
-      return transition(() => {
+      let saved: Promise<boolean> | undefined;
+      const opened = await transition(() => {
         const id = createId("tab");
         sessions.current.set(id, create());
-        setIds((previous) => [...previous, id]);
+        const next = [...liveIds.current, id];
+        liveIds.current = next;
+        setIds(next);
         activate(id);
-      });
+        // React may still be rendering the outgoing tab. Persist exactly the
+        // sessions committed here, including the newly created controller.
+        if (request)
+          saved = request.persistOpened({
+            activeId: id,
+            tabs: next.map((id) => ({
+              id,
+              session: sessions.current.get(id)!,
+            })),
+          });
+      }, request?.isCurrent);
+      return opened && (saved ?? true);
     },
     openBackground: (create: () => Session, cloudId?: string | null) => {
       if (transitioning.current) return false;

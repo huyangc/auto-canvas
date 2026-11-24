@@ -80,3 +80,71 @@ test("a link can be retried after missing recovery, a broken fragment and a bloc
   ).toBeVisible();
   await expect(page).toHaveURL(/\/editor$/);
 });
+
+function importUrl(name: string) {
+  const project = exampleProject("two-stage-op-amp.icproj.json");
+  project.name = name;
+  return (
+    "/editor?import=1#" +
+    gzipSync(JSON.stringify(project)).toString("base64url")
+  );
+}
+
+for (const failure of ["open", "write"] as const) {
+  test(`an import keeps its link if workspace storage fails to ${failure}`, async ({
+    page,
+  }) => {
+    await page.addInitScript((failure) => {
+      const dbName = "analog-canvas-workspaces";
+      if (failure === "open") {
+        const open = IDBFactory.prototype.open;
+        IDBFactory.prototype.open = function (name, version) {
+          if (name === dbName)
+            throw new DOMException("Workspace unavailable", "SecurityError");
+          return open.call(this, name, version);
+        };
+      } else {
+        const put = IDBObjectStore.prototype.put;
+        IDBObjectStore.prototype.put = function (value, key) {
+          if (this.transaction.db.name === dbName) {
+            this.transaction.abort();
+          }
+          return put.call(this, value, key);
+        };
+      }
+    }, failure);
+    const url = importUrl("In-memory drawing");
+    await openEditor(page, url);
+    await expect(
+      page.getByRole("tab", { name: /In-memory drawing/, selected: true }),
+    ).toBeVisible();
+    await expectStatus(page, /export.*project.*link|link.*export/i);
+    expect(new URL(page.url()).hash).toBe(new URL(url, page.url()).hash);
+    expect((await exportedProject(page)).name).toBe("In-memory drawing");
+  });
+}
+
+test("changing the fragment during file staging never opens the obsolete project", async ({
+  page,
+}) => {
+  await openEditor(page, "/editor?import=1#invalid");
+  await expectStatus(page, "Project link could not be imported");
+  await renameProject(page, "Recipient sketch");
+  await page.evaluate(() => {
+    const text = File.prototype.text;
+    File.prototype.text = async function () {
+      if (this.name === "Shared project.icproj.json") {
+        File.prototype.text = text;
+        window.location.hash = "invalid-new-request";
+      }
+      return text.call(this);
+    };
+  });
+  await page.goto(importUrl("Obsolete import"));
+  await expectStatus(page, "Project link could not be imported");
+  await expect(page).toHaveURL(/#invalid-new-request$/);
+  expect((await exportedProject(page)).name).toBe("Recipient sketch");
+  await expect(page.getByRole("tab", { name: /Obsolete import/ })).toHaveCount(
+    0,
+  );
+});
