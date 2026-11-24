@@ -335,8 +335,10 @@ a stand-in `lsof` that sleeps past it, the upstream-down probe's vacancy check,
 the SWC preflight's working directory, the abort of a stage after a failed
 shutdown, the pieces stage M adds (the child environment without
 `SILICON_NOTEBOOK_ENV_FILE`, the stage's own `.env` accepted only with the hash
-it was written with, requests with headers and a body, and the three-listener
-gate) and the script's own refused file operations (each after a
+it was written with, requests with headers and a body, the three-listener
+gate, the managed canvas's ownership check before it is recorded, the
+database bookkeeping across a shutdown, M-ext's misrouting verdict and M8's
+sign-out deadline) and the script's own refused file operations (each after a
 simulated swap, with a sentinel outside the sandbox) against throwaway
 repositories only; it reads nothing from `--notebook`. It also runs the real
 entry script on a throwaway repository whose `frontend` is a regular file and
@@ -403,18 +405,23 @@ notebook and canvas process gets the sandbox's environment without
 `SILICON_NOTEBOOK_ENV_FILE`. Then, each with a fresh `.local`:
 
 - **managed** (M2–M9): `npm run start` exits 0 with the service ready; the
-  canvas port is held by `node apps/server/dist/cli.js --require-canvas-database`
-  with the offline guard loaded, outside the launcher's group; through the
+  canvas port is held by `node apps/server/dist/cli.js --require-canvas-database`,
+  a descendant of the service worker in the worker's process group (verified
+  before the stage records it; any other listener is never recorded or
+  signalled and fails the step), with the offline guard loaded, outside the
+  launcher's group; through the
   frontend the canvas is ready, refuses an anonymous API request and serves
   the notebook editor; two registered users each create, save and reopen
-  projects the other cannot see; a signed-out user is refused within the
-  canvas's 60-second token window while the other is not; the stop (the
+  projects the other cannot see; a signed-out user is refused within 75
+  seconds of the sign-out's response (the canvas's 60-second token window;
+  each poll's deadline is the time left) while the other is not; the stop (the
   launcher's group, then the clone's `extension_services.py stop`) leaves no
   companion process and no listener;
 - **external** (M-ext): the stage starts `serve.sh` itself and the notebook
   only checks it; then a standalone canvas with a seeded project takes the
-  canvas port, and no request through the notebook, with or without a token,
-  answers JSON or shows that project or its user;
+  canvas port, and every request through the notebook, with or without a
+  token, gets an HTTP answer (a timeout or socket error fails the step) that
+  is not JSON and does not show that project or its user;
 - **partial and full rollback**: without the plugin entry but with the build
   target (M-a), `/canvas` answers 500 and the notebook works; with the entry
   but a build without the target (M-b), the canvas runs and answers on its own
@@ -432,5 +439,7 @@ it recorded — never by port or name, and never with silicon-notebook's `npm ru
 stop`, which kills by port. The cleanup (that stop, the stage's process groups,
 the recorded pids, then `DROP DATABASE … WITH (FORCE)` and a check that both
 databases are gone) runs at the end of the stage and, after an interrupt,
-before the sandbox is removed; the run then exits 130. No token, password or
-database URL appears in the output.
+before the sandbox is removed; the run then exits 130. Once the cleanup has
+begun no `CREATE DATABASE` starts; one already in flight is waited for
+(cancelled by its backend pid if it does not settle) and its database dropped
+if it succeeded. No token, password or database URL appears in the output.

@@ -32,3 +32,22 @@ stage M (--ref b5850d6…)                                            → 0   11
 owner ports 3000/8000/4310, notebook checkout status                → unchanged
 databases named auto_canvas_it_* afterwards                         → 0
 ```
+
+## Round 2 — accepted
+
+Reviewed: codex `gpt-6.2-sol` PR review round 1 of PR 140 at `b35e26f` (one
+P1, three P2), each checked and found valid, and the fixes an opus subagent
+made; each new stage S control fails on the old behaviour (shown by the
+implementer with a copy of the check rebuilt with it). Acceptance rerun by
+Opus.
+
+| #   | Severity | Where                            | Finding                                                                                                                                             | Fix                                                                                                                                                                                                                                                    |
+| --- | -------- | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 5   | P1 fixed | `stage-m.mjs`, `managedService`  | A listener on the canvas port was recorded as the canvas before any ownership check; a replacement process could later be signalled by the cleanup. | `managedCanvas` / `canvasOwnershipProblem`: recorded only when it descends from the recorded service worker, is in its process group, runs `apps/server/dist/cli.js --require-canvas-database`, and kept its `ps` identity while checked (M2 and M-b). |
+| 6   | P2 fixed | `stage-m.mjs`, database creation | A `CREATE DATABASE` in flight when an interrupt began could finish after the cleanup read the list, leaving a database.                             | `databaseLedger`: no create after the shutdown began; in-flight creates are awaited (10 s), then cancelled by backend pid; every database created is dropped.                                                                                          |
+| 7   | P2 fixed | `stage-m.mjs`, M-ext             | A probe without an HTTP answer counted as safe.                                                                                                     | `misroutingProblems`: every probe needs a numeric status before its body is checked; a probe without one fails, named.                                                                                                                                 |
+| 8   | P2 fixed | `stage-m.mjs`, M8                | The 75 s deadline started after the `/api/me` probe and a late poll got a full budget.                                                              | `firstRefusal`: measured from the logout's 204, each poll capped at the time left, a 401 after 75 s does not count.                                                                                                                                    |
+
+Rerun: stage S 74 passed (four new controls); stage M 112 passed (M8: first
+401 after 62.8 s); typecheck, lint, format, docs, deadcode 0; no
+`auto_canvas_it_` database left.

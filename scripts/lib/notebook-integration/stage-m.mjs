@@ -120,16 +120,90 @@ const parsed = (res) => {
   }
 };
 
-/** `ps -o lstart=,command=`: a pid's identity, or undefined when it is gone. */
-function identityOf(pid) {
+/** One `ps -o <field>=…` reading of a pid, or undefined when it is gone. */
+function psOf(fields, pid) {
   try {
-    return execFileSync("ps", ["-o", "lstart=,command=", "-p", String(pid)], {
-      encoding: "utf8",
-      env: { PATH: process.env.PATH ?? "" },
-    }).trim();
+    return execFileSync(
+      "ps",
+      [...fields.flatMap((field) => ["-o", `${field}=`]), "-p", String(pid)],
+      {
+        encoding: "utf8",
+        env: { PATH: process.env.PATH ?? "" },
+      },
+    ).trim();
   } catch {
     return undefined;
   }
+}
+
+/** `ps -o lstart= -o command=`: a pid's identity, or undefined when it is gone. */
+const identityOf = (pid) => psOf(["lstart", "command"], pid);
+
+/** The managed canvas's command line, as serve.sh starts it. */
+const CANVAS_COMMAND =
+  /(?:^|[\s/])apps\/server\/dist\/cli\.js --require-canvas-database$/u;
+/** How many parents the descent check reads before it gives up. */
+const ANCESTRY_LIMIT = 16;
+
+/**
+ * Why `pid` is not the canvas of the service worker `workerPid`, or "": it
+ * must descend from the worker (its parent chain, read with `ps -o ppid=`,
+ * reaches the worker within ANCESTRY_LIMIT steps), be in the worker's process
+ * group, and run `… apps/server/dist/cli.js --require-canvas-database`.
+ */
+function canvasOwnershipProblem(pid, workerPid) {
+  if (!(workerPid > 0)) return "has no recorded service worker to descend from";
+  let at = pid;
+  let descends = false;
+  for (let step = 0; step < ANCESTRY_LIMIT && !descends; step += 1) {
+    const parent = Number(psOf(["ppid"], at));
+    if (!(parent > 1)) break;
+    descends = parent === workerPid;
+    at = parent;
+  }
+  if (!descends)
+    return `is not a descendant of the service worker ${workerPid}`;
+  const group = groupOf(pid);
+  const workerGroup = groupOf(workerPid);
+  if (!(group > 0) || group !== workerGroup)
+    return `is in process group ${group}, not the service worker's (${workerGroup})`;
+  const command = psOf(["command"], pid) ?? "";
+  if (!CANVAS_COMMAND.test(command))
+    return `runs ${JSON.stringify(command)}, not node apps/server/dist/cli.js --require-canvas-database`;
+  return "";
+}
+
+/**
+ * The listener of the canvas port, verified as the canvas of the service
+ * worker before anything records it: `record(name, pid, identity)` is called
+ * only for a listener that passes `canvasOwnershipProblem` and kept its
+ * identity while it was checked. Anything else is never recorded (so never
+ * signalled); `problem` names it. Returns `{ canvasPid, listeners, problem }`,
+ * `canvasPid` 0 unless recorded.
+ */
+export function managedCanvas({ sandbox, canvasPort, workerPid, record }) {
+  const listeners = sandbox.listenerPids(canvasPort);
+  if (listeners.length !== 1)
+    return {
+      canvasPid: 0,
+      listeners,
+      problem: `the canvas port ${canvasPort} has ${listeners.length ? `listeners ${listeners.join(", ")}` : "no listener"}`,
+    };
+  const [pid] = listeners;
+  const identity = identityOf(pid);
+  const problem =
+    identity === undefined
+      ? "is gone"
+      : canvasOwnershipProblem(pid, workerPid) ||
+        (identityOf(pid) === identity ? "" : "changed while it was checked");
+  if (problem)
+    return {
+      canvasPid: 0,
+      listeners,
+      problem: `listener ${pid} of the canvas port ${problem}: not recorded, never signalled`,
+    };
+  record("canvas", pid, identity);
+  return { canvasPid: pid, listeners, problem: "" };
 }
 
 /** A probe of a process group (signal 0 sends nothing). */
@@ -305,6 +379,65 @@ async function stageMBody({ sandbox, report, secrets, notebook, options }) {
   }
 }
 
+/**
+ * The databases a run creates, in step with its shutdown. `create(client,
+ * name)` issues `CREATE DATABASE` only before the shutdown began (after it, it
+ * throws StageAborted and sends nothing) and records the name once the create
+ * succeeded, also when that is after the shutdown began. `shutdown(cancel)`
+ * marks the shutdown at once and resolves when every create in flight has
+ * settled: it waits `settleMs`, asks `cancel(backendPids)` to cancel the
+ * creates still running, and waits `settleMs` again. It resolves to
+ * `{ created, unsettled }`: every name to drop, and the names whose create
+ * had still not settled.
+ */
+export function databaseLedger({ settleMs = 10_000 } = {}) {
+  const created = [];
+  const pending = new Map(); // promise -> { name, backendPid }
+  let shutdown;
+  const settledWithin = (ms) =>
+    pending.size === 0
+      ? Promise.resolve()
+      : Promise.race([Promise.allSettled([...pending.keys()]), sleep(ms)]);
+  return {
+    created,
+    async create(client, name) {
+      if (shutdown)
+        throw new StageAborted(
+          `the shutdown has begun: database ${name} is not created`,
+        );
+      const attempt = client.query(`CREATE DATABASE ${name}`).then(() => {
+        created.push(name);
+      });
+      pending.set(attempt, { name, backendPid: client.processID });
+      try {
+        await attempt;
+      } finally {
+        pending.delete(attempt);
+      }
+    },
+    shutdown(cancel = async () => undefined) {
+      shutdown ??= (async () => {
+        await settledWithin(settleMs);
+        if (pending.size) {
+          try {
+            await cancel(
+              [...pending.values()].map((entry) => entry.backendPid),
+            );
+          } catch {
+            // the second wait decides
+          }
+          await settledWithin(settleMs);
+        }
+        return {
+          created: [...created],
+          unsettled: [...pending.values()].map((entry) => entry.name),
+        };
+      })();
+      return shutdown;
+    },
+  };
+}
+
 /** The stage's bookkeeping, its database access and its cleanup. */
 function stageState({ sandbox, report, secrets, notebook, options }) {
   const started = Date.now();
@@ -320,7 +453,7 @@ function stageState({ sandbox, report, secrets, notebook, options }) {
     envFile: path.join(nb, ".env"),
     say: (line) => console.log(report.clean(line)),
     elapsed: () => `${Math.round((Date.now() - started) / 1000)} s`,
-    created: [], // databases this run created
+    databases: databaseLedger(), // the databases this run created
     groups: [], // process groups this stage started (launchers, canvases)
     companions: new Map(), // pid -> { name, pid, identity }
     launched: false,
@@ -329,9 +462,9 @@ function stageState({ sandbox, report, secrets, notebook, options }) {
       "postgresql:///auto_canvas_test",
   };
   secrets.push(m.adminUrl);
-  m.recordCompanion = (name, pid) => {
+  m.recordCompanion = (name, pid, identity = identityOf(pid)) => {
     if (!(pid > 0) || m.companions.has(pid)) return;
-    m.companions.set(pid, { name, pid, identity: identityOf(pid) });
+    m.companions.set(pid, { name, pid, identity });
   };
   const pg = createRequire(path.join(repo, "apps/server/package.json"))("pg");
   m.withClient = async (connectionString, work) => {
@@ -376,6 +509,10 @@ const stillRecorded = (entry) =>
 
 async function cleanUp(m) {
   const { sandbox, report } = m;
+  // First, synchronously: no CREATE DATABASE starts from here on (the drop
+  // at the end waits for those in flight).
+  const withAdmin = (work) => m.withClient(m.adminUrl, work);
+  void m.databases.shutdown(cancelCreates(withAdmin));
   if (m.launched && fs.existsSync(path.join(m.nb, "scripts")))
     await m.extensionStop("cleanup:");
   for (const pgid of m.groups)
@@ -405,15 +542,49 @@ async function cleanUp(m) {
     left.length === 0,
     () => left.map((entry) => `${entry.name} ${entry.pid}`).join(", "),
   );
-  if (!m.created.length) return;
+  await dropDatabases({
+    databases: m.databases,
+    withAdmin,
+    report,
+  });
+}
+
+/** The ledger's way to cancel the creates still running: by backend pid. */
+const cancelCreates = (withAdmin) => async (pids) => {
+  const backends = pids.filter((pid) => Number.isInteger(pid) && pid > 0);
+  if (backends.length)
+    await withAdmin((client) =>
+      client.query(
+        "SELECT pg_catalog.pg_cancel_backend(pid) FROM unnest($1::int[]) AS pid",
+        [backends],
+      ),
+    );
+};
+
+/**
+ * The database part of the cleanup: the ledger's shutdown (no new create;
+ * every create in flight settled, a straggler cancelled through `withAdmin`),
+ * then every database a create recorded is dropped `WITH (FORCE)`, a create
+ * that succeeded after the shutdown began included, and the result reported.
+ */
+export async function dropDatabases({ databases, withAdmin, report }) {
+  const { created, unsettled } = await databases.shutdown(
+    cancelCreates(withAdmin),
+  );
+  if (unsettled.length)
+    report.fail(
+      "cleanup: every CREATE DATABASE in flight settled before the drop",
+      `still running after its cancellation: ${unsettled.join(", ")} (it may be left behind)`,
+    );
+  if (!created.length) return;
   let remaining;
   try {
-    remaining = await m.withClient(m.adminUrl, async (client) => {
-      for (const name of m.created)
+    remaining = await withAdmin(async (client) => {
+      for (const name of created)
         await client.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
       const rows = await client.query(
         "SELECT datname FROM pg_catalog.pg_database WHERE datname = ANY ($1::text[])",
-        [m.created],
+        [created],
       );
       return rows.rows.map((row) => row.datname);
     });
@@ -421,7 +592,7 @@ async function cleanUp(m) {
     remaining = [`(the drop failed: ${error.message})`];
   }
   report.check(
-    `cleanup: the stage's databases are dropped (${m.created.join(", ")})`,
+    `cleanup: the stage's databases are dropped (${created.join(", ")})`,
     remaining.length === 0,
     () => `still present: ${remaining.join(", ")}`,
   );
@@ -479,10 +650,8 @@ async function setUp(m) {
     );
     role = who.rows[0].role;
     pgPort = who.rows[0].port;
-    for (const name of [names.canvas, names.standalone]) {
-      await client.query(`CREATE DATABASE ${name}`);
-      m.created.push(name);
-    }
+    for (const name of [names.canvas, names.standalone])
+      await m.databases.create(client, name);
   });
   const urlOf = (name) =>
     `postgresql://${encodeURIComponent(role)}@127.0.0.1:${pgPort}/${name}`;
@@ -734,9 +903,14 @@ async function managedService(m, run) {
   const workerPid = Number(service?.pid);
   m.recordCompanion("supervisor", supervisorPid);
   m.recordCompanion("worker", workerPid);
-  const listeners = m.sandbox.listenerPids(m.canvasPort);
-  const canvasPid = listeners.length === 1 ? listeners[0] : 0;
-  m.recordCompanion("canvas", canvasPid);
+  // The listener is recorded (and so may be signalled by the cleanup) only
+  // once it is proven to be the worker's canvas.
+  const { canvasPid, listeners, problem } = managedCanvas({
+    sandbox: m.sandbox,
+    canvasPort: m.canvasPort,
+    workerPid,
+    record: m.recordCompanion,
+  });
   const canvasGroup = canvasPid > 0 ? groupOf(canvasPid) : -1;
   return {
     state,
@@ -746,6 +920,7 @@ async function managedService(m, run) {
     workerPid,
     listeners,
     canvasPid,
+    canvasProblem: problem,
     canvasGroup,
     stopInfo: {
       launch: run.launch,
@@ -782,14 +957,15 @@ async function stopAll(m, label, { launch, canvasPids = [], canvasGroup }) {
 }
 
 /**
- * A gated request with an optional bearer, JSON body and headers. A failure
- * after the gate passed is reported as its status; a changed listener throws
- * OwnershipLost.
+ * A gated request with an optional bearer, JSON body and headers, within
+ * `deadlineMs` (30 s by default; the gate's listener checks count against it).
+ * A failure after the gate passed is reported as a string status; a changed
+ * listener throws OwnershipLost.
  */
 async function request(
   gate,
   rawPath,
-  { method = "GET", token, json, headers } = {},
+  { method = "GET", token, json, headers, deadlineMs = 30_000 } = {},
 ) {
   const init = { headers: { ...headers } };
   if (token) init.headers.authorization = `Bearer ${token}`;
@@ -798,10 +974,41 @@ async function request(
     init.body = JSON.stringify(json);
   }
   try {
-    return await gate(rawPath, method, 30_000, init);
+    return await gate(rawPath, method, deadlineMs, init);
   } catch (error) {
     if (error instanceof OwnershipLost) throw error;
     return { status: `error ${error.message}`, headers: {}, body: "" };
+  }
+}
+
+/**
+ * Polls `probe(leftMs)` from `since` until it answers 401, every `intervalMs`,
+ * and never past `limitMs` after `since`: each probe gets only the time left
+ * as its deadline, no probe starts once it is used up, and a 401 that arrives
+ * after the limit does not count. Resolves to `{ after, last, late }`:
+ * `after` the ms from `since` to the first 401 within the limit (undefined if
+ * none), `late` the ms of a 401 that came after it.
+ */
+export async function firstRefusal({
+  since,
+  limitMs,
+  intervalMs,
+  probe,
+  now = Date.now,
+}) {
+  let last;
+  for (;;) {
+    const left = limitMs - (now() - since);
+    if (left <= 0) return { after: undefined, last };
+    last = await probe(left);
+    const after = now() - since;
+    if (last?.status === 401)
+      return after <= limitMs
+        ? { after, last }
+        : { after: undefined, late: after, last };
+    const wait = Math.min(intervalMs, limitMs - after);
+    if (wait <= 0) return { after: undefined, last };
+    await sleep(wait);
   }
 }
 
@@ -872,11 +1079,10 @@ async function managedRun(m) {
     const command = canvasPid > 0 ? (commandOf(canvasPid) ?? "") : "";
     if (
       !report.check(
-        "M2 the canvas port is held by node apps/server/dist/cli.js --require-canvas-database",
-        canvasPid > 0 &&
-          command.endsWith("apps/server/dist/cli.js --require-canvas-database"),
+        "M2 the canvas port is held by node apps/server/dist/cli.js --require-canvas-database, a descendant of the service worker in its process group (verified before it is recorded)",
+        canvasPid > 0 && !service.canvasProblem,
         () =>
-          `listeners [${service.listeners}], command ${JSON.stringify(command)}\n${canvasLogTail(m)}`,
+          `${service.canvasProblem}; listeners [${service.listeners}], command ${JSON.stringify(command)}\n${canvasLogTail(m)}`,
       )
     )
       return false;
@@ -1036,11 +1242,13 @@ async function signedInUsers(m, { getCanvas, getProxied }) {
       !idsOf(listA).includes(projectB?.id),
     `status ${listA.status}, ${idsOf(listA).length} project(s)`,
   );
-  // M8 sign-out: the canvas trusts a validated token for 60 s.
+  // M8 sign-out: the canvas trusts a validated token for 60 s. The 75 s are
+  // measured from the moment the sign-out's response arrived.
   const logout = await request(getProxied, "/api/auth/logout", {
     method: "POST",
     token: a.token,
   });
+  const signedOut = Date.now();
   report.check(
     "M8 A signs out through web -> 204",
     logout.status === 204,
@@ -1052,21 +1260,28 @@ async function signedInUsers(m, { getCanvas, getProxied }) {
     meAfter.status === 401,
     `status ${meAfter.status}`,
   );
-  const signedOut = Date.now();
-  let firstRefusal;
-  let last;
-  while (Date.now() - signedOut <= 75_000) {
-    last = await request(getCanvas, projects, { token: a.token });
-    if (last.status === 401) {
-      firstRefusal = Date.now() - signedOut;
-      break;
-    }
-    await sleep(5000);
-  }
+  const refusal =
+    logout.status === 204
+      ? await firstRefusal({
+          since: signedOut,
+          limitMs: 75_000,
+          intervalMs: 5000,
+          probe: (left) =>
+            request(getCanvas, projects, {
+              token: a.token,
+              deadlineMs: Math.min(30_000, left),
+            }),
+        })
+      : { after: undefined };
   report.check(
-    `M8 /canvas/api/projects with A's token -> 401 within 75 s${firstRefusal === undefined ? "" : ` (first 401 after ${(firstRefusal / 1000).toFixed(1)} s)`}`,
-    firstRefusal !== undefined,
-    `last status ${last?.status}`,
+    `M8 /canvas/api/projects with A's token -> 401 within 75 s of the sign-out's 204${refusal.after === undefined ? "" : ` (first 401 after ${(refusal.after / 1000).toFixed(1)} s)`}`,
+    refusal.after !== undefined,
+    () =>
+      logout.status !== 204
+        ? "the sign-out did not succeed, so nothing was polled"
+        : refusal.late !== undefined
+          ? `the first 401 came ${(refusal.late / 1000).toFixed(1)} s after the sign-out, past 75 s`
+          : `no 401 within 75 s; last status ${refusal.last?.status}`,
   );
   const stillB = await request(getCanvas, projects, { token: b.token });
   report.check(
@@ -1282,18 +1497,39 @@ async function misroutedUpstream(
         ),
       });
     }
-  const bad = answers.filter(
-    (answer) => (answer.status === 200 && answer.json) || answer.leaked.length,
-  );
+  const bad = misroutingProblems(answers);
   report.check(
-    "M-ext through the notebook, no request with or without a token answers 200 with JSON or shows the standalone canvas's project or user",
+    "M-ext through the notebook, every request with or without a token gets an HTTP answer, none 200 with JSON, none showing the standalone canvas's project or user",
     bad.length === 0,
-    JSON.stringify(bad),
+    bad.join("; "),
   );
   report.info(
     `M-ext answers: ${answers.map((answer) => `${answer.token ? "token" : "none"} ${answer.rawPath} ${answer.status}${answer.json ? " json" : ""}`).join("; ")}`,
   );
   return true;
+}
+
+/**
+ * The misrouting verdict of M-ext's probes `{ rawPath, token, status, json,
+ * leaked }`: one line per probe that fails, naming it. A probe passes only
+ * with an HTTP answer (a numeric status; a timeout or a socket error is a
+ * failure, never "safe"), and that answer is neither 200 with JSON nor a body
+ * holding any of the standalone canvas's names.
+ */
+export function misroutingProblems(answers) {
+  const problems = [];
+  for (const answer of answers) {
+    const probe = `${answer.token ? "with the token" : "without a token"} GET ${answer.rawPath}`;
+    if (typeof answer.status !== "number")
+      problems.push(`${probe}: no HTTP answer (${answer.status})`);
+    else if (answer.status === 200 && answer.json)
+      problems.push(`${probe}: 200 with JSON`);
+    else if (answer.leaked.length)
+      problems.push(
+        `${probe}: the body shows ${answer.leaked.length} of the standalone canvas's names`,
+      );
+  }
+  return problems;
 }
 
 // ---- M-a, build 2, M-b, M-full: the rollbacks ----------------------------------
@@ -1406,10 +1642,12 @@ async function targetlessRun(m) {
     const { canvasPid } = service;
     if (
       !report.check(
-        "M-b silicon-notebook starts the canvas (state ready, the canvas port held)",
-        service.readyAfter !== undefined && canvasPid > 0,
+        "M-b silicon-notebook starts the canvas (state ready, the canvas port held by the service worker's verified canvas)",
+        service.readyAfter !== undefined &&
+          canvasPid > 0 &&
+          !service.canvasProblem,
         () =>
-          `state ${JSON.stringify(service.state)}, listeners [${service.listeners}]`,
+          `${service.canvasProblem}; state ${JSON.stringify(service.state)}, listeners [${service.listeners}]`,
       )
     )
       return false;
