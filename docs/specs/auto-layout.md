@@ -1297,9 +1297,12 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   the same drawing, and neither half when `|dx|` is strictly less than one grid
   step. An item that improves never offsets one that gets worse. Ports without
   a placement or a Net on `P`, blocks on a cycle and the search's other frames
-  are not vetoed. (4) The current-source tail step returns its incumbent when
-  the tail's input pair is p-polarity, since it only builds a tail below the
-  pair and R81 places that tail above.
+  are not vetoed. (4) The current-source tail step uses the differential
+  pair's polarity. For a p-channel pair it seats the tail above the pair,
+  puts any source-degeneration elements between the pair and the tail, and
+  places loads and output ports below the pair. The centered tee has an upward
+  stem to the tail's lower contact. The n-channel step keeps the tail below
+  the pair. Both use the same completeness, routing and readability guards.
 
 - **R71 — Single-host ports.** A non-rail Cell Pin Net that reaches exactly
   one device pin gets a local seat along that pin's transformed exit direction.
@@ -1438,7 +1441,7 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   leaves a valid pair without a tail. One tail may support multiple pairs.
   Placement uses the pair members' polarity: the tail lies one row below n
   pairs or above p pairs, including shared tails and tails in mirror units.
-  The netlist refinement's tail step applies to n pairs only (R170).
+  The netlist refinement's current-source tail step uses the same polarity (R170).
 
 - **R82 — Differential pair with mirror load.** A mirror reference drain on
   input A's drain and an output drain on input B's distinct drain form a
@@ -1575,7 +1578,21 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   member id establishes left/right with its lower-id member left; sides propagate
   through the component. Pairs reached only through self Nets use the same
   lower-id-left drawing convention. Report partner pairs, axis devices and
-  touched conflicted devices.
+  touched conflicted devices. When R88 finds no component in an unpartitioned
+  layout, the `mirrorSymmetry` finalist can use T087's exact netlist involution
+  for a component with at least two pairs and a transistor pair. Components
+  containing directed blocks or hierarchical pins are excluded. Map the matched
+  pins' logical Nets to a Base Net involution and place the component on one
+  axis and try layered and template drafts. Both symmetry finalists can enter
+  finishing with a distinct, complete draft within the runner margin, with
+  fewer crossings, or with fewer netlist symmetry violations, equal crossings
+  and at most 2.2 times the incumbent's routed score. Both must strictly improve
+  the finished comparison and routed score, with no routing or visual guard
+  increases, including label-owner distance. If netlist symmetry violations
+  fall and crossings do not increase, a higher readability term or new minor
+  violations may be accepted. Zero baselines still veto new crossings, rail
+  crossings, source polarity violations, wires through symbols and unowned
+  drafting. Otherwise the usual readability term and zero-baseline rules apply.
 
 - **R89 — Symmetric blocks.** Partners use the smaller R31 row; axis devices
   retain their rows. Build a half Document from left partners and axis devices,
@@ -1883,7 +1900,11 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   instance, Net or terminal order. Each stage gets its own R89 block and axis
   through R94 in every placement strategy, collision repair and frozen sets.
   Annealing and R97 compaction use the same stage components as rigid units.
-  Partition mode and the R88 whole-component view remain unchanged.
+  When R145 splits a component, an `unsplitSymmetry` finalist can keep it on a
+  single axis. Try the selected strategy, layered and template, and take the
+  best distinct strategy draft by the routed comparator. It competes through
+  `selectFinishedLayout` under the R88 symmetry-finalist guards. Partition
+  placement continues to use the whole-component R88 view.
 
 - **R146 — Routed port-seat search.** In default mode, for documents of at
   most 40 instances and a nonzero search budget, search non-rail `port` and

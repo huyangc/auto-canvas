@@ -1,8 +1,28 @@
-import { placementPitch } from "../src/geometry.js";
-import { expect, it } from "vitest";
+import { diagnoseLabelClearance } from "@icm/derived";
+import { createRoutePath } from "@icm/model";
+import { placement, placementPitch } from "../src/geometry.js";
+import { expect, it, vi } from "vitest";
 import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
+import { planAutoLayout } from "../src/auto-layout.js";
+import * as finishedSelection from "../src/finished-selection.js";
+import { emptyChoices } from "../src/layout-choices.js";
 import { classifyNets } from "../src/net-roles.js";
-import { detectSymmetry, symmetryTopology } from "../src/symmetry.js";
+import {
+  detectSymmetry,
+  mirrorSymmetryTopology,
+  symmetryTopology,
+} from "../src/symmetry.js";
+import {
+  netlistMirrorPairs,
+  netlistSymmetry,
+} from "../src/readability-netlist-symmetry.js";
+import { readabilityNetlist } from "../src/readability-netlist.js";
+import { readabilityTerm } from "../src/readability-selection.js";
+import { routedScore } from "../src/refine.js";
+import { routedGuards } from "../src/routed-search-score.js";
+import { auditRouting } from "../src/routing-audit.js";
+import { preview, terminalPartition } from "../src/transaction.js";
+import type { AutoLayoutResult } from "../src/types.js";
 import { circuit } from "./document-fixture.js";
 
 const resolver = new InMemorySymbolResolver(builtInSymbols);
@@ -1034,3 +1054,307 @@ it.each(["layered", "stages", "template"] as const)(
   },
   60_000,
 );
+
+const degeneratedPair = () =>
+  circuit(
+    {
+      m1: "nmos",
+      m2: "nmos",
+      r2: "resistor",
+      r1: "resistor",
+      l2: "resistor",
+      l1: "resistor",
+      tail: "current-source",
+      v: "vdd-port",
+      g: "ground",
+    },
+    {
+      gate1: ["m1.G"],
+      gate2: ["m2.G"],
+      out1: ["m1.D", "l2.2"],
+      out2: ["m2.D", "l1.1"],
+      source1: ["m1.S", "r2.1"],
+      source2: ["m2.S", "r1.2"],
+      common: ["r2.2", "r1.1", "tail.+"],
+      vdd: ["v.P", "l2.1", "l1.2"],
+      ground: ["g.0", "tail.-"],
+    },
+  );
+
+it("accepts a cheaper symmetry finalist with a higher readability term and vetoes a new visual guard", () => {
+  const document = degeneratedPair();
+  document.instances.push(
+    { id: "res", symbolId: "resistor", placement: placement(1000, 300) },
+    { id: "cap", symbolId: "capacitor", placement: placement(1000, 500) },
+  );
+  document.nets.push({
+    id: "series",
+    terminals: [
+      { instanceId: "res", pinName: "2" },
+      { instanceId: "cap", pinName: "1" },
+    ],
+  });
+  const layout = (symmetric: boolean): AutoLayoutResult => {
+    const poses = [
+      ["l2", -200, -200],
+      ["l1", 200, -200],
+      ["m1", -200, 0],
+      ["m2", 200, symmetric ? 0 : 40],
+      ["r2", symmetric ? -3000 : -200, 200],
+      ["r1", symmetric ? 3000 : 200, 200],
+    ] as const;
+    const bends = symmetric
+      ? []
+      : [
+          { x: 1000, y: 360 },
+          { x: 100000, y: 360 },
+          { x: 100000, y: 440 },
+          { x: 1000, y: 440 },
+        ];
+    return {
+      edits: [
+        ...poses.map(([instanceId, x, y]) => ({
+          kind: "place_instance" as const,
+          instanceId,
+          placement: placement(x, y),
+        })),
+        {
+          kind: "set_route_path",
+          route: createRoutePath({
+            id: "series-route",
+            netId: "series",
+            start: { kind: "terminal", instanceId: "res", pinName: "2" },
+            end: { kind: "terminal", instanceId: "cap", pinName: "1" },
+            bends,
+            modes: Array.from({ length: bends.length + 1 }, () => "manual"),
+          }),
+        },
+      ],
+      groups: [],
+      diagnostics: [],
+    };
+  };
+  const replay = (result: AutoLayoutResult) => {
+    const applied = preview(document, resolver, result.edits);
+    if (!applied.ok) throw new Error("Finished layout must replay");
+    return { result, final: applied.document, choices: emptyChoices() };
+  };
+  const base = replay(layout(false));
+  const candidate = replay(layout(true));
+  expect(netlistSymmetry(base.final, resolver).violations).toBe(1);
+  expect(netlistSymmetry(candidate.final, resolver).violations).toBe(0);
+  expect(auditRouting(base.final, resolver).crossings).toBe(0);
+  expect(auditRouting(candidate.final, resolver).crossings).toBe(0);
+  expect(routedGuards(candidate.final, resolver)).toEqual(
+    routedGuards(base.final, resolver),
+  );
+  expect(routedScore(candidate, resolver)).toBeLessThan(
+    routedScore(base, resolver),
+  );
+  expect(readabilityTerm(candidate.final, resolver)).toBeGreaterThan(
+    readabilityTerm(base.final, resolver),
+  );
+  const choose = (alternative: AutoLayoutResult, kind?: "mirrorSymmetry") =>
+    finishedSelection.selectFinishedLayout(
+      document,
+      resolver,
+      base.result,
+      alternative,
+      undefined,
+      kind,
+    );
+  expect(choose(candidate.result)).toBe(base.result);
+  expect(choose(candidate.result, "mirrorSymmetry")).toBe(candidate.result);
+
+  const withDistantLabel = replay({
+    ...candidate.result,
+    edits: [
+      ...candidate.result.edits,
+      {
+        kind: "upsert_schematic_annotation",
+        annotation: {
+          id: "far",
+          kind: "instance-label",
+          anchor: {
+            kind: "object",
+            objectId: "cap",
+            localOffset: { x: 300, y: 100 },
+            fallbackPosition: { x: 1300, y: 600 },
+          },
+          content: { runs: [{ kind: "text", value: "C1" }] },
+          alignment: "middle",
+          locked: false,
+          rotation: 0,
+        },
+      },
+    ],
+  });
+  expect(
+    diagnoseLabelClearance(withDistantLabel.final, resolver).map((d) => d.code),
+  ).toContain("VISUAL_LABEL_OWNER_DISTANCE");
+  expect(routedScore(withDistantLabel, resolver)).toBeLessThan(
+    routedScore(base, resolver),
+  );
+  expect(choose(withDistantLabel.result, "mirrorSymmetry")).toBe(base.result);
+});
+
+it("orients an exact mirror through reversed passive pins and maps Base Nets", () => {
+  const document = degeneratedPair();
+  const mirror = () =>
+    mirrorSymmetryTopology(
+      document,
+      resolver,
+      classifyNets(document, resolver),
+    );
+  expect(detect(document)).toEqual([]);
+  const result = mirror();
+  expect(result.components).toEqual([
+    {
+      pairs: [
+        ["l2", "l1"],
+        ["m1", "m2"],
+        ["r2", "r1"],
+      ],
+      axis: ["tail"],
+      conflicted: [],
+    },
+  ]);
+  expect(result.netMap).toEqual(
+    new Map([
+      ["gate1", "gate2"],
+      ["gate2", "gate1"],
+      ["out1", "out2"],
+      ["out2", "out1"],
+      ["source1", "source2"],
+      ["source2", "source1"],
+      ["common", "common"],
+      ["vdd", "vdd"],
+      ["ground", "ground"],
+    ]),
+  );
+  document.instances.reverse();
+  document.nets.reverse();
+  for (const net of document.nets) net.terminals.reverse();
+  document.instances.forEach((instance, index) => {
+    instance.placement = {
+      position: { x: index * 100, y: index * 20 },
+      rotation: 90,
+      mirror: "none",
+    };
+  });
+  expect(mirror()).toEqual(result);
+});
+
+it.each(["directed block", "hierarchical symbol"])(
+  "rejects an exact mirror containing a %s",
+  (kind) => {
+    const document = degeneratedPair();
+    const opamp = builtInSymbols.find((symbol) => symbol.id === "opamp")!;
+    const symbols =
+      kind === "directed block"
+        ? resolver
+        : new InMemorySymbolResolver(
+            [
+              {
+                ...opamp,
+                id: "hierarchical-stage",
+                pins: opamp.pins.map((pin) => ({
+                  ...pin,
+                  role: "hierarchical-port" as const,
+                })),
+              },
+            ],
+            resolver,
+          );
+    const symbolId = kind === "directed block" ? "opamp" : "hierarchical-stage";
+    for (const [id, netId] of [
+      ["block1", "out1"],
+      ["block2", "out2"],
+    ] as const) {
+      document.instances.push({ id, symbolId, placement: null });
+      document.nets
+        .find((net) => net.id === netId)!
+        .terminals.push({ instanceId: id, pinName: "IN+" });
+    }
+    expect(
+      [...netlistMirrorPairs(readabilityNetlist(document, symbols))][0]!.pairs,
+    ).toContainEqual(["block1", "block2"]);
+    expect(
+      mirrorSymmetryTopology(document, symbols, classifyNets(document, symbols))
+        .components,
+    ).toEqual([]);
+  },
+);
+
+it("admits the mirror finalist and preserves the terminal partition through replay", () => {
+  const document = degeneratedPair();
+  for (const instance of document.instances)
+    if (instance.symbolId === "nmos") instance.symbolId = "pmos";
+  document.nets.find((net) => net.id === "ground")!.terminals[0] = {
+    instanceId: "v",
+    pinName: "P",
+  };
+  document.nets.find((net) => net.id === "vdd")!.terminals[0] = {
+    instanceId: "g",
+    pinName: "0",
+  };
+  document.netlist = {
+    name: "mirror",
+    formalParameters: [],
+    terminals: [
+      ["ip", "gate1"],
+      ["im", "gate2"],
+    ].map(([id, netId]) => {
+      document.instances.push({ id: id!, symbolId: "port", placement: null });
+      document.nets
+        .find((net) => net.id === netId)!
+        .terminals.push({ instanceId: id!, pinName: "P" });
+      return {
+        id: id!,
+        name: netId!,
+        netId: netId!,
+        direction: "input",
+        interfaceInstanceIds: [id!],
+      };
+    }),
+  };
+  expect(detect(document)).toEqual([]);
+  const finalist = vi.spyOn(finishedSelection, "rankedFinalists");
+  const compare = vi.spyOn(finishedSelection, "selectFinishedLayout");
+  try {
+    const result = planAutoLayout(document, resolver);
+    expect(
+      finalist.mock.results.some(({ value }) =>
+        value.includes("mirrorSymmetry"),
+      ),
+    ).toBe(true);
+    expect(
+      compare.mock.calls.some(([, , , candidate]) => {
+        const alternative = preview(document, resolver, candidate.edits);
+        return (
+          alternative.ok &&
+          netlistSymmetry(alternative.document, resolver).violations === 0
+        );
+      }),
+    ).toBe(true);
+    expect(result.diagnostics.filter((d) => d.severity === "error")).toEqual(
+      [],
+    );
+    const replay = preview(document, resolver, result.edits);
+    if (!replay.ok) throw new Error("Mirror layout must replay");
+    expect(netlistSymmetry(replay.document, resolver)).toEqual({
+      violations: 0,
+      opportunities: 3,
+    });
+    expect(auditRouting(replay.document, resolver)).toMatchObject({
+      crossings: 0,
+      unsafeProblems: [],
+    });
+    expect(terminalPartition(replay.document, resolver)).toBe(
+      terminalPartition(document, resolver),
+    );
+  } finally {
+    compare.mockRestore();
+    finalist.mockRestore();
+  }
+}, 60_000);

@@ -5,18 +5,26 @@ import {
   diagnoseLabelClearance,
   resolveDocumentRoutingGeometry,
 } from "@icm/derived";
+import { proposeGroupReflectionEdits } from "@icm/edit-engine";
 import type { SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import type {
   StageStructure,
   StageTrial,
 } from "./differential-stage-columns.js";
-import { pinPoints, placement, transformPoint } from "./geometry.js";
+import {
+  enclosingBox,
+  pinPoints,
+  placement,
+  transformPoint,
+  withPlacements,
+} from "./geometry.js";
 import { emptyChoices, emptyOverrides } from "./layout-choices.js";
 import { polarity } from "./net-roles.js";
 import { placeMarkers } from "./place-markers.js";
 import { auditRouting } from "./routing-audit.js";
 import { routedGuards } from "./routed-search-score.js";
+import { preview } from "./transaction.js";
 import type { Placement } from "./types.js";
 
 type Seats = Map<string, Placement>;
@@ -61,13 +69,15 @@ function currentSourceTail(s: StageStructure) {
 export type Tail = NonNullable<ReturnType<typeof currentSourceTail>>;
 
 /** A visible tee on the symmetry axis, with both arms drawn and a continuous
- * vertical stem down to the tail pin. Routes may be split at junctions. */
+ * vertical stem to the tail pin. Routes may be split at junctions. */
 function centeredTail(
   doc: SchematicDocument,
   r: SymbolResolver,
   s: StageStructure,
   t: Tail,
+  highSide: boolean,
 ) {
+  const tailDir = highSide ? -1 : 1;
   const pins = pinPoints(doc, r),
     p = (id: string, pin: string) =>
       pins.find((v) => v.instanceId === id && v.pinName === pin)?.point;
@@ -90,11 +100,16 @@ function centeredTail(
     a.y !== b.y ||
     foot.x !== (l.x + h.x) / 2 ||
     foot.x !== (a.x + b.x) / 2 ||
-    foot.y <= a.y
+    tailDir * (foot.y - a.y) <= 0
   )
     return false;
   const body = doc.instances.find((i) => i.id === t.id)?.placement?.position;
-  if (!body || body.x !== foot.x || body.y <= foot.y || a.x === b.x)
+  if (
+    !body ||
+    body.x !== foot.x ||
+    tailDir * (body.y - foot.y) <= 0 ||
+    a.x === b.x
+  )
     return false;
   const routing = resolveDocumentRoutingGeometry(doc, r);
   const segments = doc.routes
@@ -106,8 +121,8 @@ function centeredTail(
     if (
       contact.netId !== t.common ||
       x !== foot.x ||
-      y < a.y ||
-      y >= foot.y ||
+      tailDir * (y - a.y) < 0 ||
+      tailDir * (y - foot.y) >= 0 ||
       !contactRequiresJunctionDot(contact)
     )
       return false;
@@ -121,7 +136,7 @@ function centeredTail(
     }
     return (
       covered(arms, Math.min(a.x, b.x), Math.max(a.x, b.x)) &&
-      covered(stem, y, foot.y)
+      covered(stem, Math.min(y, foot.y), Math.max(y, foot.y))
     );
   });
 }
@@ -142,7 +157,9 @@ function* branchSeats(
   s: StageStructure,
   t: Tail,
   ports: PortSeats,
+  highSide: boolean,
 ) {
+  const tailDir = highSide ? -1 : 1;
   const initial: Seats = new Map(
     doc.instances.map((i) => [i.id, i.placement!]),
   );
@@ -151,7 +168,7 @@ function* branchSeats(
     outs = s.branches.outputs.map((i) => net(i, "P"));
   const loads = s.pairs.filter((p) => p !== pair && p !== t.pair);
   if (
-    !loads.length ||
+    (!highSide && !loads.length) ||
     loads.some((p) =>
       p.some((i, k) => !s.pins(i).some((pin) => net(i, pin.name) === outs[k])),
     )
@@ -212,11 +229,15 @@ function* branchSeats(
                   id,
                   tip.name,
                   x,
-                  y + row,
+                  y + tailDir * row,
                   placement(
                     0,
                     0,
-                    tip.at.y > 0 ? (k ? "both" : "vertical") : gatePose.mirror,
+                    tailDir * tip.at.y > 0
+                      ? k
+                        ? "both"
+                        : "vertical"
+                      : gatePose.mirror,
                   ),
                 );
               }
@@ -236,17 +257,30 @@ function* branchSeats(
                           : "horizontal"
                         : gatePose.mirror,
                     )
-                  : placement(0, 0, gatePose.mirror, pin.at.y < 0 ? 180 : 0);
-                align(id, pin.name, x + dir * j * spread, y - row, pose);
+                  : placement(
+                      0,
+                      0,
+                      gatePose.mirror,
+                      tailDir * pin.at.y < 0 ? 180 : 0,
+                    );
+                align(
+                  id,
+                  pin.name,
+                  x + dir * j * spread,
+                  y - tailDir * row,
+                  pose,
+                );
               }
             }
-            const top = t.entry.at.y < 0 ? 0 : 180;
+            const turn = tailDir * t.entry.at.y < 0 ? 0 : 180;
             align(
               t.id,
               t.entry.name,
               axis,
-              y + (hasSourceElements ? 2 : 1) * row + (reverse ? g : 2 * g),
-              placement(0, 0, "none", top),
+              y +
+                tailDir *
+                  ((hasSourceElements ? 2 : 1) * row + (reverse ? g : 2 * g)),
+              placement(0, 0, "none", turn),
             );
             placeMarkers(
               src,
@@ -256,7 +290,27 @@ function* branchSeats(
               emptyOverrides(),
               emptyChoices(),
             );
-            for (const proposed of ports(seats, -1, 1)) {
+            const loadSide = highSide
+              ? enclosingBox(
+                  withPlacements({ ...src, instances: s.devices }, seats),
+                  r,
+                )
+              : undefined;
+            for (const proposed of ports(seats, highSide ? 1 : -1, 1)) {
+              // The stage's port generator provides upper landings. Keep its
+              // horizontal trials and seat the high-side pair's outputs below.
+              if (loadSide) {
+                const bottom =
+                  g * (Math.ceil((loadSide.y + loadSide.height) / g) + 1);
+                for (const [side, id] of s.branches.outputs.entries()) {
+                  const x = proposed.get(id)!.position.x;
+                  const column = axis + (side ? radius : -radius);
+                  proposed.set(
+                    id,
+                    placement(2 * column - x, bottom, "none", 270),
+                  );
+                }
+              }
               if (!multipleLoads) {
                 yield proposed;
                 continue;
@@ -305,24 +359,47 @@ export function selectCurrentSourceTail(
 ) {
   const tail = currentSourceTail(s);
   if (!tail || stopped()) return prior;
-  // R81 puts the tail of a p-channel pair above the pair, but this stage only
-  // builds a tail below it (R170): leave the earlier steps' drawing.
   const driver = s.devices.find((i) => i.id === tail.drivers[0])?.symbolId;
-  if (driver && polarity(driver) === "p") return prior;
+  const highSide = !!driver && polarity(driver) === "p";
   const centered = (d: SchematicDocument) =>
-    complete(d) && centeredTail(d, r, s, tail);
+    highSide
+      ? centeredTail(d, r, s, tail, highSide) && completeInReflectedFrame(d)
+      : complete(d) && centeredTail(d, r, s, tail, highSide);
   const incumbent = centered(prior.final)
     ? prior
-    : search(prior, branchSeats(src, r, prior.final, s, tail, ports), centered);
+    : search(
+        prior,
+        branchSeats(src, r, prior.final, s, tail, ports, highSide),
+        centered,
+      );
   const exterior = (d: SchematicDocument) =>
     centered(d) && exteriorInputs(d, r, s);
   return stopped() || exterior(incumbent.final)
     ? incumbent
     : search(
         incumbent,
-        exteriorTailSeats(src, r, incumbent.final, s, tail),
+        exteriorTailSeats(src, r, incumbent.final, s, tail, highSide),
         exterior,
       );
+  // The stage validator expects upper outputs. Check its geometric
+  // invariants in a reflected preview while retaining the actual device poses.
+  function completeInReflectedFrame(d: SchematicDocument) {
+    let proposal: ReturnType<typeof proposeGroupReflectionEdits>;
+    try {
+      proposal = proposeGroupReflectionEdits(
+        d,
+        r,
+        d.instances.map((i) => i.id),
+        "top-bottom",
+        { x: 0, y: 0 },
+        d.junctions.map((j) => j.id),
+      );
+    } catch {
+      return false;
+    }
+    const reflected = preview(d, r, proposal.edits);
+    return reflected.ok && complete(reflected.document);
+  }
   function search(
     prior: StageTrial,
     candidates: Iterable<Seats>,

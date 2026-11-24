@@ -5,11 +5,15 @@ import {
   type SchematicDocument,
 } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
+import { directedPins } from "./directed-blocks.js";
 import { pinPoints } from "./geometry.js";
-import { familyCompatible, type NetRoles } from "./net-roles.js";
+import { channelPins, familyCompatible, type NetRoles } from "./net-roles.js";
 import { devicePins, isMarker } from "./placement-connectivity.js";
+import { netlistMirrorPairs } from "./readability-netlist-symmetry.js";
+import { readabilityNetlist } from "./readability-netlist.js";
 import { compareIds, recognizeSubstructures } from "./recognize.js";
-import type { SymmetryComponent } from "./types.js";
+import { stageComponents } from "./stage-symmetry.js";
+import type { LayoutPartition, SymmetryComponent } from "./types.js";
 
 type Pair = [string, string];
 
@@ -331,6 +335,130 @@ export function symmetryTopology(
     ),
     netMap,
   };
+}
+
+/** Adapt T087's exact logical Net involution to the Base Nets used by folding. */
+export function mirrorSymmetryTopology(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  roles: NetRoles,
+) {
+  const topology = readabilityNetlist(document, resolver);
+  const devices = new Map(topology.devices.map((d) => [d.instance.id, d]));
+  const components: SymmetryComponent[] = [];
+  const rails: Pair[] = [...roles.rails.keys()].map((n) => [n, n]);
+  const netMap = new Map<string, string>(rails);
+  const nets = (id: string) =>
+    devices.get(id)!.pins.flatMap((p) => roles.pinNet(id, p.name) ?? []);
+  for (const { pairs, axisDevices, netPairs } of netlistMirrorPairs(topology)) {
+    if (pairs.length < 2) continue;
+    const ordered = pairs
+      .map((pair) => pair.sort(compareIds) as Pair)
+      .sort(([a], [b]) => compareIds(a, b));
+    const seed = ordered.find(([a, b]) =>
+      [a, b].every((id) => channelPins(devices.get(id)!.instance.symbolId)),
+    );
+    if (
+      !seed ||
+      [...pairs.flat(), ...axisDevices].some((id) => {
+        const { instance, pins } = devices.get(id)!;
+        return (
+          pins.some((p) => p.role.includes("hierarchical")) ||
+          directedPins(instance, resolver).outputs.length > 0
+        );
+      })
+    )
+      continue;
+    const basePairs: Pair[] = [];
+    for (const [a, b] of [
+      ...ordered,
+      ...axisDevices.map((id) => [id, id] as Pair),
+    ]) {
+      const first = devices.get(a)!;
+      const second = devices.get(b)!;
+      const equal = first.pins.map((p) =>
+        second.pins.find((q) => p.name === q.name)!,
+      );
+      const matching =
+        first.passive &&
+        first.pins.some(
+          (p, i) => (p.net && netPairs.get(p.net)) !== equal[i]!.net,
+        )
+          ? [...equal].reverse()
+          : equal;
+      for (const [i, pin] of first.pins.entries()) {
+        const n = roles.pinNet(a, pin.name);
+        const m = roles.pinNet(b, matching[i]!.name);
+        if (n && m) basePairs.push([n, m]);
+      }
+    }
+    const componentMap = new Map(netMap);
+    const conflicts = new Set<string>();
+    applyRound(componentMap, conflicts, basePairs);
+    // A logical alias may connect several different Base Nets.
+    if (conflicts.size) continue;
+    for (const [n, m] of componentMap) netMap.set(n, m);
+
+    const sides: Pair[] = [];
+    const seated = new Set<string>();
+    const orient = ([a, b]: Pair) => {
+      sides.push([a, b]);
+      seated.add(a);
+      seated.add(b);
+    };
+    for (const pair of [seed, ...ordered]) {
+      if (seated.has(pair[0])) continue;
+      orient(pair);
+      for (const [a, b] of sides) {
+        const own = nets(a).filter((n) => componentMap.get(n) !== n);
+        const opposite = nets(b);
+        for (const [c, d] of ordered) {
+          if (seated.has(c)) continue;
+          if (
+            nets(c).some((n) => own.includes(n)) &&
+            nets(d).some((n) => opposite.includes(n))
+          )
+            orient([c, d]);
+          else if (
+            nets(d).some((n) => own.includes(n)) &&
+            nets(c).some((n) => opposite.includes(n))
+          )
+            orient([d, c]);
+        }
+      }
+    }
+    components.push({
+      pairs: sides.sort(([a], [b]) => compareIds(a, b)),
+      axis: axisDevices.sort(compareIds),
+      conflicted: [],
+    });
+  }
+  return {
+    components: components.sort((a, b) =>
+      compareIds(a.pairs[0]![0], b.pairs[0]![0]),
+    ),
+    netMap: new Map([...netMap].sort(([a], [b]) => compareIds(a, b))),
+  };
+}
+
+/** Drafting and rigid moves use the same symmetry topology for each finalist. */
+export function resolvedSymmetry(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  roles: NetRoles,
+  partition?: LayoutPartition,
+) {
+  if (roles.mirrorSymmetry && !partition)
+    return mirrorSymmetryTopology(document, resolver, roles);
+  const topology = symmetryTopology(document, resolver, roles);
+  if (!partition && !roles.unsplitSymmetry)
+    topology.components = stageComponents(
+      document,
+      resolver,
+      roles,
+      topology.components,
+    );
+  return topology;
 }
 
 /** Pin-centre measurements use the evaluation tolerances, not placement origins. */
