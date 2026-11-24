@@ -16,12 +16,13 @@ canvas beside it, under silicon-notebook's `/canvas` path:
 It needs a silicon-notebook that has the `/canvas` rewrite
 ([huyangc/silicon-notebook#1077](https://github.com/huyangc/silicon-notebook/pull/1077),
 merged 2026-11-23); see that repository's deployment document,
-[`docs/deployment-and-configuration_zh.md`](https://github.com/huyangc/silicon-notebook/blob/main/docs/deployment-and-configuration_zh.md).
+[`docs/deployment-and-configuration_zh.md`](https://github.com/huyangc/silicon-notebook/blob/master/docs/deployment-and-configuration_zh.md).
 How the server behaves in this mode, the start flags and the database guards
 are specified in [docs/specs/server.md](../../docs/specs/server.md#running-as-a-silicon-notebook-companion-service).
 
-Not yet covered: an offline installation is described separately (T167), and
-a managed start has not yet been run against a real silicon-notebook (T164b).
+Not yet covered: an offline installation is described separately (T167). A
+managed start against a real silicon-notebook clone is checked by stage M of
+the [integration check](../../docs/testing/README.md#stage-m-a-managed-start-in-a-silicon-notebook-clone).
 
 ## Source deployment, step by step
 
@@ -256,22 +257,30 @@ pinned to that schema. The limits:
 
 ## Rollback
 
-1. Remove the `[extensions."auto_canvas.integration"…]` tables from the
+1. Stop silicon-notebook with its own stop command; that also stops the
+   canvas it manages. (In the external mode, stop the canvas as the operator
+   started it.)
+2. Remove the `[extensions."auto_canvas.integration"…]` tables from the
    extensions TOML (or the whole file from `EXTENSIONS_CONFIG` when it held
    nothing else) and remove `CANVAS_PROXY_TARGET` from silicon-notebook's
    build environment. **Keep an existing `BACKEND_PROXY_TARGET`**: it is
    silicon-notebook's own API rewrite.
-2. Rebuild silicon-notebook and start it.
-3. Optionally uninstall the plugin package (`pip uninstall
+3. Rebuild silicon-notebook and start it.
+4. Optionally uninstall the plugin package (`pip uninstall
 silicon-notebook-auto-canvas`). The canvas database is left as it is.
 
-Removing only one part: without the TOML entry but with
-`CANVAS_PROXY_TARGET`, silicon-notebook still rewrites `/canvas` to a port
-nothing serves any more, so the canvas pages fail to load; with the entry but
-without `CANVAS_PROXY_TARGET`, silicon-notebook keeps starting the canvas but
-no longer routes `/canvas` to it, so the canvas runs unreachable. (Inferred
-from the two settings' roles; not yet observed against a real
-silicon-notebook, T164b.)
+Removing only one part, as observed against a real silicon-notebook (stage M
+of the [integration check](../../docs/testing/README.md#stage-m-a-managed-start-in-a-silicon-notebook-clone)):
+
+- Without the TOML entry but with `CANVAS_PROXY_TARGET` in the build,
+  silicon-notebook starts no canvas and still rewrites `/canvas` to the port
+  nothing serves any more: `/canvas` and `/canvas/api/…` answer 500, while
+  silicon-notebook itself works.
+- With the entry but a build without `CANVAS_PROXY_TARGET`, silicon-notebook
+  keeps starting the canvas, which answers on its own port, but `/canvas`
+  answers 404: the canvas runs unreachable.
+
+With both removed, `/canvas` answers 404 and no canvas process runs.
 
 ## An origin that has served a single-user canvas
 

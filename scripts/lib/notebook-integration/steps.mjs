@@ -475,7 +475,7 @@ export function ownershipHeld(sandbox, report, name, port, pid) {
  * outlive its deadline. A budget it has used up throws before sending.
  */
 export function ownershipGate(sandbox, port, pid) {
-  return (rawPath, method, budgetMs) => {
+  return (rawPath, method, budgetMs, init) => {
     const budget = gateBudget(budgetMs, method, rawPath);
     const { state, pids } = sandbox.listenerState(port, pid, {
       timeoutMs: budget.left(),
@@ -484,7 +484,7 @@ export function ownershipGate(sandbox, port, pid) {
       throw new OwnershipLost(
         `port ${port} is ${state} (listeners ${pids.join(", ") || "none"}; want ${pid}) before ${method ?? "GET"} ${JSON.stringify(rawPath)}`,
       );
-    return rawRequest(port, rawPath, method, budget.left());
+    return rawRequest(port, rawPath, method, budget.left(), init);
   };
 }
 
@@ -498,7 +498,7 @@ export function ownershipGate(sandbox, port, pid) {
  * request, with the remaining time recomputed after each of them.
  */
 export function proxiedGate(sandbox, { webPort, webPid, apiPort, apiPid }) {
-  return (rawPath, method, budgetMs) => {
+  return (rawPath, method, budgetMs, init) => {
     const budget = gateBudget(budgetMs, method, rawPath);
     const web = sandbox.listenerState(webPort, webPid, {
       timeoutMs: budget.left(),
@@ -512,7 +512,48 @@ export function proxiedGate(sandbox, { webPort, webPid, apiPort, apiPid }) {
           `web ${webPort} is ${web.state} (listeners ${web.pids.join(", ") || "none"}; want ${webPid}); ` +
           `api ${apiPort} is ${api.state} (listeners ${api.pids.join(", ") || "none"}; want ${apiPid})`,
       );
-    return rawRequest(webPort, rawPath, method, budget.left());
+    return rawRequest(webPort, rawPath, method, budget.left(), init);
+  };
+}
+
+/**
+ * The gate for a request through the frontend's `/canvas` rules (stage M):
+ * Next forwards it to the canvas, and the canvas asks the notebook backend
+ * who the bearer is, so all three listeners must be the recorded pids
+ * immediately before it is sent. `canvasPid: null` requires the canvas port
+ * to have no listener at all (a rollback whose rule still points there: a
+ * process that took the port would receive the forwarded request). The
+ * budget covers the three enumerations and the request, as for
+ * `proxiedGate`.
+ */
+export function tripleGate(
+  sandbox,
+  { webPort, webPid, apiPort, apiPid, canvasPort, canvasPid },
+) {
+  return (rawPath, method, budgetMs, init) => {
+    const budget = gateBudget(budgetMs, method, rawPath);
+    const seen = [
+      ["web", webPort, webPid],
+      ["api", apiPort, apiPid],
+      ["canvas", canvasPort, canvasPid],
+    ].map(([name, port, pid]) => {
+      const { state, pids } = sandbox.listenerState(port, pid ?? -1, {
+        timeoutMs: budget.left(),
+      });
+      const ok = pid === null ? state === "none" : state === "owned";
+      return { name, port, pid, state, pids, ok };
+    });
+    if (!seen.every((entry) => entry.ok))
+      throw new OwnershipLost(
+        `before ${method ?? "GET"} ${JSON.stringify(rawPath)} (through the frontend to the canvas and the notebook backend): ` +
+          seen
+            .map(
+              ({ name, port, pid, state, pids }) =>
+                `${name} ${port} is ${state} (listeners ${pids.join(", ") || "none"}; want ${pid === null ? "no listener" : pid})`,
+            )
+            .join("; "),
+      );
+    return rawRequest(webPort, rawPath, method, budget.left(), init);
   };
 }
 

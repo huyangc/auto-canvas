@@ -2,7 +2,7 @@
 // Repeatable integration check for serving auto-canvas under silicon-notebook's
 // Next.js server at /canvas. Run on demand; never part of CI.
 //
-//   node scripts/notebook-integration-check.mjs --stage <T|A> --notebook <dir>
+//   node scripts/notebook-integration-check.mjs --stage <T|A|S|M> --notebook <dir>
 //     [--ref <git ref>] [--base <commit>] [--python <interpreter>] [--keep]
 //
 // Everything it builds or starts lives in a temporary directory it creates;
@@ -15,6 +15,10 @@ import {
   UsageError,
 } from "./lib/notebook-integration/sandbox.mjs";
 import { stageA } from "./lib/notebook-integration/stage-a.mjs";
+import {
+  stageM,
+  stageMPrerequisites,
+} from "./lib/notebook-integration/stage-m.mjs";
 import { stageS } from "./lib/notebook-integration/self-check.mjs";
 import { stageT } from "./lib/notebook-integration/stage-t.mjs";
 import {
@@ -26,9 +30,10 @@ import {
 import { createReporter } from "./lib/notebook-integration/transport.mjs";
 
 const USAGE =
-  "usage: node scripts/notebook-integration-check.mjs --stage <T|A|S> --notebook <dir>\n" +
+  "usage: node scripts/notebook-integration-check.mjs --stage <T|A|S|M> --notebook <dir>\n" +
   "         [--ref <git ref>] [--base <commit>] [--python <interpreter>] [--keep]\n" +
-  "  stage A needs --ref, --base and --python; stage S runs the script's own\n" +
+  "  stage A needs --ref, --base and --python; stage M needs --ref and --python\n" +
+  "  (and the canvas builds of this checkout); stage S runs the script's own\n" +
   "  refusal self-checks on throwaway material";
 
 function parseArgs(argv) {
@@ -44,12 +49,17 @@ function parseArgs(argv) {
       options[flag.slice(2)] = value;
     } else throw new UsageError(`unknown argument ${flag}`);
   }
-  if (!["T", "A", "S"].includes(options.stage))
-    throw new UsageError("--stage must be T, A or S");
+  if (!["T", "A", "S", "M"].includes(options.stage))
+    throw new UsageError("--stage must be T, A, S or M");
   if (!options.notebook) throw new UsageError("--notebook is required");
   if (options.stage === "A")
     for (const name of ["ref", "base", "python"])
       if (!options[name]) throw new UsageError(`stage A needs --${name}`);
+  if (options.stage === "M") {
+    for (const name of ["ref", "python"])
+      if (!options[name]) throw new UsageError(`stage M needs --${name}`);
+    if (options.base) throw new UsageError("stage M takes no --base");
+  }
   return options;
 }
 
@@ -60,6 +70,16 @@ try {
   if (!(error instanceof UsageError)) throw error;
   console.error(`${error.message}\n${USAGE}`);
   process.exit(2);
+}
+
+// Stage M runs this checkout's canvas: its builds must exist before anything
+// is allocated.
+if (options.stage === "M") {
+  const problems = stageMPrerequisites();
+  if (problems.length) {
+    console.error(problems.join("\n"));
+    process.exit(2);
+  }
 }
 
 const notebook = path.resolve(options.notebook);
@@ -121,6 +141,7 @@ try {
   if (await offlineControl(sandbox, report)) {
     if (options.stage === "T") await stageT(context);
     else if (options.stage === "S") await stageS(context);
+    else if (options.stage === "M") await stageM(context);
     else await stageA(context);
     offlineVerdict(sandbox, report);
   }

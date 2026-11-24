@@ -31,11 +31,20 @@ export function createReporter() {
 }
 
 /**
- * GET with the path sent byte for byte; never follows redirects. Settles on
- * every outcome: a response cut short (error, aborted, or closed before its
- * end) rejects, and the whole exchange has one deadline.
+ * A request with the path sent byte for byte; never follows redirects.
+ * Settles on every outcome: a response cut short (error, aborted, or closed
+ * before its end) rejects, and the whole exchange has one deadline. Without
+ * `init` it sends no header of its own and no body; `init.headers` are sent
+ * as given, and `init.body` (a string) is sent with its `content-length`.
+ * Resolves to `{ status, headers, body }`, the body as text.
  */
-export function rawRequest(port, rawPath, method = "GET", deadlineMs = 30_000) {
+export function rawRequest(
+  port,
+  rawPath,
+  method = "GET",
+  deadlineMs = 30_000,
+  { headers, body } = {},
+) {
   return new Promise((resolve, reject) => {
     let settled = false;
     const settle = (fn, value) => {
@@ -44,6 +53,10 @@ export function rawRequest(port, rawPath, method = "GET", deadlineMs = 30_000) {
       clearTimeout(timer);
       fn(value);
     };
+    const sent =
+      body === undefined
+        ? headers
+        : { ...headers, "content-length": String(Buffer.byteLength(body)) };
     const req = request(
       {
         host: "127.0.0.1",
@@ -51,6 +64,7 @@ export function rawRequest(port, rawPath, method = "GET", deadlineMs = 30_000) {
         path: rawPath,
         method,
         agent: false,
+        ...(sent ? { headers: sent } : {}),
       },
       (res) => {
         const chunks = [];
@@ -78,7 +92,7 @@ export function rawRequest(port, rawPath, method = "GET", deadlineMs = 30_000) {
       req.destroy();
     }, deadlineMs);
     req.on("error", (error) => settle(reject, error));
-    req.end();
+    req.end(body);
   });
 }
 

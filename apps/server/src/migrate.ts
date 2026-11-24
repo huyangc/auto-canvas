@@ -73,6 +73,15 @@ export async function migrate(
     const schema = guard
       ? await checkGuard(connection, guard, files)
       : undefined;
+    // The unqualified statements below go to the schema the guard checked,
+    // even if another session creates a schema ahead of it in the
+    // search_path meanwhile (transaction-local: the connection's own
+    // search_path returns at COMMIT or ROLLBACK).
+    if (schema !== undefined)
+      await connection.query(
+        "SELECT pg_catalog.set_config('search_path', pg_catalog.quote_ident($1), true)",
+        [schema],
+      );
     await connection.query(`CREATE TABLE IF NOT EXISTS schema_migrations (
       name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now()
     )`);

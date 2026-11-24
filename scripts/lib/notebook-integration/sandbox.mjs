@@ -547,7 +547,14 @@ export function createSandbox(notebook, { keep }) {
     if (stat) refuse(to, "still exists after its removal");
     run();
   }
-  function env(extra = {}) {
+  /**
+   * The allow-listed child environment, with `extra` on top. By default it
+   * sets SILICON_NOTEBOOK_ENV_FILE to "" (silicon-notebook then reads no
+   * dotenv file); `{ envFile: false }` leaves the key out altogether, so the
+   * notebook reads `<root>/.env` and a canvas launcher, which refuses the key
+   * even when empty, can start (stage M).
+   */
+  function env(extra = {}, { envFile = true } = {}) {
     const nodeOptions = `--require ${guardPath} --dns-result-order=ipv4first`;
     const base = {
       PATH: process.env.PATH ?? "",
@@ -578,7 +585,9 @@ export function createSandbox(notebook, { keep }) {
     };
     for (const name of ["LANG", "LC_ALL"])
       if (process.env[name] !== undefined) base[name] = process.env[name];
-    return { ...base, ...extra };
+    const merged = { ...base, ...extra };
+    if (!envFile) delete merged.SILICON_NOTEBOOK_ENV_FILE;
+    return merged;
   }
 
   /** The current end of the marker log; pass it to guardedSince later. */
@@ -954,11 +963,23 @@ export function createSandbox(notebook, { keep }) {
   /**
    * Stops every owned group; resolves to the ids still present afterwards.
    * Closing is marked before the snapshot, so no group can start after it.
+   * The cleanups a stage registered (`beforeDispose`) run first, after
+   * closing is marked and before any group is stopped or the root removed:
+   * a stage whose processes leave the owned groups (stage M's companion
+   * services) stops them there, also after an interrupt.
    */
   let disposal;
+  const cleanups = [];
   function dispose() {
     closing = true;
     disposal ??= (async () => {
+      for (const cleanup of cleanups) {
+        try {
+          await cleanup();
+        } catch (error) {
+          console.log(`FAIL a stage cleanup: ${error?.message ?? error}`);
+        }
+      }
       await Promise.all([...groups.keys()].map((pgid) => stopGroup(pgid)));
       const left = [...groups.keys()];
       if (!keep) removeRoot();
@@ -1023,6 +1044,7 @@ export function createSandbox(notebook, { keep }) {
     listenerState,
     listenerAddresses,
     dispose,
+    beforeDispose: (cleanup) => cleanups.push(cleanup),
     randomToken: () => crypto.randomBytes(8).toString("hex"),
   };
 }
