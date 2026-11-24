@@ -17,3 +17,17 @@ Reviewer: Opus main session.
   version history with no footer; compact Save/Cancel.
 - Heart is a sibling of the link (no nested interactive content), toggle uses
   `aria-pressed`; no test weakened.
+
+## Round 2 — codex PR review round 1 findings (P2/P3), fixed by Opus as a small fix
+
+- P2 menu outlives a filter switch: `showFilter` closes the tile menu before
+  changing the filter; `shelf-wall-limit.test.tsx` opens Bias's menu, switches
+  to Favorites by click (no outside pointerdown) and expects no menu. The test
+  fails without the fix (1 failed) and passes with it.
+- P3 clipped focus ring: `.shelf-filter button:focus-visible` draws an inset
+  2px outline.
+- P2 missing acceptance results, rerun by Opus on this head:
+  `pnpm format:check` OK; `pnpm lint` exit 0; `pnpm test:local` exit 0
+  (848 files passed / 3 skipped, 8780 tests passed / 116 skipped); the plan's
+  Close-text scan over `apps/editor/src` (excluding `hosts/native`) finds no
+  hits.

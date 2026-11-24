@@ -164,6 +164,12 @@
   font-size: 12px;
 }
 
+/* The group clips overflow, so the focus ring is drawn inside each segment. */
+.shelf-filter button:focus-visible {
+  outline: 2px solid var(--icm-accent);
+  outline-offset: -2px;
+}
+
 .shelf-filter button + button {
   border-left: 1px solid var(--icm-border);
 }
