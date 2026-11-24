@@ -484,11 +484,15 @@ cleanup has begun no `CREATE DATABASE` starts; one already in flight is
 waited for (cancelled by its backend pid if it does not settle) and its
 database dropped if it succeeded. A `CREATE DATABASE` whose answer was lost
 (its connection broke) has an unknown outcome, and its backend may still be
-running it: the cleanup first waits until `pg_stat_activity` no longer shows
-that backend (its pid, recorded with the create) running the statement, then
-looks the name up and drops it if it exists. One still running when that wait
-ends (shortly before the database reserve's end) is reported as unresolved
-and not looked up. A name PostgreSQL refused (a duplicate, a cancellation) is
+running it: the cleanup first waits until that backend (its pid, recorded
+with the create) is idle or gone in `pg_stat_activity`, or shows another
+statement, then looks the name up and drops it if it exists. A backend whose
+activity cannot be read (`track_activities` off, `<insufficient privilege>`)
+counts as still running. Each poll is bounded by the time left in that wait,
+so a server that stops answering costs no more than the wait, and the drops
+after it keep their own bounds. One still running when that wait ends
+(shortly before the database reserve's end) is reported as unresolved and
+not looked up. A name PostgreSQL refused (a duplicate, a cancellation) is
 never dropped. The whole cleanup keeps one deadline, 50
 seconds from its start, inside the entry script's 60-second hard stop: the
 last 5 are left for the sandbox's own disposal, the 20 before them are
@@ -569,7 +573,10 @@ makes, loopback included, goes through a proxy of the run on `127.0.0.1`
 the hops of a redirect go there too): it forwards a request only to
 `127.0.0.1:<web>` and only while the web, api and canvas listeners are the
 recorded pids, opens a `CONNECT` tunnel only to that origin, and refuses and
-records everything else. Behind it, every page request elsewhere is aborted
+records everything else. That listener check is bounded (5 seconds, each
+`lsof` within what is left); one that fails or does not answer in time
+refuses the request like a changed listener, with its reason, and never ends
+the run. Behind it, every page request elsewhere is aborted
 and recorded, every request the page makes (a redirect's hops included) is
 observed, and WebSockets are refused. A page request elsewhere, anything the
 proxy refused that is not one of Chrome's own background hosts (another port
@@ -582,6 +589,7 @@ goes into `localStorage` only on the web origin. Screenshots and the console
 are written into the sandbox only when a browser check fails (`--keep` keeps
 them). The browser is closed in the cleanup too, before the clone is
 stopped; a start still in flight (the proxy or Chrome's launch) is awaited
-and what it made closed, and no browser starts once the shutdown began.
+and what it made closed, a close already under way is waited for until it
+has ended, and no browser starts once the shutdown began.
 After an interrupt while the browser launches or is open, the run exits 130
 with no browser process, companion or `auto_canvas_it_*` database left.

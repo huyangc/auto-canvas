@@ -269,3 +269,150 @@ interrupt of stage L right after "L4 launching the browser"    → exit 130 afte
 - `pnpm test:local`, `pnpm build`, `pnpm build:notebook-editor` and the
   package checks were not rerun (not in this round's acceptance; no file
   they cover changed besides the scripts above).
+
+# T165 report, round 4
+
+Implementer: an Opus subagent, working in place on
+`task/T165-notebook-entry-link` (head `eaeaae1`). Nothing is committed. All
+five findings of review round 4 are fixed. Each has a stage S control, and
+each control was shown to FAIL with its fix reverted (`tmp/r4/revert.py`,
+`tmp/r4/prove.sh`; logs `tmp/r4/s-<n>.log`).
+
+## Per finding
+
+1. **P1, gate at the proxy boundary** (`stage-l.mjs`). `gateVerdict(held, ms)`
+   asks the gate and never throws. An error, or no answer within `ms` (5 s;
+   the control uses 300 ms), counts as "not held", with the reason kept as
+   `detail`. The proxy's request and CONNECT handlers are async and call
+   `verdict` through it. Each handler is wrapped in `.catch` (closing that
+   one connection), and a request whose gate check outlived `close()` is
+   refused. A gate refusal is recorded as `{ why: "gate", detail }`, and
+   `networkChecks` prints the detail. The page route (`guardNetwork`) asks the
+   gate the same way. `webGate.held(ms)` gives each `lsof` what is left of
+   `ms` (`listenerState(…, { timeoutMs })`) and throws once that time is used
+   up, so a stalled `lsof` is an error within the bound.
+   `forwardingProxy` is exported for the control.
+   _Control:_ new, "S T165 round 4: a listener gate that throws or never
+   answers …". It uses a stand-in web origin and two proxies: one whose
+   `held` throws (an lsof failure) and one whose `held` never settles. For
+   each, an absolute-form GET and a CONNECT to the web origin must get 403,
+   be recorded as `gate` with the reason, forward nothing and reach nothing.
+   The next request must still be answered, no `uncaughtException` or
+   `unhandledRejection` may fire (listeners are installed only while the
+   control runs), and stage L's verdict must fail them.
+   _Reverted_ (HEAD's `stage-l.mjs`, only exported): it FAILs. The throwing
+   gate raised two uncaught exceptions (the process lived only because the
+   control's listener caught them) and both requests got no answer. The
+   gate that never answers was taken as held (a promise is truthy), so both
+   requests were forwarded (200, and 200 Connection Established).
+2. **P2, close and closeOpen** (`stage-l.mjs` `browserSessions`). A session
+   stays in `registered` until its disposal has ended. `close()` keeps one
+   promise per session (`session.closing`), which every caller gets. `closed`
+   is still set at once, so a start in flight launches nothing.
+   `closeOpen(ms)` closes every registered session and resolves only when
+   all their disposals have ended.
+   _Control:_ the shutdown control is extended. A stand-in context's `close`
+   takes 1.5 s. The control opens it, starts a normal `close`, and calls
+   `closeOpen` 200 ms later. It expects that `closeOpen` resolved only after
+   the context closed, with the "browser is closed" check already reported
+   once, and the context closed only once.
+   _Reverted_ (the old close: deregistered at once, and a second close
+   returns at once): it FAILs, because `waitedForTheClose` was false and the
+   check had not been reported when `closeOpen` returned.
+3. **P2, poll bound** (`managed-clone.mjs`).
+   `adminSession.query(sql, params, { timeoutMs })` caps that one use,
+   connecting included, without changing
+   any later use. A connection attempt cut short only by that cap does not
+   mark the session unreachable, and a timed-out query discards the
+   connection as before, so the next use opens a new one with the full step.
+   `lostCreatesRunning` passes the time left until `lostBy` to each poll. If
+   the time runs out before the next poll, the previous poll's verdict
+   stands.
+   _Control:_ new, "S T165 round 4: a poll for a lost create is bounded …".
+   It runs the real `adminSession` over a stand-in client that honours
+   `query_timeout` the way pg does ("Query read timeout") and never answers
+   the poll, with `lostBy` 400 ms away and a 3 s step. It expects every poll
+   to get ≤ 400 ms, the database part to end in under 2 s, the created
+   database's DROP to be sent on connection 2 with more than 2.5 s, the lost
+   create never to be dropped, and one failure line saying it could not be
+   read.
+   _Reverted_ (no `timeoutMs` passed): it FAILs, because the poll got 3000 ms
+   and the part took 3003 ms.
+4. **P2, by backend pid** (`managed-clone.mjs`). The poll now reads
+   `pid, state, query` for the recorded pids, or for every client backend
+   when a pid is unknown. `stillRunning` judges each create on the row of
+   its recorded backend, whatever the query text:
+   - no row (the backend is gone) or `idle`: ended;
+   - a row that cannot be read (state null or `disabled`, empty query,
+     `<insufficient privilege>`): still running;
+   - a readable row still showing the create: running;
+   - a readable row showing another statement: ended (see Deviations).
+
+   The failure line now gives each unresolved name with its reason.
+   _Control:_ follow-up 5 is extended. Backend 4105 has `track_activities`
+   off (`disabled`, no text) and 4106 shows `<insufficient privilege>`: both
+   must be reported unresolved and never looked up. 4107 is idle: that
+   create has ended and is looked up. The existing lost, hung, duplicate,
+   cancelled and other-pid cases are unchanged. The stand-in answers a poll
+   by pid, or a poll by text with its non-idle rows.
+   _Reverted_ (the text-based query and judgement): it FAILs, because
+   `…_quiet` and `…_hidden` were taken as ended and looked up, and only
+   `…_hung` was reported unresolved.
+
+5. **P3, README removal snippet**. The filter is now
+   `{ grep -vxF "$CANVAS_UI" || [ $? -eq 1 ]; }`: "nothing left" (status 1)
+   succeeds, and a real grep error (status 2) still fails. The README says
+   the snippet works under `set -euo pipefail`. I ran it by hand in bash and
+   zsh with five lists: only the path, among three entries, three entries
+   without it, the path twice, and the variable unset. The old snippet
+   stopped (exit 1, before `unset`) for only the path and for unset; the new
+   one ends 0 in every case.
+   _Control:_ new, "S T165 round 4: the README's removal snippet runs …". It
+   extracts the bash block from the README and runs it with `bash -c` under
+   `set -euo pipefail` for those five lists, checking the exit status and
+   the resulting variable.
+   _Reverted_ (the old grep): it FAILs, with status 1 and no output for the
+   only-entry and unset cases.
+
+`docs/testing/README.md` now describes the bounded listener check that
+never ends the run, the cleanup waiting for a close already under way, and
+the lost-create wait by backend pid with its bounded polls.
+
+## Acceptance (environment as the brief, `REF=b5850d6f0ef4003211ebfd8abc52e6063b62d52a`)
+
+```text
+pnpm typecheck / lint / format:check / docs:check / deadcode   → 0 (lint: 0 errors, no warning in notebook-integration)
+pnpm exec vitest run scripts/notebook-launcher.test.mjs        → 0 (47 passed)
+--stage S                                                      → 0 (94 passed; was 91: three new controls)
+--stage M                                                      → 0 (114 passed)
+--stage L                                                      → 0 (89 passed)
+leftover auto_canvas_it_* databases                            → 0
+notebook checkout git status --porcelain=v2 --branch           → identical before and after
+```
+
+## Deviations
+
+- Finding 4: a readable row of the recorded pid that shows _another_
+  statement counts as ended, not as running. CREATE DATABASE cannot run
+  inside a transaction block, and the backend of a broken connection runs no
+  further statement, so such a row means the pid was reused or the backend
+  has moved on. Rows that cannot be read still count as running, as the
+  review asks.
+- Finding 3: the bound is `query_timeout` on the client side, through
+  `adminSession`'s new per-use `timeoutMs`, rather than a server
+  `statement_timeout`. The discarded connection then frees the session for
+  the drops.
+- Finding 1's revert used HEAD's `stage-l.mjs`, which also undoes finding 2,
+  so the shutdown control failed in that run too. Finding 2 was also proved
+  on its own (run 2).
+- `forwardingProxy` is now exported, for the control.
+
+## Could not verify
+
+- A real PostgreSQL with `track_activities` off, or a real lost reply; the
+  controls use stand-ins. The new `pg_stat_activity` query was run once
+  against the local PostgreSQL 16 test server.
+- A real stalled `lsof` (the control uses a `held` that never settles; the
+  `spawnSync` timeout path is the existing one, R11-3).
+- `pnpm test:local`, `pnpm build`, and the package checks were not rerun
+  (not in this round's acceptance).

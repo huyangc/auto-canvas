@@ -184,11 +184,12 @@ browser bundle's `NEXT_PUBLIC_API_BASE_URL` must be the same-origin `/api`
 To remove the entry, take only the canvas's path out of
 `SILICON_NOTEBOOK_UI_PLUGINS` and rebuild silicon-notebook; the other UI
 packages the list names stay. Unset the variable only when the canvas's path
-was its only entry:
+was its only entry. The snippet also runs under `set -euo pipefail` (grep's
+status 1, "nothing left", is not an error there; its real errors still are):
 
 ```bash
 CANVAS_UI=/opt/auto-canvas/integrations/silicon-notebook/ui/auto-canvas
-rest=$(printf '%s' "${SILICON_NOTEBOOK_UI_PLUGINS-}" | tr ':' '\n' | grep -vxF "$CANVAS_UI" | paste -sd: -)
+rest=$(printf '%s' "${SILICON_NOTEBOOK_UI_PLUGINS-}" | tr ':' '\n' | { grep -vxF "$CANVAS_UI" || [ $? -eq 1 ]; } | paste -sd: -)
 if [ -n "$rest" ]; then export SILICON_NOTEBOOK_UI_PLUGINS="$rest"; else unset SILICON_NOTEBOOK_UI_PLUGINS; fi
 ```
 

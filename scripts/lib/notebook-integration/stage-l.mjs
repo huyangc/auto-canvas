@@ -353,6 +353,45 @@ const backgroundHost = (host) => {
   );
 };
 
+/** The listener gate's time bound for one verification. */
+const GATE_MS = 5000;
+
+/**
+ * Whether the listener gate holds, as `{ ok, detail }`: `held(ms)` (a value
+ * or a promise) within `ms`. It never throws: an error of `held`, or no
+ * answer within `ms`, is "not held" with its reason in `detail` — at the
+ * proxy's boundary and in the page's route nothing may end the process
+ * before the browser is closed and the databases dropped.
+ */
+async function gateVerdict(held, ms = GATE_MS) {
+  let timer;
+  const late = Symbol("late");
+  const timeUp = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(late), ms);
+  });
+  try {
+    const answer = await Promise.race([
+      Promise.resolve().then(() => held(ms)),
+      timeUp,
+    ]);
+    if (answer === late)
+      return {
+        ok: false,
+        detail: `the listener check gave no answer within ${ms} ms`,
+      };
+    return answer
+      ? { ok: true, detail: "" }
+      : { ok: false, detail: "a listener is not the recorded one" };
+  } catch (error) {
+    return {
+      ok: false,
+      detail: `the listener check failed: ${String(error?.message ?? error).split("\n")[0]}`,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * The run's proxy for one browser, a listener of the run on 127.0.0.1: Chrome
  * sends it every connection, loopback included (no bypass), so it sees every
@@ -362,10 +401,16 @@ const backgroundHost = (host) => {
  * Everything else — another host, another port of 127.0.0.1, a request in
  * origin form, an upgrade — is refused (403, or the connection closed) and
  * recorded as `{ target, host, why }`, `why` being "origin" (not the web
- * origin), "gate" (a listener changed) or "websocket". `forwarded` counts what
+ * origin), "gate" (a listener changed, or the gate could not be verified:
+ * `detail` says which) or "websocket". The gate is asked through
+ * `gateVerdict` within `gateMs`: a `held` that throws or does not answer
+ * refuses the request and never ends the process. `forwarded` counts what
  * went through.
  */
-async function forwardingProxy(sandbox, { webPort, held }) {
+export async function forwardingProxy(
+  sandbox,
+  { webPort, held, gateMs = GATE_MS },
+) {
   const port = await sandbox.freePort();
   const refused = [];
   const sockets = new Set();
@@ -375,15 +420,23 @@ async function forwardingProxy(sandbox, { webPort, held }) {
     socket.on("error", () => undefined);
     socket.on("close", () => sockets.delete(socket));
   };
-  const verdict = (toWeb) => (!toWeb ? "origin" : held() ? "" : "gate");
-  const server = http.createServer((req, res) => {
+  let closed = false;
+  /** "" (forward), or why not; never throws (the gate is asked through gateVerdict). */
+  const verdict = async (toWeb) => {
+    if (!toWeb) return { why: "origin" };
+    const gate = await gateVerdict(held, gateMs);
+    if (closed)
+      return { why: "gate", detail: "the proxy was closed meanwhile" };
+    return gate.ok ? { why: "" } : { why: "gate", detail: gate.detail };
+  };
+  const answer = async (req, res) => {
     let url;
     try {
       url = new URL(req.url ?? "");
     } catch {
       url = undefined;
     }
-    const why = verdict(
+    const { why, detail } = await verdict(
       url?.protocol === "http:" &&
         url.hostname === "127.0.0.1" &&
         url.port === String(webPort),
@@ -395,6 +448,7 @@ async function forwardingProxy(sandbox, { webPort, held }) {
           : `${req.headers.host ?? "(no host)"} (not a proxy request)`,
         host: url?.hostname ?? String(req.headers.host ?? ""),
         why,
+        ...(detail ? { detail } : {}),
       });
       req.resume();
       res.writeHead(403, {
@@ -436,15 +490,27 @@ async function forwardingProxy(sandbox, { webPort, held }) {
       }
     });
     req.pipe(upstream);
+  };
+  // Nothing a request does may end the process: an error of the handler
+  // itself closes that one connection.
+  const server = http.createServer((req, res) => {
+    answer(req, res).catch(() => res.destroy());
   });
   server.on("connection", track);
-  server.on("connect", (req, socket, head) => {
+  const tunnel = async (req, socket, head) => {
     const authority = req.url ?? "";
     const parts = /^\[?([^\]]*?)\]?:(\d+)$/u.exec(authority);
     const host = parts?.[1] ?? authority;
-    const why = verdict(host === "127.0.0.1" && parts?.[2] === String(webPort));
+    const { why, detail } = await verdict(
+      host === "127.0.0.1" && parts?.[2] === String(webPort),
+    );
     if (why) {
-      refused.push({ target: `CONNECT ${authority}`, host, why });
+      refused.push({
+        target: `CONNECT ${authority}`,
+        host,
+        why,
+        ...(detail ? { detail } : {}),
+      });
       socket.end("HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n");
       return;
     }
@@ -458,6 +524,9 @@ async function forwardingProxy(sandbox, { webPort, held }) {
     track(upstream);
     upstream.on("close", () => socket.destroy());
     socket.on("close", () => upstream.destroy());
+  };
+  server.on("connect", (req, socket, head) => {
+    tunnel(req, socket, head).catch(() => socket.destroy());
   });
   // A WebSocket sent to the proxy as an upgrade: the page's are refused before
   // the network (routeWebSocket); one that arrives here is refused too.
@@ -472,6 +541,7 @@ async function forwardingProxy(sandbox, { webPort, held }) {
   let closing;
   state.close = () =>
     (closing ??= new Promise((resolve) => {
+      closed = true;
       for (const socket of sockets) socket.destroy();
       server.close(() => resolve());
     }));
@@ -520,9 +590,13 @@ const launchChrome = ({ profile, proxyPort, sandbox }) =>
  * `ms`) for a start still in flight, then closes what it produced — the
  * context, the proxy, a recorded process that is still the one recorded (its
  * group, which it leads, by SIGKILL) — and reports whether any process of the
- * profile is left. `closeOpen(ms)` does that for the one still open, for the
- * cleanup; from then on `open` launches nothing, and a start that sees the
- * shutdown stops before the launch.
+ * profile is left. A session stays registered until its disposal has
+ * ended, and each session has one close: a second `close` (or `closeOpen`)
+ * gets the same promise and waits for that disposal. `closeOpen(ms)` closes
+ * every session still registered — open, starting or being closed — for the
+ * cleanup, and resolves only when their disposals have ended; from then on
+ * `open` launches nothing, and a start that sees the shutdown stops before
+ * the launch.
  */
 export function browserSessions(
   m,
@@ -530,12 +604,9 @@ export function browserSessions(
 ) {
   const { sandbox, report } = m;
   let count = 0;
-  let open;
+  const registered = new Set();
   let stopping = false;
-  const close = async (session, ms, label) => {
-    if (!session || session.closed) return;
-    session.closed = true;
-    if (open === session) open = undefined;
+  const dispose = async (session, ms, label) => {
     const deadline = Date.now() + Math.max(0, ms);
     const left = () => Math.max(0, deadline - Date.now());
     await Promise.race([session.starting, sleep(left())]);
@@ -567,6 +638,17 @@ export function browserSessions(
       () =>
         `still running: ${(profileProcesses(session.profile) ?? []).map((entry) => entry.pid).join(", ") || "(the process table could not be read)"}`,
     );
+  };
+  const close = (session, ms, label) => {
+    if (!session) return Promise.resolve();
+    if (!session.closing) {
+      // Marked at once: a start in flight sees it and launches nothing.
+      session.closed = true;
+      session.closing = dispose(session, ms, label).finally(() =>
+        registered.delete(session),
+      );
+    }
+    return session.closing;
   };
   /** The proxy, the launch and the record; stops before the launch once closed. */
   const start = async (session, label, gate) => {
@@ -622,7 +704,7 @@ export function browserSessions(
       const profile = path.join(dir, `browser-${count}`);
       sandbox.makeDir(profile, { recursive: true });
       const session = { profile, gate, blocked: [], lost: [], closed: false };
-      open = session;
+      registered.add(session);
       session.starting = start(session, label, gate).catch((error) => {
         session.launchError ??= String(error?.message ?? error).split("\n")[0];
       });
@@ -648,9 +730,13 @@ export function browserSessions(
       return session;
     },
     close,
-    closeOpen: (ms) => {
+    closeOpen: async (ms) => {
       stopping = true;
-      return close(open, Math.min(ms, 10_000), "cleanup:");
+      await Promise.all(
+        [...registered].map((session) =>
+          close(session, Math.min(ms, 10_000), "cleanup:"),
+        ),
+      );
     },
   };
 }
@@ -662,14 +748,23 @@ export function browserSessions(
  */
 const webGate = (m, up, canvasPid) => ({
   webPort: m.webPort,
-  held: () =>
-    [
+  // Each lsof run gets what is left of `ms` (a stalled one is an error
+  // within the bound, not a block); none starts once it is used up.
+  held: (ms = GATE_MS) => {
+    const by = Date.now() + ms;
+    return [
       [m.webPort, up.frontendPid],
       [m.apiPort, up.backendPid],
       [m.canvasPort, canvasPid],
-    ].every(
-      ([port, pid]) => m.sandbox.listenerState(port, pid).state === "owned",
-    ),
+    ].every(([port, pid]) => {
+      const timeoutMs = by - Date.now();
+      if (timeoutMs <= 0)
+        throw new Error(`the listeners could not be read within ${ms} ms`);
+      return (
+        m.sandbox.listenerState(port, pid, { timeoutMs }).state === "owned"
+      );
+    });
+  },
 });
 
 /** Whether a request leaves the page (not data:, blob: or about:). */
@@ -695,8 +790,9 @@ export async function guardNetwork(session, { token }) {
       session.blocked.push(`${url.protocol}//${url.host}`);
       return route.abort("blockedbyclient");
     }
-    if (!gate.held()) {
-      session.lost.push(url.pathname);
+    const held = await gateVerdict(gate.held);
+    if (!held.ok) {
+      session.lost.push(`${url.pathname} (${held.detail})`);
       return route.abort("blockedbyclient");
     }
     return route.continue();
@@ -785,12 +881,16 @@ export function networkChecks(report, session, label) {
     ...session.lost,
     ...proxy.refused
       .filter((entry) => entry.why === "gate")
-      .map((entry) => `${entry.target} (at the proxy)`),
+      .map(
+        (entry) =>
+          `${entry.target} (at the proxy${entry.detail ? `: ${entry.detail}` : ""})`,
+      ),
   ];
   report.check(
     `${label} every request to the web origin was sent while the web, api and canvas listeners were the recorded ones`,
     lost.length === 0,
-    () => `refused with a changed listener: ${lost.slice(0, 5).join(", ")}`,
+    () =>
+      `refused at the listener gate (a listener changed, or the gate could not be verified): ${lost.slice(0, 5).join(", ")}`,
   );
 }
 
