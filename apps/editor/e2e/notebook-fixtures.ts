@@ -24,6 +24,13 @@ import {
 } from "@playwright/test";
 import { projectTabAction } from "./editor-fixtures.js";
 
+import {
+  documentTrace,
+  instrumentStorage,
+  rawRecords,
+  seedDraw,
+} from "./notebook-storage-fixtures.js";
+
 export const TOKEN_KEY = "silicon_notebook_token";
 export const WORKING_COPY_KEY = "icm.working-copy.v1";
 export const RECOVERY_DATABASE = "analog-canvas-recovery";
@@ -58,7 +65,8 @@ export function notebookSuite(): void {
   test.beforeAll(() => {
     expect(test.info().config.workers).toBe(1);
   });
-  test.beforeEach(async () => {
+  test.beforeEach(async ({ context }) => {
+    await instrumentStorage(context);
     await fixture.reset();
   });
 }
@@ -188,7 +196,7 @@ export async function projectNamesOf(user: NotebookUser): Promise<string[]> {
 }
 
 /** A Project text with three resistors, so its preview is not empty. */
-function threeResistorProject(name: string): string {
+export function threeResistorProject(name: string): string {
   const project = createEmptyProject(
     `nb-${randomBytes(4).toString("hex")}`,
     name,
@@ -241,8 +249,8 @@ export async function writeTokenFrom(
 ): Promise<void> {
   await page.evaluate(
     ([key, token]) => {
-      if (token === null) localStorage.removeItem(key);
-      else localStorage.setItem(key, token);
+      if (token === null) window.__nb.remove(window.__nb.local, key);
+      else window.__nb.write(window.__nb.local, key, token);
     },
     [TOKEN_KEY, user?.token ?? null] as const,
   );
@@ -254,6 +262,7 @@ export async function signIn(
   user: NotebookUser | null,
 ): Promise<void> {
   await page.goto("/");
+  if (user) await seedDraw(page, user);
   await writeTokenFrom(page, user);
 }
 
@@ -302,64 +311,27 @@ export interface ProbeEntry {
   key: string | null;
 }
 
-/**
- * Records every IndexedDB open/delete and Storage getItem/setItem/
- * removeItem/clear of each document of this context in
- * `window.__notebookProbe` (the wrappers change no behaviour).
- */
-export async function instrumentStorage(
-  context: BrowserContext,
-): Promise<void> {
-  await context.addInitScript(() => {
-    const probe: { op: string; area: string; key: string | null }[] = [];
-    Object.defineProperty(window, "__notebookProbe", {
-      value: probe,
-      configurable: true,
-    });
-    const areaOf = (storage: Storage) => {
-      try {
-        if (storage === window.localStorage) return "local";
-        if (storage === window.sessionStorage) return "session";
-      } catch {
-        // Storage that cannot be reached is no area.
-      }
-      return "other";
-    };
-    const storage = Storage.prototype as unknown as Record<
-      string,
-      (...args: unknown[]) => unknown
-    >;
-    for (const op of ["getItem", "setItem", "removeItem", "clear"]) {
-      const original = storage[op]!;
-      storage[op] = function (this: Storage, ...args: unknown[]) {
-        probe.push({
-          op,
-          area: areaOf(this),
-          key: op === "clear" ? null : String(args[0]),
-        });
-        return original.apply(this, args);
-      };
-    }
-    const factory = IDBFactory.prototype as unknown as Record<
-      string,
-      (...args: unknown[]) => unknown
-    >;
-    for (const op of ["open", "deleteDatabase"]) {
-      const original = factory[op]!;
-      factory[op] = function (this: IDBFactory, ...args: unknown[]) {
-        probe.push({ op: `idb.${op}`, area: "idb", key: String(args[0]) });
-        return original.apply(this, args);
-      };
-    }
+export async function readProbe(page: Page): Promise<ProbeEntry[]> {
+  const events = await documentTrace(page);
+  expect(
+    events.filter(
+      (e) =>
+        e.phase === "before" &&
+        (e.op === "locked" ||
+          e.op === "open" ||
+          (e.op === "getter" &&
+            ["sessionStorage", "indexedDB", "locks"].includes(e.name))),
+    ),
+  ).toEqual([]);
+  return events.flatMap((e): ProbeEntry[] => {
+    if (["open", "deleteDatabase"].includes(e.op))
+      return [{ op: "idb." + e.op, area: "idb", key: e.name }];
+    if (e.area && ["getItem", "setItem", "removeItem", "clear"].includes(e.op))
+      return [
+        { op: e.op, area: e.area, key: e.op === "clear" ? null : e.name },
+      ];
+    return [];
   });
-}
-
-export function readProbe(page: Page): Promise<ProbeEntry[]> {
-  return page.evaluate(
-    () =>
-      (window as unknown as { __notebookProbe?: ProbeEntry[] })
-        .__notebookProbe ?? [],
-  );
 }
 
 export interface SingleUserRecovery {
@@ -407,9 +379,9 @@ export async function seedSingleUserRecovery(
   };
   await page.evaluate(
     async ({ database, store, key, value, sessionKey, workingCopy }) => {
-      sessionStorage.setItem(sessionKey, workingCopy);
+      window.__nb.write(window.__nb.session, sessionKey, workingCopy);
       await new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open(database, 1);
+        const request = window.__nb.openDB(database, 1);
         request.onupgradeneeded = () => {
           if (!request.result.objectStoreNames.contains(store))
             request.result.createObjectStore(store);
@@ -417,8 +389,11 @@ export async function seedSingleUserRecovery(
         request.onerror = () => reject(request.error);
         request.onsuccess = () => {
           const db = request.result;
-          const transaction = db.transaction(store, "readwrite");
-          transaction.objectStore(store).put(value, key);
+          const transaction = window.__nb.tx(db, store, "readwrite");
+          Reflect.apply(window.__nb.put, transaction.objectStore(store), [
+            value,
+            key,
+          ]);
           transaction.oncomplete = () => {
             db.close();
             resolve();
@@ -439,39 +414,22 @@ export async function seedSingleUserRecovery(
   return readSingleUserRecovery(page);
 }
 
-export function readSingleUserRecovery(
+export async function readSingleUserRecovery(
   page: Page,
 ): Promise<SingleUserRecovery> {
-  return page.evaluate(
-    async ({ database, store, sessionKey }) => {
-      const records = await new Promise<string[]>((resolve, reject) => {
-        const request = indexedDB.open(database);
-        request.onerror = () => reject(request.error);
-        request.onsuccess = () => {
-          const db = request.result;
-          if (!db.objectStoreNames.contains(store)) {
-            db.close();
-            resolve([]);
-            return;
-          }
-          const all = db.transaction(store).objectStore(store).getAll();
-          all.onsuccess = () => {
-            db.close();
-            resolve(
-              (all.result as unknown[]).map((value) => JSON.stringify(value)),
-            );
-          };
-          all.onerror = () => reject(all.error);
-        };
-      });
-      return { records, workingCopy: sessionStorage.getItem(sessionKey) };
-    },
-    {
-      database: RECOVERY_DATABASE,
-      store: RECOVERY_STORE,
-      sessionKey: WORKING_COPY_KEY,
-    },
+  const records = await rawRecords<unknown>(
+    page,
+    RECOVERY_DATABASE,
+    RECOVERY_STORE,
   );
+  const workingCopy = await page.evaluate(
+    (key) => window.__nb.read(window.__nb.session, key),
+    WORKING_COPY_KEY,
+  );
+  return {
+    records: records.map((value) => JSON.stringify(value)),
+    workingCopy,
+  };
 }
 
 // ---- Requests and the bearer rule. ----
@@ -855,34 +813,15 @@ export interface PageShow {
   navigation: string | null;
 }
 
-const PAGE_SHOWS_KEY = "__notebookE2ePageShows";
-
-/**
- * Records every `pageshow` of this context's documents (path, `persisted`,
- * the navigation type) into the tab's sessionStorage, where it survives the
- * reloads and history moves a case makes.
- */
-export async function recordPageShows(context: BrowserContext): Promise<void> {
-  await context.addInitScript((key) => {
-    window.addEventListener("pageshow", (event) => {
-      const entry = performance.getEntriesByType("navigation")[0] as
-        PerformanceNavigationTiming | undefined;
-      const shows = JSON.parse(
-        sessionStorage.getItem(key) ?? "[]",
-      ) as unknown[];
-      shows.push({
-        path: location.pathname,
-        persisted: event.persisted,
-        navigation: entry?.type ?? null,
-      });
-      sessionStorage.setItem(key, JSON.stringify(shows));
-    });
-  }, PAGE_SHOWS_KEY);
-}
-
 export function readPageShows(page: Page): Promise<PageShow[]> {
-  return page.evaluate(
-    (key) => JSON.parse(sessionStorage.getItem(key) ?? "[]") as PageShow[],
-    PAGE_SHOWS_KEY,
+  return page.evaluate(() =>
+    window.__nb
+      .trace()
+      .filter((e) => e.op === "pageshow")
+      .map((e) => ({
+        path: e.path!,
+        persisted: e.name === "true",
+        navigation: e.navigation ?? null,
+      })),
   );
 }

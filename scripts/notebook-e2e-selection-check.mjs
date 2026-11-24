@@ -6,6 +6,7 @@
 // and the test title joined by " › " (the file suite itself excluded).
 //
 //   --standard <listing.json> --baseline <file>  identities equal the baseline
+//   --standard <listing.json> --base-listing <merge-base.json>
 //   --prefix <listing.json>                       only the base-path case
 //   --notebook <listing.json>                     exactly the notebook cases
 //   --notebook-report <e2e-report.json>           the same, every one passed
@@ -38,10 +39,26 @@ const NOTEBOOK_MANIFEST = {
     "N10d version history placeholders hold the layout until previews load",
     "N10e previews that do not decode fall back to placeholders",
     "N10f measurement: version list observer root and requests before scrolling",
+    "S1a Bob reads his Draw preference",
+    "S1b Bob ignores legacy and Alice Draw preferences",
+    "S1c discarding Bob's copy preserves Alice and legacy recovery",
+    "S1 control rejects an unprefixed write on the recorded path",
+    "L1a Alice's held workspace lock suppresses reopening",
+    "L1b Bob's held workspace lock permits reopening",
+    "L1c a legacy workspace lock permits reopening",
+    "R1 Alice restores revision three after tab loss",
+    "R1-Bob manual recovery lists only Bob's drawing",
+    "R2 the same tab offers startup recovery only to its original user",
+    "R3 an account change drains Alice's pending revision before reload",
+    "R3 deadline reloads while Alice's workspace transaction is held",
+    "R4 Bob can publish a component with an interrupted Alice publication",
+    "R5 Bob ignores Alice's recent cloud project in the same tab",
   ],
   "notebook-bfcache\tnotebook-bfcache.spec.ts": [
     "N6c control: a plain page is restored from the back/forward cache",
     "N6c sign-out then Back: the restored editor is cleared at pageshow",
+    "R6 a persisted editor rechecks a changed session while concealed",
+    "R6 a persisted editor reveals its working modal for the same session",
   ],
   "notebook\tnotebook-worker.spec.ts": [
     "N7 previews never come from the HTTP cache or the service worker, and Bob never sees Alice's previews",
@@ -133,11 +150,17 @@ const report = readJson(file);
 expectErrorsAbsent(report);
 const tests = collect(report);
 if (mode === "--standard") {
-  if (flag !== "--baseline" || !baseline)
-    fail("--standard needs --baseline <file>");
-  const expected = readFileSync(baseline, "utf8")
-    .split("\n")
-    .filter((line) => line !== "");
+  if (!["--baseline", "--base-listing"].includes(flag) || !baseline)
+    fail(
+      "--standard needs --baseline <file> or --base-listing <merge-base.json>",
+    );
+  const base = flag === "--base-listing" ? readJson(baseline) : null;
+  if (base) expectErrorsAbsent(base);
+  const expected = base
+    ? collect(base).map(identity)
+    : readFileSync(baseline, "utf8")
+        .split("\n")
+        .filter((line) => line !== "");
   expectList(tests.map(identity).sort(), expected.sort(), "standard listing");
   if (
     tests.some((test) => /(?:^|\/)notebook-[^/]*\.spec\.ts$/u.test(test.file))

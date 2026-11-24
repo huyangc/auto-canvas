@@ -1,18 +1,19 @@
+import { trace } from "./notebook-storage-fixtures.js";
 // The back/forward cache, in the notebook-bfcache project
 // (playwright.config.ts): a browser launched without Playwright's
 // --disable-back-forward-cache, so Back can restore a page as it was.
 import { expect, test, type Page } from "@playwright/test";
-import { renameProject } from "./editor-fixtures.js";
+import { clickCommand, renameProject } from "./editor-fixtures.js";
 import { placeComponent } from "./manual-editor-fixtures.js";
 import {
   expectBearers,
   expectNoForeignOrigin,
   newUser,
+  nextAuthMe,
   nextLoad,
   notebookSuite,
   openNotebookEditor,
   readPageShows,
-  recordPageShows,
   recordRequests,
   requestsWithBearer,
   signIn,
@@ -28,16 +29,17 @@ const RESTORED_KEY = "__notebookE2eRestored";
 
 function readRestored(page: Page): Promise<unknown> {
   return page.evaluate(
-    (key) => JSON.parse(sessionStorage.getItem(key) ?? "null") as unknown,
+    (key) =>
+      JSON.parse(
+        window.__nb.read(window.__nb.session, key) ?? "null",
+      ) as unknown,
     RESTORED_KEY,
   );
 }
 
 test("N6c control: a plain page is restored from the back/forward cache", async ({
   page,
-  context,
 }) => {
-  await recordPageShows(context);
   await page.goto("/a");
   await page.goto("/b");
   await page.goBack({ waitUntil: "commit" });
@@ -50,7 +52,6 @@ test("N6c sign-out then Back: the restored editor is cleared at pageshow", async
   page,
   context,
 }) => {
-  await recordPageShows(context);
   const recorder = recordRequests(context);
   const alice = newUser("alice");
   const name = `Alice cached ${Math.random().toString(16).slice(2, 10)}`;
@@ -65,7 +66,8 @@ test("N6c sign-out then Back: the restored editor is cleared at pageshow", async
     ([key, aliceName]) => {
       window.addEventListener("pageshow", (event) => {
         if (!event.persisted) return;
-        sessionStorage.setItem(
+        window.__nb.write(
+          window.__nb.session,
           key,
           JSON.stringify({
             screen:
@@ -86,7 +88,10 @@ test("N6c sign-out then Back: the restored editor is cleared at pageshow", async
   const removed = await recorder.mark("signed out");
   await writeTokenFrom(page, null);
   expect(
-    await page.evaluate((key) => localStorage.getItem(key), TOKEN_KEY),
+    await page.evaluate(
+      (key) => window.__nb.read(window.__nb.local, key),
+      TOKEN_KEY,
+    ),
   ).toBeNull();
   const loaded = nextLoad(page);
   await page.goBack({ waitUntil: "commit" });
@@ -116,3 +121,84 @@ test("N6c sign-out then Back: the restored editor is cleared at pageshow", async
   await expectBearers(recorder, { from: removed, source: page, user: null });
   expectNoForeignOrigin(recorder.records);
 });
+
+for (const [title, changed] of [
+  ["R6 a persisted editor rechecks a changed session while concealed", true],
+  [
+    "R6 a persisted editor reveals its working modal for the same session",
+    false,
+  ],
+] as const)
+  test(title, async ({ page }) => {
+    const alice = newUser("alice"),
+      bob = newUser("bob");
+    await signIn(page, alice);
+    await openNotebookEditor(page);
+    await placeComponent(page, "resistor", { x: 320, y: 200 });
+    await expect(page.getByTestId("revision")).toHaveText("1");
+    await clickCommand(page, "Edit", "User Components…");
+    await page
+      .getByRole("button", { name: "Create Component…", exact: true })
+      .click();
+    const modal = page.getByRole("dialog", {
+      name: "Edit Component Definition",
+    });
+    const field = modal.getByLabel("Definition type");
+    await field.selectOption("json");
+    await field.focus();
+    await expect(field).toBeFocused();
+    const doc = await page.evaluate(() => {
+      window.__nb.observeRestore();
+      return window.__nb.doc;
+    });
+    await page.goto("/");
+    if (changed) await writeTokenFrom(page, bob);
+    const identified = changed ? nextAuthMe(page, bob) : null;
+    await page.goBack({ waitUntil: "commit" });
+    if (identified) expect((await identified).status()).toBe(200);
+    await page.getByTestId("schematic-canvas").waitFor();
+    await expect
+      .poll(async () =>
+        (await trace(page)).some(
+          (e) => e.doc === doc && e.op === "late-pageshow",
+        ),
+      )
+      .toBe(true);
+    const events = (await trace(page)).filter((e) => e.doc === doc);
+    const hidden = events.find((e) => e.op === "late-pagehide")!;
+    expect(hidden).toMatchObject({ concealed: true, canvas: true });
+    const token = events.find(
+      (e) => e.seq > hidden.seq && e.op === "getItem" && e.name === TOKEN_KEY,
+    )!;
+    expect(token).toMatchObject({ concealed: true });
+    const restored = events.find((e) => e.op === "late-pageshow")!;
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        op: "pageshow",
+        name: "true",
+        path: "/canvas/editor",
+      }),
+    );
+    expect(restored.seq).toBeGreaterThan(token.seq);
+    expect(restored).toMatchObject({
+      concealed: false,
+      changed,
+      canvas: !changed,
+    });
+    const reload = events.find(
+      (e) => e.op === "mark" && e.name === "auto-canvas:notebook-reload",
+    );
+    if (changed) {
+      expect(restored.outside).toBe(0);
+      expect(reload!.seq).toBeGreaterThan(restored.seq);
+    } else {
+      expect(reload).toBeUndefined();
+      expect(await page.evaluate(() => window.__nb.doc)).toBe(doc);
+      await expect(field).toHaveValue("json");
+      const box = await field.boundingBox();
+      expect(box!.width).toBeGreaterThan(0);
+      expect(box!.height).toBeGreaterThan(0);
+      await field.press("c");
+      await expect(field).toHaveValue("circuit");
+    }
+  });

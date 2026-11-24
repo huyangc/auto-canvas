@@ -1,3 +1,4 @@
+import { instrumentStorage } from "./notebook-storage-fixtures.js";
 // The notebook build's service worker, the HTTP cache and offline
 // navigation (T162c, N7 and N9). The service worker runs here
 // (`serviceWorkers: "allow"`), and no case of this file routes any request:
@@ -17,7 +18,6 @@ import {
   expectNoApiRequest,
   expectNoForeignOrigin,
   fixture,
-  instrumentStorage,
   newUser,
   nextAuthMe,
   nextLoad,
@@ -135,6 +135,7 @@ async function discoverPreviewUrls(
     },
   });
   try {
+    await instrumentStorage(discovery);
     const page = await discovery.newPage();
     const from = await fixture.seq();
     await signIn(page, alice);
@@ -674,7 +675,6 @@ test("N9 offline: the cached shell stops at the gate and opens no editor storage
   page,
   context,
 }) => {
-  await instrumentStorage(context);
   const recorder = recordRequests(context);
   const alice = newUser("alice");
   await signIn(page, alice);
@@ -691,6 +691,7 @@ test("N9 offline: the cached shell stops at the gate and opens no editor storage
   const seed = await seedSingleUserRecovery(page);
   expect(seed.records.length).toBeGreaterThanOrEqual(1);
   expect(seed.workingCopy).not.toBeNull();
+  const databases = await page.evaluate(() => window.__nb.list());
   const observed: Record<string, unknown> = {};
   try {
     // (a) A token: the cached shell, then the gate's error page.
@@ -708,6 +709,7 @@ test("N9 offline: the cached shell stops at the gate and opens no editor storage
       controller: workerScript,
     });
     expectGateOnlyProbe(probeA);
+    expect(await page.evaluate(() => window.__nb.list())).toEqual(databases);
     const onlineA = await recorder.mark("online");
     await context.setOffline(false);
     expect(await readSingleUserRecovery(page)).toEqual(seed);
@@ -729,6 +731,7 @@ test("N9 offline: the cached shell stops at the gate and opens no editor storage
     await expect(page.getByTestId("notebook-signed-out")).toBeVisible();
     const probeB = await readProbe(page);
     expectGateOnlyProbe(probeB);
+    expect(await page.evaluate(() => window.__nb.list())).toEqual(databases);
     observed.noToken = {
       status: withoutToken!.status(),
       fromServiceWorker: withoutToken!.fromServiceWorker(),

@@ -1,3 +1,13 @@
+import { newComponentDefinition } from "../src/features/user-components/component-definition-edit.js";
+import {
+  prefix,
+  seedDraw,
+  rawRecords,
+  trace,
+  documentTrace,
+  checkNamespace,
+  type StorageEventRecord,
+} from "./notebook-storage-fixtures.js";
 import {
   expect,
   test,
@@ -7,6 +17,10 @@ import {
   type Route,
 } from "@playwright/test";
 import {
+  clickCommand,
+  downloadBytes,
+  openProjectFile,
+  chooseComponent,
   projectTabAction,
   renameProject,
   showNetlistPanel,
@@ -18,7 +32,6 @@ import {
   expectNoApiRequest,
   expectNoForeignOrigin,
   fixture,
-  instrumentStorage,
   newUser,
   nextAuthMe,
   nextLoad,
@@ -32,7 +45,6 @@ import {
   readPageShows,
   readSingleUserRecovery,
   recordDialogs,
-  recordPageShows,
   recordRequests,
   RECOVERY_DATABASE,
   requestsWithBearer,
@@ -40,6 +52,7 @@ import {
   signIn,
   TOKEN_KEY,
   updateProjectAs,
+  threeResistorProject,
   WORKING_COPY_KEY,
   WORKSPACE_DATABASE,
   writeTokenFrom,
@@ -65,7 +78,10 @@ function editorModules(records: RequestRecord[]): string[] {
 }
 
 /** The probe of the editor document once it opened both databases. */
-async function expectEditorStorage(page: Page): Promise<void> {
+async function expectEditorStorage(
+  page: Page,
+  user: NotebookUser,
+): Promise<void> {
   await expect
     .poll(async () => {
       const probe = await readProbe(page);
@@ -80,7 +96,7 @@ async function expectEditorStorage(page: Page): Promise<void> {
           (entry) =>
             entry.op === "getItem" &&
             entry.area === "session" &&
-            entry.key === WORKING_COPY_KEY,
+            entry.key === prefix(user) + WORKING_COPY_KEY,
         ),
         databases: [
           ...new Set(
@@ -94,7 +110,9 @@ async function expectEditorStorage(page: Page): Promise<void> {
     .toEqual({
       token: true,
       workingCopy: true,
-      databases: [RECOVERY_DATABASE, WORKSPACE_DATABASE].sort(),
+      databases: [RECOVERY_DATABASE, WORKSPACE_DATABASE]
+        .map((n) => prefix(user) + n)
+        .sort(),
     });
 }
 
@@ -109,13 +127,12 @@ for (const [title, stored] of [
   ],
 ] as const)
   test(title, async ({ page, context }) => {
-    await instrumentStorage(context);
     const recorder = recordRequests(context);
     await page.goto("/");
     await page.evaluate(
       ([key, value]) => {
-        if (value === null) localStorage.removeItem(key);
-        else localStorage.setItem(key, value);
+        if (value === null) window.__nb.remove(window.__nb.local, key);
+        else window.__nb.write(window.__nb.local, key, value);
       },
       [TOKEN_KEY, stored] as const,
     );
@@ -138,7 +155,7 @@ for (const [title, stored] of [
     expect(await readProbe(page)).toEqual([
       { op: "getItem", area: "local", key: TOKEN_KEY },
     ]);
-    expect(await page.evaluate(() => indexedDB.databases())).toEqual([]);
+    expect(await page.evaluate(() => window.__nb.list())).toEqual([]);
     await expectBearers(recorder, {
       from: start,
       to: end,
@@ -151,7 +168,7 @@ for (const [title, stored] of [
     await signIn(page, user);
     const mounted = await recorder.mark("mounted");
     await openNotebookEditor(page);
-    await expectEditorStorage(page);
+    await expectEditorStorage(page, user);
     expect(editorModules(recorder.between(mounted)).length).toBeGreaterThan(0);
     await expectBearers(recorder, { from: mounted, source: page, user });
     expectNoForeignOrigin(recorder.records);
@@ -201,12 +218,16 @@ async function expectIdentificationFailure(
   ).toBeGreaterThan(0);
   expect(editorModules(recorder.between(from))).toEqual([]);
   await expectBearers(recorder, { from, source: page, user });
+  expect(
+    await page.evaluate(async () =>
+      (await window.__nb.list()).map((db) => db.name),
+    ),
+  ).toEqual([RECOVERY_DATABASE]);
   expect(await readSingleUserRecovery(page)).toEqual(seed);
 }
 
 /** A fresh user signed in on `/` of a tab holding a single-user draft. */
 async function seededSession(page: Page, context: BrowserContext) {
-  await instrumentStorage(context);
   const recorder = recordRequests(context);
   const user = newUser("n2");
   await page.goto("/");
@@ -361,7 +382,7 @@ test("N2f Retry after the fault is gone mounts the editor", async ({
   expect((await identified).status()).toBe(200);
   await page.getByTestId("schematic-canvas").waitFor();
   // Positive control: the mounted editor reads what the failure did not.
-  await expectEditorStorage(page);
+  await expectEditorStorage(page, user);
   await expectBearers(recorder, { from: retried, source: page, user });
   expectNoForeignOrigin(recorder.records);
 });
@@ -373,7 +394,7 @@ test("N2g a token notebook rejects shows the signed-out page", async ({
   const recorder = recordRequests(context);
   await page.goto("/");
   await page.evaluate(
-    (key) => localStorage.setItem(key, "zz-unknown"),
+    (key) => window.__nb.write(window.__nb.local, key, "zz-unknown"),
     TOKEN_KEY,
   );
   const from = await recorder.mark("unknown token");
@@ -387,6 +408,9 @@ test("N2g a token notebook rejects shows the signed-out page", async ({
     ["Bearer zz-unknown", 401],
   ]);
   expect(editorModules(recorder.between(from))).toEqual([]);
+  expect(
+    (await readProbe(page)).filter((entry) => entry.key !== TOKEN_KEY),
+  ).toEqual([]);
   expectNoForeignOrigin(recorder.records);
 });
 
@@ -633,7 +657,9 @@ test("N4b a save in the pre-event interval carries the mounted account's bearer"
   await signIn(a, alice);
   const alicePhase = await recorder.mark("alice");
   await namedDirtyDrawing(a, name);
-  // The other tab's write, before its event arrives: no gate event fires.
+  // The other tab's write, before its event arrives: write through the saved
+  // native handle on this tab so no storage event fires yet (never touching
+  // the editor's namespaced localStorage).
   await writeTokenFrom(a, bob);
   await expect(a.getByTestId("schematic-canvas")).toBeVisible();
   await expect(a.getByTestId("notebook-account-changed")).toHaveCount(0);
@@ -890,7 +916,6 @@ test("N6a sign-out then Back shows the signed-out page", async ({
   page,
   context,
 }) => {
-  await recordPageShows(context);
   const recorder = recordRequests(context);
   const alice = newUser("alice");
   const name = `Alice back ${hex()}`;
@@ -1596,4 +1621,738 @@ test("N10f measurement: version list observer root and requests before scrolling
   expectNoForeignOrigin(recorder.records);
 });
 
-// END OF CASES
+type RecoveryCopy = {
+  workingCopyId: string;
+  projectName: string;
+  generation: string;
+  unsavedAtSnapshot: boolean;
+  documentRevisions: Record<string, number>;
+  topDocumentId: string;
+  projectText: string;
+};
+
+const copies = (page: Page, user: NotebookUser) =>
+  rawRecords<RecoveryCopy>(
+    page,
+    prefix(user) + RECOVERY_DATABASE,
+    "browser-recovery-v2",
+  );
+
+async function expectMountedNamespace(page: Page, user: NotebookUser) {
+  const p = prefix(user);
+  await expect
+    .poll(() => documentTrace(page))
+    .toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          op: "mark",
+          name: "auto-canvas:notebook-commit",
+        }),
+        expect.objectContaining({
+          op: "getItem",
+          area: "local",
+          name: p + "icm.editor-mode.v1",
+        }),
+        expect.objectContaining({
+          op: "getItem",
+          area: "session",
+          name: p + WORKING_COPY_KEY,
+        }),
+        expect.objectContaining({ op: "open", name: p + RECOVERY_DATABASE }),
+        expect.objectContaining({
+          op: "transaction",
+          name: p + WORKSPACE_DATABASE,
+        }),
+        expect.objectContaining({
+          op: "request",
+          name: expect.stringContaining(p + "analog-canvas-window:"),
+        }),
+      ]),
+    );
+  checkNamespace(await documentTrace(page), user);
+}
+
+async function drawCopy(page: Page, user: NotebookUser) {
+  await renameProject(page, user.id);
+  await placeMeaningfulDrawing(page);
+  await expect(page.getByTestId("revision")).toHaveText("3");
+  await expect
+    .poll(async () =>
+      (await copies(page, user)).some(
+        (r) =>
+          r.projectName === user.id &&
+          r.generation === "latest" &&
+          r.unsavedAtSnapshot &&
+          r.documentRevisions[r.topDocumentId] === 3,
+      ),
+    )
+    .toBe(true);
+}
+
+async function closedDrawing(writer: Page, user: NotebookUser) {
+  await seedDraw(writer, user);
+  await writeTokenFrom(writer, user);
+  const tab = await writer.context().newPage();
+  await openNotebookEditor(tab);
+  await drawCopy(tab, user);
+  await expectMountedNamespace(tab, user);
+  await tab.close({ runBeforeUnload: false });
+}
+
+async function recover(page: Page) {
+  await clickCommand(page, "File", "Recover Unsaved Work…");
+  const dialog = page.getByRole("dialog", { name: "Recover recent work" });
+  await expect(dialog).toBeVisible();
+  return dialog;
+}
+
+async function switchUser(editor: Page, writer: Page, user: NotebookUser) {
+  const response = nextAuthMe(editor, user);
+  await writeTokenFrom(writer, user);
+  expect((await response).status()).toBe(200);
+  await editor.getByTestId("schematic-canvas").waitFor();
+}
+
+for (const [title, own] of [
+  ["S1a Bob reads his Draw preference", true],
+  ["S1b Bob ignores legacy and Alice Draw preferences", false],
+] as const)
+  test(title, async ({ page }) => {
+    const bob = newUser("bob");
+    await page.goto("/");
+    await page.evaluate(() =>
+      window.__nb.remove(window.__nb.local, "icm.editor-mode.v1"),
+    );
+    if (own) await seedDraw(page, bob);
+    else {
+      await seedDraw(page, newUser("alice"));
+      await page.evaluate(() =>
+        window.__nb.write(window.__nb.local, "icm.editor-mode.v1", "draw"),
+      );
+    }
+    await writeTokenFrom(page, bob);
+    await openNotebookEditor(page);
+    await expect(
+      page.getByTestId(own ? "mode-draw" : "mode-auto"),
+    ).toHaveAttribute("aria-pressed", "true");
+    const events = await documentTrace(page);
+    await expectMountedNamespace(page, bob);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        op: "getItem",
+        area: "local",
+        name: prefix(bob) + "icm.editor-mode.v1",
+      }),
+    );
+  });
+
+test("S1c discarding Bob's copy preserves Alice and legacy recovery", async ({
+  page,
+  context,
+}) => {
+  const alice = newUser("alice"),
+    bob = newUser("bob");
+  await page.goto("/");
+  const legacy = await seedSingleUserRecovery(page);
+  const legacyText = (JSON.parse(legacy.records[0]!) as RecoveryCopy)
+    .projectText;
+  await page.evaluate(
+    (text) => window.__nb.write(window.__nb.local, "icm.recovery.v1", text),
+    legacyText,
+  );
+  await closedDrawing(page, alice);
+  const original = await copies(page, alice);
+  expect(original.length).toBeGreaterThan(0);
+  await closedDrawing(page, bob);
+  const editor = await context.newPage();
+  await openNotebookEditor(editor);
+  const dialog = await recover(editor);
+  await dialog
+    .getByRole("button", { name: "Delete recovery copy of " + bob.id })
+    .click();
+  await expect
+    .poll(async () =>
+      (await copies(editor, bob)).filter((r) => r.projectName === bob.id),
+    )
+    .toEqual([]);
+  expect(await copies(editor, alice)).toEqual(original);
+  expect(await readSingleUserRecovery(page)).toEqual(legacy);
+  expect(
+    await editor.evaluate(() =>
+      window.__nb.read(window.__nb.local, "icm.recovery.v1"),
+    ),
+  ).toBe(legacyText);
+  await expectMountedNamespace(editor, bob);
+  const events = await documentTrace(editor);
+  for (const signature of [
+    { op: "getItem", area: "local", name: prefix(bob) + "icm.recovery.v1" },
+    { op: "getItem", area: "session", name: prefix(bob) + WORKING_COPY_KEY },
+    { op: "delete", name: prefix(bob) + RECOVERY_DATABASE },
+    { op: "transaction", name: prefix(bob) + WORKSPACE_DATABASE },
+  ])
+    expect(events).toContainEqual(expect.objectContaining(signature));
+});
+
+test("S1 control rejects an unprefixed write on the recorded path", async ({
+  page,
+}) => {
+  const bob = newUser("bob");
+  await signIn(page, bob);
+  await openNotebookEditor(page);
+  const before = await documentTrace(page);
+  checkNamespace(before, bob);
+  expect(before).toContainEqual(
+    expect.objectContaining({
+      op: "getItem",
+      name: prefix(bob) + "icm.editor-mode.v1",
+    }),
+  );
+  await page.evaluate(() =>
+    Storage.prototype.setItem.call(window.__nb.local, "icm.control", "bad"),
+  );
+  const control = await documentTrace(page);
+  expect(() => checkNamespace(control, bob)).toThrow(
+    "setItem outside namespace: icm.control",
+  );
+});
+
+function holdLock(page: Page, name: string) {
+  return page.evaluate(
+    (lock) =>
+      new Promise<void>((acquired) => {
+        const raw = window.__nb;
+        void Reflect.apply(raw.request, raw.locks, [
+          lock,
+          () => {
+            acquired();
+            return new Promise<void>(() => {});
+          },
+        ]);
+      }),
+    name,
+  );
+}
+
+for (const [title, owner] of [
+  ["L1a Alice's held workspace lock suppresses reopening", "alice"],
+  ["L1b Bob's held workspace lock permits reopening", "bob"],
+  ["L1c a legacy workspace lock permits reopening", "legacy"],
+] as const)
+  test(title, async ({ page, context }) => {
+    const alice = newUser("alice"),
+      bob = newUser("bob");
+    await signIn(page, alice);
+    await seedSingleUserRecovery(page);
+    const old = await context.newPage();
+    await old.goto("/");
+    await old.evaluate(
+      (p) =>
+        window.__nb.write(
+          window.__nb.session,
+          p + "icm.workspace-window.v1",
+          "w-test",
+        ),
+      prefix(alice),
+    );
+    await openNotebookEditor(old);
+    await drawCopy(old, alice);
+    await expect
+      .poll(() =>
+        rawRecords(old, prefix(alice) + WORKSPACE_DATABASE, "windows"),
+      )
+      .toContainEqual(
+        expect.objectContaining({
+          windowId: "w-test",
+          tabs: expect.arrayContaining([
+            expect.objectContaining({
+              session: expect.objectContaining({ dirty: true }),
+            }),
+          ]),
+        }),
+      );
+    await old.close();
+    const logical = "analog-canvas-window:w-test";
+    await holdLock(
+      page,
+      (owner === "alice" ? prefix(alice) : owner === "bob" ? prefix(bob) : "") +
+        logical,
+    );
+    const editor = await context.newPage();
+    await openNotebookEditor(editor);
+    await expect
+      .poll(() => documentTrace(editor))
+      .toContainEqual(expect.objectContaining({ op: "query" }));
+    const events = await documentTrace(editor);
+    checkNamespace(events, alice);
+    const windowKey = prefix(alice) + "icm.workspace-window.v1";
+    const id = await editor.evaluate(
+      (key) => window.__nb.read(window.__nb.session, key),
+      windowKey,
+    );
+    expect(id).toBeTruthy();
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        op: "request",
+        name: prefix(alice) + "analog-canvas-window:" + id,
+      }),
+    );
+    const names = await editor.evaluate(async () =>
+      (await navigator.locks.query()).held?.map((l) => l.name).sort(),
+    );
+    expect(names).toEqual(
+      [
+        ...(owner === "alice" ? [logical] : []),
+        "analog-canvas-window:" + id,
+      ].sort(),
+    );
+    const banner = editor.getByTestId("workspace-reopen-banner");
+    if (owner === "alice") {
+      await expect
+        .poll(() => documentTrace(editor))
+        .toContainEqual(
+          expect.objectContaining({
+            op: "getAll",
+            name: prefix(alice) + WORKSPACE_DATABASE,
+          }),
+        );
+      await expect(banner).toHaveCount(0);
+    } else await expect(banner).toContainText(alice.id);
+    // The facade returns logical database names; the raw origin also has
+    // the single-user recovery database seeded in the helper tab.
+    const physical = await editor.evaluate(() => window.__nb.list());
+    expect(physical.map((db) => db.name)).toContain(RECOVERY_DATABASE);
+    const visible = await editor.evaluate(async () =>
+      (await indexedDB.databases()).map((db) => db.name).sort(),
+    );
+    expect(visible).toEqual(
+      physical
+        .flatMap((db) =>
+          db.name?.startsWith(prefix(alice))
+            ? [db.name.slice(prefix(alice).length)]
+            : [],
+        )
+        .sort(),
+    );
+    // Exercise the nameless Storage operations after taking all product
+    // observations. Put a foreign and a legacy control in this tab itself.
+    const enumeration = await editor.evaluate(
+      ([own, foreign]) => {
+        const raw = window.__nb;
+        const area = raw.session;
+        raw.write(area, foreign + "sentinel", "foreign");
+        raw.write(area, "sentinel", "legacy");
+        const physicalKeys = () =>
+          Array.from(
+            { length: Reflect.apply(raw.length, area, []) as number },
+            (_, i) => Reflect.apply(raw.key, area, [i]) as string,
+          );
+        const expected = physicalKeys()
+          .filter((k) => k.startsWith(own))
+          .map((k) => k.slice(own.length))
+          .sort();
+        const actual = Array.from({ length: sessionStorage.length }, (_, i) =>
+          sessionStorage.key(i),
+        ).sort();
+        sessionStorage.clear();
+        return {
+          expected,
+          actual,
+          remaining: physicalKeys().filter((k) => k.startsWith(own)),
+          foreign: raw.read(area, foreign + "sentinel"),
+          legacy: raw.read(area, "sentinel"),
+        };
+      },
+      [prefix(alice), prefix(bob)] as const,
+    );
+    expect(enumeration.expected).toContain("icm.workspace-window.v1");
+    expect(enumeration.actual).toEqual(enumeration.expected);
+    expect(enumeration).toMatchObject({
+      remaining: [],
+      foreign: "foreign",
+      legacy: "legacy",
+    });
+  });
+
+test("R1 Alice restores revision three after tab loss", async ({
+  page,
+  context,
+}) => {
+  const alice = newUser("alice");
+  await page.goto("/");
+  await closedDrawing(page, alice);
+  const editor = await context.newPage();
+  await openNotebookEditor(editor);
+  const dialog = await recover(editor);
+  await dialog
+    .getByRole("button", { name: "Restore " + alice.id, exact: true })
+    .click();
+  await expect(editor.getByTestId("revision")).toHaveText("3");
+});
+
+test("R1-Bob manual recovery lists only Bob's drawing", async ({
+  page,
+  context,
+}) => {
+  const alice = newUser("alice"),
+    bob = newUser("bob");
+  await page.goto("/");
+  await closedDrawing(page, alice);
+  await closedDrawing(page, bob);
+  const editor = await context.newPage();
+  await openNotebookEditor(editor);
+  const dialog = await recover(editor);
+  await expect(dialog.getByText(bob.id, { exact: true })).toBeVisible();
+  await expect(dialog.getByText(alice.id, { exact: true })).toHaveCount(0);
+});
+
+test("R2 the same tab offers startup recovery only to its original user", async ({
+  page,
+  context,
+}) => {
+  const alice = newUser("alice"),
+    bob = newUser("bob");
+  const writer = await context.newPage();
+  await writer.goto("/");
+  await closedDrawing(writer, bob);
+  await signIn(page, alice);
+  await openNotebookEditor(page);
+  await drawCopy(page, alice);
+  await switchUser(page, writer, bob);
+  await openNotebookEditor(page, "/canvas/editor?recovery=meaningful");
+  const dialog = await recover(page);
+  await expect(dialog.getByText(bob.id, { exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  const banner = page.getByTestId("startup-recovery-banner");
+  await expect(banner).toHaveCount(0);
+  await switchUser(page, writer, alice);
+  await expect(banner).toContainText(alice.id);
+  await banner.getByRole("button", { name: "Restore" }).click();
+  await expect(page.getByTestId("revision")).toHaveText("3");
+});
+
+function committedPut(
+  events: StorageEventRecord[],
+  name: string,
+  revision: number,
+) {
+  return events.some(
+    (put) =>
+      put.op === "put" &&
+      put.name === name &&
+      put.revision === revision &&
+      events.some(
+        (end) =>
+          end.op === "complete" &&
+          end.doc === put.doc &&
+          end.txId === put.txId &&
+          end.seq > put.seq,
+      ),
+  );
+}
+
+// Keep the transaction in a separate, non-editor document. It survives the
+// deadline reload and cannot itself contribute a put or completion to the trace.
+async function holdWorkspace(writer: Page, user: NotebookUser) {
+  const handle = await writer.evaluateHandle(
+    async (name) => {
+      const raw = window.__nb;
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        const req = raw.openDB(name);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+      const tx = raw.tx(db, "windows", "readwrite");
+      const store = tx.objectStore("windows");
+      let held = true;
+      await new Promise<void>((resolve, reject) => {
+        function next() {
+          const req = Reflect.apply(raw.get, store, ["hold"]);
+          req.onerror = () => reject(req.error);
+          req.onsuccess = () => {
+            resolve();
+            if (held) next();
+          };
+        }
+        next();
+      });
+      return () => {
+        held = false;
+        db.close();
+      };
+    },
+    prefix(user) + WORKSPACE_DATABASE,
+  );
+  return () => handle.evaluate((release) => release());
+}
+
+for (const [title, deadline] of [
+  ["R3 an account change drains Alice's pending revision before reload", false],
+  ["R3 deadline reloads while Alice's workspace transaction is held", true],
+] as const)
+  test(title, async ({ page, context }) => {
+    const alice = newUser("alice"),
+      bob = newUser("bob");
+    const writer = await context.newPage();
+    await writer.goto("/");
+    // A different route in this very window leaves Bob a discoverable copy
+    // without creating a closed Bob window that should legitimately be offered.
+    await signIn(page, bob);
+    await openNotebookEditor(page, "/canvas/editor?recovery=bob");
+    await drawCopy(page, bob);
+    await signIn(page, alice);
+    await openNotebookEditor(page);
+    // A clean three-part project makes the first edit arm the leave prompt.
+    await openProjectFile(page, threeResistorProject(alice.id));
+    await expect(page.getByTestId("active-instance-count")).toHaveText("3");
+    await placeComponent(page, "resistor", { x: 325, y: 220 });
+    await expect(page.getByTestId("revision")).toHaveText("1");
+    const workspace = prefix(alice) + WORKSPACE_DATABASE,
+      recovery = prefix(alice) + RECOVERY_DATABASE;
+    await expect
+      .poll(async () => {
+        const events = await documentTrace(page);
+        return [workspace, recovery].every((db) => committedPut(events, db, 1));
+      })
+      .toBe(true);
+    const dialogs = recordDialogs(page);
+    await page.evaluate(() => {
+      setTimeout(() => location.reload(), 0);
+    });
+    await expect.poll(() => dialogs.types).toEqual(["beforeunload"]);
+    const release = await holdWorkspace(writer, alice);
+    await page.bringToFront();
+    await chooseComponent(page, "resistor");
+    const doc = await page.evaluate(() => window.__nb.doc);
+    const navigations: string[] = [];
+    page.on("request", (request) => {
+      if (request.isNavigationRequest() && request.frame() === page.mainFrame())
+        navigations.push(request.url());
+    });
+    await page.evaluate(() => {
+      document.addEventListener(
+        "pointerdown",
+        () => performance.mark("edit-two"),
+        { capture: true, once: true },
+      );
+    });
+    const identified = nextAuthMe(page, bob);
+    await page
+      .getByTestId("schematic-canvas")
+      .click({ position: { x: 455, y: 260 } });
+    await writeTokenFrom(writer, bob);
+    await expect(page.getByTestId("notebook-account-changed")).toBeVisible();
+    await expect(page.getByTestId("schematic-canvas")).toHaveCount(0);
+    expect(navigations).toEqual([]);
+    if (deadline) await new Promise((resolve) => setTimeout(resolve, 5000));
+    await release();
+    expect((await identified).status()).toBe(200);
+    await page.getByTestId("schematic-canvas").waitFor();
+    const events = (await trace(page)).filter((e) => e.doc === doc);
+    checkNamespace(events, alice);
+    const edit = events.find((e) => e.name === "edit-two")!;
+    const switched = events.find(
+      (e) => e.op === "storage" && e.name === TOKEN_KEY && e.seq > edit.seq,
+    )!;
+    const reload = events.find(
+      (e) => e.name === "auto-canvas:notebook-reload",
+    )!;
+    expect(switched.time - edit.time).toBeLessThan(400);
+    expect(
+      events.filter(
+        (e) =>
+          e.seq >= edit.seq &&
+          e.seq < switched.seq &&
+          ((e.op === "visibilitychange" && e.name === "hidden") ||
+            (e.op === "put" && e.name === recovery && e.revision === 2)),
+      ),
+    ).toEqual([]);
+    const drain = events.filter((e) => e.seq < reload.seq);
+    expect(committedPut(drain, recovery, 2)).toBe(true);
+    expect(committedPut(drain, workspace, 2)).toBe(!deadline);
+    expect(dialogs.types).toEqual(["beforeunload"]);
+    if (deadline) {
+      expect(reload.time - switched.time).toBeGreaterThanOrEqual(2950);
+      expect(reload.time - switched.time).toBeLessThan(5000);
+      return;
+    }
+    await expect(page.getByTestId("active-instance-count")).toHaveText("0");
+    const dialog = await recover(page);
+    await expect(
+      dialog.getByText(bob.id, { exact: true }).first(),
+    ).toBeVisible();
+    await expect(dialog.getByText(alice.id, { exact: true })).toHaveCount(0);
+    await expect(page.getByTestId("workspace-reopen-banner")).toHaveCount(0);
+    await page.close();
+    await writeTokenFrom(writer, alice);
+    const fresh = await context.newPage();
+    await openNotebookEditor(fresh);
+    const aliceDialog = await recover(fresh);
+    await expect(
+      aliceDialog
+        .getByTestId("recovery-session-card")
+        .filter({ hasText: alice.id })
+        .locator("dd")
+        .first(),
+    ).toContainText("revision 2");
+    await fresh.keyboard.press("Escape");
+    await fresh
+      .getByTestId("workspace-reopen-banner")
+      .getByRole("button", { name: "Reopen tabs" })
+      .click();
+    await expect(fresh.getByTestId("revision")).toHaveText("2");
+  });
+
+test("R4 Bob can publish a component with an interrupted Alice publication", async ({
+  page,
+  context,
+}) => {
+  const alice = newUser("alice"),
+    bob = newUser("bob");
+  await signIn(page, alice);
+  const writer = await context.newPage();
+  await writer.goto("/");
+  await openNotebookEditor(page);
+  await clickCommand(page, "Edit", "User Components…");
+  const library = page.getByRole("dialog", {
+    name: "User Components",
+    exact: true,
+  });
+  await library.getByRole("button", { name: "Create Component…" }).click();
+  const editor = page.getByRole("dialog", {
+    name: "Edit Component Definition",
+    exact: true,
+  });
+  await editor
+    .getByLabel("Definition type", { exact: true })
+    .selectOption("json");
+  const definition = newComponentDefinition();
+  definition.symbol.name = alice.id;
+  await editor
+    .getByRole("textbox", { name: "Component definition code" })
+    .fill(JSON.stringify(definition, null, 2));
+  await editor.getByRole("button", { name: "Apply", exact: true }).click();
+  const publish = editor.getByRole("button", {
+    name: /^(Publish|Update my component)$/u,
+  });
+  const pattern = "**/canvas/api/components/*";
+  await page.route(pattern, (route) =>
+    route.request().method() === "PUT" ? route.abort() : route.continue(),
+  );
+  const failed = page.waitForEvent("requestfailed", {
+    predicate: (r) =>
+      r.method() === "PUT" && r.url().includes("/api/components/"),
+  });
+  await publish.click();
+  const request = await failed;
+  const componentId = new URL(request.url()).pathname.split("/").at(-1)!;
+  const journal = () =>
+    rawRecords(
+      page,
+      prefix(alice) + "analog-canvas-component-publication",
+      "operations",
+    );
+  await expectMountedNamespace(page, alice);
+  const pending = await journal();
+  expect(pending).toEqual([
+    expect.objectContaining({
+      pending: true,
+      componentId,
+      accountId: alice.id,
+    }),
+  ]);
+  await editor.getByLabel("Close component editor").click();
+  const leave = editor.getByRole("button", {
+    name: "Discard changes",
+    exact: true,
+  });
+  if (await leave.isVisible()) await leave.click();
+  await expect(editor).toBeHidden();
+  if (await library.isVisible())
+    await library.getByRole("button", { name: "Close", exact: true }).click();
+  const file = await downloadBytes(page, "File", "Export Project File…");
+  await page.unroute(pattern);
+  await switchUser(page, writer, bob);
+  await openProjectFile(page, file);
+  await clickCommand(page, "Edit", "User Components…");
+  await library.getByRole("tab", { name: "My shelf", exact: true }).click();
+  await library
+    .getByRole("tab", { name: "Project drafts", exact: true })
+    .click();
+  await library
+    .locator(".component-draft-name")
+    .filter({ hasText: alice.id })
+    .click();
+  const published = page.waitForResponse(
+    (r) => r.request().method() === "PUT" && r.url() === request.url(),
+  );
+  await publish.click();
+  const response = await published;
+  expect(response.request().headers().authorization).toBe(bob.bearer);
+  expect(response.status()).toBe(200);
+  await expect(
+    page.getByText(
+      /Resolve the original publication with its original account/u,
+    ),
+  ).toHaveCount(0);
+  const publishedEvents = await documentTrace(page);
+  checkNamespace(publishedEvents, bob);
+  expect(publishedEvents).toContainEqual(
+    expect.objectContaining({
+      op: "put",
+      name: prefix(bob) + "analog-canvas-component-publication",
+      store: "operations",
+    }),
+  );
+  expect(await journal()).toEqual(pending);
+});
+
+test("R5 Bob ignores Alice's recent cloud project in the same tab", async ({
+  page,
+  context,
+}) => {
+  const alice = newUser("alice"),
+    bob = newUser("bob");
+  const writer = await context.newPage();
+  await writer.goto("/");
+  await closedDrawing(writer, bob);
+  await signIn(page, alice);
+  const id = await createProjectAs(alice, alice.id);
+  await openNotebookEditor(page);
+  const shelf = await projectTabAction(page, "Open Cloud Project…");
+  await shelf.getByRole("button", { name: alice.id, exact: true }).click();
+  const key = "analog-canvas.recent-cloud-project.v1";
+  const binding = () =>
+    page.evaluate(
+      (k) => window.__nb.read(window.__nb.session, k),
+      prefix(alice) + key,
+    );
+  await expect.poll(binding).toBe(id);
+  expect(new URL(page.url()).search).toBe("");
+  const urls: string[] = [];
+  page.on("request", (r) => urls.push(r.url()));
+  const listing = page.waitForResponse(
+    (r) =>
+      new URL(r.url()).pathname === "/canvas/api/projects" &&
+      r.request().method() === "GET" &&
+      r.request().headers().authorization === bob.bearer,
+  );
+  await switchUser(page, writer, bob);
+  await openShelfWall(page);
+  expect((await listing).status()).toBe(200);
+  await page.keyboard.press("Escape");
+  const dialog = await recover(page);
+  await expect(dialog.getByText(bob.id, { exact: true })).toBeVisible();
+  expect(new URL(page.url()).search).toBe("");
+  const events = await documentTrace(page);
+  checkNamespace(events, bob);
+  expect(events).toContainEqual(
+    expect.objectContaining({
+      op: "getItem",
+      name: prefix(bob) + key,
+      area: "session",
+    }),
+  );
+  expect(urls.filter((url) => url.includes(id))).toEqual([]);
+  expect(await binding()).toBe(id);
+});

@@ -1,3 +1,4 @@
+import { prefix, instrumentStorage } from "./notebook-storage-fixtures.js";
 // Evidence beside the notebook run (T162c, N11): the standard build keeps
 // its single-user recovery prompt with the API unreachable (against the
 // fixture's standalone sibling), and the notebook build keeps the Agent off
@@ -14,7 +15,6 @@ import {
   expectNoForeignOrigin,
   expectStandaloneRequests,
   fixture,
-  instrumentStorage,
   newUser,
   notebookSuite,
   origin,
@@ -62,6 +62,7 @@ test("N11d seed control: the standard editor's recovery reader accepts the singl
   // The seed the notebook cases (N2, N9) plant is what a single-user editor
   // leaves; here the standard build itself reads it back.
   const context = await siblingContext(browser);
+  await instrumentStorage(context);
   try {
     const recorder = recordRequests(context, { origin: siblingOrigin });
     const page = await context.newPage();
@@ -167,7 +168,6 @@ test("N11c the notebook build keeps the Agent off with a saved Agent session and
   page,
   context,
 }) => {
-  await instrumentStorage(context);
   const recorder = recordRequests(context);
   // The Agent reaches its session through a WebSocket (socketUrl in
   // use-agent-session.ts), and Playwright reports WebSockets apart from
@@ -182,18 +182,21 @@ test("N11c the notebook build keeps the Agent off with a saved Agent session and
   await page.goto("/");
   // A record the standard editor would resume (hasAgentSessionRecovery in
   // agent/session-recovery-presence.ts), in the tab that opens the editor.
-  await page.evaluate(([key, value]) => sessionStorage.setItem(key, value), [
-    AGENT_SESSION_KEY,
-    JSON.stringify({
-      version: 1,
-      sessionId: "agent-session-seed",
-      editorSecret: "editor-secret-seed",
-      projectId: "project-seed",
-      projectSessionId: "project-session-seed",
-      scopes: ["read"],
-      expiresAt: Date.now() + 3_600_000,
-    }),
-  ] as const);
+  await page.evaluate(
+    ([key, value]) => window.__nb.write(window.__nb.session, key, value),
+    [
+      prefix(alice) + AGENT_SESSION_KEY,
+      JSON.stringify({
+        version: 1,
+        sessionId: "agent-session-seed",
+        editorSecret: "editor-secret-seed",
+        projectId: "project-seed",
+        projectSessionId: "project-session-seed",
+        scopes: ["read"],
+        expiresAt: Date.now() + 3_600_000,
+      }),
+    ] as const,
+  );
   await writeTokenFrom(page, alice);
   const from = await recorder.mark("alice");
   await page.goto("/canvas/editor?agent=pair");
@@ -214,7 +217,7 @@ test("N11c the notebook build keeps the Agent off with a saved Agent session and
           (entry) =>
             entry.op === "getItem" &&
             entry.area === "session" &&
-            entry.key === WORKING_COPY_KEY,
+            entry.key === prefix(alice) + WORKING_COPY_KEY,
         ),
       };
     })
@@ -225,7 +228,10 @@ test("N11c the notebook build keeps the Agent off with a saved Agent session and
   const probe = await readProbe(page);
   expect(
     probe.filter(
-      (entry) => entry.op === "getItem" && entry.key === AGENT_SESSION_KEY,
+      (entry) =>
+        entry.op === "getItem" &&
+        (entry.key === AGENT_SESSION_KEY ||
+          entry.key === prefix(alice) + AGENT_SESSION_KEY),
     ),
   ).toEqual([]);
   const urls = recorder.between(from, end).map((record) => record.url);

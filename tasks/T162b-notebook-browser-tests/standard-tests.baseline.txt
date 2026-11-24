@@ -122,6 +122,7 @@
 	drawing-style.spec.ts	colors a generated pin-contact dot independently, with undo, reload, SVG, PNG and PDF
 	drawing-style.spec.ts	styles a wire's colour, line and arrow through property code, with undo, export, reload and Auto, and names it globally in one step
 	editor-modes.spec.ts	B, I and T in Auto bring up Draw and do their job
+	editor-modes.spec.ts	Delete or Backspace inside an open menu leaves the drawing alone
 	editor-modes.spec.ts	Document settings close on the switch to Auto and hold nothing
 	editor-modes.spec.ts	Draw it yourself puts focus on the Draw switch
 	editor-modes.spec.ts	Insert component… from the menu in Auto brings up Draw
@@ -270,9 +271,11 @@
 	move-and-drag.spec.ts	command move turns a part while stretching its boundary wire, restores the exact preview on Escape and commits pose and translation together
 	move-and-drag.spec.ts	dragging an unselected part past the threshold draws its wire stretching before the drop
 	move-and-drag.spec.ts	selects and moves multiple instances while viewport gestures stay transient
+	netlist-auto-layout.spec.ts	Draw updates the CLQC connection after a netlist edit and preserves placement
 	netlist-auto-layout.spec.ts	a Cell over the size limit keeps its shelf; the other is laid out
 	netlist-auto-layout.spec.ts	a multi-subcircuit netlist is announced and every Cell laid out at once
 	netlist-auto-layout.spec.ts	a one-Cell netlist is laid out after import, in one Undo step
+	netlist-auto-layout.spec.ts	chooses a drawing symbol for an undeclared MOS model
 	netlist-code-edit.spec.ts	an incomplete circuit shows a read-only draft linked to the canvas, and reopening Netlist preserves its data
 	netlist-code-edit.spec.ts	bound labels retain typography on rename and support manual scripts without an alias
 	netlist-code-edit.spec.ts	explicit inspectors yield to Netlist for a replacement while ordinary edits preserve the panel choice
@@ -302,6 +305,13 @@
 	project-file.spec.ts	native cross-window clipboard preserves an editable circuit and text-field shortcuts
 	project-file.spec.ts	paired refresh preserves the saved Cloud binding
 	project-file.spec.ts	replacement guard saves to Cloud and continues
+	project-import-link.spec.ts	a link can be retried after missing recovery, a broken fragment and a blocked tab switch
+	project-import-link.spec.ts	a link opens an independent editable snapshot beside the recipient's work
+	project-import-link.spec.ts	an import keeps its link if workspace storage fails to open
+	project-import-link.spec.ts	an import keeps its link if workspace storage fails to write
+	project-import-link.spec.ts	an import keeps its link if workspace storage fails to write and its tab is reused
+	project-import-link.spec.ts	changing the fragment during file staging never opens the obsolete project
+	project-import-link.spec.ts	returning to an earlier entry with the same URL cancels a staged import
 	project-source-format.spec.ts	edits a complete instance in portable Project Code and undoes once
 	project-source-format.spec.ts	lights the whole Project Code of a part selected on the canvas
 	project-tabs.spec.ts	C carries a fresh copy into another tab, and V and Ctrl/Cmd+V paste the same
