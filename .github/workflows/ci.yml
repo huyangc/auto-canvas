@@ -36,6 +36,10 @@ jobs:
       AUTO_CANVAS_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/auto_canvas_test
     steps:
       - uses: actions/checkout@v4
+        with:
+          # A pull request checks out its merge commit; its first parent is
+          # the base commit, so format:check can diff against it.
+          fetch-depth: 2
       - uses: pnpm/action-setup@v4
         with:
           version: 11.16.0
@@ -45,6 +49,9 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm format:check
+        env:
+          # Empty on push, which makes the script check every file.
+          FORMAT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
       - run: pnpm docs:check
       - run: pnpm agent-docs:generated:check
       - run: pnpm components:check
@@ -52,5 +59,4 @@ jobs:
       - run: pnpm lint
       - run: pnpm deadcode
       - run: pnpm build
-      # vitest.config.ts excludes known inherited failures when CI is set.
       - run: pnpm test:local

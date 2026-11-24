@@ -182,7 +182,8 @@ it.each(cases)(
   (fixture) => {
     const { document, resolver, plan } = defaultPlan(fixture);
     const initial = planLayoutOnce(document, resolver, {}, emptyOverrides());
-    expect(planAutoLayout(document, resolver)).toEqual(plan);
+    // Determinism: corpus.test.ts re-plans every corpus fixture and compares
+    // the edits with this same cached default plan, so it is not repeated here.
     const final = preview(document, resolver, plan.edits);
     expect(final.ok).toBe(true);
     if (!final.ok) return;
@@ -194,9 +195,10 @@ it.each(cases)(
     ).toBeLessThanOrEqual(routedScore(initial, resolver));
     expect(refinementMetrics(plan)!.candidates).toBeLessThanOrEqual(24);
   },
-  // Plans twice and once more without refinement; the final pin-contact
-  // search makes this exceed the 5 s default on slow CI runners. T074's
-  // readability selection adds ~1.5x on two-inverters (CI passed 15 s).
+  // Plans once (shared with this file's other cases) and once more without
+  // refinement; the final pin-contact search makes this exceed the 5 s
+  // default on slow CI runners. T074's readability selection adds ~1.5x on
+  // two-inverters (CI passed 15 s while it still planned twice).
   30000,
 );
 

@@ -31,7 +31,10 @@ in the task plan before review. Record results and missing resources in the
 task report, following the [repository workflow](../workflow.md).
 
 `pnpm test:local` runs ordinary unit/module tests, including standalone tests
-that build their own dependencies. Files named `*.slow.test.ts` (also `.tsx`
+that build their own dependencies. Its worker count comes from
+`vitest.config.ts`: half the cores locally, which leaves room for the other
+task lanes on the machine, and every core on CI; a `--maxWorkers` flag on the
+command line overrides it. Files named `*.slow.test.ts` (also `.tsx`
 or `.mjs`) hold expensive full-search quality benchmarks and are excluded
 from the default Vitest projects, `pnpm check` and CI. `pnpm test:slow` opts
 into the `slow` project and runs only those files. For auto-layout changes,
@@ -39,6 +42,10 @@ Opus must rerun `pnpm test:slow` locally and post its results as required PR
 review evidence. Held-out drawings retain quick-mode validity, routing safety
 and Net/terminal preservation checks in the default suite; their unchanged
 full-search checks, including the T013 crossing limits, run in the slow suite.
+In the same way, the full-search geometry of the current-source-tail pairs and
+of the source-degenerated differential branches, the 120-device stage chain
+and the 85-device layered chain run only in the slow suite; the default suite
+keeps quick-planning or smaller-input checks of the same invariants.
 
 `pnpm test:e2e:local` runs browser workflows;
 run `pnpm setup:e2e` once per machine or Playwright version when needed.
