@@ -494,11 +494,18 @@ function refineNetlistPlacement(
     { candidate: mirrorBest, final },
     (seats, acceptDraft) => routeSeats(seats, false, acceptDraft),
     stopped,
-    (base, moves, acceptDraft) => {
-      const draft = rerouteMovedPorts(document, resolver, base, moves);
+    (base, moves, acceptDraft, onAttempt) => {
+      const draft = rerouteMovedPorts(
+        document,
+        resolver,
+        base,
+        moves,
+        onAttempt,
+      );
       if (draft && acceptDraft(draft.final))
         return finishSeats(draft.candidate, false);
     },
+    (placed) => contactGeometryProblem(placed, resolver, contacts),
   );
   if (stopped()) return ports;
   const traced = differentialBranches(document, resolver);
@@ -2837,6 +2844,10 @@ function buildPlan(
     );
     for (const annotation of deviceLabels)
       edits.push({ kind: "upsert_schematic_annotation", annotation });
+    if (edits.length > MAX_SCHEMATIC_EDITS_PER_TRANSACTION)
+      return {
+        problem: "R10: R16 complete edit list exceeds transaction limit",
+      } as const;
     const cleaned = preview(document, resolver, edits);
     if (!cleaned.ok)
       return {

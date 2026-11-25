@@ -16,6 +16,7 @@ import {
 } from "./differential-branches.js";
 import {
   enclosingBox,
+  geometryProblem,
   pinPoints,
   placement,
   withPlacements,
@@ -38,7 +39,12 @@ type RoutePort = (
   base: Trial,
   moves: Seats,
   acceptDraft: AcceptDraft,
+  onAttempt: () => void,
 ) => Trial | undefined;
+
+function seatKey(source: SchematicDocument, seats: Seats) {
+  return JSON.stringify(source.instances.map((i) => seats.get(i.id)));
+}
 
 function portRoles(source: SchematicDocument, resolver: SymbolResolver) {
   const roles = classifyNets(source, resolver);
@@ -237,6 +243,8 @@ export function selectNetlistPortSides(
   route: RouteSeats,
   stopped: () => boolean,
   routePort?: RoutePort,
+  placementProblem = (placed: SchematicDocument) =>
+    geometryProblem(placed, resolver),
 ) {
   const context = portRoles(source, resolver);
   if (!context.ports.length) return initial.candidate;
@@ -257,9 +265,10 @@ export function selectNetlistPortSides(
     );
   };
   const routeOnce = (seats: Seats) => {
-    const key = JSON.stringify(source.instances.map((i) => seats.get(i.id)));
+    const key = seatKey(source, seats);
     if (trials.has(key)) return trials.get(key);
-    if (trials.size >= limit) return;
+    if (trials.size >= limit || placementProblem(withPlacements(source, seats)))
+      return;
     const trial = route(seats, withinWireBudget);
     trials.set(key, trial);
     return trial;
@@ -271,8 +280,9 @@ export function selectNetlistPortSides(
     routePort &&
     ((base: Trial, moves: Seats) => {
       if (localTrials >= limit) return;
-      localTrials++;
-      return routePort(base, moves, withinWireBudget);
+      return routePort(base, moves, withinWireBudget, () => {
+        localTrials++;
+      });
     });
   const run = (seed: Trial, pairs: typeof groups) =>
     searchPortLayouts(
@@ -499,7 +509,7 @@ function searchPortLayouts(
         )
           return;
       }
-      const key = JSON.stringify([...seats.values()]);
+      const key = seatKey(source, seats);
       if (seen.has(key)) return;
       seen.add(key);
       if (routePort && geo === current && source.instances.length > 24) {
@@ -581,68 +591,74 @@ function searchPortLayouts(
       "tight",
       "jog",
     ] as const;
-    for (const mode of probeCorridors ? [] : modes) {
-      mirrored = mode === "mirror";
-      if (stopped()) break;
-      for (const drawing of frames(mode, start.final, current, context)) {
-        const geo =
-          drawing === start.final
-            ? current
-            : portGeometry(drawing, resolver, context)!;
-        const status = portLevels(geo, geo.seats);
-        const wrong = geo.ports.filter(
-          (_, i) => status[i]! < (mode === "interior" ? 1 : 2),
-        );
-        if (mode === "mirror" || mode === "tight")
-          routeCandidate(geo.seats, geo);
-        if (!wrong.length) continue;
-        const groups =
-          mode === "jog"
-            ? wrong.map((p) => [p])
-            : [
-                geo.ports,
-                wrong,
-                wrong.filter((p) => main.has(p.id)),
-                ...(mode === "existing" || mode === "interior"
-                  ? [
-                      wrong.filter((p) => p.left),
-                      wrong.filter((p) => !p.left),
-                      ...wrong.map((p) => [p]),
-                    ]
-                  : []),
-              ];
-        for (const inset of mode === "interior" ? [0.2, 0.4] : [0]) {
-          const columns = inset
-            ? {
-                ...geo,
-                box: {
-                  ...geo.box,
-                  x: geo.box.x + inset * geo.box.width,
-                  width: geo.box.width * (1 - 2 * inset),
-                },
+    for (const offsets of source.instances.length > 24
+      ? [[1], [2], [4]]
+      : [[1, 2, 4]]) {
+      for (const mode of probeCorridors ? [] : modes) {
+        if (mode === "interior" && offsets[0] !== 1) continue;
+        mirrored = mode === "mirror";
+        if (stopped()) break;
+        for (const drawing of frames(mode, start.final, current, context)) {
+          const geo =
+            drawing === start.final
+              ? current
+              : portGeometry(drawing, resolver, context)!;
+          const status = portLevels(geo, geo.seats);
+          const wrong = geo.ports.filter(
+            (_, i) => status[i]! < (mode === "interior" ? 1 : 2),
+          );
+          if (mode === "mirror" || mode === "tight")
+            routeCandidate(geo.seats, geo);
+          if (!wrong.length) continue;
+          const groups =
+            mode === "jog"
+              ? wrong.map((p) => [p])
+              : [
+                  geo.ports,
+                  wrong,
+                  wrong.filter((p) => main.has(p.id)),
+                  ...(mode === "existing" || mode === "interior"
+                    ? [
+                        wrong.filter((p) => p.left),
+                        wrong.filter((p) => !p.left),
+                        ...wrong.map((p) => [p]),
+                      ]
+                    : []),
+                ];
+          for (const inset of mode === "interior" ? [0.2, 0.4] : [0]) {
+            const columns = inset
+              ? {
+                  ...geo,
+                  box: {
+                    ...geo.box,
+                    x: geo.box.x + inset * geo.box.width,
+                    width: geo.box.width * (1 - 2 * inset),
+                  },
+                }
+              : geo;
+            for (const group of groups)
+              for (const seats of edgeColumns(
+                columns,
+                group,
+                source.presentation.grid,
+                mode === "interior" ? [1] : offsets,
+                mode === "jog" ? [-2, 2] : [0],
+              )) {
+                if (stopped()) return best;
+                const before = best;
+                routeCandidate(seats, geo);
+                if (
+                  best !== before &&
+                  group.every((p) => levels[geo.ports.indexOf(p)] === 2) &&
+                  auditRouting(best.final, resolver).crossings === 0
+                )
+                  break;
               }
-            : geo;
-          for (const group of groups)
-            for (const seats of edgeColumns(
-              columns,
-              group,
-              source.presentation.grid,
-              mode === "interior" ? [1] : [1, 2, 4],
-              mode === "jog" ? [-2, 2] : [0],
-            )) {
-              if (stopped()) return best;
-              const before = best;
-              routeCandidate(seats, geo);
-              if (
-                best !== before &&
-                group.every((p) => levels[geo.ports.indexOf(p)] === 2) &&
-                auditRouting(best.final, resolver).crossings === 0
-              )
-                break;
-            }
+          }
         }
+        if (best !== start || levels.every((n) => n === 2)) break;
       }
-      if (best !== start || levels.every((n) => n === 2)) break;
+      if (best !== start) break;
     }
     if (best === start) {
       if (
