@@ -1,55 +1,38 @@
-# Agent Entry (implementer)
+# auto-canvas 仓库入口
 
-auto-canvas is a web schematic canvas for automatic analog placement and
-routing (APR) with human fine-tuning. It starts from an analog-canvas snapshot
-(UPSTREAM.md). The repository workflow is in [docs/workflow.md](docs/workflow.md):
-Opus plans and reviews, an implementer subagent implements (Codex when the
-owner asks), and codex reviews the code — and the plan when the owner asks for
-that. These rules apply to whoever implements.
+auto-canvas 是一个支持模拟电路自动布局布线和人工微调的 Web 原理图画布。先根据**本次请求**确定职责。同一个模型可以在不同会话里承担不同角色。
 
-These rules replace the upstream analog-canvas process: there are no Issues,
-deployments or Production acceptance here. Opus delivers reviewed work through
-a PR; see the workflow document.
+| 你收到的请求 | 从哪里开始 |
+| --- | --- |
+| 用户直接提出需求、报告故障或要求改进 | 你是本次任务的负责人。从「直接接到需求」开始，即使仓库里还没有对应的计划。 |
+| 用户或上级代理指定任务计划，要求实现或修复上一轮发现 | 从「执行已有计划」开始。 |
+| 用户要求审查计划、代码或 PR | 以只读方式核对请求、计划、diff 和验收证据，报告可复现的问题及位置。按审查简报记录结论。 |
 
-## When you are given a task
+[项目工作流](docs/workflow.md)约定了任务、审查和 PR 的交付方式。其中由 Opus 承担的规划、协调和验收职责，在其他模型作为入口时由该入口承担。Claude Code 的技能、钩子和工具调用方式见 [CLAUDE.md](CLAUDE.md)。其他入口可以用当前环境的工具完成相同步骤。
 
-1. Read the task's `plan.md` in full, then `review.md` if it exists. A review
-   lists findings from the previous round; fix every one marked `must-fix`.
-2. Run `git status --short --branch`. Work only on the branch the plan names.
-   Leave unrelated changes alone.
-3. Implement the plan's steps in order. Stay inside its owned paths. If a step
-   is impossible, wrong or would need an out-of-scope change, stop that step
-   and record why in the report instead of improvising a different design.
-4. Run every acceptance command in the plan. A failing command is fixed or
-   reported with its output; never weaken, skip or delete a test to make it
-   pass unless the plan puts that test in scope for removal.
-5. Report from `tasks/_template/report.md`. A Codex round writes `report.md`;
-   a subagent returns the same content as its final message unless its brief
-   says to write the file.
+## 直接接到需求
 
-## Hard rules
+1. 先运行 `git status --short --branch`，检查相关代码、测试和已有任务。用户问的是问题时，按证据回答。收到故障报告时，先定位失败用例和复现条件；即使缺少计划，也可以立即调查。
+2. 需要修改仓库时，使用本任务的独立 worktree，保留用户已有改动。若已有匹配的计划，核对其范围和分支；新任务由你基于[计划模板](tasks/_template/plan.md)编写 `tasks/T<编号>-<slug>/plan.md`，列明分支、目标、可改路径和验收命令。历史任务可作参考，不能直接当作本次授权。
+3. 对照代码自查方案，按工作流与用户确认范围和产品决策；沿用用户已经给出的决定。用户要求独立方案评审时，按工作流安排。范围确定后，可以把计划交给实现者；用户要求你亲自实现，或当前环境只有一个代理时，由你按同一计划执行，并在实现后单独核对 diff、重跑验收。
+4. 验收通过后，由任务负责人按下节交付 PR。在 PR 中说明改动、实际验证结果和遗留问题。
 
-- Commit only when your brief says so, and only on the task branch. Never
-  push, merge, rebase or switch branches. A Codex round never commits.
-- Do not edit `plan.md` or `review.md`.
-- Do not install, upgrade or remove dependencies or change `pnpm-lock.yaml`
-  unless the plan says so. A Codex round's sandbox has no network.
-- Do not hand-edit generated files (`*.generated.ts`, generated docs); run the
-  generator script that owns the file.
-- Keep behavior the plan does not mention unchanged.
-- Do not run anything that calls an LLM provider API and spends tokens (a
-  partition script, an evaluation with an LLM option, any new provider call)
-  unless the plan says the user confirmed that run. If a step needs one and the
-  plan does not say so, stop that step and record it in the report. Runs that
-  only read cached results and make no API call are fine.
+## 提交、提 PR 与合入
 
-## Repository facts
+- **默认自动提 PR。** 负责人检查最终 diff 并完成自验证后，自动提交本次任务的改动到任务分支、推送该分支并创建 PR，向开发者返回链接。这三个动作一次完成，无需另行确认。已有本任务的 PR 时，推送到同一分支更新它。开发者对本次交付另有指示时按其指示执行。
+- **按授权自动合入。** 开发者对本次交付说「CI 绿了就合入」即已授权。负责人持续跟踪 PR，确认所有检查通过、远端最新提交已有[项目工作流](docs/workflow.md)要求的评审且阻塞意见已解决后，自动合入并核实状态为 `MERGED`。有新提交时重新核对该提交的检查与评审。仅授权提 PR 时，将 PR 留给开发者决定何时合入。
 
-- Node 24+ and pnpm 11.16. Checks: `pnpm build`, `pnpm typecheck`,
-  `pnpm test:local` (Vitest), `pnpm lint`, `pnpm format:check`,
-  `pnpm deadcode` (knip).
-- Packages are `packages/*` (`@icm/*`), apps are `apps/*`. Ownership and
-  contracts: [docs/overall-product-plan.md](docs/overall-product-plan.md) and
-  [docs/specs/](docs/specs/README.md).
-- Code standards: [CODING_STANDARDS.md](CODING_STANDARDS.md). Testing:
-  [docs/testing/README.md](docs/testing/README.md).
+## 执行已有计划
+
+1. 通读任务的 `plan.md` 和已有的 `review.md`，核对 `git status --short --branch`。只在计划指定的 worktree 和分支工作。
+2. 按计划顺序修改其列出的路径，处理每一项 `must-fix`。保留范围外行为。某一步不可行或需要扩大范围时，记录原因，交由负责人处理。实现者将计划和评审记录视为只读。
+3. 运行计划中的每条验收命令。修复失败或在报告里附上失败输出；保留原有测试和断言，除非计划明确要求变更。
+4. 按[报告模板](tasks/_template/report.md)记录结果。独立 Codex 实现轮次写入任务的 `report.md`，不提交；其他受派实现者默认以最终消息返回报告，简报另有要求时按简报执行。
+5. 受派实现者仅在简报明确要求时于任务分支提交。推送、合并、rebase 和切换分支均不属于受派实现轮次。
+
+## 修改与验证
+
+- 改代码前查阅[代码规范](CODING_STANDARDS.md)；改测试时查阅[测试指南](docs/testing/README.md)。涉及包归属、跨包接口或产品行为时，核对[产品规划](docs/overall-product-plan.md)和[规格索引](docs/specs/README.md)。
+- 通过所属生成器更新 `*.generated.ts` 和生成文档。受派实现轮次仅在计划明确要求时安装、升级或移除依赖，或修改 `pnpm-lock.yaml`。
+- 运行会消耗 LLM 服务商 API token 的项目脚本或评测前，说明用途、预计调用次数和费用，取得用户对该次运行的确认。委派时将确认写入计划。只读缓存的运行可以直接执行。
+- Node 和 pnpm 版本、可用脚本见 [package.json](package.json)。核对 CI 实际执行的检查时，以 [CI 工作流](.github/workflows/ci.yml) 为准。
