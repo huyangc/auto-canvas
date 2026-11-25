@@ -34,5 +34,5 @@ auto-canvas 是一个支持模拟电路自动布局布线和人工微调的 Web 
 
 - 改代码前查阅[代码规范](CODING_STANDARDS.md)；改测试时查阅[测试指南](docs/testing/README.md)。涉及包归属、跨包接口或产品行为时，核对[产品规划](docs/overall-product-plan.md)和[规格索引](docs/specs/README.md)。
 - 通过所属生成器更新 `*.generated.ts` 和生成文档。受派实现轮次仅在计划明确要求时安装、升级或移除依赖，或修改 `pnpm-lock.yaml`。
-- 运行会消耗 LLM 服务商 API token 的项目脚本或评测前，说明用途、预计调用次数和费用，取得用户对该次运行的确认。委派时将确认写入计划。只读缓存的运行可以直接执行。
+- **API Key 额度。** 在已授权的任务范围内，只有会消耗 API Key 额度的操作需要事先询问。说明用途、预计调用次数和额度或费用，取得覆盖本次调用的确认后执行；委派时传递该授权。使用订阅账号的评审、本地测试和只读缓存等不消耗 API Key 额度的操作直接执行。判断依据是实际计费方式。
 - Node 和 pnpm 版本、可用脚本见 [package.json](package.json)。核对 CI 实际执行的检查时，以 [CI 工作流](.github/workflows/ci.yml) 为准。
