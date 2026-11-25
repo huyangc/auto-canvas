@@ -42,7 +42,6 @@ Works today:
 - **Agent relay on the server.** Live Agent sessions use Node and PostgreSQL;
   Vite forwards HTTP and WebSocket traffic to `apps/server`.
 - **Offline EDA export** scripts for Aether and Virtuoso in [eda/](eda/).
-- **Desktop preview** (`apps/desktop`, Electron) that works without a server.
 
 Not done yet:
 
@@ -124,15 +123,13 @@ For development, read `.local/logs/server-dev.log`. Containers emit these lines 
 | `pnpm test:local`         | Unit and integration tests (Vitest); server tests use `auto_canvas_test`  |
 | `pnpm test:e2e:local`     | Browser tests (Playwright); run `pnpm setup:e2e` once to install Chromium |
 | `pnpm mcp:package`        | Build the MCP server package for Agents                                   |
-| `pnpm test:desktop-build` | Build the desktop renderer                                                |
 
 ## Repository layout
 
 ```text
 apps/
-  editor/       React schematic editor (web, and the desktop renderer)
+  editor/       React schematic editor
   server/       Node server: identity, Cloud Projects, User Components
-  desktop/      Electron desktop preview
   mcp-server/   MCP adapter for Agents
   local-host/   Minimal static host for a built editor
 packages/

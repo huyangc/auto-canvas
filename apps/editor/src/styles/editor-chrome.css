@@ -1937,30 +1937,6 @@
   }
 }
 
-/* A host with header controls of its own (the desktop's Local projects and
-   About, which have no icons) needs more room. Up to 1000 px its project
-   name goes first, as below 720 px (File → Project Info still has it); up
-   to 940 px the wordmark goes too (the brand mark stays); only then, in
-   that band, may the actions shrink. Above 1000 px it is the web's bar. */
-@media (width > 720px) and (width <= 1000px) {
-  .app-chrome-main[data-host-controls] .app-brand > .app-project-name {
-    display: none;
-  }
-}
-
-@media (width > 720px) and (width <= 940px) {
-  .app-chrome-main[data-host-controls] .editor-brand h1 {
-    display: none;
-  }
-}
-
-@media (width > 1000px) {
-  .app-chrome-main[data-host-controls]
-    .app-chrome-actions:not(:has(.auto-layout-control[data-running="true"])) {
-    flex-shrink: 0;
-  }
-}
-
 .app-chrome-main .app-brand > .app-project-name {
   display: inline-flex;
   flex: 0 1000 auto;

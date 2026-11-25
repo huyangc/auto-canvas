@@ -52,14 +52,6 @@ type DocumentControllerState = ReturnType<typeof useDocumentController>;
 type ProjectFileLifecycle = ReturnType<typeof useProjectFileLifecycle>;
 type EditorPanels = ReturnType<typeof useEditorPanels>;
 
-type SessionOptions = Parameters<typeof useEditorAgentSession>[0];
-// The host is fixed for the entire build, so every render calls the same
-// hook. Web hosts exist once the Agent runtime has loaded (#1673); until
-// then the session is the workspace's, not connected.
-const useHostAgentSession = import.meta.env?.ICM_DESKTOP
-  ? (_options: SessionOptions) => null
-  : useEditorAgentSession;
-
 /** The Agent session a refreshed tab resumes, read once at startup. */
 export function useAgentStartupRecovery({
   capabilities,
@@ -72,7 +64,6 @@ export function useAgentStartupRecovery({
 }) {
   const [agentStartupRecovery] = useState(() => {
     if (
-      import.meta.env?.ICM_DESKTOP ||
       !capabilities.agent ||
       typeof window === "undefined" ||
       restoredWorkspace
@@ -153,7 +144,7 @@ export function useBrowserAgentHost({
   commitCallbacks.current = { synchronizeExternalCommit, flushRecovery };
   const browserAgentHost = useMemo(
     () =>
-      !import.meta.env?.ICM_DESKTOP && runtime
+      runtime
         ? new runtime.BrowserAgentHost(
             editorDocumentController,
             () => {
@@ -224,7 +215,7 @@ export function useAgentProjectResources({
   const resourceKey = projectSessionId;
   const browserAgentFileHost = useMemo(
     () =>
-      !import.meta.env?.ICM_DESKTOP && runtime && browserAgentHost
+      runtime && browserAgentHost
         ? (resources.get(resourceKey)?.files ??
           new runtime.BrowserAgentFileHost({
             getProjectSessionId: () =>
@@ -386,11 +377,8 @@ export function useEditorAgentConnection({
     startupRestoreOutcome,
     workspaceRestoreOutcome: workspaceRestoreOutcome(),
   });
-  const agentSession = useHostAgentSession(
-    !import.meta.env?.ICM_DESKTOP &&
-      browserAgentHost &&
-      browserAgentFileHost &&
-      browserAgentProjectHost
+  const agentSession = useEditorAgentSession(
+    browserAgentHost && browserAgentFileHost && browserAgentProjectHost
       ? {
           // A restored workspace is already the requested circuit. Resume its
           // matching Agent only once the active Project and working copy are
@@ -452,7 +440,7 @@ export function useEditorAgentConnection({
   }
 
   const openAgentConnection = () => {
-    if (import.meta.env?.ICM_DESKTOP || !agentSession) return;
+    if (!agentSession) return;
     setAgentPanelOpen(true);
     if (
       agentSession.status === "idle" ||

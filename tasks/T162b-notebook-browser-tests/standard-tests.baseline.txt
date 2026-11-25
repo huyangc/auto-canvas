@@ -186,7 +186,6 @@
 	editor-modes.spec.ts	the top bar names the project on one row, in both modes
 	editor-modes.spec.ts	the top-bar Auto Layout shows its run and Cancel stops it
 	editor-modes.spec.ts	the ⋯ menu works from the keyboard and closes like the other menus
-	editor-modes.spec.ts	with the desktop host's controls the bar keeps ⋯ and File on screen
 	editor-modes.spec.ts	⋯ → Layout offers Cancel while a run plans, in Auto and in Draw
 	editor-shell.spec.ts	Fit View keeps the drawing clear of the Properties dock
 	editor-shell.spec.ts	docked Properties JSON is the only global configuration surface

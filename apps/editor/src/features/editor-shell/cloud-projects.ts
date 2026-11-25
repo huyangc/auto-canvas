@@ -172,7 +172,7 @@ const cloudLists = new WeakMap<
   typeof fetch,
   Promise<CloudProjectListOutcome>
 >();
-if (!import.meta.env?.ICM_DESKTOP && typeof window !== "undefined")
+if (typeof window !== "undefined")
   window.addEventListener(ACCOUNT_CHANGED_EVENT, () =>
     cloudLists.delete(fetch),
   );

@@ -26,7 +26,7 @@ function tab(name: string, facts: Record<string, unknown> = {}) {
       dirty: false,
       unsafe: false,
       publication: null,
-      file: { cloudBinding: null, nativeBinding: null },
+      file: { cloudBinding: null },
       ...facts,
     },
   };
@@ -50,7 +50,6 @@ function savedTab(
         source: bound ? "cloud-project" : "new",
       },
       file: {
-        nativeBinding: null,
         persistenceState: facts.dirty ? "dirty" : bound ? "clean" : "unbound",
         cloudBinding: bound
           ? { id: facts.cloudId, revision: 4, galleryEntryId: null }
@@ -86,8 +85,7 @@ describe("reopening a closed window's tabs (#1250)", () => {
       { dirty: true },
       { unsafe: true },
       { publication: { id: "gallery-1" } },
-      { file: { cloudBinding: { id: "cloud-1" }, nativeBinding: null } },
-      { file: { cloudBinding: null, nativeBinding: { name: "a.icproj" } } },
+      { file: { cloudBinding: { id: "cloud-1" } } },
     ])
       expect(
         worthReopening(

@@ -1,11 +1,5 @@
-import {
-  createContext,
-  useContext,
-  type ReactNode,
-  type ComponentType,
-} from "react";
+import { createContext, useContext, type ReactNode } from "react";
 import type { RecordEditorUsage } from "@icm/project-protocol";
-import type { NativeProjectHomeProps } from "../hosts/native-project-home";
 import type { CircuitProject } from "@icm/model";
 import type { SessionUser } from "../components/account";
 import type {
@@ -16,13 +10,9 @@ import type {
   deleteCloudProject,
 } from "../features/editor-shell/cloud-projects";
 import type { EditorExportDelivery } from "../hosts/export-delivery";
-import type { FileCommandMenuProps } from "../features/editor-shell/file-command-menu";
-import type { NativeProjectStore } from "../hosts/native-project-store";
-import type { ProjectWorkspace } from "../document/project-workspace";
-import type { NativeExternalTarget } from "../hosts/native-external-links";
 import type { createProjectSnapshotSerializer } from "../document/project-snapshot-serializer";
 
-/** Current Cloud contract, including revisions/conflicts; not a native store. */
+/** Current Cloud contract, including revisions/conflicts. */
 export interface CloudProjectStore {
   readonly kind: "cloud";
   readonly limit: number;
@@ -43,16 +33,8 @@ export interface EditorServices {
   readonly projectSerializer?: ReturnType<
     typeof createProjectSnapshotSerializer
   >;
-  readonly restoreWorkspace?: (
-    workspace: ProjectWorkspace | null,
-  ) => Promise<{ workspace: ProjectWorkspace | null; notice?: string }>;
   readonly identity: { getSessionUser(): Promise<SessionUser | null> } | null;
   readonly projectStore: CloudProjectStore | null;
-  readonly nativeProjectStore?: NativeProjectStore;
-  readonly NativeFileCommands?: FileCommandMenuProps["NativeFileCommands"];
-  readonly NativeProjectHome?: ComponentType<NativeProjectHomeProps>;
-  readonly NativeHeaderActions?: ComponentType;
-  readonly openExternalLink?: (target: NativeExternalTarget) => Promise<void>;
   readonly capabilities: {
     readonly userComponents: boolean;
     readonly agent: boolean;

@@ -36,21 +36,10 @@ local-file Save.
 
 ## Deferred desktop preview work
 
-Deferred by the owner on 2026-11-22: the offline (desktop) preview gets no
-further work for now. Its package is assembled on Windows x64 only, so the
-packaged application cannot be built or accepted on the macOS development
-machine. What was found when the page redesign (T150) was checked in the shell
-is recorded in the
-[T152 report](../../tasks/T152-desktop-shell-gaps/report.md). Left open:
-
-| Outcome                              | Remaining boundary                                                                                                                                                                                                    |
-| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Packaged acceptance after T150       | `pnpm --filter @icm/desktop test:preview` passes on Windows x64 against a package of current `main`. Only the unpackaged `--development` run has passed (T152)                                                        |
-| Project name in mid-width windows    | With host controls and one project tab the page shows no project name from 721 to 1000 px; the window title carries it. Owner chooses what gives way, or that the title is enough; the choices are in the T152 report |
-| Layout test for that choice          | If the name is to show: one tab, widths 721, 761, 801, 901, 941 and 1001 px, the name, File and `⋯` all on screen                                                                                                     |
-| One open command in the desktop File | `Open file in new tab` and `Open Project…` call the same handler; owner decides whether the desktop keeps both                                                                                                        |
-| Product name in the shell            | The window title, the About dialog and the product name say `Analog Canvas`; the page says `Auto Canvas`. Owner decides which texts change; executable and data directory names need a migration and are separate     |
-| Release workflows                    | Windows x64 packaging and acceptance run locally. There is no release workflow in this repository.                                                                               |
+Removed on 2026-11-23 (`apps/desktop`, desktop host adapters, and desktop
+packaging/test scripts) to keep the repository focused on the web editor until
+an offline desktop client is needed again. Historical notes from T152 remain in
+[T152 report](../../tasks/T152-desktop-shell-gaps/report.md).
 
 ## Deferred contract questions
 

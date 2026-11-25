@@ -9,12 +9,8 @@ import {
   canvasPackageLock,
 } from "../src/features/netlist-export/rnl-canvas-package";
 import webConfig from "../vite.config";
-import desktopConfig from "../vite.desktop.config";
 
-const compositions = [
-  ["Web", webConfig],
-  ["desktop", desktopConfig],
-] as const;
+const compositions = [["Web", webConfig]] as const;
 
 it.each(compositions)(
   "refuses a %s build with changed Canvas package bytes",

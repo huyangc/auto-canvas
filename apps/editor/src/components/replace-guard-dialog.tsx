@@ -4,7 +4,6 @@ export interface ReplaceGuardDialogProps {
   /** What is about to replace the dirty work, e.g. "Open amp.icproj.json". */
   intent: string;
   exportOnly?: boolean;
-  nativeSave?: boolean;
   /**
    * How many Cloud Projects one account may keep. The composition root hands
    * in the shared limit so this copy can never fall behind it.
@@ -25,7 +24,6 @@ export interface ReplaceGuardDialogProps {
 export function ReplaceGuardDialog({
   intent,
   exportOnly = false,
-  nativeSave = false,
   cloudProjectLimit,
   saving,
   onCancel,
@@ -85,12 +83,7 @@ export function ReplaceGuardDialog({
               edits.
             </p>
             <p className="replace-guard-hint">
-              {nativeSave ? (
-                <>
-                  Save updates this Project's file. A new Project asks where to
-                  save it.
-                </>
-              ) : exportOnly ? (
+              {exportOnly ? (
                 <>
                   Export a Project file before continuing. This preview does not
                   save files in place.
@@ -130,17 +123,13 @@ export function ReplaceGuardDialog({
             onClick={onSaveAndContinue}
             disabled={saving}
           >
-            {nativeSave
+            {exportOnly
               ? saving
-                ? "Saving…"
-                : "Save and continue"
-              : exportOnly
-                ? saving
-                  ? "Exporting…"
-                  : "Export and continue"
-                : saving
-                  ? "Saving to Cloud…"
-                  : "Save to Cloud and continue"}
+                ? "Exporting…"
+                : "Export and continue"
+              : saving
+                ? "Saving to Cloud…"
+                : "Save to Cloud and continue"}
           </button>
         </div>
       </section>

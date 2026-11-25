@@ -98,13 +98,8 @@ function ProjectNameLabel({
 }
 
 export interface EditorAppChromeProps {
-  identityEnabled?: boolean;
   userComponentsEnabled?: boolean;
-  hostActions?: ReactNode;
-  /** A host with neither web links nor native links says it is the desktop preview. */
-  desktopPreviewLabel?: boolean;
   projectTabs?: ReactNode;
-  projectHome?: ReactNode;
   projectName: string;
   hasUnsavedWork: boolean;
   fileCommands: ComponentProps<typeof FileCommandMenu>;
@@ -165,12 +160,8 @@ export interface EditorAppChromeProps {
 
 /** Persistent command chrome above the document workspace. */
 export function EditorAppChrome({
-  identityEnabled = true,
   userComponentsEnabled = true,
-  hostActions,
-  desktopPreviewLabel = false,
   projectTabs,
-  projectHome,
   projectName,
   hasUnsavedWork,
   fileCommands,
@@ -227,28 +218,16 @@ export function EditorAppChrome({
     alignmentActions.length > 0;
   return (
     <header className="app-chrome">
-      <div
-        className="app-chrome-main"
-        // A host with header controls of its own (the desktop's project home
-        // and About) leaves the bar less room; the CSS compacts it sooner.
-        data-host-controls={
-          hostActions || projectHome || desktopPreviewLabel ? "" : undefined
-        }
-      >
+      <div className="app-chrome-main">
         <div className="app-brand">
           <div
             className="editor-brand"
             aria-label="Auto Canvas"
-            title={
-              identityEnabled
-                ? "Auto Canvas"
-                : "Desktop preview · Save projects to local files"
-            }
+            title="Auto Canvas"
           >
             <span className="app-brand-mark" aria-hidden="true" />
             <h1 title="Auto Canvas">Auto Canvas</h1>
           </div>
-          {projectHome}
           <ProjectNameLabel
             name={projectName}
             dirty={hasUnsavedWork}
@@ -317,12 +296,7 @@ export function EditorAppChrome({
           <AutoLayoutButton {...autoLayout} run={autoLayoutRun} />
           {/* File holds Project Info and the file commands; project tabs
               select projects. */}
-          <ProjectMenu
-            label="File"
-            name={projectName}
-            dirty={hasUnsavedWork}
-            onOpen={() => fileCommands.nativeFiles?.refresh()}
-          >
+          <ProjectMenu label="File" name={projectName} dirty={hasUnsavedWork}>
             <FileCommandMenu {...fileCommands} embedded />
           </ProjectMenu>
           {agentAction ? (
@@ -352,12 +326,6 @@ export function EditorAppChrome({
               </svg>
               <span className="app-action-label">Agent</span>
             </button>
-          ) : null}
-          {hostActions}
-          {desktopPreviewLabel ? (
-            <span title="Save updates a local Project. Export Project File writes an exchange copy. Online services are unavailable.">
-              Desktop preview
-            </span>
           ) : null}
           {/* ⋯ holds what the Edit and Circuit menus held, in their groups:
               Edit, Hierarchy, Netlist and Layout. */}

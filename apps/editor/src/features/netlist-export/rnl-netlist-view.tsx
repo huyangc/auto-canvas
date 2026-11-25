@@ -11,7 +11,6 @@ import type { NetlistFormat, NetlistNamingProfile } from "@icm/netlist";
 import { createRnlExport, type RnlExport } from "@icm/rnl";
 
 import { RNL_INTRO_URL } from "../../components/site-resource-links";
-import type { NativeExternalTarget } from "../../hosts/native-external-links";
 import { StaticCodeView } from "../project-code/static-code-view";
 import { OpenRnlViewerLink } from "./open-rnl-viewer-link";
 import {
@@ -85,32 +84,20 @@ export function rnlFindings(
 }
 
 /**
- * A link to the introduction to RNL, in a new tab; the desktop app opens it in
- * the system browser, through its fixed list of links. Left out where the
+ * A link to the introduction to RNL, in a new tab. Left out where the
  * build links nowhere outside itself.
  */
 export function AboutRnlLink({
   externalLinksEnabled = true,
-  onOpenExternalLink,
 }: {
   externalLinksEnabled?: boolean | undefined;
-  onOpenExternalLink?: ((target: NativeExternalTarget) => void) | undefined;
 }) {
-  if (!externalLinksEnabled && !onOpenExternalLink) return null;
+  if (!externalLinksEnabled) return null;
   return (
     <a
       className="rnl-about-link"
       data-testid="about-rnl"
       href={RNL_INTRO_URL}
-      data-native-external-link={onOpenExternalLink ? "rnl" : undefined}
-      onClick={
-        onOpenExternalLink
-          ? (event) => {
-              event.preventDefault();
-              onOpenExternalLink("rnl");
-            }
-          : undefined
-      }
       target="_blank"
       rel="noopener noreferrer"
       aria-label="About RNL (opens in a new tab)"
@@ -131,14 +118,12 @@ export function RnlNetlistView({
   namingProfile,
   rootDocumentId,
   externalLinksEnabled,
-  onOpenExternalLink,
 }: {
   project: CircuitProject;
   format: NetlistFormat;
   namingProfile: NetlistNamingProfile;
   rootDocumentId?: string | undefined;
   externalLinksEnabled?: boolean | undefined;
-  onOpenExternalLink?: ((target: NativeExternalTarget) => void) | undefined;
 }) {
   const exported = useMemo(
     () =>
@@ -184,10 +169,7 @@ export function RnlNetlistView({
     <div className="rnl-netlist" aria-label="RNL netlist">
       <p className="netlist-edit-hint">
         The drawing, written into the netlist as RNL ·{" "}
-        <AboutRnlLink
-          externalLinksEnabled={externalLinksEnabled}
-          onOpenExternalLink={onOpenExternalLink}
-        />
+        <AboutRnlLink externalLinksEnabled={externalLinksEnabled} />
         {externalLinksEnabled !== false ? (
           <OpenRnlViewerLink
             file={

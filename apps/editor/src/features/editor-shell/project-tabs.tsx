@@ -28,7 +28,6 @@ export function ProjectTabs({
   onClose,
   onCloseMany,
   closeActiveTab,
-  onSaveClose,
   onNew,
   onOpenFile,
   cloudProjects,
@@ -49,7 +48,6 @@ export function ProjectTabs({
   onCloseMany(ids: readonly string[]): void;
   /** Filled with the active tab's ×, for File's Close tab. */
   closeActiveTab?: RefObject<((trigger: HTMLElement | null) => void) | null>;
-  onSaveClose?(id: string): Promise<boolean>;
   onNew(): void;
   onOpenFile(): void;
   cloudProjects: readonly CloudProjectSummary[];
@@ -425,19 +423,6 @@ export function ProjectTabs({
           className="project-tab-close-decision"
           data-testid="project-tab-close-decision"
         >
-          {onSaveClose ? (
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => {
-                void onSaveClose(closeTarget.id).then((closed) => {
-                  if (closed) setClosing(null);
-                });
-              }}
-            >
-              Save and close
-            </button>
-          ) : null}
           <Suspense fallback={null}>
             <InlineConfirm
               key={closeTarget.id}

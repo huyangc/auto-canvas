@@ -97,8 +97,7 @@
     "agent-docs:generate": "node scripts/generate-agent-docs.mjs",
     "agent-docs:generated:check": "node scripts/generate-agent-docs.mjs --check",
     "agent-docs:check": "pnpm agent-docs:generated:check && pnpm test:local scripts/generate-agent-docs.test.mjs",
-    "test:editor-build": "pnpm --filter @icm/editor... --if-present build && pnpm test:desktop-build",
-    "test:desktop-build": "pnpm --filter @icm/editor exec vite build --config vite.desktop.config.ts",
+    "test:editor-build": "pnpm --filter @icm/editor... --if-present build",
     "check": "pnpm format:check && pnpm docs:check && pnpm agent-docs:generated:check && pnpm components:check && pnpm typecheck && pnpm lint && pnpm test:local && pnpm build",
     "server:dev": "pnpm --filter @icm/server... build && node apps/server/dist/cli.js",
     "server:migrate": "pnpm --filter @icm/server... build && node apps/server/dist/cli.js --migrate"

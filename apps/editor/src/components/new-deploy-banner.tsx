@@ -11,7 +11,6 @@ import { refreshWithRestore } from "./chunk-load-fallback";
 export function NewDeployBanner() {
   const [shown, setShown] = useState(false);
   useEffect(() => {
-    if (import.meta.env?.ICM_DESKTOP) return;
     return watchForNewDeploy(() => setShown(true));
   }, []);
   if (!shown) return null;

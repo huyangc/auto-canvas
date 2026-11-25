@@ -483,9 +483,8 @@ the RNL language and its runtime belong to rnl.
   and label written, and name only `analog-canvas-extensions` beside
   `rnl-std` (each Cell's `$CANVAS_TYPESETTING`); an op-amp also names
   `rnl-std-functional` (`packages/rnl/src/export-ops.test.ts`).
-- Desktop and local hosts serve `.wasm` as `application/wasm` and allow
-  WebAssembly compilation only (`apps/desktop/src/app-protocol.test.ts`,
-  `apps/local-host/src/local-host.test.ts`).
+- Local hosts serve `.wasm` as `application/wasm` and allow
+  WebAssembly compilation only (`apps/local-host/src/local-host.test.ts`).
 - A file the export wrote imports with every part where it was drawn, its
   labels, block layout, marks and shapes, its pins left open on the top and
   inside Cells, and the same netlist; 4-input gates
@@ -517,9 +516,8 @@ the RNL language and its runtime belong to rnl.
   multi-Cell example switched to Abstract, copied from the panel and imported
   through File → Import → `RNL…` in `apps/editor/e2e/rnl-interchange.spec.ts`).
 - Under an RNL format the panel shows the "About RNL" link, to the
-  introduction page in a new tab, and under no other format; the desktop app's
-  list of links has it (`apps/editor/e2e/rnl-interchange.spec.ts`,
-  `apps/desktop/src/external-links.test.ts`,
+  introduction page in a new tab, and under no other format
+  (`apps/editor/e2e/rnl-interchange.spec.ts`,
   `apps/editor/src/features/netlist-export/about-rnl-link.test.tsx`).
 - The library's five examples (Common-Source Amplifier, Two-Stage Op Amp,
   Current-Mirror-Loaded Differential Pair, Fully Differential Two-Stage Op

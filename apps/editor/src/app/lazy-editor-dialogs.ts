@@ -1,5 +1,3 @@
-import type { ComponentProps } from "react";
-
 import { lazyChunk } from "../components/chunk-load-fallback";
 
 export const LazyCellManagerDialog = lazyChunk("dialog", () =>
@@ -58,17 +56,11 @@ export const LazyInsertComponentDialog = lazyChunk("dialog", () =>
   ),
 );
 
-export const LazyConnectAgentPanel = import.meta.env?.ICM_DESKTOP
-  ? (
-      _props: ComponentProps<
-        typeof import("../agent/connect-agent-panel").ConnectAgentPanel
-      >,
-    ) => null
-  : lazyChunk("dialog", () =>
-      import("../agent/connect-agent-panel").then((module) => ({
-        default: module.ConnectAgentPanel,
-      })),
-    );
+export const LazyConnectAgentPanel = lazyChunk("dialog", () =>
+  import("../agent/connect-agent-panel").then((module) => ({
+    default: module.ConnectAgentPanel,
+  })),
+);
 
 // Properties sections load with the first selection that shows them. A tab
 // that outlived a deploy found the chunk gone, and the whole editor fell to
@@ -105,14 +97,8 @@ export function preloadComponentDefinitionEditor() {
   void loadComponentDefinitionEditor().catch(() => undefined);
 }
 
-export const LazyAgentPropertiesSection = import.meta.env?.ICM_DESKTOP
-  ? (
-      _props: ComponentProps<
-        typeof import("../agent/connect-agent-panel").AgentPropertiesSection
-      >,
-    ) => null
-  : lazyChunk("inline", () =>
-      import("../agent/connect-agent-panel").then((module) => ({
-        default: module.AgentPropertiesSection,
-      })),
-    );
+export const LazyAgentPropertiesSection = lazyChunk("inline", () =>
+  import("../agent/connect-agent-panel").then((module) => ({
+    default: module.AgentPropertiesSection,
+  })),
+);

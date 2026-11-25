@@ -18,12 +18,10 @@ import {
   readLibraryAuthoringDraft,
   isLibraryAuthoringDraft,
 } from "../features/user-components/library-circuit-authoring";
-const UserComponentsLibrary = import.meta.env?.ICM_DESKTOP
-  ? lazyChunk("dialog", () => import("../hosts/native-components-library"))
-  : lazyChunk(
-      "dialog",
-      () => import("../features/user-components/user-components-library"),
-    );
+const UserComponentsLibrary = lazyChunk(
+  "dialog",
+  () => import("../features/user-components/user-components-library"),
+);
 
 export default function EditorComponentLibrary(
   props: EditorComponentEditorProps & {
