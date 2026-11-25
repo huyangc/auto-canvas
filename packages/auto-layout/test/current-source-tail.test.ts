@@ -185,6 +185,11 @@ it.each([false, true])(
     expect(placedIds).toEqual(
       expect.arrayContaining(doc.instances.map((instance) => instance.id)),
     );
+    const y = (id: string) =>
+      result.document.instances.find((instance) => instance.id === id)!
+        .placement!.position.y;
+    expect(y("C")).toBeLessThan(y("M"));
+    expect(y("D")).toBeLessThan(y("P"));
     expect(result.document.routes.length).toBeGreaterThan(0);
     expect(equivalentTerminals(doc, result.document, resolver)).toBe(true);
     expect(auditRouting(result.document, resolver).unsafeProblems).toEqual([]);
