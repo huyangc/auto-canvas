@@ -488,6 +488,8 @@ function refineNetlistPlacement(
       : finishedDocument(document, resolver, mirrorBest);
   if (!final) return mirrorBest;
   const stopped = () => options.search?.signal?.aborted === true;
+  const placementProblem = (placed: SchematicDocument) =>
+    contactGeometryProblem(placed, resolver, contacts);
   const ports = selectNetlistPortSides(
     document,
     resolver,
@@ -501,11 +503,12 @@ function refineNetlistPlacement(
         base,
         moves,
         onAttempt,
+        placementProblem,
       );
       if (draft && acceptDraft(draft.final))
         return finishSeats(draft.candidate, false);
     },
-    (placed) => contactGeometryProblem(placed, resolver, contacts),
+    placementProblem,
   );
   if (stopped()) return ports;
   const traced = differentialBranches(document, resolver);

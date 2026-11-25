@@ -11,7 +11,12 @@ import {
 import { expect, it, vi } from "vitest";
 import { connectionsIntact, planLayoutOnce } from "../src/auto-layout.js";
 import { rerouteMovedPorts } from "../src/local-reroute.js";
-import { enclosingBox, placement } from "../src/geometry.js";
+import {
+  enclosingBox,
+  geometryProblem,
+  placement,
+  withPlacements,
+} from "../src/geometry.js";
 import { emptyOverrides } from "../src/layout-choices.js";
 import { selectNetlistPortSides } from "../src/netlist-port-sides.js";
 import { auditRouting } from "../src/routing-audit.js";
@@ -217,6 +222,39 @@ it("stretches a moved port with right-angle wire segments", () => {
   expect(connectionsIntact(final, resolver)).toBe(true);
 });
 
+it("rejects a moved port on a hidden op-amp supply pin before routing", () => {
+  const { d, plan } = reversed();
+  const amp = resolver.resolve("opamp")!.definition;
+  const symbols = new InMemorySymbolResolver(
+    [
+      {
+        ...amp,
+        id: "test-amp",
+        pins: amp.pins.map((p) =>
+          p.name === "VDD" ? { ...p, at: { x: 0, y: -80 } } : p,
+        ),
+      },
+    ],
+    resolver,
+  );
+  // The signal-pins variant hides VDD outside the visible device bounds.
+  const device = {
+    id: "amp",
+    symbolId: "test-amp",
+    symbolVariantId: "signal-pins",
+    placement: placement(110, 100),
+  };
+  d.instances.push(device);
+  plan.final.instances.push(device);
+  const moves = new Map([["a", placement(110, 20, "horizontal")]]);
+  expect(geometryProblem(withPlacements(plan.final, moves), symbols)).toBe(
+    "R10: coincident pin at 110,20",
+  );
+  const onAttempt = vi.fn();
+  expect(rerouteMovedPorts(d, symbols, plan, moves, onAttempt)).toBeUndefined();
+  expect(onAttempt).not.toHaveBeenCalled();
+});
+
 it("reseats an unlocked port label while preserving the unchanged net", () => {
   const { d, plan } = reversed();
   const label = {
@@ -282,6 +320,62 @@ it("shares a deterministic full-routing budget across candidates and passes", ()
   selectNetlistPortSides(d, resolver, plan, route, () => false);
   expect(route.mock.calls.length).toBeGreaterThan(0);
   expect(route.mock.calls.length).toBeLessThanOrEqual(12);
+});
+
+it("reuses local attempts when the directional pass restarts from an imperfect mirror pair", () => {
+  const d = circuit(
+    { m1: "nmos", m2: "nmos", a: "port", b: "port" },
+    { first: ["m1.G", "a.P"], second: ["m2.G", "b.P"], tail: ["m1.S", "m2.S"] },
+  );
+  d.netlist = {
+    name: "dut",
+    formalParameters: [],
+    terminals: ["first", "second"].map((id, i) => ({
+      id: "input" + i,
+      name: id,
+      netId: id,
+      direction: "input",
+      interfaceInstanceIds: [i === 0 ? "a" : "b"],
+    })),
+  };
+  const seats = new Map([
+    ["m1", placement(0, -100)],
+    ["m2", placement(0, 100)],
+    ["a", placement(150, -90)],
+    ["b", placement(150, 100)],
+  ]);
+  for (let i = 0; i < 21; i++) {
+    d.instances.push({ id: "pad" + i, symbolId: "inverter", placement: null });
+    seats.set("pad" + i, placement(0, 300 + i * 100));
+  }
+  const final = withPlacements(d, seats);
+  const initial = {
+    final,
+    candidate: { edits: [], groups: [], diagnostics: [] },
+  };
+  const tried = new Set<string>();
+  const attempts = new Set<string>();
+  selectNetlistPortSides(
+    d,
+    resolver,
+    initial,
+    () => undefined,
+    () => false,
+    (base, moves, _accept, onAttempt) => {
+      expect(base.final).toBe(final);
+      const key = JSON.stringify([...moves]);
+      expect(tried.has(key)).toBe(false);
+      tried.add(key);
+      // Only pairs and straight moves of a are eligible. This leaves trial
+      // slots for the directional pass after it revisits the symmetry seed.
+      if (moves.size === 2 || moves.get("a")?.position.y === -90) {
+        onAttempt();
+        attempts.add(key);
+      }
+      return undefined;
+    },
+  );
+  expect(attempts.size).toBe(12);
 });
 
 it("accepts a single wrong port within the large-circuit routing budget", () => {
