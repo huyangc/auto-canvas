@@ -34,6 +34,7 @@ import {
   type ReplacementCommand,
   type UseProjectFileLifecycleOptions,
 } from "./use-project-file-lifecycle";
+import { createAgentWorkspaceHandler } from "../app/agent-workspace-requests";
 import { CLOUD_AUTO_SAVE_DEADLINE_MS } from "./cloud-auto-save";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -1310,6 +1311,80 @@ describe("Cloud auto-save", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("keeps a foreground save to the same revision when an older background Save As answers", async () => {
+    await import("../agent/workspace-copy");
+    const { editor, cloud, advance } = await mountAuto();
+    const controller = editor.current.doc.controller;
+    const stored = { controller, file: editor.file.captureFileSession(), view };
+    await editor.switchTo(project("B"));
+    let active = "b";
+    const pending = deferred<CloudProjectSaveOutcome>();
+    const options = {
+      projectStore: cloudStore({ save: () => pending.promise }),
+      projectTabs: {
+        currentId: () => active,
+        isTransitioning: () => false,
+        entries: () => [
+          {
+            id: "a",
+            session:
+              active === "a"
+                ? { ...stored, file: editor.file.captureFileSession() }
+                : stored,
+          },
+        ],
+        changed: vi.fn(),
+      },
+      reserveBackgroundCloudSave: () => () => {},
+      restoreFileSession: (file: ProjectFileSession) =>
+        editor.file.restoreFileSession(file),
+      setCloudProjects: vi.fn(),
+      cloudListMutationRef: { current: 0 },
+      stageRecovery: vi.fn(),
+      flushRecovery: vi.fn(),
+    };
+    const handler = createAgentWorkspaceHandler(
+      options as unknown as Parameters<typeof createAgentWorkspaceHandler>[0],
+    );
+    const saving = handler(
+      {
+        requestId: "save-as",
+        request: { action: "save", asNew: true },
+      } as never,
+      "a",
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    await advance(CLOUD_AUTO_SAVE_DEADLINE_MS);
+    expect(await saving).toMatchObject({
+      error: { code: "CLOUD_SAVE_TIMEOUT" },
+    });
+    active = "a";
+    await act(async () => {
+      editor.current.doc.activateSession(controller);
+      editor.file.restoreFileSession(stored.file);
+    });
+    cloud.respond((written) =>
+      receipt(written, { id: "cloud-A", revision: 0 }),
+    );
+    expect(await editor.run(editor.file.saveProjectToCloud())).toMatchObject({
+      status: "saved",
+    });
+    await act(async () =>
+      pending.resolve(
+        await receipt(controller.project, { id: "duplicate", revision: 0 }),
+      ),
+    );
+    expect(editor.file.captureFileSession().cloudBinding).toMatchObject({
+      id: "cloud-A",
+      revision: 1,
+    });
+    expect(editor.file.captureFileSession().cloudWriteSequence).toBe(2);
+    await act(async () => {
+      editor.file.replaceActiveProject(project("replacement"));
+    });
+    expect(editor.file.captureFileSession().cloudWriteSequence).toBe(3);
   });
 
   it("saves a live edit 3 s after it, restarting with each edit", async () => {

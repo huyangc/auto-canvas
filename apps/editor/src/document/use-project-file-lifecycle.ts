@@ -64,6 +64,8 @@ import {
 export const REFRESH_RESTORE_STORAGE_KEY = "icm.restore-after-refresh.v1";
 
 export interface ProjectFileSession {
+  /** Latest Cloud write for this working copy in the current window. */
+  cloudWriteSequence?: number;
   persistenceState: PersistenceState;
   cloudBinding: CloudProjectBinding | null;
   savedBaseline: SavedProjectBaseline | null;
@@ -592,6 +594,7 @@ export function useProjectFileLifecycle({
     nextViewBox: GridRect = defaultViewBox,
     options: ReplaceProjectOptions = {},
   ): SchematicDocument {
+    cloudWriteSequenceRef.current++;
     replacementEpochRef.current++;
     // The install is the commit point: it retires whatever command ran it and
     // any dialog still waiting from before.
@@ -1887,6 +1890,7 @@ export function useProjectFileLifecycle({
         !describeOpenBlocker?.();
     },
     captureFileSession: (): ProjectFileSession => ({
+      cloudWriteSequence: cloudWriteSequenceRef.current,
       // The live state: a tab captured right after an edit keeps its mark.
       persistenceState: persistenceStateRef.current,
       cloudBinding: cloudBindingRef.current,
@@ -1899,6 +1903,7 @@ export function useProjectFileLifecycle({
         : {}),
     }),
     restoreFileSession: (session: ProjectFileSession) => {
+      cloudWriteSequenceRef.current = session.cloudWriteSequence ?? 0;
       replacementEpochRef.current++;
       // The outgoing session's command, dialog and busy state end here even
       // if its read never settles.
