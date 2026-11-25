@@ -1,8 +1,9 @@
+import { planningMemo } from "./planning-reuse.js";
 import {
   draftingTranslation,
   withDraftingTranslation,
 } from "./drafting-search.js";
-import { resolveRouteGeometry } from "@icm/derived";
+import { resolveRouteGeometry, visibleInstanceBounds } from "@icm/derived";
 import {
   documentObjectIds,
   MAX_SCHEMATIC_EDITS_PER_TRANSACTION,
@@ -12,7 +13,7 @@ import {
 import type { Point, SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import { readabilityRegressed } from "./readability.js";
-import { pinPoints } from "./geometry.js";
+import { pinPoints, withPlacements } from "./geometry.js";
 import { classifyNets } from "./net-roles.js";
 import { compareIds } from "./recognize.js";
 import { freezePinGroups } from "./route.js";
@@ -32,7 +33,7 @@ import { emptyChoices } from "./layout-choices.js";
 import { refinementMetrics, routedScore } from "./refine.js";
 import { calibratedScore, routedGuards } from "./routed-search-score.js";
 import { improvesReadability } from "./readability-selection.js";
-import type { AutoLayoutResult } from "./types.js";
+import type { AutoLayoutResult, Placement } from "./types.js";
 
 // Candidate tracks go through the outer pins, the centre, or one grid line
 // just outside the pin envelope. The router checks every trunk and branch.
@@ -217,30 +218,43 @@ function rerouteNets(
           audit: typeof audit;
         }
       | undefined;
+    const reservedKey = JSON.stringify([...reserved]);
     for (const trunk of trunkTracks(coords, doc.presentation.grid, rails)) {
       if (stopped()) break;
-      let routed;
-      try {
-        routed = planRouteNet(
-          cleared.document,
-          resolver,
-          {
-            target: { kind: "pins", pins: group.pins },
-            ...(trunk ? { trunk } : {}),
-          },
-          limit,
-          {
-            netScope: "base",
-            components: "physical",
-            crossingCost: 100 * doc.presentation.grid,
-            reservedIds: reserved,
-          },
-        );
-      } catch {
-        continue;
-      } // Occupied trunk or no clear path.
+      const request = {
+        target: { kind: "pins" as const, pins: group.pins },
+        ...(trunk ? { trunk } : {}),
+      };
+      const routed = planningMemo(
+        cleared.document,
+        resolver,
+        `reroute-track:${reservedKey}:${JSON.stringify(request)}`,
+        () => {
+          try {
+            return planRouteNet(cleared.document, resolver, request, limit, {
+              netScope: "base",
+              components: "physical",
+              crossingCost: 100 * doc.presentation.grid,
+              reservedIds: reserved,
+            });
+          } catch {
+            return undefined;
+          }
+        },
+      );
+      if (!routed) continue;
       const edits = [...result.edits, ...cut, ...restore, ...routed.edits];
       if (!routed.edits.length || edits.length > limit) continue;
+      if (!finish) {
+        // Rank tracks against the retained wires first. A winner still has to
+        // pass every guard on the complete transaction replay below.
+        const incremental = preview(cleared.document, resolver, routed.edits);
+        if (
+          incremental.ok &&
+          score(incremental.document) >= (winner?.score ?? bestScore)
+        )
+          continue;
+      }
       const routedResult = withDraftingTranslation(
         { ...result, edits },
         draftingTranslation(result),
@@ -295,4 +309,153 @@ function rerouteNets(
     }
   }
   return result;
+}
+
+/** Route only the signal trees whose ports moved; the other nets remain
+ * obstacles. The caller compares the completed drawing with its incumbent. */
+export function rerouteMovedPorts(
+  source: SchematicDocument,
+  resolver: SymbolResolver,
+  base: { final: SchematicDocument; candidate: AutoLayoutResult },
+  moves: ReadonlyMap<string, Placement>,
+) {
+  const doc = base.final;
+  if (!moves.size) return;
+  const roles = classifyNets(doc, resolver);
+  const nets = new Set<string>();
+  const transforms: SchematicEdit[] = [];
+  for (const [id, pose] of moves) {
+    const port = doc.instances.find((i) => i.id === id);
+    const net = roles.pinNet(id, "P");
+    if (
+      !port?.placement ||
+      !["port", "port-filled"].includes(port.symbolId) ||
+      !net ||
+      roles.rails.has(net)
+    )
+      return;
+    nets.add(net);
+    if (pose.mirror !== port.placement.mirror)
+      transforms.push({
+        kind: "mirror_instance",
+        instanceId: id,
+        mirror: pose.mirror,
+      });
+    if (pose.rotation !== port.placement.rotation)
+      transforms.push({
+        kind: "rotate_instance",
+        instanceId: id,
+        rotation: pose.rotation,
+      });
+    transforms.push({
+      kind: "move_instance",
+      instanceId: id,
+      position: pose.position,
+    });
+  }
+  const groups = freezePinGroups(doc, resolver).filter((g) =>
+    nets.has(g.netId),
+  );
+  if (
+    groups.length !== nets.size ||
+    groups.some((g) => g.contacts.length || g.pins.length < 2)
+  )
+    return;
+  const boxes = visibleInstanceBounds(withPlacements(doc, moves), resolver);
+  for (const { id, bounds: a } of boxes) {
+    if (
+      moves.has(id) &&
+      boxes.some(
+        ({ id: other, bounds: b }) =>
+          id !== other &&
+          a.x < b.x + b.width &&
+          b.x < a.x + a.width &&
+          a.y < b.y + b.height &&
+          b.y < a.y + a.height,
+      )
+    )
+      return;
+  }
+  const routes = doc.routes.filter((r) => nets.has(r.netId)),
+    junctions = doc.junctions.filter((j) => nets.has(j.netId));
+  const protectedIds = protectedObjects(doc);
+  if ([...moves.keys()].some((id) => protectedIds.has(id))) return;
+  if (
+    !routes.length ||
+    routes.some(
+      (r) =>
+        protectedIds.has(r.id) ||
+        r.members ||
+        r.legs.some(
+          (l) =>
+            l.mode === "locked" ||
+            protectedIds.has(l.id) ||
+            (l.to.kind === "bend" && protectedIds.has(l.to.bendId)),
+        ),
+    ) ||
+    junctions.some((j) => protectedIds.has(j.id) || j.members)
+  )
+    return;
+  const edits: SchematicEdit[] = [
+    ...routes.map((r) => ({
+      kind: "remove_route_geometry" as const,
+      routeId: r.id,
+    })),
+    ...junctions.map((j) => ({
+      kind: "remove_junction" as const,
+      junctionId: j.id,
+    })),
+  ];
+  edits.push(...transforms);
+  const moved = preview(doc, resolver, edits);
+  if (!moved.ok || auditRouting(moved.document, resolver).unsafeProblems.length)
+    return;
+  const restore = restorePinGroups(groups, moved.document, resolver);
+  const cleared = preview(moved.document, resolver, restore);
+  if (!cleared.ok) return;
+  const limit = MAX_SCHEMATIC_EDITS_PER_TRANSACTION;
+  const all = [...base.candidate.edits, ...edits, ...restore];
+  const reservedIds = new Set([
+    ...documentObjectIds(source),
+    ...documentObjectIds(doc),
+  ]);
+  let working = cleared.document;
+  for (const group of groups) {
+    try {
+      const routed = planRouteNet(
+        working,
+        resolver,
+        { target: { kind: "pins", pins: group.pins } },
+        limit,
+        {
+          netScope: "base",
+          components: "physical",
+          crossingCost: 20 * doc.presentation.grid,
+          reservedIds,
+        },
+      );
+      all.push(...routed.edits);
+      if (all.length > limit) return;
+      const next = preview(working, resolver, routed.edits);
+      if (!next.ok) return;
+      working = next.document;
+    } catch {
+      return;
+    }
+  }
+  const replay = preview(source, resolver, all);
+  if (
+    !replay.ok ||
+    terminalPartition(replay.document, resolver) !==
+      terminalPartition(doc, resolver) ||
+    lostNameClaim(doc, replay.document) ||
+    missingConnections(replay.document, resolver) ||
+    floatingPins(replay.document, resolver).length ||
+    auditRouting(replay.document, resolver).unsafeProblems.length
+  )
+    return;
+  return {
+    candidate: { ...base.candidate, edits: all },
+    final: replay.document,
+  };
 }

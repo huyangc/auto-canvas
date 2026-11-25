@@ -362,6 +362,15 @@ it("a bounded local reroute removes a crossing without moving pins or lengthenin
   if (!replay.ok) throw Error("invalid reroute transaction");
   const a = auditRouting(original.document, resolver),
     b = auditRouting(replay.document, resolver);
+  // The incremental prefix used to rank tracks must lead to the same
+  // accepted geometry as the single transaction delivered to the editor.
+  const suffix = result.edits.slice(original.edits.length);
+  const incremental = preview(original.document, resolver, suffix);
+  if (!incremental.ok) throw Error("invalid incremental reroute");
+  expect(auditRouting(incremental.document, resolver)).toEqual(b);
+  expect(terminalPartition(incremental.document, resolver)).toBe(
+    terminalPartition(replay.document, resolver),
+  );
   expect(b.crossings).toBe(0);
   expect(b.bends).toBeLessThanOrEqual(a.bends);
   expect(b.wireLength).toBeLessThanOrEqual(a.wireLength);

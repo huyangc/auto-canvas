@@ -519,6 +519,8 @@ function routeGroup(
   roles: NetRoles,
   signalTrunks: boolean,
   reservedIds: ReadonlySet<string>,
+  points: ReturnType<typeof pinPoints>,
+  reservedKey: string,
   sharedLandings = false,
 ): GroupRouting {
   let working = document;
@@ -538,7 +540,6 @@ function routeGroup(
     : [{ pins: group.pins }];
   // R38: freeze and wire direct contacts on every Net before the general tree.
   // Whole-list reconciliation then has no missing physical connection to add.
-  const points = pinPoints(working, resolver);
   const contacts = group.contacts.filter((pair) => {
     const [a, b] = pair.map(
       (ref) => points.find((p) => samePin(ref, p))!.point,
@@ -669,7 +670,7 @@ function routeGroup(
             const routed = planningMemo(
               working,
               resolver,
-              `route-net:${JSON.stringify([request, [...reservedIds]])}`,
+              `route-net:${reservedKey}:${JSON.stringify(request)}`,
               () => {
                 try {
                   return {
@@ -925,6 +926,10 @@ export function routeDocument(
     : { document: working, edits: [], nets: new Set<string>() };
   working = cross.document;
   edits.push(...cross.edits);
+  const points = planningMemo(document, resolver, "routing-pins", () =>
+    pinPoints(document, resolver),
+  );
+  const reservedKey = JSON.stringify([...reservedIds]);
   const routedGroups = new Map<PinGroup, GroupRouting>();
   const removals = new Map<PinGroup, SchematicEdit[]>();
   for (const group of ordered) {
@@ -936,6 +941,8 @@ export function routeDocument(
       roles,
       signalTrunks,
       reservedIds,
+      points,
+      reservedKey,
       options.sharedLandings,
     );
     if (options.ripUp) {
@@ -995,6 +1002,8 @@ export function routeDocument(
         roles,
         signalTrunks,
         reservedIds,
+        points,
+        reservedKey,
         options.sharedLandings,
       );
       if (candidate.problem || candidate.failed) continue;

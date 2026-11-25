@@ -39,7 +39,11 @@ import {
 import { contactGeometryProblem, contactPolicy } from "./contact-placement.js";
 import { optimizePins } from "./pin-portfolio.js";
 import { searchPinContacts } from "./contact-search.js";
-import { rerouteCrossings, rerouteRailCrossings } from "./local-reroute.js";
+import {
+  rerouteCrossings,
+  rerouteRailCrossings,
+  rerouteMovedPorts,
+} from "./local-reroute.js";
 import { reroutePortfolio } from "./reroute-portfolio.js";
 import { stageComponents } from "./stage-symmetry.js";
 import { blockIntrusion } from "./partition-geometry.js";
@@ -425,7 +429,30 @@ function refineNetlistPlacement(
     freezePinGroups(document, resolver),
     true,
   );
-  const routeSeats = (seats: Map<string, Placement>, clearWires = false) => {
+  const drafts = new Map<
+    string,
+    { result: AutoLayoutResult; final: SchematicDocument }
+  >();
+  const finishSeats = (result: AutoLayoutResult, clearWires: boolean) => {
+    const candidate = finish(
+      separateLabels(
+        document,
+        resolver,
+        finalizeFacing(document, resolver, options, result),
+        options,
+        true,
+        clearWires,
+      ),
+    );
+    const final = finishedDocument(document, resolver, candidate);
+    if (final && connectionsIntact(final, resolver))
+      return { candidate, final };
+  };
+  const routeSeats = (
+    seats: Map<string, Placement>,
+    clearWires = false,
+    acceptDraft?: (final: SchematicDocument) => boolean,
+  ) => {
     const draft = planLayoutOnce(
       document,
       resolver,
@@ -439,21 +466,10 @@ function refineNetlistPlacement(
       false,
       false,
       contacts,
+      drafts,
     );
-    if (!draft.final) return;
-    const candidate = finish(
-      separateLabels(
-        document,
-        resolver,
-        finalizeFacing(document, resolver, options, draft.result),
-        options,
-        true,
-        clearWires,
-      ),
-    );
-    const final = finishedDocument(document, resolver, candidate);
-    if (final && connectionsIntact(final, resolver))
-      return { final, candidate };
+    if (!draft.final || (acceptDraft && !acceptDraft(draft.final))) return;
+    return finishSeats(draft.result, clearWires);
   };
 
   const mirrorBest = hasTransistor(document)
@@ -476,8 +492,13 @@ function refineNetlistPlacement(
     document,
     resolver,
     { candidate: mirrorBest, final },
-    routeSeats,
+    (seats, acceptDraft) => routeSeats(seats, false, acceptDraft),
     stopped,
+    (base, moves, acceptDraft) => {
+      const draft = rerouteMovedPorts(document, resolver, base, moves);
+      if (draft && acceptDraft(draft.final))
+        return finishSeats(draft.candidate, false);
+    },
   );
   if (stopped()) return ports;
   const traced = differentialBranches(document, resolver);
@@ -2760,59 +2781,71 @@ function buildPlan(
       },
     ],
   });
-  const edits: SchematicEdit[] = preserveLabelClaims(document, freed);
-  // Cleanup can temporarily split a device's named Net. Do not let its visual
-  // anchor select another pin's Net before the frozen groups are restored.
-  const deviceLabels = document.annotations.filter(
-    (a) =>
-      !a.locked &&
-      a.binding?.kind === "net-name" &&
-      a.anchor.kind === "object" &&
-      document.connectivityEvidence.some(
-        (e) =>
-          e.kind === "name-claim" &&
-          e.owner.kind === "net-label" &&
-          e.owner.annotationId === a.id,
-      ) &&
-      document.instances.some(
-        (i) => a.anchor.kind === "object" && i.id === a.anchor.objectId,
-      ),
-  );
-  for (const annotation of [...freed, ...deviceLabels])
-    if (annotation.anchor.kind !== "free")
-      edits.push({
-        kind: "upsert_schematic_annotation",
-        annotation: {
-          ...annotation,
-          anchor: {
-            kind: "free",
-            position: annotation.anchor.fallbackPosition,
-          },
-        },
-      });
-  for (const route of document.routes)
-    edits.push({ kind: "remove_route_geometry", routeId: route.id });
-  for (const junction of document.junctions)
-    edits.push({ kind: "remove_junction", junctionId: junction.id });
-  if (edits.length > MAX_SCHEMATIC_EDITS_PER_TRANSACTION)
-    return refuse("R10: R16 complete edit list exceeds transaction limit");
-  const removed = preview(document, resolver, edits);
-  if (!removed.ok)
-    return refuse(
-      `R10: cleanup rejected: ${JSON.stringify(removed.diagnostics)}`,
+  const cleanup = planningMemo(document, resolver, "route-cleanup", () => {
+    const edits: SchematicEdit[] = preserveLabelClaims(document, freed);
+    // Cleanup can temporarily split a device's named Net. Do not let its visual
+    // anchor select another pin's Net before the frozen groups are restored.
+    const deviceLabels = document.annotations.filter(
+      (a) =>
+        !a.locked &&
+        a.binding?.kind === "net-name" &&
+        a.anchor.kind === "object" &&
+        document.connectivityEvidence.some(
+          (e) =>
+            e.kind === "name-claim" &&
+            e.owner.kind === "net-label" &&
+            e.owner.annotationId === a.id,
+        ) &&
+        document.instances.some(
+          (i) => a.anchor.kind === "object" && i.id === a.anchor.objectId,
+        ),
     );
-  edits.push(...restorePinGroups(frozen, removed.document, resolver));
-  // Bulk pins are never routed, but cleanup can split them off all the same.
-  edits.push(
-    ...restoreBulkPins(
-      freezePinGroups(document, resolver, { includeBulk: true }),
-      frozen,
-      removed.document,
-      resolver,
-    ),
-  );
-  for (const annotation of deviceLabels)
-    edits.push({ kind: "upsert_schematic_annotation", annotation });
+    for (const annotation of [...freed, ...deviceLabels])
+      if (annotation.anchor.kind !== "free")
+        edits.push({
+          kind: "upsert_schematic_annotation",
+          annotation: {
+            ...annotation,
+            anchor: {
+              kind: "free",
+              position: annotation.anchor.fallbackPosition,
+            },
+          },
+        });
+    for (const route of document.routes)
+      edits.push({ kind: "remove_route_geometry", routeId: route.id });
+    for (const junction of document.junctions)
+      edits.push({ kind: "remove_junction", junctionId: junction.id });
+    if (edits.length > MAX_SCHEMATIC_EDITS_PER_TRANSACTION)
+      return {
+        problem: "R10: R16 complete edit list exceeds transaction limit",
+      } as const;
+    const removed = preview(document, resolver, edits);
+    if (!removed.ok)
+      return {
+        problem: `R10: cleanup rejected: ${JSON.stringify(removed.diagnostics)}`,
+      } as const;
+    edits.push(...restorePinGroups(frozen, removed.document, resolver));
+    // Bulk pins are never routed, but cleanup can split them off all the same.
+    edits.push(
+      ...restoreBulkPins(
+        freezePinGroups(document, resolver, { includeBulk: true }),
+        frozen,
+        removed.document,
+        resolver,
+      ),
+    );
+    for (const annotation of deviceLabels)
+      edits.push({ kind: "upsert_schematic_annotation", annotation });
+    const cleaned = preview(document, resolver, edits);
+    if (!cleaned.ok)
+      return {
+        problem: `R10: cleanup rejected: ${JSON.stringify(cleaned.diagnostics)}`,
+      } as const;
+    return { edits, document: cleaned.document };
+  });
+  if (cleanup.problem !== undefined) return refuse(cleanup.problem);
+  const edits = [...cleanup.edits];
   const cleanupLength = edits.length;
   for (const group of groups)
     edits.push({
@@ -2861,13 +2894,8 @@ function buildPlan(
   }
   if (edits.length > MAX_SCHEMATIC_EDITS_PER_TRANSACTION)
     return refuse("R10: R16 complete edit list exceeds transaction limit");
-  const cleaned = preview(document, resolver, edits.slice(0, cleanupLength));
-  if (!cleaned.ok)
-    return refuse(
-      `R10: cleanup rejected: ${JSON.stringify(cleaned.diagnostics)}`,
-    );
   const placed = preview(
-    cleaned.document,
+    cleanup.document,
     resolver,
     edits.slice(cleanupLength),
   );
@@ -2933,20 +2961,27 @@ function buildPlan(
         `R10: bulk contact repair rejected: ${JSON.stringify(replay.diagnostics)}`,
       );
   }
-  edits.push(
-    ...transferPowerClaims(document, replay.document, resolver, frozen),
+  const claims = transferPowerClaims(
+    document,
+    replay.document,
+    resolver,
+    frozen,
   );
+  edits.push(...claims);
   if (edits.length > MAX_SCHEMATIC_EDITS_PER_TRANSACTION)
     return refuse("R10: R16 complete edit list exceeds transaction limit");
-  const named = preview(document, resolver, edits);
+  const named = claims.length ? preview(document, resolver, edits) : replay;
   if (!named.ok)
     return refuse(
       `R10: name-claim transfer rejected: ${JSON.stringify(named.diagnostics)}`,
     );
-  edits.push(...reanchorLabels(named.document, resolver, freed, frozen));
+  const anchors = reanchorLabels(named.document, resolver, freed, frozen);
+  edits.push(...anchors);
   if (edits.length > MAX_SCHEMATIC_EDITS_PER_TRANSACTION)
     return refuse("R10: R16 complete edit list exceeds transaction limit");
-  const reanchored = preview(document, resolver, edits);
+  const reanchored = anchors.length
+    ? preview(document, resolver, edits)
+    : named;
   if (!reanchored.ok)
     return refuse(
       `R73: label seating preview rejected: ${JSON.stringify(reanchored.diagnostics)}`,
@@ -2954,18 +2989,15 @@ function buildPlan(
   const fixedLabels = new Set(options.fixedInstanceIds);
   for (const owner of [...document.layoutGroups, ...document.constraints])
     if (owner.locked) for (const id of owner.objectIds) fixedLabels.add(id);
-  edits.push(
-    ...seatLabels(
-      reanchored.document,
-      resolver,
-      new Set(
-        [...result.placements.keys()].filter((id) => !fixedLabels.has(id)),
-      ),
-    ),
+  const labels = seatLabels(
+    reanchored.document,
+    resolver,
+    new Set([...result.placements.keys()].filter((id) => !fixedLabels.has(id))),
   );
+  edits.push(...labels);
   if (edits.length > MAX_SCHEMATIC_EDITS_PER_TRANSACTION)
     return refuse("R73: complete edit list exceeds transaction limit");
-  const final = preview(document, resolver, edits);
+  const final = labels.length ? preview(document, resolver, edits) : reanchored;
   if (!final.ok)
     return refuse(
       `R10: final replay rejected: ${JSON.stringify(final.diagnostics)}`,
