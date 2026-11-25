@@ -109,6 +109,7 @@ export function portMirrorGeometry(
   doc: SchematicDocument,
   resolver: SymbolResolver,
   groups: Group[],
+  positionsOnly = false,
 ) {
   if (!groups.length) return [];
   const centres = new Map(
@@ -134,9 +135,13 @@ export function portMirrorGeometry(
     });
   }
   const netSegments = (net: string) =>
-    doc.routes
-      .filter((r) => r.netId === net)
-      .flatMap((r) => resolveRouteGeometry(doc, resolver, r)?.segments ?? []);
+    positionsOnly
+      ? []
+      : doc.routes
+          .filter((r) => r.netId === net)
+          .flatMap(
+            (r) => resolveRouteGeometry(doc, resolver, r)?.segments ?? [],
+          );
   return groups.flatMap((g) => {
     const axis = deviceAxis(centres, g.devices);
     return g.terminals.map(([a, b]) => {

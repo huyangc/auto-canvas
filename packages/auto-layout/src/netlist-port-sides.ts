@@ -29,7 +29,16 @@ import type { AutoLayoutResult, Placement } from "./types.js";
 
 type Seats = Map<string, Placement>;
 type Trial = { candidate: AutoLayoutResult; final: SchematicDocument };
-type RouteSeats = (seats: Seats) => Trial | undefined;
+type AcceptDraft = (drawing: SchematicDocument) => boolean;
+type RouteSeats = (
+  seats: Seats,
+  acceptDraft?: AcceptDraft,
+) => Trial | undefined;
+type RoutePort = (
+  base: Trial,
+  moves: Seats,
+  acceptDraft: AcceptDraft,
+) => Trial | undefined;
 
 function portRoles(source: SchematicDocument, resolver: SymbolResolver) {
   const roles = classifyNets(source, resolver);
@@ -155,6 +164,7 @@ function* frames(
     cy = snap(geo.box.y + geo.box.height / 2);
   for (const scale of mode === "tight" ? [0.75, 0.9] : [1]) {
     const seats = new Map(geo.seats);
+    let changed = false;
     for (const i of placed.instances) {
       const p = seats.get(i.id)!;
       const pins = mode === "gate" && channelPins(i.symbolId);
@@ -170,9 +180,14 @@ function* frames(
         mode === "mirror" || flipGate ? reflectOrientation(p, "left-right") : p;
       const x = cx + (p.position.x - cx) * (mode === "mirror" ? -1 : scale),
         y = cy + (p.position.y - cy) * scale;
-      seats.set(i.id, { ...pose, position: { x: snap(x), y: snap(y) } });
+      const position = { x: snap(x), y: snap(y) };
+      changed ||=
+        pose !== p ||
+        position.x !== p.position.x ||
+        position.y !== p.position.y;
+      seats.set(i.id, { ...pose, position });
     }
-    yield withPlacements(placed, seats);
+    if (mode !== "gate" || changed) yield withPlacements(placed, seats);
   }
 }
 
@@ -221,12 +236,44 @@ export function selectNetlistPortSides(
   initial: Trial,
   route: RouteSeats,
   stopped: () => boolean,
+  routePort?: RoutePort,
 ) {
   const context = portRoles(source, resolver);
   if (!context.ports.length) return initial.candidate;
   if (stopped()) return initial.candidate;
   const groups = mirrorPortGroups(source, resolver, context.ports);
   const trace = differentialBranches(source, resolver);
+  // Share trials across passes and symmetry seeds. Check each returned
+  // drawing against the current incumbent even on a cache hit.
+  const trials = new Map<string, Trial | undefined>();
+  const limit = source.instances.length > 24 ? 12 : Infinity;
+  const baseline = auditRouting(initial.final, resolver);
+  const withinWireBudget = (drawing: SchematicDocument) => {
+    const a = auditRouting(drawing, resolver);
+    return (
+      a.crossings <= baseline.crossings &&
+      a.bends <= baseline.bends + 2 &&
+      a.wireLength <= baseline.wireLength * 1.1
+    );
+  };
+  const routeOnce = (seats: Seats) => {
+    const key = JSON.stringify(source.instances.map((i) => seats.get(i.id)));
+    if (trials.has(key)) return trials.get(key);
+    if (trials.size >= limit) return;
+    const trial = route(seats, withinWireBudget);
+    trials.set(key, trial);
+    return trial;
+  };
+  // A local trial can touch several signal nets. Its separate allowance
+  // keeps exhausted full-route budgets from turning into unbounded local work.
+  let localTrials = 0;
+  const localRoute =
+    routePort &&
+    ((base: Trial, moves: Seats) => {
+      if (localTrials >= limit) return;
+      localTrials++;
+      return routePort(base, moves, withinWireBudget);
+    });
   const run = (seed: Trial, pairs: typeof groups) =>
     searchPortLayouts(
       source,
@@ -236,8 +283,9 @@ export function selectNetlistPortSides(
       context,
       pairs,
       trace,
-      route,
+      routeOnce,
       stopped,
+      localRoute,
     );
   const best = run(initial, groups);
   if (!groups.length || stopped()) return best.candidate;
@@ -282,6 +330,7 @@ function searchPortLayouts(
   trace: ReturnType<typeof differentialBranches>,
   route: RouteSeats,
   stopped: () => boolean,
+  routePort?: (base: Trial, moves: Seats) => Trial | undefined,
 ): Trial {
   const first = portGeometry(initial.final, resolver, context);
   if (!first) return initial;
@@ -421,11 +470,109 @@ function searchPortLayouts(
     };
     const routeCandidate = (seats: Seats, geo: Geometry) => {
       if (!improves(portLevels(geo, seats), previous)) return;
+      if (
+        mirrored &&
+        reflectionWorsensDirection(
+          best.final,
+          withPlacements(start.final, seats),
+          resolver,
+        )
+      )
+        return;
+      // Final facing keeps the pin fixed, but can change its exit and wire
+      // departures. Only the device axis and the terminal coordinates are
+      // invariant for these port-only moves.
+      if (groups.length && geo === current) {
+        const geometry = portMirrorGeometry(
+          withPlacements(start.final, seats),
+          resolver,
+          groups,
+          true,
+        );
+        if (
+          geometry.some(
+            (g, i) =>
+              g.axis.error > (symmetry[5 * i] ?? Infinity) ||
+              g.centring > (symmetry[5 * i + 1] ?? Infinity) ||
+              g.alignment > (symmetry[5 * i + 2] ?? Infinity),
+          )
+        )
+          return;
+      }
       const key = JSON.stringify([...seats.values()]);
       if (seen.has(key)) return;
       seen.add(key);
+      if (routePort && geo === current && source.instances.length > 24) {
+        const moves: Seats = new Map();
+        for (const port of geo.ports) {
+          const pose = seats.get(port.id);
+          if (pose && pose !== current.seats.get(port.id))
+            moves.set(port.id, pose);
+        }
+        if (moves.size) {
+          const before = best;
+          consider(routePort(start, moves));
+          if (best !== before) return;
+        }
+      }
       consider(route(seats));
     };
+    // Reflect the already routed drawing before trying new edge columns.
+    if (!probeCorridors) {
+      const grid = source.presentation.grid;
+      const axis =
+        grid * Math.round((current.box.x + current.box.width / 2) / grid);
+      const frame = frames("mirror", start.final, current, context).next()
+        .value;
+      const geo = frame && portGeometry(frame, resolver, context);
+      if (geo && improves(portLevels(geo, geo.seats), previous)) {
+        mirrored = true;
+        consider(reflectNetlistPlan(source, resolver, start, axis));
+        mirrored = false;
+        if (best !== start) continue;
+      }
+    }
+    const grid = source.presentation.grid,
+      mid = current.box.x + current.box.width / 2;
+    for (const [index, p] of current.ports.entries()) {
+      if (previous[index] === 2) continue;
+      if (probeCorridors) {
+        if (previous[index] === 0 && main.has(p.id))
+          for (const position of corridorPositions(
+            start.final,
+            resolver,
+            p,
+            current,
+          )) {
+            if (stopped()) return best;
+            consider(
+              slideNetlistPort(source, resolver, start, p.id, p.net, position),
+            );
+          }
+        continue;
+      }
+      const sign = p.left ? -1 : 1;
+      const outward = (x: number) =>
+        grid * ((p.left ? Math.ceil(x / grid) : Math.floor(x / grid)) + sign);
+      const edge = outward(
+        p.left ? current.box.x : current.box.x + current.box.width,
+      );
+      const columns =
+        previous[index] === 0
+          ? [edge, outward(mid), outward(mid) + sign * grid]
+          : [edge];
+      for (const x of columns)
+        for (const dy of [0, -1, 1, -2, 2]) {
+          if (stopped()) return best;
+          consider(
+            slideNetlistPort(source, resolver, start, p.id, p.net, {
+              x,
+              y: p.seat.position.y + dy * grid,
+            }),
+          );
+        }
+    }
+    if (best !== start) continue;
     const modes = [
       "existing",
       "mirror",
@@ -446,14 +593,9 @@ function searchPortLayouts(
         const wrong = geo.ports.filter(
           (_, i) => status[i]! < (mode === "interior" ? 1 : 2),
         );
-        if (mode === "mirror" && improves(status, previous)) {
-          const grid = source.presentation.grid;
-          const axis =
-            grid * Math.round((current.box.x + current.box.width / 2) / grid);
-          consider(reflectNetlistPlan(source, resolver, start, axis));
-        }
         if (mode === "mirror" || mode === "tight")
           routeCandidate(geo.seats, geo);
+        if (!wrong.length) continue;
         const groups =
           mode === "jog"
             ? wrong.map((p) => [p])
@@ -489,61 +631,18 @@ function searchPortLayouts(
               mode === "jog" ? [-2, 2] : [0],
             )) {
               if (stopped()) return best;
+              const before = best;
               routeCandidate(seats, geo);
+              if (
+                best !== before &&
+                group.every((p) => levels[geo.ports.indexOf(p)] === 2) &&
+                auditRouting(best.final, resolver).crossings === 0
+              )
+                break;
             }
         }
       }
-      if (levels.every((n) => n === 2)) break;
-    }
-    mirrored = false;
-    if (levels.some((n) => n < 2)) {
-      const grid = source.presentation.grid,
-        mid = current.box.x + current.box.width / 2;
-      for (const [index, p] of current.ports.entries()) {
-        if (previous[index] === 2) continue;
-        if (probeCorridors) {
-          if (previous[index] === 0 && main.has(p.id))
-            for (const position of corridorPositions(
-              start.final,
-              resolver,
-              p,
-              current,
-            )) {
-              if (stopped()) return best;
-              consider(
-                slideNetlistPort(
-                  source,
-                  resolver,
-                  start,
-                  p.id,
-                  p.net,
-                  position,
-                ),
-              );
-            }
-          continue;
-        }
-        const sign = p.left ? -1 : 1;
-        const outward = (x: number) =>
-          grid * ((p.left ? Math.ceil(x / grid) : Math.floor(x / grid)) + sign);
-        const edge = outward(
-          p.left ? current.box.x : current.box.x + current.box.width,
-        );
-        const columns =
-          previous[index] === 0
-            ? [edge, outward(mid), outward(mid) + sign * grid]
-            : [edge];
-        for (const x of columns)
-          for (const dy of [0, -1, 1, -2, 2]) {
-            if (stopped()) return best;
-            consider(
-              slideNetlistPort(source, resolver, start, p.id, p.net, {
-                x,
-                y: p.seat.position.y + dy * grid,
-              }),
-            );
-          }
-      }
+      if (best !== start || levels.every((n) => n === 2)) break;
     }
     if (best === start) {
       if (
