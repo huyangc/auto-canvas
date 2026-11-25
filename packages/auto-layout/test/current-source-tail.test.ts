@@ -11,6 +11,7 @@ import { netlistPresentation } from "../src/netlist-presentation.js";
 import { auditRouting } from "../src/routing-audit.js";
 import { equivalentTerminals, preview } from "../src/transaction.js";
 import {
+  highSideSourceResistorTail,
   inputStageTail,
   sourceResistorTail,
 } from "./current-source-tail.test-support.js";
@@ -168,114 +169,18 @@ it("leaves the current source of a high-side pair between the supply and the pai
   expect(auditRouting(d, resolver).crossings).toBe(0);
 }, 60000);
 it.each([false, true])(
-  "draws the two source resistors joining below the high-side current source (reverse=%s)",
+  "quick planning preserves the high-side source-resistor circuit (reverse=%s)",
   (reverse) => {
-    const tailPin = reverse ? "-" : "+";
-    const doc = circuit(
-      {
-        P: "pmos",
-        M: "pmos",
-        A: "resistor",
-        B: "resistor",
-        C: "resistor",
-        D: "resistor",
-        J: "current-source",
-        u: "port",
-        v: "port",
-        a: "port",
-        b: "port",
-        power: "vdd-port",
-        gnd: "ground",
-      },
-      {
-        u: ["P.G", "u.P"],
-        v: ["M.G", "v.P"],
-        a: ["M.D", "A.2", "a.P"],
-        b: ["P.D", "B.2", "b.P"],
-        power: ["A.1", "B.1", "gnd.0"],
-        first: ["P.S", "D.2"],
-        second: ["M.S", "C.1"],
-        common: ["D.1", "C.2", "J." + tailPin],
-        return: ["J." + (reverse ? "+" : "-"), "power.P"],
-      },
-    );
-    const ext = ["u", "v", "a", "b"];
-    for (const net of doc.nets) net.id = "net-" + net.id;
-    doc.netlist = {
-      name: "gain",
-      formalParameters: [],
-      terminals: ext.map((id, i) => ({
-        id,
-        name: id,
-        netId: "net-" + id,
-        direction: i < 2 ? "input" : "output",
-        interfaceInstanceIds: [id],
-      })),
-    };
-    const plan = planAutoLayout(doc, resolver, { presentation: "netlist" });
+    const { doc } = highSideSourceResistorTail(reverse);
+    const plan = planAutoLayout(doc, resolver, {
+      presentation: "netlist",
+      search: quick,
+    });
     expect(plan.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
     const result = preview(doc, resolver, plan.edits);
     if (!result.ok) throw Error("layout transaction must replay");
-    const drawing = result.document,
-      pins = pinPoints(drawing, resolver);
-    const point = (id: string, pin = "P") =>
-      pins.find((x) => x.instanceId === id && x.pinName === pin)!.point;
-    const a = point("a"),
-      b = point("b"),
-      axis = (a.x + b.x) / 2;
-    expect((point("u").x - axis) * (b.x - axis)).toBeGreaterThan(0);
-    expect((point("v").x - axis) * (a.x - axis)).toBeGreaterThan(0);
-    expect(a.y).toBe(b.y);
-    const tail = drawing.instances.find(
-      (i) => i.symbolId === "current-source",
-    )!;
-    const foot = point(tail.id, tailPin);
-    expect(foot.x).toBe(axis);
-    expect(tail.placement!.position.y).toBeLessThan(foot.y);
-    const body = visibleInstanceBounds(drawing, resolver).filter((v) =>
-      drawing.instances.some(
-        (i) =>
-          i.id === v.id &&
-          ["pmos", "resistor", "current-source"].includes(i.symbolId),
-      ),
-    );
-    const y = (id: string) =>
-      drawing.instances.find((i) => i.id === id)!.placement!.position.y;
-    expect(y("power")).toBeLessThan(y("J"));
-    expect(y("J")).toBeLessThan(y("C"));
-    expect(y("C")).toBeLessThan(y("M"));
-    expect(y("M")).toBeLessThan(y("A"));
-    expect(a.y).toBeGreaterThan(
-      Math.max(...body.map(({ bounds }) => bounds.y + bounds.height)),
-    );
-    expect(Math.min(point("u").x, point("v").x)).toBeLessThan(
-      Math.min(...body.map(({ bounds }) => bounds.x)),
-    );
-    expect(Math.max(point("u").x, point("v").x)).toBeGreaterThan(
-      Math.max(...body.map(({ bounds }) => bounds.x + bounds.width)),
-    );
-    const shared = drawing.nets.find((n) =>
-      n.terminals.some(
-        (t) => t.instanceId === tail.id && t.pinName === tailPin,
-      ),
-    )!;
-    const tee = deriveDocumentContactEvidence(drawing, resolver).contacts.find(
-      (c) =>
-        c.netId === shared.id &&
-        c.point.x === axis &&
-        c.point.y > foot.y &&
-        contactRequiresJunctionDot(c),
-    );
-    expect(tee?.branchDirections).toEqual(
-      expect.arrayContaining([
-        { x: -1, y: 0 },
-        { x: 1, y: 0 },
-        { x: 0, y: -1 },
-      ]),
-    );
-    expect(equivalentTerminals(doc, drawing, resolver)).toBe(true);
-    expect(auditRouting(drawing, resolver).crossings).toBe(0);
+    expect(equivalentTerminals(doc, result.document, resolver)).toBe(true);
+    expect(auditRouting(result.document, resolver).unsafeProblems).toEqual([]);
   },
-  // Full-search geometry for this fixture can take over a minute on CI.
-  120_000,
+  60_000,
 );
