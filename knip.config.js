@@ -75,7 +75,6 @@ export default {
         "src/**/*.worker.ts!",
         "src/headless/index.ts!",
         "vite.config.ts!",
-        "vite.desktop.config.ts!",
         "e2e/**/*.spec.ts",
       ],
       project: [
@@ -98,10 +97,6 @@ export default {
     },
     "apps/local-host": {
       project: ["src/**/*.ts!", ...testSupport],
-    },
-    "apps/desktop": {
-      entry: ["src/main.ts!", "scripts/*.mjs!"],
-      project: ["src/**/*.ts!", "scripts/**/*.mjs!"],
     },
     "packages/*": {
       includeEntryExports: true,

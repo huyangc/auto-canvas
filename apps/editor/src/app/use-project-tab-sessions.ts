@@ -45,10 +45,7 @@ import {
   type WorkspaceReopenSummary,
 } from "../document/workspace-reopen";
 import type { SchematicClipboard } from "../features/clipboard/clipboard";
-import {
-  editInProgressReason,
-  projectHoldReason,
-} from "../features/editor-shell/edit-blockers";
+import { projectHoldReason } from "../features/editor-shell/edit-blockers";
 import type { SpiceImportReport } from "../features/editor-shell/editor-file-commands";
 import type { useEditorPanels } from "../features/editor-shell/use-editor-panels";
 import type { usePropertiesEditor } from "../features/properties/use-properties-editor";
@@ -211,7 +208,6 @@ interface ProjectTabSessionsOptions {
   restoredNewLink: RefObject<boolean>;
   resetInteractionState: () => void;
   cancelAllTransientInteraction: () => void;
-  nativeWorkspaceSaving: RefObject<boolean>;
   /** The editor mode now, read when a tab is captured, made or restored. */
   getEditorMode: () => EditorMode;
   /**
@@ -294,7 +290,6 @@ export function useProjectTabSessions({
   restoredNewLink,
   resetInteractionState,
   cancelAllTransientInteraction,
-  nativeWorkspaceSaving,
   getEditorMode,
   getCarriedOverDocks,
   endDocksCarryOver,
@@ -379,7 +374,6 @@ export function useProjectTabSessions({
       ...captureTabSession(),
       controller,
       file: {
-        nativeBinding: options.nativeBinding ?? null,
         persistenceState: options.persistenceState ?? "unbound",
         cloudBinding: options.cloudBinding ?? null,
         savedBaseline: options.savedBaseline ?? null,
@@ -665,16 +659,12 @@ export function useProjectTabSessions({
     textOnScreen: !!textEditingTarget,
     codeDraftDirty,
   });
-  const currentEditBlocker = () => editInProgressReason(editInProgress());
   const [cloudManagementBusy, setCloudManagementBusy] = useState(false);
   const cloudMutation = useRef(false);
   const projectSwitchBlocker = () =>
     projectHoldReason({
       ...editInProgress(),
-      saving:
-        isSaveInFlight() ||
-        nativeWorkspaceSaving.current ||
-        cloudMutation.current,
+      saving: isSaveInFlight() || cloudMutation.current,
       replaceGuard: !!replaceGuard,
       recoveryDialogOpen,
     });
@@ -1062,7 +1052,6 @@ export function useProjectTabSessions({
       await flushWorkspace();
   });
   return {
-    flushNativeWorkspace: flushWorkspace,
     openImportFile,
     cloudManagementBusy,
     isCloudManagementInFlight: () => cloudMutation.current,
@@ -1082,7 +1071,6 @@ export function useProjectTabSessions({
         : restoredTabs.value !== null
           ? ("restored" as const)
           : ("unsuccessful" as const),
-    currentEditBlocker,
     projectSwitchBlocker,
     projectTabs,
     dropDiscardedWork,

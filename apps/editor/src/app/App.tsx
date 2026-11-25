@@ -253,7 +253,6 @@ import {
 } from "./use-project-tab-sessions";
 import { clearDeletedCloudProjects } from "../document/cloud-project-session";
 import { readWindowWorkspace } from "../document/workspace-reopen";
-import { useNativeProjectTabs } from "./use-native-project-tabs";
 import {
   createAgentWorkspaceHandler,
   createAgentWorkspaceTargets,
@@ -280,13 +279,6 @@ import {
   useWorkspaceAgentRuntime,
   WorkspaceAgentProvider,
 } from "../agent/workspace-agent";
-const HostAgentProvider = !import.meta.env?.ICM_DESKTOP
-  ? WorkspaceAgentProvider
-  : ({ children }: Parameters<typeof WorkspaceAgentProvider>[0]) => children;
-// The build profile is fixed; each render uses the same host hook.
-const useHostAgentRuntime = import.meta.env?.ICM_DESKTOP
-  ? () => null
-  : useWorkspaceAgentRuntime;
 export { WorkspaceAgentProvider } from "../agent/workspace-agent";
 import { referencedDocumentId } from "../document/editor-session";
 import { useInteractionState } from "../interaction/interaction-state";
@@ -485,9 +477,9 @@ export function App(props: AppProps) {
   } | null>(() =>
     typeof window === "undefined" || props.project ? { workspace: null } : null,
   );
-  const startup = useRef({ props, boot });
+  const startup = useRef({ boot });
   useEffect(() => {
-    const { props: entryProps, boot: initialBoot } = startup.current;
+    const { boot: initialBoot } = startup.current;
     if (initialBoot) return;
     let mounted = true;
     void Promise.resolve()
@@ -508,12 +500,7 @@ export function App(props: AppProps) {
             new URLSearchParams(window.location.search).get("resume") === "1",
         );
       })
-      .then(async (read) => {
-        if (entryProps.services.restoreWorkspace && !read.error)
-          read = {
-            ...read,
-            ...(await entryProps.services.restoreWorkspace(read.workspace)),
-          };
+      .then((read) => {
         if (!mounted) return;
         // Taken in by the tabs just read, or by none this window keeps.
         clearDeletedCloudProjects();
@@ -534,9 +521,8 @@ export function App(props: AppProps) {
   if (!boot) return <div role="status">Restoring project tabs…</div>;
   return (
     <EditorServicesProvider services={props.services}>
-      <HostAgentProvider
+      <WorkspaceAgentProvider
         enabled={
-          !import.meta.env?.ICM_DESKTOP &&
           props.services.capabilities.agent &&
           (props.publicAgentUiEnabled ?? PUBLIC_AGENT_UI_ENABLED)
         }
@@ -547,7 +533,7 @@ export function App(props: AppProps) {
           workspaceError={boot.error ?? null}
           workspaceNotice={boot.notice ?? null}
         />
-      </HostAgentProvider>
+      </WorkspaceAgentProvider>
     </EditorServicesProvider>
   );
 }
@@ -570,8 +556,7 @@ function propertiesMosBulkDefaultNetId(
 function WorkspaceEditor({
   project: initialProject,
   initialEditorMode,
-  publicAgentUiEnabled: requestedAgentUi = !import.meta.env?.ICM_DESKTOP &&
-    PUBLIC_AGENT_UI_ENABLED,
+  publicAgentUiEnabled: requestedAgentUi = PUBLIC_AGENT_UI_ENABLED,
   restoredWorkspace,
   workspaceError,
   workspaceNotice,
@@ -584,13 +569,9 @@ function WorkspaceEditor({
     identity,
     projectSerializer,
     projectStore,
-    nativeProjectStore,
     recordUsage,
-    NativeFileCommands,
-    NativeProjectHome,
     exportDelivery,
     capabilities,
-    openExternalLink,
   } = useEditorServices();
   const opened = useRef(false);
   useEffect(() => {
@@ -599,8 +580,7 @@ function WorkspaceEditor({
       recordUsage?.("editor.open", "ok");
     }
   }, [recordUsage]);
-  const publicAgentUiEnabled =
-    !import.meta.env?.ICM_DESKTOP && capabilities.agent && requestedAgentUi;
+  const publicAgentUiEnabled = capabilities.agent && requestedAgentUi;
   const [restoringWorkspace, setRestoringWorkspace] = useState(
     restoredWorkspace !== null,
   );
@@ -747,7 +727,7 @@ function WorkspaceEditor({
   });
   const openWorkingCopyIdsRef = useRef<() => readonly string[]>(() => []);
   // The Agent's hosts are built from its runtime, which loads on demand.
-  const agentRuntime = useHostAgentRuntime();
+  const agentRuntime = useWorkspaceAgentRuntime();
   const agentStartupRecovery = useAgentStartupRecovery({
     capabilities,
     restoredWorkspace,
@@ -779,8 +759,8 @@ function WorkspaceEditor({
     canvasDragSessionRef.current?.cancel();
     stageRecovery(project, { cloudBinding });
   });
-  // The tab names the open Project; the desktop names its window itself.
-  usePageTitle(project.name, !import.meta.env?.ICM_DESKTOP);
+  // The browser tab names the open Project.
+  usePageTitle(project.name, true);
   const definitionProjectRef = useRef({ project, projectSessionId });
   definitionProjectRef.current = { project, projectSessionId };
   const projectConnectivityIndex = useMemo(
@@ -987,7 +967,7 @@ function WorkspaceEditor({
   agentProjectTabsRef.current = () => projectTabs;
   const browserAgentProjectHost = useMemo(
     () =>
-      !import.meta.env?.ICM_DESKTOP && agentRuntime && browserAgentHost
+      agentRuntime && browserAgentHost
         ? new agentRuntime.BrowserAgentProjectHost({
             isProjectAvailable: () =>
               agentProjectTabsRef
@@ -1032,7 +1012,6 @@ function WorkspaceEditor({
     captureFileSession,
     restoreFileSession,
     cloudBinding,
-    nativeBinding,
     savedProjectBaseline,
     replaceGuard,
     replaceGuardSaving,
@@ -1051,7 +1030,6 @@ function WorkspaceEditor({
     saveProjectToCloud,
     saveProjectToCloudByHand,
     saveByHand,
-    saveProjectToNative,
     isSaveInFlight,
     saveBusy,
     exportProjectFile,
@@ -1074,7 +1052,6 @@ function WorkspaceEditor({
   } = useProjectFileLifecycle({
     serializeSnapshot: snapshotSerializer.serialize,
     projectStore,
-    ...(nativeProjectStore ? { nativeProjectStore } : {}),
     exportDelivery,
     openProjectInTab: (project, view, options, background) =>
       openProjectInTabRef.current(project, view, options, background),
@@ -3606,7 +3583,7 @@ function WorkspaceEditor({
       },
       actions: { setSelectedEndpoint, highlightNet, transact, setStatus },
     });
-  if (!import.meta.env?.ICM_DESKTOP && agentRuntime)
+  if (agentRuntime)
     agentSemanticIntentRef.current =
       agentRuntime.createAgentSemanticIntentHandler({
         project,
@@ -4575,7 +4552,6 @@ function WorkspaceEditor({
     commitTextEditing,
     document,
     readShortcutDependencies: () => ({
-      nativeProjectStore,
       setStatus,
       componentEditor,
       userComponentsOpen,
@@ -4659,7 +4635,6 @@ function WorkspaceEditor({
       resolveNetLabelPlacementTarget,
       turnNetLabels,
       editorCommands,
-      openNativeProject,
     }),
   });
 
@@ -4845,14 +4820,11 @@ function WorkspaceEditor({
     },
   });
 
-  const nativeWorkspaceSaving = useRef(false);
   const {
     createTabSession,
     openImportFile,
-    flushNativeWorkspace,
     restoredTabs,
     workspaceRestoreOutcome,
-    currentEditBlocker,
     projectSwitchBlocker,
     projectTabs,
     workspaceReopen,
@@ -4940,7 +4912,6 @@ function WorkspaceEditor({
     restoredNewLink,
     resetInteractionState,
     cancelAllTransientInteraction,
-    nativeWorkspaceSaving,
     getEditorMode: () => editorModeRef.current,
     getCarriedOverDocks: () => {
       if (!docksCarriedRef.current) return null;
@@ -4963,51 +4934,24 @@ function WorkspaceEditor({
     restoredNewLink,
     restoredTabs,
   });
-  const {
-    recentNativeFiles,
-    nativeBusy,
-    setNativeBusy,
-    nativeOperation,
-    refreshNativeFiles,
-    openNativeProject,
-    closeNativeTab,
-    closeNativeTabs,
-    saveNativeTab,
-  } = useNativeProjectTabs({
-    restoringWorkspace,
-    flushNativeWorkspace,
-    nativeProjectStore,
-    setStatus,
-    replaceGuard,
-    recoveryDialogOpen,
-    saveProjectToNative,
-    isSaveInFlight,
-    openProjectFile,
+  agentWorkspaceRef.current = createAgentWorkspaceHandler({
+    projectStore,
+    stageRecovery,
+    flushRecovery,
+    editorDocumentController,
+    synchronizeExternalCommit,
+    setCloudProjects,
+    cloudListMutationRef,
+    codeDraftDirty,
+    restoreFileSession,
+    saveProjectToCloud,
+    openCloudProjectById,
+    renameProject,
     createTabSession,
-    currentEditBlocker,
+    projectSwitchBlocker,
     projectTabs,
-    nativeWorkspaceSaving,
   });
-  if (!import.meta.env?.ICM_DESKTOP)
-    agentWorkspaceRef.current = createAgentWorkspaceHandler({
-      projectStore,
-      stageRecovery,
-      flushRecovery,
-      editorDocumentController,
-      synchronizeExternalCommit,
-      setCloudProjects,
-      cloudListMutationRef,
-      codeDraftDirty,
-      restoreFileSession,
-      saveProjectToCloud,
-      openCloudProjectById,
-      renameProject,
-      createTabSession,
-      projectSwitchBlocker,
-      projectTabs,
-    });
   if (
-    !import.meta.env?.ICM_DESKTOP &&
     agentRuntime &&
     browserAgentHost &&
     browserAgentFileHost &&
@@ -5063,12 +5007,7 @@ function WorkspaceEditor({
       ) : null}
       {renderCrashRequested() ? <RenderCrashProbe /> : null}
       <EditorMenuBar
-        identity={identity}
         projectStore={projectStore}
-        nativeProjectStore={nativeProjectStore}
-        NativeFileCommands={NativeFileCommands}
-        NativeProjectHome={NativeProjectHome}
-        initiallyOpenProjectHome={restoredWorkspace === null}
         capabilities={capabilities}
         publicAgentUiEnabled={publicAgentUiEnabled}
         setStatus={setStatus}
@@ -5102,13 +5041,10 @@ function WorkspaceEditor({
         cloudManagementBusy={cloudManagementBusy}
         renameShelfProject={renameShelfProject}
         deleteShelfProject={deleteShelfProject}
-        nativeBinding={nativeBinding}
         savedProjectBaseline={savedProjectBaseline}
         isDirtyWork={isDirtyWork}
         hasUnsavedChanges={hasUnsavedChanges}
         saveByHand={saveByHand}
-        saveProjectToNative={saveProjectToNative}
-        isSaveInFlight={isSaveInFlight}
         saveBusy={saveBusy}
         exportProjectFile={exportProjectFile}
         createNewProject={createNewProject}
@@ -5147,18 +5083,8 @@ function WorkspaceEditor({
         exportSvg={exportSvg}
         exportRaster={exportRaster}
         exportDesignNetlist={exportDesignNetlist}
-        nativeWorkspaceSaving={nativeWorkspaceSaving}
         createTabSession={createTabSession}
         projectTabs={projectTabs}
-        recentNativeFiles={recentNativeFiles}
-        nativeBusy={nativeBusy}
-        setNativeBusy={setNativeBusy}
-        nativeOperation={nativeOperation}
-        refreshNativeFiles={refreshNativeFiles}
-        openNativeProject={openNativeProject}
-        closeNativeTab={closeNativeTab}
-        closeNativeTabs={closeNativeTabs}
-        saveNativeTab={saveNativeTab}
         editorMode={editorMode}
         changeEditorMode={(next) => changeEditorMode(next, { persist: true })}
         bringUpDraw={bringUpDraw}
@@ -5170,7 +5096,6 @@ function WorkspaceEditor({
       />
       <EditorDialogs
         projectStore={projectStore}
-        nativeProjectStore={nativeProjectStore}
         exportDelivery={exportDelivery}
         publicAgentUiEnabled={publicAgentUiEnabled}
         setStatus={setStatus}
@@ -5462,25 +5387,7 @@ function WorkspaceEditor({
                         netlistNamingProfile,
                       )
                     }
-                    {...(nativeProjectStore
-                      ? {
-                          onSaveFile: () =>
-                            void exportDesignNetlist(
-                              netlistPreferences.mode,
-                              netlistNamingProfile,
-                              "file",
-                            ),
-                        }
-                      : {})}
                     externalLinksEnabled={capabilities.externalLinks}
-                    {...(openExternalLink
-                      ? {
-                          onOpenExternalLink: (target) =>
-                            void openExternalLink(target).catch((error) =>
-                              setStatus(String(error)),
-                            ),
-                        }
-                      : {})}
                     configurationError={netlistPreferences.error}
                   />
                 ) : projectPanel === "instances" ? (
@@ -7311,11 +7218,7 @@ function WorkspaceEditor({
               <EmptyStateCard
                 examples={libraryProjectExamples}
                 onChooseNetlist={() => importNetlistInputRef.current?.click()}
-                onOpenProject={() =>
-                  nativeProjectStore
-                    ? void openNativeProject()
-                    : projectInputRef.current?.click()
-                }
+                onOpenProject={() => projectInputRef.current?.click()}
                 onOpenExample={(id) => {
                   // Like every other open path, wait for what holds this
                   // Project (an unapplied code draft, open settings…); the

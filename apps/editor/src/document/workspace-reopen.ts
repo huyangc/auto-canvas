@@ -35,7 +35,6 @@ interface SavedTabFacts {
   projectText?: unknown;
   file?: {
     cloudBinding?: { id?: unknown; revision?: unknown } | null;
-    nativeBinding?: unknown;
   } | null;
   recovery?: { workingCopyId?: unknown; source?: unknown } | null;
 }
@@ -104,8 +103,7 @@ export function worthReopening(record: ProjectWorkspace): boolean {
       (tab.dirty === true ||
         tab.unsafe === true ||
         tab.publication ||
-        tab.file?.cloudBinding ||
-        tab.file?.nativeBinding),
+        tab.file?.cloudBinding),
     );
   });
 }

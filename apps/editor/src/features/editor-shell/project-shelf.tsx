@@ -4,13 +4,11 @@ import { DialogCloseButton } from "../../components/dialog-close-button";
 import type { CloudProjectSummary } from "./cloud-projects";
 import "./project-shelf.css";
 
-const ShelfWall = import.meta.env?.ICM_DESKTOP
-  ? () => null
-  : lazy(() =>
-      import("../../components/shelf-wall").then((module) => ({
-        default: module.ShelfWall,
-      })),
-    );
+const ShelfWall = lazy(() =>
+  import("../../components/shelf-wall").then((module) => ({
+    default: module.ShelfWall,
+  })),
+);
 
 const InlineConfirm = lazy(() =>
   import("../../components/inline-confirm").then((module) => ({

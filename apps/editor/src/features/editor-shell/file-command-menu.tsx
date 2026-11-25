@@ -6,12 +6,10 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
-  type ComponentType,
   type RefObject,
 } from "react";
 
 import { AccountContext } from "../../accounts/account-context";
-import type { RecentProjectFile } from "../../hosts/native-project-store";
 import { CommandSubmenu } from "./command-submenu";
 import type { CloudProjectSummary } from "./cloud-projects";
 import { ProjectShelf } from "./project-shelf";
@@ -37,20 +35,6 @@ export interface FileProjectTabActions {
 }
 
 export interface FileCommandMenuProps {
-  NativeFileCommands?: ComponentType<
-    NonNullable<FileCommandMenuProps["nativeFiles"]>
-  >;
-  nativeFiles?: {
-    projectName: string;
-    path: string | null;
-    recent: RecentProjectFile[];
-    busy: boolean;
-    refresh(): void;
-    open(id?: string): void;
-    saveAs(options?: { name: string; intoLibrary: boolean }): void;
-    forget(id: string): void;
-    newProject?(): void;
-  };
   cloudEnabled?: boolean;
   canRevert: boolean;
   hasRecoverySessions: boolean;
@@ -88,8 +72,6 @@ export interface FileCommandMenuProps {
 }
 
 export function FileCommandMenu({
-  NativeFileCommands,
-  nativeFiles,
   cloudEnabled = true,
   canRevert,
   hasRecoverySessions,
@@ -252,17 +234,9 @@ export function FileCommandMenu({
     key: "save",
     content: (
       <>
-        <button
-          type="button"
-          data-testid="save-cloud-project"
-          onClick={onSave}
-          disabled={nativeFiles?.busy}
-        >
-          {cloudEnabled || nativeFiles ? "Save" : "Export Project File…"}
+        <button type="button" data-testid="save-cloud-project" onClick={onSave}>
+          {cloudEnabled ? "Save" : "Export Project File…"}
         </button>
-        {nativeFiles && NativeFileCommands ? (
-          <NativeFileCommands {...nativeFiles} newProject={onNewProject} />
-        ) : null}
         {cloudEnabled ? (
           <button
             type="button"
@@ -460,8 +434,7 @@ export function FileCommandMenu({
       className="command-menu"
       name="editor-command-menu"
       onToggle={(event) => {
-        if (event.currentTarget.open) nativeFiles?.refresh();
-        else setOpenSubmenu(null);
+        if (!event.currentTarget.open) setOpenSubmenu(null);
       }}
     >
       <summary>File</summary>

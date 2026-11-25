@@ -46,7 +46,6 @@ import type {
   EditorTool,
   useInteractionState,
 } from "../interaction/interaction-state";
-import type { EditorServices } from "../services/editor-services";
 import { snapCoordinate } from "../snap/engine";
 import type { SnapGuideLine } from "../snap/engine";
 import type { ComponentEditorSession } from "./component-editor-session";
@@ -56,7 +55,6 @@ import {
   isTypingTarget,
 } from "./editor-runtime-helpers";
 import type { HighlightedNetOrigin } from "./use-editor-derived-model";
-import type { useNativeProjectTabs } from "./use-native-project-tabs";
 
 type ProjectFileLifecycle = ReturnType<typeof useProjectFileLifecycle>;
 type EditorPanels = ReturnType<typeof useEditorPanels>;
@@ -70,7 +68,6 @@ type ComponentPlacement = ReturnType<typeof useComponentPlacement>;
 type NavigationController = ReturnType<typeof createEditorNavigationController>;
 
 interface EditorShortcutDependencies {
-  nativeProjectStore: EditorServices["nativeProjectStore"];
   setStatus: Dispatch<SetStateAction<string>>;
   componentEditor: ComponentEditorSession | null;
   userComponentsOpen: boolean;
@@ -160,9 +157,6 @@ interface EditorShortcutDependencies {
   ) => NetLabelPlacementTarget | null;
   turnNetLabels: () => void;
   editorCommands: ReturnType<typeof createEditorCommandRouter>;
-  openNativeProject: ReturnType<
-    typeof useNativeProjectTabs
-  >["openNativeProject"];
 }
 
 /** Installs the editor's key handler and the outside-press dismissal. */
@@ -236,7 +230,6 @@ export function useEditorShortcuts({
 }
 
 function createEditorShortcutHandler({
-  nativeProjectStore,
   setStatus,
   componentEditor,
   userComponentsOpen,
@@ -311,7 +304,6 @@ function createEditorShortcutHandler({
   resolveNetLabelPlacementTarget,
   turnNetLabels,
   editorCommands,
-  openNativeProject,
 }: EditorShortcutDependencies) {
   function onKeyDown(event: KeyboardEvent): void {
     // The Auto Layout report is a modal dialog, but this router captures at
@@ -563,8 +555,7 @@ function createEditorShortcutHandler({
         void saveByHand();
         return;
       case "open":
-        if (nativeProjectStore) void openNativeProject();
-        else projectInputRef.current?.click();
+        projectInputRef.current?.click();
         return;
       case "turn-net-labels":
         turnNetLabels();

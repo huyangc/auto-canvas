@@ -12,7 +12,6 @@ import * as derived from "@icm/derived";
 import { App } from "./App";
 import { AccountContext } from "../accounts/account-context";
 import { createWebEditorServices } from "../services/web-editor-services";
-import { createPreviewEditorServices } from "../services/preview-editor-services";
 import {
   defaultRazaviSymbolVariantId,
   razaviHiddenBulkRisk,
@@ -240,26 +239,6 @@ describe("editor shell", () => {
     );
     expect(file).toContain(">New Project<");
     expect(file).not.toContain("Sign out");
-  });
-
-  it("marks the top bar of a host with header controls of its own", () => {
-    const project = createEmptyProject("host", "Host");
-    const web = renderToStaticMarkup(
-      <App services={services} project={project} />,
-    );
-    expect(web).toContain('<div class="app-chrome-main">');
-    const fetch = vi.fn();
-    vi.stubGlobal("fetch", fetch);
-    try {
-      const desktop = renderToStaticMarkup(
-        <App services={createPreviewEditorServices()} project={project} />,
-      );
-      expect(desktop).toContain(
-        '<div class="app-chrome-main" data-host-controls="">',
-      );
-    } finally {
-      vi.unstubAllGlobals();
-    }
   });
 
   it("names an unnamed project Untitled in the top bar", () => {

@@ -50,10 +50,6 @@ import type { createEditorTransactionCommands } from "./editor-transaction-comma
 import type { useProjectCheck } from "./use-project-check";
 import type { useEditorAgentConnection } from "./use-agent-hosts";
 import type { useEditorDerivedModel } from "./use-editor-derived-model";
-import {
-  loadNativeProjectWorkspace,
-  type useNativeProjectTabs,
-} from "./use-native-project-tabs";
 import type { useProjectTabSessions } from "./use-project-tab-sessions";
 
 type ProjectFileLifecycle = ReturnType<typeof useProjectFileLifecycle>;
@@ -72,16 +68,10 @@ type FileCommands = ReturnType<typeof createEditorFileCommands>;
 type CloudProjects = ReturnType<typeof useCloudProjects>;
 type AgentConnection = ReturnType<typeof useEditorAgentConnection>;
 type ProjectTabSessions = ReturnType<typeof useProjectTabSessions>;
-type NativeProjectTabs = ReturnType<typeof useNativeProjectTabs>;
 
 /** The header: project tabs, menus and toolbars, bound to the editor. */
 export function EditorMenuBar({
-  identity,
   projectStore,
-  nativeProjectStore,
-  NativeFileCommands,
-  NativeProjectHome,
-  initiallyOpenProjectHome,
   capabilities,
   publicAgentUiEnabled,
   setStatus,
@@ -114,13 +104,10 @@ export function EditorMenuBar({
   cloudManagementBusy,
   renameShelfProject,
   deleteShelfProject,
-  nativeBinding,
   savedProjectBaseline,
   isDirtyWork,
   hasUnsavedChanges,
   saveByHand,
-  saveProjectToNative,
-  isSaveInFlight,
   saveBusy,
   exportProjectFile,
   createNewProject,
@@ -158,18 +145,8 @@ export function EditorMenuBar({
   exportSvg,
   exportRaster,
   exportDesignNetlist,
-  nativeWorkspaceSaving,
   createTabSession,
   projectTabs,
-  recentNativeFiles,
-  nativeBusy,
-  setNativeBusy,
-  nativeOperation,
-  refreshNativeFiles,
-  openNativeProject,
-  closeNativeTab,
-  closeNativeTabs,
-  saveNativeTab,
   editorMode,
   changeEditorMode,
   bringUpDraw,
@@ -179,12 +156,7 @@ export function EditorMenuBar({
   autoLayoutRun,
   importNetlistInputRef,
 }: {
-  identity: EditorServices["identity"];
   projectStore: EditorServices["projectStore"];
-  nativeProjectStore: EditorServices["nativeProjectStore"];
-  NativeFileCommands: EditorServices["NativeFileCommands"];
-  NativeProjectHome: EditorServices["NativeProjectHome"];
-  initiallyOpenProjectHome: boolean;
   capabilities: EditorServices["capabilities"];
   publicAgentUiEnabled: boolean;
   setStatus: Dispatch<SetStateAction<string>>;
@@ -217,13 +189,10 @@ export function EditorMenuBar({
   renameShelfProject: ProjectTabSessions["renameShelfProject"];
   deleteShelfProject: ProjectTabSessions["deleteShelfProject"];
   reloadCloudProjects: CloudProjects["reloadCloudProjects"];
-  nativeBinding: ProjectFileLifecycle["nativeBinding"];
   savedProjectBaseline: ProjectFileLifecycle["savedProjectBaseline"];
   isDirtyWork: ProjectFileLifecycle["isDirtyWork"];
   hasUnsavedChanges: ProjectFileLifecycle["hasUnsavedChanges"];
   saveByHand: ProjectFileLifecycle["saveByHand"];
-  saveProjectToNative: ProjectFileLifecycle["saveProjectToNative"];
-  isSaveInFlight: ProjectFileLifecycle["isSaveInFlight"];
   saveBusy: ProjectFileLifecycle["saveBusy"];
   exportProjectFile: ProjectFileLifecycle["exportProjectFile"];
   createNewProject: ProjectFileLifecycle["createNewProject"];
@@ -261,18 +230,8 @@ export function EditorMenuBar({
   exportSvg: FileCommands["exportSvg"];
   exportRaster: FileCommands["exportRaster"];
   exportDesignNetlist: FileCommands["exportDesignNetlist"];
-  nativeWorkspaceSaving: RefObject<boolean>;
   createTabSession: ProjectTabSessions["createTabSession"];
   projectTabs: ProjectTabSessions["projectTabs"];
-  recentNativeFiles: NativeProjectTabs["recentNativeFiles"];
-  nativeBusy: NativeProjectTabs["nativeBusy"];
-  setNativeBusy: NativeProjectTabs["setNativeBusy"];
-  nativeOperation: NativeProjectTabs["nativeOperation"];
-  refreshNativeFiles: NativeProjectTabs["refreshNativeFiles"];
-  openNativeProject: NativeProjectTabs["openNativeProject"];
-  closeNativeTab: NativeProjectTabs["closeNativeTab"];
-  closeNativeTabs: NativeProjectTabs["closeNativeTabs"];
-  saveNativeTab: NativeProjectTabs["saveNativeTab"];
   editorMode: EditorMode;
   /** The switch: an explicit choice, remembered for the next open. */
   changeEditorMode: (mode: EditorMode) => void;
@@ -284,8 +243,7 @@ export function EditorMenuBar({
   autoLayoutRun: AutoLayoutRunView;
   importNetlistInputRef: RefObject<HTMLInputElement | null>;
 }) {
-  const { NativeHeaderActions, openExternalLink, exportDelivery } =
-    useEditorServices();
+  const { exportDelivery } = useEditorServices();
   async function copyImportLink() {
     try {
       const link = createProjectImportLink(serializeProject(project));
@@ -315,15 +273,9 @@ export function EditorMenuBar({
   // with one project. Its Shelf is File's in modes without an account and
   // the user menu's in accounts mode.
   const tabActions = {
-    busy:
-      projectTabs.busy ||
-      cloudManagementBusy ||
-      (nativeProjectStore !== undefined && (nativeBusy || saveBusy)),
+    busy: projectTabs.busy || cloudManagementBusy,
     onNew: () => void projectTabs.open(() => createTabSession()),
-    onOpenFile: () =>
-      nativeProjectStore
-        ? void openNativeProject()
-        : tabProjectInputRef.current?.click(),
+    onOpenFile: () => tabProjectInputRef.current?.click(),
     onClose: (trigger: HTMLElement | null) => closeActiveTab.current?.(trigger),
   };
   const shelfActions = {
@@ -335,18 +287,6 @@ export function EditorMenuBar({
   return (
     <EditorAppChrome
       userComponentsEnabled={capabilities.userComponents}
-      hostActions={NativeHeaderActions ? <NativeHeaderActions /> : null}
-      desktopPreviewLabel={!capabilities.externalLinks && !openExternalLink}
-      identityEnabled={identity !== null}
-      projectHome={
-        NativeProjectHome ? (
-          <NativeProjectHome
-            initiallyOpen={initiallyOpenProjectHome}
-            onOpen={(id) => void openNativeProject(id)}
-            onNew={() => void projectTabs.open(() => createTabSession())}
-          />
-        ) : null
-      }
       projectTabs={
         <>
           <ProjectTabs
@@ -362,36 +302,12 @@ export function EditorMenuBar({
               projectNameEditing.current = editing;
             }}
             onClose={(id) => {
-              if (nativeProjectStore) void closeNativeTab(id);
-              else void projectTabs.close(id, () => createTabSession());
+              void projectTabs.close(id, () => createTabSession());
             }}
             closeActiveTab={closeActiveTab}
             onCloseMany={(ids) => {
-              if (nativeProjectStore) void closeNativeTabs(ids);
-              else void projectTabs.closeMany(ids, () => createTabSession());
+              void projectTabs.closeMany(ids, () => createTabSession());
             }}
-            {...(nativeProjectStore
-              ? {
-                  onSaveClose: async (id: string) => {
-                    const { saveAndCloseNativeTab } =
-                      await loadNativeProjectWorkspace();
-                    return saveAndCloseNativeTab(id, {
-                      busy: () =>
-                        nativeOperation.current ||
-                        nativeWorkspaceSaving.current ||
-                        isSaveInFlight(),
-                      setBusy: (busy) => {
-                        nativeWorkspaceSaving.current = busy;
-                        setNativeBusy(busy);
-                      },
-                      save: saveNativeTab,
-                      entries: projectTabs.entries,
-                      close: closeNativeTab,
-                      report: setStatus,
-                    });
-                  },
-                }
-              : {})}
             onNew={tabActions.onNew}
             onOpenFile={tabActions.onOpenFile}
             cloudProjects={cloudProjects}
@@ -427,32 +343,6 @@ export function EditorMenuBar({
           }
         : {})}
       fileCommands={{
-        ...(NativeFileCommands ? { NativeFileCommands } : {}),
-        ...(nativeProjectStore
-          ? {
-              nativeFiles: {
-                projectName: project.name,
-                path: nativeBinding?.path ?? null,
-                recent: recentNativeFiles,
-                busy: nativeBusy || saveBusy,
-                refresh: () => void refreshNativeFiles(),
-                open: (id?: string) => void openNativeProject(id),
-                saveAs: (options?: { name: string; intoLibrary: boolean }) =>
-                  void saveProjectToNative(
-                    undefined,
-                    true,
-                    options?.intoLibrary,
-                    options?.name,
-                  ),
-                forget: (id: string) => {
-                  void nativeProjectStore
-                    .forget(id)
-                    .then(refreshNativeFiles)
-                    .catch((error: unknown) => setStatus(String(error)));
-                },
-              },
-            }
-          : {}),
         cloudEnabled: projectStore !== null,
         canRevert: savedProjectBaseline !== null && isDirtyWork(),
         hasRecoverySessions: recoverySessions.some(

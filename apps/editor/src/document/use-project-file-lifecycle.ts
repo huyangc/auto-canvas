@@ -1,11 +1,6 @@
 import { accountKey } from "../accounts/storage";
 import type { EditorExportDelivery } from "../hosts/export-delivery";
 import type { CloudProjectStore } from "../services/editor-services";
-import type {
-  NativeFileBinding,
-  NativeProjectStore,
-  NativeSaveOutcome,
-} from "../hosts/native-project-store";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { createEmptyProject, createId } from "@icm/model";
@@ -59,7 +54,6 @@ import { CLOUD_PROJECT_COPY } from "./cloud-project-copy";
 export const REFRESH_RESTORE_STORAGE_KEY = "icm.restore-after-refresh.v1";
 
 export interface ProjectFileSession {
-  nativeBinding?: NativeFileBinding | null;
   persistenceState: PersistenceState;
   cloudBinding: CloudProjectBinding | null;
   savedBaseline: SavedProjectBaseline | null;
@@ -111,7 +105,6 @@ interface ReplaceGuardState {
 }
 
 export interface ReplaceProjectOptions {
-  nativeBinding?: NativeFileBinding | null;
   source?: BrowserRecoverySource;
   keepWorkingCopy?: boolean;
   formalFileHint?: BrowserRecoveryFormalFileHint;
@@ -141,7 +134,6 @@ type RecoveryLifecycle = Pick<
 export interface UseProjectFileLifecycleOptions {
   /** Reuse canonical bytes for the exact committed snapshot; never acknowledges a save. */
   serializeSnapshot?: (project: CircuitProject) => string;
-  nativeProjectStore?: NativeProjectStore;
   projectStore: CloudProjectStore | null;
   exportDelivery?: EditorExportDelivery;
   restoreWorkingSession?: boolean;
@@ -198,7 +190,6 @@ export interface UseProjectFileLifecycleOptions {
 export function useProjectFileLifecycle({
   serializeSnapshot = serializeProject,
   projectStore,
-  nativeProjectStore,
   exportDelivery,
   restoreWorkingSession = false,
   externalWorkspaceRestored = false,
@@ -293,17 +284,6 @@ export function useProjectFileLifecycle({
   const [saveCoordinator] = useState(() =>
     createProjectSaveCoordinator<CloudProjectSaveOutcome>(),
   );
-  const [nativeSaveCoordinator] = useState(() =>
-    createProjectSaveCoordinator<NativeSaveOutcome>(),
-  );
-  const [nativeBinding, setNativeBindingState] =
-    useState<NativeFileBinding | null>(null);
-  const nativeBindingRef = useRef(nativeBinding);
-  const nativeSavedTokenRef = useRef<string | null>(null);
-  const setNativeBinding = (binding: NativeFileBinding | null) => {
-    nativeBindingRef.current = binding;
-    setNativeBindingState(binding);
-  };
   const liveProjectRef = useRef(project);
   liveProjectRef.current = project;
   const liveSessionRef = useRef(projectSessionId);
@@ -511,7 +491,6 @@ export function useProjectFileLifecycle({
    */
   function hasUnsafeWork(): boolean {
     if (hasPendingEdits?.()) return true;
-    if (nativeProjectStore) return isDirtyWork();
     if (!isDirtyWork()) return false;
     const current = readCurrentProject();
     if (!projectHasMeaningfulContent(current)) return false;
@@ -536,10 +515,6 @@ export function useProjectFileLifecycle({
     // The install is the commit point: it retires whatever command ran it and
     // any dialog still waiting from before.
     invalidateActivation();
-    const previousBinding = nativeBindingRef.current;
-    if (previousBinding && previousBinding.id !== options.nativeBinding?.id)
-      void nativeProjectStore?.release(previousBinding.id).catch(() => {});
-    setNativeBinding(options.nativeBinding ?? null);
     recovery.cancelPending();
     if (options.keepWorkingCopy !== true) {
       recovery.beginWorkingCopy(options.source ?? "new");
@@ -715,91 +690,9 @@ export function useProjectFileLifecycle({
     return saveProjectToCloud(candidate);
   }
 
-  /** The person's Save: the Project's file, the Cloud, or an export. */
+  /** The person's Save: the Cloud, or an export. */
   function saveByHand(): Promise<unknown> {
-    return nativeProjectStore
-      ? saveProjectToNative()
-      : projectStore
-        ? saveProjectToCloudByHand()
-        : exportProjectFile();
-  }
-
-  function saveProjectToNative(
-    candidate?: CircuitProject,
-    asNew = false,
-    intoLibrary = false,
-    copyName?: string,
-  ): Promise<NativeSaveOutcome> {
-    const owner = captureReplacementOwner();
-    return nativeSaveCoordinator.save({
-      sessionId: projectSessionId,
-      current: () =>
-        isActivationCurrent(owner)
-          ? { id: liveSessionRef.current, project: readCurrentProject() }
-          : null,
-      ...(candidate ? { candidate } : {}),
-      ...(beforeSnapshot ? { beforeSnapshot } : {}),
-      asNew,
-      async write(snapshot) {
-        if (!nativeProjectStore)
-          return {
-            status: "failed",
-            message: "Local file storage is unavailable",
-          };
-        const binding = nativeBindingRef.current;
-        const { writeNativeProject } =
-          await import("../hosts/native-project-workspace");
-        return writeNativeProject(
-          snapshot,
-          {
-            store: nativeProjectStore,
-            workingCopyId: readCurrentWorkingCopyId(),
-            binding,
-            previousState: persistenceStateRef.current,
-            recovery,
-            view: viewBox,
-            currentProject: () => readCurrentProject(),
-            acknowledge: (file) => {
-              nativeSavedTokenRef.current = projectChangeToken(
-                snapshot.project,
-              );
-              setNativeBinding(file);
-            },
-            installCopy: (copy, baseline, file, dirty) => {
-              replaceActiveProject(copy, viewBox, {
-                nativeBinding: file,
-                savedBaseline: baseline,
-                persistenceState: dirty ? "dirty" : "clean",
-              });
-              nativeSavedTokenRef.current = projectChangeToken(
-                baseline.project,
-              );
-            },
-            setBaseline: setSavedProjectBaseline,
-            setState: setPersistenceState,
-            report: setStatus,
-          },
-          asNew,
-          intoLibrary,
-          copyName,
-        );
-      },
-      rejected: (reason) => ({
-        status: "failed",
-        message:
-          reason === "busy"
-            ? "Another save is in progress"
-            : "Finish current edits before saving",
-      }),
-      failed: (error, current) => {
-        const message = error instanceof Error ? error.message : "Save failed";
-        if (current) {
-          setPersistenceState("failed");
-          setStatus(`Save failed: ${message}`);
-        }
-        return { status: "failed", message };
-      },
-    });
+    return projectStore ? saveProjectToCloudByHand() : exportProjectFile();
   }
 
   async function exportProjectFile(owner?: ReplacementOwner): Promise<void> {
@@ -897,12 +790,6 @@ export function useProjectFileLifecycle({
     try {
       if (!command.isCurrent()) return false;
       replacementEpochRef.current++;
-      if (nativeProjectStore && nativeSaveCoordinator.isSaving()) {
-        setStatus(
-          "Wait for the file save to finish before replacing this Project",
-        );
-        return false;
-      }
       const snapshot = beforeSnapshot
         ? await beforeSnapshot()
         : readCurrentProject();
@@ -991,29 +878,6 @@ export function useProjectFileLifecycle({
     void (async () => {
       try {
         if (!guard.command.isCurrent()) return;
-        if (nativeProjectStore) {
-          const outcome = await saveProjectToNative();
-          await new Promise<void>((resolve) =>
-            requestAnimationFrame(() => resolve()),
-          );
-          if (
-            outcome.status === "saved" &&
-            guard.command.isCurrent() &&
-            !hasPendingEdits?.() &&
-            projectChangeToken(readCurrentProject()) ===
-              nativeSavedTokenRef.current
-          ) {
-            closeReplaceGuard(guard);
-            // The dialog is closed: whoever releases now, the slot must not
-            // outlive it, even when the callback installs nothing.
-            try {
-              await guard.perform(false);
-            } finally {
-              guard.command.release();
-            }
-          }
-          return;
-        }
         if (!projectStore) {
           await exportProjectFile(guard.command.owner);
           if (guard.command.isCurrent() && !hasUnsafeWork()) {
@@ -1070,7 +934,6 @@ export function useProjectFileLifecycle({
       persistenceState: "clean",
       cloudBinding,
       savedBaseline: baseline,
-      nativeBinding: nativeBindingRef.current,
     });
   }
 
@@ -1228,7 +1091,6 @@ export function useProjectFileLifecycle({
         options: ReplaceProjectOptions,
       ) => Promise<boolean>;
       isCurrent?: () => boolean;
-      nativeBinding?: NativeFileBinding;
       /**
        * Read once the file has been read, before the replacement: what keeps
        * the Project from being replaced holds now (a draft begun during the
@@ -1279,25 +1141,10 @@ export function useProjectFileLifecycle({
           ? `, drew ${drawn} ${drawn === 1 ? "Instance" : "Instances"} the file kept off the sheet`
           : "";
       const openOptions: ReplaceProjectOptions = {
-        ...(options.nativeBinding
-          ? {
-              nativeBinding: options.nativeBinding,
-              savedBaseline: {
-                project: structuredClone(openedProject),
-                viewBox: defaultViewBox,
-              },
-            }
-          : {}),
         source: "opened-file",
         formalFileHint: { name: staged.fileName },
         persistenceState:
-          staged.migrated || normalizedDocumentCount > 0
-            ? "dirty"
-            : options.nativeBinding
-              ? "clean"
-              : nativeProjectStore
-                ? "dirty"
-                : "unbound",
+          staged.migrated || normalizedDocumentCount > 0 ? "dirty" : "unbound",
       };
       let applied = false;
       const performOpen = async () => {
@@ -1670,7 +1517,6 @@ export function useProjectFileLifecycle({
         !describeOpenBlocker?.();
     },
     captureFileSession: (): ProjectFileSession => ({
-      nativeBinding: nativeBindingRef.current,
       // The live state: a tab captured right after an edit keeps its mark.
       persistenceState: persistenceStateRef.current,
       cloudBinding,
@@ -1683,7 +1529,6 @@ export function useProjectFileLifecycle({
       // The outgoing session's command, dialog and busy state end here even
       // if its read never settles.
       invalidateActivation();
-      setNativeBinding(session.nativeBinding ?? null);
       setPersistenceState(session.persistenceState);
       setCloudBinding(session.cloudBinding);
       setSavedProjectBaseline(session.savedBaseline);
@@ -1701,7 +1546,6 @@ export function useProjectFileLifecycle({
     startupRestorePending: startupOutcomeRef.current === "pending",
     persistenceState,
     cloudBinding,
-    nativeBinding,
     noteGalleryPublication: (id: string | null) =>
       setCloudBinding((current) =>
         current ? { ...current, galleryEntryId: id } : current,
@@ -1735,9 +1579,7 @@ export function useProjectFileLifecycle({
     saveProjectToCloud,
     saveProjectToCloudByHand,
     saveByHand,
-    saveProjectToNative,
-    isSaveInFlight: () =>
-      saveCoordinator.isSaving() || nativeSaveCoordinator.isSaving(),
+    isSaveInFlight: () => saveCoordinator.isSaving(),
     saveBusy: persistenceState === "saving",
     exportProjectFile,
     downloadCurrentProjectBackup,

@@ -18,7 +18,7 @@ on. Each topic has one owner spec; others link to it.
 | [`names-and-labels.md`](names-and-labels.md)                 | Electrical names vs label display, standard looks, renames            |
 | [`agent-api.md`](agent-api.md)                               | Agent API 3.0 Circuit operations and sibling resources                |
 | [`web-agent-session.md`](web-agent-session.md)               | Agent relay: pairing, credentials, transport, scopes                  |
-| [`persistence-and-recovery.md`](persistence-and-recovery.md) | Cloud Save, browser recovery, workspace, desktop files                |
+| [`persistence-and-recovery.md`](persistence-and-recovery.md) | Cloud Save, browser recovery, workspace                               |
 | [`export.md`](export.md)                                     | Formal SVG/PNG/PDF                                                    |
 | [`netlist-export.md`](netlist-export.md)                     | Extraction, SPICE/Spectre printing, refusals (sole owner)             |
 | [`netlist-conversion.md`](netlist-conversion.md)             | SPICE/SCS conversion core and import boundary                         |

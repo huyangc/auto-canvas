@@ -54,7 +54,7 @@ Playwright worker, whose development proxies default `AUTO_CANVAS_API_URL` to
 `http://127.0.0.1:4310`: a full-suite run must export `AUTO_CANVAS_API_URL`
 itself (the lane's API origin, for example `http://127.0.0.1:4321`); the unit
 suite runs without it.
-`pnpm test:desktop-build`, `pnpm mcp:package` and `pnpm headless:package` check
+`pnpm mcp:package` and `pnpm headless:package` check
 local packaging. Golden and performance scripts remain available for changes
 that affect their contracts.
 

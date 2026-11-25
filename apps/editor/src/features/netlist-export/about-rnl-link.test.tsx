@@ -17,17 +17,6 @@ describe("the About RNL link", () => {
     expect(markup).not.toContain("data-native-external-link");
   });
 
-  it("goes through the desktop app's fixed list of links when it has one", () => {
-    const markup = renderToStaticMarkup(
-      <AboutRnlLink
-        externalLinksEnabled={false}
-        onOpenExternalLink={() => {}}
-      />,
-    );
-    expect(markup).toContain('data-native-external-link="rnl"');
-    expect(markup).toContain(">About RNL<");
-  });
-
   it("is left out where the build links nowhere outside itself", () => {
     expect(
       renderToStaticMarkup(<AboutRnlLink externalLinksEnabled={false} />),
@@ -35,7 +24,7 @@ describe("the About RNL link", () => {
   });
 });
 
-it("waits for the current export and omits the Viewer action from desktop", () => {
+it("waits for the current export and omits the Viewer action when external links are disabled", () => {
   const props = {
     project: parseProject(JSON.stringify(rc)),
     format: "spice",
@@ -44,13 +33,8 @@ it("waits for the current export and omits the Viewer action from desktop", () =
   const web = renderToStaticMarkup(<RnlNetlistView {...props} />);
   expect(web).toContain("Open RNL Viewer");
   expect(web).toContain('aria-disabled="true"');
-  const desktop = renderToStaticMarkup(
-    <RnlNetlistView
-      {...props}
-      externalLinksEnabled={false}
-      onOpenExternalLink={() => {}}
-    />,
+  const offline = renderToStaticMarkup(
+    <RnlNetlistView {...props} externalLinksEnabled={false} />,
   );
-  expect(desktop).not.toContain("Open RNL Viewer");
-  expect(desktop).toContain('data-native-external-link="rnl"');
+  expect(offline).not.toContain("Open RNL Viewer");
 });

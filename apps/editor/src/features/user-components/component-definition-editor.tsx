@@ -67,10 +67,6 @@ import {
   readSharedComponent,
 } from "./component-library-client";
 import { ComponentLibraryError } from "./component-library-error";
-import { readNativeComponent } from "../../hosts/native-component-library";
-const readLibraryComponent = import.meta.env?.ICM_DESKTOP
-  ? readNativeComponent
-  : readSharedComponent;
 
 const ProjectTextEditor = lazy(
   () => import("../project-code/project-text-editor"),
@@ -168,8 +164,7 @@ export default function ComponentDefinitionEditor(
       (isLibraryAuthoringDraft(props.draft)
         ? readLibraryAuthoringDraft(props.draft!).publication
         : undefined) ?? {
-        ...(!import.meta.env?.ICM_DESKTOP &&
-        props.definition.libraryOrigin &&
+        ...(props.definition.libraryOrigin &&
         props.mode === "instance" &&
         !props.publicationIntent
           ? {
@@ -202,7 +197,6 @@ export default function ComponentDefinitionEditor(
   const originResolved = useRef(false);
   const [originLoading, setOriginLoading] = useState(
     () =>
-      !import.meta.env?.ICM_DESKTOP &&
       !!props.definition.libraryOrigin &&
       props.mode === "instance" &&
       !props.publicationIntent &&
@@ -211,7 +205,6 @@ export default function ComponentDefinitionEditor(
   useEffect(() => {
     const origin = props.definition.libraryOrigin;
     if (
-      import.meta.env?.ICM_DESKTOP ||
       !authReady ||
       !user ||
       originResolved.current ||
@@ -455,13 +448,12 @@ export default function ComponentDefinitionEditor(
   useEffect(() => {
     dialog.current?.showModal();
     let active = true;
-    if (!import.meta.env?.ICM_DESKTOP)
-      void fetchSessionUser().then((next) => {
-        if (active) {
-          setUser(next);
-          setAuthReady(true);
-        }
-      });
+    void fetchSessionUser().then((next) => {
+      if (active) {
+        setUser(next);
+        setAuthReady(true);
+      }
+    });
     return () => {
       active = false;
       dialog.current?.close();
@@ -482,8 +474,7 @@ export default function ComponentDefinitionEditor(
   const previewDefinition = parsed.definition ?? lastValidDefinition.current;
   const canUpdate =
     !!record &&
-    (import.meta.env?.ICM_DESKTOP ||
-      user?.isAdmin ||
+    (user?.isAdmin ||
       (record.authorId === user?.id && record.status === "shared"));
   const id = publication.componentId;
   const revision =
@@ -621,7 +612,7 @@ export default function ComponentDefinitionEditor(
         !nativeReady ||
         nativeDirty ||
         busy ||
-        (!import.meta.env?.ICM_DESKTOP && !user) ||
+        !user ||
         originLoading ||
         publicationConflict ||
         (publication.kind === "update" && !canUpdate)
@@ -651,10 +642,9 @@ export default function ComponentDefinitionEditor(
         });
         const saved = result.entry;
         const captured = await componentLibraryCapture(saved);
-        const associationError = import.meta.env?.ICM_DESKTOP
-          ? null
-          : componentPublicationContent(packaged) !==
-              componentPublicationContent(captured)
+        const associationError =
+          componentPublicationContent(packaged) !==
+          componentPublicationContent(captured)
             ? "The local definition changed. Recover the published snapshot before associating."
             : latest.current.onAssociateLibrary?.(captured);
         setRecord(saved);
@@ -682,17 +672,13 @@ export default function ComponentDefinitionEditor(
         );
         latest.current.onManaged();
         setNotice(
-          import.meta.env?.ICM_DESKTOP
-            ? draftError
-              ? `Saved to the local library. Draft: ${draftError}`
-              : "Saved to the local library."
-            : associationError
-              ? `Published. Project association pending: ${associationError}`
-              : draftError
-                ? `Saved to the public library. Draft: ${draftError}`
-                : result.outcome === "unchanged"
-                  ? "Already up to date."
-                  : "Saved to the public library.",
+          associationError
+            ? `Published. Project association pending: ${associationError}`
+            : draftError
+              ? `Saved to the public library. Draft: ${draftError}`
+              : result.outcome === "unchanged"
+                ? "Already up to date."
+                : "Saved to the public library.",
         );
       } catch (error) {
         if (
@@ -715,7 +701,7 @@ export default function ComponentDefinitionEditor(
       !localApplied ||
       source !== localAppliedText ||
       busy ||
-      (!import.meta.env?.ICM_DESKTOP && !user) ||
+      !user ||
       originLoading ||
       publicationConflict ||
       (publication.kind === "update" && !canUpdate)
@@ -745,10 +731,9 @@ export default function ComponentDefinitionEditor(
       });
       const saved = result.entry;
       const captured = await componentLibraryCapture(saved);
-      const associationError = import.meta.env?.ICM_DESKTOP
-        ? null
-        : componentPublicationContent({ definition: localApplied }) !==
-            componentPublicationContent(captured)
+      const associationError =
+        componentPublicationContent({ definition: localApplied }) !==
+        componentPublicationContent(captured)
           ? "The local definition changed. Recover the published snapshot before associating."
           : latest.current.onAssociateLibrary?.(captured);
       const associated = associationError
@@ -772,17 +757,13 @@ export default function ComponentDefinitionEditor(
       });
       if (!draftError) definitionDocument.markSaved(source);
       setNotice(
-        import.meta.env?.ICM_DESKTOP
-          ? draftError
-            ? `Saved to the local library. Draft: ${draftError}`
-            : "Saved to the local library."
-          : associationError
-            ? `Published. Project association pending: ${associationError}`
-            : draftError
-              ? `Published to the public library. Draft: ${draftError}`
-              : result.outcome === "unchanged"
-                ? "Already up to date."
-                : "Published to the public library.",
+        associationError
+          ? `Published. Project association pending: ${associationError}`
+          : draftError
+            ? `Published to the public library. Draft: ${draftError}`
+            : result.outcome === "unchanged"
+              ? "Already up to date."
+              : "Published to the public library.",
       );
     } catch (error) {
       if (
@@ -801,7 +782,6 @@ export default function ComponentDefinitionEditor(
     }
   }
   async function manage(status: "official" | "deleted" | "shared") {
-    if (import.meta.env?.ICM_DESKTOP) return;
     if (!record || busy) return;
     setBusy(true);
     setNotice(null);
@@ -938,7 +918,8 @@ export default function ComponentDefinitionEditor(
       type="button"
       className="primary"
       disabled={
-        (!import.meta.env?.ICM_DESKTOP && (!authReady || !user)) ||
+        !authReady ||
+        !user ||
         originLoading ||
         publicationConflict ||
         (publication.kind === "update" && !canUpdate) ||
@@ -950,21 +931,15 @@ export default function ComponentDefinitionEditor(
       }
       onClick={() => void save()}
     >
-      {import.meta.env?.ICM_DESKTOP
-        ? busy
-          ? "Saving…"
+      {busy
+        ? "Publishing…"
+        : publication.kind === "new" && record
+          ? "Publish as new component"
           : publication.kind === "update"
-            ? "Update local component"
-            : "Save to local library"
-        : busy
-          ? "Publishing…"
-          : publication.kind === "new" && record
-            ? "Publish as new component"
-            : publication.kind === "update"
-              ? user?.isAdmin && record?.authorId !== user.id
-                ? "Update component (admin)"
-                : "Update my component"
-              : "Publish"}
+            ? user?.isAdmin && record?.authorId !== user.id
+              ? "Update component (admin)"
+              : "Update my component"
+            : "Publish"}
     </button>
   );
   return (
@@ -1058,15 +1033,11 @@ export default function ComponentDefinitionEditor(
               {confirmation("back")}
             </div>
           ) : null}
-          {!import.meta.env?.ICM_DESKTOP && !user && authReady ? (
-            <AccountMenu inEditor />
-          ) : null}
-          {!import.meta.env?.ICM_DESKTOP && (
-            <ComponentAgentControls
-              workspace={workspace}
-              label={props.definition.symbol.name}
-            />
-          )}
+          {!user && authReady ? <AccountMenu inEditor /> : null}
+          <ComponentAgentControls
+            workspace={workspace}
+            label={props.definition.symbol.name}
+          />
           <div className="component-exit">
             <button
               type="button"
@@ -1228,9 +1199,7 @@ export default function ComponentDefinitionEditor(
         </>
       ) : null}
       {native && notice ? <p role="status">{notice}</p> : null}
-      {!import.meta.env?.ICM_DESKTOP &&
-      props.mode === "instance" &&
-      !props.definition.libraryOrigin ? (
+      {props.mode === "instance" && !props.definition.libraryOrigin ? (
         <div
           className="component-publication-destination"
           role="group"
@@ -1255,7 +1224,7 @@ export default function ComponentDefinitionEditor(
           </details>
         </div>
       ) : null}
-      {!import.meta.env?.ICM_DESKTOP && duplicate ? (
+      {duplicate ? (
         <div
           className="component-definition-actions"
           role="group"
@@ -1293,9 +1262,8 @@ export default function ComponentDefinitionEditor(
           aria-label="Publication recovery"
         >
           <span className="component-definition-note">
-            {import.meta.env?.ICM_DESKTOP
-              ? "The local component changed. Reload its saved version or create a separate copy."
-              : "Publication needs review. Reload the published version or create a separate copy."}
+            Publication needs review. Reload the published version or create a
+            separate copy.
           </span>
           <button
             type="button"
@@ -1303,11 +1271,7 @@ export default function ComponentDefinitionEditor(
             onClick={() => {
               setPublication({ kind: "new", componentId: crypto.randomUUID() });
               setPublicationConflict(false);
-              setNotice(
-                import.meta.env?.ICM_DESKTOP
-                  ? "Saving will create a separate local component."
-                  : "Publishing will create a separate component.",
-              );
+              setNotice("Publishing will create a separate component.");
             }}
           >
             Create separate copy
@@ -1318,7 +1282,7 @@ export default function ComponentDefinitionEditor(
             onClick={() =>
               requestLeave(() => {
                 setBusy(true);
-                void readLibraryComponent(id)
+                void readSharedComponent(id)
                   .then((entry) => {
                     const error = latest.current.onReloadLibrary(entry);
                     if (error) throw Error(error);
@@ -1330,9 +1294,7 @@ export default function ComponentDefinitionEditor(
               })
             }
           >
-            {import.meta.env?.ICM_DESKTOP
-              ? "Reload local version"
-              : "Reload published version"}
+            Reload published version
           </button>
         </div>
       ) : null}

@@ -56,7 +56,6 @@ type ProjectTabSessions = ReturnType<typeof useProjectTabSessions>;
 /** The dialog layer, with each dialog bound to the editor while it is open. */
 export function EditorDialogs({
   projectStore,
-  nativeProjectStore,
   exportDelivery,
   publicAgentUiEnabled,
   setStatus,
@@ -145,7 +144,6 @@ export function EditorDialogs({
   reopenClosedWindowTabs,
 }: {
   projectStore: EditorServices["projectStore"];
-  nativeProjectStore: EditorServices["nativeProjectStore"];
   exportDelivery: EditorServices["exportDelivery"];
   publicAgentUiEnabled: boolean;
   setStatus: Dispatch<SetStateAction<string>>;
@@ -307,7 +305,6 @@ export function EditorDialogs({
               intent: replaceGuard.intent,
               cloudProjectLimit: projectStore?.limit ?? 0,
               exportOnly: projectStore === null,
-              nativeSave: nativeProjectStore !== undefined,
               saving: replaceGuardSaving,
               // Bound to this confirmation: a callback left from an earlier
               // dialog answers nothing once another one is on screen.
@@ -507,9 +504,7 @@ export function EditorDialogs({
               },
               cloudProjects,
               activeCloudProjectId: cloudBinding?.id ?? null,
-              ...(!import.meta.env?.ICM_DESKTOP
-                ? { onLoadCloudProject: loadCloudProjectForCellImport }
-                : {}),
+              onLoadCloudProject: loadCloudProjectForCellImport,
               onImportCloudCell: async (source, sourceDocumentId) => {
                 const plan = planProjectCellImport(
                   project,
@@ -572,10 +567,7 @@ export function EditorDialogs({
           : null
       }
       agentConnection={
-        !import.meta.env?.ICM_DESKTOP &&
-        publicAgentUiEnabled &&
-        agentSession &&
-        agentPanelOpen
+        publicAgentUiEnabled && agentSession && agentPanelOpen
           ? {
               open: agentPanelOpen,
               status: agentSession.status,

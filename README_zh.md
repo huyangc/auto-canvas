@@ -36,7 +36,6 @@ auto-canvas 基于 cascode-ai 的 Analog Canvas：
 - **服务端上的 Agent 中转**：实时 Agent 会话使用 Node 和 PostgreSQL；Vite 将
   HTTP 和 WebSocket 请求转发至 `apps/server`。
 - **离线 EDA 导出**：[eda/](eda/) 里有导入 Aether 和 Virtuoso 的脚本。
-- **桌面预览版**（`apps/desktop`，Electron）：不需要服务端。
 
 尚未完成：
 
@@ -110,15 +109,13 @@ rg '"type":"usage"' .local/logs/server.log | tail -50
 | `pnpm test:local`         | 单元和集成测试（Vitest），服务端测试使用 `auto_canvas_test` 库          |
 | `pnpm test:e2e:local`     | 浏览器测试（Playwright），首次运行前执行 `pnpm setup:e2e` 安装 Chromium |
 | `pnpm mcp:package`        | 打包给 Agent 使用的 MCP 服务端                                          |
-| `pnpm test:desktop-build` | 编译桌面版界面                                                          |
 
 ## 仓库结构
 
 ```text
 apps/
-  editor/       React 原理图编辑器（网页版，也是桌面版的界面）
+  editor/       React 原理图编辑器
   server/       Node 服务端：登录状态、云端工程、自定义器件库
-  desktop/      Electron 桌面预览版
   mcp-server/   供 Agent 使用的 MCP 适配层
   local-host/   托管编译好的编辑器的最小静态服务
 packages/
