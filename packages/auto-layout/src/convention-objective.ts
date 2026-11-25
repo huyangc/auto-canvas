@@ -1,15 +1,24 @@
 import { visibleInstanceBounds } from "@icm/derived";
-import { createEmptyDocument, type Instance } from "@icm/model";
-import type { SymbolResolver } from "@icm/symbols";
-import { pinExit, transformPoint } from "./geometry.js";
 import {
-  channelPins,
-  isMosBulk,
-  polarity,
-  type NetRoles,
-} from "./net-roles.js";
+  createEmptyDocument,
+  type Instance,
+  type SchematicDocument,
+} from "@icm/model";
+import type { SymbolResolver } from "@icm/symbols";
+import {
+  directedPins,
+  outputFacesLeft,
+  rightFacingBlocks,
+} from "./directed-blocks.js";
+import { pinExit, transformPoint } from "./geometry.js";
+import { channelPins, polarity, type NetRoles } from "./net-roles.js";
 import { devicePins } from "./placement-connectivity.js";
-import { isRailNet, type ConventionRelations } from "./convention-relations.js";
+import { keepsOrder } from "./polarity-order.js";
+import {
+  isConventionPin,
+  isRailNet,
+  type ConventionRelations,
+} from "./convention-relations.js";
 import type { Placement } from "./types.js";
 
 /**
@@ -29,6 +38,8 @@ export const CONVENTION_WEIGHTS = {
    * iteration, changed because a differential pair makes two pairs
    * unavoidable (58; 21 plans). */
   inputLeft: 4,
+  /** Drivers left of a directed block and loads right of its outputs. */
+  blockFlow: 2,
   /** A rail pin of a non-transistor part above (supply) or below (ground)
    * its other pins (114). */
   railSide: 1,
@@ -105,11 +116,15 @@ const tenth = (v: number) => Math.round(v / 10) * 10;
  * toward the supply on top); one pose per distinct pin layout.
  */
 function devicePoses(
+  document: SchematicDocument,
   instance: Instance,
   resolver: SymbolResolver,
   pinNet: (id: string, pin: string) => string | undefined,
+  rightFacing: boolean,
 ): { pose: DevicePose; pins: PosedPin[]; box: Box }[] {
-  const pins = devicePins(instance, resolver);
+  const pins = devicePins(instance, resolver).filter((p) =>
+    isConventionPin(document, resolver, instance, p.name),
+  );
   const channel = channelPins(instance.symbolId);
   const local = (orientation: DevicePose["orientation"]) =>
     pins.map((p) => {
@@ -139,6 +154,20 @@ function devicePoses(
     }).filter(distinct);
     // A transistor symbol without an upright pose gets none: the solver
     // refuses the draft rather than draw it inverted.
+  } else if (rightFacing) {
+    const { outputs } = directedPins(instance, resolver);
+    const visibleOutputs = outputs.filter((p) =>
+      pins.some((q) => q.name === p.name),
+    );
+    orientations = ORIENTATIONS.filter(
+      (o) =>
+        keepsOrder(instance, resolver, o) &&
+        !outputFacesLeft(instance, o, resolver),
+    );
+    const right = orientations.filter((o) =>
+      visibleOutputs.some((p) => pinExit(p, o as Placement).x > 0),
+    );
+    orientations = (right.length ? right : orientations).filter(distinct);
   } else if (pins.length === 2)
     orientations = ORIENTATIONS.filter((o) => o.mirror === "none");
   else orientations = ORIENTATIONS.filter(distinct);
@@ -173,15 +202,13 @@ function devicePoses(
     }
     return {
       pose: { orientation, ax, ay },
-      pins: at
-        .filter((p) => !isMosBulk(instance.symbolId, p.name))
-        .map((p) => ({
-          ...p,
-          id: instance.id,
-          x: p.x - ax,
-          y: p.y - ay,
-          net: pinNet(instance.id, p.name),
-        })),
+      pins: at.map((p) => ({
+        ...p,
+        id: instance.id,
+        x: p.x - ax,
+        y: p.y - ay,
+        net: pinNet(instance.id, p.name),
+      })),
       box: {
         id: instance.id,
         x0: bounds.x - ax,
@@ -200,13 +227,23 @@ function devicePoses(
  * drawings: 107 of 123 and 103 of 107).
  */
 export function conventionUnits(
+  document: SchematicDocument,
   devices: readonly Instance[],
   resolver: SymbolResolver,
   roles: NetRoles,
   relations: ConventionRelations,
 ): Unit[] {
+  const rightFacing = visibleRightFacingBlocks(
+    document,
+    devices,
+    resolver,
+    roles,
+  );
   const poses = new Map(
-    devices.map((d) => [d.id, devicePoses(d, resolver, roles.pinNet)]),
+    devices.map((d) => [
+      d.id,
+      devicePoses(document, d, resolver, roles.pinNet, rightFacing.has(d.id)),
+    ]),
   );
   const pairCount = new Map<string, number>();
   for (const p of relations.pairs)
@@ -274,26 +311,37 @@ export function conventionUnits(
   return units;
 }
 
-type Check = (at: Placed) => boolean;
-interface Placed {
-  pin: (id: string, name: string) => PosedPin | undefined;
-  pins: PosedPin[];
-  boxes: Box[];
+function visibleRightFacingBlocks(
+  document: SchematicDocument,
+  devices: readonly Instance[],
+  resolver: SymbolResolver,
+  roles: NetRoles,
+) {
+  const byId = new Map(devices.map((d) => [d.id, d]));
+  return rightFacingBlocks(devices, resolver, {
+    pinNet: (id, pin) =>
+      isConventionPin(document, resolver, byId.get(id)!, pin)
+        ? roles.pinNet(id, pin)
+        : undefined,
+  });
 }
+
 interface Term {
   kind: keyof ConventionWeights;
   units: number[];
   weight: number;
-  /** True when the convention is violated. */
-  violated: Check;
+  violated: () => boolean;
 }
 
+type CostParts = Partial<Record<keyof ConventionWeights, number>>;
+
 /**
- * R168 objective over a partial state: every term counts only once all its
- * units are placed and can only grow as units are added, so the cost of a
- * partial state is a lower bound for its completions.
+ * A term waits for all its endpoints. Additional device bodies can only
+ * obstruct already tested alignments, and the wire and shape bounds only
+ * expand, so partial states lower-bound all their completions.
  */
 export function conventionObjective(
+  document: SchematicDocument,
   devices: readonly Instance[],
   resolver: SymbolResolver,
   roles: NetRoles,
@@ -302,194 +350,292 @@ export function conventionObjective(
   weights: ConventionWeights = CONVENTION_WEIGHTS,
 ) {
   const unitOf = new Map<string, number>();
-  units.forEach((u, k) => u.ids.forEach((id) => unitOf.set(id, k)));
+  const boxSlot = new Map<string, number>();
+  const pinsById = new Map<string, Map<string, number>>();
+  const pinUnits: number[] = [];
+  const netPins = new Map<string, number[]>();
+  const pinNets: (string | undefined)[] = [];
+  const boxUnits: number[] = [];
+  units.forEach((unit, k) => {
+    for (const id of unit.ids) {
+      unitOf.set(id, k);
+      boxSlot.set(id, boxUnits.length);
+      boxUnits.push(k);
+      pinsById.set(id, new Map());
+    }
+    for (const p of unit.poses[0]!.pins) {
+      const slot = pinUnits.length;
+      pinsById.get(p.id)!.set(p.name, slot);
+      pinUnits.push(k);
+      pinNets.push(p.net);
+      if (p.net) {
+        let slots = netPins.get(p.net);
+        if (!slots) netPins.set(p.net, (slots = []));
+        slots.push(slot);
+      }
+    }
+  });
+  const pin = (id: string, name: string) => pinsById.get(id)!.get(name)!;
   const unitsOf = (...ids: string[]) => [
     ...new Set(ids.map((id) => unitOf.get(id)!)),
   ];
-  const byId = new Map(devices.map((d) => [d.id, d]));
-  const T = ALIGN_TOLERANCE;
-  const centre = (at: Placed, id: string) => {
-    const b = at.boxes.find((q) => q.id === id)!;
-    return {
-      x: (b.x0 + b.x1) / 2,
-      y: (b.y0 + b.y1) / 2,
-      w: b.x1 - b.x0,
-      h: b.y1 - b.y0,
-    };
+  const poses = units.map((u) =>
+    u.poses.map((pose) => ({
+      // Packed tuples: slot, x, y, exit x/y (pins) or both box corners.
+      pins: Float64Array.from(
+        pose.pins.flatMap((p) => [pin(p.id, p.name), p.x, p.y, p.ex, p.ey]),
+      ),
+      boxes: Float64Array.from(
+        pose.boxes.flatMap((b) => [boxSlot.get(b.id)!, b.x0, b.y0, b.x1, b.y1]),
+      ),
+    })),
+  );
+  const pinUnit = Int32Array.from(pinUnits);
+  const px = new Float64Array(pinUnit.length);
+  const py = new Float64Array(pinUnit.length);
+  const pex = new Float64Array(pinUnit.length);
+  const pey = new Float64Array(pinUnit.length);
+  const bx0 = new Float64Array(boxUnits.length);
+  const by0 = new Float64Array(boxUnits.length);
+  const bx1 = new Float64Array(boxUnits.length);
+  const by1 = new Float64Array(boxUnits.length);
+  const unitPlaced = new Uint8Array(units.length);
+  const boxPlaced = new Uint8Array(boxUnits.length);
+  const unitBoxes = units.map((u) => u.ids.map((id) => boxSlot.get(id)!));
+
+  const placeUnit = (k: number, spot: Spot) => {
+    const pose = poses[k]![spot.pose]!;
+    const { pins, boxes } = pose;
+    for (let i = 0; i < pins.length; i += 5) {
+      const p = pins[i]!;
+      px[p] = pins[i + 1]! + spot.x;
+      py[p] = pins[i + 2]! + spot.y;
+      pex[p] = pins[i + 3]!;
+      pey[p] = pins[i + 4]!;
+    }
+    for (let i = 0; i < boxes.length; i += 5) {
+      const b = boxes[i]!;
+      bx0[b] = boxes[i + 1]! + spot.x;
+      by0[b] = boxes[i + 2]! + spot.y;
+      bx1[b] = boxes[i + 3]! + spot.x;
+      by1[b] = boxes[i + 4]! + spot.y;
+      boxPlaced[b] = 1;
+    }
+    unitPlaced[k] = 1;
   };
-  type Centre = ReturnType<typeof centre>;
-  // Another device body whose centre lies between the two along `axis`.
-  const between = (
-    at: Placed,
-    a: Centre,
-    b: Centre,
-    axis: "x" | "y",
-    skip: string[],
-  ) =>
-    at.boxes.some((r) => {
-      if (skip.includes(r.id)) return false;
-      const d = { x: (r.x0 + r.x1) / 2, y: (r.y0 + r.y1) / 2 };
-      const across = axis === "x" ? "y" : "x";
-      const size = axis === "x" ? "h" : "w";
-      return (
-        Math.abs(d[across] - a[across]) <= 0.5 * Math.min(a[size], b[size]) &&
-        (d[axis] - a[axis]) * (d[axis] - b[axis]) < 0
-      );
-    });
+  const unplaceUnit = (k: number) => {
+    unitPlaced[k] = 0;
+    for (const b of unitBoxes[k]!) boxPlaced[b] = 0;
+  };
+  const fits = (
+    k: number,
+    pose: number,
+    x: number,
+    y: number,
+    gapX: number,
+    gapY: number,
+  ) => {
+    const boxes = poses[k]![pose]!.boxes;
+    for (let i = 0; i < boxes.length; i += 5) {
+      const x0 = boxes[i + 1]! + x,
+        y0 = boxes[i + 2]! + y;
+      const x1 = boxes[i + 3]! + x,
+        y1 = boxes[i + 4]! + y;
+      for (let b = 0; b < boxPlaced.length; b++)
+        if (
+          boxPlaced[b] &&
+          x0 - gapX < bx1[b]! &&
+          bx0[b]! - gapX < x1 &&
+          y0 - gapY < by1[b]! &&
+          by0[b]! - gapY < y1
+        )
+          return false;
+    }
+    return true;
+  };
+
+  const T = ALIGN_TOLERANCE;
   // The open segment between two pins crosses no other device body.
-  const clear = (at: Placed, a: PosedPin, b: PosedPin, skip: string[]) => {
-    const x0 = Math.min(a.x, b.x),
-      x1 = Math.max(a.x, b.x),
-      y0 = Math.min(a.y, b.y),
-      y1 = Math.max(a.y, b.y);
-    return !at.boxes.some(
-      (r) =>
-        !skip.includes(r.id) &&
-        (x1 - x0 < 1
-          ? r.x0 < x0 - 0.5 &&
-            r.x1 > x0 + 0.5 &&
-            r.y0 < y1 - 0.5 &&
-            r.y1 > y0 + 0.5
-          : r.y0 < y0 - 0.5 &&
-            r.y1 > y0 + 0.5 &&
-            r.x0 < x1 - 0.5 &&
-            r.x1 > x0 + 0.5),
-    );
+  const clear = (a: number, b: number, boxA: number, boxB: number) => {
+    const x0 = Math.min(px[a]!, px[b]!),
+      x1 = Math.max(px[a]!, px[b]!);
+    const y0 = Math.min(py[a]!, py[b]!),
+      y1 = Math.max(py[a]!, py[b]!);
+    const vertical = x1 - x0 < 1;
+    for (let r = 0; r < boxPlaced.length; r++) {
+      if (!boxPlaced[r] || r === boxA || r === boxB) continue;
+      if (
+        vertical
+          ? bx0[r]! < x0 - 0.5 &&
+            bx1[r]! > x0 + 0.5 &&
+            by0[r]! < y1 - 0.5 &&
+            by1[r]! > y0 + 0.5
+          : by0[r]! < y0 - 0.5 &&
+            by1[r]! > y0 + 0.5 &&
+            bx0[r]! < x1 - 0.5 &&
+            bx1[r]! > x0 + 0.5
+      )
+        return false;
+    }
+    return true;
   };
   const terms: Term[] = [];
   for (const stack of relations.stacks) {
-    const ends = [stack.a.id, stack.b.id];
+    const a = pin(stack.a.id, stack.a.pin.name),
+      b = pin(stack.b.id, stack.b.pin.name);
+    const boxA = boxSlot.get(stack.a.id)!,
+      boxB = boxSlot.get(stack.b.id)!;
     terms.push({
       kind: "stack",
-      units: unitsOf(...ends),
+      units: unitsOf(stack.a.id, stack.b.id),
       weight: weights.stack,
-      violated: (at) => {
-        const a = at.pin(stack.a.id, stack.a.pin.name)!;
-        const b = at.pin(stack.b.id, stack.b.pin.name)!;
+      violated: () => {
+        const dx = px[b]! - px[a]!,
+          dy = py[b]! - py[a]!;
         // Collinear along both exits and facing each other (or touching).
         const vertical =
-          Math.abs(a.x - b.x) <= T &&
-          Math.abs(a.ex) < 0.5 &&
-          Math.abs(b.ex) < 0.5 &&
-          (Math.abs(a.y - b.y) <= T ||
-            ((b.y - a.y) * a.ey > 0 && (a.y - b.y) * b.ey > 0));
+          Math.abs(dx) <= T &&
+          Math.abs(pex[a]!) < 0.5 &&
+          Math.abs(pex[b]!) < 0.5 &&
+          (Math.abs(dy) <= T || (dy * pey[a]! > 0 && -dy * pey[b]! > 0));
         const horizontal =
-          Math.abs(a.y - b.y) <= T &&
-          Math.abs(a.ey) < 0.5 &&
-          Math.abs(b.ey) < 0.5 &&
-          (Math.abs(a.x - b.x) <= T ||
-            ((b.x - a.x) * a.ex > 0 && (a.x - b.x) * b.ex > 0));
-        return !((vertical || horizontal) && clear(at, a, b, ends));
+          Math.abs(dy) <= T &&
+          Math.abs(pey[a]!) < 0.5 &&
+          Math.abs(pey[b]!) < 0.5 &&
+          (Math.abs(dx) <= T || (dx * pex[a]! > 0 && -dx * pex[b]! > 0));
+        return !((vertical || horizontal) && clear(a, b, boxA, boxB));
       },
     });
   }
   for (const level of relations.levels) {
     if (level.marker) continue;
+    const gate = pin(level.id, level.pin);
+    const others = level.others.map((t) => pin(t.id, t.pin));
     terms.push({
       kind: "level",
       units: unitsOf(level.id, ...level.others.map((t) => t.id)),
       weight: weights.level,
-      violated: (at) => {
-        const g = at.pin(level.id, level.pin)!;
-        const others = level.others.map((t) => at.pin(t.id, t.pin)!);
-        const sideways = Math.abs(g.ex) > 0.5;
-        const u = sideways ? "y" : "x",
-          v = sideways ? "x" : "y",
-          e = sideways ? g.ex : g.ey;
-        // Another terminal straight out of the gate, on its exit side ...
-        if (
-          others.some(
-            (q) => Math.abs(q[u] - g[u]) <= T && (q[v] - g[v]) * e >= 0,
-          )
-        )
-          return false;
-        // ... or the gate line T-joins a straight segment of two of them.
-        for (let i = 0; i < others.length; i++)
+      violated: () => {
+        const sideways = Math.abs(pex[gate]!) > 0.5;
+        const across = sideways ? py : px,
+          along = sideways ? px : py;
+        const exit = sideways ? pex[gate]! : pey[gate]!;
+        const u = across[gate]!,
+          v = along[gate]!;
+        // The gate meets a terminal on its exit side or T-joins two of them.
+        for (const q of others)
+          if (Math.abs(across[q]! - u) <= T && (along[q]! - v) * exit >= 0)
+            return false;
+        for (let i = 0; i < others.length; i++) {
+          const a = others[i]!;
+          if ((along[a]! - v) * exit < 0) continue;
           for (let j = i + 1; j < others.length; j++) {
-            const a = others[i]!,
-              b = others[j]!;
+            const b = others[j]!;
             if (
-              Math.abs(a[v] - b[v]) <= T &&
-              (a[v] - g[v]) * e >= 0 &&
-              g[u] > Math.min(a[u], b[u]) - T &&
-              g[u] < Math.max(a[u], b[u]) + T
+              Math.abs(along[a]! - along[b]!) <= T &&
+              u > Math.min(across[a]!, across[b]!) - T &&
+              u < Math.max(across[a]!, across[b]!) + T
             )
               return false;
           }
+        }
         return true;
       },
     });
   }
-  const axisOf = (at: Placed, id: string) =>
-    Math.abs(at.pins.find((p) => p.id === id)!.ex) > 0.5 ? "h" : "v";
-  for (const shunt of relations.shunts)
+  for (const shunt of relations.shunts) {
+    const a = boxSlot.get(shunt.id)!;
+    const firstPin = (id: string) => pinsById.get(id)!.values().next().value!;
+    const aPin = firstPin(shunt.id);
+    const others = shunt.group
+      .filter((id) => id !== shunt.id)
+      .map((id) => ({
+        box: boxSlot.get(id)!,
+        pin: firstPin(id),
+      }));
     terms.push({
       kind: "shunt",
       units: unitsOf(...shunt.group),
       weight: weights.shunt,
-      violated: (at) => {
-        const a = centre(at, shunt.id);
-        const axis = axisOf(at, shunt.id);
-        return !shunt.group.some((other) => {
-          if (other === shunt.id || axisOf(at, other) !== axis) return false;
-          const b = centre(at, other);
-          return axis === "v"
-            ? Math.abs(a.y - b.y) <= 0.5 * Math.min(a.h, b.h) &&
-                !between(at, a, b, "x", [shunt.id, other])
-            : Math.abs(a.x - b.x) <= 0.5 * Math.min(a.w, b.w) &&
-                !between(at, a, b, "y", [shunt.id, other]);
-        });
+      violated: () => {
+        const horizontal = Math.abs(pex[aPin]!) > 0.5;
+        // Vertical parts sit side by side, horizontal parts one above another.
+        const along0 = horizontal ? by0 : bx0,
+          along1 = horizontal ? by1 : bx1;
+        const across0 = horizontal ? bx0 : by0,
+          across1 = horizontal ? bx1 : by1;
+        const aAcross = across0[a]! + across1[a]!;
+        const aAlong = along0[a]! + along1[a]!;
+        nextPart: for (const other of others) {
+          if (Math.abs(pex[other.pin]!) > 0.5 !== horizontal) continue;
+          const b = other.box;
+          const width = Math.min(
+            across1[a]! - across0[a]!,
+            across1[b]! - across0[b]!,
+          );
+          if (Math.abs(aAcross - across0[b]! - across1[b]!) > width) continue;
+          const bAlong = along0[b]! + along1[b]!;
+          for (let r = 0; r < boxPlaced.length; r++) {
+            if (!boxPlaced[r] || r === a || r === b) continue;
+            const rAlong = along0[r]! + along1[r]!;
+            if (
+              (rAlong - aAlong) * (rAlong - bAlong) < 0 &&
+              Math.abs(across0[r]! + across1[r]! - aAcross) <= width
+            )
+              continue nextPart;
+          }
+          return false;
+        }
+        return true;
       },
     });
-  // Device pins by Net (MOS bulk excluded).
-  const netDevices = new Map<string, string[]>();
-  const railPins: { id: string; pin: string; supply: boolean }[] = [];
-  for (const device of devices)
-    for (const p of devicePins(device, resolver)) {
-      if (isMosBulk(device.symbolId, p.name)) continue;
-      const net = roles.pinNet(device.id, p.name);
-      if (!net) continue;
-      netDevices.set(net, [...(netDevices.get(net) ?? []), device.id]);
-      if (isRailNet(roles, net))
-        railPins.push({
-          id: device.id,
-          pin: p.name,
-          supply: (roles.rails.get(net) ?? roles.byNet.get(net)) === "supply",
-        });
-    }
-  const nets = [...netDevices.keys()].sort();
+  }
+
+  // Slots come only from visible, non-bulk pins in the unit poses.
+  const nets = [...netPins.keys()].sort();
   const inputs = nets.filter((n) => roles.byNet.get(n) === "input");
   const outputs = nets.filter((n) => roles.byNet.get(n) === "output");
-  const meanX = (at: Placed, net: string) => {
-    const xs = at.pins.filter((p) => p.net === net).map((p) => p.x);
-    return xs.reduce((s, x) => s + x, 0) / xs.length;
+  const meanX = (slots: readonly number[]) => {
+    let sum = 0;
+    for (const slot of slots) sum += px[slot]!;
+    return sum / slots.length;
   };
   for (const input of inputs)
-    for (const output of outputs)
+    for (const output of outputs) {
+      const inPins = netPins.get(input)!,
+        outPins = netPins.get(output)!;
       terms.push({
         kind: "inputLeft",
-        units: unitsOf(...netDevices.get(input)!, ...netDevices.get(output)!),
+        units: [...new Set([...inPins, ...outPins].map((p) => pinUnit[p]!))],
         weight: weights.inputLeft / (inputs.length * outputs.length),
-        violated: (at) => meanX(at, input) >= meanX(at, output),
+        violated: () => meanX(inPins) >= meanX(outPins),
       });
-  for (const rail of railPins) {
-    const device = byId.get(rail.id)!;
-    if (channelPins(device.symbolId) || devicePins(device, resolver).length < 2)
-      continue;
-    terms.push({
-      kind: "railSide",
-      units: unitsOf(rail.id),
-      weight: weights.railSide,
-      violated: (at) => {
-        const p = at.pin(rail.id, rail.pin)!;
-        return at.pins.some(
-          (q) =>
-            q.id === rail.id &&
-            q !== p &&
-            (rail.supply ? q.y <= p.y : q.y >= p.y),
-        );
-      },
-    });
+    }
+  const railPins: { id: string; slot: number; supply: boolean }[] = [];
+  for (const device of devices) {
+    const deviceSlots = [...pinsById.get(device.id)!.values()];
+    for (const slot of deviceSlots) {
+      const net = pinNets[slot];
+      if (!net || !isRailNet(roles, net)) continue;
+      const supply =
+        (roles.rails.get(net) ?? roles.byNet.get(net)) === "supply";
+      railPins.push({ id: device.id, slot, supply });
+      if (channelPins(device.symbolId) || deviceSlots.length < 2) continue;
+      terms.push({
+        kind: "railSide",
+        units: unitsOf(device.id),
+        weight: weights.railSide,
+        violated: () => {
+          for (const other of deviceSlots)
+            if (
+              other !== slot &&
+              (supply ? py[other]! <= py[slot]! : py[other]! >= py[slot]!)
+            )
+              return true;
+          return false;
+        },
+      });
+    }
   }
   const supplies = railPins.filter((r) => r.supply);
   const grounds = railPins.filter((r) => !r.supply);
@@ -500,73 +646,129 @@ export function conventionObjective(
           kind: "supplyAbove",
           units: unitsOf(s.id, g.id),
           weight: weights.supplyAbove / (supplies.length * grounds.length),
-          violated: (at) => at.pin(s.id, s.pin)!.y >= at.pin(g.id, g.pin)!.y,
+          violated: () => py[s.slot]! >= py[g.slot]!,
         });
-  const wireNets = nets.filter(
-    (n) => !isRailNet(roles, n) && netDevices.get(n)!.length >= 2,
+
+  const blocks = visibleRightFacingBlocks(document, devices, resolver, roles);
+  for (const block of devices) {
+    if (!blocks.has(block.id)) continue;
+    const slots = pinsById.get(block.id)!;
+    const { inputs, outputs } = directedPins(block, resolver);
+    const signalNets = (pins: typeof inputs) =>
+      new Set(
+        pins.flatMap((p) => {
+          const net = pinNets[slots.get(p.name) ?? -1];
+          return net && !isRailNet(roles, net) ? [net] : [];
+        }),
+      );
+    const inNets = signalNets(inputs),
+      outNets = signalNets(outputs);
+    const blockPins = [...slots.values()];
+    const outPins = outputs
+      .filter((p) => slots.has(p.name))
+      .map((p) => slots.get(p.name)!);
+    const pairs: { id: string; slot: number; driver: boolean }[] = [];
+    for (const device of devices) {
+      if (device.id === block.id) continue;
+      const devicePins = [...pinsById.get(device.id)!.values()];
+      const touchesInput = devicePins.some((p) => inNets.has(pinNets[p] ?? ""));
+      const touchesOutput = devicePins.some((p) =>
+        outNets.has(pinNets[p] ?? ""),
+      );
+      for (const slot of devicePins) {
+        const net = pinNets[slot] ?? "";
+        if (!touchesOutput && inNets.has(net))
+          pairs.push({ id: device.id, slot, driver: true });
+        if (!touchesInput && outNets.has(net))
+          pairs.push({ id: device.id, slot, driver: false });
+      }
+    }
+    for (const { id, slot, driver } of pairs)
+      terms.push({
+        kind: "blockFlow",
+        units: unitsOf(block.id, id),
+        weight: weights.blockFlow / pairs.length,
+        violated: driver
+          ? () => px[slot]! >= meanX(blockPins)
+          : () => px[slot]! <= meanX(outPins),
+      });
+  }
+  const signalPins = new Map(
+    nets
+      .filter((n) => !isRailNet(roles, n))
+      .map((n) => [n, Int32Array.from(netPins.get(n)!)]),
+  );
+  const netPinSlots = [...signalPins.values()].filter(
+    (slots) => slots.length >= 2,
   );
 
-  const placed = (state: State): Placed => {
-    const pins: PosedPin[] = [];
-    const boxes: Box[] = [];
-    const byPin = new Map<string, PosedPin>();
-    state.forEach((spot, k) => {
-      if (!spot) return;
-      const pose = units[k]!.poses[spot.pose]!;
-      for (const p of pose.pins) {
-        const q = { ...p, x: p.x + spot.x, y: p.y + spot.y };
-        pins.push(q);
-        byPin.set(`${q.id}\u0000${q.name}`, q);
-      }
-      for (const b of pose.boxes)
-        boxes.push({
-          id: b.id,
-          x0: b.x0 + spot.x,
-          y0: b.y0 + spot.y,
-          x1: b.x1 + spot.x,
-          y1: b.y1 + spot.y,
-        });
-    });
-    return { pins, boxes, pin: (id, name) => byPin.get(`${id}\u0000${name}`) };
-  };
-  /** The weighted cost, and per term kind when `parts` is given. */
-  const cost = (
-    state: State,
-    parts?: Partial<Record<keyof ConventionWeights, number>>,
-  ) => {
-    const at = placed(state);
+  const currentCost = (parts?: CostParts) => {
     let total = 0;
-    const add = (kind: keyof ConventionWeights, value: number) => {
-      total += value;
-      if (parts) parts[kind] = (parts[kind] ?? 0) + value;
-    };
-    for (const term of terms)
-      if (term.units.every((k) => state[k]) && term.violated(at))
-        add(term.kind, term.weight);
-    for (const net of wireNets) {
+    termLoop: for (const term of terms) {
+      for (const k of term.units) if (!unitPlaced[k]) continue termLoop;
+      if (!term.violated()) continue;
+      total += term.weight;
+      if (parts) parts[term.kind] = (parts[term.kind] ?? 0) + term.weight;
+    }
+    for (const slots of netPinSlots) {
       let x0 = Infinity,
         x1 = -Infinity,
         y0 = Infinity,
-        y1 = -Infinity,
-        count = 0;
-      for (const p of at.pins)
-        if (p.net === net) {
-          count++;
-          x0 = Math.min(x0, p.x);
-          x1 = Math.max(x1, p.x);
-          y0 = Math.min(y0, p.y);
-          y1 = Math.max(y1, p.y);
-        }
-      if (count >= 2) add("wire", weights.wire * (x1 - x0 + y1 - y0));
+        y1 = -Infinity;
+      let count = 0;
+      for (let i = 0; i < slots.length; i++) {
+        const p = slots[i]!;
+        if (!unitPlaced[pinUnit[p]!]) continue;
+        count++;
+        x0 = Math.min(x0, px[p]!);
+        x1 = Math.max(x1, px[p]!);
+        y0 = Math.min(y0, py[p]!);
+        y1 = Math.max(y1, py[p]!);
+      }
+      if (count < 2) continue;
+      const value = weights.wire * (x1 - x0 + y1 - y0);
+      total += value;
+      if (parts) parts.wire = (parts.wire ?? 0) + value;
     }
-    if (at.boxes.length) {
-      const x0 = Math.min(...at.boxes.map((b) => b.x0));
-      const x1 = Math.max(...at.boxes.map((b) => b.x1));
-      const y0 = Math.min(...at.boxes.map((b) => b.y0));
-      const y1 = Math.max(...at.boxes.map((b) => b.y1));
-      add("shape", weights.shape * Math.max(x1 - x0, y1 - y0));
+    let x0 = Infinity,
+      x1 = -Infinity,
+      y0 = Infinity,
+      y1 = -Infinity;
+    for (let b = 0; b < boxPlaced.length; b++) {
+      if (!boxPlaced[b]) continue;
+      x0 = Math.min(x0, bx0[b]!);
+      x1 = Math.max(x1, bx1[b]!);
+      y0 = Math.min(y0, by0[b]!);
+      y1 = Math.max(y1, by1[b]!);
+    }
+    if (x0 !== Infinity) {
+      const value = weights.shape * Math.max(x1 - x0, y1 - y0);
+      total += value;
+      if (parts) parts.shape = (parts.shape ?? 0) + value;
     }
     return total;
   };
-  return { cost, terms: terms.length };
+
+  /** Load a standalone state, optionally accumulating the cost by term kind. */
+  const cost = (state: State, parts?: CostParts) => {
+    for (let k = 0; k < units.length; k++) {
+      const spot = state[k];
+      if (spot) placeUnit(k, spot);
+      else unplaceUnit(k);
+    }
+    return currentCost(parts);
+  };
+  return {
+    cost,
+    currentCost,
+    placeUnit,
+    unplaceUnit,
+    fits,
+    px,
+    py,
+    unitPlaced,
+    pinUnit,
+    signalPins,
+    terms: terms.length,
+  };
 }

@@ -212,9 +212,9 @@ export function restorePinGroups(
   });
 }
 
-/** Rejoin each MOS bulk pin that cleanup split from its input group to that
- * group's first non-bulk pin. Runs after `restorePinGroups`, which leaves bulk
- * pins out, so the non-bulk restoration is exactly as before. */
+/** R2(c2): rejoin cleanup fragments containing excluded pins. Compute
+ * components on the same snapshot as restorePinGroups and account for
+ * the components its edits already join. */
 export function restoreBulkPins(
   withBulk: PinGroup[],
   frozen: PinGroup[],
@@ -222,28 +222,31 @@ export function restoreBulkPins(
   resolver: SymbolResolver,
 ): SchematicEdit[] {
   const after = deriveElectricalTopologyProjection(cleaned, resolver);
-  const net = (pin: { instanceId: string; pinName: string }) =>
-    after.endpointToBaseNet.get(endpointKey({ kind: "terminal", ...pin }));
+  const componentOf = (pin: PinGroup["pins"][number]) => {
+    const key = endpointKey({ kind: "terminal", ...pin });
+    return after.endpointToBaseNet.get(key) ?? key;
+  };
   return withBulk.flatMap((group) => {
-    const anchor = frozen.find((g) => g.netId === group.netId)?.pins[0];
+    const visibleGroup = frozen.find((g) => g.netId === group.netId);
+    const anchor = visibleGroup?.pins[0] ?? group.pins[0];
     if (!anchor) return [];
-    return group.pins
-      .filter(
-        (p) =>
-          p.pinName === "B" &&
-          !frozen.some((g) =>
-            g.pins.some(
-              (q) => q.instanceId === p.instanceId && q.pinName === p.pinName,
-            ),
-          ),
-      )
-      .filter((p) => net(p) === undefined || net(p) !== net(anchor))
-      .map((p): SchematicEdit => ({
+    const covered = new Set([
+      componentOf(anchor),
+      ...(visibleGroup?.pins.map(componentOf) ?? []),
+    ]);
+    const edits: SchematicEdit[] = [];
+    for (const pin of group.pins) {
+      const component = componentOf(pin);
+      if (covered.has(component)) continue;
+      covered.add(component);
+      edits.push({
         kind: "connect_endpoints",
         from: { kind: "terminal", ...anchor },
-        to: { kind: "terminal", ...p },
+        to: { kind: "terminal", ...pin },
         newNetId: group.netId,
-      }));
+      });
+    }
+    return edits;
   });
 }
 

@@ -5,6 +5,7 @@ import { planningMemo } from "./planning-reuse.js";
 import { emptyChoices } from "./layout-choices.js";
 import { readabilityTerm } from "./readability-selection.js";
 import { readabilityMetrics } from "./readability-metrics.js";
+import { netlistSymmetry } from "./readability-netlist-symmetry.js";
 import { readabilityWeights } from "./readability-selection-weights.js";
 import {
   compareCompleteness,
@@ -13,11 +14,29 @@ import {
   type LayoutRun,
 } from "./refine.js";
 import { routedGuards } from "./routed-search-score.js";
+import { auditRouting } from "./routing-audit.js";
 import { preview } from "./transaction.js";
 import type { AutoLayoutResult, LayoutPartition } from "./types.js";
 
 type FinalistKind =
-  "runner" | "localLoop" | "attachment" | "gateRow" | "halfOrder";
+  | "runner"
+  | "convention"
+  | "unsplitSymmetry"
+  | "mirrorSymmetry"
+  | "localLoop"
+  | "attachment"
+  | "gateRow"
+  | "halfOrder";
+
+const symmetryFinalistProtectedMetrics = new Set<
+  keyof typeof readabilityWeights
+>([
+  "crossings",
+  "railCrossings",
+  "sourcePolarity",
+  "wireThroughSymbols",
+  "unownedDrafting",
+]);
 
 /** Per-call continuations finish additional placements without repeating
  * ranking, refinement or annealing. Outer drafting and rail passes still run. */
@@ -38,13 +57,29 @@ export function shouldFinishRunner(
   candidate: LayoutRun,
   resolver: SymbolResolver,
 ): boolean {
-  if (!base.final || !candidate.final) return false;
-  const placements = new Map(
-    base.final.instances.map((instance) => [instance.id, instance.placement]),
-  );
   if (
-    candidate.final.instances.length === placements.size &&
-    candidate.final.instances.every((instance) => {
+    !base.final ||
+    !candidate.final ||
+    !distinctPlacements(base.final, candidate.final)
+  )
+    return false;
+  const completeness = compareCompleteness(candidate, base, resolver);
+  if (completeness) return completeness < 0;
+  const score = routedScore(base, resolver);
+  const margin = Math.min(12500, 0.55 * score);
+  return routedScore(candidate, resolver) <= score + margin;
+}
+
+export function distinctPlacements(
+  base: SchematicDocument,
+  candidate: SchematicDocument,
+) {
+  const placements = new Map(
+    base.instances.map((instance) => [instance.id, instance.placement]),
+  );
+  return (
+    candidate.instances.length !== placements.size ||
+    !candidate.instances.every((instance) => {
       const first = placements.get(instance.id);
       const second = instance.placement;
       return (
@@ -58,13 +93,7 @@ export function shouldFinishRunner(
             first.mirror === second.mirror))
       );
     })
-  )
-    return false;
-  const completeness = compareCompleteness(candidate, base, resolver);
-  if (completeness) return completeness < 0;
-  const score = routedScore(base, resolver);
-  const margin = Math.min(12500, 0.55 * score);
-  return routedScore(candidate, resolver) <= score + margin;
+  );
 }
 
 /** Attribute existing weighted penalties to moved devices and their incident
@@ -135,7 +164,16 @@ export function movesReadabilityParticipant(
 export function rankedFinalists(pass: FinalistPass, resolver: SymbolResolver) {
   void resolver;
   return (
-    ["runner", "localLoop", "attachment", "gateRow", "halfOrder"] as const
+    [
+      "runner",
+      "convention",
+      "unsplitSymmetry",
+      "mirrorSymmetry",
+      "localLoop",
+      "attachment",
+      "gateRow",
+      "halfOrder",
+    ] as const
   ).filter((kind) => pass.available.has(kind));
 }
 
@@ -146,12 +184,16 @@ export function selectFinishedLayout(
   base: AutoLayoutResult,
   candidate: AutoLayoutResult,
   partition?: LayoutPartition,
+  kind?: FinalistKind,
 ): AutoLayoutResult {
   if (candidate.diagnostics.some((d) => d.severity === "error")) return base;
   const after = preview(source, resolver, candidate.edits);
   if (!after.ok) return base;
   const before = preview(source, resolver, base.edits);
-  if (!before.ok || base.diagnostics.some((d) => d.severity === "error"))
+  const symmetryFinalist =
+    kind === "unsplitSymmetry" || kind === "mirrorSymmetry";
+  if (!before.ok) return symmetryFinalist ? base : candidate;
+  if (!symmetryFinalist && base.diagnostics.some((d) => d.severity === "error"))
     return candidate;
   const run = (result: AutoLayoutResult, final: SchematicDocument) => ({
     result,
@@ -159,28 +201,38 @@ export function selectFinishedLayout(
     choices: emptyChoices(),
     ...(partition ? { partition } : {}),
   });
+  const candidateRun = run(candidate, after.document);
+  const baseRun = run(base, before.document);
   if (
-    compareRuns(
-      run(candidate, after.document),
-      run(base, before.document),
-      resolver,
-    ) >= 0
+    compareRuns(candidateRun, baseRun, resolver) >= 0 ||
+    (symmetryFinalist &&
+      !(routedScore(candidateRun, resolver) < routedScore(baseRun, resolver)))
   )
     return base;
+  const improvesSymmetry =
+    symmetryFinalist &&
+    auditRouting(after.document, resolver).crossings <=
+      auditRouting(before.document, resolver).crossings &&
+    netlistSymmetry(after.document, resolver).violations <
+      netlistSymmetry(before.document, resolver).violations;
   if (
+    !improvesSymmetry &&
     readabilityTerm(after.document, resolver) >
-    readabilityTerm(before.document, resolver)
+      readabilityTerm(before.document, resolver)
   )
     return base;
-  const first = readabilityMetrics(before.document, resolver, "weighted");
-  const second = readabilityMetrics(after.document, resolver, "weighted");
-  // A percentage allowance cannot permit a new violation from a zero baseline.
-  // Protect every weighted metric uniformly, without changing the frozen score.
+  const metricsMode = improvesSymmetry ? "all" : "weighted";
+  const first = readabilityMetrics(before.document, resolver, metricsMode);
+  const second = readabilityMetrics(after.document, resolver, metricsMode);
+  // Always protect the safety and signal-flow metrics during symmetry recovery.
+  // Other candidates protect every weighted metric at a zero baseline.
   for (const key of Object.keys(
     readabilityWeights,
   ) as (keyof typeof readabilityWeights)[])
     if (
-      readabilityWeights[key].weight > 0 &&
+      (improvesSymmetry
+        ? symmetryFinalistProtectedMetrics.has(key)
+        : readabilityWeights[key].weight > 0) &&
       first[key].violations === 0 &&
       second[key].violations > 0
     )

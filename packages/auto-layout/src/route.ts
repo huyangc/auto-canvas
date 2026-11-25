@@ -2,6 +2,7 @@ import { planningMemo } from "./planning-reuse.js";
 import {
   deriveElectricalTopologyProjection,
   endpointKey,
+  isVisibleEndpoint,
   resolveEndpointConnection,
   resolveDocumentLogicalNets,
   resolveRouteGeometry,
@@ -143,9 +144,13 @@ export function freezePinGroups(
       instance.symbolId,
       instance.symbolVariantId,
     )?.definition.pins ?? []) {
-      if (!options.includeBulk && isMos(instance.symbolId) && pin.name === "B")
-        continue;
       const ref = { instanceId: instance.id, pinName: pin.name };
+      if (
+        !options.includeBulk &&
+        ((isMos(instance.symbolId) && pin.name === "B") ||
+          !isVisibleEndpoint(document, resolver, { kind: "terminal", ...ref }))
+      )
+        continue;
       const netId = projection.endpointToBaseNet.get(
         endpointKey({ kind: "terminal", ...ref }),
       );
@@ -643,10 +648,10 @@ function routeGroup(
             );
           const x = median(xs),
             y = median(ys);
-          trunks.push(
-            { start: { x: xs[0]!, y }, end: { x: xs.at(-1)!, y } },
-            { start: { x, y: ys[0]! }, end: { x, y: ys.at(-1)! } },
-          );
+          if (xs[0] !== xs.at(-1))
+            trunks.push({ start: { x: xs[0]!, y }, end: { x: xs.at(-1)!, y } });
+          if (ys[0] !== ys.at(-1))
+            trunks.push({ start: { x, y: ys[0]! }, end: { x, y: ys.at(-1)! } });
         }
         // A rail's tree is tried only if its preferred trunk is incomplete.
         if (target.trunk) trunks.push(undefined);
@@ -839,7 +844,7 @@ function routeCrossCoupled(
       const group = frozen.find((group) =>
         group.pins.some((p) => samePin(p, from)),
       );
-      if (!g || !d || !group) continue;
+      if (!g || !d || !group?.pins.some((p) => samePin(p, to))) continue;
       const width = Math.abs(d.x - g.x);
       const height = Math.abs(d.y - g.y);
       if (!width || !height || width < height) continue;
@@ -1258,7 +1263,12 @@ export function routeVisibleBulkConnections(
       topology.endpointToPhysicalComponent.get(
         endpointKey({ kind: "terminal", ...pin }),
       );
-    const peers = group.pins.filter((p) => !samePin(p, from));
+    const peers = group.pins.filter(
+      (p) =>
+        !samePin(p, from) &&
+        ((p.pinName === "B" && bodies.has(p.instanceId)) ||
+          isVisibleEndpoint(working, resolver, { kind: "terminal", ...p })),
+    );
     const ordinary = peers.filter(
       (p) =>
         p.pinName !== "B" ||

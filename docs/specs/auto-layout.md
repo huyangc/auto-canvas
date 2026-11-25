@@ -154,7 +154,10 @@ AutoLayoutDiagnostic[] }`. Fixed instances retain their exact placements;
   `fallbackPosition`, preserving all other fields; (b) `remove_route_geometry`
   for every Route; (c) `remove_junction` for every Junction left without a
   Route; (c2) restore frozen pin groups split by cleanup with `connect_endpoints`,
-  joining one pin per extra component to a pin of the first component;
+  joining one pin per extra component to a pin of the first component.
+  Rejoin excluded MOS bulk and non-visible pins (`!isVisibleEndpoint`) with
+  one edit per extra component that the visible-pin restoration did not join,
+  including Nets composed entirely of excluded pins;
   (d) add layout groups; (e) transform instances in id order; (f) route
   by R11–R13; (g) transfer removed power-marker name claims by R12;
   (h) re-anchor labels by R15. Place tray instances; for placed
@@ -280,8 +283,10 @@ AutoLayoutDiagnostic[] }`. Fixed instances retain their exact placements;
   Net name claims, then restore their anchors after restoring frozen pin groups.
   A transient split must not reassign a label's name to another pin of its device.
 - **R11 — Routing set.** Before any edit, freeze pin groups per input Base Net
-  with `deriveElectricalTopologyProjection`. Exclude MOS `B` pins and pins of
-  instances unplaced in the result. Route frozen `target: { kind: "pins",
+  with `deriveElectricalTopologyProjection`. Exclude MOS `B` pins, non-visible
+  pins (`!isVisibleEndpoint`, including variant `hiddenPinNames` and base
+  pins with `implicit` visibility), and pins of instances unplaced in the
+  result from physical routing targets. Route frozen `target: { kind: "pins",
 pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   component (Routes and contacts); a label-only connection never counts as joined.
 - **R12 — Power.** Each ground/VDD marker gets one straight stub to its R6a
@@ -295,7 +300,7 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   turns once.
   Singleton power stubs and R43 trunk offsets use the same document-size
   marker default.
-  R43 connects every remaining non-bulk rail member through a
+  R43 connects every remaining visible non-bulk rail member through a
   horizontal trunk, including one marker host to join the marker's drawing.
   If the trunk is refused or incomplete, compare a plain tree under R86.
   Members that all share one column have no span for a horizontal trunk and
@@ -556,7 +561,9 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   Locked poses can retain an already-safe contact without exploring moves.
 - **R39 — Signal trunks.** For signal Nets with at least three routable pins,
   compare the existing tree, a horizontal trunk spanning the pins at median y,
-  and a vertical trunk at median x. Discard candidates that throw. Minimize
+  and a vertical trunk at median x. Try the horizontal trunk only when pins
+  span distinct x coordinates and the vertical trunk only when they span
+  distinct y coordinates. Discard candidates that throw. Minimize
   unjoined components, then proper crossings with previously planned other
   Nets, then bends, then length;
   ties retain the listed candidate order.
@@ -567,16 +574,18 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
 - **R42 — Refinement scale.** R22's candidate budget is 24 per strategy up to
   40 instances, eight from 41 to 80, and zero above 80.
 
-- **R43 — No floating rail pins.** Every non-bulk rail pin is drawn connected.
-  Pins with their own marker keep their stubs. All remaining rail pins join
-  one horizontal trunk above the device rows for supply or below them for
-  ground, together with one marker host. This applies to both strategies and
+- **R43 — No floating rail pins.** Every visible non-bulk rail pin is drawn
+  connected. Non-visible pins retain electrical membership without drawn
+  wires. Pins with their own marker keep their stubs. All remaining visible
+  non-bulk rail pins join one horizontal trunk above the device rows for
+  supply or below them for ground, together with one marker host. This applies
+  to both strategies and
   every rail size. Only R155 may add marker instances and replace this trunk
   with local trees; R165 adds ground markers before planning, on netlist input
   only. A refused or incomplete trunk gets a
   tree fallback under R86. Remaining failures produce R14 warnings naming
-  the affected pins. A floating pin is the sole non-bulk pin in its physical
-  component while its Base Net has other non-bulk pins.
+  the affected pins. A floating pin is the sole visible non-bulk pin in its
+  physical component while its Base Net has other visible non-bulk pins.
 - **R44 — Routing alternative.** After R36 selects a plan, replan its placement
   and refinement choices once with R39 disabled, without another refinement.
   R96 replans the selected finalist with R95 after R72 repair. Keep the lower
@@ -637,7 +646,8 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   Each finalist retains the existing finishing budgets and order: R72 repair,
   R96 rip-up, R44 routing comparison, R97 compaction, cross-coupled routing,
   facing, crossing reroutes and contacts, R147 relocation, R146 ports, R148
-  rails, R149 gaps, R167 pin jogs, branch columns and stub-label repair, label/drafting
+  rails, R149 gaps, finished crossing polish and stack repair, R167 pin jogs,
+  branch columns and stub-label repair, label/drafting
   finishing, and finally R155 local rails. Quality modes retain their existing
   eligibility rules for each pass. Share per-call routing and finished-seat
   caches, but copy mutable finalist results and reset per-finalist budgets.
@@ -697,8 +707,9 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   eight through 40 instances. These are candidate budgets, not time limits.
   R146–R149 retain their finishing-trial caps through 30 instances. For 31–40
   instances scale each cap `b` to `floor(b * (30 / n)^3)`: R146 uses `b=12`,
-  R147/R149 share `b=10`, R148's marker-seat search uses `b=8`, and R167 uses
-  its own `b=8`.
+  R147/R149 share `b=10`, R148's marker-seat search uses `b=8`, finished crossing
+  polish and stack repair use separate caps of `b=10` and `b=8`, and R167 uses
+  its own `b=12`.
   For example, 40 instances permit ten annealer evaluations, four shared
   relocation/gap trials, five port trials and three marker-seat trials. Rail
   rerouting retains its separate cap. Explicit `search` overrides only the
@@ -1086,9 +1097,36 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   are unchanged. Evaluation reports the stacks present and broken as
   `stackColumns` (report-only).
 
-- **R167 — Straighten pin jogs (T137).** In the planning that runs R149 (default
-  mode, a nonzero search budget, at most 40 instances), every finalist chain
-  runs one pass right after R149's gap visits and before R152.
+- **Finished crossing polish and stack repair (T183).** After R149's gap
+  visits and before R167, use the same finished replan for two bounded passes.
+  Crossing polish runs only when the finished drawing has a proper crossing.
+  It considers the rigid units attached to the crossing Base Nets. It mirrors
+  or turns eligible single devices around their body centres and exchanges the
+  centres of same-size units of up to four devices, carrying their exclusive
+  markers. Trials stay on the grid, avoid overlapping bodies, and preserve the
+  anchor when nothing is locked. Individual turns preserve vertical rail exits
+  and exclude mirrored pairs and poses that violate R164 or R169. The R54
+  estimator orders trials by estimated crossings, then wire length and a
+  deterministic placement key. A finished trial must reduce crossings, or
+  keep crossings equal while reducing both bends and the calibrated run
+  comparison. Up to two greedy passes share the ten-trial budget scaled under
+  R66.
+
+  Finished stack repair runs only if an R166 stack is broken. It tries moving
+  either unlocked rigid unit, with its exclusive markers, to align the
+  conducting pin to the other unit's pin. A single two-pin non-transistor
+  device may turn so the pins face one another. When the pins are on the wrong
+  side, it uses the smallest clear gap of one to three grid steps on the
+  facing side. Existing collinear, opposing pins in direct contact do not
+  need a gap. A finished repair must reduce the broken-stack count without
+  adding crossings, bends, label overlaps or label clearance findings. It
+  may add up to 60 units of wire and has an eight-trial budget scaled under
+  R66. Both passes preserve physical completeness, rigid units, held stacks,
+  routing guards, label owner-distance counts and netlist symmetry.
+
+- **R167 — Straighten pin jogs (T137, T183).** In the planning that runs R149
+  (default mode, a nonzero search budget, at most 40 instances), every
+  finalist chain runs one pass after finished stack repair and before R152.
   A **pin jog** is judged on the drawing's own routed wires. Its subject pin is
   a MOS gate or BJT base on a non-rail Net that reaches a non-bulk pin of
   another instance, or either pin of a two-pin non-transistor part. From the
@@ -1105,8 +1143,13 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   step. A unit with a fixed or locked member is skipped, and so is one that
   would carry a fixed or locked marker (leaving the marker behind would only
   make a new jog at it); an off-grid step is skipped, and so is a trial in
-  which a moved body would overlap another body (no clearance is required). Each unit and step is tried once. When nothing is
-  fixed or locked the whole placement keeps the incumbent's anchor, as in R147.
+  which a moved body would overlap another body (no clearance is required).
+  If the subject move is skipped or rejected, try the opposite step on a
+  distinct unlocked peer unit at the other end of the wire. At a junction,
+  the peer must be the unique non-marker terminal on a straight adjacent
+  route of the same Net. Each unit and step is tried once. When nothing is
+  fixed or locked the whole placement keeps the incumbent's anchor, as in
+  R147.
   Every trial is finished through R149's replan, and a trial that replan
   declines (it hands back an earlier run) is rejected. A finished trial is
   accepted only if physical completeness is not worse, no rigid unit is split,
@@ -1120,10 +1163,9 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   height by at most 20 each. It must also
   make progress: fewer pin jogs, fewer visible corners, or a strictly lower
   calibrated score. After an accepted move the jogs are detected again. The
-  pass has its own budget of eight finished trials, scaled under R66 (three at
-  40 instances); it is separate from R147/R149's. The score and its weights do
-  not change. A document with no pin jog in any finalist chain plans as
-  before.
+  pass has its own budget of 12 finished trials, scaled under R66 (five at
+  40 instances). The score and its weights stay the same. Without any pin
+  jogs, R167 returns its input directly.
 
   The choices are empirical. Counts are on main 347082f with R167: moves
   accepted in all finalist chains of the 79 corpus drawing cases whose plan
@@ -1151,57 +1193,56 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   experiment on `65075a0`; their case counts were not recounted for the
   shipped rule.
 
-- **R168 — Convention-solved draft (T138).** A Document is in the subset when
-  it has at most 40 instances and 12 devices (no corpus Document has more than
-  10, so neither limit removes one), at least one MOS or BJT, no partition,
-  fixed instance or locked owner, no part with an output-role or
-  hierarchical-port pin (R164's directed blocks plus hierarchical symbols; the
-  latter removes one corpus Document), and the symmetry topology that
-  placement uses (R94 `symmetryTopology` followed by R140 `stageComponents`,
-  on `classifyNets` roles) finds no component: symmetric circuits keep their
-  template drafts. The corpus has 278 such Documents; the symmetry test
-  removes 123 of the 401 that pass the other tests. For the subset only, R63
+- **R168 — Convention-solved draft (T138, T181).** A Document is in the
+  subset when it has at most 40 instances and 18 devices, and either contains
+  a MOS or BJT or has at least four devices. Partitions, fixed instances,
+  locked layout groups and constraints, and hierarchical symbols are
+  ineligible. Symmetric circuits keep their template drafts when the
+  placement symmetry topology (R94 `symmetryTopology` followed by R140
+  `stageComponents` on `classifyNets` roles) finds a component. R63
   also routes a `convention` draft that places every device at once,
   minimising violated drawing conventions; markers, ports, labels,
   collisions, attachments, routing, refinement, search and finishing are the
   existing rules, and its devices are outside R21. The draft reads
-  connectivity (`classifyNets` Nets) and symbol geometry only.
+  connectivity (`classifyNets` Nets) and symbol geometry. Only visible,
+  non-bulk pins participate in the convention and wire costs.
   - Conventions (one object each, from connectivity): STACK is R166's stack
-    (it excludes two-pin-only stacks, 29 objects in 26 subset Documents);
+    and excludes two-pin-only stacks.
     LEVEL is a transistor gate (or base) on a non-rail Net that reaches
     another device pin, held when another pin of the Net lies straight out of
     the gate on its exit side or the gate line T-joins a straight segment of
     two of them, and counted as held when the Net also reaches a port or rail
-    marker, which is seated later (187 subset Documents); SHUNT is each part
+    marker, which is seated later. SHUNT is each part
     of a group of two to four two-pin non-transistor parts on the same two
     Nets (rail Nets compared by kind), held when a group partner with a
     parallel axis is aligned beside it with no device centre between. An
     exactly-two mirror (same gate Net and source, different drains) or
     differential pair (same non-rail source Net, different gates and drains)
     of one polarity whose members are in no other pair is one rigid unit, its
-    members one column pitch (120) apart and facing as the corpus drawings
-    do: a differential pair gates outward (107 of 123 drawn pairs), a mirror
-    gates inward (103 of 107) (65 subset Documents). A soft term for other
-    pairs was dropped: no subset Document has one.
+    members one column pitch (120) apart. A differential pair faces its
+    gates outward and a mirror faces its gates inward.
   - Hard: a transistor is upright, never inverted (channel vertical, gate
     sideways, the drain or collector of an n device and the source or emitter
     of a p device on top; human drawings invert 0.5%); one pose per distinct
     pin layout; two-pin parts take the four rotations, other parts the
-    distinct ones of all eight poses; device bodies stay at least 40 apart in
-    x or 30 in y.
-  - Cost, weights per violated object, with the subset Documents whose draft
-    changes when the term is dropped (plans changed, where measured): STACK 1
-    (157), LEVEL 1 (113), SHUNT 1 (26; 6 plans); inputs left of outputs, 4
-    shared by every (input Net, output Net) pair of `classifyNets` roles,
-    violated when the mean device-pin x of the input Net is not below the
-    output Net's (58; 21 plans); rail side 1 per rail pin of a non-transistor
-    part not above (supply) or below (ground) its other pins (114); supply
-    above ground, 2 shared by every pair of supply and ground device pins of
-    different devices (29; 15 plans); wire, 1/150 per unit of half-perimeter
-    of each non-rail Net with two or more device pins (208); shape, 1/200 per
-    unit of the larger side of the device outline (171). No crossing term.
-    These are the pre-test's values; only the input weight changed (from 3 per
-    pair, because a differential pair makes two pairs unavoidable).
+    distinct ones of all eight poses. Free R164 directed blocks keep R169
+    input polarity and exclude poses with any left-facing output. When a
+    valid pose has an output exiting right, only poses with a right-facing
+    output are allowed. Device bodies stay at least 40 apart in x or 30 in y.
+  - Cost, weights per violated object: STACK 1, LEVEL 1, SHUNT 1; inputs
+    left of outputs, 4 shared by the input/output Net pairs of
+    `classifyNets` roles and violated when the input mean device-pin x is at
+    or to the right of the output mean; `blockFlow`, 2 per free R164
+    directed block, shared by its non-feedback signal driver and load
+    terminals. Drivers must lie left of the block's visible pin mean x
+    and loads right of its output pin mean x. Devices that also touch the
+    opposite side's signal Nets are treated as feedback. Rail side is
+    1 per rail pin of a non-transistor part that is at or below its other
+    pins for supply, or at or above them for ground. Supply above ground
+    is 2 shared by the supply/ground pin pairs of different devices. Wire
+    costs 1/150 per unit of half-perimeter of each non-rail Net with at
+    least two device pins, and shape costs 1/200 per unit of the longer
+    side of the device outline.
   - Search: each unit's reference point (a transistor's channel line and gate
     level, a two-pin part's pin axis and midpoint, otherwise its body centre)
     takes half-column (60) and row (50) lattice values within four steps of a
@@ -1212,25 +1253,30 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
     connected to those placed; depth-first branch and bound over the children
     sorted by cost, pose, x and y, with limited-discrepancy rounds (0, 1, 2, 4,
     ...), ends when the tree is exhausted or after 60 000 evaluated
-    placements; a polish then moves one unit at a time to its best candidate
-    while that lowers the cost, for at most a quarter of the limit more (at
-    least 5 000). There is no clock: the same Document always gets the same
-    draft. On the corpus the limit ends 213 of 278 searches; one solve takes
-    at most about 0.4 s and is made once per planning call.
+    placements. Polish uses a shared budget of an additional quarter of
+    the search limit, with a minimum of 5 000 evaluations. It first
+    relocates units while convention cost improves. If the resulting
+    placement has R54 estimated crossings, up to two further passes
+    estimate the best 24 relocations per unit by convention cost and try
+    swapping compatible single-device units at each other's positions.
+    Compatible units have the same symbol or are both two-pin passives.
+    Each accepted change lowers convention cost plus 1.5 per estimated
+    crossing and 0.0005 per unit of estimated wire length without adding
+    crossings. This stage uses at most 1 500 estimator calls including the
+    initial estimate. The search and polish are deterministic.
   - Offer: the draft joins only when it is valid and its edit list differs
     from every original and R166 candidate; a solver failure, a draft that
     misses a device or a refused run is not offered. It ranks within the
     portfolio R166 left (ties keep the earlier draft), so it can take a
-    refinement slot from an original. It is selected only when refinement
-    selects it and its refined run also compares better than the refined
-    choice planning makes without it. Otherwise planning continues exactly
-    as without R168: the annealer's alternative starts and the
-    crossing-reroute portfolio contain none of its runs. When it is selected,
-    that portfolio, the draft included, replaces the other. The comparison
-    with the refined choice made without the draft (T138 round 2) returned 2
-    of the 100 changed corpus plans to main's; both were judged needs-improvement
-    before and after.
-    Evaluation reports `conventionDraft` (`eligible`, `selected`; report-only).
+    refinement slot from an original. It wins provisionally only when
+    refinement selects it and its refined run also compares better than
+    the refined choice planning makes without it. When an original wins provisionally,
+    its annealer and crossing-reroute portfolio use the original
+    candidates. A complete, distinct and competitive convention draft can
+    still enter `FinalistPass` through `shouldFinishRunner`. It can win via
+    `selectFinishedLayout` only when it strictly improves the finished
+    comparison and passes the readability and visual/routing guards.
+    Evaluation reports `conventionDraft` (`eligible`, `selected`).
 
 - **R169 — Input polarity of directed blocks (T142).** A polarity block is a
   symbol with an input-role pin and an output-role pin plus one pin named `+`
@@ -1284,9 +1330,12 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   the same drawing, and neither half when `|dx|` is strictly less than one grid
   step. An item that improves never offsets one that gets worse. Ports without
   a placement or a Net on `P`, blocks on a cycle and the search's other frames
-  are not vetoed. (4) The current-source tail step returns its incumbent when
-  the tail's input pair is p-polarity, since it only builds a tail below the
-  pair and R81 places that tail above.
+  are not vetoed. (4) The current-source tail step uses the differential
+  pair's polarity. For a p-channel pair it seats the tail above the pair,
+  puts any source-degeneration elements between the pair and the tail, and
+  places loads and output ports below the pair. The centered tee has an upward
+  stem to the tail's lower contact. The n-channel step keeps the tail below
+  the pair. Both use the same completeness, routing and readability guards.
 
 - **R71 — Single-host ports.** A non-rail Cell Pin Net that reaches exactly
   one device pin gets a local seat along that pin's transformed exit direction.
@@ -1425,7 +1474,7 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   leaves a valid pair without a tail. One tail may support multiple pairs.
   Placement uses the pair members' polarity: the tail lies one row below n
   pairs or above p pairs, including shared tails and tails in mirror units.
-  The netlist refinement's tail step applies to n pairs only (R170).
+  The netlist refinement's current-source tail step uses the same polarity (R170).
 
 - **R82 — Differential pair with mirror load.** A mirror reference drain on
   input A's drain and an output drain on input B's distinct drain form a
@@ -1562,7 +1611,21 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   member id establishes left/right with its lower-id member left; sides propagate
   through the component. Pairs reached only through self Nets use the same
   lower-id-left drawing convention. Report partner pairs, axis devices and
-  touched conflicted devices.
+  touched conflicted devices. When R88 finds no component in an unpartitioned
+  layout, the `mirrorSymmetry` finalist can use T087's exact netlist involution
+  for a component with at least two pairs and a transistor pair. Components
+  containing directed blocks or hierarchical pins are excluded. Map the matched
+  pins' logical Nets to a Base Net involution and place the component on one
+  axis and try layered and template drafts. Both symmetry finalists can enter
+  finishing with a distinct, complete draft within the runner margin, with
+  fewer crossings, or with fewer netlist symmetry violations, equal crossings
+  and at most 2.2 times the incumbent's routed score. Both must strictly improve
+  the finished comparison and routed score, with no routing or visual guard
+  increases, including label-owner distance. If netlist symmetry violations
+  fall and crossings do not increase, a higher readability term or new minor
+  violations may be accepted. Zero baselines still veto new crossings, rail
+  crossings, source polarity violations, wires through symbols and unowned
+  drafting. Otherwise the usual readability term and zero-baseline rules apply.
 
 - **R89 — Symmetric blocks.** Partners use the smaller R31 row; axis devices
   retain their rows. Build a half Document from left partners and axis devices,
@@ -1870,7 +1933,11 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   instance, Net or terminal order. Each stage gets its own R89 block and axis
   through R94 in every placement strategy, collision repair and frozen sets.
   Annealing and R97 compaction use the same stage components as rigid units.
-  Partition mode and the R88 whole-component view remain unchanged.
+  When R145 splits a component, an `unsplitSymmetry` finalist can keep it on a
+  single axis. Try the selected strategy, layered and template, and take the
+  best distinct strategy draft by the routed comparator. It competes through
+  `selectFinishedLayout` under the R88 symmetry-finalist guards. Partition
+  placement continues to use the whole-component R88 view.
 
 - **R146 — Routed port-seat search.** In default mode, for documents of at
   most 40 instances and a nonzero search budget, search non-rail `port` and

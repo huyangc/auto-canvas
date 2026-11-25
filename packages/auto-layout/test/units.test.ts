@@ -1,4 +1,4 @@
-import { expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
 import {
   canonicalDevices,
@@ -275,37 +275,52 @@ function canonicalTopology(d: ReturnType<typeof circuit>) {
   };
 }
 
-it.each(["resistors", "mirror", "ring"] as const)(
-  "canonicalizes symmetric %s within the default timeout and preserves topology",
+describe.each(["resistors", "mirror", "ring"] as const)(
+  "symmetric %s",
   (kind) => {
-    const d = symmetricCircuit(kind);
-    const topology = canonicalTopology(d);
-    const payload = describeCircuit(d, resolver, true);
-    // Reverse and interleave to exercise different first-leaf choices.
-    for (const stride of [1, 5]) {
-      const renamed = structuredClone(d);
-      const ids = new Map(
-        d.instances.map((i, n) => [i.id, `renamed-${d.instances.length - n}`]),
-      );
-      renamed.instances = d.instances
-        .map((_, n) => renamed.instances[(n * stride) % d.instances.length]!)
-        .reverse();
-      for (const i of renamed.instances) i.id = ids.get(i.id)!;
-      renamed.nets.reverse();
-      renamed.nets.forEach((net, n) => {
-        net.id = `renamed-net-${n}`;
-        net.terminals.reverse();
-        net.terminals.forEach((t) => {
-          t.instanceId = ids.get(t.instanceId)!;
-        });
-      });
-      expect(canonicalTopology(renamed)).toEqual(topology);
-      expect(describeCircuit(renamed, resolver, true)).toEqual(payload);
-    }
-    const changed = structuredClone(d);
-    changed.nets[1]!.terminals.push(changed.nets[0]!.terminals.pop()!);
-    expect(canonicalTopology(changed)).not.toEqual(topology);
-    expect(describeCircuit(changed, resolver, true)).not.toEqual(payload);
+    // Each public contract has its own default timeout, including on slower CI runners.
+    it.each([
+      { name: "canonical topology", project: canonicalTopology },
+      {
+        name: "anonymous payload",
+        project: (d: ReturnType<typeof circuit>) =>
+          describeCircuit(d, resolver, true),
+      },
+    ])(
+      "preserves $name across reorderings and detects a changed connection",
+      ({ project }) => {
+        const d = symmetricCircuit(kind);
+        const expected = project(d);
+        // Reverse and interleave to exercise different first-leaf choices.
+        for (const stride of [1, 5]) {
+          const renamed = structuredClone(d);
+          const ids = new Map(
+            d.instances.map((i, n) => [
+              i.id,
+              `renamed-${d.instances.length - n}`,
+            ]),
+          );
+          renamed.instances = d.instances
+            .map(
+              (_, n) => renamed.instances[(n * stride) % d.instances.length]!,
+            )
+            .reverse();
+          for (const i of renamed.instances) i.id = ids.get(i.id)!;
+          renamed.nets.reverse();
+          renamed.nets.forEach((net, n) => {
+            net.id = `renamed-net-${n}`;
+            net.terminals.reverse();
+            net.terminals.forEach((t) => {
+              t.instanceId = ids.get(t.instanceId)!;
+            });
+          });
+          expect(project(renamed)).toEqual(expected);
+        }
+        const changed = structuredClone(d);
+        changed.nets[1]!.terminals.push(changed.nets[0]!.terminals.pop()!);
+        expect(project(changed)).not.toEqual(expected);
+      },
+    );
   },
 );
 

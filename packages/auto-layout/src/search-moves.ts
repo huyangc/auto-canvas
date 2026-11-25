@@ -1,4 +1,3 @@
-import { stageComponents } from "./stage-symmetry.js";
 import { partitionDocuments } from "./partition-geometry.js";
 import {
   partitionGroups,
@@ -24,7 +23,7 @@ import {
   type SearchBounds,
 } from "./search-bounds.js";
 import type { CellSide } from "./layout-choices.js";
-import { classifyNets } from "./net-roles.js";
+import { classifyNets, type NetRoles } from "./net-roles.js";
 import { isMarker } from "./placement-connectivity.js";
 import {
   compareIds,
@@ -32,7 +31,7 @@ import {
   recognizeStructures,
 } from "./recognize.js";
 import { parallelAttachments, findStages } from "./stages.js";
-import { detectSymmetry } from "./symmetry.js";
+import { resolvedSymmetry } from "./symmetry.js";
 import type { LayoutPartition, LayoutStrategy, Placement } from "./types.js";
 
 export interface SearchState {
@@ -53,18 +52,21 @@ export function randomStream(seed: number): () => number {
   };
 }
 
+type SymmetryOptions = Pick<NetRoles, "unsplitSymmetry" | "mirrorSymmetry">;
+
 /** Shared topology-derived rigid units for annealing and pin relocation. */
 export function placementUnits(
   document: SchematicDocument,
   resolver: SymbolResolver,
   fixed: ReadonlySet<string>,
   partition?: LayoutPartition,
+  symmetryOptions?: SymmetryOptions,
 ) {
   const devices = document.instances
     .filter((i) => !isMarker(i))
     .sort((a, b) => compareIds(a.id, b.id));
   const deviceDocument = { ...document, instances: devices, junctions: [] };
-  const roles = classifyNets(document, resolver);
+  const roles = { ...classifyNets(document, resolver), ...symmetryOptions };
   partition = placementPartition(document, resolver, roles, partition);
   // The same templates placeDocument uses, including persisted groups.
   const groups = partitionGroups(
@@ -103,10 +105,10 @@ export function placementUnits(
       grouped.add(id);
     }
   }
-  const components = detectSymmetry(document, resolver, roles);
-  const symmetry = partition
-    ? partitionSymmetry(components, partition)
-    : stageComponents(document, resolver, roles, components);
+  const symmetry = partitionSymmetry(
+    resolvedSymmetry(document, resolver, roles, partition).components,
+    partition,
+  );
   for (const c of symmetry) {
     const ids = [...c.pairs.flat(), ...c.axis];
     for (const id of ids) {
@@ -171,6 +173,7 @@ export function createMoveGenerator(
   bounds?: SearchBounds,
   partition?: LayoutPartition,
   pitch?: Readonly<PlacementPitch>,
+  symmetryOptions?: SymmetryOptions,
 ) {
   const {
     devices,
@@ -186,7 +189,7 @@ export function createMoveGenerator(
     grouped,
     root,
     owner,
-  } = placementUnits(document, resolver, fixed, partition);
+  } = placementUnits(document, resolver, fixed, partition, symmetryOptions);
   if (pitch) roles.pitch = pitch;
   partition = resolvedPartition;
   const found = partition

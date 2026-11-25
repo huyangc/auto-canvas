@@ -3,7 +3,6 @@ import { seatNodeAttachments } from "./attachment-seat.js";
 import { placeLocalLoopAmplifiers } from "./local-loop-amplifier.js";
 import { planningMemo } from "./planning-reuse.js";
 import { signalSeriesParts } from "./series-levels.js";
-import { stageComponents } from "./stage-symmetry.js";
 import { recordDraftingTranslation } from "./drafting-search.js";
 import {
   partitionGroups,
@@ -61,7 +60,7 @@ import {
   placeStages,
 } from "./stages.js";
 import { templatePlacement } from "./template-placement.js";
-import { symmetryTopology } from "./symmetry.js";
+import { resolvedSymmetry } from "./symmetry.js";
 import { isMos } from "./net-roles.js";
 import { placeMarkers } from "./place-markers.js";
 import { alignStacks, draftStrategy, isStackStrategy } from "./stack-snap.js";
@@ -267,7 +266,7 @@ export function placeDocument(
     const selected = planningMemo(
       document,
       resolver,
-      `row-drafts:${JSON.stringify([draftRouter.key, strategy, localLoopDraft, attachmentDraft, gateRowDraft, roles.symmetricHalfOrder, roles.seriesLevels, roles.pitch, options.fixedInstanceIds, [...overrides.sides], [...overrides.orientations]])}`,
+      `row-drafts:${JSON.stringify([draftRouter.key, strategy, localLoopDraft, attachmentDraft, gateRowDraft, roles.symmetricHalfOrder, roles.unsplitSymmetry, roles.mirrorSymmetry, roles.seriesLevels, roles.pitch, options.fixedInstanceIds, [...overrides.sides], [...overrides.orientations]])}`,
       () => {
         const draft = (signalSeries: boolean) => {
           const choices = emptyChoices();
@@ -333,7 +332,12 @@ export function placeDocument(
         problem: `R3: unresolved symbol ${i.symbolId}`,
       };
   // R94: detect topology once per placement call; R140 reuses its components.
-  const topology = symmetryTopology(document, resolver, roles);
+  const topology = resolvedSymmetry(
+    document,
+    resolver,
+    roles,
+    options.partition,
+  );
   const partition = placementPartition(
     document,
     resolver,
@@ -341,13 +345,6 @@ export function placeDocument(
     options.partition,
     topology.components,
   );
-  if (!partition)
-    topology.components = stageComponents(
-      document,
-      resolver,
-      roles,
-      topology.components,
-    );
   const symmetry = partitionSymmetry(topology.components, partition);
   const symmetryIds = new Set(
     symmetry.flatMap((c) => [...c.pairs.flat(), ...c.axis]),

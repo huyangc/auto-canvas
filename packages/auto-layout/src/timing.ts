@@ -7,6 +7,8 @@ type PlanningPhase =
   | "ports"
   | "rails"
   | "gaps"
+  | "crossingPolish"
+  | "stackRepair"
   | "pinJogs"
   | "draftingFallback"
   | "drafting"
@@ -39,6 +41,8 @@ export function timePlanning(plan: () => AutoLayoutResult): AutoLayoutResult {
       ports: 0,
       rails: 0,
       gaps: 0,
+      crossingPolish: 0,
+      stackRepair: 0,
       pinJogs: 0,
       drafting: 0,
       draftingFallback: 0,
@@ -52,6 +56,8 @@ export function timePlanning(plan: () => AutoLayoutResult): AutoLayoutResult {
       ports: 0,
       rails: 0,
       gaps: 0,
+      crossingPolish: 0,
+      stackRepair: 0,
       pinJogs: 0,
       drafting: 0,
       draftingFallback: 0,

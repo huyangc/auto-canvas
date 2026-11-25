@@ -1,28 +1,29 @@
 import type { SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import { classifyNets } from "./net-roles.js";
-import { isMarker } from "./placement-connectivity.js";
+import { createPlacementEstimator } from "./estimate.js";
+import { devicePins, isMarker } from "./placement-connectivity.js";
 import { compareIds } from "./recognize.js";
-import { conventionRelations, isRailNet } from "./convention-relations.js";
+import {
+  conventionRelations,
+  isConventionPin,
+} from "./convention-relations.js";
 import {
   ALIGN_TOLERANCE,
   COLUMN_PITCH,
   CONVENTION_WEIGHTS,
   conventionObjective,
   conventionUnits,
-  type Box,
   type ConventionWeights,
   type Spot,
   type State,
-  type Unit,
 } from "./convention-objective.js";
 import type { Placement } from "./types.js";
 
 /**
  * R168 search effort (the pre-test's value). The limit counts evaluated
- * candidate placements and is the only bound: no clock, so the same Document
- * always gets the same draft. It ends 213 of the 278 corpus searches before
- * they are exhausted; a solve took 90 ms median, 0.37 s at most.
+ * candidate placements. The search has no clock, so the same Document
+ * always gets the same draft.
  */
 export const CONVENTION_NODE_LIMIT = 60_000;
 /** The relocation polish after the search may evaluate a quarter of the
@@ -46,6 +47,10 @@ const BODY_GAP = { x: 40, y: 30 };
 const ORIGIN = 200;
 /** Cost comparisons ignore floating-point noise below this. */
 const EPSILON = 1e-9;
+const CROSSING_WEIGHT = 1.5;
+const EST_LENGTH_WEIGHT = 0.0005;
+const CROSSING_ESTIMATE_LIMIT = 1_500;
+const CROSSING_TOP_K = 24;
 
 export interface ConventionDraft {
   placements?: Map<string, Placement>;
@@ -58,12 +63,6 @@ export interface ConventionDraft {
 }
 
 const tenth = (v: number) => Math.round(v / 10) * 10;
-const overlaps = (a: Box, b: Box) =>
-  a.x0 - BODY_GAP.x < b.x1 &&
-  b.x0 - BODY_GAP.x < a.x1 &&
-  a.y0 - BODY_GAP.y < b.y1 &&
-  b.y0 - BODY_GAP.y < a.y1;
-
 /**
  * R168: place every device at once, minimising violated drawing conventions
  * (R168 objective) by deterministic depth-first branch and bound with
@@ -83,10 +82,11 @@ export function solveConventionDraft(
     return { problem: "R168: no devices", nodes: 0, limitHit: false };
   const roles = classifyNets(document, resolver);
   const relations = conventionRelations(document, resolver, roles);
-  const units = conventionUnits(devices, resolver, roles, relations);
+  const units = conventionUnits(document, devices, resolver, roles, relations);
   if (units.some((u) => !u.poses.length))
     return { problem: "R168: a device has no pose", nodes: 0, limitHit: false };
-  const { cost } = conventionObjective(
+  const objective = conventionObjective(
+    document,
     devices,
     resolver,
     roles,
@@ -94,113 +94,119 @@ export function solveConventionDraft(
     units,
     weights,
   );
-  // Units sharing a non-rail Net.
-  const signalNets = (u: Unit) =>
-    new Set(
-      u.poses[0]!.pins.map((p) => p.net).filter(
-        (n): n is string => !!n && !isRailNet(roles, n),
-      ),
-    );
-  const nets = units.map(signalNets);
-  const linked = units.map((_, k) =>
-    units.map(
-      (u, j) =>
-        k !== j && u.poses[0]!.pins.some((p) => p.net && nets[k]!.has(p.net)),
+  const {
+    currentCost,
+    placeUnit,
+    unplaceUnit,
+    fits,
+    px,
+    py,
+    unitPlaced,
+    pinUnit,
+    signalPins,
+  } = objective;
+  const linked = units.map(() => new Uint8Array(units.length));
+  for (const slots of signalPins.values())
+    for (const a of slots)
+      for (const b of slots)
+        if (pinUnit[a] !== pinUnit[b]) linked[pinUnit[a]!]![pinUnit[b]!] = 1;
+  const degree = (k: number) => linked[k]!.reduce((sum, edge) => sum + edge, 0);
+  const firstId = (k: number) => units[k]!.ids[0]!;
+  const candidatePoses = units.map((u) =>
+    u.poses.map((pose) =>
+      pose.pins.flatMap((p) => {
+        const slots = p.net ? signalPins.get(p.net) : undefined;
+        return slots
+          ? [{ x: p.x, y: p.y, sideways: Math.abs(p.ex) > 0.5, slots }]
+          : [];
+      }),
     ),
   );
-  const degree = (k: number) => linked[k]!.filter(Boolean).length;
-  const firstId = (k: number) => units[k]!.ids[0]!;
 
+  // Candidate lists are built before recursion, so all calls can share scratch.
+  const anchors: Spot[] = [];
+  const latticeX = new Set<number>(),
+    latticeY = new Set<number>();
+  const xs = new Set<number>(),
+    ys = new Set<number>();
+  const sortedX: number[] = [],
+    sortedY: number[] = [];
+  const ascending = (a: number, b: number) => a - b;
   const candidates = (state: State, k: number): Spot[] => {
-    const placed = state.flatMap((s, j) => (s ? [j] : []));
-    if (!placed.length)
+    anchors.length = 0;
+    for (let j = 0; j < state.length; j++)
+      if (state[j] && linked[k]![j]) anchors.push(state[j]!);
+    if (!anchors.length) for (const spot of state) if (spot) anchors.push(spot);
+    if (!anchors.length)
       return units[k]!.poses.map((_, pose) => ({ pose, x: 0, y: 0 }));
-    const near = placed.filter((j) => linked[k]![j]);
-    const anchors = near.length ? near : placed;
-    const pins = placed.flatMap((j) => {
-      const s = state[j]!;
-      return units[j]!.poses[s.pose]!.pins.map((p) => ({
-        ...p,
-        x: p.x + s.x,
-        y: p.y + s.y,
-      }));
-    });
-    const boxes = placed.flatMap((j) => {
-      const s = state[j]!;
-      return units[j]!.poses[s.pose]!.boxes.map((b) => ({
-        ...b,
-        x0: b.x0 + s.x,
-        x1: b.x1 + s.x,
-        y0: b.y0 + s.y,
-        y1: b.y1 + s.y,
-      }));
-    });
+
+    latticeX.clear();
+    latticeY.clear();
+    for (const s of anchors)
+      for (let d = -NEIGHBOURHOOD; d <= NEIGHBOURHOOD; d++) {
+        latticeX.add(s.x + d * HALF_COLUMN);
+        latticeY.add(s.y + d * ROW_STEP);
+      }
     const out: Spot[] = [];
-    units[k]!.poses.forEach((pose, index) => {
-      const xs = new Set<number>(),
-        ys = new Set<number>();
-      for (const j of anchors) {
-        const s = state[j]!;
-        for (let d = -NEIGHBOURHOOD; d <= NEIGHBOURHOOD; d++) {
-          xs.add(s.x + d * HALF_COLUMN);
-          ys.add(s.y + d * ROW_STEP);
+    const poses = candidatePoses[k]!;
+    for (let pose = 0; pose < poses.length; pose++) {
+      xs.clear();
+      ys.clear();
+      for (const x of latticeX) xs.add(x);
+      for (const y of latticeY) ys.add(y);
+      for (const p of poses[pose]!) {
+        for (let i = 0; i < p.slots.length; i++) {
+          const a = p.slots[i]!;
+          if (!unitPlaced[pinUnit[a]!]) continue;
+          xs.add(px[a]! - p.x);
+          ys.add(py[a]! - p.y);
+          // A sideways pin can T-join two collinear pins on the same Net.
+          if (!p.sideways) continue;
+          for (let j = i + 1; j < p.slots.length; j++) {
+            const b = p.slots[j]!;
+            if (
+              unitPlaced[pinUnit[b]!] &&
+              Math.abs(px[a]! - px[b]!) <= ALIGN_TOLERANCE
+            )
+              ys.add(tenth((py[a]! + py[b]!) / 2) - p.y);
+          }
         }
       }
-      for (const p of pose.pins) {
-        if (!p.net || isRailNet(roles, p.net)) continue;
-        const same = pins.filter((q) => q.net === p.net);
-        for (const q of same) {
-          xs.add(q.x - p.x);
-          ys.add(q.y - p.y);
+      sortedX.length = sortedY.length = 0;
+      for (const x of xs) sortedX.push(x);
+      for (const y of ys) sortedY.push(y);
+      sortedX.sort(ascending);
+      sortedY.sort(ascending);
+      for (const x of sortedX)
+        for (const y of sortedY) {
+          let near = false;
+          for (const anchor of anchors)
+            if (
+              Math.abs(anchor.x - x) <=
+                NEIGHBOURHOOD * HALF_COLUMN + COLUMN_PITCH &&
+              Math.abs(anchor.y - y) <= NEIGHBOURHOOD * ROW_STEP
+            ) {
+              near = true;
+              break;
+            }
+          if (near && fits(k, pose, x, y, BODY_GAP.x, BODY_GAP.y))
+            out.push({ pose, x, y });
         }
-        // A sideways pin (a gate) may T-join the segment between two
-        // collinear pins of its Net.
-        if (Math.abs(p.ex) > 0.5)
-          for (let i = 0; i < same.length; i++)
-            for (let j = i + 1; j < same.length; j++)
-              if (Math.abs(same[i]!.x - same[j]!.x) <= ALIGN_TOLERANCE)
-                ys.add(tenth((same[i]!.y + same[j]!.y) / 2) - p.y);
-      }
-      const X = [...xs].sort((a, b) => a - b);
-      const Y = [...ys].sort((a, b) => a - b);
-      for (const x of X)
-        for (const y of Y) {
-          if (
-            !anchors.some(
-              (j) =>
-                Math.abs(state[j]!.x - x) <=
-                  NEIGHBOURHOOD * HALF_COLUMN + COLUMN_PITCH &&
-                Math.abs(state[j]!.y - y) <= NEIGHBOURHOOD * ROW_STEP,
-            )
-          )
-            continue;
-          if (
-            pose.boxes.some((b) =>
-              boxes.some((q) =>
-                overlaps(
-                  {
-                    ...b,
-                    x0: b.x0 + x,
-                    x1: b.x1 + x,
-                    y0: b.y0 + y,
-                    y1: b.y1 + y,
-                  },
-                  q,
-                ),
-              ),
-            )
-          )
-            continue;
-          out.push({ pose: index, x, y });
-        }
-    });
+    }
     return out;
   };
+  type ScoredSpot = { spot: Spot; value: number };
+  const byScore = (a: ScoredSpot, b: ScoredSpot) =>
+    a.value - b.value ||
+    a.spot.pose - b.spot.pose ||
+    a.spot.x - b.spot.x ||
+    a.spot.y - b.spot.y;
 
   // Most-connected unit first, then the unit most connected to those placed.
   const order: number[] = [];
   const left = new Set(units.map((_, k) => k));
-  const byId = (a: number, b: number) => compareIds(firstId(a), firstId(b));
+  const compareUnits = (a: number, b: number) =>
+    compareIds(firstId(a), firstId(b));
   const take = (k: number) => {
     order.push(k);
     left.delete(k);
@@ -210,14 +216,15 @@ export function solveConventionDraft(
       (a, b) =>
         degree(b) - degree(a) ||
         units[b]!.ids.length - units[a]!.ids.length ||
-        byId(a, b),
+        compareUnits(a, b),
     )[0]!,
   );
   while (left.size) {
     const ties = (k: number) => order.filter((j) => linked[k]![j]).length;
     take(
       [...left].sort(
-        (a, b) => ties(b) - ties(a) || degree(b) - degree(a) || byId(a, b),
+        (a, b) =>
+          ties(b) - ties(a) || degree(b) - degree(a) || compareUnits(a, b),
       )[0]!,
     );
   }
@@ -231,33 +238,28 @@ export function solveConventionDraft(
   const state: State = units.map(() => undefined);
   const search = (depth: number, discrepancy: number) => {
     if (depth === order.length) {
-      const c = cost(state);
+      const c = currentCost();
       if (c < bestCost - EPSILON) {
         bestCost = c;
-        best = state.map((s) => s && { ...s });
+        best = state.slice();
       }
       return;
     }
     const k = order[depth]!;
-    const children: { spot: Spot; value: number }[] = [];
+    const children: ScoredSpot[] = [];
     for (const spot of candidates(state, k)) {
       if (nodes >= nodeLimit) {
         limitHit = true;
-        return;
+        break;
       }
       nodes++;
-      state[k] = spot;
-      const value = cost(state);
-      state[k] = undefined;
+      placeUnit(k, spot);
+      const value = currentCost();
       if (value < bestCost - EPSILON) children.push({ spot, value });
     }
-    children.sort(
-      (a, b) =>
-        a.value - b.value ||
-        a.spot.pose - b.spot.pose ||
-        a.spot.x - b.spot.x ||
-        a.spot.y - b.spot.y,
-    );
+    unplaceUnit(k);
+    if (limitHit) return;
+    children.sort(byScore);
     for (let i = 0; i < children.length; i++) {
       if (i > discrepancy) {
         truncated = true;
@@ -265,8 +267,10 @@ export function solveConventionDraft(
       }
       if (children[i]!.value >= bestCost - EPSILON) break;
       state[k] = children[i]!.spot;
+      placeUnit(k, state[k]!);
       search(depth + 1, discrepancy - i);
       state[k] = undefined;
+      unplaceUnit(k);
       if (limitHit) return;
     }
   };
@@ -287,43 +291,175 @@ export function solveConventionDraft(
       limitHit,
     };
 
-  // Polish: move one unit at a time to its best candidate while that helps.
+  // Relocate one unit at a time while the convention objective improves.
   const polishLimit = nodes + Math.max(POLISH_MIN, Math.floor(nodeLimit / 4));
-  let current = best,
-    currentCost = bestCost,
+  const current = best;
+  let value = objective.cost(current),
     improved = !exhausted;
+  const remove = (k: number) => {
+    current[k] = undefined;
+    unplaceUnit(k);
+  };
+  const place = (k: number, spot: Spot) => {
+    current[k] = spot;
+    placeUnit(k, spot);
+  };
   while (improved && nodes < polishLimit) {
     improved = false;
     for (const k of order) {
-      const trial = current.map((s, j) => (j === k ? undefined : s));
-      for (const spot of candidates(trial, k)) {
+      let chosen = current[k]!;
+      remove(k);
+      for (const spot of candidates(current, k)) {
         if (nodes >= polishLimit) break;
         nodes++;
-        trial[k] = spot;
-        const value = cost(trial);
-        trial[k] = undefined;
-        if (value < currentCost - 1e-6) {
-          currentCost = value;
-          current = trial.map((s, j) => (j === k ? spot : s));
+        placeUnit(k, spot);
+        const trial = currentCost();
+        if (trial < value - 1e-6) {
+          chosen = spot;
+          value = trial;
           improved = true;
         }
       }
+      place(k, chosen);
     }
   }
 
   const grid = document.presentation.grid || 10;
-  const placements = new Map<string, Placement>();
-  current.forEach((spot, k) => {
-    for (const m of units[k]!.poses[spot!.pose]!.members)
-      placements.set(m.id, {
-        position: {
-          x: Math.round((spot!.x + m.dx - m.pose.ax) / grid) * grid,
-          y: Math.round((spot!.y - m.pose.ay) / grid) * grid,
-        },
-        rotation: m.pose.orientation.rotation,
-        mirror: m.pose.orientation.mirror,
-      });
+  const stateToPlacements = (state: State) => {
+    const placements = new Map<string, Placement>();
+    state.forEach((spot, k) => {
+      for (const m of units[k]!.poses[spot!.pose]!.members)
+        placements.set(m.id, {
+          position: {
+            x: Math.round((spot!.x + m.dx - m.pose.ax) / grid) * grid,
+            y: Math.round((spot!.y - m.pose.ay) / grid) * grid,
+          },
+          rotation: m.pose.orientation.rotation,
+          mirror: m.pose.orientation.mirror,
+        });
+    });
+    return placements;
+  };
+
+  const byId = new Map(devices.map((i) => [i.id, i]));
+  const estimator = createPlacementEstimator(devices, resolver, {
+    ...roles,
+    pinNet: (id, pin) =>
+      isConventionPin(document, resolver, byId.get(id)!, pin)
+        ? roles.pinNet(id, pin)
+        : undefined,
   });
+  const baseEst = estimator(stateToPlacements(current));
+  if (baseEst.crossings > 0 && nodes < polishLimit) {
+    let estimates = 1;
+    const canEstimate = () => estimates < CROSSING_ESTIMATE_LIMIT;
+    const canScore = () => nodes < polishLimit;
+    const crossingObjective = (cost: number, est: typeof baseEst) =>
+      cost + CROSSING_WEIGHT * est.crossings + EST_LENGTH_WEIGHT * est.length;
+    let crossings = baseEst.crossings;
+    let score = crossingObjective(value, baseEst);
+    const consider = (cost: number, maxCrossings: number) => {
+      estimates++;
+      const est = estimator(stateToPlacements(current));
+      const next = crossingObjective(cost, est);
+      if (est.crossings > maxCrossings || next >= score - 1e-6) return;
+      score = next;
+      improved = true;
+      return est.crossings;
+    };
+
+    const singletons = order.flatMap((k) => {
+      const unit = units[k]!;
+      if (unit.ids.length !== 1) return [];
+      const device = byId.get(unit.ids[0]!)!;
+      const pins = devicePins(device, resolver).filter((p) =>
+        isConventionPin(document, resolver, device, p.name),
+      );
+      const passive =
+        pins.length === 2 && pins.every((p) => p.role === "passive");
+      return [{ k, passive, symbolId: device.symbolId }];
+    });
+    const pairs = singletons.flatMap((a, i) =>
+      singletons
+        .slice(i + 1)
+        .filter((b) => (a.passive && b.passive) || a.symbolId === b.symbolId)
+        .map((b) => [a.k, b.k] as const),
+    );
+
+    for (let pass = 0; pass < 2 && canScore() && canEstimate(); pass++) {
+      improved = false;
+      for (const k of order) {
+        if (!canScore() || !canEstimate()) break;
+        let chosen = current[k]!;
+        remove(k);
+        const ranked: ScoredSpot[] = [];
+        for (const spot of candidates(current, k)) {
+          if (!canScore()) break;
+          nodes++;
+          placeUnit(k, spot);
+          ranked.push({ spot, value: currentCost() });
+        }
+        ranked.sort(byScore);
+        // Compare each proposal to the incumbent's crossing count. Commit
+        // the best score within that bound, independent of proposal order.
+        const maxCrossings = crossings;
+        for (const { spot, value } of ranked.slice(0, CROSSING_TOP_K)) {
+          if (!canEstimate()) break;
+          current[k] = spot;
+          const next = consider(value, maxCrossings);
+          if (next !== undefined) {
+            chosen = spot;
+            crossings = next;
+          }
+        }
+        place(k, chosen);
+      }
+
+      for (const [a, b] of pairs) {
+        if (!canScore() || !canEstimate()) break;
+        const oldA = current[a]!,
+          oldB = current[b]!;
+        let chosenA = oldA,
+          chosenB = oldB;
+        const maxCrossings = crossings;
+        remove(a);
+        remove(b);
+        for (
+          let i = 0;
+          i < units[a]!.poses.length && canScore() && canEstimate();
+          i++
+        ) {
+          if (!fits(a, i, oldB.x, oldB.y, BODY_GAP.x, BODY_GAP.y)) continue;
+          const spotA = { pose: i, x: oldB.x, y: oldB.y };
+          place(a, spotA);
+          for (
+            let j = 0;
+            j < units[b]!.poses.length && canScore() && canEstimate();
+            j++
+          ) {
+            if (!fits(b, j, oldA.x, oldA.y, BODY_GAP.x, BODY_GAP.y)) continue;
+            const spotB = { pose: j, x: oldA.x, y: oldA.y };
+            place(b, spotB);
+            nodes++;
+            const next = consider(currentCost(), maxCrossings);
+            if (next !== undefined) {
+              chosenA = spotA;
+              chosenB = spotB;
+              crossings = next;
+            }
+            remove(b);
+          }
+          remove(a);
+        }
+        place(a, chosenA);
+        place(b, chosenB);
+      }
+      if (!improved || !crossings) break;
+    }
+    value = currentCost();
+  }
+
+  const placements = stateToPlacements(current);
   const all = [...placements.values()];
   const dx =
     Math.round((ORIGIN - Math.min(...all.map((p) => p.position.x))) / grid) *
@@ -335,5 +471,5 @@ export function solveConventionDraft(
     p.position.x += dx;
     p.position.y += dy;
   }
-  return { placements, nodes, limitHit, cost: currentCost };
+  return { placements, nodes, limitHit, cost: value };
 }

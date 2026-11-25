@@ -8,10 +8,9 @@ import {
 import { freezePinGroups } from "./route.js";
 import { preview } from "./transaction.js";
 import { emptyChoices } from "./layout-choices.js";
-import { classifyNets } from "./net-roles.js";
+import { classifyNets, type NetRoles } from "./net-roles.js";
 import { recognizeStructures } from "./recognize.js";
-import { symmetryTopology } from "./symmetry.js";
-import { stageComponents } from "./stage-symmetry.js";
+import { resolvedSymmetry } from "./symmetry.js";
 import { driverAttachments, parallelAttachments } from "./stages.js";
 import { isMarker } from "./placement-connectivity.js";
 import { floatingPins, missingConnections } from "./routing-audit.js";
@@ -34,7 +33,8 @@ import type {
 export function searchPinContacts(
   document: SchematicDocument,
   resolver: SymbolResolver,
-  options: AutoLayoutOptions,
+  options: AutoLayoutOptions &
+    Pick<NetRoles, "unsplitSymmetry" | "mirrorSymmetry">,
   result: AutoLayoutResult,
   strategy: LayoutStrategy,
   fixedCount: number,
@@ -99,7 +99,11 @@ export function searchPinContacts(
     choices: emptyChoices(),
   };
   const src = committed.document,
-    roles = classifyNets(src, resolver);
+    roles = {
+      ...classifyNets(src, resolver),
+      unsplitSymmetry: options.unsplitSymmetry ?? false,
+      mirrorSymmetry: options.mirrorSymmetry ?? false,
+    };
   const structures = recognizeStructures({ ...src, layoutGroups: [] }, roles);
   const devices = src.instances.filter((i) => !isMarker(i));
   const rigid = [
@@ -121,12 +125,9 @@ export function searchPinContacts(
       ...(g.tailInstanceId ? [g.tailInstanceId] : []),
       ...(g.diodeInstanceId ? [g.diodeInstanceId] : []),
     ]),
-    ...stageComponents(
-      src,
-      resolver,
-      roles,
-      symmetryTopology(src, resolver, roles).components,
-    ).map((c) => [...c.pairs.flat(), ...c.axis]),
+    ...resolvedSymmetry(src, resolver, roles, options.partition).components.map(
+      (c) => [...c.pairs.flat(), ...c.axis],
+    ),
   ];
   let budget = 4;
   while (budget > 0 && !stopped()) {
