@@ -179,6 +179,13 @@ it.each([false, true])(
     expect(plan.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
     const result = preview(doc, resolver, plan.edits);
     if (!result.ok) throw Error("layout transaction must replay");
+    const placedIds = result.document.instances
+      .filter((instance) => instance.placement)
+      .map((instance) => instance.id);
+    expect(placedIds).toEqual(
+      expect.arrayContaining(doc.instances.map((instance) => instance.id)),
+    );
+    expect(result.document.routes.length).toBeGreaterThan(0);
     expect(equivalentTerminals(doc, result.document, resolver)).toBe(true);
     expect(auditRouting(result.document, resolver).unsafeProblems).toEqual([]);
   },
