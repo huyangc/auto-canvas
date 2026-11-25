@@ -164,6 +164,7 @@ import {
 } from "./symmetry.js";
 import { searchDeviceRelocations } from "./device-relocation-search.js";
 import { straightenPinJogs } from "./pin-jogs.js";
+import { polishCrossings, repairBrokenStacks } from "./crossing-polish.js";
 import { searchRailSeats } from "./rail-seat-search.js";
 import { repairStubLabels } from "./stub-seat.js";
 import { searchPortSeats } from "./port-seat-search.js";
@@ -2457,7 +2458,10 @@ function planAutoLayoutMeasured(
               },
             });
         }
-        return finishPlacement(followed, railContacts);
+        const trial = finishPlacement(followed, railContacts);
+        // A symmetry rejection returns the pre-finishing run. Use the same
+        // decline sentinel as the feedback-band guard for finished trials.
+        return trial === initial ? gapIncumbent : trial;
       };
       const gapClosed = timePhase("gaps", () =>
         searchDeviceRelocations(
@@ -2469,10 +2473,29 @@ function planAutoLayoutMeasured(
           { phase: "gaps", budget: relocationBudget },
         ),
       );
-      // R167 straightens pin jogs on the gap-closed incumbent, before R152.
+      const crossingPolished = timePhase("crossingPolish", () =>
+        polishCrossings(
+          gapClosed,
+          resolver,
+          fixed,
+          gapReplan,
+          stopped,
+          gapIncumbent,
+        ),
+      );
+      const stackRepaired = timePhase("stackRepair", () =>
+        repairBrokenStacks(
+          crossingPolished,
+          resolver,
+          fixed,
+          gapReplan,
+          stopped,
+          gapIncumbent,
+        ),
+      );
       const closed = timePhase("pinJogs", () =>
         straightenPinJogs(
-          gapClosed,
+          stackRepaired,
           resolver,
           fixed,
           gapReplan,

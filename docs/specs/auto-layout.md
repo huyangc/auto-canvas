@@ -646,7 +646,8 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   Each finalist retains the existing finishing budgets and order: R72 repair,
   R96 rip-up, R44 routing comparison, R97 compaction, cross-coupled routing,
   facing, crossing reroutes and contacts, R147 relocation, R146 ports, R148
-  rails, R149 gaps, R167 pin jogs, branch columns and stub-label repair, label/drafting
+  rails, R149 gaps, finished crossing polish and stack repair, R167 pin jogs,
+  branch columns and stub-label repair, label/drafting
   finishing, and finally R155 local rails. Quality modes retain their existing
   eligibility rules for each pass. Share per-call routing and finished-seat
   caches, but copy mutable finalist results and reset per-finalist budgets.
@@ -706,8 +707,9 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   eight through 40 instances. These are candidate budgets, not time limits.
   R146–R149 retain their finishing-trial caps through 30 instances. For 31–40
   instances scale each cap `b` to `floor(b * (30 / n)^3)`: R146 uses `b=12`,
-  R147/R149 share `b=10`, R148's marker-seat search uses `b=8`, and R167 uses
-  its own `b=8`.
+  R147/R149 share `b=10`, R148's marker-seat search uses `b=8`, finished crossing
+  polish and stack repair use separate caps of `b=10` and `b=8`, and R167 uses
+  its own `b=12`.
   For example, 40 instances permit ten annealer evaluations, four shared
   relocation/gap trials, five port trials and three marker-seat trials. Rail
   rerouting retains its separate cap. Explicit `search` overrides only the
@@ -1095,9 +1097,36 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   are unchanged. Evaluation reports the stacks present and broken as
   `stackColumns` (report-only).
 
-- **R167 — Straighten pin jogs (T137).** In the planning that runs R149 (default
-  mode, a nonzero search budget, at most 40 instances), every finalist chain
-  runs one pass right after R149's gap visits and before R152.
+- **Finished crossing polish and stack repair (T183).** After R149's gap
+  visits and before R167, use the same finished replan for two bounded passes.
+  Crossing polish runs only when the finished drawing has a proper crossing.
+  It considers the rigid units attached to the crossing Base Nets. It mirrors
+  or turns eligible single devices around their body centres and exchanges the
+  centres of same-size units of up to four devices, carrying their exclusive
+  markers. Trials stay on the grid, avoid overlapping bodies, and preserve the
+  anchor when nothing is locked. Individual turns preserve vertical rail exits
+  and exclude mirrored pairs and poses that violate R164 or R169. The R54
+  estimator orders trials by estimated crossings, then wire length and a
+  deterministic placement key. A finished trial must reduce crossings, or
+  keep crossings equal while reducing both bends and the calibrated run
+  comparison. Up to two greedy passes share the ten-trial budget scaled under
+  R66.
+
+  Finished stack repair runs only if an R166 stack is broken. It tries moving
+  either unlocked rigid unit, with its exclusive markers, to align the
+  conducting pin to the other unit's pin. A single two-pin non-transistor
+  device may turn so the pins face one another. When the pins are on the wrong
+  side, it uses the smallest clear gap of one to three grid steps on the
+  facing side. Existing collinear, opposing pins in direct contact do not
+  need a gap. A finished repair must reduce the broken-stack count without
+  adding crossings, bends, label overlaps or label clearance findings. It
+  may add up to 60 units of wire and has an eight-trial budget scaled under
+  R66. Both passes preserve physical completeness, rigid units, held stacks,
+  routing guards, label owner-distance counts and netlist symmetry.
+
+- **R167 — Straighten pin jogs (T137, T183).** In the planning that runs R149
+  (default mode, a nonzero search budget, at most 40 instances), every
+  finalist chain runs one pass after finished stack repair and before R152.
   A **pin jog** is judged on the drawing's own routed wires. Its subject pin is
   a MOS gate or BJT base on a non-rail Net that reaches a non-bulk pin of
   another instance, or either pin of a two-pin non-transistor part. From the
@@ -1114,8 +1143,13 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   step. A unit with a fixed or locked member is skipped, and so is one that
   would carry a fixed or locked marker (leaving the marker behind would only
   make a new jog at it); an off-grid step is skipped, and so is a trial in
-  which a moved body would overlap another body (no clearance is required). Each unit and step is tried once. When nothing is
-  fixed or locked the whole placement keeps the incumbent's anchor, as in R147.
+  which a moved body would overlap another body (no clearance is required).
+  If the subject move is skipped or rejected, try the opposite step on a
+  distinct unlocked peer unit at the other end of the wire. At a junction,
+  the peer must be the unique non-marker terminal on a straight adjacent
+  route of the same Net. Each unit and step is tried once. When nothing is
+  fixed or locked the whole placement keeps the incumbent's anchor, as in
+  R147.
   Every trial is finished through R149's replan, and a trial that replan
   declines (it hands back an earlier run) is rejected. A finished trial is
   accepted only if physical completeness is not worse, no rigid unit is split,
@@ -1129,10 +1163,9 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   height by at most 20 each. It must also
   make progress: fewer pin jogs, fewer visible corners, or a strictly lower
   calibrated score. After an accepted move the jogs are detected again. The
-  pass has its own budget of eight finished trials, scaled under R66 (three at
-  40 instances); it is separate from R147/R149's. The score and its weights do
-  not change. A document with no pin jog in any finalist chain plans as
-  before.
+  pass has its own budget of 12 finished trials, scaled under R66 (five at
+  40 instances). The score and its weights stay the same. Without any pin
+  jogs, R167 returns its input directly.
 
   The choices are empirical. Counts are on main 347082f with R167: moves
   accepted in all finalist chains of the 79 corpus drawing cases whose plan
