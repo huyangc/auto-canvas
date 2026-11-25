@@ -174,6 +174,18 @@ describe("R167 pin jogs", () => {
     expect(pinJogs(result.final!, resolver)).toEqual([]);
   });
 
+  it("moves the opposite endpoint's unit when the jog's resistor is fixed", () => {
+    const fixed = new Set(["b"]);
+    const { initial, replan } = start(twoPin(), fixed);
+    expect(pinJogs(initial.final!, resolver)).toMatchObject([
+      { instanceId: "b", step: { x: -20, y: 0 } },
+    ]);
+    const result = straightenPinJogs(initial, resolver, fixed, replan);
+    expect(position(result.final!, "a")).toEqual({ x: 20, y: 0 });
+    expect(position(result.final!, "b")).toEqual({ x: 20, y: 120 });
+    expect(pinJogs(result.final!, resolver)).toEqual([]);
+  });
+
   it("keeps the drawing's anchor when nothing is fixed", () => {
     const fixed = new Set<string>();
     const { initial, replan } = start(twoPin(), fixed);

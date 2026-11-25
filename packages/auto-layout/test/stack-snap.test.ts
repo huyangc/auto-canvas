@@ -4,6 +4,7 @@ import type { SchematicDocument } from "@icm/model";
 import { InMemorySymbolResolver, builtInSymbols } from "@icm/symbols";
 import { planAutoLayout } from "../src/index.js";
 import { planLayoutOnce } from "../src/auto-layout.js";
+import * as crossingPolish from "../src/crossing-polish.js";
 import { emptyChoices, emptyOverrides } from "../src/layout-choices.js";
 import { classifyNets } from "../src/net-roles.js";
 import * as place from "../src/place.js";
@@ -329,32 +330,40 @@ describe("R166 candidates", () => {
       },
     );
     const options = { search: { seed: 1, evaluations: 8 } };
-    const off = vi.spyOn(snap, "stackPairs").mockReturnValue([]);
-    let without: string;
+    // Isolate draft selection from finished-stage repair, which also uses stackPairs.
+    const repair = vi
+      .spyOn(crossingPolish, "repairBrokenStacks")
+      .mockImplementation((initial) => initial);
     try {
-      without = JSON.stringify(planAutoLayout(d, resolver, options));
-    } finally {
-      off.mockRestore();
-    }
-    const placed = vi.spyOn(place, "placeDocument");
-    const reroute = vi.spyOn(portfolio, "reroutePortfolio");
-    try {
-      const plan = planAutoLayout(d, resolver, options);
-      // The candidate was built, yet the output is main's.
-      expect(
-        placed.mock.calls.some((call) => call[7] === "layered+stack"),
-      ).toBe(true);
-      expect(refinementMetrics(plan)?.strategy).not.toMatch(/\+stack$/);
-      expect(JSON.stringify(plan)).toBe(without);
-      // Neither the search nor the crossing reroutes saw a candidate's run.
-      expect(reroute).toHaveBeenCalled();
-      for (const call of reroute.mock.calls)
+      const off = vi.spyOn(snap, "stackPairs").mockReturnValue([]);
+      let without: string;
+      try {
+        without = JSON.stringify(planAutoLayout(d, resolver, options));
+      } finally {
+        off.mockRestore();
+      }
+      const placed = vi.spyOn(place, "placeDocument");
+      const reroute = vi.spyOn(portfolio, "reroutePortfolio");
+      try {
+        const plan = planAutoLayout(d, resolver, options);
+        // The candidate was built, yet the output is main's.
         expect(
-          [...call[3]].filter((run) => snap.isStackStrategy(run.strategy)),
-        ).toEqual([]);
+          placed.mock.calls.some((call) => call[7] === "layered+stack"),
+        ).toBe(true);
+        expect(refinementMetrics(plan)?.strategy).not.toMatch(/\+stack$/);
+        expect(JSON.stringify(plan)).toBe(without);
+        // Neither the search nor the crossing reroutes saw a candidate's run.
+        expect(reroute).toHaveBeenCalled();
+        for (const call of reroute.mock.calls)
+          expect(
+            [...call[3]].filter((run) => snap.isStackStrategy(run.strategy)),
+          ).toEqual([]);
+      } finally {
+        reroute.mockRestore();
+        placed.mockRestore();
+      }
     } finally {
-      reroute.mockRestore();
-      placed.mockRestore();
+      repair.mockRestore();
     }
   }, 30_000);
 

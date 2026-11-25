@@ -1,5 +1,10 @@
 import { resolveRouteGeometry, visibleInstanceBounds } from "@icm/derived";
-import { routeEndpoints, type Point, type SchematicDocument } from "@icm/model";
+import {
+  routeEndpoints,
+  type Point,
+  type RouteEndpoint,
+  type SchematicDocument,
+} from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import {
   relocationUnits,
@@ -20,7 +25,7 @@ import type { Placement } from "./types.js";
 /** R167: the largest perpendicular step a pin jog may have (two grid steps). */
 const PIN_JOG_STEP = 20;
 /** R167: finished trials per pass, scaled by instance count under R66. */
-const PASS_TRIALS = 8;
+const PASS_TRIALS = 12;
 /** R167: transistors whose cross-axis coordinates differ by at most this are
  * level (the evaluation's stack-column tolerance). */
 const LEVEL_TOLERANCE = 2;
@@ -303,7 +308,7 @@ function measure(document: SchematicDocument, resolver: SymbolResolver) {
 }
 
 /** One-pin markers every routed wire of which ends on the unit. */
-function carriedMarkers(
+export function carriedMarkers(
   document: SchematicDocument,
   unit: ReadonlySet<string>,
 ): string[] {
@@ -327,6 +332,49 @@ function carriedMarkers(
       );
     })
     .map((marker) => marker.id);
+}
+
+function jogPeerDevice(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  jog: PinJog,
+): string | undefined {
+  const route = document.routes.find((r) => r.id === jog.routeId);
+  if (!route) return undefined;
+  const [start, end] = routeEndpoints(route);
+  const opposite =
+    start.kind === "terminal" &&
+    start.instanceId === jog.instanceId &&
+    start.pinName === jog.pinName
+      ? end
+      : start;
+  const peer = (endpoint: RouteEndpoint) => {
+    if (endpoint.kind !== "terminal" || endpoint.instanceId === jog.instanceId)
+      return undefined;
+    const instance = document.instances.find(
+      (i) => i.id === endpoint.instanceId,
+    );
+    return instance && !isMarker(instance) ? instance.id : undefined;
+  };
+  if (opposite.kind === "terminal") return peer(opposite);
+
+  const peers = new Map<string, string>();
+  for (const adjacent of document.routes) {
+    if (adjacent.id === route.id || adjacent.netId !== route.netId) continue;
+    const ends = routeEndpoints(adjacent);
+    const at = ends.findIndex(
+      (e) => e.kind === "junction" && e.junctionId === opposite.junctionId,
+    );
+    if (at === -1) continue;
+    const endpoint = ends[1 - at]!;
+    if (endpoint.kind !== "terminal") continue;
+    const id = peer(endpoint);
+    const line =
+      id && resolveRouteGeometry(document, resolver, adjacent)?.centerline;
+    if (id && line && corners(line).length === 2)
+      peers.set(pinKey(id, endpoint.pinName), id);
+  }
+  return peers.size === 1 ? peers.values().next().value : undefined;
 }
 
 /** The unit (and its carried markers) translated by `step`, or undefined when
@@ -384,7 +432,8 @@ function translatedUnit(
 
 /**
  * R167: after R149, try to straighten each pin jog of the finished incumbent
- * by translating the jogging part's rigid unit by exactly the jog's step.
+ * by translating the jogging part's rigid unit by the jog's step or its peer
+ * unit by the reverse step when the first move cannot be kept.
  * Each trial is finished through `replan` and kept only when nothing listed
  * gets worse and the drawing makes progress. `declined` is the run `replan`
  * returns for a trial it refuses to finish.
@@ -430,13 +479,22 @@ export function straightenPinJogs(
         compareIds(a.pinName, b.pinName),
     );
     let proposal: Map<string, Placement> | undefined;
+    const propose = (unit: readonly string[] | undefined, step: Point) => {
+      if (!unit || unit.some((id) => locked.has(id))) return undefined;
+      const key = JSON.stringify([unit, step]);
+      if (tried.has(key)) return undefined;
+      tried.add(key);
+      return translatedUnit(document, resolver, unit, step, locked);
+    };
     for (const jog of jogs) {
       const unit = units.find((ids) => ids.includes(jog.instanceId));
-      if (!unit || unit.some((id) => locked.has(id))) continue;
-      const key = JSON.stringify([unit, jog.step]);
-      if (tried.has(key)) continue;
-      tried.add(key);
-      proposal = translatedUnit(document, resolver, unit, jog.step, locked);
+      proposal = propose(unit, jog.step);
+      if (!proposal) {
+        const peerId = jogPeerDevice(document, resolver, jog);
+        const peerUnit = peerId && units.find((ids) => ids.includes(peerId));
+        if (peerUnit && peerUnit !== unit)
+          proposal = propose(peerUnit, { x: -jog.step.x, y: -jog.step.y });
+      }
       if (proposal) break;
     }
     if (!proposal) break;
