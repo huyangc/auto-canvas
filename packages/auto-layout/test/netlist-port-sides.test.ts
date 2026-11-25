@@ -11,7 +11,7 @@ import {
 import { expect, it, vi } from "vitest";
 import { connectionsIntact, planLayoutOnce } from "../src/auto-layout.js";
 import { rerouteMovedPorts } from "../src/local-reroute.js";
-import { placement } from "../src/geometry.js";
+import { enclosingBox, placement } from "../src/geometry.js";
 import { emptyOverrides } from "../src/layout-choices.js";
 import { selectNetlistPortSides } from "../src/netlist-port-sides.js";
 import { auditRouting } from "../src/routing-audit.js";
@@ -126,6 +126,63 @@ it.each(["reflected plan only", "rerouted mirrors too"] as const)(
     ).toBe(plan.candidate);
   },
 );
+
+it("places both ports beyond the device bounds after a partial improvement", () => {
+  const { d, route, seats } = reversed("inverter");
+  seats.set("a", placement(-20, 20, "horizontal"));
+  seats.set("b", placement(-80, 20));
+  const plan = route(seats)!;
+  const result = selectNetlistPortSides(d, resolver, plan, route, () => false);
+  const replay = preview(d, resolver, result.edits);
+  if (!replay.ok) throw Error("expected a valid port placement");
+  const drawing = replay.document;
+  const box = enclosingBox(
+    {
+      ...drawing,
+      instances: drawing.instances.filter((i) => i.symbolId !== "port"),
+    },
+    resolver,
+  );
+  const x = (id: string) =>
+    drawing.instances.find((i) => i.id === id)!.placement!.position.x;
+  expect(x("a")).toBeLessThan(box.x);
+  expect(x("b")).toBeGreaterThan(box.x + box.width);
+});
+
+it("passes only changed placements to the local router for an edge-column batch", () => {
+  const { d, route, seats, plan: initial } = reversed("inverter", 22);
+  const box = enclosingBox(
+    {
+      ...initial.final,
+      instances: initial.final.instances.filter((i) => i.symbolId !== "port"),
+    },
+    resolver,
+  );
+  const grid = d.presentation.grid;
+  seats.set(
+    "b",
+    placement(
+      grid * (Math.ceil((box.x + box.width) / grid) + 1),
+      0,
+      "horizontal",
+    ),
+  );
+  seats.set("a", placement(180, 50, "horizontal"));
+  const plan = route(seats)!;
+  const batches: string[][] = [];
+  selectNetlistPortSides(
+    d,
+    resolver,
+    plan,
+    () => undefined,
+    () => false,
+    (_base, moves) => {
+      batches.push([...moves.keys()]);
+      return undefined;
+    },
+  );
+  expect(batches[0]).toEqual(["a"]);
+});
 
 it("returns the incumbent when the search is stopped", () => {
   const { d, plan } = reversed();
