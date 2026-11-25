@@ -284,14 +284,27 @@ export function selectNetlistPortSides(
   };
   // A local trial can touch several signal nets. Its separate allowance
   // keeps exhausted full-route budgets from turning into unbounded local work.
+  const localResults = new WeakMap<
+    SchematicDocument,
+    Map<string, Trial | undefined>
+  >();
   let localTrials = 0;
   const localRoute =
     routePort &&
     ((base: Trial, moves: Seats) => {
+      const key = seatKey(source, moves);
+      let cached = localResults.get(base.final);
+      if (cached?.has(key)) return cached.get(key);
       if (localTrials >= limit) return;
-      return routePort(base, moves, withinWireBudget, () => {
+      if (!cached) {
+        cached = new Map();
+        localResults.set(base.final, cached);
+      }
+      const trial = routePort(base, moves, withinWireBudget, () => {
         localTrials++;
       });
+      cached.set(key, trial);
+      return trial;
     });
   const run = (seed: Trial, pairs: typeof groups) =>
     searchPortLayouts(
@@ -304,6 +317,7 @@ export function selectNetlistPortSides(
       trace,
       routeOnce,
       stopped,
+      placementProblem,
       localRoute,
     );
   const best = run(initial, groups);
@@ -349,6 +363,7 @@ function searchPortLayouts(
   trace: ReturnType<typeof differentialBranches>,
   route: RouteSeats,
   stopped: () => boolean,
+  placementProblem: (placed: SchematicDocument) => string | undefined,
   routePort?: (base: Trial, moves: Seats) => Trial | undefined,
 ): Trial {
   const bounded = source.instances.length > 24;
@@ -491,25 +506,16 @@ function searchPortLayouts(
     };
     const routeCandidate = (seats: Seats, geo: Geometry, mirrored: boolean) => {
       if (!improves(portLevels(geo, seats), previous)) return;
-      if (
-        mirrored &&
-        reflectionWorsensDirection(
-          best.final,
-          withPlacements(start.final, seats),
-          resolver,
-        )
-      )
+      const key = seatKey(source, seats);
+      if (seen.has(key)) return;
+      const placed = withPlacements(start.final, seats);
+      if (mirrored && reflectionWorsensDirection(best.final, placed, resolver))
         return;
       // Final facing keeps the pin fixed, but can change its exit and wire
       // departures. Only the device axis and the terminal coordinates are
       // invariant for these port-only moves.
       if (groups.length && geo === current) {
-        const geometry = portMirrorGeometry(
-          withPlacements(start.final, seats),
-          resolver,
-          groups,
-          true,
-        );
+        const geometry = portMirrorGeometry(placed, resolver, groups, true);
         if (
           geometry.some(
             (g, i) =>
@@ -520,9 +526,8 @@ function searchPortLayouts(
         )
           return;
       }
-      const key = seatKey(source, seats);
-      if (seen.has(key)) return;
       seen.add(key);
+      if (placementProblem(placed)) return;
       if (routePort && geo === current && bounded) {
         const moves: Seats = new Map();
         for (const port of geo.ports) {

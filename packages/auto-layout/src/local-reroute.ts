@@ -4,7 +4,7 @@ import {
   draftingTranslation,
   withDraftingTranslation,
 } from "./drafting-search.js";
-import { resolveRouteGeometry, visibleInstanceBounds } from "@icm/derived";
+import { resolveRouteGeometry } from "@icm/derived";
 import {
   documentObjectIds,
   MAX_SCHEMATIC_EDITS_PER_TRANSACTION,
@@ -14,7 +14,7 @@ import {
 import type { Point, SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
 import { readabilityRegressed } from "./readability.js";
-import { pinPoints, withPlacements } from "./geometry.js";
+import { geometryProblem, pinPoints, withPlacements } from "./geometry.js";
 import { classifyNets } from "./net-roles.js";
 import { compareIds } from "./recognize.js";
 import { freezePinGroups } from "./route.js";
@@ -330,6 +330,8 @@ export function rerouteMovedPorts(
   base: { final: SchematicDocument; candidate: AutoLayoutResult },
   moves: ReadonlyMap<string, Placement>,
   onAttempt?: () => void,
+  placementProblem = (placed: SchematicDocument) =>
+    geometryProblem(placed, resolver),
 ) {
   const doc = base.final;
   if (!moves.size) return;
@@ -377,21 +379,7 @@ export function rerouteMovedPorts(
     groups.some((g) => g.contacts.length || g.pins.length < 2)
   )
     return;
-  const boxes = visibleInstanceBounds(withPlacements(doc, moves), resolver);
-  for (const { id, bounds: a } of boxes) {
-    if (
-      moves.has(id) &&
-      boxes.some(
-        ({ id: other, bounds: b }) =>
-          id !== other &&
-          a.x < b.x + b.width &&
-          b.x < a.x + a.width &&
-          a.y < b.y + b.height &&
-          b.y < a.y + a.height,
-      )
-    )
-      return;
-  }
+  if (placementProblem(withPlacements(doc, moves))) return;
   const routes = doc.routes.filter((r) => nets.has(r.netId)),
     junctions = doc.junctions.filter((j) => nets.has(j.netId));
   const protectedIds = protectedObjects(doc);
