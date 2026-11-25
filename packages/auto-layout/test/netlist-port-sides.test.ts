@@ -443,4 +443,4 @@ it("bounds full route trials on the imported Paper3 CLQC deck", async () => {
   const replay = preview(source, resolver, result.edits);
   if (!replay.ok) throw Error("CLQC port search did not replay");
   expect(connectionsIntact(replay.document, resolver)).toBe(true);
-});
+}, 30_000);

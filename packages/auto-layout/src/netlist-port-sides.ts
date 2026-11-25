@@ -552,7 +552,7 @@ function searchPortLayouts(
       const geo = frame && portGeometry(frame, resolver, context);
       if (geo && improves(portLevels(geo, geo.seats), previous)) {
         consider(reflectNetlistPlan(source, resolver, start, axis), true);
-        if (finishPass()) continue;
+        if (bounded && finishPass()) continue;
       }
     }
     const grid = source.presentation.grid,
@@ -595,7 +595,7 @@ function searchPortLayouts(
           );
         }
     }
-    if (finishPass()) continue;
+    if (bounded && finishPass()) continue;
     const modes = [
       "existing",
       "mirror",
