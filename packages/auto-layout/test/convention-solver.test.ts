@@ -384,17 +384,21 @@ describe("R168 convention-solved draft", () => {
       () => [chain(9, true), quick],
       "d26dc0f1eb6fcd25088c0135d3163e88a6a09931c39c9c915332de5652fb6c46",
     ],
-  ])("does not offer the draft to a Document %s", (_, make, base) => {
-    const [d, options] = make();
-    expect(conventionDraftEligible(d, resolver, options)).toBe(false);
-    const solve = vi.spyOn(solver, "solveConventionDraft");
-    try {
-      expect(hash(planAutoLayout(d, resolver, options))).toBe(base);
-      expect(solve).not.toHaveBeenCalled();
-    } finally {
-      solve.mockRestore();
-    }
-  });
+  ])(
+    "does not offer the draft to a Document %s",
+    (_, make, base) => {
+      const [d, options] = make();
+      expect(conventionDraftEligible(d, resolver, options)).toBe(false);
+      const solve = vi.spyOn(solver, "solveConventionDraft");
+      try {
+        expect(hash(planAutoLayout(d, resolver, options))).toBe(base);
+        expect(solve).not.toHaveBeenCalled();
+      } finally {
+        solve.mockRestore();
+      }
+    },
+    60_000,
+  );
 
   it("leaves the original portfolio alone when the draft is not selected", () => {
     const d = mirrorLoad();

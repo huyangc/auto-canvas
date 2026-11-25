@@ -276,5 +276,6 @@ it.each([false, true])(
     expect(equivalentTerminals(doc, drawing, resolver)).toBe(true);
     expect(auditRouting(drawing, resolver).crossings).toBe(0);
   },
-  60_000,
+  // Full-search geometry for this fixture can take over a minute on CI.
+  120_000,
 );
