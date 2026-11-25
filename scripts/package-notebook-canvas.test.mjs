@@ -1,4 +1,11 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gunzipSync } from "node:zlib";
@@ -191,6 +198,106 @@ describe("the package version", () => {
       "0.9.2-bd7ad74-dirty",
     );
   });
+});
+
+describe("the packaging interpreter", () => {
+  const script = new URL("./package-notebook-canvas.mjs", import.meta.url).href;
+  const temporary = [];
+  afterEach(() => {
+    for (const directory of temporary.splice(0))
+      rmSync(directory, { recursive: true, force: true });
+  });
+
+  function fixture() {
+    const directory = realpathSync(mkdtempSync(join(tmpdir(), "t180-python-")));
+    temporary.push(directory);
+    return directory;
+  }
+
+  function invoke(cwd, code, ...args) {
+    const result = spawnSync(
+      process.execPath,
+      ["--input-type=module", "-e", code, "--", ...args],
+      { cwd, encoding: "utf8" },
+    );
+    if (result.error) throw result.error;
+    return result;
+  }
+
+  it("resolves a relative path from the invocation directory and keeps PATH names", () => {
+    const directory = fixture();
+    const result = invoke(
+      directory,
+      `import { parseArgs } from ${JSON.stringify(script)};
+for (const python of process.argv.slice(1)) {
+  console.log(parseArgs(["--python", python]).python);
+}`,
+      "venv/bin/python",
+      "python3.13",
+    );
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout.trim().split("\n")).toEqual([
+      join(directory, "venv/bin/python"),
+      "python3.13",
+    ]);
+  });
+
+  it.each([
+    ["Python 3.12", 12, "70.1.0", "", /Python 3\.13 or newer/u],
+    ["missing pip", 13, "70.1.0", "pip", /cannot import pip/u],
+    [
+      "missing setuptools",
+      13,
+      "70.1.0",
+      "setuptools",
+      /cannot import setuptools/u,
+    ],
+    ["old setuptools", 13, "67.0.0", "", /setuptools 67\.0\.0.*68 or newer/u],
+    ["missing wheel", 13, "70.0.0", "wheel", /cannot import wheel/u],
+    ["old backend with wheel", 13, "68.0.0", "", null],
+    ["new backend without wheel", 13, "70.1.0", "wheel", null],
+  ])(
+    "checks the minimum requirements with %s",
+    (_name, minor, setuptools, missing, error) => {
+      const directory = fixture();
+      const interpreter = join(directory, "python");
+      // Execute the real probe with a controlled interpreter version and modules.
+      writeFileSync(
+        interpreter,
+        `#!/usr/bin/env python3
+import importlib, sys
+from types import SimpleNamespace
+
+sys.version_info = (3, ${minor})
+sys.version = "3.${minor}.0"
+class Version(tuple):
+    def __new__(cls, value):
+        return super().__new__(cls, map(int, value.split(".")))
+    def __str__(self):
+        return ".".join(map(str, self))
+
+sys.modules["pip._vendor.packaging.version"] = SimpleNamespace(Version=Version)
+def import_module(name):
+    if name == ${JSON.stringify(missing)}:
+        raise ImportError(name)
+    return SimpleNamespace(__version__=${JSON.stringify(setuptools)})
+
+importlib.import_module = import_module
+assert sys.argv[1] == "-c"
+exec(sys.argv[2])
+`,
+        { mode: 0o755 },
+      );
+      const result = invoke(
+        directory,
+        `import { checkPython } from ${JSON.stringify(script)};
+checkPython(process.argv[1]);`,
+        interpreter,
+      );
+      expect(result.status, result.stderr).toBe(error ? 2 : 0);
+      if (error) expect(result.stderr).toMatch(error);
+    },
+  );
 });
 
 /** The headers of an uncompressed ustar archive, as written by tarGz. */

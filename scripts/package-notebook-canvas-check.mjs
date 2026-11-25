@@ -36,6 +36,11 @@ import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { lsofLines } from "./lib/notebook-integration/sandbox.mjs";
+import {
+  browserSessions,
+  guardNetwork,
+} from "./lib/notebook-integration/stage-l.mjs";
 // The specifiers the server may try and miss, as in a checkout.
 import { OPTIONAL_REQUIRES } from "./lib/server-bundle.mjs";
 
@@ -43,9 +48,12 @@ const root = resolve(import.meta.dirname, "..");
 const PREFIX = "package-notebook-canvas-check";
 const RESERVED_PORTS = new Set([3000, 8000, 4310]);
 const READY_TIMEOUT_MS = 30_000;
+const BROWSER_TIMEOUT_MS = 30_000;
 const STOP_TIMEOUT_MS = 15_000;
+const KILL_TIMEOUT_MS = 5000;
 const SITE_PATH = "/usr/bin:/bin:/usr/sbin:/sbin";
 const MOUNT = "/@notebook/canvas";
+const EDITOR_INDEX = "apps/editor/dist-notebook/index.html";
 const INTEGRATION = "integrations/silicon-notebook";
 const LAUNCHERS = [`${INTEGRATION}/serve.sh`, `${INTEGRATION}/init-db.sh`];
 const LATEX = String.raw`\frac{1}{\sqrt{LC}} + \mathbb{R} + \mathcal{F}`;
@@ -144,6 +152,19 @@ let database = null;
 let stub = null;
 let closing = null;
 const results = [];
+const browsers = browserSessions({
+  sandbox: {
+    root: work,
+    freePort,
+    makeDir: mkdirSync,
+    label: (path) => relative(work, path),
+  },
+  report: {
+    check: (name, condition, detail) =>
+      check(name, condition, condition ? "" : detail()),
+    note: (message) => console.log(`${PREFIX}: ${message}`),
+  },
+});
 
 function ok(name, detail = "") {
   results.push({ name, ok: true });
@@ -187,13 +208,20 @@ async function stopGroup(pgid) {
     } catch {
       return;
     }
-    while (groupAlive(pgid)) await new Promise((done) => setTimeout(done, 50));
+    const killDeadline = performance.now() + KILL_TIMEOUT_MS;
+    while (groupAlive(pgid) && performance.now() < killDeadline)
+      await new Promise((done) =>
+        setTimeout(done, Math.min(50, killDeadline - performance.now())),
+      );
+    if (groupAlive(pgid))
+      bad(`process group ${pgid} stopped`, "still present 5 s after SIGKILL");
   }
 }
 
 function cleanup(reason, code) {
   closing ??= (async () => {
     const incomplete = [];
+    await browsers.closeOpen(10_000);
     for (const pgid of groups) await stopGroup(pgid);
     if (stub?.listening) await new Promise((done) => stub.close(done));
     if (admin && database) {
@@ -216,7 +244,11 @@ function cleanup(reason, code) {
       process.exit(code || 1);
     }
     if (reason) console.log(`${PREFIX} stopped (${reason})`);
-    process.exit(code);
+    const failed = results.filter((result) => !result.ok);
+    console.log(
+      `${PREFIX}: ${results.length - failed.length} of ${results.length} checks ok${failed.length ? `; failed: ${failed.map((result) => result.name).join("; ")}` : ""}`,
+    );
+    process.exit(code || (failed.length || !results.length ? 1 : 0));
   })();
   return closing;
 }
@@ -242,20 +274,25 @@ function run(command, args, options = {}) {
 /** Unpacks the tarball; returns the package directory. */
 function unpack() {
   const listing = run("/usr/bin/tar", ["-tzf", tarball]);
-  if (listing.status !== 0) throw new Error(`tar -t failed: ${listing.stderr}`);
   const names = listing.stdout.split("\n").filter(Boolean);
   const top = names[0]?.split("/")[0] ?? "";
-  check(
-    "the archive holds one top directory, no absolute or parent paths",
-    /^auto-canvas-notebook-[^/]+$/u.test(top) &&
-      names.every(
-        (name) =>
-          (name === `${top}/` || name.startsWith(`${top}/`)) &&
-          !name.split("/").includes(".."),
-      ),
-    `top directory ${JSON.stringify(top)}`,
-    `${names.length} entries under ${top}/`,
-  );
+  if (
+    !check(
+      "the archive holds one top directory, no absolute or parent paths",
+      listing.status === 0 &&
+        /^auto-canvas-notebook-[^/]+$/u.test(top) &&
+        names.includes(`${top}/`) &&
+        names.every(
+          (name) =>
+            name.startsWith(`${top}/`) && !name.split("/").includes(".."),
+        ),
+      listing.status === 0
+        ? `top directory ${JSON.stringify(top)}`
+        : `tar -t failed: ${listing.stderr.trim()}`,
+      `${names.length} entries under ${top}/`,
+    )
+  )
+    return null;
   const into = join(work, "site");
   mkdirSync(into);
   const extract = run("/usr/bin/tar", ["-xzf", tarball, "-C", into]);
@@ -286,6 +323,7 @@ const FIXED = new Set([
   "apps/server/dist/migrations",
   "apps/editor",
   "apps/editor/dist-notebook",
+  EDITOR_INDEX,
   "integrations",
   INTEGRATION,
   `${INTEGRATION}/serve.sh`,
@@ -307,7 +345,7 @@ function checkLayout(tree) {
   const odd = entries.filter(
     ({ stat }) => !stat.isFile() && !stat.isDirectory(),
   );
-  check(
+  const regular = check(
     "every entry is a regular file or a directory",
     odd.length === 0,
     odd.map(({ path }) => path).join(", "),
@@ -317,35 +355,33 @@ function checkLayout(tree) {
     ({ path }) =>
       !FIXED.has(path) && !PATTERNS.some((pattern) => pattern.test(path)),
   );
-  check(
+  const allowed = check(
     "nothing outside the package layout",
     outside.length === 0,
     outside.map(({ path }) => path).join(", "),
   );
-  const present = new Set(entries.map(({ path }) => path));
-  const missing = [...FIXED].filter((path) => !present.has(path));
+  const present = new Map(entries.map(({ path, stat }) => [path, stat]));
+  const missing = [...FIXED].filter((path) =>
+    path === EDITOR_INDEX ? !present.get(path)?.isFile() : !present.has(path),
+  );
   const wheels = entries.filter(({ path }) => PATTERNS[3].test(path));
-  check(
+  const complete = check(
     "every required file is present, with one wheel",
-    missing.length === 0 &&
-      wheels.length === 1 &&
-      present.has("apps/editor/dist-notebook/index.html"),
+    missing.length === 0 && wheels.length === 1,
     `missing ${missing.join(", ") || "-"}; ${wheels.length} wheels`,
   );
-  const notExecutable = LAUNCHERS.filter(
-    (path) => (lstatSync(join(tree, path)).mode & 0o111) !== 0o111,
-  );
-  check(
+  const notExecutable = entries
+    .filter(
+      ({ path, stat }) =>
+        LAUNCHERS.includes(path) && (stat.mode & 0o111) !== 0o111,
+    )
+    .map(({ path }) => path);
+  const executable = check(
     "the launchers are executable",
     notExecutable.length === 0,
     notExecutable.join(", "),
   );
-  const acceptable =
-    odd.length === 0 &&
-    outside.length === 0 &&
-    missing.length === 0 &&
-    wheels.length === 1 &&
-    notExecutable.length === 0;
+  const acceptable = regular && allowed && complete && executable;
   return { acceptable, wheel: wheels[0]?.path };
 }
 
@@ -549,11 +585,7 @@ async function exerciseServer(base, token, tree) {
   check(
     `GET ${MOUNT}/ is the packaged index.html`,
     index.status === 200 &&
-      html ===
-        readFileSync(
-          join(tree, "apps/editor/dist-notebook/index.html"),
-          "utf8",
-        ),
+      html === readFileSync(join(tree, EDITOR_INDEX), "utf8"),
     `status ${index.status}, ${html.length} characters`,
   );
   await checkEntryAssets(base, html);
@@ -617,6 +649,65 @@ async function exerciseServer(base, token, tree) {
     anonymous.status === 401,
     `status ${anonymous.status}`,
   );
+}
+
+async function checkBrowser(base, port, server, token) {
+  const label = "the packaged editor:";
+  mkdirSync(join(work, "home"));
+  mkdirSync(join(work, "t"));
+  const session = await browsers.open(label, {
+    webPort: port,
+    held: (timeout) => {
+      if (server.exitCode !== null || server.signalCode !== null) return false;
+      const listeners = lsofLines(
+        spawnSync(
+          "lsof",
+          ["-nP", "-a", `-iTCP:${port}`, "-sTCP:LISTEN", "-Fp"],
+          {
+            encoding: "utf8",
+            timeout,
+            killSignal: "SIGKILL",
+          },
+        ),
+        `lsof for port ${port}`,
+        "p",
+      );
+      return (
+        listeners.length > 0 &&
+        listeners.every((pid) => Number(pid) === server.pid)
+      );
+    },
+  });
+  if (!session) return;
+  const name =
+    'the packaged editor mounts in Chrome ([data-testid="schematic-canvas"])';
+  try {
+    await guardNetwork(session, { token });
+    // Mirror silicon-notebook's rewrite while keeping /canvas/ as the page's
+    // public path. Fall through to the existing origin guard and run proxy.
+    await session.context.route(
+      (url) => url.origin === base && url.pathname.startsWith("/canvas/"),
+      (route) => {
+        const url = new URL(route.request().url());
+        url.pathname = `/@notebook${url.pathname}`;
+        return route.fallback({ url: url.href });
+      },
+    );
+    const page = session.context.pages()[0];
+    await page.goto(`${base}/canvas/editor`, {
+      waitUntil: "domcontentloaded",
+      timeout: BROWSER_TIMEOUT_MS,
+    });
+    await page.getByTestId("schematic-canvas").waitFor({
+      state: "visible",
+      timeout: BROWSER_TIMEOUT_MS,
+    });
+    check(name, session.proxy.forwarded > 0, "the proxy forwarded no requests");
+  } catch (error) {
+    bad(name, String(error?.message ?? error).split("\n")[0]);
+  } finally {
+    await browsers.close(session, 10_000, label);
+  }
 }
 
 function checkWheel(tree, wheel) {
@@ -733,14 +824,16 @@ class ExtensionManifest:
 
 async function main() {
   console.log(`${PREFIX}: checking ${relative(root, tarball)}`);
-  const { site, tree } = unpack();
-  const { acceptable, wheel } = checkLayout(tree);
-  if (!acceptable) {
+  const unpacked = unpack();
+  const layout = unpacked && checkLayout(unpacked.tree);
+  if (!layout?.acceptable) {
     console.log(
       `${PREFIX}: the layout is not acceptable; nothing from the package is run`,
     );
     return;
   }
+  const { site, tree } = unpacked;
+  const { wheel } = layout;
 
   const databaseUrl = await createDatabase();
   const notebook = join(work, "notebook");
@@ -820,6 +913,7 @@ async function main() {
   )
     return;
   await exerciseServer(base, token, tree);
+  await checkBrowser(base, port, server, token);
 
   const started = Date.now();
   const exited = once(server, "exit");
@@ -855,8 +949,4 @@ try {
     error instanceof Error ? error.message : String(error),
   );
 }
-const failed = results.filter((result) => !result.ok);
-console.log(
-  `${PREFIX}: ${results.length - failed.length} of ${results.length} checks ok${failed.length ? `; failed: ${failed.map((result) => result.name).join("; ")}` : ""}`,
-);
-await cleanup("", failed.length || !results.length ? 1 : 0);
+await cleanup("", 0);

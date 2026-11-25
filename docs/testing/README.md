@@ -94,6 +94,7 @@ server loaded no module outside the unpacked tree but `node:` builtins (a
 `module.registerHooks` trace), the plugin wheel's offline install and import,
 and that SIGTERM stops the server within 15 s. The database and the temporary
 directories are removed at the end, also after a failure or an interrupt.
+The check also uses system Chrome and `lsof` to verify that the packaged editor mounts in a fresh headless browser whose proxy forwards only to the package server.
 `scripts/package-notebook-canvas.test.mjs` (in `pnpm test:local`) covers the
 packaging's pure helpers without a build.
 

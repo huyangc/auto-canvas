@@ -5,7 +5,7 @@
 // notices. Nothing in it needs a network, a package manager or a checkout;
 // the site runs it with its own Node (AUTO_CANVAS_NODE).
 //
-//   pnpm notebook:package   (AUTO_CANVAS_PACKAGE_PYTHON=<python with setuptools >= 68 and pip>)
+//   pnpm notebook:package   (AUTO_CANVAS_PACKAGE_PYTHON=<Python 3.13+ with pip and setuptools>)
 //   node scripts/package-notebook-canvas.mjs --python <interpreter> [--out <dir>]
 //
 // Run after `pnpm build` and `pnpm build:notebook-editor` (the pnpm script
@@ -50,6 +50,7 @@ const INTEGRATION_FILES = [
   "extensions.external.example.toml",
 ];
 const MIN_SETUPTOOLS = 68;
+const SETUPTOOLS_WITH_WHEEL = "70.1";
 
 /** `<root version>-<short sha>`, plus `-dirty` for a changed working tree. */
 export function packageVersion(rootVersion, shortSha, dirty) {
@@ -164,7 +165,7 @@ function git(...args) {
   return result.stdout.trim();
 }
 
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const options = { python: null, out: "output/notebook-canvas" };
   for (let index = 0; index < argv.length; index += 1) {
     const name = argv[index];
@@ -183,30 +184,48 @@ function parseArgs(argv) {
       2,
       "--python is required (pnpm notebook:package passes AUTO_CANVAS_PACKAGE_PYTHON)",
     );
+  if (options.python.includes("/")) options.python = resolve(options.python);
   return options;
 }
 
-/** The interpreter must have pip and setuptools >= 68; exits 2 otherwise. */
-function checkPython(python) {
+/** Refuses an interpreter that cannot build the plugin wheel offline. */
+export function checkPython(python) {
   const probe = spawnSync(
     python,
     [
       "-c",
-      "import json, pip, setuptools; print(json.dumps(setuptools.__version__))",
+      `import importlib, sys
+
+if sys.version_info < (3, 13):
+    sys.exit("Python 3.13 or newer is required (found " + sys.version.split()[0] + ")")
+
+def require(module):
+    try:
+        return importlib.import_module(module)
+    except Exception:
+        sys.exit("cannot import " + module)
+
+require("pip")
+setuptools = require("setuptools")
+from pip._vendor.packaging.version import Version
+
+version = Version(setuptools.__version__)
+if version < Version("${MIN_SETUPTOOLS}"):
+    sys.exit(f"setuptools {version} is installed; ${MIN_SETUPTOOLS} or newer is required")
+if version < Version("${SETUPTOOLS_WITH_WHEEL}"):
+    require("wheel")
+`,
     ],
     { encoding: "utf8" },
   );
-  if (probe.error || probe.status !== 0)
+  if (probe.status !== 0) {
+    const problem =
+      probe.error?.message || probe.stderr.trim().split("\n").at(-1);
     fail(
       2,
-      `the interpreter ${python} cannot import pip and setuptools (setuptools >= ${MIN_SETUPTOOLS} is needed)`,
+      `the interpreter ${python}: ${problem || `Python preflight exited (${probe.signal ?? probe.status})`}`,
     );
-  const major = Number(JSON.parse(probe.stdout).split(".")[0]);
-  if (!(major >= MIN_SETUPTOOLS))
-    fail(
-      2,
-      `the interpreter ${python} has setuptools ${JSON.parse(probe.stdout)}; ${MIN_SETUPTOOLS} or newer is needed`,
-    );
+  }
 }
 
 /** The plugin tree's setuptools leftovers: build/ and any *.egg-info. */
