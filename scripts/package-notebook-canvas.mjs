@@ -188,13 +188,37 @@ export function parseArgs(argv) {
   return options;
 }
 
-/** Refuses an interpreter that cannot build the plugin wheel offline. */
+/**
+ * The environment the wheel build runs in, and the preflight with it: both
+ * see the same modules (no PYTHONPATH or other caller variables).
+ */
+function wheelBuildEnv() {
+  return {
+    PATH: process.env.PATH ?? "/usr/bin:/bin",
+    ...(process.env.HOME ? { HOME: process.env.HOME } : {}),
+    PIP_CONFIG_FILE: "/dev/null",
+    PIP_NO_INPUT: "1",
+    PYTHONDONTWRITEBYTECODE: "1",
+  };
+}
+
+/** The preflight's last line: proof that the interpreter ran every check. */
+const PREFLIGHT_OK = "auto-canvas-python-preflight-ok";
+
+/**
+ * Refuses an interpreter that cannot build the plugin wheel offline. The
+ * probe runs in the wheel build's environment from an empty directory, and
+ * passes only when it printed PREFLIGHT_OK after every check.
+ */
 export function checkPython(python) {
-  const probe = spawnSync(
-    python,
-    [
-      "-c",
-      `import importlib, sys
+  const scratch = mkdtempSync(join(tmpdir(), "auto-canvas-preflight-"));
+  let probe;
+  try {
+    probe = spawnSync(
+      python,
+      [
+        "-c",
+        `import importlib, sys
 
 if sys.version_info < (3, 13):
     sys.exit("Python 3.13 or newer is required (found " + sys.version.split()[0] + ")")
@@ -214,16 +238,23 @@ if version < Version("${MIN_SETUPTOOLS}"):
     sys.exit(f"setuptools {version} is installed; ${MIN_SETUPTOOLS} or newer is required")
 if version < Version("${SETUPTOOLS_WITH_WHEEL}"):
     require("wheel")
+print("${PREFLIGHT_OK}")
 `,
-    ],
-    { encoding: "utf8" },
-  );
-  if (probe.status !== 0) {
+      ],
+      { encoding: "utf8", cwd: scratch, env: wheelBuildEnv() },
+    );
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+  if (
+    probe.status !== 0 ||
+    probe.stdout.trim().split("\n").at(-1) !== PREFLIGHT_OK
+  ) {
     const problem =
       probe.error?.message || probe.stderr.trim().split("\n").at(-1);
     fail(
       2,
-      `the interpreter ${python}: ${problem || `Python preflight exited (${probe.signal ?? probe.status})`}`,
+      `the interpreter ${python}: ${problem || (probe.status === 0 ? "it did not run the Python preflight" : `Python preflight exited (${probe.signal ?? probe.status})`)}`,
     );
   }
 }
@@ -271,14 +302,7 @@ function buildWheel(python, epoch) {
       {
         cwd: scratch,
         encoding: "utf8",
-        env: {
-          PATH: process.env.PATH ?? "/usr/bin:/bin",
-          ...(process.env.HOME ? { HOME: process.env.HOME } : {}),
-          SOURCE_DATE_EPOCH: String(epoch),
-          PIP_CONFIG_FILE: "/dev/null",
-          PIP_NO_INPUT: "1",
-          PYTHONDONTWRITEBYTECODE: "1",
-        },
+        env: { ...wheelBuildEnv(), SOURCE_DATE_EPOCH: String(epoch) },
       },
     );
     if (result.error || result.status !== 0)

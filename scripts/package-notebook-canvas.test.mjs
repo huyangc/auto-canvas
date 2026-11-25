@@ -298,6 +298,43 @@ checkPython(process.argv[1]);`,
       if (error) expect(result.stderr).toMatch(error);
     },
   );
+
+  it("passes only an interpreter that ran the probe, in the wheel build's environment", () => {
+    const directory = fixture();
+    // Exits 0 without running anything (as /usr/bin/true would).
+    const silent = join(directory, "silent");
+    writeFileSync(silent, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    // Prints the marker only when the caller's PYTHONPATH did not reach it and
+    // it runs outside the invocation directory.
+    const strict = join(directory, "strict");
+    writeFileSync(
+      strict,
+      `#!/bin/sh\n[ -z "\${PYTHONPATH-}" ] || exit 0\n[ "$(pwd -P)" != ${JSON.stringify(directory)} ] || exit 0\necho auto-canvas-python-preflight-ok\n`,
+      { mode: 0o755 },
+    );
+    const run = (interpreter) =>
+      spawnSync(
+        process.execPath,
+        [
+          "--input-type=module",
+          "-e",
+          `import { checkPython } from ${JSON.stringify(script)};
+checkPython(process.argv[1]);`,
+          "--",
+          interpreter,
+        ],
+        {
+          cwd: directory,
+          encoding: "utf8",
+          env: { ...process.env, PYTHONPATH: directory },
+        },
+      );
+    const refused = run(silent);
+    expect(refused.status, refused.stderr).toBe(2);
+    expect(refused.stderr).toMatch(/did not run the Python preflight/u);
+    const passed = run(strict);
+    expect(passed.status, passed.stderr).toBe(0);
+  });
 });
 
 /** The headers of an uncompressed ustar archive, as written by tarGz. */

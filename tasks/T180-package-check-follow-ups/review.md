@@ -29,3 +29,28 @@ control: index.html missing                                  → 1 (layout refus
 package-notebook-canvas.mjs --python python3.13              → 2 ("cannot import setuptools")
 leftover auto_canvas_it_pkg_* databases                      → 0
 ```
+
+## Round 2 — accepted (reviewer's fix)
+
+Codex PR review round 1 on PR 146 (head `26bf456`, gpt-6.2-sol): no blocking
+finding; two P2s on the preflight, fixed by the reviewer (a few lines):
+
+1. The probe ran in the caller's environment and directory, so a `wheel`
+   reachable only through the caller's `PYTHONPATH` could pass it while the
+   build (which drops `PYTHONPATH`) failed. The probe now runs in the wheel
+   build's environment (`wheelBuildEnv`, shared with `buildWheel`) from an
+   empty temporary directory.
+2. Exit status 0 alone passed it (`--python /usr/bin/true`), and the output
+   was then removed before the build failed. The probe prints a marker after
+   every check and passes only with it.
+
+A unit test covers both (an interpreter that exits 0 silently is refused;
+one that prints the marker only without `PYTHONPATH` and outside the
+invocation directory passes); it fails on the previous code.
+
+```text
+vitest run scripts/package-notebook-canvas.test.mjs          → 0 (18 passed; the new test fails on 26bf456)
+--python /usr/bin/true                                       → 2 ("it did not run the Python preflight")
+pnpm typecheck / lint / format:check / docs:check / deadcode → 0
+pnpm notebook:package + package-notebook-canvas-check        → 0 (24 of 24)
+```
