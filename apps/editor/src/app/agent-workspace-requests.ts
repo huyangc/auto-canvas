@@ -18,7 +18,10 @@ import {
 } from "../document/cloud-auto-save";
 import { captureProjectSaveSnapshot } from "../document/project-save-coordinator";
 import type { UseRecoveryCoordinatorResult } from "../document/recovery-coordinator";
-import type { useProjectFileLifecycle } from "../document/use-project-file-lifecycle";
+import type {
+  ProjectFileSession,
+  useProjectFileLifecycle,
+} from "../document/use-project-file-lifecycle";
 import {
   applyProjectCopyPlacement,
   captureProjectCopy,
@@ -212,6 +215,27 @@ export function createAgentWorkspaceHandler({
                   : null,
             );
             const candidate = snapshot.project;
+            const writeSequence =
+              (target.session.file.cloudWriteSequence ?? 0) + 1;
+            target.session.file.cloudWriteSequence = writeSequence;
+            const ownsWrite = (file: ProjectFileSession) =>
+              file.cloudWriteSequence === writeSequence &&
+              sameBinding(file.cloudBinding, startBinding);
+            const superseded = (file: ProjectFileSession) => {
+              if (
+                file.cloudWriteSequence === writeSequence &&
+                file.persistenceState === "saving"
+              ) {
+                file.persistenceState = "dirty";
+                if (targetWorkspaceId === projectTabs.currentId())
+                  restoreFileSession(file);
+                projectTabs.changed();
+              }
+              return fail(
+                "CLOUD_SAVE_SUPERSEDED",
+                "A newer Cloud save or binding superseded this save",
+              );
+            };
             target.session.file.persistenceState = "saving";
             projectTabs.changed();
             const epochAtStart = onlineEpoch();
@@ -224,10 +248,9 @@ export function createAgentWorkspaceHandler({
                 outcome = await projectStore.save(candidate, writeBinding);
               } catch (error) {
                 const live = findLive();
-                if (
-                  live &&
-                  sameBinding(live.session.file.cloudBinding, startBinding)
-                ) {
+                if (live && !ownsWrite(live.session.file))
+                  return superseded(live.session.file);
+                if (live) {
                   live.session.file = {
                     ...live.session.file,
                     persistenceState: "failed",
@@ -254,20 +277,8 @@ export function createAgentWorkspaceHandler({
                   "WORKSPACE_NOT_FOUND",
                   "Working copy closed while Cloud save was in flight; check the Cloud Project shelf",
                 );
-              // A receipt belongs to the binding it was written against: one
-              // that changed meanwhile keeps its own state.
-              if (
-                !sameBinding(liveTarget.session.file.cloudBinding, startBinding)
-              ) {
-                if (liveTarget.session.file.persistenceState === "saving") {
-                  liveTarget.session.file.persistenceState = "dirty";
-                  projectTabs.changed();
-                }
-                return fail(
-                  "CLOUD_SAVE_SUPERSEDED",
-                  "This working copy's Cloud Project changed while the save was in flight; its receipt was not applied",
-                );
-              }
+              if (!ownsWrite(liveTarget.session.file))
+                return superseded(liveTarget.session.file);
               if (outcome.status === "saved") {
                 const stillCurrent =
                   snapshot.matchesCurrentProject() &&
@@ -348,17 +359,16 @@ export function createAgentWorkspaceHandler({
             // A PUT with no answer must not hold the tabs, sign-out and
             // auto-save for good: the reservation ends at the deadline and
             // the copy holds as a possible save.
-            const finishing = finish();
+            let settled = false;
+            const finishing = finish().finally(() => {
+              settled = true;
+            });
             finishing.catch(() => {});
             let deadline: ReturnType<typeof setTimeout> | undefined;
             const expired = new Promise<ReturnType<typeof fail>>((resolve) => {
               deadline = setTimeout(() => {
                 const live = findLive();
-                if (
-                  live &&
-                  live.session.file.persistenceState === "saving" &&
-                  sameBinding(live.session.file.cloudBinding, startBinding)
-                ) {
+                if (!settled && live && ownsWrite(live.session.file)) {
                   live.session.file = {
                     ...live.session.file,
                     persistenceState: "failed",

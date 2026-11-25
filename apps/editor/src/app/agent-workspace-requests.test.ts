@@ -57,7 +57,6 @@ function tab(name: string, binding: CloudProjectBinding | null): TabSession {
   return {
     controller: new EditorDocumentController(project(name)),
     file: {
-      nativeBinding: null,
       persistenceState: "dirty",
       cloudBinding: binding,
       savedBaseline: null,
@@ -437,6 +436,87 @@ describe("the Agent's background Cloud save, continued", () => {
         revision: 2,
       });
       expect(session.file.autoSaveHold).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(["pending", "acknowledged"] as const)(
+    "ignores a late Save As receipt while a newer identical-content save is %s",
+    async (state) => {
+      const editor = workspace();
+      const session = editor.tabs.get("b")!;
+      await import("../agent/workspace-copy");
+      vi.useFakeTimers();
+      try {
+        const first = editor.saveIn("b", true);
+        await vi.advanceTimersByTimeAsync(0);
+        await vi.advanceTimersByTimeAsync(CLOUD_AUTO_SAVE_DEADLINE_MS);
+        expect(await first).toMatchObject({
+          error: { code: "CLOUD_SAVE_TIMEOUT" },
+        });
+        const second = editor.saveIn("b");
+        await vi.advanceTimersByTimeAsync(0);
+        const acknowledge = async () => {
+          editor.pending[1]!.resolve(
+            receipt({ id: "cloud-B", revision: 0 }, "B"),
+          );
+          expect(await second).toMatchObject({ ok: true });
+        };
+        if (state === "acknowledged") await acknowledge();
+        editor.pending[0]!.resolve(receipt(null, "Duplicate"));
+        await vi.advanceTimersByTimeAsync(0);
+        expect(session.file.cloudBinding?.id).toBe("cloud-B");
+        expect(session.file.persistenceState).toBe(
+          state === "pending" ? "saving" : "clean",
+        );
+        if (state === "pending") await acknowledge();
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it("records the timeout even after an Agent commit marks the pending copy dirty", async () => {
+    const editor = workspace();
+    const session = editor.tabs.get("b")!;
+    const active = editor.tabs.get("a")!.controller;
+    await import("../agent/workspace-copy");
+    vi.useFakeTimers();
+    try {
+      const saving = editor.saveIn("b");
+      await vi.advanceTimersByTimeAsync(0);
+      session.controller.dispatchProjectTransaction({
+        transactionId: "edit-while-saving",
+        projectId: session.controller.project.id,
+        expectedStructureRevision: session.controller.project.structureRevision,
+        actor: { kind: "human", id: "editor" },
+        edits: [{ kind: "rename_project", name: "Edited" }],
+      });
+      routeAgentCommit(session.controller, {
+        activeId: "a",
+        activeController: active,
+        renderedController: active,
+        entries: [{ id: "b", session }],
+        backgroundSaving: (id) => editor.reserved.has(id),
+        changed: vi.fn(),
+        synchronizeExternalCommit: vi.fn(),
+        noteExternalCommit: vi.fn(),
+        activateDocumentSession: vi.fn(),
+        writeRecoverySessionSnapshot: vi.fn(),
+      });
+      expect(session.file.persistenceState).toBe("dirty");
+      await vi.advanceTimersByTimeAsync(CLOUD_AUTO_SAVE_DEADLINE_MS);
+      expect(await saving).toMatchObject({
+        error: { code: "CLOUD_SAVE_TIMEOUT" },
+      });
+      expect(session.file.persistenceState).toBe("failed");
+      expect(session.file.autoSaveHold).toEqual({
+        kind: "timeout",
+        bindingId: "cloud-B",
+        revision: 1,
+      });
+      expect(editor.reserved.has("b")).toBe(false);
     } finally {
       vi.useRealTimers();
     }

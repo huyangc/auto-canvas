@@ -1,69 +1,60 @@
-# T176 report
+# T176 report — Round 7 (Codex implementation round 1)
 
-Written by Opus from the implementer's reports (rounds 1 and 2); acceptance
-results are Opus's own reruns, recorded in `review.md`.
+## Summary
 
-## What was built
+A late background Save As receipt can no longer rebind a working copy after a newer save, including an identical-content save that keeps the original Cloud revision. A pending background write that times out after an Agent edit now records the timeout hold and releases the tab reservation.
 
-- `apps/editor/src/document/cloud-auto-save.ts` (new): the preference
-  (`icm.cloud-auto-save.v1`, default on, in-memory value that survives a
-  storage failure), the online epoch, revision-scoped failure holds
-  (`holdAfterFailure`, `applicableHold`), the interaction blocker and the
-  statusbar indicator.
-- `use-project-file-lifecycle.ts`: `autoSaveArmed` and `autoSaveHold` on the
-  file session, `cloudBindingRef`, the 3 s scheduling effect with 500 ms
-  re-polls, the automatic save through the existing coordinator (no
-  `beforeSnapshot`, no routine status lines), manual Save waiting for an
-  in-flight automatic save, `isUserSaveInFlight`, `saveBusy` that ignores
-  auto-saves, replacement refused during an auto-save, `noteExternalCommit`.
-- `use-project-tab-sessions.ts` / `use-project-tabs.ts`: `isTransitioning()`,
-  `resumedFileSession` (restore never arms, offline holds end with the page),
-  one Agent background Cloud save per tab that holds tab switches,
-  `routeAgentCommit` (Agent commits reach the committing controller's tab),
-  `signingOutCheck` (sign-out blocks auto-save and is undone when the page
-  stays).
-- `agent-workspace-requests.ts` / `use-agent-hosts.ts`: background saves are
-  admitted by the live active tab, refused during a switch or a same-binding
-  foreground save, and apply a receipt only to the binding they wrote against;
-  holds are merged on the stored session; Agent commits route through
-  `noteAgentCommitRef`.
-- `App.tsx`: wiring, the auto-save blocker (switch blocker, tab transition,
-  sign-out, Agent replacement, gestures, held pointer, modal dialog, tab close
-  question) and the statusbar chip.
-- `header-account-menu.tsx`: "Auto-save to Cloud On/Off" after My Cloud
-  Projects, before Sign out.
-- `account-context.tsx` / `account-gate.tsx` (round 2): the logout check may
-  return an undo, called when sign-out does not reload.
-- `playwright.config.ts`: shared storageState seeds auto-save off.
-- Docs: `persistence-and-recovery.md`, `editor-interaction.md`,
-  `getting-started.md`.
+## Steps
 
-## Tests
+| Step                          | Status                 | Notes                                                                                                                                                                                      |
+| ----------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Original feature and baseline | Done in earlier rounds | The branch at dd6a90f includes the feature. The original baseline results are preserved below.                                                                                             |
+| Reproduce the latest findings | Done                   | Three focused files initially had 5 failing and 93 passing tests. The failures showed rebinding to the duplicate, a missing timeout hold, and retention of the previous window's sequence. |
+| Implement and verify Round 7  | Done                   | Updated the Agent save handler, file lifecycle, tab session restore and their tests.                                                                                                       |
 
-Unit: `cloud-auto-save.test.ts`, 14 lifecycle cases, tab-session, project-tabs,
-Agent requests (new file), Agent hosts, account menu, statusbar. Browser:
-`cloud-auto-save.spec.ts` (11 cases, default run), one Agent case in
-`web-agent-session.spec.ts`, one toggle test in `standalone-accounts.spec.ts`.
+## Review findings addressed
 
-## Deviations
+1. Foreground and background saves now advance the same per-working-copy write sequence. Tab switches carry the sequence, replacement advances it, and refresh or reopen drops it. The background handler checks both the sequence and the starting binding before applying a receipt or exception. Regression tests cover a newer background write both while pending and after acknowledgment, and a real foreground save following activation.
+2. The background deadline checks whether its operation is still pending and owns the write. A real commit routed to the inactive controller while the write is pending now leaves a failed copy with a revision-scoped timeout hold at the deadline.
 
-1. Design 10 changed in review (Opus decision): no cross-window `storage`
-   listener, because the notebook build guard (T163) reserves storage events
-   for the notebook gate. Another window reads a change on its next load.
-2. `signingOut` clearing on a failed logout request needed
-   `account-gate.tsx` / `account-context.tsx` (added to scope in review).
-3. `noteAgentCommit` tests target the extracted pure `routeAgentCommit`.
-4. Small additions: `useOnlineEpoch`; a manual Save answered by an automatic
-   receipt reports "Saved … to Cloud"; a thrown automatic save reports "Cloud
-   auto-save failed; …"; `isUserSaveInFlight` counts waiting manual saves.
+## Acceptance results
 
-## Not verified
+Lane 2 used ports 4273 and 4321 and database auto_canvas_test_2. Original pre-feature baseline from the saved logs in tmp/t175:
 
-Desktop at runtime (build only); the notebook and prefix e2e runs; a held
-canvas drag/pan and the tab close question in a browser (unit-level only).
+```text
+pnpm format:check / typecheck / lint / deadcode / build → 0 each
+pnpm test:local → 1 (8939 passed, 1 failed, agent-relay)
+pnpm test:e2e:local → 1 (487 passed, 2 skipped, 1 failed, web-agent-session)
+AUTO_CANVAS_E2E_ACCOUNTS=1 pnpm test:e2e:local → 0 (3 passed)
+```
 
-## Pre-existing failures (not T176)
+This round:
 
-`web-agent-session.spec.ts:662` (fails on main 7a21def), flaky
-`hierarchy.spec.ts:1179`, and `agent-relay.test.ts` under a lane's
-`AUTO_CANVAS_API_URL`.
+```text
+pnpm exec vitest run <3 files from Round 7> → 0 (98 passed)
+pnpm vitest run <11 files from the original plan> → 0 (207 passed)
+pnpm typecheck → 0
+pnpm lint → 0 (0 errors)
+pnpm format:check → 0
+pnpm docs:check → 0
+pnpm deadcode → 0
+pnpm build → 0
+pnpm test:desktop-build → 0
+pnpm test:local → 1 (9227 passed, 116 skipped, 1 failed)
+  agent-relay.test.ts expected port 4310 and received the lane's configured 4321.
+  Recheck with AUTO_CANVAS_API_URL unset → 0 (3 passed).
+pnpm test:e2e:local → 0 (500 passed, 2 skipped)
+AUTO_CANVAS_E2E_ACCOUNTS=1 pnpm test:e2e:local → 0 (4 passed)
+git diff --stat origin/main -- apps/server packages apps/desktop apps/editor/src/hosts pnpm-lock.yaml → 0 (55 files)
+git diff --stat 292fc2f -- <same paths> → 0 (empty)
+```
+
+An additional Chromium check used the real editor and intercepted Cloud requests. A 4.5 s pan and a 4.5 s tab-close decision each produced zero PUTs during the hold and one PUT after release (1 passed).
+
+## Investigation results
+
+The tests reproduced the binding error with identical Cloud revisions and the deadline error with an outstanding reservation. Both now pass with the stricter write ownership checks.
+
+## Deviations and open questions
+
+The plan's two-tip scope comparison includes upstream desktop removal at origin/main (d7b8eb0). The same comparison against the branch's actual merge base (292fc2f) is empty. The original baseline is from the implementation run before the feature existed. Desktop verification covers the requested build.

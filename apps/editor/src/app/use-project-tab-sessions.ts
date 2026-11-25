@@ -121,7 +121,12 @@ export function tabDocksFor(
 export function resumedFileSession(
   file: ProjectFileSession,
 ): ProjectFileSession {
-  const { autoSaveArmed: _restoredNotArmed, autoSaveHold, ...rest } = file;
+  const {
+    cloudWriteSequence: _previousWindowSequence,
+    autoSaveArmed: _restoredNotArmed,
+    autoSaveHold,
+    ...rest
+  } = file;
   return {
     ...rest,
     persistenceState:

@@ -64,7 +64,6 @@ describe("tab session docks per editor mode", () => {
 
 describe("resumedFileSession", () => {
   const file: ProjectFileSession = {
-    nativeBinding: null,
     persistenceState: "dirty",
     cloudBinding: { id: "amp", revision: 3 },
     savedBaseline: null,
@@ -82,6 +81,12 @@ describe("resumedFileSession", () => {
 
   it("arms nothing a refresh or reopen brings back", () => {
     expect(resumedFileSession(file).autoSaveArmed).toBeUndefined();
+  });
+
+  it("drops the previous window's Cloud write sequence", () => {
+    expect(
+      resumedFileSession({ ...file, cloudWriteSequence: 8 }),
+    ).not.toHaveProperty("cloudWriteSequence");
   });
 
   it("drops only an offline hold", () => {
