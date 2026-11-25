@@ -4,7 +4,10 @@ import type { Dispatch, RefObject, SetStateAction } from "react";
 import { createEmptyProject, createId } from "@icm/model";
 import type { AgentRuntime } from "../agent/agent-runtime-loader";
 import type { BrowserAgentFileHost } from "../agent/browser-agent-file-host";
-import type { BrowserAgentHost } from "../agent/browser-agent-host";
+import type {
+  AgentCommitOutcome,
+  BrowserAgentHost,
+} from "../agent/browser-agent-host";
 import type { BrowserAgentProjectHost } from "../agent/browser-agent-project-host";
 
 import {
@@ -602,11 +605,11 @@ export function createAgentWorkspaceTargets({
         );
     const cached = backgroundAgentHosts.current.get(controller);
     if (cached?.sessionId === controller.projectSessionId) return cached;
-    const committed = () => {
+    const committed = (outcome?: AgentCommitOutcome) => {
       // Routed to the controller's own tab as it is now: the tab may have
       // become the active one since this host was built.
-      if (noteAgentCommitRef.current(controller) === "active")
-        void flushRecovery();
+      const location = noteAgentCommitRef.current(controller, outcome);
+      if (location === "active" && !outcome?.rolledBack) void flushRecovery();
     };
     const host = new runtime.BrowserAgentHost(
       controller,

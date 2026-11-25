@@ -18,6 +18,8 @@ import type {
 } from "../features/editor-shell/cloud-projects";
 import type { CloudProjectStore } from "../services/editor-services";
 import type { EditorExportDelivery } from "../hosts/export-delivery";
+import { BrowserAgentHost } from "../agent/browser-agent-host";
+import { routeAgentCommit } from "../app/use-project-tab-sessions";
 import {
   BROWSER_RECOVERY_FORMAT,
   type BrowserRecoveryRecordV2,
@@ -1733,6 +1735,59 @@ describe("Cloud auto-save", () => {
     );
     expect(afterRollback?.persistenceState).toBe("clean");
     expect(afterRollback?.autoSaveArmed).not.toBe(true);
+    await advance(10_000);
+    expect(cloud.writes).toHaveLength(0);
+  });
+
+  it("shows the new revisions of a rolled-back Agent batch without uploading restored edits", async () => {
+    const { editor, cloud, advance } = await mountAuto({ bind: null });
+    await editor.switchTo(
+      {
+        ...structuredClone(base),
+        name: "Restored draft",
+        structureRevision: 1,
+      },
+      { ...bound, persistenceState: "dirty", autoSaveArmed: false },
+    );
+    const { doc, file } = editor.current;
+    const controller = doc.controller;
+    const noteExternalCommit = vi.fn(file.noteExternalCommit);
+    const host = new BrowserAgentHost(controller, (outcome) =>
+      routeAgentCommit(
+        controller,
+        {
+          activeController: controller,
+          renderedController: controller,
+          activeId: "a",
+          entries: [],
+          synchronizeExternalCommit: doc.synchronizeExternalCommit,
+          activateDocumentSession: doc.activateSession,
+          noteExternalCommit,
+          writeRecoverySessionSnapshot: vi.fn(),
+          changed: vi.fn(),
+        },
+        outcome,
+      ),
+    );
+
+    await act(async () => {
+      const kept = host.commitAsOneStep(() => {
+        host.commitProjectStructure({
+          ...controller.project,
+          name: "Discarded Agent edit",
+          structureRevision: controller.project.structureRevision + 1,
+        });
+        return false;
+      });
+      expect(kept).toBe(false);
+    });
+
+    expect(editor.current.doc.project).toBe(controller.project);
+    expect(editor.current.doc.project.name).toBe("Restored draft");
+    expect(editor.current.doc.project.structureRevision).toBeGreaterThan(1);
+    expect(noteExternalCommit).not.toHaveBeenCalled();
+    expect(editor.file.persistenceState).toBe("dirty");
+    expect(editor.file.cloudAutoSave.armed).toBe(false);
     await advance(10_000);
     expect(cloud.writes).toHaveLength(0);
   });

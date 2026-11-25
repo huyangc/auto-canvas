@@ -22,6 +22,10 @@ import {
   type BrowserAgentPlanningContext,
 } from "./browser-agent-command";
 
+export interface AgentCommitOutcome {
+  rolledBack?: boolean;
+}
+
 /**
  * Adapts a live {@link EditorDocumentController} to the
  * {@link AgentOperationHost} contract (Agent rationale). The Agent Circuit
@@ -32,6 +36,8 @@ import {
  * owner (the React hook in `App.tsx`) can synchronize UI state and stage
  * recovery — exactly as a human commit does. The commit also marks the
  * controller Agent-edited, which the Publish dialog notes beside the AI mark.
+ * A rolled-back batch reports only its final snapshot so the owner can
+ * synchronize the new revisions.
  *
  * This lets the full capabilities/snapshot/transact/render feature run
  * against the live browser document inside one process, with no network, token,
@@ -54,10 +60,14 @@ export class BrowserAgentHost implements AgentOperationHost {
     );
   }
   private readonly boundProjectSessionId: string;
+  private commitBatchDepth = 0;
+  private commitBatchDirty = false;
 
   constructor(
     private readonly controller: EditorDocumentController,
-    private readonly onTransactionCommitted?: () => void,
+    private readonly onTransactionCommitted?: (
+      outcome?: AgentCommitOutcome,
+    ) => void,
     private readonly onSemanticIntent?: (
       request: AgentHostSemanticIntentRequest,
     ) => AgentHostSemanticIntentResult,
@@ -105,10 +115,7 @@ export class BrowserAgentHost implements AgentOperationHost {
       );
     }
     const result = this.controller.dispatchTransaction(request);
-    if (result.ok && result.applied) {
-      this.controller.noteAgentEdit();
-      this.onTransactionCommitted?.();
-    }
+    if (result.ok && result.applied) this.noteCommit();
     return result;
   }
 
@@ -131,21 +138,28 @@ export class BrowserAgentHost implements AgentOperationHost {
       undefined,
       documentId,
     );
-    if (result.ok && result.applied) {
-      this.controller.noteAgentEdit();
-      this.onTransactionCommitted?.();
-    }
+    if (result.ok && result.applied) this.noteCommit();
     return result;
   }
 
   commitAsOneStep(commit: () => boolean): boolean {
     this.assertBound();
     const before = this.controller.project;
-    const kept = this.controller.commitAsOneStep(commit);
-    // The commits it undid were shown; show the Project they left.
-    if (!kept && this.controller.project !== before)
-      this.onTransactionCommitted?.();
-    return kept;
+    this.commitBatchDepth++;
+    let kept = false;
+    try {
+      kept = this.controller.commitAsOneStep(commit);
+      return kept;
+    } finally {
+      this.commitBatchDepth--;
+      if (this.commitBatchDepth === 0) {
+        const edited = this.commitBatchDirty;
+        this.commitBatchDirty = false;
+        if (kept && edited) this.noteCommit();
+        if (!kept && this.controller.project !== before)
+          this.onTransactionCommitted?.({ rolledBack: true });
+      }
+    }
   }
 
   /**
@@ -159,6 +173,14 @@ export class BrowserAgentHost implements AgentOperationHost {
   ): void {
     this.assertBound();
     this.controller.commitProjectStructure(project, activeDocumentId);
+    this.noteCommit();
+  }
+
+  private noteCommit(): void {
+    if (this.commitBatchDepth > 0) {
+      this.commitBatchDirty = true;
+      return;
+    }
     this.controller.noteAgentEdit();
     this.onTransactionCommitted?.();
   }

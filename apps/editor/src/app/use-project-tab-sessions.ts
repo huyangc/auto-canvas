@@ -20,6 +20,7 @@ import {
   useBeforeAccountLogout,
   type AccountLogoutCheck,
 } from "../accounts/account-context";
+import type { AgentCommitOutcome } from "../agent/browser-agent-host";
 import { flushSync } from "react-dom";
 import type { CameraRectInput } from "../canvas/fit-view";
 import type { CameraRuntime } from "../canvas/camera-runtime";
@@ -168,7 +169,8 @@ export function signingOutCheck(
  * An Agent commit to `controller`, wherever its tab is now. A tab in the
  * background has its stored session marked unsaved and armed, and its
  * recovery copy written; on screen the commit is synchronized and noted as a
- * live edit. A controller no open tab holds is left alone.
+ * live edit. A rollback only refreshes the revision of the on-screen copy.
+ * A controller no open tab holds is left alone.
  */
 export function routeAgentCommit(
   controller: EditorDocumentController,
@@ -196,15 +198,15 @@ export function routeAgentCommit(
     /** Whether the Agent's background Cloud save of this tab is in flight. */
     backgroundSaving?(tabId: string): boolean;
   },
+  outcome?: AgentCommitOutcome,
 ): "active" | "background" | "closed" {
   const stored = tabs.entries.find(
     (entry) =>
       entry.id !== tabs.activeId && entry.session.controller === controller,
   );
   if (stored) {
+    if (outcome?.rolledBack) return "background";
     const session = stored.session;
-    // A batch rolled back to the saved content is not an edit: uploading it
-    // would only advance the Cloud revision.
     const saved = session.file.savedBaseline;
     const unsaved =
       saved === null || !sameProjectContent(controller.project, saved.project);
@@ -226,10 +228,11 @@ export function routeAgentCommit(
   }
   if (controller !== tabs.activeController) return "closed";
   // Between a switch and its first render the latest synchronizer is the
-  // outgoing tab's and would do nothing: re-read the committing controller.
-  if (controller === tabs.renderedController) tabs.synchronizeExternalCommit();
+  // outgoing tab's. A rollback also only needs the controller's snapshot.
+  if (controller === tabs.renderedController && !outcome?.rolledBack)
+    tabs.synchronizeExternalCommit();
   else tabs.activateDocumentSession(controller);
-  tabs.noteExternalCommit(controller.project);
+  if (!outcome?.rolledBack) tabs.noteExternalCommit(controller.project);
   return "active";
 }
 
@@ -1204,19 +1207,24 @@ export function useProjectTabSessions({
   /** Where an Agent commit to `controller` landed; see routeAgentCommit. */
   function noteAgentCommit(
     controller: EditorDocumentController,
+    outcome?: AgentCommitOutcome,
   ): "active" | "background" | "closed" {
-    return routeAgentCommit(controller, {
-      activeController: activeControllerRef.current,
-      renderedController: editorDocumentController,
-      activateDocumentSession,
-      activeId: projectTabs.currentId(),
-      entries: projectTabs.entries(),
-      synchronizeExternalCommit,
-      noteExternalCommit,
-      writeRecoverySessionSnapshot,
-      changed: projectTabs.changed,
-      backgroundSaving: (tabId) => backgroundCloudSaves.current.has(tabId),
-    });
+    return routeAgentCommit(
+      controller,
+      {
+        activeController: activeControllerRef.current,
+        renderedController: editorDocumentController,
+        activateDocumentSession,
+        activeId: projectTabs.currentId(),
+        entries: projectTabs.entries(),
+        synchronizeExternalCommit,
+        noteExternalCommit,
+        writeRecoverySessionSnapshot,
+        changed: projectTabs.changed,
+        backgroundSaving: (tabId) => backgroundCloudSaves.current.has(tabId),
+      },
+      outcome,
+    );
   }
   return {
     openImportFile,

@@ -21,7 +21,10 @@ import type { CircuitProject, GridRect } from "@icm/model";
 import type { AgentRuntime } from "../agent/agent-runtime-loader";
 import type { BrowserAgentPlanningContext } from "../agent/browser-agent-command";
 import type { BrowserAgentFileHost } from "../agent/browser-agent-file-host";
-import type { BrowserAgentHost } from "../agent/browser-agent-host";
+import type {
+  AgentCommitOutcome,
+  BrowserAgentHost,
+} from "../agent/browser-agent-host";
 import type { BrowserAgentProjectHost } from "../agent/browser-agent-project-host";
 
 import { peekAgentSessionRecovery } from "../agent/session-recovery";
@@ -97,7 +100,10 @@ export function useBrowserAgentHost({
    * lands: the person may have switched tabs while the Agent was working.
    */
   noteAgentCommitRef: RefObject<
-    (controller: EditorDocumentController) => unknown
+    (
+      controller: EditorDocumentController,
+      outcome?: AgentCommitOutcome,
+    ) => unknown
   >;
   flushRecovery: UseRecoveryCoordinatorResult["flushNow"];
 }) {
@@ -149,8 +155,9 @@ export function useBrowserAgentHost({
       runtime
         ? new runtime.BrowserAgentHost(
             editorDocumentController,
-            () => {
-              noteAgentCommitRef.current(editorDocumentController);
+            (outcome) => {
+              noteAgentCommitRef.current(editorDocumentController, outcome);
+              if (outcome?.rolledBack) return;
               // Agent commits have already crossed a network boundary. Start the
               // durable write immediately so a following render crash cannot lose
               // the acknowledged transaction inside the debounce window.
