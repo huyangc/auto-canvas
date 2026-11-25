@@ -42,6 +42,15 @@ type RoutePort = (
   onAttempt: () => void,
 ) => Trial | undefined;
 
+function samePlacement(a: Placement, b: Placement) {
+  return (
+    a.position.x === b.position.x &&
+    a.position.y === b.position.y &&
+    a.rotation === b.rotation &&
+    a.mirror === b.mirror
+  );
+}
+
 function seatKey(source: SchematicDocument, seats: Seats) {
   return JSON.stringify(source.instances.map((i) => seats.get(i.id)));
 }
@@ -342,6 +351,7 @@ function searchPortLayouts(
   stopped: () => boolean,
   routePort?: (base: Trial, moves: Seats) => Trial | undefined,
 ): Trial {
+  const bounded = source.instances.length > 24;
   const first = portGeometry(initial.final, resolver, context);
   if (!first) return initial;
   let levels = portLevels(first, first.seats);
@@ -443,8 +453,9 @@ function searchPortLayouts(
     let rank: number[] | undefined;
     const seen = new Set<string>();
     // R170: every trial of the mirror frame is a whole-drawing reflection.
-    let mirrored = false;
-    const consider = (trial: Trial | undefined) => {
+    const finishPass = () =>
+      (bounded && best !== start) || levels.every((n) => n === 2);
+    const consider = (trial: Trial | undefined, mirrored = false) => {
       if (!trial) return;
       if (
         mirrored &&
@@ -478,7 +489,7 @@ function searchPortLayouts(
       best = trial;
       levels = next;
     };
-    const routeCandidate = (seats: Seats, geo: Geometry) => {
+    const routeCandidate = (seats: Seats, geo: Geometry, mirrored: boolean) => {
       if (!improves(portLevels(geo, seats), previous)) return;
       if (
         mirrored &&
@@ -512,12 +523,11 @@ function searchPortLayouts(
       const key = seatKey(source, seats);
       if (seen.has(key)) return;
       seen.add(key);
-      if (routePort && geo === current && source.instances.length > 24) {
+      if (routePort && geo === current && bounded) {
         const moves: Seats = new Map();
         for (const port of geo.ports) {
           const pose = seats.get(port.id);
-          if (pose && pose !== current.seats.get(port.id))
-            moves.set(port.id, pose);
+          if (pose && !samePlacement(pose, port.seat)) moves.set(port.id, pose);
         }
         if (moves.size) {
           const before = best;
@@ -525,7 +535,7 @@ function searchPortLayouts(
           if (best !== before) return;
         }
       }
-      consider(route(seats));
+      consider(route(seats), mirrored);
     };
     // Reflect the already routed drawing before trying new edge columns.
     if (!probeCorridors) {
@@ -536,10 +546,8 @@ function searchPortLayouts(
         .value;
       const geo = frame && portGeometry(frame, resolver, context);
       if (geo && improves(portLevels(geo, geo.seats), previous)) {
-        mirrored = true;
-        consider(reflectNetlistPlan(source, resolver, start, axis));
-        mirrored = false;
-        if (best !== start) continue;
+        consider(reflectNetlistPlan(source, resolver, start, axis), true);
+        if (finishPass()) continue;
       }
     }
     const grid = source.presentation.grid,
@@ -582,7 +590,7 @@ function searchPortLayouts(
           );
         }
     }
-    if (best !== start) continue;
+    if (finishPass()) continue;
     const modes = [
       "existing",
       "mirror",
@@ -591,12 +599,10 @@ function searchPortLayouts(
       "tight",
       "jog",
     ] as const;
-    for (const offsets of source.instances.length > 24
-      ? [[1], [2], [4]]
-      : [[1, 2, 4]]) {
+    for (const offsets of bounded ? [[1], [2], [4]] : [[1, 2, 4]]) {
       for (const mode of probeCorridors ? [] : modes) {
         if (mode === "interior" && offsets[0] !== 1) continue;
-        mirrored = mode === "mirror";
+        const mirrored = mode === "mirror";
         if (stopped()) break;
         for (const drawing of frames(mode, start.final, current, context)) {
           const geo =
@@ -608,7 +614,7 @@ function searchPortLayouts(
             (_, i) => status[i]! < (mode === "interior" ? 1 : 2),
           );
           if (mode === "mirror" || mode === "tight")
-            routeCandidate(geo.seats, geo);
+            routeCandidate(geo.seats, geo, mirrored);
           if (!wrong.length) continue;
           const groups =
             mode === "jog"
@@ -646,19 +652,21 @@ function searchPortLayouts(
               )) {
                 if (stopped()) return best;
                 const before = best;
-                routeCandidate(seats, geo);
+                routeCandidate(seats, geo, mirrored);
                 if (
-                  best !== before &&
-                  group.every((p) => levels[geo.ports.indexOf(p)] === 2) &&
-                  auditRouting(best.final, resolver).crossings === 0
+                  levels.every((n) => n === 2) ||
+                  (bounded &&
+                    best !== before &&
+                    group.every((p) => levels[geo.ports.indexOf(p)] === 2) &&
+                    auditRouting(best.final, resolver).crossings === 0)
                 )
                   break;
               }
           }
         }
-        if (best !== start || levels.every((n) => n === 2)) break;
+        if (finishPass()) break;
       }
-      if (best !== start) break;
+      if (finishPass()) break;
     }
     if (best === start) {
       if (
