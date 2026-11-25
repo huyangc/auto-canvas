@@ -1733,6 +1733,8 @@ export function useProjectFileLifecycle({
       token: currentProjectChangeToken,
       project,
     };
+    // A rolled-back Agent batch advances revisions while preserving content.
+    if (sameProjectContent(baseline.project, project)) return;
     // Written to the ref at once, so the moved baseline never meets a state
     // that has not yet caught up with the edit.
     const matchesSavedProject =
@@ -1769,8 +1771,7 @@ export function useProjectFileLifecycle({
     const matchesSaved =
       saved !== null &&
       sameProjectContent(committed ?? readCurrentProject(), saved.project);
-    // Every commit is reconciled, so a batch that rolls back to the saved
-    // content leaves nothing to upload.
+    // An edit that restores the saved content leaves nothing to upload.
     if (matchesSaved) {
       if (state === "dirty") setPersistenceState("clean");
       setAutoSaveArmed(false);

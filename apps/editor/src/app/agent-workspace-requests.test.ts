@@ -2,6 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import { createEmptyProject, type CircuitProject } from "@icm/model";
 import { CURRENT_PROJECT_FILE_VERSION } from "@icm/project-protocol";
 
+import {
+  BrowserAgentHost,
+  type AgentCommitOutcome,
+} from "../agent/browser-agent-host";
 import { EditorDocumentController } from "../document/document-controller";
 import { CLOUD_AUTO_SAVE_DEADLINE_MS } from "../document/cloud-auto-save";
 import type { ProjectFileSession } from "../document/use-project-file-lifecycle";
@@ -559,17 +563,22 @@ describe("routeAgentCommit", () => {
       route: (
         controller: EditorDocumentController,
         rendered: EditorDocumentController = a.controller,
+        outcome?: AgentCommitOutcome,
       ) =>
-        routeAgentCommit(controller, {
-          activeController: a.controller,
-          renderedController: rendered,
-          activeId: "a",
-          entries: [
-            { id: "a", session: a },
-            { id: "b", session: b },
-          ],
-          ...calls,
-        }),
+        routeAgentCommit(
+          controller,
+          {
+            activeController: a.controller,
+            renderedController: rendered,
+            activeId: "a",
+            entries: [
+              { id: "a", session: a },
+              { id: "b", session: b },
+            ],
+            ...calls,
+          },
+          outcome,
+        ),
     };
   }
 
@@ -594,7 +603,7 @@ describe("routeAgentCommit", () => {
     expect(b.file.autoSaveArmed).toBe(true);
   });
 
-  it("leaves a background tab clean when a rolled-back batch restored its saved content", () => {
+  it("leaves a background tab clean when a commit restores its saved content", () => {
     const { b, calls, route } = tabs();
     b.file.savedBaseline = {
       project: structuredClone(b.controller.project),
@@ -610,6 +619,47 @@ describe("routeAgentCommit", () => {
       b.controller.project,
       { cloudBinding: b.file.cloudBinding, unsavedAtSnapshot: false },
     );
+  });
+
+  it("keeps a restored dirty background tab unarmed after a failed Agent batch", () => {
+    const { a, b, calls, route } = tabs();
+    const before = b.controller.project;
+    b.dirty = true;
+    b.unsafe = true;
+    b.file = {
+      ...b.file,
+      persistenceState: "dirty",
+      autoSaveArmed: false,
+      savedBaseline: {
+        project: { ...before, name: "Saved B" },
+        viewBox: b.view,
+      },
+    };
+    const restoredFile = b.file;
+    const reported = vi.fn((outcome?: AgentCommitOutcome) =>
+      route(b.controller, a.controller, outcome),
+    );
+    const host = new BrowserAgentHost(b.controller, reported);
+    const kept = host.commitAsOneStep(() => {
+      host.commitProjectStructure({
+        ...before,
+        name: "Discarded Agent edit",
+        structureRevision: before.structureRevision + 1,
+      });
+      return false;
+    });
+
+    expect(kept).toBe(false);
+    expect(b.controller.project.name).toBe(before.name);
+    expect(b.controller.agentEdited).toBe(false);
+    expect(reported).toHaveBeenCalledExactlyOnceWith({ rolledBack: true });
+    expect(reported).toHaveReturnedWith("background");
+    expect(b.dirty).toBe(true);
+    expect(b.unsafe).toBe(true);
+    expect(b.file).toBe(restoredFile);
+    expect(b.file.autoSaveArmed).toBe(false);
+    expect(calls.changed).not.toHaveBeenCalled();
+    expect(calls.writeRecoverySessionSnapshot).not.toHaveBeenCalled();
   });
 
   it("marks a background tab unsaved and armed and journals it", () => {

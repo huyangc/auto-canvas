@@ -230,7 +230,6 @@ import {
 import {
   EDITOR_PROJECT_TRANSACTION_OPTIONS,
   useDocumentController,
-  type EditorDocumentController,
 } from "../document/document-controller";
 import { useProjectFileLifecycle } from "../document/use-project-file-lifecycle";
 import type { ReplaceProjectOptions } from "../document/use-project-file-lifecycle";
@@ -775,7 +774,7 @@ function WorkspaceEditor({
    * the project tabs exist, read when a commit lands.
    */
   const noteAgentCommitRef = useRef<
-    (controller: EditorDocumentController) => "active" | "background" | "closed"
+    ReturnType<typeof useProjectTabSessions>["noteAgentCommit"]
   >(() => "closed");
   const projectConnectivityIndex = useMemo(
     () => editorSnapshotDerived.connectivity(project, resolver),

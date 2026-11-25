@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createAgentCircuitService } from "@icm/agent-adapter";
 import type { AgentPermissions } from "@icm/agent-adapter";
@@ -189,6 +189,40 @@ describe("BrowserAgentHost + Agent Circuit service", () => {
       instance("Ragent"),
     );
     expect(controller.canUndo).toBe(false);
+  });
+
+  it("marks and reports a successful batch once, after the outer step finishes", () => {
+    const controller = new EditorDocumentController(
+      createEmptyProject("batch", "Batch"),
+    );
+    const committed = vi.fn();
+    const host = new BrowserAgentHost(controller, committed);
+    const add = (id: string) =>
+      host.dispatchTransaction({
+        transactionId: id,
+        documentId: controller.activeDocumentId,
+        expectedRevision: controller.document.revision,
+        actor: { kind: "agent", id: "codex" },
+        edits: [{ kind: "add_instance", instance: instance(id) }],
+      });
+
+    const kept = host.commitAsOneStep(() => {
+      expect(add("R1")).toMatchObject({ ok: true, applied: true });
+      expect(host.commitAsOneStep(() => add("R2").ok)).toBe(true);
+      expect(committed).not.toHaveBeenCalled();
+      expect(controller.agentEdited).toBe(false);
+      return true;
+    });
+
+    expect(kept).toBe(true);
+    expect(committed).toHaveBeenCalledExactlyOnceWith();
+    expect(controller.agentEdited).toBe(true);
+    expect(controller.document.instances).toEqual([
+      instance("R1"),
+      instance("R2"),
+    ]);
+    controller.transact([{ kind: "undo" }]);
+    expect(controller.document.instances).toEqual([]);
   });
 
   it("routes scoped semantic control to the browser without changing history", () => {

@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createEmptyProject } from "@icm/model";
 
 import type { AgentRuntime } from "../agent/agent-runtime-loader";
+import type { AgentCommitOutcome } from "../agent/browser-agent-host";
 import { EditorDocumentController } from "../document/document-controller";
 import { agentConnectionGate, useBrowserAgentHost } from "./use-agent-hosts";
 
@@ -74,13 +75,16 @@ describe("the Agent's startup gate", () => {
 });
 
 describe("the foreground Agent host", () => {
-  it("routes a commit to its own controller, then journals it", async () => {
+  it("routes commits and rollbacks to their controller and only journals commits", async () => {
     const controller = new EditorDocumentController(
       createEmptyProject("p", "P", "main"),
     );
-    let commit!: () => void;
+    let commit!: (outcome?: AgentCommitOutcome) => void;
     class FakeHost {
-      constructor(_controller: unknown, committed: () => void) {
+      constructor(
+        _controller: unknown,
+        committed: (outcome?: AgentCommitOutcome) => void,
+      ) {
         commit = committed;
       }
     }
@@ -102,7 +106,12 @@ describe("the foreground Agent host", () => {
     const root = createRoot(document.createElement("div"));
     await act(async () => root.render(createElement(Harness)));
     commit();
-    expect(noteAgentCommit).toHaveBeenCalledWith(controller);
+    expect(flushRecovery).toHaveBeenCalledTimes(1);
+    commit({ rolledBack: true });
+    expect(noteAgentCommit.mock.calls).toEqual([
+      [controller, undefined],
+      [controller, { rolledBack: true }],
+    ]);
     expect(flushRecovery).toHaveBeenCalledTimes(1);
     await act(async () => root.unmount());
   });
