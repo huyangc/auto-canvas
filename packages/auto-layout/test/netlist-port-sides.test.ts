@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { importNetlistProject } from "../../../apps/editor/src/features/auto-layout/netlist-import.test-support.js";
 import { netlistPresentation } from "../src/netlist-presentation.js";
-import { resolveRouteGeometry } from "@icm/derived";
+import { diagnoseLabelClearance, resolveRouteGeometry } from "@icm/derived";
 import { slideNetlistPort } from "../src/slide-netlist-port.js";
 import {
   builtInSymbols,
@@ -79,7 +79,7 @@ function reversed(block?: "inverter", extraParts = 0) {
   };
   const plan = route(seats);
   if (!plan) throw Error("expected connected resistor fixture");
-  return { d, plan, route };
+  return { d, plan, route, seats };
 }
 
 it("carries a routed netlist to the input-left orientation in one replay", () => {
@@ -160,8 +160,24 @@ it("stretches a moved port with right-angle wire segments", () => {
   expect(connectionsIntact(final, resolver)).toBe(true);
 });
 
-it("keeps the unchanged net when routing a port at its new seat", () => {
+it("reseats an unlocked port label while preserving the unchanged net", () => {
   const { d, plan } = reversed();
+  const label = {
+    id: "port-name",
+    kind: "instance-label" as const,
+    content: { runs: [{ kind: "text" as const, value: "a" }] },
+    anchor: {
+      kind: "object" as const,
+      objectId: "a",
+      localOffset: { x: 0, y: 0 },
+      fallbackPosition: { x: 80, y: 0 },
+    },
+    alignment: "start" as const,
+    rotation: 0 as const,
+    locked: false,
+  };
+  d.annotations.push(label);
+  plan.final.annotations.push(label);
   const trial = rerouteMovedPorts(
     d,
     resolver,
@@ -170,6 +186,10 @@ it("keeps the unchanged net when routing a port at its new seat", () => {
   );
   expect(trial).toBeDefined();
   const final = trial!.final;
+  expect(final.annotations.find((a) => a.id === label.id)?.anchor).not.toEqual(
+    label.anchor,
+  );
+  expect(diagnoseLabelClearance(final, resolver)).toEqual([]);
   expect(
     final.instances.find((i) => i.id === "a")!.placement?.position,
   ).toEqual({ x: 110, y: 20 });
@@ -205,6 +225,46 @@ it("shares a deterministic full-routing budget across candidates and passes", ()
   selectNetlistPortSides(d, resolver, plan, route, () => false);
   expect(route.mock.calls.length).toBeGreaterThan(0);
   expect(route.mock.calls.length).toBeLessThanOrEqual(12);
+});
+
+it("accepts a single wrong port within the large-circuit routing budget", () => {
+  const { d, route, seats } = reversed("inverter", 22);
+  // An already settled third port makes the all-port and wrong-port
+  // batches distinct. Both batches fail, regardless of offset or anchor.
+  d.instances.push({ id: "c", symbolId: "port", placement: null });
+  d.nets.push({
+    id: "third",
+    terminals: [
+      { instanceId: "c", pinName: "P" },
+      { instanceId: "pad0", pinName: "1" },
+    ],
+  });
+  d.netlist!.terminals.push({
+    id: "settled",
+    name: "third",
+    netId: "third",
+    direction: "input",
+    interfaceInstanceIds: ["c"],
+  });
+  seats.set("c", placement(-180, 220));
+  seats.set("a", placement(180, 50, "horizontal"));
+  seats.set("b", placement(-180, -50));
+  const plan = route(seats)!;
+  const batches: string[][] = [];
+  const trials = vi.fn((next: typeof seats) => {
+    const moved = ["a", "b", "c"].filter(
+      (id) => next.get(id)!.position.x !== seats.get(id)!.position.x,
+    );
+    batches.push(moved);
+    return moved.length === 1 ? route(next) : undefined;
+  });
+  const answer = selectNetlistPortSides(d, resolver, plan, trials, () => false);
+  expect(batches).toContainEqual(["a", "b", "c"]);
+  expect(batches).toContainEqual(["a", "b"]);
+  expect(trials.mock.calls.length).toBeLessThanOrEqual(12);
+  expect(trials.mock.results.some((r) => r.value?.candidate === answer)).toBe(
+    true,
+  );
 });
 
 it("bounds full route trials on the imported Paper3 CLQC deck", async () => {

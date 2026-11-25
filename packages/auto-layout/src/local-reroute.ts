@@ -1,3 +1,4 @@
+import { seatLabels } from "./seat-labels.js";
 import { planningMemo } from "./planning-reuse.js";
 import {
   draftingTranslation,
@@ -63,12 +64,16 @@ function* trunkTracks(points: Point[], grid: number, rails = false) {
   }
 }
 
-function protectedObjects(doc: SchematicDocument) {
+function protectedObjects(doc: SchematicDocument, movingPorts = false) {
   const ids = new Set(
-    [...doc.layoutGroups, ...doc.constraints].flatMap((g) => g.objectIds),
+    [...doc.layoutGroups, ...doc.constraints].flatMap((g) =>
+      !movingPorts || g.locked ? g.objectIds : [],
+    ),
   );
   for (const anchor of [
-    ...doc.annotations.map((a) => a.anchor),
+    ...doc.annotations
+      .filter((a) => !movingPorts || (a.locked && a.anchor.kind === "object"))
+      .map((a) => a.anchor),
     ...(doc.drafting?.objects ?? []).flatMap((o) => [
       o.anchor,
       ...(o.kind === "arrow"
@@ -153,6 +158,15 @@ function rerouteNets(
     audit.unsafeProblems.length
   )
     return result;
+  const rejectRouting = (final: SchematicDocument, next: typeof audit) =>
+    next.unsafeProblems.length > 0 ||
+    ((next.crossings > audit.crossings ||
+      next.bends > audit.bends ||
+      next.wireLength > audit.wireLength ||
+      (next.crossings === audit.crossings &&
+        next.bends === audit.bends &&
+        next.wireLength === audit.wireLength)) &&
+      !improvesReadability(doc, final, resolver));
   let trials = 0;
   for (const netId of keys) {
     if (trials === 3 || stopped() || !audit.crossings) break;
@@ -251,7 +265,11 @@ function rerouteNets(
         const incremental = preview(cleared.document, resolver, routed.edits);
         if (
           incremental.ok &&
-          score(incremental.document) >= (winner?.score ?? bestScore)
+          (rejectRouting(
+            incremental.document,
+            auditRouting(incremental.document, resolver),
+          ) ||
+            score(incremental.document) >= (winner?.score ?? bestScore))
         )
           continue;
       }
@@ -266,14 +284,7 @@ function rerouteNets(
       const final = replay.document,
         next = auditRouting(final, resolver);
       if (
-        (!improvesReadability(doc, final, resolver) &&
-          (next.crossings > audit.crossings ||
-            next.bends > audit.bends ||
-            next.wireLength > audit.wireLength ||
-            (next.crossings === audit.crossings &&
-              next.bends === audit.bends &&
-              next.wireLength === audit.wireLength))) ||
-        next.unsafeProblems.length ||
+        rejectRouting(final, next) ||
         terminalPartition(final, resolver) !== partition ||
         lostNameClaim(doc, final) ||
         missingConnections(final, resolver) ||
@@ -318,6 +329,7 @@ export function rerouteMovedPorts(
   resolver: SymbolResolver,
   base: { final: SchematicDocument; candidate: AutoLayoutResult },
   moves: ReadonlyMap<string, Placement>,
+  onAttempt?: () => void,
 ) {
   const doc = base.final;
   if (!moves.size) return;
@@ -347,11 +359,15 @@ export function rerouteMovedPorts(
         instanceId: id,
         rotation: pose.rotation,
       });
-    transforms.push({
-      kind: "move_instance",
-      instanceId: id,
-      position: pose.position,
-    });
+    if (
+      pose.position.x !== port.placement.position.x ||
+      pose.position.y !== port.placement.position.y
+    )
+      transforms.push({
+        kind: "move_instance",
+        instanceId: id,
+        position: pose.position,
+      });
   }
   const groups = freezePinGroups(doc, resolver).filter((g) =>
     nets.has(g.netId),
@@ -379,7 +395,8 @@ export function rerouteMovedPorts(
   const routes = doc.routes.filter((r) => nets.has(r.netId)),
     junctions = doc.junctions.filter((j) => nets.has(j.netId));
   const protectedIds = protectedObjects(doc);
-  if ([...moves.keys()].some((id) => protectedIds.has(id))) return;
+  const fixedPorts = protectedObjects(doc, true);
+  if ([...moves.keys()].some((id) => fixedPorts.has(id))) return;
   if (
     !routes.length ||
     routes.some(
@@ -420,6 +437,7 @@ export function rerouteMovedPorts(
     ...documentObjectIds(doc),
   ]);
   let working = cleared.document;
+  onAttempt?.();
   for (const group of groups) {
     try {
       const routed = planRouteNet(
@@ -439,10 +457,13 @@ export function rerouteMovedPorts(
       const next = preview(working, resolver, routed.edits);
       if (!next.ok) return;
       working = next.document;
+      for (const id of documentObjectIds(working)) reservedIds.add(id);
     } catch {
       return;
     }
   }
+  all.push(...seatLabels(working, resolver, new Set(moves.keys())));
+  if (all.length > limit) return;
   const replay = preview(source, resolver, all);
   if (
     !replay.ok ||
