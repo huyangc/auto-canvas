@@ -241,7 +241,8 @@ The package keeps this checkout's paths, so the launchers run unchanged:
 Node is not shipped: the site runs the package with silicon-notebook's own
 Node, named by `AUTO_CANVAS_NODE`. The offline installation steps at a site
 are described separately (T167). `node scripts/package-notebook-canvas-check.mjs`
-proves a built package in an empty directory (see
+proves a built package in an empty directory and checks that its editor mounts
+in system Chrome through a proxy restricted to the package server (see
 [docs/testing/README.md](../../docs/testing/README.md#local-validation)).
 
 ## What `serve.sh` reads, sets and removes
