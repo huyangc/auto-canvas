@@ -21,7 +21,9 @@ with one of them, correct the entry file.
   commands yourself and read the diff; the implementer's report is a claim,
   not evidence.
 - Commit only reviewed work, on the task branch, then deliver it through a PR.
-  You may push and open the PR without asking; merging needs authorization for
+  Before pushing, creating or updating a PR, check automatic review hook billing
+  under the [publication rules](AGENTS.md#提交提-pr-与合入). Once any API key spend
+  is authorized, publish automatically. Merging needs authorization for
   that delivery, a posted codex review of the remote head and passing checks.
   See [PR review and merge](docs/workflow.md#pr-评审与合入). Never push directly
   to `main`.
