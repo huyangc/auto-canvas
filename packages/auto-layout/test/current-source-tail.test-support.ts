@@ -146,3 +146,49 @@ export function inputStageTail(topology: "feedback" | "biased-follower") {
   };
   return { doc, follower };
 }
+
+export function highSideSourceResistorTail(reverse: boolean) {
+  const tailPin = reverse ? "-" : "+";
+  const doc = circuit(
+    {
+      P: "pmos",
+      M: "pmos",
+      A: "resistor",
+      B: "resistor",
+      C: "resistor",
+      D: "resistor",
+      J: "current-source",
+      u: "port",
+      v: "port",
+      a: "port",
+      b: "port",
+      power: "vdd-port",
+      gnd: "ground",
+    },
+    {
+      u: ["P.G", "u.P"],
+      v: ["M.G", "v.P"],
+      a: ["M.D", "A.2", "a.P"],
+      b: ["P.D", "B.2", "b.P"],
+      power: ["A.1", "B.1", "gnd.0"],
+      first: ["P.S", "D.2"],
+      second: ["M.S", "C.1"],
+      common: ["D.1", "C.2", "J." + tailPin],
+      return: ["J." + (reverse ? "+" : "-"), "power.P"],
+    },
+  );
+  const ext = ["u", "v", "a", "b"];
+  for (const net of doc.nets) net.id = "net-" + net.id;
+  doc.netlist = {
+    name: "gain",
+    formalParameters: [],
+    terminals: ext.map((id, i) => ({
+      id,
+      name: id,
+      netId: "net-" + id,
+      direction: i < 2 ? "input" : "output",
+      interfaceInstanceIds: [id],
+    })),
+  };
+  return { doc, tailPin };
+}
