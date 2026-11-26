@@ -12,7 +12,7 @@ export interface Schema27To28MigrationResult {
  * Upgrade schema 27 to 28. The new DraftText polarity field is optional, so
  * every valid schema-27 project is already valid schema-28 data.
  */
-export function upgradeSchema27To28WithReport(
+function upgradeSchema27To28WithReport(
   raw: Record<string, unknown>,
 ): Schema27To28MigrationResult {
   const project = structuredClone(raw);

@@ -79,7 +79,7 @@ Identity and Project errors have `{error: string}`; Component Library errors may
 paths/methods outside the Component Library return 404 `Not found`.
 Project ids are ten characters drawn from `23456789abcdefghjkmnpqrstvwxyz`.
 A Project summary is `{id, name, updatedAt, revision, schemaVersion,
-galleryEntryId: null, favorite}`; an open payload adds `projectText`.
+favorite}`; an open payload adds `projectText`.
 Timestamps are ISO strings from PostgreSQL `timestamptz`.
 
 | Endpoint                                          | Result                                                                            |
@@ -90,7 +90,7 @@ Timestamps are ISO strings from PostgreSQL `timestamptz`.
 | `POST /api/auth/profile`                          | `{displayName}` trimmed to 1–40 characters → `{user}`; 400 `invalid-display-name` |
 | `POST /api/auth/logout`                           | `{ok:true}`; identity stays local                                                 |
 | `GET /api/projects`                               | `{projects, limit}`, newest `updated_at` then id first; all Projects; `no-store`  |
-| `POST /api/projects`                              | `{name, projectText, galleryEntryId?}` → 201 `{project}` summary                  |
+| `POST /api/projects`                              | `{name, projectText}` → 201 `{project}` summary                                   |
 | `GET /api/projects/:id`                           | `{project}` open payload; 404 `not-found`; `no-store`                             |
 | `PUT /api/projects/:id`                           | Same body as POST, revision gate → `{project}` summary                            |
 | `PATCH /api/projects/:id`                         | `{favorite: boolean}` → `{project}` open payload                                  |
@@ -102,7 +102,6 @@ Timestamps are ISO strings from PostgreSQL `timestamptz`.
 | `POST /api/projects/:id/versions/:vid/restore`    | No body; same revision gate and save semantics as PUT; favorite kept              |
 
 Names are trimmed, at most 120 characters; null/missing names become `""`.
-`galleryEntryId`, if present, must be a non-empty string and is ignored.
 Invalid fields yield 400 `invalid-fields`; Project text over 2 MiB UTF-8 yields
 413 `too-large`; a parse failure yields 400 `invalid-project`.
 `GET /api/projects` returns the configured `AUTO_CANVAS_PROJECT_LIMIT` as

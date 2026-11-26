@@ -14,7 +14,7 @@ export interface Schema26To27MigrationResult {
  * and adds an optional explicit stroke color; every schema-26 value is
  * already valid schema-27 data, so the upgrade is a version stamp.
  */
-export function upgradeSchema26To27WithReport(
+function upgradeSchema26To27WithReport(
   raw: Record<string, unknown>,
 ): Schema26To27MigrationResult {
   const project = structuredClone(raw);

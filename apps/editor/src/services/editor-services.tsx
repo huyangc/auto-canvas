@@ -21,7 +21,6 @@ export interface CloudProjectStore {
   save(
     project: CircuitProject,
     binding: CloudProjectBinding | null,
-    galleryEntryId?: string,
   ): Promise<CloudProjectSaveOutcome>;
   delete(projectId: string): ReturnType<typeof deleteCloudProject>;
 }

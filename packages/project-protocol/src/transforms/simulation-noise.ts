@@ -11,7 +11,7 @@ export interface Schema45To46MigrationResult {
  * Schema 46 permits structured Noise analyses. Existing Projects carry no
  * implicit Noise intent, so migration advances only the protocol version.
  */
-export function upgradeSchema45To46WithReport(
+function upgradeSchema45To46WithReport(
   raw: Record<string, unknown>,
 ): Schema45To46MigrationResult {
   const project = structuredClone(raw);

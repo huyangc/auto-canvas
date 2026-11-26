@@ -116,15 +116,9 @@ DELETE /api/projects/:id           explicitly delete one Project
   slot). The first Save of an unbound Project creates one; there is no second
   command that silently duplicates. A revision mismatch or capacity limit
   blocks only that Save; the server never evicts another Project.
-- Summary/open include nullable `galleryEntryId` (private publication
-  metadata, preserved by full backups; older backups restore unlinked).
-  Save never republishes or takes over a publication; `POST` may carry an
-  authorized `galleryEntryId` for a just-published unbound draft; changing a
-  draft's source is an explicit Gallery Publish/Update. Publish reloads source
-  metadata when it opens.
 - `favorite` (default false) is account metadata in summary, open and backup;
-  it changes no bytes, revision or publication.
-- Duplicate is an independent Project (new identity, no Gallery link). Rename
+  it changes no Project bytes or revision.
+- Duplicate is an independent Project (new identity). Rename
   is a revision-checked Save. Opening an already open Cloud id selects its
   tab without fetching. Delete keeps an open drawing as an unbound unsaved
   tab.
@@ -135,7 +129,7 @@ Each changed Save atomically snapshots the displaced revision; the newest
 three earlier revisions are kept (pruning is final); identical retries add
 nothing. Version history offers component comparison
 (snapshot comparison), Restore
-(revision-checked Save keeping publication/favorite, never republishing) and
+(revision-checked Save keeping the favorite flag) and
 Branch (independent Project without that binding). Routes:
 `GET /api/projects/:id/versions`, version `project`/`preview.svg` reads,
 `POST .../versions/:versionId/restore`; private, not cached. Full-store

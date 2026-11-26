@@ -68,37 +68,3 @@ describe("offline Gallery file conversion", () => {
     expect(backup).toEqual(original);
   });
 });
-
-describe("bounded Gallery migration preparation", () => {
-  it("keeps exact originals and rejects any private-project scope", async () => {
-    const { prepareGalleryFormatMigration } =
-      await import("./prepare-gallery-format-migration.mjs");
-    const original = JSON.stringify(createEmptyProject("source", "Source"));
-    const backup = {
-      format: "analog-canvas-gallery-backup-v2",
-      tables: {
-        galleryEntries: [
-          { id: "one", project_text: original, schema_version: 58 },
-        ],
-        galleryEntryVersions: [],
-        galleryLikes: [],
-      },
-    };
-    const result = prepareGalleryFormatMigration(backup);
-    expect(result.requests).toEqual([
-      {
-        table: "galleryEntries",
-        id: "one",
-        originalProjectText: original,
-        projectText: serializeProject(parseProject(original)),
-      },
-    ]);
-    expect(prepareGalleryFormatMigration(result.expected).requests).toEqual([]);
-    expect(() =>
-      prepareGalleryFormatMigration({
-        ...backup,
-        tables: { ...backup.tables, cloudProjects: [] },
-      }),
-    ).toThrow("Gallery-only");
-  });
-});

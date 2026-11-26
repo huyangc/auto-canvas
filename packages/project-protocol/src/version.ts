@@ -8,4 +8,5 @@
  * nine days).
  */
 export const OLDEST_SUPPORTED_PROJECT_SCHEMA_VERSION = 24;
+/** @internal Persistence tests use this version for legacy fixtures. */
 export const PREVIOUS_PROJECT_SCHEMA_VERSION = 33;

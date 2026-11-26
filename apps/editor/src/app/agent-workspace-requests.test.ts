@@ -41,7 +41,6 @@ function receipt(
       id: binding?.id ?? "cloud-new",
       revision: (binding?.revision ?? 0) + 1,
       name,
-      galleryEntryId: null,
       schemaVersion: CURRENT_PROJECT_FILE_VERSION,
       updatedAt: "2026-11-23T00:00:00Z",
     },

@@ -1108,7 +1108,6 @@ export function useProjectTabSessions({
           cloudBinding: {
             id: saved.project.id,
             revision: saved.project.revision,
-            galleryEntryId: saved.project.galleryEntryId ?? null,
           },
           savedBaseline: {
             project: renamed.project,

@@ -7,7 +7,10 @@ export interface Schema40To41MigrationResult {
   readonly report: Schema40To41MigrationReport;
 }
 
-/** Schema 41 adds structured DC-sweep intent; existing Projects need no rewrite. */
+/**
+ * Schema 41 adds structured DC-sweep intent; existing Projects need no rewrite.
+ * @internal Migration tests inspect the report for this schema step.
+ */
 export function upgradeSchema40To41WithReport(
   raw: Record<string, unknown>,
 ): Schema40To41MigrationResult {

@@ -295,7 +295,6 @@ export function createAgentWorkspaceHandler({
                   cloudBinding: {
                     id: outcome.project.id,
                     revision: outcome.project.revision,
-                    galleryEntryId: outcome.project.galleryEntryId ?? null,
                   },
                   savedBaseline: {
                     project: candidate,

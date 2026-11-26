@@ -6,7 +6,7 @@ import {
 import { describe, expect, it } from "vitest";
 
 import { parseProjectWithMetadata } from "./load.js";
-import { upgradeSchema34To35WithReport } from "./previous-to-current.js";
+import { upgradeSchema34To35WithReport } from "./transforms/instance-reference.js";
 
 function schema34Project(): Record<string, unknown> {
   const project = createEmptyProject(

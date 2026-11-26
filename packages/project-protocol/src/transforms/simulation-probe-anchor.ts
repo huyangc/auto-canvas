@@ -64,7 +64,10 @@ function voltageAnchor(
   return route ? { kind: "route", routeId: route.id } : undefined;
 }
 
-/** Upgrade saved Net representatives to concrete voltage-probe anchors. */
+/**
+ * Upgrade saved Net representatives to concrete voltage-probe anchors.
+ * @internal Migration tests inspect the report for this schema step.
+ */
 export function upgradeSchema39To40WithReport(
   raw: Record<string, unknown>,
 ): Schema39To40MigrationResult {

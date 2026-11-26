@@ -41,12 +41,11 @@ export function createWebEditorServices(
         return outcome;
       },
       open: (id) => openCloudProject(id, fetchLike),
-      save: (project, binding, galleryEntryId) =>
+      save: (project, binding) =>
         saveCloudProject(
           project,
           binding,
           fetchLike,
-          galleryEntryId,
           projectSerializer.serialize,
         ),
       delete: (id) => deleteCloudProject(id, fetchLike),

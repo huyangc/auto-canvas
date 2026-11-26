@@ -19,7 +19,10 @@ export interface Schema25To26MigrationResult {
   readonly report: Schema25To26MigrationReport;
 }
 
-/** Upgrade schema 25's parallel Route arrays to stable schema-26 legs. */
+/**
+ * Upgrade schema 25's parallel Route arrays to stable schema-26 legs.
+ * @internal Migration tests inspect the report for this schema step.
+ */
 export function upgradeSchema25To26WithReport(
   raw: Record<string, unknown>,
 ): Schema25To26MigrationResult {

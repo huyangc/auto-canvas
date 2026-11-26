@@ -21,14 +21,12 @@ export interface CloudProjectSummary {
   updatedAt: string;
   revision: number;
   schemaVersion: number;
-  galleryEntryId?: string | null;
   favorite?: boolean;
 }
 
 export interface CloudProjectBinding {
   id: string;
   revision: number;
-  galleryEntryId?: string | null;
 }
 
 export type CloudProjectSaveOutcome =
@@ -88,10 +86,6 @@ function summaryOf(value: unknown): CloudProjectSummary | null {
         revision: record.revision,
         schemaVersion: record.schemaVersion,
         favorite: record.favorite === true,
-        galleryEntryId:
-          typeof record.galleryEntryId === "string"
-            ? record.galleryEntryId
-            : null,
       }
     : null;
 }
@@ -100,7 +94,6 @@ export async function saveCloudProject(
   project: CircuitProject,
   binding: CloudProjectBinding | null,
   fetchLike: typeof fetch = fetch,
-  galleryEntryId?: string,
   serialize: (project: CircuitProject) => string = serializeProject,
 ): Promise<CloudProjectSaveOutcome> {
   cloudLists.delete(fetchLike);
@@ -118,7 +111,6 @@ export async function saveCloudProject(
         body: JSON.stringify({
           name: project.name,
           projectText: serialize(project),
-          ...(!binding && galleryEntryId ? { galleryEntryId } : {}),
         }),
       },
     );
@@ -309,7 +301,6 @@ export async function editShelfProject(
   try {
     const project = parseProject(loaded.project.projectText);
     if (action.kind === "duplicate") {
-      // A copy is independent; it must never inherit the source's publication link.
       return saveCloudProject(
         createIndependentProject(
           project,

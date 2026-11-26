@@ -195,6 +195,7 @@ function checkedProject(
   };
 }
 
+/** @internal Tests exercise validation of in-memory projects. */
 export function validateProject(input: unknown): CircuitProject {
   const result = tryValidateProject(input);
   if (!result.ok) throw new ProjectFormatError(result.diagnostics);

@@ -11,6 +11,7 @@ export interface Schema44To45MigrationResult {
  * Schema 45 permits authored measurement rules on structured Simulation
  * setups. Existing Projects have no such intent, so migration advances only
  * the protocol version and deliberately invents no measurements.
+ * @internal Migration tests inspect the report for this schema step.
  */
 export function upgradeSchema44To45WithReport(
   raw: Record<string, unknown>,

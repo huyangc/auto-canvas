@@ -1,14 +1,7 @@
 // Keep request refusals distinct so Project loading can explain failures.
-import { dailyOpenResetTime, isDailyAllowanceRefusal } from "./daily-allowance";
-import { SITE_USAGE_CONTACT } from "./usage-policy-note";
 
 export type RequestFailureKind =
-  | "blocked"
-  | "rate-limited"
-  | "daily-limit"
-  | "not-found"
-  | "server-error"
-  | "offline";
+  "rate-limited" | "not-found" | "server-error" | "offline";
 
 export interface RequestFailure {
   failure: RequestFailureKind;
@@ -44,30 +37,17 @@ function retrySeconds(response: Response, body: unknown): number {
 export async function requestFailureOf(
   response: Response,
 ): Promise<RequestFailure> {
-  const body = (await response
-    .clone()
-    .json()
-    .catch(() => null)) as { error?: unknown; resetAt?: unknown } | null;
   const { status } = response;
-  if (status === 403 && body?.error === "account-blocked")
-    return {
-      failure: "blocked",
-      message: `This account's Gallery access is paused. Contact the Owner by replying to our email or writing to ${SITE_USAGE_CONTACT}.`,
-    };
-  if (await isDailyAllowanceRefusal(response)) {
-    const resetAt = typeof body?.resetAt === "string" ? body.resetAt : "";
-    return {
-      failure: "daily-limit",
-      message: Number.isNaN(Date.parse(resetAt))
-        ? "Today's limit is reached. Try again tomorrow."
-        : `Today's limit is reached. Try again after ${dailyOpenResetTime({ resetAt })}.`,
-    };
-  }
-  if (status === 429)
+  if (status === 429) {
+    const body: unknown = await response
+      .clone()
+      .json()
+      .catch(() => null);
     return {
       failure: "rate-limited",
       message: `Too many requests. Wait ${retrySeconds(response, body)} seconds and try again.`,
     };
+  }
   if (status === 404) return { failure: "not-found", message: "Not found." };
   return {
     failure: "server-error",

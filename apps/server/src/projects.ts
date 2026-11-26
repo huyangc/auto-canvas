@@ -42,7 +42,6 @@ function summary(row: SummaryRow) {
     updatedAt: row.updated_at.toISOString(),
     revision: row.revision,
     schemaVersion: row.schema_version,
-    galleryEntryId: null,
     favorite: row.favorite,
   };
 }
@@ -102,10 +101,7 @@ async function save(
     !body ||
     name === null ||
     name.length > 120 ||
-    typeof body.projectText !== "string" ||
-    ("galleryEntryId" in body &&
-      body.galleryEntryId !== undefined &&
-      (typeof body.galleryEntryId !== "string" || !body.galleryEntryId))
+    typeof body.projectText !== "string"
   )
     return c.json({ error: "invalid-fields" }, 400);
   if (Buffer.byteLength(body.projectText, "utf8") > 2 * 1024 * 1024)

@@ -12,7 +12,7 @@ export interface Schema46To47MigrationResult {
  * Projects carry no implicit selection, so migration advances only the
  * protocol version.
  */
-export function upgradeSchema46To47WithReport(
+function upgradeSchema46To47WithReport(
   raw: Record<string, unknown>,
 ): Schema46To47MigrationResult {
   const project = structuredClone(raw);

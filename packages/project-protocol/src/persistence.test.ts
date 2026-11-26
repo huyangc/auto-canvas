@@ -15,9 +15,7 @@ import {
   parseProjectWithMetadata,
   PREVIOUS_PROJECT_SCHEMA_VERSION,
   serializeProject,
-  upgradeSchema24To25WithReport,
   upgradeSchema25To26,
-  upgradeSchema25To26WithReport,
   upgradeSchema26To27,
   upgradeSchema27To28,
   upgradeSchema28To29,
@@ -26,6 +24,8 @@ import {
   upgradeSchema31To32,
   upgradeSchema32To33,
 } from "./index.js";
+import { upgradeSchema24To25WithReport } from "./transforms/project.js";
+import { upgradeSchema25To26WithReport } from "./transforms/route-leg.js";
 
 describe("Project persistence", () => {
   it("accepts the canonical fixture and rejects the invalid fixture", () => {

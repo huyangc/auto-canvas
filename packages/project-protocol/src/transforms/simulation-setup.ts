@@ -13,7 +13,10 @@ export interface Schema36To37MigrationResult {
   readonly report: Schema36To37MigrationReport;
 }
 
-/** Upgrade schema 36 to 37 without inventing any simulation intent. */
+/**
+ * Upgrade schema 36 to 37 without inventing any simulation intent.
+ * @internal Migration tests inspect the report for this schema step.
+ */
 export function upgradeSchema36To37WithReport(
   raw: Record<string, unknown>,
 ): Schema36To37MigrationResult {

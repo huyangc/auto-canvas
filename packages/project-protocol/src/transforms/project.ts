@@ -57,6 +57,7 @@ interface DocumentMigrationResult {
  * singleton terminal records. Existing physical topology is authoritative and
  * therefore remains byte-for-byte unchanged; the migration never guesses how
  * to partition a Base Net, Route, or Junction.
+ * @internal Migration tests inspect the report for this schema step.
  */
 export function upgradeSchema24To25WithReport(
   raw: Record<string, unknown>,

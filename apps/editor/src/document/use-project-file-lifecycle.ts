@@ -71,8 +71,6 @@ export interface ProjectFileSession {
   cloudBinding: CloudProjectBinding | null;
   savedBaseline: SavedProjectBaseline | null;
   safeSnapshotToken: string | null;
-  /** Absent in tabs saved before publications were tracked. */
-  publishedSnapshotToken?: string | null;
   /** A live edit since the last matching receipt: auto-save may send it. */
   autoSaveArmed?: boolean;
   /** What a failed Cloud write left; auto-save waits while it applies. */
@@ -166,7 +164,6 @@ export interface UseProjectFileLifecycleOptions {
     id: string,
     background: boolean,
   ): Promise<boolean> | null;
-  galleryEntryId?: string | undefined;
   project: CircuitProject;
   /**
    * The active controller's current Project: a commit is visible here before
@@ -220,7 +217,6 @@ export function useProjectFileLifecycle({
   externalWorkspaceRestored = false,
   openProjectInTab,
   selectOpenCloudProject,
-  galleryEntryId,
   project,
   currentProject,
   currentWorkingCopyId: currentWorkingCopyIdOption,
@@ -320,10 +316,8 @@ export function useProjectFileLifecycle({
   const sessionChangedOnRender = liveSessionRef.current !== projectSessionId;
   liveSessionRef.current = projectSessionId;
   const replacementEpochRef = useRef(0);
-  /** Change token of the last snapshot published or exported; see hasUnsafeWork. */
+  /** Change token of the last exported snapshot; see hasUnsafeWork. */
   const safeSnapshotTokenRef = useRef<string | null>(null);
-  /** Change token of the last snapshot published; see hasUnsavedChanges. */
-  const publishedSnapshotTokenRef = useRef<string | null>(null);
   const [persistenceState, setPersistenceStateValue] =
     useState<PersistenceState>("unbound");
   // The guard asks for the live state: an import reads its files for a while,
@@ -555,24 +549,16 @@ export function useProjectFileLifecycle({
     return token !== null && projectChangeToken(readCurrentProject()) === token;
   }
 
-  /**
-   * What the unsaved marks and a tab's close question show: dirty work,
-   * unless the Gallery holds exactly these bytes. A publication is kept with
-   * its history, so it saves the drawing the way the Cloud does; an exported
-   * file is interchange and does not.
-   */
+  /** Drives unsaved marks and the tab close prompt. */
   function hasUnsavedChanges(): boolean {
-    if (hasPendingEdits?.()) return true;
-    return (
-      isDirtyWork() && !holdsLiveProject(publishedSnapshotTokenRef.current)
-    );
+    return hasPendingEdits?.() ? true : isDirtyWork();
   }
 
   /**
    * The one predicate every leave/replace/refresh guard shares: there is
    * meaningful drawing, the persistence state says it has not reached the
    * Cloud, AND no equally safe copy of exactly these bytes exists anywhere
-   * else. Publishing to the gallery or exporting the Project file stamps
+   * else. Exporting the Project file stamps
    * the current snapshot safe — the drawing is recoverable from there, so
    * prompting again would be crying wolf.
    */
@@ -586,11 +572,6 @@ export function useProjectFileLifecycle({
 
   function noteProjectSnapshotSafe(snapshot = liveProjectRef.current): void {
     safeSnapshotTokenRef.current = projectChangeToken(snapshot);
-  }
-
-  function noteProjectPublished(snapshot = liveProjectRef.current): void {
-    noteProjectSnapshotSafe(snapshot);
-    publishedSnapshotTokenRef.current = projectChangeToken(snapshot);
   }
 
   function replaceActiveProject(
@@ -612,7 +593,6 @@ export function useProjectFileLifecycle({
     }
     const prepared = materializeRazaviProjectBulkConnections(nextProject);
     safeSnapshotTokenRef.current = null;
-    publishedSnapshotTokenRef.current = null;
     const nextDocument = installProject(prepared.project, nextViewBox, options);
     // The installed Project is the clean/unbound reference until the next
     // render adopts it under the new session: an edit before that render is
@@ -701,11 +681,7 @@ export function useProjectFileLifecycle({
     void recovery.flushNow();
     let outcome: CloudProjectSaveOutcome;
     try {
-      outcome = await projectStore.save(
-        savedCandidate,
-        writeBinding,
-        galleryEntryId,
-      );
+      outcome = await projectStore.save(savedCandidate, writeBinding);
     } catch (error) {
       if (snapshot.isCurrent() && !superseded())
         recordAutoSaveHold(writeBinding, "threw", epochAtStart);
@@ -724,7 +700,6 @@ export function useProjectFileLifecycle({
       const nextBinding = {
         id: outcome.project.id,
         revision: outcome.project.revision,
-        galleryEntryId: outcome.project.galleryEntryId ?? null,
       };
       setCloudBinding(nextBinding);
       rememberRecentCloudProject(nextBinding.id);
@@ -1536,7 +1511,6 @@ export function useProjectFileLifecycle({
           cloudBinding: {
             id: cloud.id,
             revision: cloud.revision,
-            galleryEntryId: cloud.galleryEntryId ?? null,
           },
           savedBaseline: baseline,
         };
@@ -1901,7 +1875,6 @@ export function useProjectFileLifecycle({
       cloudBinding: cloudBindingRef.current,
       savedBaseline: savedProjectBaselineRef.current,
       safeSnapshotToken: safeSnapshotTokenRef.current,
-      publishedSnapshotToken: publishedSnapshotTokenRef.current,
       ...(autoSaveArmedRef.current ? { autoSaveArmed: true } : {}),
       ...(autoSaveHoldRef.current
         ? { autoSaveHold: autoSaveHoldRef.current }
@@ -1919,8 +1892,6 @@ export function useProjectFileLifecycle({
       setAutoSaveArmed(session.autoSaveArmed === true);
       setAutoSaveHold(session.autoSaveHold ?? null);
       safeSnapshotTokenRef.current = session.safeSnapshotToken;
-      publishedSnapshotTokenRef.current =
-        session.publishedSnapshotToken ?? null;
       persistenceChangeRef.current = null;
       setRecoveryDialogOpen(false);
       setDismissedStartupRecoveryRecordId(null);
@@ -1932,10 +1903,6 @@ export function useProjectFileLifecycle({
     startupRestorePending: startupOutcomeRef.current === "pending",
     persistenceState,
     cloudBinding,
-    noteGalleryPublication: (id: string | null) => {
-      const current = cloudBindingRef.current;
-      if (current) setCloudBinding({ ...current, galleryEntryId: id });
-    },
     noteExternalCommit,
     cloudAutoSave: {
       armed: autoSaveArmed,
@@ -1966,7 +1933,6 @@ export function useProjectFileLifecycle({
     hasUnsavedChanges,
     hasUnsafeWork,
     noteProjectSnapshotSafe,
-    noteProjectPublished,
     replaceActiveProject,
     saveProjectToCloud,
     saveProjectToCloudByHand,

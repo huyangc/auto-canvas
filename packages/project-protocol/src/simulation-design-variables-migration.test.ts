@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { upgradeSchema47To48WithReport } from "./previous-to-current.js";
+import { upgradeSchema47To48WithReport } from "./transforms/simulation-design-variables.js";
 
 describe("schema 47 to 48 simulation variable migration", () => {
   it("preserves nominal behavior while adding an explicit Run Plan", () => {
