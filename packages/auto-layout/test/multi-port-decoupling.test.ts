@@ -348,3 +348,53 @@ it("preserves reversed authored contacts through placement and routing", () => {
     ),
   ).toBe(true);
 });
+
+it("prefers unclaimed pins over borrowing an authored port association and rejects non-rail supply nets", () => {
+  const source = namedSignals(
+    { A: "resistor", B: "resistor", C: "resistor" },
+    { bias: ["A.1", "B.1", "C.1"] },
+  );
+  // Remove the third port so two ports serve three hosts: bias_0 owns A and B.
+  source.instances = source.instances.filter((i) => i.id !== "bias_2");
+  source.nets[0]!.terminals = source.nets[0]!.terminals.filter(
+    (t) => t.instanceId !== "bias_2",
+  );
+  const roles = classifyNets(source, resolver);
+  const clusters = decoupledSignalPortClusters(
+    source,
+    "bias",
+    source.nets[0]!.terminals,
+    roles,
+    [],
+    [],
+    [
+      [
+        { instanceId: "bias_0", pinName: "P" },
+        { instanceId: "A", pinName: "1" },
+      ],
+      [
+        { instanceId: "bias_0", pinName: "P" },
+        { instanceId: "B", pinName: "1" },
+      ],
+    ],
+  );
+  expect(
+    clusters?.map((c) => [c.port.instanceId, c.hosts.map((h) => h.instanceId)]),
+  ).toEqual([
+    ["bias_0", ["A", "B"]],
+    ["bias_1", ["C"]],
+  ]);
+  roles.byNet.set("bias", "supply");
+  expect(
+    decoupledSignalPortClusters(
+      source,
+      "bias",
+      source.nets[0]!.terminals,
+      roles,
+      [],
+      [],
+      [],
+      { allowRails: true },
+    ),
+  ).toBeUndefined();
+});

@@ -274,7 +274,16 @@ function powerTargets(
         (pin) => !markers.some((marker) => samePin(marker, pin)),
       );
       const pins = host ? [...remaining, host] : remaining;
-      targets.unshift(...railTrunk(document, resolver, pins, role));
+      const gateOnly = group.pins.every((pin) => {
+        const inst = instances.get(pin.instanceId);
+        return (
+          !inst ||
+          isMarker(inst) ||
+          (isMos(inst.symbolId) && pin.pinName === "G")
+        );
+      });
+      if (gateOnly && targets.length) targets.unshift({ pins });
+      else targets.unshift(...railTrunk(document, resolver, pins, role));
     }
     return targets;
   }
@@ -561,19 +570,16 @@ function routeGroup(
   const diagnostics: AutoLayoutDiagnostic[] = [];
   const power = (g: PinGroup) =>
     ["supply", "ground"].includes(roles.byNet.get(g.netId) ?? "");
-  const clusters =
-    power(group) && !roles.rails.has(group.netId)
-      ? undefined
-      : decoupledSignalPortClusters(
-          working,
-          group.netId,
-          group.pins,
-          roles,
-          group.contacts,
-          points,
-          group.portAssociations,
-          { allowRails: true },
-        );
+  const clusters = decoupledSignalPortClusters(
+    working,
+    group.netId,
+    group.pins,
+    roles,
+    group.contacts,
+    points,
+    group.portAssociations,
+    { allowRails: true },
+  );
   const targets: RoutingTarget[] = clusters
     ? clusters.map((c) => ({ pins: [c.port, ...c.hosts] }))
     : power(group)

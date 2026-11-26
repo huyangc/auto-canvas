@@ -70,23 +70,21 @@ function netComponents(
   // Complete physical trees cannot benefit from marker-name resolution.
   // Likewise, one marked component cannot bridge to an unmarked component.
   const candidates = new Map<string, typeof pins>();
-  if (document.instances.length <= 40) {
-    const markers = new Set(
-      document.instances
-        .filter((i) => isPowerMarker(i.symbolId))
-        .map((i) => i.id),
-    );
-    for (const pin of pins) {
-      if (
-        !pin.netId ||
-        (components.get(pin.netId)?.size ?? 0) < 2 ||
-        !markers.has(pin.instanceId)
-      )
-        continue;
-      const group = candidates.get(pin.netId) ?? [];
-      group.push(pin);
-      candidates.set(pin.netId, group);
-    }
+  const markers = new Set(
+    document.instances
+      .filter((i) => isPowerMarker(i.symbolId))
+      .map((i) => i.id),
+  );
+  for (const pin of pins) {
+    if (
+      !pin.netId ||
+      (components.get(pin.netId)?.size ?? 0) < 2 ||
+      !markers.has(pin.instanceId)
+    )
+      continue;
+    const group = candidates.get(pin.netId) ?? [];
+    group.push(pin);
+    candidates.set(pin.netId, group);
   }
   // T071: named marker components are complete local rail trees. Unmarked
   // components still need drawn joins; floatingPins remains purely physical.

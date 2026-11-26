@@ -2197,7 +2197,8 @@ function planAutoLayoutMeasured(
                 (run) =>
                   (chosen.portfolio !== ranked ||
                     !isStackStrategy(run.strategy)) &&
-                  (!!withMcts || run.strategy !== "mcts") &&
+                  ((!!withMcts && !deferMctsToFinalist) ||
+                    run.strategy !== "mcts") &&
                   (incumbent.portfolio !== chosen.portfolio ||
                     run.strategy !== "convention"),
               ),

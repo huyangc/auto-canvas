@@ -213,7 +213,10 @@ AutoLayoutDiagnostic[] }`. Fixed instances retain their exact placements;
   pin of each non-MOS, non-two-pin device on the Net (BJT, op-amp, block),
   sorted by device id then x, preferring a pin whose exit faces the rail,
   then the lowest pin for ground or highest for VDD. A pin whose exit faces
-  away from the rail never hosts, and a MOS gate keeps its R43 join. Seat a
+  away from the rail never hosts. MOS gate pins on the rail whose exit faces
+  the rail or leaves sideways are appended last as fallback extra hosts
+  (T188), used only when no channel host or non-MOS extra host is available so
+  gate-only rail markers do not park at the origin. Seat a
   facing pin's marker straight on its exit at one or two marker offsets; seat
   a sideways pin's marker one or two offsets out along the exit and one or
   two offsets toward the rail, nearest first, so one bend joins them. Take
@@ -305,8 +308,11 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   If the trunk is refused or incomplete, compare a plain tree under R86.
   Members that all share one column have no span for a horizontal trunk and
   join by the plain tree alone; never widen a trunk past its outermost members.
+  When a marker is hosted at a MOS gate and all remaining pins on that rail
+  are MOS gates, join them with a local orthogonal tree instead of hoisting a
+  canvas-spanning rail trunk (T188).
   After finishing, R155 may replace a crossed trunk with named local marker
-  trees on documents of at most 40 instances.
+  trees on documents of up to 120 instances (T188).
   A supply or ground Cell Pin joins its Net through a trunk, with the Cell Pin on it.
   A grounded source driving a passive chain has a supply role under R4 but is
   routed as a signal, so it gets no trunk.
@@ -2382,7 +2388,7 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
 
 - **R155 — Local rail markers.** After all placement, routing, label and
   drafting finishing, consider crossed rail Nets in decreasing crossing count
-  with Net-id ties, for documents with at most 40 instances. Require an existing
+  with Net-id ties, for documents with at most 120 instances (T188). Require an existing
   `ground`/`vdd-port` with an explicit name claim, or an existing power-marker-owned
   name claim with domain `ground`/`vdd` (the model's supply domain). Never infer
   or invent a name. A claim-only rail may receive the corresponding symbol.
@@ -2390,7 +2396,8 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   pins outside the existing markers' remaining components receive local markers;
   the other pins retain a shared trunk. Also generate one marker per device,
   joining its non-bulk rail pins in one short tree. Reuse existing markers in
-  nearest-host/id order before adding copies; never exceed 40 total instances.
+  nearest-host/id order before adding copies; add at most 16 markers per rail
+  and never exceed 120 total instances.
   Share at most eight finished trials per document. Give both partitions a
   trial before considering a second seat preference; with more than two crossed
   rails retain only the first preference to share the budget across rails.
@@ -2405,7 +2412,8 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   explicit endpoint membership and a claim with the existing name, scope and
   domain. Supply copies without an authored label receive a bound net-name label.
   Seat unlocked labels after routing. Compare complete transaction replays by
-  the readability-augmented calibrated finished score, requiring fewer total
+  the readability-augmented calibrated finished score (materializing any
+  canonical junctions before canonical routes in the replay prefix), requiring fewer total
   crossings or a strictly lower frozen composite, no unsafe routing or increased
   routed guard, and no increase in T070's frozen readability composite. Ties retain the incumbent. Bends and wire length are evaluated by
   the score and the corpus acceptance gates. Cancellation and the transaction
@@ -2416,9 +2424,9 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   partition's power claim and corresponding default symbol. Each added marker's
   own claim must preserve name, scope and domain on that same partition.
   Strict fixed-terminal callers retain their behavior. Named same-symbol marker
-  components count as complete local rail trees for the small-document
-  missing-connection guard; unmarked components still require wires and floating
-  pins still use physical components. Documents above 40 retain prior behavior.
+  components count as complete local rail trees for the
+  missing-connection guard across document sizes; unmarked components still require wires and floating
+  pins still use physical components. Documents above 120 retain prior behavior.
 
 - **Existing locks and conflicts.** Members of a locked layout group or
   constraint are treated as fixed instances under R1, because the Edit Engine

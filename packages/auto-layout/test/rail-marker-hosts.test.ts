@@ -301,4 +301,31 @@ describe("T127 rail markers sit at the pin they serve", () => {
       y: first.host.y + 20,
     });
   });
+
+  it("seats a gate-only MOS rail marker beside the gate instead of parking at the origin", () => {
+    const document = circuit(
+      { M1: "nmos", M2: "nmos", vdd: "vdd-port" },
+      { rail: ["M1.G", "M2.G", "vdd.P"] },
+    );
+    document.instances.find((i) => i.id === "M1")!.placement = placement(
+      800,
+      400,
+    );
+    document.instances.find((i) => i.id === "M2")!.placement = placement(
+      800,
+      500,
+    );
+    const after = layout(document);
+    const gate = point(after, "M1", "G");
+    const marker = point(after, "vdd", "P");
+    expect(marker).toEqual({ x: gate.x - 20, y: gate.y - 20 });
+    const totalLength = after.routes
+      .flatMap((r) => resolveRouteGeometry(after, resolver, r)?.segments ?? [])
+      .reduce(
+        (sum, s) =>
+          sum + Math.abs(s.to.x - s.from.x) + Math.abs(s.to.y - s.from.y),
+        0,
+      );
+    expect(totalLength).toBeLessThanOrEqual(200);
+  });
 });

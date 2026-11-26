@@ -59,7 +59,7 @@ export function localRailCandidate(
     )
   )
     return { reason: "protected annotation" };
-  const cut: SchematicEdit[] = [
+  const cutHeader: SchematicEdit[] = [
     ...freed.map((a): SchematicEdit => ({
       kind: "upsert_schematic_annotation",
       annotation: {
@@ -91,6 +91,34 @@ export function localRailCandidate(
           ]
         : [],
     ),
+  ];
+  const cutRemovals: SchematicEdit[] = [
+    ...routes.map((r) => ({
+      kind: "remove_route_geometry" as const,
+      routeId: r.id,
+    })),
+    ...dots.map((j) => ({
+      kind: "remove_junction" as const,
+      junctionId: j.id,
+    })),
+  ];
+  const docCut: SchematicEdit[] = [...cutHeader, ...cutRemovals];
+  const replayCut: SchematicEdit[] = [
+    ...cutHeader,
+    ...dots
+      .filter(
+        (j) =>
+          !source.junctions.some((old) => old.id === j.id) &&
+          !result.edits.some(
+            (e) => e.kind === "add_junction" && e.junctionId === j.id,
+          ),
+      )
+      .map((j): SchematicEdit => ({
+        kind: "add_junction",
+        junctionId: j.id,
+        netId: j.netId,
+        position: j.position,
+      })),
     ...routes
       .filter(
         (r) =>
@@ -103,16 +131,9 @@ export function localRailCandidate(
           ),
       )
       .map((route): SchematicEdit => ({ kind: "set_route_path", route })),
-    ...routes.map((r) => ({
-      kind: "remove_route_geometry" as const,
-      routeId: r.id,
-    })),
-    ...dots.map((j) => ({
-      kind: "remove_junction" as const,
-      junctionId: j.id,
-    })),
+    ...cutRemovals,
   ];
-  const removed = preview(document, resolver, cut);
+  const removed = preview(document, resolver, docCut);
   if (!removed.ok) return { reason: "cleanup", values: removed.diagnostics };
   const restore = restorePinGroups(frozen, removed.document, resolver);
   const cleared = preview(removed.document, resolver, restore);
@@ -137,7 +158,7 @@ export function localRailCandidate(
     throw new Error("Local rail marker identity space exhausted");
   };
   let working = cleared.document;
-  const edits: SchematicEdit[] = [...cut, ...restore];
+  const edits: SchematicEdit[] = [...replayCut, ...restore];
   const unused = [...markers];
   let failure: { reason: string; values?: unknown } | undefined;
   for (const { key: hostId, pins, trunk } of clusters) {
@@ -236,7 +257,7 @@ export function localRailCandidate(
         },
       },
     );
-    if (edits.length === cut.length + restore.length) {
+    if (edits.length === replayCut.length + restore.length) {
       for (const annotation of freed)
         changes.push({
           kind: "upsert_schematic_annotation",
