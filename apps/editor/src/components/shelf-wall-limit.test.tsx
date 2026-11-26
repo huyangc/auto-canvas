@@ -393,10 +393,11 @@ it("dismisses an open quick-delete confirmation on Escape even after focus moves
     schemaVersion: project.schemaVersion,
     favorite: false,
   };
+  const other = { ...summary, id: "bias", name: "Bias" };
   vi.stubGlobal(
     "fetch",
     vi.fn<typeof fetch>(async () =>
-      Response.json({ projects: [summary], limit: 200 }),
+      Response.json({ projects: [summary, other], limit: 200 }),
     ),
   );
   container = document.createElement("div");
@@ -415,18 +416,19 @@ it("dismisses an open quick-delete confirmation on Escape even after focus moves
     container.querySelector('.shelf-tile-footer[data-confirming="true"]'),
   ).not.toBeNull();
 
-  // Tab away from the confirmation controls to the search box, then press Escape.
-  const search = container.querySelector<HTMLInputElement>(
-    'input[aria-label="Search cloud projects"]',
+  // Tab away from the expanded confirmation onto another tile's closed trash button,
+  // then press Escape: it must dismiss the open confirmation rather than bubble out.
+  const otherTrash = container.querySelector<HTMLButtonElement>(
+    '[data-testid="shelf-quick-delete-bias"]',
   )!;
-  search.focus();
+  otherTrash.focus();
   const escape = new KeyboardEvent("keydown", {
     key: "Escape",
     bubbles: true,
     cancelable: true,
   });
   await act(async () => {
-    search.dispatchEvent(escape);
+    otherTrash.dispatchEvent(escape);
   });
   expect(escape.defaultPrevented).toBe(true);
   expect(

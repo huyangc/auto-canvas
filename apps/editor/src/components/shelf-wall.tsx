@@ -319,7 +319,7 @@ export function ShelfWall({
         !controlsBusy &&
         !(
           event.target instanceof Element &&
-          event.target.closest(".inline-confirm")
+          event.target.closest('.inline-confirm[data-expanded="true"]')
         )
       ) {
         event.preventDefault();
