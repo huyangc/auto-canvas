@@ -812,7 +812,7 @@ it.each(["resistor", "capacitor", "inductor"])(
   60_000,
 );
 
-it("leaves an unpaired resistor and a resistor across mirrored Nets outside", () => {
+it("keeps unpaired and conflicted resistors outside and centres the lone mirrored-Net bridge", () => {
   const d = passiveFixture("resistor");
   d.instances = d.instances.filter((i) => i.id !== "passive-right");
   for (const net of d.nets)
@@ -842,7 +842,7 @@ it("leaves an unpaired resistor and a resistor across mirrored Nets outside", ()
       (t) => t.instanceId !== "passive-left",
     );
   expect(detect(d)).toEqual([
-    { pairs: [["a", "b"]], axis: ["t"], conflicted: [] },
+    { pairs: [["a", "b"]], axis: ["across", "t"], conflicted: [] },
   ]);
 });
 
