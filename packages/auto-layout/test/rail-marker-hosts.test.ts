@@ -328,4 +328,79 @@ describe("T127 rail markers sit at the pin they serve", () => {
       );
     expect(totalLength).toBeLessThanOrEqual(200);
   });
+
+  it("keeps MOS-gate fallback off mixed rails with a conventional host", () => {
+    const document = circuit(
+      { R1: "resistor", M1: "nmos", g1: "ground", g2: "ground" },
+      { rail: ["R1.2", "M1.G", "g1.0", "g2.0"] },
+    );
+    nameGround(document);
+    document.instances.find((i) => i.id === "R1")!.placement = placement(
+      100,
+      400,
+    );
+    document.instances.find((i) => i.id === "M1")!.placement = placement(
+      500,
+      400,
+    );
+    const after = layout(document);
+    const host = point(after, "R1", "2");
+    expect(point(after, "g1", "0")).toEqual({ x: host.x, y: host.y + 20 });
+    expect(point(after, "g2", "0")).toEqual({
+      x: host.x + 20,
+      y: host.y + 20,
+    });
+  });
+
+  it("keeps the R12 rail trunk when a gate-only rail also has a Cell Pin", () => {
+    const document = circuit(
+      { M1: "nmos", M2: "nmos", g: "ground", p: "port" },
+      { rail: ["M1.G", "M2.G", "g.0", "p.P"] },
+    );
+    document.netlist = {
+      name: "cell",
+      formalParameters: [],
+      terminals: [
+        {
+          id: "ground-terminal",
+          name: "GND",
+          netId: "rail",
+          direction: "input",
+          interfaceInstanceIds: ["p"],
+        },
+      ],
+    };
+    document.instances.find((i) => i.id === "M1")!.placement = placement(
+      800,
+      400,
+    );
+    document.instances.find((i) => i.id === "M2")!.placement = placement(
+      400,
+      500,
+    );
+    document.instances.find((i) => i.id === "p")!.placement = placement(
+      300,
+      600,
+    );
+    const after = layout(document);
+    const g1 = point(after, "M1", "G");
+    const g2 = point(after, "M2", "G");
+    const portPin = point(after, "p", "P");
+    const gateMaxY = Math.max(g1.y, g2.y);
+    const horizontalBelowGates = after.routes
+      .flatMap((r) => resolveRouteGeometry(after, resolver, r)?.segments ?? [])
+      .filter(
+        (s) =>
+          s.from.y === s.to.y && s.from.y > gateMaxY && s.from.x !== s.to.x,
+      );
+    expect(horizontalBelowGates.length).toBeGreaterThan(0);
+    const minX = Math.min(
+      ...horizontalBelowGates.map((s) => Math.min(s.from.x, s.to.x)),
+    );
+    const maxX = Math.max(
+      ...horizontalBelowGates.map((s) => Math.max(s.from.x, s.to.x)),
+    );
+    expect(minX).toBeLessThanOrEqual(portPin.x);
+    expect(maxX).toBeGreaterThanOrEqual(g1.x);
+  });
 });

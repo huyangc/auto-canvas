@@ -1,5 +1,5 @@
 import { compareRuns } from "./refine.js";
-import { isVisibleEndpoint } from "@icm/derived";
+import { diagnoseLabelClearance, isVisibleEndpoint } from "@icm/derived";
 import { MAX_SCHEMATIC_EDITS_PER_TRANSACTION } from "@icm/edit-engine";
 import type { Instance, SchematicDocument } from "@icm/model";
 import type { SymbolResolver } from "@icm/symbols";
@@ -265,18 +265,24 @@ export function localRailMarkers(
         )
           failures.crossings = [before.crossings, audit.crossings];
         if (audit.unsafeProblems.length) failures.unsafe = audit.unsafeProblems;
-        for (const [key, count] of Object.entries(guards))
-          if (
-            !(
-              document.instances.length <= 40 &&
-              [
-                "VISUAL_LABEL_CLEARANCE",
-                "VISUAL_LABEL_OWNER_DISTANCE",
-              ].includes(key)
-            ) &&
-            count > (limits[key] ?? 0)
-          )
-            failures[key] = [limits[key] ?? 0, count];
+        const beforeClearance =
+          document.instances.length <= 40 &&
+          final.document.instances.length > 40
+            ? diagnoseLabelClearance(document, resolver).reduce<
+                Record<string, number>
+              >((counts, diagnostic) => {
+                if (
+                  diagnostic.code === "VISUAL_LABEL_CLEARANCE" ||
+                  diagnostic.code === "VISUAL_LABEL_OWNER_DISTANCE"
+                )
+                  counts[diagnostic.code] = (counts[diagnostic.code] ?? 0) + 1;
+                return counts;
+              }, {})
+            : undefined;
+        for (const [key, count] of Object.entries(guards)) {
+          const limit = beforeClearance?.[key] ?? limits[key] ?? 0;
+          if (count > limit) failures[key] = [limit, count];
+        }
         if (
           compareRuns(
             run(final.document, candidate),

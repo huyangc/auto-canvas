@@ -178,7 +178,9 @@ export function extraRailHosts(
     .sort(
       (a, b) => compareIds(a.instanceId, b.instanceId) || a.point.x - b.point.x,
     );
-  const mosGates = devices
+  if (nonMos.length || powerHosts(pins, devices, resolver, ground).length)
+    return nonMos;
+  return devices
     .filter((i) => isMos(i.symbolId))
     .flatMap((i) =>
       pins.filter((p) => {
@@ -190,7 +192,6 @@ export function extraRailHosts(
     .sort(
       (a, b) => compareIds(a.instanceId, b.instanceId) || a.point.x - b.point.x,
     );
-  return [...nonMos, ...mosGates];
 }
 
 /** R6a/T127: marker pin offsets from an extra host, nearest first: one
