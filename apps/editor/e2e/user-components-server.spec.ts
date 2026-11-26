@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { clickCommand, awaitEditorReady } from "./editor-fixtures.js";
+import { openUserComponents, awaitEditorReady } from "./editor-fixtures.js";
 import { newComponentDefinition } from "../src/features/user-components/component-definition-edit.js";
 
 test("authors, publishes and reloads a PostgreSQL component before placing its capture", async ({
@@ -12,7 +12,7 @@ test("authors, publishes and reloads a PostgreSQL component before placing its c
   try {
     await page.goto("/editor?new=1");
     await awaitEditorReady(page);
-    await clickCommand(page, "Edit", "User Components…");
+    await openUserComponents(page);
     const library = page.getByRole("dialog", {
       name: "User Components",
       exact: true,
@@ -54,7 +54,7 @@ test("authors, publishes and reloads a PostgreSQL component before placing its c
     try {
       await fresh.goto(new URL("/editor?new=1", page.url()).href);
       await awaitEditorReady(fresh);
-      await clickCommand(fresh, "Edit", "User Components…");
+      await openUserComponents(fresh);
       const dialog = fresh.getByRole("dialog", {
         name: "User Components",
         exact: true,

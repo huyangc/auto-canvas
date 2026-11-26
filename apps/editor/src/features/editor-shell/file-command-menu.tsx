@@ -54,6 +54,9 @@ export interface FileCommandMenuProps {
   onOpenRecovery: () => void;
   /** Opens Project Info, where the circuit and its Cell are named. */
   onOpenInfo?: () => void;
+  /** Opens Cell Manager for creating and organizing Cells and model sources. */
+  onManageCells?: () => void;
+  cellManagerOpen?: boolean;
   projectTabs?: FileProjectTabActions;
   /**
    * Drawn as the File group inside another menu (the header's File menu),
@@ -82,6 +85,8 @@ export function FileCommandMenu({
   onRevert,
   onOpenRecovery,
   onOpenInfo,
+  onManageCells,
+  cellManagerOpen = false,
   projectTabs,
   embedded = false,
 }: FileCommandMenuProps) {
@@ -127,6 +132,17 @@ export function FileCommandMenu({
         {onOpenInfo ? (
           <button type="button" aria-haspopup="dialog" onClick={onOpenInfo}>
             Project Info
+          </button>
+        ) : null}
+        {onManageCells ? (
+          <button
+            type="button"
+            data-testid="hierarchy-entry"
+            aria-haspopup="dialog"
+            aria-expanded={cellManagerOpen}
+            onClick={onManageCells}
+          >
+            Cell Manager…
           </button>
         ) : null}
         <button type="button" onClick={onNewProject}>

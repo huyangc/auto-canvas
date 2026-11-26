@@ -2,17 +2,31 @@ export function NetlistProfileCode({
   text,
   error,
   onChange,
+  onBack,
 }: {
   text: string;
   error: string | null;
   onChange(text: string): void;
+  onBack?: () => void;
 }) {
   return (
     <section
       className="netlist-profile-code"
       aria-label="Netlist configuration"
     >
-      <h2>Netlist configuration</h2>
+      <div className="netlist-profile-header">
+        <h2>Netlist configuration</h2>
+        {onBack ? (
+          <button
+            type="button"
+            className="netlist-settings-back"
+            data-testid="netlist-settings-back"
+            onClick={onBack}
+          >
+            Back to Netlist
+          </button>
+        ) : null}
+      </div>
       <p>
         Edit or paste the complete JSON. The selected process maps device
         targets and fills missing parameters in the Project. Existing values

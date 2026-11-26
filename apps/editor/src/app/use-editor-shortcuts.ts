@@ -324,13 +324,13 @@ function createEditorShortcutHandler({
       event.target instanceof Element &&
       (event.target.closest(".project-tab-name-input") ||
         event.target.closest(".cloud-shelf-dialog, .change-log-dialog") ||
-        // An open File, ⋯ or account menu scrolls and closes itself; Escape
+        // An open File or account menu scrolls and closes itself; Escape
         // returns focus to its button, and no arrow pans. Enter and Space
         // activate its focused row, and Delete or Backspace never edits the
         // drawing behind it. Closed, its focused button leaves the keys to
         // the canvas (Escape cancels a tool, arrows pan).
         (event.target.closest(
-          ".project-menu[open], .more-menu[open], .header-account-menu[open]",
+          ".project-menu[open], .header-account-menu[open]",
         ) &&
           [
             "Escape",

@@ -86,26 +86,44 @@ export async function revealPropertiesShelf(page: Page): Promise<void> {
   await expect(page.getByTestId("selection-shelf")).toBeVisible();
 }
 
-/**
- * Open one group of editor commands. The header has two menus: File (the
- * project and its file commands) and ⋯ (Edit, Hierarchy, Netlist and Layout).
- */
+/** Open the header's File command menu. */
 export async function openMenu(page: Page, name: string): Promise<Locator> {
-  const menuTestId = name === "File" ? "project-menu" : "more-menu";
-  const menu = page.getByTestId(menuTestId);
+  if (name !== "File")
+    throw new Error(`Header only has the File menu (requested "${name}")`);
+  const menu = page.getByTestId("project-menu");
   if ((await menu.getAttribute("open")) === null)
     await menu.locator(":scope > summary").click();
   return menu.getByRole("group", { name, exact: true });
 }
 
-/** Open the Cell Manager from the header's menu and return the dialog. */
+/** Open the Cell Manager from File → Cell Manager… and return the dialog. */
 export async function openCellManager(page: Page): Promise<Locator> {
-  await (
-    await openMenu(page, "Hierarchy")
-  )
-    .getByTestId("hierarchy-entry")
-    .click();
+  await (await openMenu(page, "File")).getByTestId("hierarchy-entry").click();
   return page.getByRole("dialog", { name: "Cell Manager", exact: true });
+}
+
+/** Open User Components from the Library panel (Draw) or Insert (I) dialog. */
+export async function openUserComponents(page: Page): Promise<void> {
+  await expect(page.getByTestId("project-menu")).toBeVisible();
+  const libraryButton = page.getByTestId("library-user-components");
+  if (await libraryButton.isVisible()) {
+    await libraryButton.click();
+    return;
+  }
+  await page.locator("body").press("i");
+  await page.getByTestId("insert-user-components").click();
+}
+
+/** Open Netlist Settings inside the right project dock from the Netlist panel. */
+export async function openNetlistSettings(page: Page): Promise<void> {
+  const panel = await showNetlistPanel(page);
+  await panel.getByTestId("netlist-settings-toggle").click();
+}
+
+/** Open the Check Report (Review Netlist Issues) dialog from the Netlist panel. */
+export async function openReviewNetlistIssues(page: Page): Promise<void> {
+  const panel = await showNetlistPanel(page);
+  await panel.getByTestId("review-netlist-issues").click();
 }
 
 /** Open the Cell Manager on one of its tabs and return the dialog. */
@@ -331,9 +349,10 @@ export async function chooseComponent(
   symbolId: string,
 ): Promise<void> {
   // Route-level code splitting means `page.goto()` can resolve before the
-  // editor bundle has mounted. Opening the Edit command also waits for the
-  // editor shell and avoids dropping a shortcut during that loading window.
-  await clickCommand(page, "Edit", "Insert component… (I)");
+  // editor bundle has mounted. Waiting for the header ensures the shortcut
+  // router is attached before pressing I.
+  await expect(page.getByTestId("project-menu")).toBeVisible();
+  await page.locator("body").press("i");
   const dialog = page.getByRole("dialog", { name: "Insert Component" });
   await dialog.getByLabel("Component search").fill(symbolId);
   // Clicking a tile starts placement immediately; the quick-pick grid has no
@@ -582,8 +601,7 @@ export async function copyNetlistText(
     await toggle.click();
   await expect(panel).toBeVisible();
   if (format) await panel.getByLabel("Netlist format").selectOption(format);
-  await openMenu(page, "Netlist");
-  await page.getByTestId("copy-netlist").click();
+  await panel.getByTestId("copy-netlist-panel").click();
   await expect
     .poll(() => page.evaluate(() => navigator.clipboard.readText()))
     .not.toBe("clipboard sentinel");

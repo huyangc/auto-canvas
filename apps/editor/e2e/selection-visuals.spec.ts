@@ -2,11 +2,11 @@ import { expect, test } from "@playwright/test";
 import { createEmptyProject, type SchematicDocument } from "@icm/model";
 
 import {
-  clickCommand,
   closeProjectTools,
   expectStatus,
   exportedProject,
   openProject,
+  openReviewNetlistIssues,
   placeComponentAt,
 } from "./editor-fixtures";
 import {
@@ -407,7 +407,7 @@ test("a Net highlight set from the Check Report can always be cleared", async ({
   await page.keyboard.press("w");
   await wirePins(page, `${ids[0]}-2`, `${ids[1]}-1`);
 
-  await clickCommand(page, "Netlist", "Review Netlist Issues…");
+  await openReviewNetlistIssues(page);
   const preflight = page.getByRole("dialog", { name: "Check Report" });
   await preflight
     .getByRole("button", { name: /GENERATED_NET_NAME/ })

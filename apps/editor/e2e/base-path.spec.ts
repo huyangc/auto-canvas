@@ -1,7 +1,7 @@
 import { AgentHttpClient } from "@icm/agent-client";
 import { expect, test } from "@playwright/test";
 import {
-  clickCommand,
+  openUserComponents,
   projectTabAction,
   renameProject,
   readAgentClaim,
@@ -91,7 +91,7 @@ test("a prefixed editor saves and reopens a Cloud circuit beside notebook", asyn
       await shelf.getByRole("button", { name, exact: true }).click();
       await expect(fresh.getByTestId("hit-R1")).toBeVisible();
       await expect(fresh.getByTestId("active-instance-count")).toHaveText("1");
-      await clickCommand(fresh, "Edit", "User Components…");
+      await openUserComponents(fresh);
       await expect(
         fresh.getByRole("dialog", { name: "User Components", exact: true }),
       ).toBeVisible();

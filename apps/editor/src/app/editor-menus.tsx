@@ -1,7 +1,7 @@
 import { createProjectImportLink } from "../document/project-import-link";
 import { serializeProject } from "@icm/project-protocol";
 // The editor's menus bound to its commands: the header with its project tabs,
-// File and ⋯ menus and toolbars, and the canvas context menu.
+// File menu and toolbars, and the canvas context menu.
 import {
   useRef,
   type Dispatch,
@@ -12,15 +12,12 @@ import {
   deriveRoutingAffectedClosure,
   type HierarchyFrame,
 } from "@icm/derived";
-import type { WireSource } from "@icm/edit-engine";
 import type { CircuitProject, SchematicDocument } from "@icm/model";
 import type { NetlistNamingProfile } from "@icm/netlist";
 import type { createEditorCommandRouter } from "../commands/editor-command";
 import type { UseRecoveryCoordinatorResult } from "../document/recovery-coordinator";
 import type { useProjectFileLifecycle } from "../document/use-project-file-lifecycle";
 import type { SchematicClipboard } from "../features/clipboard/clipboard";
-import type { CellInsertCandidate } from "../features/component-insert/insert-component-dialog";
-import { fullInsertLaunch } from "../features/component-insert/insert-launch";
 import type { createEditorFileCommands } from "../features/editor-shell/editor-file-commands";
 import { ProjectTabs } from "../features/editor-shell/project-tabs";
 import type { EditorMode } from "../features/editor-shell/editor-mode";
@@ -33,7 +30,6 @@ import {
   resetLabelLookEdits,
 } from "../features/instance-display/reset-label-look";
 import type { useNetlistExportPreferences } from "../features/netlist-export/netlist-export-preferences";
-import { EDGE_ALIGNMENT_MODES } from "../features/selection/align-selection";
 import { CanvasContextMenu } from "../features/selection/canvas-context-menu";
 import type { useSelectionController } from "../features/selection/selection-controller";
 import type { summarizeVisualDiagnostics } from "../features/selection/selection-inspector-details";
@@ -67,28 +63,20 @@ type FileCommands = ReturnType<typeof createEditorFileCommands>;
 type AgentConnection = ReturnType<typeof useEditorAgentConnection>;
 type ProjectTabSessions = ReturnType<typeof useProjectTabSessions>;
 
-/** The header: project tabs, menus and toolbars, bound to the editor. */
+/** The header: project tabs, File menu and toolbars, bound to the editor. */
 export function EditorMenuBar({
   projectStore,
-  capabilities,
   publicAgentUiEnabled,
   setStatus,
-  userComponentsOpen,
-  setUserComponentsOpen,
   setSelectionOpen,
-  searchOpen,
   toggleLibraryPanel,
   visibleLibraryPanelOpen,
   recoverySessions,
   project,
   document,
   documentStack,
-  visualSelection,
-  selectionFilterOpen,
   cellManagerOpen,
   setCellManagerOpen,
-  netlistPreflightOpen,
-  setNetlistPreflightOpen,
   projectPanel,
   setProjectPanel,
   netlistPreferences,
@@ -114,7 +102,6 @@ export function EditorMenuBar({
   tool,
   transact,
   renameProject,
-  selectedEndpoint,
   projectInputRef,
   tabProjectInputRef,
   hasHierarchyEnterSelection,
@@ -123,15 +110,12 @@ export function EditorMenuBar({
   crossings,
   projectCheck,
   visualDiagnosticSummary,
-  cellInsertCandidates,
-  alignmentParticipantCount,
   internalSelection,
   projectInstanceCount,
   selectDocumentFromHierarchy,
   enterSelectedHierarchy,
   returnToTopDocument,
   toggleProjectPanel,
-  cancelAllTransientInteraction,
   placeCellInstance,
   editorCommands,
   importSpiceFiles,
@@ -152,25 +136,17 @@ export function EditorMenuBar({
   importNetlistInputRef,
 }: {
   projectStore: EditorServices["projectStore"];
-  capabilities: EditorServices["capabilities"];
   publicAgentUiEnabled: boolean;
   setStatus: Dispatch<SetStateAction<string>>;
-  userComponentsOpen: boolean;
-  setUserComponentsOpen: Dispatch<SetStateAction<boolean>>;
   setSelectionOpen: EditorPanels["setSelectionOpen"];
-  searchOpen: EditorPanels["searchOpen"];
   toggleLibraryPanel: EditorPanels["toggleLibraryPanel"];
   visibleLibraryPanelOpen: boolean;
   recoverySessions: UseRecoveryCoordinatorResult["sessions"];
   project: CircuitProject;
   document: SchematicDocument;
   documentStack: HierarchyFrame[];
-  visualSelection: SelectionController["selection"];
-  selectionFilterOpen: boolean;
   cellManagerOpen: boolean;
   setCellManagerOpen: Dispatch<SetStateAction<boolean>>;
-  netlistPreflightOpen: boolean;
-  setNetlistPreflightOpen: Dispatch<SetStateAction<boolean>>;
   projectPanel: EditorProjectPanelMode | null;
   setProjectPanel: Dispatch<SetStateAction<EditorProjectPanelMode | null>>;
   netlistPreferences: ReturnType<typeof useNetlistExportPreferences>;
@@ -196,7 +172,6 @@ export function EditorMenuBar({
   tool: InteractionState["tool"];
   transact: TransactionCommands["transact"];
   renameProject: ProjectStructureCommands["renameProject"];
-  selectedEndpoint: WireSource | null;
   projectInputRef: RefObject<HTMLInputElement | null>;
   tabProjectInputRef: RefObject<HTMLInputElement | null>;
   hasHierarchyEnterSelection: boolean;
@@ -205,15 +180,12 @@ export function EditorMenuBar({
   crossings: EditorDerivedModel["crossings"];
   projectCheck: ReturnType<typeof useProjectCheck>;
   visualDiagnosticSummary: ReturnType<typeof summarizeVisualDiagnostics>;
-  cellInsertCandidates: readonly CellInsertCandidate[];
-  alignmentParticipantCount: number;
   internalSelection: ReturnType<typeof deriveRoutingAffectedClosure>;
   projectInstanceCount: number;
   selectDocumentFromHierarchy: NavigationController["selectDocumentFromHierarchy"];
   enterSelectedHierarchy: NavigationController["enterSelectedHierarchy"];
   returnToTopDocument: NavigationController["returnToTopDocument"];
   toggleProjectPanel: (mode: EditorProjectPanelMode) => void;
-  cancelAllTransientInteraction: () => void;
   placeCellInstance: () => void;
   editorCommands: ReturnType<typeof createEditorCommandRouter>;
   importSpiceFiles: FileCommands["importSpiceFiles"];
@@ -273,7 +245,6 @@ export function EditorMenuBar({
   };
   return (
     <EditorAppChrome
-      userComponentsEnabled={capabilities.userComponents}
       projectTabs={
         <>
           <ProjectTabs
@@ -361,104 +332,10 @@ export function EditorMenuBar({
         onRevert: revertToSavedProjectBaseline,
         onOpenRecovery: openRecoveryDialog,
         onOpenInfo: () => setProjectInfoOpen(true),
+        onManageCells: () => setCellManagerOpen(true),
+        cellManagerOpen,
         projectTabs: tabActions,
       }}
-      searchOpen={searchOpen}
-      selectionFilterOpen={selectionFilterOpen}
-      cellManagerOpen={cellManagerOpen}
-      onManageCells={() => setCellManagerOpen(true)}
-      userComponentsOpen={userComponentsOpen}
-      onOpenUserComponents={() => {
-        cancelAllTransientInteraction();
-        setUserComponentsOpen(true);
-      }}
-      onInsertComponent={() =>
-        drawing("Insert", () =>
-          editorCommands.execute({
-            id: "insert.start",
-            launch: fullInsertLaunch(),
-          }),
-        )
-      }
-      placeProjectCell={{
-        enabled: cellInsertCandidates.length > 0,
-        execute: () => drawing("Place Cell", placeCellInstance),
-      }}
-      onOpenSelectionFilter={() =>
-        editorCommands.execute({ id: "selection.filter.open" })
-      }
-      onOpenSearch={() => editorCommands.execute({ id: "search.open" })}
-      deleteSelection={{
-        enabled:
-          hasVisualSelection(visualSelection) || selectedEndpoint !== null,
-        execute: () => editorCommands.execute({ id: "selection.delete" }),
-      }}
-      copySelectionImages={(["png", "svg"] as const).map((format) => ({
-        label: `Copy selection as ${format.toUpperCase()}`,
-        enabled: editorCommands.state({
-          id: "selection.copy-image",
-          format,
-        }).enabled,
-        execute: () =>
-          editorCommands.execute({
-            id: "selection.copy-image",
-            format,
-          }),
-      }))}
-      rotate={{
-        enabled: editorCommands.state({ id: "transform.rotate" }).enabled,
-        execute: () => editorCommands.execute({ id: "transform.rotate" }),
-      }}
-      mirrorLeftRight={{
-        enabled: editorCommands.state({
-          id: "transform.mirror",
-          direction: "left-right",
-        }).enabled,
-        execute: () =>
-          editorCommands.execute({
-            id: "transform.mirror",
-            direction: "left-right",
-          }),
-      }}
-      mirrorTopBottom={{
-        enabled: editorCommands.state({
-          id: "transform.mirror",
-          direction: "top-bottom",
-        }).enabled,
-        execute: () =>
-          editorCommands.execute({
-            id: "transform.mirror",
-            direction: "top-bottom",
-          }),
-      }}
-      alignmentActions={
-        alignmentParticipantCount >= 2
-          ? EDGE_ALIGNMENT_MODES.map(({ mode, label }) => {
-              const state = editorCommands.state({
-                id: "selection.align",
-                mode,
-              });
-              return {
-                mode,
-                label,
-                enabled: state.enabled,
-                execute: () =>
-                  editorCommands.execute({ id: "selection.align", mode }),
-              };
-            })
-          : []
-      }
-      instanceCodeOpen={projectPanel === "instances"}
-      netlistPreflightOpen={netlistPreflightOpen}
-      onOpenInstanceCode={() => {
-        toggleProjectPanel("instances");
-      }}
-      netlistFormat={netlistPreferences.format}
-      onOpenNetlistConfiguration={() => {
-        toggleProjectPanel("netlist-configuration");
-      }}
-      onOpenNetlistPreflight={() => setNetlistPreflightOpen(true)}
-      onExportNetlist={(format) => void exportDesignNetlist(format)}
       autoLayout={(() => {
         const state = editorCommands.state({ id: "layout.auto" });
         return {
@@ -656,6 +533,18 @@ export function EditorCanvasContextMenu({
             editorCommands.state({ id: "selection.copy" }).enabled,
           execute: () => editorCommands.execute({ id: "selection.copy" }),
         },
+        ...(["png", "svg"] as const).map((format) => ({
+          label: `Copy selection as ${format.toUpperCase()}`,
+          enabled: editorCommands.state({
+            id: "selection.copy-image",
+            format,
+          }).enabled,
+          execute: () =>
+            editorCommands.execute({
+              id: "selection.copy-image",
+              format,
+            }),
+        })),
         {
           label: "Rotate 90° (R)",
           enabled: editorCommands.state({ id: "transform.rotate" }).enabled,

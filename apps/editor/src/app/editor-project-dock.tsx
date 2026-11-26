@@ -1,7 +1,7 @@
 import { Suspense, type ReactNode } from "react";
 
 export type EditorProjectPanelMode =
-  "netlist" | "netlist-configuration" | "instances" | "project-code";
+  "netlist" | "netlist-configuration" | "project-code";
 
 /**
  * Project-wide tools occupy the right side without becoming Properties.

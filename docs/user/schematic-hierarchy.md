@@ -7,8 +7,8 @@ another Cell, as long as no recursion results.
 
 ## Cell Manager
 
-Open **Cell Manager…** (**⋯ → Hierarchy**, or **Manage Cells…** in the
-hierarchy toolbar). It lists each Cell with its Port and caller counts, opens
+Open **Cell Manager…** (**File → Cell Manager…**, **Manage…** in the **Cells**
+rail, or **Manage Cells…** in the hierarchy toolbar). It lists each Cell with its Port and caller counts, opens
 or renames it, and lists callers with **Jump to caller**.
 
 - **Set as Top**, or drag a Cell onto the **Top** row, changes the default
@@ -27,8 +27,8 @@ or renames it, and lists callers with **Jump to caller**.
   Cell again opens the existing copy. Both Projects must use the same Symbol
   Library version.
 
-**Place Cell** in the hierarchy toolbar (or **⋯ → Edit → Place Cell from this
-Project…**) opens a searchable Cell picker; place the instance like any
+**Place Cell** in the hierarchy toolbar (or pressing `I` and choosing from the
+**Cells** category) opens a searchable Cell picker; place the instance like any
 component (`R`, mirror, `Esc`). It shows the Cell name; its `Xn` instance name
 is the netlist identity. **Enter Cell** (`E`) opens a selected instance's
 child, **Shift+E** returns to the caller along the actual path, **Top** jumps
@@ -102,8 +102,8 @@ preview. The starter text is commented examples:
 Uncomment, add the body and end with `.ends my_cell` (or `ends my_cell`).
 **Apply model** commits; **Apply & Place** then places it in the parent
 (`Esc` keeps the applied model). With several subcircuits, choose the public
-entry; helpers stay with the source. The same editor opens from **⋯ → Edit → User
-Components… → Create Component…**.
+entry; helpers stay with the source. The same editor opens from **User
+Components… → Create Component…** (in the Library panel or the Insert (`I`) dialog).
 
 - **Format / Process / Copy** converts this model's draft between SPICE and
   SCS and between processes, as the Netlist sidebar does. Only reviewed core

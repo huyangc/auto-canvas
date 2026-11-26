@@ -21,6 +21,8 @@ describe("live netlist controls", () => {
         onFocusInstance={vi.fn()}
         onReset={vi.fn()}
         onCopy={vi.fn()}
+        onOpenPreflight={vi.fn()}
+        onOpenSettings={vi.fn()}
         configurationError={null}
       />,
     );
@@ -28,10 +30,12 @@ describe("live netlist controls", () => {
     expect(markup).toContain('aria-label="Netlist format"');
     expect(markup).toContain('aria-label="Netlist process"');
     expect(markup).toContain('value="spectre" selected=""');
-    // The copy button sits beside the code it copies, as an icon.
+    // The copy, review issues, and settings buttons sit beside the code as icons.
     expect(markup).toContain('data-testid="copy-netlist-panel"');
+    expect(markup).toContain('data-testid="review-netlist-issues"');
+    expect(markup).toContain('data-testid="netlist-settings-toggle"');
     expect(markup).toMatch(
-      /data-testid="refresh-netlist-panel"[\s\S]*data-testid="copy-netlist-panel"/u,
+      /data-testid="refresh-netlist-panel"[\s\S]*data-testid="copy-netlist-panel"[\s\S]*data-testid="review-netlist-issues"[\s\S]*data-testid="netlist-settings-toggle"/u,
     );
     expect(markup).not.toContain('aria-label="Port names:');
     expect(markup).not.toContain(">ABC</code>");

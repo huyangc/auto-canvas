@@ -1,10 +1,15 @@
 import { useEffect, useRef } from "react";
 
-import type { AutoLayoutMenuActions } from "./auto-layout-menu-section";
 import {
   autoLayoutChipLabel,
   type AutoLayoutRunView,
 } from "./auto-layout-label";
+
+export interface AutoLayoutMenuActions {
+  start: { enabled: boolean; reason?: string | undefined; execute: () => void };
+  /** Present only while a run is planning. */
+  cancel: { execute: () => void } | null;
+}
 
 /**
  * The top bar's Auto Layout: a primary button at rest, and while a run plans

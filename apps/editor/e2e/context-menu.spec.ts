@@ -51,6 +51,8 @@ test("right-click on a device only offers direct selection actions", async ({
     "Edit Component Definition (E)",
     "Properties (Q)",
     "Copy (C)",
+    "Copy selection as PNG",
+    "Copy selection as SVG",
     "Rotate 90° (R)",
     "Mirror left/right (Shift+R)",
     "Mirror top/bottom (Ctrl+R)",
@@ -272,15 +274,16 @@ test("visual clipboard copies a mixed selection as its formal SVG and a lone Wir
   await text.click({ modifiers: ["Shift"] });
   const canvas = page.getByTestId("schematic-canvas");
   const before = await canvas.locator('[data-layer="formal"]').innerHTML();
-  await text.click({ button: "right" });
-  await expect(page.getByTestId("canvas-context-menu")).not.toContainText(
-    "Copy as SVG",
-  );
-  await page.keyboard.press("Escape");
-  const clickCopyAs = async (format: "SVG" | "PNG") =>
-    (await openMenu(page, "Edit"))
-      .getByRole("button", { name: `Copy selection as ${format}`, exact: true })
+  const clickCopyAs = async (format: "SVG" | "PNG") => {
+    await canvas.click({ button: "right", position: { x: 650, y: 450 } });
+    await page
+      .getByTestId("canvas-context-menu")
+      .getByRole("menuitem", {
+        name: `Copy selection as ${format}`,
+        exact: true,
+      })
       .click();
+  };
   const copyImage = async (format: "SVG" | "PNG") => {
     await clickCopyAs(format);
     await expect(page.getByTestId("status")).toHaveText(
@@ -304,10 +307,10 @@ test("visual clipboard copies a mixed selection as its formal SVG and a lone Wir
   );
   await expect(resistor).toHaveClass(/selected/);
   await expect(text).toHaveClass(/selected/);
-  // Empty-canvas right-click preserves the same mixed selection.
+  // Empty-canvas right-click preserves the same mixed selection and offers image copy.
   await canvas.click({ button: "right", position: { x: 650, y: 450 } });
-  await expect(page.getByTestId("canvas-context-menu")).not.toContainText(
-    "Copy as PNG",
+  await expect(page.getByTestId("canvas-context-menu")).toContainText(
+    "Copy selection as PNG",
   );
   await expect(resistor).toHaveClass(/selected/);
   await expect(text).toHaveClass(/selected/);
@@ -376,11 +379,7 @@ test("Netlist keeps format selection in the project panel while File keeps drawi
     menu.getByRole("button", { name, exact: true });
   const menu = await openMenu(page, "File");
   await expect(button(menu, "Export SVG")).toBeHidden();
-  // The File menu's contents are file-command-menu.test.tsx's; the copy
-  // commands live in neither menu.
-  const netlistMenu = await openMenu(page, "Netlist");
-  await expect(button(netlistMenu, "Copy SPICE netlist")).toHaveCount(0);
-  await expect(button(netlistMenu, "Copy Spectre netlist")).toHaveCount(0);
+  await expect(page.getByTestId("more-menu")).toHaveCount(0);
   const projectPanel = await showNetlistPanel(page);
   await expect(projectPanel.getByLabel("Netlist format")).toBeVisible();
   await openMenu(page, "File");

@@ -112,8 +112,11 @@ export function EditorStatusbar({
   gridVisible,
   issues,
   selectionFilterSummary,
+  selectionFilterOpen = false,
+  searchOpen = false,
   agentExpiring = null,
   autoLayout = null,
+  onOpenSearch,
   onOpenSelectionFilter,
   onToggleWireOptions,
   onWireRoutingModeChange,
@@ -141,6 +144,8 @@ export function EditorStatusbar({
   /** Whether the canvas paints its background grid dots. */
   gridVisible: boolean;
   selectionFilterSummary: string | null;
+  selectionFilterOpen?: boolean;
+  searchOpen?: boolean;
   /** The Agent session's final minute, with the one action that keeps it. */
   agentExpiring?: { onKeep: () => void } | null;
   /** The last Auto Layout run's report (with Details); none while one plans. */
@@ -151,6 +156,7 @@ export function EditorStatusbar({
     checkStatus?: import("../../app/project-check").ProjectCheckStatus;
     onOpen: () => void;
   };
+  onOpenSearch?: () => void;
   onToggleWireOptions: () => void;
   onWireRoutingModeChange: (mode: WireRoutingMode) => void;
   onWireCornerOrderChange: (order: WireCornerOrder) => void;
@@ -214,17 +220,6 @@ export function EditorStatusbar({
             >
               {toolLabel(tool, vddRailMode, pendingSymbolId)}
             </span>
-          ) : null}
-          {selectionFilterSummary ? (
-            <button
-              type="button"
-              className="statusbar-tool"
-              data-testid="selection-filter-status"
-              onClick={onOpenSelectionFilter}
-              title="Choose Selectable Objects (Ctrl+Shift+F)"
-            >
-              {selectionFilterSummary}
-            </button>
           ) : null}
           {tool === "wire" ? (
             <button
@@ -317,6 +312,31 @@ export function EditorStatusbar({
       </div>
       <div className="statusbar-view-controls">
         {showChangeLog ? <ChangeLog /> : null}
+        {onOpenSearch ? (
+          <button
+            type="button"
+            className="statusbar-find-button"
+            data-testid="project-search-button"
+            aria-haspopup="dialog"
+            aria-expanded={searchOpen}
+            title="Find in Circuit… (Ctrl+F)"
+            onClick={onOpenSearch}
+          >
+            Find
+          </button>
+        ) : null}
+        <button
+          type="button"
+          className="statusbar-filter-toggle"
+          data-testid="selection-filter-button"
+          aria-haspopup="dialog"
+          aria-expanded={selectionFilterOpen}
+          aria-pressed={selectionFilterSummary !== null}
+          title="Choose Selectable Objects… (Ctrl+Shift+F)"
+          onClick={onOpenSelectionFilter}
+        >
+          {selectionFilterSummary ?? "Filter"}
+        </button>
         <button
           type="button"
           className="statusbar-hints-toggle"

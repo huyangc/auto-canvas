@@ -108,6 +108,9 @@ export function NetlistCodePanel({
   onModeChange,
   onReset,
   onCopy,
+  onOpenSettings,
+  onOpenPreflight,
+  netlistPreflightOpen = false,
   externalLinksEnabled,
   configurationError,
   onApply,
@@ -130,8 +133,13 @@ export function NetlistCodePanel({
   namingProfile: NetlistNamingProfile;
   onModeChange(mode: NetlistMode): void;
   onReset(): void;
-  /** Puts the current netlist on the clipboard, as the Netlist menu's Copy does. */
+  /** Puts the current netlist on the clipboard. */
   onCopy(): void;
+  /** Opens the JSON netlist configuration view inside the same dock. */
+  onOpenSettings?: () => void;
+  /** Opens the netlist preflight issues dialog. */
+  onOpenPreflight?: () => void;
+  netlistPreflightOpen?: boolean;
   /** Whether the build may link outside itself; the RNL view's About link. */
   externalLinksEnabled?: boolean | undefined;
   configurationError: string | null;
@@ -543,6 +551,73 @@ export function NetlistCodePanel({
             disabled={dirty || !!draftPreview}
             onCopy={onCopy}
           />
+          {onOpenPreflight ? (
+            <button
+              type="button"
+              className="netlist-code-preflight"
+              data-testid="review-netlist-issues"
+              aria-label="Review Netlist Issues…"
+              title="Review Netlist Issues…"
+              aria-haspopup="dialog"
+              aria-expanded={netlistPreflightOpen}
+              onClick={onOpenPreflight}
+            >
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <path
+                  d="M10 3.2 17 15.5H3Z M10 8v3.6 M10 13.8h.01"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+          ) : null}
+          {onOpenSettings ? (
+            <button
+              type="button"
+              className="netlist-code-settings"
+              data-testid="netlist-settings-toggle"
+              aria-label="Netlist Settings…"
+              title="Netlist Settings…"
+              onClick={onOpenSettings}
+            >
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <path
+                  d="M4 6h12 M4 10h12 M4 14h12"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                />
+                <circle
+                  cx="7"
+                  cy="6"
+                  r="1.6"
+                  fill="var(--icm-surface)"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                />
+                <circle
+                  cx="13"
+                  cy="10"
+                  r="1.6"
+                  fill="var(--icm-surface)"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                />
+                <circle
+                  cx="9"
+                  cy="14"
+                  r="1.6"
+                  fill="var(--icm-surface)"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                />
+              </svg>
+            </button>
+          ) : null}
         </div>
       </div>
       {rnl ? (

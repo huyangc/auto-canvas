@@ -200,6 +200,30 @@
   display: grid;
   gap: 8px;
 }
+.netlist-profile-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.netlist-profile-header h2 {
+  margin: 0;
+}
+.netlist-settings-back {
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--icm-border);
+  border-radius: var(--icm-radius-sm);
+  background: var(--icm-surface-muted);
+  color: var(--icm-text);
+  font-size: var(--icm-font-xs);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.netlist-settings-back:hover {
+  background: var(--icm-surface-hover);
+}
 /* However many selects the row carries — Entry appears only for a Project with
    more than one Cell — they share the width the panel has and wrap when it runs
    out. Their shared prompt width keeps both select edges aligned after a wrap.
@@ -279,7 +303,8 @@
     flex: 0 0 auto;
   }
   .netlist-code-actions {
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: repeat(2, var(--netlist-control-height));
   }
 }
 .netlist-mapping-actions {
@@ -1080,8 +1105,11 @@
   gap: var(--icm-space-2);
 }
 
-/* On-canvas references and background-grid visibility are one-click chips;
-   the pressed treatment means their corresponding layer is currently shown. */
+/* On-canvas references, find, selection filter, and background-grid visibility
+   are one-click chips; the pressed treatment means their layer or filter is
+   currently active. */
+.statusbar-find-button,
+.statusbar-filter-toggle,
 .statusbar-hints-toggle,
 .statusbar-grid-toggle {
   display: inline-flex;
@@ -1102,11 +1130,14 @@
   cursor: pointer;
 }
 
+.statusbar-find-button:hover,
+.statusbar-filter-toggle:hover,
 .statusbar-hints-toggle:hover,
 .statusbar-grid-toggle:hover {
   background: var(--icm-surface-hover);
 }
 
+.statusbar-filter-toggle[aria-pressed="true"],
 .statusbar-hints-toggle[aria-pressed="true"],
 .statusbar-grid-toggle[aria-pressed="true"] {
   border-color: transparent;
@@ -1703,8 +1734,8 @@
   background: var(--icm-accent);
 }
 
-/* Phone widths: hang the ⋯ popover from the right edge of the window, as
-   File's hangs, so it stays on screen; a long one scrolls. */
+/* Phone widths: hang the header menu popover from the right edge of the window
+   so it stays on screen; a long one scrolls. */
 @media (max-width: 720px) {
   .app-chrome-main .header-menu-popover {
     position: fixed;
@@ -1715,36 +1746,6 @@
     max-width: calc(100vw - 24px);
     max-height: calc(100dvh - var(--icm-menubar-h) - 16px);
     overflow: auto;
-  }
-}
-
-/* The ⋯ menu (T150c) is the top bar's last control: its popover opens
-   leftwards from the trigger and scrolls when its groups outgrow the
-   window. */
-.more-menu > summary {
-  justify-content: center;
-  min-width: var(--icm-control-h);
-  font-size: 1.1rem;
-  line-height: 1;
-}
-
-.app-chrome-main .more-menu > summary::after {
-  display: none;
-}
-
-.more-menu .more-menu-popover {
-  max-height: calc(100dvh - var(--icm-menubar-h) - 16px);
-  overflow: auto;
-  overscroll-behavior: contain;
-}
-
-/* At 720 px and below the popover hangs from the window's edge instead (the
-   phone-width rule above); the ranges meet, so a fractional width between
-   720 and 721 px still gets one of them. */
-@media (width > 720px) {
-  .more-menu .more-menu-popover {
-    right: 0;
-    left: auto;
   }
 }
 

@@ -21,7 +21,6 @@ import { serializeProject } from "@icm/project-protocol";
 
 import {
   revealPropertiesShelf,
-  clickCommand,
   exportedProject,
   downloadBytes,
   expectStatus,
@@ -1052,14 +1051,11 @@ test("keeps Hierarchy discoverable and restores the operation row on demand", as
   await page.setViewportSize({ width: 420, height: 700 });
   await page.goto("/editor");
 
-  // Even this narrow, the header's ⋯ menu is in view and holds the
-  // Cell Manager under Hierarchy.
-  const toggle = page.getByTestId("more-menu").locator(":scope > summary");
+  // Even this narrow, the header's File menu is in view and holds Cell Manager.
+  const toggle = page.getByTestId("project-menu").locator(":scope > summary");
   const toolbar = page.locator('.toolbar-row[aria-label="Document hierarchy"]');
   await expect(toggle).toBeInViewport({ timeout: 15_000 });
-  const entry = (await openMenu(page, "Hierarchy")).getByTestId(
-    "hierarchy-entry",
-  );
+  const entry = (await openMenu(page, "File")).getByTestId("hierarchy-entry");
   await expect(entry).toBeVisible();
   await expect(entry).toHaveText("Cell Manager…");
   await expect(entry).toHaveAttribute("aria-expanded", "false");
@@ -1108,7 +1104,10 @@ test("a Cell Pin shows a display alias, here and on its block, and keeps its nam
   await expect(pinLabel).toHaveText("Bias in");
 
   await openTopCell(page);
-  await clickCommand(page, "Edit", "Place Cell from this Project…");
+  await page
+    .getByTestId("cell-command-menu")
+    .getByRole("button", { name: "Place Cell", exact: true })
+    .click();
   await page
     .getByRole("dialog", { name: "Place Hierarchical Cell" })
     .getByRole("option", { name: /AliasStage/u })
@@ -1165,7 +1164,10 @@ test("edits a vector Cell Pin with width feedback, invalid draft retention and E
     child.netlist!.terminals[0]!.signal?.members.map((member) => member.name),
   ).toEqual(["IN<3>", "IN<2>", "IN<1>", "IN<0>"]);
   await openTopCell(page);
-  await clickCommand(page, "Edit", "Place Cell from this Project…");
+  await page
+    .getByTestId("cell-command-menu")
+    .getByRole("button", { name: "Place Cell", exact: true })
+    .click();
   await page
     .getByRole("dialog", { name: "Place Hierarchical Cell" })
     .getByRole("option", { name: /VectorStage/u })
@@ -1216,7 +1218,10 @@ test("declares and places a Cell Pin on a new local Net", async ({ page }) => {
   await expectStatus(page, "Updated Cell port direction");
 
   await openTopCell(page);
-  await clickCommand(page, "Edit", "Place Cell from this Project…");
+  await page
+    .getByTestId("cell-command-menu")
+    .getByRole("button", { name: "Place Cell", exact: true })
+    .click();
   const insertDialog = page.getByRole("dialog", {
     name: "Place Hierarchical Cell",
   });
@@ -1435,7 +1440,10 @@ test("places an existing Cell and blocks deleting its shared definition", async 
   await createCell(page, "ReusableStage");
   await openTopCell(page);
 
-  await clickCommand(page, "Edit", "Place Cell from this Project…");
+  await page
+    .getByTestId("cell-command-menu")
+    .getByRole("button", { name: "Place Cell", exact: true })
+    .click();
   const dialog = page.getByRole("dialog", { name: "Place Hierarchical Cell" });
   await expect(
     dialog.getByRole("option", { name: /ReusableStage/u }),
@@ -1461,7 +1469,10 @@ test("places an existing Cell and blocks deleting its shared definition", async 
   await expect(fullInsert).not.toHaveClass(/insert-cell-dialog/u);
   await page.keyboard.press("Escape");
 
-  await clickCommand(page, "Edit", "Place Cell from this Project…");
+  await page
+    .getByTestId("cell-command-menu")
+    .getByRole("button", { name: "Place Cell", exact: true })
+    .click();
   const cellDialog = page.getByRole("dialog", {
     name: "Place Hierarchical Cell",
   });
@@ -1774,7 +1785,10 @@ for (const { fromBus, name } of [
       position: { x: 300, y: 180 },
     });
     await openTopCell(page);
-    await clickCommand(page, "Edit", "Place Cell from this Project…");
+    await page
+      .getByTestId("cell-command-menu")
+      .getByRole("button", { name: "Place Cell", exact: true })
+      .click();
     await page
       .getByRole("dialog", { name: "Place Hierarchical Cell" })
       .getByRole("option", { name: /ScalarLanding/u })
@@ -1898,7 +1912,10 @@ test("names a free Wire bundle inline, maps it into a child and restores it thro
   await createCell(page, "BundleStage");
   await placeCellPin(page, { name: "IN<3:0>", position: { x: 300, y: 180 } });
   await openTopCell(page);
-  await clickCommand(page, "Edit", "Place Cell from this Project…");
+  await page
+    .getByTestId("cell-command-menu")
+    .getByRole("button", { name: "Place Cell", exact: true })
+    .click();
   await page
     .getByRole("dialog", { name: "Place Hierarchical Cell" })
     .getByRole("option", { name: /BundleStage/u })
@@ -2074,7 +2091,10 @@ test("names a loose bus with a Label and maps its order into differently named C
   await createCell(page, "InputStage");
   await placeCellPin(page, { name: "IN<0:3>", position: { x: 300, y: 180 } });
   await openTopCell(page);
-  await clickCommand(page, "Edit", "Place Cell from this Project…");
+  await page
+    .getByTestId("cell-command-menu")
+    .getByRole("button", { name: "Place Cell", exact: true })
+    .click();
   await page
     .getByRole("dialog", { name: "Place Hierarchical Cell" })
     .getByRole("option", { name: /InputStage/u })
@@ -2211,7 +2231,10 @@ test("keeps an unnamed caller member selector visible without creating a parent 
     position: { x: 300, y: 180 },
   });
   await openTopCell(page);
-  await clickCommand(page, "Edit", "Place Cell from this Project…");
+  await page
+    .getByTestId("cell-command-menu")
+    .getByRole("button", { name: "Place Cell", exact: true })
+    .click();
   await page
     .getByRole("dialog", { name: "Place Hierarchical Cell" })
     .getByRole("option", { name: /UnnamedInputStage/u })

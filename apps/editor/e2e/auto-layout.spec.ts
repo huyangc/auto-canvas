@@ -5,7 +5,6 @@ import {
   expectStatus,
   exportedProject,
   openEditor,
-  openMenu,
   openProject,
 } from "./editor-fixtures";
 
@@ -17,10 +16,9 @@ function documentsWithoutRevision(project: {
 }
 
 async function runAutoLayout(page: import("@playwright/test").Page) {
-  const layout = await openMenu(page, "Layout");
-  const command = layout.getByTestId("auto-layout-command");
-  await expect(command).toBeEnabled();
-  await command.click();
+  const button = page.getByTestId("auto-layout-button");
+  await expect(button).toBeEnabled();
+  await button.click();
 }
 
 // The real Worker path: plan off the main thread, apply as one transaction,

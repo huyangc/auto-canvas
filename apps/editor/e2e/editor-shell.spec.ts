@@ -308,14 +308,10 @@ test("keeps the command surface compact, its menus dismissable, and publishes PW
   page,
 }) => {
   await page.goto("/editor");
-  // Header menus, one open at a time; a blank canvas click or Escape
-  // dismisses them without navigating away.
-  await expect(page.getByTestId("copy-netlist")).toBeHidden();
-  const netlist = await openMenu(page, "Netlist");
-  await expect(netlist.getByTestId("copy-netlist")).toBeVisible();
+  // Header File menu is dismissable by blank canvas click or Escape; no ⋯ menu.
+  await expect(page.getByTestId("more-menu")).toHaveCount(0);
   const file = await openMenu(page, "File");
   await expect(file.getByTestId("check-and-save")).toBeVisible();
-  await expect(page.getByTestId("copy-netlist")).toBeHidden();
   const menu = page.getByTestId("project-menu");
   await page
     .getByTestId("schematic-canvas")
@@ -485,11 +481,7 @@ test("every web path opens the editor without community requests", async ({
     await expect(page.getByTestId("schematic-canvas")).toBeVisible();
     await expect(page.getByTestId("publish-gallery-button")).toHaveCount(0);
     await expect(page.getByTestId("examples-toggle")).toHaveCount(0);
-    await openMenu(page, "Edit");
-    await expect(
-      page.getByRole("button", { name: "User Components…", exact: true }),
-    ).toBeVisible();
-    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("library-user-components")).toBeVisible();
   }
   expect(communityRequests).toEqual([]);
 });

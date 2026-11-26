@@ -1,9 +1,9 @@
 import { test, expect, type Page } from "@playwright/test";
 import { createEmptyProject } from "@icm/model";
 import {
-  clickCommand,
   expectStatus,
   exportedProject,
+  openNetlistSettings,
   openProjectFile,
   renameProject,
   openEditor,
@@ -140,7 +140,7 @@ test("restores process and device choices, applies defaults and keeps edit/undo 
         definition.name === "sky130_fd_pr__nfet_01v8_lvt",
     ),
   ).toBe(true);
-  await clickCommand(page, "Netlist", "Netlist Settings…");
+  await openNetlistSettings(page);
   const configuration = page.getByLabel("Netlist configuration JSON");
   const preferences = JSON.parse(await configuration.inputValue());
   preferences.format = "spice";

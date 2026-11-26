@@ -3,14 +3,15 @@ import { inflateSync } from "node:zlib";
 import { createEmptyProject } from "@icm/model";
 import { serializeProject } from "@icm/project-protocol";
 import {
-  clickCommand,
   downloadBytes,
   copyNetlistText,
   expectComponentCodeField,
   expectStatus,
   openMenu,
   openCellManagerTab,
+  openNetlistSettings,
   openProjectFile,
+  openReviewNetlistIssues,
   showNetlistPanel,
   openEditor,
   openProject,
@@ -249,7 +250,7 @@ test("copies generated NoConnect nodes immediately and retains the optional Chec
   await openProject(page, serializeProject(project));
   expect(await copyNetlistText(page)).toContain("R1 IN NC0001 10k");
   await expect(checkReport(page)).toHaveCount(0);
-  await clickCommand(page, "Netlist", "Review Netlist Issues…");
+  await openReviewNetlistIssues(page);
   const dialog = checkReport(page);
   await expect(dialog).toContainText("GENERATED_NO_CONNECT_NODE");
   await expect(dialog.getByTestId("netlist-preview")).toContainText(
@@ -340,11 +341,6 @@ test("copies structural SPICE and Spectre netlists while exposing instance autho
   expect(spice).not.toMatch(/^(?:\*|\/\/)/mu);
   const spectre = await copyNetlistText(page, "spectre");
   expect(spectre).toContain("simulator lang=spectre");
-  await openMenu(page, "Netlist");
-  const primary = page.getByTestId("copy-netlist");
-  await expect(primary).toHaveAccessibleName("Copy Netlist");
-  await expect(primary).toContainText("Copy Netlist");
-  await expect(primary).toHaveAttribute("title", /Spectre \(\.scs\)/u);
   expect(await copyNetlistText(page)).toBe(spectre);
   // The panel's own copy button, beside the code, copies the same netlist.
   await page.evaluate(() => navigator.clipboard.writeText("unchanged"));
@@ -372,12 +368,7 @@ test("copies structural SPICE and Spectre netlists while exposing instance autho
   // lone MOS is missing a model target and its connections both — so this
   // asserts the Instance is named rather than pinning one message.
   await expect(netlistAlert(page)).toContainText("M1");
-  await page.evaluate(() => navigator.clipboard.writeText("unchanged"));
-  await clickCommand(page, "Netlist", "Copy Netlist");
-  await expectStatus(page, "Resolve the Check Report");
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
-    "unchanged",
-  );
+  await expect(page.getByTestId("copy-netlist-panel")).toBeDisabled();
   await page.keyboard.press("q");
   await openSelectionShelf(page);
   const properties = page.getByRole("complementary", { name: "Properties" });
@@ -640,7 +631,7 @@ test("edits output configuration without creating another electrical authority, 
   page,
 }) => {
   await page.goto("/editor");
-  await clickCommand(page, "Netlist", "Netlist Settings…");
+  await openNetlistSettings(page);
   const panel = page.getByRole("region", {
     name: "Netlist configuration",
     exact: true,
@@ -649,7 +640,7 @@ test("edits output configuration without creating another electrical authority, 
     name: "Netlist configuration JSON",
   });
   await expect(panel.getByRole("combobox")).toHaveCount(0);
-  await expect(panel.getByRole("button")).toHaveCount(0);
+  await expect(panel.getByTestId("netlist-settings-back")).toBeVisible();
   const config = JSON.parse(await code.inputValue());
   expect(config).toMatchObject({
     format: "spice",
@@ -660,20 +651,21 @@ test("edits output configuration without creating another electrical authority, 
   await code.fill(JSON.stringify(config, null, 2));
   await page.reload();
   // The workspace restores the open configuration panel. Wait for that
-  // restoration before switching to the output panel.
+  // restoration before switching back to the output panel.
   await expect(panel).toBeVisible();
-  await page.getByTestId("netlist-panel-toggle").click();
+  await panel.getByTestId("netlist-settings-back").click();
   const format = page.getByRole("combobox", { name: "Netlist format" });
   await expect(format).toHaveValue("spectre");
-  await clickCommand(page, "Netlist", "Netlist Settings…");
+  await openNetlistSettings(page);
   await expect
     .poll(async () => JSON.parse(await code.inputValue()))
     .toEqual(config);
   await code.fill("{");
   await expect(panel.getByRole("alert")).toContainText("Copying is paused");
-  await clickCommand(page, "Netlist", "Copy Netlist");
+  await panel.getByTestId("netlist-settings-back").click();
+  await page.getByTestId("copy-netlist-panel").click();
   await expectStatus(page, "Fix Netlist configuration");
-  await clickCommand(page, "Netlist", "Netlist Settings…");
+  await openNetlistSettings(page);
   await code.fill(JSON.stringify(config, null, 2));
   const netlist = await copyNetlistText(page, "spectre");
   expect(netlist).toContain("simulator lang=spectre");
@@ -697,24 +689,24 @@ test("edits output configuration without creating another electrical authority, 
       endpoint: { kind: "terminal" as const, instanceId: "R1", pinName },
     })),
   );
-  await clickCommand(page, "Netlist", "Netlist Settings…");
+  await openNetlistSettings(page);
   config.format = "spice";
   config.profiles.abstract.devices.resistor.parameters = {};
   await code.fill(JSON.stringify(config));
-  await page.getByTestId("netlist-panel-toggle").click();
+  await panel.getByTestId("netlist-settings-back").click();
   await openProjectFile(page, serializeProject(project));
   const live = page.getByLabel("Netlist code", { exact: true });
   // The panel shows the draft, value unknown; output itself stays blocked.
   await expect(live).toContainText("* Draft:");
   await expect(live).toContainText(/R1 \S+ \S+ \?/u);
   await expect(netlistAlert(page)).toContainText("requires parameter value");
-  await clickCommand(page, "Netlist", "Review Netlist Issues…");
+  await openReviewNetlistIssues(page);
   const report = checkReport(page);
   await expect(report).toContainText("1 blocking issue");
   await expect(report.getByTestId("netlist-preview")).toHaveCount(0);
   await report.getByTestId("check-report-close").click();
   await format.selectOption("spectre");
-  await clickCommand(page, "Netlist", "Review Netlist Issues…");
+  await openReviewNetlistIssues(page);
   await expect(report).toContainText("1 blocking issue");
   await expect(report.getByTestId("netlist-preview")).toHaveCount(0);
   // The report's finding navigates to its part and keeps the report open.
@@ -809,7 +801,8 @@ test("keeps the netlist live and selectable when clipboard access fails", async 
   page.on("download", (download) =>
     downloads.push(download.suggestedFilename()),
   );
-  await clickCommand(page, "Netlist", "Copy Netlist");
+  const panel = await showNetlistPanel(page);
+  await panel.getByTestId("copy-netlist-panel").click();
   const code = page.getByRole("textbox", { name: "Netlist code", exact: true });
   await expect(code).toContainText(".subckt dut");
   const netlistEditor = page.locator(

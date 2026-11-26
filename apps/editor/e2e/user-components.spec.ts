@@ -1,6 +1,6 @@
 import {
   awaitEditorReady,
-  clickCommand,
+  openUserComponents as openUserComponentsDialog,
   parseSavedProject,
   copyNetlistText,
   downloadBytes,
@@ -242,7 +242,7 @@ async function openExternalCircuit(page: Page, name: string) {
 }
 async function openUserComponents(page: Page) {
   const dialog = libraryDialog(page);
-  await clickCommand(page, "Edit", "User Components…");
+  await openUserComponentsDialog(page);
   await expect(dialog).toBeVisible();
   await dialog.getByRole("tab", { name: "Library", exact: true }).click();
   return dialog;
@@ -3918,12 +3918,12 @@ for (const chunkName of [
     const chunk = `**/${chunkName}-*.js`;
     await page.route(chunk, (route) => route.abort());
     await service.openEditorAs(page, null);
-    await clickCommand(page, "Edit", "User Components…");
+    await openUserComponentsDialog(page);
     const failure = page.getByRole("alertdialog");
     await expect(failure).toContainText("This dialog could not be loaded");
     await button(failure, "Close").click();
     await expect(failure).toBeHidden();
-    await clickCommand(page, "Edit", "User Components…");
+    await openUserComponentsDialog(page);
     await expect(failure).toBeVisible();
     await page.unroute(chunk);
     await button(failure, "Refresh app").click();

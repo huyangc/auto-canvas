@@ -146,6 +146,8 @@ export function EditorDialogs({
   editorCommands,
   drawing,
   exportDesignNetlist,
+  userComponentsEnabled,
+  onOpenUserComponents,
   workspaceReopen,
   setWorkspaceReopen,
   reopenClosedWindowTabs,
@@ -249,6 +251,8 @@ export function EditorDialogs({
   exportDesignNetlist: ReturnType<
     typeof createEditorFileCommands
   >["exportDesignNetlist"];
+  userComponentsEnabled: boolean;
+  onOpenUserComponents: () => void;
   workspaceReopen: ProjectTabSessions["workspaceReopen"];
   setWorkspaceReopen: ProjectTabSessions["setWorkspaceReopen"];
   reopenClosedWindowTabs: ProjectTabSessions["reopenClosedWindowTabs"];
@@ -373,6 +377,14 @@ export function EditorDialogs({
               externalDefinitions: insertDialogExternalCandidates,
               scope: insertScope,
               initialSelectionId: insertInitialSelectionId,
+              ...(userComponentsEnabled
+                ? {
+                    onOpenUserComponents: () => {
+                      cancelComponentInsertFromHook();
+                      onOpenUserComponents();
+                    },
+                  }
+                : {}),
               onApply: (request) =>
                 drawing("Insert", () =>
                   editorCommands.execute({

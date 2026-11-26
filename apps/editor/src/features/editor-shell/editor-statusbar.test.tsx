@@ -253,8 +253,39 @@ describe("editor statusbar", () => {
     expect(markup).toContain("Action required");
   });
 
-  it("shows a compact entry point only while selection is filtered", () => {
-    const markup = renderToStaticMarkup(
+  it("always shows the selection filter pill and highlights it while filtered", () => {
+    const unfiltered = renderToStaticMarkup(
+      <EditorStatusbar
+        status="Ready"
+        tool="pointer"
+        vddRailMode={false}
+        pendingSymbolId={null}
+        wireOptionsOpen={false}
+        wireRoutingMode="orthogonal"
+        wireCornerOrder="auto"
+        recoveryLabel={null}
+        zoomPercent={100}
+        shortcutHintsVisible={false}
+        onToggleShortcutHints={vi.fn()}
+        gridVisible
+        onToggleGrid={vi.fn()}
+        selectionFilterSummary={null}
+        onOpenSearch={vi.fn()}
+        onOpenSelectionFilter={vi.fn()}
+        onToggleWireOptions={vi.fn()}
+        onWireRoutingModeChange={vi.fn()}
+        onWireCornerOrderChange={vi.fn()}
+        onZoomOut={vi.fn()}
+        onZoomIn={vi.fn()}
+        onFitView={vi.fn()}
+      />,
+    );
+    expect(unfiltered).toContain('data-testid="project-search-button"');
+    expect(unfiltered).toContain('data-testid="selection-filter-button"');
+    expect(unfiltered).toContain('aria-pressed="false"');
+    expect(unfiltered).toContain(">Filter</button>");
+
+    const filtered = renderToStaticMarkup(
       <EditorStatusbar
         status="Ready"
         tool="pointer"
@@ -279,8 +310,9 @@ describe("editor statusbar", () => {
         onFitView={vi.fn()}
       />,
     );
-    expect(markup).toContain('data-testid="selection-filter-status"');
-    expect(markup).toContain("Filter: Wires");
+    expect(filtered).toContain('data-testid="selection-filter-button"');
+    expect(filtered).toContain('aria-pressed="true"');
+    expect(filtered).toContain(">Filter: Wires</button>");
   });
 
   it.each(["unchecked", "checking", "stale", "failed"] as const)(

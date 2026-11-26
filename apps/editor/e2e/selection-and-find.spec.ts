@@ -187,7 +187,7 @@ test("opens selectable-object choices with Ctrl+Shift+F, filters Select All, and
   await filter.getByRole("button", { name: "None" }).click();
   await filter.getByLabel("Wires").check();
   await filter.getByRole("button", { name: "Close" }).click();
-  await expect(page.getByTestId("selection-filter-status")).toContainText(
+  await expect(page.getByTestId("selection-filter-button")).toContainText(
     "Filter: Wires",
   );
 
@@ -207,7 +207,7 @@ test("opens selectable-object choices with Ctrl+Shift+F, filters Select All, and
   await page.getByTestId("hit-R1").click();
   await expect(page.getByTestId("hit-R1")).not.toHaveClass(/selected/);
 
-  await page.getByTestId("selection-filter-status").click();
+  await page.getByTestId("selection-filter-button").click();
   await filter.getByRole("button", { name: "None" }).click();
   await filter.getByLabel("Instances").check();
   await filter.getByRole("button", { name: "Close" }).click();

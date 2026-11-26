@@ -3,7 +3,7 @@ import { trace } from "./notebook-storage-fixtures.js";
 // (playwright.config.ts): a browser launched without Playwright's
 // --disable-back-forward-cache, so Back can restore a page as it was.
 import { expect, test, type Page } from "@playwright/test";
-import { clickCommand, renameProject } from "./editor-fixtures.js";
+import { openUserComponents, renameProject } from "./editor-fixtures.js";
 import { placeComponent } from "./manual-editor-fixtures.js";
 import {
   expectBearers,
@@ -136,7 +136,7 @@ for (const [title, changed] of [
     await openNotebookEditor(page);
     await placeComponent(page, "resistor", { x: 320, y: 200 });
     await expect(page.getByTestId("revision")).toHaveText("1");
-    await clickCommand(page, "Edit", "User Components…");
+    await openUserComponents(page);
     await page
       .getByRole("button", { name: "Create Component…", exact: true })
       .click();
