@@ -583,11 +583,13 @@ describe("T127 rail markers sit at the pin they serve", () => {
         R1: "resistor",
         v1: "vdd-port",
         P_BLK: "port",
+        g_fixed: "ground",
       },
       {
         sig: ["XM.iref", "R1.2"],
         vdd: ["XM.VDD", "v1.P"],
         other: ["R1.1", "P_BLK.P"],
+        gnd: ["g_fixed.0", "XM.out"],
       },
     );
     document.instances.find((i) => i.id === "XM")!.placement = placement(
@@ -600,6 +602,11 @@ describe("T127 rail markers sit at the pin they serve", () => {
     );
     document.instances.find((i) => i.id === "v1")!.placement = placement(
       150,
+      240,
+    );
+    // Distant fixed ground marker (sorts before v1): must not break free() for v1.
+    document.instances.find((i) => i.id === "g_fixed")!.placement = placement(
+      310,
       240,
     );
     // Fixed port sitting directly on the nearest sideways offset (130, 200).
@@ -622,7 +629,7 @@ describe("T127 rail markers sit at the pin they serve", () => {
       ],
     };
     const plan = planAutoLayout(document, macroResolver, {
-      fixedInstanceIds: new Set(["XM", "R1", "P_BLK"]),
+      fixedInstanceIds: new Set(["XM", "R1", "P_BLK", "g_fixed"]),
       search: { seed: 1, evaluations: 0 },
     });
     expect(plan.diagnostics.filter((d) => d.severity === "error")).toEqual([]);

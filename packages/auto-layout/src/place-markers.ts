@@ -323,7 +323,6 @@ function placePowerMarkers(
   for (const i of markers) {
     if (fixed.has(i.id) && i.placement) {
       targets.set(i.id, structuredClone(i.placement));
-      placed.push(i);
       continue;
     }
     const ground = i.symbolId === "ground";

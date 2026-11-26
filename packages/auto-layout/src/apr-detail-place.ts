@@ -316,13 +316,26 @@ function extractAprUnits(
         hostInst.placement,
       );
       const exit = pinExit(gatePin, hostInst.placement);
+      const hostNet = roles.pinNet(hostInst.id, a.host.pin.name);
       return a.stage.devices.some((dev) => {
         const dInst = placedById.get(dev.id);
         if (!dInst?.placement) return false;
-        const dx = dInst.placement.position.x - gatePt.x;
-        const dy = dInst.placement.position.y - gatePt.y;
-        const along = dx * exit.x + dy * exit.y;
-        return along > 0 && Math.abs(dx) + Math.abs(dy) <= 140;
+        const driverPins = hostNet
+          ? devicePins(dInst, resolver).filter(
+              (p) => roles.pinNet(dInst.id, p.name) === hostNet,
+            )
+          : [];
+        const pts = driverPins.length
+          ? driverPins.map((p) =>
+              transformPoint(p.at, dInst.placement!.position, dInst.placement!),
+            )
+          : [dInst.placement.position];
+        return pts.some((pt) => {
+          const dx = pt.x - gatePt.x;
+          const dy = pt.y - gatePt.y;
+          const along = dx * exit.x + dy * exit.y;
+          return along > 0 && Math.abs(dx) + Math.abs(dy) <= 140;
+        });
       });
     })
     .map((a) => [a.host.device.id, ...a.stage.devices.map((d) => d.id)]);
@@ -458,7 +471,11 @@ export function aprDetailPlace(
     fixed,
     options,
   );
-  if (devices.length < 3 || units.every((u) => u.fixed)) {
+  if (
+    devices.length < 3 ||
+    units.every((u) => u.fixed) ||
+    options?.stopped?.()
+  ) {
     return {
       placements: empty,
       candidates: [],
@@ -841,6 +858,16 @@ export function aprDetailPlace(
 
   const budgetExhausted = () =>
     evaluations >= maxProxyEvals || Boolean(options?.stopped?.());
+  if (budgetExhausted()) {
+    return {
+      placements: initial,
+      candidates: [],
+      improved: false,
+      beforeScore: 0,
+      afterScore: 0,
+      evaluations: 0,
+    };
+  }
   const beforeEval = evaluatePoses(initial);
   const deviceDoc = { ...document, instances: devices, junctions: [] };
 

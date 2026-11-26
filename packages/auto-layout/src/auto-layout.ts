@@ -2260,12 +2260,13 @@ function planAutoLayoutMeasured(
           !!primary.final &&
           !primary.result.diagnostics.some((d) => d.severity === "error") &&
           connectionsIntact(primary.final, resolver);
+        if (stopped()) break;
         const alt = planCandidate(false);
         const altOk =
           !!alt.final &&
           !alt.result.diagnostics.some((d) => d.severity === "error") &&
           connectionsIntact(alt.final, resolver);
-        if (!primaryOk && !altOk) continue;
+        if ((!primaryOk && !altOk) || stopped()) continue;
         const raw =
           primaryOk && altOk
             ? compareRuns(alt, primary, resolver) < 0

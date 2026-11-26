@@ -331,38 +331,94 @@ describe("T189 aprDetailPlace", () => {
     ).toBeUndefined();
   });
 
-  it("respects stopped() deadline callback and preserves R70 gate-driver attachments", () => {
+  it("respects stopped() deadline callback and preserves wide R70 gate-driver attachments", () => {
+    const wideDriver = {
+      schemaVersion: 1 as const,
+      id: "wide-driver-240",
+      name: "Wide Driver",
+      viewBox: { x: -120, y: -20, width: 240, height: 40 },
+      pins: [
+        {
+          name: "OUT",
+          role: "output",
+          at: { x: 120, y: 0 },
+          direction: "east" as const,
+          presentation: { visibility: "visible" as const },
+        },
+        {
+          name: "GND",
+          role: "power",
+          at: { x: 0, y: 20 },
+          direction: "south" as const,
+          presentation: { visibility: "visible" as const },
+        },
+      ],
+      primitives: [
+        {
+          kind: "polygon" as const,
+          fill: "none" as const,
+          points: [
+            { x: -120, y: -20 },
+            { x: 120, y: -20 },
+            { x: 120, y: 20 },
+            { x: -120, y: 20 },
+          ],
+        },
+      ],
+      variants: [],
+    };
+    const wideResolver = new InMemorySymbolResolver([
+      ...builtInSymbols,
+      wideDriver,
+    ]);
     const doc = circuit(
       {
-        V1: "vsource",
+        DRV: "wide-driver-240",
         M1: "nmos",
         R1: "resistor",
         R2: "resistor",
         G1: "ground",
       },
       {
-        gate: ["V1.+", "M1.G"],
+        gate: ["DRV.OUT", "M1.G"],
         drain: ["M1.D", "R1.2"],
         other: ["R1.1", "R2.1"],
-        gnd: ["V1.-", "M1.S", "R2.2", "G1.0"],
+        gnd: ["DRV.GND", "M1.S", "R2.2", "G1.0"],
       },
     );
+    // DRV is 240 units wide (origin at 0, OUT pin at 120), seated 60 units left
+    // of fixed M1.G (at x=180 -> M1.G at x=160, wait: M1 origin at 200 -> M1.G at 180).
     const initial = new Map([
-      ["V1", placement(100, 200)],
-      ["M1", placement(180, 200)],
-      ["R1", placement(260, 120)],
-      ["R2", placement(340, 200)],
-      ["G1", placement(180, 280)],
+      ["DRV", placement(0, 200)],
+      ["M1", placement(200, 200)],
+      ["R1", placement(340, 200)],
+      ["R2", placement(480, 200)],
+      ["G1", placement(200, 280)],
     ]);
     const placed = withPlacements(doc, initial);
-    const stoppedRes = aprDetailPlace(doc, placed, resolver, new Set(["M1"]), {
-      stopped: () => true,
-    });
+    const stoppedRes = aprDetailPlace(
+      doc,
+      placed,
+      wideResolver,
+      new Set(["M1"]),
+      {
+        stopped: () => true,
+      },
+    );
     expect(stoppedRes.improved).toBe(false);
     expect(stoppedRes.evaluations).toBe(0);
 
-    // M1 is fixed; V1 drives only M1.G (R70 driver attachment), so V1 must stay attached.
-    const attachedRes = aprDetailPlace(doc, placed, resolver, new Set(["M1"]));
-    expect(attachedRes.placements.get("V1")).toEqual(initial.get("V1"));
+    // M1 is fixed; DRV.OUT sits 60 units left of M1.G (origin is 200 units away),
+    // so pin-based R70 detection must keep DRV rigidly attached to M1 across all candidates.
+    const attachedRes = aprDetailPlace(
+      doc,
+      placed,
+      wideResolver,
+      new Set(["M1"]),
+    );
+    expect(attachedRes.placements.get("DRV")).toEqual(initial.get("DRV"));
+    for (const c of attachedRes.candidates) {
+      expect(c.placements.get("DRV")).toEqual(initial.get("DRV"));
+    }
   });
 });
