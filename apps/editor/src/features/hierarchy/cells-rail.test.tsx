@@ -108,4 +108,31 @@ describe("Cells rail", () => {
     await act(async () => root.unmount());
     host.remove();
   });
+
+  it("offers a Manage… button in the header when onManageCells is provided", async () => {
+    const onManageCells = vi.fn();
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    await act(async () =>
+      root.render(
+        <CellsRail
+          documents={documents}
+          topDocumentId="cell-top"
+          activeDocumentId="cell-laid-out"
+          refusalReason={(document) => reasons.get(document.id)}
+          onSelectDocument={vi.fn()}
+          onManageCells={onManageCells}
+        />,
+      ),
+    );
+    const manage = host.querySelector<HTMLButtonElement>(
+      '[data-testid="cells-rail-manage"]',
+    )!;
+    expect(manage.textContent).toBe("Manage…");
+    manage.click();
+    expect(onManageCells).toHaveBeenCalledTimes(1);
+    await act(async () => root.unmount());
+    host.remove();
+  });
 });

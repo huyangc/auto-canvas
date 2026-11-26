@@ -42,6 +42,7 @@ export function CellsRail({
   activeDocumentId,
   refusalReason,
   onSelectDocument,
+  onManageCells,
 }: {
   documents: readonly RailDocument[];
   topDocumentId: string;
@@ -49,6 +50,7 @@ export function CellsRail({
   /** The reason a refusal still holds for the Cell, if one does. */
   refusalReason: (document: RailDocument) => string | undefined;
   onSelectDocument: (documentId: string) => void;
+  onManageCells?: () => void;
 }) {
   const top = documents.find((document) => document.id === topDocumentId);
   const ordered = [
@@ -57,9 +59,23 @@ export function CellsRail({
   ];
   return (
     <nav className="cells-rail" aria-label="Cell list" data-testid="cells-rail">
-      <span className="cells-rail-title" aria-hidden="true">
-        Cells
-      </span>
+      <div className="cells-rail-header">
+        <span className="cells-rail-title" aria-hidden="true">
+          Cells
+        </span>
+        {onManageCells ? (
+          <button
+            type="button"
+            className="cells-rail-manage"
+            data-testid="cells-rail-manage"
+            aria-haspopup="dialog"
+            title="Open Cell Manager…"
+            onClick={onManageCells}
+          >
+            Manage…
+          </button>
+        ) : null}
+      </div>
       <ul>
         {ordered.map((document) => {
           const status = cellLayoutStatus(document, refusalReason(document));

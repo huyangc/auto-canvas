@@ -134,9 +134,9 @@ test("compacts the editor header at half width without GitHub, credit or account
   // One width per editor-chrome.css band the original six covered.
   for (const width of [320, 390, 480, 720, 1440]) {
     await page.setViewportSize({ width, height: 900 });
-    // T150c: File and ⋯ moved to the right of the row, after Auto Layout.
+    // Header keeps brand, history, mode switch, and File on one row (no ⋯ menu).
     const rowControls = page.locator(
-      ".app-chrome-main :is(.editor-brand, .app-history, .mode-switch, .project-menu, .command-menu)",
+      ".app-chrome-main :is(.editor-brand, .app-history, .mode-switch, .project-menu)",
     );
     const rowBounds = (await rowControls.evaluateAll(edges)).filter(
       ({ right, left }) => right > left,

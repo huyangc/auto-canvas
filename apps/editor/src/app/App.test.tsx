@@ -88,16 +88,16 @@ describe("editor shell", () => {
     expect(markup).not.toContain("Cell netlist interface");
     expect(markup).not.toContain("Netlist Reference");
     expect(markup).not.toContain("Component model");
-    // Hierarchy stays discoverable for a flat Project; the operational row is
-    // still omitted until there is hierarchy to navigate or enter.
+    // Hierarchy stays discoverable for a flat Project via File -> Cell Manager;
+    // the operational row is still omitted until there is hierarchy to navigate
+    // or enter.
     expect(markup).not.toContain('data-testid="cell-navigation"');
     expect(markup).toContain('data-testid="hierarchy-entry"');
     expect(markup).not.toContain('data-testid="edit-manage-cells"');
     expect(markup).not.toContain('data-testid="cell-command-menu"');
     expect(markup).toContain(">Cell Manager…</button>");
-    expect(markup).toContain("Edit Device Data…");
-    // Two header menus: File (the file commands) and ⋯ (Edit, Hierarchy,
-    // Netlist and Layout); the command row keeps actions.
+    expect(markup).not.toContain("Edit Device Data…");
+    // Only File is a command menu in the header; there is no miscellaneous ⋯ menu.
     const menu = (testId: string) => {
       const start = markup.indexOf(`data-testid="${testId}"`);
       expect(start).toBeGreaterThan(-1);
@@ -107,39 +107,19 @@ describe("editor shell", () => {
       '<span class="project-menu-title">File</span>',
     );
     expect(menu("project-menu")).toContain('role="group" aria-label="File"');
-    // File says New Project once. The project's name and details live in
-    // Project Info, and the open projects are the tabs; the name is
-    // only the menu's tooltip.
+    // File says New Project once, holds Project Info and Cell Manager… for flat
+    // Projects too; the project's name is only the menu's tooltip.
     const file = menu("project-menu");
     const fileCommands = file.slice(file.indexOf("project-menu-popover"));
     expect(file).toContain('title="Smoke Project"');
     expect(fileCommands.split(">New Project<")).toHaveLength(2);
     expect(fileCommands).toContain(">Project Info</button>");
+    expect(fileCommands).toContain('data-testid="hierarchy-entry"');
+    expect(fileCommands).toContain(">Cell Manager…</button>");
     expect(fileCommands).not.toContain("Smoke Project");
     expect(fileCommands).not.toContain("Project name");
     expect(fileCommands).not.toContain("Open projects");
-    // ⋯ replaces Edit and Circuit (T150c): their groups, in order, and
-    // nothing else is a header menu.
-    const more = menu("more-menu");
-    expect(more).toContain('<summary aria-label="More"');
-    const groupOrder = ["Edit", "Hierarchy", "Netlist", "Layout"].map((group) =>
-      more.indexOf(`role="group" aria-label="${group}"`),
-    );
-    for (const at of groupOrder) expect(at).toBeGreaterThan(-1);
-    expect(groupOrder).toEqual([...groupOrder].sort((a, b) => a - b));
-    for (const item of [
-      "Insert component… (I)",
-      "User Components…",
-      'data-testid="project-search-button"',
-      'data-testid="selection-filter-button"',
-      'data-testid="hierarchy-entry"',
-      'data-testid="copy-netlist"',
-      "Netlist Settings…",
-      "Edit Device Data…",
-      "Review Netlist Issues…",
-      'data-testid="auto-layout-command"',
-    ])
-      expect(more).toContain(item);
+    expect(markup).not.toContain('data-testid="more-menu"');
     expect(markup).not.toContain('data-testid="edit-menu"');
     expect(markup).not.toContain('data-testid="circuit-menu"');
     expect(markup).not.toContain("<summary>Edit</summary>");
@@ -157,19 +137,12 @@ describe("editor shell", () => {
     expect(actionRow).not.toContain('data-testid="publish-gallery-button"');
     // Without an account context the header draws no account module (T172).
     expect(actionRow).not.toContain("account-");
-    const netlistStart = markup.indexOf('aria-label="Netlist"');
-    const netlistEnd = markup.indexOf("</div>", netlistStart);
-    const netlistMenu = markup.slice(netlistStart, netlistEnd);
-    expect(netlistStart).toBeGreaterThan(-1);
-    expect(netlistMenu).toContain("Copy Netlist");
-    expect(netlistMenu).not.toContain("Copy SPICE netlist");
-    expect(netlistMenu).not.toContain("Copy Spectre netlist");
     expect(markup).toContain('data-testid="netlist-panel-toggle"');
     expect(markup).toContain('data-testid="project-code-toggle"');
-    expect(markup).toContain("Review Netlist Issues…");
-    expect(netlistMenu).not.toContain('data-testid="open-analog-simulation"');
+    expect(markup).toContain('data-testid="copy-netlist-panel"');
+    expect(markup).toContain('data-testid="review-netlist-issues"');
+    expect(markup).toContain('data-testid="netlist-settings-toggle"');
     expect(markup).not.toContain('data-testid="open-analog-simulation"');
-    expect(netlistMenu).not.toContain('data-testid="check-and-save"');
     expect(markup).toContain('data-testid="check-and-save"');
     expect(markup).not.toContain("<summary>Run</summary>");
     // Drawing tools live in the always-visible toolbar, not behind a header
@@ -228,10 +201,10 @@ describe("editor shell", () => {
     expect(actionRow).toContain('data-testid="header-account-menu"');
     expect(actionRow).toContain('data-testid="account-name"');
     expect(actionRow).toContain(">A12345678<");
-    // The row ends with it, after the ⋯ menu's popover.
+    // The row ends with it, after the File menu's popover.
     expect(
       actionRow.lastIndexOf('data-testid="header-account-menu"'),
-    ).toBeGreaterThan(actionRow.indexOf("command-popover header-menu-popover"));
+    ).toBeGreaterThan(actionRow.indexOf("project-menu-popover"));
     const fileStart = markup.indexOf('data-testid="project-menu"');
     const file = markup.slice(
       fileStart,
@@ -476,15 +449,18 @@ describe("editor shell", () => {
     expect(markup).toContain('data-open="true"');
     expect(markup).toContain(">Library</span>");
     expect(markup).toContain('class="app-statusbar"');
-    expect(markup).toContain("Insert component… (I)");
     expect(markup).not.toContain('data-testid="draw-tool-insert"');
     expect(markup).not.toContain('data-testid="draw-tool-arrow"');
     expect(markup).not.toContain('data-testid="draw-tool-line"');
     expect(markup).not.toContain('data-testid="draw-tool-rectangle"');
     expect(markup).not.toContain('data-testid="draw-tool-circle"');
     expect(markup).toContain('data-testid="selection-filter-button"');
-    expect(markup).toContain("Choose Selectable Objects… (Ctrl+Shift+F)");
-    expect(markup).toContain("Find in Circuit… (Ctrl+F)");
+    expect(markup).toContain(
+      'title="Choose Selectable Objects… (Ctrl+Shift+F)"',
+    );
+    expect(markup).toContain('data-testid="project-search-button"');
+    expect(markup).toContain('title="Find in Circuit… (Ctrl+F)"');
+    expect(markup).toContain('data-testid="library-user-components"');
     expect(markup).toContain("User Components…");
     expect(markup).not.toContain("&gt;Undo&lt;");
     expect(markup).not.toContain("&gt;Redo&lt;");

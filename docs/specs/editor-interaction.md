@@ -496,7 +496,7 @@ it does.
   another import, a new Project or a reload removes it. Each project tab keeps
   its own review in memory while another tab is shown (a reload drops it). A
   failed import opens it, closing the Netlist if it was open, unless the
-  Netlist, Project Code or Device Data (instance code) dock holds an
+  Netlist or Project Code dock holds an
   unapplied draft: the dock then stays and the review waits for Properties.
   The canvas's first button closes whichever project dock is open, and is
   named after it; with none open it opens the Netlist. At compact widths,
@@ -558,17 +558,19 @@ it does.
   switch says where drawing lives; **Got it** or any switch dismisses it for
   good.
 - **Top bar.** In both modes it reads: the brand, the project's name, Undo and
-  Redo, the switch, **Import netlist…** (Auto only), **Auto Layout**, **File**,
-  **Agent** and **⋯**; an accounts-mode editor ends the row with the signed-in
+  Redo, the switch, **Import netlist…** (Auto only), **Auto Layout**, **File**
+  and **Agent**; an accounts-mode editor ends the row with the signed-in
   account (below). The name is read-only, cut with an ellipsis, with File's
   unsaved-work dot; a click opens Project Info. Below 720 px it is hidden and
-  the header stays one row. **⋯** holds what the Edit and Circuit menus held,
-  in the groups **Edit**, **Hierarchy**, **Netlist** and **Layout**, with the
-  same commands; it closes like File (Escape, an outside click, a command),
-  and only one header menu is open at a time. A long ⋯ scrolls inside the
-  window; as in File, the arrow keys, Home and End on one of its items never
-  pan the canvas (Left and Right included; File's submenus use them), they
-  scroll the menu as the browser does, and Escape returns focus to its button.
+  the header stays one row. Only **File** (and, when signed in, the account
+  menu) opens a header popover; only one is open at a time, and Escape returns
+  focus to its summary while arrow keys, Home and End never pan the canvas.
+  Domain actions stay beside the surfaces they act on: **Cell Manager…** in
+  **File**, the **Cells** rail (**Manage…**) and the hierarchy toolbar;
+  **User Components…** in the Library panel and the Insert (`I`) dialog;
+  **Netlist Settings…** and **Review Netlist Issues…** in the Netlist panel
+  header; **Copy selection as PNG/SVG** in the canvas context menu; and
+  **Find** (`Ctrl+F`) and **Filter** (`Ctrl+Shift+F`) in the status bar.
 - **Account menu.** An accounts-mode editor ends the top bar's row with the
   signed-in account's menu: a round mark with the name's first letter and the
   username (the mark alone below 760 px), which names the account and holds,
@@ -591,13 +593,13 @@ it does.
 
 ## Automatic layout
 
-- **Entry and scope.** The top bar's **Auto Layout** button, in both modes,
-  and ⋯ → Layout → **Auto Layout** (command `layout.auto`, no shortcut)
-  plan the whole open Cell with the
+- **Entry and scope.** The top bar's **Auto Layout** button, in both modes
+  (command `layout.auto`, no shortcut),
+  plans the whole open Cell with the
   [auto-layout planner](auto-layout.md) at its default bounded search. Selection,
   locks and other Cells are ignored. It is unavailable while a run plans, while
   a tool, drag, component editor or interface confirmation is active, and on a
-  Cell with no Instance; the menu item's tooltip gives the reason.
+  Cell with no Instance; the button's tooltip gives the reason.
 - **Off the main thread.** Each run plans in its own module Web Worker on a copy
   of the Project; without Web Workers the command refuses. The editor stays
   editable. While it plans, the top-bar control shows elapsed seconds (plus

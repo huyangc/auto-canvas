@@ -33,7 +33,7 @@ describe("Auto mode's canvas panel buttons", () => {
       expect(netlist, String(label)).toContain('aria-keyshortcuts="N"');
       expect(netlist, String(label)).toMatch(/title="[^"]*\(N\)"/u);
     }
-    for (const label of ["Device Data", "Netlist Settings", "Project Code"]) {
+    for (const label of ["Netlist Settings", "Project Code"]) {
       const { netlist } = render({ projectPanelLabel: label });
       expect(netlist, label).not.toContain("aria-keyshortcuts");
       expect(netlist, label).toContain(`title="Hide ${label}"`);

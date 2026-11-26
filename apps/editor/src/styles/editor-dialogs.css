@@ -79,6 +79,29 @@
   font-size: 16px;
 }
 
+.insert-dialog-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.insert-user-components-button {
+  min-height: 28px;
+  padding: 0 0.65rem;
+  border: 1px solid var(--icm-border-strong);
+  border-radius: var(--icm-radius-sm);
+  background: var(--icm-surface-muted);
+  color: var(--icm-text);
+  font: inherit;
+  font-size: var(--icm-font-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.insert-user-components-button:hover {
+  background: var(--icm-surface-hover);
+}
+
 .insert-dialog-header kbd {
   padding: 0.15rem 0.42rem;
   border: 1px solid var(--icm-border-strong);

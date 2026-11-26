@@ -24,6 +24,7 @@ export interface InsertComponentDialogProps {
   externalDefinitions?: readonly ExternalSubcircuitInsertCandidate[];
   scope?: InsertScope;
   initialSelectionId?: string | null;
+  onOpenUserComponents?: () => void;
   onApply(request: ComponentInsertRequest): void;
   onCancel(): void;
 }
@@ -71,6 +72,7 @@ export function InsertComponentDialog({
   externalDefinitions = [],
   scope = "all",
   initialSelectionId = null,
+  onOpenUserComponents,
   onApply,
   onCancel,
 }: InsertComponentDialogProps) {
@@ -394,7 +396,19 @@ export function InsertComponentDialog({
             <p>{cellsOnly ? "Place reusable design" : "Place device"}</p>
             <h2 id="insert-component-title">{dialogTitle}</h2>
           </div>
-          {cellsOnly ? null : <kbd>I</kbd>}
+          <div className="insert-dialog-header-actions">
+            {!cellsOnly && onOpenUserComponents ? (
+              <button
+                type="button"
+                className="insert-user-components-button"
+                data-testid="insert-user-components"
+                onClick={onOpenUserComponents}
+              >
+                User Components…
+              </button>
+            ) : null}
+            {cellsOnly ? null : <kbd>I</kbd>}
+          </div>
         </header>
 
         <input

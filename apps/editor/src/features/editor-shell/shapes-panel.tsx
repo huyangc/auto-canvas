@@ -176,12 +176,18 @@ export function quickPlaceRequest(
 export interface ShapesPanelProps {
   styleProfileId: string;
   open: boolean;
+  userComponentsEnabled?: boolean;
+  userComponentsOpen?: boolean;
+  onOpenUserComponents?: () => void;
   onStartInsert(launch: InsertLaunch): void;
 }
 
 export function ShapesPanel({
   styleProfileId,
   open,
+  userComponentsEnabled = false,
+  userComponentsOpen = false,
+  onOpenUserComponents,
   onStartInsert,
 }: ShapesPanelProps) {
   const libraryGroups = componentCatalog(styleProfileId, "");
@@ -219,6 +225,18 @@ export function ShapesPanel({
       data-open={open ? "true" : "false"}
     >
       <div className="shapes-panel-body">
+        {userComponentsEnabled && onOpenUserComponents ? (
+          <button
+            type="button"
+            className="shapes-user-components-button"
+            data-testid="library-user-components"
+            aria-haspopup="dialog"
+            aria-expanded={userComponentsOpen}
+            onClick={onOpenUserComponents}
+          >
+            User Components…
+          </button>
+        ) : null}
         <details className="shapes-fold" open data-testid="shapes-fold-library">
           <summary className="shapes-fold-summary">
             <span className="shapes-fold-label">

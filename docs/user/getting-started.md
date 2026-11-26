@@ -46,17 +46,18 @@ to open that Cell.
 ## The editor
 
 The header has the project's name, **Undo** and **Redo**, the mode switch,
-**Import netlist…** (Auto only), **Auto Layout**, the **File** menu, the
-**Agent** action and the **⋯** menu. When signed in, its last control is the
+**Import netlist…** (Auto only), **Auto Layout**, the **File** menu and the
+**Agent** action. When signed in, its last control is the
 account menu: the round mark with your first letter and your username, which
 names the account and holds **My Cloud Projects** and **Sign out** (below
 760 px only the mark shows).
 The name is read-only there; click it to open Project Info, where it is
 changed (below 720 px it is hidden; File → Project Info still has it).
-**File** holds Project Info (circuit and Cell names) and the file commands;
+**File** holds Project Info (circuit and Cell names), **Cell Manager…**, and the file commands;
 **New Project** replaces the current tab's circuit after asking about unsaved
-work. **⋯** holds **Edit** (insert, find, the selection's commands),
-**Hierarchy** (Cell Manager), **Netlist** and **Layout** (Auto Layout).
+work. **Find** (`Ctrl+F`) and **Filter** (`Ctrl+Shift+F`) sit in the status bar;
+**User Components…** sits in the **Library** panel and the **Insert** (`I`) dialog;
+and **Netlist Settings…** and **Review Netlist Issues…** sit in the Netlist panel header.
 
 Each project tab is an independent circuit with its own view, selection, undo
 history and Cloud binding. With one project the tab bar is hidden, and **File**
@@ -257,7 +258,8 @@ drawing and its component definitions. Apply is undoable; invalid code changes
 nothing. Selecting parts highlights their JSON.
 
 To edit a component's definition, select it and press `E` (`Q` still edits the
-instance). **⋯ → Edit → User Components… → Create Component…** opens the
+instance). **User Components… → Create Component…** (from the **Library** panel
+or the **Insert** (`I`) dialog) opens the
 **Circuit** and **Symbol** tabs: enter SPICE or Spectre (or choose a Project
 source), use Automatic or Custom JSON artwork, and map each native terminal to
 a pin or to VDD/VSS. **Apply model** changes the Project in one undoable step;
@@ -284,8 +286,8 @@ one definition per used component type; deleting the last use removes it.
 ## Netlist and export
 
 **File → Export** saves the whole drawing as SVG, PNG (3×) or vector PDF.
-**⋯ → Edit → Copy selection as PNG/SVG** copies the selection as an image with a
-transparent background (needs HTTPS or localhost and clipboard permission).
+Right-clicking a selection offers **Copy selection as PNG/SVG**, copying it as an
+image with a transparent background (needs HTTPS or localhost and clipboard permission).
 
 The **Netlist** button copies the netlist and opens its code in the right
 sidebar. **Format** (SPICE or SCS) and **Process** (Abstract, SKY130 by

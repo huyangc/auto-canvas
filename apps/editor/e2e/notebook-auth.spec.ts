@@ -20,6 +20,7 @@ import {
   clickCommand,
   downloadBytes,
   openProjectFile,
+  openUserComponents,
   chooseComponent,
   projectTabAction,
   renameProject,
@@ -2246,7 +2247,7 @@ test("R4 Bob can publish a component with an interrupted Alice publication", asy
   const writer = await context.newPage();
   await writer.goto("/");
   await openNotebookEditor(page);
-  await clickCommand(page, "Edit", "User Components…");
+  await openUserComponents(page);
   const library = page.getByRole("dialog", {
     name: "User Components",
     exact: true,
@@ -2307,7 +2308,7 @@ test("R4 Bob can publish a component with an interrupted Alice publication", asy
   await page.unroute(pattern);
   await switchUser(page, writer, bob);
   await openProjectFile(page, file);
-  await clickCommand(page, "Edit", "User Components…");
+  await openUserComponents(page);
   await library.getByRole("tab", { name: "My shelf", exact: true }).click();
   await library
     .getByRole("tab", { name: "Project drafts", exact: true })

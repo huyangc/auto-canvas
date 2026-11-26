@@ -13,7 +13,6 @@ import {
   type ProjectWorkspace,
 } from "../document/project-workspace";
 import { resolveAnnotationName } from "@icm/derived";
-import { InstanceCodePanel } from "../features/properties/instance-code-panel";
 import { NetlistCodePanel } from "../features/netlist-export/netlist-code-panel";
 import { NetlistProfileCode } from "../features/netlist-export/netlist-profile-code";
 import { useNetlistExportPreferences } from "../features/netlist-export/netlist-export-preferences";
@@ -5110,25 +5109,17 @@ function WorkspaceEditor({
       {renderCrashRequested() ? <RenderCrashProbe /> : null}
       <EditorMenuBar
         projectStore={projectStore}
-        capabilities={capabilities}
         publicAgentUiEnabled={publicAgentUiEnabled}
         setStatus={setStatus}
-        userComponentsOpen={userComponentsOpen}
-        setUserComponentsOpen={setUserComponentsOpen}
         setSelectionOpen={setSelectionOpen}
-        searchOpen={searchOpen}
         toggleLibraryPanel={toggleLibraryPanel}
         visibleLibraryPanelOpen={visibleLibraryPanelOpen}
         recoverySessions={recoverySessions}
         project={project}
         document={document}
         documentStack={documentStack}
-        visualSelection={visualSelection}
-        selectionFilterOpen={selectionFilterOpen}
         cellManagerOpen={cellManagerOpen}
         setCellManagerOpen={setCellManagerOpen}
-        netlistPreflightOpen={netlistPreflightOpen}
-        setNetlistPreflightOpen={setNetlistPreflightOpen}
         projectPanel={projectPanel}
         setProjectPanel={setProjectPanel}
         netlistPreferences={netlistPreferences}
@@ -5155,7 +5146,6 @@ function WorkspaceEditor({
         tool={tool}
         transact={transact}
         renameProject={renameProject}
-        selectedEndpoint={selectedEndpoint}
         projectInputRef={projectInputRef}
         tabProjectInputRef={tabProjectInputRef}
         hasHierarchyEnterSelection={hasHierarchyEnterSelection}
@@ -5164,8 +5154,6 @@ function WorkspaceEditor({
         crossings={crossings}
         projectCheck={projectCheck}
         visualDiagnosticSummary={visualDiagnosticSummary}
-        cellInsertCandidates={cellInsertCandidates}
-        alignmentParticipantCount={alignmentParticipantCount}
         internalSelection={internalSelection}
         projectInstanceCount={projectInstanceCount}
         selectDocumentFromHierarchy={selectDocumentFromHierarchy}
@@ -5173,7 +5161,6 @@ function WorkspaceEditor({
         returnToTopDocument={returnToTopDocument}
         toggleProjectPanel={toggleProjectPanel}
 
-        cancelAllTransientInteraction={cancelAllTransientInteraction}
         placeCellInstance={placeCellInstance}
         editorCommands={editorCommands}
         importSpiceFiles={importSpiceFiles}
@@ -5293,6 +5280,11 @@ function WorkspaceEditor({
           editorMode === "auto" ? bringUpDraw(tool, run) : run()
         }
         exportDesignNetlist={exportDesignNetlist}
+        userComponentsEnabled={capabilities.userComponents}
+        onOpenUserComponents={() => {
+          cancelAllTransientInteraction();
+          setUserComponentsOpen(true);
+        }}
         workspaceReopen={workspaceReopen}
         setWorkspaceReopen={setWorkspaceReopen}
         reopenClosedWindowTabs={reopenClosedWindowTabs}
@@ -5362,6 +5354,7 @@ function WorkspaceEditor({
             activeDocumentId={document.id}
             refusalReason={cellOutcomes.reasonFor}
             onSelectDocument={selectDocumentFromHierarchy}
+            onManageCells={() => setCellManagerOpen(true)}
           />
         ) : null}
         {editorMode === "draw" ? (
@@ -5369,6 +5362,12 @@ function WorkspaceEditor({
             <ShapesPanel
               styleProfileId={document.presentation.styleProfileId}
               open={visibleLibraryPanelOpen}
+              userComponentsEnabled={capabilities.userComponents}
+              userComponentsOpen={userComponentsOpen}
+              onOpenUserComponents={() => {
+                cancelAllTransientInteraction();
+                setUserComponentsOpen(true);
+              }}
               onStartInsert={(launch) =>
                 editorCommands.execute({ id: "insert.start", launch })
               }
@@ -5425,6 +5424,7 @@ function WorkspaceEditor({
                   <NetlistProfileCode
                     text={netlistPreferences.text}
                     error={netlistPreferences.error}
+                    onBack={() => showProjectPanel("netlist")}
                     onChange={(text) =>
                       netlistPreferences.changeText(text, (next) => {
                         const previous = netlistPreferences.preferences;
@@ -5493,25 +5493,13 @@ function WorkspaceEditor({
                         netlistNamingProfile,
                       )
                     }
+                    onOpenSettings={() =>
+                      showProjectPanel("netlist-configuration")
+                    }
+                    onOpenPreflight={() => setNetlistPreflightOpen(true)}
+                    netlistPreflightOpen={netlistPreflightOpen}
                     externalLinksEnabled={capabilities.externalLinks}
                     configurationError={netlistPreferences.error}
-                  />
-                ) : projectPanel === "instances" ? (
-                  <InstanceCodePanel
-                    onDirtyChange={noteCodeDraftDirty}
-                    key={projectSessionId}
-                    project={project}
-                    onApply={(edits) => {
-                      const committed = commitStructure(
-                        "edit-instance-code",
-                        edits,
-                      );
-                      if (committed)
-                        setStatus(
-                          `Updated instance code in ${edits.length} Cell${edits.length === 1 ? "" : "s"}`,
-                        );
-                      return committed;
-                    }}
                   />
                 ) : (
                   <ProjectCodePanel
@@ -7362,7 +7350,6 @@ function WorkspaceEditor({
                   : {
                       netlist: "Netlist",
                       "netlist-configuration": "Netlist Settings",
-                      instances: "Device Data",
                       "project-code": "Project Code",
                     }[projectPanel]
               }
@@ -7487,6 +7474,9 @@ function WorkspaceEditor({
           setStatus(gridDotsVisible ? "Grid off" : "Grid on");
         }}
         selectionFilterSummary={selectionFilterSummary(selectionFilter)}
+        selectionFilterOpen={selectionFilterOpen}
+        searchOpen={searchOpen}
+        onOpenSearch={() => editorCommands.execute({ id: "search.open" })}
         onOpenSelectionFilter={() =>
           editorCommands.execute({ id: "selection.filter.open" })
         }
