@@ -6,10 +6,12 @@ import {
   branchInterleaving,
   differentialPortSeats,
 } from "./differential-branches.js";
+import { aprDetailPlace } from "./apr-detail-place.js";
 import { feedbackRowCircuit, hasTransistor } from "./feedback-rows.js";
 import { mctsDraftEligible } from "./mcts-placement.js";
 import { conventionDraftEligible } from "./convention-relations.js";
 import { netlistMirrorSeats } from "./netlist-mirror-seats.js";
+import { readabilityMetrics, readabilityScore } from "./readability-metrics.js";
 import { netlistSymmetry } from "./readability-netlist-symmetry.js";
 
 import { symmetricHalfParts } from "./symmetric-half-order.js";
@@ -2165,12 +2167,172 @@ function planAutoLayoutMeasured(
     };
     // T141: the search's finished candidate wins only when it keeps every
     // connection the quicker finished candidate already drew.
-    const baseline = preferIntact(
+    const annealedBaseline = preferIntact(
       document,
       resolver,
       selectFinished(),
       quickResult,
     );
+    // T189: Digital-APR-style post-placement macro/row detail refinement on
+    // top of the finished baseline (covers both <=40 primary/alternate finalists
+    // and 41–120 schematics without perturbing annealing's deterministic stream).
+    const baseline = (() => {
+      if (options.partition || search.evaluations <= 0 || stopped())
+        return annealedBaseline;
+      const basePreview = preview(document, resolver, annealedBaseline.edits);
+      if (!basePreview.ok) return annealedBaseline;
+      const apr = timePhase("aprDetailPlace", () =>
+        aprDetailPlace(document, basePreview.document, resolver, fixed, {
+          unsplitSymmetry: options.unsplitSymmetry ?? false,
+          mirrorSymmetry: options.mirrorSymmetry ?? false,
+        }),
+      );
+      if (!apr.improved || !apr.candidates.length) return annealedBaseline;
+      const baseGuards = routedGuards(basePreview.document, resolver);
+      const baseAudit = auditRouting(basePreview.document, resolver);
+      const baseMetrics = readabilityMetrics(basePreview.document, resolver);
+      const baseReadability = readabilityScore(baseMetrics);
+      const baseStrategy =
+        refinementMetrics(annealedBaseline)?.strategy ?? selected.strategy;
+      const baseRunObj: LayoutRun = {
+        result: annealedBaseline,
+        final: basePreview.document,
+        choices: emptyChoices(),
+      };
+      const criticalGuards = [
+        "floating",
+        "missing",
+        "VISUAL_WIRE_THROUGH_SYMBOL",
+        "VISUAL_LABEL_OVERLAP",
+        "VISUAL_SYMBOL_OVERLAP",
+        "VISUAL_AMBIGUOUS_JUNCTION",
+        "VISUAL_ROUTE_OVERLAP",
+        "VISUAL_TERMINAL_ON_FOREIGN_ROUTE",
+        ...(document.instances.length > 40 ? ["VISUAL_LABEL_CLEARANCE"] : []),
+      ];
+      let bestResult = annealedBaseline;
+      let bestRunObj = baseRunObj;
+      let bestReadability = baseReadability;
+      const grid = document.presentation.grid;
+      const snapGrid = (n: number) => Math.round(n / grid) * grid;
+      for (const proposal of apr.candidates) {
+        if (stopped()) break;
+        // Shift unfixed APR placements back near (0, 0) so placeDocument's
+        // unhosted power markers (which default to (0, 0)) land beside the
+        // circuit instead of far away in empty space before re-anchoring.
+        const givenPlacements = (() => {
+          if (fixed.size || !proposal.placements.size)
+            return proposal.placements;
+          let minX = Infinity;
+          let minY = Infinity;
+          for (const p of proposal.placements.values()) {
+            if (p.position.x < minX) minX = p.position.x;
+            if (p.position.y < minY) minY = p.position.y;
+          }
+          const shiftX = snapGrid(minX);
+          const shiftY = snapGrid(minY);
+          if (!shiftX && !shiftY) return proposal.placements;
+          const shifted = new Map<string, Placement>();
+          for (const [id, p] of proposal.placements)
+            shifted.set(id, {
+              ...p,
+              position: { x: p.position.x - shiftX, y: p.position.y - shiftY },
+            });
+          return shifted;
+        })();
+        const planCandidate = (signalTrunks: boolean) =>
+          planFrom(
+            draftingTranslation(annealedBaseline),
+            document,
+            resolver,
+            options,
+            {
+              sides: new Map(),
+              orientations: givenPlacements,
+            },
+            baseStrategy,
+            signalTrunks,
+            givenPlacements,
+          );
+        const primary = planCandidate(true);
+        const primaryOk =
+          !!primary.final &&
+          !primary.result.diagnostics.some((d) => d.severity === "error") &&
+          connectionsIntact(primary.final, resolver);
+        const alt = planCandidate(false);
+        const altOk =
+          !!alt.final &&
+          !alt.result.diagnostics.some((d) => d.severity === "error") &&
+          connectionsIntact(alt.final, resolver);
+        if (!primaryOk && !altOk) continue;
+        const raw =
+          primaryOk && altOk
+            ? compareRuns(alt, primary, resolver) < 0
+              ? alt
+              : primary
+            : primaryOk
+              ? primary
+              : alt;
+        const rawAlt =
+          primaryOk && altOk ? (raw === primary ? alt : primary) : raw;
+        const finished = finalizeFacing(
+          document,
+          resolver,
+          options,
+          finish(raw, rawAlt, baseStrategy, raw === primary, options),
+        );
+        const afterPreview = preview(document, resolver, finished.edits);
+        if (
+          !afterPreview.ok ||
+          finished.diagnostics.some((d) => d.severity === "error") ||
+          !connectionsIntact(afterPreview.document, resolver)
+        )
+          continue;
+        const afterGuards = routedGuards(afterPreview.document, resolver);
+        if (
+          criticalGuards.some(
+            (key) => (afterGuards[key] ?? 0) > (baseGuards[key] ?? 0),
+          )
+        )
+          continue;
+        const afterAudit = auditRouting(afterPreview.document, resolver);
+        if (afterAudit.unsafeProblems.length > baseAudit.unsafeProblems.length)
+          continue;
+        const afterMetrics = readabilityMetrics(
+          afterPreview.document,
+          resolver,
+        );
+        const afterReadability = readabilityScore(afterMetrics);
+        if (afterReadability > bestReadability + 1e-6) continue;
+        const areaLimit =
+          afterAudit.crossings < baseAudit.crossings
+            ? baseMetrics.area.violations * 1.15
+            : baseMetrics.area.violations * 1.05;
+        if (
+          baseMetrics.area.violations > 0 &&
+          afterMetrics.area.violations > areaLimit
+        )
+          continue;
+        if (
+          afterAudit.crossings > baseAudit.crossings ||
+          afterAudit.wireLength > baseAudit.wireLength * 1.12 ||
+          (afterAudit.crossings === baseAudit.crossings &&
+            afterReadability >= baseReadability - 1e-4)
+        )
+          continue;
+        const candRunObj: LayoutRun = {
+          result: finished,
+          final: afterPreview.document,
+          choices: emptyChoices(),
+        };
+        if (compareRuns(candRunObj, bestRunObj, resolver) < 0) {
+          bestResult = finished;
+          bestRunObj = candRunObj;
+          bestReadability = afterReadability;
+        }
+      }
+      return bestResult;
+    })();
     if (options.partition) {
       // A fixed placement keeps every block and its relative floorplan intact.
       return options.quality === "optimized" && search.evaluations > 0

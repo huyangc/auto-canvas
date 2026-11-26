@@ -221,7 +221,10 @@ AutoLayoutDiagnostic[] }`. Fixed instances retain their exact placements;
   a sideways pin's marker one or two offsets out along the exit and one or
   two offsets toward the rail, nearest first, so one bend joins them. Take
   the first seat clear of devices and placed markers; with none, the marker
-  is treated as a remaining marker. Remaining markers share the last channel
+  is treated as a remaining marker. When a primary or contact-hosted marker's
+  default straight seat collides on a sideways-exiting pin (for example a
+  supply pin on the side of a multi-pin block), fall back to the first clear
+  sideways offset before keeping the default seat (T189). Remaining markers share the last channel
   host and are nudged by grid steps; without one they are unhosted, placed
   from the origin by grid steps.
   Fixed markers retain their poses. R165's netlist-input markers arrive
@@ -549,7 +552,9 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   channel constraint exists.
 - **R38 — General contacts.** R25 applies to every Net. Any two non-bulk pins
   touching in the input on one frozen group receive an exact, clearance-checked
-  stub unless they remain touching. Replay reconciliation has no missing
+  stub unless they remain touching; if that direct stub is blocked but both pins
+  are already covered by a subsequent non-stub tree target on the same Net,
+  fall through to the tree router instead of aborting the plan (T189). Replay reconciliation has no missing
   contact to materialize. If whole-list replay materializes an unsafe dashed
   wire for a separated visible MOS bulk contact, replace that implicit wire
   with a clearance-checked authored wire between the same terminals and replay
@@ -1385,6 +1390,30 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   one and a half R71 offsets along the host exit, with a minimum of two grid
   steps. Route each cluster independently while preserving Base Net membership
   and terminal equivalence.
+
+- **R173 — Post-anneal APR macro and windowed detail placement (T189).** On
+  unpartitioned layouts with a nonzero search budget up to 120 instances, run
+  a deterministic digital-APR-style refinement pass (`aprDetailPlace`) on top
+  of each finalist's finished baseline without perturbing annealing's random
+  stream. Extract rigid analog units preserving templates, symmetry components,
+  parallel/driver attachments, aligned vertical conducting stacks, user layout
+  groups, constraints, inductor couplings, and fixed/locked instances. Score
+  trial placements with a fast geometry proxy that excludes R172 locally
+  decoupled multi-port clusters, counts exact 2D chord plus 1D collinear
+  alternating-interval crossings, penalizes segment intrusions through
+  multi-pin device bodies (`>= 40x40`), and rewards outward pin-exit alignment
+  and signal-flow order. Run three legalized stages — orientation/mirroring
+  (skipping R164 free right-facing blocks, allowing upright escape out of
+  vertical/both mirrors), macro column-cluster ordering/mirroring with
+  congestion- and macro-port-aware gaps (`boundaryGap`) and a width-expansion
+  cap (`<= 1.15x + 120`), and row-band windowed detail placement (`W = 4`,
+  insertion, and pairwise swaps) — emitting up to 4 deduplicated legal
+  candidates. Shift unfixed candidates back near `(0, 0)` before replanning
+  with free marker sides and both `signalTrunks` settings, finish each valid
+  candidate, and accept it only when electrical connectivity stays intact,
+  zero critical `routedGuards` or `unsafeProblems` increase, `readabilityScore`
+  does not regress, `area` stays within `<= 1.05x` (`<= 1.15x` when crossings
+  drop), `wireLength <= 1.12x`, `crossings <= base`, and `compareRuns < 0`.
 
 - **R71 — Single-host ports.** A non-rail Cell Pin Net that reaches exactly
   one device pin gets a local seat along that pin's transformed exit direction.

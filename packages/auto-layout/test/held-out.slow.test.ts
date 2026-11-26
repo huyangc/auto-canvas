@@ -9,7 +9,7 @@ import { netlistSymmetry } from "../src/readability-netlist-symmetry.js";
 import { refinementMetrics } from "../src/refine.js";
 import { auditRouting, floatingPins } from "../src/routing-audit.js";
 import { freezePinGroups } from "../src/route.js";
-import { terminalPartition, lostNameClaim } from "../src/transaction.js";
+import { equivalentTerminals, lostNameClaim } from "../src/transaction.js";
 import cases from "./held-out-cases.json";
 
 const crossingLimits: Record<string, number> = {
@@ -64,9 +64,7 @@ it.each(cases)(
     );
     expect(result.applied, JSON.stringify(result.diagnostics)).toBe(true);
     if (!result.ok) return;
-    expect(terminalPartition(result.document, resolver)).toBe(
-      terminalPartition(document, resolver),
-    );
+    expect(equivalentTerminals(document, result.document, resolver)).toBe(true);
     expect(lostNameClaim(document, result.document)).toBeUndefined();
     const physical = deriveElectricalTopologyProjection(
       result.document,

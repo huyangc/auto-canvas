@@ -346,15 +346,34 @@ function placePowerMarkers(
     const index = used.get(key) ?? 0;
     used.set(key, index + 1);
     const host = assigned?.point ?? { x: 0, y: 0 };
-    targets.set(
-      i.id,
-      placement(
-        host.x - local.x + index * grid,
-        host.y +
-          (ground ? markerOffset(document) : -markerOffset(document)) -
-          local.y,
-      ),
+    const defaultSeat = placement(
+      host.x - local.x + index * grid,
+      host.y +
+        (ground ? markerOffset(document) : -markerOffset(document)) -
+        local.y,
     );
+    targets.set(i.id, defaultSeat);
+    if (assigned && index === 0 && !free(i)) {
+      const hostInstance = posed.find((d) => d.id === assigned.instanceId);
+      const seat =
+        hostInstance &&
+        railExit(hostInstance, assigned.pinName, resolver, ground) ===
+          "sideways" &&
+        extraHostSeats(
+          document,
+          hostInstance,
+          assigned.pinName,
+          resolver,
+          ground,
+        ).find((offset) => {
+          targets.set(
+            i.id,
+            placement(host.x + offset.x - local.x, host.y + offset.y - local.y),
+          );
+          return free(i);
+        });
+      if (!seat) targets.set(i.id, defaultSeat);
+    }
     if (index > 0 || !assigned)
       for (let attempt = 0; attempt < 200; attempt++) {
         if (free(i)) break;
