@@ -87,8 +87,7 @@ yourself:
 
 Follow [PR review and merge](../../../docs/workflow.md#pr-评审与合入):
 
-1. Verify that the current branch matches the plan. Push it with
-   `git push -u origin HEAD`, then update the existing PR or create one using
+1. `git push -u origin task/<id>-<slug>`, then `gh pr create --base main` using
    `.github/pull_request_template.md`. Put the acceptance commands you reran
    and their results under Evidence: CI runs static checks, build and unit
    tests, not browser tests or live checks.
@@ -100,8 +99,8 @@ Follow [PR review and merge](../../../docs/workflow.md#pr-评审与合入):
    `gpt-6.2-sol` (see the workflow's merge condition) and
    `~/.claude/hooks/codex-pr-review.sh verify <PR>` succeeds, or, when the review
    of that head was posted from the manual command or the hook is not installed,
-   the workflow's manual check succeeds. Use the merge command in the linked
-   workflow with the verified head SHA. Confirm `state` is `MERGED`. Otherwise hand back
+   the workflow's manual check does:
+   `gh pr merge <PR> --rebase`. Confirm `state` is `MERGED`. Otherwise hand back
    the PR link and its status.
 
 ## Small fixes
