@@ -5,7 +5,9 @@ import {
   type SimulationExperimentConfig,
 } from "./schema.js";
 
-/** Broken JSON is normal authoring state, not a thrown error or a fallback configuration. */
+/** Broken JSON is normal authoring state, not a thrown error or a fallback configuration.
+ * @internal Tests cover editable experiment files with invalid JSON.
+ */
 export function readSimulationExperimentConfig(
   folder: ProjectSimulationFolder,
 ):

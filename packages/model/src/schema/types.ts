@@ -93,9 +93,6 @@ export type SimulationVoltageProbe = z.infer<
 export type SimulationStructuredInput = z.infer<
   typeof Schema.SimulationStructuredInputSchema
 >;
-export type SimulationRawDependency = z.infer<
-  typeof Schema.SimulationRawDependencySchema
->;
 export type SimulationRawInput = z.infer<
   typeof Schema.SimulationRawInputSchema
 >;

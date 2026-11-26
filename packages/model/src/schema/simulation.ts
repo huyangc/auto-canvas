@@ -383,7 +383,7 @@ export const SimulationRunPlanSchema = z.discriminatedUnion("mode", [
  */
 export const MAX_SIMULATION_INPUT_FILES = 24;
 export const MAX_SIMULATION_INPUT_BYTES = 1024 * 1024;
-export function isSimulationInputPath(path: string): boolean {
+function isSimulationInputPath(path: string): boolean {
   return (
     path.length > 0 &&
     path.length <= 240 &&

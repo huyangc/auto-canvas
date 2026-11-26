@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createEmptyDocument, createEmptyProject } from "@icm/model";
-import { createSimulationFolder } from "../../model/src/simulation-folder.test-support.js";
 import { createDesignNetlistExport } from "./export.js";
-import { compileNgspiceSourceSimulation } from "./simulation-source-ngspice.js";
 
 function pair(second: "nmos" | "pmos" = "nmos") {
   const project = createEmptyProject("implicit-body", "Implicit body", "leaf");
@@ -146,7 +144,7 @@ describe("implicit schematic MOS body supplies", () => {
     );
   });
 
-  it("propagates the default supply interface through callers and a flat simulation root", () => {
+  it("propagates the default supply interface through callers", () => {
     const project = pair("pmos");
     for (const [id, child] of [
       ["parent", "leaf"],
@@ -172,66 +170,6 @@ describe("implicit schematic MOS body supplies", () => {
     if (result.status !== "ready") return;
     expect(result.file.text).toContain("X_parent VDD VSS dut");
     expect(result.file.text).toContain("X_top VDD VSS parent");
-    const folder = createSimulationFolder({
-      id: "sim",
-      name: "Simulation",
-      profileId: "test",
-      engine: "ngspice",
-      documentId: "top",
-    });
-    const simulation = compileNgspiceSourceSimulation(project, folder);
-    expect(simulation.ok, JSON.stringify(simulation)).toBe(true);
-    if (simulation.ok) {
-      expect(simulation.generated[0]!.text).toContain("X_top VDD 0 parent");
-      expect(simulation.generated[0]!.text).toContain("X_parent VDD VSS dut");
-    }
     expect(project).toEqual(before);
   });
-});
-
-it("passes default ground to a child even when its VDD pin was already explicitly wired", () => {
-  const project = pair();
-  const leaf = project.documents[0]!;
-  const top = createEmptyDocument("top", "top");
-  for (const document of [leaf, top]) {
-    document.instances.push({
-      id: "power-pin",
-      symbolId: "port",
-      placement: null,
-    });
-    document.nets.push({
-      id: "supply",
-      terminals: [{ instanceId: "power-pin", pinName: "P" }],
-    });
-    document.netlist!.terminals.push({
-      id: "supply-port",
-      name: "VDD",
-      netId: "supply",
-      direction: "inout",
-      interfaceInstanceIds: ["power-pin"],
-    });
-  }
-  top.instances.push({
-    id: "X1",
-    reference: "X1",
-    symbolId: "cell-symbol",
-    placement: null,
-    netlist: {
-      binding: { kind: "subcircuit", childDocumentId: leaf.id },
-      parameters: {},
-    },
-  });
-  top.nets[0]!.terminals.push({ instanceId: "X1", pinName: "VDD" });
-  project.documents.unshift(top);
-  project.topDocumentId = top.id;
-  const folder = createSimulationFolder({
-    id: "sim",
-    name: "Simulation",
-    profileId: "test",
-    engine: "ngspice",
-    documentId: top.id,
-  });
-  const result = compileNgspiceSourceSimulation(project, folder);
-  expect(result.ok, JSON.stringify(result)).toBe(true);
-  if (result.ok) expect(result.generated[0]!.text).toContain("X1 VDD 0 dut");
 });

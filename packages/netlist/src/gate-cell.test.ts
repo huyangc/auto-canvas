@@ -1,7 +1,3 @@
-import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -10,10 +6,8 @@ import {
   type CircuitProject,
   type SchematicDocument,
 } from "@icm/model";
-import { createSimulationFolder } from "../../model/src/simulation-folder.test-support.js";
 
 import { createDesignNetlistExport } from "./export.js";
-import { compileNgspiceSourceSimulation } from "./simulation-source-ngspice.js";
 
 /** One terminal on a Net, the Net made when it is new. */
 function connect(
@@ -198,30 +192,6 @@ describe("a Library gate bound to a Cell of its Project (#1450)", () => {
       }),
     );
   });
-
-  it("puts the Cell's transistors in an ngspice simulation", () => {
-    const project = norOverCell();
-    const folder = createSimulationFolder({
-      id: "nor-probe",
-      name: "NOR probe",
-      profileId: "local",
-      documentId: project.topDocumentId,
-    });
-    folder.input.files.find((file) => file.path === folder.input.entry)!.text =
-      "NOR probe\n.include circuit.spice\n.control\nop\n.endc\n.end\n";
-    const compiled = compileNgspiceSourceSimulation(project, folder);
-    expect(
-      compiled.ok,
-      JSON.stringify(compiled.ok ? [] : compiled.diagnostics),
-    ).toBe(true);
-    if (!compiled.ok) return;
-    const circuit = compiled.files.find(
-      (file) => file.path === "circuit.spice",
-    )!.text;
-    expect(circuit).toMatch(/^\.subckt nor2 VDD VSS a b y$/mu);
-    expect(circuit).toMatch(/^MN1 y a VSS VSS NMOS l=1u w=1u$/mu);
-    expect(circuit).toMatch(/^X1 VDD 0 IN1 IN2 OUT nor2$/mu);
-  });
 });
 
 /**
@@ -275,100 +245,12 @@ function followerOverOta(): CircuitProject {
 describe("a Library op-amp bound to a Cell of its Project (#1878)", () => {
   it("calls the Cell in the Cell's Pin order, each Pin on the op-amp's pin of its name", () => {
     const text = exported(followerOverOta());
+    expect(text).toContain(".subckt top VDD VSS IN OUT\n");
     expect(text).toContain(".subckt ota VDD VSS out in- in+\n");
     expect(text).toMatch(/^X1 VDD VSS OUT OUT IN ota$/mu);
     expect(text).not.toContain("icm_opamp");
   });
 });
-
-function ngspiceOnPath(): boolean {
-  return spawnSync("ngspice", ["--version"], { encoding: "utf8" }).status === 0;
-}
-
-/** Skips cleanly where ngspice is absent; the hosted gate never skips. */
-describe.skipIf(!ngspiceOnPath())(
-  "a gate or op-amp bound to a transistor-level Cell under ngspice",
-  () => {
-    it("computes NOR from the Cell's transistors", () => {
-      const circuit = exported(norOverCell());
-      const directory = mkdtempSync(join(tmpdir(), "icm-gate-cell-"));
-      try {
-        const levels = ([a, b]: readonly [number, number]) => {
-          writeFileSync(
-            join(directory, "deck.cir"),
-            [
-              "* NOR over a Cell",
-              circuit.replace(/^\.end\s*$/mu, ""),
-              ".model NMOS NMOS (level=1 vto=0.5 kp=200u)",
-              ".model PMOS PMOS (level=1 vto=-0.5 kp=100u)",
-              "VS vdd 0 1.8",
-              `VA in1 0 ${a}`,
-              `VB in2 0 ${b}`,
-              "XT vdd 0 in1 in2 out top",
-              ".control",
-              "op",
-              "print v(out)",
-              ".endc",
-              ".end",
-            ].join("\n"),
-            "utf8",
-          );
-          const output = execFileSync("ngspice", ["-b", "deck.cir"], {
-            cwd: directory,
-            encoding: "utf8",
-          });
-          return Number(/v\(out\)\s*=\s*(\S+)/u.exec(output)?.[1]);
-        };
-        expect(levels([0, 0])).toBeGreaterThan(1.7);
-        for (const inputs of [
-          [1.8, 0],
-          [0, 1.8],
-          [1.8, 1.8],
-        ] as const)
-          expect(levels(inputs)).toBeLessThan(0.1);
-      } finally {
-        rmSync(directory, { recursive: true, force: true });
-      }
-    });
-
-    it("follows its input through the op-amp's Cell (#1878)", () => {
-      const circuit = exported(followerOverOta());
-      expect(circuit).toContain(".subckt top VDD VSS IN OUT\n");
-      const directory = mkdtempSync(join(tmpdir(), "icm-opamp-cell-"));
-      try {
-        const follow = (input: number) => {
-          writeFileSync(
-            join(directory, "deck.cir"),
-            [
-              "* Follower over an OTA Cell",
-              circuit.replace(/^\.end\s*$/mu, ""),
-              ".model NMOS NMOS (level=1 vto=0.5 kp=200u lambda=0.02)",
-              ".model PMOS PMOS (level=1 vto=-0.5 kp=100u lambda=0.02)",
-              "VS vdd 0 1.8",
-              `VI in 0 ${input}`,
-              "XT vdd 0 in out top",
-              ".control",
-              "op",
-              "print v(out)",
-              ".endc",
-              ".end",
-            ].join("\n"),
-            "utf8",
-          );
-          const output = execFileSync("ngspice", ["-b", "deck.cir"], {
-            cwd: directory,
-            encoding: "utf8",
-          });
-          return Number(/v\(out\)\s*=\s*(\S+)/u.exec(output)?.[1]);
-        };
-        for (const input of [0.8, 0.9, 1.0])
-          expect(Math.abs(follow(input) - input)).toBeLessThan(0.02);
-      } finally {
-        rmSync(directory, { recursive: true, force: true });
-      }
-    });
-  },
-);
 
 describe("a Library part bound to an external definition (#1928)", () => {
   /**

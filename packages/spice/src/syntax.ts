@@ -451,7 +451,9 @@ function scanParameterAssignments(text: string) {
   return result;
 }
 
-/** Physical UTF-16 ranges for a parsed .param; same assignment grammar, not textual name replacement. */
+/** Physical UTF-16 ranges for a parsed .param; same assignment grammar, not textual name replacement.
+ * @internal Parser tests verify parameter value offsets in the original text.
+ */
 export function locateSpiceParameterValues(statement: ParameterStatement) {
   // Mask comments and continuation prefixes without shifting any physical offsets.
   const raw = statement.rawText;

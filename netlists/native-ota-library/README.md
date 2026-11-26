@@ -42,8 +42,7 @@ folder keeps its four voltages, transfer keeps three, and AC/PULSE/SIN keep inpu
 and output. They do not inherit the full lab's six-signal recording set.
 
 `report.py` is editable source copied into each folder. It imports the shared
-native ASCII reader/interpolator from `native_report.py` (the import-safe
-[`native-starter-report.py`](../../scripts/lib/native-starter-report.py)). The
+native ASCII reader/interpolator from `native_report.py`. The
 ICM helpers only frame explicit plots/scalars. Complex voltage gain is a derived
 record for external magnitude/dB/phase views (the GUI no longer plots), and
 positive supply current is an explicit derived signal; original native raw

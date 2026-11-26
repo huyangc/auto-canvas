@@ -4,12 +4,7 @@ import { createDesignNetlistExport, type NetlistFormat } from "@icm/netlist";
 import { executeProjectTransaction } from "@icm/edit-engine";
 import { createExternalSubcircuitInstance } from "@icm/edit-engine";
 import { createEmptyProject } from "@icm/model";
-import { createSimulationFolder } from "../../../../../packages/model/src/simulation-folder.test-support.js";
-import {
-  generateCircuitSource,
-  compileNgspiceSourceSimulation,
-  planMappedProjectModelEdit,
-} from "@icm/netlist";
+import { planMappedProjectModelEdit } from "@icm/netlist";
 import {
   planNetlistCodeEdit,
   netlistInstanceAtLine,
@@ -17,7 +12,7 @@ import {
   createNetlistCodeEditSession,
 } from "./netlist-code-edit";
 
-it("writes a mapped model-body edit to the shared owner used by every experiment", () => {
+it("writes a mapped model-body edit to the shared owner used by the exported netlist", () => {
   const initial = createEmptyProject("model-edit", "Model edit");
   const apply = executeProjectTransaction(initial, {
     projectId: initial.id,
@@ -85,43 +80,29 @@ it("writes a mapped model-body edit to the shared owner used by every experiment
   expect(updated.project.modelSources?.[0]?.files[0]?.text).toContain(
     "3*gain*v(A)",
   );
-  for (const id of ["op", "ac"]) {
-    const folder = createSimulationFolder({
-      id,
-      name: id,
-      profileId: "test",
-      engine: "ngspice",
-      documentId: doc.id,
-    });
-    const compiled = compileNgspiceSourceSimulation(updated.project, folder);
-    expect(compiled.ok, JSON.stringify(compiled)).toBe(true);
-    const view = generateCircuitSource(
-      updated.project,
-      folder.input.circuitBindings[0]!,
-      folder.input,
-      "ngspice",
+  const view = createDesignNetlistExport(updated.project, {
+    includeLocations: true,
+  });
+  if (view.status !== "ready") throw Error(JSON.stringify(view.diagnostics));
+  expect(view.file.text).toContain("3*gain*v(A)");
+  const mapped = (next: string) =>
+    planMappedProjectModelEdit(
+      view.file.text,
+      next,
+      view.locations.modelSources ?? [],
+      updated.project.modelSources ?? [],
     );
-    expect(view.ok, JSON.stringify(view)).toBe(true);
-    if (!view.ok) return;
-    expect(view.source.text).toContain("3*gain*v(A)");
-    const mapped = (next: string) =>
-      planMappedProjectModelEdit(
-        view.source.text,
-        next,
-        view.source.modelLocations ?? [],
-        view.source.modelSnapshots ?? [],
-      );
-    const body = mapped(view.source.text.replace("3*gain", "4*gain"));
-    expect(body, JSON.stringify(body)).toMatchObject({
-      matched: true,
-      ok: true,
-    });
-    if (body.matched && body.ok)
-      expect(body.modelUpdates[0]?.files[0]?.text).toContain("4*gain");
-    expect(
-      mapped(view.source.text.replace("amp A B", "amp B A")),
-    ).toMatchObject({ matched: true, ok: false });
-  }
+  const body = mapped(view.file.text.replace("3*gain", "4*gain"));
+  expect(body, JSON.stringify(body)).toMatchObject({
+    matched: true,
+    ok: true,
+  });
+  if (body.matched && body.ok)
+    expect(body.modelUpdates[0]?.files[0]?.text).toContain("4*gain");
+  expect(mapped(view.file.text.replace("amp A B", "amp B A"))).toMatchObject({
+    matched: true,
+    ok: false,
+  });
 });
 
 async function fixture(format: NetlistFormat) {

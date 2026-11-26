@@ -1,8 +1,7 @@
 # RC starter: native VACASK migration
 
 `circuit.spi` remains structural SPICE interchange. `ac.sim`, `step.sim` and
-[the shared starter report](../../scripts/lib/native-starter-report.py) are
-the native executable recipe sources for the four bundled RC
+the report script form the native recipes for the four bundled RC
 experiments in `apps/editor/src/examples/simulation-rc.icproj.json`. They expect
 the normal Canvas binding to generate `circuit.spice` as native VACASK source;
 the filename does not select a language. They are not standalone flattened decks.

@@ -147,36 +147,7 @@ export function modelInterfaceMatches(
   );
 }
 
-/** Reachability follows the typed master bindings used by electrical extraction. */
-export function projectModelDefinitionIds(
-  project: CircuitProject,
-  roots: readonly string[],
-): string[] {
-  return projectModelReachability(project, roots).definitionIds;
-}
-
-export function projectModelReachability(
-  project: CircuitProject,
-  roots: readonly string[],
-) {
-  const visited = new Set<string>();
-  const definitions = new Set<string>();
-  const visit = (id: string) => {
-    if (visited.has(id)) return;
-    visited.add(id);
-    const document = project.documents.find((d) => d.id === id);
-    for (const instance of document?.instances ?? []) {
-      const binding = instance.netlist?.binding;
-      if (binding?.kind === "subcircuit") visit(binding.childDocumentId);
-      if (binding?.kind === "external-subcircuit")
-        definitions.add(binding.definitionId);
-    }
-  };
-  roots.forEach(visit);
-  return { documentIds: [...visited], definitionIds: [...definitions] };
-}
-
-/** One source inventory for copying/export and execution, never folder-local overrides. */
+/** Collect Project-owned sources for copying and export. */
 export function collectProjectModelSources(
   project: CircuitProject,
   ids: readonly string[],
@@ -693,10 +664,6 @@ export function renderProjectModelSource(
     result.text = converted.text;
   }
   return result;
-}
-
-export function projectModelText(source: ProjectModelSource): string {
-  return renderProjectModelSource(source).text;
 }
 
 /** Append applied owners with the same native bytes and reverse spans in every design view. */

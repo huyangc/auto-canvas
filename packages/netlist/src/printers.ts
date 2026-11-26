@@ -190,7 +190,9 @@ export function printSpiceCellInstances(cell: DesignNetlistCell): string[] {
   ];
 }
 
-/** The same printer supplies locations; no parser guesses IDs from printed refs. */
+/** The same printer supplies locations; no parser guesses IDs from printed refs.
+ * @internal Printer tests verify source locations against emitted SPICE.
+ */
 export function printSpiceWithLocations(
   ir: DesignNetlistIR,
   rootAsTopLevel = false,

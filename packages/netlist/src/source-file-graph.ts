@@ -37,15 +37,6 @@ export interface SourceFileGraph<T> {
   diagnostics: SimulationSourceDiagnostic[];
 }
 
-/** Bindings are executable owners only when the entry's include graph reaches them. */
-export function reachableCircuitBindings(
-  input: SimulationSourceInput,
-  graph: Pick<SourceFileGraph<unknown>, "paths">,
-) {
-  const paths = new Set(graph.paths);
-  return input.circuitBindings.filter((binding) => paths.has(binding.path));
-}
-
 /** One virtual-file ownership/expansion boundary. Syntax adapters supply events;
  * this traversal neither rewrites source nor reads the host filesystem. */
 export function inspectSourceFileGraph<T>(
