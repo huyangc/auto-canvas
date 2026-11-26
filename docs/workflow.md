@@ -21,7 +21,7 @@ tasks/T001-<slug>/
 
 ## 规则
 
-- **一个任务一个分支**：从最新 `main` 创建任务 worktree，分支名写入计划（例如 `task/T001-<slug>`）。受派实现者只在简报
+- **一个任务一个分支**：从计划中的最新目标基分支创建任务 worktree（默认 `main`，stacked PR 使用其父分支），分支名写入计划（例如 `task/T001-<slug>`）。受派实现者只在简报
   要求时提交，且只提交在任务分支上；不推送、不合并、不 rebase、不切分支。Codex
   实现轮次从不提交。任务负责人验收通过后提交并创建 PR，取得本次交付授权并满足合入条件后执行合并。不直接推送 `main`。
 - **方案评审按需**：默认由负责人对照代码自查，然后直接交人确认范围；用户要求时，
@@ -44,7 +44,7 @@ tasks/T001-<slug>/
 - **先判断能否并行**：两个任务的 owned paths 不能有交集，也不能一个依赖另一个
   的结果；有交集或依赖的按顺序做。删除类任务要连同所有引用方一起算范围。
 - **每个任务一个 worktree**，主目录留在 `main`。在 worktree 里装好依赖后，在该
-  worktree 里启动实现子代理：
+  worktree 里启动实现子代理。以下示例以 `origin/main` 为基分支：
 
   ```bash
   git worktree add ../auto-canvas-T001-example -b task/T001-example origin/main &&
@@ -166,7 +166,7 @@ node scripts/codex-log.mjs tasks/T001-<slug> --round 2 --follow       # 供 Moni
 每个新需求从最新的目标基分支创建专用 worktree。负责人在创建时记下准确路径和分支；同一任务的修订继续使用它。主工作区、开发者提供的目录和其他任务的 worktree 都保留。
 
 1. **确定交付点。** 仅交付 PR 时，在本轮修改已推送、评审和所需本地验证完成、已知阻塞修复处理完后清理。已授权合入时，等 GitHub 返回 `MERGED`。仍在改代码、跑本地任务或等待必须处理的反馈时保留目录。
-2. **核对目标和成果。** 用 `git worktree list --porcelain` 对照创建记录，确认路径、当前任务分支和 HEAD。核对本地 HEAD 与已交付 PR 的 `headRefOid` 相同，这也适用于 rebase 合入。检查 `git -C "$task_tree" status --porcelain --untracked-files=all --ignore-submodules=none`。用 `git -C "$task_tree" ls-files --others --ignored --exclude-standard --directory` 列出被忽略的本地文件和目录，核对其中的内容。可再生成的依赖和构建缓存可随目录移除；只存在于此处的输入、报告、评审日志等需要保留的成果先保存到目录外。发现未交付提交、工作区改动或归属不明的文件时，保留 worktree 并向开发者说明。
+2. **核对目标和成果。** 用 `git worktree list --porcelain` 对照创建记录，确认路径、当前任务分支和 HEAD。核对本地 HEAD 与已交付 PR 的 `headRefOid` 相同，这也适用于 rebase 合入。检查 `git -C "$task_tree" status --porcelain --untracked-files=all --ignore-submodules=none`。再用 `git -C "$task_tree" ls-files -v` 检查索引标记：行首为小写或 `S` 的路径可能隐藏本地修改，未经独立核对时保留 worktree。用 `git -C "$task_tree" ls-files --others --ignored --exclude-standard --directory` 列出被忽略的本地文件和目录，核对其中的内容。可再生成的依赖和构建缓存可随目录移除；只存在于此处的输入、报告、评审日志等需要保留的成果先保存到目录外。发现未交付提交、工作区改动或归属不明的文件时，保留 worktree 并向开发者说明。
 3. **移除并确认。** 从保留的主工作区运行下列命令，`task_tree` 使用创建时记录的绝对路径。只执行普通移除，遇到锁定或 Git 拒绝时保留现场并报告原因。核对列表中已无该路径，再交付 PR 链接和清理结果。
 
    ```bash
