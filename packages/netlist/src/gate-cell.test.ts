@@ -256,7 +256,20 @@ describe("a Library op-amp bound to a Cell of its Project (#1878)", () => {
   it("calls the Cell in the Cell's Pin order, each Pin on the op-amp's pin of its name", () => {
     const text = exported(followerOverOta());
     expect(text).toContain(".subckt top VDD VSS IN OUT\n");
-    expect(text).toContain(".subckt ota VDD VSS out in- in+\n");
+    const body = text.match(
+      /^\.subckt ota VDD VSS out in- in\+\n([\s\S]*?)^\.ends ota$/mu,
+    )?.[1];
+    const nodes = body?.match(/^M1 (net\d+) in\+ (net\d+) VSS /mu);
+    expect(nodes).toBeTruthy();
+    const [, mirror, tail] = nodes!;
+    expect(mirror).not.toBe(tail);
+    expect(body?.match(/^(?:M|RT ).*$/gmu)?.sort()).toEqual([
+      `M1 ${mirror} in+ ${tail} VSS NMOS l=1u w=1u`,
+      `M2 out in- ${tail} VSS NMOS l=1u w=1u`,
+      `M3 ${mirror} ${mirror} VDD VDD PMOS l=1u w=1u`,
+      `M4 out ${mirror} VDD VDD PMOS l=1u w=1u`,
+      `RT ${tail} VSS 20k`,
+    ]);
     expect(text).toMatch(/^X1 VDD VSS OUT OUT IN ota$/mu);
     expect(text).not.toContain("icm_opamp");
   });
