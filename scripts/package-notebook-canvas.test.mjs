@@ -1,8 +1,10 @@
+import { findPython } from "./test-support/notebook-python.mjs";
 import { spawnSync } from "node:child_process";
 import {
   mkdirSync,
   mkdtempSync,
   realpathSync,
+  renameSync,
   symlinkSync,
   rmSync,
   writeFileSync,
@@ -273,7 +275,7 @@ for (const arg of process.argv.slice(1)) {
     const directory = fixture();
     const venv = join(directory, "sandbox/venv");
     const created = spawnSync(
-      process.env.AUTO_CANVAS_TEST_PYTHON ?? "python3",
+      findPython(),
       ["-m", "venv", "--without-pip", venv],
       {
         encoding: "utf8",
@@ -283,16 +285,39 @@ for (const arg of process.argv.slice(1)) {
     const belowBin = join(venv, "bin/inner");
     mkdirSync(belowBin);
     symlinkSync(belowBin, join(directory, "link"));
-    const result = invoke(
-      directory,
-      `import { parseArgs } from ${JSON.stringify(script)};
+    const relaunch = (path) =>
+      invoke(
+        directory,
+        `import { parseArgs } from ${JSON.stringify(script)};
 import { execFileSync } from "node:child_process";
-const { python } = parseArgs(["--python", "link/../python"]);
+const { python } = parseArgs(["--python", process.argv[2]]);
+console.log(python);
 process.stdout.write(execFileSync(python, ["-c", process.argv[1]], { cwd: "/" }));`,
-      'import subprocess, sys; subprocess.run([sys.executable, "-c", "import sys; print(sys.prefix)"], check=True)',
+        'import subprocess, sys; subprocess.run([sys.executable, "-c", "import sys; print(sys.prefix)"], check=True)',
+        path,
+      );
+    const check = (path, expectedPrefix) => {
+      const result = relaunch(path);
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout.trim().split("\n")).toEqual([
+        join(venv, "bin/python"),
+        expectedPrefix,
+      ]);
+    };
+    check("link/../python", venv);
+    mkdirSync(join(venv, "work"));
+    const sharedBin = join(directory, "shared-bin");
+    renameSync(join(venv, "bin"), sharedBin);
+    symlinkSync(sharedBin, join(venv, "bin"));
+    // Platform Python launchers differ on venv detection through linked bin
+    // directories. Match the interpreter and prefix of the direct invocation.
+    const direct = spawnSync(
+      join(venv, "bin/python"),
+      ["-c", "import sys; print(sys.prefix)"],
+      { encoding: "utf8" },
     );
-    expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout.trim()).toBe(venv);
+    expect(direct.status, direct.stderr).toBe(0);
+    check("sandbox/venv/work/../bin/python", direct.stdout.trim());
   });
 
   it.each([

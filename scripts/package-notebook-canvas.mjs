@@ -27,14 +27,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import {
-  basename,
-  dirname,
-  isAbsolute,
-  join,
-  relative,
-  resolve,
-} from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 import {
@@ -195,18 +188,26 @@ export function parseArgs(argv) {
   // Let the OS traverse symlinks before it interprets a following "..".
   if (options.python.includes("/") && !isAbsolute(options.python))
     options.python = `${process.cwd()}/${options.python}`;
-  if (
-    !options.python.endsWith("/") &&
-    options.python.split("/").includes("..")
-  ) {
-    // CPython rebuilds sys.executable for pip's backend subprocess. Resolve the
-    // directory physically, leaving the executable symlink that selects a venv.
+  const parts = options.python.split("/");
+  const lastParent = parts.lastIndexOf("..");
+  if (lastParent !== -1) {
+    // CPython may collapse ".." when relaunching pip's backend. Resolve each
+    // parent traversal the way the OS does, keeping names that select a venv.
+    let dir = "/";
     try {
-      const parent = realpathSync.native(dirname(options.python));
-      options.python = join(parent, basename(options.python));
+      for (const part of parts.slice(0, lastParent + 1)) {
+        if (part === "..") {
+          const physical = realpathSync.native(`${dir}/..`);
+          const parent = dirname(dir);
+          dir = realpathSync.native(parent) === physical ? parent : physical;
+        } else {
+          dir = join(dir, part);
+        }
+      }
     } catch (error) {
       fail(2, `the interpreter ${options.python}: ${error.message}`);
     }
+    options.python = `${dir}/${parts.slice(lastParent + 1).join("/")}`;
   }
   return options;
 }
