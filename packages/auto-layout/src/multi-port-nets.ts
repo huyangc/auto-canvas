@@ -41,7 +41,12 @@ export function decoupledSignalPortClusters(
   portAssociations: readonly PinContact[] = [],
   options?: { allowRails?: boolean },
 ): DecoupledPortCluster[] | undefined {
-  if ((roles.rails.has(netId) && !options?.allowRails) || pins.length < 4)
+  const role = roles.byNet.get(netId);
+  if (
+    ((role === "supply" || role === "ground") && !roles.rails.has(netId)) ||
+    (roles.rails.has(netId) && !options?.allowRails) ||
+    pins.length < 4
+  )
     return undefined;
   const instances = new Map(document.instances.map((i) => [i.id, i]));
   const ports: TerminalRef[] = [],
@@ -105,8 +110,13 @@ function assignSignalPortHosts(
       }
     }
   }
+  const associated = (device: TerminalRef) =>
+    portAssociations.some(([a, b]) => samePin(a, device) || samePin(b, device));
   const clusters = ports.map((port) => {
-    const primaryHost = primaries.get(port) ?? available.values().next().value!;
+    const primaryHost =
+      primaries.get(port) ??
+      [...available].find((d) => !associated(d)) ??
+      available.values().next().value!;
     available.delete(primaryHost);
     return { port, primaryHost, hosts: [primaryHost] };
   });

@@ -468,3 +468,37 @@ it.each(["ground", "vdd-port"] as const)(
   },
   60_000,
 );
+
+it("splits crossed rails cleanly above 40 instances", () => {
+  const { d } = crossedRail();
+  for (let i = 0; i < 36; i++) {
+    d.instances.push({
+      id: `pad${i}`,
+      symbolId: "resistor",
+      placement: placement(1200 + (i % 6) * 80, Math.floor(i / 6) * 100),
+    });
+  }
+  expect(d.instances.length).toBeGreaterThan(40);
+  const route = routeDocument(
+    d,
+    resolver,
+    freezePinGroups(d, resolver),
+    classifyNets(d, resolver),
+    [],
+  );
+  expect(route.problem).toBeUndefined();
+  const initial = {
+    edits: route.edits,
+    diagnostics: route.diagnostics,
+    groups: [],
+  };
+  const result = localRailMarkers(d, resolver, initial);
+  const replay = preview(d, resolver, result.edits);
+  expect(replay.ok).toBe(true);
+  if (!replay.ok) return;
+  expect(
+    replay.document.instances.filter((i) => i.symbolId === "ground"),
+  ).toHaveLength(2);
+  expect(auditRouting(replay.document, resolver).crossings).toBe(0);
+  expect(equivalentTerminals(d, replay.document, resolver)).toBe(true);
+}, 60_000);

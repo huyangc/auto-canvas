@@ -146,8 +146,9 @@ function railExit(
 }
 
 /** R6a/T127: a non-MOS device without a two-pin host offers one visible
- * rail pin whose exit faces the rail or leaves sideways. A MOS gate on a rail
- * stays unhosted: bias markers keep their R43 join beside the gate row. */
+ * rail pin whose exit faces the rail or leaves sideways. MOS gates on a rail
+ * are appended last as fallback extra hosts only when no channel or non-MOS
+ * extra host is available (avoiding parking gate-only rail markers at (0, 0)). */
 export function extraRailHosts(
   pins: PinPoint[],
   devices: Instance[],
@@ -155,7 +156,7 @@ export function extraRailHosts(
   ground: boolean,
 ): PinPoint[] {
   const rank = { toward: 0, sideways: 1 } as const;
-  return devices
+  const nonMos = devices
     .filter((i) => offersExtraHost(i, resolver))
     .flatMap((i) => {
       const candidates = pins.flatMap((p) => {
@@ -177,6 +178,19 @@ export function extraRailHosts(
     .sort(
       (a, b) => compareIds(a.instanceId, b.instanceId) || a.point.x - b.point.x,
     );
+  const mosGates = devices
+    .filter((i) => isMos(i.symbolId))
+    .flatMap((i) =>
+      pins.filter((p) => {
+        if (p.instanceId !== i.id || p.pinName !== "G") return false;
+        const exit = railExit(i, p.pinName, resolver, ground);
+        return exit === "toward" || exit === "sideways";
+      }),
+    )
+    .sort(
+      (a, b) => compareIds(a.instanceId, b.instanceId) || a.point.x - b.point.x,
+    );
+  return [...nonMos, ...mosGates];
 }
 
 /** R6a/T127: marker pin offsets from an extra host, nearest first: one

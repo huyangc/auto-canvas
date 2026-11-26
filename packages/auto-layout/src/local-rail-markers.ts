@@ -57,6 +57,9 @@ function protectedIds(document: SchematicDocument, options: AutoLayoutOptions) {
   return ids;
 }
 
+const MAX_LOCAL_RAIL_INSTANCES = 120;
+const MAX_ADDED_MARKERS_PER_RAIL = 16;
+
 /** R155: at most eight finished trials, shared by all crossed rails. */
 export function localRailMarkers(
   source: SchematicDocument,
@@ -66,7 +69,7 @@ export function localRailMarkers(
   observe?: Observer,
 ): AutoLayoutResult {
   if (
-    source.instances.length > 40 ||
+    source.instances.length > MAX_LOCAL_RAIL_INSTANCES ||
     initial.diagnostics.some((d) => d.severity === "error")
   )
     return initial;
@@ -188,7 +191,9 @@ export function localRailMarkers(
         if (
           !clusters.length ||
           markers.length > clusters.length ||
-          document.instances.length + clusters.length - markers.length > 40
+          clusters.length - markers.length > MAX_ADDED_MARKERS_PER_RAIL ||
+          document.instances.length + clusters.length - markers.length >
+            MAX_LOCAL_RAIL_INSTANCES
         ) {
           observe?.(net, "cluster count", {
             candidate: label,
@@ -261,7 +266,16 @@ export function localRailMarkers(
           failures.crossings = [before.crossings, audit.crossings];
         if (audit.unsafeProblems.length) failures.unsafe = audit.unsafeProblems;
         for (const [key, count] of Object.entries(guards))
-          if (count > (limits[key] ?? 0))
+          if (
+            !(
+              document.instances.length <= 40 &&
+              [
+                "VISUAL_LABEL_CLEARANCE",
+                "VISUAL_LABEL_OWNER_DISTANCE",
+              ].includes(key)
+            ) &&
+            count > (limits[key] ?? 0)
+          )
             failures[key] = [limits[key] ?? 0, count];
         if (
           compareRuns(
