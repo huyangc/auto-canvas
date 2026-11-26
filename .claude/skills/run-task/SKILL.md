@@ -99,8 +99,8 @@ Follow [PR review and merge](../../../docs/workflow.md#pr-评审与合入):
    `gpt-6.2-sol` (see the workflow's merge condition) and
    `~/.claude/hooks/codex-pr-review.sh verify <PR>` succeeds, or, when the review
    of that head was posted from the manual command or the hook is not installed,
-   the workflow's manual check does:
-   `gh pr merge <PR> --rebase`. Confirm `state` is `MERGED`. Otherwise hand back
+   the workflow's manual check succeeds. Use the merge command in the linked
+   workflow with the verified head SHA. Confirm `state` is `MERGED`. Otherwise hand back
    the PR link and its status.
 
 ## Small fixes
