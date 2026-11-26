@@ -818,6 +818,19 @@ function routeGroup(
         }
       }
     } catch (error) {
+      const coveredByTree =
+        !target.freeEnd &&
+        target.stub &&
+        contacts.some((pair) => pair === raw.pins) &&
+        targets.some(
+          (other) =>
+            !other.stub &&
+            !other.freeEnd &&
+            target.pins.every((pin) =>
+              other.pins.some((ref) => samePin(pin, ref)),
+            ),
+        );
+      if (coveredByTree) continue;
       failed = true;
       failure ??= error instanceof Error ? error.message : String(error);
       unjoinedPins.push(...target.pins);

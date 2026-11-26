@@ -3,6 +3,7 @@ import type { AutoLayoutResult } from "./types.js";
 type PlanningPhase =
   | "localRails"
   | "annealer"
+  | "aprDetailPlace"
   | "relocation"
   | "ports"
   | "rails"
@@ -37,6 +38,7 @@ export function timePlanning(plan: () => AutoLayoutResult): AutoLayoutResult {
     phases: {
       localRails: 0,
       annealer: 0,
+      aprDetailPlace: 0,
       relocation: 0,
       ports: 0,
       rails: 0,
@@ -52,6 +54,7 @@ export function timePlanning(plan: () => AutoLayoutResult): AutoLayoutResult {
     phaseCalls: {
       localRails: 0,
       annealer: 0,
+      aprDetailPlace: 0,
       relocation: 0,
       ports: 0,
       rails: 0,

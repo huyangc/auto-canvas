@@ -431,4 +431,98 @@ describe("T127 rail markers sit at the pin they serve", () => {
     expect(missingConnections(after, resolver)).toBe(0);
     expect(floatingPins(after, resolver)).toEqual([]);
   });
+
+  it("seats a contact-hosted supply marker outward when a sideways macro pin's straight seat collides (T189)", () => {
+    const macroSymbol = {
+      schemaVersion: 1 as const,
+      id: "side-vdd-macro",
+      name: "Side VDD Macro",
+      viewBox: { x: -50, y: -30, width: 100, height: 80 },
+      pins: [
+        {
+          name: "iref",
+          role: "input",
+          at: { x: -50, y: 0 },
+          direction: "west" as const,
+          presentation: { visibility: "visible" as const },
+        },
+        {
+          name: "VDD",
+          role: "power",
+          at: { x: -50, y: 40 },
+          direction: "west" as const,
+          presentation: { visibility: "visible" as const },
+        },
+        {
+          name: "out",
+          role: "output",
+          at: { x: 50, y: 0 },
+          direction: "east" as const,
+          presentation: { visibility: "visible" as const },
+        },
+      ],
+      primitives: [
+        {
+          kind: "polygon" as const,
+          fill: "none" as const,
+          points: [
+            { x: -50, y: -30 },
+            { x: 50, y: -30 },
+            { x: 50, y: 50 },
+            { x: -50, y: 50 },
+          ],
+        },
+      ],
+      variants: [],
+    };
+    const macroResolver = new InMemorySymbolResolver([
+      ...builtInSymbols,
+      macroSymbol,
+    ]);
+    const document = circuit(
+      { XM: "side-vdd-macro", R1: "resistor", v1: "vdd-port" },
+      {
+        sig: ["XM.iref", "R1.2"],
+        vdd: ["XM.VDD", "v1.P"],
+      },
+    );
+    // In the input, v1 touches XM.VDD directly at (150, 240), while XM.iref sits at (150, 200)
+    // exactly 40px above XM.VDD where a naive straight-up seat would collide.
+    document.instances.find((i) => i.id === "XM")!.placement = placement(
+      200,
+      200,
+    );
+    document.instances.find((i) => i.id === "R1")!.placement = placement(
+      60,
+      120,
+    );
+    document.instances.find((i) => i.id === "v1")!.placement = placement(
+      150,
+      240,
+    );
+    const plan = planAutoLayout(document, macroResolver, {
+      fixedInstanceIds: new Set(["XM", "R1"]),
+      search: { seed: 1, evaluations: 0 },
+    });
+    expect(plan.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
+    const tx = executeTransaction(
+      document,
+      {
+        transactionId: "side-vdd",
+        documentId: document.id,
+        expectedRevision: document.revision,
+        actor: { kind: "agent", id: "test" },
+        edits: plan.edits,
+      },
+      { symbolResolver: macroResolver },
+    );
+    expect(tx.ok && tx.applied).toBe(true);
+    if (!tx.ok) throw new Error("transaction failed");
+    const after = tx.document;
+    expect(missingConnections(after, macroResolver)).toBe(0);
+    expect(floatingPins(after, macroResolver)).toEqual([]);
+    const v1Pin = after.instances.find((i) => i.id === "v1")!.placement!;
+    // Marker moved outward left of XM.VDD (x < 150) instead of colliding at x=150, y=200.
+    expect(v1Pin.position.x).toBeLessThan(150);
+  });
 });
