@@ -57,8 +57,8 @@ class AutoCanvasBundle:
 BUNDLE = AutoCanvasBundle(
     ExtensionManifest(
         id=PLUGIN_ID,
-        # 0.2.0: the workspace entry; `ui-plugin.json` carries the same version.
-        version="0.2.0",
+        # 0.3.0: adds group & per-notebook circuit/component libraries; `ui-plugin.json` carries the same version.
+        version="0.3.0",
         api_version=EXTENSION_API_VERSION,
         display_name="电路画布",
         trust="deployment",
