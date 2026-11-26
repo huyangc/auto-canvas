@@ -498,10 +498,8 @@ test("the Shelf appends a Cloud Project tab, deduplicates and saves Cloud identi
   await expect(
     cloudDialog.getByRole("button", { name: "Cancel", exact: true }),
   ).toBeVisible();
-  // Confirming swaps the footer in place on one row without growing its height.
-  expect(
-    Math.abs((await betaFooter.boundingBox())!.height - footerHeightBefore),
-  ).toBeLessThanOrEqual(1);
+  // Confirming swaps the footer in place on one row with zero height change.
+  expect((await betaFooter.boundingBox())!.height).toBe(footerHeightBefore);
   await cloudDialog
     .getByRole("button", { name: "Cancel", exact: true })
     .click();
@@ -1543,18 +1541,40 @@ for (const host of ["strip", "File"] as const)
 test("the Browse dialog tiles its cards evenly, closes from its × and drags by its header", async ({
   page,
 }) => {
-  const projects = ["Alpha", "Beta"].map((name, index) => ({
-    id: `cloud-${name.toLowerCase()}`,
+  const projects = [
+    "Alpha — Very Long Fully Differential Two-Stage Operational Transconductance Amplifier",
+    "Beta",
+  ].map((name, index) => ({
+    id: `cloud-${index === 0 ? "alpha" : "beta"}`,
     name,
     revision: 1,
     schemaVersion: createEmptyProject("p", name).schemaVersion,
     updatedAt: `2026-11-2${2 - index}T08:00:00.000Z`,
   }));
+  const renamedNames: string[] = [];
   await page.route("**/api/projects", (route) =>
     route.request().method() === "GET"
       ? route.fulfill({ json: { projects } })
       : route.fallback(),
   );
+  await page.route("**/api/projects/cloud-alpha", (route) => {
+    if (route.request().method() === "GET") {
+      const project = createEmptyProject("p", projects[0]!.name);
+      return route.fulfill({
+        json: {
+          project: { ...projects[0]!, projectText: JSON.stringify(project) },
+        },
+      });
+    }
+    if (route.request().method() === "PUT") {
+      const body = route.request().postDataJSON() as { name: string };
+      renamedNames.push(body.name);
+      projects[0]!.name = body.name;
+      projects[0]!.revision += 1;
+      return route.fulfill({ json: { project: projects[0]! } });
+    }
+    return route.fallback();
+  });
   // A preview of a fixed size settles the tiles before they are measured.
   await page.route("**/api/projects/*/preview.svg*", (route) =>
     route.fulfill({
@@ -1622,7 +1642,9 @@ test("the Browse dialog tiles its cards evenly, closes from its × and drags by 
   // anchored to its button and stays inside the viewport.
   const actions = dialog.getByTestId("shelf-actions-cloud-alpha");
   await actions.click();
-  const menu = page.getByRole("menu", { name: "Actions for Alpha" });
+  const menu = page.getByRole("menu", {
+    name: `Actions for ${projects[0]!.name}`,
+  });
   await expect(menu).toBeVisible();
   const actionsBox = (await actions.boundingBox())!;
   const menuBox = (await menu.boundingBox())!;
@@ -1633,6 +1655,20 @@ test("the Browse dialog tiles its cards evenly, closes from its × and drags by 
   // the dialog (its cancel), which the steps below still need open.
   await dialog.getByText("only you can see these").click();
   await expect(menu).toHaveCount(0);
+
+  // Clicking even a long project name edits inline with zero card height jump.
+  const alphaCard = dialog.locator(".shelf-tile-wrap").first();
+  const cardHeightBeforeRename = (await alphaCard.boundingBox())!.height;
+  await alphaCard.locator(".shelf-tile-name-btn").click();
+  const inlineInput = alphaCard.getByRole("textbox", {
+    name: "Project name",
+    exact: true,
+  });
+  await expect(inlineInput).toBeFocused();
+  expect((await alphaCard.boundingBox())!.height).toBe(cardHeightBeforeRename);
+  await inlineInput.press("Escape");
+  await expect(inlineInput).toHaveCount(0);
+  expect((await alphaCard.boundingBox())!.height).toBe(cardHeightBeforeRename);
 
   // Dragged far past the corner, the window stops 8px inside the viewport.
   const again = await grip();
@@ -1694,7 +1730,20 @@ test("the Browse dialog tiles its cards evenly, closes from its × and drags by 
   expect(narrowSecond.y).toBeGreaterThan(
     narrowFirst.y + narrowFirst.height - 1,
   );
-  await dialog.getByRole("button", { name: "Close", exact: true }).click();
+  // Clicking the dialog backdrop while editing commits the pending rename
+  // before closing the modal.
+  await dialog
+    .locator(".shelf-tile-wrap")
+    .first()
+    .locator(".shelf-tile-name-btn")
+    .click();
+  const backdropEdit = dialog.getByRole("textbox", {
+    name: "Project name",
+    exact: true,
+  });
+  await backdropEdit.fill("Alpha Backdrop Saved");
+  await page.mouse.click(4, 4);
   await expect(dialog).toBeHidden();
+  await expect.poll(() => renamedNames).toEqual(["Alpha Backdrop Saved"]);
   await page.setViewportSize(viewport);
 });

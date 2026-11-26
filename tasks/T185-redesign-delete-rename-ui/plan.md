@@ -27,6 +27,7 @@ Verified at `4fc06e18`:
 
 - `apps/editor/src/components/inline-confirm.tsx`: defaults `confirmLabel = "Really delete"` and `cancelLabel = "Keep it"`. Used by `shelf-wall.tsx`, `component-definition-editor.tsx` (uses defaults), `external-model-source-editor.tsx` (custom labels), and `project-tabs.tsx` (custom labels `"Close without saving"` / `"Keep open"`).
 - `apps/editor/src/components/inline-confirm.css`: styles `.inline-confirm`, `.inline-confirm-decision`, `.inline-confirm-actions`.
+- `apps/editor/src/features/editor-shell/cloud-projects-dialog.tsx`: closes on backdrop `pointerdown`, so dismissing while renaming needs to blur/commit first.
 - `apps/editor/src/components/shelf-wall.tsx` & `shelf-wall.css`:
   - `.shelf-tile-footer` (`flex-wrap: wrap`) renders `♡`, `Rename` button, `InlineConfirm` trash button, and `•••`. Expanding `InlineConfirm` wraps confirmation buttons onto line 2 and pushes `•••` onto line 3.
   - `.shelf-rename-form` renders below the card (or replaces the list row) with Save/Cancel buttons.
@@ -43,6 +44,7 @@ Owned paths:
 - `tasks/T185-redesign-delete-rename-ui/plan.md`
 - `apps/editor/src/components/inline-confirm.tsx`
 - `apps/editor/src/components/inline-confirm.css`
+- `apps/editor/src/features/editor-shell/cloud-projects-dialog.tsx`
 - `apps/editor/src/components/shelf-wall.tsx`
 - `apps/editor/src/components/shelf-wall.css`
 - `apps/editor/src/components/shelf-wall-limit.test.tsx`

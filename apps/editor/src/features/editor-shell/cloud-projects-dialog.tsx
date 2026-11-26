@@ -46,6 +46,15 @@ export function CloudProjectsDialog({
     [release],
   );
 
+  const closeDialog = useCallback(() => {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && dialogRef.current?.contains(active)) {
+      // Flush any focused inline edit (e.g. project rename) before unmounting.
+      active.blur();
+    }
+    onClose();
+  }, [onClose]);
+
   const handleOpenProject = useCallback(
     (id: string) => {
       onClose();
@@ -65,7 +74,7 @@ export function CloudProjectsDialog({
         onClose();
       }}
       onPointerDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
+        if (event.target === event.currentTarget) closeDialog();
       }}
     >
       <header
@@ -73,7 +82,7 @@ export function CloudProjectsDialog({
         onPointerDown={onHeaderPointerDown}
       >
         <h2 id="cloud-shelf-title">Cloud Projects</h2>
-        <DialogCloseButton onClick={onClose} />
+        <DialogCloseButton onClick={closeDialog} />
       </header>
       <div className="cloud-shelf-body">
         <Suspense
