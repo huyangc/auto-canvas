@@ -48,8 +48,9 @@ The implementer's report (and a Codex round's final `STATUS:` line) are
 claims. Establish the facts
 yourself:
 
-1. Run `git status --short` and `git diff --stat <planned-base-commit>`. Use
-   that task base for the full diff below as well. Every changed path is in
+1. Run `git status --short`. Refresh the planned target branch’s remote ref and
+   obtain its current merge base with HEAD using `git merge-base HEAD <target-ref>`.
+   Use that SHA for `git diff --stat <sha>` and the full diff below. Every changed path is in
    the plan's owned paths; nothing in plan.md or review.md changed; no
    lockfile or dependency change unless planned.
 2. For a Codex round, read the timeline:
