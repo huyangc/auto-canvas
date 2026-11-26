@@ -55,9 +55,6 @@ export -> validate -> encode file schema 78 -> readable canonical JSON -> downlo
   the one reader/writer; a full source edit is one undoable commit.
 - Not in the file: viewport, selection, undo, overlays, Agent credentials,
   recovery envelopes, renders, derived diagnostics.
-- Windows desktop also accepts `.icproj` as a filename alias for the same JSON
-  with an opt-in association (`.json` is never taken over); library files and
-  exports stay `.icproj.json`.
 
 ## Compatibility floor
 

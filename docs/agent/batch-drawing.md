@@ -46,12 +46,3 @@ count unless one side omits them (`--body` forces). Outcomes: `match`,
 `agreed` sets `datasetSuspect`: the reference may be wrong.
 `scripts/lib/draw-batch-script-agent.mjs` is a scripted Agent for trying the
 pipeline without a model.
-
-Accepted drawings go to the dataset's reference store (#1510), never the
-community wall: `pnpm gallery:import-batches RUN_DIR --source KEY` (`KEY` from
-`config/gallery-sources.json`) writes `RUN_DIR/gallery-import/KEY-*.json`
-(suspect acceptances need `--include-suspect`; `left-out.json` explains
-exclusions). `--post` posts them with the Owner token
-(Reference datasets) from
-`ANALOG_CANVAS_OWNER_TOKEN` or `~/.config/analog-canvas/owner-token`; `--help`
-lists the other options. Re-importing an id replaces it.

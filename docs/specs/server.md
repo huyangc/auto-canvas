@@ -505,7 +505,7 @@ after eviction using real PostgreSQL, HTTP and WebSockets.
 The public library keeps authors and revisions; each new record is authored by
 `local`, whose admin privileges also permit promotion and management. Reads
 need no sign-in. Validation and exact publication content identity live in
-`@icm/component-library`, shared with the editor, desktop and Worker.
+`@icm/component-library`, shared with the editor.
 
 | Endpoint                                           | Result                                                                                                                                                    |
 | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |

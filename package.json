@@ -9,15 +9,13 @@
     "pnpm": ">=11.16.0"
   },
   "dependencies": {
-    "@icm/agent-adapter": "workspace:*",
     "@icm/derived": "workspace:*",
     "@icm/devices": "workspace:*",
     "@icm/model": "workspace:*",
     "@icm/netlist": "workspace:*",
     "@icm/project-protocol": "workspace:*",
     "@icm/render-svg": "workspace:*",
-    "@icm/symbols": "workspace:*",
-    "@icm/component-library": "workspace:*"
+    "@icm/symbols": "workspace:*"
   },
   "scripts": {
     "rnl:package:check": "node scripts/rnl-canvas-package.mjs --check",
@@ -106,7 +104,6 @@
     "@anthropic-ai/sdk": "1.6.0",
     "@playwright/test": "1.62.1",
     "@types/node": "24.13.3",
-    "fflate": "0.8.3",
     "jsdom": "26.1.0",
     "knip": "6.40.0",
     "oxlint": "1.86.0",

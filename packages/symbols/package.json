@@ -15,7 +15,6 @@
   },
   "dependencies": {
     "@icm/devices": "workspace:*",
-    "@icm/model": "workspace:*",
-    "zod": "4.4.3"
+    "@icm/model": "workspace:*"
   }
 }
