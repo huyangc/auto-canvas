@@ -9,7 +9,7 @@ import {
   floatingPins,
   missingConnections,
 } from "../src/routing-audit.js";
-import { symmetryCounts, symmetryTopology } from "../src/symmetry.js";
+import { mirrorSymmetryTopology, symmetryCounts } from "../src/symmetry.js";
 import { equivalentTerminals, preview } from "../src/transaction.js";
 import { circuit } from "./document-fixture.js";
 
@@ -73,7 +73,7 @@ it.each([1, 2])(
         rotation: 0,
         locked: false,
       });
-    const { components } = symmetryTopology(
+    const { components } = mirrorSymmetryTopology(
       d,
       resolver,
       classifyNets(d, resolver),

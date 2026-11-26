@@ -560,7 +560,6 @@ function routeGroup(
   const diagnostics: AutoLayoutDiagnostic[] = [];
   const power = (g: PinGroup) =>
     ["supply", "ground"].includes(roles.byNet.get(g.netId) ?? "");
-  const points = pinPoints(working, resolver);
   const clusters =
     power(group) && !roles.rails.has(group.netId)
       ? undefined
