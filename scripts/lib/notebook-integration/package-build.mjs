@@ -129,6 +129,11 @@ export async function buildPackages(m, inbox) {
   const carry = (name, archive) => {
     sandbox.assertRealFile(archive);
     const dest = path.join(inbox, path.basename(archive));
+    sandbox.assertRealDir(inbox);
+    if (fs.lstatSync(dest, { throwIfNoEntry: false }))
+      throw new PathRefused(
+        `site archive already exists: ${path.basename(dest)}`,
+      );
     fs.renameSync(archive, dest);
     packages[name] = dest;
     report.ok(`P0 ${name} tarball delivered to the site`);

@@ -305,7 +305,7 @@ in system Chrome through a proxy restricted to the package server.
    tar -xzf "$PAIRED_NOTEBOOK_TARBALL" -C "$NB" --strip-components=1
    OFFLINE=1 "$NB/install.sh"
    tar -xzf "$CANVAS_TARBALL" -C "$CANVAS" --strip-components=1
-   "$NB/.venv/bin/python" -m pip install --no-index --find-links "$CANVAS/wheels" "$CANVAS"/wheels/*.whl
+   PIP_CONFIG_FILE=/dev/null "$NB/.venv/bin/python" -m pip --isolated install --no-index --find-links "$CANVAS/wheels" "$CANVAS"/wheels/*.whl
    ```
 
 2. Provision a separate empty PostgreSQL database as in source deployment step 2.
