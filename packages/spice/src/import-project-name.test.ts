@@ -50,6 +50,9 @@ describe("deriveImportedProjectName", () => {
     expect(deriveImportedProjectName(`${"a".repeat(150)}.sp`, "__flat__")).toBe(
       "a".repeat(120),
     );
+    expect(
+      deriveImportedProjectName(`${"a".repeat(119)}🔌.sp`, "__flat__"),
+    ).toBe("a".repeat(119));
   });
 });
 

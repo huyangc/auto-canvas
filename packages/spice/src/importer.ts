@@ -1664,7 +1664,15 @@ const GENERIC_DIRECTORY_NAMES = new Set([
 ]);
 
 function clampProjectName(name: string): string {
-  return name.trim().slice(0, MAX_IMPORTED_PROJECT_NAME_LENGTH).trim();
+  const trimmed = name.trim();
+  if (trimmed.length <= MAX_IMPORTED_PROJECT_NAME_LENGTH) return trimmed;
+  let clamped = trimmed.slice(0, MAX_IMPORTED_PROJECT_NAME_LENGTH);
+  // Keep UTF-16 length within the 120-char Cloud limit without splitting a surrogate pair.
+  const last = clamped.charCodeAt(clamped.length - 1);
+  if (last >= 0xd800 && last <= 0xdbff) {
+    clamped = clamped.slice(0, -1);
+  }
+  return clamped.trim();
 }
 
 function entryPathSegments(entryPath: string): string[] {

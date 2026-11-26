@@ -952,6 +952,7 @@ function WorkspaceEditor({
   const {
     sessionUser,
     cloudProjects,
+    currentCloudProjects,
     setCloudProjects,
     cloudProjectsReady,
     cloudListMutationRef,
@@ -1140,7 +1141,7 @@ function WorkspaceEditor({
           .entries()
           .filter(({ id }) => id !== activeTabId)
           .map(({ session }) => session.controller.project.name),
-        ...cloudProjects.map((item) => item.name),
+        ...currentCloudProjects().map((item) => item.name),
       ]);
     },
     project,
@@ -4907,7 +4908,7 @@ function WorkspaceEditor({
   } = useProjectTabSessions({
     openProjectFile,
     projectStore,
-    cloudProjects,
+    currentCloudProjects,
     onCloudProjectSaved: noteCloudProjectSaved,
     onCloudProjectsDeleted: noteCloudProjectsDeleted,
     initialProject,
