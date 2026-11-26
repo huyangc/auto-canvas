@@ -133,7 +133,7 @@ node scripts/codex-log.mjs tasks/T001-<slug> --round 2 --follow       # 供 Moni
 
 ## PR 评审与合入
 
-远端为本仓库的 `origin`。推送或创建、更新 PR 可能触发自动评审；负责人先按[发布与额度规则](../AGENTS.md#提交提-pr-与合入)核对实际计费方式。
+远端为本仓库的 `origin`。在计划指定的任务分支上用 `git push -u origin HEAD` 推送；普通任务使用 `gh pr create --base main`，stacked PR 显式指定计划中的基分支。推送或创建、更新 PR 可能触发自动评审；负责人先按[发布与额度规则](../AGENTS.md#提交提-pr-与合入)核对实际计费方式。
 
 用户的长期偏好已授权：自验证通过后自动提交、推送任务分支并创建 PR。已有 PR 时更新同一分支。开发者对本次交付另有指示时按其指示执行。开发者说“CI 绿了就合入”即已授权负责人持续跟踪并在满足下列条件时合入。仅授权提 PR 时，交付链接与评审状态。
 
@@ -172,6 +172,7 @@ node scripts/codex-log.mjs tasks/T001-<slug> --round 2 --follow       # 供 Moni
 set -eu
 pr_base=$(gh pr view "${PR_NUMBER:?请设置待评审的 PR 号}" --json baseRefName --jq .baseRefName)
 review_output=$(mktemp)
+printf 'Review output: %s\n' "$review_output"
 codex exec review --base "origin/$pr_base" --ephemeral -m gpt-6.2-sol \
   -c 'review_model="gpt-6.2-sol"' -c 'model_reasoning_effort=medium' -c 'notify=[]' -o "$review_output"
 ```
@@ -179,6 +180,8 @@ codex exec review --base "origin/$pr_base" --ephemeral -m gpt-6.2-sol \
 核对退出码和非空输出，将原文和本轮命令、SHA、退出码、字节数贴回 PR。用 `gh pr view <PR号> --json headRefOid,comments` 核对远端证据。
 
 ### Claude Code PR 操作
+
+`run-task` 的 Deliver 步骤引用本节所属的[交付流程](#pr-评审与合入)。执行时以计划中的实际分支和基分支为准，合入使用上文带 `--match-head-commit` 的完整命令。
 
 自动评审（model `gpt-6.2-sol`）由开发者本机的 `~/.claude/hooks/codex-pr-review.sh`
 提供，不是仓库产物：开 PR 后它自动跑一轮并贴回评论，判过 P0/P1 后有新提交时自动重审。
