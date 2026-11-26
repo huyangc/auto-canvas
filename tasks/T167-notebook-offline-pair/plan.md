@@ -134,14 +134,16 @@ commands in separate lists:
 - Upgrading silicon-notebook: stop; unpack the new canvas-enabled package;
   `upgrade.sh --target <notebook> --extra-wheelhouse <canvas package>/wheels`;
   start. Upgrading the canvas: stop, unpack the new canvas package to a new
-  directory, point `cwd` at it, start (migrations run at start as today).
-- Backups: silicon-notebook's database and the canvas database together;
-  restoring one without the other is not supported.
+  directory, point `cwd` at it, start.
+- **No database topics** (the owner, 2026-11-25: offline upgrades and
+  database matters are decoupled): the offline installation, upgrade and
+  switch-back text says nothing about database backup, restore, pairing or
+  migrations; silicon-notebook's own documents cover its database.
 - Switching back to a default silicon-notebook package (the offline rollback):
   stop; remove the canvas tables from the TOML (or `EXTENSIONS_CONFIG`);
   uninstall the plugin from `.venv`; `upgrade.sh --target <notebook>` from a
   default package (built without the canvas variables); start. The canvas
-  database and directory are left.
+  directory is left in place.
 - Link SN's documents (above) for everything else.
 
 **Stage P** (`--stage P --notebook <dir> --ref <sha> --python <python ≥ 3.13>
@@ -172,7 +174,7 @@ minor version is baked into the wheelhouse); `--package-python` (default
    `npm_config_offline=true`, a `PATH` of system tools without `node`, `npm`,
    `pnpm`; nothing refers to the clone or this checkout):
    - P1 default: unpack `default`, `OFFLINE=1 install.sh`, `start.sh` with
-     the site's ports → `/api/health` 200, `/canvas` silicon-notebook's 404;
+     the site's ports → `/api/ready` 200 (silicon-notebook's packaged readiness probe; `/api/health` needs a session there), `/canvas` silicon-notebook's 404;
      `stop.sh` → pids gone, ports free. Remove the directory.
    - P2 paired install: unpack `canvas` and the canvas package (separate
      directories), the README's site steps verbatim (the stage reads no
@@ -185,7 +187,7 @@ minor version is baked into the wheelhouse); `--package-python` (default
      succeeds; start → A's project from P2 is still listed and reopens,
      the click still works; stop.
    - P4 switch back: the README's rollback steps, `upgrade.sh` from
-     `default` → `/canvas` is silicon-notebook's 404, `/api/health` 200, A
+     `default` → `/canvas` is silicon-notebook's 404, `/api/ready` 200, A
      still signs in and sees the notebook from P2; the entry is absent; the
      canvas database still holds A's project (read through `psql`-free SQL on
      the stage's admin connection); stop.

@@ -242,7 +242,7 @@ export async function firstRefusal({
 }
 
 /** M3–M8: readiness, the signed-out answers, two users, a sign-out. */
-async function signedInUsers(m, { getCanvas, getProxied }) {
+export async function signedInUsers(m, { getCanvas, getProxied }) {
   const { report } = m;
   const clean = report.clean;
   // M3 ready through the notebook's origin.
@@ -431,7 +431,15 @@ async function signedInUsers(m, { getCanvas, getProxied }) {
     !stillB,
     stillB,
   );
-  return true;
+  return {
+    a,
+    projectId: projectA.id,
+    saved: {
+      revision: projectA.revision + 1,
+      name: renamed,
+      projectText: savedText,
+    },
+  };
 }
 
 // ---- M-ext: external mode, then a misrouted upstream -------------------------

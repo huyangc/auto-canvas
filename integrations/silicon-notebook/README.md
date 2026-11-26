@@ -24,7 +24,7 @@ merged 2026-11-23); see that repository's deployment document,
 How the server behaves in this mode, the start flags and the database guards
 are specified in [docs/specs/server.md](../../docs/specs/server.md#running-as-a-silicon-notebook-companion-service).
 
-Not yet covered: an offline installation is described separately (T167). A
+For a packaged deployment, follow [offline installation](#offline-installation-with-silicon-notebooks-offline-package). A
 managed start against a real silicon-notebook clone is checked by stage M of
 the [integration check](../../docs/testing/README.md#stage-m-a-managed-start-in-a-silicon-notebook-clone),
 the entry link in a browser by [stage L](../../docs/testing/README.md#stage-l-the-entry-link-in-a-browser).
@@ -163,15 +163,21 @@ time. Add its absolute path to `SILICON_NOTEBOOK_UI_PLUGINS` in step 8's
 build environment. The variable is a `:`-separated list of UI packages: when
 it already names others, append the canvas's path and keep them; otherwise
 set it to the path alone. The snippet appends only when the path is not
-already an entry (silicon-notebook's sync refuses a package named twice), so
+already an entry. Run both snippets from silicon-notebook's `frontend` directory
+so relative entries resolve from the same directory as its build
+(silicon-notebook's sync refuses a package named twice), so
 running it again changes nothing; it also runs under `set -euo pipefail`:
 
 ```bash
 CANVAS_UI=/opt/auto-canvas/integrations/silicon-notebook/ui/auto-canvas
-case ":${SILICON_NOTEBOOK_UI_PLUGINS-}:" in
-  *":$CANVAS_UI:"*) ;; # already an entry
-  *) SILICON_NOTEBOOK_UI_PLUGINS="${SILICON_NOTEBOOK_UI_PLUGINS:+$SILICON_NOTEBOOK_UI_PLUGINS:}$CANVAS_UI" ;;
-esac
+SILICON_NOTEBOOK_UI_PLUGINS=$(node - "$CANVAS_UI" "${SILICON_NOTEBOOK_UI_PLUGINS-}" <<'JS'
+const path = require('node:path')
+const [canvas, list] = process.argv.slice(2)
+const entries = list.split(':').filter(entry => entry.trim())
+if (!entries.some(entry => path.resolve(entry.trim()) === path.resolve(canvas.trim()))) entries.push(canvas)
+process.stdout.write(entries.join(':'))
+JS
+)
 export SILICON_NOTEBOOK_UI_PLUGINS
 ```
 
@@ -190,12 +196,18 @@ browser bundle's `NEXT_PUBLIC_API_BASE_URL` must be the same-origin `/api`
 To remove the entry, take only the canvas's path out of
 `SILICON_NOTEBOOK_UI_PLUGINS` and rebuild silicon-notebook; the other UI
 packages the list names stay. Unset the variable only when the canvas's path
-was its only entry. The snippet also runs under `set -euo pipefail` (grep's
-status 1, "nothing left", is not an error there; its real errors still are):
+was its only entry:
 
 ```bash
 CANVAS_UI=/opt/auto-canvas/integrations/silicon-notebook/ui/auto-canvas
-rest=$(printf '%s' "${SILICON_NOTEBOOK_UI_PLUGINS-}" | tr ':' '\n' | { grep -vxF "$CANVAS_UI" || [ $? -eq 1 ]; } | paste -sd: -)
+rest=$(node - "$CANVAS_UI" "${SILICON_NOTEBOOK_UI_PLUGINS-}" <<'JS'
+const path = require('node:path')
+const [canvas, list] = process.argv.slice(2)
+process.stdout.write(list.split(':').filter(entry =>
+  entry.trim() && path.resolve(entry.trim()) !== path.resolve(canvas.trim())
+).join(':'))
+JS
+)
 if [ -n "$rest" ]; then export SILICON_NOTEBOOK_UI_PLUGINS="$rest"; else unset SILICON_NOTEBOOK_UI_PLUGINS; fi
 ```
 
@@ -231,7 +243,7 @@ The package keeps this checkout's paths, so the launchers run unchanged:
   `apps/server/package.json`;
 - `apps/editor/dist-notebook/` — the notebook build of the editor;
 - `integrations/silicon-notebook/` — `serve.sh`, `init-db.sh`, this file
-  and the two TOML examples (and `ui/` once it exists);
+  and the two TOML examples and `ui/`;
 - `wheels/silicon_notebook_auto_canvas-<version>-py3-none-any.whl` — the
   plugin, installed instead of the `plugin/` directory of step 6;
 - `env.example` — the `AUTO_CANVAS_DATABASE_URL` line for silicon-notebook's
@@ -239,11 +251,149 @@ The package keeps this checkout's paths, so the launchers run unchanged:
   packages bundled into the server.
 
 Node is not shipped: the site runs the package with silicon-notebook's own
-Node, named by `AUTO_CANVAS_NODE`. The offline installation steps at a site
-are described separately (T167). `node scripts/package-notebook-canvas-check.mjs`
-proves a built package in an empty directory and checks that its editor mounts
-in system Chrome through a proxy restricted to the package server (see
-[docs/testing/README.md](../../docs/testing/README.md#local-validation)).
+Node, named by `AUTO_CANVAS_NODE`. The [package check](../../docs/testing/README.md#local-validation)
+installs the archive in an empty directory and verifies that its editor mounts
+in system Chrome through a proxy restricted to the package server.
+
+## Offline installation with silicon-notebook's offline package
+
+### On the build machine
+
+1. Use the site's OS, CPU architecture and Python minor version (3.13 or newer).
+   Install the Node major in silicon-notebook's `.nvmrc`, npm, pnpm and a C++
+   toolchain for its Python wheels. Use a full notebook clone. Choose the API,
+   canvas and web ports before packing. The first two become frontend rewrite
+   destinations. The example below uses 18100, 14310 and 13100.
+
+   ```bash
+   NB_SRC=/build/silicon-notebook
+   CANVAS_SRC=/build/auto-canvas
+   export PACK_PYTHON=/path/to/site-compatible-python
+   export NEXT_PUBLIC_API_BASE_URL=/api
+   export BACKEND_PROXY_TARGET=http://127.0.0.1:18100
+   export OUT_DIR=/build/notebook-artifacts  # dedicated output; pack replaces its stage/
+   unset SKIP_WHEELHOUSE CANVAS_PROXY_TARGET SILICON_NOTEBOOK_UI_PLUGINS
+   VERSION=site-1 bash "$NB_SRC/scripts/pack.sh"
+   export CANVAS_PROXY_TARGET=http://127.0.0.1:14310
+   export SILICON_NOTEBOOK_UI_PLUGINS="$CANVAS_SRC/integrations/silicon-notebook/ui/auto-canvas"
+   VERSION=site-2 bash "$NB_SRC/scripts/pack.sh"
+   ```
+
+2. Build the canvas from that same checkout. Carry both notebook tarballs
+   (default and canvas-enabled) and the canvas tarball to the site.
+   For a subsequent notebook release repeat the canvas-enabled pack at its
+   new revision with the same proxy targets and UI package.
+
+   ```bash
+   cd "$CANVAS_SRC"
+   pnpm install --frozen-lockfile
+   AUTO_CANVAS_PACKAGE_PYTHON=/path/to/python-with-setuptools pnpm notebook:package
+   ```
+
+### At the offline site
+
+1. Choose fresh sibling directories on a volume with space for upgrade backups.
+   Supply the site's Python and the actual tarball paths.
+
+   ```bash
+   NB=/opt/silicon-notebook
+   CANVAS=/opt/auto-canvas-site-2
+   export PYTHON_BIN=/path/to/site-python
+   mkdir "$NB" "$CANVAS"
+   tar -xzf "$PAIRED_NOTEBOOK_TARBALL" -C "$NB" --strip-components=1
+   OFFLINE=1 "$NB/install.sh"
+   tar -xzf "$CANVAS_TARBALL" -C "$CANVAS" --strip-components=1
+   "$NB/.venv/bin/python" -m pip install --no-index --find-links "$CANVAS/wheels" "$CANVAS"/wheels/*.whl
+   ```
+
+2. Provision a separate empty PostgreSQL database as in source deployment step 2.
+   Edit the installed `$NB/.env` according to step 4. Set its single
+   `DATABASE_URL` to the site's **notebook** database and its
+   `NEXT_PUBLIC_API_BASE_URL` to `/api`. Configure
+   `MODEL_SERVICES_CONFIG` for the site (empty for offline deterministic mode).
+   Add these literal settings, substituting the site's canvas URL and paths.
+
+   ```dotenv
+   PORT=18100
+   FRONTEND_PORT=13100
+   AUTO_CANVAS_DATABASE_URL=postgresql://auto_canvas:password@127.0.0.1:5432/auto_canvas
+   EXTENSIONS_CONFIG=/opt/silicon-notebook/.local/extensions.toml
+   ```
+
+3. Copy the example to the path named in `EXTENSIONS_CONFIG`. In the service
+   table set `cwd` to the absolute canvas directory and the healthcheck URL's
+   port to 14310. In the service's `.env` table set `AUTO_CANVAS_PORT` to
+   `"14310"`, `AUTO_CANVAS_NOTEBOOK_API` to `"http://127.0.0.1:18100"`,
+   `AUTO_CANVAS_NOTEBOOK_ENV_FILE` to the notebook's absolute `.env` path and
+   add `AUTO_CANVAS_NODE = "/opt/silicon-notebook/node/bin/node"`.
+   Keep the TOML under `.local/` and the canvas outside the notebook install
+   directory. Notebook upgrades replace entire program directories.
+
+   ```bash
+   cp "$CANVAS/integrations/silicon-notebook/extensions.example.toml" "$NB/.local/extensions.toml"
+   "${EDITOR:-vi}" "$NB/.local/extensions.toml"
+   AUTO_CANVAS_DATABASE_URL='postgresql://auto_canvas:password@127.0.0.1:5432/auto_canvas' \
+     AUTO_CANVAS_NODE="$NB/node/bin/node" "$CANVAS/integrations/silicon-notebook/init-db.sh" --notebook-root "$NB"
+   "$NB/start.sh"
+   ```
+
+   Check `/api/ready` through the web port, sign in and open a notebook.
+   Click **打开电路画布** in Sources to open the canvas. Stop both services with
+   `"$NB/stop.sh"`.
+
+### Upgrades and switching back
+
+- **Upgrade silicon-notebook.** Unpack the new canvas-enabled package into a
+  fresh sibling directory. Supply the wheels for the currently installed
+  plugin version so the upgrader can rebuild the venv offline.
+
+  ```bash
+  "$NB/stop.sh"
+  mkdir "$NEW_NOTEBOOK"
+  tar -xzf "$NEW_NOTEBOOK_TARBALL" -C "$NEW_NOTEBOOK" --strip-components=1
+  "$NEW_NOTEBOOK/upgrade.sh" --target "$NB" --extra-wheelhouse "$CANVAS/wheels"
+  "$NB/start.sh"
+  ```
+
+  Verify `/api/ready` and reopen a saved canvas project through the entry.
+
+- **Upgrade the canvas.** Unpack the new canvas package in a fresh sibling
+  directory and set `cwd` in the service table to its absolute path.
+
+  ```bash
+  "$NB/stop.sh"
+  mkdir "$NEW_CANVAS"
+  tar -xzf "$NEW_CANVAS_TARBALL" -C "$NEW_CANVAS" --strip-components=1
+  "${EDITOR:-vi}" "$NB/.local/extensions.toml"
+  "$NB/start.sh"
+  ```
+
+  If the new package changes the plugin version, install its wheel into
+  the notebook venv and deploy a notebook build with the matching UI
+  package before starting. Set `CANVAS="$NEW_CANVAS"` for future upgrades.
+
+- **Switch back to the default notebook package.** With services stopped,
+  remove the canvas extension tables from the TOML, or remove its
+  `EXTENSIONS_CONFIG` setting if it enabled only the canvas. Uninstall the
+  plugin before upgrading from the default package.
+
+  ```bash
+  "$NB/stop.sh"
+  "${EDITOR:-vi}" "$NB/.local/extensions.toml"
+  "$NB/.venv/bin/python" -m pip uninstall -y silicon-notebook-auto-canvas
+  mkdir "$DEFAULT_NOTEBOOK"
+  tar -xzf "$DEFAULT_NOTEBOOK_TARBALL" -C "$DEFAULT_NOTEBOOK" --strip-components=1
+  "$DEFAULT_NOTEBOOK/upgrade.sh" --target "$NB"
+  "$NB/start.sh"
+  ```
+
+  Check `/api/ready` and reopen the notebook. The canvas entry is gone and
+  `/canvas` returns 404. The canvas directory stays in place.
+
+For notebook configuration, recovery and plugin delivery see silicon-notebook's
+[offline packaging guide, section 5](https://github.com/huyangc/silicon-notebook/blob/master/docs/deployment-and-configuration.md),
+[packaged DEPLOY.md](https://github.com/huyangc/silicon-notebook/blob/master/packaging/DEPLOY.md)
+and [extension SOP](https://github.com/huyangc/silicon-notebook/blob/master/docs/deployment-extensions-sop.md).
 
 ## What `serve.sh` reads, sets and removes
 

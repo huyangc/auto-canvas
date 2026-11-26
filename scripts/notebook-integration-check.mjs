@@ -2,7 +2,7 @@
 // Repeatable integration check for serving auto-canvas under silicon-notebook's
 // Next.js server at /canvas. Run on demand; never part of CI.
 //
-//   node scripts/notebook-integration-check.mjs --stage <T|A|S|M|L> --notebook <dir>
+//   node scripts/notebook-integration-check.mjs --stage <T|A|S|M|L|P> --notebook <dir>
 //     [--ref <git ref>] [--base <commit>] [--python <interpreter>] [--keep]
 //
 // Everything it builds or starts lives in a temporary directory it creates;
@@ -20,6 +20,7 @@ import {
   stageL,
   stageLPrerequisites,
 } from "./lib/notebook-integration/stage-l.mjs";
+import { stageP } from "./lib/notebook-integration/stage-p.mjs";
 import { stageM } from "./lib/notebook-integration/stage-m.mjs";
 import { stageS } from "./lib/notebook-integration/self-check.mjs";
 import { stageT } from "./lib/notebook-integration/stage-t.mjs";
@@ -32,15 +33,24 @@ import {
 import { createReporter } from "./lib/notebook-integration/transport.mjs";
 
 const USAGE =
-  "usage: node scripts/notebook-integration-check.mjs --stage <T|A|S|M|L> --notebook <dir>\n" +
+  "usage: node scripts/notebook-integration-check.mjs --stage <T|A|S|M|L|P> --notebook <dir>\n" +
   "         [--ref <git ref>] [--base <commit>] [--python <interpreter>] [--keep]\n" +
-  "  stage A needs --ref, --base and --python; stages M and L need --ref and\n" +
+  "         [--package-python <wheel builder>] [--cache <directory>] (stage P)\n" +
+  "  stage A needs --ref, --base and --python; stages M, L and P need --ref and\n" +
   "  --python (and the canvas builds of this checkout); stage S runs the\n" +
   "  script's own refusal self-checks on throwaway material";
 
 function parseArgs(argv) {
   const options = { keep: false };
-  const valued = new Set(["stage", "notebook", "ref", "base", "python"]);
+  const valued = new Set([
+    "stage",
+    "notebook",
+    "ref",
+    "base",
+    "python",
+    "package-python",
+    "cache",
+  ]);
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
     if (flag === "--keep") options.keep = true;
@@ -51,19 +61,21 @@ function parseArgs(argv) {
       options[flag.slice(2)] = value;
     } else throw new UsageError(`unknown argument ${flag}`);
   }
-  if (!["T", "A", "S", "M", "L"].includes(options.stage))
-    throw new UsageError("--stage must be T, A, S, M or L");
+  if (!["T", "A", "S", "M", "L", "P"].includes(options.stage))
+    throw new UsageError("--stage must be T, A, S, M, L or P");
   if (!options.notebook) throw new UsageError("--notebook is required");
   if (options.stage === "A")
     for (const name of ["ref", "base", "python"])
       if (!options[name]) throw new UsageError(`stage A needs --${name}`);
-  if (options.stage === "M" || options.stage === "L") {
+  if (["M", "L", "P"].includes(options.stage)) {
     for (const name of ["ref", "python"])
       if (!options[name])
         throw new UsageError(`stage ${options.stage} needs --${name}`);
     if (options.base)
       throw new UsageError(`stage ${options.stage} takes no --base`);
   }
+  if (options.stage !== "P" && (options["package-python"] || options.cache))
+    throw new UsageError("--package-python and --cache are stage P options");
   return options;
 }
 
@@ -78,10 +90,10 @@ try {
 
 // Stages M and L run this checkout's canvas: its builds (and, for stage L,
 // the UI package and Playwright) must exist before anything is allocated.
-if (options.stage === "M" || options.stage === "L") {
+if (["M", "L", "P"].includes(options.stage)) {
   const problems = [
     ...managedPrerequisites(options.stage),
-    ...(options.stage === "L" ? stageLPrerequisites() : []),
+    ...(options.stage !== "M" ? stageLPrerequisites(options.stage) : []),
   ];
   if (problems.length) {
     console.error(problems.join("\n"));
@@ -132,7 +144,25 @@ for (const signal of ["SIGINT", "SIGTERM"])
     shuttingDown = true;
     interrupted = true;
     console.log(`interrupted (${signal}); cleaning up`);
-    void sandbox.dispose().catch(() => {});
+    const cleanup = sandbox.dispose();
+    if (options.stage === "P") {
+      // A readiness probe or browser waiter may still be waiting on a dead
+      // service. Once every resource is disposed it cannot advance the site.
+      void cleanup.then(
+        (left) => {
+          for (const pgid of left)
+            report.fail(
+              "P",
+              `process group ${pgid} still present after cleanup`,
+            );
+          finish();
+        },
+        (error) => {
+          report.fail("P", `cleanup failed: ${error.message}`);
+          finish();
+        },
+      );
+    } else void cleanup.catch(() => {});
     setTimeout(() => {
       report.fail(
         options.stage,
@@ -150,14 +180,15 @@ try {
     else if (options.stage === "S") await stageS(context);
     else if (options.stage === "M") await stageM(context);
     else if (options.stage === "L") await stageL(context);
+    else if (options.stage === "P") await stageP(context);
     else await stageA(context);
-    offlineVerdict(sandbox, report);
+    if (options.stage !== "P") offlineVerdict(sandbox, report);
   }
   // The scan compares against the marker inside the sandbox, which an
   // interrupt has already removed. Stage S reads nothing from the notebook,
   // so it does not scan it (the directory need not even have modules).
-  if (options.stage === "S") {
-    // nothing to observe
+  if (["S", "P"].includes(options.stage)) {
+    // P clones from git and never needs the source working tree.
   } else if (interrupted)
     report.note("source-checkout observation skipped: interrupted");
   else observeSource(sandbox, report, notebook);
