@@ -305,6 +305,7 @@ it("preserves the typed rename draft on save failure so the user can retry or ed
     favorite: false,
   };
   let attempts = 0;
+  const onOpenProject = vi.fn();
   const onRenameProject = vi.fn(async (_id: string, name: string) => {
     attempts += 1;
     if (attempts === 1) throw new Error("Temporary network error");
@@ -320,7 +321,7 @@ it("preserves the typed rename draft on save failure so the user can retry or ed
   document.body.append(container);
   root = createRoot(container);
   await act(async () =>
-    root!.render(createElement(ShelfWall, { onRenameProject })),
+    root!.render(createElement(ShelfWall, { onOpenProject, onRenameProject })),
   );
 
   await act(async () =>
@@ -357,6 +358,16 @@ it("preserves the typed rename draft on save failure so the user can retry or ed
   await act(async () => preserved.blur());
   expect(onRenameProject).toHaveBeenCalledTimes(1);
 
+  // After leaving the failed draft unfocused, clicking a tile still opens it.
+  const tile = container.querySelector<HTMLButtonElement>(
+    '[data-testid="shelf-tile-amp"]',
+  )!;
+  await act(async () => {
+    tile.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    tile.click();
+  });
+  expect(onOpenProject).toHaveBeenCalledWith("amp");
+
   // Pressing Enter explicitly retries and succeeds.
   await act(async () => {
     preserved.focus();
@@ -370,6 +381,57 @@ it("preserves the typed rename draft on save failure so the user can retry or ed
   expect(
     container.querySelector('button[aria-label="Rename Draft OTA"]'),
   ).not.toBeNull();
+});
+
+it("dismisses an open quick-delete confirmation on Escape even after focus moves outside it", async () => {
+  const project = createEmptyProject("amp", "Amp");
+  const summary = {
+    id: "amp",
+    name: "Amp",
+    updatedAt: "2026-11-06T00:00:00Z",
+    revision: 1,
+    schemaVersion: project.schemaVersion,
+    favorite: false,
+  };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn<typeof fetch>(async () =>
+      Response.json({ projects: [summary], limit: 200 }),
+    ),
+  );
+  container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  await act(async () => root!.render(createElement(ShelfWall)));
+
+  await act(async () =>
+    container
+      .querySelector<HTMLButtonElement>(
+        '[data-testid="shelf-quick-delete-amp"]',
+      )!
+      .click(),
+  );
+  expect(
+    container.querySelector('.shelf-tile-footer[data-confirming="true"]'),
+  ).not.toBeNull();
+
+  // Tab away from the confirmation controls to the search box, then press Escape.
+  const search = container.querySelector<HTMLInputElement>(
+    'input[aria-label="Search cloud projects"]',
+  )!;
+  search.focus();
+  const escape = new KeyboardEvent("keydown", {
+    key: "Escape",
+    bubbles: true,
+    cancelable: true,
+  });
+  await act(async () => {
+    search.dispatchEvent(escape);
+  });
+  expect(escape.defaultPrevented).toBe(true);
+  expect(
+    container.querySelector('.shelf-tile-footer[data-confirming="true"]'),
+  ).toBeNull();
 });
 
 async function startFavoriteToggle(inFavorites = false) {

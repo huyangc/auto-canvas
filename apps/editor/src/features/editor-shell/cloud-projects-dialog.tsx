@@ -31,6 +31,10 @@ export function CloudProjectsDialog({
   onClose,
 }: CloudProjectsDialogProps) {
   const dialogRef = useRef<HTMLDialogElement | null>(null);
+  const flushRenameRef = useRef<(() => boolean | Promise<boolean>) | null>(
+    null,
+  );
+  const closingRef = useRef(false);
   const { onPointerDown: onHeaderPointerDown, release } =
     useDialogDrag(dialogRef);
 
@@ -47,12 +51,23 @@ export function CloudProjectsDialog({
   );
 
   const closeDialog = useCallback(() => {
-    const active = document.activeElement;
-    if (active instanceof HTMLElement && dialogRef.current?.contains(active)) {
-      // Flush any focused inline edit (e.g. project rename) before unmounting.
-      active.blur();
+    const flush = flushRenameRef.current;
+    if (!flush) {
+      onClose();
+      return;
     }
-    onClose();
+    if (closingRef.current) return;
+    const outcome = flush();
+    if (outcome === true) {
+      onClose();
+      return;
+    }
+    if (outcome === false) return;
+    closingRef.current = true;
+    void outcome.then((canClose) => {
+      closingRef.current = false;
+      if (canClose) onClose();
+    });
   }, [onClose]);
 
   const handleOpenProject = useCallback(
@@ -79,7 +94,18 @@ export function CloudProjectsDialog({
     >
       <header
         className="cloud-shelf-header"
-        onPointerDown={onHeaderPointerDown}
+        onPointerDown={(event) => {
+          if (
+            event.target instanceof Element &&
+            event.target.closest(".dialog-close-button")
+          ) {
+            // Keep any inline rename input focused until the Close click
+            // flushes it, so a fast-failing blur cannot settle before click.
+            event.preventDefault();
+            return;
+          }
+          onHeaderPointerDown(event);
+        }}
       >
         <h2 id="cloud-shelf-title">Cloud Projects</h2>
         <DialogCloseButton onClick={closeDialog} />
@@ -90,6 +116,7 @@ export function CloudProjectsDialog({
         >
           <ShelfWall
             busy={busy}
+            flushRenameRef={flushRenameRef}
             onOpenProject={handleOpenProject}
             onRenameProject={onRenameProject}
             onDeleteProject={onDeleteProject}
