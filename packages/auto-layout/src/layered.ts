@@ -1,6 +1,11 @@
+import {
+  decoupledSignalPortClusters,
+  isPortSymbol,
+} from "./multi-port-nets.js";
+import { freezePinGroups } from "./route.js";
 import { symmetricHalfParts } from "./symmetric-half-order.js";
 import { inferSeriesChannels, signalSeriesParts } from "./series-levels.js";
-import { transformPoint, placementPitch } from "./geometry.js";
+import { transformPoint, pinExit, placementPitch } from "./geometry.js";
 import { visibleInstanceBounds } from "@icm/derived";
 import { outputFacesLeft } from "./directed-blocks.js";
 import {
@@ -9,7 +14,7 @@ import {
   type Instance,
   type SchematicDocument,
 } from "@icm/model";
-import type { SymbolResolver } from "@icm/symbols";
+import type { SymbolPin, SymbolResolver } from "@icm/symbols";
 import {
   channelPins,
   isMos,
@@ -453,6 +458,44 @@ function stackAxisBridges(
   return bridges;
 }
 
+/** Gates with local port stubs that need clearance in a symmetric half. */
+function localPortGates(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  roles: NetRoles,
+) {
+  const gates = new Map<string, SymbolPin>();
+  const instances = new Map(document.instances.map((i) => [i.id, i]));
+  for (const group of freezePinGroups(document, resolver)) {
+    if (roles.rails.has(group.netId)) continue;
+    const privatePort =
+      group.pins.length === 2 &&
+      group.pins.some((p) =>
+        isPortSymbol(instances.get(p.instanceId)!.symbolId),
+      );
+    if (
+      !privatePort &&
+      !decoupledSignalPortClusters(
+        document,
+        group.netId,
+        group.pins,
+        roles,
+        group.contacts,
+      )
+    )
+      continue;
+    for (const p of group.pins) {
+      const i = instances.get(p.instanceId)!;
+      if (channelPins(i.symbolId)?.gate !== p.pinName) continue;
+      const gate = devicePins(i, resolver).find(
+        (pin) => pin.name === p.pinName,
+      )!;
+      gates.set(i.id, gate);
+    }
+  }
+  return gates;
+}
+
 /** R89: lay out just one half with the shared layered algorithms, then unfold
  * it. The resulting row nodes carry one common block coordinate system. */
 function symmetryRows(
@@ -466,9 +509,9 @@ function symmetryRows(
   netMap: ReadonlyMap<string, string>,
 ): Rows {
   const blocks: string[][] = [];
-  const outer = roles.symmetricHalfOrder
-    ? symmetricHalfParts(document, resolver, roles, components)
-    : new Set<string>();
+  const attachments = symmetricHalfParts(document, resolver, roles, components);
+  const outer = roles.symmetricHalfOrder ? attachments : new Set<string>();
+  let gatePins: Map<string, SymbolPin> | undefined;
   for (const component of components) {
     const ids = [...component.pairs.flat(), ...component.axis];
     if (!ids.every((id) => rows.placements.has(id))) continue;
@@ -551,7 +594,6 @@ function symmetryRows(
       halfRows,
       document.presentation.grid,
     );
-    const ordered = orderRows(halfRows, half, resolver, halfRoles, halfGroups);
     const crossIds = new Set(
       component.pairs.flatMap(([left, right]) => {
         const a = channelPins(devices.find((i) => i.id === left)!.symbolId);
@@ -573,6 +615,61 @@ function symmetryRows(
         : node.members.some((id) => crossIds.has(id))
           ? 1
           : 0;
+    const seenRows = new Set<number>();
+    const multiColumn = halfRows.nodes.some((node) => {
+      // A two-pin load attached to the same channel is ordered by the
+      // symmetricHalfOrder finalist. It does not add a branch column.
+      if (axisOrder(node) || node.members.every((id) => attachments.has(id)))
+        return false;
+      if (seenRows.has(node.row)) return true;
+      seenRows.add(node.row);
+      return false;
+    });
+    const order = (
+      reverseTie: boolean,
+      tieScore?: RowOrderOptions["tieScore"],
+    ) =>
+      optimizeRows(halfRows, half, resolver, halfRoles, halfGroups, {
+        ...(tieScore ? { rightOrder: axisOrder, tieScore } : {}),
+        reverseTie,
+      });
+    let best;
+    if (multiColumn) {
+      const axisNets = new Set(
+        half
+          .filter((i) => axisIds.has(i.id))
+          .flatMap((i) => deviceNets(i, resolver, halfRoles))
+          .filter((n) => !roles.rails.has(n)),
+      );
+      const inwardWeight = new Map(
+        half.map((i) => {
+          const nets = deviceNets(i, resolver, halfRoles);
+          return [
+            i.id,
+            Number(nets.some((n) => axisNets.has(n))) -
+              Number(nets.some((n) => roles.byNet.get(n) === "output")),
+          ];
+        }),
+      );
+      const preference = (rows: RowNode[][]) => {
+        let total = 0;
+        for (const row of rows)
+          row.forEach((node, index) => {
+            if (!axisOrder(node))
+              for (const id of node.members)
+                total += index * inwardWeight.get(id)!;
+          });
+        return total;
+      };
+      best = order(false, preference);
+      const reversed = order(true, preference);
+      if (
+        reversed.score < best.score ||
+        (reversed.score === best.score && reversed.tie > best.tie)
+      )
+        best = reversed;
+    } else best = order(false);
+    const ordered = best.rows;
     for (const row of ordered)
       row.sort(
         (a, b) =>
@@ -582,6 +679,9 @@ function symmetryRows(
             : Number(b.members.every((id) => outer.has(id))) -
               Number(a.members.every((id) => outer.has(id)))),
       );
+    const localGates = multiColumn
+      ? (gatePins ??= localPortGates(document, resolver, roles))
+      : undefined;
     const placed = assignColumns(
       halfDocument,
       half,
@@ -590,6 +690,7 @@ function symmetryRows(
       halfGroups,
       ordered,
       halfRows,
+      localGates,
     );
     const bounds = visibleInstanceBounds(
       withPlacements(halfDocument, placed),
@@ -621,6 +722,10 @@ function symmetryRows(
       );
       pose.position.x = -centre;
     }
+    const gateFaces = (id: string, direction: number) => {
+      const gate = localGates?.get(id);
+      return gate && pinExit(gate, placed.get(id)!).x === direction;
+    };
     const runLeft = new Map<number, number>();
     for (const row of ordered) {
       const run = row
@@ -666,7 +771,10 @@ function symmetryRows(
             2;
       for (const id of run)
         placed.get(id)!.position.x = offsets.get(id)! - centre;
-      runLeft.set(row[0]!.row, edge - centre);
+      runLeft.set(
+        row[0]!.row,
+        edge - centre - (gateFaces(run[0]!, -1) ? 40 : 0),
+      );
     }
     const minimum = Math.max(
       ...component.pairs.map(
@@ -682,7 +790,8 @@ function symmetryRows(
             b.bounds.width +
             Math.max(
               bridgeClearance,
-              runLeft.has(row) ? 40 - runLeft.get(row)! : 20,
+              (runLeft.has(row) ? 40 - runLeft.get(row)! : 20) +
+                (gateFaces(b.id, 1) ? 40 : 0),
             )
           );
         }),
@@ -809,6 +918,12 @@ function rowGraph(
   return { expanded, edges, spans };
 }
 
+type RowOrderOptions = {
+  rightOrder?: (node: RowNode) => number;
+  reverseTie?: boolean;
+  tieScore?: (rows: RowNode[][]) => number;
+};
+
 /** R32: bounded alternating barycentre sweeps, retaining the best permutation. */
 export function orderRows(
   rows: Rows,
@@ -816,9 +931,24 @@ export function orderRows(
   resolver: SymbolResolver,
   roles: NetRoles,
   groups: RecognizedGroup[],
+  options?: RowOrderOptions,
 ): RowNode[][] {
+  return optimizeRows(rows, devices, resolver, roles, groups, options).rows;
+}
+
+function optimizeRows(
+  rows: Rows,
+  devices: Instance[],
+  resolver: SymbolResolver,
+  roles: NetRoles,
+  groups: RecognizedGroup[],
+  options?: RowOrderOptions,
+) {
+  const rank = options?.rightOrder;
   const tie = (a: RowNode, b: RowNode) =>
-    a.distance - b.distance || compareIds(a.id, b.id);
+    (rank ? rank(a) - rank(b) : 0) ||
+    (options?.reverseTie && !rank?.(a) ? -1 : 1) *
+      (a.distance - b.distance || compareIds(a.id, b.id));
   const { expanded, edges, spans } = rowGraph(
     rows.nodes,
     devices,
@@ -919,12 +1049,15 @@ export function orderRows(
       row.splice(first, 0, ...bundle);
     }
   };
-  for (const row of ordered) {
+  const constrain = (row: RowNode[]) => {
     bundleTails(row);
     orderBlocks(row);
-  }
+    if (rank) row.sort((a, b) => rank(a) - rank(b));
+  };
+  for (const row of ordered) constrain(row);
   let best = ordered.map((r) => [...r]),
-    bestCount = crossings();
+    bestCount = crossings(),
+    bestTie = options?.tieScore?.(best) ?? 0;
   for (let sweep = 0; sweep < 8; sweep++) {
     const down = sweep % 2 === 0;
     const toward = new Map<string, string[]>();
@@ -946,8 +1079,7 @@ export function orderRows(
           : p.get(n.id)!;
       };
       row.sort((a, b) => bary(a) - bary(b) || tie(a, b));
-      bundleTails(row);
-      orderBlocks(row);
+      constrain(row);
     }
     // Barycentres alone can swap the ends of a same-row Net without closing
     // its span. Adjacent transpositions finish that compaction, subject to the
@@ -955,23 +1087,32 @@ export function orderRows(
     for (const row of ordered) {
       if (!spans.some((s) => s.row === row[0]?.row)) continue;
       let score = crossings();
+      let currentTie = options?.tieScore?.(ordered) ?? 0;
       for (let index = 1; index < row.length; index++) {
         const original = [...row];
         [row[index - 1], row[index]] = [row[index]!, row[index - 1]!];
-        bundleTails(row);
-        orderBlocks(row);
+        constrain(row);
         const next = crossings();
-        if (next < score) score = next;
-        else row.splice(0, row.length, ...original);
+        const nextTie = options?.tieScore?.(ordered) ?? 0;
+        if (next < score || (next === score && nextTie > currentTie)) {
+          score = next;
+          currentTie = nextTie;
+        } else row.splice(0, row.length, ...original);
       }
     }
     const count = crossings();
-    if (count < bestCount) {
+    const sweepTie = options?.tieScore?.(ordered) ?? 0;
+    if (count < bestCount || (count === bestCount && sweepTie > bestTie)) {
+      bestTie = sweepTie;
       best = ordered.map((r) => [...r]);
       bestCount = count;
     }
   }
-  return best.map((row) => row.filter((n) => n.members.length));
+  return {
+    rows: best.map((row) => row.filter((n) => n.members.length)),
+    score: bestCount,
+    tie: bestTie,
+  };
 }
 
 /** R33: symmetric local blocks, shared-pin alignment, then ordered compaction. */
@@ -983,6 +1124,7 @@ export function assignColumns(
   groups: RecognizedGroup[],
   ordered: RowNode[][],
   rows: Rows,
+  localGates?: ReadonlyMap<string, SymbolPin>,
 ): Map<string, Placement> {
   const targets = new Map(
     [...rows.placements].map(([id, p]) => [id, structuredClone(p)]),
@@ -1168,8 +1310,18 @@ export function assignColumns(
   // Alignment components carry relative offsets. Reject merges that reverse row order.
   const component = new Map(nodes.map((n) => [n.id, n.id]));
   const offset = new Map(nodes.map((n) => [n.id, 0]));
+  const facesGap = (node: RowNode, direction: number) =>
+    node.members.some((id) => {
+      const gate = localGates?.get(id);
+      return gate && pinExit(gate, targets.get(id)!).x === direction;
+    });
   const constraints = ordered.flatMap((row) =>
-    row.slice(1).map((n, index) => ({ a: row[index]!, b: n })),
+    row.slice(1).map((b, index) => {
+      const a = row[index]!;
+      const gap =
+        40 + 40 * Number(facesGap(a, 1)) + 40 * Number(facesGap(b, -1));
+      return { a, b, gap };
+    }),
   );
   const acyclic = () => {
     const visiting = new Set<string>(),
@@ -1263,14 +1415,14 @@ export function assignColumns(
   const compact = () => {
     for (let pass = 0; pass < nodes.length; pass++) {
       let changed = false;
-      for (const { a, b } of constraints) {
+      for (const { a, b, gap: columnGap } of constraints) {
         const ca = component.get(a.id)!,
           cb = component.get(b.id)!;
         const minimum =
           x.get(ca)! +
           offset.get(a.id)! +
           extent.get(a.id)!.right +
-          40 -
+          columnGap -
           offset.get(b.id)! -
           extent.get(b.id)!.left;
         if (x.get(cb)! < minimum) {
@@ -1318,11 +1470,11 @@ export function assignColumns(
         }
       let low = -Infinity,
         high = Infinity;
-      for (const { a, b } of constraints) {
+      for (const { a, b, gap: columnGap } of constraints) {
         const gap =
           offset.get(a.id)! +
           extent.get(a.id)!.right +
-          40 -
+          columnGap -
           offset.get(b.id)! -
           extent.get(b.id)!.left;
         if (component.get(b.id) === c)

@@ -7,7 +7,12 @@ import {
 import type { SymbolResolver } from "@icm/symbols";
 import { directedPins } from "./directed-blocks.js";
 import { pinPoints } from "./geometry.js";
-import { channelPins, familyCompatible, type NetRoles } from "./net-roles.js";
+import {
+  isMosBulk,
+  channelPins,
+  familyCompatible,
+  type NetRoles,
+} from "./net-roles.js";
 import { devicePins, isMarker } from "./placement-connectivity.js";
 import { netlistMirrorPairs } from "./readability-netlist-symmetry.js";
 import { readabilityNetlist } from "./readability-netlist.js";
@@ -110,6 +115,16 @@ export function symmetryTopology(
   );
   const nets = (id: string) =>
     pins.get(id)!.flatMap((p) => roles.pinNet(id, p) ?? []);
+  const deviceNetCount = new Map<string, number>();
+  for (const device of devices)
+    for (const net of new Set(
+      pins
+        .get(device.id)!
+        .filter((p) => !isMosBulk(device.symbolId, p))
+        .flatMap((p) => roles.pinNet(device.id, p) ?? []),
+    ))
+      if (!roles.rails.has(net))
+        deviceNetCount.set(net, (deviceNetCount.get(net) ?? 0) + 1);
   const compatible = (a: Instance, b: Instance) =>
     a.symbolId === b.symbolId && familyCompatible(a, b);
   const nonPolar = (id: string) =>
@@ -262,6 +277,29 @@ export function symmetryTopology(
         )
           devicePairs.push([a.id, a.id, swappedPins(a.id)]);
         continue;
+      }
+      if (channelPins(a.symbolId)) {
+        const mapped = own.filter((n) => netMap.get(n) === n);
+        if (
+          mapped.length < own.length &&
+          mapped.some((n) => !roles.rails.has(n)) &&
+          own.every(
+            (n) =>
+              netMap.get(n) === n ||
+              (deviceNetCount.get(n) === 1 &&
+                !netMap.has(n) &&
+                !badNets.has(n)),
+          ) &&
+          !free.some(
+            (b) =>
+              b !== a &&
+              compatible(a, b) &&
+              mapped.every((n) => nets(b.id).includes(n)),
+          )
+        ) {
+          devicePairs.push([a.id, a.id]);
+          continue;
+        }
       }
       if (
         own.length &&

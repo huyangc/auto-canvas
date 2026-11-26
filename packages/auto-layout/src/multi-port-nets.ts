@@ -39,8 +39,10 @@ export function decoupledSignalPortClusters(
   contacts: readonly PinContact[],
   pinPositions: readonly (TerminalRef & { point: Point })[] = [],
   portAssociations: readonly PinContact[] = [],
+  options?: { allowRails?: boolean },
 ): DecoupledPortCluster[] | undefined {
-  if (roles.rails.has(netId) || pins.length < 4) return undefined;
+  if ((roles.rails.has(netId) && !options?.allowRails) || pins.length < 4)
+    return undefined;
   const instances = new Map(document.instances.map((i) => [i.id, i]));
   const ports: TerminalRef[] = [],
     devices: TerminalRef[] = [];
