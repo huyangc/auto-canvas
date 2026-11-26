@@ -210,6 +210,7 @@ export function defaultLayoutSearch(
 }
 
 interface LevelOptions extends AutoLayoutOptions {
+  aprAttempt?: { started: boolean };
   pitch?: Readonly<PlacementPitch>;
   seriesLevels?: boolean;
   reuseSeriesRoutes?: boolean;
@@ -339,6 +340,10 @@ export function planAutoLayout(
   resolver: SymbolResolver,
   options: AutoLayoutOptions = {},
 ): AutoLayoutResult {
+  const levelOptions: LevelOptions = {
+    ...options,
+    aprAttempt: { started: false },
+  };
   // T141: these edits are the ones a caller commits, so the connection gate
   // is measured on the document they actually deliver. R165 prepends its rail
   // symbols here, after the finishing pipeline has chosen its plan.
@@ -346,8 +351,8 @@ export function planAutoLayout(
     document,
     resolver,
     options.presentation === "netlist"
-      ? planNetlistPresentation(document, resolver, options)
-      : planDocument(document, resolver, options, "drawing"),
+      ? planNetlistPresentation(document, resolver, levelOptions)
+      : planDocument(document, resolver, levelOptions, "drawing"),
   );
 }
 
@@ -355,7 +360,7 @@ export function planAutoLayout(
 function planNetlistPresentation(
   document: SchematicDocument,
   resolver: SymbolResolver,
-  options: AutoLayoutOptions,
+  options: LevelOptions,
 ): AutoLayoutResult {
   const { presentation: _, ...rest } = options;
   const presented = netlistPresentation(document, resolver);
@@ -389,7 +394,7 @@ function planNetlistPresentation(
 function planDocument(
   document: SchematicDocument,
   resolver: SymbolResolver,
-  options: AutoLayoutOptions,
+  options: LevelOptions,
   input: "drawing" | "netlist" = "netlist",
 ): AutoLayoutResult {
   return reusePlanning(() =>
@@ -746,7 +751,7 @@ function preserveDrawnSymmetry(
 function selectFinalLayout(
   document: SchematicDocument,
   resolver: SymbolResolver,
-  options: AutoLayoutOptions,
+  options: LevelOptions,
 ): AutoLayoutResult {
   const finalists: FinalistPass | undefined =
     document.instances.length > 0 &&
@@ -2173,14 +2178,31 @@ function planAutoLayoutMeasured(
       selectFinished(),
       quickResult,
     );
-    // T189: Digital-APR-style post-placement macro/row detail refinement on
-    // top of the finished baseline (covers both <=40 primary/alternate finalists
-    // and 41–120 schematics without perturbing annealing's deterministic stream).
+    // T189: refine the primary finalist's finished baseline after annealing.
     const baseline = (() => {
-      if (options.partition || search.evaluations <= 0 || stopped())
+      if (
+        !searchFinalist ||
+        options.finalists?.alternate ||
+        options.aprAttempt?.started ||
+        options.partition ||
+        search.evaluations <= 0 ||
+        stopped()
+      )
         return annealedBaseline;
       const basePreview = preview(document, resolver, annealedBaseline.edits);
       if (!basePreview.ok) return annealedBaseline;
+      const baseAudit = auditRouting(basePreview.document, resolver);
+      const baseMetrics = readabilityMetrics(basePreview.document, resolver);
+      const baseReadability = readabilityScore(baseMetrics);
+      if (
+        baseAudit.crossings === 0 &&
+        baseAudit.unsafeProblems.length === 0 &&
+        baseReadability < 0.5
+      )
+        return annealedBaseline;
+
+      // Pitch, series-level and drafting variants share one attempt per plan.
+      if (options.aprAttempt) options.aprAttempt.started = true;
       const apr = timePhase("aprDetailPlace", () =>
         aprDetailPlace(document, basePreview.document, resolver, fixed, {
           unsplitSymmetry: options.unsplitSymmetry ?? false,
@@ -2188,35 +2210,29 @@ function planAutoLayoutMeasured(
           stopped,
         }),
       );
-      if (!apr.improved || !apr.candidates.length) return annealedBaseline;
-      const baseGuards = routedGuards(basePreview.document, resolver);
-      const baseAudit = auditRouting(basePreview.document, resolver);
-      const baseMetrics = readabilityMetrics(basePreview.document, resolver);
-      const baseReadability = readabilityScore(baseMetrics);
+      if (stopped() || !apr.improved || !apr.candidates.length)
+        return annealedBaseline;
+
       const baseStrategy =
         refinementMetrics(annealedBaseline)?.strategy ?? selected.strategy;
-      const baseRunObj: LayoutRun = {
-        result: annealedBaseline,
-        final: basePreview.document,
-        choices: emptyChoices(),
-      };
-      const criticalGuards = [
-        "floating",
-        "missing",
-        "VISUAL_WIRE_THROUGH_SYMBOL",
-        "VISUAL_LABEL_OVERLAP",
-        "VISUAL_SYMBOL_OVERLAP",
-        "VISUAL_AMBIGUOUS_JUNCTION",
-        "VISUAL_ROUTE_OVERLAP",
-        "VISUAL_TERMINAL_ON_FOREIGN_ROUTE",
-        ...(document.instances.length > 40 ? ["VISUAL_LABEL_CLEARANCE"] : []),
-      ];
-      let bestResult = annealedBaseline;
-      let bestRunObj = baseRunObj;
-      let bestReadability = baseReadability;
+      const routeIntact = (
+        run: LayoutRun,
+      ): run is LayoutRun & { final: SchematicDocument } =>
+        !!run.final &&
+        !run.result.diagnostics.some((d) => d.severity === "error") &&
+        connectionsIntact(run.final, resolver);
+      let bestScreened:
+        | {
+            raw: LayoutRun;
+            usedPrimary: boolean;
+            planCandidate: (signalTrunks: boolean) => LayoutRun;
+            rawAudit: ReturnType<typeof auditRouting>;
+          }
+        | undefined;
       const grid = document.presentation.grid;
       const snapGrid = (n: number) => Math.round(n / grid) * grid;
-      for (const proposal of apr.candidates) {
+      const maxProposals = document.instances.length > 40 ? 2 : 3;
+      for (const proposal of apr.candidates.slice(0, maxProposals)) {
         if (stopped()) break;
         // Shift unfixed APR placements back near (0, 0) so placeDocument's
         // unhosted power markers (which default to (0, 0)) land beside the
@@ -2256,84 +2272,117 @@ function planAutoLayoutMeasured(
             givenPlacements,
           );
         const primary = planCandidate(true);
-        const primaryOk =
-          !!primary.final &&
-          !primary.result.diagnostics.some((d) => d.severity === "error") &&
-          connectionsIntact(primary.final, resolver);
-        if (stopped()) break;
-        const alt = planCandidate(false);
-        const altOk =
-          !!alt.final &&
-          !alt.result.diagnostics.some((d) => d.severity === "error") &&
-          connectionsIntact(alt.final, resolver);
-        if ((!primaryOk && !altOk) || stopped()) continue;
-        const raw =
-          primaryOk && altOk
-            ? compareRuns(alt, primary, resolver) < 0
-              ? alt
-              : primary
-            : primaryOk
-              ? primary
-              : alt;
-        const rawAlt =
-          primaryOk && altOk ? (raw === primary ? alt : primary) : raw;
-        const finished = finalizeFacing(
-          document,
-          resolver,
-          options,
-          finish(raw, rawAlt, baseStrategy, raw === primary, options),
-        );
-        const afterPreview = preview(document, resolver, finished.edits);
+        let raw = routeIntact(primary) ? primary : undefined;
+        if (!raw && !stopped()) {
+          const fallback = planCandidate(false);
+          if (routeIntact(fallback)) raw = fallback;
+        }
+        if (!raw) continue;
+        const rawAudit = auditRouting(raw.final, resolver);
         if (
-          !afterPreview.ok ||
-          finished.diagnostics.some((d) => d.severity === "error") ||
-          !connectionsIntact(afterPreview.document, resolver)
+          rawAudit.unsafeProblems.length > baseAudit.unsafeProblems.length ||
+          rawAudit.crossings > baseAudit.crossings + 1 ||
+          rawAudit.wireLength > baseAudit.wireLength * 1.25
         )
           continue;
-        const afterGuards = routedGuards(afterPreview.document, resolver);
-        if (
-          criticalGuards.some(
-            (key) => (afterGuards[key] ?? 0) > (baseGuards[key] ?? 0),
-          )
-        )
-          continue;
-        const afterAudit = auditRouting(afterPreview.document, resolver);
-        if (afterAudit.unsafeProblems.length > baseAudit.unsafeProblems.length)
-          continue;
-        const afterMetrics = readabilityMetrics(
-          afterPreview.document,
-          resolver,
-        );
-        const afterReadability = readabilityScore(afterMetrics);
-        if (afterReadability > bestReadability + 1e-6) continue;
-        const areaLimit =
-          afterAudit.crossings < baseAudit.crossings
-            ? baseMetrics.area.violations * 1.15
-            : baseMetrics.area.violations * 1.05;
-        if (
-          baseMetrics.area.violations > 0 &&
-          afterMetrics.area.violations > areaLimit
-        )
-          continue;
-        if (
-          afterAudit.crossings > baseAudit.crossings ||
-          afterAudit.wireLength > baseAudit.wireLength * 1.12 ||
-          (afterAudit.crossings === baseAudit.crossings &&
-            afterReadability >= baseReadability - 1e-4)
-        )
-          continue;
-        const candRunObj: LayoutRun = {
-          result: finished,
-          final: afterPreview.document,
-          choices: emptyChoices(),
-        };
-        if (compareRuns(candRunObj, bestRunObj, resolver) < 0) {
-          bestResult = finished;
-          bestRunObj = candRunObj;
-          bestReadability = afterReadability;
+        if (!bestScreened || compareRuns(raw, bestScreened.raw, resolver) < 0)
+          bestScreened = {
+            raw,
+            usedPrimary: raw === primary,
+            planCandidate,
+            rawAudit,
+          };
+      }
+
+      if (!bestScreened || stopped()) return annealedBaseline;
+      const primary = bestScreened.raw;
+      let raw = primary;
+      let rawAlt = primary;
+      if (
+        bestScreened.usedPrimary &&
+        (document.instances.length <= 40 || bestScreened.rawAudit.crossings > 0)
+      ) {
+        const alt = bestScreened.planCandidate(false);
+        if (routeIntact(alt)) {
+          if (compareRuns(alt, primary, resolver) < 0) raw = alt;
+          else rawAlt = alt;
         }
       }
-      return bestResult;
+
+      if (stopped()) return annealedBaseline;
+      const finished = finalizeFacing(
+        document,
+        resolver,
+        options,
+        finish(
+          raw,
+          rawAlt,
+          baseStrategy,
+          bestScreened.usedPrimary && raw === primary,
+          options,
+        ),
+      );
+      const afterPreview = preview(document, resolver, finished.edits);
+      if (
+        !afterPreview.ok ||
+        finished.diagnostics.some((d) => d.severity === "error") ||
+        !connectionsIntact(afterPreview.document, resolver)
+      )
+        return annealedBaseline;
+      const criticalGuards = [
+        "floating",
+        "missing",
+        "VISUAL_WIRE_THROUGH_SYMBOL",
+        "VISUAL_LABEL_OVERLAP",
+        "VISUAL_SYMBOL_OVERLAP",
+        "VISUAL_AMBIGUOUS_JUNCTION",
+        "VISUAL_ROUTE_OVERLAP",
+        "VISUAL_TERMINAL_ON_FOREIGN_ROUTE",
+        ...(document.instances.length > 40 ? ["VISUAL_LABEL_CLEARANCE"] : []),
+      ];
+      const baseGuards = routedGuards(basePreview.document, resolver);
+      const afterGuards = routedGuards(afterPreview.document, resolver);
+      if (
+        criticalGuards.some(
+          (key) => (afterGuards[key] ?? 0) > (baseGuards[key] ?? 0),
+        )
+      )
+        return annealedBaseline;
+      const afterAudit = auditRouting(afterPreview.document, resolver);
+      if (afterAudit.unsafeProblems.length > baseAudit.unsafeProblems.length)
+        return annealedBaseline;
+      const afterMetrics = readabilityMetrics(afterPreview.document, resolver);
+      const afterReadability = readabilityScore(afterMetrics);
+      if (afterReadability > baseReadability + 1e-6) return annealedBaseline;
+      const areaLimit =
+        afterAudit.crossings < baseAudit.crossings
+          ? baseMetrics.area.violations * 1.15
+          : baseMetrics.area.violations * 1.05;
+      if (
+        baseMetrics.area.violations > 0 &&
+        afterMetrics.area.violations > areaLimit
+      )
+        return annealedBaseline;
+      if (
+        afterAudit.crossings > baseAudit.crossings ||
+        afterAudit.wireLength > baseAudit.wireLength * 1.12 ||
+        (afterAudit.crossings === baseAudit.crossings &&
+          afterReadability >= baseReadability - 1e-4)
+      )
+        return annealedBaseline;
+      const candRunObj: LayoutRun = {
+        result: finished,
+        final: afterPreview.document,
+        choices: emptyChoices(),
+      };
+      const baseRunObj: LayoutRun = {
+        result: annealedBaseline,
+        final: basePreview.document,
+        choices: emptyChoices(),
+      };
+      return compareRuns(candRunObj, baseRunObj, resolver) < 0
+        ? finished
+        : annealedBaseline;
     })();
     if (options.partition) {
       // A fixed placement keeps every block and its relative floorplan intact.

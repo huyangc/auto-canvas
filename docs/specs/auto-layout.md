@@ -1393,9 +1393,12 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
 
 - **R173 — Post-anneal APR macro and windowed detail placement (T189).** On
   unpartitioned layouts with a nonzero search budget up to 120 instances, run
-  a deterministic digital-APR-style refinement pass (`aprDetailPlace`) on top
-  of each finalist's finished baseline without perturbing annealing's random
-  stream. Extract rigid analog units preserving templates, symmetry components,
+  a deterministic digital-APR-style refinement pass (`aprDetailPlace`) on the
+  primary finalist's finished post-anneal baseline, preserving annealing's
+  random stream. Allow one APR attempt per planner call across layout
+  variants. Skip the pass when the baseline has zero crossings, zero unsafe
+  routing problems, and a readability score below 0.5.
+  Extract rigid analog units preserving templates, symmetry components,
   parallel/driver attachments, aligned vertical conducting stacks, user layout
   groups, constraints, inductor couplings, and fixed/locked instances. Score
   trial placements with a fast geometry proxy that excludes R172 locally
@@ -1408,12 +1411,22 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   congestion- and macro-port-aware gaps (`boundaryGap`) and a width-expansion
   cap (`<= 1.15x + 120`), and row-band windowed detail placement (`W = 4`,
   insertion, and pairwise swaps) — emitting up to 4 deduplicated legal
-  candidates. Shift unfixed candidates back near `(0, 0)` before replanning
-  with free marker sides and both `signalTrunks` settings, finish each valid
-  candidate, and accept it only when electrical connectivity stays intact,
-  zero critical `routedGuards` or `unsafeProblems` increase, `readabilityScore`
-  does not regress, `area` stays within `<= 1.05x` (`<= 1.15x` when crossings
-  drop), `wireLength <= 1.12x`, `crossings <= base`, and `compareRuns < 0`.
+  candidates. Screen the top three proxy-ranked candidates up to 40 instances
+  and the top two above 40. Shift unfixed placements back near `(0, 0)` before
+  replanning with free marker sides and `signalTrunks` enabled. Retry with
+  trunks disabled if the first route fails. Screen out incomplete or erroneous
+  routes, increases in unsafe problems, more than one extra crossing, or
+  wire length above 1.25 times the baseline. Choose the best surviving raw route
+  by `compareRuns`. For that candidate, also compare a route with trunks
+  disabled if its trunk route passed screening and it has at most 40 instances
+  or still has crossings. Check cancellation after the placement pass and
+  immediately before finishing. Apply `finish` and `finalizeFacing` once for
+  the winner. Require intact electrical connectivity, no increase in critical
+  `routedGuards` or unsafe problems, readability within `1e-6` of baseline or
+  better, and a strict readability improvement when crossings tie. Require
+  `area <= 1.05x` when baseline area violations are positive
+  (`<= 1.15x` when crossings drop), `wireLength <= 1.12x`,
+  `crossings <= base`, and `compareRuns < 0`.
 
 - **R71 — Single-host ports.** A non-rail Cell Pin Net that reaches exactly
   one device pin gets a local seat along that pin's transformed exit direction.
