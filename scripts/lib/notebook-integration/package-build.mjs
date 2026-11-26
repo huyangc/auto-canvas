@@ -63,6 +63,17 @@ function cacheDirectory(m) {
     });
     if (stat && !stat.isDirectory())
       throw new PathRefused(`--cache/${name} must be a directory`);
+    if (stat) {
+      const entries = fs.readdirSync(path.join(cache, name), {
+        recursive: true,
+        withFileTypes: true,
+      });
+      const link = entries.find((entry) => entry.isSymbolicLink());
+      if (link)
+        throw new PathRefused(
+          `persistent cache contains a symlink: ${path.join(link.parentPath, link.name)}`,
+        );
+    }
   }
   fs.mkdirSync(cache, { recursive: true });
   return cache;

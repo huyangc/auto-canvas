@@ -92,3 +92,11 @@ The approved stage P tests use the Node guard, a browser proxy, packaged
 Node, a restricted site PATH and offline pip. An OS-wide egress policy for
 all native and Python processes is a separate host requirement. The
 testing guide describes the coverage and where to run a host-wide test.
+
+## Independent PR review, round 6
+
+A managed companion must pass the Node guard and process-group checks
+before its readiness is announced or any user flow begins. Reused npm and
+pip cache directories are inspected for symlinks before invoking the
+packers. The upgrade guide lists the additional wheelhouses required for
+every other non-core package retained in the notebook venv.

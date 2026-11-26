@@ -630,7 +630,8 @@ before cleanup. External caches are excluded from that size. The stage
 prints both measurements for each run. The three notebook packs may reach the npm
 registry, nodejs.org and PyPI. The stage downloads portable Node once.
 Optionally pass `--cache <directory>` for persistent npm and pip caches
-outside either checkout. Default caches are temporary.
+outside either checkout. Use a dedicated, link-free cache tree under your
+control. Default caches are temporary.
 
 The notebook package at revision `b5850d6` directs its Python venv
 diagnostics to `/tmp/sn_venv_err`, including during a successful install.

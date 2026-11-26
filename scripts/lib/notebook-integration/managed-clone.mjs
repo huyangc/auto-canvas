@@ -1694,18 +1694,24 @@ export async function checkManagedService(m, run, label) {
     )
   )
     return failed;
-  guardLoaded(
-    sandbox,
-    report,
-    `${label} the offline guard was loaded in the canvas (pid ${canvasPid})`,
-    run.mark,
-    (entry) => entry.pid === canvasPid,
-  );
-  report.check(
-    `${label} the canvas runs outside the launcher's process group, in its worker's`,
-    canvasGroup === workerPid && canvasGroup !== run.launch.launcher.pgid,
-    `canvas group ${canvasGroup}, worker ${workerPid}, launcher group ${run.launch.launcher.pgid}`,
-  );
+  if (
+    !guardLoaded(
+      sandbox,
+      report,
+      `${label} the offline guard was loaded in the canvas (pid ${canvasPid})`,
+      run.mark,
+      (entry) => entry.pid === canvasPid,
+    )
+  )
+    return failed;
+  if (
+    !report.check(
+      `${label} the canvas runs outside the launcher's process group, in its worker's`,
+      canvasGroup === workerPid && canvasGroup !== run.launch.launcher.pgid,
+      `canvas group ${canvasGroup}, worker ${workerPid}, launcher group ${run.launch.launcher.pgid}`,
+    )
+  )
+    return failed;
   // The interrupt check waits for this line.
   report.note(
     `${label} the managed canvas is ready (supervisor pid ${supervisorPid}, worker pid ${workerPid}, canvas pid ${canvasPid}, group ${canvasGroup}) after ${m.elapsed()}`,
