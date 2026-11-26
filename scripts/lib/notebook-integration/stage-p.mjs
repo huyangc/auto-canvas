@@ -140,6 +140,7 @@ async function configurePair(m, archive) {
   await siteCommand(m, "install-plugin", ".venv/bin/python", [
     "-m",
     "pip",
+    "--isolated",
     "install",
     "--no-index",
     "--find-links",

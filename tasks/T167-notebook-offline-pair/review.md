@@ -49,3 +49,14 @@ its companions and database, and removed its temporary root. See the
   drops after the bounded activity poll and before querying the catalog for
   lost creates. A stage S control expires its session in the lookup and
   verifies that the confirmed DROP has already been sent.
+
+## Independent PR review, round 2
+
+The build checks the site inbox immediately before delivering each archive
+and refuses to replace an existing destination. The offline install guide
+and the stage both run isolated pip with its configuration disabled. A
+fresh venv installed the packaged wheel with an unusable find-links URL
+and a missing requirements file in the caller's pip environment. The CLI
+also anchors relative wheel-builder paths at the invocation directory,
+preserving their spelling for interpreter selection after the packer
+changes directories.

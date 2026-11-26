@@ -76,6 +76,9 @@ function parseArgs(argv) {
   }
   if (options.stage !== "P" && (options["package-python"] || options.cache))
     throw new UsageError("--package-python and --cache are stage P options");
+  const builder = options["package-python"];
+  if (builder?.includes(path.sep) && !path.isAbsolute(builder))
+    options["package-python"] = `${process.cwd()}${path.sep}${builder}`;
   return options;
 }
 
