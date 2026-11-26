@@ -229,4 +229,27 @@ describe("HeaderAccountMenu", () => {
       vi.unstubAllGlobals();
     }
   });
+
+  it("renders the Silicon Notebook user menu with a back-to-notebook control", () => {
+    const markup = renderToStaticMarkup(
+      <HeaderAccountMenu
+        cloudProjects={library()}
+        notebookUser={{
+          id: "u1",
+          displayName: "Alice Lin",
+          isAdmin: false,
+          backHref: "/#groups&group=grp-1",
+          backLabel: "返回 Silicon Notebook 群组",
+        }}
+      />,
+    );
+    expect(markup).toContain('data-testid="header-account-menu"');
+    expect(markup).toContain('data-initial="A"');
+    expect(markup).toContain("<strong>Alice Lin</strong>");
+    expect(markup).toContain("Silicon Notebook");
+    expect(markup).toContain("My Cloud Projects");
+    expect(markup).toContain('data-testid="back-to-notebook"');
+    expect(markup).toContain("返回 Silicon Notebook 群组");
+    expect(markup).not.toContain('data-testid="sign-out"');
+  });
 });

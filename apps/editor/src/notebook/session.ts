@@ -13,7 +13,7 @@ const TOKEN_PATTERN = /^[A-Za-z0-9._~+/=-]{1,512}$/u;
 export type TokenRead =
   { kind: "token"; token: string } | { kind: "none" } | { kind: "unreadable" };
 
-interface NotebookUser {
+export interface NotebookUser {
   id: string;
   displayName: string;
   provider: "notebook";

@@ -1,4 +1,7 @@
 import { terminalCurrentDirectionPartners } from "../features/properties/terminal-current-direction";
+import { createIndependentProject, parseProject } from "@icm/project-protocol";
+import { apiUrl } from "../lib/app-url";
+import type { HeaderNotebookUser } from "../accounts/header-account-menu";
 import { useCloudProjects } from "./use-cloud-projects";
 import {
   openLibraryExample,
@@ -476,6 +479,8 @@ export interface AppProps {
    * window (server rendering) the editor opens in Auto.
    */
   initialEditorMode?: EditorMode;
+  /** Signed-in silicon-notebook user when mounted by the notebook entry. */
+  notebookUser?: Omit<HeaderNotebookUser, "backHref" | "backLabel">;
 }
 
 export function App(props: AppProps) {
@@ -566,6 +571,7 @@ function WorkspaceEditor({
   project: initialProject,
   initialEditorMode,
   publicAgentUiEnabled: requestedAgentUi = PUBLIC_AGENT_UI_ENABLED,
+  notebookUser,
   restoredWorkspace,
   workspaceError,
   workspaceNotice,
@@ -948,6 +954,64 @@ function WorkspaceEditor({
   const [documentSettingsOpen, setDocumentSettingsOpen] = useState(false);
   const [projectInfoOpen, setProjectInfoOpen] = useState(false);
   const [cloudProjectsOpen, setCloudProjectsOpen] = useState(false);
+  const [activeNotebookGroupId, setActiveNotebookGroupId] = useState<
+    string | null
+  >(() => {
+    if (!notebookUser || typeof window === "undefined") return null;
+    const raw = new URLSearchParams(window.location.search)
+      .get("group")
+      ?.trim();
+    return raw ? raw : null;
+  });
+  const [notebookEntryGroupId] = useState<string | null>(() => {
+    if (!notebookUser || typeof window === "undefined") return null;
+    const raw = new URLSearchParams(window.location.search)
+      .get("group")
+      ?.trim();
+    return raw ? raw : null;
+  });
+  const [activeNotebookId] = useState<string | null>(() => {
+    if (!notebookUser || typeof window === "undefined") return null;
+    const raw = new URLSearchParams(window.location.search)
+      .get("notebook")
+      ?.trim();
+    return raw ? raw : null;
+  });
+  const [activeNotebookName] = useState<string | null>(() => {
+    if (!notebookUser || typeof window === "undefined") return null;
+    const raw = new URLSearchParams(window.location.search)
+      .get("notebookName")
+      ?.trim();
+    return raw ? raw : null;
+  });
+  const [pendingNotebookProject, setPendingNotebookProject] = useState<{
+    notebookId: string;
+    projectId: string;
+  } | null>(null);
+  useEffect(() => {
+    if (!notebookUser || typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    const group = url.searchParams.get("group")?.trim();
+    const notebook = url.searchParams.get("notebook")?.trim();
+    const notebookProject = url.searchParams.get("notebookProject")?.trim();
+    const view = url.searchParams.get("view")?.trim();
+    if (!group && !notebook) return;
+    url.searchParams.delete("group");
+    url.searchParams.delete("notebook");
+    url.searchParams.delete("notebookName");
+    url.searchParams.delete("notebookProject");
+    url.searchParams.delete("view");
+    window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+    if (notebook && notebookProject) {
+      setPendingNotebookProject({
+        notebookId: notebook,
+        projectId: notebookProject,
+      });
+      return;
+    }
+    if (view === "components") setUserComponentsOpen(true);
+    else if (group || view === "projects") setCloudProjectsOpen(true);
+  }, [notebookUser]);
   const projectNameEditing = useRef(false);
   const {
     sessionUser,
@@ -5075,6 +5139,40 @@ function WorkspaceEditor({
       projectTabs,
     });
   useUnsavedWorkGuard(projectTabs.hasUnsafeTabs);
+  useEffect(() => {
+    if (!pendingNotebookProject || !notebookUser) return;
+    const { notebookId, projectId } = pendingNotebookProject;
+    setPendingNotebookProject(null);
+    void fetch(
+      apiUrl(
+        `notebook/notebooks/${encodeURIComponent(notebookId)}/projects/${encodeURIComponent(projectId)}`,
+      ),
+      { cache: "no-store" },
+    )
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = (await response.json()) as {
+          project?: { name?: string; projectText?: string };
+        };
+        const name = payload.project?.name;
+        const projectText = payload.project?.projectText;
+        if (!name || typeof projectText !== "string")
+          throw new Error("Invalid circuit payload");
+        const parsed = parseProject(projectText);
+        const copy = createIndependentProject(
+          parsed,
+          createId("project"),
+          name,
+        );
+        void projectTabs.open(() => createTabSession(copy));
+        setStatus(`Opened notebook circuit "${name}" as a working copy`);
+      })
+      .catch((error: unknown) => {
+        setStatus(
+          `Could not open notebook circuit: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+  }, [pendingNotebookProject, notebookUser, projectTabs, createTabSession]);
 
   return (
     <main className="app-shell">
@@ -5179,6 +5277,25 @@ function WorkspaceEditor({
         compactLayout={compactLayout}
         autoLayoutRun={autoLayout}
         importNetlistInputRef={importNetlistInputRef}
+        {...(notebookUser
+          ? {
+              notebookUser: {
+                ...notebookUser,
+                backHref: activeNotebookId
+                  ? `/#notebook=${encodeURIComponent(activeNotebookId)}`
+                  : notebookEntryGroupId
+                    ? `/#groups&group=${encodeURIComponent(notebookEntryGroupId)}`
+                    : "/",
+                backLabel: activeNotebookId
+                  ? activeNotebookName
+                    ? `返回笔记本「${activeNotebookName}」`
+                    : "返回当前笔记本"
+                  : notebookEntryGroupId
+                    ? "返回 Silicon Notebook 群组"
+                    : "返回 Silicon Notebook",
+              },
+            }
+          : {})}
       />
       <EditorDialogs
         projectStore={projectStore}
@@ -5220,6 +5337,30 @@ function WorkspaceEditor({
         setCloudProjectsOpen={setCloudProjectsOpen}
         cloudProjectsBusy={projectTabs.busy || cloudManagementBusy}
         openCloudProjectById={openCloudProjectById}
+        {...(notebookUser
+          ? {
+              activeNotebookGroupId,
+              activeNotebookId,
+              activeNotebookName,
+              onSelectNotebookGroup: setActiveNotebookGroupId,
+              openGroupProjectCopy: (name: string, projectText: string) => {
+                try {
+                  const parsed = parseProject(projectText);
+                  const copy = createIndependentProject(
+                    parsed,
+                    createId("project"),
+                    name,
+                  );
+                  void projectTabs.open(() => createTabSession(copy));
+                  setStatus(`Opened group circuit "${name}" as a working copy`);
+                } catch (error) {
+                  setStatus(
+                    `Could not open group circuit: ${error instanceof Error ? error.message : String(error)}`,
+                  );
+                }
+              },
+            }
+          : {})}
         renameShelfProject={renameShelfProject}
         deleteShelfProject={deleteShelfProject}
         reloadCloudProjects={reloadCloudProjects}
@@ -7401,6 +7542,14 @@ function WorkspaceEditor({
         setComponentLibraryRefresh={setComponentLibraryRefresh}
         userComponentsOpen={userComponentsOpen}
         setUserComponentsOpen={setUserComponentsOpen}
+        {...(notebookUser
+          ? {
+              initialGroupId: activeNotebookGroupId,
+              activeNotebookId,
+              activeNotebookName,
+              onSelectGroup: setActiveNotebookGroupId,
+            }
+          : {})}
         editorDocumentController={editorDocumentController}
         synchronizeExternalCommit={synchronizeExternalCommit}
         definitionProjectRef={definitionProjectRef}

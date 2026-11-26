@@ -9,11 +9,20 @@ export interface HeaderAccountCloudProjects {
   onOpenDialog(): void;
 }
 
+/** Signed-in silicon-notebook identity shown in the notebook build's top bar. */
+export interface HeaderNotebookUser {
+  id: string;
+  displayName: string;
+  isAdmin: boolean;
+  backHref?: string;
+  backLabel?: string;
+}
+
 /**
  * The signed-in account closes the top bar's action group: a round mark with
  * the name's first letter plus the username, whose menu says who is signed in
- * and signs out. Only an `accounts`-mode standalone editor provides
- * `AccountContext`, so local mode and the desktop build render nothing.
+ * and signs out. Standalone `accounts` mode provides `AccountContext`, and the
+ * notebook build provides `notebookUser`; local mode renders nothing.
  *
  * Signing out goes through the context's `logout`, which runs the save check
  * before the request; calling `auth/logout` here would skip it.
@@ -21,20 +30,26 @@ export interface HeaderAccountCloudProjects {
  * With `cloudProjects`, My Cloud Projects opens the Cloud Projects modal
  * directly (and closes this menu), sitting between the identity and Auto-save.
  *
- * Auto-save to Cloud follows, before Sign out: the browser's preference that
- * a bound Cloud Project saves itself a few seconds after editing stops. It
- * toggles in place and keeps the menu open.
+ * Auto-save to Cloud follows: the browser's preference that a bound Cloud
+ * Project saves itself a few seconds after editing stops. It toggles in place
+ * and keeps the menu open.
  */
 export function HeaderAccountMenu({
   cloudProjects,
+  notebookUser,
 }: {
   cloudProjects?: HeaderAccountCloudProjects;
+  notebookUser?: HeaderNotebookUser;
 }) {
   const account = useContext(AccountContext);
   const menu = useRef<HTMLDetailsElement>(null);
   const autoSave = useCloudAutoSavePreference();
-  if (!account) return null;
-  const initial = [...account.username.trim()][0]?.toUpperCase() ?? "?";
+  if (!account && !notebookUser) return null;
+  const label = account ? account.username : notebookUser!.displayName;
+  const subtitle = account ? "Auto Canvas account" : "Silicon Notebook";
+  const initial = [...label.trim()][0]?.toUpperCase() ?? "?";
+  const backHref = notebookUser?.backHref ?? "/";
+  const backLabel = notebookUser?.backLabel ?? "返回 Silicon Notebook";
   return (
     <details
       className="command-menu header-account-menu"
@@ -53,10 +68,10 @@ export function HeaderAccountMenu({
         className="account-name"
         data-testid="account-name"
         data-initial={initial}
-        aria-label={`Account: ${account.username}`}
-        title={account.username}
+        aria-label={`Account: ${label}`}
+        title={label}
       >
-        <span className="account-name-label">{account.username}</span>
+        <span className="account-name-label">{label}</span>
       </summary>
       <div
         className="command-popover header-account-popover"
@@ -68,8 +83,8 @@ export function HeaderAccountMenu({
             {initial}
           </span>
           <span className="header-account-copy">
-            <strong>{account.username}</strong>
-            <small>Auto Canvas account</small>
+            <strong>{label}</strong>
+            <small>{subtitle}</small>
           </span>
         </div>
         <div className="command-separator" role="separator" />
@@ -104,13 +119,26 @@ export function HeaderAccountMenu({
           </span>
         </button>
         <div className="command-separator" role="separator" />
-        <button
-          type="button"
-          data-testid="sign-out"
-          onClick={() => account.logout()}
-        >
-          Sign out
-        </button>
+        {account ? (
+          <button
+            type="button"
+            data-testid="sign-out"
+            onClick={() => account.logout()}
+          >
+            Sign out
+          </button>
+        ) : (
+          <button
+            type="button"
+            data-testid="back-to-notebook"
+            onClick={() => {
+              if (menu.current) menu.current.open = false;
+              window.location.assign(backHref);
+            }}
+          >
+            {backLabel}
+          </button>
+        )}
       </div>
     </details>
   );

@@ -8,6 +8,7 @@ import type { ReactNode, ComponentProps, RefObject } from "react";
 import {
   HeaderAccountMenu,
   type HeaderAccountCloudProjects,
+  type HeaderNotebookUser,
 } from "../accounts/header-account-menu";
 import { ProjectMenu } from "./project-menu";
 import { DrawingToolbar } from "../features/editor-shell/drawing-toolbar";
@@ -83,6 +84,7 @@ export interface EditorAppChromeProps {
    * Projects; only an accounts-mode editor draws that menu.
    */
   accountCloudProjects?: HeaderAccountCloudProjects;
+  notebookUser?: HeaderNotebookUser;
   /** The top-bar Auto Layout button (start, reason when unavailable, cancel). */
   autoLayout: AutoLayoutMenuActions;
   /** The run the top-bar Auto Layout control shows while it plans. */
@@ -117,6 +119,7 @@ export function EditorAppChrome({
   hasUnsavedWork,
   fileCommands,
   accountCloudProjects,
+  notebookUser,
   autoLayout,
   autoLayoutRun,
   editorMode,
@@ -250,6 +253,7 @@ export function EditorAppChrome({
             {...(accountCloudProjects
               ? { cloudProjects: accountCloudProjects }
               : {})}
+            {...(notebookUser ? { notebookUser } : {})}
           />
         </div>
       </div>
