@@ -445,6 +445,29 @@ it("filters by search, toggles grid/list views, and delegates open/rename/delete
     container.querySelector<HTMLButtonElement>(".shelf-rename-save")!.click(),
   );
   expect(onRenameProject).toHaveBeenCalledWith("p-alpha", "Alpha Renamed");
+  expect(document.activeElement).toBe(
+    container.querySelector('[data-testid="shelf-actions-p-alpha"]'),
+  );
+
+  // Cancelling rename with Escape also restores focus to the remounted actions button.
+  await act(async () =>
+    container
+      .querySelector<HTMLButtonElement>(
+        'button[aria-label="Rename Beta Filter"]',
+      )!
+      .click(),
+  );
+  const cancelInput = container.querySelector<HTMLInputElement>(
+    'input[aria-label="Project name"]',
+  )!;
+  await act(async () => {
+    cancelInput.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+    );
+  });
+  expect(document.activeElement).toBe(
+    container.querySelector('[data-testid="shelf-actions-p-beta"]'),
+  );
 
   // Always-visible Delete button asks twice and delegates to onDeleteProject.
   await act(async () =>

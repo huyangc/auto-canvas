@@ -55,7 +55,7 @@ export interface ShelfWallProps {
   /** Syncs a delete with open editor tabs; falls back to direct API delete when omitted. */
   onDeleteProject?: ((id: string) => Promise<void>) | undefined;
   /** Notifies the host after mutations outside the tab-sync callbacks (duplicate, favorite, restore). */
-  onProjectsChanged?: (() => void) | undefined;
+  onProjectsChanged?: (() => void | Promise<void>) | undefined;
   /** Disables opening and mutations while an editor tab operation is in flight. */
   busy?: boolean | undefined;
 }
@@ -238,8 +238,14 @@ export function ShelfWall({
   const [history, setHistory] = useState<CloudProjectSummary | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const favoriteButtons = useRef(new Map<string, HTMLButtonElement>());
+  const actionButtons = useRef(new Map<string, HTMLButtonElement>());
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const favoritesFilter = useRef<HTMLButtonElement>(null);
   const pendingFavoriteFocus = useRef<string | null>(null);
+  const pendingRenameFocus = useRef<string | null>(null);
+  const mutationSeq = useRef(0);
+  const onProjectsChangedRef = useRef(onProjectsChanged);
+  onProjectsChangedRef.current = onProjectsChanged;
   const controlsBusy = busy || busyId !== null;
 
   useEffect(() => {
@@ -260,6 +266,12 @@ export function ShelfWall({
   }, []);
 
   useLayoutEffect(() => {
+    const renameId = pendingRenameFocus.current;
+    if (renameId !== null && renaming === null && busyId === null) {
+      pendingRenameFocus.current = null;
+      const target = actionButtons.current.get(renameId);
+      (target && !target.disabled ? target : searchInputRef.current)?.focus();
+    }
     const id = pendingFavoriteFocus.current;
     if (busyId !== null || id === null) return;
     pendingFavoriteFocus.current = null;
@@ -420,13 +432,14 @@ export function ShelfWall({
           throw new Error(
             `Could not create a Shelf branch (${result.status}).`,
           );
+        mutationSeq.current += 1;
         replaceSummary(result.project);
-        onProjectsChanged?.();
+        void onProjectsChangedRef.current?.();
         setHistory(null);
         return true;
       },
     };
-  }, [history, onProjectsChanged]);
+  }, [history]);
 
   async function act(
     project: CloudProjectSummary,
@@ -437,6 +450,7 @@ export function ShelfWall({
     if (controlsBusy) return;
     const name = renamed?.trim();
     if (action === "rename" && (!name || name === project.name)) {
+      pendingRenameFocus.current = project.id;
       setRenaming(null);
       return;
     }
@@ -449,8 +463,9 @@ export function ShelfWall({
     setError(null);
     try {
       if (action === "favorite") {
+        mutationSeq.current += 1;
         replaceSummary(await setShelfFavorite(project.id, !project.favorite));
-        onProjectsChanged?.();
+        void onProjectsChangedRef.current?.();
       } else if (action === "export") {
         const loaded = await openCloudProject(project.id);
         if (loaded.status !== "opened")
@@ -467,6 +482,7 @@ export function ShelfWall({
         );
       } else if (action === "rename" && onRenameProject) {
         await onRenameProject(project.id, name!);
+        const seq = ++mutationSeq.current;
         setState((current) =>
           current.status === "ready"
             ? {
@@ -477,11 +493,11 @@ export function ShelfWall({
               }
             : current,
         );
+        pendingRenameFocus.current = project.id;
         setRenaming(null);
-        void loadShelf().then((next) => {
-          if (next.status === "ready") setState(next);
-        });
-        requestAnimationFrame(() => menuButtonRef.current?.focus());
+        const refreshed = await loadShelf();
+        if (refreshed.status === "ready" && mutationSeq.current === seq)
+          setState(refreshed);
       } else {
         const result = await editShelfProject(
           project.id,
@@ -490,11 +506,11 @@ export function ShelfWall({
             : { kind: "duplicate" },
         );
         if (result.status === "saved") {
+          mutationSeq.current += 1;
           replaceSummary(result.project);
-          onProjectsChanged?.();
+          void onProjectsChangedRef.current?.();
+          if (action === "rename") pendingRenameFocus.current = project.id;
           setRenaming(null);
-          if (action === "rename")
-            requestAnimationFrame(() => menuButtonRef.current?.focus());
         } else
           throw new Error(
             result.status === "conflict"
@@ -525,6 +541,7 @@ export function ShelfWall({
     try {
       if (onDeleteProject) {
         await onDeleteProject(project.id);
+        mutationSeq.current += 1;
         setState((current) =>
           current.status === "ready"
             ? {
@@ -539,6 +556,7 @@ export function ShelfWall({
       }
       const outcome = await deleteCloudProject(project.id);
       if (outcome.status === "deleted") {
+        mutationSeq.current += 1;
         // An editor tab of it, when this browser tab returns to the editor,
         // becomes an unsaved draft instead of a saved Project that is gone.
         noteCloudProjectDeleted(project.id);
@@ -678,6 +696,10 @@ export function ShelfWall({
       </div>
       <button
         type="button"
+        ref={(button) => {
+          if (button) actionButtons.current.set(project.id, button);
+          else actionButtons.current.delete(project.id);
+        }}
         className="shelf-tile-actions"
         aria-label={`Actions for ${project.name}`}
         aria-haspopup="menu"
@@ -710,8 +732,8 @@ export function ShelfWall({
         if (event.key === "Escape" && !controlsBusy) {
           event.preventDefault();
           event.stopPropagation();
+          pendingRenameFocus.current = project.id;
           setRenaming(null);
-          menuButtonRef.current?.focus();
         }
       }}
     >
@@ -741,8 +763,8 @@ export function ShelfWall({
           type="button"
           disabled={controlsBusy}
           onClick={() => {
+            pendingRenameFocus.current = project.id;
             setRenaming(null);
-            menuButtonRef.current?.focus();
           }}
         >
           Cancel
@@ -763,6 +785,7 @@ export function ShelfWall({
           <div className="shelf-search-wrap">
             <SearchIcon />
             <input
+              ref={searchInputRef}
               type="search"
               className="shelf-search-input"
               aria-label="Search cloud projects"
@@ -1017,7 +1040,7 @@ export function ShelfWall({
           onClose={() => setHistory(null)}
           onRestored={() => {
             setHistory(null);
-            onProjectsChanged?.();
+            void onProjectsChangedRef.current?.();
             void refresh();
           }}
         />

@@ -346,7 +346,7 @@ export function EditorDialogs({
               onOpenProject: (id) => void openCloudProjectById(id, true),
               onRenameProject: renameShelfProject,
               onDeleteProject: deleteShelfProject,
-              onProjectsChanged: () => void reloadCloudProjects(),
+              onProjectsChanged: reloadCloudProjects,
               onClose: () => setCloudProjectsOpen(false),
             }
           : null
