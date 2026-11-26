@@ -231,6 +231,10 @@ import {
   EDITOR_PROJECT_TRANSACTION_OPTIONS,
   useDocumentController,
 } from "../document/document-controller";
+import {
+  DEFAULT_UNTITLED_PROJECT_NAME,
+  nextUntitledProjectName,
+} from "../document/project-name";
 import { useProjectFileLifecycle } from "../document/use-project-file-lifecycle";
 import type { ReplaceProjectOptions } from "../document/use-project-file-lifecycle";
 import {
@@ -601,7 +605,10 @@ function WorkspaceEditor({
     () =>
       materializeRazaviProjectBulkConnections(
         initialProject ??
-          createEmptyProject(createId("project"), "New Circuit"),
+          createEmptyProject(
+            createId("project"),
+            DEFAULT_UNTITLED_PROJECT_NAME,
+          ),
       ).project,
   );
   const [status, setStatus] = useState(
@@ -1126,6 +1133,16 @@ function WorkspaceEditor({
       isCloudManagementInFlight()
         ? "Cloud Project management is in progress"
         : null,
+    nextNewProjectName: () => {
+      const activeTabId = projectTabs.currentId();
+      return nextUntitledProjectName([
+        ...projectTabs
+          .entries()
+          .filter(({ id }) => id !== activeTabId)
+          .map(({ session }) => session.controller.project.name),
+        ...cloudProjects.map((item) => item.name),
+      ]);
+    },
     project,
     projectSessionId,
     viewBox,
@@ -4871,6 +4888,7 @@ function WorkspaceEditor({
 
   const {
     createTabSession,
+    createNewTabSession,
     openImportFile,
     restoredTabs,
     workspaceRestoreOutcome,
@@ -4889,6 +4907,7 @@ function WorkspaceEditor({
   } = useProjectTabSessions({
     openProjectFile,
     projectStore,
+    cloudProjects,
     onCloudProjectSaved: noteCloudProjectSaved,
     onCloudProjectsDeleted: noteCloudProjectsDeleted,
     initialProject,
@@ -5026,6 +5045,7 @@ function WorkspaceEditor({
     openCloudProjectById,
     renameProject,
     createTabSession,
+    createNewTabSession,
     projectSwitchBlocker,
     reserveBackgroundCloudSave,
     projectTabs,
@@ -5163,6 +5183,7 @@ function WorkspaceEditor({
         exportRaster={exportRaster}
         exportDesignNetlist={exportDesignNetlist}
         createTabSession={createTabSession}
+        createNewTabSession={createNewTabSession}
         projectTabs={projectTabs}
         editorMode={editorMode}
         changeEditorMode={(next) => changeEditorMode(next, { persist: true })}

@@ -72,7 +72,7 @@ test("startup recovery without a saved workspace restores into a new working cop
 
   await page.goto("/editor?recovery=meaningful");
   await expect(banner).toBeVisible();
-  await expect(banner).toContainText("New Circuit");
+  await expect(banner).toContainText("Untitled");
   await banner.getByRole("button", { name: "Restore" }).click();
   await expect(banner).toBeHidden();
   await expect(page.getByTestId("revision")).toHaveText("3");
@@ -146,7 +146,7 @@ test("a damaged copy restores its previous generation; a newer-schema copy downl
   const damaged = cards.filter({ hasText: "Damaged" });
   await expect(damaged).toHaveCount(1);
   await damaged
-    .getByRole("button", { name: "Restore previous copy of New Circuit" })
+    .getByRole("button", { name: "Restore previous copy of Untitled" })
     .click();
   await expect(dialog).toBeHidden();
   await expect(page.getByTestId("revision")).toHaveText("1");
@@ -194,7 +194,7 @@ test("export keeps recovery; explicit discard removes it and hides a clean repla
   await expectRecovered(page, '"name": "Clean Replacement"');
   await expect
     .poll(() => recoveryProjectTexts(page))
-    .not.toContain('"name": "New Circuit"');
+    .not.toContain('"name": "Untitled"');
   await page.reload();
 
   const fileMenu = await openMenu(page, "File");

@@ -24,7 +24,7 @@ async function mount(
   const options: Parameters<typeof useBootLink>[0] = {
     restoredWorkspace: null,
     bootRequestsNewProject: false,
-    preparedInitialProject: createEmptyProject("new", "New Circuit"),
+    preparedInitialProject: createEmptyProject("new", "Untitled"),
     setStatus: vi.fn(),
     restoreAfterRefresh: false,
     replaceActiveProject: vi.fn(),

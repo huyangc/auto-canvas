@@ -112,9 +112,7 @@ test("accounts reopen their saved drawing in another browser and isolate local d
   await expect(
     sibling.getByRole("heading", { name: "Workspace locked" }),
   ).toBeVisible();
-  await expect(page.locator(".app-project-name-text")).toHaveText(
-    "New Circuit",
-  );
+  await expect(page.locator(".app-project-name-text")).toHaveText("Untitled");
   const shelf = await projectTabAction(page, "Open Cloud Project…");
   await expect(shelf.getByRole("button", { name, exact: true })).toHaveCount(0);
   await page.keyboard.press("Escape");

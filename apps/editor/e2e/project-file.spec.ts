@@ -301,7 +301,7 @@ test("paired refresh preserves the saved Cloud binding", async ({
   await placeResistors(page, [360]);
   await page.keyboard.press("Control+s");
   await expect.poll(() => cloud.stored()?.revision).toBe(1);
-  await expectStatus(page, "Saved New Circuit to Cloud");
+  await expectStatus(page, "Saved Untitled to Cloud");
   await expect(page.getByTestId("project-unsaved-indicator")).toHaveCount(0);
   await page.getByTestId("open-agent").click();
   const panel = page.getByTestId("connect-agent-panel");
@@ -315,7 +315,7 @@ test("paired refresh preserves the saved Cloud binding", async ({
   await expect(page.getByTestId("project-unsaved-indicator")).toHaveCount(0);
   await page.keyboard.press("Control+s");
   await expect.poll(() => cloud.stored()?.revision).toBe(2);
-  await expectStatus(page, "Saved New Circuit to Cloud");
+  await expectStatus(page, "Saved Untitled to Cloud");
   await expect
     .poll(
       async () =>
@@ -355,7 +355,7 @@ test("paired refresh preserves the saved Cloud binding", async ({
   await expect(page.getByTestId("project-unsaved-indicator")).toBeVisible();
   await page.keyboard.press("Control+s");
   await expect.poll(() => cloud.stored()?.revision).toBe(3);
-  await expectStatus(page, "Saved New Circuit to Cloud");
+  await expectStatus(page, "Saved Untitled to Cloud");
   await expect(page.getByTestId("project-unsaved-indicator")).toHaveCount(0);
 });
 

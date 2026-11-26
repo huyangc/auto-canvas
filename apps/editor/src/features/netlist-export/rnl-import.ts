@@ -19,6 +19,7 @@ import {
   type RnlSnapshot,
 } from "@icm/rnl";
 import {
+  deriveImportedProjectName,
   importSpiceSources,
   type SpiceDiagnostic,
   type SpiceSourceInput,
@@ -317,7 +318,16 @@ async function buildImportPlan({
   // The editor's top where the file names it (Canvas 0.4): a Cell printed
   // beside it may call it, and so be the netlist's top in its place.
   const top = canvasTopDocument(imported.project, snapshot);
-  if (top) imported.project.topDocumentId = top;
+  if (top) {
+    imported.project.topDocumentId = top;
+    const topDocument = imported.project.documents.find(
+      (document) => document.id === top,
+    );
+    imported.project.name = deriveImportedProjectName(
+      entryPath,
+      topDocument?.sourceBinding?.cellName ?? topDocument?.netlist?.name,
+    );
+  }
   const drawn = drawingOf(imported.project, snapshot);
   const fileImported = imported.project;
   const kept =

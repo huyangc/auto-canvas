@@ -823,7 +823,7 @@ test("tab names edit in place as one undoable change and commit to their own tab
   await expect(first).toContainText("OTA input stage");
   await expect(first.getByLabel("Unsaved")).toBeVisible();
   await page.keyboard.press("ControlOrMeta+z");
-  await expect(first).toContainText("New Circuit");
+  await expect(first).toContainText("Untitled");
 
   // New, clicked while a name commits and widens its tab, still opens a tab.
   await first.dblclick();
@@ -831,7 +831,7 @@ test("tab names edit in place as one undoable change and commit to their own tab
   await newTab();
   await expect(tabs).toHaveCount(3);
   await expect(first).toContainText("A circuit name that expands on commit");
-  await expect(selected).toContainText("New Circuit");
+  await expect(selected).toContainText("Untitled");
   await renameProject(page, "Project B");
 
   // Double-clicking another project's name activates it before editing.
@@ -875,7 +875,7 @@ test("tab names edit in place as one undoable change and commit to their own tab
   await selected.dblclick();
   await name.fill("Another renamed circuit");
   await page
-    .getByRole("button", { name: "Close tab New Circuit", exact: true })
+    .getByRole("button", { name: "Close tab Untitled", exact: true })
     .click();
   const decision = page.getByTestId("project-tab-close-decision");
   await expect(decision).toBeVisible();
@@ -889,7 +889,7 @@ test("tab names edit in place as one undoable change and commit to their own tab
   await first.dblclick();
   await name.fill("Edited project");
   await page
-    .getByRole("button", { name: "Close tab New Circuit", exact: true })
+    .getByRole("button", { name: "Close tab Untitled", exact: true })
     .click();
   await expect(tabs).toHaveCount(4);
   await expect(decision).toHaveCount(0);
@@ -949,7 +949,7 @@ test("external tab activation cannot discard the focused name draft", async ({
   await renameProject(page, "Project A");
   await newProjectTab(page);
   await expect(page.getByRole("tab", { selected: true })).toContainText(
-    "New Circuit",
+    "Untitled",
   );
   await renameProject(page, "Project B");
   await page.getByTestId("open-agent").click();
@@ -1025,7 +1025,7 @@ test("tab rename keeps header geometry and Project Info renames the circuit and 
   await tab.dblclick();
   const name = page.getByRole("textbox", { name: "Project name", exact: true });
   await expect(name).toBeFocused();
-  await expect(name).toHaveValue("New Circuit");
+  await expect(name).toHaveValue("Untitled 2");
   const before = (await page.getByTestId("schematic-canvas").boundingBox())!;
   await name.fill(longName);
   expect(await page.getByTestId("schematic-canvas").boundingBox()).toEqual(
@@ -1069,7 +1069,7 @@ test("tab rename keeps header geometry and Project Info renames the circuit and 
   await expect(toggle).toHaveAttribute("title", longName);
   // A rename is an ordinary edit: one Undo restores the old name.
   await page.keyboard.press("ControlOrMeta+z");
-  await expect(page.getByTestId("project-name")).toHaveText("New Circuit");
+  await expect(page.getByTestId("project-name")).toHaveText("Untitled 2");
 
   // Project Info names the circuit and its Cell as one undoable edit.
   const info = await openProjectInfo(page);
@@ -1092,7 +1092,7 @@ test("tab rename keeps header geometry and Project Info renames the circuit and 
   await expect(cellField).toHaveValue("bandgap_core");
   await page.keyboard.press("Escape");
   await page.keyboard.press("ControlOrMeta+z");
-  await expect(page.getByTestId("project-name")).toHaveText("New Circuit");
+  await expect(page.getByTestId("project-name")).toHaveText("Untitled 2");
   await openProjectInfo(page);
   await expect(cellField).toHaveValue(cellName);
   await page.keyboard.press("Escape");
@@ -1334,7 +1334,7 @@ test("with one project File → Project Info renames it, and the top bar shows t
   await openEditor(page, "/editor?new=1");
   await expect(page.getByTestId("project-tabs")).toBeHidden();
   const label = page.locator(".app-project-name");
-  await expect(label).toContainText("New Circuit");
+  await expect(label).toContainText("Untitled");
   const info = await openProjectInfo(page);
   await info.getByRole("textbox", { name: "Name", exact: true }).fill("OTA");
   await info.getByRole("button", { name: "Save", exact: true }).click();
@@ -1378,7 +1378,7 @@ test("with one project File → Close tab asks as the tab's × does, and keeps t
     .getByRole("button", { name: "Close without saving", exact: true })
     .click();
   await expect(count).toHaveText("0");
-  await expect(page.locator(".app-project-name")).toContainText("New Circuit");
+  await expect(page.locator(".app-project-name")).toContainText("Untitled");
   // As after the ×, the closed work is a recovery copy to restore.
   page.on("dialog", (dialog) => void dialog.accept());
   await page.reload();
@@ -1436,7 +1436,7 @@ test("a rename in its tab survives the strip hiding when the other tab closes", 
   await name.fill("Alpha renamed");
   // Close the other tab while the name is typed: one tab, the strip hides.
   await page
-    .getByRole("button", { name: "Close tab New Circuit", exact: true })
+    .getByRole("button", { name: "Close tab Untitled", exact: true })
     .click();
   await expect(page.getByTestId("project-tabs")).toBeHidden();
   await expect(name).toHaveCount(0);

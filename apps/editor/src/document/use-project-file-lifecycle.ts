@@ -21,6 +21,7 @@ import type {
   BrowserRecoveryGeneration,
   BrowserRecoverySource,
 } from "./browser-recovery-contract";
+import { DEFAULT_UNTITLED_PROJECT_NAME } from "./project-name";
 import type { RecoveryCoordinator } from "./recovery-coordinator";
 import {
   downloadTextArtifact,
@@ -201,6 +202,8 @@ export interface UseProjectFileLifecycleOptions {
    * saves itself (desktop, and any editor without Cloud storage).
    */
   autoSave?: { enabled: boolean; blocker(): string | null };
+  /** Name for a newly created blank Project, avoiding collisions with open/saved Projects. */
+  nextNewProjectName?(): string;
   /** Feature-local drafts follow an explicit recovery fork, never an arbitrary import. */
   onRecoverBuffers?(
     from: string,
@@ -234,6 +237,7 @@ export function useProjectFileLifecycle({
   describeOpenBlocker,
   describeCloudSaveBlocker,
   autoSave,
+  nextNewProjectName,
 }: UseProjectFileLifecycleOptions) {
   const autoSaveRef = useRef(autoSave);
   autoSaveRef.current = autoSave;
@@ -1179,7 +1183,7 @@ export function useProjectFileLifecycle({
     void guardDirtyReplacement("Create a new Project", () => {
       const next = createEmptyProject(
         createId("project"),
-        "New Circuit",
+        nextNewProjectName?.() ?? DEFAULT_UNTITLED_PROJECT_NAME,
         createId("document"),
       );
       replaceActiveProject(next, defaultViewBox, { source: "new" });
