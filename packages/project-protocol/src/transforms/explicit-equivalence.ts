@@ -23,6 +23,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * meant. Such a record cannot be converted safely into physical topology,
  * owner-addressed naming, or hierarchy, so the file boundary rejects it at
  * its exact location instead of silently changing connectivity.
+ * @internal Migration tests inspect the report for this schema step.
  */
 export function upgradeSchema32To33WithReport(
   raw: Record<string, unknown>,

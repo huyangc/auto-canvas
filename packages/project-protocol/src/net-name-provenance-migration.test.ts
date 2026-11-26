@@ -2,7 +2,7 @@ import { createEmptyProject, CURRENT_MODEL_SCHEMA_VERSION } from "@icm/model";
 import { describe, expect, it } from "vitest";
 
 import { tryParseProjectWithMetadata } from "./load.js";
-import { upgradeSchema33To34WithReport } from "./previous-to-current.js";
+import { upgradeSchema33To34WithReport } from "./transforms/net-name-provenance.js";
 
 function schema33Project() {
   const current = createEmptyProject("project", "Project");

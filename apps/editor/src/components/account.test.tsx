@@ -80,7 +80,7 @@ describe("AccountMenuView", () => {
     expect(await requestEmailCode("a@b.co", reply(202))).toEqual({ ok: true });
     expect(await requestEmailCode("a@b.co", reply(429))).toEqual({
       ok: false,
-      message: "Daily limit reached — try tomorrow.",
+      message: "Too many requests — try again later.",
     });
     expect(await verifyEmailCode("a@b.co", "123456", reply(200))).toEqual({
       ok: true,

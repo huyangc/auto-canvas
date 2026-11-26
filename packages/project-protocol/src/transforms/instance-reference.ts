@@ -72,6 +72,7 @@ function migratedLabelAnnotation(
  * parallel mutable authorities. User RichText labels become ordinary attached
  * Annotation content, while master/value/reference labels remain live bound
  * projections.
+ * @internal Migration tests inspect the report for this schema step.
  */
 export function upgradeSchema34To35WithReport(
   raw: Record<string, unknown>,

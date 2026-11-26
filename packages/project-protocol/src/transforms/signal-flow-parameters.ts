@@ -15,6 +15,7 @@ export interface Schema30To31MigrationResult {
 /**
  * Upgrade schema 30 to 31. Signal Flow parameters are additive, so every
  * valid schema-30 project is already valid schema-31 data.
+ * @internal Migration tests inspect the report for this schema step.
  */
 export function upgradeSchema30To31WithReport(
   raw: Record<string, unknown>,

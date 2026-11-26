@@ -8,7 +8,10 @@ export interface Schema41To42MigrationResult {
   readonly report: Schema41To42MigrationReport;
 }
 
-/** Schema 42 replaces the optional singleton setup with a named collection. */
+/**
+ * Schema 42 replaces the optional singleton setup with a named collection.
+ * @internal Migration tests inspect the report for this schema step.
+ */
 export function upgradeSchema41To42WithReport(
   raw: Record<string, unknown>,
 ): Schema41To42MigrationResult {

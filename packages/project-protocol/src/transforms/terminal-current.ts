@@ -30,7 +30,10 @@ function migrateExpression(value: unknown, changed: { value: boolean }): void {
   if ("right" in expression) migrateExpression(expression.right, changed);
 }
 
-/** Add the terminal identity omitted by schema-43 source-current outputs. */
+/**
+ * Add the terminal identity omitted by schema-43 source-current outputs.
+ * @internal Migration tests inspect the report for this schema step.
+ */
 export function upgradeSchema43To44WithReport(
   raw: Record<string, unknown>,
 ): Schema43To44MigrationResult {

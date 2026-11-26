@@ -65,7 +65,6 @@ describe("Web editor composition", () => {
       revision: 8,
       schemaVersion: project.schemaVersion,
       updatedAt: "2026-09-26T00:00:00Z",
-      galleryEntryId: "published",
       favorite: false,
     };
     const transport = vi
@@ -103,7 +102,7 @@ describe("Web editor composition", () => {
       status: "conflict",
       project: summary,
     });
-    await store.save(project, null, "published");
+    await store.save(project, null);
     expect(await store.delete(summary.id)).toEqual({
       status: "deleted",
       projects: [],
@@ -122,9 +121,10 @@ describe("Web editor composition", () => {
     expect(new Headers(update.headers).get("if-match")).toBe("revision-7");
     const creation = transport.mock.calls[3]![1]!;
     expect(creation.method).toBe("POST");
-    expect(JSON.parse(creation.body as string).galleryEntryId).toBe(
-      "published",
-    );
+    expect(JSON.parse(creation.body as string)).toEqual({
+      name: project.name,
+      projectText: serializeProject(project),
+    });
   });
 
   it("updates the store limit on each successful list and falls back for older servers", async () => {

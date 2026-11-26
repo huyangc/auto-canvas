@@ -77,6 +77,7 @@ function powerOwnerId(
  * electrical authority through their source declaration, and visible power
  * presentation becomes the owner when an older Project relied on a shadow
  * property for a power rail or marker.
+ * @internal Migration tests inspect the report for this schema step.
  */
 export function upgradeSchema33To34WithReport(
   raw: Record<string, unknown>,

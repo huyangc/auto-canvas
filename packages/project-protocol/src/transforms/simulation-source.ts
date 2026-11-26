@@ -9,7 +9,7 @@ import { repairBoundFormatOverrides } from "./bound-format-override.js";
 import { normalizeLegacyMirrorDirections } from "./mirror-directions.js";
 
 /** One-way, offline migration. Source bytes become the only saved authority. */
-export function upgradeSchema48To49WithReport(raw: Record<string, unknown>) {
+function upgradeSchema48To49WithReport(raw: Record<string, unknown>) {
   // Repair presentation without changing authored names; export owns SPICE prefixes.
   raw = repairBoundFormatOverrides(raw);
   raw = normalizeLegacyMirrorDirections(raw);

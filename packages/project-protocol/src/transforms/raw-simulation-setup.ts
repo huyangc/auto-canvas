@@ -8,7 +8,10 @@ export interface Schema38To39MigrationResult {
   readonly report: Schema38To39MigrationReport;
 }
 
-/** Upgrade schema 38 to 39 without inventing a raw simulation draft. */
+/**
+ * Upgrade schema 38 to 39 without inventing a raw simulation draft.
+ * @internal Migration tests inspect the report for this schema step.
+ */
 export function upgradeSchema38To39WithReport(
   raw: Record<string, unknown>,
 ): Schema38To39MigrationResult {

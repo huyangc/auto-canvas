@@ -11,6 +11,7 @@ export interface Schema29To30MigrationResult {
   readonly report: Schema29To30MigrationReport;
 }
 
+/** @internal Migration tests inspect the report for this schema step. */
 export function upgradeSchema29To30WithReport(
   raw: Record<string, unknown>,
 ): Schema29To30MigrationResult {

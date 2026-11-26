@@ -43,6 +43,7 @@ function isRecoverableReferenceLabel(
   return literalPrefix !== null && literalPrefix === referencePrefix(reference);
 }
 
+/** @internal Migration tests inspect the report for this schema step. */
 export function upgradeSchema35To36WithReport(
   raw: Record<string, unknown>,
 ): Schema35To36MigrationResult {

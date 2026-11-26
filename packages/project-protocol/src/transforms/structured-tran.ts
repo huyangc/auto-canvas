@@ -8,7 +8,10 @@ export interface Schema37To38MigrationResult {
   readonly report: Schema37To38MigrationReport;
 }
 
-/** Upgrade schema 37 to 38 without inventing a transient analysis. */
+/**
+ * Upgrade schema 37 to 38 without inventing a transient analysis.
+ * @internal Migration tests inspect the report for this schema step.
+ */
 export function upgradeSchema37To38WithReport(
   raw: Record<string, unknown>,
 ): Schema37To38MigrationResult {

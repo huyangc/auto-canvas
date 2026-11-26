@@ -12,7 +12,10 @@ export interface Schema31To32MigrationResult {
   readonly report: Schema31To32MigrationReport;
 }
 
-/** Upgrade schema 31 to 32 without materializing any color override. */
+/**
+ * Upgrade schema 31 to 32 without materializing any color override.
+ * @internal Migration tests inspect the report for this schema step.
+ */
 export function upgradeSchema31To32WithReport(
   raw: Record<string, unknown>,
 ): Schema31To32MigrationResult {

@@ -1,8 +1,6 @@
 import { apiUrl } from "../lib/app-url";
 import { createContext, lazy, Suspense, useEffect, useState } from "react";
 
-import { isDailyAllowanceRefusal } from "../daily-allowance";
-
 const AccountMenuView = /* @__PURE__ */ lazy(
   () => import("./account-menu-view"),
 );
@@ -131,8 +129,8 @@ export async function requestEmailCode(
       body: JSON.stringify({ email }),
     });
     if (response.status === 202) return { ok: true };
-    if (await isDailyAllowanceRefusal(response))
-      return { ok: false, message: "Daily limit reached — try tomorrow." };
+    if (response.status === 429)
+      return { ok: false, message: "Too many requests — try again later." };
     if (response.status === 400)
       return { ok: false, message: "That email address looks invalid." };
     return { ok: false, message: "Could not send the code — try again later." };

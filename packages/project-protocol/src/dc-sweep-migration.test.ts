@@ -1,10 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { createEmptyProject } from "@icm/model";
 
-import {
-  upgradeSchema40To41,
-  upgradeSchema40To41WithReport,
-} from "./previous-to-current.js";
+import { upgradeSchema40To41 } from "./previous-to-current.js";
+import { upgradeSchema40To41WithReport } from "./transforms/dc-sweep.js";
 
 describe("schema 40 to 41", () => {
   it("changes only the version because existing simulation setups remain valid", () => {

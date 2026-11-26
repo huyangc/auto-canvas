@@ -204,7 +204,6 @@ describe("Cloud Projects", () => {
     const response = await request("/api/projects", "POST", {
       name: " Second ",
       projectText: JSON.stringify(JSON.parse(projectText("Second"))),
-      galleryEntryId: "ignored",
     });
     expect(response.status).toBe(201);
     const second = (await response.json()).project;
@@ -213,7 +212,6 @@ describe("Cloud Projects", () => {
       revision: 1,
       schemaVersion: CURRENT_PROJECT_FILE_VERSION,
       favorite: false,
-      galleryEntryId: null,
     });
     expect(second.id).toMatch(/^[23456789abcdefghjkmnpqrstvwxyz]{10}$/u);
     expect(second).not.toHaveProperty("projectText");
@@ -270,11 +268,6 @@ describe("Cloud Projects", () => {
       { name: 1, projectText: projectText() },
       { name: "a".repeat(121), projectText: projectText() },
       { name: "x", projectText: 1 },
-      ...[null, "", 3].map((galleryEntryId) => ({
-        name: "x",
-        projectText: projectText(),
-        galleryEntryId,
-      })),
     ]) {
       const reply = await request("/api/projects", "POST", body);
       expect(reply.status).toBe(400);

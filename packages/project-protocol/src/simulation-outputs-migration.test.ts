@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { CURRENT_MODEL_SCHEMA_VERSION, createEmptyProject } from "@icm/model";
 
 import { tryParseProjectWithMetadata } from "./load.js";
-import { upgradeSchema42To43WithReport } from "./previous-to-current.js";
+import { upgradeSchema42To43WithReport } from "./transforms/simulation-outputs.js";
 
 function schema42Project() {
   const project = createEmptyProject(

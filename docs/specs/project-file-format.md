@@ -217,24 +217,10 @@ Optional fields by first schema (older envelopes cannot carry them):
   export, Cell import and copy; loading never promotes legacy declarations;
   copy reuse compares files, drafts and pins and refuses conflicts.
 
-## Offline and Gallery migration
+## Offline migration
 
-- `scripts/convert-project-format.mjs` converts a Project or Gallery backup
+- `scripts/convert-project-format.mjs` converts a Project file or backup
   offline into a new directory, comparing decoded model, rendered SVG and
   netlist analysis and checking idempotence; electrical errors stay errors;
-  any failure yields a located report and no applyable backup. Gallery rows
+  any failure yields a located report and no applyable backup. Converted backup rows
   change only `project_text` and `schema_version`.
-- Online migration (`scripts/prepare-gallery-format-migration.mjs`, output
-  kept outside Git, backups refreshed first) uses admin-only same-origin
-  `POST /api/gallery/maintenance/project-format`
-  `{table, id, originalProjectText, projectText}` for `galleryEntries` or
-  `galleryEntryVersions`: literal original comparison, re-run conversion, 409
-  on a concurrent edit, idempotent, never Cloud Projects. Read back every row
-  before declaring done; a Worker rollback does not undo writes.
-- `GET /api/gallery/maintenance/schema-backup` needs `table` (`inventory`,
-  `galleryEntries`, `galleryEntryVersions`, `galleryLikes`, `cloudProjects`,
-  `cloudProjectVersions`) and optional opaque `after`, one raw row per page.
-  The store has outgrown the 100 MB `schema-restore` request: roll back via
-  point-in-time recovery (30 days)
-  or row by row. Gallery-only backups (`analog-canvas-gallery-backup-v2`, no
-  Cloud Projects) never go to the full-store `schema-restore`.

@@ -51,9 +51,7 @@ function savedTab(
       },
       file: {
         persistenceState: facts.dirty ? "dirty" : bound ? "clean" : "unbound",
-        cloudBinding: bound
-          ? { id: facts.cloudId, revision: 4, galleryEntryId: null }
-          : null,
+        cloudBinding: bound ? { id: facts.cloudId, revision: 4 } : null,
         savedBaseline: bound
           ? { project, viewBox: { x: 0, y: 0, width: 10, height: 10 } }
           : null,

@@ -14,6 +14,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /**
  * Schema 48 gives every structured Setup an explicit variable table and saved
  * Run Plan. Existing Setups retain their exact nominal behaviour.
+ * @internal Migration tests inspect the report for this schema step.
  */
 export function upgradeSchema47To48WithReport(
   raw: Record<string, unknown>,

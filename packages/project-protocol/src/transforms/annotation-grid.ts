@@ -16,6 +16,7 @@ export interface Schema28To29MigrationResult {
  * Upgrade schema 28 to 29. Fine-grid annotation/drafting coordinates are a
  * validation relaxation, and instance appearance overrides are optional, so
  * every valid schema-28 project is already valid schema-29 data.
+ * @internal Migration tests inspect the report for this schema step.
  */
 export function upgradeSchema28To29WithReport(
   raw: Record<string, unknown>,

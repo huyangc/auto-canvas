@@ -1,7 +1,7 @@
 import { createEmptyProject } from "@icm/model";
 import { describe, expect, it } from "vitest";
 
-import { upgradeSchema43To44WithReport } from "./previous-to-current.js";
+import { upgradeSchema43To44WithReport } from "./transforms/terminal-current.js";
 
 describe("schema 43 to 44 terminal-current migration", () => {
   it("adds the source-positive terminal to every current expression", () => {

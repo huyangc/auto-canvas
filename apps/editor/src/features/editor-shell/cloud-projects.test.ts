@@ -19,7 +19,6 @@ const summary = {
   updatedAt: "2026-08-28T10:00:00.000Z",
   revision: 1,
   schemaVersion: project.schemaVersion,
-  galleryEntryId: null,
   favorite: false,
 };
 
@@ -38,7 +37,7 @@ function respondWith(status: number, body: unknown) {
 }
 
 it.each([
-  [403, { error: "account-blocked" }, "Owner"],
+  [403, {}, "server refused the request (403)"],
   [
     429,
     { error: "too-many-requests", retryAfterSeconds: 12 },
@@ -229,7 +228,7 @@ describe("Cloud Project client", () => {
 });
 
 describe("Shelf card operations", () => {
-  it("duplicates all Project data with an independent identity and no Gallery binding", async () => {
+  it("duplicates all Project data with an independent identity and leaves the favorite flag behind", async () => {
     const source = parseProject(
       serializeProject(
         parseProject(
@@ -253,7 +252,6 @@ describe("Shelf card operations", () => {
             JSON.stringify({
               project: {
                 ...summary,
-                galleryEntryId: "published",
                 favorite: true,
                 projectText: serializeProject(source),
               },
@@ -270,7 +268,6 @@ describe("Shelf card operations", () => {
     const copied = parseProject(sent.projectText);
     expect(copied.id).not.toBe(source.id);
     expect({ ...copied, id: source.id, name: source.name }).toEqual(source);
-    expect(sent).not.toHaveProperty("galleryEntryId");
     expect(sent).not.toHaveProperty("favorite");
   });
   it("renames the latest revision and surfaces conflicts without retrying over new edits", async () => {

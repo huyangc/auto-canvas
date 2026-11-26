@@ -163,7 +163,10 @@ function migratedProbeLabel(
   return String(probe.id);
 }
 
-/** Replace persisted primitive probes with the canonical output-expression form. */
+/**
+ * Replace persisted primitive probes with the canonical output-expression form.
+ * @internal Migration tests inspect the report for this schema step.
+ */
 export function upgradeSchema42To43WithReport(
   raw: Record<string, unknown>,
 ): Schema42To43MigrationResult {
