@@ -1,3 +1,7 @@
+import {
+  decoupledSignalPortClusters,
+  isPortSymbol,
+} from "./multi-port-nets.js";
 import { portDirection } from "./port-convention.js";
 import { markerBlocksJoin, straightJoins } from "./straight-joins.js";
 import { contactGeometryProblem, contactPolicy } from "./contact-placement.js";
@@ -36,6 +40,7 @@ import {
 } from "./layout-choices.js";
 import {
   assignRailHosts,
+  samePin,
   touchingPins,
   type RailHost,
   type TerminalRef,
@@ -340,6 +345,56 @@ function placePowerMarkers(
   }
 }
 
+/** All placement passes use the same net membership and pairing as routing. */
+function localPortHosts(
+  document: SchematicDocument,
+  resolver: SymbolResolver,
+  roles: NetRoles,
+  pins: PinPoint[],
+) {
+  const hosts = new Map<string, PinPoint[]>();
+  const seen = new Set<string>();
+  const duplicate = new Set<string>();
+  for (const i of document.instances) {
+    if (!isPortSymbol(i.symbolId)) continue;
+    const net = roles.pinNet(i.id, "P");
+    if (!net || roles.rails.has(net)) continue;
+    if (seen.has(net)) duplicate.add(net);
+    seen.add(net);
+  }
+  if (!duplicate.size) return hosts;
+  for (const group of freezePinGroups(document, resolver)) {
+    if (!duplicate.has(group.netId)) continue;
+    const clusters = decoupledSignalPortClusters(
+      document,
+      group.netId,
+      group.pins,
+      roles,
+      group.contacts,
+      pins,
+      group.portAssociations,
+    );
+    for (const cluster of clusters ?? []) {
+      const points = cluster.hosts.flatMap((h) =>
+        pins.filter((p) => samePin(p, h)),
+      );
+      if (points.length === cluster.hosts.length)
+        hosts.set(cluster.port.instanceId, points);
+    }
+  }
+  return hosts;
+}
+
+function localPortDistances(document: SchematicDocument, decoupled: boolean) {
+  const offset = cellPinOffset(document);
+  if (!decoupled) return [offset];
+  const grid = document.presentation.grid;
+  const snap = (n: number) => Math.round(n / grid) * grid;
+  return [...new Set([snap(offset / 2), offset, snap(offset * 1.5)])].filter(
+    (distance) => distance >= grid * 2,
+  );
+}
+
 function placeCellPins(
   document: SchematicDocument,
   deviceDocument: SchematicDocument,
@@ -351,11 +406,21 @@ function placeCellPins(
   choices: LayoutChoices,
   edgeOnly: ReadonlySet<string> = new Set(),
   frozen: ReadonlySet<string> = new Set(),
+  localHosts = localPortHosts(document, resolver, roles, pins),
 ) {
   const grid = document.presentation.grid;
   const placed = new Set(frozen);
   const snap = (n: number) => Math.round(n / grid) * grid;
   const box = enclosingBox(deviceDocument, resolver);
+  const exitAt = (host: PinPoint) => {
+    const instance = deviceDocument.instances.find(
+      (i) => i.id === host.instanceId,
+    )!;
+    const pin = devicePins(instance, resolver).find(
+      (p) => p.name === host.pinName,
+    )!;
+    return pinExit(pin, targets.get(instance.id)!);
+  };
   const entries = document.instances
     .filter((i) => ["port", "port-filled"].includes(i.symbolId))
     .map((i) => {
@@ -369,10 +434,13 @@ function placeCellPins(
             : role === "output"
               ? "right"
               : "left";
-      const connected = pins.filter(
-        (p) =>
-          net !== undefined && roles.pinNet(p.instanceId, p.pinName) === net,
-      );
+      const assigned = localHosts.get(i.id);
+      const connected =
+        assigned ??
+        pins.filter(
+          (p) =>
+            net !== undefined && roles.pinNet(p.instanceId, p.pinName) === net,
+        );
       const priority = (p: PinPoint) => {
         if (p.pinName === (role === "output" ? "D" : "G")) return 0;
         const instance = deviceDocument.instances.find(
@@ -385,12 +453,13 @@ function placeCellPins(
           ? 1
           : 2;
       };
-      connected.sort(
-        (a, b) =>
-          priority(a) - priority(b) ||
-          compareIds(a.instanceId, b.instanceId) ||
-          compareIds(a.pinName, b.pinName),
-      );
+      if (!assigned)
+        connected.sort(
+          (a, b) =>
+            priority(a) - priority(b) ||
+            compareIds(a.instanceId, b.instanceId) ||
+            compareIds(a.pinName, b.pinName),
+        );
       // R164: a free directed block's output pin hosts the ports of its Net,
       // which seat on its right whatever the side choice.
       const driver = roles.rails.has(net ?? "")
@@ -409,12 +478,13 @@ function placeCellPins(
               p.pinName === driver.pin.name,
           )
         : -1;
-      if (driven > 0) connected.unshift(...connected.splice(driven, 1));
+      if (!assigned && driven > 0)
+        connected.unshift(...connected.splice(driven, 1));
       const host = connected[0]?.point ?? {
         x: box.x + box.width / 2,
         y: box.y + box.height / 2,
       };
-      if (driven >= 0) side = "right";
+      if (driven === 0 || (!assigned && driven > 0)) side = "right";
       else if (side === "left" || side === "right") {
         const centre = box.x + box.width / 2;
         side =
@@ -434,6 +504,7 @@ function placeCellPins(
         side,
         vertical,
         net,
+        decoupled: assigned !== undefined,
         count: connected.length,
         connected,
         singleHost:
@@ -446,27 +517,19 @@ function placeCellPins(
   // R71/R93: reserve local seats in id order; blocked seats use R19/R20.
   for (const entry of [...entries].sort((a, b) => compareIds(a.i.id, b.i.id))) {
     if (edgeOnly.has(entry.i.id) || frozen.has(entry.i.id)) continue;
-    const exitAt = (host: PinPoint) => {
-      const instance = deviceDocument.instances.find(
-        (i) => i.id === host.instanceId,
-      )!;
-      const pin = devicePins(instance, resolver).find(
-        (p) => p.name === host.pinName,
-      )!;
-      return pinExit(pin, targets.get(instance.id)!);
-    };
     const seats: Placement[] = [];
     const host = entry.singleHost;
     if (host) {
       const exit = exitAt(host);
-      seats.push(
-        placement(
-          snap(host.point.x + exit.x * cellPinOffset(document)),
-          snap(host.point.y + exit.y * cellPinOffset(document)),
-          exit.x > 0 ? "horizontal" : "none",
-          exit.y < 0 ? 90 : exit.y > 0 ? 270 : 0,
-        ),
-      );
+      for (const distance of localPortDistances(document, entry.decoupled))
+        seats.push(
+          placement(
+            snap(host.point.x + exit.x * distance),
+            snap(host.point.y + exit.y * distance),
+            exit.x > 0 ? "horizontal" : "none",
+            exit.y < 0 ? 90 : exit.y > 0 ? 270 : 0,
+          ),
+        );
     } else if (
       !roles.rails.has(entry.net ?? "") &&
       entry.connected.length === 2
@@ -647,13 +710,17 @@ export function portSeatCandidates(
     document.instances.length <= 40 ? straightJoins(document, resolver) : [];
   const grid = document.presentation.grid;
   const snap = (n: number) => Math.round(n / grid) * grid;
-  const hosts = pins
-    .filter((p) => roles.pinNet(p.instanceId, p.pinName) === net)
-    .sort(
-      (a, b) =>
-        compareIds(a.instanceId, b.instanceId) ||
-        compareIds(a.pinName, b.pinName),
-    );
+  const localHosts = localPortHosts(document, resolver, roles, pins);
+  const assigned = localHosts.get(portId);
+  const hosts =
+    assigned ??
+    pins
+      .filter((p) => roles.pinNet(p.instanceId, p.pinName) === net)
+      .sort(
+        (a, b) =>
+          compareIds(a.instanceId, b.instanceId) ||
+          compareIds(a.pinName, b.pinName),
+      );
   for (const host of hosts) {
     const instance = devices.instances.find((i) => i.id === host.instanceId)!;
     const pin = devicePins(instance, resolver).find(
@@ -721,6 +788,7 @@ export function portSeatCandidates(
       new Set(
         document.instances.filter((i) => i.id !== portId).map((i) => i.id),
       ),
+      localHosts,
     );
     seats.push(targets.get(portId)!);
   }
@@ -755,6 +823,11 @@ export function portSeatCandidates(
   );
   const driverBox =
     driver &&
+    (!assigned ||
+      assigned.some(
+        (p) =>
+          p.instanceId === driver.instance.id && p.pinName === driver.pin.name,
+      )) &&
     visibleInstanceBounds(
       { ...devices, instances: [driver.instance] },
       resolver,
@@ -858,6 +931,7 @@ export function nextMarkerPlacements(
       )
       .map((i) => i.id),
   );
+  const localHosts = localPortHosts(document, resolver, roles, pins);
   // Reuse R19/R20 and spacing against all stationary ports. R71 is disabled
   // only for blockers; the other local and edge seats stay exactly where they are.
   placeCellPins(
@@ -873,6 +947,7 @@ export function nextMarkerPlacements(
     new Set(
       document.instances.filter((i) => !ports.has(i.id)).map((i) => i.id),
     ),
+    localHosts,
   );
   const branchPins = pinPoints(document, resolver);
   // R43 rail rows are derived from geometry, never diagnostic coordinates.
@@ -927,9 +1002,12 @@ export function nextMarkerPlacements(
     if (!port && deviceDescriptor(i.symbolId)?.deviceClass !== "net-marker")
       continue;
     const old = i.placement!;
-    const connected = pins.filter(
-      (p) => roles.pinNet(p.instanceId, p.pinName) === roles.pinNet(i.id, "P"),
-    );
+    const connected =
+      localHosts.get(i.id) ??
+      pins.filter(
+        (p) =>
+          roles.pinNet(p.instanceId, p.pinName) === roles.pinNet(i.id, "P"),
+      );
     const host =
       connected.length === 1 && !roles.rails.has(roles.pinNet(i.id, "P") ?? "")
         ? connected[0]
@@ -945,9 +1023,11 @@ export function nextMarkerPlacements(
       port &&
       host &&
       exit &&
-      old.position.x ===
-        snap(host.point.x + exit.x * cellPinOffset(document)) &&
-      old.position.y === snap(host.point.y + exit.y * cellPinOffset(document));
+      localPortDistances(document, localHosts.has(i.id)).some(
+        (distance) =>
+          old.position.x === snap(host.point.x + exit.x * distance) &&
+          old.position.y === snap(host.point.y + exit.y * distance),
+      );
     if (port && !local) targets.set(i.id, structuredClone(old));
     const target = targets.get(i.id)!;
     const axis =

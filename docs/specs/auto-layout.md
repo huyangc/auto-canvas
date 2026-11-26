@@ -1368,6 +1368,18 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   strictly improves the incumbent run and preserves or improves physical
   completeness. A losing draft stays out of annealing and rerouting.
 
+- **R172 — Multi-port local signal decoupling (T175).** A non-rail Base Net
+  with at least two ports, a name for every port (interface terminal or logical
+  Net name), at least one device pin per port, and no power markers can use
+  local wire trees. In port id order, reserve distinct authored touching hosts
+  first, then preserve hosts from physical components containing a single port.
+  Assign other primaries in instance and pin-name order. Spare device pins stay
+  with their wired port when possible, then use the nearest primary by Manhattan
+  distance with port id breaking ties. A port with one host tries half, one and
+  one and a half R71 offsets along the host exit, with a minimum of two grid
+  steps. Route each cluster independently while preserving Base Net membership
+  and terminal equivalence.
+
 - **R71 — Single-host ports.** A non-rail Cell Pin Net that reaches exactly
   one device pin gets a local seat along that pin's transformed exit direction.
   Use a 40-unit default seat up to 40 instances and 80 units above that,
@@ -1602,6 +1614,10 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   components of named Nets. `missingConnections` sums physical component
   counts minus one for each Base Net, using all visible symbol pins except MOS
   bulk (pins hidden by the selected symbol variant's artwork are not audited).
+  As with named power markers, distinct components of one Base Net that each
+  carry a named `port` or `port-filled` count as logically joined. Unmarked
+  components still need a drawn connection, and floating pins remain physical
+  defects regardless of marker names.
   R22's existing `unrouted` weight applies to that count in every ranking and
   search. Default Edit Engine calls remain all-or-nothing.
 
