@@ -163,8 +163,12 @@ geometry or typography change to a registered symbol, complete all three checks.
    pinned evidence hashes, measurements and generated catalogs.
 2. For every affected target, visually compare the rendered candidate with its
    pinned reference raster or PDF crop witness in
-   `fixtures/visual-reference/razavi-reference-v1/`. Cover each registered
-   orientation, sample and variant, even when no golden project uses the symbol.
+   `fixtures/visual-reference/razavi-reference-v1/` as a same-scale, same-origin
+   overlay or side-by-side view using the target's recorded scale, origin
+   (preserving subpixel offset), rotation, and fixed reference-owned crop window
+   on both sides (never independently fitting or resizing either side). Cover
+   each registered orientation, sample and variant, even when no golden project
+   uses the symbol.
 3. Run `pnpm visual:golden:check` and `pnpm export:golden:check` to verify
    formal scene renders and exports against their goldens.
 
