@@ -13,7 +13,9 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  accessSync,
   chmodSync,
+  constants,
   copyFileSync,
   cpSync,
   existsSync,
@@ -195,6 +197,9 @@ export function parseArgs(argv) {
     // parent traversal the way the OS does, keeping names that select a venv.
     let dir = "/";
     try {
+      // Native realpath can erase ENOTDIR for file/.. on macOS.
+      // Check kernel traversal of the caller's complete path first.
+      accessSync(options.python, constants.X_OK);
       for (const part of parts.slice(0, lastParent + 1)) {
         if (part === "..") {
           const physical = realpathSync.native(`${dir}/..`);

@@ -40,3 +40,9 @@ exercises a linked bin directory and compares with the caller's direct
 interpreter. Both suites use the same existing Python discovery order.
 Launcher and packaging tests passed 69/69. The rebuilt package passed all 24
 archive checks. Typecheck, lint, formatting, docs and deadcode passed.
+
+Round 4 reproduced macOS native realpath accepting a parent traversal through
+a regular file. The CLI now checks the original executable path with the
+kernel before rewriting any traversal. The new case failed before the guard
+and passed afterward. All 70 launcher and packaging checks, all 24 archive
+checks, the normal package build and all static checks passed.
