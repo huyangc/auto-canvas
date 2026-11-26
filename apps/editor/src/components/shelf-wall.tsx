@@ -802,7 +802,10 @@ export function ShelfWall({
                 className="shelf-search-clear"
                 aria-label="Clear search"
                 title="Clear search"
-                onClick={() => setSearchQuery("")}
+                onClick={() => {
+                  setSearchQuery("");
+                  searchInputRef.current?.focus();
+                }}
               >
                 ×
               </button>

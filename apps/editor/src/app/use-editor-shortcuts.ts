@@ -319,6 +319,7 @@ function createEditorShortcutHandler({
       }
       return;
     }
+    if (globalThis.document?.querySelector(".cloud-shelf-dialog[open]")) return;
     if (
       event.target instanceof Element &&
       (event.target.closest(".project-tab-name-input") ||
