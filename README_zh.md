@@ -35,7 +35,6 @@ auto-canvas 基于 cascode-ai 的 Analog Canvas：
   无界面工作区，可用脚本画图。
 - **服务端上的 Agent 中转**：实时 Agent 会话使用 Node 和 PostgreSQL；Vite 将
   HTTP 和 WebSocket 请求转发至 `apps/server`。
-- **离线 EDA 导出**：[eda/](eda/) 里有导入 Aether 和 Virtuoso 的脚本。
 
 尚未完成：
 
@@ -92,7 +91,7 @@ Web 编辑器记录打开编辑器、切换 Auto / Draw、网表导入和网表�
 rg '"type":"usage"' .local/logs/server.log | tail -50
 ```
 
-开发模式使用 `.local/logs/server-dev.log`，容器部署读取服务的标准输出。编辑器事件是尽力上报，离线桌面预览不向服务端发送事件。
+开发模式使用 `.local/logs/server-dev.log`，容器部署读取服务的标准输出。编辑器事件是尽力上报。
 
 ## 常用命令
 
@@ -117,14 +116,12 @@ apps/
   editor/       React 原理图编辑器
   server/       Node 服务端：登录状态、云端工程、自定义器件库
   mcp-server/   供 Agent 使用的 MCP 适配层
-  local-host/   托管编译好的编辑器的最小静态服务
 packages/
   model, edit-engine, derived, devices, symbols, components   电路模型与编辑
   component-library                                            自定义器件库的接口约定
   spice, netlist, rnl, project-protocol                        导入导出与工程文件格式
   render-svg, exporters, math-typesetting                      渲染与图片导出
   agent-adapter, agent-client, agent-routing                   Agent 接口
-eda/            离线导入 Aether / Virtuoso 的工具
 docs/           接口约定、使用说明和开发流程
 tasks/          每个开发任务一个目录：方案、报告、审查记录
 ```
@@ -142,7 +139,6 @@ Opus 亲自重跑验收命令并阅读代码改动来审查。审查通过的改
 - [文档索引](docs/README.md)
 - [服务端 HTTP 接口约定](docs/specs/server.md)
 - [规格文档](docs/specs/README.md)
-- [EDA 工具](docs/eda-import.md)
 - [Agent 指南](docs/agent/README.md)
 
 以上文档目前为英文。
@@ -157,8 +153,7 @@ auto-canvas 是 **Analog Canvas** 的修改版本。Analog Canvas 是 cascode-ai
   [UPSTREAM.md](UPSTREAM.md)
 
 来自 Analog Canvas 的部分：原理图编辑器、电路模型和编辑引擎、符号和器件库、
-SPICE/Spectre 导入导出、渲染和图片导出、Agent 接口和 MCP 服务端、桌面预览版，
-以及 EDA 导出脚本。
+SPICE/Spectre 导入导出、渲染和图片导出、Agent 接口和 MCP 服务端。
 
 auto-canvas 的改动：删除了托管的 Gallery、账户、Cloudflare 部署和上游 CI；用
 `apps/server` 替代 Cloudflare Worker，提供云端工程和自定义器件库；采用新的开发

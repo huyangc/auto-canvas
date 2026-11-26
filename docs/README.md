@@ -13,7 +13,6 @@ Local identity and Cloud Projects: [server contract](specs/server.md).
 | [Agent guide](agent/README.md)                  | Authorized workflows and on-demand knowledge                    |
 | [Roadmap](roadmap/README.md)                    | Remaining work and acceptance questions                         |
 | [Testing](testing/README.md)                    | Validation policy and contract ownership                        |
-| [EDA tools](eda-import.md)                      | Offline conversion and Aether/Virtuoso import                   |
 
 ## Contributor reading order
 

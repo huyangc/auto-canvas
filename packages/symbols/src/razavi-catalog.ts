@@ -145,7 +145,7 @@ export { razaviCatalogSymbols, razaviSymbolCatalogEntries };
 /** @internal Catalog tests pin the generated identity and primitives. */
 export { razaviSemanticPrimitives, razaviSymbolCatalogIdentity };
 
-export function getRazaviCatalogSymbol(
+function getRazaviCatalogSymbol(
   symbolId: string,
 ): SymbolDefinition | undefined {
   return symbolsById.get(symbolId);

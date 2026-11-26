@@ -41,7 +41,6 @@ Works today:
   uses, and a headless workspace for scripted drawing.
 - **Agent relay on the server.** Live Agent sessions use Node and PostgreSQL;
   Vite forwards HTTP and WebSocket traffic to `apps/server`.
-- **Offline EDA export** scripts for Aether and Virtuoso in [eda/](eda/).
 
 Not done yet:
 
@@ -105,7 +104,7 @@ The web editor reports opening the editor, switching Auto/Draw modes, and netlis
 rg '"type":"usage"' .local/logs/server.log | tail -50
 ```
 
-For development, read `.local/logs/server-dev.log`. Containers emit these lines to standard output. Editor events use best-effort delivery. The offline desktop preview does not send events.
+For development, read `.local/logs/server-dev.log`. Containers emit these lines to standard output. Editor events use best-effort delivery.
 
 ## Commands
 
@@ -131,14 +130,12 @@ apps/
   editor/       React schematic editor
   server/       Node server: identity, Cloud Projects, User Components
   mcp-server/   MCP adapter for Agents
-  local-host/   Minimal static host for a built editor
 packages/
   model, edit-engine, derived, devices, symbols, components   circuit model and editing
   component-library                                            User Component contract
   spice, netlist, rnl, project-protocol                        import, export, file format
   render-svg, exporters, math-typesetting                      rendering and figure export
   agent-adapter, agent-client, agent-routing                   Agent API
-eda/            Offline Aether / Virtuoso import tools
 docs/           Contracts, guides and the development workflow
 tasks/          One directory per development task: plan, report, review
 ```
@@ -158,7 +155,6 @@ a pull request that needs passing CI and a posted codex review. See
 - [Documentation map](docs/README.md)
 - [Server HTTP contract](docs/specs/server.md)
 - [Specifications](docs/specs/README.md)
-- [EDA tools](docs/eda-import.md)
 - [Agent guide](docs/agent/README.md)
 
 ## Built on Analog Canvas
@@ -172,8 +168,7 @@ connectivity-aware schematic editor by cascode-ai.
 
 From Analog Canvas: the schematic editor, the circuit model and edit engine,
 the symbol and device library, SPICE/Spectre import and export, rendering and
-figure export, the Agent API and MCP server, the desktop preview and the EDA
-export scripts.
+figure export, the Agent API and the MCP server.
 
 Changed in auto-canvas: the hosted Gallery, accounts, Cloudflare deployment and
 upstream CI are removed; `apps/server` replaces the Cloudflare Worker for
