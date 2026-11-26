@@ -269,6 +269,32 @@ for (const arg of process.argv.slice(1)) {
     expect(result.stdout.trim().split("\n")).toEqual(["chosen", "chosen"]);
   });
 
+  it("lets Python relaunch the same virtual environment for a build hook", () => {
+    const directory = fixture();
+    const venv = join(directory, "sandbox/venv");
+    const created = spawnSync(
+      process.env.AUTO_CANVAS_TEST_PYTHON ?? "python3",
+      ["-m", "venv", "--without-pip", venv],
+      {
+        encoding: "utf8",
+      },
+    );
+    expect(created.status, created.stderr).toBe(0);
+    const belowBin = join(venv, "bin/inner");
+    mkdirSync(belowBin);
+    symlinkSync(belowBin, join(directory, "link"));
+    const result = invoke(
+      directory,
+      `import { parseArgs } from ${JSON.stringify(script)};
+import { execFileSync } from "node:child_process";
+const { python } = parseArgs(["--python", "link/../python"]);
+process.stdout.write(execFileSync(python, ["-c", process.argv[1]], { cwd: "/" }));`,
+      'import subprocess, sys; subprocess.run([sys.executable, "-c", "import sys; print(sys.prefix)"], check=True)',
+    );
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout.trim()).toBe(venv);
+  });
+
   it.each([
     ["Python 3.12", 12, "70.1.0", "", /Python 3\.13 or newer/u],
     ["missing pip", 13, "70.1.0", "pip", /cannot import pip/u],

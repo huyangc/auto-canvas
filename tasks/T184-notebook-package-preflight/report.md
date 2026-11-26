@@ -22,3 +22,13 @@ command-load check now runs on every supported backend. The new bundled-command
 case failed on the first commit and passed after the fix. All 21 packaging
 tests and all 24 archive checks passed. The normal package build, typecheck,
 lint, formatting and docs checks passed again.
+
+The second review reproduced a failure in pip's backend subprocess. Some
+CPython builds lexically collapse the interpreter's parent components in
+`sys.executable`. For interpreter paths containing a parent component,
+the CLI now resolves the parent directory using the OS and preserves the
+final virtual-environment executable symlink. A Python venv regression
+runs a child interpreter through `sys.executable` and verifies its prefix.
+All 22 packaging tests passed with Python 3.13. The actual package build
+through the reviewer's symlink-and-parent path passed, its archive passed
+24/24 checks, and typecheck, lint, formatting and docs checks passed.
