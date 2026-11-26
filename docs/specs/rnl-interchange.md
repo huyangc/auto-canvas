@@ -33,8 +33,8 @@ the RNL language and its runtime belong to rnl.
   [package catalog](https://rich-netlist.github.io/rnl-packages/catalog.json),
   so a file written with any of them reads; the editor writes the newest.
   Refreshing the vendored assets rejects changed catalog records or byte hashes.
-  Web and desktop builds verify and ship those bytes as local Vite assets;
-  runtime loading verifies them before decoding, without contacting the catalog.
+  The web editor build verifies and ships those bytes as local Vite assets.
+  Runtime loading verifies them before decoding, without contacting the catalog.
   The static shell caches the same-origin hashed packages, Worker and WebAssembly
   after use; package reloads refresh cached bytes with an offline fallback.
   Imported package files remain outside that cache.
@@ -52,12 +52,11 @@ the RNL language and its runtime belong to rnl.
   are printed; the export names the Cells it leaves out
   (`RNL_CELL_NOT_WRITTEN`). Uncalled Cells that would add a global net the
   reached Cells do not print stay out together.
-- An RNL format is read-only in the panel; Copy and Save take its text.
-- Under an RNL format the panel carries an "About RNL" link to the
-  introduction to RNL (<https://rich-netlist.github.io/rnl/en/>): a new tab in
-  a browser, the system browser in the desktop app, which opens only its fixed
-  list of links (`rnl` among them). The link is left out where the build links
-  nowhere outside itself. The editor has one language, so there is one page.
+- The Netlist panel displays read-only RNL text. Use **Copy** in the panel to
+  copy it or **File → Export → Export Netlist** to save it.
+- For RNL formats, the panel’s "About RNL" link opens the introduction to RNL
+  (<https://rich-netlist.github.io/rnl/en/>) in a new tab. Builds that disable
+  external links omit it. The editor has one language, so there is one page.
 - In the Web and local-host compositions, **Open RNL Viewer** follows About
   RNL. It is enabled only for the current completed RNL export. A synchronous
   click opens the full online Viewer, reusing its connected tab without
@@ -66,8 +65,8 @@ the RNL language and its runtime belong to rnl.
   API. Both sides
   check origin, window identity, launch token and request ID. Netlist text
   stays out of URLs and upload services. Popup blocking, missing capabilities,
-  import errors and timeouts are reported with retry available. The desktop
-  composition omits this action. Local-host uses `same-origin-allow-popups`
+  import errors and timeouts are reported with retry available.
+  Local-host uses `same-origin-allow-popups`
   and allows capability discovery at the Viewer host; cross-origin isolation
   is not required by this composition.
 - Bodies the netlist writes itself (ideal blocks, magnetics) print their ports

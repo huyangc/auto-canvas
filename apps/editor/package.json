@@ -34,7 +34,6 @@
     "@icm/symbols": "workspace:*",
     "@lezer/json": "1.0.3",
     "@rich-netlist/runtime": "0.5.2",
-    "fflate": "0.8.3",
     "mathlive": "0.110.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",

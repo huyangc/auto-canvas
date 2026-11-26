@@ -7,12 +7,6 @@ settings:
 importers:
   .:
     dependencies:
-      "@icm/agent-adapter":
-        specifier: workspace:*
-        version: link:packages/agent-adapter
-      "@icm/component-library":
-        specifier: workspace:*
-        version: link:packages/component-library
       "@icm/derived":
         specifier: workspace:*
         version: link:packages/derived
@@ -44,9 +38,6 @@ importers:
       "@types/node":
         specifier: 24.13.3
         version: 24.13.3
-      fflate:
-        specifier: 0.8.3
-        version: 0.8.3
       jsdom:
         specifier: 26.1.0
         version: 26.1.0(supports-color@10.2.2)
@@ -158,9 +149,6 @@ importers:
       "@rich-netlist/runtime":
         specifier: 0.5.2
         version: 0.5.2
-      fflate:
-        specifier: 0.8.3
-        version: 0.8.3
       mathlive:
         specifier: 0.110.0
         version: 0.110.0
@@ -203,9 +191,6 @@ importers:
       "@icm/model":
         specifier: workspace:*
         version: link:../../packages/model
-      "@icm/netlist":
-        specifier: workspace:*
-        version: link:../../packages/netlist
       "@icm/project-protocol":
         specifier: workspace:*
         version: link:../../packages/project-protocol
@@ -294,9 +279,6 @@ importers:
       "@icm/agent-adapter":
         specifier: workspace:*
         version: link:../agent-adapter
-      "@icm/devices":
-        specifier: workspace:*
-        version: link:../devices
       "@icm/model":
         specifier: workspace:*
         version: link:../model
@@ -554,9 +536,6 @@ importers:
       "@icm/model":
         specifier: workspace:*
         version: link:../model
-      zod:
-        specifier: 4.4.3
-        version: 4.4.3
 
 packages:
   "@anthropic-ai/sdk@1.6.0":

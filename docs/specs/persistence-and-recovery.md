@@ -5,9 +5,9 @@ Status: `accepted`
 Primary owner: Node server Project storage, `packages/project-protocol`, and
 the editor document lifecycle
 
-Web: a private Cloud Project is the saved resource; `.icproj.json` is
-import/export and backup. Desktop: an opened/saved `.icproj.json` file is.
-Both use the one Project protocol; compatibility and migration belong to the
+The web editor saves to a private Cloud Project and uses `.icproj.json` for
+import, export and backup. Both representations use the same Project protocol.
+Compatibility and migration belong to the
 [file format](project-file-format.md). Persistence validates the complete
 current schema before import or Cloud Save.
 
