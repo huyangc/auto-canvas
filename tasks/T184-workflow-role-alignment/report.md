@@ -12,4 +12,4 @@ Reworked the workflow around the task owner, delegated implementer and independe
 
 ## Deviations and open questions
 
-Documentation-only change. No runtime or CI configuration was modified.
+Review found that the Claude Code run-task skill duplicated the merge command without its reviewed-SHA guard. Updated that instruction to use the workflow’s canonical command.
