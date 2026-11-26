@@ -27,3 +27,13 @@ the stage stops; P2–P4 never ran.
 
 The four T165 follow-ups and their controls pass in stage S (101 checks).
 The reviewer runs stage P again after this round; Codex cannot (no network).
+
+## Round 2 — accepted by the task owner
+
+Both round 1 must-fix findings are closed. The complete package workflow
+passed through the P4 switch-back with the documented readiness endpoint.
+The offline upgrade and switch-back instructions reflect the owner's
+database-documentation decision. The testing guide now records resource
+use for a complete run. A separate P2 SIGINT run exited 130, cleaned up
+its companions and database, and removed its temporary root. See the
+[report](report.md) for the host reruns and checks against main.
