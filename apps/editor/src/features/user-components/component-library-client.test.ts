@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { newComponentDefinition } from "./component-definition-edit";
 import {
+  checkSharedComponentRevision,
   loadSharedComponents,
   readSharedComponent,
   publishSharedComponent,
@@ -308,4 +309,81 @@ describe("public component library responses", () => {
       ).rejects.toMatchObject({ outcomeUnknown: true });
     },
   );
+
+  it("revalidates group and notebook scoped components against their scoped endpoints", async () => {
+    const requestedUrls: string[] = [];
+    const fetchLibrary: typeof fetch = vi.fn(async (input) => {
+      const url = String(input);
+      requestedUrls.push(url);
+      if (url.includes("/notebook/groups/grp-1/components/gc-1")) {
+        return Response.json({
+          component: { id: "gc-1", status: "approved" },
+          entry: {
+            id: "grp-gc-1",
+            revision: 1,
+            authorId: "u2",
+            author: "Alice",
+            status: "shared",
+            createdAt: "2026-11-26T00:00:00Z",
+            updatedAt: "2026-11-26T00:00:00Z",
+          },
+        });
+      }
+      if (url.includes("/notebook/notebooks/nb-1/components/nc-1")) {
+        return Response.json({
+          component: { id: "nc-1", status: "rejected" },
+          entry: {
+            id: "nb-nc-1",
+            revision: 1,
+            authorId: "u2",
+            author: "Alice",
+            status: "shared",
+            createdAt: "2026-11-26T00:00:00Z",
+            updatedAt: "2026-11-26T00:00:00Z",
+          },
+        });
+      }
+      return Response.json({ error: "not-found" }, { status: 404 });
+    });
+
+    await expect(
+      checkSharedComponentRevision(
+        {
+          id: "grp-gc-1",
+          revision: 1,
+          status: "shared",
+          scope: {
+            kind: "group",
+            scopeId: "grp-1",
+            itemId: "gc-1",
+            status: "approved",
+          },
+        },
+        undefined,
+        fetchLibrary,
+      ),
+    ).resolves.toBeUndefined();
+
+    await expect(
+      checkSharedComponentRevision(
+        {
+          id: "nb-nc-1",
+          revision: 1,
+          status: "shared",
+          scope: {
+            kind: "notebook",
+            scopeId: "nb-1",
+            itemId: "nc-1",
+            status: "approved",
+          },
+        },
+        undefined,
+        fetchLibrary,
+      ),
+    ).rejects.toMatchObject({ status: 409 });
+
+    expect(requestedUrls.some((url) => url.includes("/api/components/"))).toBe(
+      false,
+    );
+  });
 });

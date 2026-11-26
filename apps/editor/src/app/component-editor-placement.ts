@@ -1,4 +1,7 @@
-import { prepareComponentCapture } from "../features/user-components/component-placement";
+import {
+  prepareComponentCapture,
+  type ScopedComponentLibraryOrigin,
+} from "../features/user-components/component-placement";
 import { captureLibraryComponent as componentLibraryCapture } from "../features/user-components/component-publication-host";
 import { sharedComponentInsertRequest } from "../features/user-components/component-definition-edit";
 import type {
@@ -19,7 +22,10 @@ export function componentEditorPlacement({
   onBeforePlace,
   externalSubcircuitInsertCandidates,
 }: EditorComponentEditorProps & { returnToLibrary: RefObject<boolean> }) {
-  async function insertSharedComponent(entry: SharedComponent): Promise<void> {
+  async function insertSharedComponent(
+    entry: SharedComponent,
+    scope?: ScopedComponentLibraryOrigin,
+  ): Promise<void> {
     returnToLibrary.current = false;
     try {
       const captured = await componentLibraryCapture(entry);
@@ -28,6 +34,7 @@ export function componentEditorPlacement({
           captured,
           `component-${entry.id}-r${entry.revision}`,
           entry,
+          scope,
         );
         return;
       }
@@ -62,6 +69,7 @@ export function componentEditorPlacement({
                 id: entry.id,
                 revision: entry.revision,
                 status: entry.status,
+                ...(scope ? { scope } : {}),
               },
             },
           },
@@ -76,6 +84,7 @@ export function componentEditorPlacement({
     packaged: SharedDefinitionPayload,
     identity: string,
     library?: SharedComponent,
+    scope?: ScopedComponentLibraryOrigin,
   ) {
     try {
       const current = definitionProjectRef.current.project;
@@ -118,6 +127,7 @@ export function componentEditorPlacement({
                       id: library.id,
                       revision: library.revision,
                       status: library.status,
+                      ...(scope ? { scope } : {}),
                     },
                   }
                 : {}),

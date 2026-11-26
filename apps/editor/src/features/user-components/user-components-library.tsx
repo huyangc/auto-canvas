@@ -23,6 +23,7 @@ import type {
 import { loadComponentCatalog as loadCatalog } from "./component-catalog-loading";
 import { ComponentCatalogControls } from "./component-catalog-controls";
 import type { ComponentCatalogQuery } from "@icm/component-library";
+import type { ScopedComponentLibraryOrigin } from "./component-placement";
 
 const GroupComponentsPanel = import.meta.env.ICM_NOTEBOOK
   ? lazy(() =>
@@ -62,7 +63,10 @@ export default function UserComponentsLibrary({
     entry: SharedComponent,
     intent: "new" | "update",
   ): void | Promise<void>;
-  onInsert(entry: SharedComponent): void | Promise<void>;
+  onInsert(
+    entry: SharedComponent,
+    scope?: ScopedComponentLibraryOrigin,
+  ): void | Promise<void>;
   refresh: number;
   drafts?: ComponentDraftCatalog;
   onOpenDraft?(target: ComponentDraftTarget): void;
@@ -567,9 +571,9 @@ export default function UserComponentsLibrary({
               <GroupComponentsPanel
                 notebookId={activeNotebookId}
                 notebookName={activeNotebookName}
-                onInsertComponent={async (entry) => {
+                onInsertComponent={async (entry, scope) => {
                   onClose();
-                  await onInsert(entry);
+                  await onInsert(entry, scope);
                 }}
               />
             </Suspense>
@@ -580,9 +584,9 @@ export default function UserComponentsLibrary({
               <GroupComponentsPanel
                 initialGroupId={initialGroupId}
                 onSelectGroup={onSelectGroup}
-                onInsertComponent={async (entry) => {
+                onInsertComponent={async (entry, scope) => {
                   onClose();
-                  await onInsert(entry);
+                  await onInsert(entry, scope);
                 }}
               />
             </Suspense>

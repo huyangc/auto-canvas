@@ -196,7 +196,10 @@ export function EditorDialogs({
   setCloudProjectsOpen: Dispatch<SetStateAction<boolean>>;
   cloudProjectsBusy: boolean;
   openCloudProjectById: ProjectFileLifecycle["openCloudProjectById"];
-  openGroupProjectCopy?: (name: string, projectText: string) => void;
+  openGroupProjectCopy?: (
+    name: string,
+    projectText: string,
+  ) => boolean | Promise<boolean>;
   activeNotebookGroupId?: string | null;
   activeNotebookId?: string | null;
   activeNotebookName?: string | null;

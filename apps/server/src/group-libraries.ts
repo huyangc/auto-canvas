@@ -422,25 +422,28 @@ function registerScopedRoutes(
     const access = await resolveAccess(c, c.req.param(paramName)!);
     if (!access.ok) return access.response;
     const { user, meta } = access;
-    const existing = await db.query<{
-      id: string;
-      author_id: string;
-      status: LibraryStatus;
-    }>(
-      `SELECT id, author_id, status FROM ${projectsTable}
+    const targetId = c.req.param("id")!;
+    const deleted = meta.isAdmin
+      ? await db.query<{ id: string }>(
+          `DELETE FROM ${projectsTable}
+           WHERE id = $1 AND ${scopeColumn} = $2
+           RETURNING id`,
+          [targetId, meta.id],
+        )
+      : await db.query<{ id: string }>(
+          `DELETE FROM ${projectsTable}
+           WHERE id = $1 AND ${scopeColumn} = $2 AND author_id = $3 AND status <> 'approved'
+           RETURNING id`,
+          [targetId, meta.id, user.id],
+        );
+    if (deleted.rows[0]) return c.json({ deleted: deleted.rows[0].id });
+    const existing = await db.query<{ id: string }>(
+      `SELECT id FROM ${projectsTable}
        WHERE id = $1 AND ${scopeColumn} = $2`,
-      [c.req.param("id"), meta.id],
+      [targetId, meta.id],
     );
-    const row = existing.rows[0];
-    if (!row) return c.json({ error: "not-found" }, 404);
-    const canDelete =
-      meta.isAdmin || (row.author_id === user.id && row.status !== "approved");
-    if (!canDelete) return c.json({ error: "forbidden" }, 403);
-    await db.query(
-      `DELETE FROM ${projectsTable} WHERE id = $1 AND ${scopeColumn} = $2`,
-      [row.id, meta.id],
-    );
-    return c.json({ deleted: row.id });
+    if (!existing.rows[0]) return c.json({ error: "not-found" }, 404);
+    return c.json({ error: "forbidden" }, 403);
   });
 
   // --- Components ---
@@ -671,25 +674,28 @@ function registerScopedRoutes(
     const access = await resolveAccess(c, c.req.param(paramName)!);
     if (!access.ok) return access.response;
     const { user, meta } = access;
-    const existing = await db.query<{
-      id: string;
-      author_id: string;
-      status: LibraryStatus;
-    }>(
-      `SELECT id, author_id, status FROM ${componentsTable}
+    const targetId = c.req.param("id")!;
+    const deleted = meta.isAdmin
+      ? await db.query<{ id: string }>(
+          `DELETE FROM ${componentsTable}
+           WHERE id = $1 AND ${scopeColumn} = $2
+           RETURNING id`,
+          [targetId, meta.id],
+        )
+      : await db.query<{ id: string }>(
+          `DELETE FROM ${componentsTable}
+           WHERE id = $1 AND ${scopeColumn} = $2 AND author_id = $3 AND status <> 'approved'
+           RETURNING id`,
+          [targetId, meta.id, user.id],
+        );
+    if (deleted.rows[0]) return c.json({ deleted: deleted.rows[0].id });
+    const existing = await db.query<{ id: string }>(
+      `SELECT id FROM ${componentsTable}
        WHERE id = $1 AND ${scopeColumn} = $2`,
-      [c.req.param("id"), meta.id],
+      [targetId, meta.id],
     );
-    const row = existing.rows[0];
-    if (!row) return c.json({ error: "not-found" }, 404);
-    const canDelete =
-      meta.isAdmin || (row.author_id === user.id && row.status !== "approved");
-    if (!canDelete) return c.json({ error: "forbidden" }, 403);
-    await db.query(
-      `DELETE FROM ${componentsTable} WHERE id = $1 AND ${scopeColumn} = $2`,
-      [row.id, meta.id],
-    );
-    return c.json({ deleted: row.id });
+    if (!existing.rows[0]) return c.json({ error: "not-found" }, 404);
+    return c.json({ error: "forbidden" }, 403);
   });
 }
 

@@ -1,3 +1,84 @@
+diff --git a/frontend/app/api-client.ts b/frontend/app/api-client.ts
+index cb2ea51ee..64e02fc16 100644
+--- a/frontend/app/api-client.ts
++++ b/frontend/app/api-client.ts
+@@ -219,3 +219,76 @@ export async function requestVoid(path: string, options: ApiRequestOptions): Pro
+ export async function requestBlob(path: string, options: ApiRequestOptions): Promise<Blob> {
+   return (await checked(path, options)).blob();
+ }
++
++function resolveCanvasApiUrl(path: string): string {
++  const normalized = path.replace(/^\/+/, "");
++  try {
++    const origin =
++      typeof window !== "undefined" && window.location.origin
++        ? window.location.origin
++        : "http://localhost";
++    const base = new URL("/canvas/api/", origin);
++    const candidate = new URL(normalized, base);
++    if (candidate.origin === base.origin && candidate.pathname.startsWith("/canvas/api/")) {
++      return `${candidate.pathname}${candidate.search}`;
++    }
++  } catch {
++    // Confined by the TypeError below.
++  }
++  throw new TypeError("canvas API requests must stay under /canvas/api/");
++}
++
++async function performCanvasApiRequest(
++  path: string,
++  options: ApiRequestOptions,
++): Promise<Response> {
++  const {
++    auth = "required",
++    tag,
++    unauthorized = "preserve",
++    headers: inputHeaders,
++    logPath,
++    ...init
++  } = options;
++  const headers = new Headers(inputHeaders);
++  const sentToken = auth === "required" ? getToken() : null;
++  if (auth === "required") {
++    for (const [name, value] of Object.entries(authHeaders())) headers.set(name, value);
++  }
++  const isFormData = typeof FormData !== "undefined" && init.body instanceof FormData;
++  if (init.body !== undefined && !isFormData && !headers.has("Content-Type")) {
++    headers.set("Content-Type", "application/json");
++  }
++  const resolved = resolveCanvasApiUrl(path);
++  const started = globalThis.performance.now();
++  const response = await fetch(resolved, { cache: "no-store", ...init, headers });
++  settleResponse(response, {
++    method: init.method || "GET",
++    pathOrUrl: resolved,
++    logPath,
++    started,
++    auth,
++    unauthorized,
++    sentToken,
++  });
++  void tag;
++  return response;
++}
++
++export async function requestCanvasJson<T>(
++  path: string,
++  options: ApiRequestOptions,
++): Promise<T> {
++  const response = await performCanvasApiRequest(path, options);
++  if (!response.ok) await throwHumanizedHttpError(response, options.tag);
++  return response.json() as Promise<T>;
++}
++
++export async function requestCanvasBlob(
++  path: string,
++  options: ApiRequestOptions,
++): Promise<Blob> {
++  const response = await performCanvasApiRequest(path, options);
++  if (!response.ok) await throwHumanizedHttpError(response, options.tag);
++  return response.blob();
++}
 diff --git a/frontend/app/globals.css b/frontend/app/globals.css
 index 6cb328dbd..05de7eb06 100644
 --- a/frontend/app/globals.css
@@ -357,16 +438,18 @@ index 6d1a30ab9..2672a3882 100644
                {/* 三个计数全部来自本页已经取回的数据（共享清单 / 群组详情 / 审批队列），
 diff --git a/frontend/app/notebook-circuits-panel.tsx b/frontend/app/notebook-circuits-panel.tsx
 new file mode 100644
-index 000000000..c989ded95
+index 000000000..7bd3bd8a6
 --- /dev/null
 +++ b/frontend/app/notebook-circuits-panel.tsx
-@@ -0,0 +1,714 @@
+@@ -0,0 +1,809 @@
 +"use client";
 +
++import Image from "next/image";
 +import { CircuitBoard, ExternalLink, Plus, RefreshCw } from "lucide-react";
-+import { useCallback, useEffect, useState } from "react";
-+
-+const TOKEN_STORAGE_KEY = "silicon_notebook_token";
++import { useCallback, useEffect, useRef, useState } from "react";
++import { requestCanvasBlob, requestCanvasJson } from "./api-client";
++import { toUserMessage } from "./errors";
++import { label } from "./vocabulary";
 +
 +type LibraryKind = "projects" | "components";
 +type LibraryFilter = "approved" | "pending" | "mine";
@@ -430,34 +513,8 @@ index 000000000..c989ded95
 +  "needs-repair": "待修复",
 +};
 +
-+function readToken(): string {
-+  try {
-+    return window.localStorage.getItem(TOKEN_STORAGE_KEY) ?? "";
-+  } catch {
-+    return "";
-+  }
-+}
-+
 +async function canvasJson<T>(path: string, init: RequestInit = {}): Promise<T> {
-+  const token = readToken();
-+  const headers = new Headers(init.headers);
-+  if (token) headers.set("Authorization", `Bearer ${token}`);
-+  const response = await fetch(`/canvas/api/${path}`, {
-+    ...init,
-+    headers,
-+    cache: "no-store",
-+  });
-+  const payload = (await response.json().catch(() => null)) as
-+    | (T & { error?: string })
-+    | null;
-+  if (!response.ok) {
-+    throw new Error(
-+      (payload && typeof payload.error === "string" && payload.error) ||
-+        `请求失败 (${response.status})`,
-+    );
-+  }
-+  if (!payload) throw new Error("无效的响应数据");
-+  return payload;
++  return requestCanvasJson<T>(path, { ...init, tag: "canvas-circuits" });
 +}
 +
 +function formatTime(value: string): string {
@@ -484,15 +541,10 @@ index 000000000..c989ded95
 +  useEffect(() => {
 +    let active = true;
 +    let objectUrl: string | null = null;
-+    const token = readToken();
-+    fetch(
-+      `/canvas/api/notebook/notebooks/${encodeURIComponent(notebookId)}/projects/${encodeURIComponent(projectId)}/preview.svg`,
-+      {
-+        headers: token ? { Authorization: `Bearer ${token}` } : {},
-+        cache: "no-store",
-+      },
++    requestCanvasBlob(
++      `notebook/notebooks/${encodeURIComponent(notebookId)}/projects/${encodeURIComponent(projectId)}/preview.svg`,
++      { tag: "canvas-circuit-preview" },
 +    )
-+      .then((res) => (res.ok ? res.blob() : null))
 +      .then((blob) => {
 +        if (!active || !blob) return;
 +        objectUrl = URL.createObjectURL(blob);
@@ -512,7 +564,16 @@ index 000000000..c989ded95
 +      </div>
 +    );
 +  }
-+  return <img className="circuit-lib-thumb-img" src={url} alt={alt} />;
++  return (
++    <Image
++      className="circuit-lib-thumb-img"
++      src={url}
++      alt={alt}
++      width={320}
++      height={180}
++      unoptimized
++    />
++  );
 +}
 +
 +export function NotebookCircuitsPanel({
@@ -538,15 +599,23 @@ index 000000000..c989ded95
 +  // Inline import from user's personal Canvas Cloud Projects / User Components
 +  const [importOpen, setImportOpen] = useState(false);
 +  const [importLoading, setImportLoading] = useState(false);
++  const [importLoadingMore, setImportLoadingMore] = useState(false);
 +  const [personalProjects, setPersonalProjects] = useState<PersonalProjectOption[]>([]);
 +  const [personalComponents, setPersonalComponents] = useState<PersonalComponentOption[]>([]);
++  const [componentQuery, setComponentQuery] = useState("");
++  const [componentNextCursor, setComponentNextCursor] = useState<string | null>(null);
 +  const [pickedSourceId, setPickedSourceId] = useState("");
 +  const [importDesc, setImportDesc] = useState("");
++  const loadSeqRef = useRef(0);
++  const importSeqRef = useRef(0);
 +
 +  const canAdmin = Boolean(meta?.isAdmin);
 +
 +  const loadLibrary = useCallback(async () => {
++    const seq = ++loadSeqRef.current;
 +    setLoading(true);
++    setProjects([]);
++    setComponents([]);
 +    setError("");
 +    try {
 +      const [projData, compData] = await Promise.all([
@@ -565,15 +634,17 @@ index 000000000..c989ded95
 +          `notebook/notebooks/${encodeURIComponent(notebookId)}/components?status=${encodeURIComponent(filter)}`,
 +        ),
 +      ]);
++      if (loadSeqRef.current !== seq) return;
 +      setMeta(projData.notebook);
 +      setProjects(projData.projects);
 +      setComponents(compData.components);
 +      setPendingProjectCount(projData.pendingCount ?? 0);
 +      setPendingComponentCount(compData.pendingCount ?? 0);
 +    } catch (err) {
-+      setError(err instanceof Error ? err.message : "无法加载电路库，请确认电路画布服务已启动。");
++      if (loadSeqRef.current !== seq) return;
++      setError(toUserMessage(err, "无法加载电路库，请确认电路画布服务已启动。"));
 +    } finally {
-+      setLoading(false);
++      if (loadSeqRef.current === seq) setLoading(false);
 +    }
 +  }, [notebookId, filter]);
 +
@@ -587,40 +658,81 @@ index 000000000..c989ded95
 +
 +  useEffect(() => {
 +    if (!importOpen) return;
-+    let active = true;
++    const seq = ++importSeqRef.current;
 +    setImportLoading(true);
++    setComponentNextCursor(null);
 +    setError("");
 +    if (kind === "projects") {
 +      canvasJson<{ projects: PersonalProjectOption[] }>("projects")
 +        .then((res) => {
-+          if (!active) return;
++          if (importSeqRef.current !== seq) return;
 +          setPersonalProjects(res.projects);
 +          setPickedSourceId(res.projects[0]?.id ?? "");
 +        })
 +        .catch((err) => {
-+          if (active) setError(err instanceof Error ? err.message : "加载个人云端项目失败");
++          if (importSeqRef.current === seq) {
++            setError(toUserMessage(err, "加载个人云端项目失败"));
++          }
 +        })
 +        .finally(() => {
-+          if (active) setImportLoading(false);
++          if (importSeqRef.current === seq) setImportLoading(false);
 +        });
 +    } else {
-+      canvasJson<{ entries: PersonalComponentOption[] }>("components?view=summary&limit=30")
++      const qs = new URLSearchParams({ view: "summary", limit: "30" });
++      if (componentQuery.trim()) qs.set("q", componentQuery.trim());
++      canvasJson<{ entries: PersonalComponentOption[]; nextCursor?: string | null }>(
++        `components?${qs.toString()}`,
++      )
 +        .then((res) => {
-+          if (!active) return;
++          if (importSeqRef.current !== seq) return;
 +          setPersonalComponents(res.entries);
-+          setPickedSourceId(res.entries[0]?.id ?? "");
++          setComponentNextCursor(res.nextCursor ?? null);
++          setPickedSourceId((current) =>
++            res.entries.some((entry) => entry.id === current)
++              ? current
++              : (res.entries[0]?.id ?? ""),
++          );
 +        })
 +        .catch((err) => {
-+          if (active) setError(err instanceof Error ? err.message : "加载自定义器件失败");
++          if (importSeqRef.current === seq) {
++            setError(toUserMessage(err, "加载自定义器件失败"));
++          }
 +        })
 +        .finally(() => {
-+          if (active) setImportLoading(false);
++          if (importSeqRef.current === seq) setImportLoading(false);
 +        });
 +    }
-+    return () => {
-+      active = false;
-+    };
-+  }, [importOpen, kind]);
++  }, [importOpen, kind, componentQuery]);
++
++  async function handleLoadMoreComponents() {
++    if (!componentNextCursor || importLoadingMore) return;
++    const seq = importSeqRef.current;
++    setImportLoadingMore(true);
++    try {
++      const qs = new URLSearchParams({
++        view: "summary",
++        limit: "30",
++        cursor: componentNextCursor,
++      });
++      if (componentQuery.trim()) qs.set("q", componentQuery.trim());
++      const res = await canvasJson<{
++        entries: PersonalComponentOption[];
++        nextCursor?: string | null;
++      }>(`components?${qs.toString()}`);
++      if (importSeqRef.current !== seq) return;
++      setPersonalComponents((prev) => {
++        const seen = new Set(prev.map((item) => item.id));
++        return [...prev, ...res.entries.filter((item) => !seen.has(item.id))];
++      });
++      setComponentNextCursor(res.nextCursor ?? null);
++    } catch (err) {
++      if (importSeqRef.current === seq) {
++        setError(toUserMessage(err, "加载更多器件失败"));
++      }
++    } finally {
++      if (importSeqRef.current === seq) setImportLoadingMore(false);
++    }
++  }
 +
 +  async function handleImportSubmit() {
 +    if (!pickedSourceId) return;
@@ -667,7 +779,7 @@ index 000000000..c989ded95
 +      setImportDesc("");
 +      await loadLibrary();
 +    } catch (err) {
-+      setError(err instanceof Error ? err.message : "提交失败");
++      setError(toUserMessage(err, "提交失败"));
 +    } finally {
 +      setBusyId(null);
 +    }
@@ -694,7 +806,7 @@ index 000000000..c989ded95
 +      setNotice(decision === "approve" ? `已审核通过「${name}」并入库。` : `已驳回「${name}」。`);
 +      await loadLibrary();
 +    } catch (err) {
-+      setError(err instanceof Error ? err.message : "审核操作失败");
++      setError(toUserMessage(err, "审核操作失败"));
 +    } finally {
 +      setBusyId(null);
 +    }
@@ -712,7 +824,7 @@ index 000000000..c989ded95
 +      setNotice(status === "approved" ? `已移除「${name}」。` : `已撤回「${name}」。`);
 +      await loadLibrary();
 +    } catch (err) {
-+      setError(err instanceof Error ? err.message : "操作失败");
++      setError(toUserMessage(err, "操作失败"));
 +    } finally {
 +      setBusyId(null);
 +    }
@@ -832,13 +944,59 @@ index 000000000..c989ded95
 +
 +      {importOpen && (
 +        <div className="circuit-lib-import-box">
++          {kind === "components" && (
++            <div className="circuit-lib-import-row">
++              <input
++                type="search"
++                className="circuit-lib-input"
++                placeholder="搜索自定义器件名称…"
++                aria-label="搜索可导入的自定义器件"
++                value={componentQuery}
++                onChange={(e) => setComponentQuery(e.target.value)}
++              />
++              {componentNextCursor && (
++                <button
++                  type="button"
++                  className="button secondary"
++                  disabled={importLoading || importLoadingMore}
++                  onClick={() => { void handleLoadMoreComponents(); }}
++                >
++                  {importLoadingMore ? "加载中…" : "加载更多器件"}
++                </button>
++              )}
++            </div>
++          )}
 +          {importLoading ? (
 +            <p className="tool-hint">正在读取你在电路画布中保存的条目…</p>
 +          ) : (kind === "projects" ? personalProjects : personalComponents).length === 0 ? (
 +            <p className="tool-hint">
-+              {kind === "projects"
-+                ? "你的个人云端项目库还是空的。可以先点击「打开电路画布」绘制并保存，或直接在画布里上传到本笔记本。"
-+                : "你还没有发布过自定义器件。请先点击「打开电路画布」在 User Components 中创建并发布。"}
++              {kind === "projects" ? (
++                <>
++                  个人云端项目库暂无可导入电路，可先
++                  <button
++                    type="button"
++                    className="link-button inline-action"
++                    onClick={() => openCanvasUrl({})}
++                  >
++                    打开电路画布
++                  </button>
++                  绘制并保存。
++                </>
++              ) : componentQuery.trim() ? (
++                "未找到匹配的自定义器件，请调整关键词后重试。"
++              ) : (
++                <>
++                  暂无可导入的自定义器件，可先
++                  <button
++                    type="button"
++                    className="link-button inline-action"
++                    onClick={() => openCanvasUrl({ view: "components" })}
++                  >
++                    打开电路画布
++                  </button>
++                  创建并发布器件。
++                </>
++              )}
 +            </p>
 +          ) : (
 +            <>
@@ -903,7 +1061,25 @@ index 000000000..c989ded95
 +                  ? "当前没有待审核的电路工程"
 +                  : "你还没有向本笔记本提交过电路工程"}
 +            </strong>
-+            <p>点击右上角「打开电路画布」绘制电路并发布到本笔记本，或直接从我的画布导入。</p>
++            <p>
++              可以
++              <button
++                type="button"
++                className="link-button inline-action"
++                onClick={() => openCanvasUrl({})}
++              >
++                打开电路画布
++              </button>
++              绘制并发布到本笔记本，或直接
++              <button
++                type="button"
++                className="link-button inline-action"
++                onClick={() => setImportOpen(true)}
++              >
++                从我的画布导入
++              </button>
++              。
++            </p>
 +          </div>
 +        ) : (
 +          <div className="circuit-lib-grid">
@@ -1009,7 +1185,7 @@ index 000000000..c989ded95
 +                </span>
 +              </div>
 +              <p className="circuit-lib-meta">
-+                作者：{item.authorName} · {CAPABILITY_LABEL[item.capability] ?? item.capability} · {item.pinCount} 引脚
++                作者：{item.authorName} · {label(CAPABILITY_LABEL, item.capability, "自定义器件")} · {item.pinCount} 引脚
 +              </p>
 +              {item.description && <p className="circuit-lib-desc">{item.description}</p>}
 +              {item.reviewNote && (
@@ -1138,3 +1314,27 @@ index 69c06f187..24918fbad 100644
  ];
  
  export type KnowledgeKind = string;
+diff --git a/frontend/tests/unit/memory-navigation.test.mjs b/frontend/tests/unit/memory-navigation.test.mjs
+index f5cb70f42..9a509b92e 100644
+--- a/frontend/tests/unit/memory-navigation.test.mjs
++++ b/frontend/tests/unit/memory-navigation.test.mjs
+@@ -132,6 +132,7 @@ test("workspace tabs keep the product order", () => {
+     ["rules", "知识库"],
+     ["memory", "记忆"],
+     ["reports", "深度报告"],
++    ["circuits", "电路库"],
+   ]);
+ });
+ 
+diff --git a/release-notes/canvas-circuit-libraries.md b/release-notes/canvas-circuit-libraries.md
+new file mode 100644
+index 000000000..7ee50698d
+--- /dev/null
++++ b/release-notes/canvas-circuit-libraries.md
+@@ -0,0 +1,6 @@
++---
++level: feature
++audience: all
++title: 笔记本工作区与群组页新增电路库入口
++---
++接入电路画布后，群组页面新增「群组电路工程」与「群组器件库」快捷入口，笔记本工作区顶部标签栏新增「电路库」标签页，可直接浏览本笔记本的电路工程与自定义器件、从个人画布导入，以及完成成员提交与管理员审核入库流程。

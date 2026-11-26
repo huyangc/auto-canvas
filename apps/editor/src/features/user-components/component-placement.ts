@@ -179,6 +179,13 @@ export function planComponentPlacement(
   };
 }
 
+export interface ScopedComponentLibraryOrigin {
+  kind: "group" | "notebook";
+  scopeId: string;
+  itemId: string;
+  status: "approved" | "pending" | "rejected";
+}
+
 export interface PendingCircuitCapture {
   payload: SharedDefinitionPayload;
   identity: string;
@@ -190,5 +197,6 @@ export interface PendingCircuitCapture {
     id: string;
     revision: number;
     status: "shared" | "official" | "deleted";
+    scope?: ScopedComponentLibraryOrigin;
   };
 }

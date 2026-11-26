@@ -242,17 +242,55 @@ export async function readSharedComponentRecord(
     );
   return payload.entry as Record<string, unknown>;
 }
-/** Lightweight revision/permission check before reusing a cached public detail. */
+/** Lightweight revision/permission check before reusing a cached public or scoped detail. */
 export async function checkSharedComponentRevision(
-  entry: Pick<ComponentLibrarySummary, "id" | "revision" | "status">,
+  entry: Pick<ComponentLibrarySummary, "id" | "revision" | "status"> & {
+    scope?: {
+      kind: "group" | "notebook";
+      scopeId: string;
+      itemId: string;
+      status: "approved" | "pending" | "rejected";
+    };
+  },
   signal?: AbortSignal,
+  fetchLibrary: typeof fetch = fetch,
 ) {
+  if (entry.scope) {
+    const segment = entry.scope.kind === "notebook" ? "notebooks" : "groups";
+    const payload = await libraryJson(
+      apiUrl(
+        `notebook/${segment}/${encodeURIComponent(entry.scope.scopeId)}/components/${encodeURIComponent(entry.scope.itemId)}`,
+      ),
+      {},
+      fetchLibrary,
+      signal,
+    );
+    const scopedComponent = isRecord(payload.component)
+      ? payload.component
+      : null;
+    const scopedEntry = payload.entry
+      ? parseSharedComponentMetadata(payload.entry)
+      : null;
+    if (
+      !scopedComponent ||
+      !scopedEntry ||
+      scopedComponent.id !== entry.scope.itemId ||
+      scopedComponent.status !== entry.scope.status ||
+      scopedEntry.id !== entry.id ||
+      scopedEntry.revision !== entry.revision
+    )
+      throw new ComponentLibraryError(
+        "This component changed. Refresh before selecting it.",
+        409,
+      );
+    return;
+  }
   await libraryJson(
     apiUrl(
       `components/${encodeURIComponent(entry.id)}?view=identity&revision=${entry.revision}${entry.status === "deleted" ? "&status=deleted" : ""}`,
     ),
     {},
-    fetch,
+    fetchLibrary,
     signal,
   ).then((payload) => {
     const identity = payload.entry
