@@ -1821,33 +1821,58 @@ function planAutoLayoutMeasured(
     const rawSym = symmetryTopology(document, resolver, roles).components;
     const unsplit =
       stageComponents(document, resolver, roles, rawSym).length > rawSym.length;
-    if (
-      !unsplit &&
-      (rawSym.length ||
-        !mirrorSymmetryTopology(document, resolver, roles).components.length)
-    )
-      return;
-    const candidateOptions = unsplit
+    const candidateComponents = unsplit
+      ? rawSym
+      : mirrorSymmetryTopology(document, resolver, roles).components;
+    if (!unsplit && (rawSym.length || !candidateComponents.length)) return;
+    const baseCandidateOptions = unsplit
       ? { ...options, unsplitSymmetry: true }
       : { ...options, mirrorSymmetry: true };
+    const halfOrderModes = symmetricHalfParts(
+      document,
+      resolver,
+      roles,
+      candidateComponents,
+    ).size
+      ? [false, true]
+      : [false];
     const draft = (
       strategy: LayoutStrategy,
       overrides: LayoutOverrides,
-    ): Candidate => ({
-      strategy,
-      overrides,
-      run: plan(document, resolver, candidateOptions, overrides, strategy),
+      symmetricHalfOrder: boolean,
+    ) => ({
+      candidate: {
+        strategy,
+        overrides,
+        run: plan(
+          document,
+          resolver,
+          symmetricHalfOrder
+            ? { ...baseCandidateOptions, symmetricHalfOrder: true }
+            : baseCandidateOptions,
+          overrides,
+          strategy,
+        ),
+      },
+      symmetricHalfOrder,
     });
     const firstStrategy = unsplit ? selected.strategy : "template";
-    let candidate = draft(
+    let bestDraft = draft(
       firstStrategy,
       unsplit ? selected.overrides : emptyOverrides(),
+      false,
     );
-    for (const strategy of ["layered", "template"] as const) {
-      if (strategy === firstStrategy) continue;
-      const next = draft(strategy, emptyOverrides());
-      if (compareRuns(next.run, candidate.run, resolver) < 0) candidate = next;
+    for (const symmetricHalfOrder of halfOrderModes) {
+      for (const strategy of ["layered", "template"] as const) {
+        if (!symmetricHalfOrder && strategy === firstStrategy) continue;
+        const next = draft(strategy, emptyOverrides(), symmetricHalfOrder);
+        if (
+          compareRuns(next.candidate.run, bestDraft.candidate.run, resolver) < 0
+        )
+          bestDraft = next;
+      }
     }
+    const { candidate, symmetricHalfOrder } = bestDraft;
     const final = candidate.run.final;
     const score = routedScore(candidate.run, resolver);
     const incumbent = selected.run.final;
@@ -1878,6 +1903,7 @@ function planAutoLayoutMeasured(
       kind: unsplit
         ? ("unsplitSymmetry" as const)
         : ("mirrorSymmetry" as const),
+      symmetricHalfOrder,
       candidate: {
         ...candidate,
         run: { ...candidate.run, result: copyResult(candidate.run.result) },
@@ -2657,6 +2683,9 @@ function planAutoLayoutMeasured(
           ? () =>
               finishFinalist(symmetryFinalist.candidate, false, {
                 unsplitSymmetry: true,
+                ...(symmetryFinalist.symmetricHalfOrder
+                  ? { symmetricHalfOrder: true }
+                  : {}),
               })
           : () => copyResult(snapshot),
       mirrorSymmetry:
@@ -2664,6 +2693,9 @@ function planAutoLayoutMeasured(
           ? () =>
               finishFinalist(symmetryFinalist.candidate, false, {
                 mirrorSymmetry: true,
+                ...(symmetryFinalist.symmetricHalfOrder
+                  ? { symmetricHalfOrder: true }
+                  : {}),
               })
           : () => copyResult(snapshot),
       halfOrder: halfOrderFinalist

@@ -60,7 +60,11 @@ import {
   placeStages,
 } from "./stages.js";
 import { templatePlacement } from "./template-placement.js";
-import { resolvedSymmetry, symmetryCounts } from "./symmetry.js";
+import {
+  mirrorSymmetryTopology,
+  resolvedSymmetry,
+  symmetryCounts,
+} from "./symmetry.js";
 import { isMos } from "./net-roles.js";
 import { placeMarkers } from "./place-markers.js";
 import { alignStacks, draftStrategy, isStackStrategy } from "./stack-snap.js";
@@ -495,13 +499,18 @@ export function placeDocument(
         problem: "R171: draft left a device unplaced",
       };
     targets = structuredClone(draft.placements);
-    // The independent column and facing decisions can split an R89/R145
-    // symmetry component. Only offer drafts that realize its paired geometry.
-    if (symmetry.length) {
+    // The independent column and facing decisions can split an R89/R145 or
+    // mirror-symmetry component. Only offer drafts that realize its paired geometry.
+    const expectedSymmetry = symmetry.length
+      ? symmetry
+      : !options.partition
+        ? mirrorSymmetryTopology(document, resolver, roles).components
+        : [];
+    if (expectedSymmetry.length) {
       const counts = symmetryCounts(
         withPlacements(document, targets),
         resolver,
-        symmetry,
+        expectedSymmetry,
       );
       if (
         counts.mirrored !== counts.pairs ||

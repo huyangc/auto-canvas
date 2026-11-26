@@ -463,7 +463,12 @@ export function mirrorSymmetryTopology(
       for (const [i, pin] of first.pins.entries()) {
         const n = roles.pinNet(a, pin.name);
         const m = roles.pinNet(b, matching[i]!.name);
-        if (n && m) basePairs.push([n, m]);
+        if (
+          n &&
+          m &&
+          !(roles.rails.has(n) && roles.rails.get(n) === roles.rails.get(m))
+        )
+          basePairs.push([n, m]);
       }
     }
     const componentMap = new Map(netMap);

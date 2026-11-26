@@ -625,12 +625,18 @@ function symmetryRows(
       seenRows.add(node.row);
       return false;
     });
+    const localGates = multiColumn
+      ? (gatePins ??= localPortGates(document, resolver, roles))
+      : undefined;
     const order = (
       reverseTie: boolean,
       tieScore?: RowOrderOptions["tieScore"],
+      pinAxis = true,
     ) =>
       optimizeRows(halfRows, half, resolver, halfRoles, halfGroups, {
-        ...(tieScore ? { rightOrder: axisOrder, tieScore } : {}),
+        ...(tieScore
+          ? { ...(pinAxis ? { rightOrder: axisOrder } : {}), tieScore }
+          : {}),
         reverseTie,
       });
     let best;
@@ -641,14 +647,42 @@ function symmetryRows(
           .flatMap((i) => deviceNets(i, resolver, halfRoles))
           .filter((n) => !roles.rails.has(n)),
       );
+      const halfById = new Map(half.map((i) => [i.id, i]));
+      const axisRowSet = new Set(
+        halfRows.nodes.filter((n) => axisOrder(n)).map((n) => n.row),
+      );
+      const crossAxisOnAxisRow = halfRows.nodes.some(
+        (node) =>
+          !axisOrder(node) &&
+          axisRowSet.has(node.row) &&
+          node.members.some((id) => {
+            const dev = halfById.get(id);
+            const localGateNet = localGates?.get(id)
+              ? roles.pinNet(id, localGates.get(id)!.name)
+              : undefined;
+            return (
+              dev !== undefined &&
+              deviceNets(dev, resolver, halfRoles).some(
+                (n) =>
+                  !roles.rails.has(n) &&
+                  !axisNets.has(n) &&
+                  n !== localGateNet &&
+                  netMap.get(n) === n,
+              )
+            );
+          }),
+      );
       const inwardWeight = new Map(
         half.map((i) => {
           const nets = deviceNets(i, resolver, halfRoles);
-          return [
-            i.id,
-            Number(nets.some((n) => axisNets.has(n))) -
-              Number(nets.some((n) => roles.byNet.get(n) === "output")),
-          ];
+          const crossesAxis = nets.some(
+            (n) =>
+              axisNets.has(n) || (!roles.rails.has(n) && netMap.get(n) === n),
+          );
+          const boundaryPort = nets.some((n) =>
+            ["input", "output"].includes(roles.byNet.get(n) ?? ""),
+          );
+          return [i.id, Number(crossesAxis) - Number(boundaryPort)];
         }),
       );
       const preference = (rows: RowNode[][]) => {
@@ -661,8 +695,8 @@ function symmetryRows(
           });
         return total;
       };
-      best = order(false, preference);
-      const reversed = order(true, preference);
+      best = order(false, preference, !crossAxisOnAxisRow);
+      const reversed = order(true, preference, !crossAxisOnAxisRow);
       if (
         reversed.score < best.score ||
         (reversed.score === best.score && reversed.tie > best.tie)
@@ -679,9 +713,6 @@ function symmetryRows(
             : Number(b.members.every((id) => outer.has(id))) -
               Number(a.members.every((id) => outer.has(id)))),
       );
-    const localGates = multiColumn
-      ? (gatePins ??= localPortGates(document, resolver, roles))
-      : undefined;
     const placed = assignColumns(
       halfDocument,
       half,
