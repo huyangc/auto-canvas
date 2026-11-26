@@ -10,6 +10,7 @@ import {
   sky130MicrometresToProjectLength,
 } from "@icm/devices";
 import {
+  builtInSymbols,
   externalSubcircuitSymbolId,
   isPdkMappableSymbolId,
   isRazaviProductSymbolId,
@@ -341,12 +342,119 @@ function importedNetlistBinding(
   }
 }
 
+const WRAPPER_DEVICE_CLASSES = new Set([
+  "mos",
+  "bjt",
+  "diode",
+  "resistor",
+  "capacitor",
+  "inductor",
+]);
+const builtInSymbolById = new Map(
+  builtInSymbols.map((symbol) => [symbol.id, symbol]),
+);
+
+function importedPortName(
+  port: CircuitCellIR["ports"][number],
+  cell: CircuitCellIR,
+  namingProfile: NonNullable<SpiceImportOptions["namingProfile"]>,
+): string {
+  return importedNetName(
+    port.name,
+    cell.nets.find((net) => net.id === port.netId)?.scope ?? "local",
+    namingProfile,
+  ).name;
+}
+
+function resolveTransparentWrapperSymbols(
+  cells: readonly CircuitCellIR[],
+  modelTypeByName: ReadonlyMap<string, string>,
+  symbolMappings: readonly PdkSymbolMappingOverride[],
+  builtInBodies: ReadonlyMap<string, ImportedBody>,
+  namingProfile: NonNullable<SpiceImportOptions["namingProfile"]>,
+): ReadonlyMap<string, ImportSymbolMapping> {
+  const cellsByName = new Map(
+    cells.map((cell) => [cell.name.toLowerCase(), cell]),
+  );
+  const wrapperSymbols = new Map<string, ImportSymbolMapping>();
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+
+  function resolve(name: string): void {
+    const cell = cellsByName.get(name);
+    if (!cell || visited.has(name) || visiting.has(name)) return;
+    visiting.add(name);
+    const mapping = wrapperSymbol(cell);
+    if (mapping) wrapperSymbols.set(name, mapping);
+    visiting.delete(name);
+    visited.add(name);
+  }
+
+  function wrapperSymbol(cell: CircuitCellIR): ImportSymbolMapping | undefined {
+    const [sole] = cell.instances;
+    if (
+      !sole ||
+      cell.instances.length !== 1 ||
+      isMutualInductor(sole) ||
+      !cell.ports.length ||
+      cell.ports.length !== sole.terminals.length ||
+      calledBuiltInBody(sole, builtInBodies)
+    )
+      return;
+
+    if (sole.target.kind === "subcircuit")
+      resolve(sole.target.cellName.toLowerCase());
+    const inner = symbolFor(
+      sole,
+      modelTypeByName,
+      symbolMappings,
+      wrapperSymbols,
+    );
+    if (
+      !inner ||
+      !isPdkMappableSymbolId(inner.symbolId) ||
+      !WRAPPER_DEVICE_CLASSES.has(
+        deviceDescriptor(inner.symbolId)?.deviceClass ?? "",
+      )
+    )
+      return;
+    const symbol = builtInSymbolById.get(inner.symbolId);
+    if (symbol?.pins.length !== sole.terminals.length) return;
+
+    const pinByNet = new Map(
+      sole.terminals.map((t) => [
+        t.netId,
+        inner.pinNames?.[t.position] ?? t.name,
+      ]),
+    );
+    const pinNames = cell.ports.map((port) =>
+      importedPortName(port, cell, namingProfile),
+    );
+    if (
+      new Set(pinNames).size !== pinNames.length ||
+      !cell.ports.every(
+        (port, index) => pinByNet.get(port.netId) === pinNames[index],
+      ) ||
+      !symbol.pins.every((pin) => pinNames.includes(pin.name))
+    )
+      return;
+    // Only the drawing passes through. The caller still targets this Cell.
+    return { symbolId: inner.symbolId, pinNames };
+  }
+
+  for (const name of cellsByName.keys()) resolve(name);
+  return wrapperSymbols;
+}
+
 function symbolFor(
   instance: CircuitInstanceIR,
   modelTypeByName: ReadonlyMap<string, string>,
   symbolMappings: readonly PdkSymbolMappingOverride[],
+  wrapperSymbols: ReadonlyMap<string, ImportSymbolMapping>,
 ): ImportSymbolMapping | null {
   if (instance.target.kind === "subcircuit") {
+    const wrapper = wrapperSymbols.get(instance.target.cellName.toLowerCase());
+    if (wrapper?.pinNames?.length === instance.terminals.length) return wrapper;
     return {
       symbolId: deriveStableId(
         "hierarchical-symbol",
@@ -602,11 +710,17 @@ function importInstance(
   modelTypeByName: ReadonlyMap<string, string>,
   symbolMappings: readonly PdkSymbolMappingOverride[],
   builtInBodies: ReadonlyMap<string, ImportedBody>,
+  wrapperSymbols: ReadonlyMap<string, ImportSymbolMapping>,
   spectre: boolean,
 ): Instance | null {
   const body = calledBuiltInBody(instance, builtInBodies);
   if (body) return importBuiltInBlock(instance, body, diagnostics);
-  const mapping = symbolFor(instance, modelTypeByName, symbolMappings);
+  const mapping = symbolFor(
+    instance,
+    modelTypeByName,
+    symbolMappings,
+    wrapperSymbols,
+  );
   if (!mapping) {
     const issue = diagnostic(
       "SPICE_IMPORT_UNSUPPORTED_SYMBOL",
@@ -979,6 +1093,7 @@ function importDocument(
   modelTypeByName: ReadonlyMap<string, string>,
   options: SpiceImportOptions,
   builtInBodies: ReadonlyMap<string, ImportedBody>,
+  wrapperSymbols: ReadonlyMap<string, ImportSymbolMapping>,
   spectreFileIds: ReadonlySet<string>,
 ): SchematicDocument {
   const symbolMappings = options.symbolMappings ?? [];
@@ -1007,6 +1122,7 @@ function importDocument(
         modelTypeByName,
         symbolMappings,
         builtInBodies,
+        wrapperSymbols,
         spectreFileIds.has(instance.sourceRef.fileId),
       ),
     )
@@ -1130,16 +1246,12 @@ function importDocument(
     }
   }
   const formalTerminals = cell.ports.map((port, index) => {
-    const importedPortName = importedNetName(
-      port.name,
-      cell.nets.find((net) => net.id === port.netId)?.scope ?? "local",
-      namingProfile,
-    ).name;
+    const portName = importedPortName(port, cell, namingProfile);
     const interfaceInstanceId = deriveStableId(
       "cell-pin",
       documentId,
       String(index),
-      importedPortName,
+      portName,
     );
     instances.push({
       id: interfaceInstanceId,
@@ -1149,13 +1261,8 @@ function importDocument(
     const net = nets.find((candidate) => candidate.id === port.netId);
     net?.terminals.push({ instanceId: interfaceInstanceId, pinName: "P" });
     return {
-      id: deriveStableId(
-        "cell-terminal",
-        documentId,
-        String(index),
-        importedPortName,
-      ),
-      name: importedPortName,
+      id: deriveStableId("cell-terminal", documentId, String(index), portName),
+      name: portName,
       netId: port.netId,
       direction: "passive" as const,
       interfaceInstanceIds: [interfaceInstanceId],
@@ -1817,6 +1924,13 @@ function importCircuitIR(
   const kept = library.size
     ? librarySource(bundle, library, spectreFileIds)
     : null;
+  const wrapperSymbols = resolveTransparentWrapperSymbols(
+    cells,
+    modelTypeByName,
+    options.symbolMappings ?? [],
+    builtInBodies,
+    options.namingProfile ?? "native",
+  );
   const importedDocuments = cells.map((cell) =>
     importDocument(
       cell,
@@ -1824,6 +1938,7 @@ function importCircuitIR(
       modelTypeByName,
       options,
       builtInBodies,
+      wrapperSymbols,
       spectreFileIds,
     ),
   );

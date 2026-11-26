@@ -11,6 +11,11 @@ import {
 } from "@icm/spice";
 import { describe, expect, it } from "vitest";
 
+import { createDesignNetlistExport } from "./export.js";
+import {
+  projectElectricalGraph,
+  compareElectricalGraphs,
+} from "./equivalence.js";
 import type { DesignNetlistIR } from "./ir.js";
 import { analyzeDesignNetlist } from "./extract.js";
 import { printSpectreNetlist, printSpiceNetlist } from "./printers.js";
@@ -263,6 +268,70 @@ function normalizedSemantics(ir: DesignNetlistIR) {
 }
 
 describe("structural SPICE round trip", () => {
+  it.each([false, true])(
+    "round trips recovered MOS wrappers (parameterized: %s)",
+    async (parameterized) => {
+      const formals = parameterized ? " params: w=20u l=1u" : "";
+      const geometry = parameterized ? "l={l} w={w}" : "l=1 w=20";
+      const overrides = parameterized ? " l=2u w=12u" : "";
+      const source = [
+        "* SKY130 wrapper round trip",
+        `.subckt IV_SKY_N_SI G D S B${formals}`,
+        `XPDK D G S B sky130_fd_pr__nfet_g5v0d10v5 ${geometry}`,
+        ".ends",
+        `.subckt IV_SKY_P_SI D G S B${formals}`,
+        `XPDK D G S B sky130_fd_pr__pfet_g5v0d10v5 ${geometry}`,
+        ".ends",
+        ".subckt amp vdd vss vin out",
+        `XN vin out vss vss IV_SKY_N_SI${overrides}`,
+        `XP out vin vdd vdd IV_SKY_P_SI${overrides}`,
+        ".ends",
+        ".end",
+        "",
+      ].join("\n");
+      const read = (text: string) =>
+        importSpiceSources(
+          [{ path: "wrapper.spi", bytes: new TextEncoder().encode(text) }],
+          "wrapper.spi",
+        );
+      const before = await read(source);
+      expect(before.successful, JSON.stringify(before.diagnostics)).toBe(true);
+      const project = before.project!;
+      const amp = project.documents.find((d) => d.name === "amp")!;
+      expect(amp.instances.find((i) => i.reference === "XN")?.symbolId).toBe(
+        "nmos",
+      );
+      expect(amp.instances.find((i) => i.reference === "XP")?.symbolId).toBe(
+        "pmos",
+      );
+      const exported = createDesignNetlistExport(project, { format: "spice" });
+      expect(
+        exported.diagnostics.filter((d) => d.severity === "error"),
+      ).toEqual([]);
+      if (exported.status !== "ready")
+        throw new Error("Wrapper export blocked");
+      const after = await read(exported.file.text);
+      expect(after.successful, JSON.stringify(after.diagnostics)).toBe(true);
+      // The graph comparator cannot expand parameterized cells. Verify each
+      // declaration and device card directly, including the raw expressions.
+      for (const line of source
+        .split("\n")
+        .filter((line) => /^(?:\.subckt |X)/u.test(line))) {
+        expect(exported.file.text.split("\n")).toContain(line);
+      }
+      const comparison = compareCircuitIR(after.ir!, before.ir!, "amp");
+      expect(comparison.topology).toBe("equal");
+      expect(comparison.differences).toEqual([]);
+      if (!parameterized) {
+        const a = projectElectricalGraph(project);
+        const b = projectElectricalGraph(after.project!);
+        if (a.status !== "ready" || b.status !== "ready")
+          throw new Error(JSON.stringify([a, b]));
+        expect(compareElectricalGraphs(a.graph, b.graph)).toBe("equal");
+      }
+    },
+  );
+
   it("re-exports an imported reviewed SKY130 X call with omitted count defaults", async () => {
     const source = [
       "SKY130 reviewed round trip",

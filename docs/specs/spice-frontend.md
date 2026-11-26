@@ -81,6 +81,12 @@ revision; it never silently changes `ngspice-46-core`.
   Ports and terminals are contiguous and zero-based.
 - Known X masters bind to cells; unknown ones stay opaque with positional
   pins. Families keep terminal order per the matrix.
+- An X call to a local `.subckt` can display the built-in symbol of its sole
+  device (MOS, BJT, diode, resistor, capacitor or inductor), including a
+  mapped PDK device or one reached through nested single-device wrappers.
+  Each formal port must pass through to a distinct canvas pin of the same
+  name and case, covering every pin. The call follows the wrapper's port
+  order and keeps its child-subcircuit binding and formal parameter values.
 - Nets are cell-scoped; `0` and `.global` names are global. Roots are cells
   no bound subcircuit calls.
 - A `K` card of two inductors of its cell imports as a Document coupling named
