@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { CircuitProject } from "@icm/model";
 import { serializeProject } from "@icm/project-protocol";
 import { ApiImage } from "../components/api-image";
@@ -29,7 +29,10 @@ export interface GroupProjectsPanelProps {
   notebookId?: string | null | undefined;
   notebookName?: string | null | undefined;
   onSelectGroup?: ((groupId: string) => void) | undefined;
-  onOpenGroupProject(name: string, projectText: string): void;
+  onOpenGroupProject(
+    name: string,
+    projectText: string,
+  ): void | boolean | Promise<void | boolean>;
 }
 
 const STATUS_LABEL: Record<GroupProjectSummary["status"], string> = {
@@ -77,6 +80,9 @@ export function GroupProjectsPanel({
   );
   const [submitDesc, setSubmitDesc] = useState("");
   const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
+  const listRequestSeq = useRef(0);
+  const selectedGroupIdRef = useRef(selectedGroupId);
+  selectedGroupIdRef.current = selectedGroupId;
 
   const selectedGroup = isNotebookScope
     ? null
@@ -98,12 +104,28 @@ export function GroupProjectsPanel({
     try {
       const list = await listNotebookGroups();
       setGroups(list);
-      setSelectedGroupId((current) => {
-        if (current && list.some((item) => item.id === current)) return current;
-        if (initialGroupId && list.some((item) => item.id === initialGroupId))
-          return initialGroupId;
-        return list[0]?.id ?? "";
-      });
+      const current = selectedGroupIdRef.current;
+      let nextGroupId = "";
+      let missingDeepLink = false;
+      if (current && list.some((item) => item.id === current)) {
+        nextGroupId = current;
+      } else if (initialGroupId) {
+        if (list.some((item) => item.id === initialGroupId)) {
+          nextGroupId = initialGroupId;
+        } else {
+          missingDeepLink = true;
+        }
+      } else {
+        nextGroupId = list[0]?.id ?? "";
+      }
+      setSelectedGroupId(nextGroupId);
+      if (missingDeepLink) {
+        setProjects([]);
+        setPendingCount(0);
+        setError(
+          "链接指定的群组不可访问或你已不在该群组中，请先手动选择一个目标群组。",
+        );
+      }
     } catch (err) {
       setError(
         err instanceof Error
@@ -120,34 +142,46 @@ export function GroupProjectsPanel({
   }, [refreshGroups]);
 
   const refreshProjects = useCallback(async () => {
+    const seq = ++listRequestSeq.current;
     if (isNotebookScope && notebookId) {
       setLoading(true);
+      setProjects([]);
       setError(null);
       try {
         const data = await listNotebookProjects(notebookId, filter);
+        if (listRequestSeq.current !== seq) return;
         setNotebookSpace(data.notebook);
         setProjects(data.projects);
-        if (data.pendingCount !== undefined) setPendingCount(data.pendingCount);
+        setPendingCount(data.pendingCount ?? 0);
       } catch (err) {
+        if (listRequestSeq.current !== seq) return;
         setError(err instanceof Error ? err.message : "加载笔记本电路库失败");
       } finally {
-        setLoading(false);
+        if (listRequestSeq.current === seq) setLoading(false);
       }
       return;
     }
-    if (!selectedGroupId) return;
+    if (!selectedGroupId || !selectedGroup) {
+      setProjects([]);
+      setPendingCount(0);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
+    setProjects([]);
     setError(null);
     try {
       const data = await listGroupProjects(selectedGroupId, filter);
+      if (listRequestSeq.current !== seq) return;
       setProjects(data.projects);
-      if (data.pendingCount !== undefined) setPendingCount(data.pendingCount);
+      setPendingCount(data.pendingCount ?? 0);
     } catch (err) {
+      if (listRequestSeq.current !== seq) return;
       setError(err instanceof Error ? err.message : "加载群组电路工程失败");
     } finally {
-      setLoading(false);
+      if (listRequestSeq.current === seq) setLoading(false);
     }
-  }, [isNotebookScope, notebookId, selectedGroupId, filter]);
+  }, [isNotebookScope, notebookId, selectedGroupId, selectedGroup, filter]);
 
   useEffect(() => {
     void refreshProjects();
@@ -164,8 +198,8 @@ export function GroupProjectsPanel({
       const detail =
         isNotebookScope && notebookId
           ? await openNotebookProject(notebookId, item.id)
-          : await openGroupProject(item.groupId ?? selectedGroupId, item.id);
-      onOpenGroupProject(detail.name, detail.projectText);
+          : await openGroupProject(selectedGroupId, item.id);
+      await onOpenGroupProject(detail.name, detail.projectText);
     } catch (err) {
       setError(err instanceof Error ? err.message : "打开电路工程失败");
     } finally {
@@ -225,7 +259,7 @@ export function GroupProjectsPanel({
         );
       } else {
         await reviewGroupProject(
-          item.groupId ?? selectedGroupId,
+          selectedGroupId,
           item.id,
           decision,
           reviewNotes[item.id] ?? "",
@@ -252,7 +286,7 @@ export function GroupProjectsPanel({
       if (isNotebookScope && notebookId) {
         await deleteNotebookProject(notebookId, item.id);
       } else {
-        await deleteGroupProject(item.groupId ?? selectedGroupId, item.id);
+        await deleteGroupProject(selectedGroupId, item.id);
       }
       setNotice(
         item.status === "approved"
@@ -299,8 +333,14 @@ export function GroupProjectsPanel({
                 setSelectedGroupId(next);
                 onSelectGroup?.(next);
                 setNotice(null);
+                setError(null);
               }}
             >
+              {!selectedGroupId ? (
+                <option value="" disabled>
+                  请选择目标群组…
+                </option>
+              ) : null}
               {groups.map((group) => (
                 <option key={group.id} value={group.id}>
                   {group.name}
@@ -421,6 +461,8 @@ export function GroupProjectsPanel({
 
       {loading ? (
         <p className="group-lib-empty">加载中…</p>
+      ) : !isNotebookScope && !selectedGroup ? (
+        <p className="group-lib-empty">请先在上方选择一个目标群组。</p>
       ) : projects.length === 0 ? (
         <p className="group-lib-empty">
           {filter === "approved"

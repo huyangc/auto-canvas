@@ -996,12 +996,15 @@ function WorkspaceEditor({
     const notebookProject = url.searchParams.get("notebookProject")?.trim();
     const view = url.searchParams.get("view")?.trim();
     if (!group && !notebook) return;
-    url.searchParams.delete("group");
-    url.searchParams.delete("notebook");
-    url.searchParams.delete("notebookName");
-    url.searchParams.delete("notebookProject");
-    url.searchParams.delete("view");
-    window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+    if (notebookProject || view) {
+      url.searchParams.delete("notebookProject");
+      url.searchParams.delete("view");
+      window.history.replaceState(
+        null,
+        "",
+        url.pathname + url.search + url.hash,
+      );
+    }
     if (notebook && notebookProject) {
       setPendingNotebookProject({
         notebookId: notebook,
@@ -1010,7 +1013,8 @@ function WorkspaceEditor({
       return;
     }
     if (view === "components") setUserComponentsOpen(true);
-    else if (group || view === "projects") setCloudProjectsOpen(true);
+    else if (view === "projects" || (!notebook && group && !view))
+      setCloudProjectsOpen(true);
   }, [notebookUser]);
   const projectNameEditing = useRef(false);
   const {
@@ -5164,8 +5168,10 @@ function WorkspaceEditor({
           createId("project"),
           name,
         );
-        void projectTabs.open(() => createTabSession(copy));
-        setStatus(`Opened notebook circuit "${name}" as a working copy`);
+        const opened = await projectTabs.open(() => createTabSession(copy));
+        if (opened) {
+          setStatus(`Opened notebook circuit "${name}" as a working copy`);
+        }
       })
       .catch((error: unknown) => {
         setStatus(
@@ -5343,7 +5349,10 @@ function WorkspaceEditor({
               activeNotebookId,
               activeNotebookName,
               onSelectNotebookGroup: setActiveNotebookGroupId,
-              openGroupProjectCopy: (name: string, projectText: string) => {
+              openGroupProjectCopy: async (
+                name: string,
+                projectText: string,
+              ): Promise<boolean> => {
                 try {
                   const parsed = parseProject(projectText);
                   const copy = createIndependentProject(
@@ -5351,12 +5360,20 @@ function WorkspaceEditor({
                     createId("project"),
                     name,
                   );
-                  void projectTabs.open(() => createTabSession(copy));
-                  setStatus(`Opened group circuit "${name}" as a working copy`);
+                  const opened = await projectTabs.open(() =>
+                    createTabSession(copy),
+                  );
+                  if (opened) {
+                    setStatus(
+                      `Opened group circuit "${name}" as a working copy`,
+                    );
+                  }
+                  return opened;
                 } catch (error) {
                   setStatus(
                     `Could not open group circuit: ${error instanceof Error ? error.message : String(error)}`,
                   );
+                  return false;
                 }
               },
             }

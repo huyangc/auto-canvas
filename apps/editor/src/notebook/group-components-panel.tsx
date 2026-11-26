@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ComponentLibrarySummary } from "@icm/agent-adapter";
 import type { SharedComponent } from "@icm/component-library";
 import { SymbolArtwork } from "../features/component-insert/symbol-artwork";
 import { loadSharedComponentSummaries } from "../features/user-components/component-library-client";
+import type { ScopedComponentLibraryOrigin } from "../features/user-components/component-placement";
 import {
   deleteGroupComponent,
   deleteNotebookComponent,
@@ -27,7 +28,10 @@ export interface GroupComponentsPanelProps {
   notebookId?: string | null | undefined;
   notebookName?: string | null | undefined;
   onSelectGroup?: ((groupId: string) => void) | undefined;
-  onInsertComponent(entry: SharedComponent): void | Promise<void>;
+  onInsertComponent(
+    entry: SharedComponent,
+    scope: ScopedComponentLibraryOrigin,
+  ): void | Promise<void>;
 }
 
 const STATUS_LABEL: Record<GroupComponentSummary["status"], string> = {
@@ -70,10 +74,17 @@ export function GroupComponentsPanel({
   const [availableSources, setAvailableSources] = useState<
     ComponentLibrarySummary[]
   >([]);
+  const [sourceQuery, setSourceQuery] = useState("");
+  const [sourceNextCursor, setSourceNextCursor] = useState<string | null>(null);
   const [sourcesLoading, setSourcesLoading] = useState(false);
+  const [sourcesLoadingMore, setSourcesLoadingMore] = useState(false);
   const [sourceComponentId, setSourceComponentId] = useState("");
   const [submitDesc, setSubmitDesc] = useState("");
   const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
+  const listRequestSeq = useRef(0);
+  const sourcesRequestSeq = useRef(0);
+  const selectedGroupIdRef = useRef(selectedGroupId);
+  selectedGroupIdRef.current = selectedGroupId;
 
   const selectedGroup = isNotebookScope
     ? null
@@ -95,12 +106,28 @@ export function GroupComponentsPanel({
     try {
       const list = await listNotebookGroups();
       setGroups(list);
-      setSelectedGroupId((current) => {
-        if (current && list.some((item) => item.id === current)) return current;
-        if (initialGroupId && list.some((item) => item.id === initialGroupId))
-          return initialGroupId;
-        return list[0]?.id ?? "";
-      });
+      const current = selectedGroupIdRef.current;
+      let nextGroupId = "";
+      let missingDeepLink = false;
+      if (current && list.some((item) => item.id === current)) {
+        nextGroupId = current;
+      } else if (initialGroupId) {
+        if (list.some((item) => item.id === initialGroupId)) {
+          nextGroupId = initialGroupId;
+        } else {
+          missingDeepLink = true;
+        }
+      } else {
+        nextGroupId = list[0]?.id ?? "";
+      }
+      setSelectedGroupId(nextGroupId);
+      if (missingDeepLink) {
+        setComponents([]);
+        setPendingCount(0);
+        setError(
+          "链接指定的群组不可访问或你已不在该群组中，请先手动选择一个目标群组。",
+        );
+      }
     } catch (err) {
       setError(
         err instanceof Error
@@ -117,34 +144,46 @@ export function GroupComponentsPanel({
   }, [refreshGroups]);
 
   const refreshComponents = useCallback(async () => {
+    const seq = ++listRequestSeq.current;
     if (isNotebookScope && notebookId) {
       setLoading(true);
+      setComponents([]);
       setError(null);
       try {
         const data = await listNotebookComponents(notebookId, filter);
+        if (listRequestSeq.current !== seq) return;
         setNotebookSpace(data.notebook);
         setComponents(data.components);
-        if (data.pendingCount !== undefined) setPendingCount(data.pendingCount);
+        setPendingCount(data.pendingCount ?? 0);
       } catch (err) {
+        if (listRequestSeq.current !== seq) return;
         setError(err instanceof Error ? err.message : "加载笔记本器件库失败");
       } finally {
-        setLoading(false);
+        if (listRequestSeq.current === seq) setLoading(false);
       }
       return;
     }
-    if (!selectedGroupId) return;
+    if (!selectedGroupId || !selectedGroup) {
+      setComponents([]);
+      setPendingCount(0);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
+    setComponents([]);
     setError(null);
     try {
       const data = await listGroupComponents(selectedGroupId, filter);
+      if (listRequestSeq.current !== seq) return;
       setComponents(data.components);
-      if (data.pendingCount !== undefined) setPendingCount(data.pendingCount);
+      setPendingCount(data.pendingCount ?? 0);
     } catch (err) {
+      if (listRequestSeq.current !== seq) return;
       setError(err instanceof Error ? err.message : "加载群组器件库失败");
     } finally {
-      setLoading(false);
+      if (listRequestSeq.current === seq) setLoading(false);
     }
-  }, [isNotebookScope, notebookId, selectedGroupId, filter]);
+  }, [isNotebookScope, notebookId, selectedGroupId, selectedGroup, filter]);
 
   useEffect(() => {
     void refreshComponents();
@@ -156,37 +195,89 @@ export function GroupComponentsPanel({
 
   useEffect(() => {
     if (!submitOpen) return;
-    let active = true;
+    const seq = ++sourcesRequestSeq.current;
+    const controller = new AbortController();
     setSourcesLoading(true);
-    void loadSharedComponentSummaries("", null, false)
+    setSourceNextCursor(null);
+    void loadSharedComponentSummaries(
+      sourceQuery.trim(),
+      null,
+      false,
+      controller.signal,
+    )
       .then((page) => {
-        if (!active) return;
+        if (sourcesRequestSeq.current !== seq) return;
         setAvailableSources(page.entries);
-        setSourceComponentId((current) => current || page.entries[0]?.id || "");
+        setSourceNextCursor(page.nextCursor);
+        setSourceComponentId((current) =>
+          page.entries.some((entry) => entry.id === current)
+            ? current
+            : (page.entries[0]?.id ?? ""),
+        );
       })
       .catch((err: unknown) => {
-        if (active)
-          setError(
-            err instanceof Error ? err.message : "加载可发布的器件列表失败",
-          );
+        if (controller.signal.aborted || sourcesRequestSeq.current !== seq)
+          return;
+        setError(
+          err instanceof Error ? err.message : "加载可发布的器件列表失败",
+        );
       })
       .finally(() => {
-        if (active) setSourcesLoading(false);
+        if (sourcesRequestSeq.current === seq) setSourcesLoading(false);
       });
     return () => {
-      active = false;
+      controller.abort();
     };
-  }, [submitOpen]);
+  }, [submitOpen, sourceQuery]);
+
+  const handleLoadMoreSources = async () => {
+    if (!sourceNextCursor || sourcesLoadingMore) return;
+    const seq = sourcesRequestSeq.current;
+    setSourcesLoadingMore(true);
+    try {
+      const page = await loadSharedComponentSummaries(
+        sourceQuery.trim(),
+        sourceNextCursor,
+        false,
+      );
+      if (sourcesRequestSeq.current !== seq) return;
+      setAvailableSources((prev) => {
+        const seen = new Set(prev.map((item) => item.id));
+        return [...prev, ...page.entries.filter((item) => !seen.has(item.id))];
+      });
+      setSourceNextCursor(page.nextCursor);
+    } catch (err) {
+      if (sourcesRequestSeq.current === seq) {
+        setError(err instanceof Error ? err.message : "加载更多器件失败");
+      }
+    } finally {
+      if (sourcesRequestSeq.current === seq) setSourcesLoadingMore(false);
+    }
+  };
 
   const handlePlace = async (item: GroupComponentSummary) => {
     setBusyId(item.id);
     setError(null);
     try {
-      const { entry } =
+      const scope: ScopedComponentLibraryOrigin =
         isNotebookScope && notebookId
-          ? await readNotebookComponent(notebookId, item.id)
-          : await readGroupComponent(item.groupId ?? selectedGroupId, item.id);
-      await onInsertComponent(entry);
+          ? {
+              kind: "notebook",
+              scopeId: notebookId,
+              itemId: item.id,
+              status: item.status,
+            }
+          : {
+              kind: "group",
+              scopeId: selectedGroupId,
+              itemId: item.id,
+              status: item.status,
+            };
+      const { entry } =
+        scope.kind === "notebook"
+          ? await readNotebookComponent(scope.scopeId, item.id)
+          : await readGroupComponent(scope.scopeId, item.id);
+      await onInsertComponent(entry, scope);
     } catch (err) {
       setError(err instanceof Error ? err.message : "加载器件失败");
     } finally {
@@ -243,7 +334,7 @@ export function GroupComponentsPanel({
         );
       } else {
         await reviewGroupComponent(
-          item.groupId ?? selectedGroupId,
+          selectedGroupId,
           item.id,
           decision,
           reviewNotes[item.id] ?? "",
@@ -270,7 +361,7 @@ export function GroupComponentsPanel({
       if (isNotebookScope && notebookId) {
         await deleteNotebookComponent(notebookId, item.id);
       } else {
-        await deleteGroupComponent(item.groupId ?? selectedGroupId, item.id);
+        await deleteGroupComponent(selectedGroupId, item.id);
       }
       setNotice(
         item.status === "approved"
@@ -316,8 +407,14 @@ export function GroupComponentsPanel({
                 setSelectedGroupId(next);
                 onSelectGroup?.(next);
                 setNotice(null);
+                setError(null);
               }}
             >
+              {!selectedGroupId ? (
+                <option value="" disabled>
+                  请选择目标群组…
+                </option>
+              ) : null}
               {groups.map((group) => (
                 <option key={group.id} value={group.id}>
                   {group.name}
@@ -386,12 +483,33 @@ export function GroupComponentsPanel({
 
       {submitOpen && (isNotebookScope || selectedGroup) ? (
         <div className="group-lib-submit-box">
+          <div className="group-lib-submit-row">
+            <input
+              type="search"
+              className="group-lib-input"
+              placeholder="搜索自定义器件名称…"
+              aria-label="搜索可发布的器件"
+              value={sourceQuery}
+              onChange={(event) => setSourceQuery(event.target.value)}
+            />
+            {sourceNextCursor ? (
+              <button
+                type="button"
+                className="group-lib-btn"
+                disabled={sourcesLoading || sourcesLoadingMore}
+                onClick={() => void handleLoadMoreSources()}
+              >
+                {sourcesLoadingMore ? "加载中…" : "加载更多器件"}
+              </button>
+            ) : null}
+          </div>
           {sourcesLoading ? (
             <p className="group-lib-hint">正在加载已发布的自定义器件…</p>
           ) : availableSources.length === 0 ? (
             <p className="group-lib-hint">
-              当前还没有可发布的自定义器件，请先点击右上角「Create
-              Component…」创建并保存器件。
+              {sourceQuery.trim()
+                ? "未找到匹配的自定义器件，请调整关键词后重试。"
+                : "当前还没有可发布的自定义器件，请先点击右上角「Create Component…」创建并保存器件。"}
             </p>
           ) : (
             <>
@@ -449,6 +567,8 @@ export function GroupComponentsPanel({
 
       {loading ? (
         <p className="group-lib-empty">加载中…</p>
+      ) : !isNotebookScope && !selectedGroup ? (
+        <p className="group-lib-empty">请先在上方选择一个目标群组。</p>
       ) : components.length === 0 ? (
         <p className="group-lib-empty">
           {filter === "approved"

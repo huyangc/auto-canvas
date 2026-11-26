@@ -36,7 +36,8 @@ export interface CloudProjectsDialogProps {
   onSelectGroup?: ((groupId: string) => void) | undefined;
   /** Notebook mode: open a group or notebook shared project as an independent working copy. */
   onOpenGroupProject?:
-    ((name: string, projectText: string) => void) | undefined;
+    | ((name: string, projectText: string) => boolean | Promise<boolean>)
+    | undefined;
 }
 
 /**
@@ -112,9 +113,9 @@ export function CloudProjectsDialog({
   );
 
   const handleOpenGroupProject = useCallback(
-    (name: string, projectText: string) => {
-      onClose();
-      onOpenGroupProject?.(name, projectText);
+    async (name: string, projectText: string) => {
+      const opened = await onOpenGroupProject?.(name, projectText);
+      if (opened !== false) onClose();
     },
     [onClose, onOpenGroupProject],
   );
