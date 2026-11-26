@@ -17,6 +17,33 @@ import type { LayoutPartition, SymmetryComponent } from "./types.js";
 
 type Pair = [string, string];
 
+export function nonPolarPassive(device: Instance, pinCount: number) {
+  return (
+    pinCount === 2 &&
+    ["resistor", "capacitor", "inductor"].includes(
+      deviceDescriptor(device.symbolId)?.deviceClass ?? "",
+    )
+  );
+}
+
+/** An exact pair of distinct mirrored non-rail nets. */
+export function mirroredNets(
+  nets: string[],
+  roles: NetRoles,
+  netMap: ReadonlyMap<string, string>,
+) {
+  const [a, b] = nets;
+  return (
+    nets.length === 2 &&
+    a !== undefined &&
+    b !== undefined &&
+    a !== b &&
+    !roles.rails.has(a) &&
+    !roles.rails.has(b) &&
+    netMap.get(a) === b &&
+    netMap.get(b) === a
+  );
+}
 /** Apply a whole round atomically. Conflicts are permanent, including the other
  * endpoint of an invalidated involution; iteration order cannot choose a winner. */
 function applyRound(
@@ -86,10 +113,7 @@ export function symmetryTopology(
   const compatible = (a: Instance, b: Instance) =>
     a.symbolId === b.symbolId && familyCompatible(a, b);
   const nonPolar = (id: string) =>
-    pins.get(id)!.length === 2 &&
-    ["resistor", "capacitor", "inductor"].includes(
-      deviceDescriptor(byId.get(id)!.symbolId)?.deviceClass ?? "",
-    );
+    nonPolarPassive(byId.get(id)!, pins.get(id)!.length);
   const seeds: Pair[] = recognizeSubstructures(
     document,
     roles,
@@ -227,6 +251,18 @@ export function symmetryTopology(
     }
     for (const a of free) {
       const own = nets(a.id);
+      if (nonPolar(a.id) && mirroredNets(own, roles, netMap)) {
+        if (
+          !free.some(
+            (b) =>
+              b !== a &&
+              compatible(a, b) &&
+              own.every((n) => nets(b.id).includes(n)),
+          )
+        )
+          devicePairs.push([a.id, a.id, swappedPins(a.id)]);
+        continue;
+      }
       if (
         own.length &&
         own.every((n) => netMap.get(n) === n) &&

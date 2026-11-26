@@ -5,6 +5,7 @@ import { visibleInstanceBounds } from "@icm/derived";
 import { outputFacesLeft } from "./directed-blocks.js";
 import {
   reflectOrientation,
+  snapGridCoordinate,
   type Instance,
   type SchematicDocument,
 } from "@icm/model";
@@ -26,7 +27,7 @@ import {
   signalDistances,
 } from "./placement-connectivity.js";
 import { placement, withPlacements } from "./geometry.js";
-import { symmetryTopology } from "./symmetry.js";
+import { mirroredNets, nonPolarPassive, symmetryTopology } from "./symmetry.js";
 import type { SymmetryComponent, Placement, RecognizedGroup } from "./types.js";
 
 type Edge = readonly [string, string];
@@ -366,6 +367,92 @@ export function deviceRows(
   );
 }
 
+/** Give each cross-branch passive its own horizontal seat on the axis. */
+function stackAxisBridges(
+  half: Instance[],
+  axisIds: Set<string>,
+  resolver: SymbolResolver,
+  roles: NetRoles,
+  netMap: ReadonlyMap<string, string>,
+  rows: Rows,
+  grid: number,
+) {
+  const bridges = new Set<string>();
+  const byPair = new Map<string, Instance[]>();
+  const neighbors = new Map<string, string[]>();
+  for (const i of half) {
+    const nets = deviceNets(i, resolver, roles);
+    if (!axisIds.has(i.id)) {
+      for (const n of nets) {
+        if (!neighbors.has(n)) neighbors.set(n, []);
+        neighbors.get(n)!.push(i.id);
+      }
+    } else if (
+      nonPolarPassive(i, devicePins(i, resolver).length) &&
+      mirroredNets(nets, roles, netMap)
+    ) {
+      bridges.add(i.id);
+      const key = JSON.stringify(nets.sort(compareIds));
+      if (!byPair.has(key)) byPair.set(key, []);
+      byPair.get(key)!.push(i);
+    }
+  }
+  const pitch = placementPitch(roles).row;
+  const snap = (v: number) => snapGridCoordinate(v, grid);
+  const step = Math.max(50, snap(pitch / 2));
+  const priority = (i: Instance) =>
+    i.symbolId === "resistor" ? 0 : i.symbolId === "capacitor" ? 1 : 2;
+  const seated = new Set<string>();
+  for (const [, group] of [...byPair].sort(([a], [b]) => compareIds(a, b))) {
+    group.sort((a, b) => priority(a) - priority(b) || compareIds(a.id, b.id));
+    const first = group[0]!;
+    const nets = deviceNets(first, resolver, roles);
+    const leftNet = nets.find((n) => neighbors.has(n)) ?? nets[0]!;
+    const ys = [
+      ...new Set(
+        (neighbors.get(leftNet) ?? []).map(
+          (id) => rows.placements.get(id)!.position.y,
+        ),
+      ),
+    ].sort((a, b) => a - b);
+    const upper = ys[0] ?? rows.placements.get(first.id)!.position.y;
+    const lower = ys[1];
+    let start = snap(upper - ((group.length - 1) * step) / 2);
+    if (lower !== undefined) {
+      start = snap(upper + Math.max(50, Math.round(pitch / 2)));
+      const delta =
+        snap(
+          start +
+            (group.length - 1) * step +
+            Math.max(60, Math.round(pitch * 0.6)),
+        ) - lower;
+      if (delta > 0)
+        for (const [id, pose] of rows.placements)
+          if ((!bridges.has(id) || seated.has(id)) && pose.position.y >= lower)
+            pose.position.y += delta;
+    }
+    group.forEach((i, j) => {
+      const pose = rows.placements.get(i.id)!;
+      const pins = devicePins(i, resolver);
+      const left = pins.find((p) => roles.pinNet(i.id, p.name) === leftNet)!;
+      const right = pins.find((p) => p !== left)!;
+      pose.position.y = snap(start + j * step);
+      pose.mirror = "none";
+      pose.rotation = 90;
+      if (
+        transformPoint(left.at, pose.position, pose).x >
+        transformPoint(right.at, pose.position, pose).x
+      )
+        pose.rotation = 270;
+      seated.add(i.id);
+    });
+  }
+  if (bridges.size)
+    for (const node of rows.nodes)
+      node.row = rows.placements.get(node.members[0]!)!.position.y / pitch;
+  return bridges;
+}
+
 /** R89: lay out just one half with the shared layered algorithms, then unfold
  * it. The resulting row nodes carry one common block coordinate system. */
 function symmetryRows(
@@ -455,6 +542,15 @@ function symmetryRows(
         halfRows.placements.get(id)!.position.y =
           node.row * placementPitch(roles).row;
     }
+    const bridges = stackAxisBridges(
+      half,
+      axisIds,
+      resolver,
+      roles,
+      netMap,
+      halfRows,
+      document.presentation.grid,
+    );
     const ordered = orderRows(halfRows, half, resolver, halfRoles, halfGroups);
     const crossIds = new Set(
       component.pairs.flatMap(([left, right]) => {
@@ -514,9 +610,22 @@ function symmetryRows(
     };
     // Axis devices in one row form a run with R33 gaps. Express the run
     // relative to its pin-centre midpoint; a lone device uses its channel.
+    let bridgeClearance = 20;
+    for (const id of bridges) {
+      const pose = placed.get(id)!;
+      const b = bounds.find((b) => b.id === id)!.bounds;
+      const centre = anchor(id);
+      bridgeClearance = Math.max(
+        bridgeClearance,
+        40 - (b.x - pose.position.x - centre),
+      );
+      pose.position.x = -centre;
+    }
     const runLeft = new Map<number, number>();
     for (const row of ordered) {
-      const run = row.flatMap((n) => n.members).filter((id) => axisIds.has(id));
+      const run = row
+        .flatMap((n) => n.members)
+        .filter((id) => axisIds.has(id) && !bridges.has(id));
       if (!run.length) continue;
       // Origins in a run differ by grid multiples, so the later per-origin
       // snap moves them together and the 40-unit gap survives (at least 40,
@@ -571,7 +680,10 @@ function symmetryRows(
           return (
             b.bounds.x +
             b.bounds.width +
-            Math.max(20, runLeft.has(row) ? 40 - runLeft.get(row)! : 20)
+            Math.max(
+              bridgeClearance,
+              runLeft.has(row) ? 40 - runLeft.get(row)! : 20,
+            )
           );
         }),
     );
@@ -660,6 +772,11 @@ function rowGraph(
       if (!nets.has(net)) nets.set(net, new Set());
       nets.get(net)!.add(node);
     }
+  // Bridge seats may fall between integer branch rows. Subdivide through
+  // those occupied levels as well so both ends remain in the row graph.
+  const intermediate = [
+    ...new Set(nodes.map((n) => n.row).filter((row) => !Number.isInteger(row))),
+  ];
   const expanded = [...nodes];
   const edges: Array<{ a: string; b: string; net: string }> = [];
   const spans: Array<{ members: string[]; row: number }> = [];
@@ -668,7 +785,9 @@ function rowGraph(
     const first = Math.min(...[...members].map((n) => n.row));
     const last = Math.max(...[...members].map((n) => n.row));
     let previous: RowNode[] = [];
-    for (let row = first; row <= last; row++) {
+    const levels = intermediate.filter((row) => row >= first && row <= last);
+    for (let row = Math.ceil(first); row <= last; row++) levels.push(row);
+    for (const row of levels.sort((a, b) => a - b)) {
       let current = [...members].filter((n) => n.row === row);
       if (!current.length) {
         const virtual = {

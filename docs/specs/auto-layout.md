@@ -1644,7 +1644,9 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   similarly pairs mutually unique devices, except on rails: rail connectivity
   never pairs devices. An unmapped device whose connected
   Nets all map to themselves and that has no unmapped identical-topology twin
-  maps to itself. Compute implications from the preceding round, then apply
+  maps to itself. A two-pin non-polar passive spanning a distinct mirrored pair
+  of non-rail Nets also maps to itself with reversed pins when no other free
+  compatible device spans that unordered pair. Compute implications from the preceding round, then apply
   together to a fixpoint. Shared connections propose self mappings only as
   defaults: non-self Net proposals replace them, including defaults from earlier
   rounds. Rails remain hard self mappings. Different non-self proposals for a
@@ -1674,8 +1676,8 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   crossings, source polarity violations, wires through symbols and unowned
   drafting. Otherwise the usual readability term and zero-baseline rules apply.
 
-- **R89 — Symmetric blocks.** Partners use the smaller R31 row; axis devices
-  retain their rows. Build a half Document from left partners and axis devices,
+- **R89 — Symmetric blocks.** Partners start on the smaller R31 row and axis devices
+  start on their R31 rows. Build a half Document from left partners and axis devices,
   folding right Nets onto left Nets. Reuse R32 and R33 with these rows and only
   groups contained in the half, moving axis devices to each row's right end.
   Cross-coupled members (mutual G/D or B/C Nets) come immediately before axis
@@ -1683,8 +1685,14 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   Before column assignment, orient recognized left members by R92: outward
   `none`, inward `horizontal`. Other paired devices with a gate use
   `horizontal` when the gate Net is self-mapped, otherwise `none`. Two-pin parts
-  and axis devices keep R31 orientation.
-  Axis devices sharing a row form one run in half-layout order with at least
+  and axis devices keep R31 orientation except for cross-branch axis bridges.
+  Centre each bridge on the axis and rotate it horizontally so its left pin
+  faces the branch on its Net. Stack parallel bridges between the first two
+  connected branch rows, moving the lower rows down for clearance. With a
+  single connected row, centre the stack vertically on that row. Resistors
+  precede capacitors, then inductors, with device id breaking ties. Keep at
+  least 40 units between the bridge and the visible extent of the left half.
+  The remaining axis devices sharing a row form one run in half-layout order with at least
   40-unit gaps between visible bounds, origins snapped up to the grid, and its
   pin-centre midpoint within half a grid of the axis. A lone axis
   device centres its channel pin (D/S or C/E), otherwise its pin centre.
@@ -1914,8 +1922,8 @@ split across …; merged into …` for evaluation tooling. Trim each recognized
   unique in both directions. Self-Net candidate matching retains equal pin names.
   Every pre-existing pair retains its correspondence; only swapped passive pairs
   are added. Passives whose Nets both map to themselves retain the axis rule, including the exclusion of identical-topology twins regardless of
-  pin order. A lone passive between two Nets that map to each other stays outside
-  the component; this rule does not recognize it as an axis device.
+  pin order. A unique passive between two distinct mirrored non-rail Nets follows
+  the R88 axis bridge rule.
 - **R143 — Coupled modules.** Prompt version 5 adds `cross-coupled` for a
   regenerative transistor pair driving each other's control pins (latch,
   comparator core, negative-resistance core or load), and `coupled-inductors`
