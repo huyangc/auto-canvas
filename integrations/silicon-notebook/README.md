@@ -309,7 +309,9 @@ in system Chrome through a proxy restricted to the package server.
    ```
 
 2. Provision a separate empty PostgreSQL database as in source deployment step 2.
-   Edit the installed `$NB/.env` according to step 4. Set its single
+   Before the first start, replace the example value of
+   `SILICON_NOTEBOOK_ADMIN_PASSWORD` in `$NB/.env` with a strong, unique
+   password for this installation. Edit the remaining settings as in step 4. Set its single
    `DATABASE_URL` to the site's **notebook** database and its
    `NEXT_PUBLIC_API_BASE_URL` to `/api`. Configure
    `MODEL_SERVICES_CONFIG` for the site (empty for offline deterministic mode).
@@ -359,20 +361,33 @@ in system Chrome through a proxy restricted to the package server.
 
   Verify `/api/ready` and reopen a saved canvas project through the entry.
 
-- **Upgrade the canvas.** Unpack the new canvas package in a fresh sibling
-  directory and set `cwd` in the service table to its absolute path.
+- **Upgrade the canvas.** Stop the services, unpack the new canvas package
+  into a fresh sibling directory and set the service's `cwd` to that directory.
 
   ```bash
   "$NB/stop.sh"
   mkdir "$NEW_CANVAS"
   tar -xzf "$NEW_CANVAS_TARBALL" -C "$NEW_CANVAS" --strip-components=1
   "${EDITOR:-vi}" "$NB/.local/extensions.toml"
-  "$NB/start.sh"
   ```
 
-  If the new package changes the plugin version, install its wheel into
-  the notebook venv and deploy a notebook build with the matching UI
-  package before starting. Set `CANVAS="$NEW_CANVAS"` for future upgrades.
+  If the plugin version changes, keep the services stopped. Unpack a fresh
+  notebook release built with the new canvas UI. Install the new local wheel
+  into the existing venv first. The upgrader pins the versions it finds
+  there, so give it the **new canvas wheelhouse** for its replacement venv.
+
+  ```bash
+  mkdir "$NEW_NOTEBOOK"
+  tar -xzf "$NEW_NOTEBOOK_TARBALL" -C "$NEW_NOTEBOOK" --strip-components=1
+  PIP_CONFIG_FILE=/dev/null "$NB/.venv/bin/python" -m pip --isolated install --upgrade --no-index --find-links "$NEW_CANVAS/wheels" "$NEW_CANVAS"/wheels/*.whl
+  "$NEW_NOTEBOOK/upgrade.sh" --target "$NB" --extra-wheelhouse "$NEW_CANVAS/wheels"
+  ```
+
+  If only the bundled UI changes, deploy the matching notebook release with
+  the currently installed plugin wheel as in the notebook upgrade above,
+  keeping the services stopped until the upgrade succeeds. Once the service
+  configuration, wheel and UI match, set `CANVAS="$NEW_CANVAS"`, run
+  `"$NB/start.sh"`, then check `/api/ready` and reopen a saved canvas project.
 
 - **Switch back to the default notebook package.** With services stopped,
   remove the canvas extension tables from the TOML, or remove its
