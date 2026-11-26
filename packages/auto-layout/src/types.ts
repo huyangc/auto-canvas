@@ -9,6 +9,7 @@ export type LayoutStrategy =
   | "layered"
   | "stages"
   | "feedback-rows"
+  | "mcts"
   | "convention"
   | "template+stack"
   | "layered+stack"
