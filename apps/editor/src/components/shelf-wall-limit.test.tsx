@@ -293,7 +293,15 @@ it("edits project names inline on click or menu Rename, saving on blur and rever
     });
     Object.defineProperty(imeEscape, "isComposing", { value: true });
     editInput.dispatchEvent(imeEscape);
+    // Safari reports keyCode 229 on IME-confirming Enter with isComposing=false.
+    const safariImeEnter = new KeyboardEvent("keydown", {
+      key: "Enter",
+      keyCode: 229,
+      bubbles: true,
+    });
+    editInput.dispatchEvent(safariImeEnter);
   });
+  expect(savedNames).toEqual([]);
   expect(container.querySelector("input.shelf-tile-name-input")).toBe(
     editInput,
   );
@@ -793,11 +801,35 @@ it("filters by search, toggles grid/list views, and delegates open/rename/delete
   });
   expect(onOpenProject).not.toHaveBeenCalled();
 
-  // Cancelling rename with Escape restores focus to the title button.
+  // Pointerless (e.g. screen reader) synthesized click on a tile while the
+  // rename input still has focus commits the draft instead of opening the tile.
   await act(async () =>
     container
       .querySelector<HTMLButtonElement>(
         'button[aria-label="Rename Beta Filter"]',
+      )!
+      .click(),
+  );
+  const srInput = container.querySelector<HTMLInputElement>(
+    'input[aria-label="Project name"]',
+  )!;
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "value",
+    )!.set!;
+    setter.call(srInput, "Beta Updated");
+    srInput.dispatchEvent(new Event("input", { bubbles: true }));
+    betaTile.click();
+  });
+  expect(onOpenProject).not.toHaveBeenCalled();
+  expect(onRenameProject).toHaveBeenCalledWith("p-beta", "Beta Updated");
+
+  // Cancelling rename with Escape restores focus to the title button.
+  await act(async () =>
+    container
+      .querySelector<HTMLButtonElement>(
+        'button[aria-label="Rename Beta Updated"]',
       )!
       .click(),
   );
@@ -810,7 +842,7 @@ it("filters by search, toggles grid/list views, and delegates open/rename/delete
     );
   });
   expect(document.activeElement).toBe(
-    container.querySelector('button[aria-label="Rename Beta Filter"]'),
+    container.querySelector('button[aria-label="Rename Beta Updated"]'),
   );
 
   // Quick delete swaps the row action bar into Delete? Confirm / Cancel,
@@ -853,7 +885,7 @@ it("filters by search, toggles grid/list views, and delegates open/rename/delete
   await act(async () =>
     container
       .querySelector<HTMLButtonElement>(
-        '[aria-label="Delete Beta Filter"] .inline-confirm-danger',
+        '[aria-label="Delete Beta Updated"] .inline-confirm-danger',
       )!
       .click(),
   );

@@ -415,8 +415,9 @@ export function ShelfWall({
 
   const refresh = useCallback(() => {
     let cancelled = false;
+    const seq = ++mutationSeq.current;
     void loadShelf().then((next) => {
-      if (!cancelled) setState(next);
+      if (!cancelled && mutationSeq.current === seq) setState(next);
     });
     return () => {
       cancelled = true;
@@ -491,6 +492,24 @@ export function ShelfWall({
       renameInputRef.current !== null &&
       document.activeElement === renameInputRef.current
     );
+  }
+
+  function handleTileOpenClick(
+    event: { preventDefault(): void },
+    projectId: string,
+    isLink: boolean,
+  ) {
+    if (suppressNextOpenRef.current) {
+      suppressNextOpenRef.current = false;
+      if (isLink) event.preventDefault();
+      return;
+    }
+    if (isRenameInputFocused()) {
+      event.preventDefault();
+      renameInputRef.current?.blur();
+      return;
+    }
+    if (!isLink) onOpenProject?.(projectId);
   }
 
   function startRename(project: CloudProjectSummary) {
@@ -820,7 +839,7 @@ export function ShelfWall({
           void commitRename(project, event.currentTarget.value, false, true);
         }}
         onKeyDown={(event) => {
-          if (event.nativeEvent.isComposing) {
+          if (event.nativeEvent.isComposing || event.keyCode === 229) {
             if (event.key === "Escape") event.stopPropagation();
             return;
           }
@@ -1049,13 +1068,9 @@ export function ShelfWall({
                     onKeyDown={() => {
                       suppressNextOpenRef.current = false;
                     }}
-                    onClick={() => {
-                      if (suppressNextOpenRef.current) {
-                        suppressNextOpenRef.current = false;
-                        return;
-                      }
-                      onOpenProject(project.id);
-                    }}
+                    onClick={(event) =>
+                      handleTileOpenClick(event, project.id, false)
+                    }
                   >
                     <span className="shelf-list-thumb">
                       <TilePreview
@@ -1080,12 +1095,9 @@ export function ShelfWall({
                     onKeyDown={() => {
                       suppressNextOpenRef.current = false;
                     }}
-                    onClick={(event) => {
-                      if (suppressNextOpenRef.current) {
-                        suppressNextOpenRef.current = false;
-                        event.preventDefault();
-                      }
-                    }}
+                    onClick={(event) =>
+                      handleTileOpenClick(event, project.id, true)
+                    }
                   >
                     <span className="shelf-list-thumb">
                       <TilePreview
@@ -1142,13 +1154,9 @@ export function ShelfWall({
                       onKeyDown={() => {
                         suppressNextOpenRef.current = false;
                       }}
-                      onClick={() => {
-                        if (suppressNextOpenRef.current) {
-                          suppressNextOpenRef.current = false;
-                          return;
-                        }
-                        onOpenProject(project.id);
-                      }}
+                      onClick={(event) =>
+                        handleTileOpenClick(event, project.id, false)
+                      }
                     >
                       <TilePreview
                         key={`${project.id}-${project.revision}`}
@@ -1171,12 +1179,9 @@ export function ShelfWall({
                       onKeyDown={() => {
                         suppressNextOpenRef.current = false;
                       }}
-                      onClick={(event) => {
-                        if (suppressNextOpenRef.current) {
-                          suppressNextOpenRef.current = false;
-                          event.preventDefault();
-                        }
-                      }}
+                      onClick={(event) =>
+                        handleTileOpenClick(event, project.id, true)
+                      }
                     >
                       <TilePreview
                         key={`${project.id}-${project.revision}`}
