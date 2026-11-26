@@ -66,7 +66,7 @@ const EMPTY_REGISTRY =
 const SAME_ORIGIN_API = { NEXT_PUBLIC_API_BASE_URL: "/api" };
 
 /** Why stage L cannot run from this checkout (besides stage M's builds). */
-export function stageLPrerequisites() {
+export function stageLPrerequisites(stage = "L") {
   const problems = [];
   for (const file of [
     UI_MANIFEST,
@@ -74,13 +74,13 @@ export function stageLPrerequisites() {
   ])
     if (!fs.existsSync(file))
       problems.push(
-        `stage L needs the UI package file ${path.relative(repo, file)}`,
+        `stage ${stage} needs the UI package file ${path.relative(repo, file)}`,
       );
   try {
     createRequire(path.join(repo, "package.json")).resolve("@playwright/test");
   } catch {
     problems.push(
-      "stage L needs @playwright/test (a root dev dependency); run pnpm install",
+      `stage ${stage} needs @playwright/test (a root dev dependency); run pnpm install`,
     );
   }
   return problems;
@@ -595,7 +595,7 @@ const launchChrome = ({ profile, proxyPort, sandbox }) =>
     handleSIGINT: false,
     handleSIGTERM: false,
     handleSIGHUP: false,
-    timeout: 60_000,
+    timeout: 10_000, // bounded below the managed cleanup's process reserve
     viewport: { width: 1440, height: 900 },
     serviceWorkers: "block",
     proxy: { server: `http://127.0.0.1:${proxyPort}` },
@@ -607,14 +607,24 @@ const launchChrome = ({ profile, proxyPort, sandbox }) =>
     },
   });
 
+// Playwright bounds the launch itself. A close deadline bounds graceful
+// context shutdown, never our ownership of a launch that can still spawn.
+export async function closeLaunchedContext(session, deadline) {
+  await session.starting;
+  await Promise.race([
+    session.context?.close().catch(() => undefined),
+    sleep(Math.max(0, deadline - Date.now())),
+  ]);
+}
+
 /**
  * The stage's browsers: each `open(label, gate)` starts the run's proxy for
  * `gate` (`{ webPort, held }`), then launches Chrome (`launch`, Chrome by
  * default) with a fresh profile `<dir>/browser-<n>` (`dir` the sandbox's root
  * by default) and records its
  * process (this script's child whose command line names the profile) while
- * the launch is still connecting. `close(session, ms)` first waits (within
- * `ms`) for a start still in flight, then closes what it produced — the
+ * the launch is still connecting. `close(session, ms)` first waits for
+ * the bounded launch, then closes what it produced — the
  * context, the proxy, a recorded process that is still the one recorded (its
  * group, which it leads, by SIGKILL) — and reports whether any process of the
  * profile is left. A session stays registered until its disposal has
@@ -635,14 +645,9 @@ export function browserSessions(
   let stopping = false;
   const dispose = async (session, ms, label) => {
     const deadline = Date.now() + Math.max(0, ms);
-    const left = () => Math.max(0, deadline - Date.now());
-    await Promise.race([session.starting, sleep(left())]);
-    await Promise.race([
-      session.context?.close().catch(() => undefined),
-      sleep(left()),
-    ]);
+    await closeLaunchedContext(session, deadline);
     await session.proxy?.close();
-    session.disposed = true;
+
     const { recorded } = session;
     if (recorded && identityOf(recorded.pid) === recorded.identity) {
       try {
@@ -683,7 +688,6 @@ export function browserSessions(
     session.proxy = proxy;
     // The shutdown began while the proxy started: no browser is launched.
     if (session.closed) {
-      if (session.disposed) await proxy.close();
       return;
     }
     const { profile } = session;
@@ -719,8 +723,7 @@ export function browserSessions(
       session.launchError = String(error?.message ?? error).split("\n")[0];
       return undefined;
     });
-    // A close that gave up waiting for this start: what it produced goes now.
-    if (session.disposed) await session.context?.close().catch(() => undefined);
+
     await waitFor(() => session.recorded || session.launchError, 5000, 50);
     session.gaveUp = true;
   };
@@ -773,7 +776,7 @@ export function browserSessions(
  * canvas listeners are still the recorded pids (the gate every request of the
  * stage goes through).
  */
-const webGate = (m, up, canvasPid) => ({
+export const webGate = (m, up, canvasPid) => ({
   webPort: m.webPort,
   // Each lsof run gets what is left of `ms` (a stalled one is an error
   // within the bound, not a block); none starts once it is used up.
@@ -788,7 +791,8 @@ const webGate = (m, up, canvasPid) => ({
       if (timeoutMs <= 0)
         throw new Error(`the listeners could not be read within ${ms} ms`);
       return (
-        m.sandbox.listenerState(port, pid, { timeoutMs }).state === "owned"
+        m.sandbox.listenerState(port, pid, { timeoutMs }).state ===
+        (pid === null ? "none" : "owned")
       );
     });
   },
@@ -919,6 +923,9 @@ export function networkChecks(report, session, label) {
     () =>
       `refused at the listener gate (a listener changed, or the gate could not be verified): ${lost.slice(0, 5).join(", ")}`,
   );
+  return (
+    !strays.length && !refused.length && proxy.forwarded > 0 && !lost.length
+  );
 }
 
 /** The `GET /api/system/extensions` row of the contribution, or a problem. */
@@ -949,17 +956,6 @@ async function extensionsRow(response, contribution) {
   };
 }
 
-/** Saves the page's screenshot into the sandbox; returns the path. */
-async function keepScreenshot(m, page, name) {
-  try {
-    const file = path.join(m.sandbox.root, `${name}.png`);
-    m.sandbox.writeFile(file, await page.screenshot({ timeout: 10_000 }));
-    return file;
-  } catch (error) {
-    return `(no screenshot: ${error.message})`;
-  }
-}
-
 /** The session's console, kept in the sandbox only (redacted). */
 function keepConsole(m, session, name) {
   try {
@@ -987,7 +983,6 @@ async function entryRun(m, browsers, contribution) {
   const { report } = m;
   const run = await launchClone(m, "L3", "managed");
   let stopInfo = { launch: run.launch };
-  let session;
   try {
     if (!run.up) return false;
     const { service, ok } = await checkManagedService(m, run, "L3");
@@ -1003,44 +998,83 @@ async function entryRun(m, browsers, contribution) {
         )
       )
         return false;
-      const name = `L notebook ${hex(3)}`;
-      const created = await request(run.up.getProxied, "/api/notebooks", {
-        method: "POST",
-        token: a.token,
-        json: { name },
-      });
-      const notebookId = parsed(created)?.id;
-      if (
-        !report.check(
-          "L3 A creates a notebook through POST /api/notebooks -> 200 with its id",
-          created.status === 200 &&
-            typeof notebookId === "string" &&
-            notebookId,
-          `status ${created.status}, body ${tail(report.clean(created.body), 3)}`,
-        )
-      )
-        return false;
-      return { ...a, notebookId };
+      return createNotebook(m, run.up.getProxied, a);
     });
     if (!user) return false;
-    session = await browsers.open("L4", webGate(m, run.up, service.canvasPid));
-    if (!session) return false;
-    const verdict = await entryInBrowser(m, session, { user, contribution });
-    await browsers.close(session, 10_000, "L4");
-    networkChecks(report, session, "L4");
-    if (verdict.failed) {
-      keepConsole(m, session, "l4");
-      for (const file of verdict.screenshots)
-        report.info(
-          `L4 screenshot (in the sandbox; kept with --keep): ${file}`,
-        );
-    }
-    return user;
+    const browserVerdict = await checkEntry(
+      m,
+      browsers,
+      webGate(m, run.up, service.canvasPid),
+      user,
+      contribution,
+    );
+    return browserVerdict === undefined ? false : user;
   } finally {
-    if (session) await browsers.close(session, 10_000, "L4");
     run.stopWatch?.();
     await stopAll(m, "L5", stopInfo);
   }
+}
+
+export async function createNotebook(m, getProxied, a) {
+  const { report } = m;
+  const name = `L notebook ${hex(3)}`;
+  const created = await request(getProxied, "/api/notebooks", {
+    method: "POST",
+    token: a.token,
+    json: { name },
+  });
+  const notebookId = parsed(created)?.id;
+  if (
+    !report.check(
+      "L3 A creates a notebook through POST /api/notebooks -> 200 with its id",
+      created.status === 200 && typeof notebookId === "string" && notebookId,
+      `status ${created.status}, body ${tail(report.clean(created.body), 3)}`,
+    )
+  )
+    return false;
+  return { ...a, notebookId, notebookName: name };
+}
+
+export async function checkEntry(
+  m,
+  browsers,
+  gate,
+  user,
+  contribution,
+  label = "L4",
+) {
+  const session = await browsers.open(label, gate);
+  if (!session) return undefined;
+  try {
+    const verdict = await entryInBrowser(m, session, { user, contribution });
+    return await finishBrowserChecks(m, browsers, session, label, verdict);
+  } finally {
+    await browsers.close(session, 10_000, label);
+  }
+}
+
+// Capture before close. The proxy can still record a refusal during close.
+export async function finishBrowserChecks(
+  m,
+  browsers,
+  session,
+  label,
+  { failed, page, images, view },
+) {
+  images[view] = await page
+    .screenshot({ timeout: 10_000 })
+    .catch(() => undefined);
+  await browsers.close(session, 10_000, label);
+  const networkOk = networkChecks(m.report, session, label);
+  if (!failed && networkOk) return true;
+  const prefix = label.toLowerCase();
+  keepConsole(m, session, prefix);
+  for (const [name, image] of Object.entries(images))
+    if (image)
+      m.report.info(
+        `${label} screenshot (in the sandbox; kept with --keep): ${writeImage(m, `${prefix}-${name}`, image)}`,
+      );
+  return false;
 }
 
 /**
@@ -1057,13 +1091,6 @@ async function entryInBrowser(m, session, { user, contribution }) {
   let failed = false;
   const check = (name, condition, detail) => {
     if (!report.check(name, condition, detail)) failed = true;
-  };
-  // Written into the sandbox only when a check of this run fails.
-  const kept = async (panelImage) => {
-    const files = [];
-    if (panelImage) files.push(writeImage(m, "l4-side-panel", panelImage));
-    files.push(await keepScreenshot(m, page, "l4-canvas"));
-    return files;
   };
   const extensions = page
     .waitForResponse(
@@ -1100,8 +1127,8 @@ async function entryInBrowser(m, session, { user, contribution }) {
     !row.problem,
     row.problem,
   );
-  if (opened.error)
-    return { failed: true, screenshots: await kept(panelImage) };
+  const images = { "side-panel": panelImage };
+  if (opened.error) return { failed: true, page, images, view: "canvas" };
   // A new user's first notebook shows the Sources panel's one-time hint
   // (给阅读多留一点空间) over the tool row, where the entry is: dismissed as
   // the user would, with its own 知道了.
@@ -1149,8 +1176,7 @@ async function entryInBrowser(m, session, { user, contribution }) {
     bearers.some(Boolean),
     `${bearers.length} request(s) to /canvas/api/, none with A's token`,
   );
-  if (failed) return { failed, screenshots: await kept(panelImage) };
-  return { failed, screenshots: [] };
+  return { failed, page, images, view: "canvas" };
 }
 
 /** Writes a screenshot taken earlier into the sandbox; returns the path. */
@@ -1214,7 +1240,6 @@ async function rollbackRun(m, browsers, contribution, user) {
   const { report } = m;
   const run = await launchClone(m, "L7", "managed");
   let stopInfo = { launch: run.launch };
-  let session;
   try {
     if (!run.up) return false;
     const { service, ok } = await checkManagedService(m, run, "L7");
@@ -1231,19 +1256,44 @@ async function rollbackRun(m, browsers, contribution, user) {
       )
     )
       return false;
-    session = await browsers.open("L7", webGate(m, run.up, service.canvasPid));
-    if (!session) return false;
+    return await checkEntryAbsent(
+      m,
+      browsers,
+      webGate(m, run.up, service.canvasPid),
+      user,
+      contribution,
+    );
+  } finally {
+    run.stopWatch?.();
+    await stopAll(m, "L8", stopInfo);
+  }
+}
+
+export async function checkEntryAbsent(
+  m,
+  browsers,
+  gate,
+  user,
+  contribution,
+  label = "L7",
+) {
+  const { report } = m;
+  const session = await browsers.open(label, gate);
+  if (!session) return false;
+  try {
     await guardNetwork(session, { token: user.token });
     const page =
       session.context.pages()[0] ?? (await session.context.newPage());
     page.setDefaultTimeout(60_000);
-    const extensions = page
-      .waitForResponse(
-        (response) =>
-          new URL(response.url()).pathname === "/api/system/extensions",
-        { timeout: 60_000 },
-      )
-      .catch(() => undefined);
+    const extensions =
+      contribution &&
+      page
+        .waitForResponse(
+          (response) =>
+            new URL(response.url()).pathname === "/api/system/extensions",
+          { timeout: 60_000 },
+        )
+        .catch(() => undefined);
     const panel = await attempt(async () => {
       await page.goto(
         `http://127.0.0.1:${m.webPort}/#notebook=${user.notebookId}`,
@@ -1260,15 +1310,20 @@ async function rollbackRun(m, browsers, contribution, user) {
       !panel.error,
       panel.error,
     );
-    const seen = await extensions;
-    const row = seen
-      ? await extensionsRow(seen, contribution)
-      : { problem: "no response observed" };
-    report.check(
-      "L7 GET /api/system/extensions still holds the entry's row, available (only the UI package was removed)",
-      !row.problem,
-      row.problem,
-    );
+    if (contribution) {
+      const seen = await extensions;
+      const row = seen
+        ? await extensionsRow(seen, contribution)
+        : { problem: "no response observed" };
+      if (
+        !report.check(
+          "L7 GET /api/system/extensions still holds the entry's row, available (only the UI package was removed)",
+          !row.problem,
+          row.problem,
+        )
+      )
+        failed = true;
+    }
     if (!panel.error) {
       let shown = 0;
       const until = Date.now() + 3000;
@@ -1290,17 +1345,13 @@ async function rollbackRun(m, browsers, contribution, user) {
       )
         failed = true;
     }
-    if (failed)
-      report.info(
-        `L7 screenshot (in the sandbox; kept with --keep): ${await keepScreenshot(m, page, "l7-side-panel")}`,
-      );
-    await browsers.close(session, 10_000, "L7");
-    networkChecks(report, session, "L7");
-    if (failed) keepConsole(m, session, "l7");
-    return true;
+    return await finishBrowserChecks(m, browsers, session, label, {
+      failed,
+      page,
+      images: {},
+      view: "side-panel",
+    });
   } finally {
-    if (session) await browsers.close(session, 10_000, "L7");
-    run.stopWatch?.();
-    await stopAll(m, "L8", stopInfo);
+    await browsers.close(session, 10_000, label);
   }
 }

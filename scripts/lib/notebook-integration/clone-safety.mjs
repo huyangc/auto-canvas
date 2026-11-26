@@ -27,6 +27,22 @@ const WRITE_PATHS = [
   "frontend/.local",
 ];
 
+/** The packer's git changes may only be normal build products. */
+export function unexpectedPackChanges(git) {
+  const files = [
+    ...git(["diff", "--name-only", "-z", "HEAD"]).split("\0"),
+    ...git(["ls-files", "--others", "--directory", "-z"]).split("\0"),
+  ];
+  return files.filter(
+    (file) =>
+      file &&
+      ![
+        ...WRITE_PATHS.filter((p) => p.startsWith("frontend/")),
+        "frontend/node_modules",
+      ].some((p) => file === p || file.startsWith(p + "/")),
+  );
+}
+
 // The generated files among them: each must be a regular file when present.
 const GENERATED_FILES = [
   "frontend/next-env.d.ts",

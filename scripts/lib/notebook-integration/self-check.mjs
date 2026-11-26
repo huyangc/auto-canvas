@@ -56,6 +56,8 @@ import {
 import {
   TOKEN_KEY,
   browserSessions,
+  closeLaunchedContext,
+  finishBrowserChecks,
   forwardingProxy,
   guardNetwork,
   networkChecks,
@@ -125,6 +127,12 @@ async function makeClone(sandbox, name, { files = {}, links = {} }) {
 }
 
 export async function stageS({ sandbox, report }) {
+  await lateContextControl(report);
+  await lostPollBoundControl(report, true);
+  await networkDiagnosticsControl(sandbox, report);
+  setupSnippetControl(report);
+  removalSnippetControl(report);
+
   const outside = path.join(sandbox.root, "self-check", "outside");
   sandbox.makeDir(outside, { recursive: true });
   const outsideFile = path.join(outside, "target.txt");
@@ -3796,11 +3804,15 @@ async function launchShutdownControl(sandbox, report) {
   const results = {};
   const gate = { webPort: 1, held: () => false }; // never forwards
   try {
-    {
+    for (const late of [false, true]) {
       let closedContext = false;
       let exited = false;
       let settledAt;
-      const launch = ({ profile }) => {
+      let connecting = false;
+      const launch = async ({ profile }) => {
+        connecting = true;
+        // No profile pid exists when the close budget expires.
+        if (late) await sleep(600);
         const child = spawn(
           process.execPath,
           [
@@ -3813,7 +3825,7 @@ async function launchShutdownControl(sandbox, report) {
         );
         started.push(child.pid);
         child.once("exit", () => (exited = true));
-        return sleep(1500).then(() => {
+        return sleep(900).then(() => {
           settledAt = Date.now();
           return {
             pages: () => [],
@@ -3830,12 +3842,11 @@ async function launchShutdownControl(sandbox, report) {
         { launch, dir: path.join(sandbox.root, "self-check", "launching") },
       );
       const opening = browsers.open("S launching:", gate);
-      await waitFor(() => started.length === 1, 10_000, 20);
-      await sleep(300); // the launch is connecting
-      await browsers.closeOpen(8000);
+      await waitFor(() => connecting, 10_000, 20);
+      await browsers.closeOpen(late ? 50 : 8000);
       const closedAt = Date.now();
       const opened = await opening;
-      results.launching = {
+      results[late ? "lateLaunch" : "launching"] = {
         session: opened === undefined ? "none" : "returned",
         closedContext,
         waitedForTheStart: settledAt !== undefined && closedAt >= settledAt,
@@ -3920,10 +3931,15 @@ async function launchShutdownControl(sandbox, report) {
   } finally {
     for (const pid of started) endOwn(pid);
   }
-  const { launching, early, closing } = results;
+  const { launching, lateLaunch, early, closing } = results;
   report.check(
     "S T165 round 2: a shutdown during the browser's launch waits for it and closes what it made (no session, the context closed, its process gone); one while the proxy starts, or after, launches nothing; round 4: one during a normal close waits for that close to end",
     launching?.session === "none" &&
+      lateLaunch?.session === "none" &&
+      lateLaunch.closedContext &&
+      lateLaunch.waitedForTheStart &&
+      lateLaunch.processGone &&
+      lateLaunch.lines.fail.length === 0 &&
       launching.closedContext &&
       launching.waitedForTheStart &&
       launching.processGone &&
@@ -3950,7 +3966,6 @@ async function launchShutdownControl(sandbox, report) {
 async function t165Round4Controls(sandbox, report) {
   await gateFailureControl(sandbox, report);
   await lostPollBoundControl(report);
-  removalSnippetControl(report);
 }
 
 /**
@@ -4093,7 +4108,7 @@ async function gateFailureControl(sandbox, report) {
  * looked up or dropped), and the created database's drop is still sent, on
  * a new connection, with the session's full 3 s step.
  */
-async function lostPollBoundControl(report) {
+async function lostPollBoundControl(report, sessionShorter = false) {
   const ledger = databaseLedger({ settleMs: 100 });
   const made = "auto_canvas_it_ctl_bound_made";
   const lost = "auto_canvas_it_ctl_bound_lost";
@@ -4132,9 +4147,13 @@ async function lostPollBoundControl(report) {
   const rec = recordingReporter();
   await dropDatabases({
     databases: ledger,
-    admin: adminSession({ open, stepMs: 3000, budgetMs: 9000 }),
+    admin: adminSession({
+      open,
+      stepMs: 3000,
+      budgetMs: sessionShorter ? 1000 : 9000,
+    }),
     report: rec.report,
-    lostBy: started + 400,
+    lostBy: started + (sessionShorter ? 4000 : 400),
   });
   const ended = Date.now() - started;
   const polls = asked.filter((entry) =>
@@ -4142,13 +4161,13 @@ async function lostPollBoundControl(report) {
   );
   const drops = asked.filter((entry) => entry.text.startsWith("DROP DATABASE"));
   report.check(
-    `S T165 round 4: a poll for a lost create is bounded by the time left until lostBy (the cleanup's database part ended after ${ended} ms), and the drop after it keeps its own bound`,
+    `S T165 round 4: a poll for a lost create is bounded by the earlier cleanup deadline (session shorter: ${sessionShorter}; the cleanup's database part ended after ${ended} ms), and the drop after it keeps its own bound`,
     polls.length >= 1 &&
-      polls.every((entry) => entry.timeout <= 400) &&
+      polls.every((entry) => entry.timeout <= (sessionShorter ? 800 : 400)) &&
       ended < 2000 &&
       drops.length === 1 &&
       drops[0].text === `DROP DATABASE IF EXISTS ${made} WITH (FORCE)` &&
-      drops[0].timeout > 2500 &&
+      drops[0].timeout > (sessionShorter ? 0 : 2500) &&
       drops[0].connection === 2 &&
       !asked.some(
         (entry) => entry.text.startsWith("DROP") && entry.text.includes(lost),
@@ -4180,6 +4199,7 @@ function removalSnippetControl(report) {
     [`/a/one:${canvas}:/b/two`, "/a/one:/b/two"],
     ["/a/one:/b/two:/c/three", "/a/one:/b/two:/c/three"],
     [`${canvas}:/a/one:${canvas}`, "/a/one"],
+    [` /a/one : ${canvas}/ :${canvas}/../auto-canvas`, " /a/one "],
     [undefined, "<unset>"],
   ];
   const seen = cases.map(([value, want]) => {
@@ -4222,7 +4242,6 @@ async function t165Round6Controls(sandbox, report) {
   await webrtcUdpControl(sandbox, report);
   await controlBrowserDisposalControl(sandbox, report);
   await guardGroupControl(report);
-  setupSnippetControl(report);
 }
 
 /** Ports a control never binds, on any protocol (the owner's). */
@@ -4487,6 +4506,8 @@ function setupSnippetControl(report) {
     ["/a/one", [setup], `/a/one:${canvas}`],
     ["/a/one", [setup, setup], `/a/one:${canvas}`],
     [canvas, [setup, setup], canvas],
+    [` ${canvas}/ `, [setup, setup], ` ${canvas}/ `],
+    [`${canvas}/../auto-canvas`, [setup, removal], "<not exported>"],
     [`/a/one:${canvas}:/b/two`, [setup], `/a/one:${canvas}:/b/two`],
     ["/a/one:/b/two", [setup, setup, removal], "/a/one:/b/two"],
     [undefined, [setup, setup, removal], "<not exported>"],
@@ -4526,4 +4547,87 @@ function setupSnippetControl(report) {
       seen.every((entry) => entry.ok),
     () => JSON.stringify({ found: Boolean(setup), seen }),
   );
+}
+
+async function networkDiagnosticsControl(sandbox, report) {
+  const label = "S-network-diagnostics";
+  const dir = path.join(sandbox.root, "network-diagnostics");
+  sandbox.makeDir(dir);
+  const rec = recordingReporter();
+  const m = {
+    sandbox: { ...sandbox, root: dir },
+    report: { ...rec.report, clean: (text) => text },
+  };
+  const session = {
+    lost: [],
+    blocked: [],
+    console: ["browser console"],
+    proxy: { forwarded: 1, refused: [] },
+  };
+  let closed = false;
+  const browsers = {
+    close: async () => {
+      closed = true;
+      session.lost.push("late listener change");
+    },
+  };
+  const page = {
+    screenshot: async () => {
+      if (closed) throw new Error("context already closed");
+      return Buffer.from("canvas image");
+    },
+  };
+  const passed = await finishBrowserChecks(m, browsers, session, label, {
+    failed: false,
+    page,
+    images: { "side-panel": Buffer.from("panel image") },
+    view: "canvas",
+  });
+  const read = (suffix) =>
+    sandbox.readFile(path.join(dir, label.toLowerCase() + suffix), "utf8");
+  report.check(
+    "S T167 a network-only failure during browser close retains both pre-close screenshots and the console",
+    !passed &&
+      rec.lines.fail.length === 1 &&
+      read("-side-panel.png") === "panel image" &&
+      read("-canvas.png") === "canvas image" &&
+      read("-console.log") === "browser console",
+    () => JSON.stringify(rec.lines),
+  );
+}
+
+// The launch creates its first child after the deadline. Verify with the
+// child's own exit event, independently of Chrome and process-table access.
+async function lateContextControl(report) {
+  const session = {};
+  let child;
+  let exited = false;
+  let closed = false;
+  session.starting = sleep(100).then(() => {
+    child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1e9)"], {
+      stdio: "ignore",
+    });
+    child.once("exit", () => {
+      exited = true;
+    });
+    session.context = {
+      close: async () => {
+        closed = true;
+        child.kill();
+      },
+    };
+  });
+  try {
+    await closeLaunchedContext(session, Date.now() + 10);
+    const owned = closed;
+    await session.starting;
+    report.check(
+      "S T167 closing owns a late launch until its context closes and its child exits",
+      owned && (await waitFor(() => exited, 2000, 20)),
+      "close returned before disposing the pending launch",
+    );
+  } finally {
+    await session.starting;
+    if (!exited) child.kill("SIGKILL");
+  }
 }

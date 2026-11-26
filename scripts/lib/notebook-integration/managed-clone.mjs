@@ -406,6 +406,7 @@ export async function runExtensionStop({
   python,
   label,
   timeoutMs = 40_000,
+  env = sandbox.env({ PYTHON_BIN: python }, { envFile: false }),
 }) {
   const name = `${label} extension_services.py stop ends the companion services`;
   const scripts = path.join(nb, "scripts");
@@ -422,7 +423,7 @@ export async function runExtensionStop({
   }
   const result = await runBounded(python, [script, "stop"], {
     cwd: nb,
-    env: sandbox.env({ PYTHON_BIN: python }, { envFile: false }),
+    env,
     timeoutMs,
   });
   return report.check(
@@ -437,7 +438,7 @@ export async function runExtensionStop({
  * Builds a Project text of `count` resistors (three by default) with the
  * canvas's own packages.
  */
-async function projectTextBuilder() {
+export async function projectTextBuilder() {
   const serverRequire = createRequire(
     path.join(repo, "apps/server/package.json"),
   );
@@ -462,10 +463,20 @@ async function projectTextBuilder() {
 }
 
 /** The extensions TOML variants, derived from the shipped examples. */
-function tomlVariants({ apiPort, canvasPort, envFile, logFile }) {
+export function tomlVariants({
+  apiPort,
+  canvasPort,
+  envFile,
+  logFile,
+  canvasRoot = repo,
+  node = process.execPath,
+}) {
   const string = (value) => JSON.stringify(value);
   const derive = (file, replacements) => {
-    let text = fs.readFileSync(path.join(integration, file), "utf8");
+    let text = fs.readFileSync(
+      path.join(canvasRoot, "integrations/silicon-notebook", file),
+      "utf8",
+    );
     for (const [from, to] of replacements) {
       if (text.split(from).length !== 2)
         throw new Error(`${file} no longer holds ${from} exactly once`);
@@ -487,7 +498,7 @@ function tomlVariants({ apiPort, canvasPort, envFile, logFile }) {
   const healthcheck = `http://127.0.0.1:${canvasPort}/@notebook/canvas/api/integration/ready.json`;
   return {
     managed: derive("extensions.example.toml", [
-      ['cwd = "/opt/auto-canvas"', `cwd = ${string(repo)}`],
+      ['cwd = "/opt/auto-canvas"', `cwd = ${string(canvasRoot)}`],
       [
         'healthcheck_url = "http://127.0.0.1:4310/@notebook/canvas/api/integration/ready.json"',
         `healthcheck_url = ${string(healthcheck)}\nshutdown_timeout_seconds = 2`,
@@ -504,7 +515,7 @@ function tomlVariants({ apiPort, canvasPort, envFile, logFile }) {
         'AUTO_CANVAS_PORT = "4310"',
         `AUTO_CANVAS_PORT = ${string(String(canvasPort))}\n` +
           `AUTO_CANVAS_LOG_FILE = ${string(logFile)}\n` +
-          `AUTO_CANVAS_NODE = ${string(process.execPath)}`,
+          `AUTO_CANVAS_NODE = ${string(node)}`,
       ],
     ]),
     external: derive("extensions.external.example.toml", [
@@ -626,9 +637,9 @@ export function managedState({
   notebook,
   options,
   stage,
+  nb = path.join(sandbox.root, "nb"),
 }) {
   const started = Date.now();
-  const nb = path.join(sandbox.root, "nb");
   const m = {
     sandbox,
     report,
@@ -795,6 +806,10 @@ export function adminSession({
     if (stale) void closeClient(stale);
   };
   return {
+    reconciliationDeadline() {
+      deadline ??= now() + budgetMs;
+      return Math.min(deadline, ceiling) - Math.min(5000, budgetMs / 4);
+    },
     limitTo(at) {
       ceiling = Math.min(ceiling, at);
     },
@@ -1087,7 +1102,11 @@ export async function dropDatabases({
     if (unresolved.length) {
       const names = (entries) => entries.map((entry) => entry.name).join(", ");
       try {
-        const running = await lostCreatesRunning(admin, unresolved, lostBy);
+        const running = await lostCreatesRunning(
+          admin,
+          unresolved,
+          Math.min(lostBy, admin.reconciliationDeadline?.() ?? Infinity),
+        );
         if (running.size)
           report.fail(
             "cleanup: the CREATE DATABASE whose answer was lost has ended",
@@ -1154,46 +1173,8 @@ export async function dropDatabases({
 
 // ---- Set-up: the clone, the databases, the files, the first build -----------
 
-/**
- * The set-up (stage M's M0 and M1): the clone at `--ref` with its refusals
- * and modules, three ports, the databases (`names`, keyed by kind: `canvas`
- * always, `standalone` for stage M), the clone's `.env` and the extensions
- * TOML, `init-db.sh`, and the first build with both rewrite targets and the
- * `buildEnv` given. `notebookEnv` ([key, value] pairs) replaces the
- * `.env`'s notebook database line when given (stage L keeps the notebook's
- * data outside `.local`, so a relaunch finds the same users and notebooks).
- * Returns false after a reported failure.
- */
-export async function setUp(
-  m,
-  { buildEnv = {}, buildLabel, notebookEnv, what },
-) {
-  const { sandbox, report, secrets, nb, stage } = m;
-  const revision = await cloneRevision({
-    sandbox,
-    report,
-    notebook: m.notebook,
-    nb,
-    ref: m.options.ref,
-  });
-  if (!revision) return false;
-  const { git, candidate } = revision;
-  const written = [];
-  const { refuseUnsafeClone } = cloneGuards({ sandbox, report, nb, written });
-  m.refuseUnsafeClone = refuseUnsafeClone;
-  refuseUnsafeStart({ nb, refuseUnsafeClone, report });
-  if (
-    !(await copyModules({
-      sandbox,
-      report,
-      notebook: m.notebook,
-      nb,
-      git,
-      candidate,
-    }))
-  )
-    return false;
-
+export async function choosePorts(m) {
+  const { sandbox, report } = m;
   // Ports, never 3000, 8000 or 4310 (freePort refuses them).
   m.apiPort = await sandbox.freePort();
   m.webPort = await sandbox.freePort();
@@ -1203,7 +1184,10 @@ export async function setUp(
   report.info(
     `ports: api ${m.apiPort}, web ${m.webPort}, canvas ${m.canvasPort}`,
   );
+}
 
+export async function createDatabases(m) {
+  const { stage, secrets, report } = m;
   // Databases: the canvas's, and (stage M) the standalone canvas's of M-ext.
   // Each name is recorded only once it was created.
   const base = `auto_canvas_it_${stage.toLowerCase()}_${hex(6)}`;
@@ -1244,6 +1228,52 @@ export async function setUp(
     )
       return false;
   }
+
+  return true;
+}
+
+/**
+ * The set-up (stage M's M0 and M1): the clone at `--ref` with its refusals
+ * and modules, three ports, the databases (`names`, keyed by kind: `canvas`
+ * always, `standalone` for stage M), the clone's `.env` and the extensions
+ * TOML, `init-db.sh`, and the first build with both rewrite targets and the
+ * `buildEnv` given. `notebookEnv` ([key, value] pairs) replaces the
+ * `.env`'s notebook database line when given (stage L keeps the notebook's
+ * data outside `.local`, so a relaunch finds the same users and notebooks).
+ * Returns false after a reported failure.
+ */
+export async function setUp(
+  m,
+  { buildEnv = {}, buildLabel, notebookEnv, what },
+) {
+  const { sandbox, report, secrets, nb, stage } = m;
+  const revision = await cloneRevision({
+    sandbox,
+    report,
+    notebook: m.notebook,
+    nb,
+    ref: m.options.ref,
+  });
+  if (!revision) return false;
+  const { git, candidate } = revision;
+  const written = [];
+  const { refuseUnsafeClone } = cloneGuards({ sandbox, report, nb, written });
+  m.refuseUnsafeClone = refuseUnsafeClone;
+  refuseUnsafeStart({ nb, refuseUnsafeClone, report });
+  if (
+    !(await copyModules({
+      sandbox,
+      report,
+      notebook: m.notebook,
+      nb,
+      git,
+      candidate,
+    }))
+  )
+    return false;
+
+  await choosePorts(m);
+  if (!(await createDatabases(m))) return false;
 
   // The stage's own files: <clone>/.env (recorded with its hash, so the
   // clone refusals accept exactly it) and the extensions TOML.
@@ -1348,7 +1378,7 @@ export async function setUp(
  * reported failure.
  */
 export async function buildWithTarget(m, { label, name, extra = {}, what }) {
-  const { sandbox, report } = m;
+  const { report } = m;
   const built = await m.build(
     {
       BACKEND_PROXY_TARGET: m.api,
@@ -1366,22 +1396,31 @@ export async function buildWithTarget(m, { label, name, extra = {}, what }) {
     )
   )
     return false;
-  const manifest = readManifest(m.frontend, sandbox.readFile);
+  return checkRoutes(m, m.frontend, label, true);
+}
+
+export function checkRoutes(m, frontend, label, paired) {
+  const { sandbox, report } = m;
+  const manifest = readManifest(frontend, sandbox.readFile);
   const rules = expectRewrites(
     report,
-    `${label} the build holds the four rules`,
+    `${label} the build holds the ${paired ? "four" : "two default"} rules`,
     manifest,
     [
       ...todaysRules(m.api),
-      {
-        source: "/canvas",
-        destination: `${m.canvasOrigin}/@notebook/canvas/`,
-      },
-      {
-        sourceMatches: (source) =>
-          source.startsWith("/canvas/:path(") && source.endsWith(")*"),
-        destination: `${m.canvasOrigin}/@notebook/canvas/:path*`,
-      },
+      ...(paired
+        ? [
+            {
+              source: "/canvas",
+              destination: `${m.canvasOrigin}/@notebook/canvas/`,
+            },
+            {
+              sourceMatches: (source) =>
+                source.startsWith("/canvas/:path(") && source.endsWith(")*"),
+              destination: `${m.canvasOrigin}/@notebook/canvas/:path*`,
+            },
+          ]
+        : []),
     ],
   );
   const destinations = expectDestinations(
@@ -1682,6 +1721,13 @@ export async function stopAll(
   const { sandbox, report } = m;
   const launchStopped = await stopLaunch({ sandbox, report, label, launch });
   await m.extensionStop(label);
+  const ended = await checkStoppedServices(m, label, canvasPids, canvasGroup);
+  if (!launchStopped || !ended)
+    throw new StageAborted(`${label}: the clone did not stop completely`);
+}
+
+export async function checkStoppedServices(m, label, canvasPids, canvasGroup) {
+  const { sandbox, report } = m;
   const watched = canvasPids.filter((pid) => pid > 0);
   const ports = [m.apiPort, m.webPort, m.canvasPort];
   const done = () =>
@@ -1695,8 +1741,7 @@ export async function stopAll(
     () =>
       `alive: ${watched.filter(pidAlive).join(", ") || "none"}; group ${canvasGroup} alive ${canvasGroup > 0 && groupAlive(canvasGroup)}; listeners ${ports.map((port) => `${port}: [${sandbox.listenerPids(port)}]`).join(", ")}`,
   );
-  if (!launchStopped || !ended)
-    throw new StageAborted(`${label}: the clone did not stop completely`);
+  return ended;
 }
 
 /**
@@ -1735,7 +1780,13 @@ export async function register(m, getProxied, letter) {
   });
   const body = parsed(res);
   if (body?.token) m.secrets.push(body.token);
-  return { status: res.status, token: body?.token, id: body?.user?.id };
+  return {
+    status: res.status,
+    token: body?.token,
+    id: body?.user?.id,
+    username,
+    password,
+  };
 }
 
 /**

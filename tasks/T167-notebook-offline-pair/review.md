@@ -1,0 +1,29 @@
+# T167 review
+
+## Round 1 — changes-requested
+
+Reviewed: Codex round 1 (`gpt-6.2-astra`, STATUS: partial — the sandbox
+denied loopback and PostgreSQL), its uncommitted diff, and Opus's rerun of
+every acceptance command outside the sandbox (`/tmp/claude-review/t167-review.sh 1`,
+logs in `/tmp/claude-review/t167-r1/`). Two plan changes in this round (see
+plan.md): the offline text says nothing about databases (the owner's
+decision of 2026-11-25), and the readiness probe is `/api/ready`.
+
+Rerun results: build, notebook build, launcher and package unit tests,
+typecheck, lint, format, docs, deadcode 0; canvas package and its check 0
+(21 of 21); stage S 0 (101 passed); stage M 0 (114 passed); stage L 0 (89
+passed); `pnpm test:local` 0 (852 files); 0 leftover databases; the notebook
+checkout unchanged. **Stage P exit 1 (45 passed, 1 failed)** after 1,610 s,
+3.1 GB in the sandbox: all four packs (default, canvas, canvas-next,
+companion) and their rewrite checks pass, P1 installs and starts the
+default package, then `P1 GET /api/health -> 200` fails with **401**, and
+the stage stops; P2–P4 never ran.
+
+| # | Severity | Where | Finding | Expected fix |
+| --- | --- | --- | --- | --- |
+| 1 | must-fix | `scripts/lib/notebook-integration/stage-p.mjs` (`:274-277`, and P4) | A packaged silicon-notebook answers `/api/health` 401 without a session; its documented readiness probe is `/api/ready` (`packaging/DEPLOY.md:59, 228, 248`; `backend/app/main.py:590`). | P1 and P4 probe `GET /api/ready` → 200 (the plan now says so); keep the `/canvas` 404 check. Then make sure P2–P4 are complete as the plan describes (they never ran here). |
+| 2 | must-fix | `integrations/silicon-notebook/README.md`, "Offline installation…" and "Upgrades and switching back" | The owner decided (2026-11-25) that the offline installation, upgrade and switch-back text says nothing about databases beyond what installing needs: no backup, restore, pairing or migration. The section has "Stop the notebook and back up its database and the canvas database together. Restore them as a pair. Restoring just one is unsupported.", "keep the existing canvas database URL … The canvas applies pending migrations at startup.", "Keep the canvas database and directory for reuse." | Remove those sentences (and any like them in `docs/testing/README.md`'s stage P text). Installation keeps creating the canvas database and running `init-db.sh` (needed to install). The switch-back says the canvas directory is left in place. silicon-notebook's own documents stay linked for everything else. |
+| 3 | note | stage P | Duration about 27 minutes and 3.1 GB of sandbox for the build phase alone; recorded for `docs/testing/README.md`'s stage P section (what it needs). | State the measured time and disk there (the reviewer's figures above, updated after a full run). |
+
+The four T165 follow-ups and their controls pass in stage S (101 checks).
+The reviewer runs stage P again after this round; Codex cannot (no network).

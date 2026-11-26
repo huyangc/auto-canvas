@@ -230,6 +230,8 @@ rules that serve auto-canvas under silicon-notebook's Next.js server at
   silicon-notebook's own plugin guards on it, and proves the entry link
   **打开电路画布** in a browser, then its removal
   ([below](#stage-l-the-entry-link-in-a-browser)).
+- [Stage P](#stage-p-paired-offline-packages) packs on a networked build host and
+  checks install, upgrade and rollback on an offline site.
 
 ```bash
 node scripts/notebook-integration-check.mjs --stage T --notebook <notebook checkout>
@@ -241,7 +243,7 @@ node scripts/notebook-integration-check.mjs --stage L --notebook <notebook check
   --ref <full commit SHA> --python <interpreter with the backend dependencies>
 ```
 
-Everything is built and started in a temporary directory the script creates
+Stages T, A, M and L build and start everything in a temporary directory the script creates
 (`--keep` leaves it). The notebook checkout is only read: the script clones its
 git repository and copies, never uses in place, its installed
 `frontend/node_modules`; Node children run offline behind a guard. Stage A
@@ -605,3 +607,36 @@ and what it made closed, a close already under way is waited for until it
 has ended, and no browser starts once the shutdown began.
 After an interrupt while the browser launches or is open, the run exits 130
 with no browser process, companion or `auto_canvas_it_*` database left.
+
+### Stage P: paired offline packages
+
+Run P on demand when either package, its launcher, the notebook upgrade path
+or the [offline instructions](../../integrations/silicon-notebook/README.md#offline-installation-with-silicon-notebooks-offline-package)
+change. Run the canvas builds first. Use the same PostgreSQL lane and system Chrome
+as M and L. The full notebook clone needs the Node major in its `.nvmrc`,
+npm, curl, a C++ compiler and Python 3.13 or newer with pip and venv.
+The same Python packs and installs the notebook wheels. `--package-python`
+defaults to that interpreter and needs pip and setuptools 68+ for the canvas wheel.
+
+```bash
+node scripts/notebook-integration-check.mjs --stage P --notebook "$NB" \
+  --ref "$(git -C "$NB" rev-parse origin/master)" --python "$PY" --package-python "$PKG_PY"
+```
+
+A complete P0–P4 run took 35 minutes and measured 5.6 GiB in the sandbox
+before cleanup. External caches are excluded from that size. The stage
+prints both measurements for each run. The three notebook packs may reach the npm
+registry, nodejs.org and PyPI. The stage downloads portable Node once.
+Optionally pass `--cache <directory>` for persistent npm and pip caches
+outside either checkout. Default caches are temporary.
+
+The site receives only the tarballs. It uses packaged Node, a system-utility
+PATH, the offline guard and offline pip settings. P1 checks that the default
+notebook serves `/api/ready` with HTTP 200 and `/canvas` with an HTML 404.
+P2 installs the pair, runs M's two-user checks and clicks the notebook entry.
+P3 checks the missing-wheel refusal, upgrades with the wheel, then reopens the
+saved project and clicks the entry. P4 applies the default package, repeats
+the P1 probes, signs A back in and opens the original notebook without its
+entry. Each launch ends with the package's `stop.sh`. The line
+`P1 site phase begins (offline)` marks the start of the site interrupt check.
+Use `--keep` for local diagnosis.
