@@ -13,7 +13,9 @@ for a capable engineer who has never seen this conversation.
    base as described in the [workflow](../../../docs/workflow.md#并行任务).
    Record the path and branch at creation. Use the existing task worktree
    for a continuation, or the checkout explicitly chosen by the developer.
-   Copy `tasks/_template/plan.md` in that worktree.
+   Before writing the plan in a developer-selected checkout, create or verify
+   its dedicated task branch without disturbing existing work. Record whether
+   the checkout was supplied or task-created. Copy `tasks/_template/plan.md` there.
 2. **Investigate before writing.** Read the code the request touches. Record
    in Context the facts that matter: entry points, importers of what will
    change (`grep -rn` the symbol), generated files and their generators,

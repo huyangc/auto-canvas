@@ -48,7 +48,8 @@ The implementer's report (and a Codex round's final `STATUS:` line) are
 claims. Establish the facts
 yourself:
 
-1. `git status --short` and `git diff --stat main`: every changed path is in
+1. Run `git status --short` and `git diff --stat <planned-base-commit>`. Use
+   that task base for the full diff below as well. Every changed path is in
    the plan's owned paths; nothing in plan.md or review.md changed; no
    lockfile or dependency change unless planned.
 2. For a Codex round, read the timeline:
