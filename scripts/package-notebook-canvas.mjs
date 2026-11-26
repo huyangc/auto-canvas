@@ -22,11 +22,19 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+} from "node:path";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 import {
@@ -187,6 +195,19 @@ export function parseArgs(argv) {
   // Let the OS traverse symlinks before it interprets a following "..".
   if (options.python.includes("/") && !isAbsolute(options.python))
     options.python = `${process.cwd()}/${options.python}`;
+  if (
+    !options.python.endsWith("/") &&
+    options.python.split("/").includes("..")
+  ) {
+    // CPython rebuilds sys.executable for pip's backend subprocess. Resolve the
+    // directory physically, leaving the executable symlink that selects a venv.
+    try {
+      const parent = realpathSync.native(dirname(options.python));
+      options.python = join(parent, basename(options.python));
+    } catch (error) {
+      fail(2, `the interpreter ${options.python}: ${error.message}`);
+    }
+  }
   return options;
 }
 
