@@ -68,3 +68,14 @@ the first launch. For a plugin-version upgrade it keeps services stopped
 until the new wheel, matching UI, and service path are in place. It names
 the new wheelhouse for the upgrader's version-pinned reinstall. The stage
 prerequisites also describe the wheel dependency for older setuptools.
+
+## Independent PR review, round 4
+
+- The cache exclusion compares filesystem identities along directory
+  ancestors, including when a requested cache has missing path components.
+- Each package launch checks the configured ports immediately before starting
+  the launcher. Paired launches check the canvas port as well.
+- The offline operator's Bash snippets stop on a failed command before
+  proceeding to the next service start.
+- The owner of the notebook installer has a separate proposed fix for its
+  shared diagnostic file in [silicon-notebook PR #1079](https://github.com/huyangc/silicon-notebook/pull/1079).

@@ -636,7 +636,8 @@ The notebook package at revision `b5850d6` directs its Python venv
 diagnostics to `/tmp/sn_venv_err`, including during a successful install.
 This file is shared across installs on the host and can survive stage cleanup.
 Use an isolated build/test host for this revision when concurrent runs or
-per-run isolation matter. The installer in the notebook package owns this path.
+per-run isolation matter. [The upstream installer fix](https://github.com/huyangc/silicon-notebook/pull/1079)
+removes the shared file and sends diagnostics to the calling process.
 
 The site receives only the tarballs. It uses packaged Node, a system-utility
 PATH, the offline guard and offline pip settings. P1 checks that the default
