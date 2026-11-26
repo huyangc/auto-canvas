@@ -205,21 +205,6 @@ describe("drawing intents", () => {
       expect(drawingSwitchBlocked(inside(markup)), markup).toBe(true);
   });
 
-  it("blocks the switch from the tab strip's open Shelf picker", () => {
-    document.body.innerHTML =
-      '<details class="project-tabs-shelf" open><summary id="summary">▾</summary>' +
-      '<div><button id="project">Amp</button></div></details>';
-    for (const id of ["summary", "project"])
-      expect(drawingSwitchBlocked(document.querySelector(`#${id}`)), id).toBe(
-        true,
-      );
-    // Closed, its summary is an ordinary strip button.
-    document.querySelector("details")!.removeAttribute("open");
-    expect(drawingSwitchBlocked(document.querySelector("#summary"))).toBe(
-      false,
-    );
-  });
-
   it("does not let an open non-modal overlay block keys pressed elsewhere", () => {
     document.body.innerHTML =
       '<div role="dialog" aria-modal="false"><button>All</button></div>' +

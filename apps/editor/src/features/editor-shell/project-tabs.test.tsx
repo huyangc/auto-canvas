@@ -25,11 +25,7 @@ function props(
     onCloseMany: vi.fn(),
     onNew: vi.fn(),
     onOpenFile: vi.fn(),
-    cloudProjects: [],
-    onShelfOpened: vi.fn(),
-    onOpenShelf: vi.fn(),
-    onRenameShelf: vi.fn(async () => {}),
-    onDeleteShelf: vi.fn(async () => {}),
+    onOpenCloudProjects: vi.fn(),
   };
 }
 
@@ -149,5 +145,21 @@ describe("ProjectTabs", () => {
     expect(field()).toBeNull();
     expect(two.onEditingChange).toHaveBeenLastCalledWith(false);
     expect(two.onRename).toHaveBeenCalledWith("a", "Alpha renamed");
+  });
+
+  it("opens Cloud Projects directly from the tab strip button when cloud is enabled", async () => {
+    const two = props([tab("a", "Alpha"), tab("b", "Beta")]);
+    const view = await mount(two);
+    const cloudBtn = view.host.querySelector<HTMLButtonElement>(
+      'button[aria-label="Open Cloud Project…"]',
+    );
+    expect(cloudBtn).not.toBeNull();
+    await act(async () => cloudBtn!.click());
+    expect(two.onOpenCloudProjects).toHaveBeenCalledTimes(1);
+
+    await view.render({ ...two, cloudEnabled: false });
+    expect(
+      view.host.querySelector('button[aria-label="Open Cloud Project…"]'),
+    ).toBeNull();
   });
 });

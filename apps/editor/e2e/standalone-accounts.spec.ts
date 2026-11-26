@@ -113,8 +113,11 @@ test("accounts reopen their saved drawing in another browser and isolate local d
     sibling.getByRole("heading", { name: "Workspace locked" }),
   ).toBeVisible();
   await expect(page.locator(".app-project-name-text")).toHaveText("Untitled");
-  const shelf = await projectTabAction(page, "Open Cloud Project…");
-  await expect(shelf.getByRole("button", { name, exact: true })).toHaveCount(0);
+  const dialog = await projectTabAction(page, "Open Cloud Project…");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("button", { name, exact: true })).toHaveCount(
+    0,
+  );
   await page.keyboard.press("Escape");
   await signOut(page);
   await enter(page, alice, false);
@@ -132,18 +135,12 @@ test("accounts reopen their saved drawing in another browser and isolate local d
   try {
     await fresh.goto(new URL("/editor", page.url()).href);
     await enter(fresh, alice.toLowerCase(), false);
-    await (
-      await projectTabAction(fresh, "Open Cloud Project…")
-    )
-      .getByRole("button", { name, exact: true })
-      .click();
+    const freshDialog = await projectTabAction(fresh, "Open Cloud Project…");
+    await expect(freshDialog).toBeVisible();
+    await freshDialog.getByRole("button", { name, exact: true }).click();
     await expect(fresh.locator(".app-project-name-text")).toHaveText(name);
     await expect(fresh.getByTestId("hit-R1")).toBeVisible();
-    await (
-      await projectTabAction(fresh, "Open Cloud Project…")
-    )
-      .getByRole("button", { name: "Browse Cloud Projects…" })
-      .click();
+    await projectTabAction(fresh, "Open Cloud Project…");
     await expect(
       fresh.getByRole("img", { name: "Preview of " + name }),
     ).toHaveAttribute("src", /^blob:/);

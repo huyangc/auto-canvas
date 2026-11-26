@@ -3,53 +3,251 @@
   color: var(--icm-text-muted);
   font-size: 13px;
 }
+
 .shelf-wall {
-  padding: 18px 22px;
   width: 100%;
   box-sizing: border-box;
 }
 
-.shelf-tile {
+.shelf-icon {
+  display: block;
+  flex: none;
+}
+
+/* Top toolbar: search, All / Favorites filter, count, and Grid / List toggle. */
+.shelf-count-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 14px;
+  margin: 0 0 14px;
+}
+
+.shelf-toolbar-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.shelf-toolbar-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.shelf-search-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1 1 180px;
+  max-width: 260px;
+  min-width: 140px;
+  color: var(--icm-text-muted);
+}
+
+.shelf-search-wrap > .shelf-icon {
+  position: absolute;
+  left: 9px;
+  pointer-events: none;
+}
+
+.shelf-search-input {
+  box-sizing: border-box;
+  width: 100%;
+  height: 30px;
+  padding: 0 26px 0 28px;
+  border: 1px solid var(--icm-border);
+  border-radius: 6px;
+  background: var(--icm-surface);
+  color: var(--icm-text);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.shelf-search-input:focus-visible {
+  outline: 2px solid var(--icm-accent);
+  outline-offset: -1px;
+}
+
+.shelf-search-input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.shelf-search-clear {
+  position: absolute;
+  right: 4px;
   display: grid;
-  grid-column: 1 / -1;
-  grid-row: 1 / 4;
-  grid-template-columns: subgrid;
-  grid-template-rows: subgrid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--icm-text-muted);
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.shelf-search-clear:hover {
+  color: var(--icm-text);
+  background: var(--icm-surface-hover);
+}
+
+.shelf-count {
+  margin: 0;
+  color: var(--icm-text-muted);
+  font-size: 0.85rem;
+}
+
+/* All | ♥ Favorites and Grid | List segmented controls. */
+.shelf-filter,
+.shelf-view-switch {
+  display: inline-flex;
+  flex: none;
+  border: 1px solid var(--icm-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.shelf-filter button,
+.shelf-view-switch button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 0;
+  color: var(--icm-text-muted);
+  background: var(--icm-surface);
+  box-shadow: none;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.shelf-view-switch button {
+  width: 30px;
+  padding: 0;
+}
+
+/* The group clips overflow, so the focus ring is drawn inside each segment. */
+.shelf-filter button:focus-visible,
+.shelf-view-switch button:focus-visible {
+  outline: 2px solid var(--icm-accent);
+  outline-offset: -2px;
+}
+
+.shelf-filter button + button,
+.shelf-view-switch button + button {
+  border-left: 1px solid var(--icm-border);
+}
+
+.shelf-filter button[aria-pressed="true"],
+.shelf-view-switch button[aria-pressed="true"] {
+  border-color: var(--icm-border);
+  color: var(--icm-text);
+  background: var(--icm-accent-soft);
+  box-shadow: none;
+}
+
+.shelf-filter button[aria-pressed="true"] span {
+  color: var(--icm-error);
+}
+
+.shelf-empty-filter {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 36px 20px;
+  border: 1px dashed var(--icm-border);
+  border-radius: var(--icm-radius-md, 10px);
+  color: var(--icm-text-muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.shelf-empty-filter p {
+  margin: 0;
+}
+
+.shelf-reset-filter {
+  padding: 6px 12px;
+  border: 1px solid var(--icm-border);
+  border-radius: 6px;
+  background: var(--icm-surface);
+  color: var(--icm-text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.shelf-reset-filter:hover {
+  background: var(--icm-surface-hover);
+}
+
+/* Grid (Card) view */
+.shelf-tile-wrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
   border: 1px solid var(--icm-border);
   border-radius: var(--icm-radius-md, 10px);
   background: var(--icm-surface);
   overflow: hidden;
-  text-decoration: none;
-  color: inherit;
   transition:
     border-color 120ms ease,
     box-shadow 120ms ease;
 }
 
-/* The card's link and its heart share one grid: the link spans every row
- * and column (its children land on the wrap's rows through subgrid), and the
- * heart, a sibling the link cannot contain, sits over the name's row in the
- * last column. The name keeps the first column, so a long name wraps before
- * the heart instead of running under it. Rows: preview, name, meta, rename. */
-.shelf-tile-wrap {
-  position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-rows: auto auto auto auto;
+.shelf-tile-wrap:hover {
+  border-color: var(--icm-border-hover, var(--icm-border-strong));
+  box-shadow: 0 4px 16px rgb(0 0 0 / 8%);
 }
 
-.shelf-tile:hover {
-  border-color: var(--icm-border-hover);
-  box-shadow: 0 4px 16px rgb(0 0 0 / 8%);
+.shelf-tile {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  text-decoration: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.shelf-tile:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.shelf-tile:focus-visible {
+  outline: 2px solid var(--icm-accent);
+  outline-offset: -2px;
 }
 
 .shelf-tile-preview {
   display: block;
-  grid-column: 1 / -1;
   background: #fff;
   border-bottom: 1px solid var(--icm-border);
   padding: 10px;
 }
+
 .shelf-tile-preview-missing {
   display: grid;
   place-items: center;
@@ -68,53 +266,75 @@
   display: block;
   width: 100%;
   height: auto;
-  max-height: 380px;
+  max-height: 360px;
   object-fit: contain;
 }
 
+.shelf-tile-copy {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+}
+
 .shelf-tile-name {
-  grid-column: 1;
   min-width: 0;
-  padding: 10px 4px 0 12px;
   font-size: 14px;
   font-weight: 600;
+  color: var(--icm-text);
   overflow-wrap: anywhere;
 }
 
 .shelf-tile-meta {
-  grid-column: 1 / -1;
-  padding: 2px 12px 12px;
   display: -webkit-box;
   overflow: hidden;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  line-clamp: 3;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   font-size: 12px;
   color: var(--icm-text-muted);
 }
 
+.shelf-tile-revision {
+  color: var(--icm-text-muted);
+}
+
+/* Always-visible card footer and list action bar */
+.shelf-tile-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--icm-border);
+  background: var(--icm-surface-muted);
+}
+
+.shelf-quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
 .shelf-tile-favorite {
-  z-index: 1;
-  grid-column: 2;
-  grid-row: 2;
-  align-self: start;
   display: grid;
   place-items: center;
-  width: 26px;
-  height: 26px;
-  margin: 6px 8px 0 0;
+  width: 28px;
+  height: 28px;
   padding: 0;
-  border: 0;
-  border-radius: var(--icm-radius-sm);
+  border: 1px solid transparent;
+  border-radius: 6px;
   color: var(--icm-text-muted);
   background: none;
-  font-size: 17px;
+  font-size: 16px;
   line-height: 1;
   cursor: pointer;
 }
 
 .shelf-tile-favorite[aria-pressed="true"] {
-  border: 0;
+  border-color: transparent;
   color: var(--icm-error);
   background: none;
   box-shadow: none;
@@ -122,7 +342,8 @@
 
 .shelf-tile-favorite:hover:not(:disabled) {
   color: var(--icm-error);
-  background: var(--icm-accent-soft);
+  background: var(--icm-surface);
+  border-color: var(--icm-border);
 }
 
 .shelf-tile-favorite:disabled {
@@ -130,90 +351,239 @@
   opacity: 0.6;
 }
 
-.shelf-count-row {
+.shelf-action-btn,
+.shelf-tile-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--icm-text-muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.shelf-action-btn:hover:not(:disabled),
+.shelf-tile-actions:hover:not(:disabled) {
+  color: var(--icm-text);
+  background: var(--icm-surface);
+  border-color: var(--icm-border);
+}
+
+.shelf-action-btn:focus-visible,
+.shelf-tile-actions:focus-visible,
+.shelf-tile-favorite:focus-visible {
+  outline: 2px solid var(--icm-accent);
+  outline-offset: 1px;
+}
+
+.shelf-action-btn:disabled,
+.shelf-tile-actions:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.shelf-action-delete:hover:not(:disabled) {
+  color: var(--icm-error);
+  border-color: rgb(235 87 87 / 35%);
+  background: rgb(235 87 87 / 10%);
+}
+
+.shelf-tile-footer .inline-confirm,
+.shelf-list-actions .inline-confirm {
+  display: inline-flex;
+  align-items: center;
+}
+
+.shelf-tile-footer .inline-confirm-actions,
+.shelf-list-actions .inline-confirm-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.shelf-tile-footer .inline-confirm-decision button,
+.shelf-list-actions .inline-confirm-decision button {
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--icm-border);
+  border-radius: 5px;
+  background: var(--icm-surface);
+  color: var(--icm-text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.shelf-tile-footer .inline-confirm-danger,
+.shelf-list-actions .inline-confirm-danger {
+  border-color: rgb(235 87 87 / 45%);
+  background: rgb(235 87 87 / 12%);
+  color: var(--icm-error);
+  font-weight: 500;
+}
+
+/* Compact List view */
+.shelf-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.shelf-list-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 8px 16px;
-  margin: 0 0 12px;
-}
-
-.shelf-count {
-  margin: 0;
-  color: var(--icm-text-muted);
-  font-size: 0.85rem;
-}
-
-/* All | ♥ Favorites: one segmented control, the shown view pressed. */
-.shelf-filter {
-  display: inline-flex;
-  flex: none;
+  gap: 10px;
+  padding: 8px 10px;
   border: 1px solid var(--icm-border);
-  border-radius: 6px;
-  overflow: hidden;
-}
-
-.shelf-filter button {
-  padding: 3px 10px;
-  border: 0;
-  border-radius: 0;
-  color: var(--icm-text-muted);
+  border-radius: var(--icm-radius-md, 8px);
   background: var(--icm-surface);
-  box-shadow: none;
-  font-size: 12px;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease;
 }
 
-/* The group clips overflow, so the focus ring is drawn inside each segment. */
-.shelf-filter button:focus-visible {
+.shelf-list-row:hover {
+  border-color: var(--icm-border-hover, var(--icm-border-strong));
+  background: var(--icm-surface-muted);
+}
+
+.shelf-list-open {
+  display: flex;
+  flex: 1 1 240px;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.shelf-list-open:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.shelf-list-open:focus-visible {
   outline: 2px solid var(--icm-accent);
-  outline-offset: -2px;
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
-.shelf-filter button + button {
-  border-left: 1px solid var(--icm-border);
+.shelf-list-thumb {
+  flex: none;
+  width: 60px;
+  height: 40px;
+  overflow: hidden;
+  border: 1px solid var(--icm-border);
+  border-radius: 5px;
+  background: #fff;
 }
 
-.shelf-filter button[aria-pressed="true"] {
-  border-color: var(--icm-border);
-  color: var(--icm-text);
-  background: var(--icm-accent-soft);
-  box-shadow: none;
+.shelf-list-thumb .shelf-tile-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 3px;
+  border: 0;
+  box-sizing: border-box;
 }
 
-.shelf-filter button[aria-pressed="true"] span {
-  color: var(--icm-error);
+.shelf-list-thumb .shelf-tile-preview img,
+.shelf-list-thumb .shelf-tile-preview svg {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  object-fit: contain;
 }
 
-.shelf-tile-revision {
-  color: var(--icm-text-muted);
+.shelf-list-thumb .shelf-tile-preview-missing {
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
 }
 
+.shelf-list-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.shelf-list-copy .shelf-tile-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.shelf-list-actions {
+  display: flex;
+  flex-wrap: wrap;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Inline rename form */
 .shelf-rename-form {
   display: grid;
-  grid-column: 1 / -1;
-  grid-row: 4;
   gap: 6px;
-  padding-block: 8px;
+  flex: 1;
+  padding: 8px 10px;
+  border-top: 1px solid var(--icm-border);
+  background: var(--icm-surface-muted);
   min-width: 0;
 }
+
+.shelf-list-row .shelf-rename-form {
+  display: flex;
+  align-items: center;
+  padding: 0;
+  border-top: 0;
+  background: none;
+}
+
 .shelf-rename-form input {
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
+  flex: 1;
   padding: 6px 8px;
   color: var(--icm-text);
   background: var(--icm-surface);
-  border: 1px solid var(--icm-border);
-  border-radius: 4px;
+  border: 1px solid var(--icm-accent);
+  border-radius: 5px;
   font: inherit;
+  font-size: 13px;
 }
+
 /* Save and Cancel: compact buttons side by side under the field. */
 .shelf-rename-actions {
   display: flex;
   justify-content: flex-end;
   gap: 6px;
+  flex: none;
 }
+
 .shelf-rename-actions button {
   min-height: 28px;
   padding: 3px 12px;
@@ -221,35 +591,28 @@
   border-radius: 6px;
   background: var(--icm-surface);
   color: var(--icm-text);
+  font: inherit;
   font-size: 13px;
   cursor: pointer;
 }
+
 .shelf-rename-actions .shelf-rename-save {
   border-color: var(--icm-accent);
   color: #fff;
   background: var(--icm-accent);
 }
+
 .shelf-rename-actions .shelf-rename-save:hover:not(:disabled) {
   border-color: var(--icm-accent);
   background: rgb(var(--icm-accent-rgb) / 88%);
 }
+
 .shelf-rename-actions .shelf-rename-save:disabled {
   color: #fff;
   opacity: 0.55;
 }
 
-.shelf-tile-actions {
-  position: absolute;
-  right: 8px;
-  top: 8px;
-  padding: 4px 10px;
-  border: 1px solid var(--icm-border);
-  border-radius: 6px;
-  background: var(--icm-surface);
-  color: var(--icm-text);
-  cursor: pointer;
-}
-
+/* Overflow context menu */
 .shelf-context-menu {
   position: fixed;
   z-index: 800;
@@ -265,6 +628,7 @@
   background: var(--icm-surface);
   box-shadow: 0 8px 30px rgb(0 0 0 / 15%);
 }
+
 .shelf-context-menu > * {
   padding: 9px 12px;
   border: 0;
@@ -277,12 +641,19 @@
   text-decoration: none;
   cursor: pointer;
 }
+
 .shelf-context-menu > *:hover,
 .shelf-context-menu > *:focus-visible {
   background: var(--icm-accent-soft);
 }
+
 .shelf-action-error {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: rgb(235 87 87 / 10%);
   color: var(--icm-error);
+  font-size: 13px;
 }
 
 /* Delete, the menu's danger item. InlineConfirm wraps its trigger in a span,
@@ -294,6 +665,7 @@
   padding: 0;
   border-radius: 0;
 }
+
 .shelf-context-menu .shelf-menu-delete {
   display: block;
   width: 100%;
@@ -309,10 +681,12 @@
   text-align: left;
   cursor: pointer;
 }
+
 .shelf-context-menu .shelf-menu-delete:hover,
 .shelf-context-menu .shelf-menu-delete:focus-visible {
   background: rgb(235 87 87 / 10%);
 }
+
 .shelf-context-menu .inline-confirm-decision {
   padding: 8px 12px;
 }
