@@ -80,7 +80,7 @@ index cb2ea51ee..64e02fc16 100644
 +  return response.blob();
 +}
 diff --git a/frontend/app/globals.css b/frontend/app/globals.css
-index 6cb328dbd..05de7eb06 100644
+index 6cb328dbd..d22623643 100644
 --- a/frontend/app/globals.css
 +++ b/frontend/app/globals.css
 @@ -16014,3 +16014,278 @@ button.transfer-toolbar-unsure {
@@ -252,7 +252,7 @@ index 6cb328dbd..05de7eb06 100644
 +
 +.circuit-lib-grid {
 +  display: grid;
-+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
++  grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
 +  gap: 14px;
 +}
 +
@@ -363,7 +363,7 @@ index 6cb328dbd..05de7eb06 100644
 +  margin-top: 8px;
 +}
 diff --git a/frontend/app/groups-page.tsx b/frontend/app/groups-page.tsx
-index 6d1a30ab9..2672a3882 100644
+index 6d1a30ab9..32110d154 100644
 --- a/frontend/app/groups-page.tsx
 +++ b/frontend/app/groups-page.tsx
 @@ -4,6 +4,7 @@ import {
@@ -382,7 +382,16 @@ index 6d1a30ab9..2672a3882 100644
  import { toUserMessage } from "./errors.ts";
  import { copyTextSafely } from "./copy-text.ts";
  import { useCopyResult } from "./copy-result.ts";
-@@ -138,7 +140,26 @@ export function GroupsPage({
+@@ -64,7 +66,7 @@ import { GroupLeaveDialog, useLeaveExports } from "./group-leave-dialog.tsx";
+ import { Pagination } from "./Pagination";
+ import { anchorOf, type ExitAnchor } from "./use-notebook-exit.ts";
+ import { useClientPagination } from "./use-client-pagination.ts";
+-import type { NotebookSummary } from "./workspace-model.ts";
++import { supportsCanvasCircuitLibraries, type NotebookSummary } from "./workspace-model.ts";
+ 
+ type GroupsPageProps = {
+   currentUserId: string;
+@@ -138,7 +140,24 @@ export function GroupsPage({
    const [requests, setRequests] = useState<ShareRequest[] | null>(null);
    const [invite, setInvite] = useState<GroupInviteState | null>(null);
    const [myRequests, setMyRequests] = useState<ShareRequest[]>([]);
@@ -394,9 +403,7 @@ index 6d1a30ab9..2672a3882 100644
 +      .then((projection) => {
 +        if (!alive) return;
 +        setCanvasAvailable(
-+          projection.extensions.some(
-+            (ext) => ext.pluginId === "auto_canvas.integration" && ext.available,
-+          ),
++          supportsCanvasCircuitLibraries(projection.extensions),
 +        );
 +      })
 +      .catch(() => {
@@ -409,7 +416,7 @@ index 6d1a30ab9..2672a3882 100644
    const [busy, setBusy] = useState("");
    const [error, setError] = useState("");
    const [notice, setNotice] = useState("");
-@@ -569,6 +590,26 @@ export function GroupsPage({
+@@ -569,6 +588,26 @@ export function GroupsPage({
                    </div>
                    <p>{detail.description || "这个群组还没有填写说明。"}</p>
                    <span>Owner {ownerMember ? memberLabel(ownerMember) : "—"}</span>
@@ -438,10 +445,10 @@ index 6d1a30ab9..2672a3882 100644
                {/* 三个计数全部来自本页已经取回的数据（共享清单 / 群组详情 / 审批队列），
 diff --git a/frontend/app/notebook-circuits-panel.tsx b/frontend/app/notebook-circuits-panel.tsx
 new file mode 100644
-index 000000000..7bd3bd8a6
+index 000000000..bb1955c01
 --- /dev/null
 +++ b/frontend/app/notebook-circuits-panel.tsx
-@@ -0,0 +1,809 @@
+@@ -0,0 +1,813 @@
 +"use client";
 +
 +import Image from "next/image";
@@ -591,6 +598,7 @@ index 000000000..7bd3bd8a6
 +  const [pendingProjectCount, setPendingProjectCount] = useState(0);
 +  const [pendingComponentCount, setPendingComponentCount] = useState(0);
 +  const [loading, setLoading] = useState(true);
++  const [reloadTick, setReloadTick] = useState(0);
 +  const [busyId, setBusyId] = useState<string | null>(null);
 +  const [error, setError] = useState("");
 +  const [notice, setNotice] = useState("");
@@ -650,19 +658,25 @@ index 000000000..7bd3bd8a6
 +
 +  useEffect(() => {
 +    void loadLibrary();
-+  }, [loadLibrary]);
++  }, [loadLibrary, reloadTick]);
 +
 +  useEffect(() => {
 +    if (!canAdmin && filter === "pending") setFilter("approved");
 +  }, [canAdmin, filter]);
 +
 +  useEffect(() => {
-+    if (!importOpen) return;
++    if (!importOpen) {
++      setImportLoadingMore(false);
++      return;
++    }
 +    const seq = ++importSeqRef.current;
 +    setImportLoading(true);
++    setImportLoadingMore(false);
 +    setComponentNextCursor(null);
++    setPickedSourceId("");
 +    setError("");
 +    if (kind === "projects") {
++      setPersonalProjects([]);
 +      canvasJson<{ projects: PersonalProjectOption[] }>("projects")
 +        .then((res) => {
 +          if (importSeqRef.current !== seq) return;
@@ -678,6 +692,7 @@ index 000000000..7bd3bd8a6
 +          if (importSeqRef.current === seq) setImportLoading(false);
 +        });
 +    } else {
++      setPersonalComponents([]);
 +      const qs = new URLSearchParams({ view: "summary", limit: "30" });
 +      if (componentQuery.trim()) qs.set("q", componentQuery.trim());
 +      canvasJson<{ entries: PersonalComponentOption[]; nextCursor?: string | null }>(
@@ -687,11 +702,7 @@ index 000000000..7bd3bd8a6
 +          if (importSeqRef.current !== seq) return;
 +          setPersonalComponents(res.entries);
 +          setComponentNextCursor(res.nextCursor ?? null);
-+          setPickedSourceId((current) =>
-+            res.entries.some((entry) => entry.id === current)
-+              ? current
-+              : (res.entries[0]?.id ?? ""),
-+          );
++          setPickedSourceId(res.entries[0]?.id ?? "");
 +        })
 +        .catch((err) => {
 +          if (importSeqRef.current === seq) {
@@ -777,7 +788,7 @@ index 000000000..7bd3bd8a6
 +      }
 +      setImportOpen(false);
 +      setImportDesc("");
-+      await loadLibrary();
++      setReloadTick((v) => v + 1);
 +    } catch (err) {
 +      setError(toUserMessage(err, "提交失败"));
 +    } finally {
@@ -804,7 +815,7 @@ index 000000000..7bd3bd8a6
 +        },
 +      );
 +      setNotice(decision === "approve" ? `已审核通过「${name}」并入库。` : `已驳回「${name}」。`);
-+      await loadLibrary();
++      setReloadTick((v) => v + 1);
 +    } catch (err) {
 +      setError(toUserMessage(err, "审核操作失败"));
 +    } finally {
@@ -822,7 +833,7 @@ index 000000000..7bd3bd8a6
 +        { method: "DELETE" },
 +      );
 +      setNotice(status === "approved" ? `已移除「${name}」。` : `已撤回「${name}」。`);
-+      await loadLibrary();
++      setReloadTick((v) => v + 1);
 +    } catch (err) {
 +      setError(toUserMessage(err, "操作失败"));
 +    } finally {
@@ -1252,7 +1263,7 @@ index 000000000..7bd3bd8a6
 +  );
 +}
 diff --git a/frontend/app/page.tsx b/frontend/app/page.tsx
-index 2036550bd..422fc7387 100644
+index 2036550bd..a58437998 100644
 --- a/frontend/app/page.tsx
 +++ b/frontend/app/page.tsx
 @@ -244,6 +244,7 @@ import { LoginEntrance } from "./auth-book";
@@ -1263,25 +1274,27 @@ index 2036550bd..422fc7387 100644
  import { NotebookGroupShare, BORROWED_BASE_SHARE_WARNING } from "./notebook-group-share";
  import { NotebookCollaboratorsShare } from "./notebook-collaborators-share";
  import { ShareOverviewCollaborators, ShareOverviewCollaboratorsChip } from "./share-overview-collaborators";
-@@ -5929,7 +5930,16 @@ export default function Home() {
+@@ -346,6 +347,7 @@ import {
+   KNOWLEDGE_STATUS_OPTIONS,
+   SOURCES_PAGE_SIZE,
+   showPaperMetaBackfill,
++  supportsCanvasCircuitLibraries,
+   type ChatMode,
+   type ConversationSummary,
+   type DuplicateGroup,
+@@ -5929,7 +5931,10 @@ export default function Home() {
              <section className="workspace-panel chat-panel">
                <div className="workspace-panel-header">
                  <div className="chat-tabs">
 -                  {CHAT_MODES.map(([mode, label]) => (
 +                  {CHAT_MODES.filter(([mode]) =>
 +                    mode !== "circuits" ||
-+                    Boolean(
-+                      workspaceExtensions.projection?.extensions.some(
-+                        (ext) =>
-+                          ext.pluginId === "auto_canvas.integration" &&
-+                          ext.available,
-+                      ),
-+                    ),
++                    supportsCanvasCircuitLibraries(workspaceExtensions.projection?.extensions),
 +                  ).map(([mode, label]) => (
                      <button
                        key={mode}
                        className={`chat-tab ${chatMode === mode ? "active" : ""}${mode === "reports" && sourceScopeBlocked ? " scope-disabled" : ""}`}
-@@ -6231,6 +6241,13 @@ export default function Home() {
+@@ -6231,6 +6236,13 @@ export default function Home() {
                    />
                  )}
  
@@ -1296,10 +1309,10 @@ index 2036550bd..422fc7387 100644
                    <MemoryPanel
                      scope="notebook"
 diff --git a/frontend/app/workspace-model.ts b/frontend/app/workspace-model.ts
-index 69c06f187..24918fbad 100644
+index 69c06f187..e1441b2bd 100644
 --- a/frontend/app/workspace-model.ts
 +++ b/frontend/app/workspace-model.ts
-@@ -949,12 +949,13 @@ export type ConversationShareResponse = {
+@@ -949,14 +949,45 @@ export type ConversationShareResponse = {
    shared_through_id: string;
  };
  
@@ -1313,12 +1326,53 @@ index 69c06f187..24918fbad 100644
 +  ["circuits", "电路库"],
  ];
  
++/**
++ * Group & per-notebook circuit library routes and deep-links were introduced
++ * in `auto_canvas.integration` 0.3.0. Earlier 0.2.0 deployments only provide
++ * the workspace side-panel launcher and return 404 for library endpoints.
++ */
++export const MIN_CANVAS_LIBRARY_VERSION: readonly [number, number, number] = [0, 3, 0];
++
++function parseSemverTriple(version: string | null | undefined): [number, number, number] | null {
++  if (!version) return null;
++  const match = /^\s*(\d+)\.(\d+)(?:\.(\d+))?(?:[-+].*)?\s*$/.exec(version);
++  if (!match) return null;
++  return [Number(match[1]), Number(match[2]), Number(match[3] ?? "0")];
++}
++
++export function supportsCanvasCircuitLibraries(
++  extensions: ReadonlyArray<{ pluginId: string; version?: string; available: boolean }> | null | undefined,
++): boolean {
++  if (!extensions) return false;
++  return extensions.some((ext) => {
++    if (ext.pluginId !== "auto_canvas.integration" || !ext.available) return false;
++    const parsed = parseSemverTriple(ext.version);
++    if (!parsed) return false;
++    const [maj, min, patch] = parsed;
++    const [reqMaj, reqMin, reqPatch] = MIN_CANVAS_LIBRARY_VERSION;
++    if (maj !== reqMaj) return maj > reqMaj;
++    if (min !== reqMin) return min > reqMin;
++    return patch >= reqPatch;
++  });
++}
++
  export type KnowledgeKind = string;
+ export type KnowledgeFieldValue = { key: string; value: string };
+ export type KnowledgeTypeCount = { object_type: string; label: string; count: number };
 diff --git a/frontend/tests/unit/memory-navigation.test.mjs b/frontend/tests/unit/memory-navigation.test.mjs
-index f5cb70f42..9a509b92e 100644
+index f5cb70f42..0537eac9c 100644
 --- a/frontend/tests/unit/memory-navigation.test.mjs
 +++ b/frontend/tests/unit/memory-navigation.test.mjs
-@@ -132,6 +132,7 @@ test("workspace tabs keep the product order", () => {
+@@ -9,7 +9,7 @@ import {
+ } from "../../app/memory-model.ts";
+ import { deleteConfirmText } from "../../app/notebook-deletion-copy.ts";
+ import { openMemoryDeepLink } from "../../app/workspace-transitions.ts";
+-import { CHAT_MODES } from "../../app/workspace-model.ts";
++import { CHAT_MODES, supportsCanvasCircuitLibraries } from "../../app/workspace-model.ts";
+ import {
+   callSitesIn,
+   declarations,
+@@ -132,9 +132,38 @@ test("workspace tabs keep the product order", () => {
      ["rules", "知识库"],
      ["memory", "记忆"],
      ["reports", "深度报告"],
@@ -1326,6 +1380,37 @@ index f5cb70f42..9a509b92e 100644
    ]);
  });
  
++test("circuit library entries require auto_canvas.integration >= 0.3.0", () => {
++  assert.equal(supportsCanvasCircuitLibraries(null), false);
++  assert.equal(
++    supportsCanvasCircuitLibraries([
++      { pluginId: "auto_canvas.integration", version: "0.2.0", available: true },
++    ]),
++    false,
++  );
++  assert.equal(
++    supportsCanvasCircuitLibraries([
++      { pluginId: "auto_canvas.integration", version: "0.3.0", available: false },
++    ]),
++    false,
++  );
++  assert.equal(
++    supportsCanvasCircuitLibraries([
++      { pluginId: "auto_canvas.integration", version: "0.3.0", available: true },
++    ]),
++    true,
++  );
++  assert.equal(
++    supportsCanvasCircuitLibraries([
++      { pluginId: "auto_canvas.integration", version: "1.0.0", available: true },
++    ]),
++    true,
++  );
++});
++
+ 
+ test("an inaccessible Memory deep-link falls back without rejecting login", async () => {
+   let fellBack = false;
 diff --git a/release-notes/canvas-circuit-libraries.md b/release-notes/canvas-circuit-libraries.md
 new file mode 100644
 index 000000000..7ee50698d

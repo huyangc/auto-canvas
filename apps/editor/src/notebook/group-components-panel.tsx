@@ -66,6 +66,7 @@ export function GroupComponentsPanel({
   const [components, setComponents] = useState<GroupComponentSummary[]>([]);
   const [pendingCount, setPendingCount] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [reloadTick, setReloadTick] = useState(0);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -187,17 +188,21 @@ export function GroupComponentsPanel({
 
   useEffect(() => {
     void refreshComponents();
-  }, [refreshComponents]);
+  }, [refreshComponents, reloadTick]);
 
   useEffect(() => {
     if (!canAdmin && filter === "pending") setFilter("approved");
   }, [canAdmin, filter]);
 
   useEffect(() => {
-    if (!submitOpen) return;
+    if (!submitOpen) {
+      setSourcesLoadingMore(false);
+      return;
+    }
     const seq = ++sourcesRequestSeq.current;
     const controller = new AbortController();
     setSourcesLoading(true);
+    setSourcesLoadingMore(false);
     setSourceNextCursor(null);
     void loadSharedComponentSummaries(
       sourceQuery.trim(),
@@ -309,7 +314,8 @@ export function GroupComponentsPanel({
           ? `器件「${created.name}」已直接入库到「${targetName}」。`
           : `器件「${created.name}」已提交到「${targetName}」，等待管理员审核。`,
       );
-      await Promise.all([refreshGroups(), refreshComponents()]);
+      setReloadTick((v) => v + 1);
+      await refreshGroups();
     } catch (err) {
       setError(err instanceof Error ? err.message : "提交器件失败");
     } finally {
@@ -345,7 +351,8 @@ export function GroupComponentsPanel({
           ? `已审核通过器件「${item.name}」并入库。`
           : `已驳回器件「${item.name}」。`,
       );
-      await Promise.all([refreshGroups(), refreshComponents()]);
+      setReloadTick((v) => v + 1);
+      await refreshGroups();
     } catch (err) {
       setError(err instanceof Error ? err.message : "审核操作失败");
     } finally {
@@ -368,7 +375,8 @@ export function GroupComponentsPanel({
           ? `已移除「${item.name}」。`
           : `已撤回「${item.name}」。`,
       );
-      await Promise.all([refreshGroups(), refreshComponents()]);
+      setReloadTick((v) => v + 1);
+      await refreshGroups();
     } catch (err) {
       setError(err instanceof Error ? err.message : "删除失败");
     } finally {

@@ -71,6 +71,7 @@ export function GroupProjectsPanel({
   const [projects, setProjects] = useState<GroupProjectSummary[]>([]);
   const [pendingCount, setPendingCount] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [reloadTick, setReloadTick] = useState(0);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -185,7 +186,7 @@ export function GroupProjectsPanel({
 
   useEffect(() => {
     void refreshProjects();
-  }, [refreshProjects]);
+  }, [refreshProjects, reloadTick]);
 
   useEffect(() => {
     if (!canAdmin && filter === "pending") setFilter("approved");
@@ -234,7 +235,8 @@ export function GroupProjectsPanel({
           ? `「${created.name}」已直接入库到「${targetName}」。`
           : `「${created.name}」已提交到「${targetName}」，等待管理员审核。`,
       );
-      await Promise.all([refreshGroups(), refreshProjects()]);
+      setReloadTick((v) => v + 1);
+      await refreshGroups();
     } catch (err) {
       setError(err instanceof Error ? err.message : "提交电路工程失败");
     } finally {
@@ -270,7 +272,8 @@ export function GroupProjectsPanel({
           ? `已审核通过「${item.name}」并入库。`
           : `已驳回「${item.name}」。`,
       );
-      await Promise.all([refreshGroups(), refreshProjects()]);
+      setReloadTick((v) => v + 1);
+      await refreshGroups();
     } catch (err) {
       setError(err instanceof Error ? err.message : "审核操作失败");
     } finally {
@@ -293,7 +296,8 @@ export function GroupProjectsPanel({
           ? `已移除「${item.name}」。`
           : `已撤回「${item.name}」。`,
       );
-      await Promise.all([refreshGroups(), refreshProjects()]);
+      setReloadTick((v) => v + 1);
+      await refreshGroups();
     } catch (err) {
       setError(err instanceof Error ? err.message : "删除失败");
     } finally {

@@ -4,7 +4,7 @@
     {
       "id": "auto_canvas.integration.entry",
       "plugin_id": "auto_canvas.integration",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "capability": "auto_canvas.integration.available",
       "slot": "workspace.side_panel",
       "permission": "notebook:read",
