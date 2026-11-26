@@ -79,3 +79,16 @@ prerequisites also describe the wheel dependency for older setuptools.
   proceeding to the next service start.
 - The owner of the notebook installer has a separate proposed fix for its
   shared diagnostic file in [silicon-notebook PR #1079](https://github.com/huyangc/silicon-notebook/pull/1079).
+
+## Independent PR review, round 5
+
+The default notebook pack explicitly supplies empty canvas rewrite and UI
+plugin variables. The paired packs override them with the selected endpoint
+and plugin. The guide uses the same build arguments. The integration
+harness also rejects frontend dotenv files in its disposable build clone
+and checks all three built rewrite manifests.
+
+The approved stage P tests use the Node guard, a browser proxy, packaged
+Node, a restricted site PATH and offline pip. An OS-wide egress policy for
+all native and Python processes is a separate host requirement. The
+testing guide describes the coverage and where to run a host-wide test.

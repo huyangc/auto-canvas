@@ -273,8 +273,8 @@ in system Chrome through a proxy restricted to the package server.
    export NEXT_PUBLIC_API_BASE_URL=/api
    export BACKEND_PROXY_TARGET=http://127.0.0.1:18100
    export OUT_DIR=/build/notebook-artifacts  # dedicated output; pack replaces its stage/
-   unset SKIP_WHEELHOUSE CANVAS_PROXY_TARGET SILICON_NOTEBOOK_UI_PLUGINS
-   VERSION=site-1 bash "$NB_SRC/scripts/pack.sh"
+   unset SKIP_WHEELHOUSE
+   CANVAS_PROXY_TARGET= SILICON_NOTEBOOK_UI_PLUGINS= VERSION=site-1 bash "$NB_SRC/scripts/pack.sh"
    export CANVAS_PROXY_TARGET=http://127.0.0.1:14310
    export SILICON_NOTEBOOK_UI_PLUGINS="$CANVAS_SRC/integrations/silicon-notebook/ui/auto-canvas"
    VERSION=site-2 bash "$NB_SRC/scripts/pack.sh"
