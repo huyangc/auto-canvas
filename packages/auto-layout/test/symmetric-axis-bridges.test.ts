@@ -4,6 +4,9 @@ import { expect, it } from "vitest";
 import { planAutoLayout } from "../src/auto-layout.js";
 import { geometryProblem, pinPoints } from "../src/geometry.js";
 import { classifyNets } from "../src/net-roles.js";
+import { placeDocument } from "../src/place.js";
+import { readabilityMetrics } from "../src/readability-metrics.js";
+import { recognizeStructures } from "../src/recognize.js";
 import {
   auditRouting,
   floatingPins,
@@ -131,4 +134,54 @@ it("centres a single drain bridge on its neighboring row", () => {
   const at = (id: string) =>
     drawn.instances.find((i) => i.id === id)!.placement!.position;
   expect(at("R")).toEqual({ x: (at("M1").x + at("M2").x) / 2, y: at("M1").y });
+}, 60_000);
+
+it("seats parallel LC bridges above a cross-coupled pair without wire-through-symbol", () => {
+  const d = circuit(
+    {
+      M1: "nmos",
+      M2: "nmos",
+      L1: "inductor-compact",
+      C1: "variable-capacitor",
+      I1: "current-source",
+      G: "ground",
+    },
+    {
+      left: ["M1.D", "M2.G", "L1.1", "C1.P1"],
+      right: ["M2.D", "M1.G", "L1.2", "C1.P2"],
+      tail: ["M1.S", "M2.S", "I1.+"],
+      gnd: ["I1.-", "G.0"],
+    },
+  );
+  const roles = classifyNets(d, resolver);
+  const placed = placeDocument(
+    d,
+    resolver,
+    roles,
+    recognizeStructures(d, roles),
+    {},
+    undefined,
+    undefined,
+    "layered",
+  );
+  expect(placed.problem).toBeUndefined();
+  const draftAt = (id: string) => placed.placements.get(id)!.position;
+  expect(draftAt("L1").y).toBeLessThan(draftAt("M1").y);
+  expect(draftAt("C1").y).toBeLessThan(draftAt("M1").y);
+  expect(draftAt("L1").x).toBe((draftAt("M1").x + draftAt("M2").x) / 2);
+  expect(draftAt("C1").x).toBe((draftAt("M1").x + draftAt("M2").x) / 2);
+  const result = planAutoLayout(d, resolver);
+  expect(
+    result.diagnostics.filter((diag) => diag.severity === "error"),
+  ).toEqual([]);
+  const after = preview(d, resolver, result.edits);
+  if (!after.ok) throw new Error(JSON.stringify(after.diagnostics));
+  const drawn = after.document;
+  expect(equivalentTerminals(d, drawn, resolver)).toBe(true);
+  expect(missingConnections(drawn, resolver)).toBe(0);
+  expect(floatingPins(drawn, resolver)).toEqual([]);
+  expect(geometryProblem(drawn, resolver)).toBeUndefined();
+  expect(
+    readabilityMetrics(drawn, resolver, "all").wireThroughSymbols.violations,
+  ).toBe(0);
 }, 60_000);

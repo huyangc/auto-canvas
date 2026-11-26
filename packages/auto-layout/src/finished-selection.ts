@@ -21,6 +21,7 @@ import type { AutoLayoutResult, LayoutPartition } from "./types.js";
 type FinalistKind =
   | "runner"
   | "convention"
+  | "mcts"
   | "unsplitSymmetry"
   | "mirrorSymmetry"
   | "localLoop"
@@ -167,6 +168,7 @@ export function rankedFinalists(pass: FinalistPass, resolver: SymbolResolver) {
     [
       "runner",
       "convention",
+      "mcts",
       "unsplitSymmetry",
       "mirrorSymmetry",
       "localLoop",

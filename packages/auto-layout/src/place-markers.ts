@@ -392,9 +392,14 @@ function localPortHosts(
 
 function localPortDistances(document: SchematicDocument, decoupled: boolean) {
   const offset = cellPinOffset(document);
-  if (!decoupled) return [offset];
   const grid = document.presentation.grid;
   const snap = (n: number) => Math.round(n / grid) * grid;
+  if (!decoupled) {
+    if (offset <= 40) return [offset];
+    return [...new Set([offset, snap(offset / 2), grid * 2])].filter(
+      (distance) => distance >= grid * 2,
+    );
+  }
   return [...new Set([snap(offset / 2), offset, snap(offset * 1.5)])].filter(
     (distance) => distance >= grid * 2,
   );

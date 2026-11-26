@@ -1765,11 +1765,31 @@ function planAutoLayoutMeasured(
       return undefined;
     }
   })();
+  // When finalists are active, keep the incumbent through annealing and let
+  // MCTS compete as a guarded finalist via selectFinishedLayout so it never
+  // discards an annealable incumbent or introduces readability/visual regressions.
+  const deferMctsToFinalist = Boolean(
+    withMcts && options.finalists && !options.finalists.alternate,
+  );
   const {
     portfolio,
     selected,
     refined: refinedFinalists,
-  } = withMcts ?? incumbent;
+  } = deferMctsToFinalist ? incumbent : (withMcts ?? incumbent);
+  const mctsFinalist =
+    deferMctsToFinalist &&
+    withMcts &&
+    withMcts.selected.run.final &&
+    !floatingPins(withMcts.selected.run.final, resolver).length &&
+    !missingConnections(withMcts.selected.run.final, resolver)
+      ? {
+          ...withMcts.selected,
+          run: {
+            ...withMcts.selected.run,
+            result: copyResult(withMcts.selected.run.result),
+          },
+        }
+      : undefined;
   // Snapshot the other refined run before facing/rerouting mutates results.
   // The existing winner (including its annealed fallback) is finished first.
   const runner = refinedFinalists
@@ -2655,6 +2675,7 @@ function planAutoLayoutMeasured(
     for (const [kind, candidate] of [
       ["runner", alternateFinalist],
       ["convention", conventionFinalist],
+      ["mcts", mctsFinalist],
       [
         "unsplitSymmetry",
         symmetryFinalist?.kind === "unsplitSymmetry"
@@ -2712,6 +2733,9 @@ function planAutoLayoutMeasured(
         : () => copyResult(snapshot),
       convention: conventionFinalist
         ? () => finishFinalist(conventionFinalist, false)
+        : () => copyResult(snapshot),
+      mcts: mctsFinalist
+        ? () => finishFinalist(mctsFinalist, false)
         : () => copyResult(snapshot),
       attachment: attachmentFinalist
         ? () =>

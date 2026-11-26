@@ -1390,3 +1390,42 @@ it.each([false, true])(
     expect(netMap.get("V_CMFB")).toBe(shared ? undefined : "V_CMFB");
   },
 );
+
+it("does not pull an asymmetric bias-column driver onto the symmetry axis", () => {
+  const d = circuit(
+    {
+      m1: "nmos",
+      m2: "nmos",
+      a: "nmos",
+      b: "nmos",
+      t: "current-source",
+      M22: "pmos",
+      M23: "nmos",
+      M24: "nmos",
+      VB7: "port",
+      VDD: "vdd-port",
+      VSS: "ground",
+    },
+    {
+      inp: ["m1.G"],
+      inn: ["m2.G"],
+      tail: ["m1.S", "m2.S", "t.+"],
+      ca: ["m1.D", "a.S"],
+      cb: ["m2.D", "b.S"],
+      da: ["a.D"],
+      db: ["b.D"],
+      bias: ["a.G", "b.G", "M22.D", "M23.D", "M23.G"],
+      mid: ["M23.S", "M24.D"],
+      vdd: ["VDD.P", "M22.S"],
+      gnd: ["VSS.0", "t.-", "M24.S"],
+      vb7: ["M22.G", "VB7.P"],
+    },
+  );
+  const { components } = symmetryTopology(
+    d,
+    resolver,
+    classifyNets(d, resolver),
+  );
+  expect(components[0]!.pairs).toContainEqual(["a", "b"]);
+  expect(components[0]!.axis).toEqual(["t"]);
+});

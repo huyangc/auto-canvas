@@ -278,18 +278,56 @@ export function symmetryTopology(
           devicePairs.push([a.id, a.id, swappedPins(a.id)]);
         continue;
       }
-      if (channelPins(a.symbolId)) {
+      const ch = channelPins(a.symbolId);
+      if (ch) {
+        const drain = roles.pinNet(a.id, ch.drain);
+        const source = roles.pinNet(a.id, ch.source);
+        const gate = roles.pinNet(a.id, ch.gate);
+        const channel = [drain, source].filter((n): n is string => !!n);
         const mapped = own.filter((n) => netMap.get(n) === n);
+        const nonRailChannel = channel.filter((n) => !roles.rails.has(n));
+        const feedsPairedChannel = (net: string) =>
+          [...deviceMap.keys()].some((id) => {
+            const other = byId.get(id)!;
+            const otherGate = channelPins(other.symbolId)?.gate;
+            return pins
+              .get(id)!
+              .some((p) => p !== otherGate && roles.pinNet(id, p) === net);
+          });
+        const sharedWithAsymmetric = (net: string) =>
+          free.some(
+            (b) =>
+              b !== a &&
+              nets(b.id).includes(net) &&
+              nets(b.id).some(
+                (n) =>
+                  netMap.get(n) !== n &&
+                  !(
+                    deviceNetCount.get(n) === 1 &&
+                    !netMap.has(n) &&
+                    !badNets.has(n)
+                  ),
+              ),
+          );
         if (
-          mapped.length < own.length &&
-          mapped.some((n) => !roles.rails.has(n)) &&
+          channel.length === 2 &&
+          channel.every((n) => netMap.get(n) === n) &&
+          nonRailChannel.length > 0 &&
+          gate !== undefined &&
+          netMap.get(gate) !== gate &&
+          deviceNetCount.get(gate) === 1 &&
+          !netMap.has(gate) &&
+          !badNets.has(gate) &&
           own.every(
             (n) =>
               netMap.get(n) === n ||
-              (deviceNetCount.get(n) === 1 &&
+              (n === gate &&
+                deviceNetCount.get(n) === 1 &&
                 !netMap.has(n) &&
                 !badNets.has(n)),
           ) &&
+          nonRailChannel.some(feedsPairedChannel) &&
+          !nonRailChannel.some(sharedWithAsymmetric) &&
           !free.some(
             (b) =>
               b !== a &&
