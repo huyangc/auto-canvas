@@ -7,6 +7,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type RefObject,
 } from "react";
 import { TilePreview } from "./tile-preview";
 import { InlineConfirm } from "./inline-confirm";
@@ -58,6 +59,9 @@ export interface ShelfWallProps {
   onProjectsChanged?: (() => void | Promise<void>) | undefined;
   /** Disables opening and mutations while an editor tab operation is in flight. */
   busy?: boolean | undefined;
+  /** Registers a flush callback so a host dialog can await any pending rename before closing. */
+  flushRenameRef?:
+    RefObject<(() => boolean | Promise<boolean>) | null> | undefined;
 }
 
 type ShelfViewMode = "grid" | "list";
@@ -213,6 +217,7 @@ export function ShelfWall({
   onDeleteProject,
   onProjectsChanged,
   busy = false,
+  flushRenameRef,
 }: ShelfWallProps) {
   const [state, setState] = useState<ShelfState>({ status: "loading" });
   const singleColumn = useSingleColumn();
@@ -223,6 +228,7 @@ export function ShelfWall({
   const titleButtons = useRef(new Map<string, HTMLButtonElement>());
   const renameInputRef = useRef<HTMLInputElement>(null);
   const activeRenameIdRef = useRef<string | null>(null);
+  const renameInFlightRef = useRef<Promise<boolean> | null>(null);
   const suppressNextOpenRef = useRef(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const favoritesFilter = useRef<HTMLButtonElement>(null);
@@ -304,6 +310,33 @@ export function ShelfWall({
     input.focus({ preventScroll: true });
     input.select();
   }, [renaming?.id]);
+
+  useEffect(() => {
+    if (!confirmingDeleteId) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.key === "Escape" &&
+        !controlsBusy &&
+        !(
+          event.target instanceof Element &&
+          event.target.closest(".inline-confirm")
+        )
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        setConfirmingDeleteId(null);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [confirmingDeleteId, controlsBusy]);
+
+  useEffect(
+    () => () => {
+      if (flushRenameRef) flushRenameRef.current = null;
+    },
+    [flushRenameRef],
+  );
 
   // A filter or view change can hide the tile whose menu or delete confirm is
   // open (a keyboard switch fires no outside pointerdown), so close both too.
@@ -453,6 +486,13 @@ export function ShelfWall({
     };
   }, [history]);
 
+  function isRenameInputFocused(): boolean {
+    return (
+      renameInputRef.current !== null &&
+      document.activeElement === renameInputRef.current
+    );
+  }
+
   function startRename(project: CloudProjectSummary) {
     if (controlsBusy) return;
     setMenu(null);
@@ -475,8 +515,9 @@ export function ShelfWall({
     rawValue: string,
     restoreFocus: boolean,
     fromBlur = false,
-  ) {
-    if (activeRenameIdRef.current !== project.id) return;
+  ): boolean | Promise<boolean> {
+    if (activeRenameIdRef.current !== project.id)
+      return renameInFlightRef.current ?? true;
     const trimmed = rawValue.trim();
     // After a failed save, don't auto-resubmit the exact same failing draft on
     // blur; Enter still retries explicitly, and editing + blurring submits the
@@ -486,14 +527,35 @@ export function ShelfWall({
       renaming?.id === project.id &&
       trimmed === renaming.failedName
     )
-      return;
+      return true;
     activeRenameIdRef.current = null;
     if (!trimmed || trimmed === project.name) {
       if (restoreFocus) pendingRenameFocus.current = project.id;
       setRenaming(null);
-      return;
+      return true;
     }
-    void act(project, "rename", trimmed, restoreFocus);
+    const pending = act(project, "rename", trimmed, restoreFocus);
+    renameInFlightRef.current = pending;
+    void pending.finally(() => {
+      if (renameInFlightRef.current === pending)
+        renameInFlightRef.current = null;
+    });
+    return pending;
+  }
+
+  if (flushRenameRef) {
+    flushRenameRef.current = () => {
+      if (renameInFlightRef.current) return renameInFlightRef.current;
+      if (!renaming || state.status !== "ready") return true;
+      const project = state.projects.find((item) => item.id === renaming.id);
+      if (!project) return true;
+      return commitRename(
+        project,
+        renameInputRef.current?.value ?? renaming.name,
+        false,
+        true,
+      );
+    };
   }
 
   async function act(
@@ -501,14 +563,14 @@ export function ShelfWall({
     action: "duplicate" | "rename" | "export" | "favorite",
     renamed?: string,
     restoreRenameFocus = false,
-  ) {
+  ): Promise<boolean> {
     setMenu(null);
-    if (controlsBusy) return;
+    if (controlsBusy) return false;
     const name = renamed?.trim();
     if (action === "rename" && (!name || name === project.name)) {
       if (restoreRenameFocus) pendingRenameFocus.current = project.id;
       setRenaming(null);
-      return;
+      return true;
     }
     if (
       action === "favorite" &&
@@ -580,6 +642,7 @@ export function ShelfWall({
                   : `Could not ${action} this Project (${result.status}).`,
           );
       }
+      return true;
     } catch (cause) {
       if (action === "rename") {
         // Keep the user's draft editable so they can fix or retry without retyping.
@@ -596,6 +659,7 @@ export function ShelfWall({
           ? cause.message
           : "Could not complete this action. Try again.",
       );
+      return false;
     } finally {
       setBusyId(null);
     }
@@ -740,14 +804,14 @@ export function ShelfWall({
             failedName: current?.failedName,
           }))
         }
-        onBlur={(event) =>
-          commitRename(project, event.currentTarget.value, false, true)
-        }
+        onBlur={(event) => {
+          void commitRename(project, event.currentTarget.value, false, true);
+        }}
         onKeyDown={(event) => {
           if (event.key === "Enter" && !event.nativeEvent.isComposing) {
             event.preventDefault();
             event.stopPropagation();
-            commitRename(project, event.currentTarget.value, true);
+            void commitRename(project, event.currentTarget.value, true);
           } else if (event.key === "Escape" && !controlsBusy) {
             event.preventDefault();
             event.stopPropagation();
@@ -964,8 +1028,7 @@ export function ShelfWall({
                     data-testid={`shelf-tile-${project.id}`}
                     disabled={controlsBusy}
                     onPointerDown={() => {
-                      suppressNextOpenRef.current =
-                        activeRenameIdRef.current !== null;
+                      suppressNextOpenRef.current = isRenameInputFocused();
                     }}
                     onKeyDown={() => {
                       suppressNextOpenRef.current = false;
@@ -996,8 +1059,7 @@ export function ShelfWall({
                     href={shelfProjectHref(project.id)}
                     data-testid={`shelf-tile-${project.id}`}
                     onPointerDown={() => {
-                      suppressNextOpenRef.current =
-                        activeRenameIdRef.current !== null;
+                      suppressNextOpenRef.current = isRenameInputFocused();
                     }}
                     onKeyDown={() => {
                       suppressNextOpenRef.current = false;
@@ -1059,8 +1121,7 @@ export function ShelfWall({
                       data-testid={`shelf-tile-${project.id}`}
                       disabled={controlsBusy}
                       onPointerDown={() => {
-                        suppressNextOpenRef.current =
-                          activeRenameIdRef.current !== null;
+                        suppressNextOpenRef.current = isRenameInputFocused();
                       }}
                       onKeyDown={() => {
                         suppressNextOpenRef.current = false;
@@ -1089,8 +1150,7 @@ export function ShelfWall({
                       href={shelfProjectHref(project.id)}
                       data-testid={`shelf-tile-${project.id}`}
                       onPointerDown={() => {
-                        suppressNextOpenRef.current =
-                          activeRenameIdRef.current !== null;
+                        suppressNextOpenRef.current = isRenameInputFocused();
                       }}
                       onKeyDown={() => {
                         suppressNextOpenRef.current = false;

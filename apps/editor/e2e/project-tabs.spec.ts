@@ -1552,6 +1552,7 @@ test("the Browse dialog tiles its cards evenly, closes from its × and drags by 
     updatedAt: `2026-11-2${2 - index}T08:00:00.000Z`,
   }));
   const renamedNames: string[] = [];
+  let failNextRename = true;
   await page.route("**/api/projects", (route) =>
     route.request().method() === "GET"
       ? route.fulfill({ json: { projects } })
@@ -1567,6 +1568,13 @@ test("the Browse dialog tiles its cards evenly, closes from its × and drags by 
       });
     }
     if (route.request().method() === "PUT") {
+      if (failNextRename) {
+        failNextRename = false;
+        return route.fulfill({
+          status: 500,
+          json: { error: "Temporary rename outage" },
+        });
+      }
       const body = route.request().postDataJSON() as { name: string };
       renamedNames.push(body.name);
       projects[0]!.name = body.name;
@@ -1730,8 +1738,9 @@ test("the Browse dialog tiles its cards evenly, closes from its × and drags by 
   expect(narrowSecond.y).toBeGreaterThan(
     narrowFirst.y + narrowFirst.height - 1,
   );
-  // Clicking the dialog backdrop while editing commits the pending rename
-  // before closing the modal.
+  // Clicking the dialog backdrop while editing awaits the pending rename:
+  // on failure it keeps the dialog open with the error and preserved draft;
+  // editing and clicking the backdrop again saves and closes the modal.
   await dialog
     .locator(".shelf-tile-wrap")
     .first()
@@ -1741,6 +1750,11 @@ test("the Browse dialog tiles its cards evenly, closes from its × and drags by 
     name: "Project name",
     exact: true,
   });
+  await backdropEdit.fill("Alpha Backdrop Fail");
+  await page.mouse.click(4, 4);
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("alert")).toBeVisible();
+  await expect(backdropEdit).toHaveValue("Alpha Backdrop Fail");
   await backdropEdit.fill("Alpha Backdrop Saved");
   await page.mouse.click(4, 4);
   await expect(dialog).toBeHidden();
