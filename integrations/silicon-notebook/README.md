@@ -351,6 +351,14 @@ in system Chrome through a proxy restricted to the package server.
 
 ### Upgrades and switching back
 
+The commands below assume the canvas plugin is the only additional Python
+package. If the notebook venv also contains other plugins or non-core
+packages, carry their installed versions and dependencies as local wheels.
+Append `--extra-wheelhouse /absolute/path/to/wheels` to **each**
+`upgrade.sh` invocation for every additional wheel directory, including
+when switching back. The switch-back command can omit this argument only
+when uninstalling the canvas plugin leaves no additional packages.
+
 - **Upgrade silicon-notebook.** Unpack the new canvas-enabled package into a
   fresh sibling directory. Supply the wheels for the currently installed
   plugin version so the upgrader can rebuild the venv offline.
