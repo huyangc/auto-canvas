@@ -219,8 +219,10 @@ It runs `pnpm build` and `pnpm build:notebook-editor`, then
 `auto-canvas-notebook-<version>.tar.gz` of it (`<version>` is the root
 version and the commit, `-dirty` for a changed working tree; the tarball is
 deterministic: sorted entries, owner root, the commit time as every mtime).
-`AUTO_CANVAS_PACKAGE_PYTHON` names a Python with pip and setuptools 68 or
-newer, which builds the plugin wheel offline (`pip wheel --no-index`).
+`AUTO_CANVAS_PACKAGE_PYTHON` names a Python 3.13+ interpreter with pip and setuptools 68+.
+With setuptools below 70.1, also install the wheel package and its dependencies
+so setuptools can load `bdist_wheel`. This interpreter builds the plugin wheel
+offline (`pip wheel --no-index`).
 `--out <dir>` (after the command) writes elsewhere.
 
 The package keeps this checkout's paths, so the launchers run unchanged:
