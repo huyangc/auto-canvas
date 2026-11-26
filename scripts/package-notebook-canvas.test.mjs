@@ -271,6 +271,22 @@ for (const arg of process.argv.slice(1)) {
     expect(result.stdout.trim().split("\n")).toEqual(["chosen", "chosen"]);
   });
 
+  it("refuses a parent traversal through a regular file", () => {
+    const directory = fixture();
+    mkdirSync(join(directory, "bin"));
+    writeFileSync(join(directory, "bin/python"), "#!/bin/sh\nexit 0\n", {
+      mode: 0o755,
+    });
+    symlinkSync(join(directory, "bin/python"), join(directory, "link"));
+    const result = invoke(
+      directory,
+      `import { parseArgs } from ${JSON.stringify(script)};
+parseArgs(["--python", "link/../python"]);`,
+    );
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("the interpreter");
+  });
+
   it("lets Python relaunch the same virtual environment for a build hook", () => {
     const directory = fixture();
     const venv = join(directory, "sandbox/venv");
