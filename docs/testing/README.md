@@ -616,7 +616,9 @@ change. Run the canvas builds first. Use the same PostgreSQL lane and system Chr
 as M and L. The full notebook clone needs the Node major in its `.nvmrc`,
 npm, curl, a C++ compiler and Python 3.13 or newer with pip and venv.
 The same Python packs and installs the notebook wheels. `--package-python`
-defaults to that interpreter and needs pip and setuptools 68+ for the canvas wheel.
+defaults to that interpreter. Building the canvas wheel requires Python 3.13+,
+pip and setuptools 68+. For setuptools below 70.1, also install `wheel`
+and its dependencies so the `bdist_wheel` command loads.
 
 ```bash
 node scripts/notebook-integration-check.mjs --stage P --notebook "$NB" \

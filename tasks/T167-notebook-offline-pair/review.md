@@ -60,3 +60,11 @@ and a missing requirements file in the caller's pip environment. The CLI
 also anchors relative wheel-builder paths at the invocation directory,
 preserving their spelling for interpreter selection after the packer
 changes directories.
+
+## Independent PR review, round 3
+
+The offline guide now requires replacing the example admin password before
+the first launch. For a plugin-version upgrade it keeps services stopped
+until the new wheel, matching UI, and service path are in place. It names
+the new wheelhouse for the upgrader's version-pinned reinstall. The stage
+prerequisites also describe the wheel dependency for older setuptools.
