@@ -274,15 +274,13 @@ function powerTargets(
         (pin) => !markers.some((marker) => samePin(marker, pin)),
       );
       const pins = host ? [...remaining, host] : remaining;
-      const gateOnly = group.pins.every((pin) => {
+      const isMosGate = (pin: { instanceId: string; pinName: string }) => {
         const inst = instances.get(pin.instanceId);
-        return (
-          !inst ||
-          isMarker(inst) ||
-          (isMos(inst.symbolId) && pin.pinName === "G")
-        );
-      });
-      if (gateOnly && targets.length) targets.unshift({ pins });
+        return !!inst && isMos(inst.symbolId) && pin.pinName === "G";
+      };
+      const gateOnly =
+        !!host && isMosGate(host) && remaining.every((pin) => isMosGate(pin));
+      if (gateOnly) targets.unshift({ pins });
       else targets.unshift(...railTrunk(document, resolver, pins, role));
     }
     return targets;
