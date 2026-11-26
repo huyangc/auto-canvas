@@ -173,3 +173,51 @@ describe("implicit schematic MOS body supplies", () => {
     expect(project).toEqual(before);
   });
 });
+
+it("passes default ground to a child even when its VDD pin was already explicitly wired", () => {
+  const project = pair();
+  const leaf = project.documents[0]!;
+  const top = createEmptyDocument("top", "top");
+  for (const document of [leaf, top]) {
+    document.instances.push({
+      id: "power-pin",
+      symbolId: "port",
+      placement: null,
+    });
+    document.nets.push({
+      id: "supply",
+      terminals: [{ instanceId: "power-pin", pinName: "P" }],
+    });
+    document.netlist!.terminals.push({
+      id: "supply-port",
+      name: "VDD",
+      netId: "supply",
+      direction: "inout",
+      interfaceInstanceIds: ["power-pin"],
+    });
+  }
+  top.instances.push({
+    id: "X1",
+    reference: "X1",
+    symbolId: "cell-symbol",
+    placement: null,
+    netlist: {
+      binding: { kind: "subcircuit", childDocumentId: leaf.id },
+      parameters: {},
+    },
+  });
+  top.nets[0]!.terminals.push({ instanceId: "X1", pinName: "VDD" });
+  project.documents.unshift(top);
+  project.topDocumentId = top.id;
+  const before = structuredClone(project);
+  const result = createDesignNetlistExport(project);
+  expect(result.status, JSON.stringify(result.diagnostics)).toBe("ready");
+  if (result.status !== "ready") return;
+  expect(result.file.text).toMatch(/^X1 VDD VSS dut$/mu);
+  expect(result.file.text).toContain(".subckt dut VDD VSS\n");
+  for (const id of ["M1", "M2"])
+    expect(result.file.text).toMatch(
+      new RegExp(`^${id} \\S+ \\S+ \\S+ VSS NMOS `, "mu"),
+    );
+  expect(project).toEqual(before);
+});

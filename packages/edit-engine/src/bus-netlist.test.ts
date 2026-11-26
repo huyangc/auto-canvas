@@ -707,16 +707,22 @@ function slicedBusDcFixture() {
     });
     expect(exported.status, JSON.stringify(exported.diagnostics)).toBe("ready");
     if (exported.status !== "ready") throw new Error("Slice export refused");
-    expect(
-      exported
-        .ir!.cells.find((cell) => cell.id === "child")!
-        .ports.map((port) => port.name),
-    ).toEqual(
+    const childIR = exported.ir!.cells.find((cell) => cell.id === "child")!;
+    expect(childIR.ports.map((port) => port.name)).toEqual(
       format === "spice"
         ? ["IN_1_", "IN_0_", "OUT_1_", "OUT_0_"]
         : ["IN\\<1\\>", "IN\\<0\\>", "OUT\\<1\\>", "OUT\\<0\\>"],
     );
     const topIR = exported.ir!.cells.find((cell) => cell.id === "top")!;
+    for (const i of [0, 1]) {
+      const resistor = childIR.instances.find(
+        (instance) => instance.reference === `R${i}`,
+      )!;
+      expect(resistor.nodes.map((node) => node.netName)).toEqual([
+        childIR.ports[i]!.netName,
+        childIR.ports[2 + i]!.netName,
+      ]);
+    }
     const inputs = ["IN<1>", "IN<0>"];
     const outputs = [
       ...expectCallWiring(topIR, "slice_pass", "nested", inputs, [2, 3]),

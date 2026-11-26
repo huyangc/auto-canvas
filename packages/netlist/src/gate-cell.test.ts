@@ -147,7 +147,17 @@ describe("a Library gate bound to a Cell of its Project (#1450)", () => {
     const project = norOverCell();
     drawTopSupply(project, "VDDA");
     const text = exported(project);
-    expect(text).toContain(".subckt nor2 VDD VSS a b y\n");
+    const body = text.match(
+      /^\.subckt nor2 VDD VSS a b y\n([\s\S]*?)^\.ends nor2$/mu,
+    )?.[1];
+    const internalNet = body?.match(/^MP1 (net\d+) /mu)?.[1];
+    expect(internalNet).toBeDefined();
+    expect(body?.match(/^M.*$/gmu)?.sort()).toEqual([
+      "MN1 y a VSS VSS NMOS l=1u w=1u",
+      "MN2 y b VSS VSS NMOS l=1u w=1u",
+      `MP1 ${internalNet} a VDD VDD PMOS l=1u w=1u`,
+      `MP2 y b ${internalNet} VDD PMOS l=1u w=1u`,
+    ]);
     // The gate's A, B and Y on the Cell's a, b and y; its VDD on the one
     // drawn supply, its VSS on ground, which the export writes as VSS.
     expect(text).toMatch(/^X1 VDDA VSS IN1 IN2 OUT nor2$/mu);
