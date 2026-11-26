@@ -1,12 +1,66 @@
 import { describe, expect, it } from "vitest";
 import { builtInSymbols, InMemorySymbolResolver } from "@icm/symbols";
 import { aprDetailPlace } from "../src/apr-detail-place.js";
+import { planAutoLayout } from "../src/index.js";
 import { geometryProblem, placement, withPlacements } from "../src/geometry.js";
+import {
+  readabilityMetrics,
+  readabilityScore,
+} from "../src/readability-metrics.js";
+import { auditRouting } from "../src/routing-audit.js";
+import { planningTiming } from "../src/timing.js";
+import { preview } from "../src/transaction.js";
 import { circuit } from "./document-fixture.js";
 
 const resolver = new InMemorySymbolResolver(builtInSymbols);
 
 describe("T189 aprDetailPlace", () => {
+  it("runs APR only for the primary finalist", () => {
+    const doc = circuit(
+      { m: "nmos", bottom: "nmos", a: "opamp", r: "resistor", c: "capacitor" },
+      {
+        vdd: ["r.1"],
+        out: ["r.2", "m.D", "c.1"],
+        sense: ["m.S", "bottom.D", "a.IN-"],
+        gnd: ["bottom.S", "c.2"],
+        input: ["bottom.G", "a.IN+"],
+        control: ["a.OUT", "m.G"],
+      },
+    );
+    const result = planAutoLayout(doc, resolver);
+    expect(result.diagnostics.filter((d) => d.severity === "error")).toEqual(
+      [],
+    );
+    const calls = planningTiming(result)?.phaseCalls;
+    expect(calls?.localRails).toBeGreaterThan(1);
+    expect(calls?.aprDetailPlace).toBe(1);
+  });
+
+  it("skips APR finishing on a clean post-anneal layout", () => {
+    const doc = circuit(
+      { a: "resistor", b: "resistor", c: "resistor", d: "resistor" },
+      { ab: ["a.2", "b.1"], bc: ["b.2", "c.1"], cd: ["c.2", "d.1"] },
+    );
+    const result = planAutoLayout(doc, resolver);
+    expect(result.diagnostics.filter((d) => d.severity === "error")).toEqual(
+      [],
+    );
+    const placed = preview(doc, resolver, result.edits);
+    if (!placed.ok) throw Error(JSON.stringify(placed.diagnostics));
+    expect(auditRouting(placed.document, resolver)).toMatchObject({
+      crossings: 0,
+      unsafeProblems: [],
+    });
+    expect(
+      readabilityScore(readabilityMetrics(placed.document, resolver)),
+    ).toBeLessThan(0.5);
+    expect(planningTiming(result)?.phaseCalls).toMatchObject({
+      annealer: 1,
+      aprDetailPlace: 0,
+      finishing: 6,
+    });
+  });
+
   it("unwinds a reversed row order via windowed detail placement without overlaps", () => {
     // Four upper NMOS drivers M1..M4 connected straight down to four lower
     // resistors R1..R4 placed in reverse order (R4, R3, R2, R1).
