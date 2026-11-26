@@ -275,6 +275,7 @@ it("edits project names inline on click or menu Rename, saving on blur and rever
   ).not.toBeNull();
 
   // Clicking the title, typing a new name, and blurring saves automatically.
+  // Escape during IME composition must not cancel the rename.
   await act(async () =>
     container
       .querySelector<HTMLButtonElement>('button[aria-label="Rename Amp"]')!
@@ -286,7 +287,16 @@ it("edits project names inline on click or menu Rename, saving on blur and rever
   await act(async () => {
     setter.call(editInput, "LNA Stage");
     editInput.dispatchEvent(new Event("input", { bubbles: true }));
+    const imeEscape = new KeyboardEvent("keydown", {
+      key: "Escape",
+      bubbles: true,
+    });
+    Object.defineProperty(imeEscape, "isComposing", { value: true });
+    editInput.dispatchEvent(imeEscape);
   });
+  expect(container.querySelector("input.shelf-tile-name-input")).toBe(
+    editInput,
+  );
   await act(async () => editInput.blur());
   expect(savedNames).toEqual(["LNA Stage"]);
   expect(
@@ -354,9 +364,23 @@ it("preserves the typed rename draft on save failure so the user can retry or ed
   expect(preserved.disabled).toBe(false);
   expect(document.activeElement).toBe(preserved);
 
-  // Blurring without editing does not re-fire the same failing request.
+  // Blurring without editing does not re-fire the same failing request, and a
+  // subsequent host flush allows closing the modal rather than trapping it.
+  const flushRenameRef: {
+    current: (() => boolean | Promise<boolean>) | null;
+  } = { current: null };
+  await act(async () =>
+    root!.render(
+      createElement(ShelfWall, {
+        onOpenProject,
+        onRenameProject,
+        flushRenameRef,
+      }),
+    ),
+  );
   await act(async () => preserved.blur());
   expect(onRenameProject).toHaveBeenCalledTimes(1);
+  expect(flushRenameRef.current?.()).toBe(true);
 
   // After leaving the failed draft unfocused, clicking a tile still opens it.
   const tile = container.querySelector<HTMLButtonElement>(

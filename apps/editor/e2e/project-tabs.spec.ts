@@ -1600,18 +1600,28 @@ test("the Browse dialog tiles its cards evenly, closes from its × and drags by 
   const previewsSettled = () =>
     expect
       .poll(() =>
-        dialog
-          .locator(".shelf-tile-preview img")
-          .evaluateAll(
-            (images) =>
-              images.length === 2 &&
-              images.every(
-                (image) =>
-                  image instanceof HTMLImageElement &&
-                  image.complete &&
-                  image.naturalWidth > 0,
-              ),
-          ),
+        dialog.evaluate((root) => {
+          const images = [...root.querySelectorAll(".shelf-tile-preview img")];
+          if (
+            images.length !== 2 ||
+            !images.every(
+              (image) =>
+                image instanceof HTMLImageElement &&
+                image.complete &&
+                image.naturalWidth > 0 &&
+                image.getBoundingClientRect().height > 0,
+            )
+          )
+            return false;
+          const masonry = root.querySelector<HTMLElement>(".masonry");
+          const item = root.querySelector<HTMLElement>(".masonry-item");
+          return (
+            masonry !== null &&
+            item !== null &&
+            masonry.getBoundingClientRect().height >=
+              item.getBoundingClientRect().height - 1
+          );
+        }),
       )
       .toBe(true);
   await previewsSettled();
