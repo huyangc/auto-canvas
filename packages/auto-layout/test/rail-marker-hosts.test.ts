@@ -403,4 +403,32 @@ describe("T127 rail markers sit at the pin they serve", () => {
     expect(minX).toBeLessThanOrEqual(portPin.x);
     expect(maxX).toBeGreaterThanOrEqual(g1.x);
   });
+
+  it("joins all gate-hosted marker stubs on an unnamed multi-marker rail", () => {
+    const document = circuit(
+      {
+        M1: "nmos",
+        M2: "nmos",
+        M3: "nmos",
+        v1: "vdd-port",
+        v2: "vdd-port",
+      },
+      { rail: ["M1.G", "M2.G", "M3.G", "v1.P", "v2.P"] },
+    );
+    document.instances.find((i) => i.id === "M1")!.placement = placement(
+      200,
+      400,
+    );
+    document.instances.find((i) => i.id === "M2")!.placement = placement(
+      500,
+      400,
+    );
+    document.instances.find((i) => i.id === "M3")!.placement = placement(
+      800,
+      400,
+    );
+    const after = layout(document);
+    expect(missingConnections(after, resolver)).toBe(0);
+    expect(floatingPins(after, resolver)).toEqual([]);
+  });
 });

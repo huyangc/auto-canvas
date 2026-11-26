@@ -33,6 +33,7 @@ import {
   powerHosts,
 } from "./place-markers.js";
 import { isMarker } from "./placement-connectivity.js";
+import { railMarkerClaim } from "./rail-marker-identity.js";
 import { compareIds, recognizeSubstructures } from "./recognize.js";
 import {
   auditRouting,
@@ -268,18 +269,30 @@ function powerTargets(
       (pin) =>
         !targets.some((target) => target.pins.some((ref) => samePin(pin, ref))),
     );
-    if (remaining.length) {
-      // Include one stub's host so the trunk shares the marker's drawing.
-      const host = targets[0]?.pins.find(
-        (pin) => !markers.some((marker) => samePin(marker, pin)),
-      );
-      const pins = host ? [...remaining, host] : remaining;
-      const isMosGate = (pin: { instanceId: string; pinName: string }) => {
-        const inst = instances.get(pin.instanceId);
-        return !!inst && isMos(inst.symbolId) && pin.pinName === "G";
-      };
+    const stubHosts = targets
+      .map((target) =>
+        target.pins.find(
+          (pin) => !markers.some((marker) => samePin(marker, pin)),
+        ),
+      )
+      .filter((pin): pin is TerminalRef => pin !== undefined);
+    const isMosGate = (pin: { instanceId: string; pinName: string }) => {
+      const inst = instances.get(pin.instanceId);
+      return !!inst && isMos(inst.symbolId) && pin.pinName === "G";
+    };
+    const unnamedMultiGateStubs =
+      stubHosts.length > 1 &&
+      stubHosts.every((host) => isMosGate(host)) &&
+      !railMarkerClaim(document, group.netId);
+    if (remaining.length || unnamedMultiGateStubs) {
+      // Include one stub's host so the trunk shares the marker's drawing, or
+      // every gate-hosted stub on an unnamed rail where markers cannot merge by name.
+      const hosts = unnamedMultiGateStubs ? stubHosts : stubHosts.slice(0, 1);
+      const pins = [...remaining, ...hosts];
       const gateOnly =
-        !!host && isMosGate(host) && remaining.every((pin) => isMosGate(pin));
+        hosts.length > 0 &&
+        hosts.every((host) => isMosGate(host)) &&
+        remaining.every((pin) => isMosGate(pin));
       if (gateOnly) targets.unshift({ pins });
       else targets.unshift(...railTrunk(document, resolver, pins, role));
     }
