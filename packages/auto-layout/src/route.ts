@@ -561,28 +561,30 @@ function routeGroup(
   const power = (g: PinGroup) =>
     ["supply", "ground"].includes(roles.byNet.get(g.netId) ?? "");
   const points = pinPoints(working, resolver);
-  const clusters = power(group)
-    ? undefined
-    : decoupledSignalPortClusters(
-        working,
-        group.netId,
-        group.pins,
-        roles,
-        group.contacts,
-        points,
-        group.portAssociations,
-      );
-  const targets: RoutingTarget[] = power(group)
-    ? powerTargets(
-        working,
-        resolver,
-        group,
-        roles.byNet.get(group.netId) as "supply" | "ground",
-        roles.rails.has(group.netId),
-      )
-    : (clusters?.map((c) => ({ pins: [c.port, ...c.hosts] })) ?? [
-        { pins: group.pins },
-      ]);
+  const clusters =
+    power(group) && !roles.rails.has(group.netId)
+      ? undefined
+      : decoupledSignalPortClusters(
+          working,
+          group.netId,
+          group.pins,
+          roles,
+          group.contacts,
+          points,
+          group.portAssociations,
+          { allowRails: true },
+        );
+  const targets: RoutingTarget[] = clusters
+    ? clusters.map((c) => ({ pins: [c.port, ...c.hosts] }))
+    : power(group)
+      ? powerTargets(
+          working,
+          resolver,
+          group,
+          roles.byNet.get(group.netId) as "supply" | "ground",
+          roles.rails.has(group.netId),
+        )
+      : [{ pins: group.pins }];
   // R38: freeze and wire direct contacts on every Net before the general tree.
   // Whole-list reconciliation then has no missing physical connection to add.
   const contacts = group.contacts.filter((pair) => {

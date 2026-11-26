@@ -3,7 +3,11 @@ import {
   isPortSymbol,
 } from "./multi-port-nets.js";
 import { portDirection } from "./port-convention.js";
-import { markerBlocksJoin, straightJoins } from "./straight-joins.js";
+import {
+  markerBlocksJoin,
+  straightJoins,
+  symbolBlocksJoin,
+} from "./straight-joins.js";
 import { contactGeometryProblem, contactPolicy } from "./contact-placement.js";
 import { freezePinGroups } from "./route.js";
 import { visibleInstanceBounds, visibleSymbolInkBounds } from "@icm/derived";
@@ -358,7 +362,7 @@ function localPortHosts(
   for (const i of document.instances) {
     if (!isPortSymbol(i.symbolId)) continue;
     const net = roles.pinNet(i.id, "P");
-    if (!net || roles.rails.has(net)) continue;
+    if (!net) continue;
     if (seen.has(net)) duplicate.add(net);
     seen.add(net);
   }
@@ -373,6 +377,7 @@ function localPortHosts(
       group.contacts,
       pins,
       group.portAssociations,
+      { allowRails: true },
     );
     for (const cluster of clusters ?? []) {
       const points = cluster.hosts.flatMap((h) =>
@@ -392,6 +397,32 @@ function localPortDistances(document: SchematicDocument, decoupled: boolean) {
   const snap = (n: number) => Math.round(n / grid) * grid;
   return [...new Set([snap(offset / 2), offset, snap(offset * 1.5)])].filter(
     (distance) => distance >= grid * 2,
+  );
+}
+
+/** The full pin-to-pin stub must clear the visible bounds of intervening instances. */
+function clearPortStub(
+  bounds: ReturnType<typeof visibleInstanceBounds>,
+  host: PinPoint,
+  net: string,
+  seat: Placement,
+  portPin: ReturnType<typeof devicePins>[number] | undefined,
+  horizontal: boolean,
+) {
+  const end = portPin
+    ? transformPoint(portPin.at, seat.position, seat)
+    : seat.position;
+  const axis = horizontal ? "x" : "y";
+  const segment = {
+    net,
+    axis,
+    across: horizontal ? "y" : "x",
+    line: horizontal ? host.point.y : host.point.x,
+    low: Math.min(host.point[axis], end[axis]),
+    high: Math.max(host.point[axis], end[axis]),
+  } as const;
+  return !bounds.some(
+    (b) => b.id !== host.instanceId && symbolBlocksJoin(b.bounds, segment),
   );
 }
 
@@ -508,7 +539,7 @@ function placeCellPins(
         count: connected.length,
         connected,
         singleHost:
-          !roles.rails.has(net ?? "") && connected.length === 1
+          (assigned || !roles.rails.has(net ?? "")) && connected.length === 1
             ? connected[0]
             : undefined,
         coordinate: snap(vertical ? host.y : host.x),
@@ -570,7 +601,33 @@ function placeCellPins(
         i.symbolId === "vdd-port" ||
         placed.has(i.id),
     );
+    const guardStub = host && (entry.decoupled || cellPinOffset(document) > 40);
+    const bounds =
+      guardStub && seats.length
+        ? visibleInstanceBounds(
+            withPlacements(
+              {
+                ...document,
+                instances: occupied.filter((i) => i.id !== entry.i.id),
+              },
+              targets,
+            ),
+            resolver,
+          )
+        : [];
     for (const p of seats) {
+      if (
+        guardStub &&
+        !clearPortStub(
+          bounds,
+          host,
+          entry.net!,
+          p,
+          devicePins(entry.i, resolver)[0],
+          !!exitAt(host).x,
+        )
+      )
+        continue;
       targets.set(entry.i.id, p);
       if (
         !geometryProblem(
@@ -721,6 +778,10 @@ export function portSeatCandidates(
           compareIds(a.instanceId, b.instanceId) ||
           compareIds(a.pinName, b.pinName),
       );
+  const bounds = visibleInstanceBounds(document, resolver).filter(
+    (b) => b.id !== portId,
+  );
+  const portPin = devicePins(port, resolver)[0];
   for (const host of hosts) {
     const instance = devices.instances.find((i) => i.id === host.instanceId)!;
     const pin = devicePins(instance, resolver).find(
@@ -732,15 +793,19 @@ export function portSeatCandidates(
       cellPinOffset(document),
       cellPinOffset(document) * 2,
       cellPinOffset(document) * 3,
-    ])
-      seats.push(
-        placement(
-          snap(host.point.x + exit.x * distance),
-          snap(host.point.y + exit.y * distance),
-          exit.x > 0 ? "horizontal" : "none",
-          exit.y < 0 ? 90 : exit.y > 0 ? 270 : 0,
-        ),
+    ]) {
+      const seat = placement(
+        snap(host.point.x + exit.x * distance),
+        snap(host.point.y + exit.y * distance),
+        exit.x > 0 ? "horizontal" : "none",
+        exit.y < 0 ? 90 : exit.y > 0 ? 270 : 0,
       );
+      if (
+        (!assigned && (hosts.length !== 1 || distance <= 40)) ||
+        clearPortStub(bounds, host, net, seat, portPin, !!exit.x)
+      )
+        seats.push(seat);
+    }
   }
   if (hosts.length > 1) {
     const median = (values: number[]) => {
@@ -804,13 +869,16 @@ export function portSeatCandidates(
     const host = [...hosts].sort((a, b) =>
       right ? b.point.x - a.point.x : a.point.x - b.point.x,
     )[0]!;
-    seats.push(
-      placement(
-        snap(host.point.x + (right ? 1 : -1) * cellPinOffset(document)),
-        snap(host.point.y),
-        right ? "horizontal" : "none",
-      ),
+    const seat = placement(
+      snap(host.point.x + (right ? 1 : -1) * cellPinOffset(document)),
+      snap(host.point.y),
+      right ? "horizontal" : "none",
     );
+    if (
+      (!assigned && cellPinOffset(document) <= 40) ||
+      clearPortStub(bounds, host, net, seat, portPin, true)
+    )
+      seats.push(seat);
   }
   const contacts = contactPolicy(document, freezePinGroups(document, resolver));
   // R164: a port of a free directed block's output Net stays on its right.
@@ -832,7 +900,6 @@ export function portSeatCandidates(
       { ...devices, instances: [driver.instance] },
       resolver,
     )[0]?.bounds;
-  const portPin = devicePins(port, resolver)[0];
   const seen = new Set<string>();
   return seats.filter((seat) => {
     const key = JSON.stringify(seat);
@@ -1009,7 +1076,8 @@ export function nextMarkerPlacements(
           roles.pinNet(p.instanceId, p.pinName) === roles.pinNet(i.id, "P"),
       );
     const host =
-      connected.length === 1 && !roles.rails.has(roles.pinNet(i.id, "P") ?? "")
+      connected.length === 1 &&
+      (localHosts.has(i.id) || !roles.rails.has(roles.pinNet(i.id, "P") ?? ""))
         ? connected[0]
         : undefined;
     const hostInstance = host && devices.find((i) => i.id === host.instanceId);

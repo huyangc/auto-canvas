@@ -1358,3 +1358,35 @@ it("admits the mirror finalist and preserves the terminal partition through repl
     finalist.mockRestore();
   }
 }, 60_000);
+
+it.each([false, true])(
+  "recognizes a private tail gate only while it has one device owner (shared=%s)",
+  (shared) => {
+    const d = circuit(
+      {
+        a: "nmos",
+        b: "nmos",
+        M21: "nmos",
+        CM: "port",
+        VSS: "ground",
+        ...(shared ? { extra: "resistor" } : {}),
+      },
+      {
+        left: ["a.D"],
+        right: ["b.D"],
+        inp: ["a.G"],
+        inn: ["b.G"],
+        tail: ["a.S", "b.S", "M21.D"],
+        gnd: ["M21.S", "VSS.0"],
+        V_CMFB: ["M21.G", "CM.P", ...(shared ? ["extra.1"] : [])],
+      },
+    );
+    const { components, netMap } = symmetryTopology(
+      d,
+      resolver,
+      classifyNets(d, resolver),
+    );
+    expect(components[0]!.axis.includes("M21")).toBe(!shared);
+    expect(netMap.get("V_CMFB")).toBe(shared ? undefined : "V_CMFB");
+  },
+);

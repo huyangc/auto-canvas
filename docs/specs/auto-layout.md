@@ -1368,9 +1368,9 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   strictly improves the incumbent run and preserves or improves physical
   completeness. A losing draft stays out of annealing and rerouting.
 
-- **R172 — Multi-port local signal decoupling (T175).** A non-rail Base Net
+- **R172 — Multi-port local decoupling (T175/T177).** A signal or rail Base Net
   with at least two ports, a name for every port (interface terminal or logical
-  Net name), at least one device pin per port, and no power markers can use
+  Net name), at least one visible non-bulk device pin per port, and no power markers can use
   local wire trees. In port id order, reserve distinct authored touching hosts
   first, then preserve hosts from physical components containing a single port.
   Assign other primaries in instance and pin-name order. Spare device pins stay
@@ -1383,10 +1383,12 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
 - **R71 — Single-host ports.** A non-rail Cell Pin Net that reaches exactly
   one device pin gets a local seat along that pin's transformed exit direction.
   Use a 40-unit default seat up to 40 instances and 80 units above that,
-  with clear artwork. Face the port toward the host;
+  with clear artwork. For an R172 port or a single-host stub longer than 40
+  units, initial placement and local seat search require the host-to-port
+  segment to clear every intervening instance’s visible bounds. Face the port toward the host;
   the port-label renderer keeps text upright. Reserve local seats in id order.
   If the seat is blocked, use R19/R20. Multiple-host ports retain R93 and
-  R19/R20 with the same document-size edge offset. Rail ports retain R62 clearance.
+  R19/R20 with the same document-size edge offset. Rail ports outside R172 retain R62 clearance.
   Local seats are excluded from edge spacing and side refinement. Fixed ports
   remain occupied and never move; touching ports require R38 validation.
   After routing and label finishing, a diagnosed short port stub can extend
@@ -1644,7 +1646,10 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
   similarly pairs mutually unique devices, except on rails: rail connectivity
   never pairs devices. An unmapped device whose connected
   Nets all map to themselves and that has no unmapped identical-topology twin
-  maps to itself. A two-pin non-polar passive spanning a distinct mirrored pair
+  maps to itself. A channel device attached to a proven non-rail self Net can
+  also map to itself when each remaining unmapped Net is unconflicted and
+  private to that device, and no other free compatible device shares all its
+  mapped Nets. A two-pin non-polar passive spanning a distinct mirrored pair
   of non-rail Nets also maps to itself with reversed pins when no other free
   compatible device spans that unordered pair. Compute implications from the preceding round, then apply
   together to a fixpoint. Shared connections propose self mappings only as
@@ -1679,9 +1684,13 @@ pins }` lists, never Net ids. `planRouteNet` groups the frozen pins by physical
 - **R89 — Symmetric blocks.** Partners start on the smaller R31 row and axis devices
   start on their R31 rows. Build a half Document from left partners and axis devices,
   folding right Nets onto left Nets. Reuse R32 and R33 with these rows and only
-  groups contained in the half, moving axis devices to each row's right end.
+  groups contained in the half, pinning axis devices to each row's right end throughout R32.
   Cross-coupled members (mutual G/D or B/C Nets) come immediately before axis
-  devices, keeping all other nodes in their prior order.
+  devices. For multi-column halves compare both initial distance orders by R32
+  crossings and same-row spans. Break ties in sweeps and adjacent swaps by
+  preferring axis neighbors inward and output-connected devices outward. In
+  multi-column halves, reserve 40 additional units per side of an aisle
+  facing a local gate port on a decoupled signal or private bias Net.
   Before column assignment, orient recognized left members by R92: outward
   `none`, inward `horizontal`. Other paired devices with a gate use
   `horizontal` when the gate Net is self-mapped, otherwise `none`. Two-pin parts
