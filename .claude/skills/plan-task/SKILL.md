@@ -1,6 +1,6 @@
 ---
 name: plan-task
-description: Turn a request into an auto-canvas task for an implementer. Investigates the code, writes tasks/<id>-<slug>/plan.md from the template, confirms scope with the user, marks it approved and opens the task branch. Use before any implementation work in this repository.
+description: Turn a request into an auto-canvas task for an implementer. Investigates the code, writes tasks/<id>-<slug>/plan.md from the template, confirms scope with the user, marks it approved in its dedicated worktree. Use before any implementation work in this repository.
 ---
 
 # plan-task
@@ -9,7 +9,11 @@ The plan is the only context the implementer gets besides AGENTS.md. Write it
 for a capable engineer who has never seen this conversation.
 
 1. **Number and name.** Next free `T<nnn>` under `tasks/`; slug in lowercase
-   kebab case. Copy `tasks/_template/plan.md`.
+   kebab case. For a new task, create its dedicated worktree from the planned
+   base as described in the [workflow](../../../docs/workflow.md#并行任务).
+   Record the path and branch at creation. Use the existing task worktree
+   for a continuation, or the checkout explicitly chosen by the developer.
+   Copy `tasks/_template/plan.md` in that worktree.
 2. **Investigate before writing.** Read the code the request touches. Record
    in Context the facts that matter: entry points, importers of what will
    change (`grep -rn` the symbol), generated files and their generators,
@@ -40,5 +44,6 @@ for a capable engineer who has never seen this conversation.
    that changes scope or a product decision again, go back to the user. Set
    `- Status: approved` and record the base commit only once the user has
    confirmed the final reviewed scope and product decisions.
-7. **Branch.** From a clean `main`: `git switch -c task/<id>-<slug>`, commit
-   the plan alone (`Plan T<nnn>: <title>`), and hand over to `run-task`.
+7. **Handoff.** Verify the checkout and branch match the task record, commit
+   the plan alone (`Plan T<nnn>: <title>`) on that branch, and pass its worktree
+   path and branch to `run-task`.
