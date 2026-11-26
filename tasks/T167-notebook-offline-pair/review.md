@@ -37,3 +37,15 @@ database-documentation decision. The testing guide now records resource
 use for a complete run. A separate P2 SIGINT run exited 130, cleaned up
 its companions and database, and removed its temporary root. See the
 [report](report.md) for the host reruns and checks against main.
+
+## Independent PR review, round 1
+
+- The pinned notebook installer redirects venv stderr to a fixed file outside
+  the stage root. The operator-facing test notes now document this upstream
+  packaging limitation; the canvas check does not remove a file another
+  installer may be using.
+- A slow catalog lookup for a lost CREATE could exhaust the admin session
+  before a confirmed database received its DROP. Cleanup now sends confirmed
+  drops after the bounded activity poll and before querying the catalog for
+  lost creates. A stage S control expires its session in the lookup and
+  verifies that the confirmed DROP has already been sent.

@@ -1122,6 +1122,19 @@ export async function dropDatabases({
         );
       }
     }
+    const drop = async (name) => {
+      try {
+        await admin.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+      } catch (error) {
+        report.fail(
+          `cleanup: database ${name} is dropped`,
+          `the drop failed: ${error.message}`,
+        );
+      }
+    };
+    // A slow catalog lookup for a lost CREATE must not consume the time
+    // reserved to drop databases whose creation this run already confirmed.
+    for (const name of created) await drop(name);
     let found = [];
     if (lost.length) {
       try {
@@ -1142,15 +1155,7 @@ export async function dropDatabases({
     }
     const dropping = [...created, ...found];
     if (!dropping.length) return;
-    for (const name of dropping)
-      try {
-        await admin.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
-      } catch (error) {
-        report.fail(
-          `cleanup: database ${name} is dropped`,
-          `the drop failed: ${error.message}`,
-        );
-      }
+    for (const name of found) await drop(name);
     let remaining;
     try {
       const rows = await admin.query(
