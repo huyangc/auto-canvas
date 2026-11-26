@@ -166,7 +166,7 @@ node scripts/codex-log.mjs tasks/T001-<slug> --round 2 --follow       # 供 Moni
 
 ### 手动运行独立 PR 评审
 
-钩子未运行，或运行结束后仍缺少当前远端 head 的有效评审时，负责人手动补评。确认任务 worktree 的 HEAD 等于 PR 的 `headRefOid`，更新 PR 基分支的远端引用并检查差异非空。在该 worktree 中为本轮创建独立输出文件，以下示例使用当前分支关联的 PR。
+钩子未运行，或运行结束后仍缺少当前远端 head 的有效评审时，负责人手动补评。在 `git status --porcelain` 输出为空的 worktree 中评审，确认其 HEAD 等于 PR 的 `headRefOid`。若任务 worktree 有未提交工作，另建该 SHA 的干净 worktree 并保留原有改动。更新 PR 基分支的远端引用并检查差异非空。在该 worktree 中为本轮创建独立输出文件，以下示例使用当前分支关联的 PR。
 
 ```bash
 pr_base=$(gh pr view --json baseRefName --jq .baseRefName)
@@ -185,7 +185,7 @@ codex exec review --base "origin/$pr_base" --ephemeral -m gpt-6.2-sol \
 设了 `review_model` 时以它为准（评审用它），依赖 hook 一轮前两个键都要查；该轮日志
 `~/.claude/codex-pr-review/logs/pr<PR号>-r<n>.log` 里有一行 `model:`，要确认是
 `gpt-6.2-sol`，否则改好配置重跑，或手动补评并贴回输出。
-核对日志对应的仓库、PR 和提交。缺少有效证据时，按[手动运行独立 PR 评审](#手动运行独立-pr-评审)补评。
+日志文件名只含 PR 号和轮次。同一钩子用于多个仓库时，须能把日志对应到具体仓库、PR、远端 head SHA 和已贴出的那一轮评论。关联不明或缺少有效证据时，按[手动运行独立 PR 评审](#手动运行独立-pr-评审)补评。
 
 装有 hook 时可用的手动操作：
 
