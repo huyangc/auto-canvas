@@ -148,25 +148,6 @@ function SearchIcon() {
   );
 }
 
-function PencilIcon() {
-  return (
-    <svg
-      className="shelf-icon"
-      viewBox="0 0 16 16"
-      width="14"
-      height="14"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M11.4 2.6a1.4 1.4 0 0 1 2 2L5.5 12.5 2.5 13.5l1-3 7.9-7.9z" />
-    </svg>
-  );
-}
-
 function TrashIcon() {
   return (
     <svg
@@ -239,6 +220,10 @@ export function ShelfWall({
   const [busyId, setBusyId] = useState<string | null>(null);
   const favoriteButtons = useRef(new Map<string, HTMLButtonElement>());
   const actionButtons = useRef(new Map<string, HTMLButtonElement>());
+  const titleButtons = useRef(new Map<string, HTMLButtonElement>());
+  const renameInputRef = useRef<HTMLInputElement>(null);
+  const activeRenameIdRef = useRef<string | null>(null);
+  const suppressNextOpenRef = useRef(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const favoritesFilter = useRef<HTMLButtonElement>(null);
   const pendingFavoriteFocus = useRef<string | null>(null);
@@ -269,7 +254,9 @@ export function ShelfWall({
     const renameId = pendingRenameFocus.current;
     if (renameId !== null && renaming === null && busyId === null) {
       pendingRenameFocus.current = null;
-      const target = actionButtons.current.get(renameId);
+      const target =
+        titleButtons.current.get(renameId) ??
+        actionButtons.current.get(renameId);
       (target && !target.disabled ? target : searchInputRef.current)?.focus();
     }
     const id = pendingFavoriteFocus.current;
@@ -280,6 +267,9 @@ export function ShelfWall({
   });
 
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(
+    null,
+  );
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(
     null,
   );
   const [error, setError] = useState<string | null>(null);
@@ -295,15 +285,25 @@ export function ShelfWall({
   const menuRef = useRef<HTMLDivElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
 
-  // A filter or view change can hide the tile whose menu is open (a keyboard
-  // switch fires no outside pointerdown), so it closes the menu too.
+  useEffect(() => {
+    if (!renaming?.id) return;
+    const input = renameInputRef.current;
+    if (!input) return;
+    input.focus({ preventScroll: true });
+    input.select();
+  }, [renaming?.id]);
+
+  // A filter or view change can hide the tile whose menu or delete confirm is
+  // open (a keyboard switch fires no outside pointerdown), so close both too.
   function showFilter(next: "all" | "favorites") {
     setMenu(null);
+    setConfirmingDeleteId(null);
     setFilter(next);
   }
 
   function changeViewMode(next: ShelfViewMode) {
     setMenu(null);
+    setConfirmingDeleteId(null);
     setViewMode(next);
     try {
       if (typeof window.localStorage?.setItem === "function")
@@ -441,16 +441,50 @@ export function ShelfWall({
     };
   }, [history]);
 
+  function startRename(project: CloudProjectSummary) {
+    if (controlsBusy) return;
+    setMenu(null);
+    setConfirmingDeleteId(null);
+    setError(null);
+    suppressNextOpenRef.current = false;
+    activeRenameIdRef.current = project.id;
+    setRenaming({ id: project.id, name: project.name });
+  }
+
+  function cancelRename(projectId: string) {
+    if (activeRenameIdRef.current !== projectId) return;
+    activeRenameIdRef.current = null;
+    pendingRenameFocus.current = projectId;
+    setRenaming(null);
+  }
+
+  function commitRename(
+    project: CloudProjectSummary,
+    rawValue: string,
+    restoreFocus: boolean,
+  ) {
+    if (activeRenameIdRef.current !== project.id) return;
+    activeRenameIdRef.current = null;
+    const trimmed = rawValue.trim();
+    if (!trimmed || trimmed === project.name) {
+      if (restoreFocus) pendingRenameFocus.current = project.id;
+      setRenaming(null);
+      return;
+    }
+    void act(project, "rename", trimmed, restoreFocus);
+  }
+
   async function act(
     project: CloudProjectSummary,
     action: "duplicate" | "rename" | "export" | "favorite",
     renamed?: string,
+    restoreRenameFocus = false,
   ) {
     setMenu(null);
     if (controlsBusy) return;
     const name = renamed?.trim();
     if (action === "rename" && (!name || name === project.name)) {
-      pendingRenameFocus.current = project.id;
+      if (restoreRenameFocus) pendingRenameFocus.current = project.id;
       setRenaming(null);
       return;
     }
@@ -493,7 +527,7 @@ export function ShelfWall({
               }
             : current,
         );
-        pendingRenameFocus.current = project.id;
+        if (restoreRenameFocus) pendingRenameFocus.current = project.id;
         setRenaming(null);
         const refreshed = await loadShelf();
         if (refreshed.status === "ready" && mutationSeq.current === seq)
@@ -509,7 +543,8 @@ export function ShelfWall({
           mutationSeq.current += 1;
           replaceSummary(result.project);
           void onProjectsChangedRef.current?.();
-          if (action === "rename") pendingRenameFocus.current = project.id;
+          if (action === "rename" && restoreRenameFocus)
+            pendingRenameFocus.current = project.id;
           setRenaming(null);
         } else
           throw new Error(
@@ -524,6 +559,7 @@ export function ShelfWall({
           );
       }
     } catch (cause) {
+      if (action === "rename") setRenaming(null);
       setError(
         cause instanceof Error
           ? cause.message
@@ -656,6 +692,54 @@ export function ShelfWall({
     </button>
   );
 
+  const renderProjectTitle = (project: CloudProjectSummary) =>
+    renaming?.id === project.id ? (
+      <input
+        ref={renameInputRef}
+        className="shelf-tile-name-input"
+        aria-label="Project name"
+        autoComplete="off"
+        maxLength={120}
+        value={renaming.name}
+        disabled={controlsBusy}
+        onChange={(event) =>
+          setRenaming({
+            id: project.id,
+            name: event.target.value,
+          })
+        }
+        onBlur={(event) =>
+          commitRename(project, event.currentTarget.value, false)
+        }
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+            event.preventDefault();
+            event.stopPropagation();
+            commitRename(project, event.currentTarget.value, true);
+          } else if (event.key === "Escape" && !controlsBusy) {
+            event.preventDefault();
+            event.stopPropagation();
+            cancelRename(project.id);
+          }
+        }}
+      />
+    ) : (
+      <button
+        type="button"
+        ref={(button) => {
+          if (button) titleButtons.current.set(project.id, button);
+          else titleButtons.current.delete(project.id);
+        }}
+        className="shelf-tile-name-btn"
+        aria-label={`Rename ${project.name}`}
+        title="Click to rename"
+        disabled={controlsBusy}
+        onClick={() => startRename(project)}
+      >
+        {project.name}
+      </button>
+    );
+
   const renderActionBar = (
     project: CloudProjectSummary,
     variant: "card" | "list",
@@ -664,113 +748,59 @@ export function ShelfWall({
       className={
         variant === "card" ? "shelf-tile-footer" : "shelf-list-actions"
       }
+      data-confirming={confirmingDeleteId === project.id || undefined}
     >
-      <div className="shelf-quick-actions">
-        {renderHeartButton(project)}
-        <button
-          type="button"
-          className="shelf-action-btn"
-          aria-label={`Rename ${project.name}`}
-          title="Rename"
-          disabled={controlsBusy}
-          onClick={(event) => {
-            menuButtonRef.current = event.currentTarget;
-            setMenu(null);
-            setError(null);
-            setRenaming({ id: project.id, name: project.name });
-          }}
-        >
-          <PencilIcon />
-          {variant === "card" ? <span>Rename</span> : null}
-        </button>
+      {renderHeartButton(project)}
+      <div className="shelf-footer-end">
         <InlineConfirm
           className="shelf-action-btn shelf-action-delete"
           data-testid={`shelf-quick-delete-${project.id}`}
           aria-label={`Delete ${project.name}`}
           title="Delete"
+          promptLabel="Delete?"
+          open={confirmingDeleteId === project.id}
+          onOpenChange={(next) => {
+            if (next) {
+              setMenu(null);
+              setConfirmingDeleteId(project.id);
+            } else {
+              setConfirmingDeleteId((current) =>
+                current === project.id ? null : current,
+              );
+            }
+          }}
+          dismissOnOutsideClick
           disabled={controlsBusy}
           onConfirm={() => removeProject(project)}
         >
           <TrashIcon />
         </InlineConfirm>
-      </div>
-      <button
-        type="button"
-        ref={(button) => {
-          if (button) actionButtons.current.set(project.id, button);
-          else actionButtons.current.delete(project.id);
-        }}
-        className="shelf-tile-actions"
-        aria-label={`Actions for ${project.name}`}
-        aria-haspopup="menu"
-        aria-expanded={menu?.project.id === project.id}
-        data-testid={`shelf-actions-${project.id}`}
-        disabled={controlsBusy}
-        onClick={(event) => {
-          menuButtonRef.current = event.currentTarget;
-          if (menu?.project.id === project.id) {
-            setMenu(null);
-            return;
-          }
-          showMenu(project, event.currentTarget.getBoundingClientRect());
-        }}
-      >
-        •••
-      </button>
-    </div>
-  );
-
-  const renderRenameForm = (project: CloudProjectSummary) => (
-    <form
-      className="shelf-rename-form"
-      autoComplete="off"
-      onSubmit={(event) => {
-        event.preventDefault();
-        void act(project, "rename", renaming?.name ?? project.name);
-      }}
-      onKeyDown={(event) => {
-        if (event.key === "Escape" && !controlsBusy) {
-          event.preventDefault();
-          event.stopPropagation();
-          pendingRenameFocus.current = project.id;
-          setRenaming(null);
-        }
-      }}
-    >
-      <input
-        aria-label="Project name"
-        autoComplete="off"
-        autoFocus
-        maxLength={120}
-        value={renaming?.name ?? project.name}
-        disabled={controlsBusy}
-        onChange={(event) =>
-          setRenaming({
-            id: project.id,
-            name: event.target.value,
-          })
-        }
-      />
-      <span className="shelf-rename-actions">
-        <button
-          type="submit"
-          className="shelf-rename-save"
-          disabled={controlsBusy || !(renaming?.name ?? "").trim()}
-        >
-          Save
-        </button>
         <button
           type="button"
+          ref={(button) => {
+            if (button) actionButtons.current.set(project.id, button);
+            else actionButtons.current.delete(project.id);
+          }}
+          className="shelf-tile-actions"
+          aria-label={`Actions for ${project.name}`}
+          aria-haspopup="menu"
+          aria-expanded={menu?.project.id === project.id}
+          data-testid={`shelf-actions-${project.id}`}
           disabled={controlsBusy}
-          onClick={() => {
-            pendingRenameFocus.current = project.id;
-            setRenaming(null);
+          onClick={(event) => {
+            menuButtonRef.current = event.currentTarget;
+            setConfirmingDeleteId(null);
+            if (menu?.project.id === project.id) {
+              setMenu(null);
+              return;
+            }
+            showMenu(project, event.currentTarget.getBoundingClientRect());
           }}
         >
-          Cancel
+          •••
         </button>
-      </span>
-    </form>
+      </div>
+    </div>
   );
 
   return (
@@ -793,6 +823,7 @@ export function ShelfWall({
               value={searchQuery}
               onChange={(event) => {
                 setMenu(null);
+                setConfirmingDeleteId(null);
                 setSearchQuery(event.currentTarget.value);
               }}
             />
@@ -892,75 +923,88 @@ export function ShelfWall({
         >
           {shown.map((project) => (
             <div className="shelf-list-row" role="listitem" key={project.id}>
-              {renaming?.id === project.id ? (
-                renderRenameForm(project)
-              ) : (
-                <>
-                  {onOpenProject ? (
-                    <button
-                      type="button"
-                      className="shelf-list-open"
-                      aria-label={project.name}
-                      data-testid={`shelf-tile-${project.id}`}
-                      disabled={controlsBusy}
-                      onClick={() => onOpenProject(project.id)}
-                    >
-                      <span className="shelf-list-thumb">
-                        <TilePreview
-                          key={`${project.id}-${project.revision}`}
-                          src={cloudProjectPreviewUrl(
-                            project.id,
-                            project.revision,
-                          )}
-                          alt={`Preview of ${project.name}`}
-                        />
-                      </span>
-                      <span className="shelf-list-copy">
-                        <span className="shelf-tile-name">{project.name}</span>
-                        <span className="shelf-tile-meta">
-                          <time dateTime={project.updatedAt}>
-                            {formatUpdatedAt(project.updatedAt)}
-                          </time>
-                          {" · "}
-                          <span className="shelf-tile-revision">
-                            revision {project.revision}
-                          </span>
-                        </span>
-                      </span>
-                    </button>
-                  ) : (
-                    <a
-                      className="shelf-list-open"
-                      href={shelfProjectHref(project.id)}
-                      data-testid={`shelf-tile-${project.id}`}
-                    >
-                      <span className="shelf-list-thumb">
-                        <TilePreview
-                          key={`${project.id}-${project.revision}`}
-                          src={cloudProjectPreviewUrl(
-                            project.id,
-                            project.revision,
-                          )}
-                          alt={`Preview of ${project.name}`}
-                        />
-                      </span>
-                      <span className="shelf-list-copy">
-                        <span className="shelf-tile-name">{project.name}</span>
-                        <span className="shelf-tile-meta">
-                          <time dateTime={project.updatedAt}>
-                            {formatUpdatedAt(project.updatedAt)}
-                          </time>
-                          {" · "}
-                          <span className="shelf-tile-revision">
-                            revision {project.revision}
-                          </span>
-                        </span>
-                      </span>
-                    </a>
-                  )}
-                  {renderActionBar(project, "list")}
-                </>
-              )}
+              <div className="shelf-list-main">
+                {onOpenProject ? (
+                  <button
+                    type="button"
+                    className="shelf-list-open"
+                    aria-label={project.name}
+                    data-testid={`shelf-tile-${project.id}`}
+                    disabled={controlsBusy}
+                    onPointerDown={() => {
+                      suppressNextOpenRef.current =
+                        activeRenameIdRef.current !== null;
+                    }}
+                    onKeyDown={() => {
+                      suppressNextOpenRef.current = false;
+                    }}
+                    onClick={() => {
+                      if (suppressNextOpenRef.current) {
+                        suppressNextOpenRef.current = false;
+                        return;
+                      }
+                      onOpenProject(project.id);
+                    }}
+                  >
+                    <span className="shelf-list-thumb">
+                      <TilePreview
+                        key={`${project.id}-${project.revision}`}
+                        src={cloudProjectPreviewUrl(
+                          project.id,
+                          project.revision,
+                        )}
+                        alt={`Preview of ${project.name}`}
+                      />
+                    </span>
+                  </button>
+                ) : (
+                  <a
+                    className="shelf-list-open"
+                    aria-label={project.name}
+                    href={shelfProjectHref(project.id)}
+                    data-testid={`shelf-tile-${project.id}`}
+                    onPointerDown={() => {
+                      suppressNextOpenRef.current =
+                        activeRenameIdRef.current !== null;
+                    }}
+                    onKeyDown={() => {
+                      suppressNextOpenRef.current = false;
+                    }}
+                    onClick={(event) => {
+                      if (suppressNextOpenRef.current) {
+                        suppressNextOpenRef.current = false;
+                        event.preventDefault();
+                      }
+                    }}
+                  >
+                    <span className="shelf-list-thumb">
+                      <TilePreview
+                        key={`${project.id}-${project.revision}`}
+                        src={cloudProjectPreviewUrl(
+                          project.id,
+                          project.revision,
+                        )}
+                        alt={`Preview of ${project.name}`}
+                      />
+                    </span>
+                  </a>
+                )}
+                <div className="shelf-list-copy">
+                  <div className="shelf-tile-title-row">
+                    {renderProjectTitle(project)}
+                  </div>
+                  <span className="shelf-tile-meta">
+                    <time dateTime={project.updatedAt}>
+                      {formatUpdatedAt(project.updatedAt)}
+                    </time>
+                    {" · "}
+                    <span className="shelf-tile-revision">
+                      revision {project.revision}
+                    </span>
+                  </span>
+                </div>
+              </div>
+              {renderActionBar(project, "list")}
             </div>
           ))}
         </div>
@@ -974,61 +1018,84 @@ export function ShelfWall({
             key: project.id,
             node: (
               <div className="shelf-tile-wrap">
-                {onOpenProject ? (
-                  <button
-                    type="button"
-                    className="shelf-tile"
-                    aria-label={project.name}
-                    data-testid={`shelf-tile-${project.id}`}
-                    disabled={controlsBusy}
-                    onClick={() => onOpenProject(project.id)}
-                  >
-                    <TilePreview
-                      key={`${project.id}-${project.revision}`}
-                      src={cloudProjectPreviewUrl(project.id, project.revision)}
-                      alt={`Preview of ${project.name}`}
-                    />
-                    <span className="shelf-tile-copy">
-                      <span className="shelf-tile-name">{project.name}</span>
-                      <span className="shelf-tile-meta">
-                        <time dateTime={project.updatedAt}>
-                          {formatUpdatedAt(project.updatedAt)}
-                        </time>
-                        {" · "}
-                        <span className="shelf-tile-revision">
-                          revision {project.revision}
-                        </span>
+                <div className="shelf-tile-body">
+                  {onOpenProject ? (
+                    <button
+                      type="button"
+                      className="shelf-tile"
+                      aria-label={project.name}
+                      data-testid={`shelf-tile-${project.id}`}
+                      disabled={controlsBusy}
+                      onPointerDown={() => {
+                        suppressNextOpenRef.current =
+                          activeRenameIdRef.current !== null;
+                      }}
+                      onKeyDown={() => {
+                        suppressNextOpenRef.current = false;
+                      }}
+                      onClick={() => {
+                        if (suppressNextOpenRef.current) {
+                          suppressNextOpenRef.current = false;
+                          return;
+                        }
+                        onOpenProject(project.id);
+                      }}
+                    >
+                      <TilePreview
+                        key={`${project.id}-${project.revision}`}
+                        src={cloudProjectPreviewUrl(
+                          project.id,
+                          project.revision,
+                        )}
+                        alt={`Preview of ${project.name}`}
+                      />
+                    </button>
+                  ) : (
+                    <a
+                      className="shelf-tile"
+                      aria-label={project.name}
+                      href={shelfProjectHref(project.id)}
+                      data-testid={`shelf-tile-${project.id}`}
+                      onPointerDown={() => {
+                        suppressNextOpenRef.current =
+                          activeRenameIdRef.current !== null;
+                      }}
+                      onKeyDown={() => {
+                        suppressNextOpenRef.current = false;
+                      }}
+                      onClick={(event) => {
+                        if (suppressNextOpenRef.current) {
+                          suppressNextOpenRef.current = false;
+                          event.preventDefault();
+                        }
+                      }}
+                    >
+                      <TilePreview
+                        key={`${project.id}-${project.revision}`}
+                        src={cloudProjectPreviewUrl(
+                          project.id,
+                          project.revision,
+                        )}
+                        alt={`Preview of ${project.name}`}
+                      />
+                    </a>
+                  )}
+                  <div className="shelf-tile-copy">
+                    <div className="shelf-tile-title-row">
+                      {renderProjectTitle(project)}
+                    </div>
+                    <span className="shelf-tile-meta">
+                      <time dateTime={project.updatedAt}>
+                        {formatUpdatedAt(project.updatedAt)}
+                      </time>
+                      {" · "}
+                      <span className="shelf-tile-revision">
+                        revision {project.revision}
                       </span>
                     </span>
-                  </button>
-                ) : (
-                  <a
-                    className="shelf-tile"
-                    href={shelfProjectHref(project.id)}
-                    data-testid={`shelf-tile-${project.id}`}
-                  >
-                    <TilePreview
-                      key={`${project.id}-${project.revision}`}
-                      src={cloudProjectPreviewUrl(project.id, project.revision)}
-                      alt={`Preview of ${project.name}`}
-                    />
-                    <span className="shelf-tile-copy">
-                      <span className="shelf-tile-name">{project.name}</span>
-                      <span className="shelf-tile-meta">
-                        <time dateTime={project.updatedAt}>
-                          {formatUpdatedAt(project.updatedAt)}
-                        </time>
-                        {" · "}
-                        <span className="shelf-tile-revision">
-                          revision {project.revision}
-                        </span>
-                      </span>
-                    </span>
-                  </a>
-                )}
-                {renaming?.id === project.id
-                  ? renderRenameForm(project)
-                  : renderActionBar(project, "card")}
+                  </div>
+                </div>
+                {renderActionBar(project, "card")}
               </div>
             ),
           }))}
@@ -1111,10 +1178,7 @@ export function ShelfWall({
             role="menuitem"
             type="button"
             disabled={controlsBusy}
-            onClick={() => {
-              setRenaming({ id: menu.project.id, name: menu.project.name });
-              setMenu(null);
-            }}
+            onClick={() => startRename(menu.project)}
           >
             Rename
           </button>
@@ -1129,12 +1193,13 @@ export function ShelfWall({
           <InlineConfirm
             // Keyed by Project: switching the menu to another tile (a keyboard
             // activation, with no outside pointerdown) must not carry an open
-            // "Really delete" over to it.
+            // delete confirmation over to it.
             key={menu.project.id}
             role="menuitem"
             className="shelf-menu-delete"
             data-testid={`shelf-delete-${menu.project.id}`}
             aria-label={`Delete ${menu.project.name} from your shelf`}
+            promptLabel="Delete?"
             disabled={controlsBusy}
             onConfirm={async () => {
               const target = menu.project;

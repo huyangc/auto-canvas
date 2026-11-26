@@ -487,14 +487,28 @@ test("the Shelf appends a Cloud Project tab, deduplicates and saves Cloud identi
     name: "Delete Beta renamed",
     exact: true,
   });
+  const betaFooter = cloudDialog
+    .locator(".shelf-tile-wrap", { hasText: "Beta renamed" })
+    .locator(".shelf-tile-footer");
+  const footerHeightBefore = (await betaFooter.boundingBox())!.height;
   await deleteBeta.click();
+  await expect(
+    cloudDialog.getByRole("button", { name: "Confirm", exact: true }),
+  ).toBeVisible();
+  await expect(
+    cloudDialog.getByRole("button", { name: "Cancel", exact: true }),
+  ).toBeVisible();
+  // Confirming swaps the footer in place on one row without growing its height.
+  expect(
+    Math.abs((await betaFooter.boundingBox())!.height - footerHeightBefore),
+  ).toBeLessThanOrEqual(1);
   await cloudDialog
-    .getByRole("button", { name: "Keep it", exact: true })
+    .getByRole("button", { name: "Cancel", exact: true })
     .click();
   expect(deletes).toEqual([]);
   await deleteBeta.click();
   await cloudDialog
-    .getByRole("button", { name: "Really delete", exact: true })
+    .getByRole("button", { name: "Confirm", exact: true })
     .click();
   await expect.poll(() => deleteRequested).toBe(true);
   const writesBeforeDeletion = [...writes];
@@ -1515,7 +1529,13 @@ for (const host of ["strip", "File"] as const)
       await expect(tileName).toBeFocused();
     }
     await expect(tileName).toHaveValue("Amp ");
-    await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    // Escape cancels the inline rename without closing the Browse dialog.
+    await tileName.press("Escape");
+    await expect(tileName).toHaveCount(0);
+    await expect(dialog).toBeVisible();
+    await expect(
+      dialog.getByRole("button", { name: "Rename Amp", exact: true }),
+    ).toHaveCSS("cursor", "text");
     await close.click();
     await expect(dialog).toBeHidden();
   });

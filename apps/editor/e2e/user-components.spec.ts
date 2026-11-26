@@ -2807,7 +2807,7 @@ test("live preview and the administrator lifecycle keep captured Projects", asyn
     page.getByText("Promoted to an official component."),
   ).toBeVisible();
   await button(page, "Delete component").click();
-  await button(page, "Really delete").click();
+  await button(page, "Confirm").click();
   await expect(page.getByText("Removed from the library.")).toBeVisible();
   await button(page, "Close component editor").click();
   expect((await readProject(page)).componentDefinitions).toEqual(captured);

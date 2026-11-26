@@ -218,6 +218,10 @@
   box-shadow: 0 4px 16px rgb(0 0 0 / 8%);
 }
 
+.shelf-tile-body {
+  position: relative;
+}
+
 .shelf-tile {
   display: block;
   width: 100%;
@@ -229,6 +233,15 @@
   color: inherit;
   font: inherit;
   cursor: pointer;
+}
+
+/* Stretched open target: preview, metadata, and title whitespace all open the
+ * circuit while the title button/input sits above at z-index: 1. */
+.shelf-tile::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
 }
 
 .shelf-tile:disabled {
@@ -276,12 +289,73 @@
   padding: 10px 12px;
 }
 
-.shelf-tile-name {
+.shelf-tile-title-row {
+  display: flex;
+  align-items: center;
   min-width: 0;
+}
+
+.shelf-tile-name-btn {
+  position: relative;
+  z-index: 1;
+  display: inline-block;
+  min-width: 0;
+  max-width: 100%;
+  margin: -2px -5px;
+  padding: 2px 5px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--icm-text);
+  font: inherit;
   font-size: 14px;
   font-weight: 600;
-  color: var(--icm-text);
+  line-height: 1.35;
+  text-align: left;
   overflow-wrap: anywhere;
+  cursor: text;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
+}
+
+.shelf-tile-name-btn:hover:not(:disabled) {
+  background: var(--icm-surface-hover, rgb(127 127 127 / 10%));
+  border-color: var(--icm-border);
+}
+
+.shelf-tile-name-btn:focus-visible {
+  outline: 2px solid var(--icm-accent);
+  outline-offset: 1px;
+}
+
+.shelf-tile-name-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.shelf-tile-name-input {
+  position: relative;
+  z-index: 1;
+  box-sizing: border-box;
+  width: calc(100% + 10px);
+  min-width: 0;
+  margin: -2px -5px;
+  padding: 2px 5px;
+  border: 1px solid var(--icm-accent);
+  border-radius: 5px;
+  background: var(--icm-surface);
+  color: var(--icm-text);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+  outline: 2px solid rgb(var(--icm-accent-rgb) / 20%);
+  outline-offset: 0;
+}
+
+.shelf-tile-name-input:disabled {
+  opacity: 0.6;
 }
 
 .shelf-tile-meta {
@@ -301,18 +375,20 @@
 /* Always-visible card footer and list action bar */
 .shelf-tile-footer {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: space-between;
-  gap: 4px;
+  gap: 6px;
+  min-height: 40px;
+  box-sizing: border-box;
   padding: 6px 8px;
   border-top: 1px solid var(--icm-border);
   background: var(--icm-surface-muted);
 }
 
-.shelf-quick-actions {
+.shelf-footer-end {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 4px;
   min-width: 0;
@@ -398,38 +474,88 @@
   background: rgb(235 87 87 / 10%);
 }
 
+.shelf-tile-footer[data-confirming="true"] > .shelf-tile-favorite,
+.shelf-tile-footer[data-confirming="true"] .shelf-tile-actions,
+.shelf-list-actions[data-confirming="true"] > .shelf-tile-favorite,
+.shelf-list-actions[data-confirming="true"] .shelf-tile-actions {
+  display: none;
+}
+
+.shelf-tile-footer[data-confirming="true"] .shelf-footer-end,
+.shelf-tile-footer[data-confirming="true"] .inline-confirm,
+.shelf-tile-footer[data-confirming="true"] .inline-confirm-decision {
+  width: 100%;
+}
+
 .shelf-tile-footer .inline-confirm,
 .shelf-list-actions .inline-confirm {
   display: inline-flex;
   align-items: center;
 }
 
+.shelf-tile-footer .inline-confirm-row,
+.shelf-list-actions .inline-confirm-row {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+}
+
+.shelf-tile-footer .inline-confirm-prompt,
+.shelf-list-actions .inline-confirm-prompt {
+  padding-left: 4px;
+  color: var(--icm-error);
+  font-weight: 600;
+}
+
 .shelf-tile-footer .inline-confirm-actions,
 .shelf-list-actions .inline-confirm-actions {
   display: inline-flex;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
+  flex: none;
 }
 
-.shelf-tile-footer .inline-confirm-decision button,
-.shelf-list-actions .inline-confirm-decision button {
+.shelf-tile-footer .inline-confirm-actions button,
+.shelf-list-actions .inline-confirm-actions button {
   height: 26px;
-  padding: 0 8px;
+  padding: 0 9px;
   border: 1px solid var(--icm-border);
   border-radius: 5px;
   background: var(--icm-surface);
   color: var(--icm-text);
   font: inherit;
   font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
   cursor: pointer;
 }
 
-.shelf-tile-footer .inline-confirm-danger,
-.shelf-list-actions .inline-confirm-danger {
+.shelf-tile-footer .inline-confirm-actions button:hover:not(:disabled),
+.shelf-list-actions .inline-confirm-actions button:hover:not(:disabled) {
+  background: var(--icm-surface-hover, rgb(127 127 127 / 10%));
+}
+
+.shelf-tile-footer .inline-confirm-actions button.inline-confirm-danger,
+.shelf-list-actions .inline-confirm-actions button.inline-confirm-danger {
   border-color: rgb(235 87 87 / 45%);
   background: rgb(235 87 87 / 12%);
   color: var(--icm-error);
-  font-weight: 500;
+  font-weight: 600;
+}
+
+.shelf-tile-footer
+  .inline-confirm-actions
+  button.inline-confirm-danger:hover:not(:disabled),
+.shelf-list-actions
+  .inline-confirm-actions
+  button.inline-confirm-danger:hover:not(:disabled) {
+  border-color: rgb(235 87 87 / 65%);
+  background: rgb(235 87 87 / 20%);
 }
 
 /* Compact List view */
@@ -441,7 +567,7 @@
 
 .shelf-list-row {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
@@ -459,12 +585,19 @@
   background: var(--icm-surface-muted);
 }
 
-.shelf-list-open {
+.shelf-list-main {
+  position: relative;
   display: flex;
-  flex: 1 1 240px;
+  flex: 1 1 200px;
   align-items: center;
   gap: 12px;
   min-width: 0;
+}
+
+.shelf-list-open {
+  display: flex;
+  flex: none;
+  align-items: center;
   padding: 0;
   border: 0;
   background: none;
@@ -473,6 +606,13 @@
   text-align: left;
   text-decoration: none;
   cursor: pointer;
+}
+
+.shelf-list-open::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
 }
 
 .shelf-list-open:disabled {
@@ -529,7 +669,7 @@
   flex: 1;
 }
 
-.shelf-list-copy .shelf-tile-name {
+.shelf-list-copy .shelf-tile-name-btn {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -537,79 +677,10 @@
 
 .shelf-list-actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   flex: none;
   align-items: center;
   gap: 4px;
-}
-
-/* Inline rename form */
-.shelf-rename-form {
-  display: grid;
-  gap: 6px;
-  flex: 1;
-  padding: 8px 10px;
-  border-top: 1px solid var(--icm-border);
-  background: var(--icm-surface-muted);
-  min-width: 0;
-}
-
-.shelf-list-row .shelf-rename-form {
-  display: flex;
-  align-items: center;
-  padding: 0;
-  border-top: 0;
-  background: none;
-}
-
-.shelf-rename-form input {
-  box-sizing: border-box;
-  width: 100%;
-  min-width: 0;
-  flex: 1;
-  padding: 6px 8px;
-  color: var(--icm-text);
-  background: var(--icm-surface);
-  border: 1px solid var(--icm-accent);
-  border-radius: 5px;
-  font: inherit;
-  font-size: 13px;
-}
-
-/* Save and Cancel: compact buttons side by side under the field. */
-.shelf-rename-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 6px;
-  flex: none;
-}
-
-.shelf-rename-actions button {
-  min-height: 28px;
-  padding: 3px 12px;
-  border: 1px solid var(--icm-border-strong);
-  border-radius: 6px;
-  background: var(--icm-surface);
-  color: var(--icm-text);
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.shelf-rename-actions .shelf-rename-save {
-  border-color: var(--icm-accent);
-  color: #fff;
-  background: var(--icm-accent);
-}
-
-.shelf-rename-actions .shelf-rename-save:hover:not(:disabled) {
-  border-color: var(--icm-accent);
-  background: rgb(var(--icm-accent-rgb) / 88%);
-}
-
-.shelf-rename-actions .shelf-rename-save:disabled {
-  color: #fff;
-  opacity: 0.55;
 }
 
 /* Overflow context menu */
@@ -666,6 +737,11 @@
   border-radius: 0;
 }
 
+.shelf-context-menu > .inline-confirm:hover,
+.shelf-context-menu > .inline-confirm:focus-visible {
+  background: none;
+}
+
 .shelf-context-menu .shelf-menu-delete {
   display: block;
   width: 100%;
@@ -688,5 +764,33 @@
 }
 
 .shelf-context-menu .inline-confirm-decision {
-  padding: 8px 12px;
+  width: 100%;
+  margin-top: 4px;
+  padding: 8px 10px 6px;
+  border-top: 1px solid var(--icm-border);
+  box-sizing: border-box;
+}
+
+.shelf-context-menu .inline-confirm-row {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.shelf-context-menu .inline-confirm-prompt {
+  color: var(--icm-error);
+  font-weight: 600;
+}
+
+.shelf-context-menu .inline-confirm-actions {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  flex: none;
+}
+
+.shelf-context-menu .inline-confirm-actions button {
+  white-space: nowrap;
 }

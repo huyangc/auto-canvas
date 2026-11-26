@@ -69,7 +69,7 @@ it("keeps the server limit in counts and duplicate failures after shelf mutation
   await click('[data-testid="shelf-favorite-source"]');
   expect(count()).toContain("2 of 37 saved");
   // A keyboard activation of another tile's ••• fires no outside pointerdown:
-  // the open "Really delete" must not carry over to that other Project.
+  // the open delete confirmation must not carry over to that other Project.
   await click('[data-testid="shelf-actions-source"]');
   await click('[data-testid="shelf-delete-source"]');
   expect(
@@ -193,25 +193,40 @@ it("toggles a favorite from the heart beside the name and filters the wall to fa
   expect(tiles().sort()).toEqual(["shelf-tile-amp", "shelf-tile-bias"]);
 });
 
-it("renames with a compact Save and Cancel under the name field", async () => {
+it("edits project names inline on click or menu Rename, saving on blur and reverting on Escape or blank", async () => {
+  const project = createEmptyProject("amp", "Amp");
   const summary = {
     id: "amp",
     name: "Amp",
     updatedAt: "2026-11-06T00:00:00Z",
     revision: 1,
-    schemaVersion: createEmptyProject("amp", "Amp").schemaVersion,
+    schemaVersion: project.schemaVersion,
     favorite: false,
   };
+  const savedNames: string[] = [];
   vi.stubGlobal(
     "fetch",
-    vi.fn<typeof fetch>(async () =>
-      Response.json({ projects: [summary], limit: 200 }),
-    ),
+    vi.fn<typeof fetch>(async (url, init) => {
+      if (url === "/api/projects/amp" && init?.method === "PUT") {
+        const body = JSON.parse(String(init.body)) as { name: string };
+        savedNames.push(body.name);
+        return Response.json({
+          project: { ...summary, name: body.name, revision: 2 },
+        });
+      }
+      if (url === "/api/projects/amp")
+        return Response.json({
+          project: { ...summary, projectText: serializeProject(project) },
+        });
+      return Response.json({ projects: [summary], limit: 200 });
+    }),
   );
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
   await act(async () => root!.render(createElement(ShelfWall)));
+
+  // Menu Rename activates the in-place title input; Escape cancels and restores focus.
   await act(async () =>
     container
       .querySelector<HTMLElement>('[data-testid="shelf-actions-amp"]')!
@@ -221,19 +236,62 @@ it("renames with a compact Save and Cancel under the name field", async () => {
     ...container.querySelectorAll<HTMLElement>('[role="menuitem"]'),
   ].find((item) => item.textContent === "Rename")!;
   await act(async () => rename.click());
-  const form = container.querySelector("form.shelf-rename-form")!;
-  const buttons = [...form.querySelectorAll("button")].map((button) => [
-    button.type,
-    button.textContent,
-  ]);
-  expect(buttons).toEqual([
-    ["submit", "Save"],
-    ["button", "Cancel"],
-  ]);
-  await act(async () =>
-    form.querySelectorAll<HTMLButtonElement>("button")[1]!.click(),
-  );
+  const menuInput = container.querySelector<HTMLInputElement>(
+    'input.shelf-tile-name-input[aria-label="Project name"]',
+  )!;
+  expect(menuInput).not.toBeNull();
   expect(container.querySelector("form.shelf-rename-form")).toBeNull();
+  await act(async () => {
+    menuInput.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+    );
+  });
+  expect(container.querySelector("input.shelf-tile-name-input")).toBeNull();
+  expect(document.activeElement).toBe(
+    container.querySelector('button[aria-label="Rename Amp"]'),
+  );
+
+  // Clicking the title directly edits inline; blank blur reverts without saving.
+  await act(async () =>
+    container
+      .querySelector<HTMLButtonElement>('button[aria-label="Rename Amp"]')!
+      .click(),
+  );
+  const blankInput = container.querySelector<HTMLInputElement>(
+    "input.shelf-tile-name-input",
+  )!;
+  const setter = Object.getOwnPropertyDescriptor(
+    HTMLInputElement.prototype,
+    "value",
+  )!.set!;
+  await act(async () => {
+    setter.call(blankInput, "   ");
+    blankInput.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(async () => blankInput.blur());
+  expect(savedNames).toEqual([]);
+  expect(
+    container.querySelector('button[aria-label="Rename Amp"]'),
+  ).not.toBeNull();
+
+  // Clicking the title, typing a new name, and blurring saves automatically.
+  await act(async () =>
+    container
+      .querySelector<HTMLButtonElement>('button[aria-label="Rename Amp"]')!
+      .click(),
+  );
+  const editInput = container.querySelector<HTMLInputElement>(
+    "input.shelf-tile-name-input",
+  )!;
+  await act(async () => {
+    setter.call(editInput, "LNA Stage");
+    editInput.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(async () => editInput.blur());
+  expect(savedNames).toEqual(["LNA Stage"]);
+  expect(
+    container.querySelector('button[aria-label="Rename LNA Stage"]'),
+  ).not.toBeNull();
 });
 
 async function startFavoriteToggle(inFavorites = false) {
@@ -422,7 +480,7 @@ it("filters by search, toggles grid/list views, and delegates open/rename/delete
   );
   expect(container.querySelector('[data-testid="shelf-list"]')).not.toBeNull();
 
-  // Inline rename via always-visible Rename button delegates to onRenameProject.
+  // Inline rename by clicking the title directly delegates to onRenameProject on Enter.
   await act(async () =>
     container
       .querySelector<HTMLButtonElement>(
@@ -441,15 +499,38 @@ it("filters by search, toggles grid/list views, and delegates open/rename/delete
     setter.call(renameInput, "Alpha Renamed");
     renameInput.dispatchEvent(new Event("input", { bubbles: true }));
   });
-  await act(async () =>
-    container.querySelector<HTMLButtonElement>(".shelf-rename-save")!.click(),
-  );
+  await act(async () => {
+    renameInput.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+    );
+  });
   expect(onRenameProject).toHaveBeenCalledWith("p-alpha", "Alpha Renamed");
   expect(document.activeElement).toBe(
-    container.querySelector('[data-testid="shelf-actions-p-alpha"]'),
+    container.querySelector('button[aria-label="Rename Alpha Renamed"]'),
   );
 
-  // Cancelling rename with Escape also restores focus to the remounted actions button.
+  // Clicking a tile while a rename input is focused blurs to save without opening the tile.
+  onOpenProject.mockClear();
+  await act(async () =>
+    container
+      .querySelector<HTMLButtonElement>(
+        'button[aria-label="Rename Beta Filter"]',
+      )!
+      .click(),
+  );
+  const betaTile = container.querySelector<HTMLButtonElement>(
+    '[data-testid="shelf-tile-p-beta"]',
+  )!;
+  await act(async () => {
+    betaTile.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    container
+      .querySelector<HTMLInputElement>('input[aria-label="Project name"]')!
+      .blur();
+    betaTile.click();
+  });
+  expect(onOpenProject).not.toHaveBeenCalled();
+
+  // Cancelling rename with Escape restores focus to the title button.
   await act(async () =>
     container
       .querySelector<HTMLButtonElement>(
@@ -466,10 +547,39 @@ it("filters by search, toggles grid/list views, and delegates open/rename/delete
     );
   });
   expect(document.activeElement).toBe(
-    container.querySelector('[data-testid="shelf-actions-p-beta"]'),
+    container.querySelector('button[aria-label="Rename Beta Filter"]'),
   );
 
-  // Always-visible Delete button asks twice and delegates to onDeleteProject.
+  // Quick delete swaps the row action bar into Delete? Confirm / Cancel,
+  // dismisses on outside click, and delegates to onDeleteProject on Confirm.
+  await act(async () =>
+    container
+      .querySelector<HTMLButtonElement>(
+        '[data-testid="shelf-quick-delete-p-beta"]',
+      )!
+      .click(),
+  );
+  const confirmBar = container.querySelector(
+    '.shelf-list-actions[data-confirming="true"]',
+  );
+  expect(confirmBar).not.toBeNull();
+  const confirmButtons = [
+    ...confirmBar!.querySelectorAll<HTMLButtonElement>(
+      ".inline-confirm-actions button",
+    ),
+  ].map((button) => button.textContent);
+  expect(confirmButtons).toEqual(["Confirm", "Cancel"]);
+  expect(confirmBar!.querySelector(".inline-confirm-prompt")?.textContent).toBe(
+    "Delete?",
+  );
+  // Outside pointerdown dismisses delete confirmation.
+  await act(async () => {
+    document.body.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+  });
+  expect(
+    container.querySelector('.shelf-list-actions[data-confirming="true"]'),
+  ).toBeNull();
+
   await act(async () =>
     container
       .querySelector<HTMLButtonElement>(
