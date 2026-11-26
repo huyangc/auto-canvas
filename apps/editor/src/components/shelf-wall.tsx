@@ -549,6 +549,11 @@ export function ShelfWall({
       if (!renaming || state.status !== "ready") return true;
       const project = state.projects.find((item) => item.id === renaming.id);
       if (!project) return true;
+      // Intentional anti-trap trade-off: the first close attempt saves and
+      // keeps the dialog open on failure (displaying the error + draft); a
+      // subsequent close with the same unchanged failed draft passes
+      // fromBlur=true and is allowed to dismiss the modal instead of trapping
+      // the user during an outage. Enter still retries explicitly.
       return commitRename(
         project,
         renameInputRef.current?.value ?? renaming.name,
@@ -808,7 +813,11 @@ export function ShelfWall({
           void commitRename(project, event.currentTarget.value, false, true);
         }}
         onKeyDown={(event) => {
-          if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+          if (event.nativeEvent.isComposing) {
+            if (event.key === "Escape") event.stopPropagation();
+            return;
+          }
+          if (event.key === "Enter") {
             event.preventDefault();
             event.stopPropagation();
             void commitRename(project, event.currentTarget.value, true);

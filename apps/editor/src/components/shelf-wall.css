@@ -682,6 +682,26 @@
   gap: 4px;
 }
 
+/* At narrow viewports, let a list row place its single-line confirmation bar
+ * cleanly underneath the thumbnail and title so the project name stays readable. */
+@media (max-width: 560px) {
+  .shelf-list-row {
+    flex-wrap: wrap;
+  }
+
+  .shelf-list-actions[data-confirming="true"] {
+    width: 100%;
+    padding-top: 6px;
+    border-top: 1px solid var(--icm-border);
+  }
+
+  .shelf-list-actions[data-confirming="true"] .shelf-footer-end,
+  .shelf-list-actions[data-confirming="true"] .inline-confirm,
+  .shelf-list-actions[data-confirming="true"] .inline-confirm-decision {
+    width: 100%;
+  }
+}
+
 /* Overflow context menu */
 .shelf-context-menu {
   position: fixed;
