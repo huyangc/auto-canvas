@@ -119,6 +119,8 @@ export async function buildPackages(m, inbox) {
     OUT_DIR: out,
     NEXT_PUBLIC_API_BASE_URL: "/api",
     BACKEND_PROXY_TARGET: m.api,
+    CANVAS_PROXY_TARGET: "",
+    SILICON_NOTEBOOK_UI_PLUGINS: "",
     npm_config_cache: path.join(cache, "npm"),
     PIP_CACHE_DIR: path.join(cache, "pip"),
   };

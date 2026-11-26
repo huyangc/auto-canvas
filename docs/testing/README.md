@@ -640,7 +640,11 @@ per-run isolation matter. [The upstream installer fix](https://github.com/huyang
 removes the shared file and sends diagnostics to the calling process.
 
 The site receives only the tarballs. It uses packaged Node, a system-utility
-PATH, the offline guard and offline pip settings. P1 checks that the default
+PATH, the Node network guard and offline pip settings. The end-of-stage
+network result covers connections observed by the Node guard. Browser
+checks use their own loopback proxy. To verify host-wide isolation for
+Python and native executables as well, run the site phase on a host whose
+network policy blocks non-loopback traffic. P1 checks that the default
 notebook serves `/api/ready` with HTTP 200 and `/canvas` with an HTML 404.
 P2 installs the pair, runs M's two-user checks and clicks the notebook entry.
 P3 checks the missing-wheel refusal, upgrades with the wheel, then reopens the
