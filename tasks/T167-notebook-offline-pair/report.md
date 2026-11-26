@@ -28,6 +28,27 @@ with 68 checks passed and zero failed. Cleanup stopped all three recorded
 companions, dropped the run's database and removed its temporary root.
 The harness itself exited 0. Log: `/private/tmp/t167-owner-interrupt.log`.
 
+## Verification against main `fff1e51`
+
+The owner combined the task with main in a separate test worktree. The
+final task branch carries the same implementation, tests and operator
+instructions as that worktree. The package checker includes the browser
+boot check delivered in PR #146.
+
+| Check | Result |
+| --- | --- |
+| Frozen offline dependency install, both builds, typecheck, lint, format, docs and deadcode | Passed |
+| Launcher and package unit tests | 65 passed |
+| Local suite | 9,226 passed, 115 skipped |
+| Real package and archive checker | 24 of 24 checks passed |
+| Stages S, M, L | 101, 114 and 89 checks passed |
+| Complete stage P | 170 passed, 0 failed in 908 seconds with 5,856,968 KiB in the sandbox at the end |
+| Final cleanup | Six recorded companions stopped. An independent lane-2 query after the runs found zero integration databases |
+
+The host commands and full logs use the same plan and notebook revision as
+round 2. Logs for this main integration are in
+`/private/tmp/t167-integration-evidence/`.
+
 ## Implementation-round steps before external verification
 
 | Step | Status | Notes |
