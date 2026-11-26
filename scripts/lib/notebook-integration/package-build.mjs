@@ -14,7 +14,7 @@ import {
   cloneRevision,
   refuseUnsafeStart,
 } from "./notebook-clone.mjs";
-import { PathRefused } from "./sandbox.mjs";
+import { hasDirectoryAncestor, PathRefused } from "./sandbox.mjs";
 import { abnormalEnd, checkStopped, StageAborted, tail } from "./steps.mjs";
 
 export async function checkedCommand(m, name, command, args, options, refusal) {
@@ -43,18 +43,15 @@ function cacheDirectory(m) {
   let parent = requested;
   while (!fs.lstatSync(parent, { throwIfNoEntry: false }))
     parent = path.dirname(parent);
-  const cache = path.join(
-    fs.realpathSync(parent),
-    path.relative(parent, requested),
-  );
+  const existing = fs.realpathSync(parent);
+  const cache = path.join(existing, path.relative(parent, requested));
+  const cacheStat = fs.statSync(cache, { throwIfNoEntry: false });
   for (const dir of [repo, m.notebook, m.sandbox.root].map((p) =>
     fs.realpathSync(p),
   )) {
     if (
-      cache === dir ||
-      cache.startsWith(dir + path.sep) ||
-      dir.startsWith(cache + path.sep) ||
-      cache === path.parse(cache).root
+      hasDirectoryAncestor(existing, fs.statSync(dir)) ||
+      (cacheStat && hasDirectoryAncestor(dir, cacheStat))
     )
       throw new PathRefused(
         "--cache needs its own directory outside both checkouts and the sandbox",

@@ -20,6 +20,7 @@ import {
   runManagedStage,
   throughCanvas,
   tomlVariants,
+  vacant,
 } from "./managed-clone.mjs";
 import { awaitLaunch, groupOf, stopLaunch } from "./notebook-clone.mjs";
 import { buildPackages, checkedCommand, oneFile } from "./package-build.mjs";
@@ -230,6 +231,15 @@ async function runningPackage(m, phase, paired, probe) {
     throw new StageAborted("installed routes");
   const mark = sandbox.guardMark();
   const since = Date.now();
+  const ports = paired
+    ? [m.apiPort, m.webPort, m.canvasPort]
+    : [m.apiPort, m.webPort];
+  requireCheck(
+    m,
+    `${phase} the packaged ports are vacant before start`,
+    ports.every((port) => vacant(m, port)),
+    "a configured port is already occupied",
+  );
   const launcher = sandbox.start("./start.sh", [], {
     cwd: nb,
     name: `${phase}-start`,

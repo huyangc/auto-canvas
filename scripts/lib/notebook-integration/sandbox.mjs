@@ -232,8 +232,14 @@ process.on("disconnect", () => {
 });
 `;
 
-function sameDirectory(a, b) {
-  return a.dev === b.dev && a.ino === b.ino;
+/** Compare directory identities along a resolved, existing path. */
+export function hasDirectoryAncestor(directory, ancestorStat) {
+  for (let dir = directory; ; dir = path.dirname(dir)) {
+    const stat = fs.statSync(dir);
+    if (stat.dev === ancestorStat.dev && stat.ino === ancestorStat.ino)
+      return true;
+    if (path.dirname(dir) === dir) return false;
+  }
 }
 
 /**
@@ -270,16 +276,11 @@ function resolveTemporaryParent(notebook) {
   if (!notebookStat.isDirectory())
     throw new UsageError(`--notebook ${notebook} is not a directory`);
   const parent = fs.realpathSync(os.tmpdir());
-  for (let dir = parent; ;) {
-    if (sameDirectory(fs.statSync(dir), notebookStat))
-      throw new UsageError(
-        `the temporary directory ${parent} is inside the notebook checkout; ` +
-          "unset or change TMPDIR",
-      );
-    const up = path.dirname(dir);
-    if (up === dir) break;
-    dir = up;
-  }
+  if (hasDirectoryAncestor(parent, notebookStat))
+    throw new UsageError(
+      `the temporary directory ${parent} is inside the notebook checkout; ` +
+        "unset or change TMPDIR",
+    );
   return parent;
 }
 

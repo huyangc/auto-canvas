@@ -268,6 +268,7 @@ in system Chrome through a proxy restricted to the package server.
    destinations. The example below uses 18100, 14310 and 13100.
 
    ```bash
+   set -euo pipefail
    NB_SRC=/build/silicon-notebook
    CANVAS_SRC=/build/auto-canvas
    export PACK_PYTHON=/path/to/site-compatible-python
@@ -287,6 +288,7 @@ in system Chrome through a proxy restricted to the package server.
    new revision with the same proxy targets and UI package.
 
    ```bash
+   set -euo pipefail
    cd "$CANVAS_SRC"
    pnpm install --frozen-lockfile
    AUTO_CANVAS_PACKAGE_PYTHON=/path/to/python-with-setuptools pnpm notebook:package
@@ -298,6 +300,7 @@ in system Chrome through a proxy restricted to the package server.
    Supply the site's Python and the actual tarball paths.
 
    ```bash
+   set -euo pipefail
    NB=/opt/silicon-notebook
    CANVAS=/opt/auto-canvas-site-2
    export PYTHON_BIN=/path/to/site-python
@@ -334,6 +337,7 @@ in system Chrome through a proxy restricted to the package server.
    directory. Notebook upgrades replace entire program directories.
 
    ```bash
+   set -euo pipefail
    cp "$CANVAS/integrations/silicon-notebook/extensions.example.toml" "$NB/.local/extensions.toml"
    "${EDITOR:-vi}" "$NB/.local/extensions.toml"
    AUTO_CANVAS_DATABASE_URL='postgresql://auto_canvas:password@127.0.0.1:5432/auto_canvas' \
@@ -352,6 +356,7 @@ in system Chrome through a proxy restricted to the package server.
   plugin version so the upgrader can rebuild the venv offline.
 
   ```bash
+  set -euo pipefail
   "$NB/stop.sh"
   mkdir "$NEW_NOTEBOOK"
   tar -xzf "$NEW_NOTEBOOK_TARBALL" -C "$NEW_NOTEBOOK" --strip-components=1
@@ -365,6 +370,7 @@ in system Chrome through a proxy restricted to the package server.
   into a fresh sibling directory and set the service's `cwd` to that directory.
 
   ```bash
+  set -euo pipefail
   "$NB/stop.sh"
   mkdir "$NEW_CANVAS"
   tar -xzf "$NEW_CANVAS_TARBALL" -C "$NEW_CANVAS" --strip-components=1
@@ -377,6 +383,7 @@ in system Chrome through a proxy restricted to the package server.
   there, so give it the **new canvas wheelhouse** for its replacement venv.
 
   ```bash
+  set -euo pipefail
   mkdir "$NEW_NOTEBOOK"
   tar -xzf "$NEW_NOTEBOOK_TARBALL" -C "$NEW_NOTEBOOK" --strip-components=1
   PIP_CONFIG_FILE=/dev/null "$NB/.venv/bin/python" -m pip --isolated install --upgrade --no-index --find-links "$NEW_CANVAS/wheels" "$NEW_CANVAS"/wheels/*.whl
@@ -395,6 +402,7 @@ in system Chrome through a proxy restricted to the package server.
   plugin before upgrading from the default package.
 
   ```bash
+  set -euo pipefail
   "$NB/stop.sh"
   "${EDITOR:-vi}" "$NB/.local/extensions.toml"
   "$NB/.venv/bin/python" -m pip uninstall -y silicon-notebook-auto-canvas
