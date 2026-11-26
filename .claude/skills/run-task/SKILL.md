@@ -85,23 +85,11 @@ yourself:
 
 ## Deliver
 
-Follow [PR review and merge](../../../docs/workflow.md#pr-评审与合入):
+Follow the [repository PR workflow](../../../docs/workflow.md#pr-评审与合入) for publication, independent review and merge.
 
-1. `git push -u origin task/<id>-<slug>`, then `gh pr create --base main` using
-   `.github/pull_request_template.md`. Put the acceptance commands you reran
-   and their results under Evidence: CI runs static checks, build and unit
-   tests, not browser tests or live checks.
-2. Read the review the codex hook (`gpt-6.2-sol`) posts to the PR. Verify each
-   finding. Fix P0/P1 findings that hold, push, and read the re-review. No comment on the current
-   head means no review: run it by hand.
-3. Merge only if this delivery authorizes it, `gh pr checks` meets the workflow's
-   merge condition (every check `pass`), the review of that head was run with
-   `gpt-6.2-sol` (see the workflow's merge condition) and
-   `~/.claude/hooks/codex-pr-review.sh verify <PR>` succeeds, or, when the review
-   of that head was posted from the manual command or the hook is not installed,
-   the workflow's manual check does:
-   `gh pr merge <PR> --rebase`. Confirm `state` is `MERGED`. Otherwise hand back
-   the PR link and its status.
+1. Before publishing, check whether the automatic review hook uses API key quota and apply the repository billing rule. Verify the current branch matches the plan. Push it and update its existing PR, or create a PR against the planned base (normally `main`). Use the [PR template](../../../.github/pull_request_template.md) and include the acceptance commands you reran and their results.
+2. Check independent review evidence for the current remote head. Use the workflow’s manual fallback if the hook does not produce a valid review. Resolve blocking findings and verify each new head.
+3. When this delivery has merge authorization and the workflow’s checks and review requirements are met, use its merge command with the reviewed SHA and verify the PR state is `MERGED`. For a PR-only handoff, return the link and its current review and CI status.
 
 ## Small fixes
 

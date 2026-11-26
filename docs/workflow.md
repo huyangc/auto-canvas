@@ -47,9 +47,9 @@ tasks/T001-<slug>/
   worktree 里启动实现子代理：
 
   ```bash
-  git worktree add ../auto-canvas-T001-example -b task/T001-example origin/main
-  cd ../auto-canvas-T001-example
-  pnpm install --frozen-lockfile --offline
+  git worktree add ../auto-canvas-T001-example -b task/T001-example origin/main &&
+    cd ../auto-canvas-T001-example &&
+    pnpm install --frozen-lockfile --offline
   ```
 
 - **并行集成测试各用一条车道**，避免端口和测试库冲突。涉及相应服务时，在验收命令里写明所用端口和数据库：
