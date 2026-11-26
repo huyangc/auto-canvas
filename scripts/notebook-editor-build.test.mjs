@@ -137,6 +137,7 @@ const STORAGE_CONSUMERS = [
   "apps/editor/src/app/App.tsx", // rows 10-15
   "apps/editor/src/app/use-agent-hosts.ts", // row 8
   "apps/editor/src/components/chunk-load-fallback.tsx", // row 4
+  "apps/editor/src/components/shelf-wall.tsx", // Cloud Projects grid/list view preference; per-user like rows 10-15
   "apps/editor/src/components/stale-build-recovery.ts", // row 17, Cache Storage
   "apps/editor/src/document/browser-recovery-store.ts", // rows 1, 1a
   "apps/editor/src/document/cloud-auto-save.ts", // T176 auto-save preference; per-user like rows 10-15
