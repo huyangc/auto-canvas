@@ -228,6 +228,7 @@ export function ShelfWall({
   const favoritesFilter = useRef<HTMLButtonElement>(null);
   const pendingFavoriteFocus = useRef<string | null>(null);
   const pendingRenameFocus = useRef<string | null>(null);
+  const pendingRenameRetryFocus = useRef(false);
   const mutationSeq = useRef(0);
   const onProjectsChangedRef = useRef(onProjectsChanged);
   onProjectsChangedRef.current = onProjectsChanged;
@@ -251,6 +252,15 @@ export function ShelfWall({
   }, []);
 
   useLayoutEffect(() => {
+    if (
+      pendingRenameRetryFocus.current &&
+      renaming !== null &&
+      busyId === null
+    ) {
+      pendingRenameRetryFocus.current = false;
+      const input = renameInputRef.current;
+      if (input && !input.disabled) input.focus({ preventScroll: true });
+    }
     const renameId = pendingRenameFocus.current;
     if (renameId !== null && renaming === null && busyId === null) {
       pendingRenameFocus.current = null;
@@ -266,9 +276,11 @@ export function ShelfWall({
     (heart && !heart.disabled ? heart : favoritesFilter.current)?.focus();
   });
 
-  const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(
-    null,
-  );
+  const [renaming, setRenaming] = useState<{
+    id: string;
+    name: string;
+    failedName?: string | undefined;
+  } | null>(null);
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(
     null,
   );
@@ -462,10 +474,20 @@ export function ShelfWall({
     project: CloudProjectSummary,
     rawValue: string,
     restoreFocus: boolean,
+    fromBlur = false,
   ) {
     if (activeRenameIdRef.current !== project.id) return;
-    activeRenameIdRef.current = null;
     const trimmed = rawValue.trim();
+    // After a failed save, don't auto-resubmit the exact same failing draft on
+    // blur; Enter still retries explicitly, and editing + blurring submits the
+    // updated draft.
+    if (
+      fromBlur &&
+      renaming?.id === project.id &&
+      trimmed === renaming.failedName
+    )
+      return;
+    activeRenameIdRef.current = null;
     if (!trimmed || trimmed === project.name) {
       if (restoreFocus) pendingRenameFocus.current = project.id;
       setRenaming(null);
@@ -559,7 +581,16 @@ export function ShelfWall({
           );
       }
     } catch (cause) {
-      if (action === "rename") setRenaming(null);
+      if (action === "rename") {
+        // Keep the user's draft editable so they can fix or retry without retyping.
+        activeRenameIdRef.current = project.id;
+        pendingRenameRetryFocus.current = true;
+        setRenaming((current) =>
+          current?.id === project.id
+            ? { ...current, failedName: name }
+            : { id: project.id, name: name ?? project.name, failedName: name },
+        );
+      }
       setError(
         cause instanceof Error
           ? cause.message
@@ -703,13 +734,14 @@ export function ShelfWall({
         value={renaming.name}
         disabled={controlsBusy}
         onChange={(event) =>
-          setRenaming({
+          setRenaming((current) => ({
             id: project.id,
             name: event.target.value,
-          })
+            failedName: current?.failedName,
+          }))
         }
         onBlur={(event) =>
-          commitRename(project, event.currentTarget.value, false)
+          commitRename(project, event.currentTarget.value, false, true)
         }
         onKeyDown={(event) => {
           if (event.key === "Enter" && !event.nativeEvent.isComposing) {
@@ -732,7 +764,7 @@ export function ShelfWall({
         }}
         className="shelf-tile-name-btn"
         aria-label={`Rename ${project.name}`}
-        title="Click to rename"
+        title={`${project.name} — Click to rename`}
         disabled={controlsBusy}
         onClick={() => startRename(project)}
       >

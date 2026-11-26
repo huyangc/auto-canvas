@@ -298,9 +298,11 @@
 .shelf-tile-name-btn {
   position: relative;
   z-index: 1;
+  box-sizing: border-box;
   display: inline-block;
   min-width: 0;
-  max-width: 100%;
+  max-width: calc(100% + 10px);
+  height: 26px;
   margin: -2px -5px;
   padding: 2px 5px;
   border: 1px solid transparent;
@@ -310,9 +312,11 @@
   font: inherit;
   font-size: 14px;
   font-weight: 600;
-  line-height: 1.35;
+  line-height: 20px;
   text-align: left;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   cursor: text;
   transition:
     background 120ms ease,
@@ -340,6 +344,7 @@
   box-sizing: border-box;
   width: calc(100% + 10px);
   min-width: 0;
+  height: 26px;
   margin: -2px -5px;
   padding: 2px 5px;
   border: 1px solid var(--icm-accent);
@@ -349,7 +354,7 @@
   font: inherit;
   font-size: 14px;
   font-weight: 600;
-  line-height: 1.35;
+  line-height: 20px;
   outline: 2px solid rgb(var(--icm-accent-rgb) / 20%);
   outline-offset: 0;
 }
@@ -379,7 +384,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 6px;
-  min-height: 40px;
+  min-height: 41px;
   box-sizing: border-box;
   padding: 6px 8px;
   border-top: 1px solid var(--icm-border);
@@ -521,7 +526,7 @@
 
 .shelf-tile-footer .inline-confirm-actions button,
 .shelf-list-actions .inline-confirm-actions button {
-  height: 26px;
+  height: 28px;
   padding: 0 9px;
   border: 1px solid var(--icm-border);
   border-radius: 5px;
@@ -667,12 +672,6 @@
   gap: 2px;
   min-width: 0;
   flex: 1;
-}
-
-.shelf-list-copy .shelf-tile-name-btn {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .shelf-list-actions {

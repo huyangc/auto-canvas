@@ -294,6 +294,84 @@ it("edits project names inline on click or menu Rename, saving on blur and rever
   ).not.toBeNull();
 });
 
+it("preserves the typed rename draft on save failure so the user can retry or edit", async () => {
+  const project = createEmptyProject("amp", "Amp");
+  const summary = {
+    id: "amp",
+    name: "Amp",
+    updatedAt: "2026-11-06T00:00:00Z",
+    revision: 1,
+    schemaVersion: project.schemaVersion,
+    favorite: false,
+  };
+  let attempts = 0;
+  const onRenameProject = vi.fn(async (_id: string, name: string) => {
+    attempts += 1;
+    if (attempts === 1) throw new Error("Temporary network error");
+    summary.name = name;
+  });
+  vi.stubGlobal(
+    "fetch",
+    vi.fn<typeof fetch>(async () =>
+      Response.json({ projects: [{ ...summary }], limit: 200 }),
+    ),
+  );
+  container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  await act(async () =>
+    root!.render(createElement(ShelfWall, { onRenameProject })),
+  );
+
+  await act(async () =>
+    container
+      .querySelector<HTMLButtonElement>('button[aria-label="Rename Amp"]')!
+      .click(),
+  );
+  const input = container.querySelector<HTMLInputElement>(
+    "input.shelf-tile-name-input",
+  )!;
+  const setter = Object.getOwnPropertyDescriptor(
+    HTMLInputElement.prototype,
+    "value",
+  )!.set!;
+  await act(async () => {
+    setter.call(input, "Draft OTA");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(async () => input.blur());
+
+  // Error surfaces while keeping the typed draft enabled and focused.
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+    "Temporary network error",
+  );
+  const preserved = container.querySelector<HTMLInputElement>(
+    "input.shelf-tile-name-input",
+  )!;
+  expect(preserved).not.toBeNull();
+  expect(preserved.value).toBe("Draft OTA");
+  expect(preserved.disabled).toBe(false);
+  expect(document.activeElement).toBe(preserved);
+
+  // Blurring without editing does not re-fire the same failing request.
+  await act(async () => preserved.blur());
+  expect(onRenameProject).toHaveBeenCalledTimes(1);
+
+  // Pressing Enter explicitly retries and succeeds.
+  await act(async () => {
+    preserved.focus();
+    preserved.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+    );
+  });
+  expect(onRenameProject).toHaveBeenCalledTimes(2);
+  expect(onRenameProject).toHaveBeenLastCalledWith("amp", "Draft OTA");
+  expect(container.querySelector("input.shelf-tile-name-input")).toBeNull();
+  expect(
+    container.querySelector('button[aria-label="Rename Draft OTA"]'),
+  ).not.toBeNull();
+});
+
 async function startFavoriteToggle(inFavorites = false) {
   const summary = {
     id: "bias",
