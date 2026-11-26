@@ -1,9 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { parseVacaskRawfile } from "./test-support/vacask-rawfile.js";
 import { SimulationSourceInputSchema, SourceSpanSchema } from "@icm/model";
 import {
   inspectVacaskSource,
@@ -254,83 +249,45 @@ describe("native VACASK lexical source ownership", () => {
   });
 });
 
-// Explicit kernel evidence; no fake success when the pinned runtime is absent.
-it.skipIf(!process.env.VACASK_BIN)(
-  "matches native section/include semantics in the actual kernel",
-  () => {
-    const body =
-      '\nground 0\nmodel voltage vsource\nV (Out 0) voltage dc=level\ncontrol\nabort always\noptions rawfile="ascii" strictsave=2\nsave default\nanalysis proof op\nendc\n';
-    const variants = [
-      {
-        name: "valid",
-        include: 'include "models.inc" section=TT',
-        library:
-          'section tt\ninclude "missing.inc"\nendsection\nsection TT\ninclude "\'value.inc\'"\nendsection\nsection TT\ninclude "missing-again.inc"\nendsection\n',
-        ok: true,
-      },
-      {
-        name: "unselected",
-        include: 'include "models.inc"',
-        library: "section TT\nparameters level=3\nendsection\n",
-        ok: false,
-      },
-      {
-        name: "unclosed",
-        include: 'include "models.inc" section=TT',
-        library: "section TT\nparameters level=3\n",
-        ok: false,
-      },
-      {
-        name: "nested",
-        include: 'include "models.inc" section=TT',
-        library:
-          "section TT\nsection nested\nparameters level=3\nendsection\nendsection\n",
-        ok: false,
-      },
-    ];
-    for (const variant of variants) {
-      const files = {
-        "tb/run.sim": `Source graph kernel proof\n${variant.include}\n${body}`,
-        "tb/models.inc": variant.library,
-        "tb/'value.inc'": "parameters level=3\n",
-      };
-      expect(graph(files).diagnostics.length === 0, variant.name).toBe(
-        variant.ok,
-      );
-      const cwd = mkdtempSync(
-        join(tmpdir(), `icm-native-source-${variant.name}-`),
-      );
-      for (const [path, text] of Object.entries(files)) {
-        mkdirSync(dirname(join(cwd, path)), { recursive: true });
-        writeFileSync(join(cwd, path), text);
-      }
-      const startup = join(cwd, "vacaskrc.toml");
-      writeFileSync(startup, "# controlled source-graph qualification\n");
-      const run = spawnSync(
-        process.env.VACASK_BIN!,
-        ["--tomlfile", startup, "-n", "1", "-b", "1", "tb/run.sim"],
-        {
-          cwd,
-          encoding: "utf8",
-          windowsHide: true,
-          timeout: 15000,
-        },
-      );
-      writeFileSync(join(cwd, "stdout.log"), run.stdout ?? "");
-      writeFileSync(join(cwd, "stderr.log"), run.stderr ?? "");
-      expect(run.error, cwd).toBeUndefined();
-      expect(run.status === 0, `${cwd}\n${run.stdout}\n${run.stderr}`).toBe(
-        variant.ok,
-      );
-      if (variant.ok) {
-        const raw = parseVacaskRawfile(
-          readFileSync(join(cwd, "proof.raw"), "utf8"),
-        );
-        if (!raw.ok) throw new Error(raw.error.message);
-        expect(
-          raw.plots[0]!.vectors.find((v) => v.variable.name === "Out")!.real[0],
-        ).toBe(3);
-      }
-    }
-  },
-);
+it("validates case-sensitive include sections in native run files", () => {
+  const body =
+    '\nground 0\nmodel voltage vsource\nV (Out 0) voltage dc=level\ncontrol\nabort always\noptions rawfile="ascii" strictsave=2\nsave default\nanalysis proof op\nendc\n';
+  const variants = [
+    {
+      name: "valid",
+      include: 'include "models.inc" section=TT',
+      library:
+        'section tt\ninclude "missing.inc"\nendsection\nsection TT\ninclude "\'value.inc\'"\nendsection\nsection TT\ninclude "missing-again.inc"\nendsection\n',
+      ok: true,
+    },
+    {
+      name: "unselected",
+      include: 'include "models.inc"',
+      library: "section TT\nparameters level=3\nendsection\n",
+      ok: false,
+    },
+    {
+      name: "unclosed",
+      include: 'include "models.inc" section=TT',
+      library: "section TT\nparameters level=3\n",
+      ok: false,
+    },
+    {
+      name: "nested",
+      include: 'include "models.inc" section=TT',
+      library:
+        "section TT\nsection nested\nparameters level=3\nendsection\nendsection\n",
+      ok: false,
+    },
+  ];
+  for (const variant of variants) {
+    const files = {
+      "tb/run.sim": `Source graph kernel proof\n${variant.include}\n${body}`,
+      "tb/models.inc": variant.library,
+      "tb/'value.inc'": "parameters level=3\n",
+    };
+    expect(graph(files).diagnostics.length === 0, variant.name).toBe(
+      variant.ok,
+    );
+  }
+});

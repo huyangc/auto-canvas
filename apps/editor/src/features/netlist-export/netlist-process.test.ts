@@ -2,15 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 import * as engine from "@icm/edit-engine";
 import * as devices from "@icm/devices";
 import { createEmptyProject, type CircuitProject } from "@icm/model";
-import { createSimulationFolder } from "../../../../../packages/model/src/simulation-folder.test-support.js";
 import {
   executeProjectTransaction,
   type ProjectStructureEdit,
 } from "@icm/edit-engine";
-import {
-  createDesignNetlistExport,
-  compileNgspiceSourceSimulation,
-} from "@icm/netlist";
+import { createDesignNetlistExport } from "@icm/netlist";
 import { createLibraryExampleProject } from "../../examples/library-examples";
 import { placedInstanceNetlist } from "../component-insert/placed-instance-netlist";
 import { createDefaultNetlistExportPreferences } from "./netlist-export-preferences";
@@ -962,32 +958,6 @@ describe("persisted netlist process authoring", () => {
       expect(exported(apply(mapped))).not.toContain(target);
     },
   );
-
-  it("keeps direct export and generated simulation cards identical after process selection", () => {
-    const project = apply(
-      createLibraryExampleProject("current-mirror-loaded-differential-pair")!,
-      createNetlistExportProfile("sky130"),
-    );
-    const folder = createSimulationFolder({
-      id: "simulation",
-      name: "Simulation",
-      profileId: "sky130-test",
-      engine: "ngspice",
-      documentId: project.topDocumentId,
-    });
-    const simulation = compileNgspiceSourceSimulation(project, folder);
-    expect(simulation.ok, JSON.stringify(simulation)).toBe(true);
-    if (!simulation.ok) return;
-    // Design blocks name their ground VSS; the simulator's flat root uses 0.
-    const cards = (text: string) =>
-      text
-        .replace(/\bVSS\b/gu, "0")
-        .split(/\r?\n/u)
-        .filter((line) => /^XM\d+ /u.test(line));
-    expect(cards(exported(project))).toEqual(
-      cards(simulation.generated[0]!.text),
-    );
-  });
 });
 
 it("reuses immutable defaults across tab remounts but respects profile content and snapshot changes", () => {

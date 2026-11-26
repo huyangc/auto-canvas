@@ -209,7 +209,7 @@ export type PrintedVacask =
 /**
  * Native circuit projection directly from the shared electrical IR. Analyses,
  * model-library selection and environment policy belong to preparation, not
- * this printer. Used by native execution and the generated Circuit preview.
+ * this printer.
  */
 export function printVacaskWithLocations(
   ir: DesignNetlistIR,

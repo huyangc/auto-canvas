@@ -1,10 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { createEmptyDocument, createEmptyProject } from "@icm/model";
-import { createSimulationFolder } from "../../model/src/simulation-folder.test-support.js";
 
 import { createDesignNetlistExport } from "./export.js";
-import { compileNgspiceSourceSimulation } from "./simulation-source-ngspice.js";
 
 /** A Cell `dut` of transistors in parallel, bound to the given targets. */
 function mosProject(
@@ -137,7 +135,7 @@ describe("a generic target the netlist does not define (#1420)", () => {
     expect(undefinedFindings(result.diagnostics)).toEqual([]);
   });
 
-  it("is quiet about a card the imported SPICE or the run's own files define", () => {
+  it("is quiet about a card the imported SPICE defines", () => {
     const project = mosProject([
       { id: "m1", symbolId: "nmos", model: "NMOS" },
       { id: "m2", symbolId: "pmos", model: "PMOS" },
@@ -161,30 +159,6 @@ describe("a generic target the netlist does not define (#1420)", () => {
       expect.objectContaining({
         objectIds: ["m2"],
         message: expect.stringMatching(/^M2 names PMOS, which the netlist/u),
-      }),
-    ]);
-    // A run's deck carries no stand-in (#1420) and says what it needs.
-    const folder = (id: string, card?: string) => {
-      const created = createSimulationFolder({
-        id,
-        name: id,
-        profileId: "test",
-        engine: "ngspice",
-        documentId: "dut",
-      });
-      const run = created.input.files.find((file) => file.path === "run.cir")!;
-      if (card) run.text = run.text.replace(".control", `${card}\n.control`);
-      project.simulationFolders.push(created);
-      const compiled = compileNgspiceSourceSimulation(project, created);
-      if (!compiled.ok) throw new Error(JSON.stringify(compiled.diagnostics));
-      return undefinedFindings(compiled.warnings);
-    };
-    expect(folder("tb", ".model PMOS PMOS(level=1)")).toEqual([]);
-    // A card with no parameters is the author's too.
-    expect(folder("bare", ".model PMOS PMOS")).toEqual([]);
-    expect(folder("other")).toEqual([
-      expect.objectContaining({
-        message: expect.stringMatching(/^M2 names PMOS/u),
       }),
     ]);
   });

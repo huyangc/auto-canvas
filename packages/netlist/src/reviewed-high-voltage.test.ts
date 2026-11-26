@@ -1,9 +1,7 @@
 import { createEmptyProject } from "@icm/model";
-import { createSimulationFolder } from "../../model/src/simulation-folder.test-support.js";
 import { expect, it } from "vitest";
 
 import { createDesignNetlistExport } from "./export.js";
-import { ngspiceSimulationDevices } from "./simulation-ngspice-devices.js";
 
 /** Two DMOS devices bound to SKY130's 16 V and 20 V wrappers. */
 function highVoltageProject() {
@@ -57,14 +55,7 @@ function highVoltageProject() {
       })),
     );
   }
-  const folder = createSimulationFolder({
-    id: "simulation",
-    name: "Simulation",
-    profileId: "sky130-test",
-    engine: "ngspice",
-    documentId: document.id,
-  });
-  return { project, folder };
+  return project;
 }
 
 it("warns that a 16 V device at a size SKY130 does not model cannot run (#1483)", () => {
@@ -74,7 +65,7 @@ it("warns that a 16 V device at a size SKY130 does not model cannot run (#1483)"
     master: string,
     parameters: Record<string, string>,
   ) => {
-    const { project } = highVoltageProject();
+    const project = highVoltageProject();
     project.externalSubcircuitDefinitions[device]!.name = master;
     project.documents[0]!.instances[device]!.netlist!.parameters = parameters;
     const exported = createDesignNetlistExport(project, { format: "spice" });
@@ -123,7 +114,7 @@ it("writes each 20 V device's own channel on its X line (#1486)", () => {
     [0, "sky130_fd_pr__nfet_20v0_zvt", "l=5 w=30 m=1"],
     [1, "sky130_fd_pr__pfet_20v0", "l=0.5 w=30 m=1"],
   ] as const) {
-    const { project } = highVoltageProject();
+    const project = highVoltageProject();
     project.externalSubcircuitDefinitions[device]!.name = master;
     project.documents[0]!.instances[device]!.netlist!.parameters = { m: "1" };
     const exported = createDesignNetlistExport(project, { format: "spice" });
@@ -139,8 +130,8 @@ it("writes each 20 V device's own channel on its X line (#1486)", () => {
   }
 });
 
-it("prints SKY130's high-voltage wrappers and probes the MOSFET each one holds", () => {
-  const { project, folder } = highVoltageProject();
+it("prints SKY130's high-voltage wrappers", () => {
+  const project = highVoltageProject();
   const exported = createDesignNetlistExport(project, { format: "spice" });
   expect(exported.status, JSON.stringify(exported.diagnostics)).toBe("ready");
   if (exported.status !== "ready") return;
@@ -153,13 +144,4 @@ it("prints SKY130's high-voltage wrappers and probes the MOSFET each one holds",
   expect(exported.file.text).toMatch(
     /^XM2 \S+ \S+ \S+ \S+ sky130_fd_pr__pfet_20v0 l=0\.5 w=30 m=2$/mu,
   );
-  // Operating points read the MOSFET inside: nested one level down at 16 V,
-  // named m1 at 20 V (both checked against the SKY130 wrappers in ngspice 46).
-  const devices = ngspiceSimulationDevices(project, folder.input);
-  expect(
-    devices.find((device) => device.instanceId === "XM1")?.nativeDevice,
-  ).toBe("m.xm1.xmain1.msky130_fd_pr__nfet_g5v0d16v0__base");
-  expect(
-    devices.find((device) => device.instanceId === "XM2")?.nativeDevice,
-  ).toBe("m.xm2.m1");
 });

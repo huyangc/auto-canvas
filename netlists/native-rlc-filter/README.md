@@ -7,10 +7,9 @@ template, with `alter instance("R1") r=...` set to 200, 632.455532 or 1000 ohm.
 This native control command changes only this Run, not the Canvas value.
 
 The generated `circuit.spice` binding contains native source despite its stable
-filename. Each folder has editable copies of the template,
-[shared starter report](../../scripts/lib/native-starter-report.py), and the
-existing measurement/plot reporting helpers. No JSON analysis protocol or
-ngspice runtime is added. RC and RLC copies are checked against one report source.
+filename. Each folder includes an editable template, a report script, and the
+measurement/plot reporting helpers. No JSON analysis protocol or
+ngspice runtime is added.
 
 ## Preserved experiment intent
 

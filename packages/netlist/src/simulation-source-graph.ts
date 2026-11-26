@@ -9,9 +9,7 @@ import {
   type SourceFileGraph,
 } from "./source-file-graph.js";
 
-export type { SimulationSourceDiagnostic } from "./source-file-graph.js";
-export type SimulationSourceGraph = SourceFileGraph<SpiceStatement>;
-export type SourceStatement = SimulationSourceGraph["statements"][number];
+type SimulationSourceGraph = SourceFileGraph<SpiceStatement>;
 
 /** Existing SPICE source adapter. Native VACASK replaces this adapter at the
  * compiler boundary, not the virtual-file ownership and traversal contract. */

@@ -229,7 +229,9 @@ export function inspectVacaskSource(path: string, text: string, entry = false) {
 }
 
 /** Native includes use the same ownership graph as the existing compiler.
- * No SPICE-to-native fallback, extension-based language guessing or host reads. */
+ * No SPICE-to-native fallback, extension-based language guessing or host reads.
+ * @internal Source tests cover include resolution in the virtual file graph.
+ */
 export function inspectVacaskSourceGraph(
   input: SimulationSourceInput,
   options: { includeComments?: boolean } = {},

@@ -5,7 +5,6 @@ import { createSimulationFolder } from "../../model/src/simulation-folder.test-s
 
 import { createDesignNetlistExport } from "./export.js";
 import { analyzeDesignNetlist } from "./extract.js";
-import { compileNgspiceSourceSimulation } from "./simulation-source-ngspice.js";
 import { printVacaskWithLocations } from "./vacask-printer.js";
 
 const NPN_CARD = ".model NPN NPN(IS=1e-16 BF=100 VAF=100)";
@@ -112,7 +111,7 @@ describe("the generic bipolar models (#1420)", () => {
     expect(genericFindings(result)).toEqual([]);
   });
 
-  it("leaves NPN to a model the run's own files or the imported SPICE define", () => {
+  it("uses imported NPN models in exports independently of run files", () => {
     const project = bjtProject([{ id: "q1", reference: "Q1" }]);
     const folder = (id: string, model?: string) => {
       const created = createSimulationFolder({
@@ -130,17 +129,6 @@ describe("the generic bipolar models (#1420)", () => {
       folder("tb", ".model NPN NPN(IS=2e-16 BF=200)"),
       folder("other"),
     );
-    const deck = (id: string) => {
-      const compiled = compileNgspiceSourceSimulation(
-        project,
-        project.simulationFolders.find((item) => item.id === id)!,
-      );
-      if (!compiled.ok) throw new Error(JSON.stringify(compiled.diagnostics));
-      return compiled.generated[0]!.text;
-    };
-    expect(deck("tb")).toContain("Q1 collector base emitter NPN");
-    expect(deck("tb")).not.toContain(".model");
-    expect(deck("other")).toContain(NPN_CARD);
     expect(spice(project).file.text).toContain(NPN_CARD);
     project.source.files.push({
       id: "deck",

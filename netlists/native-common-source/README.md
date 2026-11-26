@@ -28,15 +28,13 @@ same circuit without changing geometry, wire connections or device parameters.
   reports `output_pp` twice over 200–400 us. Original multi-axis data is retained.
   This does not pretend the static parser can infer arbitrary outer sweeps.
 
-`report.py` is an editable copy of the
-[shared starter calculations](../../scripts/lib/native-starter-report.py).
+`report.py` contains the editable starter calculations.
 `icm_reports.py` uses the existing measurement/plot reporting helpers. No hidden
 frontend evaluator, new persisted analysis plan, or ngspice fallback is added.
 
 ## Environment and acceptance boundary
 
-`vacask-sky130-candidate` requests the single sectioned dependency and exact digest
-in [model-symbols-sections.json](../vacask-sky130/model-symbols-sections.json).
+`vacask-sky130-candidate` requests the sectioned SKY130 dependency by digest.
 The bundled source selects `include "models/library.inc" section=tt`; the templates
 here retain their unsectioned conversion-input include. Its Profile must
 declare wrapper `defaultScale=1e-6`; Canvas dimensions and source do not inject a

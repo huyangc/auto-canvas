@@ -31,18 +31,14 @@ the converter-derived primitive inventory.
 
 ## Shared calculations and environment
 
-`report.py` is copied from [the shared starter report](../../scripts/lib/native-starter-report.py).
-It computes complex gain from returned voltages and reports through the existing
+`report.py` computes complex gain from returned voltages and reports through the existing
 Python framing helpers. Gain-at-frequency and falling crossing use linear
 interpolation of sampled dB against frequency. Missing crossings report an
 unavailable measurement; they do not erase the waveform. No frontend evaluator
 or parallel JSON analysis configuration is introduced.
 
 Each bundled model folder requests `vacask-sky130-candidate`, with the native
-include selecting its original `section=tt`, `ff`, or `ss`. The single dependency
-digest and section-specific primitive maps are in
-`netlists/vacask-sky130/model-symbols-sections.json`, derived by
-`inspectVacaskModelArtifact()` from the packaged converted files.
+include selecting its original `section=tt`, `ff`, or `ss`.
 The Profile owns `defaultSection=tt`, the `defaultScale=1e-6` wrapper policy, and requires
 the reviewed BSIM4 4.8.3 native module and declared Python runtime. These are
 candidate identities, **not qualified hosted Profiles**; among the committed

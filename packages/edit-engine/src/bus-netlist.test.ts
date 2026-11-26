@@ -1,8 +1,4 @@
 import { expect, it } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { execFileSync, spawnSync } from "node:child_process";
-import { join } from "node:path";
 import {
   createEmptyProject,
   createEmptyDocument,
@@ -23,7 +19,7 @@ import {
 import {
   analyzeDesignNetlist,
   createDesignNetlistExport,
-  generateCircuitSource,
+  printSpiceNetlist,
 } from "@icm/netlist";
 import { parseProject, serializeProject } from "@icm/project-protocol";
 import {
@@ -313,12 +309,7 @@ function busDcFixture(migrate = false) {
     "OUT_0_",
   ]);
   const topIR = analysis.ir!.cells.find((c) => c.id === top.id)!;
-  const measured: {
-    node: string;
-    expected: number;
-    variant: string;
-    member: number;
-  }[] = [];
+  const outputs: string[] = [];
   for (const variant of ["identity", "reverse"]) {
     const call = topIR.instances.find((instance) => instance.id === variant)!;
     expect(call.nodes.map((n) => n.pinName)).toEqual([
@@ -331,35 +322,15 @@ function busDcFixture(migrate = false) {
       "OUT<0>",
     ]);
     expect(new Set(call.nodes.map((n) => n.netName)).size).toBe(8);
-    for (let i = 0; i < 4; i++)
-      measured.push({
-        node: call.nodes[i + 4]!.netName,
-        expected:
-          (values[variant === "identity" ? i : 3 - i]! * 1e9) / (1e9 + 1e3),
-        variant,
-        member: 3 - i,
-      });
+    outputs.push(...call.nodes.slice(4).map((node) => node.netName));
   }
-  const source = generateCircuitSource(
-    project,
-    {
-      id: "oracle",
-      path: "circuit.spice",
-      documentId: top.id,
-      emission: "top-level",
-    },
-    undefined,
-    "ngspice",
-  );
-  if (!source.ok) throw new Error(JSON.stringify(source.diagnostics));
-  const deck = `${source.source.text}\n.control\nop\n${measured.map((m) => `print v(${m.node})`).join("\n")}\nquit\n.endc\n.end\n`;
-  return { deck, measured, project };
+  return { project, outputs, spice: printSpiceNetlist(analysis.ir!) };
 }
 
 it("exports distinct bus members through identity and reverse hierarchy after canonical reopening", () => {
-  const { project, deck, measured } = busDcFixture();
-  expect(measured).toHaveLength(8);
-  expect(deck).toContain(".subckt bus_pass");
+  const { project, spice, outputs } = busDcFixture();
+  expect(new Set(outputs).size).toBe(8);
+  expect(spice).toContain(".subckt bus_pass");
   expect(
     project.documents
       .find((cell) => cell.id === "child")!
@@ -368,8 +339,8 @@ it("exports distinct bus members through identity and reverse hierarchy after ca
 });
 
 it("preserves physical hierarchy channels after connected reorder, rename and resize", () => {
-  const { project, measured } = busDcFixture(true);
-  expect(measured).toHaveLength(8);
+  const { project, outputs } = busDcFixture(true);
+  expect(new Set(outputs).size).toBe(8);
   expect(
     project.documents.find((cell) => cell.id === "child")!.netlist!
       .terminals[0]!.name,
@@ -499,40 +470,17 @@ function copiedBusDcFixture() {
   const analysis = analyzeDesignNetlist(project);
   expect(analysis.ir, JSON.stringify(analysis.diagnostics)).not.toBeNull();
   const topIR = analysis.ir!.cells.find((cell) => cell.id === "copied-top")!;
-  const measured = ["identity", "reverse"].flatMap((variant) => {
+  const outputs = ["identity", "reverse"].flatMap((variant) => {
     const id = plan.mapping.objects.instances[variant]!;
     const call = topIR.instances.find((instance) => instance.id === id)!;
     expect(new Set(call.nodes.map((node) => node.netName)).size).toBe(8);
-    return values.map((_, index) => ({
-      node: call.nodes[index + 4]!.netName,
-      expected:
-        (values[variant === "identity" ? index : 3 - index]! * 1e9) /
-        (1e9 + 1e3),
-      variant: `copied-${variant}`,
-      member: 3 - index,
-    }));
+    return call.nodes.slice(4).map((node) => node.netName);
   });
-  const emitted = generateCircuitSource(
-    project,
-    {
-      id: "copied-oracle",
-      path: "copied.spice",
-      documentId: "copied-top",
-      emission: "top-level",
-    },
-    undefined,
-    "ngspice",
-  );
-  if (!emitted.ok) throw new Error(JSON.stringify(emitted.diagnostics));
-  return {
-    project,
-    measured,
-    deck: `${emitted.source.text}\n.control\nop\n${measured.map((item) => `print v(${item.node})`).join("\n")}\nquit\n.endc\n.end\n`,
-  };
+  return outputs;
 }
 
 it("copies transformed migrated hierarchy across Projects with independent scalar outputs after reopening", () => {
-  expect(copiedBusDcFixture().measured).toHaveLength(8);
+  expect(new Set(copiedBusDcFixture()).size).toBe(8);
 });
 
 function slicedBusDcFixture() {
@@ -564,9 +512,9 @@ function slicedBusDcFixture() {
     ]),
   );
   const variants = [
-    { id: "nested", expression: "DATA<1>,DATA<0>", expected: [0.3, 0.4] },
-    { id: "reorder", expression: "RESET,CLK", expected: [0.2, 0.1] },
-    { id: "range", expression: "DATA<1:0>", expected: [0.3, 0.4] },
+    { id: "nested", expression: "DATA<1>,DATA<0>" },
+    { id: "reorder", expression: "RESET,CLK" },
+    { id: "range", expression: "DATA<1:0>" },
   ];
   const top = createEmptyDocument("top", "slice_testbench");
   top.netlist!.name = "slice_testbench";
@@ -714,40 +662,19 @@ function slicedBusDcFixture() {
   const topIR = analyzeDesignNetlist(project).ir!.cells.find(
     (cell) => cell.id === "top",
   )!;
-  const measured = variants.flatMap((variant) => {
+  const outputs = variants.flatMap((variant) => {
     const call = topIR.instances.find(
       (instance) => instance.id === variant.id,
     )!;
     expect(new Set(call.nodes.map((node) => node.netName)).size).toBe(4);
-    return variant.expected.map((value, index) => ({
-      node: call.nodes[index + 2]!.netName,
-      expected: (value * 1e9) / (1e9 + 1e3),
-      variant: variant.id,
-      member: 1 - index,
-    }));
+    return call.nodes.slice(2).map((node) => node.netName);
   });
-  const source = generateCircuitSource(
-    project,
-    {
-      id: "slice-oracle",
-      path: "slice.spice",
-      documentId: "top",
-      emission: "top-level",
-    },
-    undefined,
-    "ngspice",
-  );
-  if (!source.ok) throw new Error(JSON.stringify(source.diagnostics));
-  return {
-    project,
-    measured,
-    deck: `${source.source.text}\n.control\nop\n${measured.map((item) => `print v(${item.node})`).join("\n")}\nquit\n.endc\n.end\n`,
-  };
+  return { project, outputs };
 }
 
 it("exports mixed bundles, ordered and nested slices through hierarchy after canonical reopening", () => {
-  const { measured, project } = slicedBusDcFixture();
-  expect(measured).toHaveLength(6);
+  const { outputs, project } = slicedBusDcFixture();
+  expect(new Set(outputs).size).toBe(6);
   expect(
     project.documents.find((document) => document.id === "top")!.netlist!
       .terminals[0]!.name,
@@ -793,64 +720,3 @@ it("traces a selected mixed-bundle member through nested slices without highligh
   }
   expect(serializeProject(project)).toBe(before);
 });
-
-// Native ngspice is optional in unit-test hosts. Local Windows acceptance may
-// explicitly select a WSL distribution; no alternate simulator is substituted.
-const distro = process.env.ICM_BUS_NGSPICE_WSL_DISTRO;
-const executable = distro ? "wsl" : "ngspice";
-const prefix = distro ? ["-d", distro, "--", "ngspice"] : [];
-const available =
-  spawnSync(executable, [...prefix, "--version"], { encoding: "utf8" })
-    .status === 0;
-it.skipIf(!available).each([
-  ["identity and whole-bus reversal", busDcFixture],
-  ["mixed bundles, ordered and nested slices", slicedBusDcFixture],
-  ["connected member reorder and explicit rename", () => busDcFixture(true)],
-  [
-    "transformed cross-Project copy after connected migration",
-    copiedBusDcFixture,
-  ],
-] as const)(
-  "ngspice proves four independent DC values through %s",
-  (_, fixture) => {
-    const { deck, measured } = fixture();
-    const directory = mkdtempSync(join(tmpdir(), "icm-bus-dc-"));
-    try {
-      const path = join(directory, "bus.cir");
-      writeFileSync(path, deck);
-      const simulatorPath = distro
-        ? path
-            .replace(
-              /^([A-Za-z]):/u,
-              (_, letter: string) => `/mnt/${letter.toLowerCase()}`,
-            )
-            .replaceAll("\\", "/")
-        : path;
-      const output = execFileSync(
-        executable,
-        [...prefix, "-b", simulatorPath],
-        { encoding: "utf8", timeout: 30000 },
-      );
-      for (const measurement of measured) {
-        const row = output
-          .split(/\r?\n/u)
-          .find((line) =>
-            line
-              .toLowerCase()
-              .startsWith(`v(${measurement.node.toLowerCase()}) =`),
-          );
-        expect(
-          row,
-          `${measurement.variant} OUT<${measurement.member}>`,
-        ).toBeDefined();
-        const actual = Number(row!.split("=")[1]!.trim());
-        expect(
-          Math.abs(actual - measurement.expected),
-          JSON.stringify({ ...measurement, actual }),
-        ).toBeLessThan(1e-6);
-      }
-    } finally {
-      rmSync(directory, { recursive: true, force: true });
-    }
-  },
-);

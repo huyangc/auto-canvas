@@ -1373,6 +1373,7 @@ const STANDARD_CELL_RULES: readonly StandardCellRule[] = [
 /**
  * The standard-cell library a cell name belongs to, any cell of it, gate or
  * not (#1596): for telling a cell no Library gate takes from an unknown name.
+ * @internal Tests pin standard-cell library recognition.
  */
 export function standardCellLibraryOfName(
   name: string,

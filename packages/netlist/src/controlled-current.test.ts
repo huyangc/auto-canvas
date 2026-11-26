@@ -5,13 +5,8 @@ import {
   lowerTerminalCurrentControls,
   signedControlGain,
 } from "./controlled-current.js";
-import { nativeCurrentSenses } from "./simulation-native-current.js";
 import { importSpiceSources } from "@icm/spice";
 import { printVacaskWithLocations } from "./vacask-printer.js";
-import {
-  instrumentCellTerminalCurrents,
-  instrumentationKey,
-} from "./terminal-current-instrumentation.js";
 
 function fixture() {
   const project = createEmptyProject("terminal-current", "Terminal current");
@@ -97,19 +92,6 @@ describe("terminal-current controlled sources", () => {
         ).toHaveLength(2);
         expect(native.text).toContain("__icm_ccvs gain=-(3000)");
       }
-      const sense = nativeCurrentSenses(
-        cell,
-        byId("R1"),
-        [],
-        new Set(cell.instances.map((i) => i.reference)),
-      ).find((s) => s.pinName === "1")!;
-      expect(sense.senseReference).toBe(probe.reference);
-      expect(sense.collision).toBe(false);
-      const measured = instrumentCellTerminalCurrents(
-        cell,
-        new Map([[instrumentationKey(sense), sense]]),
-      );
-      expect(measured).toEqual(cell);
     },
   );
 

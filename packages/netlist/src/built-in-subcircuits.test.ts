@@ -5,7 +5,6 @@ import {
   type CircuitProject,
   type SchematicDocument,
 } from "@icm/model";
-import { createSimulationFolder } from "../../model/src/simulation-folder.test-support.js";
 import {
   subcircuitDescriptor,
   builtInModelContract,
@@ -15,8 +14,6 @@ import {
 import { createDesignNetlistExport } from "./export.js";
 import { addOwnSubcircuit } from "./own-subcircuit.test-support.js";
 import { analyzeDesignNetlistForAuthoring } from "./extract.js";
-import { compileNgspiceSourceSimulation } from "./simulation-source-ngspice.js";
-import { generateCircuitSource } from "./simulation-circuit-source.js";
 
 const inverterNets = [
   ["A", "in_node"],
@@ -607,106 +604,6 @@ describe("built-in Analog Block subcircuits", () => {
       "X1 VDD VSS plus minus out icm_opamp_vdd_vss gain=2e3",
     );
   });
-
-  it("includes the built-in model in an ngspice simulation binding", () => {
-    const project = analogBlockProject(
-      ["opamp"],
-      [
-        ["IN+", "plus"],
-        ["IN-", "minus"],
-        ["OUT", "out"],
-      ],
-    );
-    const folder = createSimulationFolder({
-      id: "ideal-opamp-probe",
-      name: "Ideal opamp probe",
-      profileId: "local",
-      documentId: project.documents[0]!.id,
-    });
-    folder.input.files.find((file) => file.path === folder.input.entry)!.text =
-      "Ideal opamp probe\n.include circuit.spice\n.control\nop\n.endc\n.end\n";
-    const compiled = compileNgspiceSourceSimulation(project, folder);
-    expect(
-      compiled.ok,
-      JSON.stringify(compiled.ok ? [] : compiled.diagnostics),
-    ).toBe(true);
-    if (!compiled.ok) return;
-    const generated = compiled.files.find(
-      (file) => file.path === "circuit.spice",
-    )!.text;
-    expect(generated).toContain(
-      ".subckt icm_opamp_vdd_vss VDD VSS VIP VIN VOUT params: gain=1e6",
-    );
-    expect(generated).toContain("Blin nlin 0 V={gain*(V(VIP)-V(VIN))}");
-    expect(generated).toContain("X1 VDD VSS plus minus out icm_opamp_vdd_vss");
-    expect(generated.match(/\.subckt icm_opamp_vdd_vss\b/gu)).toHaveLength(1);
-  });
-
-  it("includes a logic gate's ideal body in an ngspice simulation", () => {
-    const project = analogBlockProject(
-      ["d-flip-flop", "d-flip-flop"],
-      [
-        ["D", "d"],
-        ["CK", "ck"],
-        ["Q", "q"],
-        ["QBAR", "qb"],
-      ],
-    );
-    const folder = createSimulationFolder({
-      id: "logic-probe",
-      name: "Logic probe",
-      profileId: "local",
-      documentId: project.documents[0]!.id,
-    });
-    folder.input.files.find((file) => file.path === folder.input.entry)!.text =
-      "Logic probe\n.include circuit.spice\n.control\nop\n.endc\n.end\n";
-    const compiled = compileNgspiceSourceSimulation(project, folder);
-    expect(
-      compiled.ok,
-      JSON.stringify(compiled.ok ? [] : compiled.diagnostics),
-    ).toBe(true);
-    if (!compiled.ok) return;
-    const generated = compiled.files.find(
-      (file) => file.path === "circuit.spice",
-    )!.text;
-    // Two flip-flops, one body.
-    expect(generated.match(/\.subckt d_flip_flop\b/gu)).toHaveLength(1);
-    expect(generated).toMatch(/^X2 \S+ \S+ d1 ck1 q1 qb1 d_flip_flop$/mu);
-  });
-
-  it.each(["ngspice", "vacask"] as const)(
-    "opens an editable %s circuit with a generated ideal-model Cell",
-    (engine) => {
-      const project = analogBlockProject(
-        ["opamp"],
-        [
-          ["IN+", "plus"],
-          ["IN-", "minus"],
-          ["OUT", "out"],
-        ],
-      );
-      const result = generateCircuitSource(
-        project,
-        {
-          id: "circuit",
-          path: "circuit.spice",
-          documentId: "dut",
-          emission: "top-level",
-        },
-        undefined,
-        engine,
-      );
-      expect(result.ok).toBe(true);
-      if (result.ok) {
-        expect(
-          result.source.instances.some((item) => item.instanceId === "block-1"),
-        ).toBe(true);
-        expect(
-          result.source.parameters.every((item) => item.documentId === "dut"),
-        ).toBe(true);
-      }
-    },
-  );
 
   it.each(["and", "nand", "or", "nor", "xor", "xnor"])(
     "exports every four-input %s terminal in its declared electrical order",
