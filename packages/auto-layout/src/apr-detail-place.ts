@@ -25,9 +25,14 @@ import {
 import { decoupledSignalPortClusters } from "./multi-port-nets.js";
 import { channelPins, isMosBulk, type NetRoles } from "./net-roles.js";
 import { devicePins, signalDistances } from "./placement-connectivity.js";
-import { compareIds, validInductorCouplings } from "./recognize.js";
+import {
+  compareIds,
+  recognizeStructures,
+  validInductorCouplings,
+} from "./recognize.js";
+import { freezePinGroups } from "./route.js";
 import { placementUnits } from "./search-moves.js";
-import { conductingPins } from "./stages.js";
+import { conductingPins, driverAttachments } from "./stages.js";
 import type { Placement } from "./types.js";
 
 const EMPTY = createEmptyDocument("apr-detail", "apr-detail");
@@ -289,8 +294,41 @@ function extractAprUnits(
     }
   }
 
+  // Keep already-seated R70 gate-driver attachments rigidly paired with their
+  // receiver (only when the driver currently sits on the receiver gate's exit
+  // side within 140 units, mirroring how aligned stacks are preserved above).
+  const seatedDrivers = driverAttachments(
+    devices,
+    resolver,
+    roles,
+    recognizeStructures(document, roles),
+  )
+    .filter((a) => {
+      const hostInst = placedById.get(a.host.device.id);
+      if (!hostInst?.placement) return false;
+      const gatePin = devicePins(hostInst, resolver).find(
+        (p) => p.name === a.host.pin.name,
+      );
+      if (!gatePin) return false;
+      const gatePt = transformPoint(
+        gatePin.at,
+        hostInst.placement.position,
+        hostInst.placement,
+      );
+      const exit = pinExit(gatePin, hostInst.placement);
+      return a.stage.devices.some((dev) => {
+        const dInst = placedById.get(dev.id);
+        if (!dInst?.placement) return false;
+        const dx = dInst.placement.position.x - gatePt.x;
+        const dy = dInst.placement.position.y - gatePt.y;
+        const along = dx * exit.x + dy * exit.y;
+        return along > 0 && Math.abs(dx) + Math.abs(dy) <= 140;
+      });
+    })
+    .map((a) => [a.host.device.id, ...a.stage.devices.map((d) => d.id)]);
   for (const ids of [
     ...stacks,
+    ...seatedDrivers,
     ...document.layoutGroups.map((g) => g.objectIds),
     ...document.constraints.map((c) => c.objectIds),
     ...validInductorCouplings(document).map((c) =>
@@ -393,12 +431,15 @@ export function aprDetailPlace(
   placed: SchematicDocument,
   resolver: SymbolResolver,
   fixed: ReadonlySet<string>,
-  symmetryOptions?: Pick<NetRoles, "unsplitSymmetry" | "mirrorSymmetry">,
+  options?: Pick<NetRoles, "unsplitSymmetry" | "mirrorSymmetry"> & {
+    stopped?: () => boolean;
+  },
 ): AprResult {
   const empty = new Map<string, Placement>();
   if (
     document.instances.length < 4 ||
-    document.instances.length > MAX_APR_INSTANCES
+    document.instances.length > MAX_APR_INSTANCES ||
+    options?.stopped?.()
   ) {
     return {
       placements: empty,
@@ -415,7 +456,7 @@ export function aprDetailPlace(
     placed,
     resolver,
     fixed,
-    symmetryOptions,
+    options,
   );
   if (devices.length < 3 || units.every((u) => u.fixed)) {
     return {
@@ -549,26 +590,35 @@ export function aprDetailPlace(
     }
     if (railList.length) railPinsByDevice.set(d.id, railList);
   }
-  // Respect R172 multi-port decoupling so locally decoupled port nets do not
+  // Respect R172 multi-port decoupling (including authored port associations
+  // and contacts from freezePinGroups) so locally decoupled port nets do not
   // create phantom cross-canvas MST wires in the placement proxy.
   const placedPoints = pinPoints(placed, resolver);
   const netById = new Map(document.nets.map((n) => [n.id, n]));
+  const frozenByNet = new Map(
+    freezePinGroups(document, resolver).map((g) => [g.netId, g]),
+  );
   const activeNets: NetPinRef[][] = [];
   for (const [netId, devPins] of [...netPinsMap.entries()].sort(([a], [b]) =>
     compareIds(a, b),
   )) {
     if (devPins.length < 2) continue;
+    const frozen = frozenByNet.get(netId);
     const netObj = netById.get(netId);
-    const allTerminals = (netObj?.terminals ?? [])
-      .filter((t) => !t.memberId)
-      .map((t) => ({ instanceId: t.instanceId, pinName: t.pinName }));
+    const allTerminals =
+      frozen?.pins ??
+      (netObj?.terminals ?? [])
+        .filter((t) => !t.memberId)
+        .map((t) => ({ instanceId: t.instanceId, pinName: t.pinName }));
     const clusters = decoupledSignalPortClusters(
       placed,
       netId,
       allTerminals,
       roles,
-      [],
+      frozen?.contacts ?? [],
       placedPoints,
+      frozen?.portAssociations,
+      { allowRails: true },
     );
     if (clusters) {
       for (const cluster of clusters) {
@@ -585,6 +635,20 @@ export function aprDetailPlace(
       activeNets.push(devPins);
     }
   }
+  // Scale proxy evaluation budget inversely with O(E^2) pairwise crossing cost
+  // so dense multi-hundred-net graphs stay bounded deterministically within the
+  // latency target while normal schematics (<=110 edges) keep the full budget.
+  const totalMstEdges = activeNets.reduce(
+    (sum, pins) => sum + Math.max(0, pins.length - 1),
+    0,
+  );
+  const maxProxyEvals = Math.min(
+    MAX_PROXY_EVALS,
+    Math.max(
+      40,
+      Math.floor(20_000_000 / Math.max(1, totalMstEdges * totalMstEdges)),
+    ),
+  );
 
   // Precompute directed signal edges (strictly increasing signal distance).
   const flowEdges: Array<{ from: string; to: string }> = [];
@@ -775,6 +839,8 @@ export function aprDetailPlace(
     return false;
   };
 
+  const budgetExhausted = () =>
+    evaluations >= maxProxyEvals || Boolean(options?.stopped?.());
   const beforeEval = evaluatePoses(initial);
   const deviceDoc = { ...document, instances: devices, junctions: [] };
 
@@ -792,7 +858,7 @@ export function aprDetailPlace(
       (u) => !u.fixed && !u.hasGroupOrSymmetry && u.members.length === 1,
     );
     for (const unit of singles) {
-      if (evaluations >= MAX_PROXY_EVALS) break;
+      if (budgetExhausted()) break;
       const id = unit.members[0]!;
       const dev = deviceById.get(id)!;
       const curPose = best.get(id)!;
@@ -815,7 +881,7 @@ export function aprDetailPlace(
       let bestLocalPose: Placement | undefined;
       let bestLocalEval = bestEval;
       for (const mirror of mirrorStates) {
-        if (evaluations >= MAX_PROXY_EVALS) break;
+        if (budgetExhausted()) break;
         if (mirror === curPose.mirror) continue;
         const candidateOrient = { rotation: curPose.rotation, mirror };
         if (
@@ -915,7 +981,7 @@ export function aprDetailPlace(
       movedIds: ReadonlySet<string>,
       internalClearance = 0,
     ): boolean => {
-      if (evaluations >= MAX_PROXY_EVALS) return false;
+      if (budgetExhausted()) return false;
       if (movedHasConflict(trial, movedIds, internalClearance)) return false;
       const nextEval = evaluatePoses(trial);
       if (
@@ -933,7 +999,7 @@ export function aprDetailPlace(
 
     // 2a. Try mirroring each free multi-device column cluster horizontally.
     for (const col of columns) {
-      if (evaluations >= MAX_PROXY_EVALS) break;
+      if (budgetExhausted()) break;
       if (!col.canMirror || col.members.length < 2) continue;
       const box = groupBox(col.members, best);
       const axis2 = box.x + (box.x + box.width);
@@ -1044,7 +1110,14 @@ export function aprDetailPlace(
         const nextCol = runCols[i + 1];
         cursor = newRight + (nextCol ? boundaryGap(col, nextCol) : colGap);
       }
-      const newSpanWidth = cursor - colGap - startX;
+      let minLeft = Infinity;
+      let maxColRight = -Infinity;
+      for (const col of columns) {
+        const b = groupBox(col.members, trial);
+        if (b.x < minLeft) minLeft = b.x;
+        if (b.x + b.width > maxColRight) maxColRight = b.x + b.width;
+      }
+      const newSpanWidth = maxColRight - minLeft;
       if (
         maxRight === undefined &&
         newSpanWidth > initialSpanWidth * 1.15 + 120
@@ -1086,10 +1159,10 @@ export function aprDetailPlace(
       const wLen = Math.min(WINDOW_SIZE, order.length);
       const perms = PERMS_BY_LEN.get(wLen) ?? [];
       for (let w = 0; w <= order.length - wLen; w++) {
-        if (evaluations >= MAX_PROXY_EVALS) break;
+        if (budgetExhausted()) break;
         const baseOrder = [...order];
         for (const perm of perms) {
-          if (evaluations >= MAX_PROXY_EVALS) break;
+          if (budgetExhausted()) break;
           if (perm.every((v, k) => v === k)) continue;
           const candidate = [...baseOrder];
           for (let k = 0; k < wLen; k++)
@@ -1099,10 +1172,10 @@ export function aprDetailPlace(
       }
 
       for (let i = 0; i < order.length; i++) {
-        if (evaluations >= MAX_PROXY_EVALS) break;
+        if (budgetExhausted()) break;
         const moving = order[i]!;
         for (let to = 0; to < order.length; to++) {
-          if (evaluations >= MAX_PROXY_EVALS) break;
+          if (budgetExhausted()) break;
           const from = order.indexOf(moving);
           if (from === to) continue;
           const candidate = order.filter((c) => c !== moving);
@@ -1164,7 +1237,7 @@ export function aprDetailPlace(
       trial: Map<string, Placement>,
       movedIds: ReadonlySet<string>,
     ): boolean => {
-      if (evaluations >= MAX_PROXY_EVALS) return false;
+      if (budgetExhausted()) return false;
       if (movedHasConflict(trial, movedIds, MIN_CLEARANCE)) return false;
       const nextEval = evaluatePoses(trial);
       if (
@@ -1181,7 +1254,7 @@ export function aprDetailPlace(
     };
 
     for (const band of bands) {
-      if (evaluations >= MAX_PROXY_EVALS) break;
+      if (budgetExhausted()) break;
       if (band.length < 2) continue;
       band.sort(
         (a, b) => a.box.x - b.box.x || compareIds(a.unit.id, b.unit.id),
@@ -1270,10 +1343,10 @@ export function aprDetailPlace(
       const wLen = Math.min(WINDOW_SIZE, order.length);
       const perms = PERMS_BY_LEN.get(wLen) ?? [];
       for (let w = 0; w <= order.length - wLen; w++) {
-        if (evaluations >= MAX_PROXY_EVALS) break;
+        if (budgetExhausted()) break;
         const baseOrder = [...order];
         for (const perm of perms) {
-          if (evaluations >= MAX_PROXY_EVALS) break;
+          if (budgetExhausted()) break;
           if (perm.every((v, k) => v === k)) continue;
           const candidate = [...baseOrder];
           for (let k = 0; k < wLen; k++)
@@ -1283,10 +1356,10 @@ export function aprDetailPlace(
       }
 
       for (let i = 0; i < order.length; i++) {
-        if (evaluations >= MAX_PROXY_EVALS) break;
+        if (budgetExhausted()) break;
         const moving = order[i]!;
         for (let to = 0; to < order.length; to++) {
-          if (evaluations >= MAX_PROXY_EVALS) break;
+          if (budgetExhausted()) break;
           const from = order.indexOf(moving);
           if (from === to) continue;
           const candidate = order.filter((u) => u !== moving);
@@ -1299,9 +1372,9 @@ export function aprDetailPlace(
       // across fixed obstacles and tall multi-row columns without shifting
       // untouched units in the band).
       for (let i = 0; i < order.length; i++) {
-        if (evaluations >= MAX_PROXY_EVALS) break;
+        if (budgetExhausted()) break;
         for (let j = i + 1; j < order.length; j++) {
-          if (evaluations >= MAX_PROXY_EVALS) break;
+          if (budgetExhausted()) break;
           const uA = order[i]!;
           const uB = order[j]!;
           const boxA = groupBox(uA.members, best);
@@ -1371,6 +1444,7 @@ export function aprDetailPlace(
     )
     .map((u) => u.members[0]!);
   for (const id of macroBlocks.slice(0, 2)) {
+    if (budgetExhausted()) break;
     const dev = deviceById.get(id)!;
     const curPose = initial.get(id)!;
     const curBox = worldBox(id, initial);
@@ -1384,6 +1458,7 @@ export function aprDetailPlace(
       ? ["none", "horizontal", "vertical", "both"]
       : ["none", "horizontal"];
     for (const mirror of states) {
+      if (budgetExhausted()) break;
       if (mirror === curPose.mirror) continue;
       const orient = { rotation: curPose.rotation, mirror };
       if (rightFacing.has(id) && outputFacesLeft(dev, orient, resolver))
@@ -1408,29 +1483,37 @@ export function aprDetailPlace(
   }
 
   // Track A: Orient -> Macro Column Place -> Orient
-  const orient1 = runOrientPass(initial, beforeEval);
+  const orient1 = budgetExhausted()
+    ? { poses: initial, eval: beforeEval, changed: false }
+    : runOrientPass(initial, beforeEval);
   if (orient1.changed) record("orient", orient1.poses, orient1.eval);
 
-  const macro1 = runMacroColumnPass(orient1.poses, orient1.eval);
-  const macroOriented = macro1.changed
-    ? runOrientPass(macro1.poses, macro1.eval)
-    : macro1;
+  const macro1 = budgetExhausted()
+    ? { poses: orient1.poses, eval: orient1.eval, changed: false }
+    : runMacroColumnPass(orient1.poses, orient1.eval);
+  const macroOriented =
+    macro1.changed && !budgetExhausted()
+      ? runOrientPass(macro1.poses, macro1.eval)
+      : macro1;
   if (macro1.changed || macroOriented.changed)
     record("macro", macroOriented.poses, macroOriented.eval);
 
   // Track B: Windowed Row Detail Place directly on initial (preserves macro columns)
-  const rowOnly = runWindowedRowPass(initial, beforeEval);
-  if (rowOnly.changed) record("row", rowOnly.poses, rowOnly.eval);
+  if (!budgetExhausted()) {
+    const rowOnly = runWindowedRowPass(initial, beforeEval);
+    if (rowOnly.changed) record("row", rowOnly.poses, rowOnly.eval);
+  }
 
   // Track C: Combined Macro -> Row -> Orient
-  if (macro1.changed || orient1.changed) {
+  if ((macro1.changed || orient1.changed) && !budgetExhausted()) {
     const combinedRow = runWindowedRowPass(
       macroOriented.poses,
       macroOriented.eval,
     );
-    const combinedFinal = combinedRow.changed
-      ? runOrientPass(combinedRow.poses, combinedRow.eval)
-      : combinedRow;
+    const combinedFinal =
+      combinedRow.changed && !budgetExhausted()
+        ? runOrientPass(combinedRow.poses, combinedRow.eval)
+        : combinedRow;
     if (combinedRow.changed || combinedFinal.changed)
       record("combined", combinedFinal.poses, combinedFinal.eval);
   }

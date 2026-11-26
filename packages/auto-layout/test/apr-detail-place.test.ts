@@ -330,4 +330,39 @@ describe("T189 aprDetailPlace", () => {
       geometryProblem(withPlacements(doc, result.placements), macroResolver),
     ).toBeUndefined();
   });
+
+  it("respects stopped() deadline callback and preserves R70 gate-driver attachments", () => {
+    const doc = circuit(
+      {
+        V1: "vsource",
+        M1: "nmos",
+        R1: "resistor",
+        R2: "resistor",
+        G1: "ground",
+      },
+      {
+        gate: ["V1.+", "M1.G"],
+        drain: ["M1.D", "R1.2"],
+        other: ["R1.1", "R2.1"],
+        gnd: ["V1.-", "M1.S", "R2.2", "G1.0"],
+      },
+    );
+    const initial = new Map([
+      ["V1", placement(100, 200)],
+      ["M1", placement(180, 200)],
+      ["R1", placement(260, 120)],
+      ["R2", placement(340, 200)],
+      ["G1", placement(180, 280)],
+    ]);
+    const placed = withPlacements(doc, initial);
+    const stoppedRes = aprDetailPlace(doc, placed, resolver, new Set(["M1"]), {
+      stopped: () => true,
+    });
+    expect(stoppedRes.improved).toBe(false);
+    expect(stoppedRes.evaluations).toBe(0);
+
+    // M1 is fixed; V1 drives only M1.G (R70 driver attachment), so V1 must stay attached.
+    const attachedRes = aprDetailPlace(doc, placed, resolver, new Set(["M1"]));
+    expect(attachedRes.placements.get("V1")).toEqual(initial.get("V1"));
+  });
 });
