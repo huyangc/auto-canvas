@@ -166,10 +166,11 @@ node scripts/codex-log.mjs tasks/T001-<slug> --round 2 --follow       # 供 Moni
 
 ### 手动运行独立 PR 评审
 
-钩子未运行，或运行结束后仍缺少当前远端 head 的有效评审时，负责人手动补评。在 `git status --porcelain` 输出为空的 worktree 中评审，确认其 HEAD 等于 PR 的 `headRefOid`。若任务 worktree 有未提交工作，另建该 SHA 的干净 worktree 并保留原有改动。更新 PR 基分支的远端引用并检查差异非空。在该 worktree 中为本轮创建独立输出文件，以下示例使用当前分支关联的 PR。
+钩子未运行，或运行结束后仍缺少当前远端 head 的有效评审时，负责人手动补评。在 `git status --porcelain` 输出为空的 worktree 中评审，确认其 HEAD 等于 PR 的 `headRefOid`。若任务 worktree 有未提交工作，另建该 SHA 的干净 worktree 并保留原有改动。更新 PR 基分支的远端引用并检查差异非空。在该 worktree 中为本轮创建独立输出文件，先将 `PR_NUMBER` 设为待评审的 PR 号；示例在脚本中运行，也适用于 detached HEAD。
 
 ```bash
-pr_base=$(gh pr view --json baseRefName --jq .baseRefName)
+set -eu
+pr_base=$(gh pr view "${PR_NUMBER:?请设置待评审的 PR 号}" --json baseRefName --jq .baseRefName)
 review_output=$(mktemp)
 codex exec review --base "origin/$pr_base" --ephemeral -m gpt-6.2-sol \
   -c 'review_model="gpt-6.2-sol"' -c 'model_reasoning_effort=medium' -c 'notify=[]' -o "$review_output"

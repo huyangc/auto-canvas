@@ -87,7 +87,8 @@ yourself:
 
 Follow [PR review and merge](../../../docs/workflow.md#pr-评审与合入):
 
-1. `git push -u origin task/<id>-<slug>`, then `gh pr create --base main` using
+1. Verify that the current branch matches the plan. Push it with
+   `git push -u origin HEAD`, then update the existing PR or create one using
    `.github/pull_request_template.md`. Put the acceptance commands you reran
    and their results under Evidence: CI runs static checks, build and unit
    tests, not browser tests or live checks.
