@@ -3,6 +3,7 @@ import {
   mkdirSync,
   mkdtempSync,
   realpathSync,
+  symlinkSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -242,6 +243,32 @@ for (const python of process.argv.slice(1)) {
     ]);
   });
 
+  it("keeps the interpreter selected by a symlink followed by a parent component", () => {
+    const directory = fixture();
+    mkdirSync(join(directory, "env/bin"), { recursive: true });
+    symlinkSync(join(directory, "env/bin"), join(directory, "link"));
+    writeFileSync(join(directory, "env/python"), "#!/bin/sh\necho chosen\n", {
+      mode: 0o755,
+    });
+    writeFileSync(join(directory, "python"), "#!/bin/sh\necho different\n", {
+      mode: 0o755,
+    });
+    const relative = "link/../python";
+    const result = invoke(
+      directory,
+      `import { parseArgs } from ${JSON.stringify(script)};
+import { execFileSync } from "node:child_process";
+for (const arg of process.argv.slice(1)) {
+  const { python } = parseArgs(["--python", arg]);
+  process.stdout.write(execFileSync(python, [], { cwd: "/" }));
+}`,
+      relative,
+      `${directory}/${relative}`,
+    );
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout.trim().split("\n")).toEqual(["chosen", "chosen"]);
+  });
+
   it.each([
     ["Python 3.12", 12, "70.1.0", "", /Python 3\.13 or newer/u],
     ["missing pip", 13, "70.1.0", "pip", /cannot import pip/u],
@@ -254,6 +281,13 @@ for (const python of process.argv.slice(1)) {
     ],
     ["old setuptools", 13, "67.0.0", "", /setuptools 67\.0\.0.*68 or newer/u],
     ["missing wheel", 13, "70.0.0", "wheel", /cannot import wheel/u],
+    [
+      "unloadable wheel command",
+      13,
+      "70.0.0",
+      "bdist_wheel",
+      /cannot load bdist_wheel/u,
+    ],
     ["old backend with wheel", 13, "68.0.0", "", null],
     ["new backend without wheel", 13, "70.1.0", "wheel", null],
   ])(
@@ -277,10 +311,17 @@ class Version(tuple):
         return ".".join(map(str, self))
 
 sys.modules["pip._vendor.packaging.version"] = SimpleNamespace(Version=Version)
+class Distribution:
+    def get_command_class(self, command):
+        assert command == "bdist_wheel"
+        if command == ${JSON.stringify(missing)}:
+            raise ImportError("missing packaging")
+        return object
+
 def import_module(name):
     if name == ${JSON.stringify(missing)}:
         raise ImportError(name)
-    return SimpleNamespace(__version__=${JSON.stringify(setuptools)})
+    return SimpleNamespace(__version__=${JSON.stringify(setuptools)}, Distribution=Distribution)
 
 importlib.import_module = import_module
 assert sys.argv[1] == "-c"

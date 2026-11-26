@@ -5,7 +5,7 @@
 // notices. Nothing in it needs a network, a package manager or a checkout;
 // the site runs it with its own Node (AUTO_CANVAS_NODE).
 //
-//   pnpm notebook:package   (AUTO_CANVAS_PACKAGE_PYTHON=<Python 3.13+ with pip and setuptools>)
+//   pnpm notebook:package   (AUTO_CANVAS_PACKAGE_PYTHON=<Python 3.13+ with pip, setuptools 68+, and wheel below setuptools 70.1>)
 //   node scripts/package-notebook-canvas.mjs --python <interpreter> [--out <dir>]
 //
 // Run after `pnpm build` and `pnpm build:notebook-editor` (the pnpm script
@@ -26,7 +26,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 import {
@@ -184,7 +184,9 @@ export function parseArgs(argv) {
       2,
       "--python is required (pnpm notebook:package passes AUTO_CANVAS_PACKAGE_PYTHON)",
     );
-  if (options.python.includes("/")) options.python = resolve(options.python);
+  // Let the OS traverse symlinks before it interprets a following "..".
+  if (options.python.includes("/") && !isAbsolute(options.python))
+    options.python = `${process.cwd()}/${options.python}`;
   return options;
 }
 
@@ -238,6 +240,10 @@ if version < Version("${MIN_SETUPTOOLS}"):
     sys.exit(f"setuptools {version} is installed; ${MIN_SETUPTOOLS} or newer is required")
 if version < Version("${SETUPTOOLS_WITH_WHEEL}"):
     require("wheel")
+    try:
+        setuptools.Distribution().get_command_class("bdist_wheel")
+    except Exception as error:
+        sys.exit(f"cannot load bdist_wheel: {error}")
 print("${PREFLIGHT_OK}")
 `,
       ],
