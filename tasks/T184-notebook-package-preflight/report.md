@@ -13,3 +13,12 @@ The packaging CLI preserves path traversal through symbolic links when invoked f
 | `node scripts/package-notebook-canvas-check.mjs --tarball <archive>` on PostgreSQL lane 3 | 24/24 passed, including browser boot and offline wheel installation |
 
 The regressions exercise two executable files reached through different interpretations of a symbolic link followed by a parent component, and a backend whose wheel module imports while its command cannot load. The existing Python, pip, setuptools, wheel and sanitized-environment checks also pass.
+
+## Independent review follow-up
+
+The independent reviewer reproduced a command-load failure on setuptools 83.
+The module requirement remains conditional on the backend version and the
+command-load check now runs on every supported backend. The new bundled-command
+case failed on the first commit and passed after the fix. All 21 packaging
+tests and all 24 archive checks passed. The normal package build, typecheck,
+lint, formatting and docs checks passed again.

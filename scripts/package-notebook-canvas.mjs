@@ -240,10 +240,10 @@ if version < Version("${MIN_SETUPTOOLS}"):
     sys.exit(f"setuptools {version} is installed; ${MIN_SETUPTOOLS} or newer is required")
 if version < Version("${SETUPTOOLS_WITH_WHEEL}"):
     require("wheel")
-    try:
-        setuptools.Distribution().get_command_class("bdist_wheel")
-    except Exception as error:
-        sys.exit(f"cannot load bdist_wheel: {error}")
+try:
+    setuptools.Distribution().get_command_class("bdist_wheel")
+except Exception as error:
+    sys.exit(f"cannot load bdist_wheel: {error}")
 print("${PREFLIGHT_OK}")
 `,
       ],

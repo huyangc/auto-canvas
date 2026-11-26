@@ -289,6 +289,13 @@ for (const arg of process.argv.slice(1)) {
       /cannot load bdist_wheel/u,
     ],
     ["old backend with wheel", 13, "68.0.0", "", null],
+    [
+      "unloadable bundled command",
+      13,
+      "83.0.0",
+      "bdist_wheel",
+      /cannot load bdist_wheel/u,
+    ],
     ["new backend without wheel", 13, "70.1.0", "wheel", null],
   ])(
     "checks the minimum requirements with %s",
