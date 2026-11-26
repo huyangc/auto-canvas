@@ -32,3 +32,11 @@ runs a child interpreter through `sys.executable` and verifies its prefix.
 All 22 packaging tests passed with Python 3.13. The actual package build
 through the reviewer's symlink-and-parent path passed, its archive passed
 24/24 checks, and typecheck, lint, formatting and docs checks passed.
+
+The third review identified a venv whose bin directory is itself a symlink.
+The CLI now resolves parent traversals individually, keeping a lexical parent
+when it denotes the same directory and retaining the path suffix. The regression
+exercises a linked bin directory and compares with the caller's direct
+interpreter. Both suites use the same existing Python discovery order.
+Launcher and packaging tests passed 69/69. The rebuilt package passed all 24
+archive checks. Typecheck, lint, formatting, docs and deadcode passed.

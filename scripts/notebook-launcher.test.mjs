@@ -1,3 +1,4 @@
+import { findPython } from "./test-support/notebook-python.mjs";
 // @vitest-environment node
 // The silicon-notebook launch scripts, with a recording stand-in for Node: no
 // real server, no database, no port. The plugin package and the TOML
@@ -660,24 +661,6 @@ describe("init-db.sh", () => {
     expect(result.stdout).not.toContain("initialised");
   });
 });
-
-function findPython() {
-  const configured = process.env.AUTO_CANVAS_TEST_PYTHON;
-  const candidates = configured
-    ? [configured]
-    : ["python3.13", "python3.12", "python3"];
-  for (const candidate of candidates) {
-    const probe = spawnSync(
-      candidate,
-      ["-c", "import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)"],
-      { encoding: "utf8" },
-    );
-    if (probe.status === 0) return candidate;
-  }
-  throw new Error(
-    "The plugin test needs Python 3.12 or newer: set AUTO_CANVAS_TEST_PYTHON to its path or put python3.13, python3.12 or python3 on PATH",
-  );
-}
 
 // Runs in Python: imports the bundle under an audit hook that records every
 // write, process, socket and thread, calls each capability decision under the
