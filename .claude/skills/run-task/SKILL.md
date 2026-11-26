@@ -90,6 +90,7 @@ Follow the [repository PR workflow](../../../docs/workflow.md#pr-评审与合入
 1. Before publishing, check whether the automatic review hook uses API key quota and apply the repository billing rule. Verify the current branch matches the plan. Push it and update its existing PR, or create a PR against the planned base (normally `main`). Use the [PR template](../../../.github/pull_request_template.md) and include the acceptance commands you reran and their results.
 2. Check independent review evidence for the current remote head. Use the workflow’s manual fallback if the hook does not produce a valid review. Resolve blocking findings and verify each new head.
 3. When this delivery has merge authorization and the workflow’s checks and review requirements are met, use its merge command with the reviewed SHA and verify the PR state is `MERGED`. For a PR-only handoff, return the link and its current review and CI status.
+4. At the delivery point, the task owner follows [worktree cleanup](../../../docs/workflow.md#任务-worktree-收尾) for the worktree they created. Include the result in the handoff.
 
 ## Small fixes
 

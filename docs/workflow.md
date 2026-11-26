@@ -161,6 +161,20 @@ node scripts/codex-log.mjs tasks/T001-<slug> --round 2 --follow       # 供 Moni
 - **合入结果**：只认 `gh pr view <PR号> --json state` 返回 `MERGED`。stacked PR 使用
   自己的基分支。
 
+### 任务 worktree 收尾
+
+每个新需求从最新的目标基分支创建专用 worktree。负责人在创建时记下准确路径和分支；同一任务的修订继续使用它。主工作区、开发者提供的目录和其他任务的 worktree 都保留。
+
+1. **确定交付点。** 仅交付 PR 时，在本轮修改已推送、评审和所需本地验证完成、已知阻塞修复处理完后清理。已授权合入时，等 GitHub 返回 `MERGED`。仍在改代码、跑本地任务或等待必须处理的反馈时保留目录。
+2. **核对目标和成果。** 用 `git worktree list --porcelain` 对照创建记录，确认路径、当前任务分支和 HEAD。核对本地 HEAD 与已交付 PR 的 `headRefOid` 相同，这也适用于 rebase 合入。检查 `git -C "$task_tree" status --porcelain --untracked-files=all --ignore-submodules=none`。用 `git -C "$task_tree" ls-files --others --ignored --exclude-standard --directory` 列出被忽略的本地文件和目录，核对其中的内容。可再生成的依赖和构建缓存可随目录移除；只存在于此处的输入、报告、评审日志等需要保留的成果先保存到目录外。发现未交付提交、工作区改动或归属不明的文件时，保留 worktree 并向开发者说明。
+3. **移除并确认。** 从保留的主工作区运行下列命令，`task_tree` 使用创建时记录的绝对路径。只执行普通移除，遇到锁定或 Git 拒绝时保留现场并报告原因。核对列表中已无该路径，再交付 PR 链接和清理结果。
+
+   ```bash
+   git worktree remove "$task_tree" && git worktree list --porcelain
+   ```
+
+本步骤只回收本地工作目录。保留任务分支，已交付的 PR 后续若收到修改意见，可用该分支另建 worktree 继续同一 PR。
+
 ### CI
 
 [CI 工作流](../.github/workflows/ci.yml) 在 PR 和推送到 `main` 时启动一个 `Check` 作业，使用 PostgreSQL 16。安装依赖后依次运行格式、文档链接、生成文档、器件库、类型、lint、deadcode、构建和 `pnpm test:local`。同一引用有新运行时会取消旧运行。浏览器测试、实机检查和 `*.slow.test.ts` 的执行范围见[测试指南](testing/README.md)；负责人将任务要求的本地验收证据写进 PR。
