@@ -10,6 +10,7 @@ import {
   resolveEndpointConnection,
   resolveDocumentLogicalNets,
   resolveRouteGeometry,
+  visibleInstanceBounds,
 } from "@icm/derived";
 import {
   MAX_SCHEMATIC_EDITS_PER_TRANSACTION,
@@ -854,6 +855,44 @@ function routeGroup(
   return { document: working, edits, diagnostics, failed };
 }
 
+/** True when a route segment passes through the interior of a box. */
+function segmentCrossesInterior(
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+  box: { x: number; y: number; width: number; height: number },
+) {
+  const eps = 1e-3;
+  const xMin = box.x + eps;
+  const xMax = box.x + box.width - eps;
+  const yMin = box.y + eps;
+  const yMax = box.y + box.height - eps;
+  if (xMin >= xMax || yMin >= yMax) return false;
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  let t0 = 0;
+  let t1 = 1;
+  for (const [p, q] of [
+    [-dx, a.x - xMin],
+    [dx, xMax - a.x],
+    [-dy, a.y - yMin],
+    [dy, yMax - a.y],
+  ] as const) {
+    if (Math.abs(p) < 1e-9) {
+      if (q < 0) return false;
+    } else {
+      const r = q / p;
+      if (p < 0) {
+        if (r > t1) return false;
+        if (r > t0) t0 = r;
+      } else {
+        if (r < t0) return false;
+        if (r < t1) t1 = r;
+      }
+    }
+  }
+  return t0 < t1;
+}
+
 /** R144 seeds the tree with the drawing convention before orthogonal routing. */
 function routeCrossCoupled(
   document: SchematicDocument,
@@ -866,6 +905,7 @@ function routeCrossCoupled(
   const edits: SchematicEdit[] = [];
   const nets = new Set<string>();
   const points = pinPoints(document, resolver);
+  const instanceBounds = visibleInstanceBounds(document, resolver);
   const { structures } = recognizeSubstructures(document, roles);
   for (const pair of structures.filter(
     (s) => s.kind === "cross-coupled-pair",
@@ -930,6 +970,21 @@ function routeCrossCoupled(
             auditRouting(working, resolver).problems.length
         )
           continue;
+        const added = next.document.routes.filter(
+          (r) => !working.routes.some((o) => o.id === r.id),
+        );
+        const hitsSymbol = added.some((route) => {
+          const geom = resolveRouteGeometry(next.document, resolver, route);
+          return geom?.segments.some((seg) =>
+            instanceBounds.some(
+              (b) =>
+                b.id !== source &&
+                b.id !== target &&
+                segmentCrossesInterior(seg.from, seg.to, b.bounds),
+            ),
+          );
+        });
+        if (hitsSymbol) continue;
         edits.push(...replayEdits(working, frozen, group, wire.edits));
         working = next.document;
         nets.add(group.netId);

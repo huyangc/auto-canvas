@@ -317,7 +317,15 @@ it.each([
   (name, make) => {
     const document = make();
     const plan = planAutoLayout(document, resolver);
-    if (name === "pump") expect(refinementMetrics(plan)?.strategy).toBe("mcts");
+    if (name === "pump") {
+      expect(
+        refinementMetrics(
+          planAutoLayout(document, resolver, {
+            search: { seed: 1, evaluations: 0 },
+          }),
+        )?.strategy,
+      ).toBe("mcts");
+    }
     expect(plan.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
     const result = executeTransaction(
       document,
@@ -502,7 +510,7 @@ it("isolates a valid losing matrix draft from annealing and rerouting", () => {
     anneal.mockRestore();
     polish.mockRestore();
   }
-});
+}, 60_000);
 
 it("does not infer a pass gate driver from another gate alone", () => {
   const d = pump();

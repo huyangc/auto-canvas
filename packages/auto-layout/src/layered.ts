@@ -376,6 +376,7 @@ export function deviceRows(
 function stackAxisBridges(
   half: Instance[],
   axisIds: Set<string>,
+  crossIds: Set<string>,
   resolver: SymbolResolver,
   roles: NetRoles,
   netMap: ReadonlyMap<string, string>,
@@ -385,6 +386,7 @@ function stackAxisBridges(
   const bridges = new Set<string>();
   const byPair = new Map<string, Instance[]>();
   const neighbors = new Map<string, string[]>();
+  const byId = new Map(half.map((i) => [i.id, i]));
   for (const i of half) {
     const nets = deviceNets(i, resolver, roles);
     if (!axisIds.has(i.id)) {
@@ -413,12 +415,9 @@ function stackAxisBridges(
     const first = group[0]!;
     const nets = deviceNets(first, resolver, roles);
     const leftNet = nets.find((n) => neighbors.has(n)) ?? nets[0]!;
+    const peerIds = neighbors.get(leftNet) ?? [];
     const ys = [
-      ...new Set(
-        (neighbors.get(leftNet) ?? []).map(
-          (id) => rows.placements.get(id)!.position.y,
-        ),
-      ),
+      ...new Set(peerIds.map((id) => rows.placements.get(id)!.position.y)),
     ].sort((a, b) => a - b);
     const upper = ys[0] ?? rows.placements.get(first.id)!.position.y;
     const lower = ys[1];
@@ -435,6 +434,31 @@ function stackAxisBridges(
         for (const [id, pose] of rows.placements)
           if ((!bridges.has(id) || seated.has(id)) && pose.position.y >= lower)
             pose.position.y += delta;
+    } else if (peerIds.length > 0 && peerIds.every((id) => crossIds.has(id))) {
+      // Cross-coupled pairs carry their regenerative X in the horizontal gap on
+      // their own row; seat bridging loads cleanly above their drains (or below
+      // their sources) instead of crowding the cross-coupled gap.
+      const offsets = peerIds.flatMap((id) => {
+        const inst = byId.get(id)!;
+        const pose = rows.placements.get(id)!;
+        const ch = channelPins(inst.symbolId);
+        return devicePins(inst, resolver)
+          .filter(
+            (p) =>
+              roles.pinNet(id, p.name) === leftNet &&
+              (!ch || p.name !== ch.gate),
+          )
+          .map(
+            (p) =>
+              transformPoint(p.at, pose.position, pose).y - pose.position.y,
+          );
+      });
+      const side = offsets.reduce((sum, dy) => sum + dy, 0);
+      const clearance = Math.max(60, Math.round(pitch * 0.6));
+      start =
+        side > 0
+          ? snap(upper + clearance)
+          : snap(upper - clearance - (group.length - 1) * step);
     }
     group.forEach((i, j) => {
       const pose = rows.placements.get(i.id)!;
@@ -585,15 +609,6 @@ function symmetryRows(
         halfRows.placements.get(id)!.position.y =
           node.row * placementPitch(roles).row;
     }
-    const bridges = stackAxisBridges(
-      half,
-      axisIds,
-      resolver,
-      roles,
-      netMap,
-      halfRows,
-      document.presentation.grid,
-    );
     const crossIds = new Set(
       component.pairs.flatMap(([left, right]) => {
         const a = channelPins(devices.find((i) => i.id === left)!.symbolId);
@@ -608,6 +623,16 @@ function symmetryRows(
           ? [left]
           : [];
       }),
+    );
+    const bridges = stackAxisBridges(
+      half,
+      axisIds,
+      crossIds,
+      resolver,
+      roles,
+      netMap,
+      halfRows,
+      document.presentation.grid,
     );
     const axisOrder = (node: RowNode) =>
       node.members.some((id) => axisIds.has(id))

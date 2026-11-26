@@ -99,6 +99,42 @@ it("keeps a right-facing M6 gate port from jumping across M14", () => {
   }
 });
 
+it("keeps a dense large-canvas single-host port local via shorter stub fallback", () => {
+  const d = circuit(
+    { M8: "nmos", M9: "pmos", VB2: "port-filled" },
+    { bias: ["M9.G", "VB2.P"] },
+  );
+  const targets = new Map([
+    ["M8", placement(0, 0)],
+    ["M9", placement(70, 0)],
+  ]);
+  for (let i = 0; i < 45; i++) {
+    const id = "R" + i;
+    d.instances.push({ id, symbolId: "resistor", placement: null });
+    targets.set(id, placement(400 + i * 80, 400));
+  }
+  placeMarkers(
+    d,
+    resolver,
+    classifyNets(d, resolver),
+    targets,
+    emptyOverrides(),
+    emptyChoices(),
+  );
+  const placed = withPlacements(d, targets);
+  const gate = pinPoints(placed, resolver).find(
+    (p) => p.instanceId === "M9" && p.pinName === "G",
+  )!.point;
+  const blocker = visibleInstanceBounds(placed, resolver).find(
+    (b) => b.id === "M8",
+  )!.bounds;
+  const seat = targets.get("VB2")!;
+  expect(geometryProblem(placed, resolver)).toBeUndefined();
+  expect(seat.position.y).toBe(gate.y);
+  expect(seat.position.x).toBeGreaterThanOrEqual(blocker.x + blocker.width);
+  expect(seat.position.x).toBeLessThan(gate.x);
+});
+
 function foldedCascode() {
   const d = circuit(
     {
