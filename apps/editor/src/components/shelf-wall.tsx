@@ -507,6 +507,8 @@ export function ShelfWall({
     if (activeRenameIdRef.current !== projectId) return;
     activeRenameIdRef.current = null;
     pendingRenameFocus.current = projectId;
+    if (renaming?.id === projectId && renaming.failedName !== undefined)
+      setError(null);
     setRenaming(null);
   }
 
@@ -531,6 +533,8 @@ export function ShelfWall({
     activeRenameIdRef.current = null;
     if (!trimmed || trimmed === project.name) {
       if (restoreFocus) pendingRenameFocus.current = project.id;
+      if (renaming?.id === project.id && renaming.failedName !== undefined)
+        setError(null);
       setRenaming(null);
       return true;
     }
@@ -618,9 +622,12 @@ export function ShelfWall({
         );
         if (restoreRenameFocus) pendingRenameFocus.current = project.id;
         setRenaming(null);
-        const refreshed = await loadShelf();
-        if (refreshed.status === "ready" && mutationSeq.current === seq)
-          setState(refreshed);
+        // Refresh metadata in the background so a stalled list fetch cannot
+        // block dialog dismissal after the rename write has already succeeded.
+        void loadShelf().then((refreshed) => {
+          if (refreshed.status === "ready" && mutationSeq.current === seq)
+            setState(refreshed);
+        });
       } else {
         const result = await editShelfProject(
           project.id,
