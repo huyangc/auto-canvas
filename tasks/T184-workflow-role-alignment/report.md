@@ -12,4 +12,4 @@ Reworked the workflow around the task owner, delegated implementer and independe
 
 ## Deviations and open questions
 
-The workflow clarifies how Claude Code callers use the actual planned branch and the reviewed-SHA merge command. The delivery skill itself is unchanged. Its duplicate executable examples still hardcode the task branch and omit the reviewed-SHA guard. Aligning that skill requires separate authorization beyond this task’s owned path.
+The developer explicitly authorized extending T184 to the Deliver section of the Claude Code run-task skill. It now points to the canonical workflow, including hook billing, planned branch and base, latest-head review and the SHA-guarded merge. The reviewed worktree example also stops installation if creation or directory selection fails.
