@@ -14,7 +14,7 @@ export interface CloudProjectsDialogProps {
   onOpenProject(id: string): void;
   onRenameProject(id: string, name: string): Promise<void>;
   onDeleteProject(id: string): Promise<void>;
-  onProjectsChanged?: (() => void) | undefined;
+  onProjectsChanged?: (() => void | Promise<void>) | undefined;
   onClose(): void;
 }
 
@@ -60,6 +60,7 @@ export function CloudProjectsDialog({
       aria-labelledby="cloud-shelf-title"
       ref={attachDialog}
       onCancel={(event) => {
+        if (event.target !== event.currentTarget) return;
         event.preventDefault();
         onClose();
       }}
